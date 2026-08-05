@@ -172,7 +172,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 
 	// Wallet attestation: enabled when trust.wallet_attestation.enabled + pdp_url are set
 	if cfg.APIGW.Trust.WalletAttestation.Enabled && pdpURL != "" {
-		c.walletAttestationEvaluator = trust.NewWalletAttestationEvaluator(trustEvaluator)
+		c.walletAttestationEvaluator = trust.NewWalletAttestationEvaluator(trustEvaluator, c.jwtTrustVerifier)
 
 		// Build SPOCP policy engine for tier-based scope authorization (nil = default open)
 		policy := cfg.APIGW.Trust.WalletAttestation.Policy

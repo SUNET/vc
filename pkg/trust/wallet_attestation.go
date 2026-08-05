@@ -33,9 +33,13 @@ type WalletAttestationResult struct {
 	TrustFramework string
 }
 
-// WalletAttestationEvaluator evaluates wallet attestation JWTs by delegating the
-// trust decision to the go-trust AuthZEN PDP. The PDP validates the wallet provider's
-// signature against its configured trust lists and federation anchors.
+// WalletAttestationEvaluator evaluates wallet attestation JWTs by verifying
+// the WIA's own signature locally and then delegating the trust DECISION
+// (only) to the go-trust AuthZEN PDP - the PDP evaluates whether an
+// already-verified key belongs to a trusted wallet provider, it does not
+// verify signatures itself. Signature verification is the caller's
+// responsibility, same as every other trust check in this package
+// (JWTTrustVerifier.EvaluateIssuerTrust).
 //
 // Supports two WIA formats:
 //   - IETF draft-ietf-oauth-attestation-based-client-auth: iss claim present
@@ -44,39 +48,67 @@ type WalletAttestationResult struct {
 // PKCE (mandatory for public clients) is the sole code-binding mechanism.
 type WalletAttestationEvaluator struct {
 	TrustEvaluator TrustEvaluator
+	// Verifier resolves and verifies the WIA's own signing key material -
+	// x5c, an embedded jwk header, a DID-based issuer, or kid/JWKS lookup
+	// (JWTTrustVerifier.extractJWTKeyMaterial's existing resolution
+	// strategies, reused as-is here rather than reimplemented).
+	Verifier *JWTTrustVerifier
 }
 
 // NewWalletAttestationEvaluator creates a new evaluator.
-func NewWalletAttestationEvaluator(evaluator TrustEvaluator) *WalletAttestationEvaluator {
-	return &WalletAttestationEvaluator{TrustEvaluator: evaluator}
+func NewWalletAttestationEvaluator(evaluator TrustEvaluator, verifier *JWTTrustVerifier) *WalletAttestationEvaluator {
+	return &WalletAttestationEvaluator{TrustEvaluator: evaluator, Verifier: verifier}
 }
 
-// Evaluate verifies a wallet attestation JWT via the trust PDP.
+// Evaluate verifies a wallet attestation JWT's signature, then evaluates
+// wallet-provider trust via the PDP.
 func (e *WalletAttestationEvaluator) Evaluate(ctx context.Context, attestation string) (*WalletAttestationResult, error) {
 	if e.TrustEvaluator == nil {
 		return nil, errors.New("no trust evaluator configured (pdp_url required)")
 	}
+	if e.Verifier == nil {
+		return nil, errors.New("no JWT verifier configured (required to verify the WIA's own signature before any PDP trust decision)")
+	}
 
-	// Extract routing info (PDP performs actual signature verification)
+	// Extract WIA-specific identity fields the generic verifier doesn't know
+	// about (sub, attestation_source), plus TS03's extra security check: when
+	// x5c is present, iss (self-asserted) must be consistent with the
+	// cert-derived identity rather than silently overriding it.
 	identity, err := parseAttestationIdentity(attestation)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build evaluation request based on key type
-	evalReq := &EvaluationRequest{}
-	evalReq.SubjectID = identity.issuer
-	evalReq.Role = RoleWalletProvider
-
-	if identity.hasX5C {
-		// x5c-based WIA (TS03): send cert chain for validation
-		evalReq.KeyType = KeyTypeX5C
-		evalReq.Key = identity.x5cChain
-	} else {
-		// iss-based WIA (IETF draft): send raw JWT for JWK-based validation
-		evalReq.KeyType = KeyTypeJWK
-		evalReq.Key = attestation
+	// Verify the WIA's own signature and resolve its actual signing key
+	// material (x5c, embedded jwk, DID, or kid/JWKS) - the PDP call below
+	// only makes a trust decision given this already-verified key; it was
+	// previously handed either the x5c chain (fine) or, for the no-x5c/iss
+	// case, the raw attestation JWT string itself (a bug: go-trust's JWK
+	// evaluation path requires an actual resolved JWK, not a compact JWT -
+	// confirmed live: "unsupported public key type: string").
+	_, keyInfo, err := e.Verifier.VerifyJWTSignature(ctx, attestation, "wallet-attestation")
+	if err != nil {
+		return nil, fmt.Errorf("wallet attestation signature verification failed: %w", err)
 	}
+
+	// Belt-and-suspenders: the generic verifier's own issuer resolution
+	// (ExtractJWTClaimsInfo, falling back to x5c leaf CN when iss is absent)
+	// should agree with parseAttestationIdentity's WIA-specific extraction.
+	// A mismatch means the two resolution strategies disagree about identity,
+	// which should never happen for a well-formed WIA.
+	if identity.issuer != "" && keyInfo.IssuerID != "" && identity.issuer != keyInfo.IssuerID {
+		return nil, fmt.Errorf("wallet attestation issuer mismatch: iss claim %q does not match verified key issuer %q", identity.issuer, keyInfo.IssuerID)
+	}
+	issuer := identity.issuer
+	if issuer == "" {
+		issuer = keyInfo.IssuerID
+	}
+
+	evalReq := &EvaluationRequest{}
+	evalReq.SubjectID = issuer
+	evalReq.Role = RoleWalletProvider
+	evalReq.KeyType = keyInfo.KeyType
+	evalReq.Key = keyInfo.KeyMaterial
 
 	decision, err := e.TrustEvaluator.Evaluate(ctx, evalReq)
 	if err != nil {
@@ -85,7 +117,7 @@ func (e *WalletAttestationEvaluator) Evaluate(ctx context.Context, attestation s
 
 	result := &WalletAttestationResult{
 		Trusted:           decision.Trusted,
-		Issuer:            identity.issuer,
+		Issuer:            issuer,
 		Subject:           identity.sub,
 		AttestationSource: identity.attestationSource,
 		Reason:            decision.Reason,
@@ -93,7 +125,7 @@ func (e *WalletAttestationEvaluator) Evaluate(ctx context.Context, attestation s
 	}
 
 	if !decision.Trusted {
-		return result, fmt.Errorf("wallet provider %q not trusted: %s", identity.issuer, decision.Reason)
+		return result, fmt.Errorf("wallet provider %q not trusted: %s", issuer, decision.Reason)
 	}
 	if identity.sub == "" {
 		return nil, errors.New("wallet attestation missing required 'sub' claim")

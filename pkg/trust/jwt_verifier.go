@@ -80,30 +80,28 @@ func NewJWTTrustVerifier(cfg JWTTrustVerifierConfig) *JWTTrustVerifier {
 	}
 }
 
-// EvaluateIssuerTrust verifies the credential signature and evaluates the trust of the credential issuer.
-// It splits the SD-JWT VP token, verifies the issuer JWT signature using key material from the header
-// (x5c, jwk, DID resolution, or kid/JWKS resolution), and evaluates trust via the configured PDP.
-func (v *JWTTrustVerifier) EvaluateIssuerTrust(ctx context.Context, vpToken string, scope string) error {
-	if v.trustEvaluator == nil {
-		v.log.Warn("Trust evaluator not initialized - this should never happen")
-		return fmt.Errorf("trust evaluator not initialized")
-	}
-
-	// Split the SD-JWT to get the issuer JWT
-	parts := strings.Split(vpToken, "~")
-	issuerJWT := parts[0]
-	if issuerJWT == "" {
-		return fmt.Errorf("empty issuer JWT in VP token")
-	}
-
-	// Build the algorithm allowlist for signature verification
+// VerifyJWTSignature parses tokenString and verifies its signature using key
+// material resolved from its own header/claims (x5c, embedded jwk, DID-based
+// issuer, or kid/JWKS lookup - see extractJWTKeyMaterial), WITHOUT evaluating
+// PDP trust. Exposed separately from EvaluateIssuerTrust so callers that need
+// a different PDP role or request shape than EvaluateIssuerTrust's hardcoded
+// RoleCredentialIssuer/SD-JWT-VP splitting (e.g. WalletAttestationEvaluator,
+// which verifies a WIA - a plain JWT, not an SD-JWT VP - and then evaluates
+// trust with RoleWalletProvider) can reuse the same verification instead of
+// hand-rolling a parallel, easy-to-get-wrong implementation.
+//
+// issuerID/credentialType for key resolution and logging come from the
+// token's own iss/vct claims (ExtractJWTClaimsInfo) - correct for any JWT
+// that uses the iss claim conventionally, WIAs included; vct simply stays
+// empty for non-SD-JWT-VC tokens like a WIA.
+func (v *JWTTrustVerifier) VerifyJWTSignature(ctx context.Context, tokenString, scope string) (*jwt.Token, *JWTKeyMaterial, error) {
 	allowedSet := BuildAllowedAlgorithmSet(v.allowedAlgs)
 
 	// keyInfo is captured by the keyfunc closure and populated during jwt.Parse.
 	var keyInfo *JWTKeyMaterial
 
 	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
-	token, err := parser.Parse(issuerJWT, func(token *jwt.Token) (any, error) {
+	token, err := parser.Parse(tokenString, func(token *jwt.Token) (any, error) {
 		alg := token.Method.Alg()
 
 		// Check algorithm allowlist - "none" is never permitted
@@ -131,7 +129,31 @@ func (v *JWTTrustVerifier) EvaluateIssuerTrust(ctx context.Context, vpToken stri
 	if err != nil {
 		v.log.Warn("JWT signature verification failed",
 			"scope", scope, "error", err)
-		return fmt.Errorf("JWT signature verification failed: %w", err)
+		return nil, nil, fmt.Errorf("JWT signature verification failed: %w", err)
+	}
+
+	return token, keyInfo, nil
+}
+
+// EvaluateIssuerTrust verifies the credential signature and evaluates the trust of the credential issuer.
+// It splits the SD-JWT VP token, verifies the issuer JWT signature using key material from the header
+// (x5c, jwk, DID resolution, or kid/JWKS resolution), and evaluates trust via the configured PDP.
+func (v *JWTTrustVerifier) EvaluateIssuerTrust(ctx context.Context, vpToken string, scope string) error {
+	if v.trustEvaluator == nil {
+		v.log.Warn("Trust evaluator not initialized - this should never happen")
+		return fmt.Errorf("trust evaluator not initialized")
+	}
+
+	// Split the SD-JWT to get the issuer JWT
+	parts := strings.Split(vpToken, "~")
+	issuerJWT := parts[0]
+	if issuerJWT == "" {
+		return fmt.Errorf("empty issuer JWT in VP token")
+	}
+
+	token, keyInfo, err := v.VerifyJWTSignature(ctx, issuerJWT, scope)
+	if err != nil {
+		return err
 	}
 
 	// At this point the JWT signature is verified. Extract claims for trust evaluation.
