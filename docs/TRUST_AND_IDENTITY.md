@@ -89,9 +89,10 @@ apigw:
 1. Wallet sends `OAuth-Client-Attestation` (WIA JWT) and `OAuth-Client-Attestation-PoP` (PoP JWT) as HTTP headers in the PAR request per [draft-ietf-oauth-attestation-based-client-auth-04 §3.1](https://www.ietf.org/archive/id/draft-ietf-oauth-attestation-based-client-auth-04.html#section-3.1)
 2. APIGW looks up `client_id` in static client map → not found
 3. APIGW validates the PoP JWT signature against the WIA's `cnf.jwk` and checks `aud` matches this AS
-4. APIGW sends the WIA to go-trust PDP with `role=wallet-provider`
-5. PDP validates wallet provider's signature against trust lists/federation
-6. If trusted: wallet accepted as public client (PKCE mandatory)
+4. **APIGW itself verifies the WIA's own JWT signature** (`WalletAttestationEvaluator` → the shared `JWTTrustVerifier`, the same verifier used for issuer/verifier trust) before any PDP call. Key material is resolved either from the WIA's `x5c` header (TS03/EUDI format) or, for `iss`-based WIAs with no embedded key, by discovering the wallet provider's JWKS from `iss` via a multi-step chain: `.well-known/jwt-vc-issuer` → `.well-known/openid-credential-issuer` → `.well-known/openid-configuration` → `.well-known/oauth-authorization-server` (first one that resolves wins).
+5. Only once the signature is verified does APIGW send the **resolved key material** (never the raw token) to go-trust PDP with `role=wallet-provider`
+6. PDP performs a pure trust/registry-membership decision on that key (whitelist, OIDF federation, DID registry, ...) — **the PDP never parses or verifies a JWT signature itself**; that would let an unverified token reach registry code expecting a resolved JWK
+7. If trusted: wallet accepted as public client (PKCE mandatory)
 
 > **Legacy fallback:** Form-body `client_assertion` (without PoP) is accepted for backward compatibility but is deprecated. New integrations MUST use the HTTP header mechanism.
 
@@ -101,9 +102,15 @@ apigw:
 - **DPoP** sender-constrains the access token
 - **PAR** locks the redirect_uri at authorization time
 - **No redirect URI allowlist needed** — PKCE is the primary binding
+- **Signature verification happens in APIGW, not the PDP** — the PDP is a pure trust-decision service over already-resolved key material; it must never be handed a raw, unverified token. (Fixed in PR #556 — an earlier version skipped local verification and forwarded the WIA string directly, which for `iss`-based/no-x5c attestations meant the PDP's registry code received a JWT string where it expected a JWK, and treated it as untyped `crypto.PublicKey` input.)
 
 ### Requirements
 
-- `trust.pdp_url` must be configured (PDP performs the trust decision)
-- Wallet provider must be discoverable by the PDP (via OIDF, trust lists, or JWKS registry)
-- Attestation JWT must contain `iss` (provider) and `sub` (wallet instance = `client_id`)
+- `trust.pdp_url` must be configured (the PDP performs only the trust/registry decision, not signature verification)
+- The wallet provider's signing key must be resolvable by APIGW's own JWKS discovery chain (above) — for `iss`-based WIAs this means the wallet provider needs a real `iss` value pointing at one of the well-known discovery documents (or a bare `.well-known/jwks.json`, if you add that as an additional fallback — see go-wallet-backend's WIA docs for what it publishes)
+- The resolved key/provider identity must additionally be discoverable by the PDP itself (via OIDF, trust lists, or a whitelist registry) — this is a *separate* lookup from the JWKS discovery above
+- Attestation JWT must contain `iss` (provider) and `sub` (wallet instance's `client_id` — see the note below on what value this must actually be)
+
+:::note `sub` must equal the OAuth `client_id`, not the credential issuer
+Per the draft, the WIA's `sub` claim must be the client_id value the wallet uses in the *same* OAuth transaction — i.e. whatever APIGW resolves as `req.ClientID` for an unregistered client (its `redirect_uri`, OID4VCI §7.1 convention). A wallet that puts a different value there (e.g. the credential issuer's own URL) gets a clear `wallet attestation subject does not match client_id` rejection at PAR — this was a real bug hit while integrating wallet-frontend's WIA support.
+:::
