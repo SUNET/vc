@@ -43,8 +43,30 @@ func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialO
 		Scope: req.Scope,
 	}
 
+	// mso_mdoc scopes have no VCTM by design (ErrScopeIsMDoc) - fall back to
+	// the MDDL schema for display name/id, same as every other caller of
+	// GetVCTMFromScope is expected to per its own doc comment. Without this,
+	// the offer-creation UI 500s for every mdoc scope even though issuance
+	// itself works fine via GetMDDLFromScope elsewhere.
+	var offerName, offerID string
 	vctm, err := c.GetVCTMFromScope(ctx, vctmReq)
-	if err != nil {
+	switch {
+	case err == nil:
+		offerName = vctm.Name
+		offerID = vctm.VCT
+	case errors.Is(err, ErrScopeIsMDoc):
+		mddl, mddlErr := c.GetMDDLFromScope(ctx, &GetMDDLFromScopeRequest{Scope: req.Scope})
+		if mddlErr != nil {
+			return nil, mddlErr
+		}
+		if len(mddl.Display) > 0 {
+			offerName = mddl.Display[0].Name
+		}
+		if offerName == "" {
+			offerName = mddl.DocType
+		}
+		offerID = mddl.DocType
+	default:
 		return nil, err
 	}
 
@@ -82,8 +104,8 @@ func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialO
 	}
 
 	reply := &CredentialOfferReply{
-		Name: vctm.Name,
-		ID:   vctm.VCT,
+		Name: offerName,
+		ID:   offerID,
 		QR:   *qr,
 	}
 
