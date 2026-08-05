@@ -281,24 +281,18 @@ func NewValidator() (*validator.Validate, error) {
 		return nil, err
 	}
 
-	// Register struct-level validation for SAMLConfig
+	// doc:constraint name="saml_metadata_source" struct="SAMLSP" applies="MDQServer,StaticIDPMetadata" description="Exactly one of mdq_server or static_idp_metadata must be set when enable is true. Mutual exclusivity is enforced by field tags."
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		cfg := sl.Current().Interface().(model.SAMLSP)
 		if !cfg.Enable {
 			return
 		}
-
-		hasMDQ := cfg.MDQServer != ""
-		hasStatic := cfg.StaticIDPMetadata != nil
-
-		if !hasMDQ && !hasStatic {
+		if cfg.MDQServer == "" && cfg.StaticIDPMetadata == nil {
 			sl.ReportError(cfg.MDQServer, "MDQServer", "MDQServer", "saml_metadata_source_required", "")
-		}
-		if hasMDQ && hasStatic {
-			sl.ReportError(cfg.MDQServer, "MDQServer", "MDQServer", "saml_metadata_source_exclusive", "")
 		}
 	}, model.SAMLSP{})
 
+	// doc:constraint name="oidc_openid_scope" struct="OIDCRP" applies="Scopes" description="The 'openid' scope is mandatory when OIDC RP is enabled."
 	// Register struct-level validation for OIDCRPConfig
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		cfg := sl.Current().Interface().(model.OIDCRP)
@@ -312,6 +306,8 @@ func NewValidator() (*validator.Validate, error) {
 		}
 	}, model.OIDCRP{})
 
+	// doc:constraint name="api_auth_exclusive" struct="APIAuth" applies="JWKS,OIDC" description="JWKS and OIDC are mutually exclusive — enable at most one."
+	// doc:constraint name="api_auth_rules_require_auth" struct="APIAuth" applies="Rules,RulesFile" description="Authorization rules require JWKS or OIDC to be enabled."
 	// Register struct-level validation for APIAuth
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		cfg := sl.Current().Interface().(model.APIAuth)
@@ -331,8 +327,7 @@ func NewValidator() (*validator.Validate, error) {
 		}
 	}, model.APIAuth{})
 
-	// Register struct-level validation for APIAuthJWKS: at least one of JWKSURL/JWKSFilePath when enabled
-	// (mutual exclusivity is enforced by the excluded_with field tags)
+	// doc:constraint name="jwks_source_required" struct="APIAuthJWKS" applies="JWKSURL,JWKSFilePath" description="Exactly one of jwks_url or jwks_file_path must be set when enable is true."
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		cfg := sl.Current().Interface().(model.APIAuthJWKS)
 		if !cfg.Enable {

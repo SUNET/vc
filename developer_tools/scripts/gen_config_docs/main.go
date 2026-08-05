@@ -25,6 +25,15 @@ import (
 
 // ---- Data types ----
 
+// DocConstraint represents a struct-level validation rule parsed from
+// "// doc:constraint ..." comments in validate.go.
+type DocConstraint struct {
+	Name        string
+	Struct      string
+	Applies     []string // Go field names
+	Description string
+}
+
 type TagInfo struct {
 	YAMLName    string
 	Omitempty   bool
@@ -117,6 +126,27 @@ func (r *TypeRegistry) ParseDir(dir string) error {
 }
 
 func (r *TypeRegistry) Lookup(name string) *StructDef {
+	if def, ok := r.types[name]; ok {
+		return def
+	}
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		simple := name[idx+1:]
+		if def, ok := r.types[simple]; ok {
+			return def
+		}
+	}
+	return nil
+}
+
+// LookupInPkg resolves a type name preferring the given package.
+// This avoids collisions when different packages define structs with the same name.
+func (r *TypeRegistry) LookupInPkg(name, pkgName string) *StructDef {
+	// Try package-qualified name first to avoid cross-package collisions
+	if pkgName != "" {
+		if def, ok := r.types[pkgName+"."+name]; ok {
+			return def
+		}
+	}
 	if def, ok := r.types[name]; ok {
 		return def
 	}
@@ -227,6 +257,27 @@ func (r *TypeRegistry) LookupMapValueType(name string) *StructDef {
 		return nil
 	}
 	return r.Lookup(valName)
+}
+
+// LookupMapValueTypeInPkg is like LookupMapValueType but prefers the given package.
+func (r *TypeRegistry) LookupMapValueTypeInPkg(name, pkgName string) *StructDef {
+	var valName string
+	var ok bool
+	if pkgName != "" {
+		valName, ok = r.mapAliases[pkgName+"."+name]
+	}
+	if !ok {
+		valName, ok = r.mapAliases[name]
+	}
+	if !ok {
+		if idx := strings.LastIndex(name, "."); idx >= 0 {
+			valName, ok = r.mapAliases[name[idx+1:]]
+		}
+	}
+	if !ok {
+		return nil
+	}
+	return r.LookupInPkg(valName, pkgName)
 }
 
 func (r *TypeRegistry) parseFields(st *ast.StructType, def *StructDef, pkgName string) {
@@ -418,39 +469,150 @@ func determineRequired(tag TagInfo) string {
 		return "No"
 	}
 
-	if strings.Contains(v, "required_if=Enable true") {
-		// Check for excluded_with to annotate mutual exclusivity
-		reExcluded := regexp.MustCompile(`excluded_with=(\w+)`)
-		if m := reExcluded.FindStringSubmatch(v); len(m) > 1 {
-			return fmt.Sprintf("Yes (if enabled; mutually exclusive with %s)", camelToSnake(m[1]))
-		}
-		return "Yes (if enabled)"
-	}
-	re := regexp.MustCompile(`required_without=(\w+)`)
-	if m := re.FindStringSubmatch(v); len(m) > 1 {
-		reExcluded := regexp.MustCompile(`excluded_with=(\w+)`)
-		if m2 := reExcluded.FindStringSubmatch(v); len(m2) > 1 {
-			return fmt.Sprintf("Yes (if %s not set; mutually exclusive)", camelToSnake(m[1]))
-		}
-		return fmt.Sprintf("Yes (if %s not set)", camelToSnake(m[1]))
-	}
+	// Split validation rules on comma, stopping at "dive" (everything after
+	// dive applies to collection elements, not the field itself).
+	var rules []string
 	for r := range strings.SplitSeq(v, ",") {
 		r = strings.TrimSpace(r)
+		if r == "dive" {
+			break
+		}
+		rules = append(rules, r)
+	}
+
+	reExcluded := regexp.MustCompile(`excluded_with=(\w+)`)
+
+	for _, r := range rules {
+		// required_if=Field value [Field2 value2 ...]
+		if after, ok := strings.CutPrefix(r, "required_if="); ok {
+			parts := strings.Fields(after)
+			var conditions []string
+			for i := 0; i+1 < len(parts); i += 2 {
+				field := camelToSnake(parts[i])
+				val := parts[i+1]
+				if field == "enable" && val == "true" {
+					conditions = append(conditions, "enabled")
+				} else {
+					conditions = append(conditions, fmt.Sprintf("%s is \"%s\"", field, val))
+				}
+			}
+			cond := strings.Join(conditions, " and ")
+			if tag.Default != "" {
+				return "No"
+			}
+			if m := reExcluded.FindStringSubmatch(v); len(m) > 1 {
+				return fmt.Sprintf("Yes (if %s; mutually exclusive with %s)", cond, camelToSnake(m[1]))
+			}
+			return fmt.Sprintf("Yes (if %s)", cond)
+		}
+
+		// required_without_all=Field1 Field2 ...
+		if after, ok := strings.CutPrefix(r, "required_without_all="); ok {
+			parts := strings.Fields(after)
+			names := make([]string, len(parts))
+			for i, p := range parts {
+				names[i] = camelToSnake(p)
+			}
+			return fmt.Sprintf("Yes (if none of %s set)", strings.Join(names, ", "))
+		}
+
+		// required_without=Field
+		if after, ok := strings.CutPrefix(r, "required_without="); ok {
+			parts := strings.Fields(after)
+			if len(parts) > 0 {
+				field := camelToSnake(parts[0])
+				if m := reExcluded.FindStringSubmatch(v); len(m) > 1 {
+					return fmt.Sprintf("Yes (if %s not set; mutually exclusive)", field)
+				}
+				return fmt.Sprintf("Yes (if %s not set)", field)
+			}
+		}
+
+		// required_with=Field
+		if after, ok := strings.CutPrefix(r, "required_with="); ok {
+			parts := strings.Fields(after)
+			if len(parts) > 0 {
+				field := camelToSnake(parts[0])
+				if tag.Default != "" {
+					return "No"
+				}
+				return fmt.Sprintf("Yes (if %s set)", field)
+			}
+		}
+
+		// required_unless=Field value [Field2 value2 ...]
+		if after, ok := strings.CutPrefix(r, "required_unless="); ok {
+			parts := strings.Fields(after)
+			var conditions []string
+			for i := 0; i+1 < len(parts); i += 2 {
+				field := camelToSnake(parts[i])
+				val := parts[i+1]
+				conditions = append(conditions, fmt.Sprintf("%s is \"%s\"", field, val))
+			}
+			return fmt.Sprintf("Yes (unless %s)", strings.Join(conditions, " or "))
+		}
+
+		// bare required
 		if r == "required" {
-			// If a default value is provided, the field is not required from
-			// the end-user's perspective since the default will be used.
 			if tag.Default != "" {
 				return "No"
 			}
 			return "Yes"
 		}
 	}
+
 	// Standalone excluded_with without a required_* tag
-	reExcluded := regexp.MustCompile(`excluded_with=(\w+)`)
 	if m := reExcluded.FindStringSubmatch(v); len(m) > 1 {
 		return fmt.Sprintf("No (mutually exclusive with %s)", camelToSnake(m[1]))
 	}
 	return "No"
+}
+
+// parseDocConstraints reads a Go source file and extracts structured
+// "// doc:constraint" comments. Format:
+//
+//	// doc:constraint name="<id>" struct="<GoType>" applies="<Field1>,<Field2>" description="<text>"
+func parseDocConstraints(path string) ([]DocConstraint, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	re := regexp.MustCompile(`//\s*doc:constraint\s+(.+)`)
+	kvRe := regexp.MustCompile(`(\w+)="([^"]*)"`)
+	var constraints []DocConstraint
+	for _, line := range strings.Split(string(data), "\n") {
+		m := re.FindStringSubmatch(strings.TrimSpace(line))
+		if m == nil {
+			continue
+		}
+		kvs := kvRe.FindAllStringSubmatch(m[1], -1)
+		c := DocConstraint{}
+		for _, kv := range kvs {
+			switch kv[1] {
+			case "name":
+				c.Name = kv[2]
+			case "struct":
+				c.Struct = kv[2]
+			case "applies":
+				c.Applies = strings.Split(kv[2], ",")
+			case "description":
+				c.Description = kv[2]
+			}
+		}
+		if c.Name != "" && c.Struct != "" {
+			constraints = append(constraints, c)
+		}
+	}
+	return constraints, nil
+}
+
+// buildConstraintsByType groups constraints by struct name for inline rendering.
+func buildConstraintsByType(constraints []DocConstraint) map[string][]DocConstraint {
+	idx := make(map[string][]DocConstraint)
+	for _, c := range constraints {
+		idx[c.Struct] = append(idx[c.Struct], c)
+	}
+	return idx
 }
 
 func formatDefault(tag TagInfo) string {
@@ -715,6 +877,9 @@ var documented = map[string]bool{}
 // so additional paths can be appended.
 var subsByType = map[string]*SubSection{}
 
+// constraintsByType maps Go struct name to its doc constraints (for inline rendering).
+var constraintsByType map[string][]DocConstraint
+
 func buildDocument(reg *TypeRegistry) []*DocSection {
 	cfg := reg.Lookup("Cfg")
 	if cfg == nil {
@@ -725,7 +890,7 @@ func buildDocument(reg *TypeRegistry) []*DocSection {
 		if field.Tag.YAMLName == "" || field.Tag.YAMLName == "-" {
 			continue
 		}
-		sec := buildTopLevel(reg, field)
+		sec := buildTopLevel(reg, field, cfg.PkgName)
 		if sec != nil {
 			sections = append(sections, sec)
 		}
@@ -822,13 +987,13 @@ func secretPlaceholder(yamlName string) string {
 	return "\"<secret-value>\""
 }
 
-func buildTopLevel(reg *TypeRegistry, field *FieldDef) *DocSection {
+func buildTopLevel(reg *TypeRegistry, field *FieldDef, pkgName string) *DocSection {
 	yamlKey := field.Tag.YAMLName
 
 	var def *StructDef
 	typeName := resolveTypeName(field.TypeExpr)
 	if typeName != "" {
-		def = reg.Lookup(typeName)
+		def = reg.LookupInPkg(typeName, pkgName)
 	}
 	if def == nil && field.InlineDef != nil {
 		def = field.InlineDef
@@ -840,7 +1005,7 @@ func buildTopLevel(reg *TypeRegistry, field *FieldDef) *DocSection {
 		isMap = true
 		valName := resolveTypeName(mt.Value)
 		if valName != "" {
-			mapValDef = reg.Lookup(valName)
+			mapValDef = reg.LookupInPkg(valName, pkgName)
 		}
 	}
 
@@ -909,6 +1074,26 @@ func buildStructSubSection(reg *TypeRegistry, def *StructDef, path string) *SubS
 		sub.Rows = append(sub.Rows, row)
 	}
 
+	// Append inline constraint notes for this struct type (before the table)
+	if cs, ok := constraintsByType[def.Name]; ok {
+		var notes strings.Builder
+		for i, c := range cs {
+			if i > 0 {
+				notes.WriteString(">\n")
+			}
+			fields := make([]string, len(c.Applies))
+			for j, f := range c.Applies {
+				fields[j] = "`" + camelToSnake(strings.TrimSpace(f)) + "`"
+			}
+			notes.WriteString(fmt.Sprintf("> **Constraint** (%s): %s\n", strings.Join(fields, ", "), c.Description))
+		}
+		if sub.Desc != "" {
+			sub.Desc = notes.String() + "\n" + sub.Desc
+		} else {
+			sub.Desc = notes.String()
+		}
+	}
+
 	// Track this subsection by type name for merging additional paths
 	if def.Name != "" {
 		if existing, ok := subsByType[def.Name]; ok {
@@ -932,7 +1117,7 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 		// Named struct type
 		typeName := resolveTypeName(f.TypeExpr)
 		if typeName != "" {
-			if childDef := reg.Lookup(typeName); childDef != nil {
+			if childDef := reg.LookupInPkg(typeName, def.PkgName); childDef != nil {
 				if !documented[childDef.Name] {
 					documented[childDef.Name] = true
 					sub := buildStructSubSection(reg, childDef, childPath)
@@ -950,7 +1135,7 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 
 		// Named map type alias (e.g., type Clients map[string]*Client)
 		if !expanded && typeName != "" {
-			if valDef := reg.LookupMapValueType(typeName); valDef != nil {
+			if valDef := reg.LookupMapValueTypeInPkg(typeName, def.PkgName); valDef != nil {
 				keyPH := mapKeyPlaceholder(f.Tag)
 				if !documented[valDef.Name] {
 					documented[valDef.Name] = true
@@ -980,11 +1165,11 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 			if mt, ok := asMapType(f.TypeExpr); ok {
 				valName := resolveTypeName(mt.Value)
 				if valName != "" {
-					valDef := reg.Lookup(valName)
+					valDef := reg.LookupInPkg(valName, def.PkgName)
 					keyPH := mapKeyPlaceholder(f.Tag)
 					// If the map value is itself a named map alias, resolve one level deeper
 					if valDef == nil {
-						if innerDef := reg.LookupMapValueType(valName); innerDef != nil {
+						if innerDef := reg.LookupMapValueTypeInPkg(valName, def.PkgName); innerDef != nil {
 							valDef = innerDef
 							innerKey := "<key>"
 							if f.Tag.DocValueKey != "" {
@@ -1014,7 +1199,7 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 			if at, ok := f.TypeExpr.(*ast.ArrayType); ok {
 				elemName := resolveTypeName(at.Elt)
 				if elemName != "" {
-					if elemDef := reg.Lookup(elemName); elemDef != nil {
+					if elemDef := reg.LookupInPkg(elemName, def.PkgName); elemDef != nil {
 						if !documented[elemDef.Name] {
 							documented[elemDef.Name] = true
 							sub := buildStructSubSection(reg, elemDef, childPath+"[]")
@@ -1291,6 +1476,16 @@ func main() {
 		if err := reg.ParseDir(d); err != nil {
 			log.Fatalf("error parsing %s: %v", d, err)
 		}
+	}
+
+	// Parse doc:constraint comments from validate.go
+	validatePath := filepath.Join(root, "pkg/helpers/validate.go")
+	if _, err := os.Stat(validatePath); err == nil {
+		parsed, err := parseDocConstraints(validatePath)
+		if err != nil {
+			log.Fatalf("parsing doc constraints: %v", err)
+		}
+		constraintsByType = buildConstraintsByType(parsed)
 	}
 
 	sections := buildDocument(reg)

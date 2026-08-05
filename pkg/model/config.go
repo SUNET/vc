@@ -97,10 +97,8 @@ type Mongo struct {
 	// the MongoDB server's certificate. When empty, the system root CAs are used.
 	CAFilePath string `yaml:"ca_file_path" validate:"omitempty"`
 	// CertFilePath is the path to a PEM-encoded client certificate for mutual TLS (mTLS).
-	// Must be set together with KeyFilePath.
 	CertFilePath string `yaml:"cert_file_path" validate:"required_with=KeyFilePath"`
 	// KeyFilePath is the path to a PEM-encoded client private key for mutual TLS (mTLS).
-	// Must be set together with CertFilePath.
 	KeyFilePath string `yaml:"key_file_path" validate:"required_with=CertFilePath"`
 }
 
@@ -234,12 +232,10 @@ type SAMLSP struct {
 	MetadataURL string `yaml:"metadata_url,omitempty"`
 
 	// MDQServer is the base URL for MDQ (Metadata Query Protocol) server (must end with /)
-	// Mutually exclusive with StaticIDPMetadata
-	MDQServer string `yaml:"mdq_server,omitempty" doc_example:"\"https://md.sunet.se/entities/\""`
+	MDQServer string `yaml:"mdq_server,omitempty" validate:"excluded_with=StaticIDPMetadata" doc_example:"\"https://md.sunet.se/entities/\""`
 
 	// StaticIDPMetadata configures a single static IdP as alternative to MDQ
-	// Mutually exclusive with MDQServer
-	StaticIDPMetadata *StaticIDPConfig `yaml:"static_idp_metadata,omitempty"`
+	StaticIDPMetadata *StaticIDPConfig `yaml:"static_idp_metadata,omitempty" validate:"excluded_with=MDQServer"`
 
 	// CertificatePath is the path to X.509 certificate for SAML signing/encryption
 	// TODO(pki): Migrate to pki.KeyConfig for consistency with other services and
@@ -284,7 +280,7 @@ type StaticIDPConfig struct {
 	// EntityID is the IdP entity identifier
 	EntityID string `yaml:"entity_id" validate:"required"`
 
-	// MetadataPath is the file path to IdP metadata XML (mutually exclusive with MetadataURL)
+	// MetadataPath is the file path to IdP metadata XML
 	MetadataPath string `yaml:"metadata_path,omitempty" validate:"required_without=MetadataURL,excluded_with=MetadataURL"`
 
 	// MetadataURL is the HTTP(S) URL to fetch IdP metadata from (mutually exclusive with MetadataPath)
@@ -309,7 +305,7 @@ type OIDCRP struct {
 	// Used for .well-known/openid-configuration discovery
 	IssuerURL string `yaml:"issuer_url" validate:"required_if=Enable true" doc_example:"\"https://accounts.google.com\""`
 
-	// Scopes are the OAuth2/OIDC scopes to request (at least one scope is required, e.g. "openid")
+	// Scopes are the OAuth2/OIDC scopes to request
 	Scopes []string `yaml:"scopes" validate:"required,min=1,dive,required" default:"[\"openid\", \"profile\", \"email\"]"`
 
 	// SessionDuration is the maximum time in seconds an in-flight OIDC authorization flow
@@ -338,7 +334,6 @@ type OIDCRP struct {
 }
 
 // OIDCRPRegistrationConfig configures how the client obtains its credentials.
-// Exactly one of Preconfigured or Dynamic must be set.
 type OIDCRPRegistrationConfig struct {
 	// Preconfigured uses pre-registered client credentials.
 	// Set this when the client is already registered with the OIDC Provider.
@@ -558,9 +553,8 @@ type Verifier struct {
 	// Supported values: "x509_san_dns" (default), "did".
 	// When "did", the DID field must be set and /.well-known/did.json is served.
 	ClientIDScheme string `yaml:"client_id_scheme,omitempty" default:"x509_san_dns" validate:"omitempty,oneof=x509_san_dns did"`
-	// DID is the verifier's DID identity (e.g., "did:web:verifier.example.com").
-	// Required when ClientIDScheme is "did".
-	DID string `yaml:"did,omitempty" validate:"required_if=ClientIDScheme did"`
+	// DID is the verifier's DID identity.
+	DID string `yaml:"did,omitempty" validate:"required_if=ClientIDScheme did" doc_example:"\"did:web:verifier.example.com\""`
 	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets
 	PreferredVPFormats *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"`
 	// SupportedWallets holds supported wallet configurations
@@ -581,7 +575,7 @@ type Verifier struct {
 	// When enabled, serves /.well-known/openid-federation as a self-signed JWT.
 	OpenIDFederation *openidfederation.Config `yaml:"federation,omitempty"`
 	// Presets holds predefined verification request presets shown in the UI.
-	// The map key is the human-readable label (e.g., "PID", "PID + EHIC").
+	// The map key is the human-readable label.
 	// Each preset maps credential_metadata scopes to optional claim overrides.
 	// A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow.
 	Presets map[string]VerificationPreset `yaml:"presets,omitempty" validate:"omitempty,dive,dive" doc_key:"preset label" doc_value_key:"scope" doc_example:"\"PID\":{\"pid\":null},\"PID + EHIC\":{\"pid\":null,\"ehic\":null}"`
@@ -702,7 +696,6 @@ type StaticOIDCClient struct {
 	// ClientSecret is the client secret for authentication.
 	// Can be defined in the secrets file under verifier.oidc_op.static_clients
 	// as a map of client_id to client_secret.
-	// Required unless TokenEndpointAuthMethod is "none" (public client).
 	ClientSecret string `yaml:"client_secret" validate:"required_unless=TokenEndpointAuthMethod none"`
 	// RedirectURIs is the list of allowed redirect URIs for this client
 	RedirectURIs []string `yaml:"redirect_uris" validate:"required,min=1,dive,redirect_uri"`
@@ -927,10 +920,8 @@ type APIAuthJWKS struct {
 	// Enable enables static JWKS Bearer token authentication
 	Enable bool `yaml:"enable" default:"false"`
 	// JWKSURL is the URL of the JSON Web Key Set used to validate token signatures.
-	// Mutually exclusive with jwks_file_path; exactly one must be set when enable is true
 	JWKSURL string `yaml:"jwks_url" validate:"excluded_with=JWKSFilePath,omitempty,url" doc_example:"\"https://auth.example.com/.well-known/jwks.json\""`
 	// JWKSFilePath is a local file path to a JWKS JSON file used to validate token signatures.
-	// Mutually exclusive with jwks_url; exactly one must be set when enable is true
 	JWKSFilePath string `yaml:"jwks_file_path" validate:"excluded_with=JWKSURL,omitempty"`
 	// Issuer is the expected "iss" claim. Tokens with a different issuer are rejected
 	Issuer string `yaml:"issuer" validate:"required_if=Enable true"`
@@ -955,7 +946,7 @@ type APIAuthOIDC struct {
 	ClientID string `yaml:"client_id" validate:"required_if=Enable true"`
 	// ClientSecret is the OAuth2 client secret. May be empty for public clients.
 	ClientSecret string `yaml:"client_secret"`
-	// RedirectURI is the callback URL for the admin UI OIDC login flow (e.g. "https://apigw.example.com/ui/callback").
+	// RedirectURI is the callback URL for the admin UI OIDC login flow.
 	RedirectURI string `yaml:"redirect_uri" validate:"required_if=Enable true,omitempty,url" doc_example:"\"https://apigw.example.com/ui/callback\""`
 	// Scopes are the OAuth2/OIDC scopes to request (default: ["openid"]).
 	Scopes []string `yaml:"scopes"`
@@ -1226,23 +1217,21 @@ func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 type CredentialMetadata struct {
 	// VCTMFilePath is the path to a local VCTM JSON file.
 	// When set, apigw will publish the VCTM at /type-metadata/:scope.
-	// Used for every format except mso_mdoc (mutually exclusive with VCTMUrl).
-	// At least one of VCTMFilePath, VCTMUrl, MDDLFilePath, MDDLUrl is required.
+	// Used for every format except mso_mdoc.
 	VCTMFilePath string `yaml:"vctm_file_path" json:"-" validate:"required_without_all=VCTMUrl MDDLFilePath MDDLUrl"`
 	// VCTMUrl is the URL where the VCTM is already published externally.
 	// When set, the VCTM is fetched from this URL at startup for internal use
 	// but NOT re-published by apigw.
-	// Used for every format except mso_mdoc (mutually exclusive with VCTMFilePath).
+	// Used for every format except mso_mdoc.
 	VCTMUrl string `yaml:"vctm_url" json:"-" validate:"required_without_all=VCTMFilePath MDDLFilePath MDDLUrl,omitempty,url"`
 
 	VCTM *sdjwtvc.VCTM `yaml:"-" json:"-"`
 
 	// MDDLFilePath is the path to a local MDDL (mso_mdoc) schema JSON file,
-	// as produced by registry-cli's mddl format generator. The mso_mdoc
-	// analogue of VCTMFilePath — mutually exclusive with MDDLUrl.
+	// as produced by registry-cli's mddl format generator.
 	MDDLFilePath string `yaml:"mddl_file_path" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLUrl"`
 	// MDDLUrl is the URL where the MDDL schema is already published
-	// externally. The mso_mdoc analogue of VCTMUrl.
+	// externally. The mso_mdoc analogue of vctm_url.
 	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath,omitempty,url"`
 
 	MDDL *mdoc.MDDLSchema `yaml:"-" json:"-"`

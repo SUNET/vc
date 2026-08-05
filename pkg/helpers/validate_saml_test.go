@@ -91,7 +91,7 @@ func TestValidateSAMLConfig(t *testing.T) {
 				},
 			},
 			expectError: true,
-			errorMsg:    "saml_metadata_source_exclusive",
+			errorMsg:    "excluded_with",
 		},
 		{
 			name: "static IdP without entityID",

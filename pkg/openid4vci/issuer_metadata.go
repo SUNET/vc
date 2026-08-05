@@ -185,8 +185,7 @@ type CredentialConfigurationsSupported struct {
 	DisclosurePolicy *EmbeddedDisclosurePolicy `json:"disclosure_policy,omitempty" yaml:"disclosure_policy,omitempty"`
 }
 
-// EmbeddedDisclosurePolicy defines rules indicating the conditions a wallet-relying party
-// must meet to access an electronic attestation of attributes.
+// EmbeddedDisclosurePolicy defines rules indicating the conditions a wallet-relying party must meet to access an electronic attestation of attributes.
 // Per CIR 2024/2979 Annex III, three common policy types are defined.
 type EmbeddedDisclosurePolicy struct {
 	// PolicyType identifies the disclosure policy type. One of:
@@ -197,12 +196,12 @@ type EmbeddedDisclosurePolicy struct {
 
 	// AuthorizedRelyingParties is a list of EU-wide unique Relying Party identifiers
 	// (as found in the Wallet-Relying Party Registration Certificate).
-	// Required when PolicyType is "authorized_relying_parties".
+	// Required when policy_type is "authorized_relying_parties".
 	AuthorizedRelyingParties []string `json:"authorized_relying_parties,omitempty" yaml:"authorized_relying_parties,omitempty" validate:"required_if=PolicyType authorized_relying_parties,dive,required"`
 
 	// TrustedRoots is a list of root or intermediate certificate SHA-256 fingerprints
 	// (hex-encoded, 64 characters) from which the RP's access certificate must be derived.
-	// Required when PolicyType is "specific_root_of_trust".
+	// Required when policy_type is "specific_root_of_trust".
 	TrustedRoots []string `json:"trusted_roots,omitempty" yaml:"trusted_roots,omitempty" validate:"required_if=PolicyType specific_root_of_trust,dive,required,len=64,hexadecimal"`
 }
 
