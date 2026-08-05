@@ -91,12 +91,21 @@ func (e *WalletAttestationEvaluator) Evaluate(ctx context.Context, attestation s
 		return nil, fmt.Errorf("wallet attestation signature verification failed: %w", err)
 	}
 
-	// Belt-and-suspenders: the generic verifier's own issuer resolution
-	// (ExtractJWTClaimsInfo, falling back to x5c leaf CN when iss is absent)
-	// should agree with parseAttestationIdentity's WIA-specific extraction.
-	// A mismatch means the two resolution strategies disagree about identity,
-	// which should never happen for a well-formed WIA.
-	if identity.issuer != "" && keyInfo.IssuerID != "" && identity.issuer != keyInfo.IssuerID {
+	// Belt-and-suspenders: for iss-only WIAs (no x5c), the generic verifier's
+	// issuer resolution (ExtractJWTClaimsInfo, from the `iss` claim) should
+	// exactly match parseAttestationIdentity's extraction (also the `iss`
+	// claim) - a mismatch here would mean the two code paths disagree about
+	// the same claim, which should never happen.
+	//
+	// For x5c-based WIAs this check is skipped: identity.issuer is
+	// cert-derived (DNS SAN or CN) while keyInfo.IssuerID falls back to the
+	// `iss` claim verbatim (e.g. a full URL) when present. These are
+	// legitimately non-equal even for a valid WIA - parseAttestationIdentity
+	// already enforces iss↔x5c consistency (via issMatchesCertIdentity,
+	// which accounts for the URL-vs-hostname shape difference) when both are
+	// present, so re-checking strict equality here would reject valid TS03
+	// attestations.
+	if !identity.hasX5C && identity.issuer != "" && keyInfo.IssuerID != "" && identity.issuer != keyInfo.IssuerID {
 		return nil, fmt.Errorf("wallet attestation issuer mismatch: iss claim %q does not match verified key issuer %q", identity.issuer, keyInfo.IssuerID)
 	}
 	issuer := identity.issuer

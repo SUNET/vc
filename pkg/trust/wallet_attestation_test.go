@@ -6,8 +6,11 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"fmt"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
@@ -227,6 +230,36 @@ func signTestWIAWithJWK(t *testing.T, signingKey *ecdsa.PrivateKey, issuer, sub,
 	return signed
 }
 
+// signTestWIAWithX5C creates a signed ES256 WIA with an x5c header (TS03/EUDI
+// format): a self-signed cert whose DNS SAN is dnsSAN, plus an `iss` claim
+// that is a URL over that same host - the shape that previously tripped the
+// belt-and-suspenders issuer check, since parseAttestationIdentity derives
+// the issuer as the bare DNS SAN while the generic verifier's IssuerID is the
+// raw (URL-shaped) iss claim.
+func signTestWIAWithX5C(t *testing.T, dnsSAN, iss, sub string) string {
+	t.Helper()
+	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: dnsSAN},
+		DNSNames:     []string{dnsSAN},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &signingKey.PublicKey, signingKey)
+	require.NoError(t, err)
+
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{"iss": iss, "sub": sub})
+	token.Header["typ"] = "oauth-client-attestation+jwt"
+	token.Header["x5c"] = []any{base64.StdEncoding.EncodeToString(certDER)}
+
+	signed, err := token.SignedString(signingKey)
+	require.NoError(t, err)
+	return signed
+}
+
 // capturingEvaluator is a TrustEvaluator that records the last EvaluationRequest
 // it received, so tests can assert exactly what was sent to the PDP.
 type capturingEvaluator struct {
@@ -275,13 +308,35 @@ func TestWalletAttestationEvaluator_Evaluate_SignatureVerified(t *testing.T) {
 	assert.Equal(t, "https://wallet-provider.example.com", evaluator.lastRequest.SubjectID)
 }
 
-func TestWalletAttestationEvaluator_Evaluate_RejectsForgedIssuer(t *testing.T) {
-	// A WIA signed by ONE key but claiming to be issued by a DIFFERENT
-	// wallet provider's iss - if signature verification is skipped (the
-	// original bug: ParseUnverified, "PDP already validated"), this would
-	// sail through unnoticed. It must fail here instead, since nothing
-	// verifies that "https://real-wallet-provider.example.com" actually
-	// signed this token - the embedded jwk belongs to an unrelated key.
+// Regression for a bug the belt-and-suspenders issuer check introduced: for
+// x5c-based (TS03) WIAs, parseAttestationIdentity derives the issuer from the
+// cert's DNS SAN (a bare hostname), while the generic verifier's IssuerID
+// falls back to the raw `iss` claim (a URL) when present. A valid WIA with
+// iss="https://<dnsSAN>" was being rejected by a strict-equality check
+// between the two, even though parseAttestationIdentity already validated
+// iss↔cert consistency (via issMatchesCertIdentity, which understands the
+// URL-vs-hostname shape difference). The check must be skipped for x5c WIAs.
+func TestWalletAttestationEvaluator_Evaluate_X5CIssuerFormatMismatchAllowed(t *testing.T) {
+	wia := signTestWIAWithX5C(t, "wallet-provider.example.com", "https://wallet-provider.example.com", "instance-jkt-123")
+
+	evaluator := &capturingEvaluator{trustDecision: true}
+	we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator))
+
+	result, err := we.Evaluate(context.Background(), wia)
+	require.NoError(t, err)
+	assert.True(t, result.Trusted)
+	assert.Equal(t, "wallet-provider.example.com", result.Issuer)
+
+	require.NotNil(t, evaluator.lastRequest)
+	assert.Equal(t, KeyTypeX5C, evaluator.lastRequest.KeyType)
+}
+
+func TestWalletAttestationEvaluator_Evaluate_RejectsSignatureMismatch(t *testing.T) {
+	// A WIA whose signature does not match its embedded jwk - if signature
+	// verification is skipped (the original bug: ParseUnverified, "PDP
+	// already validated"), this would sail through unnoticed. It must fail
+	// here instead, since nothing verifies that the embedded jwk actually
+	// signed this token.
 	attackerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
