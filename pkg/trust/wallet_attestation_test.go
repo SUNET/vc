@@ -219,11 +219,18 @@ func signTestWIAWithJWK(t *testing.T, signingKey *ecdsa.PrivateKey, issuer, sub,
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	token.Header["typ"] = "oauth-client-attestation+jwt"
 	pubKey := signingKey.PublicKey
+	// P-256 JWK x/y must be fixed-width 32-byte values; X.Bytes()/Y.Bytes()
+	// drop leading zero bytes, which would intermittently produce a
+	// non-compliant (shorter) encoding that strict JWK parsers reject.
+	xBytes := make([]byte, 32)
+	yBytes := make([]byte, 32)
+	pubKey.X.FillBytes(xBytes)
+	pubKey.Y.FillBytes(yBytes)
 	token.Header["jwk"] = map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(pubKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(pubKey.Y.Bytes()),
+		"x":   base64.RawURLEncoding.EncodeToString(xBytes),
+		"y":   base64.RawURLEncoding.EncodeToString(yBytes),
 	}
 	signed, err := token.SignedString(signingKey)
 	require.NoError(t, err)
