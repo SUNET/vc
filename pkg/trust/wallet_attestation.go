@@ -33,6 +33,14 @@ type WalletAttestationResult struct {
 	TrustFramework string
 }
 
+// WIA trust-model modes — see WalletAttestationEvaluator.Mode. Mirrors
+// go-wallet-backend's WIAConfig.Mode terminology so operators configure both
+// sides of an interop pair consistently.
+const (
+	WIAModeETSI = "etsi"
+	WIAModeIETF = "ietf"
+)
+
 // WalletAttestationEvaluator evaluates wallet attestation JWTs by verifying
 // the WIA's own signature locally and then delegating the trust DECISION
 // (only) to the go-trust AuthZEN PDP - the PDP evaluates whether an
@@ -45,6 +53,9 @@ type WalletAttestationResult struct {
 //   - IETF draft-ietf-oauth-attestation-based-client-auth: iss claim present
 //   - EC TS03 §2.2.1 (EUDI): no iss, identity from x5c certificate chain in header
 //
+// Mode optionally pins which of the two a deployment accepts (see the Mode
+// field); when unset, both remain accepted as determined by the WIA itself.
+//
 // PKCE (mandatory for public clients) is the sole code-binding mechanism.
 type WalletAttestationEvaluator struct {
 	TrustEvaluator TrustEvaluator
@@ -53,11 +64,22 @@ type WalletAttestationEvaluator struct {
 	// (JWTTrustVerifier.extractJWTKeyMaterial's existing resolution
 	// strategies, reused as-is here rather than reimplemented).
 	Verifier *JWTTrustVerifier
+	// Mode restricts which WIA trust model is accepted: WIAModeETSI
+	// (x5c-only, matching EC TS03 v1.5.2 / ETSI TS 119 472-3 — identity
+	// verified against the Trusted List for Wallet Providers), WIAModeIETF
+	// (iss/JWKS-only, the plain IETF draft format with no ARF/ETSI
+	// counterpart), or "" to accept either (the pre-Mode default: whichever
+	// format the WIA itself uses). Enforced in Evaluate before any signature
+	// verification is attempted, so a mismatched WIA is rejected cheaply and
+	// never reaches the PDP with the "wrong" trust model's data.
+	Mode string
 }
 
-// NewWalletAttestationEvaluator creates a new evaluator.
-func NewWalletAttestationEvaluator(evaluator TrustEvaluator, verifier *JWTTrustVerifier) *WalletAttestationEvaluator {
-	return &WalletAttestationEvaluator{TrustEvaluator: evaluator, Verifier: verifier}
+// NewWalletAttestationEvaluator creates a new evaluator. mode is one of
+// WIAModeETSI, WIAModeIETF, or "" to accept either format — see
+// WalletAttestationEvaluator.Mode.
+func NewWalletAttestationEvaluator(evaluator TrustEvaluator, verifier *JWTTrustVerifier, mode string) *WalletAttestationEvaluator {
+	return &WalletAttestationEvaluator{TrustEvaluator: evaluator, Verifier: verifier, Mode: mode}
 }
 
 // Evaluate verifies a wallet attestation JWT's signature, then evaluates
@@ -77,6 +99,20 @@ func (e *WalletAttestationEvaluator) Evaluate(ctx context.Context, attestation s
 	identity, err := parseAttestationIdentity(attestation)
 	if err != nil {
 		return nil, err
+	}
+
+	// Enforce the configured trust model, if pinned, before any signature
+	// verification: reject a mismatched WIA cheaply, and never let it reach
+	// the PDP call below with the "wrong" model's KeyType/Key data.
+	switch e.Mode {
+	case WIAModeETSI:
+		if !identity.hasX5C {
+			return nil, errors.New("wallet attestation rejected: this deployment requires the etsi (x5c) trust model, but the WIA has no x5c header")
+		}
+	case WIAModeIETF:
+		if identity.hasX5C {
+			return nil, errors.New("wallet attestation rejected: this deployment requires the ietf (iss/JWKS) trust model, but the WIA has an x5c header")
+		}
 	}
 
 	// Verify the WIA's own signature and resolve its actual signing key
