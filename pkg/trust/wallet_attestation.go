@@ -386,37 +386,41 @@ func parseAttestationIdentity(attestation string) (*attestationIdentity, error) 
 
 	// Check for x5c in JWT header
 	if x5cRaw, ok := token.Header["x5c"]; ok {
-		if x5cArr, ok := x5cRaw.([]interface{}); ok && len(x5cArr) > 0 {
-			result.hasX5C = true
-			for _, cert := range x5cArr {
-				if s, ok := cert.(string); ok {
-					result.x5cChain = append(result.x5cChain, s)
-				}
-			}
-
-			// Fail closed: x5c header present but no valid cert strings extracted.
-			// This prevents falling back to self-asserted iss with a malformed x5c.
-			if len(result.x5cChain) == 0 {
-				return nil, errors.New("x5c header present but contains no valid certificate strings")
-			}
-
-			// When x5c is present, identity MUST come from the certificate.
-			// The x5c chain is the cryptographic proof; iss is self-asserted
-			// and must not override the cert-derived identity.
-			if len(result.x5cChain) > 0 {
-				certIdentity, err := issuerFromX5CLeaf(result.x5cChain[0])
-				if err != nil {
-					return nil, fmt.Errorf("failed to extract issuer from x5c: %w", err)
-				}
-				// If iss is present, validate consistency (not strict equality —
-				// iss is typically a URL like "https://host" while cert SAN is
-				// a bare hostname "host")
-				if issClaim != "" && !issMatchesCertIdentity(issClaim, certIdentity) {
-					return nil, fmt.Errorf("iss claim %q does not match x5c certificate identity %q", issClaim, certIdentity)
-				}
-				result.issuer = certIdentity
+		// Fail closed: an x5c header that isn't a non-empty array is malformed.
+		// Treating it as "no x5c" here would let it silently masquerade as an
+		// IETF/iss-only WIA, slipping past WIAModeIETF's "reject any x5c
+		// header" enforcement in Evaluate.
+		x5cArr, isArr := x5cRaw.([]interface{})
+		if !isArr || len(x5cArr) == 0 {
+			return nil, errors.New("x5c header present but malformed (not a non-empty array)")
+		}
+		result.hasX5C = true
+		for _, cert := range x5cArr {
+			if s, ok := cert.(string); ok {
+				result.x5cChain = append(result.x5cChain, s)
 			}
 		}
+
+		// Fail closed: x5c header present but no valid cert strings extracted.
+		// This prevents falling back to self-asserted iss with a malformed x5c.
+		if len(result.x5cChain) == 0 {
+			return nil, errors.New("x5c header present but contains no valid certificate strings")
+		}
+
+		// When x5c is present, identity MUST come from the certificate.
+		// The x5c chain is the cryptographic proof; iss is self-asserted
+		// and must not override the cert-derived identity.
+		certIdentity, err := issuerFromX5CLeaf(result.x5cChain[0])
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract issuer from x5c: %w", err)
+		}
+		// If iss is present, validate consistency (not strict equality —
+		// iss is typically a URL like "https://host" while cert SAN is
+		// a bare hostname "host")
+		if issClaim != "" && !issMatchesCertIdentity(issClaim, certIdentity) {
+			return nil, fmt.Errorf("iss claim %q does not match x5c certificate identity %q", issClaim, certIdentity)
+		}
+		result.issuer = certIdentity
 	}
 
 	// No x5c: use iss claim (IETF draft format — PDP validates via JWKS)

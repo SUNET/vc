@@ -170,7 +170,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 		Log:                        c.log,
 	})
 
-	// Wallet attestation: enabled when trust.wallet_attestation.enabled + pdp_url are set
+	// Wallet attestation: enabled when apigw.trust.wallet_attestation.enabled + pdp_url are set
 	if cfg.APIGW.Trust.WalletAttestation.Enabled && pdpURL != "" {
 		waMode := cfg.APIGW.Trust.WalletAttestation.Mode
 		switch waMode {

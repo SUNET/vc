@@ -267,6 +267,24 @@ func signTestWIAWithX5C(t *testing.T, dnsSAN, iss, sub string) string {
 	return signed
 }
 
+// signTestWIAWithEmptyX5C creates a signed ES256 WIA with a malformed x5c
+// header: the key is present but its value is an empty array, rather than
+// being absent entirely. This must not be treated as "no x5c" (see
+// parseAttestationIdentity's fail-closed handling).
+func signTestWIAWithEmptyX5C(t *testing.T, iss, sub string) string {
+	t.Helper()
+	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{"iss": iss, "sub": sub})
+	token.Header["typ"] = "oauth-client-attestation+jwt"
+	token.Header["x5c"] = []any{}
+
+	signed, err := token.SignedString(signingKey)
+	require.NoError(t, err)
+	return signed
+}
+
 // capturingEvaluator is a TrustEvaluator that records the last EvaluationRequest
 // it received, so tests can assert exactly what was sent to the PDP.
 type capturingEvaluator struct {
@@ -394,6 +412,19 @@ func TestWalletAttestationEvaluator_Evaluate_ModeEnforcement(t *testing.T) {
 			_, err := we.Evaluate(context.Background(), wia)
 			require.NoError(t, err)
 			require.NotNil(t, evaluator.lastRequest)
+		}
+	})
+
+	t.Run("empty-array x5c header is rejected, not silently treated as no-x5c", func(t *testing.T) {
+		malformedWIA := signTestWIAWithEmptyX5C(t, "https://wallet-provider.example.com", "instance-jkt-123")
+		for _, mode := range []string{"", WIAModeETSI, WIAModeIETF} {
+			evaluator := &capturingEvaluator{trustDecision: true}
+			we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator), mode)
+
+			_, err := we.Evaluate(context.Background(), malformedWIA)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "malformed")
+			assert.Nil(t, evaluator.lastRequest, "PDP must never be called for a malformed x5c header")
 		}
 	})
 
