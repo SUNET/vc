@@ -177,7 +177,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 		case "", trust.WIAModeETSI, trust.WIAModeIETF:
 			// valid (empty = accept either format)
 		default:
-			c.log.Warn("wallet_attestation.mode is not \"etsi\" or \"ietf\" - ignoring, accepting either WIA format",
+			c.log.Warn("apigw.trust.wallet_attestation.mode is not \"etsi\" or \"ietf\" - ignoring, accepting either WIA format",
 				"configured_mode", waMode)
 			waMode = ""
 		}

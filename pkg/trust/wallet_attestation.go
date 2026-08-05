@@ -65,9 +65,9 @@ type WalletAttestationEvaluator struct {
 	// strategies, reused as-is here rather than reimplemented).
 	Verifier *JWTTrustVerifier
 	// Mode restricts which WIA trust model is accepted: WIAModeETSI
-	// (x5c-only, matching EC TS03 v1.5.2 / ETSI TS 119 472-3 — identity
+	// (x5c-based, matching EC TS03 v1.5.2 / ETSI TS 119 472-3 — identity
 	// verified against the Trusted List for Wallet Providers), WIAModeIETF
-	// (iss/JWKS-only, the plain IETF draft format with no ARF/ETSI
+	// (iss/JWKS-based, the plain IETF draft format with no ARF/ETSI
 	// counterpart), or "" to accept either (the pre-Mode default: whichever
 	// format the WIA itself uses). Enforced in Evaluate before any signature
 	// verification is attempted, so a mismatched WIA is rejected cheaply and

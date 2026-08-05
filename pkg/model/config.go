@@ -689,10 +689,10 @@ type WalletAttestationConfig struct {
 	//     draft-ietf-oauth-attestation-based-client-auth format, resolved via
 	//     JWKS discovery — no ARF/ETSI counterpart). A WIA with x5c is
 	//     rejected before signature verification.
-	//   - "" (default): accept either format, as determined by the WIA
-	//     itself (trust.wallet_attestation.WalletAttestationEvaluator.Evaluate's
-	//     existing hasX5C-based branching) — preserves pre-Mode behavior for
-	//     deployments that haven't opted into pinning one trust model.
+	//   - "" (default): accept either format, as determined by whether the
+	//     WIA carries an x5c header or an iss claim — preserves pre-Mode
+	//     behavior for deployments that haven't opted into pinning one trust
+	//     model.
 	//
 	// Any other value is treated the same as "" (a warning is logged, not a
 	// startup failure — this package has no config.Validate() convention to
