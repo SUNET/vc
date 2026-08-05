@@ -232,12 +232,10 @@ type SAMLSP struct {
 	MetadataURL string `yaml:"metadata_url,omitempty"`
 
 	// MDQServer is the base URL for MDQ (Metadata Query Protocol) server (must end with /)
-	// Mutually exclusive with StaticIDPMetadata
-	MDQServer string `yaml:"mdq_server,omitempty" doc_example:"\"https://md.sunet.se/entities/\""`
+	MDQServer string `yaml:"mdq_server,omitempty" validate:"excluded_with=StaticIDPMetadata" doc_example:"\"https://md.sunet.se/entities/\""`
 
 	// StaticIDPMetadata configures a single static IdP as alternative to MDQ
-	// Mutually exclusive with MDQServer
-	StaticIDPMetadata *StaticIDPConfig `yaml:"static_idp_metadata,omitempty"`
+	StaticIDPMetadata *StaticIDPConfig `yaml:"static_idp_metadata,omitempty" validate:"excluded_with=MDQServer"`
 
 	// CertificatePath is the path to X.509 certificate for SAML signing/encryption
 	// TODO(pki): Migrate to pki.KeyConfig for consistency with other services and

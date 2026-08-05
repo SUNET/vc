@@ -25,6 +25,15 @@ import (
 
 // ---- Data types ----
 
+// DocConstraint represents a struct-level validation rule parsed from
+// "// doc:constraint ..." comments in validate.go.
+type DocConstraint struct {
+	Name        string
+	Struct      string
+	Applies     []string // Go field names
+	Description string
+}
+
 type TagInfo struct {
 	YAMLName    string
 	Omitempty   bool
@@ -488,6 +497,9 @@ func determineRequired(tag TagInfo) string {
 				}
 			}
 			cond := strings.Join(conditions, " and ")
+			if tag.Default != "" {
+				return "No"
+			}
 			if m := reExcluded.FindStringSubmatch(v); len(m) > 1 {
 				return fmt.Sprintf("Yes (if %s; mutually exclusive with %s)", cond, camelToSnake(m[1]))
 			}
@@ -521,6 +533,9 @@ func determineRequired(tag TagInfo) string {
 			parts := strings.Fields(after)
 			if len(parts) > 0 {
 				field := camelToSnake(parts[0])
+				if tag.Default != "" {
+					return "No"
+				}
 				return fmt.Sprintf("Yes (if %s set)", field)
 			}
 		}
@@ -551,6 +566,53 @@ func determineRequired(tag TagInfo) string {
 		return fmt.Sprintf("No (mutually exclusive with %s)", camelToSnake(m[1]))
 	}
 	return "No"
+}
+
+// parseDocConstraints reads a Go source file and extracts structured
+// "// doc:constraint" comments. Format:
+//
+//	// doc:constraint name="<id>" struct="<GoType>" applies="<Field1>,<Field2>" description="<text>"
+func parseDocConstraints(path string) ([]DocConstraint, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	re := regexp.MustCompile(`//\s*doc:constraint\s+(.+)`)
+	kvRe := regexp.MustCompile(`(\w+)="([^"]*)"`)
+	var constraints []DocConstraint
+	for _, line := range strings.Split(string(data), "\n") {
+		m := re.FindStringSubmatch(strings.TrimSpace(line))
+		if m == nil {
+			continue
+		}
+		kvs := kvRe.FindAllStringSubmatch(m[1], -1)
+		c := DocConstraint{}
+		for _, kv := range kvs {
+			switch kv[1] {
+			case "name":
+				c.Name = kv[2]
+			case "struct":
+				c.Struct = kv[2]
+			case "applies":
+				c.Applies = strings.Split(kv[2], ",")
+			case "description":
+				c.Description = kv[2]
+			}
+		}
+		if c.Name != "" && c.Struct != "" {
+			constraints = append(constraints, c)
+		}
+	}
+	return constraints, nil
+}
+
+// buildConstraintsByType groups constraints by struct name for inline rendering.
+func buildConstraintsByType(constraints []DocConstraint) map[string][]DocConstraint {
+	idx := make(map[string][]DocConstraint)
+	for _, c := range constraints {
+		idx[c.Struct] = append(idx[c.Struct], c)
+	}
+	return idx
 }
 
 func formatDefault(tag TagInfo) string {
@@ -815,6 +877,9 @@ var documented = map[string]bool{}
 // so additional paths can be appended.
 var subsByType = map[string]*SubSection{}
 
+// constraintsByType maps Go struct name to its doc constraints (for inline rendering).
+var constraintsByType map[string][]DocConstraint
+
 func buildDocument(reg *TypeRegistry) []*DocSection {
 	cfg := reg.Lookup("Cfg")
 	if cfg == nil {
@@ -1007,6 +1072,26 @@ func buildStructSubSection(reg *TypeRegistry, def *StructDef, path string) *SubS
 			Required: determineRequired(f.Tag),
 		}
 		sub.Rows = append(sub.Rows, row)
+	}
+
+	// Append inline constraint notes for this struct type (before the table)
+	if cs, ok := constraintsByType[def.Name]; ok {
+		var notes strings.Builder
+		for i, c := range cs {
+			if i > 0 {
+				notes.WriteString(">\n")
+			}
+			fields := make([]string, len(c.Applies))
+			for j, f := range c.Applies {
+				fields[j] = "`" + camelToSnake(strings.TrimSpace(f)) + "`"
+			}
+			notes.WriteString(fmt.Sprintf("> **Constraint** (%s): %s\n", strings.Join(fields, ", "), c.Description))
+		}
+		if sub.Desc != "" {
+			sub.Desc = notes.String() + "\n" + sub.Desc
+		} else {
+			sub.Desc = notes.String()
+		}
 	}
 
 	// Track this subsection by type name for merging additional paths
@@ -1391,6 +1476,16 @@ func main() {
 		if err := reg.ParseDir(d); err != nil {
 			log.Fatalf("error parsing %s: %v", d, err)
 		}
+	}
+
+	// Parse doc:constraint comments from validate.go
+	validatePath := filepath.Join(root, "pkg/helpers/validate.go")
+	if _, err := os.Stat(validatePath); err == nil {
+		parsed, err := parseDocConstraints(validatePath)
+		if err != nil {
+			log.Fatalf("parsing doc constraints: %v", err)
+		}
+		constraintsByType = buildConstraintsByType(parsed)
 	}
 
 	sections := buildDocument(reg)

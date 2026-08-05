@@ -95,7 +95,7 @@ Shared configuration used across all services.
 | Field       | Type     | Description                                          | Example | Default         | Required         |
 | ----------- | -------- | ---------------------------------------------------- | ------- | --------------- | ---------------- |
 | `enable`    | `bool`   | Enable activates SASL authentication                 | -       | `false`         | No               |
-| `mechanism` | `string` | SASL mechanism (PLAIN, SCRAM-SHA-256, SCRAM-SHA-512) | -       | `SCRAM-SHA-512` | Yes (if enabled) |
+| `mechanism` | `string` | SASL mechanism (PLAIN, SCRAM-SHA-256, SCRAM-SHA-512) | -       | `SCRAM-SHA-512` | No               |
 | `username`  | `string` | SASL username                                        | -       | -               | Yes (if enabled) |
 | `password`  | `string` | SASL password                                        | -       | -               | Yes (if enabled) |
 
@@ -208,6 +208,10 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 > **Path:** `.apigw.api_server.api_auth`, `.issuer.api_server.api_auth`, `.verifier.api_server.api_auth`, `.registry.api_server.api_auth`
 
+> **Constraint** (`jwks`, `oidc`): JWKS and OIDC are mutually exclusive — enable at most one.
+>
+> **Constraint** (`rules`, `rules_file`): Authorization rules require JWKS or OIDC to be enabled.
+
 JWKS and OIDC are mutually exclusive
 If neither is enabled, no authentication is applied (open access)
 
@@ -234,6 +238,8 @@ When no rules are configured, any valid Bearer JWT grants access.
 ### `jwks`
 
 > **Path:** `.apigw.api_server.api_auth.jwks`, `.issuer.api_server.api_auth.jwks`, `.verifier.api_server.api_auth.jwks`, `.registry.api_server.api_auth.jwks`
+
+> **Constraint** (`jwks_url`, `jwks_file_path`): Exactly one of jwks_url or jwks_file_path must be set when enable is true.
 
 | Field            | Type     | Description                                                                 | Example                                            | Default | Required                                    |
 | ---------------- | -------- | --------------------------------------------------------------------------- | -------------------------------------------------- | ------- | ------------------------------------------- |
@@ -412,21 +418,23 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 
 > **Path:** `.apigw.auth_providers.saml`
 
-| Field                        | Type     | Description                                                                                                                                                                                                                                                                                                                                               | Example                                   | Default | Required         |
-| ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | ---------------- |
-| `enable`                     | `bool`   | SAML support (default: false)                                                                                                                                                                                                                                                                                                                             | -                                         | `false` | No               |
-| `entity_id`                  | `string` | SAML SP entity identifier (typically the metadata URL)                                                                                                                                                                                                                                                                                                    | `"https://issuer.sunet.se/saml/metadata"` | -       | Yes (if enabled) |
-| `metadata_url`               | `string` | Public URL where SP metadata is served (optional, auto-generated if empty)                                                                                                                                                                                                                                                                                | -                                         | -       | No               |
-| `mdq_server`                 | `string` | Base URL for MDQ (Metadata Query Protocol) server (must end with /) Mutually exclusive with StaticIDPMetadata                                                                                                                                                                                                                                             | `"https://md.sunet.se/entities/"`         | -       | No               |
-| `static_idp_metadata`        | `object` | A single static IdP as alternative to MDQ Mutually exclusive with MDQServer                                                                                                                                                                                                                                                                               | -                                         | -       | No               |
-| `certificate_path`           | `string` | Path to X.509 certificate for SAML signing/encryption TODO(pki): Migrate to pki.KeyConfig for consistency with other services and to enable HSM-backed SAML signing keys in the future.                                                                                                                                                                   | -                                         | -       | Yes (if enabled) |
-| `private_key_path`           | `string` | Path to private key for SAML signing/encryption TODO(pki): See CertificatePath TODO — both fields would be replaced by a single KeyConfig.                                                                                                                                                                                                                | -                                         | -       | Yes (if enabled) |
-| `acs_endpoint`               | `string` | Assertion Consumer Service URL where IdP sends SAML responses                                                                                                                                                                                                                                                                                             | `"https://issuer.sunet.se/saml/acs"`      | -       | Yes (if enabled) |
-| `session_duration`           | `int`    | Maximum time in seconds an in-flight SAML authentication flow (AuthnRequest → Response) may remain active before it expires                                                                                                                                                                                                                               | -                                         | `300`   | No               |
-| `attribute_mapping`          | `object` | AttributeMapping normalizes provider-specific attribute names (e.g. SAML OIDs) to canonical claim names. Applied to ALL attributes in the assertion. Which normalized attributes are used depends on the data source: - assertion: VCTM determines which go into the credential - datastore: auth_claims determines which are used for DB identity lookup | -                                         | -       | Yes (if enabled) |
-| `metadata_signing_cert_path` | `string` | Path to the X.509 certificate used to verify metadata signatures. When set, all fetched metadata (MDQ and static) must carry a valid XML signature from this certificate.                                                                                                                                                                                 | -                                         | -       | No               |
-| `allow_unsigned_metadata`    | `bool`   | AllowUnsignedMetadata permits MDQ/URL metadata without signature verification. This is INSECURE (MITM → fake IdP) and should only be used in development. When false (default), MDQ and URL metadata sources require MetadataSigningCertPath. Local metadata files are allowed unsigned regardless (with a startup warning).                              | -                                         | `false` | No               |
-| `metadata_cache_ttl`         | `int`    | MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ                                                                                                                                                                                                                                                                     | -                                         | -       | No               |
+> **Constraint** (`mdq_server`, `static_idp_metadata`): Exactly one of mdq_server or static_idp_metadata must be set when enable is true. Mutual exclusivity is enforced by field tags.
+
+| Field                        | Type     | Description                                                                                                                                                                                                                                                                                                                                               | Example                                   | Default | Required                                         |
+| ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | ------------------------------------------------ |
+| `enable`                     | `bool`   | SAML support (default: false)                                                                                                                                                                                                                                                                                                                             | -                                         | `false` | No                                               |
+| `entity_id`                  | `string` | SAML SP entity identifier (typically the metadata URL)                                                                                                                                                                                                                                                                                                    | `"https://issuer.sunet.se/saml/metadata"` | -       | Yes (if enabled)                                 |
+| `metadata_url`               | `string` | Public URL where SP metadata is served (optional, auto-generated if empty)                                                                                                                                                                                                                                                                                | -                                         | -       | No                                               |
+| `mdq_server`                 | `string` | Base URL for MDQ (Metadata Query Protocol) server (must end with /)                                                                                                                                                                                                                                                                                       | `"https://md.sunet.se/entities/"`         | -       | No (mutually exclusive with static_idp_metadata) |
+| `static_idp_metadata`        | `object` | A single static IdP as alternative to MDQ                                                                                                                                                                                                                                                                                                                 | -                                         | -       | No (mutually exclusive with mdq_server)          |
+| `certificate_path`           | `string` | Path to X.509 certificate for SAML signing/encryption TODO(pki): Migrate to pki.KeyConfig for consistency with other services and to enable HSM-backed SAML signing keys in the future.                                                                                                                                                                   | -                                         | -       | Yes (if enabled)                                 |
+| `private_key_path`           | `string` | Path to private key for SAML signing/encryption TODO(pki): See CertificatePath TODO — both fields would be replaced by a single KeyConfig.                                                                                                                                                                                                                | -                                         | -       | Yes (if enabled)                                 |
+| `acs_endpoint`               | `string` | Assertion Consumer Service URL where IdP sends SAML responses                                                                                                                                                                                                                                                                                             | `"https://issuer.sunet.se/saml/acs"`      | -       | Yes (if enabled)                                 |
+| `session_duration`           | `int`    | Maximum time in seconds an in-flight SAML authentication flow (AuthnRequest → Response) may remain active before it expires                                                                                                                                                                                                                               | -                                         | `300`   | No                                               |
+| `attribute_mapping`          | `object` | AttributeMapping normalizes provider-specific attribute names (e.g. SAML OIDs) to canonical claim names. Applied to ALL attributes in the assertion. Which normalized attributes are used depends on the data source: - assertion: VCTM determines which go into the credential - datastore: auth_claims determines which are used for DB identity lookup | -                                         | -       | Yes (if enabled)                                 |
+| `metadata_signing_cert_path` | `string` | Path to the X.509 certificate used to verify metadata signatures. When set, all fetched metadata (MDQ and static) must carry a valid XML signature from this certificate.                                                                                                                                                                                 | -                                         | -       | No                                               |
+| `allow_unsigned_metadata`    | `bool`   | AllowUnsignedMetadata permits MDQ/URL metadata without signature verification. This is INSECURE (MITM → fake IdP) and should only be used in development. When false (default), MDQ and URL metadata sources require MetadataSigningCertPath. Local metadata files are allowed unsigned regardless (with a startup warning).                              | -                                         | `false` | No                                               |
+| `metadata_cache_ttl`         | `int`    | MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ                                                                                                                                                                                                                                                                     | -                                         | -       | No                                               |
 
 ### `static_idp_metadata`
 
@@ -441,6 +449,8 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 ### `oidc`
 
 > **Path:** `.apigw.auth_providers.oidc`
+
+> **Constraint** (`scopes`): The 'openid' scope is mandatory when OIDC RP is enabled.
 
 | Field               | Type       | Description                                                                                                                                                                                                                                                                                                                                                        | Example                                     | Default                          | Required         |
 | ------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- | -------------------------------- | ---------------- |
@@ -753,14 +763,14 @@ Configuration for the Issuer service that signs and issues verifiable credential
 
 > **Path:** `.issuer.grpc_server.tls`, `.registry.grpc_server.tls`
 
-| Field                         | Type     | Description                                 | Example                        | Default                | Required         |
-| ----------------------------- | -------- | ------------------------------------------- | ------------------------------ | ---------------------- | ---------------- |
-| `enable`                      | `bool`   | Enable                                      | -                              | `false`                | No               |
-| `cert_file_path`              | `string` | Server certificate                          | -                              | `/pki/grpc_server.crt` | Yes (if enabled) |
-| `key_file_path`               | `string` | Server private key                          | -                              | `/pki/grpc_server.key` | Yes (if enabled) |
-| `client_ca_path`              | `string` | CA to verify client certificates (for mTLS) | -                              | `/pki/client_ca.crt`   | Yes (if enabled) |
-| `allowed_client_fingerprints` | `object` | SHA256 fingerprint -> friendly name         | `a1b2c3...: issuer-prod`       | -                      | No               |
-| `allowed_client_dns`          | `object` | Friendly name -> Certificate Subject DN     | `apigw-prod: CN=apigw,O=SUNET` | -                      | No               |
+| Field                         | Type     | Description                                 | Example                        | Default                | Required |
+| ----------------------------- | -------- | ------------------------------------------- | ------------------------------ | ---------------------- | -------- |
+| `enable`                      | `bool`   | Enable                                      | -                              | `false`                | No       |
+| `cert_file_path`              | `string` | Server certificate                          | -                              | `/pki/grpc_server.crt` | No       |
+| `key_file_path`               | `string` | Server private key                          | -                              | `/pki/grpc_server.key` | No       |
+| `client_ca_path`              | `string` | CA to verify client certificates (for mTLS) | -                              | `/pki/client_ca.crt`   | No       |
+| `allowed_client_fingerprints` | `object` | SHA256 fingerprint -> friendly name         | `a1b2c3...: issuer-prod`       | -                      | No       |
+| `allowed_client_dns`          | `object` | Friendly name -> Certificate Subject DN     | `apigw-prod: CN=apigw,O=SUNET` | -                      | No       |
 
 ### `jwt_attribute`
 
@@ -768,15 +778,15 @@ Configuration for the Issuer service that signs and issues verifiable credential
 
 In a later state this should be placed under authentic source in order to issue credentials based on that configuration.
 
-| Field                        | Type     | Description                                                    | Example                                           | Default | Required                       |
-| ---------------------------- | -------- | -------------------------------------------------------------- | ------------------------------------------------- | ------- | ------------------------------ |
-| `issuer`                     | `string` | Issuer of the token                                            | `https://issuer.sunet.se`                         | -       | Yes                            |
-| `static_host`                | `string` | Static host of the issuer, expose static files, like pictures. | -                                                 | -       | No                             |
-| `enable_not_before`          | `bool`   | The time not before which the token is valid                   | -                                                 | `false` | No                             |
-| `valid_duration`             | `int64`  | Valid duration of the token in seconds                         | -                                                 | `3600`  | Yes (if enable_not_before set) |
-| `verifiable_credential_type` | `string` | VerifiableCredentialType URL                                   | `https://credential.sunet.se/identity_credential` | -       | Yes                            |
-| `status`                     | `string` | Status status of the Verifiable Credential                     | -                                                 | -       | No                             |
-| `kid`                        | `string` | Kid key id of the signing key                                  | -                                                 | -       | No                             |
+| Field                        | Type     | Description                                                    | Example                                           | Default | Required |
+| ---------------------------- | -------- | -------------------------------------------------------------- | ------------------------------------------------- | ------- | -------- |
+| `issuer`                     | `string` | Issuer of the token                                            | `https://issuer.sunet.se`                         | -       | Yes      |
+| `static_host`                | `string` | Static host of the issuer, expose static files, like pictures. | -                                                 | -       | No       |
+| `enable_not_before`          | `bool`   | The time not before which the token is valid                   | -                                                 | `false` | No       |
+| `valid_duration`             | `int64`  | Valid duration of the token in seconds                         | -                                                 | `3600`  | No       |
+| `verifiable_credential_type` | `string` | VerifiableCredentialType URL                                   | `https://credential.sunet.se/identity_credential` | -       | Yes      |
+| `status`                     | `string` | Status status of the Verifiable Credential                     | -                                                 | -       | No       |
+| `kid`                        | `string` | Kid key id of the signing key                                  | -                                                 | -       | No       |
 
 ### `mdoc`
 
@@ -1091,7 +1101,7 @@ Configuration for the Registry service that manages credential status.
 | Field      | Type     | Description    | Example | Default | Required         |
 | ---------- | -------- | -------------- | ------- | ------- | ---------------- |
 | `enable`   | `bool`   | The admin GUI  | -       | `false` | No               |
-| `username` | `string` | Admin username | -       | `admin` | Yes (if enabled) |
+| `username` | `string` | Admin username | -       | `admin` | No               |
 | `password` | `string` | Admin password | -       | -       | Yes (if enabled) |
 
 ## Secrets File Reference
