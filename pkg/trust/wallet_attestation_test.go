@@ -396,6 +396,18 @@ func TestWalletAttestationEvaluator_Evaluate_ModeEnforcement(t *testing.T) {
 			require.NotNil(t, evaluator.lastRequest)
 		}
 	})
+
+	t.Run("invalid mode rejects both formats", func(t *testing.T) {
+		for _, wia := range []string{x5cWIA, ietfWIA} {
+			evaluator := &capturingEvaluator{trustDecision: true}
+			we := NewWalletAttestationEvaluator(evaluator, newTestVerifier(evaluator), "bogus")
+
+			_, err := we.Evaluate(context.Background(), wia)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid trust model mode")
+			assert.Nil(t, evaluator.lastRequest, "PDP must never be called for an invalid mode")
+		}
+	})
 }
 
 func TestWalletAttestationEvaluator_Evaluate_RejectsSignatureMismatch(t *testing.T) {

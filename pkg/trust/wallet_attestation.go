@@ -113,6 +113,10 @@ func (e *WalletAttestationEvaluator) Evaluate(ctx context.Context, attestation s
 		if identity.hasX5C {
 			return nil, errors.New("wallet attestation rejected: this deployment requires the ietf (iss/JWKS) trust model, but the WIA has an x5c header")
 		}
+	case "":
+		// accept either format, as determined by the WIA itself
+	default:
+		return nil, fmt.Errorf("wallet attestation rejected: invalid trust model mode %q (must be %q, %q, or empty)", e.Mode, WIAModeETSI, WIAModeIETF)
 	}
 
 	// Verify the WIA's own signature and resolve its actual signing key
