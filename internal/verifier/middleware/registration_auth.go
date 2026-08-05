@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -18,9 +19,9 @@ import (
 )
 
 const (
-	errCodeInvalidToken                            = "invalid_token"
-	errDescInvalidRegistrationAuthorizationToken   = "invalid registration authorization token"
-	errDescMissingOrInvalidBearerToken            = "missing or invalid bearer token"
+	errCodeInvalidToken                          = "invalid_token"
+	errDescInvalidRegistrationAuthorizationToken = "invalid registration authorization token"
+	errDescMissingOrInvalidBearerToken           = "missing or invalid bearer token"
 )
 
 // RegistrationAuthValidator validates initial access tokens for dynamic client registration.

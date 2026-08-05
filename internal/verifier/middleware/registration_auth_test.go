@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +13,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-	"github.com/SUNET/vc/pkg/logger"
-	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -22,10 +22,10 @@ import (
 )
 
 const (
-	registerPath       = "/register"
-	issuerExampleURL   = "https://issuer.example.com"
-	registerAudience   = "vc-verifier-register"
-	jwtKid             = "kid-1"
+	registerPath     = "/register"
+	issuerExampleURL = "https://issuer.example.com"
+	registerAudience = "vc-verifier-register"
+	jwtKid           = "kid-1"
 )
 
 func TestRegistrationAuthMiddlewareOpenMode(t *testing.T) {
@@ -142,9 +142,9 @@ func TestRegistrationAuthMiddlewareJWTMode(t *testing.T) {
 				DynamicRegistrationAuth: &model.DynamicRegistrationAuthConfig{
 					Mode: "jwt",
 					JWT: &model.DynamicRegistrationJWTAuthConfig{
-						JWKSURI:           jwksServer.URL,
-						Issuer:            issuerExampleURL,
-						Audience:          registerAudience,
+						JWKSURI:            jwksServer.URL,
+						Issuer:             issuerExampleURL,
+						Audience:           registerAudience,
 						AllowedSigningAlgs: []string{"RS256"},
 					},
 				},
