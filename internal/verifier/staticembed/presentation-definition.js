@@ -243,6 +243,9 @@ Alpine.data("app", () => ({
     /** @type {EventSource | null} */
     notifyEventSource: null,
 
+    /** @type {boolean} Set once a native DC API presentation has been submitted and accepted. */
+    dcApiVerified: false,
+
     async init() {
         await this.lookupCredentialsList();
 
@@ -386,6 +389,7 @@ Alpine.data("app", () => ({
         this.credentialAttributes = null;
         this.dcqlQuery = null;
         this.presentationDefinition = null;
+        this.dcApiVerified = false;
     },
 
     /** 
@@ -469,6 +473,8 @@ Alpine.data("app", () => ({
             return;
         }
 
+        this.dcApiVerified = false;
+
         try {
             const res = await this.fetchData(
                 new URL("/ui/interaction", baseUrl), 
@@ -529,16 +535,67 @@ Alpine.data("app", () => ({
             );
             if (!result) return false;
 
-            if (result.data?.redirect_uri) {
-                globalThis.location.href = result.data.redirect_uri;
-                return true;
+            // result.data is the WALLET's own DC API response payload
+            // (returned directly to this page by navigator.credentials.get(),
+            // never over the network) - it can never itself carry a
+            // redirect_uri, since that's a property of the VERIFIER's HTTP
+            // response, not of the wallet's. Unlike the QR/deep-link flow
+            // (where the wallet POSTs its response to response_uri over the
+            // network on its own), this page is the only thing that has the
+            // response in hand, so it must forward it itself before the
+            // verifier's backend ever learns the presentation happened.
+            const submission = await this._submitDCAPIResponse(result.data);
+            if (submission?.redirect_uri) {
+                globalThis.location.href = submission.redirect_uri;
+            } else {
+                this.dcApiVerified = true;
             }
-            return false;
+            return true;
         } catch (err) {
             if (err.name === 'AbortError') return true;
             console.log("DC API not available or failed, falling back to QR/links:", err.message);
             return false;
         }
+    },
+
+    /**
+     * Forward the wallet's DC API response payload to the verifier's own
+     * response_uri (`/verification/oidc-direct_post`) - the exact endpoint a
+     * non-DC-API wallet POSTs to directly over the network for the QR/
+     * deep-link flow, so this reaches the identical server-side handling
+     * (ProcessDirectPost) either way.
+     *
+     * The payload has one of two shapes depending on the negotiated
+     * response_mode: `{ response: "<jwe-compact>" }` for `dc_api.jwt`
+     * (encrypted/signed), or `{ vp_token: {...}, state }` for plain
+     * `dc_api` - `vp_token` there is itself a JSON object (DCQL query id ->
+     * VP), sent JSON-encoded as a single string, matching how the
+     * form-encoded direct_post request already carries it for the QR flow.
+     *
+     * @param {{response?: string, vp_token?: object, state?: string}} data
+     * @returns {Promise<{redirect_uri?: string} | null>}
+     */
+    async _submitDCAPIResponse(data) {
+        const body = new URLSearchParams();
+        if (data.response) {
+            body.set("response", data.response);
+        } else if (data.vp_token) {
+            body.set("vp_token", JSON.stringify(data.vp_token));
+        } else {
+            throw new Error("DC API response has neither 'response' nor 'vp_token'");
+        }
+        if (data.state) body.set("state", data.state);
+
+        const res = await fetch(new URL("/verification/oidc-direct_post", baseUrl), {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body,
+        });
+        if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`Failed to submit DC API response: HTTP ${res.status} - ${text}`);
+        }
+        return res.json().catch(() => null);
     },
 
     /** Set up QR + wallet links + SSE fallback flow. */
