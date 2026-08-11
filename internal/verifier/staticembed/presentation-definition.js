@@ -571,8 +571,15 @@ Alpine.data("app", () => ({
      * `dc_api` - `vp_token` there is itself a JSON object (DCQL query id ->
      * VP), sent JSON-encoded as a single string, matching how the
      * form-encoded direct_post request already carries it for the QR flow.
+     * (If a wallet ever returns `vp_token` as an already-encoded string -
+     * e.g. a bare JWT - it's forwarded as-is instead of being re-stringified,
+     * since double-encoding would corrupt it.)
      *
-     * @param {{response?: string, vp_token?: object, state?: string}} data
+     * `state` is required by the verifier's direct_post handler in both
+     * shapes, so its absence is treated as a hard error here rather than
+     * silently omitted and left to surface as an opaque HTTP 400.
+     *
+     * @param {{response?: string, vp_token?: (object|string), state?: string, presentation_submission?: object}} data
      * @returns {Promise<{redirect_uri?: string} | null>}
      */
     async _submitDCAPIResponse(data) {
@@ -580,11 +587,25 @@ Alpine.data("app", () => ({
         if (data.response) {
             body.set("response", data.response);
         } else if (data.vp_token) {
-            body.set("vp_token", JSON.stringify(data.vp_token));
+            body.set(
+                "vp_token",
+                typeof data.vp_token === "string" ? data.vp_token : JSON.stringify(data.vp_token),
+            );
         } else {
             throw new Error("DC API response has neither 'response' nor 'vp_token'");
         }
-        if (data.state) body.set("state", data.state);
+        if (!data.state) {
+            throw new Error("DC API response is missing required 'state' field");
+        }
+        body.set("state", data.state);
+        if (data.presentation_submission) {
+            body.set(
+                "presentation_submission",
+                typeof data.presentation_submission === "string"
+                    ? data.presentation_submission
+                    : JSON.stringify(data.presentation_submission),
+            );
+        }
 
         const res = await fetch(new URL("/verification/oidc-direct_post", baseUrl), {
             method: "POST",
