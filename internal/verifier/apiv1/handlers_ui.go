@@ -270,13 +270,20 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// doesn't inspect response_mode, so this is purely about getting the
 	// wallet to encrypt; the wire handling at /verification/direct_post is
 	// unchanged either way.
+	//
+	// Unlike CreateRequestObject's OIDC RP flow (whose /verification/
+	// oidc-direct_post endpoint tolerates direct_post/direct_post.jwt's
+	// unencrypted vp_token+state shape too), DigitalCredentials.ResponseMode
+	// is NOT honored here even when set: this UI flow's own
+	// _submitDCAPIResponse only ever forwards the encrypted `response` JWE
+	// to /verification/direct_post, which has no unencrypted fallback. A
+	// config value other than "dc_api.jwt" would make the wallet skip
+	// encryption and produce a payload this page can't submit at all, so
+	// it's ignored here to keep request/response shapes consistent
+	// end-to-end for this specific flow.
 	responseMode := "direct_post.jwt"
 	if c.cfg.Verifier.DigitalCredentials.Enable {
-		if c.cfg.Verifier.DigitalCredentials.ResponseMode != "" {
-			responseMode = c.cfg.Verifier.DigitalCredentials.ResponseMode
-		} else {
-			responseMode = "dc_api.jwt"
-		}
+		responseMode = "dc_api.jwt"
 	}
 
 	requestObject := &openid4vp.RequestObject{
