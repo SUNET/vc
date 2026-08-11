@@ -336,6 +336,17 @@ func (m *RegistryManager) applyPolicyToRequest(req *authzen.EvaluationRequest, p
 		}
 	}
 
+	// Apply FIDO MDS3 constraints
+	if policyCtx.Policy.FIDOMDS3 != nil {
+		fido := policyCtx.Policy.FIDOMDS3
+		if len(fido.AllowedAAGUIDs) > 0 {
+			req.Context["allowed_aaguids"] = fido.AllowedAAGUIDs
+		}
+		if len(fido.BlockedAAGUIDs) > 0 {
+			req.Context["blocked_aaguids"] = fido.BlockedAAGUIDs
+		}
+	}
+
 	// Store policy name in context for debugging/logging
 	req.Context["_policy"] = policyCtx.Policy.Name
 }
