@@ -260,13 +260,39 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		return nil, fmt.Errorf("failed to construct response URI: %w", err)
 	}
 
+	// "direct_post.jwt" (encrypted, cross-device-network delivery) unless
+	// this page's native DC API attempt is enabled, in which case the
+	// wallet's own DC API response builder only encrypts for an EXACT
+	// response_mode match of "dc_api.jwt" (OpenID4VP 1.0 DC API integration
+	// profile's defined value - "direct_post.jwt" isn't a DC API response
+	// mode at all) - see CreateRequestObject's identical branch for the
+	// other (OIDC RP) verification flow. VerificationDirectPost itself
+	// doesn't inspect response_mode, so this is purely about getting the
+	// wallet to encrypt; the wire handling at /verification/direct_post is
+	// unchanged either way.
+	//
+	// Unlike CreateRequestObject's OIDC RP flow (whose /verification/
+	// oidc-direct_post endpoint tolerates direct_post/direct_post.jwt's
+	// unencrypted vp_token+state shape too), DigitalCredentials.ResponseMode
+	// is NOT honored here even when set: this UI flow's own
+	// _submitDCAPIResponse only ever forwards the encrypted `response` JWE
+	// to /verification/direct_post, which has no unencrypted fallback. A
+	// config value other than "dc_api.jwt" would make the wallet skip
+	// encryption and produce a payload this page can't submit at all, so
+	// it's ignored here to keep request/response shapes consistent
+	// end-to-end for this specific flow.
+	responseMode := "direct_post.jwt"
+	if c.cfg.Verifier.DigitalCredentials.Enable {
+		responseMode = "dc_api.jwt"
+	}
+
 	requestObject := &openid4vp.RequestObject{
 		ResponseURI:  responseURI,
 		AUD:          "https://self-issued.me/v2",
 		ISS:          uiClientID,
 		ClientID:     authorizationContext.ClientID,
 		ResponseType: "vp_token",
-		ResponseMode: "direct_post.jwt",
+		ResponseMode: responseMode,
 		State:        authorizationContext.State,
 		Nonce:        authorizationContext.Nonce,
 		ClientMetadata: &openid4vp.ClientMetadata{
