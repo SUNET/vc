@@ -575,6 +575,13 @@ Alpine.data("app", () => ({
      * e.g. a bare JWT - it's forwarded as-is instead of being re-stringified,
      * since double-encoding would corrupt it.)
      *
+     * NOTE: `response` (the `dc_api.jwt` encrypted/signed shape) is forwarded
+     * here for protocol completeness, but ProcessDirectPost on the verifier
+     * does not yet implement JWE decryption for it and currently rejects it
+     * with an error (`DC API encrypted response handling not yet
+     * implemented`). Only the plain `dc_api` / `vp_token` shape is fully
+     * supported end-to-end today.
+     *
      * `state` is required by the verifier's direct_post handler in both
      * shapes, so its absence is treated as a hard error here rather than
      * silently omitted and left to surface as an opaque HTTP 400.
