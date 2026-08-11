@@ -559,62 +559,39 @@ Alpine.data("app", () => ({
     },
 
     /**
-     * Forward the wallet's DC API response payload to the verifier's own
-     * response_uri (`/verification/oidc-direct_post`) - the exact endpoint a
-     * non-DC-API wallet POSTs to directly over the network for the QR/
-     * deep-link flow, so this reaches the identical server-side handling
-     * (ProcessDirectPost) either way.
+     * Forward the wallet's DC API response payload to THIS page's own
+     * response_uri (`/verification/direct_post` -
+     * VerificationDirectPost/VerificationDirectPostRequest) - the exact
+     * endpoint a non-DC-API wallet POSTs to directly over the network for
+     * the QR/deep-link flow (`UIInteraction` sets it as `response_uri` on
+     * the very same request object regardless of delivery channel), so this
+     * reaches identical server-side handling either way. NOT
+     * `/verification/oidc-direct_post` - that belongs to a wholly separate
+     * flow (`authorize_enhanced.html`'s OIDC RP page), with its own
+     * session/state cache namespace; submitting there for a session created
+     * via `/ui/interaction` fails with "session not found".
      *
-     * The payload has one of two shapes depending on the negotiated
-     * response_mode: `{ response: "<jwe-compact>" }` for `dc_api.jwt`
-     * (encrypted/signed), or `{ vp_token: {...}, state }` for plain
-     * `dc_api` - `vp_token` there is itself a JSON object (DCQL query id ->
-     * VP), sent JSON-encoded as a single string, matching how the
-     * form-encoded direct_post request already carries it for the QR flow.
-     * (If a wallet ever returns `vp_token` as an already-encoded string -
-     * e.g. a bare JWT - it's forwarded as-is instead of being re-stringified,
-     * since double-encoding would corrupt it.)
+     * This endpoint only ever accepts one shape: `{ response: "<jwe-compact>" }`
+     * (`UIInteraction` always requests an encrypted response - see its
+     * `response_mode` doc comment, which now mints `dc_api.jwt` whenever DC
+     * API is enabled so the wallet actually encrypts). `state` is never
+     * submitted alongside the ciphertext; the server recovers it by
+     * decrypting the JWE and reading the `state` claim from the plaintext,
+     * which is where the session lookup actually happens
+     * (`VerificationDirectPost`) - there is no unencrypted `vp_token`/
+     * `presentation_submission` fallback shape on this endpoint to forward.
      *
-     * NOTE: `response` (the `dc_api.jwt` encrypted/signed shape) is forwarded
-     * here for protocol completeness, but ProcessDirectPost on the verifier
-     * does not yet implement JWE decryption for it and currently rejects it
-     * with an error (`DC API encrypted response handling not yet
-     * implemented`). Only the plain `dc_api` / `vp_token` shape is fully
-     * supported end-to-end today.
-     *
-     * `state` is required by the verifier's direct_post handler in both
-     * shapes, so its absence is treated as a hard error here rather than
-     * silently omitted and left to surface as an opaque HTTP 400.
-     *
-     * @param {{response?: string, vp_token?: (object|string), state?: string, presentation_submission?: object}} data
+     * @param {{response?: string}} data
      * @returns {Promise<{redirect_uri?: string} | null>}
      */
     async _submitDCAPIResponse(data) {
+        if (!data.response) {
+            throw new Error("DC API response is missing the encrypted 'response' payload");
+        }
         const body = new URLSearchParams();
-        if (data.response) {
-            body.set("response", data.response);
-        } else if (data.vp_token) {
-            body.set(
-                "vp_token",
-                typeof data.vp_token === "string" ? data.vp_token : JSON.stringify(data.vp_token),
-            );
-        } else {
-            throw new Error("DC API response has neither 'response' nor 'vp_token'");
-        }
-        if (!data.state) {
-            throw new Error("DC API response is missing required 'state' field");
-        }
-        body.set("state", data.state);
-        if (data.presentation_submission) {
-            body.set(
-                "presentation_submission",
-                typeof data.presentation_submission === "string"
-                    ? data.presentation_submission
-                    : JSON.stringify(data.presentation_submission),
-            );
-        }
+        body.set("response", data.response);
 
-        const res = await fetch(new URL("/verification/oidc-direct_post", baseUrl), {
+        const res = await fetch(new URL("/verification/direct_post", baseUrl), {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body,
