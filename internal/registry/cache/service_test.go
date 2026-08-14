@@ -26,9 +26,7 @@ func testCfg(ha bool) *model.Cfg {
 // TestNew_Memory verifies New() with in-memory backend (ha=false).
 func TestNew_Memory(t *testing.T) {
 	cfg := testCfg(false)
-	dbService := &db.Service{MongoClient: nil}
-
-	s, err := cachetest.New(t, cfg, dbService, New)
+	s, err := cachetest.New(t, cfg, &db.Service{MongoClient: nil}, New)
 	require.NoError(t, err)
 	require.NotNil(t, s)
 
@@ -57,9 +55,7 @@ func TestNew_Mongo(t *testing.T) {
 	defer cleanup()
 
 	cfg := testCfg(true)
-	dbService := &db.Service{MongoClient: client}
-
-	s, err := cachetest.New(t, cfg, dbService, New)
+	s, err := cachetest.New(t, cfg, &db.Service{MongoClient: client}, New)
 	require.NoError(t, err)
 	require.NotNil(t, s)
 
@@ -85,9 +81,7 @@ func TestNew_Mongo(t *testing.T) {
 // TestNew_NilMongoClient verifies New() returns an error when ha=true but client is nil.
 func TestNew_NilMongoClient(t *testing.T) {
 	cfg := testCfg(true)
-	dbService := &db.Service{MongoClient: nil}
-
-	s, err := cachetest.New(t, cfg, dbService, New)
+	s, err := cachetest.New(t, cfg, &db.Service{MongoClient: nil}, New)
 	assert.Error(t, err)
 	assert.Nil(t, s)
 	assert.Contains(t, err.Error(), "cache:")
@@ -99,9 +93,7 @@ func TestNew_DefaultTokenRefreshInterval(t *testing.T) {
 		Common:   &model.Common{HA: model.HAConfig{Enable: false, CacheDatabaseName: "vc_cache"}},
 		Registry: &model.Registry{TokenStatusLists: &model.TokenStatusLists{TokenRefreshInterval: 0}},
 	}
-	dbService := &db.Service{MongoClient: nil}
-
-	s, err := cachetest.New(t, cfg, dbService, New)
+	s, err := cachetest.New(t, cfg, &db.Service{MongoClient: nil}, New)
 	require.NoError(t, err)
 	require.NotNil(t, s)
 	assert.NotNil(t, s.JWT)
