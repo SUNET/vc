@@ -1,25 +1,19 @@
 package cache
 
 import (
-	"context"
-	"fmt"
-	"os/exec"
 	"testing"
-	"time"
 
 	"github.com/creasty/defaults"
 
 	"github.com/SUNET/vc/internal/registry/db"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/testsupport"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func testCfg(ha bool) *model.Cfg {
@@ -46,57 +40,13 @@ func testTracer(t *testing.T, cfg *model.Cfg, log *logger.Log) *trace.Tracer {
 }
 
 func isDockerAvailable() bool {
-	dockerPath, err := exec.LookPath("docker")
-	if err != nil {
-		return false
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return exec.CommandContext(ctx, dockerPath, "version").Run() == nil // #nosec G204
+	return testsupport.IsDockerAvailable()
 }
 
 func startMongoContainer(t *testing.T) (*mongo.Client, func()) {
 	t.Helper()
-	if !isDockerAvailable() {
-		t.Skip("Docker is not available")
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
-
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        "mongo:7",
-			ExposedPorts: []string{"27017/tcp"},
-			WaitingFor:   wait.ForLog("Waiting for connections"),
-		},
-		Started: true,
-	})
-	if err != nil {
-		cancel()
-		t.Fatalf("start mongo container: %v", err)
-	}
-
-	port, err := container.MappedPort(ctx, "27017")
-	if err != nil {
-		cancel()
-		t.Fatalf("mapped port: %v", err)
-	}
-	host, err := container.Host(ctx)
-	if err != nil {
-		cancel()
-		t.Fatalf("container host: %v", err)
-	}
-
-	client, err := mongo.Connect(options.Client().ApplyURI(fmt.Sprintf("mongodb://%s:%s", host, port.Port())))
-	if err != nil {
-		cancel()
-		t.Fatalf("mongo connect: %v", err)
-	}
-
-	return client, func() {
-		client.Disconnect(ctx)   // #nosec G104
-		container.Terminate(ctx) // #nosec G104
-		cancel()
-	}
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	return client, cleanup
 }
 
 // TestNew_Memory verifies New() with in-memory backend (ha=false).

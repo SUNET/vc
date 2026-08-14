@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/golang-jwt/jwt/v5"
-	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
@@ -83,13 +82,9 @@ func (s *Service) CreateNewSectionIfNeeded(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 
-	countFilter := bson.M{
-		"section": currentSection,
-		"decoy":   true,
-	}
 	// Use limited count: we only need to know if decoys > 1000, not the exact total.
 	// With 1M+ documents, an unlimited CountDocuments takes ~670ms; with limit 1001 it returns in <1ms.
-	numberOfDecoyDocs, err := s.tokenStatusListColl.CountDocsWithLimit(ctx, countFilter, 1001)
+	numberOfDecoyDocs, err := s.tokenStatusListColl.CountDecoysInSectionWithLimit(ctx, currentSection, 1001)
 	if err != nil {
 		return 0, err
 	}

@@ -15,6 +15,8 @@ type CredentialOfferStore interface {
 
 // DatastoreStore defines the interface for datastore operations
 type DatastoreStore interface {
+	// Count returns the (possibly approximate) number of documents in the datastore.
+	Count(ctx context.Context) (int64, error)
 	Save(ctx context.Context, doc *model.CompleteDocument) error
 	SaveMany(ctx context.Context, docs []*model.CompleteDocument) error
 	AddIdentity(ctx context.Context, query *AddIdentityQuery) error
@@ -32,6 +34,8 @@ type DatastoreStore interface {
 
 // IdentityMappingStore defines the interface for identity mapping operations
 type IdentityMappingStore interface {
+	// Count returns the (possibly approximate) number of identity mappings.
+	Count(ctx context.Context) (int64, error)
 	CreateMapping(ctx context.Context, mapping *model.IdentityMapping) error
 	CreateMappings(ctx context.Context, mappings []*model.IdentityMapping) error
 	EnsureMapping(ctx context.Context, mapping *model.IdentityMapping) error
@@ -41,9 +45,16 @@ type IdentityMappingStore interface {
 	SearchMappings(ctx context.Context, query *SearchMappingsQuery) ([]*model.IdentityMapping, error)
 }
 
+// DynamicRegistrationStore defines the interface for OIDC dynamic client registration operations
+type DynamicRegistrationStore interface {
+	Save(ctx context.Context, creds *DynamicRegistrationCredentials) error
+	Get(ctx context.Context) (*DynamicRegistrationCredentials, error)
+}
+
 // Ensure concrete types implement the interfaces
 var (
-	_ CredentialOfferStore = (*CredentialOfferColl)(nil)
-	_ DatastoreStore       = (*DatastoreColl)(nil)
-	_ IdentityMappingStore = (*IdentityMappingsColl)(nil)
+	_ CredentialOfferStore     = (*CredentialOfferColl)(nil)
+	_ DatastoreStore           = (*DatastoreColl)(nil)
+	_ IdentityMappingStore     = (*IdentityMappingsColl)(nil)
+	_ DynamicRegistrationStore = (*DynamicRegistrationColl)(nil)
 )
