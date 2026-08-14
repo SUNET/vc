@@ -6,12 +6,11 @@ import (
 
 	"github.com/SUNET/vc/internal/verifier/db"
 	"github.com/SUNET/vc/pkg/cache"
-	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/testsupport"
-	"github.com/SUNET/vc/pkg/trace"
+	"github.com/SUNET/vc/pkg/testsupport/tracertest"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/stretchr/testify/assert"
@@ -24,18 +23,11 @@ func testCfg(ha bool) *model.Cfg {
 	}
 }
 
-func testTracer(t *testing.T, cfg *model.Cfg, log *logger.Log) *trace.Tracer {
-	t.Helper()
-	tracer, err := trace.New(t.Context(), cfg, "cache-test", log)
-	require.NoError(t, err)
-	return tracer
-}
-
 // TestNew_Memory verifies New() with in-memory backend (ha=false).
 func TestNew_Memory(t *testing.T) {
 	cfg := testCfg(false)
 	log := testsupport.TestLogger(t)
-	tracer := testTracer(t, cfg, log)
+	tracer := tracertest.New(t, cfg, log, "cache-test")
 
 	dbService := &db.Service{MongoClient: nil}
 
@@ -96,7 +88,7 @@ func TestNewTestMemoryCache(t *testing.T) {
 func TestNew_NilMongoClient(t *testing.T) {
 	cfg := testCfg(true)
 	log := testsupport.TestLogger(t)
-	tracer := testTracer(t, cfg, log)
+	tracer := tracertest.New(t, cfg, log, "cache-test")
 
 	dbService := &db.Service{MongoClient: nil}
 
@@ -113,7 +105,7 @@ func TestNew_Mongo(t *testing.T) {
 
 	cfg := testCfg(true)
 	log := testsupport.TestLogger(t)
-	tracer := testTracer(t, cfg, log)
+	tracer := tracertest.New(t, cfg, log, "cache-test")
 
 	dbService := &db.Service{MongoClient: client}
 
