@@ -10,7 +10,7 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/testsupport"
-	"github.com/SUNET/vc/pkg/testsupport/tracertest"
+	"github.com/SUNET/vc/pkg/testsupport/cachetest"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/stretchr/testify/assert"
@@ -26,12 +26,9 @@ func testCfg(ha bool) *model.Cfg {
 // TestNew_Memory verifies New() with in-memory backend (ha=false).
 func TestNew_Memory(t *testing.T) {
 	cfg := testCfg(false)
-	log := testsupport.TestLogger(t)
-	tracer := tracertest.New(t, cfg, log, "cache-test")
-
 	dbService := &db.Service{MongoClient: nil}
 
-	s, err := New(t.Context(), cfg, dbService, tracer, log)
+	s, err := cachetest.New(t, cfg, dbService, New)
 	require.NoError(t, err)
 	require.NotNil(t, s)
 
@@ -87,12 +84,9 @@ func TestNewTestMemoryCache(t *testing.T) {
 // TestNew_NilMongoClient verifies New() returns an error when ha=true but client is nil.
 func TestNew_NilMongoClient(t *testing.T) {
 	cfg := testCfg(true)
-	log := testsupport.TestLogger(t)
-	tracer := tracertest.New(t, cfg, log, "cache-test")
-
 	dbService := &db.Service{MongoClient: nil}
 
-	s, err := New(t.Context(), cfg, dbService, tracer, log)
+	s, err := cachetest.New(t, cfg, dbService, New)
 	assert.Error(t, err)
 	assert.Nil(t, s)
 	assert.Contains(t, err.Error(), "cache:")
@@ -104,12 +98,9 @@ func TestNew_Mongo(t *testing.T) {
 	defer cleanup()
 
 	cfg := testCfg(true)
-	log := testsupport.TestLogger(t)
-	tracer := tracertest.New(t, cfg, log, "cache-test")
-
 	dbService := &db.Service{MongoClient: client}
 
-	s, err := New(t.Context(), cfg, dbService, tracer, log)
+	s, err := cachetest.New(t, cfg, dbService, New)
 	require.NoError(t, err)
 	require.NotNil(t, s)
 

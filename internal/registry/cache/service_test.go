@@ -8,7 +8,7 @@ import (
 	"github.com/SUNET/vc/internal/registry/db"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/testsupport"
-	"github.com/SUNET/vc/pkg/testsupport/tracertest"
+	"github.com/SUNET/vc/pkg/testsupport/cachetest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,12 +26,9 @@ func testCfg(ha bool) *model.Cfg {
 // TestNew_Memory verifies New() with in-memory backend (ha=false).
 func TestNew_Memory(t *testing.T) {
 	cfg := testCfg(false)
-	log := testsupport.TestLogger(t)
-	tracer := tracertest.New(t, cfg, log, "cache-test")
-
 	dbService := &db.Service{MongoClient: nil}
 
-	s, err := New(t.Context(), cfg, dbService, tracer, log)
+	s, err := cachetest.New(t, cfg, dbService, New)
 	require.NoError(t, err)
 	require.NotNil(t, s)
 
@@ -60,12 +57,9 @@ func TestNew_Mongo(t *testing.T) {
 	defer cleanup()
 
 	cfg := testCfg(true)
-	log := testsupport.TestLogger(t)
-	tracer := tracertest.New(t, cfg, log, "cache-test")
-
 	dbService := &db.Service{MongoClient: client}
 
-	s, err := New(t.Context(), cfg, dbService, tracer, log)
+	s, err := cachetest.New(t, cfg, dbService, New)
 	require.NoError(t, err)
 	require.NotNil(t, s)
 
@@ -91,12 +85,9 @@ func TestNew_Mongo(t *testing.T) {
 // TestNew_NilMongoClient verifies New() returns an error when ha=true but client is nil.
 func TestNew_NilMongoClient(t *testing.T) {
 	cfg := testCfg(true)
-	log := testsupport.TestLogger(t)
-	tracer := tracertest.New(t, cfg, log, "cache-test")
-
 	dbService := &db.Service{MongoClient: nil}
 
-	s, err := New(t.Context(), cfg, dbService, tracer, log)
+	s, err := cachetest.New(t, cfg, dbService, New)
 	assert.Error(t, err)
 	assert.Nil(t, s)
 	assert.Contains(t, err.Error(), "cache:")
@@ -108,12 +99,9 @@ func TestNew_DefaultTokenRefreshInterval(t *testing.T) {
 		Common:   &model.Common{HA: model.HAConfig{Enable: false, CacheDatabaseName: "vc_cache"}},
 		Registry: &model.Registry{TokenStatusLists: &model.TokenStatusLists{TokenRefreshInterval: 0}},
 	}
-	log := testsupport.TestLogger(t)
-	tracer := tracertest.New(t, cfg, log, "cache-test")
-
 	dbService := &db.Service{MongoClient: nil}
 
-	s, err := New(t.Context(), cfg, dbService, tracer, log)
+	s, err := cachetest.New(t, cfg, dbService, New)
 	require.NoError(t, err)
 	require.NotNil(t, s)
 	assert.NotNil(t, s.JWT)
