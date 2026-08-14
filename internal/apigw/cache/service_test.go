@@ -13,7 +13,6 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 func testCfg(ha bool) *model.Cfg {
@@ -28,13 +27,6 @@ func testCfg(ha bool) *model.Cfg {
 	}
 }
 
-func testLogger(t *testing.T) *logger.Log {
-	t.Helper()
-	log, err := logger.New("test", "", false)
-	require.NoError(t, err)
-	return log
-}
-
 func testTracer(t *testing.T, cfg *model.Cfg, log *logger.Log) *trace.Tracer {
 	t.Helper()
 	tracer, err := trace.New(t.Context(), cfg, "cache-test", log)
@@ -42,20 +34,10 @@ func testTracer(t *testing.T, cfg *model.Cfg, log *logger.Log) *trace.Tracer {
 	return tracer
 }
 
-func isDockerAvailable() bool {
-	return testsupport.IsDockerAvailable()
-}
-
-func startMongoContainer(t *testing.T) (*mongo.Client, func()) {
-	t.Helper()
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	return client, cleanup
-}
-
 // TestNew_Memory verifies New() with in-memory backend (ha=false).
 func TestNew_Memory(t *testing.T) {
 	cfg := testCfg(false)
-	log := testLogger(t)
+	log := testsupport.TestLogger(t)
 	tracer := testTracer(t, cfg, log)
 
 	dbService := &db.Service{MongoClient: nil}
@@ -122,7 +104,7 @@ func TestNewTestMemoryCache(t *testing.T) {
 // TestNew_NilMongoClient verifies New() returns an error when ha=true but client is nil.
 func TestNew_NilMongoClient(t *testing.T) {
 	cfg := testCfg(true)
-	log := testLogger(t)
+	log := testsupport.TestLogger(t)
 	tracer := testTracer(t, cfg, log)
 
 	dbService := &db.Service{MongoClient: nil}
@@ -135,11 +117,11 @@ func TestNew_NilMongoClient(t *testing.T) {
 
 // TestNew_Mongo verifies New() with MongoDB backend (ha=true).
 func TestNew_Mongo(t *testing.T) {
-	client, cleanup := startMongoContainer(t)
+	_, client, cleanup := testsupport.StartMongoContainer(t)
 	defer cleanup()
 
 	cfg := testCfg(true)
-	log := testLogger(t)
+	log := testsupport.TestLogger(t)
 	tracer := testTracer(t, cfg, log)
 
 	dbService := &db.Service{MongoClient: client}
