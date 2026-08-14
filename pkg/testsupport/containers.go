@@ -75,8 +75,14 @@ func StartMongoContainer(t *testing.T) (uri string, client *mongo.Client, cleanu
 	}
 
 	cleanup = func() {
-		client.Disconnect(ctx)   // #nosec G104
-		container.Terminate(ctx) // #nosec G104
+		// Use a fresh context for teardown: ctx's 120s setup deadline may
+		// already have elapsed by the time cleanup runs (e.g. a slow test
+		// body), which would otherwise make Disconnect/Terminate fail
+		// immediately and leak the container.
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		client.Disconnect(cleanupCtx)   // #nosec G104
+		container.Terminate(cleanupCtx) // #nosec G104
 		cancel()
 	}
 
