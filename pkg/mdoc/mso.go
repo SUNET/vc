@@ -111,8 +111,13 @@ func (b *MSOBuilder) WithSigner(key crypto.Signer, certChain []*x509.Certificate
 
 // AddDataElement adds a data element to the MSO.
 func (b *MSOBuilder) AddDataElement(namespace, elementID string, value any) error {
-	// Generate random salt (at least 16 bytes per spec)
-	randomSalt := make([]byte, 32)
+	// Use 8-byte random for pseudonym_seed to keep item within 128-byte circuit limit
+	// Use 16 bytes for all other elements
+	saltSize := 16
+	if elementID == "pseudonym_seed" {
+		saltSize = 8
+	}
+	randomSalt := make([]byte, saltSize)
 	if _, err := rand.Read(randomSalt); err != nil {
 		return fmt.Errorf("failed to generate random salt: %w", err)
 	}
@@ -160,11 +165,10 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 		return nil, nil, fmt.Errorf("validity period is required")
 	}
 
-	encoder, err := NewCBOREncoder()
+	encoder, err := NewItemCBOREncoder()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
+		return nil, nil, fmt.Errorf("failed to create item encoder: %w", err)
 	}
-
 	issuerNameSpaces := make(map[string][]cbor.Tag)
 	valueDigests := make(map[string]map[uint][]byte)
 	for namespace, items := range b.namespaces {
@@ -206,22 +210,33 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 	validFromStr := b.validFrom.UTC().Format(time.RFC3339)
 	validUntilStr := b.validUntil.UTC().Format(time.RFC3339)
 
+	// Get device key as inline COSE map
+	/*deviceKeyCOSE := map[any]any{
+		int64(1):  int64(2),
+		int64(-1): int64(1),
+		int64(-2): b.deviceKey.X,
+		int64(-3): b.deviceKey.Y,
+	}*/
+	type coseKeyMap struct {
+		Kty int    `cbor:"1,keyasint"`
+		Crv int    `cbor:"-1,keyasint"`
+		X   []byte `cbor:"-2,keyasint"`
+		Y   []byte `cbor:"-3,keyasint"`
+	}
+	deviceKeyCOSE := coseKeyMap{
+		Kty: 2,
+		Crv: 1,
+		X:   b.deviceKey.X,
+		Y:   b.deviceKey.Y,
+	}
+
 	mso := map[string]any{
 		"version":         "1.0",
 		"digestAlgorithm": string(b.digestAlgorithm),
 		"docType":         b.docType,
 		"valueDigests":    valueDigests,
-		// DeviceKeyInfo.deviceKey is the COSE_Key structure embedded
-		// directly (a CBOR map, per ISO 18013-5), not pre-serialized to
-		// bytes and wrapped in a byte string - b.deviceKey's own `cbor:"..."`
-		// struct tags (see COSEKey) produce the correct map encoding when
-		// this whole mso value is marshaled below. The previous
-		// double-encoding was a real bug caught by Google's own
-		// https://digital-credentials.dev/ demo, which rejected our issued
-		// mdocs with "'bytes' object has no attribute 'get'" trying to read
-		// deviceKey as a dict.
 		"deviceKeyInfo": map[string]any{
-			"deviceKey": b.deviceKey,
+			"deviceKey": deviceKeyCOSE,
 		},
 		"validityInfo": map[string]any{
 			"signed":     cbor.Tag{Number: 0, Content: signedTime},
@@ -256,7 +271,7 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 		certDER = append(certDER, cert.Raw)
 	}
 
-	signedMSO, err := Sign1(msoTaggedBytes, b.signerKey, algorithm, certDER, nil)
+	signedMSO, err := Sign1(msoTaggedBytes, b.signerKey, algorithm, certDER, []byte{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to sign MSO: %w", err)
 	}

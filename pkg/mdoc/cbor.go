@@ -58,6 +58,17 @@ func NewCBOREncoder() (*CBOREncoder, error) {
 	return encoder, nil
 }
 
+// NewItemCBOREncoder creates a CBOR encoder that preserves struct field order.
+// Used for IssuerSignedItems where key order must match ISO 18013-5 spec:
+// digestID, random, elementIdentifier, elementValue
+func NewItemCBOREncoder() (cbor.EncMode, error) {
+	encOpts := cbor.EncOptions{
+		Sort:        cbor.SortNone,
+		IndefLength: cbor.IndefLengthForbidden,
+		TimeTag:     cbor.EncTagRequired,
+	}
+	return encOpts.EncMode()
+}
 // Marshal encodes a value to CBOR.
 func (e *CBOREncoder) Marshal(v any) ([]byte, error) {
 	return e.encMode.Marshal(v)

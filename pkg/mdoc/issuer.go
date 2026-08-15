@@ -226,6 +226,12 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		signedMSO.Payload,
 		signedMSO.Signature,
 	}
+	deviceSigArray := []any{
+		[]byte{0xa1, 0x01, 0x26}, // Protected
+		map[string]any{},         // Unprotected
+		nil,                      // Payload (detached)
+		[]byte{},                 // Empty signature placeholder
+	}
 	// Everything encoded successfully: build response containing the document
 	innerDoc := DocumentMdoc{
 		DocType: req.Schema.DocType,
@@ -236,7 +242,7 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		DeviceSigned: DeviceSignedMdoc{
 			NameSpaces: cbor.Tag{Number: 24, Content: emptyMapBytes},
 			DeviceAuth: DeviceAuthMdoc{
-				DeviceSignature: []byte{0xD2}, // Dynamic wallet signature placeholder
+				DeviceSignature: deviceSigArray, // Dynamic wallet signature placeholder
 			},
 		},
 	}
