@@ -111,10 +111,10 @@ func (b *MSOBuilder) WithSigner(key crypto.Signer, certChain []*x509.Certificate
 
 // AddDataElement adds a data element to the MSO.
 func (b *MSOBuilder) AddDataElement(namespace, elementID string, value any) error {
-	// Use 8-byte random for pairwise_pseudonym to keep item within 128-byte circuit limit
+	// Use 8-byte random for pseudonym_seed to keep item within 128-byte circuit limit
 	// Use 16 bytes for all other elements
 	saltSize := 16
-	if elementID == pairwisePseudonymClaim {
+	if elementID == "pseudonym_seed" {
 		saltSize = 8
 	}
 	randomSalt := make([]byte, saltSize)

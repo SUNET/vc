@@ -416,7 +416,7 @@ type Issuer struct {
 	// In HA setups each APIGW node refreshes two documents (VCI+OAuth2), so the defaults
 	// should accommodate the expected cluster size. Default: 2 req/s, burst 20.
 	SignMetadataRateLimit SignMetadataRateLimitConfig `yaml:"sign_metadata_rate_limit"`
-	// PseudonymSeed, if true, makes the issuer attach a random seed as the pairwise_pseudonym claim.
+	// PseudonymSeed, if true, makes the issuer attach a random seed as the pseudonym_seed claim.
 	PseudonymSeed *bool `yaml:"pseudonym_seed" validate:"omitempty"`
 }
 

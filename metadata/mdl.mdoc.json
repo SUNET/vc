@@ -61,7 +61,7 @@
       "family_name_national_character": { "value_type": "tstr" },
       "given_name_national_character": { "value_type": "tstr" },
       "signature_usual_mark": { "value_type": "bstr" },
-      "pairwise_pseudonym": { "value_type": "bstr" }
+      "pseudonym_seed": { "value_type": "bstr" }
     }
   }
 }

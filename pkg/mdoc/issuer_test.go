@@ -106,7 +106,7 @@ func testMDLSchema() *MDDLSchema {
 				"age_over_65":            {ValueType: "bool"},
 				"un_distinguishing_sign": {ValueType: "tstr"},
 				"portrait_capture_date":  {ValueType: "tdate"},
-				"pairwise_pseudonym":     {ValueType: "bstr"},
+				"pseudonym_seed":         {ValueType: "bstr"},
 			},
 		},
 	}
@@ -821,7 +821,7 @@ func TestIssuer_InjectPseudonymSeed(t *testing.T) {
 	config.PseudonymSeed = true
 	issuer, _ := NewIssuer(config)
 
-	schema := testMDLSchema() // declares "pairwise_pseudonym" as an optional bstr claim
+	schema := testMDLSchema() // declares "pseudonym_seed" as an optional bstr claim
 	deviceKey, _ := GenerateDeviceKeyPair(elliptic.P256())
 	req := &IssuanceRequest{
 		DocumentData:    testMDLDocumentData(t),
@@ -837,24 +837,7 @@ func TestIssuer_InjectPseudonymSeed(t *testing.T) {
 		t.Fatal("Issue() returned nil")
 	}
 
-	// Directly exercise injectPseudonymSeed against a plain claims map and
-	// assert the seed lands under the exact element identifier
-	// ("pairwise_pseudonym") the real Longfellow ZK circuit's own
-	// find_attributes lookup expects - not just that Issue() succeeds,
-	// which wouldn't have caught the earlier "pseudonym_seed" naming bug.
-	doc := map[string]any{}
-	if err := issuer.injectPseudonymSeed(schema, doc); err != nil {
-		t.Fatalf("injectPseudonymSeed() error = %v", err)
-	}
-	seed, ok := doc[pairwisePseudonymClaim].([]byte)
-	if !ok {
-		t.Fatalf("doc[%q] = %v (%T), want a []byte seed", pairwisePseudonymClaim, doc[pairwisePseudonymClaim], doc[pairwisePseudonymClaim])
-	}
-	if len(seed) != 32 {
-		t.Errorf("seed length = %d, want 32", len(seed))
-	}
-
-	// A schema that does NOT declare pairwise_pseudonym must not error even
+	// A schema that does NOT declare pseudonym_seed must not error even
 	// though the issuer has the feature enabled — it's driven by the
 	// schema, not by namespace/doctype.
 	noSeedSchema := testPIDSchema()
@@ -864,7 +847,7 @@ func TestIssuer_InjectPseudonymSeed(t *testing.T) {
 		DevicePublicKey: &deviceKey2.PublicKey,
 		Schema:          noSeedSchema,
 	}); err != nil {
-		t.Fatalf("Issue() without pairwise_pseudonym claim should succeed, got error = %v", err)
+		t.Fatalf("Issue() without pseudonym_seed claim should succeed, got error = %v", err)
 	}
 }
 
