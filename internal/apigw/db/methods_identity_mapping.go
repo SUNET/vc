@@ -56,6 +56,19 @@ func (c *IdentityMappingsColl) createIndex(ctx context.Context) error {
 	return nil
 }
 
+// Count returns the (possibly approximate) number of identity mappings.
+func (c *IdentityMappingsColl) Count(ctx context.Context) (int64, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:count")
+	defer span.End()
+
+	count, err := c.Coll.EstimatedDocumentCount(ctx)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return 0, err
+	}
+	return count, nil
+}
+
 // CreateMapping creates a new identity mapping
 func (c *IdentityMappingsColl) CreateMapping(ctx context.Context, mapping *model.IdentityMapping) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:createMapping")

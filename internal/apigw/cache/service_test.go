@@ -1,24 +1,17 @@
 package cache
 
 import (
-	"context"
-	"fmt"
-	"os/exec"
 	"testing"
 	"time"
 
 	"github.com/SUNET/vc/internal/apigw/db"
-	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
-	"github.com/SUNET/vc/pkg/trace"
+	"github.com/SUNET/vc/pkg/testsupport"
+	"github.com/SUNET/vc/pkg/testsupport/cachetest"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func testCfg(ha bool) *model.Cfg {
@@ -33,83 +26,10 @@ func testCfg(ha bool) *model.Cfg {
 	}
 }
 
-func testLogger(t *testing.T) *logger.Log {
-	t.Helper()
-	log, err := logger.New("test", "", false)
-	require.NoError(t, err)
-	return log
-}
-
-func testTracer(t *testing.T, cfg *model.Cfg, log *logger.Log) *trace.Tracer {
-	t.Helper()
-	tracer, err := trace.New(t.Context(), cfg, "cache-test", log)
-	require.NoError(t, err)
-	return tracer
-}
-
-func isDockerAvailable() bool {
-	dockerPath, err := exec.LookPath("docker")
-	if err != nil {
-		return false
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return exec.CommandContext(ctx, dockerPath, "version").Run() == nil // #nosec G204
-}
-
-func startMongoContainer(t *testing.T) (*mongo.Client, func()) {
-	t.Helper()
-	if !isDockerAvailable() {
-		t.Skip("Docker is not available")
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
-
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        "mongo:7",
-			ExposedPorts: []string{"27017/tcp"},
-			WaitingFor:   wait.ForLog("Waiting for connections"),
-		},
-		Started: true,
-	})
-	if err != nil {
-		cancel()
-		t.Fatalf("start mongo container: %v", err)
-	}
-
-	port, err := container.MappedPort(ctx, "27017")
-	if err != nil {
-		cancel()
-		t.Fatalf("mapped port: %v", err)
-	}
-	host, err := container.Host(ctx)
-	if err != nil {
-		cancel()
-		t.Fatalf("container host: %v", err)
-	}
-
-	client, err := mongo.Connect(options.Client().ApplyURI(fmt.Sprintf("mongodb://%s:%s", host, port.Port())))
-	if err != nil {
-		cancel()
-		t.Fatalf("mongo connect: %v", err)
-	}
-
-	return client, func() {
-		client.Disconnect(ctx)   // #nosec G104
-		container.Terminate(ctx) // #nosec G104
-		cancel()
-	}
-}
-
 // TestNew_Memory verifies New() with in-memory backend (ha=false).
 func TestNew_Memory(t *testing.T) {
 	cfg := testCfg(false)
-	log := testLogger(t)
-	tracer := testTracer(t, cfg, log)
-
-	dbService := &db.Service{MongoClient: nil}
-
-	s, err := New(t.Context(), cfg, dbService, tracer, log)
+	s, err := cachetest.New(t, cfg, &db.Service{MongoClient: nil}, New)
 	require.NoError(t, err)
 	require.NotNil(t, s)
 
@@ -171,12 +91,7 @@ func TestNewTestMemoryCache(t *testing.T) {
 // TestNew_NilMongoClient verifies New() returns an error when ha=true but client is nil.
 func TestNew_NilMongoClient(t *testing.T) {
 	cfg := testCfg(true)
-	log := testLogger(t)
-	tracer := testTracer(t, cfg, log)
-
-	dbService := &db.Service{MongoClient: nil}
-
-	s, err := New(t.Context(), cfg, dbService, tracer, log)
+	s, err := cachetest.New(t, cfg, &db.Service{MongoClient: nil}, New)
 	assert.Error(t, err)
 	assert.Nil(t, s)
 	assert.Contains(t, err.Error(), "cache:")
@@ -184,16 +99,11 @@ func TestNew_NilMongoClient(t *testing.T) {
 
 // TestNew_Mongo verifies New() with MongoDB backend (ha=true).
 func TestNew_Mongo(t *testing.T) {
-	client, cleanup := startMongoContainer(t)
+	_, client, cleanup := testsupport.StartMongoContainer(t)
 	defer cleanup()
 
 	cfg := testCfg(true)
-	log := testLogger(t)
-	tracer := testTracer(t, cfg, log)
-
-	dbService := &db.Service{MongoClient: client}
-
-	s, err := New(t.Context(), cfg, dbService, tracer, log)
+	s, err := cachetest.New(t, cfg, &db.Service{MongoClient: client}, New)
 	require.NoError(t, err)
 	require.NotNil(t, s)
 

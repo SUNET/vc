@@ -71,7 +71,7 @@ func (c *TokenStatusListColl) InitializeIfEmpty(ctx context.Context) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:token_status_list:initializeIfEmpty")
 	defer span.End()
 
-	count, err := c.CountDocs(ctx, bson.M{})
+	count, err := c.CountAll(ctx)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return err
@@ -121,12 +121,12 @@ func (c *TokenStatusListColl) createIndex(ctx context.Context) error {
 	return nil
 }
 
-// CountDocs counts documents matching the filter
-func (c *TokenStatusListColl) CountDocs(ctx context.Context, filter bson.M) (int64, error) {
-	ctx, span := c.Service.tracer.Start(ctx, "db:token_status_list:countDocs")
+// CountAll returns the total number of status entries across all sections.
+func (c *TokenStatusListColl) CountAll(ctx context.Context) (int64, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:token_status_list:countAll")
 	defer span.End()
 
-	count, err := c.Coll.CountDocuments(ctx, filter)
+	count, err := c.Coll.CountDocuments(ctx, bson.M{})
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return 0, err
@@ -135,12 +135,14 @@ func (c *TokenStatusListColl) CountDocs(ctx context.Context, filter bson.M) (int
 	return count, nil
 }
 
-// CountDocsWithLimit counts documents matching the filter, stopping early once limit is reached.
-// This is much faster than CountDocs when only a threshold check is needed (e.g. "are there more than N?").
-func (c *TokenStatusListColl) CountDocsWithLimit(ctx context.Context, filter bson.M, limit int64) (int64, error) {
-	ctx, span := c.Service.tracer.Start(ctx, "db:token_status_list:countDocsWithLimit")
+// CountDecoysInSectionWithLimit counts decoy entries in the given section, stopping early
+// once limit is reached. This is much faster than an unbounded count when only a threshold
+// check is needed (e.g. "are there more than N?").
+func (c *TokenStatusListColl) CountDecoysInSectionWithLimit(ctx context.Context, section int64, limit int64) (int64, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:token_status_list:countDecoysInSectionWithLimit")
 	defer span.End()
 
+	filter := bson.M{"section": section, "decoy": true}
 	opts := options.Count().SetLimit(limit)
 	count, err := c.Coll.CountDocuments(ctx, filter, opts)
 	if err != nil {

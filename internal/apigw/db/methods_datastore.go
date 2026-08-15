@@ -50,6 +50,19 @@ func (c *DatastoreColl) createIndex(ctx context.Context) error {
 	return nil
 }
 
+// Count returns the (possibly approximate) number of documents in the datastore.
+func (c *DatastoreColl) Count(ctx context.Context) (int64, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:count")
+	defer span.End()
+
+	count, err := c.Coll.EstimatedDocumentCount(ctx)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return 0, err
+	}
+	return count, nil
+}
+
 // Save saves one document to the generic collection
 func (c *DatastoreColl) Save(ctx context.Context, doc *model.CompleteDocument) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:save")

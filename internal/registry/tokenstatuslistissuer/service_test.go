@@ -8,9 +8,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,8 +17,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/creasty/defaults"
 
@@ -29,6 +25,7 @@ import (
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/testsupport"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
 	"github.com/SUNET/vc/pkg/trace"
 )
@@ -36,29 +33,21 @@ import (
 // isDockerAvailable checks if Docker is accessible by running 'docker version'
 // This approach is portable across platforms (Linux, macOS, Windows)
 func isDockerAvailable() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "docker", "version")
-	if err := cmd.Run(); err != nil {
-		return false
-	}
-
-	return true
+	return testsupport.IsDockerAvailable()
 }
 
 // testSuite holds the test infrastructure
 type testSuite struct {
-	t              *testing.T
-	ctx            context.Context
-	cancel         context.CancelFunc
-	cfg            *model.Cfg
-	dbService      *db.Service
-	cacheService   *cache.Service
-	log            *logger.Log
-	tracer         *trace.Tracer
-	mongoContainer testcontainers.Container
-	keyPath        string
+	t            *testing.T
+	ctx          context.Context
+	cancel       context.CancelFunc
+	cfg          *model.Cfg
+	dbService    *db.Service
+	cacheService *cache.Service
+	log          *logger.Log
+	tracer       *trace.Tracer
+	mongoCleanup func()
+	keyPath      string
 }
 
 // newTestSuite creates a new test suite with MongoDB testcontainer
@@ -180,35 +169,9 @@ func (s *testSuite) initializeConfiguration() {
 
 // startMongoContainer starts a MongoDB container using testcontainers
 func (s *testSuite) startMongoContainer() {
-	req := testcontainers.ContainerRequest{
-		Image:        "mongo:7",
-		ExposedPorts: []string{"27017/tcp"},
-		WaitingFor:   wait.ForLog("Waiting for connections"),
-	}
-
-	var err error
-	s.mongoContainer, err = testcontainers.GenericContainer(s.ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	if err != nil {
-		s.t.Fatalf("Failed to start MongoDB container: %v", err)
-	}
-
-	// Get the mapped port
-	mappedPort, err := s.mongoContainer.MappedPort(s.ctx, "27017")
-	if err != nil {
-		s.t.Fatalf("Failed to get mapped port: %v", err)
-	}
-
-	host, err := s.mongoContainer.Host(s.ctx)
-	if err != nil {
-		s.t.Fatalf("Failed to get container host: %v", err)
-	}
-
-	// Update configuration with MongoDB URI
-	s.cfg.Common.Mongo.URI = fmt.Sprintf("mongodb://%s:%s", host, mappedPort.Port())
-	s.t.Logf("MongoDB container started at %s", s.cfg.Common.Mongo.URI)
+	uri, _, cleanup := testsupport.StartMongoContainer(s.t)
+	s.cfg.Common.Mongo.URI = uri
+	s.mongoCleanup = cleanup
 }
 
 // initializeLogging creates test logger
@@ -248,8 +211,8 @@ func (s *testSuite) cleanup() {
 	if s.dbService != nil {
 		_ = s.dbService.Close(s.ctx)
 	}
-	if s.mongoContainer != nil {
-		_ = s.mongoContainer.Terminate(s.ctx)
+	if s.mongoCleanup != nil {
+		s.mongoCleanup()
 	}
 	s.cancel()
 }
