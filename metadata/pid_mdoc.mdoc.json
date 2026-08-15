@@ -15,7 +15,7 @@
       "family_name": { "mandatory": true, "value_type": "tstr" },
       "given_name": { "mandatory": true, "value_type": "tstr" },
       "age_over_18": { "value_type": "bool" },
-      "pseudonym_seed": { "value_type": "bstr" }
+      "pairwise_pseudonym": { "value_type": "bstr" }
     }
   }
 }

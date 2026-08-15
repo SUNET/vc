@@ -124,8 +124,25 @@ func TestMSOBuilder_AddDataElement(t *testing.T) {
 	if item.ElementValue != "Doe" {
 		t.Errorf("ElementValue = %v, want Doe", item.ElementValue)
 	}
-	if len(item.Random) != 32 {
-		t.Errorf("Random length = %d, want 32", len(item.Random))
+	if len(item.Random) != 16 {
+		t.Errorf("Random length = %d, want 16", len(item.Random))
+	}
+}
+
+// TestMSOBuilder_AddDataElement_PairwisePseudonymUsesShorterSalt guards the
+// pairwise_pseudonym-specific 8-byte salt branch in AddDataElement, which had
+// no test coverage: an 8-byte-too-many salt would silently push the encoded
+// IssuerSignedItem past the Longfellow ZK circuit's 128-byte item limit.
+func TestMSOBuilder_AddDataElement_PairwisePseudonymUsesShorterSalt(t *testing.T) {
+	builder := NewMSOBuilder(DocType)
+
+	if err := builder.AddDataElement(Namespace, pairwisePseudonymClaim, make([]byte, 32)); err != nil {
+		t.Fatalf("AddDataElement() error = %v", err)
+	}
+
+	item := builder.namespaces[Namespace][0]
+	if len(item.Random) != 8 {
+		t.Errorf("Random length = %d, want 8", len(item.Random))
 	}
 }
 

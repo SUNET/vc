@@ -132,8 +132,11 @@ type MDoc struct {
 	SignatureUsualMark []byte `json:"signature_usual_mark,omitempty" cbor:"signature_usual_mark,omitempty"`
 
 	// PseudonymSeed is a fixed-length seed value used to derive holder-specific
-	// pseudonyms for pseudonymous authentication schemes.
-	PseudonymSeed []byte `json:"pseudonym_seed,omitempty" cbor:"pseudonym_seed,omitempty" validate:"omitempty,len=32"`
+	// pseudonyms for pseudonymous authentication schemes. The wire element
+	// identifier is "pairwise_pseudonym" (see pairwisePseudonymClaim), not
+	// "pseudonym_seed" - the latter was an earlier internal name that never
+	// matched what the Longfellow ZK circuit's own find_attributes expects.
+	PseudonymSeed []byte `json:"pairwise_pseudonym,omitempty" cbor:"pairwise_pseudonym,omitempty" validate:"omitempty,len=32"`
 }
 
 // DrivingPrivilege represents a single driving privilege category.

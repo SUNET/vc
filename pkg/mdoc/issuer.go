@@ -27,7 +27,7 @@ type Issuer struct {
 	defaultValidity time.Duration
 	// Digest algorithm to use
 	digestAlgorithm DigestAlgorithm
-	// pseudonymSeed enables attaching a random seed as the pseudonym_seed claim. Default: false.
+	// pseudonymSeed enables attaching a random seed as the pairwise_pseudonym claim. Default: false.
 	pseudonymSeed bool
 }
 
@@ -428,21 +428,29 @@ func convertMapFields(elementsSchema map[string]ClaimMetadata, m map[string]any)
 	return result, nil
 }
 
+// pairwisePseudonymClaim is the mdoc element identifier a Longfellow ZK
+// circuit expects to find the 32-byte pseudonym seed under (confirmed
+// against zk-cred-longfellow's own real V8 test vectors, which name the
+// element "pairwise_pseudonym" - not "pseudonym_seed", an earlier internal
+// name this issuer used that never matched what the circuit actually looks
+// up via find_attributes).
+const pairwisePseudonymClaim = "pairwise_pseudonym"
+
 // injectPseudonymSeed generates a fresh 32-byte pseudonym seed when the
-// issuer is configured for it and the schema declares "pseudonym_seed" as a
-// claim in some namespace but the caller didn't already supply one. This
-// keeps the toggle decoupled from any namespace/doctype: it is driven purely
-// by whether the schema opts in to the claim.
+// issuer is configured for it and the schema declares "pairwise_pseudonym"
+// as a claim in some namespace but the caller didn't already supply one.
+// This keeps the toggle decoupled from any namespace/doctype: it is driven
+// purely by whether the schema opts in to the claim.
 func (i *Issuer) injectPseudonymSeed(schema *MDDLSchema, doc map[string]any) error {
 	if !i.pseudonymSeed {
 		return nil
 	}
-	if _, present := doc["pseudonym_seed"]; present {
+	if _, present := doc[pairwisePseudonymClaim]; present {
 		return nil
 	}
 	declared := false
 	for _, elements := range schema.Claims {
-		if _, ok := elements["pseudonym_seed"]; ok {
+		if _, ok := elements[pairwisePseudonymClaim]; ok {
 			declared = true
 			break
 		}
@@ -455,7 +463,7 @@ func (i *Issuer) injectPseudonymSeed(schema *MDDLSchema, doc map[string]any) err
 	if _, err := rand.Read(seed); err != nil {
 		return fmt.Errorf("failed to generate pseudonym seed: %w", err)
 	}
-	doc["pseudonym_seed"] = seed
+	doc[pairwisePseudonymClaim] = seed
 	return nil
 }
 

@@ -748,7 +748,7 @@ Configuration for the Issuer service that signs and issues verifiable credential
 | `mdoc`                     | `object` | MDL/mdoc configuration                                                                                                                                                                                            | -                           | -       | No       |
 | `audit_log`                | `object` | Audit log configuration                                                                                                                                                                                           | -                           | -       | No       |
 | `sign_metadata_rate_limit` | `object` | The rate limiter for the SignMetadata gRPC endpoint. In HA setups each APIGW node refreshes two documents (VCI+OAuth2), so the defaults should accommodate the expected cluster size. Default: 2 req/s, burst 20. | -                           | -       | No       |
-| `pseudonym_seed`           | `bool`   | PseudonymSeed, if true, makes the issuer attach a random seed as the pseudonym_seed claim.                                                                                                                        | -                           | -       | No       |
+| `pseudonym_seed`           | `bool`   | PseudonymSeed, if true, makes the issuer attach a random seed as the pairwise_pseudonym claim.                                                                                                                    | -                           | -       | No       |
 
 ### `grpc_server`
 
