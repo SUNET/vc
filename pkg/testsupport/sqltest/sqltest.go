@@ -11,8 +11,10 @@
 package sqltest
 
 import (
+	"strconv"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sqlstore"
 	"github.com/SUNET/vc/pkg/testsupport"
 
@@ -112,4 +114,93 @@ func StartMariaDB(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 		_ = ctr.Terminate(ctx)
 	}
 	return db, sqlstore.MariaDBDialect, cleanup
+}
+
+// PostgresConfig spins up a throwaway, unmigrated Postgres container and
+// returns a *model.PostgresConfig pointing at it (for exercising the real
+// sqlstore.Connect/db.New code path, as opposed to StartPostgres's
+// already-opened *sqlx.DB) and a cleanup function.
+func PostgresConfig(t *testing.T) (*model.PostgresConfig, func()) {
+	t.Helper()
+	if !testsupport.IsDockerAvailable() {
+		t.Skip("Skipping test: Docker is not available")
+	}
+	ctx := t.Context()
+
+	ctr, err := postgres.Run(ctx, "postgres:16", postgres.BasicWaitStrategies())
+	if err != nil {
+		t.Fatalf("start postgres container: %v", err)
+	}
+
+	host, err := ctr.Host(ctx)
+	if err != nil {
+		_ = ctr.Terminate(ctx)
+		t.Fatalf("postgres host: %v", err)
+	}
+	port, err := ctr.MappedPort(ctx, "5432/tcp")
+	if err != nil {
+		_ = ctr.Terminate(ctx)
+		t.Fatalf("postgres mapped port: %v", err)
+	}
+	portNum, err := strconv.Atoi(port.Port())
+	if err != nil {
+		_ = ctr.Terminate(ctx)
+		t.Fatalf("postgres port: %v", err)
+	}
+
+	cfg := &model.PostgresConfig{
+		Host:         host,
+		Port:         portNum,
+		User:         "postgres",
+		Password:     "postgres",
+		Database:     "postgres",
+		SSLMode:      "disable",
+		MaxOpenConns: 5,
+		MaxIdleConns: 2,
+	}
+	return cfg, func() { _ = ctr.Terminate(ctx) }
+}
+
+// MariaDBConfig spins up a throwaway, unmigrated MariaDB container and
+// returns a *model.MariaDBConfig pointing at it (for exercising the real
+// sqlstore.Connect/db.New code path, as opposed to StartMariaDB's
+// already-opened *sqlx.DB) and a cleanup function.
+func MariaDBConfig(t *testing.T) (*model.MariaDBConfig, func()) {
+	t.Helper()
+	if !testsupport.IsDockerAvailable() {
+		t.Skip("Skipping test: Docker is not available")
+	}
+	ctx := t.Context()
+
+	ctr, err := mariadb.Run(ctx, "mariadb:11")
+	if err != nil {
+		t.Fatalf("start mariadb container: %v", err)
+	}
+
+	host, err := ctr.Host(ctx)
+	if err != nil {
+		_ = ctr.Terminate(ctx)
+		t.Fatalf("mariadb host: %v", err)
+	}
+	port, err := ctr.MappedPort(ctx, "3306/tcp")
+	if err != nil {
+		_ = ctr.Terminate(ctx)
+		t.Fatalf("mariadb mapped port: %v", err)
+	}
+	portNum, err := strconv.Atoi(port.Port())
+	if err != nil {
+		_ = ctr.Terminate(ctx)
+		t.Fatalf("mariadb port: %v", err)
+	}
+
+	cfg := &model.MariaDBConfig{
+		Host:         host,
+		Port:         portNum,
+		User:         "test",
+		Password:     "test",
+		Database:     "test",
+		MaxOpenConns: 5,
+		MaxIdleConns: 2,
+	}
+	return cfg, func() { _ = ctr.Terminate(ctx) }
 }
