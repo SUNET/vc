@@ -1,0 +1,31 @@
+---
+# Optional overlay adding a PostgreSQL container for local dev/testing of the
+# relational storage backend (Common.SQL.Backend: postgres). Not part of the
+# default docker-compose.yaml so the default dev stack keeps using MongoDB
+# unchanged. Bring up alongside the base file:
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.postgres.yaml up
+#
+services:
+  postgres:
+    image: postgres:16
+    container_name: "vc_dev_postgres"
+    hostname: "postgres.vc.docker"
+    restart: always
+    environment:
+      - "POSTGRES_USER=vc"
+      - "POSTGRES_PASSWORD=vc"
+      - "POSTGRES_DB=vc"
+    expose:
+      - 5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vc"]
+      start_period: 3s
+    networks:
+      vc-dev-net:
+        ipv4_address: 172.16.50.24
+
+volumes:
+  postgres_data:

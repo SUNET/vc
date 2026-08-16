@@ -17,12 +17,31 @@ type Secrets struct {
 // CommonSecrets holds secrets from the common section
 type CommonSecrets struct {
 	Mongo MongoSecrets `yaml:"mongo,omitempty"`
+	SQL   SQLSecrets   `yaml:"sql,omitempty"`
 }
 
 // MongoSecrets holds the mongo connection URI (may contain credentials)
 type MongoSecrets struct {
 	// URI is the MongoDB connection string, which may include authentication credentials
 	URI string `yaml:"uri"`
+}
+
+// SQLSecrets holds relational database passwords, keyed by backend.
+type SQLSecrets struct {
+	Postgres PostgresSecrets `yaml:"postgres,omitempty"`
+	MariaDB  MariaDBSecrets  `yaml:"mariadb,omitempty"`
+}
+
+// PostgresSecrets holds the Postgres connection password
+type PostgresSecrets struct {
+	// Password is the Postgres connection password
+	Password string `yaml:"password"`
+}
+
+// MariaDBSecrets holds the MariaDB connection password
+type MariaDBSecrets struct {
+	// Password is the MariaDB connection password
+	Password string `yaml:"password"`
 }
 
 // APIGWSecrets holds API gateway secrets
@@ -125,6 +144,14 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		}
 		if cfg.Common.Mongo.URI == "" && secrets.Common.Mongo.URI != "" {
 			cfg.Common.Mongo.URI = secrets.Common.Mongo.URI
+		}
+		// SQL passwords: fill from secrets only when the main config leaves them empty,
+		// same split as Mongo.URI above.
+		if cfg.Common.SQL.Postgres != nil && cfg.Common.SQL.Postgres.Password == "" && secrets.Common.SQL.Postgres.Password != "" {
+			cfg.Common.SQL.Postgres.Password = secrets.Common.SQL.Postgres.Password
+		}
+		if cfg.Common.SQL.MariaDB != nil && cfg.Common.SQL.MariaDB.Password == "" && secrets.Common.SQL.MariaDB.Password != "" {
+			cfg.Common.SQL.MariaDB.Password = secrets.Common.SQL.MariaDB.Password
 		}
 	}
 

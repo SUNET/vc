@@ -1,0 +1,32 @@
+---
+# Optional overlay adding a MariaDB container for local dev/testing of the
+# relational storage backend (Common.SQL.Backend: mariadb). Not part of the
+# default docker-compose.yaml so the default dev stack keeps using MongoDB
+# unchanged. Bring up alongside the base file:
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.mariadb.yaml up
+#
+services:
+  mariadb:
+    image: mariadb:11
+    container_name: "vc_dev_mariadb"
+    hostname: "mariadb.vc.docker"
+    restart: always
+    environment:
+      - "MARIADB_USER=vc"
+      - "MARIADB_PASSWORD=vc"
+      - "MARIADB_DATABASE=vc"
+      - "MARIADB_RANDOM_ROOT_PASSWORD=yes"
+    expose:
+      - 3306
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 5s
+    networks:
+      vc-dev-net:
+        ipv4_address: 172.16.50.26
+
+volumes:
+  mariadb_data:
