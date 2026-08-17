@@ -850,8 +850,8 @@ func TestIssuer_InjectPseudonymSeed(t *testing.T) {
 	if !ok {
 		t.Fatalf("doc[%q] = %v (%T), want a []byte seed", "pseudonym_seed", doc["pseudonym_seed"], doc["pseudonym_seed"])
 	}
-	if len(seed) != 12 {
-		t.Errorf("seed length = %d, want 12", len(seed))
+	if len(seed) != 32 {
+		t.Errorf("seed length = %d, want 32", len(seed))
 	}
 
 	// A schema that does NOT declare pseudonym_seed must not error even
