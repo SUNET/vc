@@ -291,6 +291,13 @@ type DeviceResponseMdoc struct {
 	Documents      []DocumentMdoc  `cbor:"documents,omitempty"`
 	DocumentErrors []DocumentError `json:"documentErrors,omitempty" cbor:"documentErrors,omitempty"`
 	Status         uint64          `cbor:"status"`
+	// ZkDocuments carries zero-knowledge (Longfellow) proof-of-possession
+	// documents, multipaz's "zkDocuments" extension to the standard ISO
+	// 18013-5 DeviceResponse (used for the "mso_mdoc_zk" DCQL format).
+	// Empty/absent for a plain "mso_mdoc" DeviceResponse - this field is
+	// purely additive and does not affect Documents-based verification.
+	// See zk.go and zk_verifier.go.
+	ZkDocuments []ZkDocumentMdoc `cbor:"zkDocuments,omitempty"`
 }
 
 type DocumentError map[string]int

@@ -68,9 +68,21 @@ type MetaQuery struct {
 	// Each inner array specifies a set of fully expanded types that MUST be present in the credential's type property.
 	TypeValues [][]string `json:"type_values,omitempty" yaml:"type_values,omitempty"`
 
-	// DoctypeValue for ISO mdoc format (mso_mdoc).
+	// DoctypeValue for ISO mdoc format (mso_mdoc) and ZK-mdoc format (mso_mdoc_zk).
 	// String that specifies an allowed value for the doctype of the requested Verifiable Credential.
 	DoctypeValue string `json:"doctype_value,omitempty" yaml:"doctype_value,omitempty"`
+
+	// ZKSystemType for ZK-mdoc format (mso_mdoc_zk) only.
+	// A non-empty array of ZK proof system/circuit variants the Verifier is
+	// willing to accept (e.g. Longfellow circuits for different attribute
+	// counts). See ZKSystemTypeSpec and dcql_zk.go.
+	ZKSystemType []ZKSystemTypeSpec `json:"zk_system_type,omitempty" yaml:"zk_system_type,omitempty"`
+
+	// PPIDContext for ZK-mdoc format (mso_mdoc_zk) only.
+	// An optional verifier-supplied string that further scopes a requested
+	// pairwise pseudonym (PPID) beyond the verifier's own identity - see
+	// pkg/mdoc.ComputeZkVerifierContext.
+	PPIDContext string `json:"ppid_context,omitempty" yaml:"ppid_context,omitempty"`
 }
 
 // VPFormatsSupported defines format-specific parameters for Verifier or Wallet metadata.
@@ -459,6 +471,22 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 			return &DCQLValidationError{
 				Field:   "meta.doctype_value",
 				Message: "doctype_value is required for ISO mdoc format",
+			}
+		}
+	case FormatMsoMdocZk:
+		// ZK-mdoc requires doctype_value, same as plain mso_mdoc
+		if query.Meta.DoctypeValue == "" {
+			return &DCQLValidationError{
+				Field:   "meta.doctype_value",
+				Message: "doctype_value is required for ZK-mdoc format",
+			}
+		}
+		// ...plus a non-empty zk_system_type array declaring which ZK
+		// systems/circuits the verifier accepts.
+		if len(query.Meta.ZKSystemType) == 0 {
+			return &DCQLValidationError{
+				Field:   "meta.zk_system_type",
+				Message: "zk_system_type is required for ZK-mdoc format",
 			}
 		}
 	default:
