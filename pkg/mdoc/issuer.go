@@ -428,11 +428,11 @@ func convertMapFields(elementsSchema map[string]ClaimMetadata, m map[string]any)
 	return result, nil
 }
 
-// injectPseudonymSeed generates a fresh 32-byte pseudonym seed when the
-// issuer is configured for it and the schema declares "pseudonym_seed" as a
-// claim in some namespace but the caller didn't already supply one. This
-// keeps the toggle decoupled from any namespace/doctype: it is driven purely
-// by whether the schema opts in to the claim.
+// injectPseudonymSeed generates a fresh pseudonym seed when the issuer is
+// configured for it and the schema declares "pseudonym_seed" as a claim in
+// some namespace but the caller didn't already supply one. This keeps the
+// toggle decoupled from any namespace/doctype: it is driven purely by
+// whether the schema opts in to the claim.
 func (i *Issuer) injectPseudonymSeed(schema *MDDLSchema, doc map[string]any) error {
 	if !i.pseudonymSeed {
 		return nil
@@ -451,6 +451,16 @@ func (i *Issuer) injectPseudonymSeed(schema *MDDLSchema, doc map[string]any) err
 		return nil
 	}
 
+	// Must stay 32 bytes - zk-cred-longfellow's native PPID witnessing
+	// explicitly validates this ("pseudonym_seed value is not a valid
+	// 32-byte CBOR byte string"), confirmed live: shrinking it (previously
+	// tried at 12 bytes here) is rejected outright by that check, it is not
+	// just a hashing-budget question. The item's overall
+	// IssuerSignedItemBytes size (separately measured against the V8
+	// circuits' ~119-byte per-attribute SHA-256 witnessing ceiling) must be
+	// brought down some other way if it still overflows with a full 32-byte
+	// seed - see this function's git history/PR discussion for the current
+	// state of that investigation.
 	seed := make([]byte, 32)
 	if _, err := rand.Read(seed); err != nil {
 		return fmt.Errorf("failed to generate pseudonym seed: %w", err)
