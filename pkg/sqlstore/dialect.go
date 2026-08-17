@@ -80,6 +80,9 @@ func (postgresDialect) Rebind(query string) string { return sqlx.Rebind(sqlx.DOL
 func (postgresDialect) JSONColumnType() string     { return "JSONB" }
 
 func (postgresDialect) UpsertClause(conflictCols, updateCols []string) string {
+	if len(conflictCols) == 0 {
+		panic("sqlstore: UpsertClause requires at least one conflict column")
+	}
 	if len(updateCols) == 0 {
 		return fmt.Sprintf("ON CONFLICT (%s) DO NOTHING", strings.Join(conflictCols, ", "))
 	}
@@ -110,6 +113,9 @@ func (mariaDBDialect) Rebind(query string) string { return sqlx.Rebind(sqlx.QUES
 func (mariaDBDialect) JSONColumnType() string     { return "JSON" }
 
 func (mariaDBDialect) UpsertClause(conflictCols, updateCols []string) string {
+	if len(conflictCols) == 0 {
+		panic("sqlstore: UpsertClause requires at least one conflict column")
+	}
 	if len(updateCols) == 0 {
 		// MariaDB has no "DO NOTHING" upsert clause; updating a conflict
 		// column to itself is a harmless no-op write that still avoids a

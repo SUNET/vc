@@ -88,8 +88,13 @@ type MTLS struct {
 
 // Mongo holds the MongoDB configuration
 type Mongo struct {
-	// URI is the MongoDB connection URI
-	URI string `yaml:"uri" validate:"required" doc_example:"\"mongodb://user:password@mongo:27017/vc\""`
+	// URI is the MongoDB connection URI. Required when Common.SQL.Backend is
+	// "mongo" (the default primary-store backend) or when Common.HA.Enable is
+	// true (pkg/cache has no relational backend yet, so HA caching always
+	// uses Mongo regardless of the primary store's backend). Enforced by a
+	// Common-level struct validation rather than a plain "required" tag here,
+	// since the requirement depends on sibling fields of Common, not of Mongo.
+	URI string `yaml:"uri" validate:"omitempty" doc_example:"\"mongodb://user:password@mongo:27017/vc\""`
 	// TLS enables TLS for the MongoDB connection.
 	// Can also be enabled via the connection URI parameter "tls=true".
 	TLS bool `yaml:"tls" default:"false"`
@@ -128,12 +133,17 @@ type SQL struct {
 
 // PostgresConfig holds PostgreSQL connection settings.
 type PostgresConfig struct {
-	// Host is the Postgres server hostname
-	Host string `yaml:"host" validate:"required_if=Backend postgres" doc_example:"\"postgres\""`
+	// Host is the Postgres server hostname. Required when Common.SQL.Backend
+	// is "postgres"; enforced by a SQL-level struct validation rather than a
+	// plain "required_if" tag here, since "Backend" lives on the parent SQL
+	// struct, not on PostgresConfig, and required_if can only reference
+	// sibling fields.
+	Host string `yaml:"host" validate:"omitempty" doc_example:"\"postgres\""`
 	// Port is the Postgres server port
 	Port int `yaml:"port" default:"5432"`
-	// User is the Postgres connection user
-	User string `yaml:"user" validate:"required_if=Backend postgres"`
+	// User is the Postgres connection user. Required when Common.SQL.Backend
+	// is "postgres" (see Host doc comment for why this isn't a required_if tag).
+	User string `yaml:"user" validate:"omitempty"`
 	// Password is the Postgres connection password. May also be set via secrets.yaml
 	// (Common.SQL.Postgres.Password), following the same split as Mongo.URI.
 	Password string `yaml:"password,omitempty"`
@@ -158,12 +168,17 @@ type PostgresConfig struct {
 // default port and TLS parameter semantics differ enough between the two
 // drivers to want independent validation tags.
 type MariaDBConfig struct {
-	// Host is the MariaDB server hostname
-	Host string `yaml:"host" validate:"required_if=Backend mariadb" doc_example:"\"mariadb\""`
+	// Host is the MariaDB server hostname. Required when Common.SQL.Backend
+	// is "mariadb"; enforced by a SQL-level struct validation rather than a
+	// plain "required_if" tag here, since "Backend" lives on the parent SQL
+	// struct, not on MariaDBConfig, and required_if can only reference
+	// sibling fields.
+	Host string `yaml:"host" validate:"omitempty" doc_example:"\"mariadb\""`
 	// Port is the MariaDB server port
 	Port int `yaml:"port" default:"3306"`
-	// User is the MariaDB connection user
-	User string `yaml:"user" validate:"required_if=Backend mariadb"`
+	// User is the MariaDB connection user. Required when Common.SQL.Backend
+	// is "mariadb" (see Host doc comment for why this isn't a required_if tag).
+	User string `yaml:"user" validate:"omitempty"`
 	// Password is the MariaDB connection password. May also be set via secrets.yaml
 	// (Common.SQL.MariaDB.Password), following the same split as Mongo.URI.
 	Password string `yaml:"password,omitempty"`

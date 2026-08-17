@@ -11,29 +11,45 @@ import (
 	"github.com/go-sql-driver/mysql"
 )
 
+// libpqQuote quotes a libpq keyword/value connection string value if it
+// contains characters that would otherwise make the value ambiguous
+// (whitespace, a single quote, or a backslash), single-quoting it and
+// backslash-escaping any embedded backslashes/quotes per libpq's own
+// connection-string escaping rules. Values with none of those characters are
+// returned unquoted, matching the plain "key=value" form used before this
+// existed.
+func libpqQuote(v string) string {
+	if v == "" || !strings.ContainsAny(v, " '\\") {
+		return v
+	}
+	v = strings.ReplaceAll(v, `\`, `\\`)
+	v = strings.ReplaceAll(v, `'`, `\'`)
+	return "'" + v + "'"
+}
+
 // DSN returns a libpq keyword/value connection string for this Postgres
 // configuration, understood directly by pgx (both sslmode and the
 // sslrootcert/sslcert/sslkey file-path parameters are native libpq
 // connection parameters, so no separate *tls.Config needs to be built here).
 func (p *PostgresConfig) DSN() string {
 	parts := []string{
-		"host=" + p.Host,
+		"host=" + libpqQuote(p.Host),
 		"port=" + strconv.Itoa(p.Port),
-		"user=" + p.User,
-		"dbname=" + p.Database,
-		"sslmode=" + p.SSLMode,
+		"user=" + libpqQuote(p.User),
+		"dbname=" + libpqQuote(p.Database),
+		"sslmode=" + libpqQuote(p.SSLMode),
 	}
 	if p.Password != "" {
-		parts = append(parts, "password="+p.Password)
+		parts = append(parts, "password="+libpqQuote(p.Password))
 	}
 	if p.CAFilePath != "" {
-		parts = append(parts, "sslrootcert="+p.CAFilePath)
+		parts = append(parts, "sslrootcert="+libpqQuote(p.CAFilePath))
 	}
 	if p.CertFilePath != "" {
-		parts = append(parts, "sslcert="+p.CertFilePath)
+		parts = append(parts, "sslcert="+libpqQuote(p.CertFilePath))
 	}
 	if p.KeyFilePath != "" {
-		parts = append(parts, "sslkey="+p.KeyFilePath)
+		parts = append(parts, "sslkey="+libpqQuote(p.KeyFilePath))
 	}
 	return strings.Join(parts, " ")
 }

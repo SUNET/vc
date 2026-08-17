@@ -29,6 +29,7 @@ func Connect(ctx context.Context, cfg *model.SQL) (*sqlx.DB, Dialect, error) {
 		db.SetMaxOpenConns(cfg.Postgres.MaxOpenConns)
 		db.SetMaxIdleConns(cfg.Postgres.MaxIdleConns)
 		if err := db.PingContext(ctx); err != nil {
+			_ = db.Close()
 			return nil, nil, fmt.Errorf("sqlstore: ping postgres: %w", err)
 		}
 		return db, PostgresDialect, nil
@@ -48,6 +49,7 @@ func Connect(ctx context.Context, cfg *model.SQL) (*sqlx.DB, Dialect, error) {
 		db.SetMaxOpenConns(cfg.MariaDB.MaxOpenConns)
 		db.SetMaxIdleConns(cfg.MariaDB.MaxIdleConns)
 		if err := db.PingContext(ctx); err != nil {
+			_ = db.Close()
 			return nil, nil, fmt.Errorf("sqlstore: ping mariadb: %w", err)
 		}
 		return db, MariaDBDialect, nil
