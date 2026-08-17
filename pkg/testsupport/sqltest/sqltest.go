@@ -58,7 +58,7 @@ func StartPostgres(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 		t.Fatalf("ping postgres: %v", err)
 	}
 
-	if err := sqlstore.Migrate(db, sqlstore.PostgresDialect); err != nil {
+	if err := sqlstore.ApplySchema(db, sqlstore.PostgresDialect); err != nil {
 		_ = db.Close()
 		_ = ctr.Terminate(ctx)
 		t.Fatalf("migrate postgres: %v", err)
@@ -103,7 +103,7 @@ func StartMariaDB(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 		t.Fatalf("ping mariadb: %v", err)
 	}
 
-	if err := sqlstore.Migrate(db, sqlstore.MariaDBDialect); err != nil {
+	if err := sqlstore.ApplySchema(db, sqlstore.MariaDBDialect); err != nil {
 		_ = db.Close()
 		_ = ctr.Terminate(ctx)
 		t.Fatalf("migrate mariadb: %v", err)
