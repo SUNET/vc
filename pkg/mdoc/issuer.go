@@ -428,11 +428,11 @@ func convertMapFields(elementsSchema map[string]ClaimMetadata, m map[string]any)
 	return result, nil
 }
 
-// injectPseudonymSeed generates a fresh 32-byte pseudonym seed when the
-// issuer is configured for it and the schema declares "pseudonym_seed" as a
-// claim in some namespace but the caller didn't already supply one. This
-// keeps the toggle decoupled from any namespace/doctype: it is driven purely
-// by whether the schema opts in to the claim.
+// injectPseudonymSeed generates a fresh pseudonym seed when the issuer is
+// configured for it and the schema declares "pseudonym_seed" as a claim in
+// some namespace but the caller didn't already supply one. This keeps the
+// toggle decoupled from any namespace/doctype: it is driven purely by
+// whether the schema opts in to the claim.
 func (i *Issuer) injectPseudonymSeed(schema *MDDLSchema, doc map[string]any) error {
 	if !i.pseudonymSeed {
 		return nil
@@ -451,7 +451,22 @@ func (i *Issuer) injectPseudonymSeed(schema *MDDLSchema, doc map[string]any) err
 		return nil
 	}
 
-	seed := make([]byte, 32)
+	// 12 bytes, not the previous 32: the deployed V8 ZK circuits' per-attribute
+	// SHA-256 witnessing is hardcoded (in zk-cred-longfellow's compiled circuit
+	// wire layout, not just glue code) to a fixed 2-block budget per
+	// IssuerSignedItemBytes - 128 raw bytes, but only ~119 of that is usable
+	// once SHA-256's own padding overhead is accounted for. Confirmed live
+	// that a 32-byte seed's encoded item (136 bytes) overflows it ("SHA-256
+	// input was too long") even with AddDataElement's existing 8-byte
+	// (not 16) salt for this element - that earlier fix's own comment cites
+	// the raw 128-byte figure, not the true ~119-byte ceiling, which is
+	// likely why it wasn't sufficient alone. 12 bytes here lands at 115
+	// bytes total (measured), leaving real margin below 119 rather than
+	// landing back on the same edge. Acceptable tradeoff: the seed is only
+	// ever used locally, per presentation, to derive a fresh
+	// SHA256(seed || verifier_context) pseudonym - it never leaves the
+	// device itself.
+	seed := make([]byte, 12)
 	if _, err := rand.Read(seed); err != nil {
 		return fmt.Errorf("failed to generate pseudonym seed: %w", err)
 	}
