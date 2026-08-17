@@ -28,12 +28,12 @@ var postgresMigrations embed.FS
 //go:embed migrations/mariadb/*.sql
 var mariadbMigrations embed.FS
 
-// Migrate runs any pending schema migrations for the given dialect against
+// ApplySchema runs any pending schema migrations for the given dialect against
 // db. Safe to call on every service startup: golang-migrate tracks applied
 // versions in a schema_migrations table in the target database and is a
 // no-op once the schema is already current, mirroring how Mongo index
 // creation already happens idempotently at startup.
-func Migrate(db *sqlx.DB, dialect Dialect) error {
+func ApplySchema(db *sqlx.DB, dialect Dialect) error {
 	var (
 		migrationsFS embed.FS
 		subdir       string

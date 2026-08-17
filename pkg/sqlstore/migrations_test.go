@@ -16,7 +16,7 @@ import (
 )
 
 // allTables lists every table created by the migrations, used to assert
-// the schema landed as expected after Migrate runs.
+// the schema landed as expected after ApplySchema runs.
 var allTables = []string{
 	"datastore",
 	"datastore_identity_mapping",
@@ -30,7 +30,7 @@ var allTables = []string{
 	"cache_entries",
 }
 
-func TestMigrate_Postgres(t *testing.T) {
+func TestApplySchema_Postgres(t *testing.T) {
 	if !testsupport.IsDockerAvailable() {
 		t.Skip("Skipping test: Docker is not available")
 	}
@@ -48,9 +48,9 @@ func TestMigrate_Postgres(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, db.PingContext(ctx))
 
-	require.NoError(t, sqlstore.Migrate(db, sqlstore.PostgresDialect))
+	require.NoError(t, sqlstore.ApplySchema(db, sqlstore.PostgresDialect))
 	// Running again must be a no-op (ErrNoChange handled internally), not an error.
-	require.NoError(t, sqlstore.Migrate(db, sqlstore.PostgresDialect))
+	require.NoError(t, sqlstore.ApplySchema(db, sqlstore.PostgresDialect))
 
 	for _, table := range allTables {
 		_, err := db.ExecContext(ctx, "SELECT 1 FROM "+table+" LIMIT 0")
@@ -58,7 +58,7 @@ func TestMigrate_Postgres(t *testing.T) {
 	}
 }
 
-func TestMigrate_MariaDB(t *testing.T) {
+func TestApplySchema_MariaDB(t *testing.T) {
 	if !testsupport.IsDockerAvailable() {
 		t.Skip("Skipping test: Docker is not available")
 	}
@@ -76,8 +76,8 @@ func TestMigrate_MariaDB(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, db.PingContext(ctx))
 
-	require.NoError(t, sqlstore.Migrate(db, sqlstore.MariaDBDialect))
-	require.NoError(t, sqlstore.Migrate(db, sqlstore.MariaDBDialect))
+	require.NoError(t, sqlstore.ApplySchema(db, sqlstore.MariaDBDialect))
+	require.NoError(t, sqlstore.ApplySchema(db, sqlstore.MariaDBDialect))
 
 	for _, table := range allTables {
 		_, err := db.ExecContext(ctx, "SELECT 1 FROM "+table+" LIMIT 0")
