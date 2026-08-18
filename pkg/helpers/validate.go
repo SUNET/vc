@@ -281,7 +281,7 @@ func NewValidator() (*validator.Validate, error) {
 		return nil, err
 	}
 
-	// doc:constraint name="mongo_uri_required" struct="Common" applies="Mongo,SQL,HA" description="Mongo.URI is required when SQL.Backend is \"mongo\" (the default primary-store backend) or when HA.Enable is true (HA caching has no relational backend yet, so it always uses Mongo); not required for a pure relational deployment (a non-mongo SQL.Backend with HA disabled)."
+	// doc:constraint name="mongo_uri_required" struct="Common" applies="Mongo,SQL,HA" description="Mongo.URI is required when SQL.Backend is 'mongo' (the default primary-store backend) or when HA.Enable is true (HA caching has no relational backend yet, so it always uses Mongo); not required for a pure relational deployment (a non-mongo SQL.Backend with HA disabled)."
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		cfg := sl.Current().Interface().(model.Common)
 		backend := cfg.SQL.Backend
@@ -293,7 +293,7 @@ func NewValidator() (*validator.Validate, error) {
 		}
 	}, model.Common{})
 
-	// doc:constraint name="sql_backend_config_required" struct="SQL" applies="Postgres,MariaDB" description="When Backend is \"postgres\", Postgres.Host and Postgres.User are required; when Backend is \"mariadb\", MariaDB.Host and MariaDB.User are required. Enforced at the SQL struct level (rather than required_if tags on PostgresConfig/MariaDBConfig themselves) because \"Backend\" lives on the parent SQL struct, not on those nested structs."
+	// doc:constraint name="sql_backend_config_required" struct="SQL" applies="Postgres,MariaDB" description="When Backend is 'postgres', Postgres.Host and Postgres.User are required; when Backend is 'mariadb', MariaDB.Host and MariaDB.User are required. Enforced at the SQL struct level (rather than required_if tags on PostgresConfig/MariaDBConfig themselves) because 'Backend' lives on the parent SQL struct, not on those nested structs."
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		cfg := sl.Current().Interface().(model.SQL)
 		switch cfg.Backend {

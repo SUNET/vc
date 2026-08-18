@@ -56,8 +56,9 @@ func (p *PostgresConfig) DSN() string {
 
 // tlsConfigName is the name registered with mysql.RegisterTLSConfig for a
 // given MariaDBConfig's custom TLS settings (CA/client certificate). Derived
-// from the config values themselves so distinct configurations register
-// under distinct names, and a given configuration's name is stable.
+// from Host and Port so it's stable across calls; two MariaDBConfig values
+// that share the same host:port (which would also mean connecting to the
+// same server) share the same registered name.
 func (m *MariaDBConfig) tlsConfigName() string {
 	return "vc-" + m.Host + "-" + strconv.Itoa(m.Port)
 }

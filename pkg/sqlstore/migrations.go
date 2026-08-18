@@ -1,6 +1,7 @@
 package sqlstore
 
 import (
+	"context"
 	"embed"
 	"errors"
 	"fmt"
@@ -34,6 +35,24 @@ var mariadbMigrations embed.FS
 // no-op once the schema is already current, mirroring how Mongo index
 // creation already happens idempotently at startup.
 func ApplySchema(db *sqlx.DB, dialect Dialect) error {
+	ctx := context.Background()
+
+	// A single connection dedicated to running migrations, distinct from
+	// db's own pool. This matters because golang-migrate's database driver
+	// closes whatever it was constructed from when the migrate instance is
+	// torn down: WithInstance(db.DB, ...) would make it close db itself (the
+	// shared pool every other query in the service also uses), while
+	// WithConnection(conn, ...) only closes this one borrowed connection —
+	// which is what lets ApplySchema run repeatedly against a long-lived
+	// shared pool (once per service startup) without ever closing db out
+	// from under the rest of the service, and without leaking a connection
+	// either.
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("sqlstore: acquire connection: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+
 	var (
 		migrationsFS embed.FS
 		subdir       string
@@ -44,7 +63,7 @@ func ApplySchema(db *sqlx.DB, dialect Dialect) error {
 	case "postgres":
 		migrationsFS, subdir = postgresMigrations, "migrations/postgres"
 		newDBDriver = func() (database.Driver, error) {
-			return postgres.WithInstance(db.DB, &postgres.Config{})
+			return postgres.WithConnection(ctx, conn, &postgres.Config{})
 		}
 	case "mariadb":
 		migrationsFS, subdir = mariadbMigrations, "migrations/mariadb"
@@ -55,7 +74,7 @@ func ApplySchema(db *sqlx.DB, dialect Dialect) error {
 			// opened with multiStatements=true (see MariaDBConfig.DSN),
 			// which the go-sql-driver/mysql driver needs to execute more
 			// than one statement per Exec call.
-			return mysql.WithInstance(db.DB, &mysql.Config{})
+			return mysql.WithConnection(ctx, conn, &mysql.Config{})
 		}
 	default:
 		return fmt.Errorf("sqlstore: no migrations for dialect %q", dialect.Name())
@@ -79,6 +98,7 @@ func ApplySchema(db *sqlx.DB, dialect Dialect) error {
 	if err != nil {
 		return fmt.Errorf("sqlstore: init migrate: %w", err)
 	}
+	defer func() { _, _ = m.Close() }()
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("sqlstore: run migrations: %w", err)

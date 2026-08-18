@@ -761,6 +761,7 @@ var knownTerms = []struct {
 	match string
 	snake string
 }{
+	{"MariaDB", "mariadb"},
 	{"PKCS11", "pkcs11"},
 	{"JWKS", "jwks"},
 	{"OIDC", "oidc"},

@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-08-17
+**Generated:** 2026-08-18
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -34,7 +34,7 @@ Shared configuration used across all services.
 
 > **Path:** `.common`
 
-> **Constraint** (`mongo`, `sql`, `ha`): Mongo.URI is required when SQL.Backend is \
+> **Constraint** (`mongo`, `sql`, `ha`): Mongo.URI is required when SQL.Backend is 'mongo' (the default primary-store backend) or when HA.Enable is true (HA caching has no relational backend yet, so it always uses Mongo); not required for a pure relational deployment (a non-mongo SQL.Backend with HA disabled).
 
 | Field                 | Type     | Description                                                                                                                                                                                                                                                                             | Example                  | Default | Required |
 | --------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------- | -------- |
@@ -74,7 +74,7 @@ Shared configuration used across all services.
 
 > **Path:** `.common.sql`
 
-> **Constraint** (`postgres`, `maria_db`): When Backend is \
+> **Constraint** (`postgres`, `mariadb`): When Backend is 'postgres', Postgres.Host and Postgres.User are required; when Backend is 'mariadb', MariaDB.Host and MariaDB.User are required. Enforced at the SQL struct level (rather than required_if tags on PostgresConfig/MariaDBConfig themselves) because 'Backend' lives on the parent SQL struct, not on those nested structs.
 
 support a relational storage backend as an alternative to MongoDB.
 Backend selection is config-time only: a running service uses exactly
