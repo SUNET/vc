@@ -227,6 +227,37 @@ func TestDownloadArtifact_AbsoluteURLNotMirrored(t *testing.T) {
 	}
 }
 
+// TestDownloadArtifact_PlaintextHTTPRejected guards against a real gap
+// flagged in Copilot review on PR #576: a remote/untrusted catalog's
+// absolute Artifact.URL could specify plaintext "http://" transport.
+// SHA-256 verification still catches tampered bytes, but this should be
+// refused up front rather than silently fetched - unnecessary exposure to
+// on-path inspection/tampering-in-transit for no benefit.
+func TestDownloadArtifact_PlaintextHTTPRejected(t *testing.T) {
+	client := NewClient("https://mirror-a.invalid")
+	payload := []byte("bytes")
+	hash := mustSha256Hex(t, payload)
+	descriptor := &CircuitDescriptor{
+		ID: "test-circuit",
+		Artifact: &Artifact{
+			URL:  "http://cdn.example.com/circuit.zst",
+			Hash: "sha256:" + hash,
+		},
+	}
+	called := false
+	client.FetchBytes = func(ctx context.Context, url string) ([]byte, error) {
+		called = true
+		return payload, nil
+	}
+	_, err := client.DownloadArtifact(context.Background(), descriptor)
+	if err == nil {
+		t.Fatal("expected an error for a plaintext http:// artifact URL, got nil")
+	}
+	if called {
+		t.Error("expected DownloadArtifact to refuse http:// before ever fetching, but FetchBytes was called")
+	}
+}
+
 // TestDownloadArtifact_BlankURLFallsBackToHashPath confirms the
 // hash-derived path construction rule when Artifact.URL is blank.
 func TestDownloadArtifact_BlankURLFallsBackToHashPath(t *testing.T) {

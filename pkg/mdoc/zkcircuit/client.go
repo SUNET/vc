@@ -330,6 +330,15 @@ func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescri
 	if artifact.Hash == "" {
 		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact has no hash - refusing to download unverifiable bytes", descriptor.ID)}
 	}
+	if strings.HasPrefix(artifact.URL, "http://") {
+		// SHA-256 verification below still catches tampered bytes, but a
+		// remote/untrusted catalog dictating a plaintext transport for its
+		// own absolute artifact URL is unnecessary exposure to on-path
+		// inspection/tampering-in-transit (and avoidable operational
+		// fragility) - reject up front rather than silently fetching over
+		// http.
+		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact URL %q uses plaintext http - refusing (must be https or a relative path resolved against a configured source)", descriptor.ID, artifact.URL)}
+	}
 
 	maxBytes := capFor(artifact.Size, hardCeilingCompressedBytes)
 	var lastFailure string
