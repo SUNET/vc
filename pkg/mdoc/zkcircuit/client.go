@@ -39,6 +39,50 @@ import (
 // zk-circuits catalog service.
 const DefaultZkCircuitURL = "https://zk-circuits.fly.dev"
 
+const (
+	// maxManifestOrDescriptorBytes bounds GET /v1/manifest.json and
+	// GET /v1/circuits/{id}.json responses. These are plain JSON catalog
+	// documents (real ones are a few KB per circuit), but Sources are
+	// remote and configurable (verifier.zk_circuits.sources), so an
+	// unbounded read from a malicious/compromised source could exhaust
+	// memory. Generous relative to any realistic catalog size.
+	maxManifestOrDescriptorBytes = 64 * 1024 * 1024 // 64 MiB
+
+	// artifactSizeMarginPct is the tolerance added on top of a
+	// descriptor's own declared Artifact.Size/Uncompressed.Size when
+	// bounding a download/decompression - covers minor drift between the
+	// catalog's declared size and the actual bytes without opening the
+	// door to unbounded reads.
+	artifactSizeMarginPct = 110 // +10%
+
+	// hardCeilingCompressedBytes/hardCeilingDecompressedBytes bound
+	// artifact downloads/decompression regardless of what a descriptor
+	// declares, since the declared size itself comes from the same
+	// (potentially compromised) source being fetched from. Sized well
+	// above real published circuit artifacts (the live catalog's largest
+	// entries as of 2026-08 are ~300KB compressed / ~88MB decompressed -
+	// a ~300x zstd ratio) to leave headroom for legitimate growth while
+	// still bounding a decompression-bomb/DoS to a sane amount of memory.
+	hardCeilingCompressedBytes   = 50 * 1024 * 1024  // 50 MiB
+	hardCeilingDecompressedBytes = 512 * 1024 * 1024 // 512 MiB
+)
+
+// capFor returns the byte cap to enforce for a download/decompression step,
+// given a catalog-declared size (<=0 if unknown/absent) and an absolute
+// hard ceiling that always applies regardless of what the descriptor
+// claims - the declared size comes from the same source being fetched
+// from, so it is a hint, not itself a trust boundary.
+func capFor(declaredSize, hardCeiling int64) int64 {
+	if declaredSize <= 0 {
+		return hardCeiling
+	}
+	withMargin := declaredSize * artifactSizeMarginPct / 100
+	if withMargin <= 0 || withMargin > hardCeiling {
+		return hardCeiling
+	}
+	return withMargin
+}
+
 // VerificationRecord is one format-specific interop verification recorded
 // against a circuit's Source, mirroring catalog.VerificationRecord in
 // go-zk-circuits' pkg/catalog/types.go field-for-field. Descriptive
@@ -212,7 +256,7 @@ func (c *Client) FetchManifest(ctx context.Context) (*Manifest, error) {
 	var lastErr error
 	for _, source := range c.Sources {
 		url := manifestURL(source)
-		body, err := c.fetchText(ctx, url)
+		body, err := c.fetchText(ctx, url, maxManifestOrDescriptorBytes)
 		if err != nil {
 			lastErr = fmt.Errorf("fetch %s: %w", url, err)
 			continue
@@ -237,7 +281,7 @@ func (c *Client) FetchCircuit(ctx context.Context, id string) (*CircuitDescripto
 	var lastErr error
 	for _, source := range c.Sources {
 		url := circuitURL(source, id)
-		body, err := c.fetchText(ctx, url)
+		body, err := c.fetchText(ctx, url, maxManifestOrDescriptorBytes)
 		if err != nil {
 			lastErr = fmt.Errorf("fetch %s: %w", url, err)
 			continue
@@ -280,9 +324,10 @@ func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescri
 		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact has no hash - refusing to download unverifiable bytes", descriptor.ID)}
 	}
 
+	maxBytes := capFor(artifact.Size, hardCeilingCompressedBytes)
 	var lastFailure string
 	for _, url := range c.candidateArtifactURLs(artifact) {
-		data, err := c.fetchBytes(ctx, url)
+		data, err := c.fetchBytes(ctx, url, maxBytes)
 		if err != nil {
 			lastFailure = fmt.Sprintf("fetch failed from %s: %v", url, err)
 			continue
@@ -324,14 +369,37 @@ func (c *Client) DownloadAndDecompress(ctx context.Context, descriptor *CircuitD
 	case "", "none":
 		decompressed = compressed
 	case "zstd":
-		decoder, err := zstd.NewReader(bytes.NewReader(compressed))
+		// Bound the decompressed output: Sources are remote/configurable
+		// (verifier.zk_circuits.sources), and zstd can compress a tiny
+		// payload into a huge one (a "decompression bomb") - real
+		// published circuits already compress ~300x (e.g. ~278KB ->
+		// ~87.7MB), so a hostile source could trivially claim/produce far
+		// more. maxDecompressed uses the descriptor's own declared
+		// Uncompressed.Size (+ margin) when present, else falls back to
+		// hardCeilingDecompressedBytes.
+		var declaredSize int64
+		if artifact.Uncompressed != nil {
+			declaredSize = artifact.Uncompressed.Size
+		}
+		maxDecompressed := capFor(declaredSize, hardCeilingDecompressedBytes)
+
+		decoder, err := zstd.NewReader(
+			bytes.NewReader(compressed),
+			zstd.WithDecoderMaxMemory(uint64(hardCeilingDecompressedBytes)),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize zstd decoder for circuit %q: %w", descriptor.ID, err)
 		}
 		defer decoder.Close()
-		decompressed, err = io.ReadAll(decoder)
+		decompressed, err = io.ReadAll(io.LimitReader(decoder, maxDecompressed+1))
 		if err != nil {
 			return nil, fmt.Errorf("failed to zstd-decompress circuit %q: %w", descriptor.ID, err)
+		}
+		if int64(len(decompressed)) > maxDecompressed {
+			return nil, &ArtifactError{Message: fmt.Sprintf(
+				"decompressed circuit %q exceeded the %d byte cap - refusing to continue (possible decompression bomb)",
+				descriptor.ID, maxDecompressed,
+			)}
 		}
 	default:
 		return nil, fmt.Errorf("circuit %q uses unsupported compression %q", descriptor.ID, artifact.Compression)
@@ -385,30 +453,48 @@ func sha256Hex(data []byte) string {
 // bareHex strips a "sha256:" prefix if present (the wire format's
 // convention for Artifact.Hash/Uncompressed.Hash), leaving the string
 // as-is otherwise so a legacy unprefixed hash would still compare
-// correctly too.
+// correctly too. The prefix match is case-insensitive so an uppercase or
+// mixed-case "SHA256:" from the catalog doesn't get left in place and
+// break an otherwise-correct hash comparison/URL fallback.
 func bareHex(hash string) string {
-	return strings.TrimPrefix(hash, "sha256:")
+	if len(hash) >= 7 && strings.EqualFold(hash[:7], "sha256:") {
+		return hash[7:]
+	}
+	return hash
 }
 
-func (c *Client) fetchText(ctx context.Context, url string) (string, error) {
+// fetchText fetches url as text, capped at maxBytes (see fetchBytesHTTP).
+// The injected FetchText override, when set, is used as-is for tests and
+// is not subject to maxBytes - the cap is a transport-level concern of the
+// real HTTP fetch path.
+func (c *Client) fetchText(ctx context.Context, url string, maxBytes int64) (string, error) {
 	if c.FetchText != nil {
 		return c.FetchText(ctx, url)
 	}
-	data, err := c.fetchBytesHTTP(ctx, url)
+	data, err := c.fetchBytesHTTP(ctx, url, maxBytes)
 	if err != nil {
 		return "", err
 	}
 	return string(data), nil
 }
 
-func (c *Client) fetchBytes(ctx context.Context, url string) ([]byte, error) {
+// fetchBytes fetches url as bytes, capped at maxBytes (see
+// fetchBytesHTTP). The injected FetchBytes override, when set, is used
+// as-is for tests and is not subject to maxBytes.
+func (c *Client) fetchBytes(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
 	if c.FetchBytes != nil {
 		return c.FetchBytes(ctx, url)
 	}
-	return c.fetchBytesHTTP(ctx, url)
+	return c.fetchBytesHTTP(ctx, url, maxBytes)
 }
 
-func (c *Client) fetchBytesHTTP(ctx context.Context, url string) ([]byte, error) {
+// fetchBytesHTTP performs the real HTTP GET, refusing to read more than
+// maxBytes from the response body. Sources are remote and configurable
+// (verifier.zk_circuits.sources), so an unbounded io.ReadAll here would let
+// a malicious/compromised source exhaust memory with an oversized
+// response; maxBytes bounds that regardless of what any Content-Length
+// header (which is not trusted) claims.
+func (c *Client) fetchBytesHTTP(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
 	client := c.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
@@ -425,5 +511,12 @@ func (c *Client) fetchBytesHTTP(ctx context.Context, url string) ([]byte, error)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("unexpected status %d from %s", resp.StatusCode, url)
 	}
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("response from %s exceeded the %d byte cap", url, maxBytes)
+	}
+	return data, nil
 }

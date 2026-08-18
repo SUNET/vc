@@ -1,6 +1,7 @@
 package zkcircuit
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -404,5 +405,153 @@ func TestRealHTTPRoundTrip_NonSuccessStatus(t *testing.T) {
 	_, err := client.FetchManifest(context.Background())
 	if err == nil {
 		t.Fatal("expected an error for a 500 response")
+	}
+}
+
+// TestBareHex confirms the "sha256:" prefix strip is case-insensitive (an
+// uppercase/mixed-case prefix from the catalog must not survive into the
+// hash comparison), and that an unprefixed or non-matching-prefix hash
+// passes through unchanged.
+func TestBareHex(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"lowercase prefix", "sha256:deadbeef", "deadbeef"},
+		{"uppercase prefix", "SHA256:DEADBEEF", "DEADBEEF"},
+		{"mixed-case prefix", "Sha256:deadBEEF", "deadBEEF"},
+		{"no prefix", "deadbeef", "deadbeef"},
+		{"too short for a prefix", "sha2", "sha2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := bareHex(tc.in); got != tc.want {
+				t.Errorf("bareHex(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDownloadArtifact_OversizedResponseRejected confirms a response body
+// larger than the descriptor's declared Artifact.Size (+ margin) is
+// rejected rather than read into memory unbounded - Sources are remote and
+// configurable, so an oversized/malicious response must not be able to
+// exhaust memory.
+func TestDownloadArtifact_OversizedResponseRejected(t *testing.T) {
+	oversized := bytes.Repeat([]byte("x"), 10_000)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(oversized)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	descriptor := &CircuitDescriptor{
+		ID: "test-circuit",
+		Artifact: &Artifact{
+			URL:  "/v1/artifacts/sha256/deadbeef",
+			Hash: "sha256:deadbeef",
+			// Declared far smaller than what the server actually serves -
+			// the +10% margin cap should still reject long before 10,000
+			// bytes are read.
+			Size: 50,
+		},
+	}
+
+	_, err := client.DownloadArtifact(context.Background(), descriptor)
+	if err == nil {
+		t.Fatal("expected an error for a response exceeding the declared size cap")
+	}
+	var artifactErr *ArtifactError
+	if !errors.As(err, &artifactErr) {
+		t.Fatalf("expected *ArtifactError, got %T: %v", err, err)
+	}
+}
+
+// TestDownloadAndDecompress_BombRejected confirms a zstd payload that
+// decompresses to far more than the descriptor's declared
+// Uncompressed.Size is rejected rather than fully materialized in memory -
+// this is the decompression-bomb case: a small compressed artifact that
+// expands to a huge amount of data.
+func TestDownloadAndDecompress_BombRejected(t *testing.T) {
+	// Highly compressible payload - real zstd ratios on real circuits are
+	// already ~300x (see hardCeilingDecompressedBytes' doc comment); an
+	// all-zero buffer compresses far more aggressively than that, so this
+	// keeps the test's actual compressed/decompressed sizes small while
+	// still exercising a genuine, large compression-ratio bomb shape.
+	bomb := make([]byte, 8*1024*1024) // 8 MiB of zeros
+
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		t.Fatalf("zstd.NewWriter: %v", err)
+	}
+	compressed := encoder.EncodeAll(bomb, nil)
+	encoder.Close()
+
+	compressedHash := mustSha256Hex(t, compressed)
+
+	descriptor := &CircuitDescriptor{
+		ID: "test-circuit",
+		Artifact: &Artifact{
+			URL:         "/v1/artifacts/sha256/" + compressedHash,
+			Hash:        "sha256:" + compressedHash,
+			Size:        int64(len(compressed)),
+			Compression: "zstd",
+			// Declared decompressed size is tiny/wrong compared to the
+			// actual ~8MiB the payload expands to - the cap must catch
+			// this using the streamed LimitReader, not by decompressing
+			// everything first and checking length afterward.
+			Uncompressed: &Uncompressed{Size: 100},
+		},
+	}
+	client := NewClient("https://example.invalid")
+	client.FetchBytes = func(ctx context.Context, url string) ([]byte, error) {
+		return compressed, nil
+	}
+
+	_, err = client.DownloadAndDecompress(context.Background(), descriptor)
+	if err == nil {
+		t.Fatal("expected an error for a decompressed payload exceeding the declared size cap")
+	}
+	var artifactErr *ArtifactError
+	if !errors.As(err, &artifactErr) {
+		t.Fatalf("expected *ArtifactError, got %T: %v", err, err)
+	}
+}
+
+// TestDownloadAndDecompress_NoDeclaredSizeUsesHardCeiling confirms that
+// when a descriptor omits Uncompressed.Size entirely, decompression still
+// succeeds for a legitimately-sized payload (falls back to the generous
+// hard ceiling, not a tiny default that would reject real circuits).
+func TestDownloadAndDecompress_NoDeclaredSizeUsesHardCeiling(t *testing.T) {
+	original := []byte("legitimate circuit content with no declared uncompressed size")
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		t.Fatalf("zstd.NewWriter: %v", err)
+	}
+	compressed := encoder.EncodeAll(original, nil)
+	encoder.Close()
+	compressedHash := mustSha256Hex(t, compressed)
+
+	descriptor := &CircuitDescriptor{
+		ID: "test-circuit",
+		Artifact: &Artifact{
+			URL:         "/v1/artifacts/sha256/" + compressedHash,
+			Hash:        "sha256:" + compressedHash,
+			Compression: "zstd",
+			// No Uncompressed field at all.
+		},
+	}
+	client := NewClient("https://example.invalid")
+	client.FetchBytes = func(ctx context.Context, url string) ([]byte, error) {
+		return compressed, nil
+	}
+
+	data, err := client.DownloadAndDecompress(context.Background(), descriptor)
+	if err != nil {
+		t.Fatalf("DownloadAndDecompress: %v", err)
+	}
+	if string(data) != string(original) {
+		t.Errorf("decompressed data mismatch")
 	}
 }
