@@ -32,6 +32,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -437,16 +439,33 @@ func buildZkAttributes(issuerSigned map[string]map[string]any, requestedClaimIDs
 	// DCQL request only names the leaf identifier (mdoc claim paths are
 	// [namespace, elementIdentifier], and buildZkAttributes has never
 	// needed the namespace itself: ZkAttribute.Identifier is bare, matching
-	// the native verifier's own expectation), so this mirrors the lookup
-	// semantics the old (buggy) map-iteration version had, minus the
-	// nondeterminism.
-	findClaim := func(identifier string) (any, bool) {
-		for _, items := range issuerSigned {
-			if value, ok := items[identifier]; ok {
-				return value, true
+	// the native verifier's own expectation). ISO mdoc allows the same
+	// elementIdentifier to be disclosed in more than one namespace, which
+	// would otherwise make this pick one arbitrarily (Go map iteration
+	// order) - silently verifying the wrong claim value or behaving
+	// nondeterministically across calls. Fails closed on that ambiguity
+	// instead of guessing which namespace was intended.
+	findClaim := func(identifier string) (any, bool, error) {
+		var value any
+		var namespaces []string
+		for ns, items := range issuerSigned {
+			if v, ok := items[identifier]; ok {
+				value = v
+				namespaces = append(namespaces, ns)
 			}
 		}
-		return nil, false
+		switch len(namespaces) {
+		case 0:
+			return nil, false, nil
+		case 1:
+			return value, true, nil
+		default:
+			sort.Strings(namespaces)
+			return nil, false, fmt.Errorf(
+				"claim %q is disclosed in more than one namespace (%s) - ambiguous, refusing to guess which one was intended",
+				identifier, strings.Join(namespaces, ", "),
+			)
+		}
 	}
 
 	buildOne := func(identifier string, value any) (ZkAttribute, error) {
@@ -467,7 +486,10 @@ func buildZkAttributes(issuerSigned map[string]map[string]any, requestedClaimIDs
 			// silently mis-ordering.
 			return nil, nil, fmt.Errorf("%s must not appear in RequestedClaimIDs - it is always appended last automatically", PseudonymClaimIdentifier)
 		}
-		value, ok := findClaim(identifier)
+		value, ok, err := findClaim(identifier)
+		if err != nil {
+			return nil, nil, err
+		}
 		if !ok {
 			return nil, nil, fmt.Errorf("requested claim %q was not disclosed in this presentation", identifier)
 		}
@@ -479,7 +501,12 @@ func buildZkAttributes(issuerSigned map[string]map[string]any, requestedClaimIDs
 	}
 
 	var pseudonym []byte
-	if value, ok := findClaim(PseudonymClaimIdentifier); ok {
+	pseudonymValue, pseudonymOK, err := findClaim(PseudonymClaimIdentifier)
+	if err != nil {
+		return nil, nil, err
+	}
+	if pseudonymOK {
+		value := pseudonymValue
 		b, ok := value.([]byte)
 		if !ok {
 			// A present-but-wrong-type pairwise_pseudonym claim must not

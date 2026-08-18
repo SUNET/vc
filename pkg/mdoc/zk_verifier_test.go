@@ -445,3 +445,55 @@ func TestBuildZkAttributes_RejectsPseudonymInRequestedClaimIDs(t *testing.T) {
 		t.Fatal("expected an error for pairwise_pseudonym appearing in requestedClaimIDs, got nil")
 	}
 }
+
+// TestBuildZkAttributes_RejectsAmbiguousCrossNamespaceClaim guards against
+// a real gap flagged in Copilot review on PR #576: findClaim looked up a
+// requested claim's leaf identifier across every disclosed namespace. ISO
+// mdoc allows the same elementIdentifier to be disclosed in more than one
+// namespace, which would previously make findClaim silently pick one
+// arbitrarily (Go map iteration order) instead of failing - risking
+// verification of the wrong claim value, nondeterministically across
+// calls. Now must fail closed instead of guessing which namespace was
+// intended.
+func TestBuildZkAttributes_RejectsAmbiguousCrossNamespaceClaim(t *testing.T) {
+	issuerSigned := map[string]map[string]any{
+		"org.iso.18013.5.1": {
+			"issue_date": "2020-01-01",
+		},
+		"org.iso.18013.5.1.aamva": {
+			"issue_date": "2019-06-15", // same leaf identifier, different namespace
+		},
+	}
+	_, _, err := buildZkAttributes(issuerSigned, []string{"issue_date"})
+	if err == nil {
+		t.Fatal("expected an error for a claim identifier disclosed in more than one namespace, got nil")
+	}
+	if !strings.Contains(err.Error(), "issue_date") || !strings.Contains(err.Error(), "more than one namespace") {
+		t.Errorf("expected error to name the ambiguous claim and explain why, got: %v", err)
+	}
+}
+
+// TestBuildZkAttributes_RejectsAmbiguousCrossNamespacePseudonym is the same
+// ambiguity guard as TestBuildZkAttributes_RejectsAmbiguousCrossNamespaceClaim,
+// for the pairwise_pseudonym lookup specifically - it uses the same
+// findClaim helper and toggles the PPID verification branch, so an
+// ambiguous match here must also fail closed rather than picking one
+// namespace's pseudonym value arbitrarily.
+func TestBuildZkAttributes_RejectsAmbiguousCrossNamespacePseudonym(t *testing.T) {
+	issuerSigned := map[string]map[string]any{
+		"org.iso.18013.5.1": {
+			"given_name":             "Alice",
+			PseudonymClaimIdentifier: []byte("0123456789abcdef0123456789abcdef"),
+		},
+		"org.iso.18013.5.1.aamva": {
+			PseudonymClaimIdentifier: []byte("fedcba9876543210fedcba9876543210"),
+		},
+	}
+	_, _, err := buildZkAttributes(issuerSigned, []string{"given_name"})
+	if err == nil {
+		t.Fatal("expected an error for pairwise_pseudonym disclosed in more than one namespace, got nil")
+	}
+	if !strings.Contains(err.Error(), PseudonymClaimIdentifier) || !strings.Contains(err.Error(), "more than one namespace") {
+		t.Errorf("expected error to name the ambiguous pseudonym claim and explain why, got: %v", err)
+	}
+}
