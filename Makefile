@@ -240,16 +240,16 @@ test-pkcs11: ## Test with PKCS#11 build tag
 zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native ZK/PPID verification
 	$(info Fetching/building zk-cred-longfellow's go-cabi target from $(ZK_CRED_LONGFELLOW_REPO)@$(ZK_CRED_LONGFELLOW_REF))
 	@if [ ! -d "$(ZK_CRED_LONGFELLOW_CHECKOUT)/.git" ]; then \
-		mkdir -p $(ZK_CRED_LONGFELLOW_CHECKOUT) && \
-		git -C $(ZK_CRED_LONGFELLOW_CHECKOUT) init -q && \
-		git -C $(ZK_CRED_LONGFELLOW_CHECKOUT) remote add origin $(ZK_CRED_LONGFELLOW_REPO); \
+		mkdir -p "$(ZK_CRED_LONGFELLOW_CHECKOUT)" && \
+		git -C "$(ZK_CRED_LONGFELLOW_CHECKOUT)" init -q && \
+		git -C "$(ZK_CRED_LONGFELLOW_CHECKOUT)" remote add origin "$(ZK_CRED_LONGFELLOW_REPO)"; \
 	fi
-	git -C $(ZK_CRED_LONGFELLOW_CHECKOUT) fetch --depth 1 origin $(ZK_CRED_LONGFELLOW_REF)
-	git -C $(ZK_CRED_LONGFELLOW_CHECKOUT) checkout FETCH_HEAD
-	$(MAKE) -C $(ZK_CRED_LONGFELLOW_CHECKOUT) go-cabi
-	@mkdir -p $(ZK_CRED_LONGFELLOW_STAGE)/include $(ZK_CRED_LONGFELLOW_STAGE)/lib
-	cp $(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/zk_cred_longfellow_go.h $(ZK_CRED_LONGFELLOW_STAGE)/include/
-	cp $(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/libzk_cred_longfellow.* $(ZK_CRED_LONGFELLOW_STAGE)/lib/
+	git -C "$(ZK_CRED_LONGFELLOW_CHECKOUT)" fetch --depth 1 origin "$(ZK_CRED_LONGFELLOW_REF)"
+	git -C "$(ZK_CRED_LONGFELLOW_CHECKOUT)" checkout FETCH_HEAD
+	$(MAKE) -C "$(ZK_CRED_LONGFELLOW_CHECKOUT)" go-cabi
+	@mkdir -p "$(ZK_CRED_LONGFELLOW_STAGE)/include" "$(ZK_CRED_LONGFELLOW_STAGE)/lib"
+	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/zk_cred_longfellow_go.h" "$(ZK_CRED_LONGFELLOW_STAGE)/include/"
+	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi"/libzk_cred_longfellow.* "$(ZK_CRED_LONGFELLOW_STAGE)/lib/"
 	@echo "Staged zk-cred-longfellow's Go C-ABI lib + header in $(ZK_CRED_LONGFELLOW_STAGE)"
 	@echo "Build/test with: CGO_ENABLED=1 LD_LIBRARY_PATH=\$$(pwd)/$(ZK_CRED_LONGFELLOW_STAGE)/lib go {build,test} -tags $(ZKNATIVE_TAG) ./..."
 
