@@ -98,9 +98,9 @@ type ZkDocumentDataMdoc struct {
 	// DeviceSigned maps namespace -> disclosed device-signed elements
 	// (e.g. elements asserted by the mdoc app itself, not the issuer).
 	// Normally empty - this org's wallets don't currently populate it (see
-	// LongfellowZkSystem.kt's own `deviceSigned = emptyMap()` TODO), but the
-	// wire format allows it, and a verifier that requested such a claim
-	// needs to be able to read it back.
+	// LongfellowZkSystem.kt, which still hard-codes `deviceSigned =
+	// emptyMap()`), but the wire format allows it, and a verifier that
+	// requested such a claim needs to be able to read it back.
 	DeviceSigned map[string][]ZkSignedItemMdoc `cbor:"deviceSigned,omitempty"`
 
 	// MsoX5Chain is the issuer's DS certificate chain: a single bstr (one
