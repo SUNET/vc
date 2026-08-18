@@ -75,6 +75,14 @@ func NewVerifier(circuit []byte, version uint8, numAttributes uint8) (*Verifier,
 	if handle == nil {
 		return nil, fmt.Errorf("zknative: rust_initialize_verifier: %s", takeErrorString(errOut))
 	}
+	if errOut != nil {
+		// Unexpected on the success path per this FFI's contract, but
+		// takeErrorString both frees the owned C string and is a no-op on
+		// nil - cheap insurance against leaking native memory if the Rust
+		// side ever does set errOut alongside a valid handle (e.g. a
+		// future warning-on-success case).
+		_ = takeErrorString(errOut)
+	}
 	return &Verifier{handle: handle}, nil
 }
 
@@ -189,6 +197,12 @@ func (v *Verifier) VerifyWithPPID(args VerifyWithPPIDArgs) error {
 	)
 	if status != 0 {
 		return fmt.Errorf("zknative: rust_verify_with_ppid failed (status=%d): %s", int32(status), takeErrorString(errOut))
+	}
+	if errOut != nil {
+		// Same defensive free as NewVerifier: unexpected alongside
+		// status == 0 per this FFI's contract, but cheap insurance
+		// against leaking native memory if it ever happens.
+		_ = takeErrorString(errOut)
 	}
 	return nil
 }

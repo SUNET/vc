@@ -435,47 +435,6 @@ func buildZkAttributes(issuerSigned map[string]map[string]any, requestedClaimIDs
 		return nil, nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
 	}
 
-	// findClaim looks up identifier across every disclosed namespace - the
-	// DCQL request only names the leaf identifier (mdoc claim paths are
-	// [namespace, elementIdentifier], and buildZkAttributes has never
-	// needed the namespace itself: ZkAttribute.Identifier is bare, matching
-	// the native verifier's own expectation). ISO mdoc allows the same
-	// elementIdentifier to be disclosed in more than one namespace, which
-	// would otherwise make this pick one arbitrarily (Go map iteration
-	// order) - silently verifying the wrong claim value or behaving
-	// nondeterministically across calls. Fails closed on that ambiguity
-	// instead of guessing which namespace was intended.
-	findClaim := func(identifier string) (any, bool, error) {
-		var value any
-		var namespaces []string
-		for ns, items := range issuerSigned {
-			if v, ok := items[identifier]; ok {
-				value = v
-				namespaces = append(namespaces, ns)
-			}
-		}
-		switch len(namespaces) {
-		case 0:
-			return nil, false, nil
-		case 1:
-			return value, true, nil
-		default:
-			sort.Strings(namespaces)
-			return nil, false, fmt.Errorf(
-				"claim %q is disclosed in more than one namespace (%s) - ambiguous, refusing to guess which one was intended",
-				identifier, strings.Join(namespaces, ", "),
-			)
-		}
-	}
-
-	buildOne := func(identifier string, value any) (ZkAttribute, error) {
-		valueCBOR, err := cborEncoder.Marshal(value)
-		if err != nil {
-			return ZkAttribute{}, fmt.Errorf("failed to encode attribute %q: %w", identifier, err)
-		}
-		return ZkAttribute{Identifier: identifier, ValueCBOR: valueCBOR}, nil
-	}
-
 	attributes := make([]ZkAttribute, 0, len(requestedClaimIDs)+1)
 	for _, identifier := range requestedClaimIDs {
 		if identifier == PseudonymClaimIdentifier {
@@ -486,49 +445,106 @@ func buildZkAttributes(issuerSigned map[string]map[string]any, requestedClaimIDs
 			// silently mis-ordering.
 			return nil, nil, fmt.Errorf("%s must not appear in RequestedClaimIDs - it is always appended last automatically", PseudonymClaimIdentifier)
 		}
-		value, ok, err := findClaim(identifier)
+		value, ok, err := findClaimInNamespaces(issuerSigned, identifier)
 		if err != nil {
 			return nil, nil, err
 		}
 		if !ok {
 			return nil, nil, fmt.Errorf("requested claim %q was not disclosed in this presentation", identifier)
 		}
-		attr, err := buildOne(identifier, value)
+		attr, err := buildZkAttribute(cborEncoder, identifier, value)
 		if err != nil {
 			return nil, nil, err
 		}
 		attributes = append(attributes, attr)
 	}
 
-	var pseudonym []byte
-	pseudonymValue, pseudonymOK, err := findClaim(PseudonymClaimIdentifier)
+	pseudonymAttr, pseudonym, err := extractPseudonymAttribute(issuerSigned, cborEncoder)
 	if err != nil {
 		return nil, nil, err
 	}
-	if pseudonymOK {
-		value := pseudonymValue
-		b, ok := value.([]byte)
-		if !ok {
-			// A present-but-wrong-type pairwise_pseudonym claim must not
-			// silently fall back to the non-PPID verify path (which is
-			// unimplemented even under "zknative" - see
-			// nativeVerifyZkProof's doc comment): that would produce a
-			// misleading ErrNativeZkVerifyNotImplemented instead of a
-			// clear error about the actual malformed claim.
-			return nil, nil, fmt.Errorf(
-				"%s claim has unexpected CBOR type %T, want []byte",
-				PseudonymClaimIdentifier, value,
-			)
-		}
-		attr, err := buildOne(PseudonymClaimIdentifier, value)
-		if err != nil {
-			return nil, nil, err
-		}
-		attributes = append(attributes, attr)
-		pseudonym = b
+	if pseudonymAttr != nil {
+		attributes = append(attributes, *pseudonymAttr)
 	}
-
 	return attributes, pseudonym, nil
+}
+
+// findClaimInNamespaces looks up identifier across every disclosed
+// namespace - the DCQL request only names the leaf identifier (mdoc claim
+// paths are [namespace, elementIdentifier], and buildZkAttributes has
+// never needed the namespace itself: ZkAttribute.Identifier is bare,
+// matching the native verifier's own expectation). ISO mdoc allows the
+// same elementIdentifier to be disclosed in more than one namespace,
+// which would otherwise make this pick one arbitrarily (Go map iteration
+// order) - silently verifying the wrong claim value or behaving
+// nondeterministically across calls. Fails closed on that ambiguity
+// instead of guessing which namespace was intended.
+func findClaimInNamespaces(issuerSigned map[string]map[string]any, identifier string) (any, bool, error) {
+	var value any
+	var namespaces []string
+	for ns, items := range issuerSigned {
+		if v, ok := items[identifier]; ok {
+			value = v
+			namespaces = append(namespaces, ns)
+		}
+	}
+	switch len(namespaces) {
+	case 0:
+		return nil, false, nil
+	case 1:
+		return value, true, nil
+	default:
+		sort.Strings(namespaces)
+		return nil, false, fmt.Errorf(
+			"claim %q is disclosed in more than one namespace (%s) - ambiguous, refusing to guess which one was intended",
+			identifier, strings.Join(namespaces, ", "),
+		)
+	}
+}
+
+// buildZkAttribute CBOR-encodes value (via encoder, the package's
+// canonical sorted-key encoder - see buildZkAttributes' doc comment for
+// why) into a ZkAttribute for identifier.
+func buildZkAttribute(encoder *CBOREncoder, identifier string, value any) (ZkAttribute, error) {
+	valueCBOR, err := encoder.Marshal(value)
+	if err != nil {
+		return ZkAttribute{}, fmt.Errorf("failed to encode attribute %q: %w", identifier, err)
+	}
+	return ZkAttribute{Identifier: identifier, ValueCBOR: valueCBOR}, nil
+}
+
+// extractPseudonymAttribute looks up the pairwise_pseudonym claim (if
+// disclosed - not every presentation has one, hence the nil-attr/nil-err
+// "absent" return), validates its CBOR type, and builds its ZkAttribute.
+// Split out of buildZkAttributes to keep that function's own cognitive
+// complexity down; used for a document's PPID branch (see
+// buildZkAttributes and ZkHandler.verifyOneDocument).
+func extractPseudonymAttribute(issuerSigned map[string]map[string]any, encoder *CBOREncoder) (*ZkAttribute, []byte, error) {
+	value, ok, err := findClaimInNamespaces(issuerSigned, PseudonymClaimIdentifier)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !ok {
+		return nil, nil, nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		// A present-but-wrong-type pairwise_pseudonym claim must not
+		// silently fall back to the non-PPID verify path (which is
+		// unimplemented even under "zknative" - see
+		// nativeVerifyZkProof's doc comment): that would produce a
+		// misleading ErrNativeZkVerifyNotImplemented instead of a clear
+		// error about the actual malformed claim.
+		return nil, nil, fmt.Errorf(
+			"%s claim has unexpected CBOR type %T, want []byte",
+			PseudonymClaimIdentifier, value,
+		)
+	}
+	attr, err := buildZkAttribute(encoder, PseudonymClaimIdentifier, value)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &attr, b, nil
 }
 
 // deviceSignedToWireMap converts the flattened {namespace: [{elementIdentifier,
