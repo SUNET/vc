@@ -303,9 +303,17 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				}
 			}
 
-			// Best-effort SessionTranscript for the OpenID4VP redirect flow -
-			// see BuildOID4VPSessionTranscript's doc comment: not yet
-			// checked against a real wallet's own transcript bytes.
+			// SessionTranscript for the OpenID4VP redirect flow. Its wire
+			// format is cross-checked against an independent CBOR library
+			// (see pkg/mdoc.TestBuildOID4VPSessionTranscript_MatchesIndependentKotlinCBORLibraryCrossCheck),
+			// but is STILL NOT confirmed against a real wallet's own
+			// transcript bytes from a live session - no such fixture could
+			// be found (checked siros-sdk-kotlin, siros-sdk-swift,
+			// go-wallet-backend, multipaz). TRACKED GAP: if native ZK
+			// verification of a real presentation fails in a way that looks
+			// like a transcript/binding mismatch, treat
+			// BuildOID4VPSessionTranscript's exact byte layout as a prime
+			// suspect and get a real captured transcript to compare against.
 			responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/oidc-direct_post")
 			if err != nil {
 				c.log.Error(err, "failed to construct response URI for ZK session transcript", "scope", scope)
