@@ -52,8 +52,10 @@ not depend on any native ZK library:
    `zk_system_type` for this format, and `MatchZKSystemType` to check a
    presented `zkSystemId` against what a request declared it would accept.
    `copyDCQL` (presentation_builder.go) was updated to deep-copy these new
-   fields (plus `DoctypeValue`, which it was silently dropping already - a
-   pre-existing gap this format would otherwise have hit immediately).
+   fields, and, in the same change, to also deep-copy `DoctypeValue` -
+   which it had been silently dropping before this fix (a pre-existing
+   gap this format would otherwise have hit immediately). Both are copied
+   today; neither is still missing.
 
 4. **Issuer trust evaluation** (`pkg/mdoc/zk_verifier.go`,
    `ZkHandler.verifyOneDocument`) - the presented `msoX5chain` is extracted
