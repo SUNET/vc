@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -158,8 +159,11 @@ type CircuitDescriptor struct {
 }
 
 // ParamInt reads a numeric Params entry (decoded from JSON, so stored as
-// float64) as an int. Returns (0, false) if the key is absent or not
-// numeric.
+// float64) as an int. Returns (0, false) if the key is absent, not
+// numeric, not an integral value (e.g. a catalog entry with
+// "num_attributes": 2.5), or outside the platform int range - all of
+// which would otherwise let a remote/untrusted catalog response silently
+// truncate into a nonsensical value via int(float64).
 func (d *CircuitDescriptor) ParamInt(key string) (int, bool) {
 	v, ok := d.Params[key]
 	if !ok {
@@ -167,6 +171,9 @@ func (d *CircuitDescriptor) ParamInt(key string) (int, bool) {
 	}
 	switch n := v.(type) {
 	case float64:
+		if n != math.Trunc(n) || n < math.MinInt || n > math.MaxInt {
+			return 0, false
+		}
 		return int(n), true
 	case int:
 		return n, true

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -553,5 +554,40 @@ func TestDownloadAndDecompress_NoDeclaredSizeUsesHardCeiling(t *testing.T) {
 	}
 	if string(data) != string(original) {
 		t.Errorf("decompressed data mismatch")
+	}
+}
+
+// TestParamInt_RejectsNonIntegralAndOutOfRange guards against a real
+// concern (raised in Copilot review on PR #576): Params is decoded from
+// JSON, so a numeric entry is always a float64 on the way in. Without
+// validation, a remote/untrusted catalog response with a fractional value
+// (e.g. "num_attributes": 2.5) or one outside the platform int range
+// would silently truncate/misbehave via a bare int(float64) conversion.
+func TestParamInt_RejectsNonIntegralAndOutOfRange(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   any
+		wantOK  bool
+		wantInt int
+	}{
+		{"integral float64", float64(2), true, 2},
+		{"native int", 3, true, 3},
+		{"fractional float64", 2.5, false, 0},
+		{"too large for int64-range float64", math.MaxFloat64, false, 0},
+		{"negative infinity", math.Inf(-1), false, 0},
+		{"NaN", math.NaN(), false, 0},
+		{"non-numeric", "not-a-number", false, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &CircuitDescriptor{Params: map[string]any{"k": tc.value}}
+			got, ok := d.ParamInt("k")
+			if ok != tc.wantOK {
+				t.Fatalf("ParamInt(%v) ok = %v, want %v", tc.value, ok, tc.wantOK)
+			}
+			if ok && got != tc.wantInt {
+				t.Errorf("ParamInt(%v) = %d, want %d", tc.value, got, tc.wantInt)
+			}
+		})
 	}
 }
