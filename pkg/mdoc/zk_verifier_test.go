@@ -123,7 +123,17 @@ func TestZkHandler_VerifyAndExtract_ReachesNativeStub(t *testing.T) {
 // TestZkHandler_VerifyAndExtract_ReachesNativeStub but for a document that
 // disclosed a pairwise_pseudonym claim - it must take the
 // verify_with_ppid/ComputeZkVerifierContext branch, not silently skip PPID
-// handling, and still reach (only) the native-stub error.
+// handling. What happens next depends on the build:
+//   - default (no "zknative" tag): nativeVerifyZkProofWithPPID is a stub,
+//     so this reaches (only) ErrNativeZkVerifyNotImplemented - checked by
+//     assertZkPPIDPathOutcome in zk_verifier_stub_test.go.
+//   - "zknative" tag: nativeVerifyZkProofWithPPID is real and actually
+//     attempts verification (with this test's deliberately-bogus
+//     cert/proof and a circuit-id/attribute-count mismatch - testZkSystemID
+//     is the 1-attribute circuit but this fixture discloses 2 attributes),
+//     so it must fail for a REAL reason, NOT
+//     ErrNativeZkVerifyNotImplemented - checked by assertZkPPIDPathOutcome
+//     in zk_verifier_native_test.go. See docs/ZK_PPID_VERIFICATION_PLAN.md.
 func TestZkHandler_VerifyAndExtract_PPIDPath(t *testing.T) {
 	cert := createTestZkCert(t)
 	dd := buildTestZkDocumentData(t, cert, testZkSystemID, true /* includePseudonym */)
@@ -140,9 +150,7 @@ func TestZkHandler_VerifyAndExtract_PPIDPath(t *testing.T) {
 		RequestedZkSystems: []openid4vp.ZKSystemTypeSpec{{ID: testZkSystemID, System: "longfellow-libzk-v1"}},
 		SessionTranscript:  []byte{0xA0},
 	})
-	if !errors.Is(err, ErrNativeZkVerifyNotImplemented) {
-		t.Errorf("VerifyAndExtract() error = %v, want ErrNativeZkVerifyNotImplemented", err)
-	}
+	assertZkPPIDPathOutcome(t, err)
 }
 
 func TestComputeZkVerifierContext_Deterministic(t *testing.T) {

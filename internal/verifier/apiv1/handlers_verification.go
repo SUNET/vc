@@ -265,11 +265,12 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 		case FormatMDocZK:
 			// ZK mDOC: zero-knowledge proof of possession (+ optional
-			// pairwise pseudonym) over an mdoc credential. Note: this
-			// currently always fails past the trust/matching checks below,
-			// with a specific ErrNativeZkVerifyNotImplemented-derived error -
-			// vc-verifier has no native binding to zk-cred-longfellow's
-			// Longfellow ZK verifier yet. See
+			// pairwise pseudonym) over an mdoc credential. Native proof
+			// verification (nativeVerifyZkProofWithPPID) is real when
+			// vc-verifier is built with the "zknative" Go build tag (see
+			// pkg/mdoc/zk_native_cgo.go); the default build returns a
+			// specific ErrNativeZkVerifyNotImplemented-derived error past
+			// the trust/matching checks below. See
 			// docs/ZK_PPID_VERIFICATION_PLAN.md.
 			if c.trustEvaluator == nil {
 				c.log.Error(nil, "TrustEvaluator required for ZK mDOC verification", "scope", scope)
@@ -277,7 +278,8 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			}
 
 			zkHandler, err := mdoc.NewZkHandler(mdoc.ZkVerifierConfig{
-				TrustEvaluator: c.trustEvaluator,
+				TrustEvaluator:   c.trustEvaluator,
+				ZkCircuitSources: c.cfg.Verifier.ZkCircuits.Sources,
 			})
 			if err != nil {
 				c.log.Error(err, "failed to create ZK mDOC handler", "scope", scope)

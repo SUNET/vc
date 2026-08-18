@@ -1,6 +1,8 @@
 # ZK/PPID Presentation Verification Plan
 
-**Status: Plumbing implemented, native ZK verification NOT implemented.**
+**Status: Plumbing implemented AND native ZK/PPID verification implemented**
+(opt-in, `zknative` Go build tag). See "Native verification (implemented)"
+below.
 
 This document covers vc-verifier's support for verifying "mso_mdoc_zk"
 presentations - zero-knowledge (Longfellow) proof-of-possession over an mdoc
@@ -107,22 +109,73 @@ not depend on any native ZK library:
    construction until confirmed live. The DC API variant and older OpenID4VP
    drafts are not implemented.
 
-## What's stubbed (plumbing exists, native call doesn't)
+## Native verification (implemented)
 
-`nativeVerifyZkProof` / `nativeVerifyZkProofWithPPID` in
-`pkg/mdoc/zk_verifier.go` always return `ErrNativeZkVerifyNotImplemented`.
-Every check listed above runs for real first - a malformed/untrusted/
-mismatched presentation is rejected for that specific reason, and only a
-presentation that would otherwise fully validate reaches this error. Tests
-(`TestZkHandler_VerifyAndExtract_ReachesNativeStub`,
-`..._PPIDPath`) confirm this precisely: they assert the returned error `Is`
-`ErrNativeZkVerifyNotImplemented`, not some other failure.
+`nativeVerifyZkProofWithPPID` in `pkg/mdoc/zk_verifier.go` is now a REAL
+call, not a stub - when vc-verifier is built with the `zknative` Go build
+tag (see README.md's "Native ZK/PPID proof verification" section for
+setup). The default build (no `zknative` tag, `CGO_ENABLED=0`, fully
+static - unchanged) still returns `ErrNativeZkVerifyNotImplemented`, same
+as before; this is purely opt-in, mirroring `pkg/pki`'s PKCS#11 support.
 
-## What's missing: a native Longfellow ZK verifier binding for Go
+This closes the gap the rest of this document originally described in
+detail (kept below, historical, for context on *why* it was hard and what
+changed to make it tractable).
 
-This is the real, substantial remaining gap. `zk-cred-longfellow`
-(`~/work/siros.org/zk-cred-longfellow`) is a Rust crate exposing, via
-UniFFI (`src/ffi_api.rs`, feature `uniffi`):
+### What made this tractable: zk-cred-longfellow's plain C ABI
+
+`zk-cred-longfellow` (`~/work/siros.org/zk-cred-longfellow`) added a
+second, hand-written, ordinary `extern "C"` ABI specifically for Go
+(`src/go_ffi.rs` / `include/zk_cred_longfellow_go.h`), separate from the
+UniFFI/RustBuffer-based ABI (`src/ffi_api.rs`) that generates the
+Swift/Kotlin bindings described below. It exposes:
+
+```rust
+fn rust_initialize_verifier(circuit: *const u8, circuit_len: usize, circuit_version: u8, num_attributes: u8, error_out: *mut *mut c_char) -> *mut MdocZkVerifier
+fn rust_free_verifier(verifier: *mut MdocZkVerifier)
+fn rust_free_error_string(ptr: *mut c_char)
+fn rust_verify_with_ppid(verifier: *const MdocZkVerifier, issuer_pk: *const u8, issuer_pk_len: usize, attributes: *const CAttribute, attributes_len: usize, doc_type: *const c_char, device_name_spaces_bytes: *const u8, device_name_spaces_bytes_len: usize, session_transcript: *const u8, session_transcript_len: usize, time: *const c_char, verifier_context: *const u8, verifier_context_len: usize, proof: *const u8, proof_len: usize, error_out: *mut *mut c_char) -> i32
+```
+
+Plain pointers/lengths/small integers only - no UniFFI RustBuffer
+serialization to reimplement by hand, and it accepts a real variable-length
+attribute array, a real `device_name_spaces_bytes`, splits (expensive)
+circuit loading from verification (so a long-lived process loads each
+distinct circuit once and reuses the handle), and returns an owned,
+caller-freed error string with the real underlying error message.
+
+This repo's `pkg/mdoc/zknative` package (build tag `zknative`) is a cgo
+wrapper around exactly this ABI. `pkg/mdoc/zk_native_cgo.go` (same tag)
+resolves a presented document's `zkSystemId` to a circuit via a new Go port
+of the wallet SDKs' circuit-catalog client
+(`pkg/mdoc/zkcircuit`, fetching from the live
+`https://zk-circuits.fly.dev` service by default, SHA-256-verifying and
+zstd-decompressing the downloaded artifact), caches the loaded native
+verifier per circuit id (`sync.Map`-style, with in-flight de-duplication so
+concurrent requests for the same not-yet-loaded circuit don't redundantly
+reload it), and calls `VerifyWithPPID`.
+
+### Remaining native-binding gap: non-PPID `nativeVerifyZkProof`
+
+`zk-cred-longfellow`'s Go C ABI only exports `rust_verify_with_ppid` today -
+no plain non-PPID verify function exists yet. `nativeVerifyZkProof` (the
+non-PPID direction) therefore still returns
+`ErrNativeZkVerifyNotImplemented`, even under the `zknative` tag, with a
+message naming this specific reason. This was assessed as acceptable scope
+for this change: every real presentation from this org's wallets today uses
+the deployed 2-attribute (`given_name` + `pairwise_pseudonym`) V8 circuit -
+i.e. the PPID path - so this does not block real end-to-end verification.
+Adding a `rust_verify` sibling function to zk-cred-longfellow's `go_ffi.rs`
+(mirroring `rust_verify_with_ppid` minus the pseudonym/verifier_context
+arguments) is a small, separate follow-up once needed.
+
+### Historical background (why this was hard before `go_ffi.rs` existed)
+
+The rest of this subsection is kept for context; it no longer describes the
+current state, see above.
+
+`zk-cred-longfellow` also exposes a UniFFI-based ABI (`src/ffi_api.rs`,
+feature `uniffi`) for the Swift/Kotlin bindings:
 
 ```rust
 fn initialize_verifier(circuit: &[u8], circuit_version: CircuitVersion, num_attributes: u8) -> Result<MdocZkVerifier, MdocZkError>
@@ -130,108 +183,14 @@ fn verify(verifier: &MdocZkVerifier, issuer_public_key_sec_1: &[u8], attributes:
 fn verify_with_ppid(verifier: &MdocZkVerifier, ..., verifier_context: &[u8], proof: &[u8]) -> Result<(), MdocZkError>
 ```
 
-(`Attribute { identifier: String, value_cbor: Vec<u8> }`, `MdocZkVerifier` a
-`uniffi::Object`.) This is exactly the API `pkg/mdoc/zk_verifier.go`'s stub
-functions are shaped to call once a binding exists - `zkSystemID`'s
-version/num_attributes would resolve which circuit to load via
-`initialize_verifier` (with caching across calls, since circuit loading is
-expensive - `MdocZkVerifier` should be held, not reconstructed per call).
-
-### Why there's no Go binding today
-
-1. **UniFFI itself doesn't target Go as a first-class language.** The crate
-   generates Swift and Kotlin bindings (`make bindings` in the crate's
-   Makefile) via UniFFI's own `uniffi-bindgen` machinery. There is no
-   official `uniffi-bindgen-go` from Mozilla; third-party Go generators for
-   UniFFI exist in the wider ecosystem but are not wired into this crate,
-   and adding one is a non-trivial integration project of its own (new
-   generator dependency, Go binding template/codegen wiring, CI, testing) -
-   explicitly out of scope for this change per the task that produced it.
-
-2. **The raw UniFFI FFI is not a "plain C API" you can bind via cgo
-   directly.** Every `#[uniffi::export]`\-generated `extern "C"` function
-   (see `bindings/swift/zk_cred_longfellowFFI.h`, UniFFI's own generated C
-   header used to compile the Swift/Kotlin scaffolding) takes/returns
-   `RustBuffer` (a length-prefixed byte buffer) and an out `RustCallStatus`,
-   not idiomatic C types. Complex arguments (`&[Attribute]`, `Option<&[u8;
-   32]>`, the `MdocZkVerifier` opaque object) are serialized using UniFFI's
-   own internal wire protocol - reimplementing that protocol by hand in cgo
-   (to avoid needing a real code generator) means matching an
-   internal-and-versioned serialization format not intended for direct
-   consumption, for every argument/return type these functions use. That is
-   real, error-prone, multi-day work - not something to half-implement.
-
-3. **A narrower, already-started alternative exists in the crate, but it's
-   incomplete and not general-purpose.** `zk-cred-longfellow/src/mdoc_zk/prover.rs`
-   already has a plain (non-UniFFI) `#[unsafe(no_mangle)] pub extern "C" fn
-   rust_verify_with_ppid(...)`, explicitly commented `"C FFI for Go CGo
-   verifier"`. This does NOT go through UniFFI's RustBuffer wire format -
-   it's a genuine, cgo-callable C ABI function, and the crate's `mdoc_zk`
-   module (where it lives) is NOT gated behind the `uniffi` Cargo feature, so
-   `cargo build --release` (default features) already produces a
-   cdylib/staticlib exporting it as a plain C symbol. However, as it stands
-   today it is:
-   - **Hardcoded to V8 circuits and exactly 2 fixed attributes**
-     (`given_name` + `pairwise_pseudonym`) - not general purpose.
-   - **Hardcoded to an empty `device_name_spaces_bytes`** (`b"\xa0"`) -
-     can't verify a document with any device-signed elements.
-   - **Reloads/recompiles the circuit on every single call** (it calls
-     `MdocZkVerifier::new(...)` inline rather than taking an already-
-     initialized verifier handle) - circuit loading is expensive; this is
-     fine for a quick fuzz/test harness, wrong for a real verifier service
-     handling many presentations.
-   - **Not referenced from anywhere** - no Go file, build target, or header
-     exists for it anywhere in `zk-cred-longfellow` or this repo. It reads
-     as a starting marker/scratch stub, not a maintained entry point.
-   - Returns only an `i32` status code (0 / -1), losing the underlying
-     `anyhow::Error` detail `verify`/`verify_with_ppid` provide via
-     `MdocZkError`'s `Display`.
-
-   Generalizing this into something a real Go verifier could depend on -
-   splitting circuit load from verify (with caching), accepting a variable
-   attribute list from Go instead of two hardcoded slots, real
-   `device_name_spaces_bytes`, richer error reporting, a Makefile target
-   that builds this specific C ABI export + a hand-written (not
-   UniFFI-generated) header, and testing on whatever platform(s)
-   vc-verifier actually deploys to - is real, scoped, and worth doing, but
-   is Rust-crate work in `zk-cred-longfellow`, a several-hour-to-multi-day
-   effort in its own right, and was assessed as too large to prototype
-   safely within this change's time budget (per this task's own scope
-   discipline: don't half-implement unsafe FFI code). It is the
-   recommended path forward - not building a Go UniFFI binding from scratch.
-
-### Recommended next step
-
-Generalize `rust_verify_with_ppid` (or add sibling `rust_initialize_verifier`
-/ `rust_verify` / `rust_free_verifier` functions alongside it) in
-`zk-cred-longfellow/src/mdoc_zk/prover.rs`, gated the same way (plain
-`extern "C"`, NOT behind the `uniffi` feature), to:
-
-1. Split circuit loading (`rust_initialize_verifier(circuit, circuit_len,
-   circuit_version, num_attributes) -> *mut MdocZkVerifier` + a matching
-   `rust_free_verifier`) from verification, so a long-lived Go process
-   loads each distinct circuit once.
-2. Accept a real variable-length attribute array (identifier + CBOR value
-   pairs) from Go instead of the two hardcoded slots.
-3. Accept a real `device_name_spaces_bytes` byte slice.
-4. Return an owned, caller-freed error string (or write into a
-   caller-provided buffer) instead of just an `i32`.
-5. Add a Makefile target building this specific export (default features,
-   no `uniffi`) plus a small hand-written header (NOT the UniFFI-generated
-   one, which describes a different, RustBuffer-based ABI) - this is the
-   "plain C-compatible shared library build target" item 4 of this task
-   asked to prototype if tractable; per the above, it is tractable **only
-   once the underlying Rust functions are generalized** - the build-tooling
-   part alone (Makefile target + header) is a small addition, but wiring it
-   to functions that are still 2-attribute/V8-only/no-device-namespaces
-   would just move the "not general purpose" problem into Go instead of
-   fixing it, so it wasn't added as tooling alone in this change.
-
-Once that exists, `pkg/mdoc/zk_verifier.go`'s `nativeVerifyZkProof` /
-`nativeVerifyZkProofWithPPID` become real cgo calls; everything upstream of
-them (trust evaluation, zk_system_type matching, argument assembly,
-verifier_context derivation) already produces exactly the values those
-calls would need.
+UniFFI does not target Go as a first-class language, and its raw
+`RustBuffer`-based C header (`bindings/swift/zk_cred_longfellowFFI.h`) is
+not something cgo can consume directly without reimplementing UniFFI's own
+internal, versioned wire protocol by hand - real, error-prone, multi-day
+work. `src/go_ffi.rs`'s plain C ABI (described above) is what made a Go
+binding tractable without that: a second, hand-written, ordinary ABI built
+alongside (not instead of) the UniFFI one, from the same crate's default
+Cargo features.
 
 ## Known simplifications / follow-ups (not native-binding related)
 
@@ -261,3 +220,30 @@ calls would need.
   `copyDCQL`, since `mso_mdoc_zk`'s own validation requires
   `doctype_value`). Other pre-existing `copyDCQL` gaps (e.g. `TypeValues`,
   `ClaimQuery.ID`) were left as-is - out of scope for this change.
+- The non-PPID native verify direction (`nativeVerifyZkProof`) remains
+  unimplemented even under the `zknative` build tag - see "Remaining
+  native-binding gap" above; this is a zk-cred-longfellow (Rust crate) gap,
+  not a Go-side one.
+- The W3C Digital Credentials API and older OpenID4VP session-transcript
+  variants are still out of scope for native verification, same as for the
+  plumbing itself (see `BuildOID4VPSessionTranscript` above) - this change
+  targeted specifically the OpenID4VP redirect-flow path.
+- `pkg/mdoc/zkcircuit.Client`'s circuit-catalog source(s) are configurable
+  via `verifier.zk_circuits.sources` in YAML config (see
+  `docs/CONFIGURATION.md`), defaulting to the live
+  `https://zk-circuits.fly.dev` service. The verifier cache in
+  `zk_native_cgo.go` is keyed by `zkSystemId` (the circuit's own catalog
+  id) for the lifetime of the process - there is no eviction/TTL, since the
+  known circuit catalog is small and each entry's bytes are immutable once
+  published.
+- Test coverage: `pkg/mdoc/zkcircuit` has unit tests (mocked HTTP, an
+  injectable-fetch-function pattern mirroring siros-sdk-kotlin's
+  `ZkCircuitClient` test, plus one real `httptest`-backed round trip).
+  `pkg/mdoc/zknative` and `pkg/mdoc/zk_native_cgo.go` each have a REAL,
+  live integration test that fetches the actual V8/2-attribute circuit from
+  `https://zk-circuits.fly.dev` and verifies a genuine, known-good
+  Longfellow V8 PPID proof (sourced from zk-cred-longfellow's own
+  `mdoc_zk::prover_v8_test` fixture) end to end through cgo - confirming a
+  genuine proof verifies, a tampered proof (one flipped byte) is rejected
+  with a real error, and a wrong attribute count is rejected cleanly. These
+  tests are skipped (not failed) if the live service is unreachable.

@@ -4,21 +4,26 @@ package mdoc
 // presentations - zero-knowledge (Longfellow) proof-of-possession, with an
 // optional pairwise pseudonym (PPID), over an mdoc credential.
 //
-// It implements everything that CAN be implemented without a native
-// Longfellow ZK verify function: decoding the zkDocuments wire structure,
-// matching the requested DCQL zk_system_type against what was presented,
-// verifying the issuer's certificate chain (msoX5chain) via the same
-// TrustEvaluator used for plain "mso_mdoc" presentations, deriving the
-// verifier_context a pairwise pseudonym is bound to, and assembling the
-// exact argument shapes zk-cred-longfellow's own verify/verify_with_ppid
-// FFI functions expect.
+// It implements: decoding the zkDocuments wire structure, matching the
+// requested DCQL zk_system_type against what was presented, verifying the
+// issuer's certificate chain (msoX5chain) via the same TrustEvaluator used
+// for plain "mso_mdoc" presentations, deriving the verifier_context a
+// pairwise pseudonym is bound to, and assembling the exact argument shapes
+// zk-cred-longfellow's own verify_with_ppid FFI function expects.
 //
-// What it does NOT do: the actual cryptographic ZK proof verification.
-// nativeVerifyZkProof/nativeVerifyZkProofWithPPID are stubs that return
-// ErrNativeZkVerifyNotImplemented - vc-verifier (this Go codebase) has no
-// binding to zk-cred-longfellow's Rust implementation. See
-// docs/ZK_PPID_VERIFICATION_PLAN.md for exactly what such a binding would
-// need to expose and why one isn't included in this change.
+// The actual cryptographic ZK proof verification
+// (nativeVerifyZkProof/nativeVerifyZkProofWithPPID) is implemented in one
+// of two build-tag-gated files:
+//   - zk_native_cgo.go (build tag "zknative"): a real cgo binding to
+//     zk-cred-longfellow, resolving the presented zkSystemId to a circuit
+//     via pkg/mdoc/zkcircuit and pkg/mdoc/zknative.
+//   - zk_native_stub.go (default, no "zknative" tag): returns
+//     ErrNativeZkVerifyNotImplemented.
+//
+// This mirrors pkg/pki's PKCS#11 support (build tag "pkcs11"): the default
+// vc-verifier build stays CGO_ENABLED=0/fully static; native ZK
+// verification is opt-in. See docs/ZK_PPID_VERIFICATION_PLAN.md and
+// README.md's "Native ZK/PPID proof verification" section for setup.
 import (
 	"context"
 	"crypto/ecdsa"
@@ -75,6 +80,13 @@ type ZkVerifierConfig struct {
 	// IssuerURL, same contract as VerifierConfig.IssuerURL.
 	IssuerURL string
 
+	// ZkCircuitSources are zk-circuits catalog mirror base URLs (see
+	// pkg/mdoc/zkcircuit.Client), tried in order, used to resolve a
+	// presented document's zkSystemId to a circuit for native verification.
+	// Only consulted when built with the "zknative" tag; ignored by the
+	// default stub. If empty, zkcircuit.DefaultZkCircuitURL is used.
+	ZkCircuitSources []string
+
 	// Clock is an optional function that returns the current time. Defaults
 	// to time.Now.
 	Clock func() time.Time
@@ -83,9 +95,10 @@ type ZkVerifierConfig struct {
 // ZkHandler verifies "mso_mdoc_zk" OpenID4VP presentations - the ZK/PPID
 // counterpart to MDocHandler (which handles plain "mso_mdoc").
 type ZkHandler struct {
-	trustEvaluator trust.TrustEvaluator
-	issuerURL      string
-	clock          func() time.Time
+	trustEvaluator   trust.TrustEvaluator
+	issuerURL        string
+	zkCircuitSources []string
+	clock            func() time.Time
 }
 
 // NewZkHandler creates a new ZkHandler.
@@ -98,9 +111,10 @@ func NewZkHandler(cfg ZkVerifierConfig) (*ZkHandler, error) {
 		clock = time.Now
 	}
 	return &ZkHandler{
-		trustEvaluator: cfg.TrustEvaluator,
-		issuerURL:      cfg.IssuerURL,
-		clock:          clock,
+		trustEvaluator:   cfg.TrustEvaluator,
+		issuerURL:        cfg.IssuerURL,
+		zkCircuitSources: cfg.ZkCircuitSources,
+		clock:            clock,
 	}, nil
 }
 
@@ -328,20 +342,20 @@ func (h *ZkHandler) verifyOneDocument(ctx context.Context, zkDoc *ZkDocumentMdoc
 
 	timeStr := string(dd.Timestamp)
 
-	// 4. Call into the native ZK verifier - currently a stub.
+	// 4. Call into the native ZK verifier.
 	if pseudonym != nil {
 		verifierContext := ComputeZkVerifierContext(pctx.SessionID, pctx.ClientID, pctx.PPIDContext)
 		if err := nativeVerifyZkProofWithPPID(
-			dd.ZkSystemID, issuerPubKeySEC1, attributes, dd.DocType,
+			ctx, dd.ZkSystemID, issuerPubKeySEC1, attributes, dd.DocType,
 			deviceNameSpacesBytes, pctx.SessionTranscript, timeStr,
-			verifierContext[:], zkDoc.Proof,
+			verifierContext[:], zkDoc.Proof, h.zkCircuitSources,
 		); err != nil {
 			return nil, err
 		}
 	} else {
 		if err := nativeVerifyZkProof(
-			dd.ZkSystemID, issuerPubKeySEC1, attributes, dd.DocType,
-			deviceNameSpacesBytes, pctx.SessionTranscript, timeStr, zkDoc.Proof,
+			ctx, dd.ZkSystemID, issuerPubKeySEC1, attributes, dd.DocType,
+			deviceNameSpacesBytes, pctx.SessionTranscript, timeStr, zkDoc.Proof, h.zkCircuitSources,
 		); err != nil {
 			return nil, err
 		}
@@ -459,45 +473,6 @@ func sec1PublicKeyFromCert(cert *x509.Certificate) ([]byte, error) {
 	return ecdhPub.Bytes(), nil
 }
 
-// nativeVerifyZkProof is the (stubbed) call site for zk-cred-longfellow's
-// own `verify` FFI function (src/ffi_api.rs), for a document WITHOUT a
-// pairwise pseudonym. The real function additionally needs an initialized
-// MdocZkVerifier (loaded from a circuit file matching zkSystemID's
-// version/num_attributes - see initialize_verifier in the same file) held
-// across calls, since circuit loading is expensive; this stub signature
-// takes zkSystemID directly since there is no verifier instance to cache it
-// against yet.
-//
-// TODO(zk-native-binding): replace this body with a real call once a Go
-// binding for zk-cred-longfellow exists. See docs/ZK_PPID_VERIFICATION_PLAN.md
-// for exactly what that binding needs to expose.
-func nativeVerifyZkProof(
-	zkSystemID string,
-	issuerPublicKeySEC1 []byte,
-	attributes []ZkAttribute,
-	docType string,
-	deviceNameSpacesBytes []byte,
-	sessionTranscript []byte,
-	timeStr string,
-	proof []byte,
-) error {
-	return ErrNativeZkVerifyNotImplemented
-}
-
-// nativeVerifyZkProofWithPPID is the verify_with_ppid counterpart of
-// nativeVerifyZkProof, for a document that disclosed a pairwise_pseudonym
-// attribute (V8 circuits only). See that function's doc comment - the same
-// native-binding gap applies here.
-func nativeVerifyZkProofWithPPID(
-	zkSystemID string,
-	issuerPublicKeySEC1 []byte,
-	attributes []ZkAttribute,
-	docType string,
-	deviceNameSpacesBytes []byte,
-	sessionTranscript []byte,
-	timeStr string,
-	verifierContext []byte,
-	proof []byte,
-) error {
-	return ErrNativeZkVerifyNotImplemented
-}
+// nativeVerifyZkProof and nativeVerifyZkProofWithPPID are implemented in
+// zk_native_cgo.go (build tag "zknative") or zk_native_stub.go (default) -
+// see this file's package doc comment above.

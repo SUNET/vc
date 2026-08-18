@@ -2,6 +2,11 @@ cover.out
 coverage.html
 coverage.out
 bin/
+
+# Native ZK/PPID verification (opt-in, "zknative" build tag): local
+# zk-cred-longfellow checkout + staged Go C-ABI library/header, populated by
+# `make zk-native-lib`. Never committed - fetched/built on demand.
+/third_party/
 pki/*
 !pki/create_pki.sh
 redis-data/

@@ -38,6 +38,17 @@ RESERVED_TAGS           := latest testing demo dev
 # PKCS#11 requires CGO for hardware security module support.
 PKCS11_TAG              := pkcs11
 
+# zknative: native Longfellow ZK/PPID proof verification (pkg/mdoc/zknative),
+# via cgo against zk-cred-longfellow's Go C-ABI build. Requires CGO_ENABLED=1
+# and `make zk-native-lib` to have staged the shared library/header first -
+# see that target and README.md's "Native ZK/PPID proof verification"
+# section.
+ZKNATIVE_TAG            := zknative
+ZK_CRED_LONGFELLOW_REPO ?= git@github.com:sirosfoundation/zk-cred-longfellow.git
+ZK_CRED_LONGFELLOW_REF  ?= main
+ZK_CRED_LONGFELLOW_CHECKOUT := third_party/.zk-cred-longfellow-src
+ZK_CRED_LONGFELLOW_STAGE    := third_party/zk-cred-longfellow
+
 # Service Build Configuration (service -> static/dynamic, tags)
 # Format: service_name:cgo_mode:build_tags
 BUILD_CONFIGS           := \
@@ -92,7 +103,10 @@ help: ## Show this help message
 	$(info Services: $(SERVICES))
 	$(info )
 	$(info Optional Build Features:)
-	$(info   make build-issuer-hsm     - Build issuer with PKCS#11 HSM support)
+	$(info   make build-issuer-hsm         - Build issuer with PKCS#11 HSM support)
+	$(info   make zk-native-lib            - Fetch/build zk-cred-longfellow's Go C-ABI lib for native ZK/PPID verification)
+	$(info   make build-verifier-zknative  - Build verifier with native ZK/PPID proof verification (requires zk-native-lib))
+	$(info   make test-zknative            - Run pkg/mdoc's zknative-tagged tests (requires zk-native-lib))
 	$(info )
 	$(info OpenID Conformance Suite:)
 	$(info   make oidc-conformance-setup      - Start conformance suite)
@@ -199,6 +213,43 @@ test-js: ## Run JS unit tests for staticembed helpers
 test-pkcs11: ## Test with PKCS#11 build tag
 	$(info Testing with PKCS#11 build tag)
 	go test -tags $(PKCS11_TAG) -v ./pkg/signing/...
+
+# ==============================================================================
+# Native ZK/PPID Proof Verification (zk-cred-longfellow, cgo, opt-in)
+# ==============================================================================
+#
+# pkg/mdoc/zknative wraps zk-cred-longfellow's plain C-ABI Go verifier
+# binding (its `go-cabi` Makefile target + include/zk_cred_longfellow_go.h)
+# via cgo. This is opt-in (Go build tag "zknative") for the same reason
+# PKCS#11 support is opt-in above: the default vc-verifier build is
+# CGO_ENABLED=0 and fully static, and must stay that way.
+#
+# This target clones (or updates) zk-cred-longfellow into a local,
+# gitignored checkout, builds its `go-cabi` target (a plain `make` command
+# in that crate, not a git operation - safe to re-run), and stages the
+# resulting shared library + hand-written header where
+# pkg/mdoc/zknative's cgo directives (`${SRCDIR}/../../../third_party/...`)
+# expect to find them. Override ZK_CRED_LONGFELLOW_REPO/_REF to build a
+# fork or pin a specific tag/commit.
+zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native ZK/PPID verification
+	$(info Fetching/building zk-cred-longfellow's go-cabi target from $(ZK_CRED_LONGFELLOW_REPO)@$(ZK_CRED_LONGFELLOW_REF))
+	@if [ -d "$(ZK_CRED_LONGFELLOW_CHECKOUT)/.git" ]; then \
+		git -C $(ZK_CRED_LONGFELLOW_CHECKOUT) fetch origin $(ZK_CRED_LONGFELLOW_REF) && \
+		git -C $(ZK_CRED_LONGFELLOW_CHECKOUT) checkout FETCH_HEAD; \
+	else \
+		git clone --branch $(ZK_CRED_LONGFELLOW_REF) --depth 1 $(ZK_CRED_LONGFELLOW_REPO) $(ZK_CRED_LONGFELLOW_CHECKOUT); \
+	fi
+	$(MAKE) -C $(ZK_CRED_LONGFELLOW_CHECKOUT) go-cabi
+	@mkdir -p $(ZK_CRED_LONGFELLOW_STAGE)/include $(ZK_CRED_LONGFELLOW_STAGE)/lib
+	cp $(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/zk_cred_longfellow_go.h $(ZK_CRED_LONGFELLOW_STAGE)/include/
+	cp $(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/libzk_cred_longfellow.* $(ZK_CRED_LONGFELLOW_STAGE)/lib/
+	@echo "Staged zk-cred-longfellow's Go C-ABI lib + header in $(ZK_CRED_LONGFELLOW_STAGE)"
+	@echo "Build/test with: CGO_ENABLED=1 LD_LIBRARY_PATH=\$$(pwd)/$(ZK_CRED_LONGFELLOW_STAGE)/lib go {build,test} -tags $(ZKNATIVE_TAG) ./..."
+
+test-zknative: ## Run pkg/mdoc's zknative-tagged tests (requires: make zk-native-lib)
+	$(info Testing with zknative build tag - requires 'make zk-native-lib' first)
+	CGO_ENABLED=1 LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/lib \
+		go test -tags $(ZKNATIVE_TAG) -v ./pkg/mdoc/...
 
 # DIDComm v2.1 Test targets
 test-didcomm: ## Test DIDComm v2.1 implementation
@@ -423,6 +474,15 @@ build-issuer-hsm: ## Build issuer with PKCS#11 HSM support
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
 		-tags $(PKCS11_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_issuer-hsm \
 		$(LDFLAGS_DYNAMIC) ./cmd/issuer/
+
+build-verifier-zknative: ## Build verifier with native ZK/PPID proof verification (requires: make zk-native-lib)
+	$(info Building verifier with native ZK/PPID proof verification - requires 'make zk-native-lib' first)
+	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) \
+		CGO_CFLAGS="-I$(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/include" \
+		CGO_LDFLAGS="-L$(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/lib -lzk_cred_longfellow" \
+		go build -tags $(ZKNATIVE_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_verifier-zknative \
+		$(LDFLAGS_DYNAMIC) ./cmd/verifier/
+	@echo "Run with: LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/lib ./bin/$(NAME)_verifier-zknative"
 
 # ==============================================================================
 # Docker Build Targets

@@ -233,8 +233,9 @@ Optional features are enabled via Go build tags. The following tags are availabl
 | `saml,oidcrp` | All optional apigw features    | apigw               | static      | `make build-apigw-all`        |
 | `pkcs11`      | PKCS#11 HSM signing            | issuer              | **dynamic** | `make build-issuer-hsm`       |
 | `vc20`        | W3C Verifiable Credentials 2.0 | vc20-test-server    | static      | `make build-vc20-test-server` |
+| `zknative`    | Native ZK/PPID proof verification (mso_mdoc_zk) | verifier | **dynamic** | `make build-verifier-zknative` |
 
-> **Note:** The `pkcs11` tag requires CGO (`CGO_ENABLED=1`) and produces a dynamically linked binary.
+> **Note:** The `pkcs11` and `zknative` tags require CGO (`CGO_ENABLED=1`) and produce dynamically linked binaries. See "Native ZK/PPID proof verification" below for `zknative` setup.
 
 ### Docker
 
@@ -257,6 +258,47 @@ For convenience all services can be built inside a Docker container.
 
 Set the image version with `VERSION=x.x.x` (default: `latest`).
 
+### Native ZK/PPID proof verification
+
+vc-verifier can verify "mso_mdoc_zk" presentations (zero-knowledge
+Longfellow proof-of-possession, with an optional pairwise pseudonym over an
+mdoc credential) natively, via a cgo binding to
+[zk-cred-longfellow](https://github.com/sirosfoundation/zk-cred-longfellow)'s
+plain C-ABI Go verifier build. This is **opt-in** (the `zknative` build
+tag) - the default `make build-verifier`/Docker build stays
+`CGO_ENABLED=0` and fully static, exactly like the `pkcs11` tag above, and
+for the same reason: cgo requires a C compiler/linker and a locally built
+shared library that a static build has no use for.
+
+Setup:
+
+```sh
+# 1. Clone + build zk-cred-longfellow's `go-cabi` target, staging the
+#    resulting shared library + header under third_party/zk-cred-longfellow/
+#    (gitignored - never committed). Override ZK_CRED_LONGFELLOW_REPO/_REF
+#    to build a fork or pin a specific tag/commit.
+make zk-native-lib
+
+# 2. Build the verifier with native ZK/PPID verification.
+make build-verifier-zknative
+
+# 3. Run it (needs the shared library on the loader path).
+LD_LIBRARY_PATH=$(pwd)/third_party/zk-cred-longfellow/lib ./bin/vc_verifier-zknative
+
+# ...or run pkg/mdoc's zknative-tagged tests directly:
+make test-zknative
+```
+
+Configuration: the circuit catalog service vc-verifier fetches circuits
+from is configurable via `verifier.zk_circuits.sources` in YAML config
+(defaults to the live `https://zk-circuits.fly.dev` service if unset) -
+see `docs/CONFIGURATION.md`'s `zk_circuits` section.
+
+See `docs/ZK_PPID_VERIFICATION_PLAN.md` for the full design writeup: what
+this verifies, the confirmed `verifier_context`/pseudonym-derivation wire
+formula, and exactly what's still out of scope (the W3C Digital
+Credentials API and older OpenID4VP session-transcript variants).
+
 ## Start, Stop & Restart
 
 | Command          | Description                                 |
@@ -276,6 +318,7 @@ Set the image version with `VERSION=x.x.x` (default: `latest`).
 | `make test-oidcrp`   | Test with `oidcrp` build tag                                  |
 | `make test-vc20`     | Test with `vc20` build tag                                    |
 | `make test-pkcs11`   | Test with `pkcs11` build tag (requires `make test-env`)       |
+| `make test-zknative` | Test with `zknative` build tag (requires `make zk-native-lib`) |
 | `make test-all-tags` | Test with all build tags                                      |
 | `make test-env`      | Install test dependencies (softhsm2, opensc)                  |
 
