@@ -205,13 +205,16 @@ func (r *ZkDocumentResult) GetClaims() map[string]any {
 // arguments (including, for a PPID document, the verifier_context - see
 // ComputeZkVerifierContext), and then calls the native ZK verify function.
 //
-// That last call is currently a stub (see nativeVerifyZkProof /
-// nativeVerifyZkProofWithPPID) - it always returns
-// ErrNativeZkVerifyNotImplemented. Every prior step is real: a document that
-// fails trust evaluation or zk_system_type matching is rejected for that
+// That last call (see nativeVerifyZkProof / nativeVerifyZkProofWithPPID)
+// is real for the PPID path under the "zknative" build tag (see
+// zk_native_cgo.go); the non-PPID direction and the default (no
+// "zknative" tag) build both still return ErrNativeZkVerifyNotImplemented
+// - see those functions' own doc comments for why. Every prior step here
+// is always real regardless of the build tag: a document that fails
+// trust evaluation or zk_system_type matching is rejected for that
 // reason, not because of the native-binding gap, so callers can already
-// distinguish "this presentation is malformed/untrusted" from "verification
-// isn't fully wired up yet" by checking the returned error.
+// distinguish "this presentation is malformed/untrusted" from
+// "verification isn't fully wired up yet" by checking the returned error.
 func (h *ZkHandler) VerifyAndExtract(ctx context.Context, vpToken string, pctx ZkPresentationContext) (*ZkVerificationResult, error) {
 	// Decode the VP token (base64url-encoded DeviceResponse) - same
 	// convention as MDocHandler.VerifyAndExtract.
