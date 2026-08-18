@@ -276,9 +276,9 @@ Setup:
 # 1. Clone + build zk-cred-longfellow's `go-cabi` target, staging the
 #    resulting shared library + header under third_party/zk-cred-longfellow/
 #    (gitignored - never committed). Override ZK_CRED_LONGFELLOW_REPO/_REF
-#    to build a fork or pin a specific tag/branch - the initial clone uses
-#    `git clone --branch`, which only accepts a ref name, not an arbitrary
-#    commit SHA.
+#    to build a fork or pin a specific tag, branch, OR commit SHA - the
+#    target fetches whichever ref is given directly (`git fetch --depth 1
+#    origin $(REF)`), which works for all three ref types.
 make zk-native-lib
 
 # 2. Build the verifier with native ZK/PPID verification.
