@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -112,6 +113,7 @@ func TestZkHandler_VerifyAndExtract_ReachesNativeStub(t *testing.T) {
 		SessionID:          "session-1",
 		RequestedZkSystems: []openid4vp.ZKSystemTypeSpec{{ID: testZkSystemID, System: "longfellow-libzk-v1"}},
 		SessionTranscript:  []byte{0xA0},
+		RequestedClaimIDs:  []string{"given_name"},
 	})
 	if err == nil {
 		t.Fatal("VerifyAndExtract() expected the native-stub error, got nil")
@@ -151,6 +153,7 @@ func TestZkHandler_VerifyAndExtract_PPIDPath(t *testing.T) {
 		PPIDContext:        "https://relying-party.example",
 		RequestedZkSystems: []openid4vp.ZKSystemTypeSpec{{ID: testZkSystemID, System: "longfellow-libzk-v1"}},
 		SessionTranscript:  []byte{0xA0},
+		RequestedClaimIDs:  []string{"given_name"},
 	})
 	assertZkPPIDPathOutcome(t, err)
 }
@@ -292,7 +295,7 @@ func TestBuildZkAttributes_StructuredValueCBOREncodingIsDeterministic(t *testing
 
 	var first []byte
 	for i := 0; i < 50; i++ {
-		attributes, _, err := buildZkAttributes(issuerSigned)
+		attributes, _, err := buildZkAttributes(issuerSigned, []string{"driving_privileges"})
 		if err != nil {
 			t.Fatalf("buildZkAttributes: %v", err)
 		}
@@ -321,14 +324,124 @@ func TestBuildZkAttributes_StructuredValueCBOREncodingIsDeterministic(t *testing
 func TestBuildZkAttributes_RejectsWrongTypePseudonymClaim(t *testing.T) {
 	issuerSigned := map[string]map[string]any{
 		"org.iso.18013.5.1": {
+			"given_name":             "Alice",
 			PseudonymClaimIdentifier: "not-bytes", // wrong CBOR type
 		},
 	}
-	_, _, err := buildZkAttributes(issuerSigned)
+	_, _, err := buildZkAttributes(issuerSigned, []string{"given_name"})
 	if err == nil {
 		t.Fatal("expected an error for a wrong-type pairwise_pseudonym claim, got nil")
 	}
 	if !strings.Contains(err.Error(), PseudonymClaimIdentifier) {
 		t.Errorf("expected error to name %q, got: %v", PseudonymClaimIdentifier, err)
+	}
+}
+
+// TestBuildZkAttributes_OrderMatchesRequestedClaimIDsWithPseudonymLast guards
+// against the real, confirmed bug this fix addresses: buildZkAttributes used
+// to derive attribute order from Go map iteration (randomized), but
+// zk-cred-longfellow's native verifier matches attributes to circuit slots
+// purely by position - a wrong order makes native verification of a
+// genuinely valid proof fail. This exercises many namespaces/claims (so a
+// single lucky map-iteration order can't mask a regression) and confirms:
+// (1) order exactly matches RequestedClaimIDs, (2) it's identical across
+// repeated calls regardless of Go's randomized map order, (3)
+// pairwise_pseudonym always lands last even though it's stored in a
+// different namespace than the requested claims and never appears in
+// RequestedClaimIDs itself - mirroring siros-sdk-kotlin/siros-sdk-swift's
+// `requestedClaims + PSEUDONYM_CLAIM` proving-side convention.
+func TestBuildZkAttributes_OrderMatchesRequestedClaimIDsWithPseudonymLast(t *testing.T) {
+	issuerSigned := map[string]map[string]any{
+		"eu.europa.ec.eudi.pid.1": {
+			"given_name":  "Helen",
+			"family_name": "Mirren",
+			"birth_date":  "1945-08-26",
+			"age_over_18": true,
+			"nationality": "GB",
+		},
+		"org.iso.18013.5.1": {
+			PseudonymClaimIdentifier: []byte("0123456789abcdef0123456789abcdef"),
+		},
+	}
+	requestedClaimIDs := []string{"family_name", "given_name", "age_over_18"}
+	wantOrder := []string{"family_name", "given_name", "age_over_18", PseudonymClaimIdentifier}
+
+	var firstIdentifiers []string
+	for i := 0; i < 50; i++ {
+		attributes, pseudonym, err := buildZkAttributes(issuerSigned, requestedClaimIDs)
+		if err != nil {
+			t.Fatalf("iteration %d: buildZkAttributes: %v", i, err)
+		}
+		if pseudonym == nil {
+			t.Fatalf("iteration %d: expected a non-nil pseudonym", i)
+		}
+		gotIdentifiers := make([]string, len(attributes))
+		for j, attr := range attributes {
+			gotIdentifiers[j] = attr.Identifier
+		}
+		if i == 0 {
+			firstIdentifiers = gotIdentifiers
+			if !slices.Equal(gotIdentifiers, wantOrder) {
+				t.Fatalf("attribute order = %v, want %v", gotIdentifiers, wantOrder)
+			}
+			continue
+		}
+		if !slices.Equal(gotIdentifiers, firstIdentifiers) {
+			t.Fatalf("iteration %d: attribute order is non-deterministic\nfirst: %v\ngot:   %v", i, firstIdentifiers, gotIdentifiers)
+		}
+	}
+}
+
+// TestBuildZkAttributes_RejectsUndisclosedRequestedClaim guards against
+// silently proceeding when a claim the DCQL request named wasn't actually
+// disclosed - the old map-iteration-based version would have simply
+// produced a shorter, silently-wrong attribute list instead of a clear
+// error naming the missing claim.
+func TestBuildZkAttributes_RejectsUndisclosedRequestedClaim(t *testing.T) {
+	issuerSigned := map[string]map[string]any{
+		"org.iso.18013.5.1": {
+			"given_name": "Alice",
+		},
+	}
+	_, _, err := buildZkAttributes(issuerSigned, []string{"given_name", "family_name"})
+	if err == nil {
+		t.Fatal("expected an error for a requested-but-undisclosed claim, got nil")
+	}
+	if !strings.Contains(err.Error(), "family_name") {
+		t.Errorf("expected error to name the missing claim %q, got: %v", "family_name", err)
+	}
+}
+
+// TestBuildZkAttributes_RejectsEmptyRequestedClaimIDs guards against
+// silently guessing an order when the caller has no DCQL-derived ordering
+// to supply (e.g. no cached DCQL query for this session) - failing loudly
+// here is safer than falling back to any order this function might pick on
+// its own, since native verification's positional matching would otherwise
+// fail unpredictably instead of with a clear, attributable error.
+func TestBuildZkAttributes_RejectsEmptyRequestedClaimIDs(t *testing.T) {
+	issuerSigned := map[string]map[string]any{
+		"org.iso.18013.5.1": {"given_name": "Alice"},
+	}
+	_, _, err := buildZkAttributes(issuerSigned, nil)
+	if err == nil {
+		t.Fatal("expected an error for empty requestedClaimIDs, got nil")
+	}
+}
+
+// TestBuildZkAttributes_RejectsPseudonymInRequestedClaimIDs guards against a
+// DCQL request that names "pairwise_pseudonym" explicitly in its claims list
+// (which siros-sdk-kotlin/siros-sdk-swift never do - it's always appended
+// separately) - accepting that would double it up at the wrong position
+// rather than the required last slot.
+func TestBuildZkAttributes_RejectsPseudonymInRequestedClaimIDs(t *testing.T) {
+	issuerSigned := map[string]map[string]any{
+		"org.iso.18013.5.1": {
+			"given_name":             "Alice",
+			PseudonymClaimIdentifier: []byte("0123456789abcdef0123456789abcdef"),
+		},
+	}
+	_, _, err := buildZkAttributes(issuerSigned, []string{"given_name", PseudonymClaimIdentifier})
+	if err == nil {
+		t.Fatal("expected an error for pairwise_pseudonym appearing in requestedClaimIDs, got nil")
 	}
 }

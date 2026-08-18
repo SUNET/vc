@@ -154,6 +154,22 @@ type ZkPresentationContext struct {
 	// verify call uses it both as a public input and to seed the Fiat-Shamir
 	// transcript the proof itself was built against.
 	SessionTranscript []byte
+
+	// RequestedClaimIDs is the DCQL credential query's `claims[].path`
+	// leaf identifiers, in the exact order the request specified them -
+	// NOT including "pairwise_pseudonym" (see PseudonymClaimIdentifier),
+	// which buildZkAttributes always appends last, matching the
+	// siros-sdk-kotlin/siros-sdk-swift proving-side convention
+	// (`requestedClaims + PSEUDONYM_CLAIM`). This is the sole source of
+	// truth for the order attributes are assembled in: zk-cred-longfellow's
+	// verifier matches attributes to circuit slots purely by position (see
+	// its own docs on this), so a wrong or nondeterministic order here
+	// would make native verification of a genuinely valid proof fail. Empty
+	// if no DCQL query was cached for this session/scope (best-effort,
+	// matching RequestedZkSystems' own fallback) - buildZkAttributes then
+	// has no ordering to reconstruct and returns an error rather than
+	// silently guessing.
+	RequestedClaimIDs []string
 }
 
 // ZkDocumentResult is the per-document verification/extraction result for
@@ -326,7 +342,7 @@ func (h *ZkHandler) verifyOneDocument(ctx context.Context, zkDoc *ZkDocumentMdoc
 
 	// 3. Assemble the native call's arguments.
 	issuerSigned := dd.FlattenIssuerSigned()
-	attributes, pseudonym, err := buildZkAttributes(issuerSigned)
+	attributes, pseudonym, err := buildZkAttributes(issuerSigned, pctx.RequestedClaimIDs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to assemble ZK attributes: %w", err)
 	}
@@ -388,7 +404,23 @@ func (h *ZkHandler) verifyOneDocument(ctx context.Context, zkDoc *ZkDocumentMdoc
 // []ZkAttribute shape the native verify call expects, and separately
 // returns the pairwise_pseudonym bytes if the document disclosed one (found
 // under PseudonymClaimIdentifier in any namespace).
-func buildZkAttributes(issuerSigned map[string]map[string]any) ([]ZkAttribute, []byte, error) {
+//
+// Order is NOT derived from map iteration (Go's map order is randomized,
+// and was a real, confirmed nondeterminism bug here before this fix -
+// zk-cred-longfellow's verifier matches attributes to circuit slots purely
+// by position, so a random order makes native verification of a genuinely
+// valid proof fail unpredictably). Instead this reconstructs the exact
+// order the original prover used: requestedClaimIDs (the DCQL request's own
+// claims[].path order) first, then "pairwise_pseudonym" always LAST if
+// present - mirroring siros-sdk-kotlin/siros-sdk-swift's
+// `requestedClaims + PSEUDONYM_CLAIM` proving-side convention exactly. See
+// ZkPresentationContext.RequestedClaimIDs's doc comment for the full
+// rationale.
+func buildZkAttributes(issuerSigned map[string]map[string]any, requestedClaimIDs []string) ([]ZkAttribute, []byte, error) {
+	if len(requestedClaimIDs) == 0 {
+		return nil, nil, fmt.Errorf("no requested claim IDs available to determine attribute order - cannot safely assemble a native ZK verify call")
+	}
+
 	// Use the package's canonical (sorted-map-key) CBOR encoder, not the
 	// cbor library's plain package-level Marshal: an attribute's value can
 	// itself be a map (structured mdoc claims decode as map[string]any),
@@ -401,36 +433,72 @@ func buildZkAttributes(issuerSigned map[string]map[string]any) ([]ZkAttribute, [
 		return nil, nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
 	}
 
-	var attributes []ZkAttribute
-	var pseudonym []byte
-
-	for _, items := range issuerSigned {
-		for identifier, value := range items {
-			valueCBOR, err := cborEncoder.Marshal(value)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to encode attribute %q: %w", identifier, err)
-			}
-			attributes = append(attributes, ZkAttribute{
-				Identifier: identifier,
-				ValueCBOR:  valueCBOR,
-			})
-			if identifier == PseudonymClaimIdentifier {
-				b, ok := value.([]byte)
-				if !ok {
-					// A present-but-wrong-type pairwise_pseudonym claim must
-					// not silently fall back to the non-PPID verify path
-					// (which is unimplemented even under "zknative" - see
-					// nativeVerifyZkProof's doc comment): that would produce
-					// a misleading ErrNativeZkVerifyNotImplemented instead
-					// of a clear error about the actual malformed claim.
-					return nil, nil, fmt.Errorf(
-						"%s claim has unexpected CBOR type %T, want []byte",
-						PseudonymClaimIdentifier, value,
-					)
-				}
-				pseudonym = b
+	// findClaim looks up identifier across every disclosed namespace - the
+	// DCQL request only names the leaf identifier (mdoc claim paths are
+	// [namespace, elementIdentifier], and buildZkAttributes has never
+	// needed the namespace itself: ZkAttribute.Identifier is bare, matching
+	// the native verifier's own expectation), so this mirrors the lookup
+	// semantics the old (buggy) map-iteration version had, minus the
+	// nondeterminism.
+	findClaim := func(identifier string) (any, bool) {
+		for _, items := range issuerSigned {
+			if value, ok := items[identifier]; ok {
+				return value, true
 			}
 		}
+		return nil, false
+	}
+
+	buildOne := func(identifier string, value any) (ZkAttribute, error) {
+		valueCBOR, err := cborEncoder.Marshal(value)
+		if err != nil {
+			return ZkAttribute{}, fmt.Errorf("failed to encode attribute %q: %w", identifier, err)
+		}
+		return ZkAttribute{Identifier: identifier, ValueCBOR: valueCBOR}, nil
+	}
+
+	attributes := make([]ZkAttribute, 0, len(requestedClaimIDs)+1)
+	for _, identifier := range requestedClaimIDs {
+		if identifier == PseudonymClaimIdentifier {
+			// Kotlin/Swift never include this in requestedClaims itself
+			// (it's appended separately, always last) - a DCQL request
+			// that somehow did name it explicitly would double it up at
+			// the wrong position, so guard against that rather than
+			// silently mis-ordering.
+			return nil, nil, fmt.Errorf("%s must not appear in RequestedClaimIDs - it is always appended last automatically", PseudonymClaimIdentifier)
+		}
+		value, ok := findClaim(identifier)
+		if !ok {
+			return nil, nil, fmt.Errorf("requested claim %q was not disclosed in this presentation", identifier)
+		}
+		attr, err := buildOne(identifier, value)
+		if err != nil {
+			return nil, nil, err
+		}
+		attributes = append(attributes, attr)
+	}
+
+	var pseudonym []byte
+	if value, ok := findClaim(PseudonymClaimIdentifier); ok {
+		b, ok := value.([]byte)
+		if !ok {
+			// A present-but-wrong-type pairwise_pseudonym claim must not
+			// silently fall back to the non-PPID verify path (which is
+			// unimplemented even under "zknative" - see
+			// nativeVerifyZkProof's doc comment): that would produce a
+			// misleading ErrNativeZkVerifyNotImplemented instead of a
+			// clear error about the actual malformed claim.
+			return nil, nil, fmt.Errorf(
+				"%s claim has unexpected CBOR type %T, want []byte",
+				PseudonymClaimIdentifier, value,
+			)
+		}
+		attr, err := buildOne(PseudonymClaimIdentifier, value)
+		if err != nil {
+			return nil, nil, err
+		}
+		attributes = append(attributes, attr)
+		pseudonym = b
 	}
 
 	return attributes, pseudonym, nil

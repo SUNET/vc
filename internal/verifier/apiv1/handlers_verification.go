@@ -289,15 +289,26 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// Find this scope's CredentialQuery (by the "scope == query ID"
 			// convention this codebase's own DCQL builders use - see
 			// buildDCQLQueryFromConfig in client.go) to recover
-			// zk_system_type/ppid_context. Best-effort: if no DCQL query was
-			// cached for this session (or none matches), RequestedZkSystems
-			// is empty and every document will correctly fail zk_system_type
-			// matching rather than silently skipping that check.
+			// zk_system_type/ppid_context, and the requested claims in their
+			// original request order - see ZkPresentationContext.
+			// RequestedClaimIDs's doc comment for why order matters here.
+			// Best-effort: if no DCQL query was cached for this session (or
+			// none matches), RequestedZkSystems/RequestedClaimIDs are both
+			// empty and verification correctly fails (zk_system_type
+			// matching, then buildZkAttributes' own empty-order guard)
+			// rather than silently skipping either check.
 			var zkMeta openid4vp.MetaQuery
+			var requestedClaimIDs []string
 			if authCtx.DCQLQuery != nil {
 				for _, cq := range authCtx.DCQLQuery.Credentials {
 					if cq.ID == scope && openid4vp.IsMdocZkFormat(cq.Format) {
 						zkMeta = cq.Meta
+						for _, claim := range cq.Claims {
+							if len(claim.Path) == 0 || claim.Path[len(claim.Path)-1] == nil {
+								continue
+							}
+							requestedClaimIDs = append(requestedClaimIDs, *claim.Path[len(claim.Path)-1])
+						}
 						break
 					}
 				}
@@ -330,6 +341,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				ClientID:           authCtx.ClientID,
 				PPIDContext:        zkMeta.PPIDContext,
 				RequestedZkSystems: zkMeta.ZKSystemType,
+				RequestedClaimIDs:  requestedClaimIDs,
 				SessionTranscript:  sessionTranscript,
 			})
 			if err != nil {
