@@ -29,9 +29,9 @@ import (
 // includes one.
 //
 // NOT independently verified against a real device's own transcript bytes -
-// this is spec-derived, best-effort plumbing for the (currently stubbed)
-// native ZK verify call. Confirm against a real wallet before relying on it
-// for anything that actually checks a cryptographic binding.
+// this is spec-derived, best-effort plumbing for the native ZK verify call.
+// Confirm against a real wallet before relying on it for anything that
+// actually checks a cryptographic binding.
 func BuildOID4VPSessionTranscript(clientID, nonce, responseURI string, readerPublicKeyJWKThumbprint []byte) ([]byte, error) {
 	var jwkThumbprint any
 	if readerPublicKeyJWKThumbprint != nil {

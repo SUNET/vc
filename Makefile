@@ -230,7 +230,8 @@ test-pkcs11: ## Test with PKCS#11 build tag
 # resulting shared library + hand-written header where
 # pkg/mdoc/zknative's cgo directives (`${SRCDIR}/../../../third_party/...`)
 # expect to find them. Override ZK_CRED_LONGFELLOW_REPO/_REF to build a
-# fork or pin a specific tag/commit.
+# fork or pin a specific tag/branch - the initial clone uses `git clone
+# --branch`, which only accepts a ref name, not an arbitrary commit SHA.
 zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native ZK/PPID verification
 	$(info Fetching/building zk-cred-longfellow's go-cabi target from $(ZK_CRED_LONGFELLOW_REPO)@$(ZK_CRED_LONGFELLOW_REF))
 	@if [ -d "$(ZK_CRED_LONGFELLOW_CHECKOUT)/.git" ]; then \
