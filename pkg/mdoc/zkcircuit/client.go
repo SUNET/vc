@@ -276,6 +276,9 @@ func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescri
 	if artifact == nil {
 		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q has no artifact", descriptor.ID)}
 	}
+	if artifact.Hash == "" {
+		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact has no hash - refusing to download unverifiable bytes", descriptor.ID)}
+	}
 
 	var lastFailure string
 	for _, url := range c.candidateArtifactURLs(artifact) {
