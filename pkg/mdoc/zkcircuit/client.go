@@ -30,6 +30,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -312,7 +313,14 @@ func (c *Client) FetchCircuit(ctx context.Context, id string) (*CircuitDescripto
 // Builds an ordered list of URL candidates and tries each in turn (first
 // hash-verified success wins):
 //   - if Artifact.URL is already an absolute URL, it is the only candidate
-//     (it already pins its own host - nothing to mirror-fallback across);
+//     (it already pins its own host - nothing to mirror-fallback across).
+//     Must be https, and its host must match one of this Client's
+//     configured Sources exactly - otherwise rejected up front, before any
+//     fetch is attempted. Without this, a compromised/malicious mirror's
+//     catalog response could point an absolute Artifact.URL at an
+//     arbitrary host (a blind SSRF primitive: SHA-256 verification only
+//     runs after the fetch completes, too late to stop the outbound
+//     request itself);
 //   - otherwise (the real service's current behavior) it is a relative
 //     path, resolved against every configured Sources mirror in order;
 //   - if Artifact.URL is blank, the path is instead constructed from
@@ -320,8 +328,9 @@ func (c *Client) FetchCircuit(ctx context.Context, id string) (*CircuitDescripto
 //     algorithm the service supports today), again resolved against every
 //     mirror.
 //
-// Returns an *ArtifactError if descriptor has no Artifact, or if every URL
-// candidate either failed to fetch or failed hash verification.
+// Returns an *ArtifactError if descriptor has no Artifact, if an absolute
+// Artifact.URL is rejected (plaintext http, or a disallowed host), or if
+// every URL candidate either failed to fetch or failed hash verification.
 func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescriptor) ([]byte, error) {
 	artifact := descriptor.Artifact
 	if artifact == nil {
@@ -338,6 +347,17 @@ func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescri
 		// fragility) - reject up front rather than silently fetching over
 		// http.
 		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact URL %q uses plaintext http - refusing (must be https or a relative path resolved against a configured source)", descriptor.ID, artifact.URL)}
+	}
+	if strings.HasPrefix(artifact.URL, "https://") && !c.isAllowedAbsoluteHost(artifact.URL) {
+		// Without this, an absolute artifact.URL from the remote,
+		// configurable catalog is a blind SSRF primitive: a
+		// compromised/malicious mirror could point it at an arbitrary host
+		// (an internal service, a cloud metadata endpoint, ...), and
+		// SHA-256 verification below only runs *after* the fetch completes
+		// - too late to prevent the outbound request itself. Only allow an
+		// absolute URL whose host matches one of the configured Sources'
+		// hosts exactly.
+		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact URL %q's host is not among this client's configured sources - refusing (a compromised/malicious mirror could otherwise redirect this verifier to an arbitrary host)", descriptor.ID, artifact.URL)}
 	}
 
 	maxBytes := capFor(artifact.Size, hardCeilingCompressedBytes)
@@ -447,6 +467,28 @@ func manifestURL(source string) string {
 
 func circuitURL(source, id string) string {
 	return strings.TrimRight(source, "/") + "/v1/circuits/" + id + ".json"
+}
+
+// isAllowedAbsoluteHost reports whether rawURL's host matches one of
+// c.Sources' hosts exactly (case-insensitive) - see the SSRF-prevention
+// rationale on DownloadArtifact's isAllowedAbsoluteHost call site. A
+// malformed rawURL, or a Sources entry that fails to parse, never counts
+// as a match (fail closed).
+func (c *Client) isAllowedAbsoluteHost(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	for _, source := range c.Sources {
+		sourceURL, err := url.Parse(source)
+		if err != nil {
+			continue
+		}
+		if strings.EqualFold(parsed.Host, sourceURL.Host) {
+			return true
+		}
+	}
+	return false
 }
 
 // candidateArtifactURLs implements the resolution rules documented on

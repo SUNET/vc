@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -210,7 +211,13 @@ func TestDownloadArtifact_AbsoluteURLNotMirrored(t *testing.T) {
 	descriptor := &CircuitDescriptor{
 		ID: "test-circuit",
 		Artifact: &Artifact{
-			URL:  "https://cdn.example.com/circuit.zst",
+			// Same host as the first configured source (allowed per the
+			// SSRF-prevention host allowlist - see
+			// TestDownloadArtifact_AbsoluteURLDisallowedHostRejected for the
+			// mismatched-host rejection case), different path, proving this
+			// absolute URL is used as-is rather than being resolved as a
+			// relative path against every mirror.
+			URL:  "https://mirror-a.invalid/circuit.zst",
 			Hash: "sha256:" + hash,
 		},
 	}
@@ -222,8 +229,43 @@ func TestDownloadArtifact_AbsoluteURLNotMirrored(t *testing.T) {
 	if _, err := client.DownloadArtifact(context.Background(), descriptor); err != nil {
 		t.Fatalf("DownloadArtifact: %v", err)
 	}
-	if len(calledURLs) != 1 || calledURLs[0] != "https://cdn.example.com/circuit.zst" {
+	if len(calledURLs) != 1 || calledURLs[0] != "https://mirror-a.invalid/circuit.zst" {
 		t.Errorf("expected exactly one call to the absolute URL, got %v", calledURLs)
+	}
+}
+
+// TestDownloadArtifact_AbsoluteURLDisallowedHostRejected guards against the
+// SSRF finding on PR #576: an absolute Artifact.URL from the remote,
+// configurable catalog whose host doesn't match any configured Source must
+// be rejected before any fetch is attempted - otherwise a
+// compromised/malicious mirror could redirect this client to an arbitrary
+// host (SHA-256 verification alone doesn't help, since it only runs after
+// the fetch already completed).
+func TestDownloadArtifact_AbsoluteURLDisallowedHostRejected(t *testing.T) {
+	client := NewClient("https://mirror-a.invalid", "https://mirror-b.invalid")
+	payload := []byte("bytes")
+	hash := mustSha256Hex(t, payload)
+	descriptor := &CircuitDescriptor{
+		ID: "test-circuit",
+		Artifact: &Artifact{
+			URL:  "https://cdn.example.com/circuit.zst",
+			Hash: "sha256:" + hash,
+		},
+	}
+	fetchCalled := false
+	client.FetchBytes = func(ctx context.Context, url string) ([]byte, error) {
+		fetchCalled = true
+		return payload, nil
+	}
+	_, err := client.DownloadArtifact(context.Background(), descriptor)
+	if err == nil {
+		t.Fatal("expected an error for an absolute URL whose host isn't a configured source, got nil")
+	}
+	if !strings.Contains(err.Error(), "cdn.example.com") {
+		t.Errorf("expected error to name the rejected host, got: %v", err)
+	}
+	if fetchCalled {
+		t.Error("expected the disallowed host to be rejected before any fetch was attempted")
 	}
 }
 
