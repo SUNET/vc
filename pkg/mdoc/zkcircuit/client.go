@@ -341,8 +341,9 @@ func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescri
 	}
 
 	maxBytes := capFor(artifact.Size, hardCeilingCompressedBytes)
+	candidates := c.candidateArtifactURLs(artifact)
 	var lastFailure string
-	for _, url := range c.candidateArtifactURLs(artifact) {
+	for _, url := range candidates {
 		data, err := c.fetchBytes(ctx, url, maxBytes)
 		if err != nil {
 			lastFailure = fmt.Sprintf("fetch failed from %s: %v", url, err)
@@ -358,8 +359,13 @@ func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescri
 	}
 	return nil, &ArtifactError{
 		Message: fmt.Sprintf(
-			"failed to download a hash-verified artifact for circuit %q from any of %d source(s) (last: %s)",
-			descriptor.ID, len(c.Sources), lastFailure,
+			// len(candidates), not len(c.Sources): an absolute artifact.URL
+			// collapses to exactly 1 candidate regardless of how many
+			// mirrors are configured (see candidateArtifactURLs), so
+			// reporting len(c.Sources) here was misleading during
+			// debugging.
+			"failed to download a hash-verified artifact for circuit %q from any of %d candidate URL(s) (last: %s)",
+			descriptor.ID, len(candidates), lastFailure,
 		),
 	}
 }

@@ -49,14 +49,19 @@ import (
 // verify_with_ppid_wasm, which hardcodes the same identifier).
 const PseudonymClaimIdentifier = "pairwise_pseudonym"
 
-// ErrNativeZkVerifyNotImplemented is returned by the (stubbed) native ZK
-// proof verification call. Every check that does NOT require the native
-// Longfellow library - trust chain, zk_system_type matching, argument
-// assembly - has already completed successfully by the time this error is
-// produced; it marks specifically the "call into libzk" step that vc
-// currently cannot perform. See docs/ZK_PPID_VERIFICATION_PLAN.md.
+// ErrNativeZkVerifyNotImplemented is returned by the native ZK proof
+// verification call site when it isn't available: either this build
+// lacks the "zknative" tag entirely (the default, fully-static build -
+// see zk_native_stub.go), or it does have that tag but the specific
+// direction called isn't wired up (the non-PPID path - see
+// zk_native_cgo.go's own doc comment for why). It is NOT returned when
+// built with "zknative" for the PPID path, which is real. Every check
+// that does NOT require the native Longfellow library - trust chain,
+// zk_system_type matching, argument assembly - has already completed
+// successfully by the time this error is produced; it marks specifically
+// the "call into libzk" step. See docs/ZK_PPID_VERIFICATION_PLAN.md.
 var ErrNativeZkVerifyNotImplemented = errors.New(
-	"native Longfellow ZK proof verification is not implemented: vc-verifier has no Go binding to zk-cred-longfellow yet (see docs/ZK_PPID_VERIFICATION_PLAN.md)",
+	"native Longfellow ZK proof verification is not available in this build/direction (see docs/ZK_PPID_VERIFICATION_PLAN.md)",
 )
 
 // ZkAttribute mirrors zk-cred-longfellow's own `Attribute` FFI record
