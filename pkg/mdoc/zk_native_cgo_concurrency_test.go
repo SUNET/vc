@@ -62,6 +62,7 @@ func TestGetOrLoadVerifier_ContextCancellationWhileWaiting(t *testing.T) {
 	// handler above is currently blocking on). A second caller therefore
 	// takes the "wait on the in-flight load" branch.
 	waiterCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		cancel()

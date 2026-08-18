@@ -93,10 +93,10 @@ func TestBuildOID4VPSessionTranscript_Deterministic(t *testing.T) {
 //
 // What this does NOT establish: it is not a byte capture from an actual
 // live wallet<->verifier session (no such fixture was found - see
-// docs/ZK_PPID_VERIFICATION_PLAN.md and the TODO at
-// internal/verifier/apiv1/handlers_verification.go's ZK dispatch site for
-// that still-open gap), and siros-sdk-kotlin's own test suite does not
-// itself assert concrete expected bytes for this specific function either
+// docs/ZK_PPID_VERIFICATION_PLAN.md and the still-open gap noted at
+// internal/verifier/apiv1/handlers_verification.go's ZK dispatch site), and
+// siros-sdk-kotlin's own test suite does not itself assert concrete
+// expected bytes for this specific function either
 // (only its OpenID4VPDCAPIHandover sibling has an inline recompute-and-
 // compare test). This test raises confidence in the wire-format
 // construction specifically; it does not close the "confirm against a

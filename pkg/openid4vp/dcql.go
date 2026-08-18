@@ -474,40 +474,49 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 			}
 		}
 	case FormatMsoMdocZk:
-		// ZK-mdoc requires doctype_value, same as plain mso_mdoc
-		if query.Meta.DoctypeValue == "" {
-			return &DCQLValidationError{
-				Field:   "meta.doctype_value",
-				Message: "doctype_value is required for ZK-mdoc format",
-			}
-		}
-		// ...plus a non-empty zk_system_type array declaring which ZK
-		// systems/circuits the verifier accepts, each entry of which must
-		// itself carry the "id"/"system" fields ZKSystemTypeSpec requires
-		// (matching/circuit resolution depends on both being present -
-		// see MatchZKSystemType and pkg/mdoc/zkcircuit.Client.FetchCircuit).
-		if len(query.Meta.ZKSystemType) == 0 {
-			return &DCQLValidationError{
-				Field:   "meta.zk_system_type",
-				Message: "zk_system_type is required for ZK-mdoc format",
-			}
-		}
-		for i, spec := range query.Meta.ZKSystemType {
-			if spec.ID == "" {
-				return &DCQLValidationError{
-					Field:   fmt.Sprintf("meta.zk_system_type[%d].id", i),
-					Message: "id is required for each zk_system_type entry",
-				}
-			}
-			if spec.System == "" {
-				return &DCQLValidationError{
-					Field:   fmt.Sprintf("meta.zk_system_type[%d].system", i),
-					Message: "system is required for each zk_system_type entry",
-				}
-			}
-		}
+		return validateMsoMdocZkQuery(query)
 	default:
 		// Unknown format - allow but don't validate
+	}
+	return nil
+}
+
+// validateMsoMdocZkQuery validates the ZK-mdoc (mso_mdoc_zk)-specific
+// fields of a CredentialQuery, split out of ValidateCredentialQuery to
+// keep that function's per-format switch flat (this format alone needs a
+// nested per-entry loop over zk_system_type, unlike every other format).
+func validateMsoMdocZkQuery(query CredentialQuery) error {
+	// ZK-mdoc requires doctype_value, same as plain mso_mdoc.
+	if query.Meta.DoctypeValue == "" {
+		return &DCQLValidationError{
+			Field:   "meta.doctype_value",
+			Message: "doctype_value is required for ZK-mdoc format",
+		}
+	}
+	// ...plus a non-empty zk_system_type array declaring which ZK
+	// systems/circuits the verifier accepts, each entry of which must
+	// itself carry the "id"/"system" fields ZKSystemTypeSpec requires
+	// (matching/circuit resolution depends on both being present - see
+	// MatchZKSystemType and pkg/mdoc/zkcircuit.Client.FetchCircuit).
+	if len(query.Meta.ZKSystemType) == 0 {
+		return &DCQLValidationError{
+			Field:   "meta.zk_system_type",
+			Message: "zk_system_type is required for ZK-mdoc format",
+		}
+	}
+	for i, spec := range query.Meta.ZKSystemType {
+		if spec.ID == "" {
+			return &DCQLValidationError{
+				Field:   fmt.Sprintf("meta.zk_system_type[%d].id", i),
+				Message: "id is required for each zk_system_type entry",
+			}
+		}
+		if spec.System == "" {
+			return &DCQLValidationError{
+				Field:   fmt.Sprintf("meta.zk_system_type[%d].system", i),
+				Message: "system is required for each zk_system_type entry",
+			}
+		}
 	}
 	return nil
 }
