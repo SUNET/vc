@@ -163,3 +163,35 @@ func TestGetOrLoadVerifier_WaiterSeesRealLoadError(t *testing.T) {
 		t.Errorf("waiter error should surface the real underlying failure (\"parse circuit descriptor...\"), not a generic placeholder; got: %v", waiterErr)
 	}
 }
+
+// TestGetOrLoadVerifier_RejectsOutOfRangeNumAttributes guards against a
+// real gap flagged in Copilot review on PR #576: version/num_attributes
+// come from a remote, configurable catalog response and were narrowed to
+// uint8 for zknative.NewVerifier without a bounds check - a malicious or
+// buggy descriptor (e.g. "num_attributes": 999) would silently wrap
+// (999 -> 231) instead of failing with a clear error. Serves a real
+// circuit descriptor (no artifact download needed - the bounds check
+// happens before that) with an out-of-range num_attributes and confirms
+// getOrLoadVerifier fails fast with a descriptive error instead of ever
+// reaching the native library.
+func TestGetOrLoadVerifier_RejectsOutOfRangeNumAttributes(t *testing.T) {
+	const zkSystemID = "test-out-of-range-num-attributes"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": "` + zkSystemID + `",
+			"system": "longfellow",
+			"params": {"version": 8, "num_attributes": 999}
+		}`))
+	}))
+	defer server.Close()
+
+	_, _, err := getOrLoadVerifier(context.Background(), zkSystemID, []string{server.URL})
+	if err == nil {
+		t.Fatal("expected an error for num_attributes=999 (out of uint8 range), got nil")
+	}
+	if !strings.Contains(err.Error(), "out of range") {
+		t.Errorf("expected error to mention the out-of-range value, got: %v", err)
+	}
+}

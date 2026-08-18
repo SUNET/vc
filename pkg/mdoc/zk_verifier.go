@@ -415,9 +415,20 @@ func buildZkAttributes(issuerSigned map[string]map[string]any) ([]ZkAttribute, [
 				ValueCBOR:  valueCBOR,
 			})
 			if identifier == PseudonymClaimIdentifier {
-				if b, ok := value.([]byte); ok {
-					pseudonym = b
+				b, ok := value.([]byte)
+				if !ok {
+					// A present-but-wrong-type pairwise_pseudonym claim must
+					// not silently fall back to the non-PPID verify path
+					// (which is unimplemented even under "zknative" - see
+					// nativeVerifyZkProof's doc comment): that would produce
+					// a misleading ErrNativeZkVerifyNotImplemented instead
+					// of a clear error about the actual malformed claim.
+					return nil, nil, fmt.Errorf(
+						"%s claim has unexpected CBOR type %T, want []byte",
+						PseudonymClaimIdentifier, value,
+					)
 				}
+				pseudonym = b
 			}
 		}
 	}

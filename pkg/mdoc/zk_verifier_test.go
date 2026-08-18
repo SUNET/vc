@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -306,5 +307,28 @@ func TestBuildZkAttributes_StructuredValueCBOREncodingIsDeterministic(t *testing
 		if !bytes.Equal(first, encoded) {
 			t.Fatalf("iteration %d: value_cbor for a structured attribute is non-deterministic\nfirst: %x\ngot:   %x", i, first, encoded)
 		}
+	}
+}
+
+// TestBuildZkAttributes_RejectsWrongTypePseudonymClaim guards against a
+// real gap: a document could carry a "pairwise_pseudonym"-identified claim
+// whose CBOR value doesn't decode to []byte (malformed, or a wallet bug).
+// Silently falling back to treating the document as non-PPID would route
+// verification into nativeVerifyZkProof, which is unimplemented even under
+// the "zknative" tag - producing a misleading
+// ErrNativeZkVerifyNotImplemented instead of a clear error naming the
+// actual problem.
+func TestBuildZkAttributes_RejectsWrongTypePseudonymClaim(t *testing.T) {
+	issuerSigned := map[string]map[string]any{
+		"org.iso.18013.5.1": {
+			PseudonymClaimIdentifier: "not-bytes", // wrong CBOR type
+		},
+	}
+	_, _, err := buildZkAttributes(issuerSigned)
+	if err == nil {
+		t.Fatal("expected an error for a wrong-type pairwise_pseudonym claim, got nil")
+	}
+	if !strings.Contains(err.Error(), PseudonymClaimIdentifier) {
+		t.Errorf("expected error to name %q, got: %v", PseudonymClaimIdentifier, err)
 	}
 }

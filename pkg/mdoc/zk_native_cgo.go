@@ -16,6 +16,7 @@ package mdoc
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 
 	"github.com/SUNET/vc/pkg/mdoc/zkcircuit"
@@ -215,6 +216,19 @@ func getOrLoadVerifier(ctx context.Context, zkSystemID string, zkCircuitSources 
 	numAttrs, ok := descriptor.ParamInt("num_attributes")
 	if !ok {
 		err = fmt.Errorf("circuit %q descriptor has no numeric params.num_attributes", zkSystemID)
+		return nil, 0, err
+	}
+	// version/numAttrs come from a remote, configurable catalog response
+	// (see pkg/mdoc/zkcircuit) and are about to be narrowed to uint8 for
+	// zknative.NewVerifier - validate the range explicitly first so a
+	// malformed/malicious descriptor (e.g. num_attributes: 999) fails
+	// with a clear error instead of silently wrapping (999 -> 231).
+	if version < 0 || version > math.MaxUint8 {
+		err = fmt.Errorf("circuit %q descriptor's params.version %d is out of uint8 range", zkSystemID, version)
+		return nil, 0, err
+	}
+	if numAttrs <= 0 || numAttrs > math.MaxUint8 {
+		err = fmt.Errorf("circuit %q descriptor's params.num_attributes %d is out of range (must be 1-255)", zkSystemID, numAttrs)
 		return nil, 0, err
 	}
 
