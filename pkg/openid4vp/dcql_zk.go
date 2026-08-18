@@ -61,6 +61,11 @@ type ZKSystemTypeSpec struct {
 	System string `json:"system" yaml:"system" validate:"required"`
 
 	// Params holds every other member of the wire object, as strings.
+	// The json:"-"/yaml:"-" tags exist only so the default struct-tag
+	// reflection codecs never touch this field directly - MarshalJSON/
+	// UnmarshalJSON and MarshalYAML/UnmarshalYAML below fully own how
+	// Params is (de)serialized (flattened to the top level, not nested
+	// under a "params" key/property).
 	Params map[string]string `json:"-" yaml:"-"`
 }
 
@@ -122,6 +127,70 @@ func (z *ZKSystemTypeSpec) UnmarshalJSON(data []byte) error {
 			params[k] = s
 		} else {
 			params[k] = string(raw)
+		}
+	}
+
+	z.ID = id
+	z.System = system
+	z.Params = params
+	return nil
+}
+
+// MarshalYAML implements gopkg.in/yaml.v2's Marshaler interface for
+// ZKSystemTypeSpec, mirroring MarshalJSON: the config shape is a single
+// flat mapping (`id`, `system`, plus every Params entry), not a nested
+// "params" key.
+func (z ZKSystemTypeSpec) MarshalYAML() (any, error) {
+	m := make(map[string]any, len(z.Params)+2)
+	for k, v := range z.Params {
+		m[k] = v
+	}
+	m["id"] = z.ID
+	m["system"] = z.System
+	return m, nil
+}
+
+// UnmarshalYAML implements gopkg.in/yaml.v2's Unmarshaler interface for
+// ZKSystemTypeSpec, mirroring UnmarshalJSON: every mapping key other than
+// "id"/"system" is captured in Params (as its string form). Without this,
+// the Params field's json:"-"/yaml:"-" tags would make it impossible for
+// a YAML-authored config (e.g. pkg/configuration's presentation request
+// templates, loaded via gopkg.in/yaml.v2) to ever set
+// num_attributes/circuit_hash/etc - only a JSON request body could,
+// since MarshalJSON/UnmarshalJSON already handle that path.
+func (z *ZKSystemTypeSpec) UnmarshalYAML(unmarshal func(any) error) error {
+	var m map[string]any
+	if err := unmarshal(&m); err != nil {
+		return err
+	}
+
+	idRaw, ok := m["id"]
+	if !ok {
+		return fmt.Errorf("zk_system_type entry missing required \"id\"")
+	}
+	id, ok := idRaw.(string)
+	if !ok {
+		return fmt.Errorf("zk_system_type entry \"id\" must be a string")
+	}
+
+	systemRaw, ok := m["system"]
+	if !ok {
+		return fmt.Errorf("zk_system_type entry missing required \"system\"")
+	}
+	system, ok := systemRaw.(string)
+	if !ok {
+		return fmt.Errorf("zk_system_type entry \"system\" must be a string")
+	}
+
+	params := make(map[string]string, len(m))
+	for k, v := range m {
+		if k == "id" || k == "system" {
+			continue
+		}
+		if s, ok := v.(string); ok {
+			params[k] = s
+		} else {
+			params[k] = fmt.Sprintf("%v", v)
 		}
 	}
 
