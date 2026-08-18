@@ -30,6 +30,9 @@ type Policy struct {
 
 	// MDOCIACA contains mDOC IACA-specific constraints
 	MDOCIACA *MDOCIACAPolicyConstraints `json:"mdociaca,omitempty" yaml:"mdociaca,omitempty"`
+
+	// FIDOMDS3 contains FIDO Alliance MDS3-specific constraints
+	FIDOMDS3 *FIDOMDS3PolicyConstraints `json:"fidomds3,omitempty" yaml:"fidomds3,omitempty"`
 }
 
 // PolicyConstraints contains registry-agnostic trust constraints.
@@ -140,6 +143,27 @@ type MDOCIACAPolicyConstraints struct {
 	// RequireIACAEndpoint requires the issuer to publish mdoc_iacas_uri.
 	// When true, issuers without IACA endpoints are rejected.
 	RequireIACAEndpoint bool `json:"require_iaca_endpoint,omitempty" yaml:"require_iaca_endpoint,omitempty"`
+}
+
+// FIDOMDS3PolicyConstraints contains FIDO Alliance MDS3-specific constraints,
+// applied on top of (never instead of) the registry's own MDS3 status-report
+// and x5c chain verification.
+//
+// If AllowedAAGUIDs is non-empty, only those AAGUIDs are trusted regardless
+// of MDS3 certification status ("allowlist_only" semantics). Otherwise, if
+// BlockedAAGUIDs is non-empty, all MDS3-certified AAGUIDs are trusted except
+// those listed ("allow_except_blocklist" semantics). If both are non-empty,
+// AllowedAAGUIDs takes precedence and BlockedAAGUIDs is ignored. If neither
+// is set — including when no policy matches the request's action at all —
+// behavior is unchanged: MDS3 status/chain verification only.
+type FIDOMDS3PolicyConstraints struct {
+	// AllowedAAGUIDs restricts trust to specific AAGUIDs, regardless of MDS3
+	// certification status. If empty, this constraint has no effect.
+	AllowedAAGUIDs []string `json:"allowed_aaguids,omitempty" yaml:"allowed_aaguids,omitempty"`
+
+	// BlockedAAGUIDs denies specific AAGUIDs even if MDS3 certifies them.
+	// Only applied when AllowedAAGUIDs is empty.
+	BlockedAAGUIDs []string `json:"blocked_aaguids,omitempty" yaml:"blocked_aaguids,omitempty"`
 }
 
 // PolicyManager manages trust policies and routes requests based on action.name.
@@ -280,4 +304,25 @@ func (pc *PolicyContext) GetMDOCIACAIssuerAllowlist() []string {
 		return nil
 	}
 	return pc.Policy.MDOCIACA.IssuerAllowlist
+}
+
+// HasFIDOMDS3Constraints returns true if the policy has FIDO MDS3-specific constraints.
+func (pc *PolicyContext) HasFIDOMDS3Constraints() bool {
+	return pc.Policy != nil && pc.Policy.FIDOMDS3 != nil
+}
+
+// GetFIDOMDS3AllowedAAGUIDs returns the AAGUID allowlist from the policy, or nil.
+func (pc *PolicyContext) GetFIDOMDS3AllowedAAGUIDs() []string {
+	if pc.Policy == nil || pc.Policy.FIDOMDS3 == nil {
+		return nil
+	}
+	return pc.Policy.FIDOMDS3.AllowedAAGUIDs
+}
+
+// GetFIDOMDS3BlockedAAGUIDs returns the AAGUID blocklist from the policy, or nil.
+func (pc *PolicyContext) GetFIDOMDS3BlockedAAGUIDs() []string {
+	if pc.Policy == nil || pc.Policy.FIDOMDS3 == nil {
+		return nil
+	}
+	return pc.Policy.FIDOMDS3.BlockedAAGUIDs
 }
