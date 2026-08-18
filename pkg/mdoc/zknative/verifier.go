@@ -32,6 +32,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"unsafe"
 )
 
@@ -72,6 +73,12 @@ func NewVerifier(circuit []byte, version uint8, numAttributes uint8) (*Verifier,
 	circuitPtr, circuitLen := bytesPtr(circuit)
 	var errOut *C.char
 	handle := C.rust_initialize_verifier(circuitPtr, circuitLen, C.uint8_t(version), C.uint8_t(numAttributes), &errOut)
+	// circuitPtr points into circuit's backing array, not a Go-managed
+	// reference C itself understands - KeepAlive guarantees circuit
+	// (and so its backing array) can't be GC'd before the (synchronous)
+	// C call above returns, regardless of what the compiler can prove
+	// about circuitPtr's own liveness.
+	runtime.KeepAlive(circuit)
 	if handle == nil {
 		return nil, fmt.Errorf("zknative: rust_initialize_verifier: %s", takeErrorString(errOut))
 	}
@@ -195,6 +202,18 @@ func (v *Verifier) VerifyWithPPID(args VerifyWithPPIDArgs) error {
 		proofPtr, proofLen,
 		&errOut,
 	)
+	// issuerPtr/dnsPtr/transcriptPtr/vcPtr/proofPtr each point into their
+	// respective Go slice's backing array (see bytesPtr) - KeepAlive each
+	// slice so none can be GC'd before the (synchronous) C call above
+	// returns, regardless of what the compiler can prove about the raw
+	// pointers' own liveness. cAttrs' CAttribute.value_cbor pointers are
+	// separately C-allocated copies (see cBytesCopy) and freed via
+	// toFree below, so they don't need this.
+	runtime.KeepAlive(args.IssuerPublicKeySEC1)
+	runtime.KeepAlive(args.DeviceNameSpacesBytes)
+	runtime.KeepAlive(args.SessionTranscript)
+	runtime.KeepAlive(args.VerifierContext)
+	runtime.KeepAlive(args.Proof)
 	if status != 0 {
 		return fmt.Errorf("zknative: rust_verify_with_ppid failed (status=%d): %s", int32(status), takeErrorString(errOut))
 	}

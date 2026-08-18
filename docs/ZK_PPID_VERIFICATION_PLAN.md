@@ -6,8 +6,10 @@ below.
 
 This document covers vc-verifier's support for verifying "mso_mdoc_zk"
 presentations - zero-knowledge (Longfellow) proof-of-possession over an mdoc
-credential, with an optional pairwise pseudonym (PPID) - and exactly what's
-missing before it actually works end to end.
+credential, with an optional pairwise pseudonym (PPID) - describing both
+the (now implemented) design and the remaining gaps/out-of-scope items
+(the non-PPID direction, other session transcript variants - see "Native
+verification (implemented)" below for exactly what those are).
 
 ## Background
 
@@ -126,7 +128,7 @@ changed to make it tractable).
 
 ### What made this tractable: zk-cred-longfellow's plain C ABI
 
-`zk-cred-longfellow` (`~/work/siros.org/zk-cred-longfellow`) added a
+`zk-cred-longfellow` added a
 second, hand-written, ordinary `extern "C"` ABI specifically for Go
 (`src/go_ffi.rs` / `include/zk_cred_longfellow_go.h`), separate from the
 UniFFI/RustBuffer-based ABI (`src/ffi_api.rs`) that generates the

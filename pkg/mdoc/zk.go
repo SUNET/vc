@@ -34,8 +34,9 @@ package mdoc
 //	}
 //
 // See docs/ZK_PPID_VERIFICATION_PLAN.md for how this plugs into
-// verification (zk_verifier.go) and exactly what's still missing (the
-// native Longfellow ZK verify call itself).
+// verification (zk_verifier.go) - native verification of the PPID
+// direction is implemented (opt-in, "zknative" build tag); the non-PPID
+// direction remains the documented gap.
 
 import (
 	"crypto/x509"
