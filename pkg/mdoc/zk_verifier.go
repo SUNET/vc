@@ -34,8 +34,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fxamacker/cbor/v2"
-
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/trust"
 
@@ -330,7 +328,21 @@ func (h *ZkHandler) verifyOneDocument(ctx context.Context, zkDoc *ZkDocumentMdoc
 		return nil, fmt.Errorf("failed to assemble ZK attributes: %w", err)
 	}
 
-	deviceNameSpacesBytes, err := cbor.Marshal(deviceSignedToWireMap(dd.DeviceSigned))
+	// Use the package's canonical (sorted-map-key) CBOR encoder, not the
+	// cbor library's plain package-level Marshal: deviceSignedToWireMap
+	// returns a genuine Go map (map[string]map[string]any), and Go map
+	// iteration order is randomized, so the default (SortNone) encoder
+	// would produce non-deterministic bytes across calls whenever there is
+	// more than one namespace or element. device_name_spaces_bytes must
+	// byte-match the canonical CBOR encoding a real wallet's own canonical
+	// encoder produced when it built the ZK proof - every other CBOR
+	// encode call site in this package already goes through
+	// NewCBOREncoder() for exactly this reason.
+	cborEncoder, err := NewCBOREncoder()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
+	}
+	deviceNameSpacesBytes, err := cborEncoder.Marshal(deviceSignedToWireMap(dd.DeviceSigned))
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode device_name_spaces_bytes: %w", err)
 	}
@@ -374,12 +386,24 @@ func (h *ZkHandler) verifyOneDocument(ctx context.Context, zkDoc *ZkDocumentMdoc
 // returns the pairwise_pseudonym bytes if the document disclosed one (found
 // under PseudonymClaimIdentifier in any namespace).
 func buildZkAttributes(issuerSigned map[string]map[string]any) ([]ZkAttribute, []byte, error) {
+	// Use the package's canonical (sorted-map-key) CBOR encoder, not the
+	// cbor library's plain package-level Marshal: an attribute's value can
+	// itself be a map (structured mdoc claims decode as map[string]any),
+	// and the default encoder's SortNone mode encodes maps in Go's
+	// randomized iteration order - non-deterministic across calls. Each
+	// attribute's value_cbor must byte-match the canonical encoding a real
+	// wallet's own canonical encoder committed to inside the ZK proof.
+	cborEncoder, err := NewCBOREncoder()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
+	}
+
 	var attributes []ZkAttribute
 	var pseudonym []byte
 
 	for _, items := range issuerSigned {
 		for identifier, value := range items {
-			valueCBOR, err := cbor.Marshal(value)
+			valueCBOR, err := cborEncoder.Marshal(value)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to encode attribute %q: %w", identifier, err)
 			}

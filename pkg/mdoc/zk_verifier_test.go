@@ -1,6 +1,7 @@
 package mdoc
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -218,5 +219,92 @@ func TestComputeZkVerifierContext_AbsentPPIDContextIsNotHashedEmptyString(t *tes
 	}
 	if got == wantIfHashedEmptyString {
 		t.Error("ComputeZkVerifierContext() must not hash an empty string for absent ppidContext")
+	}
+}
+
+// TestDeviceSignedToWireMap_CBOREncodingIsDeterministic guards against a
+// real bug: device_name_spaces_bytes must byte-match the canonical CBOR
+// encoding a real wallet's own canonical encoder produced when it built
+// the ZK proof. deviceSignedToWireMap returns a genuine Go map
+// (map[string]map[string]any), and Go deliberately randomizes map
+// iteration order - encoding it with the CBOR library's plain
+// package-level Marshal (SortNone) would silently produce different
+// bytes across calls for any document with more than one
+// namespace/element, which is exactly what this multi-namespace,
+// multi-element case exercises. The fix (this package's canonical
+// NewCBOREncoder(), used here) must always sort map keys regardless of
+// Go's map iteration order.
+func TestDeviceSignedToWireMap_CBOREncodingIsDeterministic(t *testing.T) {
+	deviceSigned := map[string][]ZkSignedItemMdoc{
+		"org.iso.18013.5.1": {
+			{ElementIdentifier: "given_name", ElementValue: "Alice"},
+			{ElementIdentifier: "family_name", ElementValue: "Doe"},
+			{ElementIdentifier: "age_over_18", ElementValue: true},
+		},
+		"eu.europa.ec.eudi.pid.1": {
+			{ElementIdentifier: "birth_date", ElementValue: "1990-01-01"},
+			{ElementIdentifier: "nationality", ElementValue: "SE"},
+		},
+	}
+
+	encoder, err := NewCBOREncoder()
+	if err != nil {
+		t.Fatalf("NewCBOREncoder: %v", err)
+	}
+
+	var first []byte
+	for i := 0; i < 50; i++ {
+		// Rebuild the map fresh each iteration - Go's map iteration order
+		// is randomized per range statement, so reusing one map instance
+		// wouldn't meaningfully re-exercise the ordering risk.
+		wireMap := deviceSignedToWireMap(deviceSigned)
+		encoded, err := encoder.Marshal(wireMap)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		if i == 0 {
+			first = encoded
+			continue
+		}
+		if !bytes.Equal(first, encoded) {
+			t.Fatalf("iteration %d: CBOR encoding of deviceSignedToWireMap output is non-deterministic\nfirst: %x\ngot:   %x", i, first, encoded)
+		}
+	}
+}
+
+// TestBuildZkAttributes_StructuredValueCBOREncodingIsDeterministic mirrors
+// TestDeviceSignedToWireMap_CBOREncodingIsDeterministic for
+// buildZkAttributes: an mdoc element's value can itself decode as a Go map
+// (structured claims), so value_cbor must also go through the canonical
+// encoder rather than the CBOR library's plain, order-unstable default.
+func TestBuildZkAttributes_StructuredValueCBOREncodingIsDeterministic(t *testing.T) {
+	issuerSigned := map[string]map[string]any{
+		"org.iso.18013.5.1": {
+			"driving_privileges": map[string]any{
+				"vehicle_category_code": "B",
+				"issue_date":            "2020-01-01",
+				"expiry_date":           "2030-01-01",
+				"codes":                 "none",
+			},
+		},
+	}
+
+	var first []byte
+	for i := 0; i < 50; i++ {
+		attributes, _, err := buildZkAttributes(issuerSigned)
+		if err != nil {
+			t.Fatalf("buildZkAttributes: %v", err)
+		}
+		if len(attributes) != 1 {
+			t.Fatalf("expected 1 attribute, got %d", len(attributes))
+		}
+		encoded := attributes[0].ValueCBOR
+		if i == 0 {
+			first = encoded
+			continue
+		}
+		if !bytes.Equal(first, encoded) {
+			t.Fatalf("iteration %d: value_cbor for a structured attribute is non-deterministic\nfirst: %x\ngot:   %x", i, first, encoded)
+		}
 	}
 }
