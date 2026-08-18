@@ -44,7 +44,7 @@ PKCS11_TAG              := pkcs11
 # see that target and README.md's "Native ZK/PPID proof verification"
 # section.
 ZKNATIVE_TAG            := zknative
-ZK_CRED_LONGFELLOW_REPO ?= git@github.com:sirosfoundation/zk-cred-longfellow.git
+ZK_CRED_LONGFELLOW_REPO ?= https://github.com/sirosfoundation/zk-cred-longfellow.git
 ZK_CRED_LONGFELLOW_REF  ?= main
 ZK_CRED_LONGFELLOW_CHECKOUT := third_party/.zk-cred-longfellow-src
 ZK_CRED_LONGFELLOW_STAGE    := third_party/zk-cred-longfellow
