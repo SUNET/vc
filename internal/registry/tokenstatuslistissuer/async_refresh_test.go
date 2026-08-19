@@ -59,7 +59,15 @@ func (f *fakeTokenStatusListStore) GetAllStatusesForSection(ctx context.Context,
 		}
 	}
 	if f.blockGetAll != nil {
-		<-f.blockGetAll
+		select {
+		case <-f.blockGetAll:
+		case <-ctx.Done():
+			// Respect context cancellation/timeout so a test failure before
+			// blockGetAll is closed (e.g. a require.* failure) doesn't leave
+			// this goroutine (and the refreshLoop/refreshSectionAsync
+			// goroutine that called it) blocked indefinitely past the end
+			// of the test.
+		}
 	}
 	return f.statuses, nil
 }
