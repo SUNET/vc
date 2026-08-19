@@ -36,6 +36,27 @@ func newOfferTestClient(t *testing.T, credMeta map[string]*model.CredentialMetad
 	}
 }
 
+func TestSVGTemplateReply_NilRequest(t *testing.T) {
+	client := &Client{}
+	_, err := client.SVGTemplateReply(t.Context(), nil)
+	require.Error(t, err)
+}
+
+func TestSVGTemplateReply_BothVCTMAndMDDLSet(t *testing.T) {
+	client := &Client{}
+	_, err := client.SVGTemplateReply(t.Context(), &SVGTemplateRequest{
+		VCTM: &sdjwtvc.VCTM{},
+		MDDL: &mdoc.MDDLSchema{},
+	})
+	require.Error(t, err)
+}
+
+func TestSVGTemplateReply_NeitherVCTMNorMDDLSet(t *testing.T) {
+	client := &Client{}
+	_, err := client.SVGTemplateReply(t.Context(), &SVGTemplateRequest{})
+	require.Error(t, err)
+}
+
 func TestUICreateCredentialOffer_VCTMScope(t *testing.T) {
 	credMeta := map[string]*model.CredentialMetadata{
 		"siros_id": {VCTM: &sdjwtvc.VCTM{Name: "SIROS ID", VCT: "urn:siros:id"}},

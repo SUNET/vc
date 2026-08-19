@@ -205,6 +205,13 @@ type SVGTemplateRequest struct {
 }
 
 func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) (*vcclient.SVGTemplateReply, error) {
+	if req == nil {
+		return nil, fmt.Errorf("SVGTemplateRequest is nil")
+	}
+	if req.VCTM != nil && req.MDDL != nil {
+		return nil, fmt.Errorf("SVGTemplateRequest must set exactly one of VCTM or MDDL, not both")
+	}
+
 	var svgTemplateURI string
 	switch {
 	case req.VCTM != nil:
