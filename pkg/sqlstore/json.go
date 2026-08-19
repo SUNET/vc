@@ -31,6 +31,13 @@ func (j JSON[T]) Value() (driver.Value, error) {
 // Scan implements sql.Scanner.
 func (j *JSON[T]) Scan(src any) error {
 	if src == nil {
+		// A SQL NULL must reset j.V to its zero value: if this JSON[T] is
+		// reused across scans (e.g. the same row struct passed to
+		// sqlx.Get/Select in a loop), leaving j.V untouched here would leak
+		// the previous row's value into a row whose column is actually
+		// NULL.
+		var zero T
+		j.V = zero
 		return nil
 	}
 	var b []byte
