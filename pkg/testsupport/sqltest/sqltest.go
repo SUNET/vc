@@ -11,6 +11,7 @@
 package sqltest
 
 import (
+	"context"
 	"strconv"
 	"testing"
 
@@ -18,12 +19,37 @@ import (
 	"github.com/SUNET/vc/pkg/testsupport"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mariadb"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
+
+// containerHostPort resolves ctr's host and mapped port for portSpec (e.g.
+// "5432/tcp") as a (host, int port) pair, terminating ctr and failing the
+// test on any error - shared by every StartXxx/XxxConfig helper below, all
+// of which otherwise repeated this exact host/port/strconv.Atoi sequence.
+func containerHostPort(t *testing.T, ctr testcontainers.Container, ctx context.Context, portSpec, label string) (string, int) {
+	t.Helper()
+	host, err := ctr.Host(ctx)
+	if err != nil {
+		_ = ctr.Terminate(ctx)
+		t.Fatalf("%s host: %v", label, err)
+	}
+	port, err := ctr.MappedPort(ctx, portSpec)
+	if err != nil {
+		_ = ctr.Terminate(ctx)
+		t.Fatalf("%s mapped port: %v", label, err)
+	}
+	portNum, err := strconv.Atoi(port.Port())
+	if err != nil {
+		_ = ctr.Terminate(ctx)
+		t.Fatalf("%s port: %v", label, err)
+	}
+	return host, portNum
+}
 
 // StartPostgres spins up a throwaway, fully-migrated Postgres container and
 // returns a connected *sqlx.DB, its Dialect, and a cleanup function. Skips
@@ -106,24 +132,7 @@ func StartMariaDB(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 		t.Fatalf("ping mariadb: %v", err)
 	}
 
-	host, err := ctr.Host(ctx)
-	if err != nil {
-		_ = db.Close()
-		_ = ctr.Terminate(ctx)
-		t.Fatalf("mariadb host: %v", err)
-	}
-	port, err := ctr.MappedPort(ctx, "3306/tcp")
-	if err != nil {
-		_ = db.Close()
-		_ = ctr.Terminate(ctx)
-		t.Fatalf("mariadb mapped port: %v", err)
-	}
-	portNum, err := strconv.Atoi(port.Port())
-	if err != nil {
-		_ = db.Close()
-		_ = ctr.Terminate(ctx)
-		t.Fatalf("mariadb port: %v", err)
-	}
+	host, portNum := containerHostPort(t, ctr, ctx, "3306/tcp", "mariadb")
 	cfg := &sqlstore.SQL{
 		Backend: "mariadb",
 		MariaDB: &sqlstore.MariaDBConfig{
@@ -164,21 +173,7 @@ func PostgresConfig(t *testing.T) (*sqlstore.PostgresConfig, func()) {
 		t.Fatalf("start postgres container: %v", err)
 	}
 
-	host, err := ctr.Host(ctx)
-	if err != nil {
-		_ = ctr.Terminate(ctx)
-		t.Fatalf("postgres host: %v", err)
-	}
-	port, err := ctr.MappedPort(ctx, "5432/tcp")
-	if err != nil {
-		_ = ctr.Terminate(ctx)
-		t.Fatalf("postgres mapped port: %v", err)
-	}
-	portNum, err := strconv.Atoi(port.Port())
-	if err != nil {
-		_ = ctr.Terminate(ctx)
-		t.Fatalf("postgres port: %v", err)
-	}
+	host, portNum := containerHostPort(t, ctr, ctx, "5432/tcp", "postgres")
 
 	cfg := &sqlstore.PostgresConfig{
 		Host:         host,
@@ -209,21 +204,7 @@ func MariaDBConfig(t *testing.T) (*sqlstore.MariaDBConfig, func()) {
 		t.Fatalf("start mariadb container: %v", err)
 	}
 
-	host, err := ctr.Host(ctx)
-	if err != nil {
-		_ = ctr.Terminate(ctx)
-		t.Fatalf("mariadb host: %v", err)
-	}
-	port, err := ctr.MappedPort(ctx, "3306/tcp")
-	if err != nil {
-		_ = ctr.Terminate(ctx)
-		t.Fatalf("mariadb mapped port: %v", err)
-	}
-	portNum, err := strconv.Atoi(port.Port())
-	if err != nil {
-		_ = ctr.Terminate(ctx)
-		t.Fatalf("mariadb port: %v", err)
-	}
+	host, portNum := containerHostPort(t, ctr, ctx, "3306/tcp", "mariadb")
 
 	cfg := &sqlstore.MariaDBConfig{
 		Host:         host,
