@@ -1224,9 +1224,15 @@ func (c *Cfg) VCTUrlsForScopes(scopes []string) []string {
 	return urls
 }
 
-// VCTIdentifiersForScopes resolves a list of scope keys to the original VCT
-// identifiers from the VCTM (e.g. URNs). Scopes without a loaded VCTM are
-// silently skipped.
+// VCTIdentifiersForScopes resolves a list of scope keys to the vct value
+// actually embedded in issued credentials for that scope -- BuildCredentialWithSigner
+// (pkg/sdjwtvc/methods.go) sets body["vct"] = vctm.VCT, the VCTM's own
+// declared "vct" field, not the published type-metadata URL VCTUrlsForScopes
+// returns (that URL only appears in credential_configurations_supported's
+// issuer-metadata "vct", a different, cosmetic value from what's actually
+// embedded in a credential). DCQL queries built from VCTUrlsForScopes instead
+// of this never matched any real issued credential — confirmed live via a
+// fresh test issuance (lpidproto PLAN.md workstream 7 task 7.5, finding 16).
 func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 	ids := make([]string, 0, len(scopes))
 	for _, scope := range scopes {

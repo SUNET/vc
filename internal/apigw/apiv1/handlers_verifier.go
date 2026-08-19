@@ -66,7 +66,32 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 			Format:   c.cfg.GetFormatForScope(authScope),
 			Multiple: false,
 			Meta: openid4vp.MetaQuery{
-				VCTValues: c.cfg.VCTIdentifiersForScopes([]string{authScope}),
+				// VCTUrlsForScopes, not VCTIdentifiersForScopes (finding 18,
+				// reversing finding 16). The credential's own embedded "vct"
+				// JWT claim (set by BuildCredentialWithSigner from vctm.VCT,
+				// e.g. "urn:eudi:pid:1") is NOT what the EUDI reference wallet
+				// matches a DCQL query against. Confirmed live against the real
+				// wallet-core/multipaz sources: when a document is added from an
+				// openid4vci offer, Offer.kt's OfferedDocument.documentFormat
+				// sets SdJwtVcFormat(vct = configuration.type) from the ISSUER
+				// METADATA's declared vct in credential_configurations_supported
+				// (our published type-metadata URL) -- never by parsing the
+				// issued credential's JWT body. SdJwtVcCredentialFactory then
+				// stamps that same format.vct onto the stored Credential's own
+				// `vct` property (CredentialFactory.kt). DcqlRequestProcessor's
+				// candidateDocumentsForQuery filters candidates by comparing the
+				// query's vct_values against exactly this metadata-derived tag
+				// (SdJwtVcFormat equality) -- BEFORE it ever parses the
+				// credential's actual JWT body -- so querying with the vctm-
+				// internal value here can never match any real issued document,
+				// independent of what's embedded in the credential body.
+				// Finding 16's reversal was based on inspecting the credential
+				// BODY's own vct claim, which the wallet never consults for this
+				// match. Reverted back to VCTUrlsForScopes; verified the
+				// server's own DCQL validation (pkg/openid4vp/validator.go
+				// validateAgainstDCQL) is a no-op stub, so this does not
+				// introduce a new server-side vct mismatch.
+				VCTValues: c.cfg.VCTUrlsForScopes([]string{authScope}),
 			},
 			RequireCryptographicHolderBinding: false,
 			Claims:                            scopeClaimQueries,
