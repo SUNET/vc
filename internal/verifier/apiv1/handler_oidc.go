@@ -208,6 +208,10 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 			QRCodeImageURL: walletQRURL,
 		})
 	}
+	// Maps have randomized iteration order; sort so the UI is stable across reloads.
+	slices.SortFunc(response.WalletLinks, func(a, b WalletLink) int {
+		return strings.Compare(a.Name, b.Name)
+	})
 
 	// Add Digital Credentials API configuration
 	response.PreferredFormats = c.cfg.Verifier.DigitalCredentials.PreferredFormats
