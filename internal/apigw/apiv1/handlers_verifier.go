@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/issuance"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -271,6 +272,38 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	}
 
 	c.log.Debug("Found credential metadata", "scope", scope, "vct", credMetaCfg.GetVCTURL())
+
+	// LOCAL PATCH (lpidportal): evaluate SPOCP issuance policy (if configured
+	// for this scope) against the presented credential's own claims. Upstream
+	// only wires issuance.GetPolicyEngine/Evaluate into the OIDC-RP callback
+	// (handlers_oidcrp.go) — this is the openid4vp equivalent, added because
+	// PolicyEngine.Evaluate is claims-source-agnostic (it takes a plain
+	// map[string]any and doesn't care whether it came from an OIDC token or a
+	// presented credential). This gates on PID *attributes* only — it is not
+	// a substitute for the identity-binding lookup below (ResolveIdentifier /
+	// GetByIdentity), which still does the actual wallet-to-applicant match.
+	// See vc-deploy/patches/README.md.
+	if scopeCfg := c.cfg.APIGW.DataSources.LookupScopePolicyConfig(scope); scopeCfg != nil && scopeCfg.IssuancePolicy != nil {
+		policyEngine, policyErr := issuance.GetPolicyEngine(scopeCfg.IssuancePolicy)
+		if policyErr != nil {
+			return nil, fmt.Errorf("failed to initialize issuance policy engine: %w", policyErr)
+		}
+		if policyEngine != nil {
+			// Evaluate the full presented-credential claims map, not just the
+			// identity subset extracted below — a policy rule may reference
+			// attributes (e.g. an age predicate) that aren't part of the
+			// identity-matching claim set at all.
+			policyClaims := maps.Clone(credential)
+			if policyErr := policyEngine.Evaluate(scope, policyClaims, scopeCfg.IssuancePolicy.QueryTemplate); policyErr != nil {
+				c.log.Warn("Issuance policy denied credential",
+					"scope", scope,
+					"matched_auth_scope", matchedAuthScope,
+					"error", policyErr)
+				return nil, fmt.Errorf("credential issuance denied: %w", policyErr)
+			}
+			c.log.Info("Issuance policy evaluation passed", "scope", scope)
+		}
+	}
 
 	// Extract identity from validated credential using the matched auth scope's claims.
 	// The vpAuth config tells us which claims to extract based on which credential was presented.
