@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
@@ -346,9 +347,22 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 		}
 	}
 
+	// html/template's default URL-attribute escaper only trusts a small
+	// scheme allowlist (http/https/mailto); anything else -- including the
+	// wallet's own custom-scheme redirect_uri (e.g.
+	// "eu.europa.ec.euidi://authorization"), which is exactly what ends up
+	// here for the openid4vp auth method -- gets silently replaced with the
+	// "#ZgotmplZ" safety sentinel instead of erroring, breaking the
+	// data-redirect-url attribute consent.js reads. Confirmed live
+	// (lpidproto PLAN.md workstream 7): the wallet's own JS then fails with
+	// "TypeError: Failed to construct 'URL': Invalid URL". redirectURL here
+	// is server-derived from the requesting client's own registered
+	// redirect_uri (WalletURI) or an internal auth-provider redirect, never
+	// raw user input, so marking it template.URL to bypass the scheme
+	// filter is safe.
 	c.HTML(http.StatusOK, "consent.html", gin.H{
 		"AuthMethod":  authProvider,
-		"RedirectURL": redirectURL,
+		"RedirectURL": template.URL(redirectURL),
 	})
 	return nil, nil
 }
