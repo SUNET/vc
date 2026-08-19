@@ -14,7 +14,7 @@ import (
 )
 
 // testNewSQLService exercises the real New()/newSQL() code path end to end
-// (config -> sqlstore.Connect -> sqlstore.Migrate -> store wiring), as
+// (config -> sqlstore.Connect -> sqlstore.ApplySchema -> store wiring), as
 // opposed to the individual sql_*_test.go files, which construct each SQL
 // store directly against an already-migrated database.
 func testNewSQLService(t *testing.T, cfg *model.Cfg) *Service {
