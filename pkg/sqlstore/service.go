@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
@@ -14,6 +15,19 @@ import (
 // call re-pings the backend.
 const probeCacheTTL = 10 * time.Second
 
+// ProbeCache guards a cached apiv1_status.StatusProbe against concurrent
+// Status() calls - a health-check/readiness endpoint is commonly hit by
+// multiple requests in flight at once, and the plain read-then-write this
+// replaces was a genuine data race under that load. Only one goroutine at a
+// time ever runs ping (see ProbeStatus): a call arriving while the cache is
+// stale but another goroutine's ping is already in flight simply waits for
+// the lock, then re-checks NextCheck and returns that fresh result rather
+// than pinging again.
+type ProbeCache struct {
+	mu    sync.Mutex
+	store apiv1_status.StatusProbeStore
+}
+
 // ProbeStatus implements the shared caching health-probe pattern every
 // db.Service.Status (apigw, verifier, ...) uses regardless of which backend
 // (Mongo or SQL) is active: ping at most once per probeCacheTTL, returning
@@ -24,9 +38,12 @@ const probeCacheTTL = 10 * time.Second
 // already opened its own tracing span around ctx (this package can't import
 // pkg/trace itself: pkg/model imports pkg/sqlstore, and pkg/trace imports
 // pkg/model, so sqlstore -> trace would be a cycle).
-func ProbeStatus(ctx context.Context, probeStore *apiv1_status.StatusProbeStore, ping func(context.Context) error) *apiv1_status.StatusProbe {
-	if time.Now().Before(probeStore.NextCheck.AsTime()) {
-		return probeStore.PreviousResult
+func ProbeStatus(ctx context.Context, cache *ProbeCache, ping func(context.Context) error) *apiv1_status.StatusProbe {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+
+	if time.Now().Before(cache.store.NextCheck.AsTime()) {
+		return cache.store.PreviousResult
 	}
 	probe := &apiv1_status.StatusProbe{
 		Name:          "db",
@@ -39,8 +56,8 @@ func ProbeStatus(ctx context.Context, probeStore *apiv1_status.StatusProbeStore,
 		probe.Healthy = false
 	}
 
-	probeStore.PreviousResult = probe
-	probeStore.NextCheck = timestamppb.New(time.Now().Add(probeCacheTTL))
+	cache.store.PreviousResult = probe
+	cache.store.NextCheck = timestamppb.New(time.Now().Add(probeCacheTTL))
 
 	return probe
 }
