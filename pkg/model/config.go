@@ -21,6 +21,7 @@ import (
 	"github.com/SUNET/vc/pkg/openidfederation"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/sqlstore"
 )
 
 // BoolVal safely dereferences a *bool, returning the pointed-to value or
@@ -88,8 +89,13 @@ type MTLS struct {
 
 // Mongo holds the MongoDB configuration
 type Mongo struct {
-	// URI is the MongoDB connection URI
-	URI string `yaml:"uri" validate:"required" doc_example:"\"mongodb://user:password@mongo:27017/vc\""`
+	// URI is the MongoDB connection URI. Required when Common.SQL.Backend is
+	// "mongo" (the default primary-store backend) or when Common.HA.Enable is
+	// true (pkg/cache has no relational backend yet, so HA caching always
+	// uses Mongo regardless of the primary store's backend). Enforced by a
+	// Common-level struct validation rather than a plain "required" tag here,
+	// since the requirement depends on sibling fields of Common, not of Mongo.
+	URI string `yaml:"uri" validate:"omitempty" doc_example:"\"mongodb://user:password@mongo:27017/vc\""`
 	// TLS enables TLS for the MongoDB connection.
 	// Can also be enabled via the connection URI parameter "tls=true".
 	TLS bool `yaml:"tls" default:"false"`
@@ -148,6 +154,9 @@ type Common struct {
 	Log Log `yaml:"log"`
 	// Mongo is the MongoDB configuration
 	Mongo Mongo `yaml:"mongo" validate:"omitempty"`
+	// SQL is the relational database configuration, used by services that
+	// support a relational storage backend as an alternative to MongoDB.
+	SQL sqlstore.SQL `yaml:"sql" validate:"omitempty"`
 	// Tracing is the OpenTelemetry tracing configuration
 	Tracing OTEL `yaml:"tracing" validate:"omitempty"`
 	// Metrics is the OpenTelemetry metrics configuration
