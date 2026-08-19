@@ -3,6 +3,7 @@ package oauth2
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"path"
 	"reflect"
@@ -132,6 +133,35 @@ func (c *Clients) Get(clientID string) (*Client, error) {
 		return nil, errors.New("client not found in config")
 	}
 	return client, nil
+}
+
+// dangerousRedirectURISchemes are schemes that render as "trusted" (i.e. not
+// escaped/sanitized) wherever a redirect_uri ends up being used verbatim --
+// e.g. the consent page renders it via html/template's template.URL(...) to
+// preserve wallets' own custom-scheme deep links (RFC 8252), which also
+// bypasses that escaper's normal scheme allowlist entirely. A redirect_uri
+// using one of these schemes could execute script or exfiltrate data via the
+// browser's own address bar/DOM APIs rather than just redirecting navigation.
+var dangerousRedirectURISchemes = []string{"javascript", "data", "vbscript", "file", "about"}
+
+// ValidateRedirectURIScheme rejects redirect_uri values using a scheme that's
+// unsafe to ever treat as a trusted URL (see dangerousRedirectURISchemes),
+// and values with no scheme at all. It intentionally does NOT restrict to an
+// allowlist of specific schemes: custom app-specific schemes (e.g.
+// "eu.europa.ec.euidi://authorization") are a legitimate, expected shape for
+// native wallet redirect URIs and must keep working.
+func ValidateRedirectURIScheme(redirectURI string) error {
+	parsed, err := url.Parse(redirectURI)
+	if err != nil {
+		return fmt.Errorf("redirect_uri is not a valid URI: %w", err)
+	}
+	if parsed.Scheme == "" {
+		return errors.New("redirect_uri must have a scheme")
+	}
+	if slices.Contains(dangerousRedirectURISchemes, strings.ToLower(parsed.Scheme)) {
+		return fmt.Errorf("redirect_uri scheme %q is not allowed", parsed.Scheme)
+	}
+	return nil
 }
 
 // Allow validates the client request and returns the Client configuration if allowed.
