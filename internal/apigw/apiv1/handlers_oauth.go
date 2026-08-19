@@ -37,6 +37,21 @@ import (
 //	@Router			/op/par [post]
 func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error) {
 	c.log.Debug("OAuthPar", "client_id", req.ClientID, "scope", req.Scope)
+
+	// Statically-configured clients already have their redirect_uri checked
+	// against a registered allowlist by Clients.Allow below. Wallet-attestation
+	// authenticated clients (the fallback branch further down) have no such
+	// allowlist -- attestation proves the wallet's identity, not that its
+	// requested redirect_uri is safe -- so without this, an attacker-supplied
+	// scheme like "javascript:" or "data:" would be stored as WalletURI and
+	// later rendered as a trusted URL on the consent page (endpoints_oauth.go
+	// wraps it in template.URL(...) to preserve custom wallet schemes, which
+	// also disables html/template's own scheme sanitization). Checking this
+	// unconditionally, before either path, closes the gap for both.
+	if err := oauth2.ValidateRedirectURIScheme(req.RedirectURI); err != nil {
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "invalid redirect_uri", 400, err)
+	}
+
 	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
 	if err != nil {
 		// Client not in static map — try wallet attestation via PDP.

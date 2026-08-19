@@ -225,3 +225,39 @@ func TestRedirectURIsContains(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateRedirectURIScheme(t *testing.T) {
+	tts := []struct {
+		name        string
+		redirectURI string
+		wantErr     bool
+	}{
+		{name: "https is allowed", redirectURI: "https://example.com/callback", wantErr: false},
+		{name: "http is allowed", redirectURI: "http://example.com/callback", wantErr: false},
+		{
+			// Native wallet deep-link schemes (RFC 8252) must keep working --
+			// this is exactly the shape the EUDI reference wallet uses.
+			name:        "custom app scheme is allowed",
+			redirectURI: "eu.europa.ec.euidi://authorization",
+			wantErr:     false,
+		},
+		{name: "javascript scheme is rejected", redirectURI: "javascript:alert(document.cookie)", wantErr: true},
+		{name: "JAVASCRIPT scheme is rejected case-insensitively", redirectURI: "JAVASCRIPT:alert(1)", wantErr: true},
+		{name: "data scheme is rejected", redirectURI: "data:text/html,<script>alert(1)</script>", wantErr: true},
+		{name: "vbscript scheme is rejected", redirectURI: "vbscript:msgbox(1)", wantErr: true},
+		{name: "file scheme is rejected", redirectURI: "file:///etc/passwd", wantErr: true},
+		{name: "no scheme is rejected", redirectURI: "//example.com/callback", wantErr: true},
+		{name: "empty string is rejected", redirectURI: "", wantErr: true},
+	}
+
+	for _, tt := range tts {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRedirectURIScheme(tt.redirectURI)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}

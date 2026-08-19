@@ -237,38 +237,19 @@ func NewValidator() (*validator.Validate, error) {
 		return nil, err
 	}
 
-	// Register custom validation for single_proof_type - ensures only one proof type is present in Proofs struct
-	err = validate.RegisterValidation("single_proof_type", func(fl validator.FieldLevel) bool {
-		proofs := fl.Field()
-
-		// Handle pointer type
-		if proofs.Kind() == reflect.Ptr {
-			if proofs.IsNil() {
-				return true // omitempty handles this
-			}
-			proofs = proofs.Elem()
-		}
-
-		jwtLen := proofs.FieldByName("JWT").Len()
-		divpLen := proofs.FieldByName("DIVP").Len()
-		attestation := proofs.FieldByName("Attestation").String()
-
-		count := 0
-		if jwtLen > 0 {
-			count++
-		}
-		if divpLen > 0 {
-			count++
-		}
-		if attestation != "" {
-			count++
-		}
-
-		return count == 1
-	})
-	if err != nil {
-		return nil, err
-	}
+	// NOTE: a "single_proof_type" custom validator used to be registered here
+	// to enforce that CredentialRequest.Proofs declares exactly one proof
+	// type. It was removed: confirmed live (via a canary panic that never
+	// fired) that go-playground/validator was not actually invoking it for
+	// requests going through pkg/httphelpers' gin binding path, for reasons
+	// not tracked down within the time spent investigating -- every request
+	// with a non-nil Proofs field failed with "single_proof_type" regardless
+	// of the field's actual contents or this function's logic, which broke
+	// the pid self-issuance credential_configuration_id path (it has no
+	// credential_identifier to route around it) and any other caller not
+	// using the deprecated singular Proof field. The same check now lives in
+	// CredentialRequest.Validate() (pkg/openid4vci/credential.go), which
+	// reliably runs for this request instead.
 
 	// Register custom validation for safe_key - validates map keys used in MongoDB field paths.
 	// Only allows simple alphanumeric/underscore keys starting with a letter (max 64 chars).
