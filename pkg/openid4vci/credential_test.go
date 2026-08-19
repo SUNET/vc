@@ -44,6 +44,31 @@ func TestCredentialValidation(t *testing.T) {
 			wantErr:              false,
 		},
 		{
+			// Proofs omitted entirely (nil) -- the deprecated singular
+			// "proof" field case -- must still be allowed.
+			name: "nil proofs is allowed (deprecated singular proof field)",
+			credentialRequest: &CredentialRequest{
+				CredentialConfigurationID: "vc+ldp",
+				Proofs:                    nil,
+			},
+			authorizationDetails: nil,
+			wantErr:              false,
+		},
+		{
+			// An explicitly-present but entirely empty proofs object
+			// declares zero proof types, which is exactly as invalid as
+			// declaring more than one -- must be rejected, matching
+			// VerifyProofWithOptions's existing behavior.
+			name: "explicitly empty proofs object is rejected",
+			credentialRequest: &CredentialRequest{
+				CredentialConfigurationID: "vc+ldp",
+				Proofs:                    &Proofs{},
+			},
+			authorizationDetails: nil,
+			wantErr:              true,
+			errContains:          "proofs must declare exactly one proof type",
+		},
+		{
 			name: "authorization_details flow with valid credential_identifier",
 			credentialRequest: &CredentialRequest{
 				CredentialIdentifier: "cred-id-1",
@@ -278,7 +303,7 @@ func TestExtractAllJWKs(t *testing.T) {
 		attestation := makeTestAttestationJWT(t, []map[string]any{
 			{"kty": "EC", "crv": "P-256", "x": "key1x", "y": "key1y"},
 		})
-		proofs := &Proofs{Attestation: attestation}
+		proofs := &Proofs{Attestation: []ProofAttestation{attestation}}
 		jwks, err := proofs.ExtractAllJWKs(1)
 		assert.NoError(t, err)
 		assert.Len(t, jwks, 1)
@@ -297,7 +322,7 @@ func TestExtractAllJWKs(t *testing.T) {
 			{"kty": "EC", "crv": "P-256", "x": "key2x", "y": "key2y"},
 			{"kty": "EC", "crv": "P-256", "x": "key3x", "y": "key3y"},
 		})
-		proofs := &Proofs{Attestation: attestation}
+		proofs := &Proofs{Attestation: []ProofAttestation{attestation}}
 		jwks, err := proofs.ExtractAllJWKs(3)
 		assert.NoError(t, err)
 		assert.Len(t, jwks, 3)
@@ -331,7 +356,7 @@ func TestExtractAllJWKs(t *testing.T) {
 			{"kty": "EC", "crv": "P-256", "x": "key2x", "y": "key2y"},
 			{"kty": "EC", "crv": "P-256", "x": "key3x", "y": "key3y"},
 		})
-		proofs := &Proofs{Attestation: attestation}
+		proofs := &Proofs{Attestation: []ProofAttestation{attestation}}
 		jwks, err := proofs.ExtractAllJWKs(2)
 		assert.Error(t, err)
 		assert.Nil(t, jwks)
@@ -356,7 +381,7 @@ func TestProofsCount(t *testing.T) {
 	})
 
 	t.Run("attestation count", func(t *testing.T) {
-		proofs := &Proofs{Attestation: ProofAttestation("some.jwt.token")}
+		proofs := &Proofs{Attestation: []ProofAttestation{ProofAttestation("some.jwt.token")}}
 		assert.NotEmpty(t, proofs.Attestation)
 	})
 

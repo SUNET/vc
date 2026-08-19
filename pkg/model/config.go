@@ -21,6 +21,7 @@ import (
 	"github.com/SUNET/vc/pkg/openidfederation"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/sqlstore"
 )
 
 // BoolVal safely dereferences a *bool, returning the pointed-to value or
@@ -88,8 +89,13 @@ type MTLS struct {
 
 // Mongo holds the MongoDB configuration
 type Mongo struct {
-	// URI is the MongoDB connection URI
-	URI string `yaml:"uri" validate:"required" doc_example:"\"mongodb://user:password@mongo:27017/vc\""`
+	// URI is the MongoDB connection URI. Required when Common.SQL.Backend is
+	// "mongo" (the default primary-store backend) or when Common.HA.Enable is
+	// true (pkg/cache has no relational backend yet, so HA caching always
+	// uses Mongo regardless of the primary store's backend). Enforced by a
+	// Common-level struct validation rather than a plain "required" tag here,
+	// since the requirement depends on sibling fields of Common, not of Mongo.
+	URI string `yaml:"uri" validate:"omitempty" doc_example:"\"mongodb://user:password@mongo:27017/vc\""`
 	// TLS enables TLS for the MongoDB connection.
 	// Can also be enabled via the connection URI parameter "tls=true".
 	TLS bool `yaml:"tls" default:"false"`
@@ -148,6 +154,9 @@ type Common struct {
 	Log Log `yaml:"log"`
 	// Mongo is the MongoDB configuration
 	Mongo Mongo `yaml:"mongo" validate:"omitempty"`
+	// SQL is the relational database configuration, used by services that
+	// support a relational storage backend as an alternative to MongoDB.
+	SQL sqlstore.SQL `yaml:"sql" validate:"omitempty"`
 	// Tracing is the OpenTelemetry tracing configuration
 	Tracing OTEL `yaml:"tracing" validate:"omitempty"`
 	// Metrics is the OpenTelemetry metrics configuration
@@ -1226,9 +1235,15 @@ func (c *Cfg) VCTUrlsForScopes(scopes []string) []string {
 	return urls
 }
 
-// VCTIdentifiersForScopes resolves a list of scope keys to the original VCT
-// identifiers from the VCTM (e.g. URNs). Scopes without a loaded VCTM are
-// silently skipped.
+// VCTIdentifiersForScopes resolves a list of scope keys to the vct value
+// actually embedded in issued credentials for that scope -- BuildCredentialWithSigner
+// (pkg/sdjwtvc/methods.go) sets body["vct"] = vctm.VCT, the VCTM's own
+// declared "vct" field, not the published type-metadata URL VCTUrlsForScopes
+// returns (that URL only appears in credential_configurations_supported's
+// issuer-metadata "vct", a different, cosmetic value from what's actually
+// embedded in a credential). DCQL queries built from VCTUrlsForScopes instead
+// of this never matched any real issued credential — confirmed live via a
+// fresh test issuance (lpidproto PLAN.md workstream 7 task 7.5, finding 16).
 func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 	ids := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
@@ -1583,9 +1598,35 @@ func (cfg *IssuerMetadata) applyCommonCredentialConfig(credConfig *openid4vci.Cr
 		// Default to common algorithms if not configured
 		proofAlgs = []string{"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}
 	}
+	// Confirmed by direct testing (lpidproto PLAN.md workstream 7): scoping
+	// 'attestation' to only the "pid" credential config breaks metadata
+	// parsing for EVERY offer, including ones that only reference "pid" --
+	// eudi-lib-jvm-openid4vci-kt validates proof_types_supported across the
+	// whole credential_configurations_supported document, not per-entry.
+	// So this must be declared uniformly for every scope, "lpid" included;
+	// it cannot be scoped away. See ARCHITECTURE.md for the resulting
+	// caveat this leaves on "lpid"'s advertised proof capabilities, and
+	// pkg/openid4vci/proof_attestation.go's Verify() for the deeper gap
+	// this uncovered (attestation proofs are never signature-verified).
 	credConfig.ProofTypesSupported = map[string]openid4vci.ProofsTypesSupported{
 		"jwt": {
 			ProofSigningAlgValuesSupported: proofAlgs,
+			KeyAttestationsRequired:        openid4vci.KeyAttestationRequirement{},
+		},
+		// "attestation": declared alongside "jwt" because
+		// eudi-lib-jvm-openid4vci-kt 0.12.1+ hard-fails issuer metadata
+		// validation unless both proof types are present ("Both JWT Proofs
+		// and Attestation Proofs must be supported"). This is a declarative
+		// capability advertisement only -- vc-apigw has no wallet-attestation
+		// verification wired up (lpidproto PLAN.md workstream 8, not started),
+		// and this project's reference-wallet client config uses
+		// ClientAuthenticationType.None rather than AttestationBased, so it
+		// won't actually submit an attestation-typed proof. Revisit alongside
+		// KeyAttestationsRequired above if WS8 ever implements real
+		// attestation verification.
+		"attestation": {
+			ProofSigningAlgValuesSupported: proofAlgs,
+			KeyAttestationsRequired:        openid4vci.KeyAttestationRequirement{},
 		},
 	}
 }

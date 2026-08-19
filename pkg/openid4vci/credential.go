@@ -45,7 +45,15 @@ type CredentialRequest struct {
 	// to which the issued Credential instances will be bound to. The proofs parameter contains exactly one
 	// parameter named as the proof type in Appendix F, the value set for this parameter is a non-empty array
 	// containing parameters as defined by the corresponding proof type.
-	Proofs *Proofs `json:"proofs,omitempty" validate:"single_proof_type,omitempty"`
+	// "Exactly one proof type" is enforced in Validate() below, not via a
+	// struct tag: the go-playground/validator custom validation function
+	// registered for this used to be named "single_proof_type", but it was
+	// never actually being invoked here (confirmed live with a canary panic
+	// that never fired) for reasons not tracked down within the time spent
+	// investigating -- moving the check to Validate(), which already runs
+	// reliably for this request, sidesteps whatever is wrong with the
+	// struct-tag path rather than leaving proof-type-count unchecked.
+	Proofs *Proofs `json:"proofs,omitempty" validate:"omitempty"`
 
 	// Proof OPTIONAL. Single proof object for non-batch requests.
 	// Deprecated: Use Proofs instead. This field is kept for backward compatibility with older wallets.
@@ -67,6 +75,30 @@ func (c *CredentialRequest) IsAccessTokenDPoP() bool {
 // Otherwise, credential_configuration_id MUST be used.
 func (c *CredentialRequest) Validate(ctx context.Context, authorizationDetails []AuthorizationDetailsParameter) error {
 	hasAuthDetails := len(authorizationDetails) > 0
+
+	// The proofs parameter, if present at all, MUST declare exactly one
+	// proof type (JWT, DIVP, or Attestation) -- OID4VCI Appendix F. A
+	// client using the deprecated singular "proof" field instead omits
+	// "proofs" from the request body entirely, which JSON-unmarshals to
+	// Proofs == nil, not to a non-nil-but-empty Proofs -- so this only
+	// needs to skip clients that never sent "proofs" at all, not tolerate
+	// an explicitly-empty "proofs": {}, which is exactly as invalid as
+	// VerifyProofWithOptions already treats it.
+	if c.Proofs != nil {
+		proofTypeCount := 0
+		if len(c.Proofs.JWT) > 0 {
+			proofTypeCount++
+		}
+		if len(c.Proofs.DIVP) > 0 {
+			proofTypeCount++
+		}
+		if len(c.Proofs.Attestation) > 0 {
+			proofTypeCount++
+		}
+		if proofTypeCount != 1 {
+			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "proofs must declare exactly one proof type"}
+		}
+	}
 
 	// Neither identifier nor configuration ID provided
 	if c.CredentialIdentifier == "" && c.CredentialConfigurationID == "" {
@@ -194,9 +226,13 @@ type Proofs struct {
 	// signed using Data Integrity Proof as defined in Appendix F.2
 	DIVP []ProofDIVP `json:"di_vp,omitempty"`
 
-	// Attestation contains a single JWT representing a key attestation
-	// as defined in Appendix D.1
-	Attestation ProofAttestation `json:"attestation,omitempty"`
+	// Attestation contains an array of JWTs representing key attestations
+	// as defined in Appendix D.1. Confirmed as an array (not a bare string)
+	// against the EUDI reference wallet's pinned eudi-lib-jvm-openid4vci-kt
+	// (lpidproto PLAN.md workstream 7): it sends "attestation" with the same
+	// array shape as "jwt", which this field previously rejected with a JSON
+	// unmarshal error.
+	Attestation []ProofAttestation `json:"attestation,omitempty"`
 }
 
 // ProofType returns the proof type of the proofs contained in this struct.
@@ -207,7 +243,7 @@ func (p *Proofs) ProofType() string {
 	if len(p.DIVP) > 0 {
 		return "di_vp"
 	}
-	if p.Attestation != "" {
+	if len(p.Attestation) > 0 {
 		return "attestation"
 	}
 	return ""
@@ -225,7 +261,7 @@ func (p *Proofs) ExtractJWK() (*apiv1_issuer.Jwk, error) {
 	case "di_vp":
 		return p.DIVP[0].ExtractJWK()
 	case "attestation":
-		return p.Attestation.ExtractJWK()
+		return p.Attestation[0].ExtractJWK()
 	}
 
 	return nil, fmt.Errorf("no proofs found")
@@ -245,7 +281,7 @@ func (p *Proofs) ExtractAllJWKs(maxLength int) ([]*apiv1_issuer.Jwk, error) {
 	case "di_vp":
 		return p.extractAllJWKsFromDIVP(maxLength)
 	case "attestation":
-		return p.Attestation.ExtractAllJWKs(maxLength)
+		return p.Attestation[0].ExtractAllJWKs(maxLength)
 	}
 
 	return nil, fmt.Errorf("no proofs provided")

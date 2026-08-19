@@ -75,9 +75,10 @@ func (s *Service) endpointOIDCDirectPost(ctx context.Context, c *gin.Context) (a
 	}
 
 	// Per OpenID4VP spec Section 7.2, the direct_post response MUST be
-	// 200 OK with a JSON body. A 302 redirect would cause the wallet to
-	// follow it and consume the authorization code before the browser can.
-	// The browser picks up the redirect via the poll endpoint instead.
+	// 200 OK with a JSON body. A 302 would make the wallet HTTP client
+	// follow the Location and consume the authorization code. Same-device
+	// web wallets instead get redirect_uri in the JSON body; cross-device
+	// flows omit it so the original /authorize tab can poll and redirect.
 	if response.RedirectURI != "" {
 		c.JSON(http.StatusOK, gin.H{
 			"redirect_uri": response.RedirectURI,

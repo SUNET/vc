@@ -69,7 +69,17 @@
                     </form>
                 </div>
             </template>
-            <template x-if="!loading && credentialsList && credentialAttributes && !presentationDefinition">
+            <template x-if="dcApiVerified">
+                <div class="box container">
+                    <div class="notification is-success">
+                        <p>Presentation verified successfully.</p>
+                    </div>
+                    <div class="mt-5 is-flex is-justify-content-flex-start is-align-items-center">
+                        <button class="button is-small is-light" @click.prevent="handleResetCancel">Start over</button>
+                    </div>
+                </div>
+            </template>
+            <template x-if="!loading && credentialsList && credentialAttributes && !presentationDefinition && !dcApiVerified">
                 <div class="box container">
                     <form x-ref="attributesSelectionForm" @submit.prevent="handleAttributesSelectionForm">
                         <div class="field block">
@@ -121,7 +131,7 @@
                     </form>
                 </div>
             </template>
-            <template x-if="!loading && credentialsList && credentialAttributes && presentationDefinition">
+            <template x-if="!loading && credentialsList && credentialAttributes && presentationDefinition && !dcApiVerified">
                 <div class="box container">
                     <div class="block is-flex is-justify-content-center">
                         <img :src="`data:image/png;base64,${presentationDefinition.qr_code}`" alt="" />

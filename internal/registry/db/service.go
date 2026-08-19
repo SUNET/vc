@@ -21,10 +21,10 @@ type Service struct {
 	log         *logger.Log
 	cfg         *model.Cfg
 
-	// Token Status List collections (MongoDB)
-	TokenStatusListColl     *TokenStatusListColl
-	TokenStatusListMetadata *TokenStatusListMetadataColl
-	CredentialSubjects      *CredentialSubjectsColl
+	// Token Status List collections
+	TokenStatusListColl     TokenStatusListStore
+	TokenStatusListMetadata TokenStatusListMetadataStore
+	CredentialSubjects      CredentialSubjectsStore
 }
 
 // New creates a new database service

@@ -20,7 +20,7 @@ import (
 func RunDocuments(ctx context.Context, cfg *model.DatastoreImport, dbService *db.Service, log *logger.Log) error {
 	log = log.New("importer")
 
-	count, err := dbService.DatastoreColl.Coll.EstimatedDocumentCount(ctx)
+	count, err := dbService.DatastoreColl.Count(ctx)
 	if err != nil {
 		return fmt.Errorf("check datastore count: %w", err)
 	}
@@ -92,7 +92,7 @@ func shouldImport(id string, users []string) bool {
 func RunIdentityMappings(ctx context.Context, cfg *model.IdentityMappingImport, dbService *db.Service, log *logger.Log) error {
 	log = log.New("importer")
 
-	count, err := dbService.IdentityMappingsColl.Coll.EstimatedDocumentCount(ctx)
+	count, err := dbService.IdentityMappingsColl.Count(ctx)
 	if err != nil {
 		return fmt.Errorf("check identity mappings count: %w", err)
 	}

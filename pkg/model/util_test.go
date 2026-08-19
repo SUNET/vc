@@ -39,42 +39,6 @@ func TestBoolPtr(t *testing.T) {
 	}
 }
 
-func TestLeafs_Empty(t *testing.T) {
-	var l Leafs
-	if !l.Empty() {
-		t.Error("nil leafs should be empty")
-	}
-
-	l = Leafs{}
-	if !l.Empty() {
-		t.Error("empty leafs should be empty")
-	}
-
-	l = Leafs{{Value: []byte("data")}}
-	if l.Empty() {
-		t.Error("non-empty leafs should not be empty")
-	}
-}
-
-func TestLeafs_Array(t *testing.T) {
-	var l Leafs
-	if arr := l.Array(); arr != nil {
-		t.Errorf("nil leafs array should be nil, got %v", arr)
-	}
-
-	l = Leafs{
-		{Value: []byte("a")},
-		{Value: []byte("b")},
-	}
-	arr := l.Array()
-	if len(arr) != 2 {
-		t.Fatalf("expected 2 elements, got %d", len(arr))
-	}
-	if string(arr[0]) != "a" || string(arr[1]) != "b" {
-		t.Errorf("unexpected values: %v", arr)
-	}
-}
-
 func TestExtractIdentityClaims(t *testing.T) {
 	required := []string{"sub", "email", "name"}
 

@@ -3,11 +3,13 @@ package openid4vci
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/pkg/jose"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 )
@@ -102,6 +104,40 @@ func (p ProofAttestation) Validate() error {
 	return nil
 }
 
+// ExtractNonce extracts the nonce claim from the attestation JWT without
+// verifying signature, mirroring ProofJWTToken.ExtractNonce. Needed because
+// handlers_issuer.go's nonce resolution previously only looked at
+// Proofs.JWT, so a credential request using the "attestation" proof type
+// (which the EUDI reference wallet's pinned openid4vci-kt actually sends
+// when metadata declares attestation support, lpidproto PLAN.md workstream 7)
+// fell back to the stale pre-auth-code nonce and failed Verify()'s own
+// nonce check with "nonce claim does not match server-provided c_nonce".
+func (p ProofAttestation) ExtractNonce() string {
+	if p == "" {
+		return ""
+	}
+
+	parts := strings.Split(string(p), ".")
+	if len(parts) < 2 {
+		return ""
+	}
+
+	claimsByte, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		claimsByte, err = base64.RawStdEncoding.DecodeString(parts[1])
+		if err != nil {
+			return ""
+		}
+	}
+
+	var claims ProofAttestationClaims
+	if err := json.Unmarshal(claimsByte, &claims); err != nil {
+		return ""
+	}
+
+	return claims.Nonce
+}
+
 // ExtractJWK extracts the first attested key (JWK) from the attestation JWT.
 // The attested_keys claim contains an array of JWKs that are attested by this proof.
 func (p ProofAttestation) ExtractJWK() (*apiv1_issuer.Jwk, error) {
@@ -179,48 +215,109 @@ func (p ProofAttestation) ExtractAllJWKs(maxLength int) ([]*apiv1_issuer.Jwk, er
 
 // Verify verifies a Key Attestation proof according to OpenID4VCI 1.0 Appendix D.1
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-key-attestation
+//
+// This checks that the attestation JWT is validly signed by whoever holds
+// the private key matching its own x5c leaf certificate -- the same
+// self-consistency check ProofJWTToken.Verify does for JWT proofs -- using
+// the JWT's own embedded certificate, not a trusted root. It does NOT
+// establish that the attestation issuer identified by that certificate is
+// itself trustworthy: this codebase has no trusted-attestation-issuer
+// registry yet (a separate, larger effort, akin to the FIDO2
+// hardware-attestation trust work), so a self-issued or otherwise
+// arbitrary certificate still passes. That said, this is a real
+// improvement over accepting the proof with no signature check at all
+// (the previous behavior, via ParseUnverified): forging attested_keys or
+// claims now requires an actual private key and a certificate to match,
+// not just well-formed JSON. A proof with no x5c header has no key
+// material this server can resolve at all (there is no kid-based registry
+// either), so it is rejected outright rather than silently accepted.
 func (p ProofAttestation) Verify(opts *VerifyProofOptions) error {
 	// First validate the JWT structure using validator tags
 	if err := p.Validate(); err != nil {
 		return err
 	}
 
-	token, _, err := jwtv5.NewParser().ParseUnverified(string(p), jwtv5.MapClaims{})
+	// Read the x5c header without going through the JWT library's Parse
+	// API -- p.Validate() above already confirmed this is a well-formed
+	// 3-part JWT with a decodable JSON header, so a plain base64+json
+	// decode (the same approach Validate uses) is all that's needed to
+	// peek at one header field, and it keeps this nowhere near a
+	// signature-verification code path before the real one below.
+	parts := strings.Split(string(p), ".")
+	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "failed to parse attestation JWT"}
+		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "failed to decode attestation header"}
+	}
+	var header map[string]any
+	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "failed to parse attestation header"}
 	}
 
-	claims, ok := token.Claims.(jwtv5.MapClaims)
+	x5cRaw, ok := header["x5c"]
 	if !ok {
-		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "failed to extract claims from attestation JWT"}
+		return &Error{Err: ErrInvalidProof, ErrorDescription: "attestation proof cannot be verified: no x5c header present, and this issuer does not yet support kid-based attestation-issuer key resolution"}
+	}
+	certs, err := jose.ParseX5CHeader(x5cRaw)
+	if err != nil {
+		return &Error{Err: ErrInvalidProof, ErrorDescription: fmt.Sprintf("failed to parse attestation x5c header: %v", err)}
+	}
+	publicKey := certs[0].PublicKey
+
+	claims := jwtv5.MapClaims{}
+	token, err := jwtv5.ParseWithClaims(string(p), claims, func(token *jwtv5.Token) (any, error) {
+		// Restrict to strong asymmetric signing methods regardless of opts,
+		// matching ProofJWTToken.Verify -- otherwise the JWT library trusts
+		// whatever alg the token itself declares (including weak/symmetric
+		// algorithms), which is exactly what a forged attestation would rely
+		// on now that a signature check exists at all.
+		switch token.Method.(type) {
+		case *jwtv5.SigningMethodECDSA:
+			// ES256, ES384, ES512
+		case *jwtv5.SigningMethodRSA:
+			// RS256, RS384, RS512
+		case *jwtv5.SigningMethodRSAPSS:
+			// PS256, PS384, PS512
+		case *jwtv5.SigningMethodEd25519:
+			// EdDSA
+		default:
+			return nil, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("unsupported signing method: %v", token.Header["alg"])}
+		}
+
+		// Check if algorithm is supported (if supported algorithms are specified)
+		if opts != nil && len(opts.SupportedAlgorithms) > 0 {
+			alg, ok := token.Header["alg"].(string)
+			if !ok {
+				return nil, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "alg header must be a string"}
+			}
+			if !slices.Contains(opts.SupportedAlgorithms, alg) {
+				return nil, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("alg '%s' is not supported", alg)}
+			}
+		}
+
+		// nonce: validate against server-provided c_nonce if provided
+		if opts != nil && opts.CNonce != "" {
+			nonce, ok := claims["nonce"]
+			if !ok {
+				return nil, &Error{Err: ErrInvalidNonce, ErrorDescription: "nonce claim not found in attestation but c_nonce was provided"}
+			}
+			if nonce != opts.CNonce {
+				return nil, &Error{Err: ErrInvalidNonce, ErrorDescription: "nonce claim does not match server-provided c_nonce"}
+			}
+		}
+
+		return publicKey, nil
+	})
+	if err != nil {
+		var vciErr *Error
+		if errors.As(err, &vciErr) {
+			return vciErr
+		}
+		return &Error{Err: ErrInvalidProof, ErrorDescription: err.Error()}
 	}
 
-	// Runtime validations that depend on opts
-
-	// Check if algorithm is supported (if supported algorithms are specified)
-	if opts != nil && len(opts.SupportedAlgorithms) > 0 {
-		alg, ok := token.Header["alg"].(string)
-		if !ok {
-			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "alg header must be a string"}
-		}
-		if !slices.Contains(opts.SupportedAlgorithms, alg) {
-			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("alg '%s' is not supported", alg)}
-		}
+	if !token.Valid {
+		return &Error{Err: ErrInvalidProof, ErrorDescription: "attestation JWT signature is invalid"}
 	}
-
-	// nonce: validate against server-provided c_nonce if provided
-	if opts != nil && opts.CNonce != "" {
-		nonce, ok := claims["nonce"]
-		if !ok {
-			return &Error{Err: ErrInvalidNonce, ErrorDescription: "nonce claim not found in attestation but c_nonce was provided"}
-		}
-		if nonce != opts.CNonce {
-			return &Error{Err: ErrInvalidNonce, ErrorDescription: "nonce claim does not match server-provided c_nonce"}
-		}
-	}
-
-	// TODO: Implement signature verification against trusted attestation issuers
-	// This requires establishing trust in the attestation issuer
 
 	return nil
 }

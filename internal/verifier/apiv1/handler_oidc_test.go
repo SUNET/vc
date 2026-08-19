@@ -1517,6 +1517,9 @@ func TestAuthorize_WalletLinks(t *testing.T) {
 	}
 	assert.Contains(t, walletNames["SUNET Wallet"], "https://wallet.sunet.se/cb?")
 	assert.Contains(t, walletNames["Test Wallet"], "https://test-wallet.example.com/authorize?")
+
+	// Order must be stable (sorted by name) — map iteration would shuffle them
+	assert.Equal(t, []string{"SUNET Wallet", "Test Wallet"}, []string{resp.WalletLinks[0].Name, resp.WalletLinks[1].Name})
 }
 
 // TestAuthorize_NoWalletLinks tests that no wallet links when supported_wallets is empty
@@ -2175,6 +2178,7 @@ func TestProcessDirectPost(t *testing.T) {
 		expectError            bool
 		expectedErrorType      error
 		expectShowCredentials  bool
+		expectWalletRedirect   bool
 		expectedStatus         cache.SessionStatus
 	}{
 		{ // #nosec G101
@@ -2269,6 +2273,33 @@ func TestProcessDirectPost(t *testing.T) {
 			expectError:    false,
 			expectedStatus: cache.SessionStatusCodeIssued,
 		},
+		{ // #nosec G101
+			name:      "same-device web wallet returns RP redirect_uri",
+			sessionID: "session-dp-8",
+			vpToken:   "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
+				s.RedirectURI = "https://client.example.com/callback"
+				s.State = "client-state"
+				s.WalletFollowsRedirect = true
+			},
+			expectError:          false,
+			expectWalletRedirect: true,
+			expectedStatus:       cache.SessionStatusCodeIssued,
+		},
+		{ // #nosec G101
+			name:      "same-device web wallet without redirect URI",
+			sessionID: "session-dp-9",
+			vpToken:   "eyJhbGciOiJFUzI1NiJ9.test-payload.signature",
+			authCtxSetup: func(s *cache.AuthorizationContext) {
+				s.Status = cache.SessionStatusPending
+				s.RedirectURI = ""
+				s.State = "client-state"
+				s.WalletFollowsRedirect = true
+			},
+			expectError:    false,
+			expectedStatus: cache.SessionStatusCodeIssued,
+		},
 	}
 
 	for _, tt := range tests {
@@ -2318,14 +2349,46 @@ func TestProcessDirectPost(t *testing.T) {
 				if tt.expectShowCredentials {
 					// Should redirect to display page
 					assert.Contains(t, resp.RedirectURI, "/verification/display/")
+				} else if tt.expectWalletRedirect {
+					assert.Contains(t, resp.RedirectURI, "https://client.example.com/callback")
+					assert.Contains(t, resp.RedirectURI, "state=client-state")
+					assert.Contains(t, resp.RedirectURI, "code="+authCtx.Code)
 				} else {
-					// Direct post must NOT return redirect_uri; the browser
-					// picks up the redirect via the poll endpoint instead.
+					// Cross-device: omit redirect_uri so the /authorize
+					// poller performs the RP redirect instead of the wallet.
 					assert.Empty(t, resp.RedirectURI)
 				}
 			}
 		})
 	}
+}
+
+func TestAuthorizationCodeRedirectURI(t *testing.T) {
+	t.Run("nil session", func(t *testing.T) {
+		got, err := authorizationCodeRedirectURI(nil)
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+	t.Run("empty redirect URI", func(t *testing.T) {
+		got, err := authorizationCodeRedirectURI(&cache.AuthorizationContext{
+			Code:  "abc",
+			State: "xyz",
+		})
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+	t.Run("appends code and state", func(t *testing.T) {
+		got, err := authorizationCodeRedirectURI(&cache.AuthorizationContext{
+			RedirectURI: "https://rp.example.com/cb?foo=bar",
+			Code:        "auth-code",
+			State:       "rp-state",
+		})
+		require.NoError(t, err)
+		assert.Contains(t, got, "https://rp.example.com/cb")
+		assert.Contains(t, got, "foo=bar")
+		assert.Contains(t, got, "code=auth-code")
+		assert.Contains(t, got, "state=rp-state")
+	})
 }
 
 // TestContainsOIDC tests the containsOIDC helper method

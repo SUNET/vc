@@ -2,85 +2,25 @@ package cache
 
 import (
 	"context"
-	"fmt"
-	"os/exec"
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/testsupport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // isDockerAvailable checks if Docker is accessible
 func isDockerAvailable() bool {
-	dockerPath, err := exec.LookPath("docker")
-	if err != nil {
-		return false
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, dockerPath, "version") // #nosec G204
-	return cmd.Run() == nil
+	return testsupport.IsDockerAvailable()
 }
 
 // startMongoContainer spins up a throwaway MongoDB via testcontainers and
 // returns a connected *mongo.Client plus a cleanup function.
 func startMongoContainer(t *testing.T) (*mongo.Client, func()) {
 	t.Helper()
-
-	if !isDockerAvailable() {
-		t.Skip("Skipping test: Docker is not available")
-	}
-
-	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
-
-	req := testcontainers.ContainerRequest{
-		Image:        "mongo:7",
-		ExposedPorts: []string{"27017/tcp"},
-		WaitingFor:   wait.ForLog("Waiting for connections"),
-	}
-
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	if err != nil {
-		cancel()
-		t.Fatalf("Failed to start MongoDB container: %v", err)
-	}
-
-	mappedPort, err := container.MappedPort(ctx, "27017")
-	if err != nil {
-		cancel()
-		t.Fatalf("Failed to get mapped port: %v", err)
-	}
-
-	host, err := container.Host(ctx)
-	if err != nil {
-		cancel()
-		t.Fatalf("Failed to get container host: %v", err)
-	}
-
-	uri := fmt.Sprintf("mongodb://%s:%s", host, mappedPort.Port())
-	t.Logf("MongoDB container started at %s", uri)
-
-	client, err := mongo.Connect(options.Client().ApplyURI(uri))
-	if err != nil {
-		cancel()
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-
-	cleanup := func() {
-		client.Disconnect(ctx)   // #nosec G104
-		container.Terminate(ctx) // #nosec G104
-		cancel()
-	}
-
+	_, client, cleanup := testsupport.StartMongoContainer(t)
 	return client, cleanup
 }
 
@@ -334,36 +274,10 @@ func TestMongoStore_GetEmptyQuery(t *testing.T) {
 
 // TestNewMongoStore_ViaContainer verifies NewMongoStore creates a working MongoStore.
 func TestNewMongoStore_ViaContainer(t *testing.T) {
-	if !isDockerAvailable() {
-		t.Skip("Skipping test: Docker is not available")
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
-	defer cancel()
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
 
-	req := testcontainers.ContainerRequest{
-		Image:        "mongo:7",
-		ExposedPorts: []string{"27017/tcp"},
-		WaitingFor:   wait.ForLog("Waiting for connections"),
-	}
-
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	require.NoError(t, err)
-	defer container.Terminate(ctx)
-
-	mappedPort, err := container.MappedPort(ctx, "27017")
-	require.NoError(t, err)
-	host, err := container.Host(ctx)
-	require.NoError(t, err)
-
-	uri := fmt.Sprintf("mongodb://%s:%s", host, mappedPort.Port())
-
-	client, err := mongo.Connect(options.Client().ApplyURI(uri))
-	require.NoError(t, err)
-
-	store, err := NewMongoStore(ctx, client, "test_factory", "auth_ctx", 5*time.Minute)
+	store, err := NewMongoStore(t.Context(), client, "test_factory", "auth_ctx", 5*time.Minute)
 	require.NoError(t, err)
 	require.NotNil(t, store)
 }

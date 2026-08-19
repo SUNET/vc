@@ -45,7 +45,7 @@ func (c *CredentialRequest) VerifyProofWithOptions(publicKey crypto.PublicKey, o
 	if len(c.Proofs.DIVP) > 0 {
 		proofTypeCount++
 	}
-	if c.Proofs.Attestation != "" {
+	if len(c.Proofs.Attestation) > 0 {
 		proofTypeCount++
 	}
 
@@ -77,9 +77,14 @@ func (c *CredentialRequest) VerifyProofWithOptions(publicKey crypto.PublicKey, o
 		return nil
 	}
 
-	// Verify Attestation proof
-	if c.Proofs.Attestation != "" {
-		return c.Proofs.Attestation.Verify(opts)
+	// Verify Attestation proofs
+	if len(c.Proofs.Attestation) > 0 {
+		for _, attestationProof := range c.Proofs.Attestation {
+			if err := attestationProof.Verify(opts); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
 	return nil

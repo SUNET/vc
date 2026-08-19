@@ -22,6 +22,10 @@ type mockIdentityMappingStore struct {
 	resolveQuery  *db.ResolveMappingQuery // captured for assertions
 }
 
+func (m *mockIdentityMappingStore) Count(_ context.Context) (int64, error) {
+	return 0, nil
+}
+
 func (m *mockIdentityMappingStore) CreateMapping(_ context.Context, _ *model.IdentityMapping) error {
 	return nil
 }

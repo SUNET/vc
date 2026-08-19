@@ -27,6 +27,12 @@ func docKey(authenticSource, scope, documentID string) string {
 	return fmt.Sprintf("%s|%s|%s", authenticSource, scope, documentID)
 }
 
+func (m *memoryDatastoreStore) Count(_ context.Context) (int64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return int64(len(m.docs)), nil
+}
+
 func (m *memoryDatastoreStore) Save(_ context.Context, doc *model.CompleteDocument) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -222,6 +228,12 @@ func newMemoryIdentityMappingStore() *memoryIdentityMappingStore {
 
 func mappingKey(authenticSource, personID string) string {
 	return fmt.Sprintf("%s|%s", authenticSource, personID)
+}
+
+func (m *memoryIdentityMappingStore) Count(_ context.Context) (int64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return int64(len(m.mappings)), nil
 }
 
 func (m *memoryIdentityMappingStore) CreateMapping(_ context.Context, mapping *model.IdentityMapping) error {

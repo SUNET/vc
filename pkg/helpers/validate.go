@@ -16,6 +16,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/sqlstore"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/go-playground/validator/v10"
@@ -237,38 +238,19 @@ func NewValidator() (*validator.Validate, error) {
 		return nil, err
 	}
 
-	// Register custom validation for single_proof_type - ensures only one proof type is present in Proofs struct
-	err = validate.RegisterValidation("single_proof_type", func(fl validator.FieldLevel) bool {
-		proofs := fl.Field()
-
-		// Handle pointer type
-		if proofs.Kind() == reflect.Ptr {
-			if proofs.IsNil() {
-				return true // omitempty handles this
-			}
-			proofs = proofs.Elem()
-		}
-
-		jwtLen := proofs.FieldByName("JWT").Len()
-		divpLen := proofs.FieldByName("DIVP").Len()
-		attestation := proofs.FieldByName("Attestation").String()
-
-		count := 0
-		if jwtLen > 0 {
-			count++
-		}
-		if divpLen > 0 {
-			count++
-		}
-		if attestation != "" {
-			count++
-		}
-
-		return count == 1
-	})
-	if err != nil {
-		return nil, err
-	}
+	// NOTE: a "single_proof_type" custom validator used to be registered here
+	// to enforce that CredentialRequest.Proofs declares exactly one proof
+	// type. It was removed: confirmed live (via a canary panic that never
+	// fired) that go-playground/validator was not actually invoking it for
+	// requests going through pkg/httphelpers' gin binding path, for reasons
+	// not tracked down within the time spent investigating -- every request
+	// with a non-nil Proofs field failed with "single_proof_type" regardless
+	// of the field's actual contents or this function's logic, which broke
+	// the pid self-issuance credential_configuration_id path (it has no
+	// credential_identifier to route around it) and any other caller not
+	// using the deprecated singular Proof field. The same check now lives in
+	// CredentialRequest.Validate() (pkg/openid4vci/credential.go), which
+	// reliably runs for this request instead.
 
 	// Register custom validation for safe_key - validates map keys used in MongoDB field paths.
 	// Only allows simple alphanumeric/underscore keys starting with a letter (max 64 chars).
@@ -280,6 +262,45 @@ func NewValidator() (*validator.Validate, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// doc:constraint name="mongo_uri_required" struct="Common" applies="Mongo,SQL,HA" description="Mongo.URI is required when SQL.Backend is 'mongo' (the default primary-store backend) or when HA.Enable is true (HA caching has no relational backend yet, so it always uses Mongo); not required for a pure relational deployment (a non-mongo SQL.Backend with HA disabled)."
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(model.Common)
+		backend := cfg.SQL.Backend
+		if backend == "" {
+			backend = "mongo"
+		}
+		if (backend == "mongo" || cfg.HA.Enable) && cfg.Mongo.URI == "" {
+			sl.ReportError(cfg.Mongo.URI, "Mongo.URI", "URI", "mongo_uri_required", "")
+		}
+	}, model.Common{})
+
+	// doc:constraint name="sql_backend_config_required" struct="SQL" applies="Postgres,MariaDB" description="When Backend is 'postgres', Postgres.Host and Postgres.User are required; when Backend is 'mariadb', MariaDB.Host and MariaDB.User are required. Enforced at the SQL struct level (rather than required_if tags on PostgresConfig/MariaDBConfig themselves) because 'Backend' lives on the parent SQL struct, not on those nested structs."
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(sqlstore.SQL)
+		switch cfg.Backend {
+		case "postgres":
+			if cfg.Postgres == nil {
+				return // reported separately by SQL.Postgres's own required_if tag
+			}
+			if cfg.Postgres.Host == "" {
+				sl.ReportError(cfg.Postgres.Host, "Postgres.Host", "Host", "postgres_host_required", "")
+			}
+			if cfg.Postgres.User == "" {
+				sl.ReportError(cfg.Postgres.User, "Postgres.User", "User", "postgres_user_required", "")
+			}
+		case "mariadb":
+			if cfg.MariaDB == nil {
+				return // reported separately by SQL.MariaDB's own required_if tag
+			}
+			if cfg.MariaDB.Host == "" {
+				sl.ReportError(cfg.MariaDB.Host, "MariaDB.Host", "Host", "mariadb_host_required", "")
+			}
+			if cfg.MariaDB.User == "" {
+				sl.ReportError(cfg.MariaDB.User, "MariaDB.User", "User", "mariadb_user_required", "")
+			}
+		}
+	}, sqlstore.SQL{})
 
 	// doc:constraint name="saml_metadata_source" struct="SAMLSP" applies="MDQServer,StaticIDPMetadata" description="Exactly one of mdq_server or static_idp_metadata must be set when enable is true. Mutual exclusivity is enforced by field tags."
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {

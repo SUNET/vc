@@ -343,6 +343,8 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		proofNonce = openid4vci.ProofJWTToken(req.Proof.JWT).ExtractNonce()
 	} else if req.Proofs != nil && len(req.Proofs.JWT) > 0 {
 		proofNonce = req.Proofs.JWT[0].ExtractNonce()
+	} else if req.Proofs != nil && len(req.Proofs.Attestation) > 0 {
+		proofNonce = req.Proofs.Attestation[0].ExtractNonce()
 	}
 
 	// Determine which nonce to validate against.

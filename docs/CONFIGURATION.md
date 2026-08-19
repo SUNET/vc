@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Generated:** 2026-08-05
+**Generated:** 2026-08-19
 
 Complete reference for all configuration parameters in the VC system.
 
@@ -34,11 +34,14 @@ Shared configuration used across all services.
 
 > **Path:** `.common`
 
+> **Constraint** (`mongo`, `sql`, `ha`): Mongo.URI is required when SQL.Backend is 'mongo' (the default primary-store backend) or when HA.Enable is true (HA caching has no relational backend yet, so it always uses Mongo); not required for a pure relational deployment (a non-mongo SQL.Backend with HA disabled).
+
 | Field                 | Type     | Description                                                                                                                                                                                                                                                                             | Example                  | Default | Required |
 | --------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------- | -------- |
 | `production`          | `bool`   | Production mode                                                                                                                                                                                                                                                                         | -                        | `true`  | No       |
 | `log`                 | `object` | Logging configuration                                                                                                                                                                                                                                                                   | -                        | -       | No       |
 | `mongo`               | `object` | MongoDB configuration                                                                                                                                                                                                                                                                   | -                        | -       | No       |
+| `sql`                 | `object` | Relational database configuration, used by services that support a relational storage backend as an alternative to MongoDB.                                                                                                                                                             | -                        | -       | No       |
 | `tracing`             | `object` | OpenTelemetry tracing configuration                                                                                                                                                                                                                                                     | -                        | -       | No       |
 | `metrics`             | `object` | OpenTelemetry metrics configuration                                                                                                                                                                                                                                                     | -                        | -       | No       |
 | `kafka`               | `object` | Kafka message broker configuration                                                                                                                                                                                                                                                      | -                        | -       | No       |
@@ -59,13 +62,69 @@ Shared configuration used across all services.
 
 > **Path:** `.common.mongo`
 
-| Field            | Type     | Description                                                                                                                     | Example                                    | Default | Required                    |
-| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------- | --------------------------- |
-| `uri`            | `string` | MongoDB connection URI                                                                                                          | `"mongodb://user:password@mongo:27017/vc"` | -       | Yes                         |
-| `tls`            | `bool`   | TLS for the MongoDB connection. Can also be enabled via the connection URI parameter "tls=true".                                | -                                          | `false` | No                          |
-| `ca_file_path`   | `string` | Path to a PEM-encoded CA certificate used to verify the MongoDB server's certificate. When empty, the system root CAs are used. | -                                          | -       | No                          |
-| `cert_file_path` | `string` | Path to a PEM-encoded client certificate for mutual TLS (mTLS).                                                                 | -                                          | -       | Yes (if key_file_path set)  |
-| `key_file_path`  | `string` | Path to a PEM-encoded client private key for mutual TLS (mTLS).                                                                 | -                                          | -       | Yes (if cert_file_path set) |
+| Field            | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                   | Example                                    | Default | Required                    |
+| ---------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------- | --------------------------- |
+| `uri`            | `string` | MongoDB connection URI. Required when Common.SQL.Backend is "mongo" (the default primary-store backend) or when Common.HA.Enable is true (pkg/cache has no relational backend yet, so HA caching always uses Mongo regardless of the primary store's backend). Enforced by a Common-level struct validation rather than a plain "required" tag here, since the requirement depends on sibling fields of Common, not of Mongo. | `"mongodb://user:password@mongo:27017/vc"` | -       | No                          |
+| `tls`            | `bool`   | TLS for the MongoDB connection. Can also be enabled via the connection URI parameter "tls=true".                                                                                                                                                                                                                                                                                                                              | -                                          | `false` | No                          |
+| `ca_file_path`   | `string` | Path to a PEM-encoded CA certificate used to verify the MongoDB server's certificate. When empty, the system root CAs are used.                                                                                                                                                                                                                                                                                               | -                                          | -       | No                          |
+| `cert_file_path` | `string` | Path to a PEM-encoded client certificate for mutual TLS (mTLS).                                                                                                                                                                                                                                                                                                                                                               | -                                          | -       | Yes (if key_file_path set)  |
+| `key_file_path`  | `string` | Path to a PEM-encoded client private key for mutual TLS (mTLS).                                                                                                                                                                                                                                                                                                                                                               | -                                          | -       | Yes (if cert_file_path set) |
+
+### `sql`
+
+> **Path:** `.common.sql`
+
+> **Constraint** (`postgres`, `mariadb`): When Backend is 'postgres', Postgres.Host and Postgres.User are required; when Backend is 'mariadb', MariaDB.Host and MariaDB.User are required. Enforced at the SQL struct level (rather than required_if tags on PostgresConfig/MariaDBConfig themselves) because 'Backend' lives on the parent SQL struct, not on those nested structs.
+
+support a relational storage backend as an alternative to MongoDB.
+Backend selection is config-time only: a running service uses exactly
+one backend for its whole lifetime.
+
+| Field      | Type     | Description                                                                                                                                                                                                                                 | Example | Default | Required                       |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | ------------------------------ |
+| `backend`  | `string` | Backend selects the storage backend for services that support relational storage. "mongo" (default, current behavior) keeps existing Mongo-backed behavior unchanged; "postgres" and "mariadb" select the corresponding relational backend. | -       | `mongo` | No                             |
+| `postgres` | `object` | Postgres-specific connection settings, used when Backend is "postgres".                                                                                                                                                                     | -       | -       | Yes (if backend is "postgres") |
+| `mariadb`  | `object` | MariaDB/MySQL-specific connection settings, used when Backend is "mariadb".                                                                                                                                                                 | -       | -       | Yes (if backend is "mariadb")  |
+
+### `postgres`
+
+> **Path:** `.common.sql.postgres`
+
+| Field            | Type     | Description                                                                                                                                                                                                                                                                               | Example      | Default   | Required                    |
+| ---------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | --------- | --------------------------- |
+| `host`           | `string` | Postgres server hostname. Required when Common.SQL.Backend is "postgres"; enforced by a SQL-level struct validation rather than a plain "required_if" tag here, since "Backend" lives on the parent SQL struct, not on PostgresConfig, and required_if can only reference sibling fields. | `"postgres"` | -         | No                          |
+| `port`           | `int`    | Postgres server port                                                                                                                                                                                                                                                                      | -            | `5432`    | No                          |
+| `user`           | `string` | Postgres connection user. Required when Common.SQL.Backend is "postgres" (see Host doc comment for why this isn't a required_if tag).                                                                                                                                                     | -            | -         | No                          |
+| `password`       | `string` | Postgres connection password. May also be set via secrets.yaml (Common.SQL.Postgres.Password), following the same split as Mongo.URI.                                                                                                                                                     | -            | -         | No                          |
+| `database`       | `string` | Postgres database name                                                                                                                                                                                                                                                                    | `"vc"`       | `vc`      | No                          |
+| `ssl_mode`       | `string` | Postgres SSL mode: disable, require, verify-ca, or verify-full                                                                                                                                                                                                                            | -            | `disable` | No                          |
+| `ca_file_path`   | `string` | Path to a PEM-encoded CA certificate used to verify the server's certificate.                                                                                                                                                                                                             | -            | -         | No                          |
+| `cert_file_path` | `string` | Path to a PEM-encoded client certificate for mutual TLS (mTLS).                                                                                                                                                                                                                           | -            | -         | Yes (if key_file_path set)  |
+| `key_file_path`  | `string` | Path to a PEM-encoded client private key for mutual TLS (mTLS).                                                                                                                                                                                                                           | -            | -         | Yes (if cert_file_path set) |
+| `max_open_conns` | `int`    | Maximum number of open connections to the database.                                                                                                                                                                                                                                       | -            | `25`      | No                          |
+| `max_idle_conns` | `int`    | Maximum number of idle connections in the pool.                                                                                                                                                                                                                                           | -            | `5`       | No                          |
+
+### `mariadb`
+
+> **Path:** `.common.sql.mariadb`
+
+Kept as a separate struct from PostgresConfig (rather than shared) since
+default port and TLS parameter semantics differ enough between the two
+drivers to want independent validation tags.
+
+| Field            | Type     | Description                                                                                                                                                                                                                                                                            | Example     | Default | Required                    |
+| ---------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------- | --------------------------- |
+| `host`           | `string` | MariaDB server hostname. Required when Common.SQL.Backend is "mariadb"; enforced by a SQL-level struct validation rather than a plain "required_if" tag here, since "Backend" lives on the parent SQL struct, not on MariaDBConfig, and required_if can only reference sibling fields. | `"mariadb"` | -       | No                          |
+| `port`           | `int`    | MariaDB server port                                                                                                                                                                                                                                                                    | -           | `3306`  | No                          |
+| `user`           | `string` | MariaDB connection user. Required when Common.SQL.Backend is "mariadb" (see Host doc comment for why this isn't a required_if tag).                                                                                                                                                    | -           | -       | No                          |
+| `password`       | `string` | MariaDB connection password. May also be set via secrets.yaml (Common.SQL.MariaDB.Password), following the same split as Mongo.URI.                                                                                                                                                    | -           | -       | No                          |
+| `database`       | `string` | MariaDB database name                                                                                                                                                                                                                                                                  | `"vc"`      | `vc`    | No                          |
+| `tls`            | `bool`   | TLS for the MariaDB connection.                                                                                                                                                                                                                                                        | -           | `false` | No                          |
+| `ca_file_path`   | `string` | Path to a PEM-encoded CA certificate used to verify the server's certificate.                                                                                                                                                                                                          | -           | -       | No                          |
+| `cert_file_path` | `string` | Path to a PEM-encoded client certificate for mutual TLS (mTLS).                                                                                                                                                                                                                        | -           | -       | Yes (if key_file_path set)  |
+| `key_file_path`  | `string` | Path to a PEM-encoded client private key for mutual TLS (mTLS).                                                                                                                                                                                                                        | -           | -       | Yes (if cert_file_path set) |
+| `max_open_conns` | `int`    | Maximum number of open connections to the database.                                                                                                                                                                                                                                    | -           | `25`    | No                          |
+| `max_idle_conns` | `int`    | Maximum number of idle connections in the pool.                                                                                                                                                                                                                                        | -           | `5`     | No                          |
 
 ### `tracing`
 
@@ -671,10 +730,11 @@ Trust evaluation operates in one of two modes:
 
 > **Path:** `.apigw.trust.wallet_attestation`, `.verifier.trust.wallet_attestation`
 
-| Field     | Type     | Description                                                                                                                                                                                                                                                                                                                          | Example | Default | Required |
-| --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
-| `enabled` | `bool`   | Wallet attestation-based authentication. When true and PDPURL is configured, wallets can authenticate using a provider-signed attestation JWT instead of pre-registration in Clients. The PDP validates the wallet provider against configured trust lists/federation. PKCE remains mandatory as the primary code-binding mechanism. | -       | `false` | No       |
-| `policy`  | `object` | SPOCP-based authorization for wallet attestation. When configured, after the PDP validates the wallet provider, the SPOCP engine checks whether the attestation tier (attestation_source) is authorized for the requested scope. When empty, all trusted wallets are authorized (default open).                                      | -       | -       | No       |
+| Field     | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Example | Default | Required |
+| --------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `enabled` | `bool`   | Wallet attestation-based authentication. When true and PDPURL is configured, wallets can authenticate using a provider-signed attestation JWT instead of pre-registration in Clients. The PDP validates the wallet provider against configured trust lists/federation. PKCE remains mandatory as the primary code-binding mechanism.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | -       | `false` | No       |
+| `policy`  | `object` | SPOCP-based authorization for wallet attestation. When configured, after the PDP validates the wallet provider, the SPOCP engine checks whether the attestation tier (attestation_source) is authorized for the requested scope. When empty, all trusted wallets are authorized (default open).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | -       | -       | No       |
+| `mode`    | `string` | Mode restricts which WIA trust model this deployment accepts, matching the same "etsi"/"ietf" terminology used by go-wallet-backend's WIAConfig.Mode: - "etsi": require x5c (EC TS03 v1.5.2 / ETSI TS 119 472-3 model, identity verified against the Trusted List for Wallet Providers). A WIA without x5c is rejected before signature verification. - "ietf": require iss + no x5c (the plain IETF draft-ietf-oauth-attestation-based-client-auth format, resolved via JWKS discovery — no ARF/ETSI counterpart). A WIA with x5c is rejected before signature verification. - "" (default): accept either format, as determined by whether the WIA carries an x5c header or an iss claim — preserves pre-Mode behavior for deployments that haven't opted into pinning one trust model. Any other value is treated the same as "" (a warning is logged, not a startup failure — this package has no config.Validate() convention to hard-fail against). Pinning this matters beyond documentation: without it, an operator expecting only ARF-conformant ("etsi") wallets would still silently accept an iss/JWKS-based ("ietf") WIA from a misconfigured or malicious wallet, trusting a JWKS discovery chain instead of the Trusted List for Wallet Providers PKI anchor.       | -       | -       | No       |
 
 ### `policy`
 
@@ -1133,6 +1193,7 @@ Sections omitted from the secrets file are left untouched.
 | Field   | Type     | Description | Example | Default | Required |
 | ------- | -------- | ----------- | ------- | ------- | -------- |
 | `mongo` | `object` | Mongo       | -       | -       | No       |
+| `sql`   | `object` | SQL         | -       | -       | No       |
 
 ### `mongo`
 
@@ -1141,6 +1202,31 @@ Sections omitted from the secrets file are left untouched.
 | Field | Type     | Description                                                             | Example | Default | Required |
 | ----- | -------- | ----------------------------------------------------------------------- | ------- | ------- | -------- |
 | `uri` | `string` | MongoDB connection string, which may include authentication credentials | -       | -       | No       |
+
+### `sql`
+
+> **Path:** `.common.sql`
+
+| Field      | Type     | Description                  | Example | Default | Required |
+| ---------- | -------- | ---------------------------- | ------- | ------- | -------- |
+| `postgres` | `object` | Postgres connection password | -       | -       | No       |
+| `mariadb`  | `object` | MariaDB connection password  | -       | -       | No       |
+
+### `postgres`
+
+> **Path:** `.common.sql.postgres`
+
+| Field      | Type     | Description                  | Example | Default | Required |
+| ---------- | -------- | ---------------------------- | ------- | ------- | -------- |
+| `password` | `string` | Postgres connection password | -       | -       | No       |
+
+### `mariadb`
+
+> **Path:** `.common.sql.mariadb`
+
+| Field      | Type     | Description                 | Example | Default | Required |
+| ---------- | -------- | --------------------------- | ------- | ------- | -------- |
+| `password` | `string` | MariaDB connection password | -       | -       | No       |
 
 ### `apigw`
 
@@ -1265,6 +1351,11 @@ Sections omitted from the secrets file are left untouched.
 common:
   mongo:
     uri: "mongodb://user:password@mongo:27017/vc"
+  sql:
+    postgres:
+      password: "change-me-in-production"
+    mariadb:
+      password: "change-me-in-production"
 apigw:
   api_server:
     api_auth:

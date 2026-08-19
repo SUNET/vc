@@ -243,6 +243,9 @@ Alpine.data("app", () => ({
     /** @type {EventSource | null} */
     notifyEventSource: null,
 
+    /** @type {boolean} Set once a native DC API presentation has been submitted and accepted. */
+    dcApiVerified: false,
+
     async init() {
         await this.lookupCredentialsList();
 
@@ -386,6 +389,7 @@ Alpine.data("app", () => ({
         this.credentialAttributes = null;
         this.dcqlQuery = null;
         this.presentationDefinition = null;
+        this.dcApiVerified = false;
     },
 
     /** 
@@ -469,6 +473,8 @@ Alpine.data("app", () => ({
             return;
         }
 
+        this.dcApiVerified = false;
+
         try {
             const res = await this.fetchData(
                 new URL("/ui/interaction", baseUrl), 
@@ -529,16 +535,72 @@ Alpine.data("app", () => ({
             );
             if (!result) return false;
 
-            if (result.data?.redirect_uri) {
-                globalThis.location.href = result.data.redirect_uri;
-                return true;
+            // result.data is the WALLET's own DC API response payload
+            // (returned directly to this page by navigator.credentials.get(),
+            // never over the network) - it can never itself carry a
+            // redirect_uri, since that's a property of the VERIFIER's HTTP
+            // response, not of the wallet's. Unlike the QR/deep-link flow
+            // (where the wallet POSTs its response to response_uri over the
+            // network on its own), this page is the only thing that has the
+            // response in hand, so it must forward it itself before the
+            // verifier's backend ever learns the presentation happened.
+            const submission = await this._submitDCAPIResponse(result.data);
+            if (submission?.redirect_uri) {
+                globalThis.location.href = submission.redirect_uri;
+            } else {
+                this.dcApiVerified = true;
             }
-            return false;
+            return true;
         } catch (err) {
             if (err.name === 'AbortError') return true;
             console.log("DC API not available or failed, falling back to QR/links:", err.message);
             return false;
         }
+    },
+
+    /**
+     * Forward the wallet's DC API response payload to THIS page's own
+     * response_uri (`/verification/direct_post` -
+     * VerificationDirectPost/VerificationDirectPostRequest) - the exact
+     * endpoint a non-DC-API wallet POSTs to directly over the network for
+     * the QR/deep-link flow (`UIInteraction` sets it as `response_uri` on
+     * the very same request object regardless of delivery channel), so this
+     * reaches identical server-side handling either way. NOT
+     * `/verification/oidc-direct_post` - that belongs to a wholly separate
+     * flow (`authorize_enhanced.html`'s OIDC RP page), with its own
+     * session/state cache namespace; submitting there for a session created
+     * via `/ui/interaction` fails with "session not found".
+     *
+     * This endpoint only ever accepts one shape: `{ response: "<jwe-compact>" }`
+     * (`UIInteraction` always requests an encrypted response - see its
+     * `response_mode` doc comment, which now mints `dc_api.jwt` whenever DC
+     * API is enabled so the wallet actually encrypts). `state` is never
+     * submitted alongside the ciphertext; the server recovers it by
+     * decrypting the JWE and reading the `state` claim from the plaintext,
+     * which is where the session lookup actually happens
+     * (`VerificationDirectPost`) - there is no unencrypted `vp_token`/
+     * `presentation_submission` fallback shape on this endpoint to forward.
+     *
+     * @param {{response?: string}} data
+     * @returns {Promise<{redirect_uri?: string} | null>}
+     */
+    async _submitDCAPIResponse(data) {
+        if (!data.response) {
+            throw new Error("DC API response is missing the encrypted 'response' payload");
+        }
+        const body = new URLSearchParams();
+        body.set("response", data.response);
+
+        const res = await fetch(new URL("/verification/direct_post", baseUrl), {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body,
+        });
+        if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`Failed to submit DC API response: HTTP ${res.status} - ${text}`);
+        }
+        return res.json().catch(() => null);
     },
 
     /** Set up QR + wallet links + SSE fallback flow. */

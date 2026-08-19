@@ -310,6 +310,18 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, fmt.Errorf("data source %q for credential type %q requires an identifier", credSource.DataSource, session.CredentialType)
 	}
 
+	// AuthorizationDetails is intentionally left empty here, matching the same
+	// decision already made in handlers_datastore.go's pre-auth code minting:
+	// if set, the token endpoint reflects it back with credential_identifiers
+	// added, which per OID4VCI spec then forces the wallet to use
+	// credential_identifier (not credential_configuration_id) in the
+	// credential request. Confirmed against the EUDI reference wallet's
+	// pinned eudi-lib-jvm-openid4vci-kt (lpidproto PLAN.md workstream 7):
+	// it doesn't build identifier-scoped credential requests, so it aborts
+	// with zero issued documents when authorization_details is present.
+	// Leaving it empty makes the wallet fall back to credential_configuration_id,
+	// which both this library's CredentialRequest.Validate and
+	// ResolveCredentialFormatWithAuthDetails already handle as the normal path.
 	authCtx := &cache.AuthorizationContext{
 		SessionID:    preAuthCode,
 		Code:         preAuthCode,
@@ -320,12 +332,6 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		Nonce:        nonce,
 		AuthProvider: model.AuthProviderOIDC,
 		Identifier:   identifier,
-		AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{
-			{
-				Type:                      "openid_credential",
-				CredentialConfigurationID: session.CredentialType,
-			},
-		},
 	}
 	if credSourceErr == nil {
 		authCtx.DataSource = string(credSource.DataSource)

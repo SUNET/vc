@@ -22,10 +22,10 @@ type Service struct {
 	log         *logger.Log
 	tracer      *trace.Tracer
 
-	DatastoreColl           *DatastoreColl
-	IdentityMappingsColl    *IdentityMappingsColl
-	CredentialOfferColl     *CredentialOfferColl
-	DynamicRegistrationColl *DynamicRegistrationColl
+	DatastoreColl           DatastoreStore
+	IdentityMappingsColl    IdentityMappingStore
+	CredentialOfferColl     CredentialOfferStore
+	DynamicRegistrationColl DynamicRegistrationStore
 }
 
 // New creates a new database service
@@ -43,23 +43,25 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		return nil, err
 	}
 
-	service.DatastoreColl = &DatastoreColl{
+	datastoreColl := &DatastoreColl{
 		Service: service,
 		Coll:    service.MongoClient.Database("vc").Collection("datastore"),
 		log:     log.New("VCDatastoreColl"),
 	}
-	if err := service.DatastoreColl.createIndex(ctx); err != nil {
+	if err := datastoreColl.createIndex(ctx); err != nil {
 		return nil, err
 	}
+	service.DatastoreColl = datastoreColl
 
-	service.IdentityMappingsColl = &IdentityMappingsColl{
+	identityMappingsColl := &IdentityMappingsColl{
 		Service: service,
 		Coll:    service.MongoClient.Database("vc").Collection("identity_mappings"),
 		log:     log.New("VCIdentityMappingsColl"),
 	}
-	if err := service.IdentityMappingsColl.createIndex(ctx); err != nil {
+	if err := identityMappingsColl.createIndex(ctx); err != nil {
 		return nil, err
 	}
+	service.IdentityMappingsColl = identityMappingsColl
 
 	var err error
 
