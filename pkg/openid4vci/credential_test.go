@@ -278,7 +278,7 @@ func TestExtractAllJWKs(t *testing.T) {
 		attestation := makeTestAttestationJWT(t, []map[string]any{
 			{"kty": "EC", "crv": "P-256", "x": "key1x", "y": "key1y"},
 		})
-		proofs := &Proofs{Attestation: attestation}
+		proofs := &Proofs{Attestation: []ProofAttestation{attestation}}
 		jwks, err := proofs.ExtractAllJWKs(1)
 		assert.NoError(t, err)
 		assert.Len(t, jwks, 1)
@@ -297,7 +297,7 @@ func TestExtractAllJWKs(t *testing.T) {
 			{"kty": "EC", "crv": "P-256", "x": "key2x", "y": "key2y"},
 			{"kty": "EC", "crv": "P-256", "x": "key3x", "y": "key3y"},
 		})
-		proofs := &Proofs{Attestation: attestation}
+		proofs := &Proofs{Attestation: []ProofAttestation{attestation}}
 		jwks, err := proofs.ExtractAllJWKs(3)
 		assert.NoError(t, err)
 		assert.Len(t, jwks, 3)
@@ -331,7 +331,7 @@ func TestExtractAllJWKs(t *testing.T) {
 			{"kty": "EC", "crv": "P-256", "x": "key2x", "y": "key2y"},
 			{"kty": "EC", "crv": "P-256", "x": "key3x", "y": "key3y"},
 		})
-		proofs := &Proofs{Attestation: attestation}
+		proofs := &Proofs{Attestation: []ProofAttestation{attestation}}
 		jwks, err := proofs.ExtractAllJWKs(2)
 		assert.Error(t, err)
 		assert.Nil(t, jwks)
@@ -356,7 +356,7 @@ func TestProofsCount(t *testing.T) {
 	})
 
 	t.Run("attestation count", func(t *testing.T) {
-		proofs := &Proofs{Attestation: ProofAttestation("some.jwt.token")}
+		proofs := &Proofs{Attestation: []ProofAttestation{ProofAttestation("some.jwt.token")}}
 		assert.NotEmpty(t, proofs.Attestation)
 	})
 

@@ -194,9 +194,13 @@ type Proofs struct {
 	// signed using Data Integrity Proof as defined in Appendix F.2
 	DIVP []ProofDIVP `json:"di_vp,omitempty"`
 
-	// Attestation contains a single JWT representing a key attestation
-	// as defined in Appendix D.1
-	Attestation ProofAttestation `json:"attestation,omitempty"`
+	// Attestation contains an array of JWTs representing key attestations
+	// as defined in Appendix D.1. Confirmed as an array (not a bare string)
+	// against the EUDI reference wallet's pinned eudi-lib-jvm-openid4vci-kt
+	// (lpidproto PLAN.md workstream 7): it sends "attestation" with the same
+	// array shape as "jwt", which this field previously rejected with a JSON
+	// unmarshal error.
+	Attestation []ProofAttestation `json:"attestation,omitempty"`
 }
 
 // ProofType returns the proof type of the proofs contained in this struct.
@@ -207,7 +211,7 @@ func (p *Proofs) ProofType() string {
 	if len(p.DIVP) > 0 {
 		return "di_vp"
 	}
-	if p.Attestation != "" {
+	if len(p.Attestation) > 0 {
 		return "attestation"
 	}
 	return ""
@@ -225,7 +229,7 @@ func (p *Proofs) ExtractJWK() (*apiv1_issuer.Jwk, error) {
 	case "di_vp":
 		return p.DIVP[0].ExtractJWK()
 	case "attestation":
-		return p.Attestation.ExtractJWK()
+		return p.Attestation[0].ExtractJWK()
 	}
 
 	return nil, fmt.Errorf("no proofs found")
@@ -245,7 +249,7 @@ func (p *Proofs) ExtractAllJWKs(maxLength int) ([]*apiv1_issuer.Jwk, error) {
 	case "di_vp":
 		return p.extractAllJWKsFromDIVP(maxLength)
 	case "attestation":
-		return p.Attestation.ExtractAllJWKs(maxLength)
+		return p.Attestation[0].ExtractAllJWKs(maxLength)
 	}
 
 	return nil, fmt.Errorf("no proofs provided")

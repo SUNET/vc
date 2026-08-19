@@ -131,7 +131,7 @@ func TestProofTypes(t *testing.T) {
 			name: "attestation",
 			cr: &CredentialRequest{
 				Proofs: &Proofs{
-					Attestation: mockKeyAttestation,
+					Attestation: []ProofAttestation{mockKeyAttestation},
 				},
 			},
 			errStr: "",
@@ -140,7 +140,7 @@ func TestProofTypes(t *testing.T) {
 			name: "attestation_missing",
 			cr: &CredentialRequest{
 				Proofs: &Proofs{
-					Attestation: "",
+					Attestation: nil,
 				},
 			},
 			errStr: "invalid_credential_request",
@@ -484,7 +484,7 @@ func TestVerifyProofErrorDescriptions(t *testing.T) {
 	})
 
 	t.Run("empty attestation returns proper error description", func(t *testing.T) {
-		cr := &CredentialRequest{Proofs: &Proofs{Attestation: ""}}
+		cr := &CredentialRequest{Proofs: &Proofs{Attestation: nil}}
 		err := cr.VerifyProof(privateKey.Public())
 		assert.Error(t, err)
 		openidErr, ok := err.(*Error)
