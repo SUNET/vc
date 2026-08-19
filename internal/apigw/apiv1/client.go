@@ -225,6 +225,15 @@ func (c *Client) EphemeralEncryptionKey(ctx context.Context, kid string) (jwk.Ke
 		if err := publicJWK.Set("use", "enc"); err != nil {
 			return nil, nil, err
 		}
+		// The reference wallet's ClientMetaDataValidator (eudi-lib-jvm-openid4vp-kt)
+		// only treats a jwks entry as a viable encryption-key candidate if it has
+		// both a non-blank "kid" AND a non-blank "alg" -- entries without "alg"
+		// are silently filtered out, so without this the candidate list ends up
+		// empty and the wallet rejects the request with InvalidClientMetaData
+		// ("No encryption JWKs were advertised").
+		if err := publicJWK.Set("alg", "ECDH-ES"); err != nil {
+			return nil, nil, err
+		}
 		return existing, publicJWK, nil
 	}
 
@@ -255,6 +264,12 @@ func (c *Client) EphemeralEncryptionKey(ctx context.Context, kid string) (jwk.Ke
 	}
 
 	if err := publicJWK.Set("kid", kid); err != nil {
+		return nil, nil, err
+	}
+
+	// See the comment on the cache-hit branch above: the wallet requires "alg"
+	// on the JWK itself, not just at the top-level authorization_encrypted_response_alg.
+	if err := publicJWK.Set("alg", "ECDH-ES"); err != nil {
 		return nil, nil, err
 	}
 
