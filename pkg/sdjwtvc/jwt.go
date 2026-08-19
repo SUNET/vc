@@ -18,6 +18,15 @@ type Signer interface {
 	PublicKey() any
 }
 
+// certChainSigner is implemented by Signers that also expose an x5c-ready
+// certificate chain (e.g. *pki.KeyMaterialSigner). Checked via an optional
+// interface assertion in SignWithSigner rather than added to Signer directly,
+// so Signer implementations with no certificate (HSM/PKCS#11 key-only setups)
+// aren't forced to grow a method they can't meaningfully implement.
+type certChainSigner interface {
+	GetCertificateChain() []string
+}
+
 // Sign signs the JWT with the provided header, body, signing method, and signing key
 func Sign(header, body jwt.MapClaims, signingMethod jwt.SigningMethod, signingKey any) (string, error) {
 	token := jwt.NewWithClaims(signingMethod, body)
@@ -36,6 +45,24 @@ func SignWithSigner(ctx context.Context, header, body jwt.MapClaims, signer Sign
 	// Set algorithm and kid from signer
 	header["alg"] = signer.Algorithm()
 	header["kid"] = signer.KeyID()
+
+	// The EUDI reference wallet's SD-JWT VC claim extraction (multipaz's
+	// SdJwtVcCredential.getClaimsImpl) requires an x5c certificate chain in
+	// the JWS header and throws IllegalStateException("Only X509-certified
+	// keys are supported in SD-JWT") otherwise -- it does not support
+	// resolving the signer's key via a bare kid. That exception is swallowed
+	// silently by DcqlRequestProcessor.findMatchesForQuery (wrapped in
+	// runCatching with no logging), so a credential issued with kid-only,
+	// no-x5c headers is invisibly excluded from every DCQL/openid4vp
+	// presentation match -- confirmed live against the actual wallet-core
+	// and multipaz sources (lpidproto PLAN.md workstream 7 task 7.5, finding
+	// 17) after every other candidate (vct, claims, status, trust) checked
+	// out fine and the wallet still reported "document not available".
+	if cc, ok := signer.(certChainSigner); ok {
+		if chain := cc.GetCertificateChain(); len(chain) > 0 {
+			header["x5c"] = chain
+		}
+	}
 
 	// Encode header
 	headerJSON, err := json.Marshal(header)
