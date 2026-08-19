@@ -58,7 +58,7 @@ func StartPostgres(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 		t.Fatalf("ping postgres: %v", err)
 	}
 
-	if err := sqlstore.ApplySchema(ctx, db, sqlstore.PostgresDialect); err != nil {
+	if err := sqlstore.ApplySchema(ctx, db, sqlstore.PostgresDialect, nil); err != nil {
 		_ = db.Close()
 		_ = ctr.Terminate(ctx)
 		t.Fatalf("migrate postgres: %v", err)
@@ -86,7 +86,11 @@ func StartMariaDB(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 		t.Fatalf("start mariadb container: %v", err)
 	}
 
-	connStr, err := ctr.ConnectionString(ctx, "multiStatements=true", "parseTime=true")
+	// Deliberately NOT multiStatements=true here: ApplySchema now opens its
+	// own dedicated migration connection with that enabled (see
+	// MariaDBConfig.MigrationDSN) rather than needing it on the
+	// application's own pool.
+	connStr, err := ctr.ConnectionString(ctx, "parseTime=true")
 	if err != nil {
 		_ = ctr.Terminate(ctx)
 		t.Fatalf("mariadb connection string: %v", err)
@@ -103,7 +107,36 @@ func StartMariaDB(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 		t.Fatalf("ping mariadb: %v", err)
 	}
 
-	if err := sqlstore.ApplySchema(ctx, db, sqlstore.MariaDBDialect); err != nil {
+	host, err := ctr.Host(ctx)
+	if err != nil {
+		_ = db.Close()
+		_ = ctr.Terminate(ctx)
+		t.Fatalf("mariadb host: %v", err)
+	}
+	port, err := ctr.MappedPort(ctx, "3306/tcp")
+	if err != nil {
+		_ = db.Close()
+		_ = ctr.Terminate(ctx)
+		t.Fatalf("mariadb mapped port: %v", err)
+	}
+	portNum, err := strconv.Atoi(port.Port())
+	if err != nil {
+		_ = db.Close()
+		_ = ctr.Terminate(ctx)
+		t.Fatalf("mariadb port: %v", err)
+	}
+	cfg := &sqlstore.SQL{
+		Backend: "mariadb",
+		MariaDB: &sqlstore.MariaDBConfig{
+			Host:     host,
+			Port:     portNum,
+			User:     "test",
+			Password: "test",
+			Database: "test",
+		},
+	}
+
+	if err := sqlstore.ApplySchema(ctx, db, sqlstore.MariaDBDialect, cfg); err != nil {
 		_ = db.Close()
 		_ = ctr.Terminate(ctx)
 		t.Fatalf("migrate mariadb: %v", err)

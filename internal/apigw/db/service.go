@@ -117,7 +117,7 @@ func newSQL(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logg
 	if err != nil {
 		return nil, err
 	}
-	if err := sqlstore.ApplySchema(ctx, db, dialect); err != nil {
+	if err := sqlstore.ApplySchema(ctx, db, dialect, &cfg.Common.SQL); err != nil {
 		return nil, err
 	}
 	service.SQLDB = db
