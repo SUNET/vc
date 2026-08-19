@@ -4,6 +4,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
+	"math/big"
 	"testing"
 	"time"
 
@@ -50,6 +54,41 @@ func createValidJWTProof(t *testing.T, privateKey *ecdsa.PrivateKey, aud string)
 	return signedToken
 }
 
+// createSelfSignedCertDER creates a minimal self-signed X.509 certificate for
+// privateKey, returning its DER bytes, for building x5c test fixtures.
+func createSelfSignedCertDER(t *testing.T, privateKey *ecdsa.PrivateKey) []byte {
+	t.Helper()
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "test-attestation-issuer"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &privateKey.PublicKey, privateKey)
+	require.NoError(t, err)
+	return der
+}
+
+// signAttestationJWT builds and signs a key-attestation JWT with signingKey,
+// with an x5c header containing certDER. Passing a cert for a different key
+// than signingKey lets tests construct a proof whose x5c doesn't match its
+// own signature, to prove Verify actually checks it.
+func signAttestationJWT(t *testing.T, signingKey *ecdsa.PrivateKey, certDER []byte) ProofAttestation {
+	t.Helper()
+	claims := jwtv5.MapClaims{
+		"iat": time.Now().Unix(),
+		"attested_keys": []map[string]any{
+			{"kty": "EC", "crv": "P-256", "x": "test", "y": "test"},
+		},
+	}
+	token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, claims)
+	token.Header["typ"] = "key-attestation+jwt"
+	token.Header["x5c"] = []string{base64.StdEncoding.EncodeToString(certDER)}
+	signed, err := token.SignedString(signingKey)
+	require.NoError(t, err)
+	return ProofAttestation(signed)
+}
+
 // createJWTProofWithIat creates a JWT proof with an explicit iat, to test clock-skew tolerance.
 func createJWTProofWithIat(t *testing.T, privateKey *ecdsa.PrivateKey, aud string, iat time.Time) string {
 	t.Helper()
@@ -73,6 +112,9 @@ func createJWTProofWithIat(t *testing.T, privateKey *ecdsa.PrivateKey, aud strin
 }
 
 func TestProofTypes(t *testing.T) {
+	attestationKey := generateTestEC256Key(t)
+	validAttestation := signAttestationJWT(t, attestationKey, createSelfSignedCertDER(t, attestationKey))
+
 	tts := []struct {
 		name   string
 		cr     *CredentialRequest
@@ -131,7 +173,7 @@ func TestProofTypes(t *testing.T) {
 			name: "attestation",
 			cr: &CredentialRequest{
 				Proofs: &Proofs{
-					Attestation: []ProofAttestation{mockKeyAttestation},
+					Attestation: []ProofAttestation{validAttestation},
 				},
 			},
 			errStr: "",
@@ -391,10 +433,29 @@ func TestDIVPVerify(t *testing.T) {
 }
 
 func TestVerifyAttestationProof(t *testing.T) {
-	t.Run("valid attestation", func(t *testing.T) {
-		// This mock attestation has all required claims
+	t.Run("valid attestation with matching x5c signature", func(t *testing.T) {
+		key := generateTestEC256Key(t)
+		cert := createSelfSignedCertDER(t, key)
+		attestation := signAttestationJWT(t, key, cert)
+		assert.NoError(t, attestation.Verify(nil))
+	})
+
+	t.Run("signature not matching x5c cert is rejected", func(t *testing.T) {
+		signingKey := generateTestEC256Key(t)
+		otherKey := generateTestEC256Key(t)
+		cert := createSelfSignedCertDER(t, otherKey) // x5c names a different key than the one that actually signed
+		attestation := signAttestationJWT(t, signingKey, cert)
+		assert.Error(t, attestation.Verify(nil))
+	})
+
+	t.Run("no x5c header is rejected", func(t *testing.T) {
+		// mockKeyAttestation has no x5c/kid at all. Previously accepted
+		// with no signature check whatsoever (ParseUnverified); now
+		// rejected outright since there's no key material to verify
+		// against.
 		err := mockKeyAttestation.Verify(nil)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "x5c")
 	})
 
 	t.Run("invalid attestation format", func(t *testing.T) {

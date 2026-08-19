@@ -3,11 +3,13 @@ package openid4vci
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/pkg/jose"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 )
@@ -213,48 +215,80 @@ func (p ProofAttestation) ExtractAllJWKs(maxLength int) ([]*apiv1_issuer.Jwk, er
 
 // Verify verifies a Key Attestation proof according to OpenID4VCI 1.0 Appendix D.1
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-key-attestation
+//
+// This checks that the attestation JWT is validly signed by whoever holds
+// the private key matching its own x5c leaf certificate -- the same
+// self-consistency check ProofJWTToken.Verify does for JWT proofs -- using
+// the JWT's own embedded certificate, not a trusted root. It does NOT
+// establish that the attestation issuer identified by that certificate is
+// itself trustworthy: this codebase has no trusted-attestation-issuer
+// registry yet (a separate, larger effort, akin to the FIDO2
+// hardware-attestation trust work), so a self-issued or otherwise
+// arbitrary certificate still passes. That said, this is a real
+// improvement over accepting the proof with no signature check at all
+// (the previous behavior, via ParseUnverified): forging attested_keys or
+// claims now requires an actual private key and a certificate to match,
+// not just well-formed JSON. A proof with no x5c header has no key
+// material this server can resolve at all (there is no kid-based registry
+// either), so it is rejected outright rather than silently accepted.
 func (p ProofAttestation) Verify(opts *VerifyProofOptions) error {
 	// First validate the JWT structure using validator tags
 	if err := p.Validate(); err != nil {
 		return err
 	}
 
-	token, _, err := jwtv5.NewParser().ParseUnverified(string(p), jwtv5.MapClaims{})
+	unverified, _, err := jwtv5.NewParser().ParseUnverified(string(p), jwtv5.MapClaims{})
 	if err != nil {
 		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "failed to parse attestation JWT"}
 	}
 
-	claims, ok := token.Claims.(jwtv5.MapClaims)
+	x5cRaw, ok := unverified.Header["x5c"]
 	if !ok {
-		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "failed to extract claims from attestation JWT"}
+		return &Error{Err: ErrInvalidProof, ErrorDescription: "attestation proof cannot be verified: no x5c header present, and this issuer does not yet support kid-based attestation-issuer key resolution"}
+	}
+	certs, err := jose.ParseX5CHeader(x5cRaw)
+	if err != nil {
+		return &Error{Err: ErrInvalidProof, ErrorDescription: fmt.Sprintf("failed to parse attestation x5c header: %v", err)}
+	}
+	publicKey := certs[0].PublicKey
+
+	claims := jwtv5.MapClaims{}
+	token, err := jwtv5.ParseWithClaims(string(p), claims, func(token *jwtv5.Token) (any, error) {
+		// Check if algorithm is supported (if supported algorithms are specified)
+		if opts != nil && len(opts.SupportedAlgorithms) > 0 {
+			alg, ok := token.Header["alg"].(string)
+			if !ok {
+				return nil, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "alg header must be a string"}
+			}
+			if !slices.Contains(opts.SupportedAlgorithms, alg) {
+				return nil, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("alg '%s' is not supported", alg)}
+			}
+		}
+
+		// nonce: validate against server-provided c_nonce if provided
+		if opts != nil && opts.CNonce != "" {
+			nonce, ok := claims["nonce"]
+			if !ok {
+				return nil, &Error{Err: ErrInvalidNonce, ErrorDescription: "nonce claim not found in attestation but c_nonce was provided"}
+			}
+			if nonce != opts.CNonce {
+				return nil, &Error{Err: ErrInvalidNonce, ErrorDescription: "nonce claim does not match server-provided c_nonce"}
+			}
+		}
+
+		return publicKey, nil
+	})
+	if err != nil {
+		var vciErr *Error
+		if errors.As(err, &vciErr) {
+			return vciErr
+		}
+		return &Error{Err: ErrInvalidProof, ErrorDescription: err.Error()}
 	}
 
-	// Runtime validations that depend on opts
-
-	// Check if algorithm is supported (if supported algorithms are specified)
-	if opts != nil && len(opts.SupportedAlgorithms) > 0 {
-		alg, ok := token.Header["alg"].(string)
-		if !ok {
-			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "alg header must be a string"}
-		}
-		if !slices.Contains(opts.SupportedAlgorithms, alg) {
-			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("alg '%s' is not supported", alg)}
-		}
+	if !token.Valid {
+		return &Error{Err: ErrInvalidProof, ErrorDescription: "attestation JWT signature is invalid"}
 	}
-
-	// nonce: validate against server-provided c_nonce if provided
-	if opts != nil && opts.CNonce != "" {
-		nonce, ok := claims["nonce"]
-		if !ok {
-			return &Error{Err: ErrInvalidNonce, ErrorDescription: "nonce claim not found in attestation but c_nonce was provided"}
-		}
-		if nonce != opts.CNonce {
-			return &Error{Err: ErrInvalidNonce, ErrorDescription: "nonce claim does not match server-provided c_nonce"}
-		}
-	}
-
-	// TODO: Implement signature verification against trusted attestation issuers
-	// This requires establishing trust in the attestation issuer
 
 	return nil
 }
