@@ -3,8 +3,6 @@ package mdoc
 import (
 	"crypto/sha256"
 	"fmt"
-
-	"github.com/fxamacker/cbor/v2"
 )
 
 // BuildOID4VPSessionTranscript builds the ISO 18013-5 SessionTranscript CBOR
@@ -33,18 +31,29 @@ import (
 // Confirm against a real wallet before relying on it for anything that
 // actually checks a cryptographic binding.
 func BuildOID4VPSessionTranscript(clientID, nonce, responseURI string, readerPublicKeyJWKThumbprint []byte) ([]byte, error) {
+	// Use the package's canonical CBOR encoder (NewCBOREncoder), not the
+	// cbor library's plain package-level Marshal, for the same reason every
+	// other CBOR encode call site in this package does: the wallet/prover
+	// side that this must byte-match also encodes canonically, so any
+	// mismatch here (e.g. a future field becoming map-shaped) could
+	// silently make otherwise-valid proofs fail verification.
+	encoder, err := NewCBOREncoder()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
+	}
+
 	var jwkThumbprint any
 	if readerPublicKeyJWKThumbprint != nil {
 		jwkThumbprint = readerPublicKeyJWKThumbprint
 	}
 
-	handoverInfo, err := cbor.Marshal([]any{clientID, nonce, jwkThumbprint, responseURI})
+	handoverInfo, err := encoder.Marshal([]any{clientID, nonce, jwkThumbprint, responseURI})
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode handoverInfo: %w", err)
 	}
 	handoverInfoDigest := sha256.Sum256(handoverInfo)
 
-	transcript, err := cbor.Marshal([]any{nil, nil, []any{"OpenID4VPHandover", handoverInfoDigest[:]}})
+	transcript, err := encoder.Marshal([]any{nil, nil, []any{"OpenID4VPHandover", handoverInfoDigest[:]}})
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode SessionTranscript: %w", err)
 	}
