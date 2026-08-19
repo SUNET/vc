@@ -3,10 +3,10 @@
 -- cache the way Mongo needs a new collection.
 CREATE TABLE cache_entries (
     cache_name  VARCHAR(128) NOT NULL,
-    key         VARCHAR(512) NOT NULL,
+    cache_key   VARCHAR(512) NOT NULL,
     json_value  JSONB NOT NULL,
     expires_at  TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (cache_name, key)
+    PRIMARY KEY (cache_name, cache_key)
 );
 
 -- Read-time correctness ("WHERE expires_at > now()") plus a periodic bounded

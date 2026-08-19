@@ -1207,10 +1207,10 @@ Sections omitted from the secrets file are left untouched.
 
 > **Path:** `.common.sql`
 
-| Field      | Type     | Description | Example | Default | Required |
-| ---------- | -------- | ----------- | ------- | ------- | -------- |
-| `postgres` | `object` | Postgres    | -       | -       | No       |
-| `mariadb`  | `object` | Maria DB    | -       | -       | No       |
+| Field      | Type     | Description                  | Example | Default | Required |
+| ---------- | -------- | ---------------------------- | ------- | ------- | -------- |
+| `postgres` | `object` | Postgres connection password | -       | -       | No       |
+| `mariadb`  | `object` | MariaDB connection password  | -       | -       | No       |
 
 ### `postgres`
 

@@ -34,9 +34,14 @@ var mariadbMigrations embed.FS
 // versions in a schema_migrations table in the target database and is a
 // no-op once the schema is already current, mirroring how Mongo index
 // creation already happens idempotently at startup.
-func ApplySchema(db *sqlx.DB, dialect Dialect) error {
-	ctx := context.Background()
-
+//
+// ctx bounds connection acquisition and the driver setup phase (both respect
+// ctx via PingContext/QueryRowContext internally) -- e.g. a caller can time
+// out or cancel startup if the database is unreachable, rather than hanging
+// indefinitely. golang-migrate's Up() call itself has no context support, so
+// ctx cannot interrupt schema application once it's actually running; in
+// practice a bad network/DB fails during connection setup, before that point.
+func ApplySchema(ctx context.Context, db *sqlx.DB, dialect Dialect) error {
 	// A single connection dedicated to running migrations, distinct from
 	// db's own pool. This matters because golang-migrate's database driver
 	// closes whatever it was constructed from when the migrate instance is

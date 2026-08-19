@@ -28,8 +28,10 @@ type MongoSecrets struct {
 
 // SQLSecrets holds relational database passwords, keyed by backend.
 type SQLSecrets struct {
+	// Postgres holds the Postgres connection password
 	Postgres PostgresSecrets `yaml:"postgres,omitempty"`
-	MariaDB  MariaDBSecrets  `yaml:"mariadb,omitempty"`
+	// MariaDB holds the MariaDB connection password
+	MariaDB MariaDBSecrets `yaml:"mariadb,omitempty"`
 }
 
 // PostgresSecrets holds the Postgres connection password

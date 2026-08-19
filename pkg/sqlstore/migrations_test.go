@@ -48,9 +48,9 @@ func TestApplySchema_Postgres(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, db.PingContext(ctx))
 
-	require.NoError(t, sqlstore.ApplySchema(db, sqlstore.PostgresDialect))
+	require.NoError(t, sqlstore.ApplySchema(ctx, db, sqlstore.PostgresDialect))
 	// Running again must be a no-op (ErrNoChange handled internally), not an error.
-	require.NoError(t, sqlstore.ApplySchema(db, sqlstore.PostgresDialect))
+	require.NoError(t, sqlstore.ApplySchema(ctx, db, sqlstore.PostgresDialect))
 
 	for _, table := range allTables {
 		_, err := db.ExecContext(ctx, "SELECT 1 FROM "+table+" LIMIT 0")
@@ -76,8 +76,8 @@ func TestApplySchema_MariaDB(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, db.PingContext(ctx))
 
-	require.NoError(t, sqlstore.ApplySchema(db, sqlstore.MariaDBDialect))
-	require.NoError(t, sqlstore.ApplySchema(db, sqlstore.MariaDBDialect))
+	require.NoError(t, sqlstore.ApplySchema(ctx, db, sqlstore.MariaDBDialect))
+	require.NoError(t, sqlstore.ApplySchema(ctx, db, sqlstore.MariaDBDialect))
 
 	for _, table := range allTables {
 		_, err := db.ExecContext(ctx, "SELECT 1 FROM "+table+" LIMIT 0")
