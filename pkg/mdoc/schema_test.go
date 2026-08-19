@@ -126,20 +126,28 @@ func TestMDDLSchema_SVGValues(t *testing.T) {
 					Display: []ClaimDisplay{{Locale: "en-US", Name: "Nationality"}},
 					SVGID:   "nationality",
 				},
+				"document_number": {
+					// Label set distinct from Name - must win over Name,
+					// mirroring sdjwtvc.VCTM.SVGValues using Display[0].Label.
+					Display: []ClaimDisplay{{Locale: "en-US", Name: "Document Number", Label: "Doc No."}},
+					SVGID:   "document_number",
+				},
 			},
 		},
 	}
 
 	data := map[string]any{
-		"family_name": "Andersson",
-		"given_name":  "Helen",
-		"portrait":    "base64data",
+		"family_name":     "Andersson",
+		"given_name":      "Helen",
+		"portrait":        "base64data",
+		"document_number": "123456789",
 		// nationality deliberately absent from data.
 	}
 
 	got := schema.SVGValues(data)
 	want := map[string]SVGValue{
-		"family_name": {Label: "Family Name", Value: "Andersson"},
+		"family_name":     {Label: "Family Name", Value: "Andersson"},
+		"document_number": {Label: "Doc No.", Value: "123456789"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("SVGValues() = %+v, want %+v", got, want)

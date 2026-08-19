@@ -192,8 +192,12 @@ func (s *MDDLSchema) SVGValues(data map[string]any) map[string]SVGValue {
 			if !ok {
 				continue
 			}
+			label := meta.Display[0].Label
+			if label == "" {
+				label = meta.Display[0].Name
+			}
 			result[meta.SVGID] = SVGValue{
-				Label: meta.Display[0].Name,
+				Label: label,
 				Value: value,
 			}
 		}

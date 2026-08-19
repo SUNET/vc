@@ -2,7 +2,9 @@ package apiv1
 
 import (
 	"testing"
+	"time"
 
+	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -54,6 +56,42 @@ func TestSVGTemplateReply_BothVCTMAndMDDLSet(t *testing.T) {
 func TestSVGTemplateReply_NeitherVCTMNorMDDLSet(t *testing.T) {
 	client := &Client{}
 	_, err := client.SVGTemplateReply(t.Context(), &SVGTemplateRequest{})
+	require.Error(t, err)
+}
+
+// TestSVGTemplateReply_MDDLDataURI exercises the MDDL branch's happy path
+// with a data: URI (avoids a real cacheService/HTTP origin) - the MDDL
+// branch previously had no test coverage at all.
+func TestSVGTemplateReply_MDDLDataURI(t *testing.T) {
+	log, err := logger.New("test", "", false)
+	require.NoError(t, err)
+
+	client := &Client{
+		log:          log,
+		cacheService: &cache.Service{SVGTemplate: cache.NewTestMemoryCache[string](time.Minute)},
+	}
+	mddl := &mdoc.MDDLSchema{
+		Display: []mdoc.DisplayProperties{
+			{
+				Rendering: &mdoc.Rendering{
+					SVGTemplates: []mdoc.SVGTemplate{
+						{URI: "data:image/svg+xml;base64,PHN2Zy8+"},
+					},
+				},
+			},
+		},
+	}
+
+	reply, err := client.SVGTemplateReply(t.Context(), &SVGTemplateRequest{MDDL: mddl})
+	require.NoError(t, err)
+	require.Equal(t, "PHN2Zy8+", reply.Template)
+}
+
+// TestSVGTemplateReply_MDDLNoTemplates confirms the MDDL branch's own
+// no-templates error path, mirroring the existing VCTM coverage's shape.
+func TestSVGTemplateReply_MDDLNoTemplates(t *testing.T) {
+	client := &Client{}
+	_, err := client.SVGTemplateReply(t.Context(), &SVGTemplateRequest{MDDL: &mdoc.MDDLSchema{}})
 	require.Error(t, err)
 }
 
