@@ -16,6 +16,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/sqlstore"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/go-playground/validator/v10"
@@ -295,7 +296,7 @@ func NewValidator() (*validator.Validate, error) {
 
 	// doc:constraint name="sql_backend_config_required" struct="SQL" applies="Postgres,MariaDB" description="When Backend is 'postgres', Postgres.Host and Postgres.User are required; when Backend is 'mariadb', MariaDB.Host and MariaDB.User are required. Enforced at the SQL struct level (rather than required_if tags on PostgresConfig/MariaDBConfig themselves) because 'Backend' lives on the parent SQL struct, not on those nested structs."
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
-		cfg := sl.Current().Interface().(model.SQL)
+		cfg := sl.Current().Interface().(sqlstore.SQL)
 		switch cfg.Backend {
 		case "postgres":
 			if cfg.Postgres == nil {
@@ -318,7 +319,7 @@ func NewValidator() (*validator.Validate, error) {
 				sl.ReportError(cfg.MariaDB.User, "MariaDB.User", "User", "mariadb_user_required", "")
 			}
 		}
-	}, model.SQL{})
+	}, sqlstore.SQL{})
 
 	// doc:constraint name="saml_metadata_source" struct="SAMLSP" applies="MDQServer,StaticIDPMetadata" description="Exactly one of mdq_server or static_idp_metadata must be set when enable is true. Mutual exclusivity is enforced by field tags."
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {

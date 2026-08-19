@@ -1469,6 +1469,7 @@ func main() {
 		filepath.Join(root, "pkg/openid4vp"),
 		filepath.Join(root, "pkg/openid4vci"),
 		filepath.Join(root, "pkg/openidfederation"),
+		filepath.Join(root, "pkg/sqlstore"),
 	}
 	for _, d := range dirs {
 		if _, err := os.Stat(d); os.IsNotExist(err) {

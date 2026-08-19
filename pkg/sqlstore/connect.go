@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/SUNET/vc/pkg/model"
-
 	"github.com/jmoiron/sqlx"
 
 	_ "github.com/go-sql-driver/mysql" // registers the "mysql" database/sql driver
@@ -16,7 +14,7 @@ import (
 // and returns it alongside the matching Dialect. Pings the database before
 // returning so connection/auth failures surface at startup rather than on
 // first query.
-func Connect(ctx context.Context, cfg *model.SQL) (*sqlx.DB, Dialect, error) {
+func Connect(ctx context.Context, cfg *SQL) (*sqlx.DB, Dialect, error) {
 	switch cfg.Backend {
 	case "postgres":
 		if cfg.Postgres == nil {
