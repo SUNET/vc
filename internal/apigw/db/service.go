@@ -13,7 +13,6 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ErrNoDocuments is returned when no documents are found
@@ -113,11 +112,8 @@ func newSQL(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logg
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	db, dialect, err := sqlstore.Connect(ctx, &cfg.Common.SQL)
+	db, dialect, err := sqlstore.ConnectAndApplySchema(ctx, &cfg.Common.SQL)
 	if err != nil {
-		return nil, err
-	}
-	if err := sqlstore.ApplySchema(ctx, db, dialect, &cfg.Common.SQL); err != nil {
 		return nil, err
 	}
 	service.SQLDB = db
@@ -155,41 +151,16 @@ func (s *Service) Status(ctx context.Context) *apiv1_status.StatusProbe {
 	ctx, span := s.tracer.Start(ctx, "db:status")
 	defer span.End()
 
-	if time.Now().Before(s.probeStore.NextCheck.AsTime()) {
-		return s.probeStore.PreviousResult
+	ping := func(ctx context.Context) error {
+		if s.SQLDB != nil {
+			return s.SQLDB.PingContext(ctx)
+		}
+		return s.MongoClient.Ping(ctx, nil)
 	}
-	probe := &apiv1_status.StatusProbe{
-		Name:          "db",
-		Healthy:       true,
-		Message:       "OK",
-		LastCheckedTS: timestamppb.Now(),
-	}
-
-	var err error
-	if s.SQLDB != nil {
-		err = s.SQLDB.PingContext(ctx)
-	} else {
-		err = s.MongoClient.Ping(ctx, nil)
-	}
-	if err != nil {
-		probe.Message = err.Error()
-		probe.Healthy = false
-	}
-
-	s.probeStore.PreviousResult = probe
-	s.probeStore.NextCheck = timestamppb.New(time.Now().Add(10 * time.Second))
-
-	return probe
+	return sqlstore.ProbeStatus(ctx, s.probeStore, ping)
 }
 
 // Close closes the database connection
 func (s *Service) Close(ctx context.Context) error {
-	if s.SQLDB != nil {
-		return s.SQLDB.Close()
-	}
-	if err := s.MongoClient.Disconnect(ctx); err != nil {
-		return err
-	}
-	ctx.Done()
-	return nil
+	return sqlstore.CloseBackend(s.SQLDB, func() error { return s.MongoClient.Disconnect(ctx) })
 }

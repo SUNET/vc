@@ -56,3 +56,21 @@ func Connect(ctx context.Context, cfg *SQL) (*sqlx.DB, Dialect, error) {
 		return nil, nil, fmt.Errorf("sqlstore: unsupported backend %q (expected \"postgres\" or \"mariadb\")", cfg.Backend)
 	}
 }
+
+// ConnectAndApplySchema connects (via Connect) and immediately runs schema
+// migrations (via ApplySchema) against the new connection pool, closing that
+// pool if migrations fail. Connect itself already closes on a ping failure;
+// this closes the other failure path a bare Connect+ApplySchema call pair
+// would otherwise leak the pool on, so callers get one call that's clean on
+// every failure path instead of needing to remember cleanup themselves.
+func ConnectAndApplySchema(ctx context.Context, cfg *SQL) (*sqlx.DB, Dialect, error) {
+	db, dialect, err := Connect(ctx, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := ApplySchema(ctx, db, dialect, cfg); err != nil {
+		_ = db.Close()
+		return nil, nil, err
+	}
+	return db, dialect, nil
+}
