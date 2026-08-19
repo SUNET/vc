@@ -44,6 +44,31 @@ func TestCredentialValidation(t *testing.T) {
 			wantErr:              false,
 		},
 		{
+			// Proofs omitted entirely (nil) -- the deprecated singular
+			// "proof" field case -- must still be allowed.
+			name: "nil proofs is allowed (deprecated singular proof field)",
+			credentialRequest: &CredentialRequest{
+				CredentialConfigurationID: "vc+ldp",
+				Proofs:                    nil,
+			},
+			authorizationDetails: nil,
+			wantErr:              false,
+		},
+		{
+			// An explicitly-present but entirely empty proofs object
+			// declares zero proof types, which is exactly as invalid as
+			// declaring more than one -- must be rejected, matching
+			// VerifyProofWithOptions's existing behavior.
+			name: "explicitly empty proofs object is rejected",
+			credentialRequest: &CredentialRequest{
+				CredentialConfigurationID: "vc+ldp",
+				Proofs:                    &Proofs{},
+			},
+			authorizationDetails: nil,
+			wantErr:              true,
+			errContains:          "proofs must declare exactly one proof type",
+		},
+		{
 			name: "authorization_details flow with valid credential_identifier",
 			credentialRequest: &CredentialRequest{
 				CredentialIdentifier: "cred-id-1",

@@ -78,8 +78,12 @@ func (c *CredentialRequest) Validate(ctx context.Context, authorizationDetails [
 
 	// The proofs parameter, if present at all, MUST declare exactly one
 	// proof type (JWT, DIVP, or Attestation) -- OID4VCI Appendix F. A
-	// client using the deprecated singular "proof" field instead leaves
-	// Proofs entirely unset (all three sub-fields empty), which is fine.
+	// client using the deprecated singular "proof" field instead omits
+	// "proofs" from the request body entirely, which JSON-unmarshals to
+	// Proofs == nil, not to a non-nil-but-empty Proofs -- so this only
+	// needs to skip clients that never sent "proofs" at all, not tolerate
+	// an explicitly-empty "proofs": {}, which is exactly as invalid as
+	// VerifyProofWithOptions already treats it.
 	if c.Proofs != nil {
 		proofTypeCount := 0
 		if len(c.Proofs.JWT) > 0 {
@@ -91,7 +95,7 @@ func (c *CredentialRequest) Validate(ctx context.Context, authorizationDetails [
 		if len(c.Proofs.Attestation) > 0 {
 			proofTypeCount++
 		}
-		if proofTypeCount > 1 {
+		if proofTypeCount != 1 {
 			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "proofs must declare exactly one proof type"}
 		}
 	}
