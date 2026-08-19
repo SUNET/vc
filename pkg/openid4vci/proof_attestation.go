@@ -102,6 +102,40 @@ func (p ProofAttestation) Validate() error {
 	return nil
 }
 
+// ExtractNonce extracts the nonce claim from the attestation JWT without
+// verifying signature, mirroring ProofJWTToken.ExtractNonce. Needed because
+// handlers_issuer.go's nonce resolution previously only looked at
+// Proofs.JWT, so a credential request using the "attestation" proof type
+// (which the EUDI reference wallet's pinned openid4vci-kt actually sends
+// when metadata declares attestation support, lpidproto PLAN.md workstream 7)
+// fell back to the stale pre-auth-code nonce and failed Verify()'s own
+// nonce check with "nonce claim does not match server-provided c_nonce".
+func (p ProofAttestation) ExtractNonce() string {
+	if p == "" {
+		return ""
+	}
+
+	parts := strings.Split(string(p), ".")
+	if len(parts) < 2 {
+		return ""
+	}
+
+	claimsByte, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		claimsByte, err = base64.RawStdEncoding.DecodeString(parts[1])
+		if err != nil {
+			return ""
+		}
+	}
+
+	var claims ProofAttestationClaims
+	if err := json.Unmarshal(claimsByte, &claims); err != nil {
+		return ""
+	}
+
+	return claims.Nonce
+}
+
 // ExtractJWK extracts the first attested key (JWK) from the attestation JWT.
 // The attested_keys claim contains an array of JWKs that are attested by this proof.
 func (p ProofAttestation) ExtractJWK() (*apiv1_issuer.Jwk, error) {
