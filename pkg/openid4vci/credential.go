@@ -45,7 +45,15 @@ type CredentialRequest struct {
 	// to which the issued Credential instances will be bound to. The proofs parameter contains exactly one
 	// parameter named as the proof type in Appendix F, the value set for this parameter is a non-empty array
 	// containing parameters as defined by the corresponding proof type.
-	Proofs *Proofs `json:"proofs,omitempty" validate:"single_proof_type,omitempty"`
+	// "Exactly one proof type" is enforced in Validate() below, not via a
+	// struct tag: the go-playground/validator custom validation function
+	// registered for this used to be named "single_proof_type", but it was
+	// never actually being invoked here (confirmed live with a canary panic
+	// that never fired) for reasons not tracked down within the time spent
+	// investigating -- moving the check to Validate(), which already runs
+	// reliably for this request, sidesteps whatever is wrong with the
+	// struct-tag path rather than leaving proof-type-count unchecked.
+	Proofs *Proofs `json:"proofs,omitempty" validate:"omitempty"`
 
 	// Proof OPTIONAL. Single proof object for non-batch requests.
 	// Deprecated: Use Proofs instead. This field is kept for backward compatibility with older wallets.
@@ -67,6 +75,26 @@ func (c *CredentialRequest) IsAccessTokenDPoP() bool {
 // Otherwise, credential_configuration_id MUST be used.
 func (c *CredentialRequest) Validate(ctx context.Context, authorizationDetails []AuthorizationDetailsParameter) error {
 	hasAuthDetails := len(authorizationDetails) > 0
+
+	// The proofs parameter, if present at all, MUST declare exactly one
+	// proof type (JWT, DIVP, or Attestation) -- OID4VCI Appendix F. A
+	// client using the deprecated singular "proof" field instead leaves
+	// Proofs entirely unset (all three sub-fields empty), which is fine.
+	if c.Proofs != nil {
+		proofTypeCount := 0
+		if len(c.Proofs.JWT) > 0 {
+			proofTypeCount++
+		}
+		if len(c.Proofs.DIVP) > 0 {
+			proofTypeCount++
+		}
+		if len(c.Proofs.Attestation) > 0 {
+			proofTypeCount++
+		}
+		if proofTypeCount > 1 {
+			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "proofs must declare exactly one proof type"}
+		}
+	}
 
 	// Neither identifier nor configuration ID provided
 	if c.CredentialIdentifier == "" && c.CredentialConfigurationID == "" {
