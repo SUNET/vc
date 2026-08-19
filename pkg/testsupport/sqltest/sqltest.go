@@ -2,19 +2,19 @@
 // pre-migrated and ready to use, for repository-level SQL store tests.
 //
 // It lives in its own leaf package, separate from pkg/testsupport itself,
-// for the same reason as pkg/testsupport/tracertest: pkg/sqlstore depends
-// on pkg/model, which in turn depends on packages (e.g. pkg/mdoc) that
-// import pkg/cache, and pkg/cache's own tests already import
-// pkg/testsupport. Adding a pkg/sqlstore dependency to pkg/testsupport
-// itself would create an import cycle; keeping it here, imported only by
-// packages that don't sit on that cycle, avoids the problem.
+// matching pkg/testsupport/tracertest and pkg/testsupport/cachetest: those
+// two exist to avoid import cycles through packages that still depend on
+// pkg/model. pkg/sqlstore itself has no such dependency (SQL/PostgresConfig/
+// MariaDBConfig moved from pkg/model into pkg/sqlstore precisely to avoid
+// depending on pkg/model at all), so this package could safely be folded
+// back into pkg/testsupport directly -- kept separate here anyway, for now,
+// to match its siblings' layout rather than as a cycle requirement.
 package sqltest
 
 import (
 	"strconv"
 	"testing"
 
-	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sqlstore"
 	"github.com/SUNET/vc/pkg/testsupport"
 
@@ -117,10 +117,10 @@ func StartMariaDB(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 }
 
 // PostgresConfig spins up a throwaway, unmigrated Postgres container and
-// returns a *model.PostgresConfig pointing at it (for exercising the real
+// returns a *sqlstore.PostgresConfig pointing at it (for exercising the real
 // sqlstore.Connect/db.New code path, as opposed to StartPostgres's
 // already-opened *sqlx.DB) and a cleanup function.
-func PostgresConfig(t *testing.T) (*model.PostgresConfig, func()) {
+func PostgresConfig(t *testing.T) (*sqlstore.PostgresConfig, func()) {
 	t.Helper()
 	if !testsupport.IsDockerAvailable() {
 		t.Skip("Skipping test: Docker is not available")
@@ -148,7 +148,7 @@ func PostgresConfig(t *testing.T) (*model.PostgresConfig, func()) {
 		t.Fatalf("postgres port: %v", err)
 	}
 
-	cfg := &model.PostgresConfig{
+	cfg := &sqlstore.PostgresConfig{
 		Host:         host,
 		Port:         portNum,
 		User:         "postgres",
@@ -162,10 +162,10 @@ func PostgresConfig(t *testing.T) (*model.PostgresConfig, func()) {
 }
 
 // MariaDBConfig spins up a throwaway, unmigrated MariaDB container and
-// returns a *model.MariaDBConfig pointing at it (for exercising the real
+// returns a *sqlstore.MariaDBConfig pointing at it (for exercising the real
 // sqlstore.Connect/db.New code path, as opposed to StartMariaDB's
 // already-opened *sqlx.DB) and a cleanup function.
-func MariaDBConfig(t *testing.T) (*model.MariaDBConfig, func()) {
+func MariaDBConfig(t *testing.T) (*sqlstore.MariaDBConfig, func()) {
 	t.Helper()
 	if !testsupport.IsDockerAvailable() {
 		t.Skip("Skipping test: Docker is not available")
@@ -193,7 +193,7 @@ func MariaDBConfig(t *testing.T) (*model.MariaDBConfig, func()) {
 		t.Fatalf("mariadb port: %v", err)
 	}
 
-	cfg := &model.MariaDBConfig{
+	cfg := &sqlstore.MariaDBConfig{
 		Host:         host,
 		Port:         portNum,
 		User:         "test",
