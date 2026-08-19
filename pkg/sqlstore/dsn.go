@@ -64,22 +64,44 @@ func (m *MariaDBConfig) tlsConfigName() string {
 }
 
 // DSN returns a go-sql-driver/mysql connection string for this MariaDB
-// configuration. When CA/client certificate paths are set, this also
-// registers a named TLS config with the mysql driver (mysql.RegisterTLSConfig)
-// and references it in the returned DSN; the caller does not need to
-// register anything itself.
+// configuration, for the application's own long-lived connection pool. When
+// CA/client certificate paths are set, this also registers a named TLS
+// config with the mysql driver (mysql.RegisterTLSConfig) and references it
+// in the returned DSN; the caller does not need to register anything itself.
+//
+// Does not enable MultiStatements: see MigrationDSN for why that's kept to
+// a separate, migration-only connection.
 func (m *MariaDBConfig) DSN() (string, error) {
+	return m.dsn(false)
+}
+
+// MigrationDSN returns a connection string identical to DSN, except with
+// MultiStatements enabled. Schema migration files contain more than one SQL
+// statement per file (e.g. a CREATE TABLE followed by CREATE INDEX
+// statements), which requires the go-sql-driver/mysql driver's
+// MultiStatements option to execute more than one statement per Exec call.
+//
+// Kept as a separate DSN/connection from the application's own pool (DSN
+// above) rather than enabling MultiStatements there too: MySQL's wire
+// protocol requires an explicit opt-in (CLIENT_MULTI_STATEMENTS) for
+// multiple semicolon-separated statements in one query, and every ordinary
+// request-path query in this codebase is a single statement built via sqlx
+// with bound parameters -- it never needs this capability. Enabling it
+// repo-wide on the shared pool would only widen the blast radius of any
+// future SQL-injection bug (stacked queries) for no benefit, so it's scoped
+// to sqlstore.ApplySchema's dedicated migration connection instead.
+func (m *MariaDBConfig) MigrationDSN() (string, error) {
+	return m.dsn(true)
+}
+
+func (m *MariaDBConfig) dsn(multiStatements bool) (string, error) {
 	cfg := mysql.NewConfig()
 	cfg.User = m.User
 	cfg.Passwd = m.Password
 	cfg.Net = "tcp"
 	cfg.Addr = fmt.Sprintf("%s:%d", m.Host, m.Port)
 	cfg.DBName = m.Database
-	// Schema migration files contain more than one statement per file
-	// (e.g. CREATE TABLE followed by CREATE INDEX); this is required for
-	// the migration driver to execute all of them. Harmless for ordinary
-	// single-statement queries.
-	cfg.MultiStatements = true
+	cfg.MultiStatements = multiStatements
 	// Without this, DATE/DATETIME/TIMESTAMP columns are returned as raw
 	// []byte instead of time.Time, breaking any row struct field typed
 	// time.Time.

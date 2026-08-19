@@ -1,6 +1,7 @@
 package sqlstore_test
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/sqlstore"
@@ -48,9 +49,9 @@ func TestApplySchema_Postgres(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, db.PingContext(ctx))
 
-	require.NoError(t, sqlstore.ApplySchema(ctx, db, sqlstore.PostgresDialect))
+	require.NoError(t, sqlstore.ApplySchema(ctx, db, sqlstore.PostgresDialect, nil))
 	// Running again must be a no-op (ErrNoChange handled internally), not an error.
-	require.NoError(t, sqlstore.ApplySchema(ctx, db, sqlstore.PostgresDialect))
+	require.NoError(t, sqlstore.ApplySchema(ctx, db, sqlstore.PostgresDialect, nil))
 
 	for _, table := range allTables {
 		_, err := db.ExecContext(ctx, "SELECT 1 FROM "+table+" LIMIT 0")
@@ -68,7 +69,11 @@ func TestApplySchema_MariaDB(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ctr.Terminate(ctx) })
 
-	connStr, err := ctr.ConnectionString(ctx, "multiStatements=true")
+	// Deliberately NOT multiStatements=true here: ApplySchema now opens its
+	// own dedicated migration connection with that enabled (see
+	// MariaDBConfig.MigrationDSN) rather than needing it on the
+	// application's own pool.
+	connStr, err := ctr.ConnectionString(ctx, "parseTime=true")
 	require.NoError(t, err)
 
 	db, err := sqlx.Open(sqlstore.MariaDBDialect.DriverName(), connStr)
@@ -76,8 +81,25 @@ func TestApplySchema_MariaDB(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, db.PingContext(ctx))
 
-	require.NoError(t, sqlstore.ApplySchema(ctx, db, sqlstore.MariaDBDialect))
-	require.NoError(t, sqlstore.ApplySchema(ctx, db, sqlstore.MariaDBDialect))
+	host, err := ctr.Host(ctx)
+	require.NoError(t, err)
+	port, err := ctr.MappedPort(ctx, "3306/tcp")
+	require.NoError(t, err)
+	portNum, err := strconv.Atoi(port.Port())
+	require.NoError(t, err)
+	cfg := &sqlstore.SQL{
+		Backend: "mariadb",
+		MariaDB: &sqlstore.MariaDBConfig{
+			Host:     host,
+			Port:     portNum,
+			User:     "test",
+			Password: "test",
+			Database: "test",
+		},
+	}
+
+	require.NoError(t, sqlstore.ApplySchema(ctx, db, sqlstore.MariaDBDialect, cfg))
+	require.NoError(t, sqlstore.ApplySchema(ctx, db, sqlstore.MariaDBDialect, cfg))
 
 	for _, table := range allTables {
 		_, err := db.ExecContext(ctx, "SELECT 1 FROM "+table+" LIMIT 0")

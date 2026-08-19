@@ -7,6 +7,7 @@
 package sqlstore
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -98,7 +99,19 @@ func (postgresDialect) JSONContains(column string) string {
 }
 
 func (postgresDialect) JSONTextExtract(column, key string) string {
-	return fmt.Sprintf("%s->>'%s'", column, key)
+	return fmt.Sprintf("%s->>'%s'", column, escapeSQLStringLiteral(key))
+}
+
+// escapeSQLStringLiteral escapes a value for safe embedding inside a
+// standard-conforming ('...') SQL string literal by doubling embedded
+// single quotes. Postgres's default standard_conforming_strings setting
+// means backslash has no special meaning in a plain '...' literal, so only
+// the quote character itself needs escaping. Every JSONTextExtract caller
+// today passes a hardcoded key (never user input), but this guards against
+// both malformed SQL for keys with unusual characters and, if a future
+// caller ever passes an untrusted key, SQL injection via an embedded quote.
+func escapeSQLStringLiteral(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
 }
 
 func (postgresDialect) CaseInsensitiveLike(column string) string {
@@ -135,8 +148,25 @@ func (mariaDBDialect) JSONContains(column string) string {
 
 func (mariaDBDialect) JSONTextExtract(column, key string) string {
 	// MariaDB does not support MySQL's "->>" shorthand operator; use the
-	// portable JSON_UNQUOTE(JSON_EXTRACT(...)) form instead.
-	return fmt.Sprintf("JSON_UNQUOTE(JSON_EXTRACT(%s, '$.%s'))", column, key)
+	// portable JSON_UNQUOTE(JSON_EXTRACT(...)) form instead. The key is
+	// always double-quoted within the JSON path ($."key") -- valid whether
+	// or not the key actually needs quoting -- and escaped, guarding
+	// against both malformed SQL for irregular keys and, if a future caller
+	// ever passes an untrusted key, injection via an embedded quote.
+	return fmt.Sprintf("JSON_UNQUOTE(JSON_EXTRACT(%s, '$.%s'))", column, escapeMariaDBJSONPathKey(key))
+}
+
+// escapeMariaDBJSONPathKey escapes key for safe embedding as a double-quoted
+// JSON path segment ($."key") inside a SQL string literal. Uses Go's own
+// JSON string escaping (json.Marshal on a string never fails) for the
+// path-quoting layer -- the JSON path grammar's quoted-key escaping rules
+// are the same as JSON string escaping -- then escapes the result again for
+// the surrounding SQL string literal: unlike Postgres, MariaDB's default
+// sql_mode treats backslash as an escape character in string literals, so
+// both backslash and the quote character need escaping here.
+func escapeMariaDBJSONPathKey(key string) string {
+	jsonQuoted, _ := json.Marshal(key) // e.g. `"foo\"bar"`, already double-quoted
+	return strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(string(jsonQuoted))
 }
 
 func (mariaDBDialect) CaseInsensitiveLike(column string) string {
