@@ -752,11 +752,26 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 
 	c.log.Info("VP processed successfully", "session_id", session.SessionID, "claims_count", len(oidcClaims))
 
-	// Do NOT return redirect_uri here. The browser's /authorize page polls
-	// for session status and handles the redirect to the RP. Returning
-	// redirect_uri would cause the wallet to also redirect, consuming the
-	// authorization code before the browser can use it.
-	return &DirectPostResponse{}, nil
+	// Cross-device (QR / native wallet): the /authorize page is still
+	// polling and will redirect the original browser to the RP. Returning
+	// redirect_uri here would also send the wallet there and race on the
+	// one-time authorization code.
+	//
+	// Same-device web wallet: the user left /authorize, so nothing is
+	// polling. Return the RP callback so the wallet can navigate there.
+	if !session.WalletFollowsRedirect {
+		return &DirectPostResponse{}, nil
+	}
+
+	redirectURI, err := authorizationCodeRedirectURI(session)
+	if err != nil {
+		c.log.Error(err, "Failed to parse redirect URI")
+		return nil, ErrServerError
+	}
+
+	return &DirectPostResponse{
+		RedirectURI: redirectURI,
+	}, nil
 }
 
 // CallbackRequest represents a callback request
@@ -937,19 +952,33 @@ func (c *Client) PollSession(ctx context.Context, req *PollSessionRequest) (*Pol
 
 	// If code is issued, provide redirect URI
 	if session.Status == cache.SessionStatusCodeIssued {
-		u, err := url.Parse(session.RedirectURI)
+		redirectURI, err := authorizationCodeRedirectURI(session)
 		if err != nil {
 			c.log.Error(err, "Failed to parse redirect URI")
 			return nil, ErrServerError
 		}
-		q := u.Query()
-		q.Set("code", session.Code)
-		q.Set("state", session.State)
-		u.RawQuery = q.Encode()
-		response.RedirectURI = u.String()
+		response.RedirectURI = redirectURI
 	}
 
 	return response, nil
+}
+
+// authorizationCodeRedirectURI builds the RP callback URL with the issued
+// authorization code and original state. Empty when the session has no
+// redirect_uri (the wallet then stays put; the poller has nothing to follow).
+func authorizationCodeRedirectURI(session *cache.AuthorizationContext) (string, error) {
+	if session == nil || session.RedirectURI == "" {
+		return "", nil
+	}
+	u, err := url.Parse(session.RedirectURI)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set("code", session.Code)
+	q.Set("state", session.State)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 // UserInfoRequest represents a UserInfo endpoint request

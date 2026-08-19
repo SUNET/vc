@@ -14,6 +14,11 @@ import (
 type UpdateSessionPreferenceRequest struct {
 	SessionID             string `json:"session_id" binding:"required" validate:"required,max=128,printascii"`
 	ShowCredentialDetails bool   `json:"show_credential_details"`
+	// WalletFollowsRedirect is optional. When non-nil it records that the
+	// user is continuing in a same-device web wallet that should follow
+	// redirect_uri from direct_post. Omitted on credential-display saves
+	// so those POSTs do not clear a previously set flag.
+	WalletFollowsRedirect *bool `json:"wallet_follows_redirect"`
 }
 
 // UpdateSessionPreferenceResponse contains the response
@@ -34,6 +39,9 @@ func (c *Client) UpdateSessionPreference(ctx context.Context, req *UpdateSession
 
 	// Update preference
 	authCtx.ShowCredentialDetails = req.ShowCredentialDetails
+	if req.WalletFollowsRedirect != nil {
+		authCtx.WalletFollowsRedirect = *req.WalletFollowsRedirect
+	}
 
 	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		c.log.Error(err, "Failed to update session preference")

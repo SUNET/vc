@@ -79,7 +79,42 @@ func TestUpdateSessionPreference(t *testing.T) {
 	}
 }
 
-// TestConfirmCredentialDisplay tests the ConfirmCredentialDisplay handler
+func TestUpdateSessionPreference_WalletFollowsRedirect(t *testing.T) {
+	ctx := t.Context()
+	client, _ := CreateTestClientWithMock(nil)
+
+	authCtx := createTestDBSessionForPrefs("session-wallet-redirect")
+	authCtx.ShowCredentialDetails = true
+	require.NoError(t, client.cacheService.AuthContext.Create(ctx, authCtx))
+
+	flag := true
+	resp, err := client.UpdateSessionPreference(ctx, &UpdateSessionPreferenceRequest{
+		SessionID:             "session-wallet-redirect",
+		ShowCredentialDetails: true,
+		WalletFollowsRedirect: &flag,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.True(t, resp.Success)
+
+	updated, err := client.cacheService.AuthContext.GetByID(ctx, "session-wallet-redirect")
+	require.NoError(t, err)
+	assert.True(t, updated.WalletFollowsRedirect)
+	assert.True(t, updated.ShowCredentialDetails)
+
+	// A later display-preference save must not clear the flag.
+	resp, err = client.UpdateSessionPreference(ctx, &UpdateSessionPreferenceRequest{
+		SessionID:             "session-wallet-redirect",
+		ShowCredentialDetails: false,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	updated, err = client.cacheService.AuthContext.GetByID(ctx, "session-wallet-redirect")
+	require.NoError(t, err)
+	assert.True(t, updated.WalletFollowsRedirect, "omitting wallet_follows_redirect must leave the flag set")
+	assert.False(t, updated.ShowCredentialDetails)
+}
 func TestConfirmCredentialDisplay(t *testing.T) {
 	ctx := t.Context()
 
