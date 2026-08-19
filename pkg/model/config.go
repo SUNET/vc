@@ -156,6 +156,8 @@ type Common struct {
 	Kafka Kafka `yaml:"kafka" validate:"omitempty"`
 	// SecretFilePath is the path to a separate YAML file containing secrets; when set, secret values in config.yaml are cleared and only non-empty fields from the secrets file are applied.
 	SecretFilePath string `yaml:"secret_file_path,omitempty" doc_example:"\"/etc/vc/secrets.yaml\""`
+	// SkipSecretsPermCheck disables file permission validation on the secrets file. Required for platforms like Fly.io that mount files as 0755.
+	SkipSecretsPermCheck bool `yaml:"skip_secrets_perm_check" default:"false"`
 	// HA configures high-availability mode. When Enable is true, caches use MongoDB
 	// (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.
 	HA HAConfig `yaml:"ha" validate:"omitempty"`

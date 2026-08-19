@@ -4,7 +4,7 @@ package v1.status;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "vc/internal/gen/status/apiv1_status";
+option go_package = "github.com/SUNET/vc/internal/gen/status/apiv1_status";
 
 
 message StatusRequest {}
@@ -24,6 +24,7 @@ message StatusProbe {
     bool healthy = 2;
     string message = 3;
     google.protobuf.Timestamp lastCheckedTS = 4;
+    string status = 5; // "OK" if healthy, "FAIL" otherwise
 }
 
 message BuildVariables {

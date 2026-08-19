@@ -2,7 +2,9 @@ syntax = "proto3";
 
 package v1.registry;
 
-option go_package = "vc/internal/gen/registry/apiv1_registry";
+option go_package = "github.com/SUNET/vc/internal/gen/registry/apiv1_registry";
+
+import "v1-status-model.proto";
 
 service RegistryService {
     // Token Status List operations
@@ -10,6 +12,8 @@ service RegistryService {
     rpc TokenStatusListUpdateStatus (TokenStatusListUpdateStatusRequest) returns (TokenStatusListUpdateStatusReply) {}
     // Credential subject operations
     rpc SaveCredentialSubject (SaveCredentialSubjectRequest) returns (SaveCredentialSubjectReply) {}
+    // Service status / readiness
+    rpc Status (v1.status.StatusRequest) returns (v1.status.StatusReply) {}
 }
 
 // Token Status List messages

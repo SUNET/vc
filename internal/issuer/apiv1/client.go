@@ -19,6 +19,7 @@ import (
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/status"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"google.golang.org/grpc"
@@ -42,6 +43,8 @@ type Client struct {
 	registryClient apiv1_registry.RegistryServiceClient
 	mdocIssuer     *mdoc.Issuer // mDL issuer for ISO 18013-5 credentials
 	signMetadataRL *rate.Limiter
+
+	statusAggregator *status.Aggregator
 }
 
 // New creates a new instance of the public api
@@ -68,6 +71,8 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 		c.log.Info("mDL issuer not initialized", "error", err)
 		// Non-fatal: mDL issuance will be unavailable but SD-JWT will work
 	}
+
+	c.statusAggregator = c.buildStatusAggregator()
 
 	c.log.Info("Started")
 

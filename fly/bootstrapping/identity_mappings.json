@@ -1,0 +1,66 @@
+{
+  "100": [
+    {
+      "authentic_source_person_id": "authentic_source_person_id_100",
+      "authentic_source": "Skatteverket",
+      "attributes": {
+        "birth_date": "1996-01-30",
+        "family_name": "Mirren",
+        "given_name": "Helen"
+      },
+      "created_at": "0001-01-01T00:00:00Z"
+    },
+    {
+      "authentic_source_person_id": "authentic_source_person_id_100",
+      "authentic_source": "SUNET",
+      "attributes": {
+        "birth_date": "1996-01-30",
+        "family_name": "Mirren",
+        "given_name": "Helen"
+      },
+      "created_at": "0001-01-01T00:00:00Z"
+    },
+    {
+      "authentic_source_person_id": "authentic_source_person_id_100",
+      "authentic_source": "Ladok",
+      "attributes": {
+        "birth_date": "1996-01-30",
+        "family_name": "Mirren",
+        "given_name": "Helen"
+      },
+      "created_at": "0001-01-01T00:00:00Z"
+    }
+  ],
+  "102": [
+    {
+      "authentic_source_person_id": "authentic_source_person_id_102",
+      "authentic_source": "Skatteverket",
+      "attributes": {
+        "birth_date": "1988-09-09",
+        "family_name": "Oldman",
+        "given_name": "Gary"
+      },
+      "created_at": "0001-01-01T00:00:00Z"
+    },
+    {
+      "authentic_source_person_id": "authentic_source_person_id_102",
+      "authentic_source": "SUNET",
+      "attributes": {
+        "birth_date": "1988-09-09",
+        "family_name": "Oldman",
+        "given_name": "Gary"
+      },
+      "created_at": "0001-01-01T00:00:00Z"
+    },
+    {
+      "authentic_source_person_id": "authentic_source_person_id_102",
+      "authentic_source": "Ladok",
+      "attributes": {
+        "birth_date": "1988-09-09",
+        "family_name": "Oldman",
+        "given_name": "Gary"
+      },
+      "created_at": "0001-01-01T00:00:00Z"
+    }
+  ]
+}

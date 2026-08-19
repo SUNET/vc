@@ -1,0 +1,46 @@
+app = "vc-verifier"
+primary_region = "arn"
+
+[build]
+  image = "docker.sunet.se/iam_vc/verifier:local"
+
+[env]
+  VC_CONFIG_YAML = "/config.yaml"
+
+[[files]]
+  guest_path = "/config.yaml"
+  local_path = "fly/config.yaml"
+
+[[files]]
+  guest_path = "/secrets.yaml"
+  local_path = "secrets.yaml"
+
+[[files]]
+  guest_path = "/pki/signing_ec_private.pem"
+  secret_name = "SIGNING_EC_PRIVATE_KEY"
+
+[[files]]
+  guest_path = "/pki/signing_ec_chain.pem"
+  secret_name = "SIGNING_EC_CHAIN"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

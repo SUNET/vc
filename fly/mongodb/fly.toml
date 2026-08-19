@@ -1,0 +1,32 @@
+app = "sunet-vc-mongodb"
+primary_region = "arn"
+
+[build]
+  image = "mongo:7.0"
+
+[env]
+  MONGO_DATA_DIR = "/data/db"
+
+# Enable IPv6 so MongoDB is reachable over Fly's 6PN private network
+[experimental]
+  cmd = ["--ipv6", "--bind_ip_all"]
+
+[mounts]
+  source = "mongo_data"
+  destination = "/data/db"
+  initial_size = "1gb"
+
+# No public access — services connect over private 6PN network on port 27017.
+# Fly exposes all ports on .internal automatically without [[services]].
+
+[checks]
+  [checks.mongo]
+    port = 27017
+    type = "tcp"
+    grace_period = "10s"
+    interval = "30s"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

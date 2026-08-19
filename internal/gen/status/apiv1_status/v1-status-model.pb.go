@@ -7,13 +7,12 @@
 package apiv1_status
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (
@@ -109,6 +108,7 @@ type StatusProbe struct {
 	Healthy       bool                   `protobuf:"varint,2,opt,name=healthy,proto3" json:"healthy,omitempty"`
 	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
 	LastCheckedTS *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=lastCheckedTS,proto3" json:"lastCheckedTS,omitempty"`
+	Status        string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"` // "OK" if healthy, "FAIL" otherwise
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -169,6 +169,13 @@ func (x *StatusProbe) GetLastCheckedTS() *timestamppb.Timestamp {
 		return x.LastCheckedTS
 	}
 	return nil
+}
+
+func (x *StatusProbe) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
 }
 
 type BuildVariables struct {
@@ -388,12 +395,13 @@ const file_v1_status_model_proto_rawDesc = "" +
 	"\vserviceName\x18\x01 \x01(\tR\vserviceName\x12B\n" +
 	"\x0fbuild_variables\x18\x02 \x01(\v2\x19.v1.status.BuildVariablesR\x0ebuildVariables\x12.\n" +
 	"\x06probes\x18\x03 \x03(\v2\x16.v1.status.StatusProbeR\x06probes\x12\x16\n" +
-	"\x06status\x18\x04 \x01(\tR\x06status\"\x97\x01\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\"\xaf\x01\n" +
 	"\vStatusProbe\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\ahealthy\x18\x02 \x01(\bR\ahealthy\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12@\n" +
-	"\rlastCheckedTS\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\rlastCheckedTS\"\xbe\x01\n" +
+	"\rlastCheckedTS\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\rlastCheckedTS\x12\x16\n" +
+	"\x06status\x18\x05 \x01(\tR\x06status\"\xbe\x01\n" +
 	"\x0eBuildVariables\x12\x1d\n" +
 	"\n" +
 	"git_commit\x18\x01 \x01(\tR\tgitCommit\x12\x1d\n" +
@@ -406,7 +414,7 @@ const file_v1_status_model_proto_rawDesc = "" +
 	"\aversion\x18\x06 \x01(\tR\aversion\"\x8c\x01\n" +
 	"\x10StatusProbeStore\x128\n" +
 	"\tnextCheck\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tnextCheck\x12>\n" +
-	"\x0epreviousResult\x18\x02 \x01(\v2\x16.v1.status.StatusProbeR\x0epreviousResultB%Z#vc/internal/gen/status/apiv1_statusb\x06proto3"
+	"\x0epreviousResult\x18\x02 \x01(\v2\x16.v1.status.StatusProbeR\x0epreviousResultB6Z4github.com/SUNET/vc/internal/gen/status/apiv1_statusb\x06proto3"
 
 var (
 	file_v1_status_model_proto_rawDescOnce sync.Once

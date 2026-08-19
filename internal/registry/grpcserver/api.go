@@ -3,6 +3,7 @@ package grpcserver
 import (
 	"context"
 
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	"github.com/SUNET/vc/internal/registry/apiv1"
 )
 
@@ -15,4 +16,5 @@ type TokenStatusListIssuer interface {
 // Apiv1 interface for the apiv1 client methods used by grpcserver
 type Apiv1 interface {
 	SaveCredentialSubject(ctx context.Context, req *apiv1.SaveCredentialSubjectRequest) error
+	Status(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error)
 }

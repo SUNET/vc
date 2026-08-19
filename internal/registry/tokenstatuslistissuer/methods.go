@@ -142,3 +142,32 @@ func (s *Service) UpdateStatus(ctx context.Context, section int64, index int64, 
 	s.refreshSection(ctx, section)
 	return nil
 }
+
+// HealthProbe implements the status.Prober contract.
+//
+// Ready = can accept a request and populate a status entry for a credential.
+// That request lifecycle is exactly AddStatus, which requires:
+//
+//  1. Signing key material loaded — needed to (re)generate the status list
+//     JWT/CWT that becomes visible after the new entry is written (see
+//     refreshSection at the tail of AddStatus).
+//  2. Metadata collection reachable — GetCurrentSection is the very first
+//     read of AddStatus (via CreateNewSectionIfNeeded).
+//  3. Status list collection reachable — the actual Add write target.
+//     A bounded CountDocs is used as a cheap round-trip that proves the
+//     collection is queryable without performing a write.
+//
+// Returning a non-nil error means the service cannot allocate a new status
+// entry right now, and the error message names which precondition failed.
+func (s *Service) HealthProbe(ctx context.Context) error {
+	if s.signer == nil {
+		return fmt.Errorf("signing key not loaded")
+	}
+	if _, err := s.tokenStatusListMetadata.GetCurrentSection(ctx); err != nil {
+		return fmt.Errorf("current section unavailable: %w", err)
+	}
+	if _, err := s.tokenStatusListColl.CountDocsWithLimit(ctx, bson.M{}, 1); err != nil {
+		return fmt.Errorf("status list collection unavailable: %w", err)
+	}
+	return nil
+}

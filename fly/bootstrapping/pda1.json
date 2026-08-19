@@ -1,0 +1,90 @@
+{
+  "100": {
+    "meta": {
+      "authentic_source": "Skatteverket",
+      "scope": "pda1",
+      "document_id": "document_id_pda1_100",
+      "created_at": "0001-01-01T00:00:00Z"
+    },
+    "identity_mapping_ids": [
+      "authentic_source_person_id_100"
+    ],
+    "document_data": {
+      "authentic_source": {
+        "id": "pda1-as-100",
+        "name": "SUNET"
+      },
+      "date_of_expiry": "2026-04-20",
+      "date_of_issuance": "2024-04-05",
+      "document_number": "40046784",
+      "employer": {
+        "country": "SE",
+        "id": "31",
+        "name": "02"
+      },
+      "ending_date": "2027-05-28",
+      "issuing_authority": {
+        "id": "01",
+        "name": "SUNET"
+      },
+      "issuing_country": "EU",
+      "legislation_country": "EU",
+      "personal_administrative_number": "40046784",
+      "starting_date": "2026-05-28",
+      "status_confirmation": "02",
+      "work_address": {
+        "country": "EU",
+        "formatted": "Calle de Serrano 45",
+        "house_number": "11",
+        "locality": "Madrid",
+        "postal_code": "28001",
+        "region": "Madrid",
+        "street_address": "Tulegatan"
+      }
+    }
+  },
+  "102": {
+    "meta": {
+      "authentic_source": "Skatteverket",
+      "scope": "pda1",
+      "document_id": "document_id_pda1_102",
+      "created_at": "0001-01-01T00:00:00Z"
+    },
+    "identity_mapping_ids": [
+      "authentic_source_person_id_102"
+    ],
+    "document_data": {
+      "authentic_source": {
+        "id": "pda1-as-102",
+        "name": "SUNET"
+      },
+      "date_of_expiry": "2026-04-20",
+      "date_of_issuance": "2024-04-05",
+      "document_number": "57381544",
+      "employer": {
+        "country": "SE",
+        "id": "33",
+        "name": "02"
+      },
+      "ending_date": "2027-05-28",
+      "issuing_authority": {
+        "id": "01",
+        "name": "SUNET"
+      },
+      "issuing_country": "EU",
+      "legislation_country": "EU",
+      "personal_administrative_number": "57381544",
+      "starting_date": "2026-05-28",
+      "status_confirmation": "02",
+      "work_address": {
+        "country": "EU",
+        "formatted": "Rua Augusta 22",
+        "house_number": "11",
+        "locality": "Lissabon",
+        "postal_code": "1100-001",
+        "region": "Lissabon",
+        "street_address": "Tulegatan"
+      }
+    }
+  }
+}

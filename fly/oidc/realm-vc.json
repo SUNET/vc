@@ -1,0 +1,131 @@
+{
+  "realm": "vc",
+  "enabled": true,
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "clients": [
+    {
+      "clientId": "apigw-oidc-client",
+      "name": "VC Issuer (apigw)",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "10zbIalXeVYQpwMni29iq",
+      "redirectUris": [
+        "https://sunet-vc-apigw.fly.dev/*"
+      ],
+      "webOrigins": [
+        "https://sunet-vc-apigw.fly.dev"
+      ],
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "protocolMappers": [
+        {
+          "name": "birthdate",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "birthdate",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "birthdate",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "given_name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "firstName",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "given_name",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "family_name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "lastName",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "family_name",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Smith",
+      "email": "alice@sunet.se",
+      "attributes": {
+        "birthdate": ["1990-05-15"]
+      },
+      "credentials": [
+        { "type": "password", "value": "admin", "temporary": false }
+      ]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Bobsson",
+      "email": "bob@sunet.se",
+      "attributes": {
+        "birthdate": ["1985-03-22"]
+      },
+      "credentials": [
+        { "type": "password", "value": "admin", "temporary": false }
+      ]
+    },
+    {
+      "username": "mirren",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Helen",
+      "lastName": "Mirren",
+      "email": "mirren@sunet.se",
+      "attributes": {
+        "birthdate": ["1996-01-30"]
+      },
+      "credentials": [
+        { "type": "password", "value": "admin", "temporary": false }
+      ]
+    },
+    {
+      "username": "oldman",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Gary",
+      "lastName": "Oldman",
+      "email": "oldman@sunet.se",
+      "attributes": {
+        "birthdate": ["1988-09-09"]
+      },
+      "credentials": [
+        { "type": "password", "value": "admin", "temporary": false }
+      ]
+    }
+  ]
+}

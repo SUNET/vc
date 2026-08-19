@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	"github.com/SUNET/vc/internal/issuer/apiv1"
 )
 
@@ -70,4 +71,10 @@ func (s *Service) SignMetadata(ctx context.Context, in *apiv1_issuer.SignMetadat
 // GetIACAs returns the IACA certificates from the mDOC certificate chain
 func (s *Service) GetIACAs(ctx context.Context, _ *apiv1_issuer.Empty) (*apiv1_issuer.GetIACAsReply, error) {
 	return s.apiv1.GetIACAs(ctx)
+}
+
+// Status returns the readiness status of the issuer service and its
+// dependencies.
+func (s *Service) Status(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {
+	return s.apiv1.Health(ctx, req)
 }

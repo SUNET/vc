@@ -1,0 +1,786 @@
+{
+  "100": {
+    "meta": {
+      "authentic_source": "Ladok",
+      "scope": "diploma",
+      "document_id": "document_id_diploma_100",
+      "created_at": "0001-01-01T00:00:00Z"
+    },
+    "identity_mapping_ids": [
+      "authentic_source_person_id_100"
+    ],
+    "document_data": {
+      "@context": [
+        "https://www.w3.org/2018/credentials/v1",
+        "http://data.europa.eu/snb/model/context/edc-ap"
+      ],
+      "credentialProfiles": {
+        "id": "http://data.europa.eu/snb/credential/e34929035b",
+        "inScheme": {
+          "id": "http://data.europa.eu/snb/credential/25831c2",
+          "type": "ConceptScheme"
+        },
+        "prefLabel": {
+          "en": "Generic"
+        },
+        "type": "Concept"
+      },
+      "credentialSchema": {
+        "id": "http://data.europa.eu/snb/model/ap/edc-generic-full",
+        "type": "ShaclValidator2017"
+      },
+      "credentialSubject": {
+        "dateOfBirth": "1972-06-19T00:00:00",
+        "familyName": {
+          "und": "Bos Aanvragerouder"
+        },
+        "givenName": {
+          "und": "Cccc Oudertwee"
+        },
+        "hasClaim": {
+          "awardedBy": {
+            "awardingBody": {
+              "homepage": {
+                "contentURL": "https://duo.nl",
+                "id": "urn:epass:webResource:1b4e6a8c-a362-40bc-9c63-1889b375cdf0",
+                "type": "WebResource"
+              },
+              "id": "urn:epass:org:069bb272-b0b4-4bf0-be25-063e18118455",
+              "identifier": [
+                {
+                  "id": "urn:epass:identifier:eddc65e9-1e3e-4ff8-8eac-a3b1af2878d6",
+                  "notation": "duo.nl",
+                  "schemeName": "schac",
+                  "type": "Identifier"
+                },
+                {
+                  "id": "urn:epass:identifier:0bcf2af5-ca54-4490-971c-31e9902c314f",
+                  "notation": "27NF",
+                  "schemeName": "BRIN",
+                  "type": "Identifier"
+                }
+              ],
+              "legalName": {
+                "nl": "ArtEZ"
+              },
+              "location": {
+                "address": {
+                  "countryCode": {
+                    "id": "http://publications.europa.eu/resource/authority/country/NLD",
+                    "inScheme": {
+                      "id": "http://publications.europa.eu/resource/authority/country",
+                      "type": "ConceptScheme"
+                    },
+                    "notation": "country",
+                    "prefLabel": {
+                      "en": "Netherlands"
+                    },
+                    "type": "Concept"
+                  },
+                  "id": "urn:epass:address:53ac5e64-8ba2-4fa2-8abb-e1ef9a1562d9",
+                  "type": "Address"
+                },
+                "id": "urn:epass:location:fbc56047-6869-4a81-a14c-d6e1d3afc43c",
+                "type": "Location"
+              },
+              "type": "Organisation"
+            },
+            "awardingDate": "2004-03-31T00:00:00",
+            "id": "urn:epass:awardingProcess:0317c922-1044-455f-8157-df4e85373a6b",
+            "type": "AwardingProcess",
+            "used": {
+              "assessedBy": {
+                "homepage": {
+                  "contentURL": "https://duo.nl",
+                  "id": "urn:epass:webResource:23d14143-207b-4834-87f5-7b8568b8248f",
+                  "type": "WebResource"
+                },
+                "id": "urn:epass:org:99a07d36-ae7c-4935-bea6-8fe122b2307d",
+                "identifier": [
+                  {
+                    "id": "urn:epass:identifier:2cbfa317-f665-4107-b2dc-5949632ff388",
+                    "notation": "duo.nl",
+                    "schemeName": "schac",
+                    "type": "Identifier"
+                  },
+                  {
+                    "id": "urn:epass:identifier:b993a38f-2b2a-4f05-bc49-8132aac97f71",
+                    "notation": "27NF",
+                    "schemeName": "BRIN",
+                    "type": "Identifier"
+                  }
+                ],
+                "legalName": {
+                  "nl": "ArtEZ"
+                },
+                "location": {
+                  "address": {
+                    "countryCode": {
+                      "id": "http://publications.europa.eu/resource/authority/country/NLD",
+                      "inScheme": {
+                        "id": "http://publications.europa.eu/resource/authority/country",
+                        "type": "ConceptScheme"
+                      },
+                      "notation": "country",
+                      "prefLabel": {
+                        "en": "Netherlands"
+                      },
+                      "type": "Concept"
+                    },
+                    "id": "urn:epass:address:40336b1e-e98e-4ad4-b852-f420160290e4",
+                    "type": "Address"
+                  },
+                  "id": "urn:epass:location:c0716228-cdb7-4d81-8f91-23c5d675a901",
+                  "type": "Location"
+                },
+                "type": "Organisation"
+              },
+              "awardedBy": {
+                "awardingBody": {
+                  "homepage": {
+                    "contentURL": "https://duo.nl",
+                    "id": "urn:epass:webResource:2af737c6-0061-478a-b1e8-c037a02a3e08",
+                    "type": "WebResource"
+                  },
+                  "id": "urn:epass:org:d25508d0-d15b-4f7e-90d8-ce769842b497",
+                  "identifier": [
+                    {
+                      "id": "urn:epass:identifier:4e4ec0c6-28eb-4730-9378-1d43f0335302",
+                      "notation": "duo.nl",
+                      "schemeName": "schac",
+                      "type": "Identifier"
+                    },
+                    {
+                      "id": "urn:epass:identifier:25a8ef21-a634-4af3-af6f-46f1a9588cf6",
+                      "notation": "27NF",
+                      "schemeName": "BRIN",
+                      "type": "Identifier"
+                    }
+                  ],
+                  "legalName": {
+                    "nl": "ArtEZ"
+                  },
+                  "location": {
+                    "address": {
+                      "countryCode": {
+                        "id": "http://publications.europa.eu/resource/authority/country/NLD",
+                        "inScheme": {
+                          "id": "http://publications.europa.eu/resource/authority/country",
+                          "type": "ConceptScheme"
+                        },
+                        "notation": "country",
+                        "prefLabel": {
+                          "en": "Netherlands"
+                        },
+                        "type": "Concept"
+                      },
+                      "id": "urn:epass:address:270c77a0-52b8-42a7-91d3-38fc56fc3e83",
+                      "type": "Address"
+                    },
+                    "id": "urn:epass:location:e4a6ee59-2368-4bee-bac6-edcb9e82bf60",
+                    "type": "Location"
+                  },
+                  "type": "Organisation"
+                },
+                "awardingDate": "2004-03-31T00:00:00",
+                "id": "urn:epass:awardingProcess:0ac9bf65-ebf9-448e-8b18-c93d4f7d45b5",
+                "type": "AwardingProcess"
+              },
+              "dateIssued": "2004-03-31T00:00:00",
+              "description": {
+                "nl": "HBO Master Architectuur"
+              },
+              "grade": {
+                "id": "urn:epass:note:fe50ecb3-99ed-43f7-87d9-b39b1923aae1",
+                "noteFormat": {
+                  "definition": {
+                    "und": "http://data.europa.eu/snb/model/elm/noteFormat"
+                  },
+                  "id": "urn:epass:concept:56555584-2e2b-4494-bfe3-3467080dfae3",
+                  "notation": "text/plain",
+                  "type": "Concept"
+                },
+                "noteLiteral": {
+                  "und": "passed"
+                },
+                "type": "Note"
+              },
+              "gradeStatus": {
+                "id": "http://data.europa.eu/snb/grade-status/c_60a1cf9a",
+                "inScheme": {
+                  "id": "http://data.europa.eu/snb/grade-status/25831c2",
+                  "type": "ConceptScheme"
+                },
+                "notation": "grade-status",
+                "prefLabel": {
+                  "en": "pass"
+                },
+                "type": "Concept"
+              },
+              "id": "converter:assessment:1",
+              "identifier": [
+                {
+                  "id": "urn:epass:identifier:d5526824-78e2-4397-b436-a7d52852a16d",
+                  "notation": "44336",
+                  "schemeName": "ISAT",
+                  "type": "Identifier"
+                },
+                {
+                  "id": "urn:epass:identifier:9ba8aea5-b1f4-4c23-9ab0-ca031fe2eb64",
+                  "notation": "Degree Programme",
+                  "schemeName": "elmo:type:los",
+                  "type": "Identifier"
+                }
+              ],
+              "specifiedBy": {
+                "id": "urn:epass:learningAssessmentSpec:0670ea41-1564-4cbf-824c-1c97f0ae8876",
+                "title": {
+                  "nl": "HBO Master Architectuur"
+                },
+                "type": "LearningAssessmentSpecification"
+              },
+              "title": {
+                "nl": "HBO Master Architectuur"
+              },
+              "type": "LearningAssessment"
+            }
+          },
+          "description": {
+            "nl": "HBO Master Architectuur"
+          },
+          "id": "urn:epass:learningAchievement:99ba5709-3174-4775-9845-d1e398246822",
+          "identifier": [
+            {
+              "id": "urn:epass:identifier:ed948bbb-cac6-4357-a329-c53c6f9369a3",
+              "notation": "44336",
+              "schemeName": "ISAT",
+              "type": "Identifier"
+            },
+            {
+              "id": "urn:epass:identifier:9a2f0c8e-14d3-45de-b336-52ef50f8a2b5",
+              "notation": "Degree Programme",
+              "schemeName": "elmo:type:los",
+              "type": "Identifier"
+            }
+          ],
+          "specifiedBy": {
+            "educationLevel": {
+              "id": "http://data.europa.eu/snb/eqf/7",
+              "inScheme": {
+                "id": "http://data.europa.eu/snb/eqf/25831c2",
+                "type": "ConceptScheme"
+              },
+              "notation": "eqf-level",
+              "prefLabel": {
+                "en": "Level 7"
+              },
+              "type": "Concept"
+            },
+            "eqfLevel": {
+              "id": "http://data.europa.eu/snb/eqf/7",
+              "inScheme": {
+                "id": "http://data.europa.eu/snb/eqf/25831c2",
+                "type": "ConceptScheme"
+              },
+              "notation": "eqf-level",
+              "prefLabel": {
+                "en": "Level 7"
+              },
+              "type": "Concept"
+            },
+            "id": "urn:epass:qualification:9fc73e04-43eb-4642-99e3-98a0bd878d07",
+            "title": {
+              "nl": "HBO Master Architectuur"
+            },
+            "type": "Qualification"
+          },
+          "title": {
+            "nl": "HBO Master Architectuur"
+          },
+          "type": "LearningAchievement"
+        },
+        "id": "urn:epass:person:1335bfa5-3d8f-405c-8eb3-958e1becea8c",
+        "type": "Person"
+      },
+      "displayParameter": {
+        "id": "urn:epass:displayParameter:1",
+        "individualDisplay": {
+          "displayDetail": {
+            "id": "urn:epass:displayDetail:cbb965c7-a71b-464e-865b-faf2130e40d4",
+            "image": {
+              "content": "/9j/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k=",
+              "contentEncoding": {
+                "id": "http://data.europa.eu/snb/encoding/6146cde7dd",
+                "inScheme": {
+                  "id": "http://data.europa.eu/snb/encoding/25831c2",
+                  "type": "ConceptScheme"
+                },
+                "prefLabel": {
+                  "en": "base64"
+                },
+                "type": "Concept"
+              },
+              "contentType": {
+                "id": "http://publications.europa.eu/resource/authority/file-type/JPEG",
+                "inScheme": {
+                  "id": "http://publications.europa.eu/resource/authority/file-type",
+                  "type": "ConceptScheme"
+                },
+                "notation": "file-type",
+                "prefLabel": {
+                  "en": "JPEG"
+                },
+                "type": "Concept"
+              },
+              "id": "urn:epass:mediaObject:1b5e2711-81f5-45e0-a77f-3c0c47d60918",
+              "type": "MediaObject"
+            },
+            "page": 1,
+            "type": "DisplayDetail"
+          },
+          "id": "urn:epass:individualDisplay:a0a3d808-96d6-4b97-95e6-256abf948ff1",
+          "language": {
+            "id": "http://publications.europa.eu/resource/authority/language/ENG",
+            "inScheme": {
+              "id": "http://publications.europa.eu/resource/authority/language",
+              "type": "ConceptScheme"
+            },
+            "notation": "langugage",
+            "prefLabel": {
+              "en": "en"
+            },
+            "type": "Concept"
+          },
+          "type": "IndividualDisplay"
+        },
+        "language": {
+          "id": "http://publications.europa.eu/resource/authority/language/ENG",
+          "inScheme": {
+            "id": "http://publications.europa.eu/resource/authority/language",
+            "type": "ConceptScheme"
+          },
+          "notation": "langugage",
+          "prefLabel": {
+            "en": "en"
+          },
+          "type": "Concept"
+        },
+        "primaryLanguage": {
+          "id": "http://publications.europa.eu/resource/authority/language/ENG",
+          "inScheme": {
+            "id": "http://publications.europa.eu/resource/authority/language",
+            "type": "ConceptScheme"
+          },
+          "notation": "langugage",
+          "prefLabel": {
+            "en": "en"
+          },
+          "type": "Concept"
+        },
+        "title": {
+          "en": "A converted document from ELMO:1.7"
+        },
+        "type": "DisplayParameter"
+      },
+      "issuanceDate": "2025-03-25T07:52:38",
+      "issued": "2025-03-25T07:52:38",
+      "type": [
+        "VerifiableCredential",
+        "EuropeanDigitalCredential"
+      ],
+      "validFrom": "2025-03-25T07:52:38"
+    }
+  },
+  "102": {
+    "meta": {
+      "authentic_source": "Ladok",
+      "scope": "diploma",
+      "document_id": "document_id_diploma_102",
+      "created_at": "0001-01-01T00:00:00Z"
+    },
+    "identity_mapping_ids": [
+      "authentic_source_person_id_102"
+    ],
+    "document_data": {
+      "@context": [
+        "https://www.w3.org/2018/credentials/v1",
+        "http://data.europa.eu/snb/model/context/edc-ap"
+      ],
+      "credentialProfiles": {
+        "id": "http://data.europa.eu/snb/credential/e34929035b",
+        "inScheme": {
+          "id": "http://data.europa.eu/snb/credential/25831c2",
+          "type": "ConceptScheme"
+        },
+        "prefLabel": {
+          "en": "Generic"
+        },
+        "type": "Concept"
+      },
+      "credentialSchema": {
+        "id": "http://data.europa.eu/snb/model/ap/edc-generic-full",
+        "type": "ShaclValidator2017"
+      },
+      "credentialSubject": {
+        "dateOfBirth": "1972-06-19T00:00:00",
+        "familyName": {
+          "und": "Bos Aanvragerouder"
+        },
+        "givenName": {
+          "und": "Cccc Oudertwee"
+        },
+        "hasClaim": {
+          "awardedBy": {
+            "awardingBody": {
+              "homepage": {
+                "contentURL": "https://duo.nl",
+                "id": "urn:epass:webResource:1b4e6a8c-a362-40bc-9c63-1889b375cdf0",
+                "type": "WebResource"
+              },
+              "id": "urn:epass:org:069bb272-b0b4-4bf0-be25-063e18118455",
+              "identifier": [
+                {
+                  "id": "urn:epass:identifier:eddc65e9-1e3e-4ff8-8eac-a3b1af2878d6",
+                  "notation": "duo.nl",
+                  "schemeName": "schac",
+                  "type": "Identifier"
+                },
+                {
+                  "id": "urn:epass:identifier:0bcf2af5-ca54-4490-971c-31e9902c314f",
+                  "notation": "27NF",
+                  "schemeName": "BRIN",
+                  "type": "Identifier"
+                }
+              ],
+              "legalName": {
+                "nl": "ArtEZ"
+              },
+              "location": {
+                "address": {
+                  "countryCode": {
+                    "id": "http://publications.europa.eu/resource/authority/country/NLD",
+                    "inScheme": {
+                      "id": "http://publications.europa.eu/resource/authority/country",
+                      "type": "ConceptScheme"
+                    },
+                    "notation": "country",
+                    "prefLabel": {
+                      "en": "Netherlands"
+                    },
+                    "type": "Concept"
+                  },
+                  "id": "urn:epass:address:53ac5e64-8ba2-4fa2-8abb-e1ef9a1562d9",
+                  "type": "Address"
+                },
+                "id": "urn:epass:location:fbc56047-6869-4a81-a14c-d6e1d3afc43c",
+                "type": "Location"
+              },
+              "type": "Organisation"
+            },
+            "awardingDate": "2004-03-31T00:00:00",
+            "id": "urn:epass:awardingProcess:0317c922-1044-455f-8157-df4e85373a6b",
+            "type": "AwardingProcess",
+            "used": {
+              "assessedBy": {
+                "homepage": {
+                  "contentURL": "https://duo.nl",
+                  "id": "urn:epass:webResource:23d14143-207b-4834-87f5-7b8568b8248f",
+                  "type": "WebResource"
+                },
+                "id": "urn:epass:org:99a07d36-ae7c-4935-bea6-8fe122b2307d",
+                "identifier": [
+                  {
+                    "id": "urn:epass:identifier:2cbfa317-f665-4107-b2dc-5949632ff388",
+                    "notation": "duo.nl",
+                    "schemeName": "schac",
+                    "type": "Identifier"
+                  },
+                  {
+                    "id": "urn:epass:identifier:b993a38f-2b2a-4f05-bc49-8132aac97f71",
+                    "notation": "27NF",
+                    "schemeName": "BRIN",
+                    "type": "Identifier"
+                  }
+                ],
+                "legalName": {
+                  "nl": "ArtEZ"
+                },
+                "location": {
+                  "address": {
+                    "countryCode": {
+                      "id": "http://publications.europa.eu/resource/authority/country/NLD",
+                      "inScheme": {
+                        "id": "http://publications.europa.eu/resource/authority/country",
+                        "type": "ConceptScheme"
+                      },
+                      "notation": "country",
+                      "prefLabel": {
+                        "en": "Netherlands"
+                      },
+                      "type": "Concept"
+                    },
+                    "id": "urn:epass:address:40336b1e-e98e-4ad4-b852-f420160290e4",
+                    "type": "Address"
+                  },
+                  "id": "urn:epass:location:c0716228-cdb7-4d81-8f91-23c5d675a901",
+                  "type": "Location"
+                },
+                "type": "Organisation"
+              },
+              "awardedBy": {
+                "awardingBody": {
+                  "homepage": {
+                    "contentURL": "https://duo.nl",
+                    "id": "urn:epass:webResource:2af737c6-0061-478a-b1e8-c037a02a3e08",
+                    "type": "WebResource"
+                  },
+                  "id": "urn:epass:org:d25508d0-d15b-4f7e-90d8-ce769842b497",
+                  "identifier": [
+                    {
+                      "id": "urn:epass:identifier:4e4ec0c6-28eb-4730-9378-1d43f0335302",
+                      "notation": "duo.nl",
+                      "schemeName": "schac",
+                      "type": "Identifier"
+                    },
+                    {
+                      "id": "urn:epass:identifier:25a8ef21-a634-4af3-af6f-46f1a9588cf6",
+                      "notation": "27NF",
+                      "schemeName": "BRIN",
+                      "type": "Identifier"
+                    }
+                  ],
+                  "legalName": {
+                    "nl": "ArtEZ"
+                  },
+                  "location": {
+                    "address": {
+                      "countryCode": {
+                        "id": "http://publications.europa.eu/resource/authority/country/NLD",
+                        "inScheme": {
+                          "id": "http://publications.europa.eu/resource/authority/country",
+                          "type": "ConceptScheme"
+                        },
+                        "notation": "country",
+                        "prefLabel": {
+                          "en": "Netherlands"
+                        },
+                        "type": "Concept"
+                      },
+                      "id": "urn:epass:address:270c77a0-52b8-42a7-91d3-38fc56fc3e83",
+                      "type": "Address"
+                    },
+                    "id": "urn:epass:location:e4a6ee59-2368-4bee-bac6-edcb9e82bf60",
+                    "type": "Location"
+                  },
+                  "type": "Organisation"
+                },
+                "awardingDate": "2004-03-31T00:00:00",
+                "id": "urn:epass:awardingProcess:0ac9bf65-ebf9-448e-8b18-c93d4f7d45b5",
+                "type": "AwardingProcess"
+              },
+              "dateIssued": "2004-03-31T00:00:00",
+              "description": {
+                "nl": "HBO Master Architectuur"
+              },
+              "grade": {
+                "id": "urn:epass:note:fe50ecb3-99ed-43f7-87d9-b39b1923aae1",
+                "noteFormat": {
+                  "definition": {
+                    "und": "http://data.europa.eu/snb/model/elm/noteFormat"
+                  },
+                  "id": "urn:epass:concept:56555584-2e2b-4494-bfe3-3467080dfae3",
+                  "notation": "text/plain",
+                  "type": "Concept"
+                },
+                "noteLiteral": {
+                  "und": "passed"
+                },
+                "type": "Note"
+              },
+              "gradeStatus": {
+                "id": "http://data.europa.eu/snb/grade-status/c_60a1cf9a",
+                "inScheme": {
+                  "id": "http://data.europa.eu/snb/grade-status/25831c2",
+                  "type": "ConceptScheme"
+                },
+                "notation": "grade-status",
+                "prefLabel": {
+                  "en": "pass"
+                },
+                "type": "Concept"
+              },
+              "id": "converter:assessment:1",
+              "identifier": [
+                {
+                  "id": "urn:epass:identifier:d5526824-78e2-4397-b436-a7d52852a16d",
+                  "notation": "44336",
+                  "schemeName": "ISAT",
+                  "type": "Identifier"
+                },
+                {
+                  "id": "urn:epass:identifier:9ba8aea5-b1f4-4c23-9ab0-ca031fe2eb64",
+                  "notation": "Degree Programme",
+                  "schemeName": "elmo:type:los",
+                  "type": "Identifier"
+                }
+              ],
+              "specifiedBy": {
+                "id": "urn:epass:learningAssessmentSpec:0670ea41-1564-4cbf-824c-1c97f0ae8876",
+                "title": {
+                  "nl": "HBO Master Architectuur"
+                },
+                "type": "LearningAssessmentSpecification"
+              },
+              "title": {
+                "nl": "HBO Master Architectuur"
+              },
+              "type": "LearningAssessment"
+            }
+          },
+          "description": {
+            "nl": "HBO Master Architectuur"
+          },
+          "id": "urn:epass:learningAchievement:99ba5709-3174-4775-9845-d1e398246822",
+          "identifier": [
+            {
+              "id": "urn:epass:identifier:ed948bbb-cac6-4357-a329-c53c6f9369a3",
+              "notation": "44336",
+              "schemeName": "ISAT",
+              "type": "Identifier"
+            },
+            {
+              "id": "urn:epass:identifier:9a2f0c8e-14d3-45de-b336-52ef50f8a2b5",
+              "notation": "Degree Programme",
+              "schemeName": "elmo:type:los",
+              "type": "Identifier"
+            }
+          ],
+          "specifiedBy": {
+            "educationLevel": {
+              "id": "http://data.europa.eu/snb/eqf/7",
+              "inScheme": {
+                "id": "http://data.europa.eu/snb/eqf/25831c2",
+                "type": "ConceptScheme"
+              },
+              "notation": "eqf-level",
+              "prefLabel": {
+                "en": "Level 7"
+              },
+              "type": "Concept"
+            },
+            "eqfLevel": {
+              "id": "http://data.europa.eu/snb/eqf/7",
+              "inScheme": {
+                "id": "http://data.europa.eu/snb/eqf/25831c2",
+                "type": "ConceptScheme"
+              },
+              "notation": "eqf-level",
+              "prefLabel": {
+                "en": "Level 7"
+              },
+              "type": "Concept"
+            },
+            "id": "urn:epass:qualification:9fc73e04-43eb-4642-99e3-98a0bd878d07",
+            "title": {
+              "nl": "HBO Master Architectuur"
+            },
+            "type": "Qualification"
+          },
+          "title": {
+            "nl": "HBO Master Architectuur"
+          },
+          "type": "LearningAchievement"
+        },
+        "id": "urn:epass:person:1335bfa5-3d8f-405c-8eb3-958e1becea8c",
+        "type": "Person"
+      },
+      "displayParameter": {
+        "id": "urn:epass:displayParameter:1",
+        "individualDisplay": {
+          "displayDetail": {
+            "id": "urn:epass:displayDetail:cbb965c7-a71b-464e-865b-faf2130e40d4",
+            "image": {
+              "content": "/9j/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k=",
+              "contentEncoding": {
+                "id": "http://data.europa.eu/snb/encoding/6146cde7dd",
+                "inScheme": {
+                  "id": "http://data.europa.eu/snb/encoding/25831c2",
+                  "type": "ConceptScheme"
+                },
+                "prefLabel": {
+                  "en": "base64"
+                },
+                "type": "Concept"
+              },
+              "contentType": {
+                "id": "http://publications.europa.eu/resource/authority/file-type/JPEG",
+                "inScheme": {
+                  "id": "http://publications.europa.eu/resource/authority/file-type",
+                  "type": "ConceptScheme"
+                },
+                "notation": "file-type",
+                "prefLabel": {
+                  "en": "JPEG"
+                },
+                "type": "Concept"
+              },
+              "id": "urn:epass:mediaObject:1b5e2711-81f5-45e0-a77f-3c0c47d60918",
+              "type": "MediaObject"
+            },
+            "page": 1,
+            "type": "DisplayDetail"
+          },
+          "id": "urn:epass:individualDisplay:a0a3d808-96d6-4b97-95e6-256abf948ff1",
+          "language": {
+            "id": "http://publications.europa.eu/resource/authority/language/ENG",
+            "inScheme": {
+              "id": "http://publications.europa.eu/resource/authority/language",
+              "type": "ConceptScheme"
+            },
+            "notation": "langugage",
+            "prefLabel": {
+              "en": "en"
+            },
+            "type": "Concept"
+          },
+          "type": "IndividualDisplay"
+        },
+        "language": {
+          "id": "http://publications.europa.eu/resource/authority/language/ENG",
+          "inScheme": {
+            "id": "http://publications.europa.eu/resource/authority/language",
+            "type": "ConceptScheme"
+          },
+          "notation": "langugage",
+          "prefLabel": {
+            "en": "en"
+          },
+          "type": "Concept"
+        },
+        "primaryLanguage": {
+          "id": "http://publications.europa.eu/resource/authority/language/ENG",
+          "inScheme": {
+            "id": "http://publications.europa.eu/resource/authority/language",
+            "type": "ConceptScheme"
+          },
+          "notation": "langugage",
+          "prefLabel": {
+            "en": "en"
+          },
+          "type": "Concept"
+        },
+        "title": {
+          "en": "A converted document from ELMO:1.7"
+        },
+        "type": "DisplayParameter"
+      },
+      "issuanceDate": "2025-03-25T07:52:38",
+      "issued": "2025-03-25T07:52:38",
+      "type": [
+        "VerifiableCredential",
+        "EuropeanDigitalCredential"
+      ],
+      "validFrom": "2025-03-25T07:52:38"
+    }
+  }
+}

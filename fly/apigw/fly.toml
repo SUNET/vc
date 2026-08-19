@@ -1,0 +1,78 @@
+app = "vc-apigw"
+primary_region = "arn"
+
+[build]
+  image = "docker.sunet.se/iam_vc/apigw:local"
+
+[env]
+  VC_CONFIG_YAML = "/config.yaml"
+
+[[files]]
+  guest_path = "/config.yaml"
+  local_path = "fly/config.yaml"
+
+[[files]]
+  guest_path = "/secrets.yaml"
+  local_path = "secrets.yaml"
+
+[[files]]
+  guest_path = "/pki/signing_ec_private.pem"
+  secret_name = "SIGNING_EC_PRIVATE_KEY"
+
+[[files]]
+  guest_path = "/pki/signing_ec_chain.pem"
+  secret_name = "SIGNING_EC_CHAIN"
+
+[[files]]
+  guest_path = "/bootstrapping/diploma.json"
+  local_path = "fly/bootstrapping/diploma.json"
+
+[[files]]
+  guest_path = "/bootstrapping/eduid.json"
+  local_path = "fly/bootstrapping/eduid.json"
+
+[[files]]
+  guest_path = "/bootstrapping/ehic.json"
+  local_path = "fly/bootstrapping/ehic.json"
+
+[[files]]
+  guest_path = "/bootstrapping/pda1.json"
+  local_path = "fly/bootstrapping/pda1.json"
+
+[[files]]
+  guest_path = "/bootstrapping/pid.json"
+  local_path = "fly/bootstrapping/pid.json"
+
+[[files]]
+  guest_path = "/bootstrapping/mdl.json"
+  local_path = "fly/bootstrapping/mdl.json"
+
+[[files]]
+  guest_path = "/bootstrapping/pid_mdoc.json"
+  local_path = "fly/bootstrapping/pid_mdoc.json"
+
+[[files]]
+  guest_path = "/bootstrapping/identity_mappings.json"
+  local_path = "fly/bootstrapping/identity_mappings.json"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

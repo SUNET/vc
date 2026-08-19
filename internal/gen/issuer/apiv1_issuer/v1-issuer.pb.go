@@ -7,12 +7,12 @@
 package apiv1_issuer
 
 import (
+	apiv1_status "github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -954,7 +954,7 @@ var File_v1_issuer_proto protoreflect.FileDescriptor
 
 const file_v1_issuer_proto_rawDesc = "" +
 	"\n" +
-	"\x0fv1-issuer.proto\x12\tv1.issuer\"\x83\x01\n" +
+	"\x0fv1-issuer.proto\x12\tv1.issuer\x1a\x15v1-status-model.proto\"\x83\x01\n" +
 	"\x13SignMetadataRequest\x12#\n" +
 	"\rmetadata_json\x18\x01 \x01(\fR\fmetadataJson\x12#\n" +
 	"\rmetadata_type\x18\x02 \x01(\tR\fmetadataType\x12\x10\n" +
@@ -1031,14 +1031,15 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\n" +
 	"valid_from\x18\x05 \x01(\tR\tvalidFrom\x12\x1f\n" +
 	"\vvalid_until\x18\x06 \x01(\tR\n" +
-	"validUntil2\x9a\x03\n" +
+	"validUntil2\xd8\x03\n" +
 	"\rIssuerService\x12E\n" +
 	"\tMakeSDJWT\x12\x1b.v1.issuer.MakeSDJWTRequest\x1a\x19.v1.issuer.MakeSDJWTReply\"\x00\x12B\n" +
 	"\bMakeMDoc\x12\x1a.v1.issuer.MakeMDocRequest\x1a\x18.v1.issuer.MakeMDocReply\"\x00\x12B\n" +
 	"\bMakeVC20\x12\x1a.v1.issuer.MakeVC20Request\x1a\x18.v1.issuer.MakeVC20Reply\"\x00\x120\n" +
 	"\x04JWKS\x12\x10.v1.issuer.Empty\x1a\x14.v1.issuer.JwksReply\"\x00\x12N\n" +
 	"\fSignMetadata\x12\x1e.v1.issuer.SignMetadataRequest\x1a\x1c.v1.issuer.SignMetadataReply\"\x00\x128\n" +
-	"\bGetIACAs\x12\x10.v1.issuer.Empty\x1a\x18.v1.issuer.GetIACAsReply\"\x00B%Z#vc/internal/gen/issuer/apiv1_issuerb\x06proto3"
+	"\bGetIACAs\x12\x10.v1.issuer.Empty\x1a\x18.v1.issuer.GetIACAsReply\"\x00\x12<\n" +
+	"\x06Status\x12\x18.v1.status.StatusRequest\x1a\x16.v1.status.StatusReply\"\x00B6Z4github.com/SUNET/vc/internal/gen/issuer/apiv1_issuerb\x06proto3"
 
 var (
 	file_v1_issuer_proto_rawDescOnce sync.Once
@@ -1054,20 +1055,22 @@ func file_v1_issuer_proto_rawDescGZIP() []byte {
 
 var file_v1_issuer_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_v1_issuer_proto_goTypes = []any{
-	(*SignMetadataRequest)(nil), // 0: v1.issuer.SignMetadataRequest
-	(*SignMetadataReply)(nil),   // 1: v1.issuer.SignMetadataReply
-	(*GetIACAsReply)(nil),       // 2: v1.issuer.GetIACAsReply
-	(*MakeSDJWTRequest)(nil),    // 3: v1.issuer.MakeSDJWTRequest
-	(*MakeSDJWTReply)(nil),      // 4: v1.issuer.MakeSDJWTReply
-	(*MakeMDocRequest)(nil),     // 5: v1.issuer.MakeMDocRequest
-	(*MakeMDocReply)(nil),       // 6: v1.issuer.MakeMDocReply
-	(*Credential)(nil),          // 7: v1.issuer.Credential
-	(*Empty)(nil),               // 8: v1.issuer.Empty
-	(*JwksReply)(nil),           // 9: v1.issuer.JwksReply
-	(*Keys)(nil),                // 10: v1.issuer.keys
-	(*Jwk)(nil),                 // 11: v1.issuer.jwk
-	(*MakeVC20Request)(nil),     // 12: v1.issuer.MakeVC20Request
-	(*MakeVC20Reply)(nil),       // 13: v1.issuer.MakeVC20Reply
+	(*SignMetadataRequest)(nil),        // 0: v1.issuer.SignMetadataRequest
+	(*SignMetadataReply)(nil),          // 1: v1.issuer.SignMetadataReply
+	(*GetIACAsReply)(nil),              // 2: v1.issuer.GetIACAsReply
+	(*MakeSDJWTRequest)(nil),           // 3: v1.issuer.MakeSDJWTRequest
+	(*MakeSDJWTReply)(nil),             // 4: v1.issuer.MakeSDJWTReply
+	(*MakeMDocRequest)(nil),            // 5: v1.issuer.MakeMDocRequest
+	(*MakeMDocReply)(nil),              // 6: v1.issuer.MakeMDocReply
+	(*Credential)(nil),                 // 7: v1.issuer.Credential
+	(*Empty)(nil),                      // 8: v1.issuer.Empty
+	(*JwksReply)(nil),                  // 9: v1.issuer.JwksReply
+	(*Keys)(nil),                       // 10: v1.issuer.keys
+	(*Jwk)(nil),                        // 11: v1.issuer.jwk
+	(*MakeVC20Request)(nil),            // 12: v1.issuer.MakeVC20Request
+	(*MakeVC20Reply)(nil),              // 13: v1.issuer.MakeVC20Reply
+	(*apiv1_status.StatusRequest)(nil), // 14: v1.status.StatusRequest
+	(*apiv1_status.StatusReply)(nil),   // 15: v1.status.StatusReply
 }
 var file_v1_issuer_proto_depIdxs = []int32{
 	11, // 0: v1.issuer.MakeSDJWTRequest.jwk:type_name -> v1.issuer.jwk
@@ -1080,14 +1083,16 @@ var file_v1_issuer_proto_depIdxs = []int32{
 	8,  // 7: v1.issuer.IssuerService.JWKS:input_type -> v1.issuer.Empty
 	0,  // 8: v1.issuer.IssuerService.SignMetadata:input_type -> v1.issuer.SignMetadataRequest
 	8,  // 9: v1.issuer.IssuerService.GetIACAs:input_type -> v1.issuer.Empty
-	4,  // 10: v1.issuer.IssuerService.MakeSDJWT:output_type -> v1.issuer.MakeSDJWTReply
-	6,  // 11: v1.issuer.IssuerService.MakeMDoc:output_type -> v1.issuer.MakeMDocReply
-	13, // 12: v1.issuer.IssuerService.MakeVC20:output_type -> v1.issuer.MakeVC20Reply
-	9,  // 13: v1.issuer.IssuerService.JWKS:output_type -> v1.issuer.JwksReply
-	1,  // 14: v1.issuer.IssuerService.SignMetadata:output_type -> v1.issuer.SignMetadataReply
-	2,  // 15: v1.issuer.IssuerService.GetIACAs:output_type -> v1.issuer.GetIACAsReply
-	10, // [10:16] is the sub-list for method output_type
-	4,  // [4:10] is the sub-list for method input_type
+	14, // 10: v1.issuer.IssuerService.Status:input_type -> v1.status.StatusRequest
+	4,  // 11: v1.issuer.IssuerService.MakeSDJWT:output_type -> v1.issuer.MakeSDJWTReply
+	6,  // 12: v1.issuer.IssuerService.MakeMDoc:output_type -> v1.issuer.MakeMDocReply
+	13, // 13: v1.issuer.IssuerService.MakeVC20:output_type -> v1.issuer.MakeVC20Reply
+	9,  // 14: v1.issuer.IssuerService.JWKS:output_type -> v1.issuer.JwksReply
+	1,  // 15: v1.issuer.IssuerService.SignMetadata:output_type -> v1.issuer.SignMetadataReply
+	2,  // 16: v1.issuer.IssuerService.GetIACAs:output_type -> v1.issuer.GetIACAsReply
+	15, // 17: v1.issuer.IssuerService.Status:output_type -> v1.status.StatusReply
+	11, // [11:18] is the sub-list for method output_type
+	4,  // [4:11] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name

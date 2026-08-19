@@ -6,6 +6,7 @@ import (
 	"github.com/SUNET/vc/internal/registry/db"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/status"
 )
 
 // TokenStatusListIssuer defines the interface for the Token Status List issuer service
@@ -13,6 +14,7 @@ type TokenStatusListIssuer interface {
 	GetCachedJWT(ctx context.Context, section int64) string
 	GetCachedCWT(ctx context.Context, section int64) []byte
 	GetAllSections(ctx context.Context) ([]int64, error)
+	HealthProbe(ctx context.Context) error
 }
 
 // AdminDBStore defines the interface for admin GUI database operations on Token Status List
@@ -34,6 +36,9 @@ type Client struct {
 	tokenStatusListIssuer TokenStatusListIssuer
 	adminDB               AdminDBStore
 	credentialSubjects    CredentialSubjectsStore
+	dbService             *db.Service
+
+	statusAggregator *status.Aggregator
 }
 
 //	@title		Registry API
@@ -46,12 +51,15 @@ func New(ctx context.Context, cfg *model.Cfg, tokenStatusListIssuer TokenStatusL
 		cfg:                   cfg,
 		log:                   log.New("apiv1"),
 		tokenStatusListIssuer: tokenStatusListIssuer,
+		dbService:             dbService,
 	}
 
 	if dbService != nil {
 		c.adminDB = dbService.TokenStatusListColl
 		c.credentialSubjects = dbService.CredentialSubjects
 	}
+
+	c.statusAggregator = c.buildStatusAggregator()
 
 	c.log.Info("Started")
 

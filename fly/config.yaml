@@ -1,0 +1,233 @@
+---
+common:
+  secret_file_path: "/secrets.yaml"
+  skip_secrets_perm_check: true
+  production: true
+  mongo:
+    uri: "mongodb://sunet-vc-mongodb.internal:27017"
+
+  credential_metadata:
+    pid:
+      vctm_file_path: "/metadata/vctm_pid.json"
+      format: "dc+sd-jwt"
+    ehic:
+      vctm_file_path: "/metadata/vctm_ehic.json"
+      format: "dc+sd-jwt"
+    pid_mdoc:
+      mddl_file_path: "/metadata/pid_mdoc.mdoc.json"
+      format: "mso_mdoc"
+    mdl:
+      mddl_file_path: "/metadata/mdl.mdoc.json"
+      format: "mso_mdoc"
+
+issuer:
+  issuer_url: "https://sunet-vc-apigw.fly.dev"
+  api_server:
+    addr: :8080
+    trust_proxy_tls: true
+    tls:
+      enable: false
+  grpc_server:
+    addr: :8090
+  registry_client:
+    addr: sunet-vc-registry.internal:8090
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  jwt_attribute:
+    issuer: https://sunet-vc-apigw.fly.dev
+    enable_not_before: true
+    valid_duration: 3600
+    verifiable_credential_type: "https://credential.sunet.se/identity_credential"
+  pseudonym_seed: true
+
+verifier:
+  api_server:
+    addr: 0.0.0.0:8080
+    trust_proxy_tls: true
+    tls:
+      enable: false
+    cors:
+      allowed_origins:
+        - "https://sunet-vc-wallet-frontend.fly.dev"
+  public_url: "https://sunet-vc-verifier.fly.dev"
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  outbound:
+    oidc_provider:
+      issuer: "https://sunet-vc-verifier.fly.dev"
+      subject_type: "public"
+      code_duration: 300
+      session_duration: 3600
+      access_token_duration: 3600
+      id_token_duration: 3600
+      refresh_token_duration: 86400
+  inbound:
+    openid4vp:
+      token_endpoint: "https://sunet-vc-verifier.fly.dev/token"
+      clients:
+        "1003":
+          type: "public"
+          redirect_uri: "https://dev.wallet.sunet.se"
+          scopes:
+            - "pid"
+            - "ehic"
+        "fly-wallet":
+          type: "public"
+          redirect_uri: "https://sunet-vc-wallet-frontend.fly.dev"
+          scopes:
+            - "pid"
+            - "ehic"
+      supported_credentials:
+        - vct: "urn:eudi:pid:1"
+          scopes:
+            - "pid"
+        - vct: "urn:eudi:ehic:1"
+          scopes:
+            - "ehic"
+  presets:
+    "PID":
+      pid:
+        exclude_claims:
+          - path: ["trust_anchor"]
+          - path: ["attestation_legal_category"]
+    "EHIC":
+      ehic:
+    "PID Age Over 18":
+      pid:
+        claims:
+          - path: ["birthdate"]
+        validations:
+          - rule: "age_over"
+            path: ["birthdate"]
+            value: 18
+    "PID + EHIC":
+      pid:
+        exclude_claims:
+          - path: ["trust_anchor"]
+          - path: ["attestation_legal_category"]
+      ehic:
+
+registry:
+  api_server:
+    addr: :8080
+    trust_proxy_tls: true
+    tls:
+      enable: false
+  public_url: "https://sunet-vc-registry.fly.dev"
+  grpc_server:
+    addr: :8090
+  token_status_lists:
+    key_config:
+      private_key_path: "/pki/signing_ec_private.pem"
+      chain_path: "/pki/signing_ec_chain.pem"
+  admin_gui:
+    enable: true
+
+apigw:
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  api_server:
+    addr: :8080
+    trust_proxy_tls: true
+    tls:
+      enable: false
+    cors:
+      allowed_origins:
+        - "https://sunet-vc-wallet-frontend.fly.dev"
+    api_auth:
+      oidc:
+        enable: false
+  public_url: "https://sunet-vc-apigw.fly.dev"
+  registry_public_url: "https://sunet-vc-registry.fly.dev"
+  issuer_client:
+    addr: sunet-vc-issuer.internal:8090
+  registry_client:
+    addr: sunet-vc-registry.internal:8090
+  identity_mapping_import:
+    file_paths:
+      - "/bootstrapping/identity_mappings.json"
+    users:
+      - "100"
+      - "102"
+  auth_providers:
+    oidc:
+      enable: true
+      issuer_url: "https://sunet-vc-oidc.fly.dev/realms/vc"
+      redirect_uri: "https://sunet-vc-apigw.fly.dev/oidcrp/callback"
+      scopes: ["openid", "profile"]
+      session_duration: 300
+      attribute_mapping:
+        birthdate:
+          claim: "birth_date"
+          required: true
+        given_name:
+          claim: "given_name"
+          required: true
+        family_name:
+          claim: "family_name"
+          required: true
+      registration:
+        preconfigured:
+          enable: true
+          client_id: "apigw-oidc-client"
+  data_sources:
+    datastore:
+      import:
+        file_paths:
+          - "/bootstrapping/diploma.json"
+          - "/bootstrapping/eduid.json"
+          - "/bootstrapping/ehic.json"
+          - "/bootstrapping/pda1.json"
+          - "/bootstrapping/pid.json"
+          - "/bootstrapping/mdl.json"
+          - "/bootstrapping/pid_mdoc.json"
+        users:
+          - "100"
+          - "102"
+      scopes:
+        pid:
+          auth_provider: oidc
+          auth_claims: ["given_name", "family_name", "birth_date"]
+        ehic:
+          auth_provider: openid4vp
+          auth_scopes:
+            pid:
+              auth_claims: ["given_name", "family_name", "birth_date"]
+        pid_mdoc:
+          auth_provider: oidc
+          auth_claims: ["given_name", "family_name", "birth_date"]
+        mdl:
+          auth_provider: oidc
+          auth_claims: ["given_name", "family_name", "birth_date"]
+  delivery:
+    openid4vci:
+      token_endpoint: "https://sunet-vc-apigw.fly.dev/token"
+      clients:
+        "1003":
+          type: "public"
+          redirect_uri: "http://localhost:3000"
+          scopes:
+            - "pid"
+            - "ehic"
+            - "pid_mdoc"
+            - "mdl"
+        "fly-wallet":
+          type: "public"
+          redirect_uri: "https://sunet-vc-wallet-frontend.fly.dev"
+          scopes:
+            - "pid"
+            - "ehic"
+            - "pid_mdoc"
+            - "mdl"
+    credential_offers:
+      issuer_url: "https://sunet-vc-apigw.fly.dev"
+      wallets:
+        dev_wallet:
+          label: "Dev Wallet"
+          redirect_uri: "https://dev.wallet.sunet.se/credential-offer"
+        fly_wallet:
+          label: "Fly Wallet"
+          redirect_uri: "https://sunet-vc-wallet-frontend.fly.dev/credential-offer"
