@@ -21,3 +21,23 @@ jobs:
 
       - name: Run tests
         run: make test
+
+  config-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/*.sum"
+
+      - name: Check docs/CONFIGURATION.md is up to date
+        run: |
+          make gen-config-docs
+          if ! git diff --exit-code docs/CONFIGURATION.md; then
+            echo "::error::docs/CONFIGURATION.md is out of date. Run 'make gen-config-docs' and commit the result."
+            exit 1
+          fi
