@@ -200,8 +200,24 @@ func (s *Service) refreshSectionCoalesced(ctx context.Context, section int64) {
 	})
 }
 
+// sectionRefreshTimeout bounds a single refreshSection call. Without this, a
+// hung Mongo fetch (network stall, server issue) would never return: the
+// goroutine running it leaks forever, and -- since refreshSectionAsync's
+// context is deliberately detached from the caller's cancellation via
+// context.WithoutCancel -- nothing else times it out either. Every
+// AddStatus/UpdateStatus call arriving while it's stuck would add another
+// waiter channel to the in-flight singleflight call, which is unbounded for
+// as long as that call never completes. 2 minutes is comfortably above the
+// ~15-20s measured for a full 1,000,000-entry section (this repo's default
+// SectionSize), leaving headroom for a larger configured section or a slow
+// disk, while still guaranteeing eventual cleanup either way.
+const sectionRefreshTimeout = 2 * time.Minute
+
 // refreshSection refreshes the cache for a single section
 func (s *Service) refreshSection(ctx context.Context, section int64) {
+	ctx, cancel := context.WithTimeout(ctx, sectionRefreshTimeout)
+	defer cancel()
+
 	statuses, err := s.tokenStatusListColl.GetAllStatusesForSection(ctx, section)
 	if err != nil {
 		s.log.Error(err, "Failed to get statuses for section", "section", section)
