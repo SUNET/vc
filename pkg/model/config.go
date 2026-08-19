@@ -1662,6 +1662,36 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 							AltText: d.Logo.AltText,
 						}
 					}
+
+					// Map SVG templates, mirroring the dc+sd-jwt/VCTM branch below.
+					if d.Rendering != nil && len(d.Rendering.SVGTemplates) > 0 {
+						svgTemplates := make([]openid4vci.MetadataSvgTemplate, len(d.Rendering.SVGTemplates))
+						for j, t := range d.Rendering.SVGTemplates {
+							tmpl := openid4vci.MetadataSvgTemplate{
+								URI: t.URI,
+							}
+							if t.Properties != nil {
+								tmpl.Properties = &openid4vci.MetadataSvgTemplateProperties{
+									Orientation: t.Properties.Orientation,
+									ColorScheme: t.Properties.ColorScheme,
+									Contrast:    t.Properties.Contrast,
+								}
+							}
+							svgTemplates[j] = tmpl
+						}
+						display.Rendering = &openid4vci.MetadataRendering{
+							SvgTemplates: svgTemplates,
+						}
+
+						// Fallback: set logo.uri from first SVG template URI
+						// for wallets that render from logo.uri instead of svg_templates
+						if display.Logo == nil && len(svgTemplates) > 0 {
+							display.Logo = &openid4vci.MetadataLogo{
+								URI: svgTemplates[0].URI,
+							}
+						}
+					}
+
 					credMetadata.Display[i] = display
 				}
 			}

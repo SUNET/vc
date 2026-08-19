@@ -412,25 +412,29 @@ func (s *Service) endpointOAuthAuthorizationConsentSvgTemplate(ctx context.Conte
 		Scope: scope,
 	}
 
+	var svgTemplateRequest *apiv1.SVGTemplateRequest
 	vctm, err := s.apiv1.GetVCTMFromScope(ctx, getVCTMFromScopeRequest)
-	if errors.Is(err, apiv1.ErrScopeIsMDoc) {
-		// mso_mdoc scopes have no VCTM and no SVG-template concept at all -
-		// see MDDLSchema.
-		err := fmt.Errorf("scope has no SVG templates (mso_mdoc credential): %w", err)
-		span.SetStatus(codes.Error, err.Error())
-		s.log.Debug(err.Error(), "scope", scope)
-		c.AbortWithStatus(http.StatusBadRequest)
-		return nil, err
-	}
-	if err != nil {
+	switch {
+	case err == nil:
+		svgTemplateRequest = &apiv1.SVGTemplateRequest{VCTM: vctm}
+	case errors.Is(err, apiv1.ErrScopeIsMDoc):
+		// mso_mdoc scopes have no VCTM - fall back to the MDDL schema, same
+		// pattern as UICreateCredentialOffer. MDDL display entries can
+		// declare their own svg_templates (see MDDLSchema.Rendering);
+		// SVGTemplateReply returns its own error if none are present.
+		mddl, mddlErr := s.apiv1.GetMDDLFromScope(ctx, &apiv1.GetMDDLFromScopeRequest{Scope: scope})
+		if mddlErr != nil {
+			span.SetStatus(codes.Error, mddlErr.Error())
+			s.log.Error(mddlErr, "getting MDDL schema failed")
+			c.AbortWithStatus(http.StatusBadRequest)
+			return nil, mddlErr
+		}
+		svgTemplateRequest = &apiv1.SVGTemplateRequest{MDDL: mddl}
+	default:
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "getting VCTM failed")
 		c.AbortWithStatus(http.StatusBadRequest)
 		return nil, err
-	}
-
-	svgTemplateRequest := &apiv1.SVGTemplateRequest{
-		VCTM: vctm,
 	}
 
 	reply, err := s.apiv1.SVGTemplateReply(ctx, svgTemplateRequest)

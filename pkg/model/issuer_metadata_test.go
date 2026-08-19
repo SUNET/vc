@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
@@ -93,6 +94,70 @@ func TestIssuerMetadata_Generate_VCTMDisplay(t *testing.T) {
 	assert.Equal(t, "VCTM Display Name", credConfig.CredentialMetadata.Display[0].Name)
 	assert.Equal(t, "en-US", credConfig.CredentialMetadata.Display[0].Locale)
 	assert.Equal(t, "VCTM Description", credConfig.CredentialMetadata.Display[0].Description)
+}
+
+func TestIssuerMetadata_Generate_MDDLDisplay_SVGTemplates(t *testing.T) {
+	cfg := &IssuerMetadata{}
+
+	mockMDDL := &mdoc.MDDLSchema{
+		Format:  "mso_mdoc",
+		DocType: "org.iso.18013.5.1.mDL",
+		Display: []mdoc.DisplayProperties{
+			{
+				Locale: "en-US",
+				Name:   "Mobile Driving Licence",
+				Rendering: &mdoc.Rendering{
+					SVGTemplates: []mdoc.SVGTemplate{
+						{
+							URI: "https://issuer.example.com/mdl.svg",
+							Properties: &mdoc.SVGTemplateProperties{
+								Orientation: "landscape",
+								ColorScheme: "light",
+								Contrast:    "normal",
+							},
+						},
+					},
+				},
+			},
+		},
+		Claims: map[string]mdoc.NamespaceClaims{
+			"org.iso.18013.5.1": {
+				"family_name": {Mandatory: true, ValueType: "tstr"},
+			},
+		},
+	}
+
+	credMeta := map[string]*CredentialMetadata{
+		"test_mdl": {
+			Format: "mso_mdoc",
+			MDDL:   mockMDDL,
+		},
+	}
+
+	ctx := context.Background()
+	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
+	require.NoError(t, err)
+	require.NotNil(t, metadata)
+
+	credConfig, exists := metadata.CredentialConfigurationsSupported["test_mdl"]
+	require.True(t, exists)
+	require.NotNil(t, credConfig.CredentialMetadata)
+	require.Len(t, credConfig.CredentialMetadata.Display, 1)
+
+	display := credConfig.CredentialMetadata.Display[0]
+	require.NotNil(t, display.Rendering, "mso_mdoc display with svg_templates must produce a Rendering block, mirroring the dc+sd-jwt/VCTM path")
+	require.Len(t, display.Rendering.SvgTemplates, 1)
+	assert.Equal(t, "https://issuer.example.com/mdl.svg", display.Rendering.SvgTemplates[0].URI)
+	require.NotNil(t, display.Rendering.SvgTemplates[0].Properties)
+	assert.Equal(t, "landscape", display.Rendering.SvgTemplates[0].Properties.Orientation)
+	assert.Equal(t, "light", display.Rendering.SvgTemplates[0].Properties.ColorScheme)
+	assert.Equal(t, "normal", display.Rendering.SvgTemplates[0].Properties.Contrast)
+
+	// No explicit logo was set — the svg_templates fallback must populate
+	// Logo.URI from the first template, for wallets that render from
+	// logo.uri instead of understanding svg_templates.
+	require.NotNil(t, display.Logo)
+	assert.Equal(t, "https://issuer.example.com/mdl.svg", display.Logo.URI)
 }
 
 func TestIssuerMetadata_Generate_VCTMDisplay_PartialRendering(t *testing.T) {

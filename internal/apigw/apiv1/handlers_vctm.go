@@ -196,18 +196,32 @@ func (c *Client) TypeMetadata(ctx context.Context, req *TypeMetadataRequest) (js
 	return reply, nil
 }
 
-// SVGTemplateRequest holds the request for fetching an SVG template.
+// SVGTemplateRequest holds the request for fetching an SVG template. Exactly
+// one of VCTM or MDDL should be set, mirroring the two credential-metadata
+// sources GetVCTMFromScope/GetMDDLFromScope resolve a scope to.
 type SVGTemplateRequest struct {
-	VCTM *sdjwtvc.VCTM `json:"-"`
+	VCTM *sdjwtvc.VCTM    `json:"-"`
+	MDDL *mdoc.MDDLSchema `json:"-"`
 }
 
 func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) (*vcclient.SVGTemplateReply, error) {
-	if len(req.VCTM.Display) == 0 || req.VCTM.Display[0].Rendering == nil ||
-		len(req.VCTM.Display[0].Rendering.SVGTemplates) == 0 {
-		return nil, fmt.Errorf("VCTM has no SVG templates")
+	var svgTemplateURI string
+	switch {
+	case req.VCTM != nil:
+		if len(req.VCTM.Display) == 0 || req.VCTM.Display[0].Rendering == nil ||
+			len(req.VCTM.Display[0].Rendering.SVGTemplates) == 0 {
+			return nil, fmt.Errorf("VCTM has no SVG templates")
+		}
+		svgTemplateURI = req.VCTM.Display[0].Rendering.SVGTemplates[0].URI
+	case req.MDDL != nil:
+		if len(req.MDDL.Display) == 0 || req.MDDL.Display[0].Rendering == nil ||
+			len(req.MDDL.Display[0].Rendering.SVGTemplates) == 0 {
+			return nil, fmt.Errorf("MDDL schema has no SVG templates")
+		}
+		svgTemplateURI = req.MDDL.Display[0].Rendering.SVGTemplates[0].URI
+	default:
+		return nil, fmt.Errorf("no VCTM or MDDL schema provided")
 	}
-
-	svgTemplateURI := req.VCTM.Display[0].Rendering.SVGTemplates[0].URI
 
 	if cached, ok := c.cacheService.SVGTemplate.Get(ctx, svgTemplateURI); ok {
 		reply := &vcclient.SVGTemplateReply{Template: cached}

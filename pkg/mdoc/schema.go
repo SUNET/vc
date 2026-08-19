@@ -20,18 +20,51 @@ type MDDLSchema struct {
 // DisplayProperties describes how the credential should be presented to the
 // holder, mirroring registry-cli's mddl.DisplayProperties.
 type DisplayProperties struct {
-	Locale          string `json:"locale"`
-	Name            string `json:"name"`
-	Description     string `json:"description,omitempty"`
-	Logo            *Logo  `json:"logo,omitempty"`
-	BackgroundColor string `json:"background_color,omitempty"`
-	TextColor       string `json:"text_color,omitempty"`
+	Locale          string     `json:"locale"`
+	Name            string     `json:"name"`
+	Description     string     `json:"description,omitempty"`
+	Logo            *Logo      `json:"logo,omitempty"`
+	BackgroundColor string     `json:"background_color,omitempty"`
+	TextColor       string     `json:"text_color,omitempty"`
+	Rendering       *Rendering `json:"rendering,omitempty"`
 }
 
 // Logo describes a display logo image.
 type Logo struct {
 	URI     string `json:"uri,omitempty"`
 	AltText string `json:"alt_text,omitempty"`
+}
+
+// Rendering contains SVG-based rendering information for an mdoc display
+// entry, mirroring sdjwtvc.Rendering (SD-JWT VC §8.1.2). mdoc has no "simple"
+// rendering sub-object to mirror: Logo/BackgroundColor/TextColor already live
+// directly on DisplayProperties above.
+type Rendering struct {
+	SVGTemplates []SVGTemplate `json:"svg_templates,omitempty"`
+}
+
+// SVGTemplate describes a single SVG template used to render the credential,
+// mirroring sdjwtvc.SVGTemplates.
+type SVGTemplate struct {
+	URI        string                 `json:"uri"`
+	Properties *SVGTemplateProperties `json:"properties,omitempty"`
+}
+
+// SVGTemplateProperties describes the rendering context an SVG template is
+// intended for, mirroring sdjwtvc.SVGTemplateProperties.
+type SVGTemplateProperties struct {
+	Orientation string `json:"orientation,omitempty"`
+	ColorScheme string `json:"color_scheme,omitempty"`
+	Contrast    string `json:"contrast,omitempty"`
+}
+
+// SVGValue holds a resolved claim for SVG template rendering, mirroring
+// sdjwtvc.SVGValue. Kept as its own type (rather than importing sdjwtvc's)
+// to keep pkg/mdoc and pkg/sdjwtvc decoupled, matching how Presentation
+// below already returns a bare map[string]any rather than a shared type.
+type SVGValue struct {
+	Label string `json:"label"`
+	Value any    `json:"value"`
 }
 
 // NamespaceClaims maps element identifiers to their claim metadata within a
@@ -47,6 +80,9 @@ type ClaimMetadata struct {
 	Mandatory bool                     `json:"mandatory,omitempty"`
 	ValueType string                   `json:"value_type,omitempty"`
 	Elements  map[string]ClaimMetadata `json:"elements,omitempty"`
+	// SVGID is the identifier for SVG template placeholders, mirroring
+	// sdjwtvc.Claim.SVGID (SD-JWT VC §8.1.2.2).
+	SVGID string `json:"svg_id,omitempty"`
 }
 
 // ClaimDisplay is a localized display label for a claim.
@@ -128,6 +164,38 @@ func (s *MDDLSchema) Presentation(data map[string]any) map[string]any {
 		}
 	}
 
+	return result
+}
+
+// SVGValues resolves claims that have an svg_id against flat document data
+// and returns a map keyed by svg_id, mirroring sdjwtvc.VCTM.SVGValues. Like
+// Presentation above, document data is looked up by element ID directly
+// (flat, not nested under the mdoc namespace).
+func (s *MDDLSchema) SVGValues(data map[string]any) map[string]SVGValue {
+	if data == nil || len(s.Claims) == 0 {
+		return nil
+	}
+
+	result := map[string]SVGValue{}
+	for _, elements := range s.Claims {
+		for elementID, meta := range elements {
+			if meta.SVGID == "" || len(meta.Display) == 0 {
+				continue
+			}
+			value, ok := data[elementID]
+			if !ok {
+				continue
+			}
+			result[meta.SVGID] = SVGValue{
+				Label: meta.Display[0].Name,
+				Value: value,
+			}
+		}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
 	return result
 }
 
