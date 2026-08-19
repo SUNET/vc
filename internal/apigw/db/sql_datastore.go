@@ -117,19 +117,27 @@ func (c *SQLDatastoreColl) insertDocument(ctx context.Context, q sqlxExtQuerier,
 	return err
 }
 
-func (c *SQLDatastoreColl) insertIdentityMappings(ctx context.Context, q sqlxExtQuerier, meta *model.MetaData, identityMappingIDs []string) error {
-	if len(identityMappingIDs) == 0 {
-		return nil
-	}
+// identityMappingRowsValues builds the "(?, ?, ?, ?), (?, ?, ?, ?), ..."
+// placeholder list and matching args for a multi-row insert into
+// datastore_identity_mapping, one row per id in identityMappingIDs.
+func identityMappingRowsValues(authenticSource, scope, documentID string, identityMappingIDs []string) (string, []any) {
 	placeholders := make([]string, 0, len(identityMappingIDs))
 	args := make([]any, 0, len(identityMappingIDs)*4)
 	for _, id := range identityMappingIDs {
 		placeholders = append(placeholders, "(?, ?, ?, ?)")
-		args = append(args, meta.AuthenticSource, meta.Scope, meta.DocumentID, id)
+		args = append(args, authenticSource, scope, documentID, id)
 	}
+	return strings.Join(placeholders, ", "), args
+}
+
+func (c *SQLDatastoreColl) insertIdentityMappings(ctx context.Context, q sqlxExtQuerier, meta *model.MetaData, identityMappingIDs []string) error {
+	if len(identityMappingIDs) == 0 {
+		return nil
+	}
+	values, args := identityMappingRowsValues(meta.AuthenticSource, meta.Scope, meta.DocumentID, identityMappingIDs)
 	query := c.dialect.Rebind(fmt.Sprintf(
 		`INSERT INTO datastore_identity_mapping (authentic_source, scope, document_id, identity_mapping_id) VALUES %s`,
-		strings.Join(placeholders, ", "),
+		values,
 	))
 	_, err := q.ExecContext(ctx, query, args...)
 	return err
@@ -226,19 +234,22 @@ func (c *SQLDatastoreColl) AddIdentity(ctx context.Context, query *AddIdentityQu
 	if !ok {
 		return helpers.ErrNoDocumentFound
 	}
-	meta := &model.MetaData{AuthenticSource: query.AuthenticSource, Scope: query.Scope, DocumentID: query.DocumentID}
-
-	// Dedup: insert-if-absent per id, matching Mongo's $addToSet semantics.
-	for _, id := range query.IdentityMappingIDs {
-		q := c.dialect.Rebind(fmt.Sprintf(
-			`INSERT INTO datastore_identity_mapping (authentic_source, scope, document_id, identity_mapping_id) VALUES (?, ?, ?, ?) %s`,
-			c.dialect.UpsertClause([]string{"authentic_source", "scope", "document_id", "identity_mapping_id"}, nil),
-		))
-		if _, err := c.db.ExecContext(ctx, q, meta.AuthenticSource, meta.Scope, meta.DocumentID, id); err != nil {
-			return err
-		}
+	if len(query.IdentityMappingIDs) == 0 {
+		return nil
 	}
-	return nil
+
+	// Single multi-row upsert (insert-if-absent per id, matching Mongo's
+	// $addToSet semantics): one round-trip and one atomic statement, rather
+	// than one INSERT per id, which was both N round-trips and non-atomic
+	// (a failure partway through would leave a subset of ids inserted).
+	values, args := identityMappingRowsValues(query.AuthenticSource, query.Scope, query.DocumentID, query.IdentityMappingIDs)
+	q := c.dialect.Rebind(fmt.Sprintf(
+		`INSERT INTO datastore_identity_mapping (authentic_source, scope, document_id, identity_mapping_id) VALUES %s %s`,
+		values,
+		c.dialect.UpsertClause([]string{"authentic_source", "scope", "document_id", "identity_mapping_id"}, nil),
+	))
+	_, err = c.db.ExecContext(ctx, q, args...)
+	return err
 }
 
 // DeleteIdentity deletes identity in document.
@@ -307,6 +318,68 @@ func (c *SQLDatastoreColl) toCompleteDocument(ctx context.Context, row datastore
 	}, nil
 }
 
+// documentKey identifies one datastore row by its natural key.
+type documentKey struct {
+	AuthenticSource string
+	Scope           string
+	DocumentID      string
+}
+
+// fetchIdentityMappingIDsBatch returns every row's identity_mapping_ids in a
+// single query, keyed by documentKey - used instead of calling
+// fetchIdentityMappingIDs once per row (an N+1 query pattern) when a caller
+// already has a whole result set of rows to resolve at once.
+func (c *SQLDatastoreColl) fetchIdentityMappingIDsBatch(ctx context.Context, q sqlxExtQuerier, rows []datastoreRow) (map[documentKey][]string, error) {
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(rows))
+	args := make([]any, 0, len(rows)*3)
+	for i, row := range rows {
+		placeholders[i] = "(?, ?, ?)"
+		args = append(args, row.AuthenticSource, row.Scope, row.DocumentID)
+	}
+	query := c.dialect.Rebind(fmt.Sprintf(
+		`SELECT authentic_source, scope, document_id, identity_mapping_id FROM datastore_identity_mapping
+		WHERE (authentic_source, scope, document_id) IN (%s) ORDER BY document_id, identity_mapping_id`,
+		strings.Join(placeholders, ", "),
+	))
+	var mappingRows []struct {
+		AuthenticSource   string `db:"authentic_source"`
+		Scope             string `db:"scope"`
+		DocumentID        string `db:"document_id"`
+		IdentityMappingID string `db:"identity_mapping_id"`
+	}
+	if err := q.SelectContext(ctx, &mappingRows, query, args...); err != nil {
+		return nil, err
+	}
+	result := make(map[documentKey][]string, len(rows))
+	for _, r := range mappingRows {
+		key := documentKey{AuthenticSource: r.AuthenticSource, Scope: r.Scope, DocumentID: r.DocumentID}
+		result[key] = append(result[key], r.IdentityMappingID)
+	}
+	return result, nil
+}
+
+// toCompleteDocumentsBatch is toCompleteDocument for a whole result set at
+// once: one batched identity-mapping query instead of one per row.
+func (c *SQLDatastoreColl) toCompleteDocumentsBatch(ctx context.Context, rows []datastoreRow) ([]*model.CompleteDocument, error) {
+	idsByKey, err := c.fetchIdentityMappingIDsBatch(ctx, c.db, rows)
+	if err != nil {
+		return nil, err
+	}
+	docs := make([]*model.CompleteDocument, len(rows))
+	for i, row := range rows {
+		key := documentKey{AuthenticSource: row.AuthenticSource, Scope: row.Scope, DocumentID: row.DocumentID}
+		docs[i] = &model.CompleteDocument{
+			Meta:               row.toMeta(),
+			IdentityMappingIDs: idsByKey[key],
+			DocumentData:       row.DocumentData.V,
+		}
+	}
+	return docs, nil
+}
+
 // GetByIdentity returns matching documents for a scope where any of the
 // document's identity mappings match the provided identifier.
 func (c *SQLDatastoreColl) GetByIdentity(ctx context.Context, scope, identityMappingID string) (map[string]*model.CompleteDocument, error) {
@@ -321,12 +394,12 @@ func (c *SQLDatastoreColl) GetByIdentity(ctx context.Context, scope, identityMap
 		return nil, err
 	}
 
-	docs := make(map[string]*model.CompleteDocument, len(rows))
-	for _, row := range rows {
-		doc, err := c.toCompleteDocument(ctx, row)
-		if err != nil {
-			return nil, err
-		}
+	completeDocs, err := c.toCompleteDocumentsBatch(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	docs := make(map[string]*model.CompleteDocument, len(completeDocs))
+	for _, doc := range completeDocs {
 		docs[doc.Meta.AuthenticSource] = doc
 	}
 	return docs, nil
@@ -552,14 +625,10 @@ func (c *SQLDatastoreColl) Search(ctx context.Context, query *SearchDocumentsQue
 		return nil, err
 	}
 
-	res := make([]*model.CompleteDocument, len(rows))
-	for i, row := range rows {
-		doc, err := c.toCompleteDocument(ctx, row)
-		if err != nil {
-			span.SetStatus(codes.Error, err.Error())
-			return nil, err
-		}
-		res[i] = doc
+	res, err := c.toCompleteDocumentsBatch(ctx, rows)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
 	}
 	return res, nil
 }
