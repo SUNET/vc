@@ -89,6 +89,12 @@ type ClaimMetadata struct {
 type ClaimDisplay struct {
 	Locale string `json:"locale"`
 	Name   string `json:"name"`
+	// Label is a display label distinct from Name, for schemas that declare
+	// both. Attributes/Presentation below still key off Name (their
+	// existing, established behavior); Label is consumed by Generate's
+	// mso_mdoc credential_metadata.claims mapping (pkg/model/config.go),
+	// which falls back to Name when Label is empty.
+	Label string `json:"label,omitempty"`
 }
 
 // defaultLocale is used to bucket claims that declare no display info, so

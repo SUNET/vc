@@ -1727,10 +1727,28 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 				sort.Strings(elementIDs)
 				for _, elementID := range elementIDs {
 					ns, el := namespace, elementID
-					credMetadata.Claims = append(credMetadata.Claims, openid4vci.ClaimDescription{
+					meta := elements[elementID]
+					claim := openid4vci.ClaimDescription{
 						Path:      []*string{&ns, &el},
-						Mandatory: elements[elementID].Mandatory,
-					})
+						Mandatory: meta.Mandatory,
+						SVGID:     meta.SVGID,
+					}
+					if len(meta.Display) > 0 {
+						display := make([]openid4vci.ClaimDisplayProperties, len(meta.Display))
+						for j, d := range meta.Display {
+							label := d.Label
+							if label == "" {
+								label = d.Name
+							}
+							display[j] = openid4vci.ClaimDisplayProperties{
+								Name:   d.Name,
+								Label:  label,
+								Locale: d.Locale,
+							}
+						}
+						claim.Display = display
+					}
+					credMetadata.Claims = append(credMetadata.Claims, claim)
 				}
 			}
 			if len(credMetadata.Display) > 0 || len(credMetadata.Claims) > 0 {

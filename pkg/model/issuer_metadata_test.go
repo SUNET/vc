@@ -160,6 +160,81 @@ func TestIssuerMetadata_Generate_MDDLDisplay_SVGTemplates(t *testing.T) {
 	assert.Equal(t, "https://issuer.example.com/mdl.svg", display.Logo.URI)
 }
 
+// TestIssuerMetadata_Generate_MDDLClaims_DisplayAndSVGID is a regression test
+// for a bug found in live testing (PR #584): the mso_mdoc claims-building
+// loop only set Path/Mandatory on each ClaimDescription, silently dropping
+// SVGID and Display -- breaking svg_id placeholder substitution (no value
+// ever bound) and the wallet's claims list (its isDisplayClaim check needs
+// display[].locale/label, so every claim's display was empty).
+func TestIssuerMetadata_Generate_MDDLClaims_DisplayAndSVGID(t *testing.T) {
+	cfg := &IssuerMetadata{}
+
+	mockMDDL := &mdoc.MDDLSchema{
+		Format:  "mso_mdoc",
+		DocType: "org.iso.18013.5.1.mDL",
+		Claims: map[string]mdoc.NamespaceClaims{
+			"org.iso.18013.5.1": {
+				// SVGID + Display with an explicit Label distinct from Name.
+				"family_name": {
+					Mandatory: true,
+					ValueType: "tstr",
+					SVGID:     "family_name",
+					Display: []mdoc.ClaimDisplay{
+						{Locale: "en-US", Name: "family_name", Label: "Family Name"},
+					},
+				},
+				// SVGID + Display with no Label set -- must fall back to Name.
+				"given_name": {
+					ValueType: "tstr",
+					SVGID:     "given_name",
+					Display: []mdoc.ClaimDisplay{
+						{Locale: "en-US", Name: "Given Name"},
+					},
+				},
+				// No Display at all -- Claim.Display must stay empty, not panic.
+				"portrait": {
+					ValueType: "bstr",
+				},
+			},
+		},
+	}
+
+	credMeta := map[string]*CredentialMetadata{
+		"test_mdl": {Format: "mso_mdoc", MDDL: mockMDDL},
+	}
+
+	metadata, err := cfg.Generate(context.Background(), "https://issuer.sunet.se", credMeta)
+	require.NoError(t, err)
+	require.NotNil(t, metadata)
+
+	credConfig, exists := metadata.CredentialConfigurationsSupported["test_mdl"]
+	require.True(t, exists)
+	require.NotNil(t, credConfig.CredentialMetadata)
+	require.Len(t, credConfig.CredentialMetadata.Claims, 3)
+
+	byElementID := map[string]openid4vci.ClaimDescription{}
+	for _, c := range credConfig.CredentialMetadata.Claims {
+		require.Len(t, c.Path, 2)
+		require.NotNil(t, c.Path[1])
+		byElementID[*c.Path[1]] = c
+	}
+
+	familyName := byElementID["family_name"]
+	assert.Equal(t, "family_name", familyName.SVGID)
+	require.Len(t, familyName.Display, 1)
+	assert.Equal(t, "Family Name", familyName.Display[0].Label, "an explicit Label must win over Name")
+	assert.Equal(t, "en-US", familyName.Display[0].Locale)
+
+	givenName := byElementID["given_name"]
+	assert.Equal(t, "given_name", givenName.SVGID)
+	require.Len(t, givenName.Display, 1)
+	assert.Equal(t, "Given Name", givenName.Display[0].Label, "Label must fall back to Name when unset")
+
+	portrait := byElementID["portrait"]
+	assert.Empty(t, portrait.SVGID)
+	assert.Empty(t, portrait.Display)
+}
+
 func TestIssuerMetadata_Generate_VCTMDisplay_PartialRendering(t *testing.T) {
 	tests := []struct {
 		name            string
