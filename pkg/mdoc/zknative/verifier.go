@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync"
 	"unsafe"
 )
 
@@ -56,6 +57,12 @@ type Attribute struct {
 // that.
 type Verifier struct {
 	handle *C.MdocZkVerifier
+	// closeOnce guards rust_free_verifier: the old if-handle-nil / assign-nil
+	// pattern was a check-then-act race - two concurrent Close() calls could
+	// both pass the nil check and both free the same handle (a cgo
+	// double-free, i.e. crash or heap corruption). sync.Once makes "freed
+	// exactly once" an actual guarantee instead of a doc comment.
+	closeOnce sync.Once
 }
 
 // NewVerifier loads and compiles a circuit, returning a reusable Verifier.
@@ -93,15 +100,20 @@ func NewVerifier(circuit []byte, version uint8, numAttributes uint8) (*Verifier,
 	return &Verifier{handle: handle}, nil
 }
 
-// Close releases the underlying circuit handle. Not safe to call
-// concurrently with an in-flight VerifyWithPPID call using the same
-// Verifier, and not safe to call more than once.
+// Close releases the underlying circuit handle. Safe to call more than
+// once (and concurrently) - only the first call frees the handle. Not safe
+// to call concurrently with an in-flight VerifyWithPPID call using the same
+// Verifier.
 func (v *Verifier) Close() error {
-	if v == nil || v.handle == nil {
+	if v == nil {
 		return nil
 	}
-	C.rust_free_verifier(v.handle)
-	v.handle = nil
+	v.closeOnce.Do(func() {
+		if v.handle != nil {
+			C.rust_free_verifier(v.handle)
+			v.handle = nil
+		}
+	})
 	return nil
 }
 
@@ -184,7 +196,7 @@ func (v *Verifier) VerifyWithPPID(args VerifyWithPPIDArgs) error {
 	}
 
 	issuerPtr, issuerLen := bytesPtr(args.IssuerPublicKeySEC1)
-	dnsPtr, dnsLen := bytesPtr(args.DeviceNameSpacesBytes)
+	namespacesPtr, namespacesLen := bytesPtr(args.DeviceNameSpacesBytes)
 	transcriptPtr, transcriptLen := bytesPtr(args.SessionTranscript)
 	vcPtr, vcLen := bytesPtr(args.VerifierContext)
 	proofPtr, proofLen := bytesPtr(args.Proof)
@@ -195,14 +207,14 @@ func (v *Verifier) VerifyWithPPID(args VerifyWithPPIDArgs) error {
 		issuerPtr, issuerLen,
 		attrsPtr, C.size_t(len(cAttrs)),
 		cDocType,
-		dnsPtr, dnsLen,
+		namespacesPtr, namespacesLen,
 		transcriptPtr, transcriptLen,
 		cTime,
 		vcPtr, vcLen,
 		proofPtr, proofLen,
 		&errOut,
 	)
-	// issuerPtr/dnsPtr/transcriptPtr/vcPtr/proofPtr each point into their
+	// issuerPtr/namespacesPtr/transcriptPtr/vcPtr/proofPtr each point into their
 	// respective Go slice's backing array (see bytesPtr) - KeepAlive each
 	// slice so none can be GC'd before the (synchronous) C call above
 	// returns, regardless of what the compiler can prove about the raw

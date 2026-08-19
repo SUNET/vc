@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/mdoc/zkcircuit"
@@ -34,35 +35,10 @@ import (
 // that's unreachable (e.g. an offline CI runner) rather than failing the
 // whole suite.
 func TestVerifyWithPPID_RealLiveCircuitAndGoldenProof(t *testing.T) {
-	const circuitID = "longfellow-libzk-v1_8_2_4307_2945"
-
-	client := zkcircuit.NewClient()
-	ctx := context.Background()
-
-	descriptor, err := client.FetchCircuit(ctx, circuitID)
-	if err != nil {
-		t.Skipf("zk-circuits.fly.dev unreachable or circuit missing, skipping live test: %v", err)
-	}
-	version, ok := descriptor.ParamInt("version")
-	if !ok || version != 8 {
-		t.Fatalf("expected circuit %s to report version=8, got %d (ok=%v)", circuitID, version, ok)
-	}
-	numAttrs, ok := descriptor.ParamInt("num_attributes")
-	if !ok || numAttrs != 2 {
-		t.Fatalf("expected circuit %s to report num_attributes=2, got %d (ok=%v)", circuitID, numAttrs, ok)
-	}
-
-	circuit, err := client.DownloadAndDecompress(ctx, descriptor)
-	if err != nil {
-		if strings.Contains(err.Error(), "failed to download a hash-verified artifact") {
-			t.Skipf("zk-circuits.fly.dev unreachable, skipping live test: %v", err)
-		}
-		t.Fatalf("DownloadAndDecompress: %v", err)
-	}
-
+	circuit, version, numAttrs := fetchLiveTestCircuit(t)
 	fixtures := loadFixtures(t)
 
-	verifier, err := NewVerifier(circuit, uint8(version), uint8(numAttrs))
+	verifier, err := NewVerifier(circuit, version, numAttrs)
 	if err != nil {
 		t.Fatalf("NewVerifier: %v", err)
 	}
@@ -119,6 +95,79 @@ func TestVerifyWithPPID_RealLiveCircuitAndGoldenProof(t *testing.T) {
 	shortCtxArgs.VerifierContext = args.VerifierContext[:16]
 	if err := verifier.VerifyWithPPID(shortCtxArgs); err == nil {
 		t.Error("expected short verifier_context to be rejected")
+	}
+}
+
+// fetchLiveTestCircuit fetches the same real V8/2-attribute circuit used by
+// TestVerifyWithPPID_RealLiveCircuitAndGoldenProof from the live catalog
+// service, skipping the calling test (not failing it) if the service is
+// unreachable.
+func fetchLiveTestCircuit(t *testing.T) (circuit []byte, version, numAttrs uint8) {
+	t.Helper()
+	const circuitID = "longfellow-libzk-v1_8_2_4307_2945"
+
+	client := zkcircuit.NewClient()
+	ctx := context.Background()
+
+	descriptor, err := client.FetchCircuit(ctx, circuitID)
+	if err != nil {
+		t.Skipf("zk-circuits.fly.dev unreachable or circuit missing, skipping live test: %v", err)
+	}
+	v, ok := descriptor.ParamInt("version")
+	if !ok || v != 8 {
+		t.Fatalf("expected circuit %s to report version=8, got %d (ok=%v)", circuitID, v, ok)
+	}
+	n, ok := descriptor.ParamInt("num_attributes")
+	if !ok || n != 2 {
+		t.Fatalf("expected circuit %s to report num_attributes=2, got %d (ok=%v)", circuitID, n, ok)
+	}
+
+	circuitBytes, err := client.DownloadAndDecompress(ctx, descriptor)
+	if err != nil {
+		if strings.Contains(err.Error(), "failed to download a hash-verified artifact") {
+			t.Skipf("zk-circuits.fly.dev unreachable, skipping live test: %v", err)
+		}
+		t.Fatalf("DownloadAndDecompress: %v", err)
+	}
+	return circuitBytes, uint8(v), uint8(n)
+}
+
+// TestVerifier_Close_ConcurrentCallsSafe is a regression test for the
+// check-then-act double-free race masv3971 flagged on PR #576: the old
+// Close() checked v.handle == nil and freed/nilled it without any
+// synchronization, so two goroutines racing Close() on the same live handle
+// could both pass the nil check and both call rust_free_verifier - a cgo
+// double-free (crash or heap corruption under a real allocator, not just a
+// leak). With the sync.Once guard, only one of N concurrent Close() calls
+// actually frees the handle; this test only proves that concurrent Close()
+// doesn't crash/corrupt - it can't itself detect a double-free that the
+// allocator happens not to crash on, which is exactly why the race was worth
+// fixing structurally rather than trusting a test to catch it.
+func TestVerifier_Close_ConcurrentCallsSafe(t *testing.T) {
+	circuit, version, numAttrs := fetchLiveTestCircuit(t)
+
+	verifier, err := NewVerifier(circuit, version, numAttrs)
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	const goroutines = 16
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for range goroutines {
+		go func() {
+			defer wg.Done()
+			if err := verifier.Close(); err != nil {
+				t.Errorf("Close: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// A further call, after every concurrent one has returned, must still
+	// be a harmless no-op.
+	if err := verifier.Close(); err != nil {
+		t.Errorf("Close after concurrent Close calls: %v", err)
 	}
 }
 
