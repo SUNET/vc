@@ -6,6 +6,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/sqlstore"
 	"github.com/SUNET/vc/pkg/testsupport"
 	"github.com/SUNET/vc/pkg/testsupport/tracertest"
 	"github.com/SUNET/vc/pkg/trace"
@@ -40,4 +41,27 @@ func NewServiceForTest[S Closer](t *testing.T, tracerName string, cfg *model.Cfg
 	require.NotNil(t, svc)
 	t.Cleanup(func() { _ = svc.Close(t.Context()) })
 	return svc
+}
+
+// RunPostgresAndMariaDBContract runs newFn (a db package's own New()) against
+// both a fresh Postgres and a fresh MariaDB testcontainer, as subtests named
+// "Postgres"/"MariaDB", calling checkFn against each resulting service. This
+// is the shared two-backend contract-test shape every db.Service's SQL test
+// uses; callers keep their own checkFn with package-specific assertions.
+func RunPostgresAndMariaDBContract[S Closer](t *testing.T, tracerName string, newFn NewServiceFunc[S], checkFn func(*testing.T, S)) {
+	t.Helper()
+
+	t.Run("Postgres", func(t *testing.T) {
+		pgCfg, cleanup := PostgresConfig(t)
+		defer cleanup()
+		cfg := &model.Cfg{Common: &model.Common{SQL: sqlstore.SQL{Backend: "postgres", Postgres: pgCfg}}}
+		checkFn(t, NewServiceForTest(t, tracerName, cfg, newFn))
+	})
+
+	t.Run("MariaDB", func(t *testing.T) {
+		mdbCfg, cleanup := MariaDBConfig(t)
+		defer cleanup()
+		cfg := &model.Cfg{Common: &model.Common{SQL: sqlstore.SQL{Backend: "mariadb", MariaDB: mdbCfg}}}
+		checkFn(t, NewServiceForTest(t, tracerName, cfg, newFn))
+	})
 }
