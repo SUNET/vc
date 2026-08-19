@@ -1517,6 +1517,9 @@ func TestAuthorize_WalletLinks(t *testing.T) {
 	}
 	assert.Contains(t, walletNames["SUNET Wallet"], "https://wallet.sunet.se/cb?")
 	assert.Contains(t, walletNames["Test Wallet"], "https://test-wallet.example.com/authorize?")
+
+	// Order must be stable (sorted by name) — map iteration would shuffle them
+	assert.Equal(t, []string{"SUNET Wallet", "Test Wallet"}, []string{resp.WalletLinks[0].Name, resp.WalletLinks[1].Name})
 }
 
 // TestAuthorize_NoWalletLinks tests that no wallet links when supported_wallets is empty
