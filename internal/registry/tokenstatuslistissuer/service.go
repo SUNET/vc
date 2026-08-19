@@ -172,8 +172,19 @@ func (s *Service) refreshAllSections(ctx context.Context) {
 // cache catch up in the background instead of blocking on it here. The context is
 // detached from the caller's cancellation (via context.WithoutCancel) so the
 // refresh isn't aborted the moment the triggering RPC returns.
+//
+// Uses refreshGroup.DoChan directly rather than spawning our own goroutine:
+// DoChan is itself non-blocking and only starts a new goroutine when no refresh
+// for this section is already in flight, so a burst of AddStatus/UpdateStatus
+// calls landing while one refresh is running coalesces onto that single
+// in-flight call instead of each parking its own goroutine on refreshGroup.Do.
 func (s *Service) refreshSectionAsync(ctx context.Context, section int64) {
-	go s.refreshSectionCoalesced(context.WithoutCancel(ctx), section)
+	ctx = context.WithoutCancel(ctx)
+	key := strconv.FormatInt(section, 10)
+	s.refreshGroup.DoChan(key, func() (any, error) {
+		s.refreshSection(ctx, section)
+		return nil, nil
+	})
 }
 
 // refreshSectionCoalesced refreshes a section's cache, coalescing concurrent calls
