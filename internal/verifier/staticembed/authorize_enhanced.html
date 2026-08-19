@@ -363,7 +363,7 @@
                     {{range .WalletLinks}}
                     <div class="wallet-link-item" style="border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; padding: 12px;">
                         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                            <a href="{{.URL}}" class="btn btn-secondary" style="text-decoration: none; text-align: center; flex: 1;">
+                            <a href="{{.URL}}" class="btn btn-secondary js-web-wallet-link" style="text-decoration: none; text-align: center; flex: 1;">
                                 🌐 Open {{.Name}}
                             </a>
                             <button class="btn btn-secondary wallet-qr-toggle" data-wallet-name="{{.Name}}" style="white-space: nowrap; padding: 8px 12px;" title="Show QR code to scan from another device">
@@ -682,6 +682,49 @@
                 if (qrDiv) {
                     const isHidden = qrDiv.classList.toggle('hidden');
                     btn.textContent = isHidden ? '📷 QR' : '✕ Hide QR';
+                }
+            });
+        });
+
+        // Same-device web wallet: tell the verifier this browser is leaving
+        // /authorize so direct_post can return redirect_uri. Cross-device
+        // (QR, modified-click new tab) keeps polling on this page instead.
+        async function markWalletFollowsRedirect() {
+            const showDetails = showCredentialDetailsCheckbox
+                ? showCredentialDetailsCheckbox.checked
+                : false;
+            const response = await fetch('/verification/session-preference', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: config.sessionId,
+                    show_credential_details: showDetails,
+                    wallet_follows_redirect: true,
+                }),
+                keepalive: true,
+            });
+            if (!response.ok) {
+                throw new Error(`Failed to mark same-device flow: ${response.status}`);
+            }
+        }
+
+        document.querySelectorAll('.js-web-wallet-link').forEach(link => {
+            link.addEventListener('click', async (event) => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                    return;
+                }
+                event.preventDefault();
+                const url = link.href;
+                try {
+                    await markWalletFollowsRedirect();
+                    if (pollInterval) {
+                        clearInterval(pollInterval);
+                        pollInterval = null;
+                    }
+                    window.location.href = url;
+                } catch (err) {
+                    console.error('Failed to mark same-device flow, opening wallet in a new tab so this page can still redirect', err);
+                    window.open(url, '_blank', 'noopener');
                 }
             });
         });
