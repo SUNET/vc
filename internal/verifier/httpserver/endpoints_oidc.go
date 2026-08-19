@@ -104,6 +104,7 @@ func (s *Service) endpointAuthorize(ctx context.Context, c *gin.Context) (any, e
 		"CustomCSS":        response.CustomCSS,
 		"CSSFile":          response.CSSFile,
 		"LogoURL":          response.LogoURL,
+		"RedirectURI":      template.URL(request.RedirectURI),
 		"Config": gin.H{
 			"DigitalCredentials": gin.H{
 				"Enable":          s.cfg.Verifier.DigitalCredentials.Enable,

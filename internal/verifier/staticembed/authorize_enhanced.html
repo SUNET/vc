@@ -266,6 +266,9 @@
     <link rel="stylesheet" href="{{.CSSFile}}">
     {{end}}
     <link rel="icon" href="/static/favicon.png" type="image/png">
+    {{if .RedirectURI}}
+    <link rel="dns-prefetch" href="{{.RedirectURI}}">
+    {{end}}
 </head>
 <body>
     <div class="container">
