@@ -22,7 +22,7 @@ type Service struct {
 	cfg         *model.Cfg
 	log         *logger.Log
 	tracer      *trace.Tracer
-	probeStore  *apiv1_status.StatusProbeStore
+	probeStore  *sqlstore.ProbeCache
 
 	// OIDC client collection, client registration
 	Clients ClientStore
@@ -43,7 +43,7 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		log:         log.New("db"),
 		cfg:         cfg,
 		tracer:      tracer,
-		probeStore:  &apiv1_status.StatusProbeStore{},
+		probeStore:  &sqlstore.ProbeCache{},
 		MongoClient: conn.MongoClient,
 		SQLDB:       conn.SQLDB,
 	}
