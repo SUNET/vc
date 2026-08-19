@@ -254,6 +254,24 @@ func (p ProofAttestation) Verify(opts *VerifyProofOptions) error {
 
 	claims := jwtv5.MapClaims{}
 	token, err := jwtv5.ParseWithClaims(string(p), claims, func(token *jwtv5.Token) (any, error) {
+		// Restrict to strong asymmetric signing methods regardless of opts,
+		// matching ProofJWTToken.Verify -- otherwise the JWT library trusts
+		// whatever alg the token itself declares (including weak/symmetric
+		// algorithms), which is exactly what a forged attestation would rely
+		// on now that a signature check exists at all.
+		switch token.Method.(type) {
+		case *jwtv5.SigningMethodECDSA:
+			// ES256, ES384, ES512
+		case *jwtv5.SigningMethodRSA:
+			// RS256, RS384, RS512
+		case *jwtv5.SigningMethodRSAPSS:
+			// PS256, PS384, PS512
+		case *jwtv5.SigningMethodEd25519:
+			// EdDSA
+		default:
+			return nil, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("unsupported signing method: %v", token.Header["alg"])}
+		}
+
 		// Check if algorithm is supported (if supported algorithms are specified)
 		if opts != nil && len(opts.SupportedAlgorithms) > 0 {
 			alg, ok := token.Header["alg"].(string)
