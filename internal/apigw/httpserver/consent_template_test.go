@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"bytes"
+	"encoding/json"
 	"html/template"
 	"testing"
 
@@ -12,13 +13,20 @@ import (
 )
 
 // parseConsentTemplate mirrors exactly how Service.Default builds the HTML
-// template set (same template.New("").Funcs(...).ParseFS(staticembed.FS,
-// "*.html") call in service.go), so this test exercises the real template
-// as rendered in production, not a stand-in.
+// template set -- same template.New("").Funcs(...).ParseFS(staticembed.FS,
+// "*.html") call, same "json" func body, as service.go -- so this test
+// exercises the real template set as rendered in production, not a
+// stand-in with different behavior for any template the glob picks up.
 func parseConsentTemplate(t *testing.T) *template.Template {
 	t.Helper()
 	tmpl := template.New("").Funcs(template.FuncMap{
-		"json": func(v any) (any, error) { return template.JS(""), nil }, //#nosec G203 -- unused by consent.html, present only to mirror service.go's FuncMap
+		"json": func(v any) (any, error) {
+			jsonBytes, err := json.Marshal(v)
+			if err != nil {
+				return "", err
+			}
+			return template.JS(string(jsonBytes)), nil //#nosec G203 -- json.Marshal output is safe
+		},
 	})
 	return template.Must(tmpl.ParseFS(staticembed.FS, "*.html"))
 }
