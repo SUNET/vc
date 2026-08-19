@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/sqlstore"
 	"github.com/SUNET/vc/pkg/testsupport"
 	"github.com/SUNET/vc/pkg/testsupport/sqltest"
 	"github.com/SUNET/vc/pkg/testsupport/tracertest"
@@ -12,7 +13,7 @@ import (
 )
 
 // testNewSQLService exercises the real New()/newSQL() code path end to end
-// (config -> sqlstore.Connect -> sqlstore.Migrate -> store wiring).
+// (config -> sqlstore.Connect -> sqlstore.ApplySchema -> store wiring).
 func testNewSQLService(t *testing.T, cfg *model.Cfg) *Service {
 	t.Helper()
 	log := testsupport.TestLogger(t)
@@ -52,7 +53,7 @@ func TestNewService_Postgres(t *testing.T) {
 	pgCfg, cleanup := sqltest.PostgresConfig(t)
 	defer cleanup()
 
-	cfg := &model.Cfg{Common: &model.Common{SQL: model.SQL{Backend: "postgres", Postgres: pgCfg}}}
+	cfg := &model.Cfg{Common: &model.Common{SQL: sqlstore.SQL{Backend: "postgres", Postgres: pgCfg}}}
 	svc := testNewSQLService(t, cfg)
 	testNewServiceContract(t, svc)
 }
@@ -61,7 +62,7 @@ func TestNewService_MariaDB(t *testing.T) {
 	mdbCfg, cleanup := sqltest.MariaDBConfig(t)
 	defer cleanup()
 
-	cfg := &model.Cfg{Common: &model.Common{SQL: model.SQL{Backend: "mariadb", MariaDB: mdbCfg}}}
+	cfg := &model.Cfg{Common: &model.Common{SQL: sqlstore.SQL{Backend: "mariadb", MariaDB: mdbCfg}}}
 	svc := testNewSQLService(t, cfg)
 	testNewServiceContract(t, svc)
 }
