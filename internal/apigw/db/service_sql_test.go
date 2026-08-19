@@ -6,29 +6,15 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/sqlstore"
-	"github.com/SUNET/vc/pkg/testsupport"
 	"github.com/SUNET/vc/pkg/testsupport/sqltest"
-	"github.com/SUNET/vc/pkg/testsupport/tracertest"
 
 	"github.com/stretchr/testify/require"
 )
 
-// testNewSQLService exercises the real New()/newSQL() code path end to end
-// (config -> sqlstore.Connect -> sqlstore.ApplySchema -> store wiring), as
-// opposed to the individual sql_*_test.go files, which construct each SQL
-// store directly against an already-migrated database.
-func testNewSQLService(t *testing.T, cfg *model.Cfg) *Service {
-	t.Helper()
-	log := testsupport.TestLogger(t)
-	tracer := tracertest.New(t, cfg, log, "apigw-db-sql-service-test")
-
-	svc, err := New(t.Context(), cfg, tracer, log)
-	require.NoError(t, err)
-	require.NotNil(t, svc)
-	t.Cleanup(func() { _ = svc.Close(t.Context()) })
-	return svc
-}
-
+// testNewServiceContract exercises the real New()/newSQL() code path end to
+// end (config -> sqlstore.Connect -> sqlstore.ApplySchema -> store wiring),
+// as opposed to the individual sql_*_test.go files, which construct each
+// SQL store directly against an already-migrated database.
 func testNewServiceContract(t *testing.T, svc *Service) {
 	t.Helper()
 	ctx := t.Context()
@@ -59,8 +45,7 @@ func TestNewService_Postgres(t *testing.T) {
 	defer cleanup()
 
 	cfg := &model.Cfg{Common: &model.Common{SQL: sqlstore.SQL{Backend: "postgres", Postgres: pgCfg}}}
-	svc := testNewSQLService(t, cfg)
-	testNewServiceContract(t, svc)
+	testNewServiceContract(t, sqltest.NewServiceForTest(t, "apigw-db-sql-service-test", cfg, New))
 }
 
 func TestNewService_MariaDB(t *testing.T) {
@@ -68,6 +53,5 @@ func TestNewService_MariaDB(t *testing.T) {
 	defer cleanup()
 
 	cfg := &model.Cfg{Common: &model.Common{SQL: sqlstore.SQL{Backend: "mariadb", MariaDB: mdbCfg}}}
-	svc := testNewSQLService(t, cfg)
-	testNewServiceContract(t, svc)
+	testNewServiceContract(t, sqltest.NewServiceForTest(t, "apigw-db-sql-service-test", cfg, New))
 }

@@ -1,14 +1,13 @@
 // Package sqltest provides shared Postgres/MariaDB testcontainer helpers,
-// pre-migrated and ready to use, for repository-level SQL store tests.
+// pre-migrated and ready to use, for repository-level SQL store tests, plus
+// NewServiceForTest (service.go) - the shared "build cfg, call a db
+// package's New(), register Close on cleanup" harness every db.Service's
+// SQL contract test uses.
 //
 // It lives in its own leaf package, separate from pkg/testsupport itself,
 // matching pkg/testsupport/tracertest and pkg/testsupport/cachetest: those
 // two exist to avoid import cycles through packages that still depend on
-// pkg/model. pkg/sqlstore itself has no such dependency (SQL/PostgresConfig/
-// MariaDBConfig moved from pkg/model into pkg/sqlstore precisely to avoid
-// depending on pkg/model at all), so this package could safely be folded
-// back into pkg/testsupport directly -- kept separate here anyway, for now,
-// to match its siblings' layout rather than as a cycle requirement.
+// pkg/model, which this package now also imports (for NewServiceForTest).
 package sqltest
 
 import (
