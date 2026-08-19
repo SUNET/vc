@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/SUNET/vc/internal/registry/cache"
 	"github.com/SUNET/vc/internal/registry/db"
@@ -26,6 +27,12 @@ type Service struct {
 	log                     *logger.Log
 
 	cacheService *cache.Service
+
+	// refreshGroup coalesces concurrent refreshSection calls for the same section
+	// (e.g. several credential issuances landing in the same section at once, or an
+	// async refresh overlapping with the periodic ticker) into a single underlying
+	// full-section fetch + re-sign instead of running them redundantly in parallel.
+	refreshGroup singleflight.Group
 
 	// refreshInterval is how often tokens are regenerated
 	refreshInterval time.Duration
@@ -139,14 +146,78 @@ func (s *Service) refreshAllSections(ctx context.Context) {
 	}
 
 	for _, section := range sections {
-		s.refreshSection(ctx, section)
+		s.refreshSectionCoalesced(ctx, section)
 	}
 
 	s.log.Debug("Cache refresh completed", "sections", len(sections))
 }
 
+// refreshSectionAsync schedules a background refresh of a section's cached Status
+// List Token without blocking the caller.
+//
+// refreshSection performs a full section re-fetch (every entry in the section, up
+// to SectionSize, default 1,000,000) plus JWT and CWT re-signing. Measured locally
+// against a MongoDB instance with a realistic 1,000,000-entry section (the config
+// default), that full fetch alone takes on the order of 15-20 seconds, even though
+// the query is fully served by the section+index index (no collection scan) —
+// the cost is simply transferring and decoding a million documents, not a missing
+// index. Running that inline on AddStatus/UpdateStatus — as this code used to do —
+// blocks every single credential issuance (or status update) on a full status-list
+// rebuild, which is the root cause of the ~16-20s "minting a credential is slow"
+// symptom.
+//
+// The database write these callers already performed is durable and synchronous,
+// and the cached token is already only refreshed periodically (every
+// TokenRefreshInterval, default 12h) by refreshLoop, so it is safe to let the
+// cache catch up in the background instead of blocking on it here. The context is
+// detached from the caller's cancellation (via context.WithoutCancel) so the
+// refresh isn't aborted the moment the triggering RPC returns.
+//
+// Uses refreshGroup.DoChan directly rather than spawning our own goroutine:
+// DoChan is itself non-blocking and only starts a new goroutine when no refresh
+// for this section is already in flight, so a burst of AddStatus/UpdateStatus
+// calls landing while one refresh is running coalesces onto that single
+// in-flight call instead of each parking its own goroutine on refreshGroup.Do.
+func (s *Service) refreshSectionAsync(ctx context.Context, section int64) {
+	ctx = context.WithoutCancel(ctx)
+	key := strconv.FormatInt(section, 10)
+	s.refreshGroup.DoChan(key, func() (any, error) {
+		s.refreshSection(ctx, section)
+		return nil, nil
+	})
+}
+
+// refreshSectionCoalesced refreshes a section's cache, coalescing concurrent calls
+// for the same section (from concurrent AddStatus/UpdateStatus callers, or an
+// in-flight async refresh overlapping with the periodic ticker) into a single
+// underlying refreshSection call rather than running redundant full-section scans
+// in parallel.
+func (s *Service) refreshSectionCoalesced(ctx context.Context, section int64) {
+	key := strconv.FormatInt(section, 10)
+	_, _, _ = s.refreshGroup.Do(key, func() (any, error) {
+		s.refreshSection(ctx, section)
+		return nil, nil
+	})
+}
+
+// sectionRefreshTimeout bounds a single refreshSection call. Without this, a
+// hung Mongo fetch (network stall, server issue) would never return: the
+// goroutine running it leaks forever, and -- since refreshSectionAsync's
+// context is deliberately detached from the caller's cancellation via
+// context.WithoutCancel -- nothing else times it out either. Every
+// AddStatus/UpdateStatus call arriving while it's stuck would add another
+// waiter channel to the in-flight singleflight call, which is unbounded for
+// as long as that call never completes. 2 minutes is comfortably above the
+// ~15-20s measured for a full 1,000,000-entry section (this repo's default
+// SectionSize), leaving headroom for a larger configured section or a slow
+// disk, while still guaranteeing eventual cleanup either way.
+const sectionRefreshTimeout = 2 * time.Minute
+
 // refreshSection refreshes the cache for a single section
 func (s *Service) refreshSection(ctx context.Context, section int64) {
+	ctx, cancel := context.WithTimeout(ctx, sectionRefreshTimeout)
+	defer cancel()
+
 	statuses, err := s.tokenStatusListColl.GetAllStatusesForSection(ctx, section)
 	if err != nil {
 		s.log.Error(err, "Failed to get statuses for section", "section", section)

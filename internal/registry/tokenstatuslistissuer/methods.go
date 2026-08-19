@@ -117,8 +117,9 @@ func (s *Service) AddStatus(ctx context.Context, status uint8) (int64, int64, er
 		return 0, 0, err
 	}
 
-	// Refresh cache so the new status is immediately visible in the served token
-	s.refreshSection(ctx, currentSection)
+	// Refresh the cached Status List Token in the background; see refreshSectionAsync
+	// for why this must not run inline on the credential-issuance request path.
+	s.refreshSectionAsync(ctx, currentSection)
 
 	return currentSection, index, nil
 }
@@ -133,7 +134,8 @@ func (s *Service) UpdateStatus(ctx context.Context, section int64, index int64, 
 	if err := s.tokenStatusListColl.UpdateStatus(ctx, section, index, status); err != nil {
 		return err
 	}
-	// Refresh cache so the updated status is immediately visible in the served token
-	s.refreshSection(ctx, section)
+	// Refresh the cached Status List Token in the background; see refreshSectionAsync
+	// for why this must not run inline on the request path.
+	s.refreshSectionAsync(ctx, section)
 	return nil
 }
