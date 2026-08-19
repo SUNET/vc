@@ -237,12 +237,23 @@ func (p ProofAttestation) Verify(opts *VerifyProofOptions) error {
 		return err
 	}
 
-	unverified, _, err := jwtv5.NewParser().ParseUnverified(string(p), jwtv5.MapClaims{})
+	// Read the x5c header without going through the JWT library's Parse
+	// API -- p.Validate() above already confirmed this is a well-formed
+	// 3-part JWT with a decodable JSON header, so a plain base64+json
+	// decode (the same approach Validate uses) is all that's needed to
+	// peek at one header field, and it keeps this nowhere near a
+	// signature-verification code path before the real one below.
+	parts := strings.Split(string(p), ".")
+	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "failed to parse attestation JWT"}
+		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "failed to decode attestation header"}
+	}
+	var header map[string]any
+	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "failed to parse attestation header"}
 	}
 
-	x5cRaw, ok := unverified.Header["x5c"]
+	x5cRaw, ok := header["x5c"]
 	if !ok {
 		return &Error{Err: ErrInvalidProof, ErrorDescription: "attestation proof cannot be verified: no x5c header present, and this issuer does not yet support kid-based attestation-issuer key resolution"}
 	}
