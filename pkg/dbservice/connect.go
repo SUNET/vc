@@ -14,6 +14,7 @@ package dbservice
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/SUNET/vc/pkg/model"
@@ -47,7 +48,19 @@ type Connection struct {
 // its own name (e.g. "apigw:db:connect" vs "verifier:db:connect") -
 // covering only the Mongo branch would silently drop startup connect/ping/
 // migration work from traces whenever a deployment runs on SQL instead.
+//
+// Returns an error up front if Common.HA.Enable is set alongside a SQL
+// backend: HA-mode caching (pkg/cache's Mongo-backed AuthContext/generic
+// caches) is wired up by each service's own cache.Service.New using this
+// same Connection's MongoClient, which is nil when the SQL backend is
+// selected - without this guard, that would surface much later as a nil
+// *mongo.Client reaching pkg/cache instead of a clear startup error.
+// Combining SQL storage with HA caching isn't supported yet.
 func Connect(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, spanName string) (*Connection, error) {
+	if isSQLBackend := cfg.Common.SQL.Backend == "postgres" || cfg.Common.SQL.Backend == "mariadb"; cfg.Common.HA.Enable && isSQLBackend {
+		return nil, fmt.Errorf("dbservice: Common.HA.Enable is not supported together with Common.SQL.Backend=%q - HA-mode caching requires a Mongo connection, which is not established when the SQL backend is selected", cfg.Common.SQL.Backend)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, connectTimeout)
 	defer cancel()
 
