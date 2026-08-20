@@ -38,7 +38,7 @@ func (c *SQLDynamicRegistrationColl) Save(ctx context.Context, creds *DynamicReg
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:dynamic_registration:save")
 	defer span.End()
 
-	creds.RegisteredAt = time.Now()
+	creds.RegisteredAt = time.Now().UTC()
 
 	updateCols := []string{
 		"client_secret", "registration_access_token", "registration_client_uri",

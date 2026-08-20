@@ -91,7 +91,13 @@ func Connect(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, spanName
 		// successfully even with an unreachable Mongo, only failing much
 		// later on first query.
 		if err := client.Ping(ctx, nil); err != nil {
-			_ = client.Disconnect(ctx)
+			// ctx may already be expired (that's often exactly why Ping
+			// failed), so use a fresh context for cleanup - Disconnect must
+			// still run to release the connection even when the original
+			// deadline has passed.
+			disconnectCtx, disconnectCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = client.Disconnect(disconnectCtx)
+			disconnectCancel()
 			return nil, fmt.Errorf("dbservice: ping mongo: %w", err)
 		}
 		return &Connection{MongoClient: client}, nil

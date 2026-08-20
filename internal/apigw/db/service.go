@@ -73,6 +73,7 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		log:     log.New("VCDatastoreColl"),
 	}
 	if err := datastoreColl.createIndex(ctx); err != nil {
+		service.disconnectMongoOnStartupError()
 		return nil, err
 	}
 	service.DatastoreColl = datastoreColl
@@ -83,6 +84,7 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		log:     log.New("VCIdentityMappingsColl"),
 	}
 	if err := identityMappingsColl.createIndex(ctx); err != nil {
+		service.disconnectMongoOnStartupError()
 		return nil, err
 	}
 	service.IdentityMappingsColl = identityMappingsColl
@@ -90,18 +92,33 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 	service.CredentialOfferColl, err = NewCredentialOfferColl(ctx, "credential_offer", service, log.New("VCCredentialOfferColl"))
 	if err != nil {
 		service.log.Error(err, "failed to create credential offer collection")
+		service.disconnectMongoOnStartupError()
 		return nil, err
 	}
 
 	service.DynamicRegistrationColl, err = NewDynamicRegistrationColl(ctx, "oidc_dynamic_registration", service, log.New("VCDynamicRegistrationColl"))
 	if err != nil {
 		service.log.Error(err, "failed to create dynamic registration collection")
+		service.disconnectMongoOnStartupError()
 		return nil, err
 	}
 
 	service.log.Info("Started")
 
 	return service, nil
+}
+
+// disconnectMongoOnStartupError disconnects the Mongo client after a
+// collection/index setup failure in New, so a failed startup doesn't leak
+// the already-open connection. Uses a fresh background context (not the
+// caller's, which may be close to its own startup deadline) so cleanup
+// still runs even if that deadline has passed.
+func (s *Service) disconnectMongoOnStartupError() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.MongoClient.Disconnect(ctx); err != nil {
+		s.log.Error(err, "failed to disconnect mongo client after startup error")
+	}
 }
 
 // Status returns the status of the database
