@@ -90,12 +90,20 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 			return nil, fmt.Errorf("common.credential_metadata is required for the %s service", serviceName)
 		}
 
+		// Registry is nil unless Common.CredentialRegistry.Enable is true -
+		// scopes with a vctm_file_path/vctm_url/mddl_file_path/mddl_url
+		// configured never consult it either way.
+		registry, err := cfg.Common.CredentialRegistry.NewClient()
+		if err != nil {
+			return nil, fmt.Errorf("failed to build credential registry client: %w", err)
+		}
+
 		// Load VCTM data and derive Attributes before validation.
 		for scope, constructor := range cfg.Common.CredentialMetadata {
 			if constructor == nil {
 				continue
 			}
-			if err := constructor.LoadCredentialSchema(ctx, scope); err != nil {
+			if err := constructor.LoadCredentialSchema(ctx, scope, registry); err != nil {
 				return nil, fmt.Errorf("failed to load VCTM for scope %q: %w", scope, err)
 			}
 		}
