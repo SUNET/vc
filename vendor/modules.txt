@@ -865,7 +865,7 @@ github.com/sirosfoundation/go-trust/pkg/registry/didweb
 github.com/sirosfoundation/go-trust/pkg/registry/rpcert
 github.com/sirosfoundation/go-trust/pkg/testserver
 github.com/sirosfoundation/go-trust/pkg/trustapi
-# github.com/sirosfoundation/go-ts11client v0.0.0-20260820211517-87ad2f937a29
+# github.com/sirosfoundation/go-ts11client v0.0.0-20260820230845-d45f20d8c6f8
 ## explicit; go 1.26.4
 github.com/sirosfoundation/go-ts11client
 github.com/sirosfoundation/go-ts11client/schemameta

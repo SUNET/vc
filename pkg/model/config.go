@@ -1280,22 +1280,31 @@ func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 	return ids
 }
 
-// CredentialRegistry configures an optional TS11 credential metadata registry client (github.com/sirosfoundation/go-ts11client), disabled by default. When enabled, Registries are queried concurrently for every scope-level vct/doctype lookup - the first to answer wins - so one slow or unreachable registry never blocks resolution as long as another configured registry has the answer.
+// CredentialRegistry configures an optional TS11 credential metadata registry client (github.com/sirosfoundation/go-ts11client), disabled by default. When enabled, Registries is an ordered list of logical registries: a later entry overrides an earlier one for the same vct/doctype, so distinct registries are tried in that order rather than raced - only the mirrors within a single logical registry are queried concurrently, first hit wins, since only mirrors are expected to hold identical content.
 type CredentialRegistry struct {
 	// Enable turns on registry-backed resolution for any scope that sets
 	// vct or doctype instead of a local file/URL. Existing
 	// vctm_file_path/vctm_url/mddl_file_path/mddl_url-configured scopes
 	// are entirely unaffected either way.
 	Enable bool `yaml:"enable" default:"false"`
-	// Registries lists the TS11 registries to query. Required if Enable is true.
-	Registries []CredentialRegistryEndpoint `yaml:"registries" validate:"required_if=Enable true,omitempty,dive"`
+	// Registries is an ordered list of logical (independent) registries.
+	// A later entry overrides an earlier one for the same vct/doctype.
+	// Required if Enable is true.
+	Registries []CredentialRegistryLogical `yaml:"registries" validate:"required_if=Enable true,omitempty,dive"`
 	// RefreshInterval controls how long a registry's discovery index is
 	// trusted before being re-fetched. Zero means fetch once and cache
 	// forever for the lifetime of this process.
 	RefreshInterval time.Duration `yaml:"refresh_interval" default:"1h"`
 }
 
-// CredentialRegistryEndpoint identifies one TS11 registry to query.
+// CredentialRegistryLogical is one independent TS11 registry, optionally served by more than one mirror endpoint holding equivalent content, queried concurrently and raced - first hit wins.
+type CredentialRegistryLogical struct {
+	// Mirrors is the set of endpoints serving this logical registry's
+	// content. At least one is required.
+	Mirrors []CredentialRegistryEndpoint `yaml:"mirrors" validate:"required,min=1,dive"`
+}
+
+// CredentialRegistryEndpoint identifies one TS11 registry endpoint to query.
 type CredentialRegistryEndpoint struct {
 	// BaseURL is the registry's origin, e.g. "https://registry.siros.org".
 	BaseURL string `yaml:"base_url" validate:"required,url" doc_example:"\"https://registry.siros.org\""`
@@ -1311,9 +1320,13 @@ func (cr *CredentialRegistry) NewClient() (ts11client.Client, error) {
 	if cr == nil || !cr.Enable {
 		return nil, nil
 	}
-	registries := make([]ts11client.RegistryConfig, 0, len(cr.Registries))
-	for _, r := range cr.Registries {
-		registries = append(registries, ts11client.RegistryConfig{BaseURL: r.BaseURL, Timeout: r.Timeout})
+	registries := make([]ts11client.LogicalRegistry, 0, len(cr.Registries))
+	for _, lr := range cr.Registries {
+		mirrors := make([]ts11client.RegistryConfig, 0, len(lr.Mirrors))
+		for _, m := range lr.Mirrors {
+			mirrors = append(mirrors, ts11client.RegistryConfig{BaseURL: m.BaseURL, Timeout: m.Timeout})
+		}
+		registries = append(registries, ts11client.LogicalRegistry{Mirrors: mirrors})
 	}
 	return ts11client.New(ts11client.Config{
 		Registries:      registries,

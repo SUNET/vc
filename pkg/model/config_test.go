@@ -346,12 +346,30 @@ func TestCredentialRegistry_NewClient_DisabledByDefault(t *testing.T) {
 
 func TestCredentialRegistry_NewClient_Enabled(t *testing.T) {
 	cr := CredentialRegistry{
-		Enable:     true,
-		Registries: []CredentialRegistryEndpoint{{BaseURL: "https://registry.siros.org"}},
+		Enable: true,
+		Registries: []CredentialRegistryLogical{
+			{Mirrors: []CredentialRegistryEndpoint{{BaseURL: "https://registry.siros.org"}}},
+		},
 	}
 	client, err := cr.NewClient()
 	require.NoError(t, err)
 	assert.NotNil(t, client)
+}
+
+func TestCredentialRegistry_NewClient_MultipleLogicalRegistriesAndMirrors(t *testing.T) {
+	cr := CredentialRegistry{
+		Enable: true,
+		Registries: []CredentialRegistryLogical{
+			{Mirrors: []CredentialRegistryEndpoint{
+				{BaseURL: "https://registry.siros.org"},
+				{BaseURL: "https://registry-mirror.siros.org"},
+			}},
+			{Mirrors: []CredentialRegistryEndpoint{{BaseURL: "https://registry.example.org"}}},
+		},
+	}
+	client, err := cr.NewClient()
+	require.NoError(t, err)
+	assert.NotNil(t, client, "a config with multiple logical registries, one of which has multiple mirrors, must build successfully")
 }
 
 func TestLookupCredentialSources(t *testing.T) {

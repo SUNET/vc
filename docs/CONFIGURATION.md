@@ -185,12 +185,20 @@ drivers to want independent validation tags.
 | Field              | Type       | Description                                                                                                                                                                                                   | Example | Default | Required         |
 | ------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | ---------------- |
 | `enable`           | `bool`     | Registry-backed resolution for any scope that sets vct or doctype instead of a local file/URL. Existing vctm_file_path/vctm_url/mddl_file_path/mddl_url-configured scopes are entirely unaffected either way. | -       | `false` | No               |
-| `registries`       | `array`    | The TS11 registries to query. Required if Enable is true.                                                                                                                                                     | -       | -       | Yes (if enabled) |
+| `registries`       | `array`    | Ordered list of logical (independent) registries. A later entry overrides an earlier one for the same vct/doctype. Required if Enable is true.                                                                | -       | -       | Yes (if enabled) |
 | `refresh_interval` | `duration` | How long a registry's discovery index is trusted before being re-fetched. Zero means fetch once and cache forever for the lifetime of this process.                                                           | -       | `1h`    | No               |
 
 ### `registries` entry
 
 > **Path:** `.common.credential_registry.registries[]`
+
+| Field     | Type    | Description                                                                         | Example | Default | Required |
+| --------- | ------- | ----------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `mirrors` | `array` | Set of endpoints serving this logical registry's content. At least one is required. | -       | -       | Yes      |
+
+### `mirrors` entry
+
+> **Path:** `.common.credential_registry.registries[].mirrors[]`
 
 | Field      | Type       | Description                                           | Example                        | Default | Required |
 | ---------- | ---------- | ----------------------------------------------------- | ------------------------------ | ------- | -------- |

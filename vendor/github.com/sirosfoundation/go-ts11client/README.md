@@ -33,11 +33,20 @@ resolution isn't a live round-trip.
 
 ## Design
 
-- **Multiple registries, queried concurrently, first hit wins.** Every
-  `ResolveVCT`/`ResolveDoctype` call races all configured registries;
-  whichever answers first (and has the entry) wins, and the rest are
-  canceled. A slow or unreachable registry never blocks resolution as
-  long as another configured registry has the answer.
+- **Two-level registry structure.** `Config.Registries` is an ordered
+  list of `LogicalRegistry` entries, each with one or more `Mirrors`.
+  Mirrors are queried concurrently and race - happy-eyeballs, first hit
+  wins - since they're expected to hold identical content (e.g. a CDN in
+  front of the same registry, or two independently-operated copies of the
+  same catalog). Distinct `LogicalRegistry` entries are **not** raced
+  against each other: they may hold different, non-overlapping
+  credentials (e.g. your own org's registry plus a federation partner's),
+  so every `ResolveVCT`/`ResolveDoctype` call tries them from the end of
+  the list backwards - a later entry overrides an earlier one for the
+  same key, the same convention used to let a deployment-local registry
+  extend or override a shared upstream one - stopping at the first hit.
+  A slow or unreachable mirror never blocks resolution as long as another
+  mirror of the same logical registry has the answer.
 - **Cache-first by default.** Each registry's discovery index
   (`.well-known/vctm-registry.json`) is fetched once and reused for every
   subsequent lookup; set `Config.RefreshInterval` to re-fetch
@@ -50,6 +59,12 @@ resolution isn't a live round-trip.
 - **Callers own their own types.** `Resolved.Data` is the raw document
   bytes; this package doesn't impose a VCTM/MDDL struct of its own -
   decode into whatever type you already use.
+- **Bulk enumeration is separate from lookup.** `FetchTS11Schemas` fetches
+  every entry from a paginated TS11 `/api/v1/schemas.json` endpoint in one
+  call, for callers (e.g. a poll-and-store service) that need to sync a
+  whole catalog rather than resolve one key at a time. It's stateless -
+  no cache, no local-override layer - callers that poll on a schedule
+  already have their own storage for that.
 
 ## Usage
 
@@ -62,9 +77,17 @@ local, _ := ts11client.NewLocalSource(
 
 client, err := ts11client.New(ts11client.Config{
     Local: local, // always checked first, always wins
-    Registries: []ts11client.RegistryConfig{
-        {BaseURL: "https://registry.siros.org"},
-        {BaseURL: "https://registry.example.org"},
+    Registries: []ts11client.LogicalRegistry{
+        // Our own registry, served by two mirrors - raced, first wins.
+        {Mirrors: []ts11client.RegistryConfig{
+            {BaseURL: "https://registry.siros.org"},
+            {BaseURL: "https://registry-mirror.siros.org"},
+        }},
+        // A federation partner's registry - tried only if the above
+        // (higher-priority, since it's later in the list) misses.
+        {Mirrors: []ts11client.RegistryConfig{
+            {BaseURL: "https://registry.example.org"},
+        }},
     },
 })
 
