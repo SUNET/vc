@@ -54,6 +54,14 @@ func containerHostPort(t *testing.T, ctr testcontainers.Container, ctx context.C
 // StartPostgres spins up a throwaway, fully-migrated Postgres container and
 // returns a connected *sqlx.DB, its Dialect, and a cleanup function. Skips
 // the calling test if Docker is not available.
+//
+// The returned cleanup closure always terminates the container via
+// context.Background(), not the ctx used for setup: ctx is t.Context(),
+// which the testing package cancels once the test is done, and the whole
+// point of Terminate is to run reliably during teardown - a caller that
+// registers cleanup via t.Cleanup (rather than a bare defer) could
+// otherwise have it run against an already-canceled context and silently
+// fail to terminate, leaking the container.
 func StartPostgres(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 	t.Helper()
 	if !testsupport.IsDockerAvailable() {
@@ -91,7 +99,7 @@ func StartPostgres(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 
 	cleanup := func() {
 		_ = db.Close()
-		_ = ctr.Terminate(ctx)
+		_ = ctr.Terminate(context.Background())
 	}
 	return db, sqlstore.PostgresDialect, cleanup
 }
@@ -152,7 +160,7 @@ func StartMariaDB(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 
 	cleanup := func() {
 		_ = db.Close()
-		_ = ctr.Terminate(ctx)
+		_ = ctr.Terminate(context.Background())
 	}
 	return db, sqlstore.MariaDBDialect, cleanup
 }
@@ -185,7 +193,7 @@ func PostgresConfig(t *testing.T) (*sqlstore.PostgresConfig, func()) {
 		MaxOpenConns: 5,
 		MaxIdleConns: 2,
 	}
-	return cfg, func() { _ = ctr.Terminate(ctx) }
+	return cfg, func() { _ = ctr.Terminate(context.Background()) }
 }
 
 // MariaDBConfig spins up a throwaway, unmigrated MariaDB container and
@@ -215,5 +223,5 @@ func MariaDBConfig(t *testing.T) (*sqlstore.MariaDBConfig, func()) {
 		MaxOpenConns: 5,
 		MaxIdleConns: 2,
 	}
-	return cfg, func() { _ = ctr.Terminate(ctx) }
+	return cfg, func() { _ = ctr.Terminate(context.Background()) }
 }
