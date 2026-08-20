@@ -188,12 +188,27 @@ func getOrLoadVerifier(ctx context.Context, zkSystemID string, zkCircuitSources 
 	verifierCacheState.mu.Unlock()
 
 	// Runs on every return path (including a panic unwinding through
-	// here), so a waiter is never left blocked forever: err/verifier/
-	// numAttributes are the named return values, already set by the
-	// `return` statement that triggered this defer.
+	// here), so a waiter is never left blocked forever. A panic leaves the
+	// named return values at whatever they were last explicitly assigned -
+	// which for every error branch below is a non-nil err, but for a panic
+	// occurring BEFORE any assignment (e.g. inside FetchCircuit or
+	// NewVerifier itself) would otherwise be err==nil/verifier==nil/
+	// numAttributes==0, and the old code cached that nil verifier as a
+	// "success". recover() here turns that into an explicit failure
+	// (recorded for waiters, cache left unpopulated) and re-panics so the
+	// original failure still propagates to this goroutine's own caller.
 	defer func() {
+		if r := recover(); r != nil {
+			verifierCacheState.mu.Lock()
+			load.err = fmt.Errorf("panic while loading circuit %q: %v", zkSystemID, r)
+			delete(verifierCacheState.inFly, zkSystemID)
+			close(load.done)
+			verifierCacheState.mu.Unlock()
+			panic(r)
+		}
+
 		verifierCacheState.mu.Lock()
-		if err == nil {
+		if err == nil && verifier != nil && numAttributes > 0 {
 			verifierCacheState.byID[zkSystemID] = &cachedVerifier{verifier: verifier, numAttributes: numAttributes}
 		}
 		load.err = err

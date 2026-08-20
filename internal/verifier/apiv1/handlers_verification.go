@@ -325,7 +325,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// like a transcript/binding mismatch, treat
 			// BuildOID4VPSessionTranscript's exact byte layout as a prime
 			// suspect and get a real captured transcript to compare against.
-			responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/oidc-direct_post")
+			responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "oidc-direct_post")
 			if err != nil {
 				c.log.Error(err, "failed to construct response URI for ZK session transcript", "scope", scope)
 				return nil, fmt.Errorf("failed to construct response URI for scope %s: %w", scope, err)

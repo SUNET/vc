@@ -61,7 +61,7 @@ func TestNativeVerifyZkProofWithPPID_RealCircuitAndProof(t *testing.T) {
 		deviceNameSpacesBytes, transcript, timeStr, verifierContext, proof, nil,
 	)
 	if err != nil {
-		if strings.Contains(err.Error(), "fetching circuit descriptor") {
+		if strings.Contains(err.Error(), "fetching circuit descriptor") || strings.Contains(err.Error(), "downloading circuit artifact") {
 			t.Skipf("zk-circuits.fly.dev unreachable, skipping live test: %v", err)
 		}
 		t.Fatalf("expected genuine proof to verify via the real wiring, got: %v", err)
