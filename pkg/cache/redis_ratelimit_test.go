@@ -78,17 +78,28 @@ func TestRedisRateLimitCounter_TTLSetOnFreshWindowKey(t *testing.T) {
 
 	ctx := t.Context()
 	window := time.Minute
-	// Captured immediately before the call (matching IncrementWithTTL's own
-	// now := time.Now()), not after, so a window boundary crossed during the
-	// call can't make this compute a different windowID than the one the
-	// increment actually wrote to.
+	// IncrementWithTTL computes its own windowID from an internal
+	// time.Now(), taken after this call starts - bracket it with a
+	// before/after pair and check both candidate window keys, since a
+	// boundary crossed between "before" and that internal call would
+	// otherwise make this look up a different (empty) key and fail
+	// spuriously even though the real key got its TTL correctly.
 	before := time.Now()
 	_, err = rl.IncrementWithTTL(ctx, "ttl-check", window)
 	require.NoError(t, err)
+	after := time.Now()
 
-	currWindowID := before.Unix() / int64(window.Seconds())
-	key := "ttl-check:" + strconv.FormatInt(currWindowID, 10)
-	ttl, err := client.TTL(ctx, key).Result()
-	require.NoError(t, err)
+	windowSecs := int64(window.Seconds())
+	candidates := []int64{before.Unix() / windowSecs, after.Unix() / windowSecs}
+
+	var ttl time.Duration
+	for _, id := range candidates {
+		key := "ttl-check:" + strconv.FormatInt(id, 10)
+		v, err := client.TTL(ctx, key).Result()
+		require.NoError(t, err)
+		if v > ttl {
+			ttl = v
+		}
+	}
 	assert.Greater(t, ttl, time.Duration(0), "fresh window key must have a TTL set")
 }
