@@ -10,6 +10,19 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// incrWithTTLScript atomically increments a counter and, only on the
+// increment that creates the key (count==1), sets its TTL - as a single
+// Lua script, so there's no window between INCR and EXPIRE where a crash
+// could leave the key permanently un-expiring. Redis executes scripts
+// atomically, so this replaces INCR + a conditional, separate EXPIRE call.
+var incrWithTTLScript = redis.NewScript(`
+local count = redis.call("INCR", KEYS[1])
+if count == 1 then
+	redis.call("EXPIRE", KEYS[1], ARGV[1])
+end
+return count
+`)
+
 // RedisRateLimitCounter is a Redis-backed sliding-window rate limit counter.
 // It mirrors MongoRateLimitCounter's algorithm exactly (two fixed
 // sub-windows per key, weighted to approximate a sliding window), but the
@@ -47,28 +60,16 @@ func (r *RedisRateLimitCounter) IncrementWithTTL(ctx context.Context, key string
 	currKey := fmt.Sprintf("%s:%d", key, currWindowID)
 	prevKey := fmt.Sprintf("%s:%d", key, prevWindowID)
 
-	// INCR atomically creates currKey at 1 (if absent) or increments it.
-	// Since INCR is atomic, exactly one caller ever observes the return
-	// value 1 for a given key even under concurrent access - that caller,
-	// and only that caller, sets the TTL, so a fresh key can't end up
-	// without one (a raced double-EXPIRE would be harmless anyway; this
-	// just avoids resetting the TTL on every increment).
-	currCount, err := r.client.Incr(ctx, currKey).Result()
+	// Atomically increment and, only on the increment that creates the key,
+	// set its TTL - covers current + previous window, matching
+	// MongoRateLimitCounter's 120s TTL index for its default ~60s window.
+	// Derived from the normalized windowSecs (not the raw window param) so
+	// a zero/negative/sub-second window - which falls back to the 60s
+	// default above - gets a TTL consistent with that same 60s bucketing.
+	ttlSecs := 2 * windowSecs
+	currCount, err := incrWithTTLScript.Run(ctx, r.client, []string{currKey}, ttlSecs).Int64()
 	if err != nil {
 		return 0, fmt.Errorf("rate limit increment failed (key=%s): %w", currKey, err)
-	}
-	if currCount == 1 {
-		// Covers current + previous window, matching MongoRateLimitCounter's
-		// 120s TTL index for its default ~60s window. Derived from the
-		// normalized windowSecs (not the raw window param) so a zero/
-		// negative/sub-second window - which falls back to the 60s default
-		// above - gets a TTL consistent with that same 60s bucketing,
-		// instead of a mismatched (or zero/negative, which Redis treats as
-		// "delete immediately") duration from the raw window.
-		ttl := 2 * time.Duration(windowSecs) * time.Second
-		if err := r.client.Expire(ctx, currKey, ttl).Err(); err != nil {
-			r.log.Error(err, "rate limit: failed to set TTL on fresh window key", "key", currKey)
-		}
 	}
 
 	// Read the previous window's count (read-only - already finalized).

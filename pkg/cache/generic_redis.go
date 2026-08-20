@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -187,22 +188,47 @@ func (r *RedisCache[V]) GetAndDelete(ctx context.Context, key string) (V, bool) 
 // over this cache's own keys, not the whole Redis keyspace. Like
 // MongoCache.Len (EstimatedDocumentCount), this is an approximate,
 // informational count, not a value to build correctness on.
+//
+// On a *redis.ClusterClient, a single SCAN only walks the node it's sent
+// to, not the whole cluster - keys live on whichever shard they hash to.
+// Fan out via ForEachMaster and sum, so this stays a whole-cache count
+// under either topology.
 func (r *RedisCache[V]) Len() int {
 	ctx := context.Background()
 	pattern := r.collection + ":*"
+
+	if cc, ok := r.client.(*redis.ClusterClient); ok {
+		var total atomic.Int64
+		if err := cc.ForEachMaster(ctx, func(ctx context.Context, master *redis.Client) error {
+			n, err := scanCount(ctx, master, pattern)
+			total.Add(int64(n))
+			return err
+		}); err != nil {
+			r.log.Error(err, "redis cache len failed", "cache", r.collection)
+		}
+		return int(total.Load())
+	}
+
+	n, err := scanCount(ctx, r.client, pattern)
+	if err != nil {
+		r.log.Error(err, "redis cache len failed", "cache", r.collection)
+	}
+	return n
+}
+
+// scanCount counts keys matching pattern on a single node via SCAN.
+func scanCount(ctx context.Context, client redis.UniversalClient, pattern string) (int, error) {
 	var count int
 	var cursor uint64
 	for {
-		keys, next, err := r.client.Scan(ctx, cursor, pattern, 1000).Result()
+		keys, next, err := client.Scan(ctx, cursor, pattern, 1000).Result()
 		if err != nil {
-			r.log.Error(err, "redis cache len failed", "cache", r.collection)
-			return count
+			return count, err
 		}
 		count += len(keys)
 		cursor = next
 		if cursor == 0 {
-			break
+			return count, nil
 		}
 	}
-	return count
 }
