@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -479,6 +480,46 @@ func TestRealHTTPRoundTrip_NonSuccessStatus(t *testing.T) {
 	_, err := client.FetchManifest(context.Background())
 	if err == nil {
 		t.Fatal("expected an error for a 500 response")
+	}
+}
+
+// TestDownloadArtifact_RedirectToDisallowedHostRejected confirms a
+// compromised/malicious configured source can't use an HTTP redirect to
+// smuggle the actual fetch to an arbitrary host. DownloadArtifact's own
+// host-allowlist check only validates the URL it's about to request -
+// without CheckRedirect enforcement inside fetchBytesHTTP, a 3xx response
+// from an otherwise-trusted source would let net/http's default client
+// silently follow the request anywhere (a blind SSRF primitive).
+func TestDownloadArtifact_RedirectToDisallowedHostRejected(t *testing.T) {
+	var attackerHit atomic.Bool
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attackerHit.Store(true)
+		_, _ = w.Write([]byte("should never be reached"))
+	}))
+	defer attacker.Close()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/artifacts/redirect", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, attacker.URL+"/payload", http.StatusFound)
+	})
+	source := httptest.NewServer(mux)
+	defer source.Close()
+
+	client := NewClient(source.URL)
+	descriptor := &CircuitDescriptor{
+		ID: "circuit-redirect",
+		Artifact: &Artifact{
+			URL:  "/v1/artifacts/redirect",
+			Hash: "sha256:" + mustSha256Hex(t, []byte("irrelevant")),
+		},
+	}
+
+	_, err := client.DownloadArtifact(context.Background(), descriptor)
+	if err == nil {
+		t.Fatal("expected the redirect to a disallowed host to be rejected")
+	}
+	if attackerHit.Load() {
+		t.Fatal("attacker server was reached - a redirect to a disallowed host was followed")
 	}
 }
 

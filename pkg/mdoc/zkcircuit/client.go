@@ -559,9 +559,31 @@ func (c *Client) fetchBytes(ctx context.Context, url string, maxBytes int64) ([]
 // response; maxBytes bounds that regardless of what any Content-Length
 // header (which is not trusted) claims.
 func (c *Client) fetchBytesHTTP(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
-	client := c.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+	baseClient := c.HTTPClient
+	if baseClient == nil {
+		baseClient = &http.Client{Timeout: 30 * time.Second}
+	}
+	// A bare http.Client follows redirects to ANY host by default. Sources
+	// are remote/configurable, and DownloadArtifact's own host-allowlist
+	// check (isAllowedAbsoluteHost) only validates the URL it's ABOUT to
+	// fetch - a compromised/malicious source could otherwise 3xx-redirect
+	// this request to an arbitrary internal host, a blind SSRF primitive
+	// the allowlist check would never see. CheckRedirect re-validates every
+	// hop against that same allowlist (redirects within it, e.g. the
+	// documented alias->canonical-id 301, still work); it doesn't mutate
+	// baseClient, which may be shared/injected by callers/tests.
+	client := &http.Client{
+		Transport: baseClient.Transport,
+		Timeout:   baseClient.Timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects fetching %s", url)
+			}
+			if !c.isAllowedAbsoluteHost(req.URL.String()) {
+				return fmt.Errorf("redirect to disallowed host %q", req.URL.Host)
+			}
+			return nil
+		},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
