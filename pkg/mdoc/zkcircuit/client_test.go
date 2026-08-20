@@ -532,11 +532,18 @@ func TestDownloadArtifact_RedirectToDisallowedHostRejected(t *testing.T) {
 // the host check alone would succeed here - only the scheme check catches it.
 func TestDownloadArtifact_RedirectDowngradeToHTTPRejected(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/artifacts/downgrade", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "http://"+r.Host+"/v1/artifacts/plain", http.StatusFound)
-	})
 	server := httptest.NewTLSServer(mux)
 	defer server.Close()
+
+	// Built from server.URL (known at test setup, not the incoming
+	// request) so the redirect target isn't derived from request data -
+	// avoids tripping static-analysis open-redirect rules that flag any
+	// http.Redirect() target built from an *http.Request field, even
+	// though this is a fixed test URL, not attacker input.
+	downgradedURL := "http://" + strings.TrimPrefix(server.URL, "https://") + "/v1/artifacts/plain"
+	mux.HandleFunc("/v1/artifacts/downgrade", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, downgradedURL, http.StatusFound)
+	})
 
 	client := NewClient(server.URL)
 	client.HTTPClient = server.Client() // trusts the test server's self-signed cert
