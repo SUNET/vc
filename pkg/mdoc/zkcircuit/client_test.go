@@ -565,6 +565,44 @@ func TestDownloadArtifact_RedirectDowngradeToHTTPRejected(t *testing.T) {
 	}
 }
 
+// TestDownloadArtifact_SameSchemeRedirectAllowed confirms the https-downgrade
+// guard doesn't reject every non-https redirect unconditionally: a Source
+// legitimately configured as http:// (e.g. a local dev/test mirror, as every
+// other test in this file uses) must still be able to follow its own
+// same-scheme (http->http) alias redirects - only a downgrade FROM https is
+// rejected.
+func TestDownloadArtifact_SameSchemeRedirectAllowed(t *testing.T) {
+	payload := []byte("same-scheme redirect payload")
+	hash := mustSha256Hex(t, payload)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/artifacts/alias", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/v1/artifacts/canonical", http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("/v1/artifacts/canonical", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(payload)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	descriptor := &CircuitDescriptor{
+		ID: "circuit-alias",
+		Artifact: &Artifact{
+			URL:  "/v1/artifacts/alias",
+			Hash: "sha256:" + hash,
+		},
+	}
+
+	data, err := client.DownloadArtifact(context.Background(), descriptor)
+	if err != nil {
+		t.Fatalf("expected the same-scheme (http->http) redirect to succeed, got: %v", err)
+	}
+	if string(data) != string(payload) {
+		t.Errorf("unexpected artifact bytes: %q", data)
+	}
+}
+
 // TestBareHex confirms the "sha256:" prefix strip is case-insensitive (an
 // uppercase/mixed-case prefix from the catalog must not survive into the
 // hash comparison), and that an unprefixed or non-matching-prefix hash

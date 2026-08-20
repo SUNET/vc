@@ -582,14 +582,18 @@ func (c *Client) fetchBytesHTTP(ctx context.Context, url string, maxBytes int64)
 			if !c.isAllowedAbsoluteHost(req.URL.String()) {
 				return fmt.Errorf("redirect to disallowed host %q", req.URL.Host)
 			}
-			if req.URL.Scheme != "https" {
-				// The host allowlist alone isn't enough: a same-host
-				// https->http redirect would still pass it while silently
-				// downgrading the transport, defeating DownloadArtifact's
-				// explicit rejection of plaintext absolute artifact URLs
-				// (candidateArtifactURLs never builds a plain-http URL
-				// itself, so this can only happen via a redirect response).
-				return fmt.Errorf("redirect to non-https scheme %q", req.URL.Scheme)
+			// The host allowlist alone isn't enough: a same-host https->http
+			// redirect would still pass it while silently downgrading the
+			// transport, defeating DownloadArtifact's explicit rejection of
+			// plaintext absolute artifact URLs (candidateArtifactURLs never
+			// builds a plain-http URL itself, so this can only happen via a
+			// redirect response). Only enforce https when the ORIGINAL
+			// request was https (via[0]) - blocking every non-https redirect
+			// unconditionally would also break a Source legitimately
+			// configured as http:// (e.g. a local dev/test mirror), whose
+			// own same-scheme alias redirects are not a downgrade at all.
+			if len(via) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme != "https" {
+				return fmt.Errorf("redirect from https to non-https scheme %q (downgrade not allowed)", req.URL.Scheme)
 			}
 			return nil
 		},
