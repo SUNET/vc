@@ -42,12 +42,17 @@ type Connection struct {
 // "mariadb" connect to the corresponding relational database via
 // pkg/sqlstore, running schema migrations at startup; anything else,
 // including unset, keeps the default MongoDB-backed behavior) and connects
-// to it. mongoSpanName names the tracing span opened around the Mongo
-// connect call, since each caller already gives it its own name (e.g.
-// "apigw:db:connect" vs "verifier:db:connect").
-func Connect(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, mongoSpanName string) (*Connection, error) {
+// to it. spanName names the tracing span opened around the whole connect
+// call (whichever backend is selected), since each caller already gives it
+// its own name (e.g. "apigw:db:connect" vs "verifier:db:connect") -
+// covering only the Mongo branch would silently drop startup connect/ping/
+// migration work from traces whenever a deployment runs on SQL instead.
+func Connect(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, spanName string) (*Connection, error) {
 	ctx, cancel := context.WithTimeout(ctx, connectTimeout)
 	defer cancel()
+
+	ctx, span := tracer.Start(ctx, spanName)
+	defer span.End()
 
 	switch cfg.Common.SQL.Backend {
 	case "postgres", "mariadb":
@@ -58,9 +63,6 @@ func Connect(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, mongoSpa
 		return &Connection{SQLDB: db, Dialect: dialect}, nil
 
 	default:
-		_, span := tracer.Start(ctx, mongoSpanName)
-		defer span.End()
-
 		opts, err := cfg.Common.Mongo.MongoClientOptions()
 		if err != nil {
 			return nil, err

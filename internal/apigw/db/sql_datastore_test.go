@@ -126,6 +126,22 @@ func testDatastoreStoreContract(t *testing.T, store DatastoreStore) {
 	// Replace on a nonexistent document is a silent no-op.
 	require.NoError(t, store.Replace(ctx, mkDoc("NOPE", "x", "y", nil, nil)))
 
+	// Save with duplicate identity mapping IDs must not error - the SQL
+	// backend's (authentic_source, scope, document_id, identity_mapping_id)
+	// primary key can't represent a literal duplicate row, so it dedupes;
+	// Mongo's array field has no such constraint and keeps the duplicate
+	// verbatim. Both are acceptable (this only asserts every distinct ID
+	// still resolves, not an exact-multiset match) - a caller-supplied
+	// duplicate must never turn into a constraint-violation error on one
+	// backend but not the other.
+	dupDoc := mkDoc("SUNET", "pid", "doc-dup", []string{"dup-1", "dup-1", "dup-2"}, map[string]any{"family_name": "Duplicate"})
+	require.NoError(t, store.Save(ctx, dupDoc))
+	full, err = store.GetByKey(ctx, "SUNET", "pid", "doc-dup")
+	require.NoError(t, err)
+	assert.Contains(t, full.IdentityMappingIDs, "dup-1")
+	assert.Contains(t, full.IdentityMappingIDs, "dup-2")
+	require.NoError(t, store.DeleteByKey(ctx, "SUNET", "pid", "doc-dup"))
+
 	// DeleteByKey
 	require.NoError(t, store.DeleteByKey(ctx, "OTHER", "ehic", "doc-3"))
 	count, err = store.Count(ctx)

@@ -39,7 +39,10 @@ func NewServiceForTest[S Closer](t *testing.T, tracerName string, cfg *model.Cfg
 	svc, err := newFn(t.Context(), cfg, tracer, log)
 	require.NoError(t, err)
 	require.NotNil(t, svc)
-	t.Cleanup(func() { _ = svc.Close(t.Context()) })
+	// t.Cleanup-registered functions run after the testing package cancels
+	// t.Context(), so Close must use a fresh context here - not t.Context()
+	// again, which would already be done for by the time this runs.
+	t.Cleanup(func() { _ = svc.Close(context.Background()) })
 	return svc
 }
 

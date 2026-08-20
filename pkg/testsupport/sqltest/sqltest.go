@@ -31,21 +31,27 @@ import (
 // "5432/tcp") as a (host, int port) pair, terminating ctr and failing the
 // test on any error - shared by every StartXxx/XxxConfig helper below, all
 // of which otherwise repeated this exact host/port/strconv.Atoi sequence.
+//
+// Terminate always uses context.Background(), not ctx: ctx is t.Context(),
+// which the testing package can cancel mid-call (e.g. on a test timeout),
+// and Terminate should reliably clean up the container regardless of why
+// this function is failing - matching every other cleanup path in this
+// package.
 func containerHostPort(t *testing.T, ctr testcontainers.Container, ctx context.Context, portSpec, label string) (string, int) {
 	t.Helper()
 	host, err := ctr.Host(ctx)
 	if err != nil {
-		_ = ctr.Terminate(ctx)
+		_ = ctr.Terminate(context.Background())
 		t.Fatalf("%s host: %v", label, err)
 	}
 	port, err := ctr.MappedPort(ctx, portSpec)
 	if err != nil {
-		_ = ctr.Terminate(ctx)
+		_ = ctr.Terminate(context.Background())
 		t.Fatalf("%s mapped port: %v", label, err)
 	}
 	portNum, err := strconv.Atoi(port.Port())
 	if err != nil {
-		_ = ctr.Terminate(ctx)
+		_ = ctr.Terminate(context.Background())
 		t.Fatalf("%s port: %v", label, err)
 	}
 	return host, portNum
@@ -76,24 +82,24 @@ func StartPostgres(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 
 	connStr, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		_ = ctr.Terminate(ctx)
+		_ = ctr.Terminate(context.Background())
 		t.Fatalf("postgres connection string: %v", err)
 	}
 
 	db, err := sqlx.Open(sqlstore.PostgresDialect.DriverName(), connStr)
 	if err != nil {
-		_ = ctr.Terminate(ctx)
+		_ = ctr.Terminate(context.Background())
 		t.Fatalf("open postgres: %v", err)
 	}
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		_ = ctr.Terminate(ctx)
+		_ = ctr.Terminate(context.Background())
 		t.Fatalf("ping postgres: %v", err)
 	}
 
 	if err := sqlstore.ApplySchema(ctx, db, sqlstore.PostgresDialect, nil); err != nil {
 		_ = db.Close()
-		_ = ctr.Terminate(ctx)
+		_ = ctr.Terminate(context.Background())
 		t.Fatalf("migrate postgres: %v", err)
 	}
 
@@ -125,18 +131,18 @@ func StartMariaDB(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 	// application's own pool.
 	connStr, err := ctr.ConnectionString(ctx, "parseTime=true")
 	if err != nil {
-		_ = ctr.Terminate(ctx)
+		_ = ctr.Terminate(context.Background())
 		t.Fatalf("mariadb connection string: %v", err)
 	}
 
 	db, err := sqlx.Open(sqlstore.MariaDBDialect.DriverName(), connStr)
 	if err != nil {
-		_ = ctr.Terminate(ctx)
+		_ = ctr.Terminate(context.Background())
 		t.Fatalf("open mariadb: %v", err)
 	}
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		_ = ctr.Terminate(ctx)
+		_ = ctr.Terminate(context.Background())
 		t.Fatalf("ping mariadb: %v", err)
 	}
 
@@ -154,7 +160,7 @@ func StartMariaDB(t *testing.T) (*sqlx.DB, sqlstore.Dialect, func()) {
 
 	if err := sqlstore.ApplySchema(ctx, db, sqlstore.MariaDBDialect, cfg); err != nil {
 		_ = db.Close()
-		_ = ctr.Terminate(ctx)
+		_ = ctr.Terminate(context.Background())
 		t.Fatalf("migrate mariadb: %v", err)
 	}
 

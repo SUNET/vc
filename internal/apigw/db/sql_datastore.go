@@ -130,10 +130,33 @@ func identityMappingRowsValues(authenticSource, scope, documentID string, identi
 	return strings.Join(placeholders, ", "), args
 }
 
+// dedupeStrings returns ids with duplicates removed, preserving the order
+// of first occurrence.
+func dedupeStrings(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	result := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result
+}
+
 func (c *SQLDatastoreColl) insertIdentityMappings(ctx context.Context, q sqlxExtQuerier, meta *model.MetaData, identityMappingIDs []string) error {
 	if len(identityMappingIDs) == 0 {
 		return nil
 	}
+	// The table's primary key is (authentic_source, scope, document_id,
+	// identity_mapping_id); model.CompleteDocument doesn't validate
+	// identityMappingIDs is duplicate-free, and Mongo's array field happily
+	// stores duplicate entries. Dedupe (first occurrence wins) before
+	// building the VALUES list so a caller-supplied duplicate doesn't turn
+	// into a constraint-violation error the Mongo backend would never hit
+	// for the exact same input.
+	identityMappingIDs = dedupeStrings(identityMappingIDs)
 	values, args := identityMappingRowsValues(meta.AuthenticSource, meta.Scope, meta.DocumentID, identityMappingIDs)
 	query := c.dialect.Rebind(fmt.Sprintf(
 		`INSERT INTO datastore_identity_mapping (authentic_source, scope, document_id, identity_mapping_id) VALUES %s`,
