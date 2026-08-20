@@ -102,6 +102,7 @@ func TestIssuerMetadata_Generate_VCTMDisplay_PartialRendering(t *testing.T) {
 		wantBgColor     string
 		wantTextColor   string
 		wantLogoNil     bool
+		wantLogoURI     string
 	}{
 		{
 			name: "simple rendering without logo",
@@ -124,7 +125,8 @@ func TestIssuerMetadata_Generate_VCTMDisplay_PartialRendering(t *testing.T) {
 			},
 			wantBgColor:   "",
 			wantTextColor: "",
-			wantLogoNil:   true,
+			wantLogoNil:   false,
+			wantLogoURI:   "data:image/svg+xml;base64,abc",
 		},
 	}
 
@@ -158,6 +160,9 @@ func TestIssuerMetadata_Generate_VCTMDisplay_PartialRendering(t *testing.T) {
 			assert.Equal(t, tt.wantTextColor, credConfig.CredentialMetadata.Display[0].TextColor)
 			if tt.wantLogoNil {
 				assert.Nil(t, credConfig.CredentialMetadata.Display[0].Logo)
+			} else {
+				require.NotNil(t, credConfig.CredentialMetadata.Display[0].Logo)
+				assert.Equal(t, tt.wantLogoURI, credConfig.CredentialMetadata.Display[0].Logo.URI)
 			}
 		})
 	}
