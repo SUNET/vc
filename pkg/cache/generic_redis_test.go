@@ -2,10 +2,6 @@ package cache
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -140,20 +136,13 @@ func TestRedisCache_JWKKey(t *testing.T) {
 	}))
 	require.NoError(t, err)
 
-	raw, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-	key, err := jwk.Import(raw)
-	require.NoError(t, err)
+	key := newTestECJWKKey(t)
 
 	c.Set(ctx, "k1", key)
 	got, ok := c.Get(ctx, "k1")
 	require.True(t, ok, "expected jwk.Key to round-trip through RedisCache")
 
-	origJSON, err := json.Marshal(key)
-	require.NoError(t, err)
-	gotJSON, err := json.Marshal(got)
-	require.NoError(t, err)
-	assert.JSONEq(t, string(origJSON), string(gotJSON))
+	assertSameJWKKey(t, key, got)
 }
 
 // TestRedisCache_KeysNamespacedByCollection confirms two RedisCache
