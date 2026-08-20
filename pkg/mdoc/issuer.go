@@ -231,7 +231,7 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		return nil, fmt.Errorf("failed to determine device key algorithm: %w", err)
 	}
 
-	deviceProtectedHeader, err := encoder.Marshal(map[int]int64{1: deviceAlg})
+	deviceProtectedHeader, err := encoder.Marshal(map[int64]any{HeaderAlgorithm: deviceAlg})
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode device protected header: %w", err)
 	}

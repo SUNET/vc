@@ -211,26 +211,13 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 	validUntilStr := b.validUntil.UTC().Format(time.RFC3339)
 
 
-	type coseKeyMap struct {
- 		Kty int64  `cbor:"1,keyasint"`
- 		Crv int64  `cbor:"-1,keyasint"`
-		X   []byte `cbor:"-2,keyasint"`
- 		Y   []byte `cbor:"-3,keyasint,omitempty"`
-	}
-	deviceKeyCOSE := coseKeyMap{
- 		Kty: b.deviceKey.Kty,
- 		Crv: b.deviceKey.Crv,
-		X:   b.deviceKey.X,
-		Y:   b.deviceKey.Y,
-	}
-
 	mso := map[string]any{
 		"version":         "1.0",
 		"digestAlgorithm": string(b.digestAlgorithm),
 		"docType":         b.docType,
 		"valueDigests":    valueDigests,
 		"deviceKeyInfo": map[string]any{
-			"deviceKey": deviceKeyCOSE,
+			"deviceKey": *b.deviceKey,
 		},
 		"validityInfo": map[string]any{
 			"signed":     cbor.Tag{Number: 0, Content: signedTime},
