@@ -50,6 +50,9 @@ func NewRedisCache[V any](client redis.UniversalClient, collection string, ttl t
 	if client == nil {
 		return nil, fmt.Errorf("redis client cannot be nil")
 	}
+	if collection == "" {
+		return nil, fmt.Errorf("redis cache: collection cannot be empty")
+	}
 	if log == nil {
 		log = nopLogger{}
 	}

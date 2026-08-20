@@ -126,6 +126,14 @@ func TestRedisCache_NilClient(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestRedisCache_EmptyCollection(t *testing.T) {
+	client, cleanup := startRedisContainer(t)
+	defer cleanup()
+
+	_, err := NewRedisCache[string](client, "", 5*time.Minute, nil)
+	assert.Error(t, err, "an empty collection breaks key namespacing and widens Len()'s scan pattern, so it must be rejected")
+}
+
 func TestRedisCache_JWKKey(t *testing.T) {
 	client, cleanup := startRedisContainer(t)
 	defer cleanup()
