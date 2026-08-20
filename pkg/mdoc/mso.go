@@ -165,9 +165,9 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 		return nil, nil, fmt.Errorf("validity period is required")
 	}
 
-	encoder, err := NewItemCBOREncoder()
+	encoder, err := NewCBOREncoder()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create item encoder: %w", err)
+		return nil, nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
 	}
 	issuerNameSpaces := make(map[string][]cbor.Tag)
 	valueDigests := make(map[string]map[uint][]byte)
@@ -210,22 +210,16 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 	validFromStr := b.validFrom.UTC().Format(time.RFC3339)
 	validUntilStr := b.validUntil.UTC().Format(time.RFC3339)
 
-	// Get device key as inline COSE map
-	/*deviceKeyCOSE := map[any]any{
-		int64(1):  int64(2),
-		int64(-1): int64(1),
-		int64(-2): b.deviceKey.X,
-		int64(-3): b.deviceKey.Y,
-	}*/
+
 	type coseKeyMap struct {
-		Kty int    `cbor:"1,keyasint"`
-		Crv int    `cbor:"-1,keyasint"`
+ 		Kty int64  `cbor:"1,keyasint"`
+ 		Crv int64  `cbor:"-1,keyasint"`
 		X   []byte `cbor:"-2,keyasint"`
-		Y   []byte `cbor:"-3,keyasint"`
+ 		Y   []byte `cbor:"-3,keyasint,omitempty"`
 	}
 	deviceKeyCOSE := coseKeyMap{
-		Kty: 2,
-		Crv: 1,
+ 		Kty: b.deviceKey.Kty,
+ 		Crv: b.deviceKey.Crv,
 		X:   b.deviceKey.X,
 		Y:   b.deviceKey.Y,
 	}
