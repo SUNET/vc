@@ -59,8 +59,14 @@ func (r *RedisRateLimitCounter) IncrementWithTTL(ctx context.Context, key string
 	}
 	if currCount == 1 {
 		// Covers current + previous window, matching MongoRateLimitCounter's
-		// 120s TTL index for its default ~60s window.
-		if err := r.client.Expire(ctx, currKey, 2*window).Err(); err != nil {
+		// 120s TTL index for its default ~60s window. Derived from the
+		// normalized windowSecs (not the raw window param) so a zero/
+		// negative/sub-second window - which falls back to the 60s default
+		// above - gets a TTL consistent with that same 60s bucketing,
+		// instead of a mismatched (or zero/negative, which Redis treats as
+		// "delete immediately") duration from the raw window.
+		ttl := 2 * time.Duration(windowSecs) * time.Second
+		if err := r.client.Expire(ctx, currKey, ttl).Err(); err != nil {
 			r.log.Error(err, "rate limit: failed to set TTL on fresh window key", "key", currKey)
 		}
 	}

@@ -78,10 +78,15 @@ func TestRedisRateLimitCounter_TTLSetOnFreshWindowKey(t *testing.T) {
 
 	ctx := t.Context()
 	window := time.Minute
+	// Captured immediately before the call (matching IncrementWithTTL's own
+	// now := time.Now()), not after, so a window boundary crossed during the
+	// call can't make this compute a different windowID than the one the
+	// increment actually wrote to.
+	before := time.Now()
 	_, err = rl.IncrementWithTTL(ctx, "ttl-check", window)
 	require.NoError(t, err)
 
-	currWindowID := time.Now().Unix() / int64(window.Seconds())
+	currWindowID := before.Unix() / int64(window.Seconds())
 	key := "ttl-check:" + strconv.FormatInt(currWindowID, 10)
 	ttl, err := client.TTL(ctx, key).Result()
 	require.NoError(t, err)
