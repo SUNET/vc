@@ -13,7 +13,7 @@ import (
 var _ RateLimitCounter = (*RedisRateLimitCounter)(nil)
 
 func TestRedisRateLimitCounter_NilClient(t *testing.T) {
-	_, err := NewRedisRateLimitCounter(nil, nil)
+	_, err := NewRedisRateLimitCounter(nil, "ratelimit_test", nil)
 	assert.Error(t, err)
 }
 
@@ -21,7 +21,7 @@ func TestRedisRateLimitCounter_FirstIncrement(t *testing.T) {
 	client, cleanup := startRedisContainer(t)
 	defer cleanup()
 
-	rl, err := NewRedisRateLimitCounter(client, nil)
+	rl, err := NewRedisRateLimitCounter(client, "ratelimit_test", nil)
 	require.NoError(t, err)
 
 	count, err := rl.IncrementWithTTL(t.Context(), "test-key", time.Minute)
@@ -33,7 +33,7 @@ func TestRedisRateLimitCounter_MultipleIncrementsInSameWindow(t *testing.T) {
 	client, cleanup := startRedisContainer(t)
 	defer cleanup()
 
-	rl, err := NewRedisRateLimitCounter(client, nil)
+	rl, err := NewRedisRateLimitCounter(client, "ratelimit_test", nil)
 	require.NoError(t, err)
 
 	ctx := t.Context()
@@ -52,7 +52,7 @@ func TestRedisRateLimitCounter_IndependentKeys(t *testing.T) {
 	client, cleanup := startRedisContainer(t)
 	defer cleanup()
 
-	rl, err := NewRedisRateLimitCounter(client, nil)
+	rl, err := NewRedisRateLimitCounter(client, "ratelimit_test", nil)
 	require.NoError(t, err)
 
 	ctx := t.Context()
@@ -73,7 +73,7 @@ func TestRedisRateLimitCounter_TTLSetOnFreshWindowKey(t *testing.T) {
 	client, cleanup := startRedisContainer(t)
 	defer cleanup()
 
-	rl, err := NewRedisRateLimitCounter(client, nil)
+	rl, err := NewRedisRateLimitCounter(client, "ratelimit_test", nil)
 	require.NoError(t, err)
 
 	ctx := t.Context()
@@ -94,7 +94,7 @@ func TestRedisRateLimitCounter_TTLSetOnFreshWindowKey(t *testing.T) {
 
 	var ttl time.Duration
 	for _, id := range candidates {
-		key := "ttl-check:" + strconv.FormatInt(id, 10)
+		key := "ratelimit_test:ttl-check:" + strconv.FormatInt(id, 10)
 		v, err := client.TTL(ctx, key).Result()
 		require.NoError(t, err)
 		if v > ttl {

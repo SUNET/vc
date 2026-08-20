@@ -32,18 +32,24 @@ return count
 // on a nonexistent key.
 type RedisRateLimitCounter struct {
 	client redis.UniversalClient
+	prefix string
 	log    Logger
 }
 
 // NewRedisRateLimitCounter creates a new Redis-backed rate limit counter.
-func NewRedisRateLimitCounter(client redis.UniversalClient, log Logger) (*RedisRateLimitCounter, error) {
+// prefix namespaces every key this counter writes ("<prefix>:<key>:<windowID>")
+// so it can't collide with unrelated keys in a shared Redis
+// keyspace/instance - Mongo gets this isolation for free from its
+// collection; Redis has no such boundary, so RedisRateLimitCounter needs
+// one explicitly, same as RedisCache's collection.
+func NewRedisRateLimitCounter(client redis.UniversalClient, prefix string, log Logger) (*RedisRateLimitCounter, error) {
 	if client == nil {
 		return nil, fmt.Errorf("redis client cannot be nil")
 	}
 	if log == nil {
 		log = nopLogger{}
 	}
-	return &RedisRateLimitCounter{client: client, log: log}, nil
+	return &RedisRateLimitCounter{client: client, prefix: prefix, log: log}, nil
 }
 
 // IncrementWithTTL atomically increments the current sub-window's counter
@@ -57,8 +63,8 @@ func (r *RedisRateLimitCounter) IncrementWithTTL(ctx context.Context, key string
 	currWindowID := now.Unix() / windowSecs
 	prevWindowID := currWindowID - 1
 
-	currKey := fmt.Sprintf("%s:%d", key, currWindowID)
-	prevKey := fmt.Sprintf("%s:%d", key, prevWindowID)
+	currKey := fmt.Sprintf("%s:%s:%d", r.prefix, key, currWindowID)
+	prevKey := fmt.Sprintf("%s:%s:%d", r.prefix, key, prevWindowID)
 
 	// Atomically increment and, only on the increment that creates the key,
 	// set its TTL - covers current + previous window, matching

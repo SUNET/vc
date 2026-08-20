@@ -117,6 +117,16 @@ func (r *RedisCache[V]) SetWithTTL(ctx context.Context, key string, value V, ttl
 }
 
 func (r *RedisCache[V]) setWithTTL(ctx context.Context, key string, value V, ttl time.Duration, op string) {
+	// Redis's SET treats a non-positive expiration as "no expiration" -
+	// the opposite of MongoCache's SetWithTTL(ttl<=0), which shifts
+	// created_at so far into the past that the document is already
+	// expired under the collection's TTL index. Clamp to the smallest
+	// representable TTL instead, so a non-positive ttl still expires
+	// (near-)immediately here too, rather than caching permanently.
+	if ttl <= 0 {
+		ttl = time.Millisecond
+	}
+
 	data, err := json.Marshal(value)
 	if err != nil {
 		r.log.Error(err, logPrefix+op+" marshal failed", "cache", r.collection, "key", key)

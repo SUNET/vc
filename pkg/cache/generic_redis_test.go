@@ -188,3 +188,26 @@ func TestRedisCache_TTLExpiration(t *testing.T) {
 	_, ok = c.Get(ctx, "expiring")
 	assert.False(t, ok, "value should have expired")
 }
+
+// TestRedisCache_SetWithTTL_NonPositiveExpiresImmediately confirms a
+// non-positive TTL doesn't cache permanently (Redis's own SET treats
+// ttl<=0 as "no expiration"), matching MongoCache.SetWithTTL(ttl<=0)'s
+// effectively-immediate expiry.
+func TestRedisCache_SetWithTTL_NonPositiveExpiresImmediately(t *testing.T) {
+	client, cleanup := startRedisContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	c, err := NewRedisCache[string](client, "cache_ttl_nonpositive", 10*time.Minute, nil)
+	require.NoError(t, err)
+
+	c.SetWithTTL(ctx, "zero-ttl", "value", 0)
+	time.Sleep(50 * time.Millisecond)
+	_, ok := c.Get(ctx, "zero-ttl")
+	assert.False(t, ok, "a zero TTL must not cache the value permanently")
+
+	c.SetWithTTL(ctx, "negative-ttl", "value", -time.Second)
+	time.Sleep(50 * time.Millisecond)
+	_, ok = c.Get(ctx, "negative-ttl")
+	assert.False(t, ok, "a negative TTL must not cache the value permanently")
+}
