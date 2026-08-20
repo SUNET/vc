@@ -1338,12 +1338,12 @@ type CredentialMetadata struct {
 	// VCTMFilePath is the path to a local VCTM JSON file.
 	// When set, apigw will publish the VCTM at /type-metadata/:scope.
 	// Used for every format except mso_mdoc.
-	VCTMFilePath string `yaml:"vctm_file_path" json:"-" validate:"required_without_all=VCTMUrl MDDLFilePath MDDLUrl VCT"`
+	VCTMFilePath string `yaml:"vctm_file_path" json:"-" validate:"required_without_all=VCTMUrl MDDLFilePath MDDLUrl VCT Doctype"`
 	// VCTMUrl is the URL where the VCTM is already published externally.
 	// When set, the VCTM is fetched from this URL at startup for internal use
 	// but NOT re-published by apigw.
 	// Used for every format except mso_mdoc.
-	VCTMUrl string `yaml:"vctm_url" json:"-" validate:"required_without_all=VCTMFilePath MDDLFilePath MDDLUrl VCT,omitempty,url"`
+	VCTMUrl string `yaml:"vctm_url" json:"-" validate:"required_without_all=VCTMFilePath MDDLFilePath MDDLUrl VCT Doctype,omitempty,url"`
 
 	// VCT is the vct claim value to resolve via Common.CredentialRegistry
 	// (a TS11 registry client), used only when neither VCTMFilePath nor
@@ -1356,10 +1356,10 @@ type CredentialMetadata struct {
 
 	// MDDLFilePath is the path to a local MDDL (mso_mdoc) schema JSON file,
 	// as produced by registry-cli's mddl format generator.
-	MDDLFilePath string `yaml:"mddl_file_path" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLUrl Doctype"`
+	MDDLFilePath string `yaml:"mddl_file_path" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLUrl VCT Doctype"`
 	// MDDLUrl is the URL where the MDDL schema is already published
 	// externally. The mso_mdoc analogue of vctm_url.
-	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath Doctype,omitempty,url"`
+	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath VCT Doctype,omitempty,url"`
 
 	// Doctype is the mdoc doctype value to resolve via
 	// Common.CredentialRegistry, used only when neither MDDLFilePath nor

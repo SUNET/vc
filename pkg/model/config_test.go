@@ -20,6 +20,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
+	"github.com/go-playground/validator/v10"
 	ts11client "github.com/sirosfoundation/go-ts11client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -313,6 +314,31 @@ func TestCredentialMetadata_Doctype_NoRegistryConfigured(t *testing.T) {
 	err := c.LoadCredentialSchema(context.Background(), "pid_mdoc", nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "credential_registry is not enabled")
+}
+
+// TestCredentialMetadata_ValidationTags_VCTAloneSatisfiesRequirement
+// guards against a real gap Copilot caught in review: VCT was only added
+// to some of the six fields' required_without_all lists, so a vct-only
+// scope config could still fail struct validation demanding
+// mddl_file_path/mddl_url even though vct is a legitimate standalone
+// source. Exercises the actual validator, not just LoadCredentialSchema
+// (which never runs struct-tag validation itself).
+func TestCredentialMetadata_ValidationTags_VCTAloneSatisfiesRequirement(t *testing.T) {
+	v := validator.New(validator.WithRequiredStructEnabled())
+	cm := &CredentialMetadata{Format: "dc+sd-jwt", VCT: "urn:eudi:pid:1"}
+	assert.NoError(t, v.Struct(cm))
+}
+
+func TestCredentialMetadata_ValidationTags_DoctypeAloneSatisfiesRequirement(t *testing.T) {
+	v := validator.New(validator.WithRequiredStructEnabled())
+	cm := &CredentialMetadata{Format: "mso_mdoc", Doctype: "org.iso.18013.5.1.mDL"}
+	assert.NoError(t, v.Struct(cm))
+}
+
+func TestCredentialMetadata_ValidationTags_NoneSetFailsValidation(t *testing.T) {
+	v := validator.New(validator.WithRequiredStructEnabled())
+	cm := &CredentialMetadata{Format: "dc+sd-jwt"}
+	assert.Error(t, v.Struct(cm))
 }
 
 func TestResolveVCTUrls_RegistryResolvedVCT(t *testing.T) {
