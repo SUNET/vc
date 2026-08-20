@@ -630,6 +630,9 @@ github.com/mattermost/xml-roundtrip-validator
 # github.com/mattn/go-isatty v0.0.24
 ## explicit; go 1.20
 github.com/mattn/go-isatty
+# github.com/mdelapenya/tlscert v0.2.0
+## explicit; go 1.23
+github.com/mdelapenya/tlscert
 # github.com/miekg/pkcs11 v1.1.2
 ## explicit; go 1.12
 github.com/miekg/pkcs11
@@ -797,6 +800,23 @@ github.com/quic-go/quic-go/quicvarint
 # github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9
 ## explicit
 github.com/rcrowley/go-metrics
+# github.com/redis/go-redis/v9 v9.22.0
+## explicit; go 1.24
+github.com/redis/go-redis/v9
+github.com/redis/go-redis/v9/auth
+github.com/redis/go-redis/v9/internal
+github.com/redis/go-redis/v9/internal/auth/streaming
+github.com/redis/go-redis/v9/internal/hashtag
+github.com/redis/go-redis/v9/internal/hscan
+github.com/redis/go-redis/v9/internal/interfaces
+github.com/redis/go-redis/v9/internal/maintnotifications/logs
+github.com/redis/go-redis/v9/internal/otel
+github.com/redis/go-redis/v9/internal/pool
+github.com/redis/go-redis/v9/internal/proto
+github.com/redis/go-redis/v9/internal/routing
+github.com/redis/go-redis/v9/internal/util
+github.com/redis/go-redis/v9/maintnotifications
+github.com/redis/go-redis/v9/push
 # github.com/russellhaering/goxmldsig v1.6.1
 ## explicit; go 1.23.0
 github.com/russellhaering/goxmldsig
@@ -886,6 +906,9 @@ github.com/testcontainers/testcontainers-go/modules/mariadb
 # github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
 ## explicit; go 1.25.0
 github.com/testcontainers/testcontainers-go/modules/postgres
+# github.com/testcontainers/testcontainers-go/modules/redis v0.44.0
+## explicit; go 1.25.0
+github.com/testcontainers/testcontainers-go/modules/redis
 # github.com/tklauser/go-sysconf v0.4.0
 ## explicit; go 1.25.0
 github.com/tklauser/go-sysconf
@@ -1089,6 +1112,9 @@ go.opentelemetry.io/proto/otlp/common/v1
 go.opentelemetry.io/proto/otlp/metrics/v1
 go.opentelemetry.io/proto/otlp/resource/v1
 go.opentelemetry.io/proto/otlp/trace/v1
+# go.uber.org/atomic v1.11.0
+## explicit; go 1.18
+go.uber.org/atomic
 # go.uber.org/multierr v1.11.0
 ## explicit; go 1.19
 go.uber.org/multierr
