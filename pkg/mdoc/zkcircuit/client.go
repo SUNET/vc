@@ -582,6 +582,15 @@ func (c *Client) fetchBytesHTTP(ctx context.Context, url string, maxBytes int64)
 			if !c.isAllowedAbsoluteHost(req.URL.String()) {
 				return fmt.Errorf("redirect to disallowed host %q", req.URL.Host)
 			}
+			if req.URL.Scheme != "https" {
+				// The host allowlist alone isn't enough: a same-host
+				// https->http redirect would still pass it while silently
+				// downgrading the transport, defeating DownloadArtifact's
+				// explicit rejection of plaintext absolute artifact URLs
+				// (candidateArtifactURLs never builds a plain-http URL
+				// itself, so this can only happen via a redirect response).
+				return fmt.Errorf("redirect to non-https scheme %q", req.URL.Scheme)
+			}
 			return nil
 		},
 	}

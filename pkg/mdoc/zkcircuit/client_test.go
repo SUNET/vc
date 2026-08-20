@@ -523,6 +523,41 @@ func TestDownloadArtifact_RedirectToDisallowedHostRejected(t *testing.T) {
 	}
 }
 
+// TestDownloadArtifact_RedirectDowngradeToHTTPRejected confirms a same-host
+// https->http redirect is rejected even though the host-allowlist check
+// alone would pass it (same host, still within Sources): validating only
+// the host silently permits a scheme downgrade, defeating DownloadArtifact's
+// explicit rejection of plaintext absolute artifact URLs. Uses a real TLS
+// test server (matching production, where Sources are genuinely https) so
+// the host check alone would succeed here - only the scheme check catches it.
+func TestDownloadArtifact_RedirectDowngradeToHTTPRejected(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/artifacts/downgrade", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://"+r.Host+"/v1/artifacts/plain", http.StatusFound)
+	})
+	server := httptest.NewTLSServer(mux)
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	client.HTTPClient = server.Client() // trusts the test server's self-signed cert
+
+	descriptor := &CircuitDescriptor{
+		ID: "circuit-downgrade",
+		Artifact: &Artifact{
+			URL:  "/v1/artifacts/downgrade",
+			Hash: "sha256:" + mustSha256Hex(t, []byte("irrelevant")),
+		},
+	}
+
+	_, err := client.DownloadArtifact(context.Background(), descriptor)
+	if err == nil {
+		t.Fatal("expected the https->http downgrade redirect to be rejected")
+	}
+	if !strings.Contains(err.Error(), "non-https") {
+		t.Errorf("expected a non-https scheme rejection, got: %v", err)
+	}
+}
+
 // TestBareHex confirms the "sha256:" prefix strip is case-insensitive (an
 // uppercase/mixed-case prefix from the catalog must not survive into the
 // hash comparison), and that an unprefixed or non-matching-prefix hash
