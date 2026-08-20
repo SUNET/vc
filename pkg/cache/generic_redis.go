@@ -197,7 +197,10 @@ func (r *RedisCache[V]) GetAndDelete(ctx context.Context, key string) (V, bool) 
 // MATCH pattern scoped to this cache's collection prefix - an O(n) walk
 // over this cache's own keys, not the whole Redis keyspace. Like
 // MongoCache.Len (EstimatedDocumentCount), this is an approximate,
-// informational count, not a value to build correctness on.
+// informational count, not a value to build correctness on. On any scan
+// error, returns 0 rather than a partial count - matching
+// MongoCache.Len, and avoiding misleading a caller with an undercount
+// that looks like a real (if approximate) answer.
 //
 // On a *redis.ClusterClient, a single SCAN only walks the node it's sent
 // to, not the whole cluster - keys live on whichever shard they hash to.
@@ -211,10 +214,14 @@ func (r *RedisCache[V]) Len() int {
 		var total atomic.Int64
 		if err := cc.ForEachMaster(ctx, func(ctx context.Context, master *redis.Client) error {
 			n, err := scanCount(ctx, master, pattern)
+			if err != nil {
+				return err
+			}
 			total.Add(int64(n))
-			return err
+			return nil
 		}); err != nil {
 			r.log.Error(err, "redis cache len failed", "cache", r.collection)
+			return 0
 		}
 		return int(total.Load())
 	}
@@ -222,6 +229,7 @@ func (r *RedisCache[V]) Len() int {
 	n, err := scanCount(ctx, r.client, pattern)
 	if err != nil {
 		r.log.Error(err, "redis cache len failed", "cache", r.collection)
+		return 0
 	}
 	return n
 }
