@@ -154,6 +154,16 @@ func (r *RedisCache[V]) SetNXWithTTL(ctx context.Context, key string, value V, t
 }
 
 func (r *RedisCache[V]) setNXWithTTL(ctx context.Context, key string, value V, ttl time.Duration) (bool, error) {
+	// Same clamp as setWithTTL: a non-positive ttl reaching Redis's SETNX
+	// means "no expiration" rather than "expire immediately". Without
+	// this, SetNX() (which passes r.ttl straight through) would silently
+	// create permanent keys whenever the cache's own default ttl is
+	// non-positive, inconsistent with Set()/SetWithTTL() on this same
+	// cache instance.
+	if ttl <= 0 {
+		ttl = time.Millisecond
+	}
+
 	data, err := json.Marshal(value)
 	if err != nil {
 		return false, fmt.Errorf("redis cache setnx marshal failed (cache=%s): %w", r.collection, err)

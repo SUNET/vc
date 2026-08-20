@@ -17,6 +17,14 @@ func TestRedisRateLimitCounter_NilClient(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestRedisRateLimitCounter_EmptyPrefix(t *testing.T) {
+	client, cleanup := startRedisContainer(t)
+	defer cleanup()
+
+	_, err := NewRedisRateLimitCounter(client, "", nil)
+	assert.Error(t, err, "an empty prefix defeats the whole point of namespacing keys, so it must be rejected")
+}
+
 func TestRedisRateLimitCounter_FirstIncrement(t *testing.T) {
 	client, cleanup := startRedisContainer(t)
 	defer cleanup()

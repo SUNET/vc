@@ -211,3 +211,24 @@ func TestRedisCache_SetWithTTL_NonPositiveExpiresImmediately(t *testing.T) {
 	_, ok = c.Get(ctx, "negative-ttl")
 	assert.False(t, ok, "a negative TTL must not cache the value permanently")
 }
+
+// TestRedisCache_SetNX_NonPositiveDefaultTTLExpiresImmediately confirms
+// SetNX() - which passes the cache's own default ttl straight through -
+// doesn't create a permanent key when that default ttl is non-positive,
+// matching setWithTTL's clamp.
+func TestRedisCache_SetNX_NonPositiveDefaultTTLExpiresImmediately(t *testing.T) {
+	client, cleanup := startRedisContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	c, err := NewRedisCache[string](client, "cache_setnx_nonpositive", 0, nil)
+	require.NoError(t, err)
+
+	ok, err := c.SetNX(ctx, "zero-default-ttl", "value")
+	require.NoError(t, err)
+	require.True(t, ok, "key didn't exist yet, so SetNX must report it was set")
+
+	time.Sleep(50 * time.Millisecond)
+	_, ok = c.Get(ctx, "zero-default-ttl")
+	assert.False(t, ok, "SetNX must not cache the value permanently when the cache's default ttl is non-positive")
+}

@@ -46,6 +46,9 @@ func NewRedisRateLimitCounter(client redis.UniversalClient, prefix string, log L
 	if client == nil {
 		return nil, fmt.Errorf("redis client cannot be nil")
 	}
+	if prefix == "" {
+		return nil, fmt.Errorf("redis rate limit counter: prefix cannot be empty")
+	}
 	if log == nil {
 		log = nopLogger{}
 	}
