@@ -10,6 +10,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// logPrefix prefixes every RedisCache log message so the backend is
+// identifiable in shared logs alongside MongoCache/MemoryCache.
+const logPrefix = "redis cache "
+
 // RedisCache is a generic cache backed by Redis. Values are JSON-encoded
 // before storage (matching MongoCache's approach), which allows interface
 // types (e.g. jwk.Key) to round-trip correctly via a custom decoder. Unlike
@@ -78,7 +82,7 @@ func (r *RedisCache[V]) decodeValue(data []byte, op, key string) (V, bool) {
 	}
 	if err != nil {
 		r.log.Error(
-			err, "redis cache "+op+": failed to unmarshal JSON value",
+			err, logPrefix+op+": failed to unmarshal JSON value",
 			"cache", r.collection, "key", key,
 		)
 		var zero V
@@ -114,11 +118,11 @@ func (r *RedisCache[V]) SetWithTTL(ctx context.Context, key string, value V, ttl
 func (r *RedisCache[V]) setWithTTL(ctx context.Context, key string, value V, ttl time.Duration, op string) {
 	data, err := json.Marshal(value)
 	if err != nil {
-		r.log.Error(err, "redis cache "+op+" marshal failed", "cache", r.collection, "key", key)
+		r.log.Error(err, logPrefix+op+" marshal failed", "cache", r.collection, "key", key)
 		return
 	}
 	if err := r.client.Set(ctx, r.namespacedKey(key), data, ttl).Err(); err != nil {
-		r.log.Error(err, "redis cache "+op+" failed", "cache", r.collection, "key", key)
+		r.log.Error(err, logPrefix+op+" failed", "cache", r.collection, "key", key)
 	}
 }
 
