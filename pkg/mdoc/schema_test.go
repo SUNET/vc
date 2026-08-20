@@ -1,6 +1,9 @@
 package mdoc
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestLoadMDDLSchema(t *testing.T) {
 	valid := []byte(`{
@@ -96,5 +99,71 @@ func TestMDDLSchema_Attributes(t *testing.T) {
 	}
 	if _, ok := defaultBucket["portrait"]; !ok {
 		t.Error("missing fallback 'portrait' label under default locale")
+	}
+}
+
+func TestMDDLSchema_SVGValues(t *testing.T) {
+	schema := &MDDLSchema{
+		Format:  "mso_mdoc",
+		DocType: "org.iso.18013.5.1.mDL",
+		Claims: map[string]NamespaceClaims{
+			"org.iso.18013.5.1": {
+				"family_name": {
+					Display: []ClaimDisplay{{Locale: "en-US", Name: "Family Name"}},
+					SVGID:   "family_name",
+				},
+				"given_name": {
+					// No SVGID — must not appear in SVGValues, mirroring
+					// sdjwtvc.VCTM.SVGValues skipping claims with no svg_id.
+					Display: []ClaimDisplay{{Locale: "en-US", Name: "Given Name"}},
+				},
+				"portrait": {
+					// SVGID set but no Display — must also be skipped, since
+					// there is no label to attach to the resolved value.
+					SVGID: "portrait_image",
+				},
+				"nationality": {
+					Display: []ClaimDisplay{{Locale: "en-US", Name: "Nationality"}},
+					SVGID:   "nationality",
+				},
+				"document_number": {
+					// Label set distinct from Name - must win over Name,
+					// mirroring sdjwtvc.VCTM.SVGValues using Display[0].Label.
+					Display: []ClaimDisplay{{Locale: "en-US", Name: "Document Number", Label: "Doc No."}},
+					SVGID:   "document_number",
+				},
+			},
+		},
+	}
+
+	data := map[string]any{
+		"family_name":     "Andersson",
+		"given_name":      "Helen",
+		"portrait":        "base64data",
+		"document_number": "123456789",
+		// nationality deliberately absent from data.
+	}
+
+	got := schema.SVGValues(data)
+	want := map[string]SVGValue{
+		"family_name":     {Label: "Family Name", Value: "Andersson"},
+		"document_number": {Label: "Doc No.", Value: "123456789"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("SVGValues() = %+v, want %+v", got, want)
+	}
+}
+
+func TestMDDLSchema_SVGValues_NoSVGIDsReturnsNil(t *testing.T) {
+	schema := &MDDLSchema{
+		Claims: map[string]NamespaceClaims{
+			"org.iso.18013.5.1": {
+				"family_name": {Display: []ClaimDisplay{{Locale: "en-US", Name: "Family Name"}}},
+			},
+		},
+	}
+
+	if got := schema.SVGValues(map[string]any{"family_name": "Andersson"}); got != nil {
+		t.Errorf("SVGValues() = %+v, want nil when no claim declares svg_id", got)
 	}
 }

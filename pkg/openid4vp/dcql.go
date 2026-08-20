@@ -68,9 +68,21 @@ type MetaQuery struct {
 	// Each inner array specifies a set of fully expanded types that MUST be present in the credential's type property.
 	TypeValues [][]string `json:"type_values,omitempty" yaml:"type_values,omitempty"`
 
-	// DoctypeValue for ISO mdoc format (mso_mdoc).
+	// DoctypeValue for ISO mdoc format (mso_mdoc) and ZK-mdoc format (mso_mdoc_zk).
 	// String that specifies an allowed value for the doctype of the requested Verifiable Credential.
 	DoctypeValue string `json:"doctype_value,omitempty" yaml:"doctype_value,omitempty"`
+
+	// ZKSystemType for ZK-mdoc format (mso_mdoc_zk) only.
+	// A non-empty array of ZK proof system/circuit variants the Verifier is
+	// willing to accept (e.g. Longfellow circuits for different attribute
+	// counts). See ZKSystemTypeSpec and dcql_zk.go.
+	ZKSystemType []ZKSystemTypeSpec `json:"zk_system_type,omitempty" yaml:"zk_system_type,omitempty"`
+
+	// PPIDContext for ZK-mdoc format (mso_mdoc_zk) only.
+	// An optional verifier-supplied string that further scopes a requested
+	// pairwise pseudonym (PPID) beyond the verifier's own identity - see
+	// pkg/mdoc.ComputeZkVerifierContext.
+	PPIDContext string `json:"ppid_context,omitempty" yaml:"ppid_context,omitempty"`
 }
 
 // VPFormatsSupported defines format-specific parameters for Verifier or Wallet metadata.
@@ -461,8 +473,50 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 				Message: "doctype_value is required for ISO mdoc format",
 			}
 		}
+	case FormatMsoMdocZk:
+		return validateMsoMdocZkQuery(query)
 	default:
 		// Unknown format - allow but don't validate
+	}
+	return nil
+}
+
+// validateMsoMdocZkQuery validates the ZK-mdoc (mso_mdoc_zk)-specific
+// fields of a CredentialQuery, split out of ValidateCredentialQuery to
+// keep that function's per-format switch flat (this format alone needs a
+// nested per-entry loop over zk_system_type, unlike every other format).
+func validateMsoMdocZkQuery(query CredentialQuery) error {
+	// ZK-mdoc requires doctype_value, same as plain mso_mdoc.
+	if query.Meta.DoctypeValue == "" {
+		return &DCQLValidationError{
+			Field:   "meta.doctype_value",
+			Message: "doctype_value is required for ZK-mdoc format",
+		}
+	}
+	// ...plus a non-empty zk_system_type array declaring which ZK
+	// systems/circuits the verifier accepts, each entry of which must
+	// itself carry the "id"/"system" fields ZKSystemTypeSpec requires
+	// (matching/circuit resolution depends on both being present - see
+	// MatchZKSystemType and pkg/mdoc/zkcircuit.Client.FetchCircuit).
+	if len(query.Meta.ZKSystemType) == 0 {
+		return &DCQLValidationError{
+			Field:   "meta.zk_system_type",
+			Message: "zk_system_type is required for ZK-mdoc format",
+		}
+	}
+	for i, spec := range query.Meta.ZKSystemType {
+		if spec.ID == "" {
+			return &DCQLValidationError{
+				Field:   fmt.Sprintf("meta.zk_system_type[%d].id", i),
+				Message: "id is required for each zk_system_type entry",
+			}
+		}
+		if spec.System == "" {
+			return &DCQLValidationError{
+				Field:   fmt.Sprintf("meta.zk_system_type[%d].system", i),
+				Message: "system is required for each zk_system_type entry",
+			}
+		}
 	}
 	return nil
 }
