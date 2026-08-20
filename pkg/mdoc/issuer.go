@@ -226,11 +226,21 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		signedMSO.Payload,
 		signedMSO.Signature,
 	}
+	deviceAlg, err := coseAlgorithmForPublicKey(req.DevicePublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine device key algorithm: %w", err)
+	}
+
+	deviceProtectedHeader, err := encoder.Marshal(map[int]int{1: deviceAlg})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode device protected header: %w", err)
+	}
+
 	deviceSigArray := []any{
-		[]byte{0xa1, 0x01, 0x26}, // Protected
-		map[string]any{},         // Unprotected
-		nil,                      // Payload (detached)
-		[]byte{},                 // Empty signature placeholder
+		deviceProtectedHeader, // Protected — alg derived from the actual device key (was hardcoded ES256)
+		map[string]any{},      // Unprotected
+		nil,                   // Payload (detached)
+		[]byte{},              // Empty signature placeholder
 	}
 	// Everything encoded successfully: build response containing the document
 	innerDoc := DocumentMdoc{

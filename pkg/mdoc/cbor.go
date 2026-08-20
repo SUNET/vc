@@ -58,6 +58,26 @@ func NewCBOREncoder() (*CBOREncoder, error) {
 	return encoder, nil
 }
 
+func coseAlgorithmForPublicKey(pub crypto.PublicKey) (int, error) {
+	switch k := pub.(type) {
+	case *ecdsa.PublicKey:
+		switch k.Curve {
+		case elliptic.P256():
+			return -7, nil // ES256
+		case elliptic.P384():
+			return -35, nil // ES384
+		case elliptic.P521():
+			return -36, nil // ES512
+		default:
+			return 0, fmt.Errorf("unsupported EC curve: %s", k.Curve.Params().Name)
+		}
+	case ed25519.PublicKey:
+		return -8, nil // EdDSA
+	default:
+		return 0, fmt.Errorf("unsupported device public key type: %T", pub)
+	}
+}
+
 // Marshal encodes a value to CBOR.
 func (e *CBOREncoder) Marshal(v any) ([]byte, error) {
 	return e.encMode.Marshal(v)
