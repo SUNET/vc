@@ -65,6 +65,7 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		collection: oidcDB.Collection("clients"),
 	}
 	if err := clientsColl.createIndex(ctx); err != nil {
+		service.disconnectMongoOnStartupError()
 		return nil, err
 	}
 	service.Clients = clientsColl
@@ -72,6 +73,19 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 	service.log.Info("Started")
 
 	return service, nil
+}
+
+// disconnectMongoOnStartupError disconnects the Mongo client after a
+// collection/index setup failure in New, so a failed startup doesn't leak
+// the already-open connection. Uses a fresh background context (not the
+// caller's, which may be close to its own startup deadline) so cleanup
+// still runs even if that deadline has passed.
+func (s *Service) disconnectMongoOnStartupError() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.MongoClient.Disconnect(ctx); err != nil {
+		s.log.Error(err, "failed to disconnect mongo client after startup error")
+	}
 }
 
 // NewServiceWithMocks creates a db.Service with mock implementations for testing
