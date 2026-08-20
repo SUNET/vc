@@ -156,6 +156,7 @@ func copyDCQL(src *DCQL) *DCQL {
 	for i, cred := range src.Credentials {
 		meta := MetaQuery{
 			DoctypeValue: cred.Meta.DoctypeValue,
+			PPIDContext:  cred.Meta.PPIDContext,
 		}
 		if len(cred.Meta.VCTValues) > 0 {
 			meta.VCTValues = append([]string{}, cred.Meta.VCTValues...)
@@ -164,6 +165,20 @@ func copyDCQL(src *DCQL) *DCQL {
 			meta.TypeValues = make([][]string, len(cred.Meta.TypeValues))
 			for j, tv := range cred.Meta.TypeValues {
 				meta.TypeValues[j] = append([]string{}, tv...)
+			}
+		}
+		if len(cred.Meta.ZKSystemType) > 0 {
+			meta.ZKSystemType = make([]ZKSystemTypeSpec, len(cred.Meta.ZKSystemType))
+			for j, spec := range cred.Meta.ZKSystemType {
+				params := make(map[string]string, len(spec.Params))
+				for k, v := range spec.Params {
+					params[k] = v
+				}
+				meta.ZKSystemType[j] = ZKSystemTypeSpec{
+					ID:     spec.ID,
+					System: spec.System,
+					Params: params,
+				}
 			}
 		}
 		dst.Credentials[i] = CredentialQuery{

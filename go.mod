@@ -37,6 +37,7 @@ require (
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/kaptinlin/jsonschema v0.9.8
 	github.com/kelseyhightower/envconfig v1.4.0
+	github.com/klauspost/compress v1.19.1
 	github.com/lestrrat-go/jwx/v3 v3.2.0
 	github.com/lithammer/shortuuid/v4 v4.2.0
 	github.com/miekg/pkcs11 v1.1.2
@@ -147,7 +148,6 @@ require (
 	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kaptinlin/jsonpointer v0.4.28 // indirect
-	github.com/klauspost/compress v1.19.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect

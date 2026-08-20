@@ -594,6 +594,22 @@ type Verifier struct {
 	// Revocation configures credential revocation checking at presentation time (ARF 3.0 §6.6.3.7).
 	// When enabled, the Verifier checks Token Status List references in presented credentials.
 	Revocation *RevocationConfig `yaml:"revocation,omitempty"`
+	// ZkCircuits configures the zk-circuits catalog service used to resolve
+	// "mso_mdoc_zk" (Longfellow ZK/PPID) proof circuits for native
+	// verification. Only consulted by builds with the "zknative" Go build
+	// tag (see pkg/mdoc/zk_native_cgo.go) - ignored by the default build.
+	ZkCircuits ZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
+}
+
+// ZkCircuitsConfig configures the zk-circuits catalog client
+// (pkg/mdoc/zkcircuit) used to resolve a presented "mso_mdoc_zk" document's
+// zkSystemId to a downloadable circuit artifact.
+type ZkCircuitsConfig struct {
+	// Sources are zk-circuits catalog mirror base URLs, tried in order
+	// until one succeeds (see pkg/mdoc/zkcircuit.Client - these are
+	// mirrors of the SAME catalog, not distinct registries). Defaults to
+	// the live deployed service if empty.
+	Sources []string `yaml:"sources,omitempty" default:"[\"https://zk-circuits.fly.dev\"]" doc_example:"[\"https://zk-circuits.fly.dev\"]"`
 }
 
 // RevocationConfig configures credential revocation verification at presentation time.

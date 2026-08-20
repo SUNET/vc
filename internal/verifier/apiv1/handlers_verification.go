@@ -263,6 +263,110 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				})
 			}
 
+		case FormatMDocZK:
+			// ZK mDOC: zero-knowledge proof of possession (+ optional
+			// pairwise pseudonym) over an mdoc credential. Native proof
+			// verification (nativeVerifyZkProofWithPPID) is real when
+			// vc-verifier is built with the "zknative" Go build tag (see
+			// pkg/mdoc/zk_native_cgo.go); the default build returns a
+			// specific ErrNativeZkVerifyNotImplemented-derived error past
+			// the trust/matching checks below. See
+			// docs/ZK_PPID_VERIFICATION_PLAN.md.
+			if c.trustEvaluator == nil {
+				c.log.Error(nil, "TrustEvaluator required for ZK mDOC verification", "scope", scope)
+				return nil, fmt.Errorf("TrustEvaluator not configured for ZK mDOC verification")
+			}
+
+			zkHandler, err := mdoc.NewZkHandler(mdoc.ZkVerifierConfig{
+				TrustEvaluator:   c.trustEvaluator,
+				ZkCircuitSources: c.cfg.Verifier.ZkCircuits.Sources,
+			})
+			if err != nil {
+				c.log.Error(err, "failed to create ZK mDOC handler", "scope", scope)
+				return nil, fmt.Errorf("failed to create ZK mDOC handler for scope %s: %w", scope, err)
+			}
+
+			// Find this scope's CredentialQuery (by the "scope == query ID"
+			// convention this codebase's own DCQL builders use - see
+			// buildDCQLQueryFromConfig in client.go) to recover
+			// zk_system_type/ppid_context, and the requested claims in their
+			// original request order - see ZkPresentationContext.
+			// RequestedClaimIDs's doc comment for why order matters here.
+			// Best-effort: if no DCQL query was cached for this session (or
+			// none matches), RequestedZkSystems/RequestedClaimIDs are both
+			// empty and verification correctly fails (zk_system_type
+			// matching, then buildZkAttributes' own empty-order guard)
+			// rather than silently skipping either check.
+			var zkMeta openid4vp.MetaQuery
+			var requestedClaimIDs []string
+			if authCtx.DCQLQuery != nil {
+				for _, cq := range authCtx.DCQLQuery.Credentials {
+					if cq.ID == scope && openid4vp.IsMdocZkFormat(cq.Format) {
+						zkMeta = cq.Meta
+						for _, claim := range cq.Claims {
+							if len(claim.Path) == 0 || claim.Path[len(claim.Path)-1] == nil {
+								continue
+							}
+							requestedClaimIDs = append(requestedClaimIDs, *claim.Path[len(claim.Path)-1])
+						}
+						break
+					}
+				}
+			}
+
+			// SessionTranscript for the OpenID4VP redirect flow. Its wire
+			// format is cross-checked against an independent CBOR library
+			// (see pkg/mdoc.TestBuildOID4VPSessionTranscript_MatchesIndependentKotlinCBORLibraryCrossCheck),
+			// but is STILL NOT confirmed against a real wallet's own
+			// transcript bytes from a live session - no such fixture could
+			// be found (checked siros-sdk-kotlin, siros-sdk-swift,
+			// go-wallet-backend, multipaz). TRACKED GAP: if native ZK
+			// verification of a real presentation fails in a way that looks
+			// like a transcript/binding mismatch, treat
+			// BuildOID4VPSessionTranscript's exact byte layout as a prime
+			// suspect and get a real captured transcript to compare against.
+			responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "oidc-direct_post")
+			if err != nil {
+				c.log.Error(err, "failed to construct response URI for ZK session transcript", "scope", scope)
+				return nil, fmt.Errorf("failed to construct response URI for scope %s: %w", scope, err)
+			}
+			sessionTranscript, err := mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, nil)
+			if err != nil {
+				c.log.Error(err, "failed to build ZK session transcript", "scope", scope)
+				return nil, fmt.Errorf("failed to build ZK session transcript for scope %s: %w", scope, err)
+			}
+
+			zkResult, err := zkHandler.VerifyAndExtract(ctx, vpToken, mdoc.ZkPresentationContext{
+				SessionID:          authCtx.SessionID,
+				ClientID:           authCtx.ClientID,
+				PPIDContext:        zkMeta.PPIDContext,
+				RequestedZkSystems: zkMeta.ZKSystemType,
+				RequestedClaimIDs:  requestedClaimIDs,
+				SessionTranscript:  sessionTranscript,
+			})
+			if err != nil {
+				c.log.Error(err, "ZK mDOC verification failed", "scope", scope)
+				return nil, fmt.Errorf("ZK mDOC verification failed for scope %s: %w", scope, err)
+			}
+
+			c.log.Debug("ZK mDOC verified successfully", "scope", scope, "doc_count", len(zkResult.Documents))
+
+			for docType, docResult := range zkResult.Documents {
+				verifiedClaims := docResult.GetClaims()
+				disclosers := mapToDisclosers(verifiedClaims)
+				verifiedClaims["docType"] = docType
+				nsMap := make(map[string]any, len(docResult.Claims))
+				for ns, items := range docResult.Claims {
+					nsMap[ns] = items
+				}
+				verifiedClaims["namespaces"] = nsMap
+				scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
+					Scope:      scope,
+					Credential: verifiedClaims,
+					Claims:     disclosers,
+				})
+			}
+
 		default:
 			c.log.Error(nil, "Unknown credential format", "scope", scope, "format", format)
 			return nil, fmt.Errorf("unknown credential format for scope %s", scope)
@@ -426,6 +530,9 @@ const (
 	FormatSDJWT CredentialFormat = "vc+sd-jwt"
 	// FormatMDoc represents ISO/IEC 18013-5 mDOC credentials (mso_mdoc)
 	FormatMDoc CredentialFormat = "mso_mdoc"
+	// FormatMDocZK represents a zero-knowledge-proof presentation of an
+	// ISO/IEC 18013-5 mDOC credential (mso_mdoc_zk) - see pkg/mdoc/zk*.go.
+	FormatMDocZK CredentialFormat = "mso_mdoc_zk"
 	// FormatUnknown represents an unrecognized format
 	FormatUnknown CredentialFormat = "unknown"
 )
@@ -452,14 +559,21 @@ func detectCredentialFormat(vpToken string) CredentialFormat {
 		}
 	}
 
-	// mDOC: base64url-encoded CBOR DeviceResponse
-	// Try to decode as base64url - if successful and doesn't look like JWT, assume mDOC
+	// mDOC / ZK-mDOC: base64url-encoded CBOR DeviceResponse. Both
+	// "mso_mdoc" and "mso_mdoc_zk" are wire-compatible CBOR at this
+	// byte-sniffing level (a DeviceResponse is a DeviceResponse either way -
+	// only the presence of a non-empty "zkDocuments" array distinguishes
+	// them), so a successful decode needs one more peek to tell them apart.
 	if !strings.Contains(vpToken, ".") && !strings.Contains(vpToken, "~") {
-		if _, err := base64.RawURLEncoding.DecodeString(vpToken); err == nil {
-			return FormatMDoc
+		data, err := base64.RawURLEncoding.DecodeString(vpToken)
+		if err != nil {
+			// Also try standard base64 (some implementations use this)
+			data, err = base64.StdEncoding.DecodeString(vpToken)
 		}
-		// Also try standard base64 (some implementations use this)
-		if _, err := base64.StdEncoding.DecodeString(vpToken); err == nil {
+		if err == nil {
+			if isZK, zkErr := mdoc.PeekIsZkDeviceResponse(data); zkErr == nil && isZK {
+				return FormatMDocZK
+			}
 			return FormatMDoc
 		}
 	}
