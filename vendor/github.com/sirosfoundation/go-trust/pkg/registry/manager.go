@@ -113,6 +113,15 @@ func (m *RegistryManager) Evaluate(ctx context.Context, req *authzen.EvaluationR
 		}, nil
 	}
 
+	// Preserve the pre-normalization Subject.ID before rewriting it below.
+	// Registries that need the raw OpenID4VP client_id_scheme claim (e.g. to
+	// verify a presented certificate is actually bound to the claimed
+	// x509_san_dns/x509_san_uri/x509_hash identity, not just chained to a
+	// trusted CA - see registry.VerifyLeafBinding) recover it via
+	// registry.OriginalSubjectID, since the rewrite below is otherwise
+	// irreversible from their point of view.
+	StashOriginalSubjectID(req, req.Subject.ID)
+
 	// Normalize subject ID: strip OpenID4VP client_id_scheme prefixes
 	// (e.g. "x509_san_dns:host" -> "https://host") so all registries
 	// receive a consistent identifier.
@@ -333,6 +342,17 @@ func (m *RegistryManager) applyPolicyToRequest(req *authzen.EvaluationRequest, p
 		}
 		if mdoc.RequireIACAEndpoint {
 			req.Context["require_iaca_endpoint"] = true
+		}
+	}
+
+	// Apply FIDO MDS3 constraints
+	if policyCtx.Policy.FIDOMDS3 != nil {
+		fido := policyCtx.Policy.FIDOMDS3
+		if len(fido.AllowedAAGUIDs) > 0 {
+			req.Context["allowed_aaguids"] = fido.AllowedAAGUIDs
+		}
+		if len(fido.BlockedAAGUIDs) > 0 {
+			req.Context["blocked_aaguids"] = fido.BlockedAAGUIDs
 		}
 	}
 

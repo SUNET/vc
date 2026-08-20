@@ -904,6 +904,7 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 | `presets`                | `object` | Predefined verification request presets shown in the UI. The map key is the human-readable label. Each preset maps credential_metadata scopes to optional claim overrides. A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow. | `"PID":{"pid":null},"PID + EHIC":{"pid":null,"ehic":null}` | -              | No                                 |
 | `combined_presentation`  | `object` | Combined presentation verification (ARF 3.0 §6.6.3.10). When multiple credentials are presented, this verifies they belong to the same holder.                                                                                                              | -                                                          | -              | No                                 |
 | `revocation`             | `object` | Credential revocation checking at presentation time (ARF 3.0 §6.6.3.7). When enabled, the Verifier checks Token Status List references in presented credentials.                                                                                            | -                                                          | -              | No                                 |
+| `zk_circuits`            | `object` | The zk-circuits catalog service used to resolve "mso_mdoc_zk" (Longfellow ZK/PPID) proof circuits for native verification. Only consulted by builds with the "zknative" Go build tag (see pkg/mdoc/zk_native_cgo.go) - ignored by the default build.        | -                                                          | -              | No                                 |
 
 ### `preferred_vp_formats`
 
@@ -1126,6 +1127,17 @@ These clients are checked in addition to dynamically registered clients stored i
 | `cache_ttl`   | `int`      | Duration in seconds to cache fetched status list tokens.                                                                                                                                                                                                                                      | -       | `300`   | No       |
 | `fail_open`   | `bool`     | FailOpen determines behavior when the status list is unreachable or unparseable: - true: log warning and allow the credential through (fail-open) - false: reject the credential (fail-closed) Note: explicitly revoked/suspended credentials are always rejected regardless of this setting. | -       | `true`  | No       |
 | `skip_scopes` | `[]string` | Credential scopes exempt from revocation checking (e.g., short-lived credentials valid < 24 hours per ARF 3.0 §6.6.3.7).                                                                                                                                                                      | -       | -       | No       |
+
+### `zk_circuits`
+
+> **Path:** `.verifier.zk_circuits`
+
+(pkg/mdoc/zkcircuit) used to resolve a presented "mso_mdoc_zk" document's
+zkSystemId to a downloadable circuit artifact.
+
+| Field     | Type       | Description                                                                                                                                                                                                               | Example                           | Default                           | Required |
+| --------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- | --------------------------------- | -------- |
+| `sources` | `[]string` | Zk-circuits catalog mirror base URLs, tried in order until one succeeds (see pkg/mdoc/zkcircuit.Client - these are mirrors of the SAME catalog, not distinct registries). Defaults to the live deployed service if empty. | `["https://zk-circuits.fly.dev"]` | `["https://zk-circuits.fly.dev"]` | No       |
 
 ## `registry` (Top-level)
 

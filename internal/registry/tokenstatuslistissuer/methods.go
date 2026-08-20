@@ -160,10 +160,11 @@ func (s *Service) HealthProbe(ctx context.Context) error {
 	if s.signer == nil {
 		return fmt.Errorf("signing key not loaded")
 	}
-	if _, err := s.tokenStatusListMetadata.GetCurrentSection(ctx); err != nil {
+	section, err := s.tokenStatusListMetadata.GetCurrentSection(ctx)
+	if err != nil {
 		return fmt.Errorf("current section unavailable: %w", err)
 	}
-	if _, err := s.tokenStatusListColl.CountDocsWithLimit(ctx, bson.M{}, 1); err != nil {
+	if _, err := s.tokenStatusListColl.CountDecoysInSectionWithLimit(ctx, section, 1); err != nil {
 		return fmt.Errorf("status list collection unavailable: %w", err)
 	}
 	return nil

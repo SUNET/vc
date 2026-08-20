@@ -1,0 +1,621 @@
+// Package zkcircuit is a Go client for the go-zk-circuits catalog REST API -
+// the real, deployed read-only service for discovering/downloading ZK-proof
+// circuit artifacts for the Longfellow-ZKP-pseudonym feature
+// (https://zk-circuits.fly.dev today). It is a port of
+// siros-sdk-kotlin's ZkCircuitClient.kt (same org, same wire protocol -
+// mirror that file if the wire protocol ever changes.
+//
+// Wire protocol:
+//
+//	GET /v1/manifest.json         -> Manifest{circuits: []CircuitDescriptor}
+//	GET /v1/circuits/{id}.json    -> CircuitDescriptor (id may be an alias;
+//	                                 the server 301-redirects to the
+//	                                 canonical id)
+//	GET <artifact.url>            -> the circuit's raw (zstd-compressed)
+//	                                 bytes
+//
+// Callers MUST verify a downloaded artifact's SHA-256 digest against
+// Artifact.Hash themselves - the API's own docs are explicit that this is
+// the client's responsibility, never guaranteed by a successful HTTP fetch
+// alone. DownloadArtifact does this; see its doc comment.
+package zkcircuit
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/klauspost/compress/zstd"
+)
+
+// DefaultZkCircuitURL is the default (pre-DNS) base URL of the deployed
+// zk-circuits catalog service.
+const DefaultZkCircuitURL = "https://zk-circuits.fly.dev"
+
+const (
+	// maxManifestOrDescriptorBytes bounds GET /v1/manifest.json and
+	// GET /v1/circuits/{id}.json responses. These are plain JSON catalog
+	// documents (real ones are a few KB per circuit), but Sources are
+	// remote and configurable (verifier.zk_circuits.sources), so an
+	// unbounded read from a malicious/compromised source could exhaust
+	// memory. Generous relative to any realistic catalog size.
+	maxManifestOrDescriptorBytes = 64 * 1024 * 1024 // 64 MiB
+
+	// artifactSizeMarginPct is the tolerance added on top of a
+	// descriptor's own declared Artifact.Size/Uncompressed.Size when
+	// bounding a download/decompression - covers minor drift between the
+	// catalog's declared size and the actual bytes without opening the
+	// door to unbounded reads.
+	artifactSizeMarginPct = 110 // +10%
+
+	// hardCeilingCompressedBytes/hardCeilingDecompressedBytes bound
+	// artifact downloads/decompression regardless of what a descriptor
+	// declares, since the declared size itself comes from the same
+	// (potentially compromised) source being fetched from. Sized well
+	// above real published circuit artifacts (the live catalog's largest
+	// entries as of 2026-08 are ~300KB compressed / ~88MB decompressed -
+	// a ~300x zstd ratio) to leave headroom for legitimate growth while
+	// still bounding a decompression-bomb/DoS to a sane amount of memory.
+	hardCeilingCompressedBytes   = 50 * 1024 * 1024  // 50 MiB
+	hardCeilingDecompressedBytes = 512 * 1024 * 1024 // 512 MiB
+)
+
+// capFor returns the byte cap to enforce for a download/decompression step,
+// given a catalog-declared size (<=0 if unknown/absent) and an absolute
+// hard ceiling that always applies regardless of what the descriptor
+// claims - the declared size comes from the same source being fetched
+// from, so it is a hint, not itself a trust boundary.
+func capFor(declaredSize, hardCeiling int64) int64 {
+	if declaredSize <= 0 {
+		return hardCeiling
+	}
+	withMargin := declaredSize * artifactSizeMarginPct / 100
+	if withMargin <= 0 || withMargin > hardCeiling {
+		return hardCeiling
+	}
+	return withMargin
+}
+
+// VerificationRecord is one format-specific interop verification recorded
+// against a circuit's Source, mirroring catalog.VerificationRecord in
+// go-zk-circuits' pkg/catalog/types.go field-for-field. Descriptive
+// metadata only - not itself a trust decision.
+type VerificationRecord struct {
+	Tool             string `json:"tool,omitempty"`
+	ToolVersion      string `json:"toolVersion,omitempty"`
+	VerifierIdentity string `json:"verifierIdentity,omitempty"`
+	Date             string `json:"date,omitempty"`
+	Result           string `json:"result,omitempty"`
+	Notes            string `json:"notes,omitempty"`
+}
+
+// Source is a CircuitDescriptor's provenance, mirroring catalog.Source.
+type Source struct {
+	Origin     string               `json:"origin,omitempty"`
+	OriginRef  string               `json:"originRef,omitempty"`
+	OriginPath string               `json:"originPath,omitempty"`
+	Toolchain  string               `json:"toolchain,omitempty"`
+	License    string               `json:"license,omitempty"`
+	OpenSource bool                 `json:"openSource,omitempty"`
+	AddedBy    string               `json:"addedBy,omitempty"`
+	VerifiedBy []VerificationRecord `json:"verifiedBy,omitempty"`
+}
+
+// Uncompressed is the decompressed-form hash/size of an Artifact, present
+// when Artifact.Compression is not "none". Mirrors catalog.Uncompressed.
+type Uncompressed struct {
+	Hash string `json:"hash,omitempty"`
+	Size int64  `json:"size,omitempty"`
+}
+
+// Artifact describes the downloadable bytes for a circuit, mirroring
+// catalog.Artifact.
+//
+// URL, in the real deployed service, is usually a *relative* path (e.g.
+// "/v1/artifacts/sha256/<hex>"), not an absolute URL - DownloadArtifact
+// resolves it against each configured source mirror accordingly.
+//
+// Hash is over the bytes AS SERVED (compressed, if Compression != "none");
+// Uncompressed.Hash is over the decompressed bytes.
+type Artifact struct {
+	URL          string        `json:"url,omitempty"`
+	Hash         string        `json:"hash,omitempty"`
+	Size         int64         `json:"size,omitempty"`
+	Compression  string        `json:"compression,omitempty"`
+	MediaType    string        `json:"mediaType,omitempty"`
+	Uncompressed *Uncompressed `json:"uncompressed,omitempty"`
+}
+
+// CircuitDescriptor is one catalog entry - the body of
+// GET /v1/circuits/{id}.json and one element of Manifest.Circuits -
+// mirroring catalog.CircuitDescriptor field-for-field.
+//
+// Params is deliberately loosely typed (map[string]any, mirroring the
+// Kotlin client's JsonObject): format-specific "meta" properties like
+// "version", "num_attributes", "circuit_hash" vary in JSON type (numbers
+// decode as float64) - use ParamInt/ParamString to read them.
+type CircuitDescriptor struct {
+	ID            string         `json:"id"`
+	Aliases       []string       `json:"aliases,omitempty"`
+	System        string         `json:"system,omitempty"`
+	SystemVersion string         `json:"systemVersion,omitempty"`
+	DocTypes      []string       `json:"docTypes,omitempty"`
+	Published     bool           `json:"published,omitempty"`
+	Status        string         `json:"status,omitempty"`
+	Params        map[string]any `json:"params,omitempty"`
+	Artifact      *Artifact      `json:"artifact,omitempty"`
+	Source        *Source        `json:"source,omitempty"`
+	PublishedAt   string         `json:"publishedAt,omitempty"`
+	DeprecatedAt  string         `json:"deprecatedAt,omitempty"`
+	Notes         string         `json:"notes,omitempty"`
+}
+
+// ParamInt reads a numeric Params entry (decoded from JSON, so stored as
+// float64) as an int. Returns (0, false) if the key is absent, not
+// numeric, not an integral value (e.g. a catalog entry with
+// "num_attributes": 2.5), or outside the platform int range - all of
+// which would otherwise let a remote/untrusted catalog response silently
+// truncate into a nonsensical value via int(float64).
+func (d *CircuitDescriptor) ParamInt(key string) (int, bool) {
+	v, ok := d.Params[key]
+	if !ok {
+		return 0, false
+	}
+	switch n := v.(type) {
+	case float64:
+		if n != math.Trunc(n) || n < math.MinInt || n > math.MaxInt {
+			return 0, false
+		}
+		return int(n), true
+	case int:
+		return n, true
+	default:
+		return 0, false
+	}
+}
+
+// ParamString reads a string Params entry. Returns ("", false) if the key
+// is absent or not a string.
+func (d *CircuitDescriptor) ParamString(key string) (string, bool) {
+	v, ok := d.Params[key]
+	if !ok {
+		return "", false
+	}
+	s, ok := v.(string)
+	return s, ok
+}
+
+// Manifest is the top-level document served at GET /v1/manifest.json,
+// mirroring catalog.Manifest.
+type Manifest struct {
+	ManifestVersion int                 `json:"manifestVersion,omitempty"`
+	GeneratedAt     string              `json:"generatedAt,omitempty"`
+	Catalog         string              `json:"catalog,omitempty"`
+	Circuits        []CircuitDescriptor `json:"circuits,omitempty"`
+	Next            string              `json:"next,omitempty"`
+}
+
+// ArtifactError is returned by DownloadArtifact when no configured source
+// (or URL candidate) produced hash-verified artifact bytes - either every
+// fetch attempt failed outright, or the downloaded bytes' SHA-256 digest
+// never matched the expected hash. Per the service's own API contract, hash
+// verification is the client's responsibility, not something the server
+// guarantees.
+type ArtifactError struct {
+	Message string
+}
+
+func (e *ArtifactError) Error() string { return e.Message }
+
+// Client is a client for the go-zk-circuits catalog REST API.
+//
+// DELIBERATELY DIFFERENT fallback semantics than a typical multi-registry
+// client: Sources here are *mirrors of the same catalog* (the literal same
+// service, reachable at a different hostname), not distinct registries
+// whose entries get merged - every method tries each source **in list
+// order** and returns the first one that succeeds, without ever merging
+// results across sources. This mirrors siros-sdk-kotlin's ZkCircuitClient
+// exactly.
+type Client struct {
+	// Sources are mirror base URLs, tried in order until one succeeds.
+	Sources []string
+
+	// HTTPClient backs the default (non-injected) fetch implementations.
+	// Defaults to a client with a 30s timeout if nil when first used.
+	HTTPClient *http.Client
+
+	// FetchText is an optional injectable text-fetch function (used for
+	// manifest.json/circuit descriptor JSON), for tests. When nil, a real
+	// HTTPClient-backed implementation is used.
+	FetchText func(ctx context.Context, url string) (string, error)
+
+	// FetchBytes is an optional injectable byte-fetch function (used for
+	// artifact downloads), for tests. When nil, a real HTTPClient-backed
+	// implementation is used.
+	FetchBytes func(ctx context.Context, url string) ([]byte, error)
+}
+
+// NewClient creates a Client for the given mirror source URLs. If no
+// sources are given, DefaultZkCircuitURL is used.
+func NewClient(sources ...string) *Client {
+	if len(sources) == 0 {
+		sources = []string{DefaultZkCircuitURL}
+	}
+	return &Client{
+		Sources:    sources,
+		HTTPClient: &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+// FetchManifest performs GET /v1/manifest.json, returning the first
+// Sources entry that serves a parseable manifest (see the Client doc
+// comment for the ordered-fallback, non-merging semantics). Returns an
+// error only if every source failed.
+func (c *Client) FetchManifest(ctx context.Context) (*Manifest, error) {
+	var lastErr error
+	for _, source := range c.Sources {
+		url := manifestURL(source)
+		body, err := c.fetchText(ctx, url, maxManifestOrDescriptorBytes)
+		if err != nil {
+			lastErr = fmt.Errorf("fetch %s: %w", url, err)
+			continue
+		}
+		var manifest Manifest
+		if err := json.Unmarshal([]byte(body), &manifest); err != nil {
+			lastErr = fmt.Errorf("parse manifest from %s: %w", url, err)
+			continue
+		}
+		return &manifest, nil
+	}
+	return nil, fmt.Errorf("all %d zk-circuit source(s) failed to yield a manifest: %w", len(c.Sources), lastErr)
+}
+
+// FetchCircuit performs GET /v1/circuits/{id}.json, returning the first
+// Sources entry that serves a descriptor for id (a canonical id or alias -
+// the server redirects an alias to its canonical id; the default
+// HTTPClient-backed fetch follows redirects automatically via
+// net/http's default behavior). Returns an error only if every source
+// failed.
+func (c *Client) FetchCircuit(ctx context.Context, id string) (*CircuitDescriptor, error) {
+	var lastErr error
+	for _, source := range c.Sources {
+		url := circuitURL(source, id)
+		body, err := c.fetchText(ctx, url, maxManifestOrDescriptorBytes)
+		if err != nil {
+			lastErr = fmt.Errorf("fetch %s: %w", url, err)
+			continue
+		}
+		var descriptor CircuitDescriptor
+		if err := json.Unmarshal([]byte(body), &descriptor); err != nil {
+			lastErr = fmt.Errorf("parse circuit descriptor %q from %s: %w", id, url, err)
+			continue
+		}
+		return &descriptor, nil
+	}
+	return nil, fmt.Errorf("all %d zk-circuit source(s) failed to yield circuit %q: %w", len(c.Sources), id, lastErr)
+}
+
+// DownloadArtifact downloads a circuit's artifact bytes (AS SERVED - still
+// compressed, if descriptor.Artifact.Compression != "none") and verifies
+// their SHA-256 digest against descriptor.Artifact.Hash before returning
+// them. See DownloadAndDecompress to also decompress and verify the
+// decompressed digest.
+//
+// Builds an ordered list of URL candidates and tries each in turn (first
+// hash-verified success wins):
+//   - if Artifact.URL is already an absolute URL, it is the only candidate
+//     (it already pins its own host - nothing to mirror-fallback across).
+//     Must be https, and its host must match one of this Client's
+//     configured Sources exactly - otherwise rejected up front, before any
+//     fetch is attempted. Without this, a compromised/malicious mirror's
+//     catalog response could point an absolute Artifact.URL at an
+//     arbitrary host (a blind SSRF primitive: SHA-256 verification only
+//     runs after the fetch completes, too late to stop the outbound
+//     request itself);
+//   - otherwise (the real service's current behavior) it is a relative
+//     path, resolved against every configured Sources mirror in order;
+//   - if Artifact.URL is blank, the path is instead constructed from
+//     Artifact.Hash as "v1/artifacts/{alg}/{hex}" ("sha256" is the only
+//     algorithm the service supports today), again resolved against every
+//     mirror.
+//
+// Returns an *ArtifactError if descriptor has no Artifact, if an absolute
+// Artifact.URL is rejected (plaintext http, or a disallowed host), or if
+// every URL candidate either failed to fetch or failed hash verification.
+func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescriptor) ([]byte, error) {
+	artifact := descriptor.Artifact
+	if artifact == nil {
+		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q has no artifact", descriptor.ID)}
+	}
+	if artifact.Hash == "" {
+		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact has no hash - refusing to download unverifiable bytes", descriptor.ID)}
+	}
+	if strings.HasPrefix(artifact.URL, "http://") {
+		// SHA-256 verification below still catches tampered bytes, but a
+		// remote/untrusted catalog dictating a plaintext transport for its
+		// own absolute artifact URL is unnecessary exposure to on-path
+		// inspection/tampering-in-transit (and avoidable operational
+		// fragility) - reject up front rather than silently fetching over
+		// http.
+		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact URL %q uses plaintext http - refusing (must be https or a relative path resolved against a configured source)", descriptor.ID, artifact.URL)}
+	}
+	if strings.HasPrefix(artifact.URL, "https://") && !c.isAllowedAbsoluteHost(artifact.URL) {
+		// Without this, an absolute artifact.URL from the remote,
+		// configurable catalog is a blind SSRF primitive: a
+		// compromised/malicious mirror could point it at an arbitrary host
+		// (an internal service, a cloud metadata endpoint, ...), and
+		// SHA-256 verification below only runs *after* the fetch completes
+		// - too late to prevent the outbound request itself. Only allow an
+		// absolute URL whose host matches one of the configured Sources'
+		// hosts exactly.
+		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact URL %q's host is not among this client's configured sources - refusing (a compromised/malicious mirror could otherwise redirect this verifier to an arbitrary host)", descriptor.ID, artifact.URL)}
+	}
+
+	maxBytes := capFor(artifact.Size, hardCeilingCompressedBytes)
+	candidates := c.candidateArtifactURLs(artifact)
+	var lastFailure string
+	for _, url := range candidates {
+		data, err := c.fetchBytes(ctx, url, maxBytes)
+		if err != nil {
+			lastFailure = fmt.Sprintf("fetch failed from %s: %v", url, err)
+			continue
+		}
+		actual := sha256Hex(data)
+		expected := bareHex(artifact.Hash)
+		if !strings.EqualFold(actual, expected) {
+			lastFailure = fmt.Sprintf("hash mismatch from %s: expected %s, got %s", url, expected, actual)
+			continue
+		}
+		return data, nil
+	}
+	return nil, &ArtifactError{
+		Message: fmt.Sprintf(
+			// len(candidates), not len(c.Sources): an absolute artifact.URL
+			// collapses to exactly 1 candidate regardless of how many
+			// mirrors are configured (see candidateArtifactURLs), so
+			// reporting len(c.Sources) here was misleading during
+			// debugging.
+			"failed to download a hash-verified artifact for circuit %q from any of %d candidate URL(s) (last: %s)",
+			descriptor.ID, len(candidates), lastFailure,
+		),
+	}
+}
+
+// DownloadAndDecompress downloads a circuit's artifact (see
+// DownloadArtifact), then decompresses it if Artifact.Compression is
+// "zstd" (the only compression the live service uses today; "none" is
+// passed through unchanged). If Artifact.Uncompressed.Hash is present, the
+// decompressed bytes' SHA-256 digest is additionally verified against it -
+// belt-and-braces on top of the compressed-bytes check DownloadArtifact
+// already performed, since a native ZK verifier is handed these
+// decompressed bytes directly and a corrupt circuit file would fail far
+// less legibly there than here.
+func (c *Client) DownloadAndDecompress(ctx context.Context, descriptor *CircuitDescriptor) ([]byte, error) {
+	compressed, err := c.DownloadArtifact(ctx, descriptor)
+	if err != nil {
+		return nil, err
+	}
+
+	artifact := descriptor.Artifact
+	var decompressed []byte
+	switch artifact.Compression {
+	case "", "none":
+		decompressed = compressed
+	case "zstd":
+		// Bound the decompressed output: Sources are remote/configurable
+		// (verifier.zk_circuits.sources), and zstd can compress a tiny
+		// payload into a huge one (a "decompression bomb") - real
+		// published circuits already compress ~300x (e.g. ~278KB ->
+		// ~87.7MB), so a hostile source could trivially claim/produce far
+		// more. maxDecompressed uses the descriptor's own declared
+		// Uncompressed.Size (+ margin) when present, else falls back to
+		// hardCeilingDecompressedBytes.
+		var declaredSize int64
+		if artifact.Uncompressed != nil {
+			declaredSize = artifact.Uncompressed.Size
+		}
+		maxDecompressed := capFor(declaredSize, hardCeilingDecompressedBytes)
+
+		decoder, err := zstd.NewReader(
+			bytes.NewReader(compressed),
+			zstd.WithDecoderMaxMemory(uint64(hardCeilingDecompressedBytes)),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize zstd decoder for circuit %q: %w", descriptor.ID, err)
+		}
+		defer decoder.Close()
+		decompressed, err = io.ReadAll(io.LimitReader(decoder, maxDecompressed+1))
+		if err != nil {
+			return nil, fmt.Errorf("failed to zstd-decompress circuit %q: %w", descriptor.ID, err)
+		}
+		if int64(len(decompressed)) > maxDecompressed {
+			return nil, &ArtifactError{Message: fmt.Sprintf(
+				"decompressed circuit %q exceeded the %d byte cap - refusing to continue (possible decompression bomb)",
+				descriptor.ID, maxDecompressed,
+			)}
+		}
+	default:
+		return nil, fmt.Errorf("circuit %q uses unsupported compression %q", descriptor.ID, artifact.Compression)
+	}
+
+	if artifact.Uncompressed != nil && artifact.Uncompressed.Hash != "" {
+		actual := sha256Hex(decompressed)
+		expected := bareHex(artifact.Uncompressed.Hash)
+		if !strings.EqualFold(actual, expected) {
+			return nil, &ArtifactError{Message: fmt.Sprintf(
+				"decompressed circuit %q hash mismatch: expected %s, got %s",
+				descriptor.ID, expected, actual,
+			)}
+		}
+	}
+
+	return decompressed, nil
+}
+
+func manifestURL(source string) string {
+	return strings.TrimRight(source, "/") + "/v1/manifest.json"
+}
+
+func circuitURL(source, id string) string {
+	return strings.TrimRight(source, "/") + "/v1/circuits/" + id + ".json"
+}
+
+// isAllowedAbsoluteHost reports whether rawURL's host matches one of
+// c.Sources' hosts exactly (case-insensitive) - see the SSRF-prevention
+// rationale on DownloadArtifact's isAllowedAbsoluteHost call site. A
+// malformed rawURL, or a Sources entry that fails to parse, never counts
+// as a match (fail closed).
+func (c *Client) isAllowedAbsoluteHost(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	for _, source := range c.Sources {
+		sourceURL, err := url.Parse(source)
+		if err != nil {
+			continue
+		}
+		if strings.EqualFold(parsed.Host, sourceURL.Host) {
+			return true
+		}
+	}
+	return false
+}
+
+// candidateArtifactURLs implements the resolution rules documented on
+// DownloadArtifact.
+func (c *Client) candidateArtifactURLs(artifact *Artifact) []string {
+	url := artifact.URL
+	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+		return []string{url}
+	}
+	path := strings.TrimPrefix(url, "/")
+	if path == "" {
+		path = "v1/artifacts/sha256/" + bareHex(artifact.Hash)
+	}
+	candidates := make([]string, 0, len(c.Sources))
+	for _, source := range c.Sources {
+		candidates = append(candidates, strings.TrimRight(source, "/")+"/"+path)
+	}
+	return candidates
+}
+
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// bareHex strips a "sha256:" prefix if present (the wire format's
+// convention for Artifact.Hash/Uncompressed.Hash), leaving the string
+// as-is otherwise so a legacy unprefixed hash would still compare
+// correctly too. The prefix match is case-insensitive so an uppercase or
+// mixed-case "SHA256:" from the catalog doesn't get left in place and
+// break an otherwise-correct hash comparison/URL fallback.
+func bareHex(hash string) string {
+	if len(hash) >= 7 && strings.EqualFold(hash[:7], "sha256:") {
+		return hash[7:]
+	}
+	return hash
+}
+
+// fetchText fetches url as text, capped at maxBytes (see fetchBytesHTTP).
+// The injected FetchText override, when set, is used as-is for tests and
+// is not subject to maxBytes - the cap is a transport-level concern of the
+// real HTTP fetch path.
+func (c *Client) fetchText(ctx context.Context, url string, maxBytes int64) (string, error) {
+	if c.FetchText != nil {
+		return c.FetchText(ctx, url)
+	}
+	data, err := c.fetchBytesHTTP(ctx, url, maxBytes)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// fetchBytes fetches url as bytes, capped at maxBytes (see
+// fetchBytesHTTP). The injected FetchBytes override, when set, is used
+// as-is for tests and is not subject to maxBytes.
+func (c *Client) fetchBytes(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
+	if c.FetchBytes != nil {
+		return c.FetchBytes(ctx, url)
+	}
+	return c.fetchBytesHTTP(ctx, url, maxBytes)
+}
+
+// fetchBytesHTTP performs the real HTTP GET, refusing to read more than
+// maxBytes from the response body. Sources are remote and configurable
+// (verifier.zk_circuits.sources), so an unbounded io.ReadAll here would let
+// a malicious/compromised source exhaust memory with an oversized
+// response; maxBytes bounds that regardless of what any Content-Length
+// header (which is not trusted) claims.
+func (c *Client) fetchBytesHTTP(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
+	baseClient := c.HTTPClient
+	if baseClient == nil {
+		baseClient = &http.Client{Timeout: 30 * time.Second}
+	}
+	// A bare http.Client follows redirects to ANY host by default. Sources
+	// are remote/configurable, and DownloadArtifact's own host-allowlist
+	// check (isAllowedAbsoluteHost) only validates the URL it's ABOUT to
+	// fetch - a compromised/malicious source could otherwise 3xx-redirect
+	// this request to an arbitrary internal host, a blind SSRF primitive
+	// the allowlist check would never see. CheckRedirect re-validates every
+	// hop against that same allowlist (redirects within it, e.g. the
+	// documented alias->canonical-id 301, still work); it doesn't mutate
+	// baseClient, which may be shared/injected by callers/tests.
+	client := &http.Client{
+		Transport: baseClient.Transport,
+		Timeout:   baseClient.Timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects fetching %s", url)
+			}
+			if !c.isAllowedAbsoluteHost(req.URL.String()) {
+				return fmt.Errorf("redirect to disallowed host %q", req.URL.Host)
+			}
+			// The host allowlist alone isn't enough: a same-host https->http
+			// redirect would still pass it while silently downgrading the
+			// transport, defeating DownloadArtifact's explicit rejection of
+			// plaintext absolute artifact URLs (candidateArtifactURLs never
+			// builds a plain-http URL itself, so this can only happen via a
+			// redirect response). Only enforce https when the ORIGINAL
+			// request was https (via[0]) - blocking every non-https redirect
+			// unconditionally would also break a Source legitimately
+			// configured as http:// (e.g. a local dev/test mirror), whose
+			// own same-scheme alias redirects are not a downgrade at all.
+			if len(via) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme != "https" {
+				return fmt.Errorf("redirect from https to non-https scheme %q (downgrade not allowed)", req.URL.Scheme)
+			}
+			return nil
+		},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("unexpected status %d from %s", resp.StatusCode, url)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("response from %s exceeded the %d byte cap", url, maxBytes)
+	}
+	return data, nil
+}
