@@ -6,12 +6,14 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/pkg/dbservice"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/sqlstore"
 	"github.com/SUNET/vc/pkg/trace"
 
+	"github.com/jmoiron/sqlx"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ErrNoDocuments is returned when no documents are found
@@ -20,10 +22,11 @@ var ErrNoDocuments = errors.New("no documents in result")
 // Service is the database service
 type Service struct {
 	MongoClient *mongo.Client
+	SQLDB       *sqlx.DB
 	cfg         *model.Cfg
 	log         *logger.Log
 	tracer      *trace.Tracer
-	probeStore  *apiv1_status.StatusProbeStore
+	probeStore  *sqlstore.ProbeCache
 
 	DatastoreColl           DatastoreStore
 	IdentityMappingsColl    IdentityMappingStore
@@ -31,21 +34,38 @@ type Service struct {
 	DynamicRegistrationColl DynamicRegistrationStore
 }
 
-// New creates a new database service
+// New creates a new database service. The storage backend is selected by
+// cfg.Common.SQL.Backend: "postgres" or "mariadb" connect to the
+// corresponding relational database (via pkg/sqlstore, running schema
+// migrations at startup); anything else (including unset, the default)
+// keeps the existing MongoDB-backed behavior unchanged.
 func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.Log) (*Service, error) {
+	conn, err := dbservice.Connect(ctx, cfg, tracer, "apigw:db:connect")
+	if err != nil {
+		return nil, err
+	}
+
 	service := &Service{
-		log:        log.New("db"),
-		cfg:        cfg,
-		tracer:     tracer,
-		probeStore: &apiv1_status.StatusProbeStore{},
+		log:         log.New("db"),
+		cfg:         cfg,
+		tracer:      tracer,
+		probeStore:  &sqlstore.ProbeCache{},
+		MongoClient: conn.MongoClient,
+		SQLDB:       conn.SQLDB,
+	}
+
+	if conn.SQLDB != nil {
+		service.DatastoreColl = NewSQLDatastoreColl(service, conn.SQLDB, conn.Dialect)
+		service.IdentityMappingsColl = NewSQLIdentityMappingsColl(service, conn.SQLDB, conn.Dialect)
+		service.CredentialOfferColl = NewSQLCredentialOfferColl(service, conn.SQLDB, conn.Dialect)
+		service.DynamicRegistrationColl = NewSQLDynamicRegistrationColl(service, conn.SQLDB, conn.Dialect)
+
+		service.log.Info("Started", "backend", cfg.Common.SQL.Backend)
+		return service, nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-
-	if err := service.connect(ctx); err != nil {
-		return nil, err
-	}
 
 	datastoreColl := &DatastoreColl{
 		Service: service,
@@ -53,6 +73,7 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		log:     log.New("VCDatastoreColl"),
 	}
 	if err := datastoreColl.createIndex(ctx); err != nil {
+		service.disconnectMongoOnStartupError()
 		return nil, err
 	}
 	service.DatastoreColl = datastoreColl
@@ -63,21 +84,22 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		log:     log.New("VCIdentityMappingsColl"),
 	}
 	if err := identityMappingsColl.createIndex(ctx); err != nil {
+		service.disconnectMongoOnStartupError()
 		return nil, err
 	}
 	service.IdentityMappingsColl = identityMappingsColl
 
-	var err error
-
 	service.CredentialOfferColl, err = NewCredentialOfferColl(ctx, "credential_offer", service, log.New("VCCredentialOfferColl"))
 	if err != nil {
 		service.log.Error(err, "failed to create credential offer collection")
+		service.disconnectMongoOnStartupError()
 		return nil, err
 	}
 
 	service.DynamicRegistrationColl, err = NewDynamicRegistrationColl(ctx, "oidc_dynamic_registration", service, log.New("VCDynamicRegistrationColl"))
 	if err != nil {
 		service.log.Error(err, "failed to create dynamic registration collection")
+		service.disconnectMongoOnStartupError()
 		return nil, err
 	}
 
@@ -86,22 +108,17 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 	return service, nil
 }
 
-// connect connects to the database
-func (s *Service) connect(ctx context.Context) error {
-	ctx, span := s.tracer.Start(ctx, "apigw:db:connect")
-	defer span.End()
-
-	opts, err := s.cfg.Common.Mongo.MongoClientOptions()
-	if err != nil {
-		return err
+// disconnectMongoOnStartupError disconnects the Mongo client after a
+// collection/index setup failure in New, so a failed startup doesn't leak
+// the already-open connection. Uses a fresh background context (not the
+// caller's, which may be close to its own startup deadline) so cleanup
+// still runs even if that deadline has passed.
+func (s *Service) disconnectMongoOnStartupError() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.MongoClient.Disconnect(ctx); err != nil {
+		s.log.Error(err, "failed to disconnect mongo client after startup error")
 	}
-	client, err := mongo.Connect(opts)
-	if err != nil {
-		return err
-	}
-	s.MongoClient = client
-
-	return nil
 }
 
 // Status returns the status of the database
@@ -109,32 +126,16 @@ func (s *Service) Status(ctx context.Context) *apiv1_status.StatusProbe {
 	ctx, span := s.tracer.Start(ctx, "db:status")
 	defer span.End()
 
-	if time.Now().Before(s.probeStore.NextCheck.AsTime()) {
-		return s.probeStore.PreviousResult
+	ping := func(ctx context.Context) error {
+		if s.SQLDB != nil {
+			return s.SQLDB.PingContext(ctx)
+		}
+		return s.MongoClient.Ping(ctx, nil)
 	}
-	probe := &apiv1_status.StatusProbe{
-		Name:          "db",
-		Healthy:       true,
-		Message:       "OK",
-		LastCheckedTS: timestamppb.Now(),
-	}
-
-	if err := s.MongoClient.Ping(ctx, nil); err != nil {
-		probe.Message = err.Error()
-		probe.Healthy = false
-	}
-
-	s.probeStore.PreviousResult = probe
-	s.probeStore.NextCheck = timestamppb.New(time.Now().Add(10 * time.Second))
-
-	return probe
+	return sqlstore.ProbeStatus(ctx, s.probeStore, ping)
 }
 
 // Close closes the database connection
 func (s *Service) Close(ctx context.Context) error {
-	if err := s.MongoClient.Disconnect(ctx); err != nil {
-		return err
-	}
-	ctx.Done()
-	return nil
+	return sqlstore.CloseBackend(s.SQLDB, func() error { return s.MongoClient.Disconnect(ctx) })
 }
