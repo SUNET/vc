@@ -265,7 +265,13 @@ func (c *SQLDatastoreColl) AddIdentity(ctx context.Context, query *AddIdentityQu
 	// $addToSet semantics): one round-trip and one atomic statement, rather
 	// than one INSERT per id, which was both N round-trips and non-atomic
 	// (a failure partway through would leave a subset of ids inserted).
-	values, args := identityMappingRowsValues(query.AuthenticSource, query.Scope, query.DocumentID, query.IdentityMappingIDs)
+	// Dedupe first: model.CompleteDocument doesn't validate
+	// IdentityMappingIDs is duplicate-free, and a caller-supplied duplicate
+	// would otherwise still do unnecessary work in the same INSERT (or, on
+	// backends where ON CONFLICT/ON DUPLICATE KEY can't cleanly resolve two
+	// identical rows in one statement, fail).
+	identityMappingIDs := dedupeStrings(query.IdentityMappingIDs)
+	values, args := identityMappingRowsValues(query.AuthenticSource, query.Scope, query.DocumentID, identityMappingIDs)
 	q := c.dialect.Rebind(fmt.Sprintf(
 		`INSERT INTO datastore_identity_mapping (authentic_source, scope, document_id, identity_mapping_id) VALUES %s %s`,
 		values,

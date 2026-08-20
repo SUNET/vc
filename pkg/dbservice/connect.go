@@ -84,6 +84,16 @@ func Connect(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, spanName
 		if err != nil {
 			return nil, err
 		}
+		// mongo.Connect doesn't itself dial the server - it constructs a
+		// client that connects lazily on first real use. Without an
+		// explicit Ping here, connectTimeout wouldn't actually bound the
+		// "connect" step as documented, and a service could start
+		// successfully even with an unreachable Mongo, only failing much
+		// later on first query.
+		if err := client.Ping(ctx, nil); err != nil {
+			_ = client.Disconnect(ctx)
+			return nil, fmt.Errorf("dbservice: ping mongo: %w", err)
+		}
 		return &Connection{MongoClient: client}, nil
 	}
 }
