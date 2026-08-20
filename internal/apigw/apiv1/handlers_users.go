@@ -139,14 +139,23 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 	// req.VCTM is nil for mso_mdoc scopes (GetVCTMFromScope only returns a
 	// VCTM for sd-jwt-based credentials) - use the MDDL schema's own
-	// Presentation instead. mso_mdoc has no SVG-template concept, so
-	// svgTemplateClaims stays empty in that case.
+	// Presentation/SVGValues instead.
 	switch {
 	case req.VCTM != nil:
 		presentationClaims = req.VCTM.Presentation(doc.DocumentData)
 		svgTemplateClaims = req.VCTM.SVGValues(doc.DocumentData)
 	case req.MDDL != nil:
 		presentationClaims = req.MDDL.Presentation(doc.DocumentData)
+		// mdoc.SVGValue mirrors sdjwtvc.SVGValue field-for-field but is a
+		// distinct type (keeps pkg/mdoc decoupled from pkg/sdjwtvc); convert
+		// into the wire type UserLookupReply.SVGTemplateClaims already commits to.
+		mdocSVGValues := req.MDDL.SVGValues(doc.DocumentData)
+		if len(mdocSVGValues) > 0 {
+			svgTemplateClaims = make(map[string]sdjwtvc.SVGValue, len(mdocSVGValues))
+			for svgID, v := range mdocSVGValues {
+				svgTemplateClaims[svgID] = sdjwtvc.SVGValue{Label: v.Label, Value: v.Value}
+			}
+		}
 	}
 
 	if svgTemplateClaims == nil {

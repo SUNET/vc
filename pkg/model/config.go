@@ -1629,6 +1629,38 @@ func (cfg *IssuerMetadata) applyCommonCredentialConfig(credConfig *openid4vci.Cr
 	}
 }
 
+// mapSvgTemplates converts a dialect's SVG template list (mdoc.SVGTemplate
+// for mso_mdoc, sdjwtvc.SVGTemplates for dc+sd-jwt/VCTM — same shape, but
+// distinct named types, so a plain function can't take either directly)
+// into the openid4vci wire format, shared by both the mso_mdoc and VCTM
+// branches of Generate below so the two don't duplicate this mapping.
+// uri/properties extract the relevant fields from each dialect's template
+// type. If logo is nil, falls back to the first template's URI, for wallets
+// that render from logo.uri instead of understanding svg_templates.
+func mapSvgTemplates[T any](
+	templates []T,
+	uri func(T) string,
+	properties func(T) (orientation, colorScheme, contrast string, ok bool),
+	logo *openid4vci.MetadataLogo,
+) (*openid4vci.MetadataRendering, *openid4vci.MetadataLogo) {
+	svgTemplates := make([]openid4vci.MetadataSvgTemplate, len(templates))
+	for i, t := range templates {
+		tmpl := openid4vci.MetadataSvgTemplate{URI: uri(t)}
+		if orientation, colorScheme, contrast, ok := properties(t); ok {
+			tmpl.Properties = &openid4vci.MetadataSvgTemplateProperties{
+				Orientation: orientation,
+				ColorScheme: colorScheme,
+				Contrast:    contrast,
+			}
+		}
+		svgTemplates[i] = tmpl
+	}
+	if logo == nil && len(svgTemplates) > 0 {
+		logo = &openid4vci.MetadataLogo{URI: svgTemplates[0].URI}
+	}
+	return &openid4vci.MetadataRendering{SvgTemplates: svgTemplates}, logo
+}
+
 // Generate generates issuer metadata from configuration.
 // Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
 func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, credentials map[string]*CredentialMetadata) (*openid4vci.CredentialIssuerMetadataParameters, error) {
@@ -1671,6 +1703,22 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 							AltText: d.Logo.AltText,
 						}
 					}
+
+					// Map SVG templates, mirroring the dc+sd-jwt/VCTM branch below.
+					if d.Rendering != nil && len(d.Rendering.SVGTemplates) > 0 {
+						display.Rendering, display.Logo = mapSvgTemplates(
+							d.Rendering.SVGTemplates,
+							func(t mdoc.SVGTemplate) string { return t.URI },
+							func(t mdoc.SVGTemplate) (string, string, string, bool) {
+								if t.Properties == nil {
+									return "", "", "", false
+								}
+								return t.Properties.Orientation, t.Properties.ColorScheme, t.Properties.Contrast, true
+							},
+							display.Logo,
+						)
+					}
+
 					credMetadata.Display[i] = display
 				}
 			}
@@ -1688,10 +1736,28 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 				sort.Strings(elementIDs)
 				for _, elementID := range elementIDs {
 					ns, el := namespace, elementID
-					credMetadata.Claims = append(credMetadata.Claims, openid4vci.ClaimDescription{
+					meta := elements[elementID]
+					claim := openid4vci.ClaimDescription{
 						Path:      []*string{&ns, &el},
-						Mandatory: elements[elementID].Mandatory,
-					})
+						Mandatory: meta.Mandatory,
+						SVGID:     meta.SVGID,
+					}
+					if len(meta.Display) > 0 {
+						display := make([]openid4vci.ClaimDisplayProperties, len(meta.Display))
+						for j, d := range meta.Display {
+							label := d.Label
+							if label == "" {
+								label = d.Name
+							}
+							display[j] = openid4vci.ClaimDisplayProperties{
+								Name:   d.Name,
+								Label:  label,
+								Locale: d.Locale,
+							}
+						}
+						claim.Display = display
+					}
+					credMetadata.Claims = append(credMetadata.Claims, claim)
 				}
 			}
 			if len(credMetadata.Display) > 0 || len(credMetadata.Claims) > 0 {
@@ -1767,33 +1833,19 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 
 					// Map SVG templates (spec-compliant rendering) — independent of `simple`,
 					// since a VCTM may provide svg_templates without a simple rendering block.
+					// Shared with the mso_mdoc/MDDL branch above via mapSvgTemplates.
 					if len(vctmDisplay.Rendering.SVGTemplates) > 0 {
-						svgTemplates := make([]openid4vci.MetadataSvgTemplate, len(vctmDisplay.Rendering.SVGTemplates))
-						for j, t := range vctmDisplay.Rendering.SVGTemplates {
-							tmpl := openid4vci.MetadataSvgTemplate{
-								URI: t.URI,
-							}
-
-							if t.Properties != nil {
-								tmpl.Properties = &openid4vci.MetadataSvgTemplateProperties{
-									Orientation: t.Properties.Orientation,
-									ColorScheme: t.Properties.ColorScheme,
-									Contrast:    t.Properties.Contrast,
+						display.Rendering, display.Logo = mapSvgTemplates(
+							vctmDisplay.Rendering.SVGTemplates,
+							func(t sdjwtvc.SVGTemplates) string { return t.URI },
+							func(t sdjwtvc.SVGTemplates) (string, string, string, bool) {
+								if t.Properties == nil {
+									return "", "", "", false
 								}
-							}
-							svgTemplates[j] = tmpl
-						}
-						display.Rendering = &openid4vci.MetadataRendering{
-							SvgTemplates: svgTemplates,
-						}
-
-						// Fallback: set logo.uri from first SVG template URI
-						// for wallets that render from logo.uri instead of svg_templates
-						if display.Logo == nil && len(svgTemplates) > 0 {
-							display.Logo = &openid4vci.MetadataLogo{
-								URI: svgTemplates[0].URI,
-							}
-						}
+								return t.Properties.Orientation, t.Properties.ColorScheme, t.Properties.Contrast, true
+							},
+							display.Logo,
+						)
 					}
 				}
 
