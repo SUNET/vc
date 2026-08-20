@@ -25,6 +25,7 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/revocation"
+	"github.com/SUNET/vc/pkg/status"
 	"github.com/SUNET/vc/pkg/trace"
 	"github.com/SUNET/vc/pkg/trust"
 
@@ -62,6 +63,8 @@ type Client struct {
 	// OIDC related
 	presentationBuilder *openid4vp.PresentationBuilder
 	claimsExtractor     *openid4vp.ClaimsExtractor
+
+	statusAggregator *status.Aggregator
 }
 
 // New creates a new instance of the public api
@@ -161,6 +164,8 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		c.revocationRegistry = revocation.NewRegistry(statusListChecker)
 		c.log.Info("Revocation checker initialized", "cache_ttl", cacheTTL, "fail_open", cfg.Verifier.Revocation.FailOpen)
 	}
+
+	c.statusAggregator = c.buildStatusAggregator()
 
 	c.log.Info("Started")
 

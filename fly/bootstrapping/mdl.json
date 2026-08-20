@@ -1,0 +1,94 @@
+{
+  "100": {
+    "meta": {
+      "authentic_source": "Skatteverket",
+      "scope": "mdl",
+      "document_id": "document_id_mdl_100"
+    },
+    "identity_mapping_ids": [
+      "authentic_source_person_id_100"
+    ],
+    "document_data": {
+      "age_birth_year": 1996,
+      "age_in_years": 30,
+      "age_over_18": true,
+      "age_over_21": true,
+      "age_over_65": false,
+      "birth_place": "Tulegatan 11",
+      "document_number": "doc-mdl-mirren-authentic_source_person_id_100",
+      "expiry_date": "2033-01-01",
+      "family_name": "Mirren",
+      "given_name": "Helen",
+      "issuing_authority": "SUNET",
+      "issuing_country": "SE",
+      "issuing_jurisdiction": "Stockholm",
+      "resident_address": "Tulegatan 11, Stockholm",
+      "resident_city": "Stockholm",
+      "resident_country": "SE",
+      "resident_postal_code": "11353",
+      "resident_state": "Stockholm",
+      "sex": 0,
+      "driving_privileges": [
+        {
+          "vehicle_category_code": "B",
+          "issue_date": "2024-01-01",
+          "expiry_date": "2033-01-01"
+        }
+      ],
+      "un_distinguishing_sign": "S",
+      "birth_date": "1996-01-30",
+      "portrait": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVQYV2P8z8DwHwYGBgZGMAEADigBCCGZkB0AAAAASUVORK5CYII=",
+      "administrative_number": "pan-authentic_source_person_id_100",
+      "nationalities": [
+        "SE"
+      ],
+      "issue_date": "2024-01-01"
+    }
+  },
+  "102": {
+    "meta": {
+      "authentic_source": "Skatteverket",
+      "scope": "mdl",
+      "document_id": "document_id_mdl_102"
+    },
+    "identity_mapping_ids": [
+      "authentic_source_person_id_102"
+    ],
+    "document_data": {
+      "age_birth_year": 1988,
+      "age_in_years": 37,
+      "age_over_18": true,
+      "age_over_21": true,
+      "age_over_65": false,
+      "birth_place": "Tulegatan 11",
+      "document_number": "doc-mdl-oldman-authentic_source_person_id_102",
+      "expiry_date": "2033-01-01",
+      "family_name": "Oldman",
+      "given_name": "Gary",
+      "issuing_authority": "SUNET",
+      "issuing_country": "SE",
+      "issuing_jurisdiction": "Stockholm",
+      "resident_address": "Tulegatan 11, Stockholm",
+      "resident_city": "Stockholm",
+      "resident_country": "SE",
+      "resident_postal_code": "11353",
+      "resident_state": "Stockholm",
+      "sex": 0,
+      "driving_privileges": [
+        {
+          "vehicle_category_code": "B",
+          "issue_date": "2024-01-01",
+          "expiry_date": "2033-01-01"
+        }
+      ],
+      "un_distinguishing_sign": "S",
+      "birth_date": "1988-09-09",
+      "portrait": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVQYV2P8z8DwHwYGBgZGMAEADigBCCGZkB0AAAAASUVORK5CYII=",
+      "administrative_number": "pan-authentic_source_person_id_102",
+      "nationalities": [
+        "SE"
+      ],
+      "issue_date": "2024-01-01"
+    }
+  }
+}

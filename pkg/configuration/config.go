@@ -74,7 +74,7 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	// If a secret file path is configured, load secrets from that file
 	// and apply secrets to the config (clearing secret fields first).
 	if cfg.Common != nil && cfg.Common.SecretFilePath != "" {
-		secrets, err := LoadSecrets(cfg.Common.SecretFilePath)
+		secrets, err := LoadSecrets(cfg.Common.SecretFilePath, cfg.Common.SkipSecretsPermCheck)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load secrets file: %w", err)
 		}
@@ -111,6 +111,19 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 
 	}
 
+	// Nil out service sections this service doesn't own so that a shared
+	// config file won't fail validation on incomplete sibling stanzas.
+	switch serviceName {
+	case "issuer":
+		cfg.APIGW, cfg.Verifier, cfg.Registry = nil, nil, nil
+	case "verifier":
+		cfg.APIGW, cfg.Issuer, cfg.Registry = nil, nil, nil
+	case "registry":
+		cfg.APIGW, cfg.Issuer, cfg.Verifier = nil, nil, nil
+	case "apigw":
+		cfg.Issuer, cfg.Verifier, cfg.Registry = nil, nil, nil
+	}
+
 	if err := helpers.Check(ctx, cfg, cfg, log); err != nil {
 		return nil, err
 	}
@@ -119,7 +132,7 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 }
 
 // LoadSecrets reads and parses the secrets YAML file.
-func LoadSecrets(path string) (*model.Secrets, error) {
+func LoadSecrets(path string, skipPermCheck bool) (*model.Secrets, error) {
 	cleanPath := filepath.Clean(path)
 
 	fileInfo, err := os.Stat(cleanPath)
@@ -132,8 +145,9 @@ func LoadSecrets(path string) (*model.Secrets, error) {
 	}
 
 	// Fail if the secrets file has any group or world permission bits set.
+	// Skip this check when skip_secrets_perm_check is set (e.g. Fly.io mounts files as 0755).
 	mode := fileInfo.Mode().Perm()
-	if mode&0o077 != 0 {
+	if mode&0o077 != 0 && !skipPermCheck {
 		return nil, fmt.Errorf("secrets file %q has overly permissive mode %04o; no group/world access allowed (e.g. 0600 or 0400)", cleanPath, mode)
 	}
 

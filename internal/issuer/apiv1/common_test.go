@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	"github.com/SUNET/vc/internal/issuer/auditlog"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -42,6 +43,10 @@ func (m *mockRegistryClient) TokenStatusListUpdateStatus(ctx context.Context, in
 
 func (m *mockRegistryClient) SaveCredentialSubject(ctx context.Context, in *apiv1_registry.SaveCredentialSubjectRequest, opts ...grpc.CallOption) (*apiv1_registry.SaveCredentialSubjectReply, error) {
 	return &apiv1_registry.SaveCredentialSubjectReply{}, nil
+}
+
+func (m *mockRegistryClient) Status(ctx context.Context, in *apiv1_status.StatusRequest, opts ...grpc.CallOption) (*apiv1_status.StatusReply, error) {
+	return &apiv1_status.StatusReply{}, nil
 }
 
 func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logger.Log) *Client {

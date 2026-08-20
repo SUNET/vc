@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/SUNET/vc/pkg/logger"
@@ -98,4 +99,15 @@ func (s *Service) Close(ctx context.Context) error {
 
 	ctx.Done()
 	return nil
+}
+
+// HealthProbe implements the status.Prober contract: returns nil when MongoDB
+// is reachable, otherwise the underlying error.
+func (s *Service) HealthProbe(ctx context.Context) error {
+	if s.MongoClient == nil {
+		return errors.New("mongo client not connected")
+	}
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return s.MongoClient.Ping(pingCtx, nil)
 }

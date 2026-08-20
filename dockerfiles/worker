@@ -50,12 +50,12 @@ ARG TARGETARCH=amd64
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=${TARGETARCH} go build -v ${GO_BUILD_TAGS:+-tags "$GO_BUILD_TAGS"} -o bin/vc_$SERVICE_NAME -ldflags \
-    "-X vc/pkg/model.BuildVariableGitCommit=$(git rev-list -1 HEAD) \
-    -X vc/pkg/model.BuildVariableGitBranch=$(git rev-parse --abbrev-ref HEAD) \
-    -X vc/pkg/model.BuildVariableTimestamp=$(date +'%F:T%TZ') \
-    -X vc/pkg/model.BuildVariableGoVersion=$(go version|awk '{print $3}') \
-    -X vc/pkg/model.BuildVariableGoArch=$(go version|awk '{print $4}') \
-    -X vc/pkg/model.BuildVersion=$(echo $BUILDTAG) \
+    "-X github.com/SUNET/vc/pkg/status.BuildVariableGitCommit=$(git rev-list -1 HEAD) \
+    -X github.com/SUNET/vc/pkg/status.BuildVariableGitBranch=$(git rev-parse --abbrev-ref HEAD) \
+    -X github.com/SUNET/vc/pkg/status.BuildVariableTimestamp=$(date +'%F:T%TZ') \
+    -X github.com/SUNET/vc/pkg/status.BuildVariableGoVersion=$(go version|awk '{print $3}') \
+    -X github.com/SUNET/vc/pkg/status.BuildVariableGoArch=$(go version|awk '{print $4}') \
+    -X github.com/SUNET/vc/pkg/status.BuildVersion=$(echo $BUILDTAG) \
     -w -s --extldflags '-static'" ./cmd/$SERVICE_NAME
 
 # Deploy — Alpine for minimal CVE surface (binary is statically linked)
@@ -73,12 +73,13 @@ RUN addgroup -S vcservice && adduser -S vcservice -G vcservice
 COPY --from=builder /go/src/app/bin/vc_${SERVICE_NAME} /vc_service
 COPY --from=builder /go/src/app/docs /docs
 COPY --from=builder /go/src/app/standards /standards
+COPY --from=builder /go/src/app/metadata /metadata
 
 EXPOSE 8080
 
 USER vcservice
 
-HEALTHCHECK --interval=20s --timeout=10s CMD curl -k --connect-timeout 5 https://localhost:8080/health | grep -q STATUS_OK
+HEALTHCHECK --interval=20s --timeout=10s CMD curl -k --connect-timeout 5 http://localhost:8080/health | grep -q STATUS_OK || curl -k --connect-timeout 5 https://localhost:8080/health | grep -q STATUS_OK
 
 # vars in CMD and ENTRYPOINT are evaluated at runtime, that's why we use a static name on the binary.
 CMD [ "./vc_service" ]

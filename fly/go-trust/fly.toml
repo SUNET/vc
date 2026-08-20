@@ -1,0 +1,34 @@
+app = "sunet-vc-go-trust"
+primary_region = "arn"
+
+[build]
+  image = "ghcr.io/sirosfoundation/go-trust:latest"
+
+[env]
+  GT_HOST = "0.0.0.0"
+  GT_PORT = "6001"
+
+[[files]]
+  guest_path = "/whitelist.yaml"
+  local_path = "fly/go-trust/whitelist.yaml"
+
+[experimental]
+  cmd = ["--registry", "whitelist", "--whitelist", "/whitelist.yaml"]
+
+[http_service]
+  internal_port = 6001
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

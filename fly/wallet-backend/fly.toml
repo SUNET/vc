@@ -1,0 +1,43 @@
+app = "sunet-vc-wallet-backend"
+primary_region = "arn"
+
+[build]
+  image = "ghcr.io/sirosfoundation/go-wallet-backend:latest"
+
+[env]
+  WALLET_SERVER_HOST = "0.0.0.0"
+  WALLET_SERVER_PORT = "8080"
+  WALLET_SERVER_ADMIN_PORT = "8081"
+  WALLET_SERVER_RP_ID = "sunet-vc-wallet-frontend.fly.dev"
+  WALLET_SERVER_RP_ORIGIN = "https://sunet-vc-wallet-frontend.fly.dev"
+  WALLET_SERVER_CORS_ALLOWED_ORIGINS = "https://sunet-vc-wallet-frontend.fly.dev"
+  WALLET_SERVER_CORS_ALLOW_CREDENTIALS = "true"
+  WALLET_SERVER_CORS_ALLOWED_HEADERS = "Authorization,Content-Type,X-Tenant-ID,X-Token-Mode,If-None-Match,X-Private-Data-If-Match,X-Private-Data-If-None-Match,Upgrade,Connection,Sec-WebSocket-Key,Sec-WebSocket-Version,Sec-WebSocket-Protocol"
+  WALLET_TRUST_DEFAULT_ENDPOINT = "https://sunet-vc-go-trust.fly.dev"
+  WALLET_STORAGE_TYPE = "mongodb"
+  WALLET_STORAGE_MONGODB_URI = "mongodb://sunet-vc-mongodb.internal:27017"
+  WALLET_STORAGE_MONGODB_DATABASE = "wallet"
+  WALLET_LOGGING_LEVEL = "info"
+  WALLET_LOGGING_FORMAT = "json"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/status"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

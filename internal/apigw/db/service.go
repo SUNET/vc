@@ -5,13 +5,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ErrNoDocuments is returned when no documents are found
@@ -23,7 +21,6 @@ type Service struct {
 	cfg         *model.Cfg
 	log         *logger.Log
 	tracer      *trace.Tracer
-	probeStore  *apiv1_status.StatusProbeStore
 
 	DatastoreColl           DatastoreStore
 	IdentityMappingsColl    IdentityMappingStore
@@ -34,10 +31,9 @@ type Service struct {
 // New creates a new database service
 func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.Log) (*Service, error) {
 	service := &Service{
-		log:        log.New("db"),
-		cfg:        cfg,
-		tracer:     tracer,
-		probeStore: &apiv1_status.StatusProbeStore{},
+		log:    log.New("db"),
+		cfg:    cfg,
+		tracer: tracer,
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -104,30 +100,18 @@ func (s *Service) connect(ctx context.Context) error {
 	return nil
 }
 
-// Status returns the status of the database
-func (s *Service) Status(ctx context.Context) *apiv1_status.StatusProbe {
-	ctx, span := s.tracer.Start(ctx, "db:status")
+// HealthProbe implements the status.Prober contract: returns nil when MongoDB
+// is reachable, otherwise the underlying error.
+func (s *Service) HealthProbe(ctx context.Context) error {
+	ctx, span := s.tracer.Start(ctx, "apigw:db:healthprobe")
 	defer span.End()
 
-	if time.Now().Before(s.probeStore.NextCheck.AsTime()) {
-		return s.probeStore.PreviousResult
+	if s.MongoClient == nil {
+		return errors.New("mongo client not connected")
 	}
-	probe := &apiv1_status.StatusProbe{
-		Name:          "db",
-		Healthy:       true,
-		Message:       "OK",
-		LastCheckedTS: timestamppb.Now(),
-	}
-
-	if err := s.MongoClient.Ping(ctx, nil); err != nil {
-		probe.Message = err.Error()
-		probe.Healthy = false
-	}
-
-	s.probeStore.PreviousResult = probe
-	s.probeStore.NextCheck = timestamppb.New(time.Now().Add(10 * time.Second))
-
-	return probe
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return s.MongoClient.Ping(pingCtx, nil)
 }
 
 // Close closes the database connection

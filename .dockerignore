@@ -1,2 +1,5 @@
 docs/
 pki/
+gen_bootstrap
+.git
+bin/

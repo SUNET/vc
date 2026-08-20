@@ -1,0 +1,16 @@
+server:
+  op_port: 9005
+  issuer: "https://sunet-vc-mini-oidc.fly.dev"
+  scopes_supported: [openid, profile, email, pid, ehic, pid_mdoc, mdl]
+
+clients:
+  - client_id: "apigw-oidc-client"
+    client_name: "VC API Gateway"
+    client_secret: "${APIGW_CLIENT_SECRET}"
+    redirect_uris: ["https://sunet-vc-apigw.fly.dev/oidcrp/callback"]
+    token_endpoint_auth_method: "client_secret_basic"
+
+rp:
+  base_url: "https://sunet-vc-mini-oidc.fly.dev"
+  client_id: "mini-oidc-rp"
+  op_issuer: "https://sunet-vc-mini-oidc.fly.dev"

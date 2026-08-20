@@ -43,7 +43,7 @@ verifier:
 	secretsPath := filepath.Join(tmpDir, "secrets.yaml")
 	require.NoError(t, os.WriteFile(secretsPath, []byte(content), 0o600))
 
-	secrets, err := LoadSecrets(secretsPath)
+	secrets, err := LoadSecrets(secretsPath, false)
 	require.NoError(t, err)
 
 	// Verify common secrets
@@ -68,13 +68,13 @@ verifier:
 }
 
 func TestLoadSecrets_FileNotFound(t *testing.T) {
-	_, err := LoadSecrets("/nonexistent/path/secrets.yaml")
+	_, err := LoadSecrets("/nonexistent/path/secrets.yaml", false)
 	assert.Error(t, err)
 }
 
 func TestLoadSecrets_DirectoryPath(t *testing.T) {
 	tmpDir := t.TempDir()
-	_, err := LoadSecrets(tmpDir)
+	_, err := LoadSecrets(tmpDir, false)
 	assert.Error(t, err)
 }
 
@@ -83,7 +83,7 @@ func TestLoadSecrets_OverlyPermissiveMode(t *testing.T) {
 	secretsPath := filepath.Join(tmpDir, "secrets.yaml")
 	require.NoError(t, os.WriteFile(secretsPath, []byte("---\n"), 0o644))
 
-	_, err := LoadSecrets(secretsPath)
+	_, err := LoadSecrets(secretsPath, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "overly permissive mode")
 }
@@ -93,7 +93,7 @@ func TestLoadSecrets_InvalidYAML(t *testing.T) {
 	secretsPath := filepath.Join(tmpDir, "bad.yaml")
 	require.NoError(t, os.WriteFile(secretsPath, []byte("{{not valid yaml"), 0o600))
 
-	_, err := LoadSecrets(secretsPath)
+	_, err := LoadSecrets(secretsPath, false)
 	assert.Error(t, err)
 }
 
@@ -102,7 +102,7 @@ func TestLoadSecrets_EmptyFile(t *testing.T) {
 	secretsPath := filepath.Join(tmpDir, "empty.yaml")
 	require.NoError(t, os.WriteFile(secretsPath, []byte(""), 0o600))
 
-	secrets, err := LoadSecrets(secretsPath)
+	secrets, err := LoadSecrets(secretsPath, false)
 	require.NoError(t, err)
 
 	assert.Nil(t, secrets.Common)
@@ -119,7 +119,7 @@ registry:
 	secretsPath := filepath.Join(tmpDir, "partial.yaml")
 	require.NoError(t, os.WriteFile(secretsPath, []byte(content), 0o600))
 
-	secrets, err := LoadSecrets(secretsPath)
+	secrets, err := LoadSecrets(secretsPath, false)
 	require.NoError(t, err)
 
 	require.NotNil(t, secrets.Registry)

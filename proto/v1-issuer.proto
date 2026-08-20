@@ -2,7 +2,9 @@ syntax = "proto3";
 
 package v1.issuer;
 
-option go_package = "vc/internal/gen/issuer/apiv1_issuer";
+option go_package = "github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer";
+
+import "v1-status-model.proto";
 
 //import "google/protobuf/timestamp.proto";
 //import "google/protobuf/any.proto";
@@ -14,6 +16,7 @@ service IssuerService {
     rpc JWKS (Empty) returns (JwksReply) {}
     rpc SignMetadata (SignMetadataRequest) returns (SignMetadataReply) {}
     rpc GetIACAs (Empty) returns (GetIACAsReply) {}
+    rpc Status (v1.status.StatusRequest) returns (v1.status.StatusReply) {}
 }
 
 // SignMetadataRequest asks the issuer to sign metadata JSON with its own key

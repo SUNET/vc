@@ -82,7 +82,8 @@ BUILD_CONFIGS           := \
 	_check-reserved-tag \
 	release release-prod release-demo check_current_branch \
 	release-check-issuer-jwks \
-	release-jwt-issuer build-jwt-issuer
+	release-jwt-issuer build-jwt-issuer \
+	fly-launch fly-deploy fly-deploy-% fly-status fly-destroy
 
 # ==============================================================================
 # Help Target
@@ -119,6 +120,13 @@ help: ## Show this help message
 	$(info Cross-Device Flow Tests:)
 	$(info   make test-cross-device           - Full cross-device flow (VCI→browser→QR→wallet→SSE→token))
 	$(info   make test-cross-device-quick     - QR rendering smoke test only)
+	$(info )
+	$(info Fly.io Deployment:)
+	$(info   make fly-launch                  - Create Fly apps for all services)
+	$(info   make fly-deploy                  - Deploy all services to Fly.io)
+	$(info   make fly-deploy-SERVICE          - Deploy a specific service (e.g., make fly-deploy-apigw))
+	$(info   make fly-status                  - Show status of all Fly.io services)
+	$(info   make fly-destroy FLY_CONFIRM=yes - Destroy all Fly.io apps)
 	$(info )
 	$(info Environment Variables:)
 	$(info   VERSION               - Docker image version (default: latest))
@@ -605,7 +613,7 @@ check-protoc: ## Check if protoc is installed
 
 proto: proto-status proto-registry proto-issuer ## Generate all protobuf files
 
-PROTO_OPTS := --proto_path=./proto/ --go-grpc_opt=module=vc --go-grpc_out=. --go_opt=module=vc --go_out=.
+PROTO_OPTS := --proto_path=./proto/ --go-grpc_opt=module=github.com/SUNET/vc --go-grpc_out=. --go_opt=module=github.com/SUNET/vc --go_out=.
 
 # Catch-all for services without explicit proto targets (e.g. apigw)
 proto-%:
@@ -846,6 +854,9 @@ vscode: test-env ## Set up VS Code development environment
     sudo chmod +x /usr/local/bin/yq
 	$(info Installing act for local GitHub Actions testing)
 	curl -sfL https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash -s -- -b /usr/local/bin
+	$(info Installing flyctl)
+	curl -sL https://fly.io/install.sh | sh
+	export FLYCTL_INSTALL="$$HOME/.fly" && export PATH="$$FLYCTL_INSTALL/bin:$$PATH"
 	$(info Installing GitHub CLI (gh))
 	curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
 	sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
@@ -1016,3 +1027,32 @@ release-demo: ## Promote a release tag to demo
 	echo ""; \
 	echo "==> Demo promotion complete for $$SRC_TAG (:demo)"; \
 	echo ""
+
+# ==============================================================================
+# Fly.io Deployment Targets
+# ==============================================================================
+
+FLY_SERVICES    := mongodb oidc go-trust apigw issuer verifier registry wallet-backend wallet-frontend
+FLY_REGION      ?= arn
+FLY_ENV_PREFIX  ?= sunet-vc
+FLY_ORG         ?= sirosfoundation
+
+fly-launch: ## Create Fly.io apps for all services
+	./fly/deploy.sh launch --region $(FLY_REGION) --env $(FLY_ENV_PREFIX) --org $(FLY_ORG)
+
+fly-deploy: $(addprefix fly-deploy-,$(FLY_SERVICES)) ## Deploy all services to Fly.io
+
+fly-deploy-%: ## Deploy a specific service to Fly.io (e.g., make fly-deploy-apigw)
+	./fly/deploy.sh deploy --service $* --region $(FLY_REGION) --env $(FLY_ENV_PREFIX) --org $(FLY_ORG)
+
+fly-status: ## Show status of all Fly.io services
+	./fly/deploy.sh status --env $(FLY_ENV_PREFIX)
+
+fly-status-%: ## Show status of a specific Fly.io service (e.g., make fly-status-oidc)
+	@fly status -a $(FLY_ENV_PREFIX)-$*
+
+fly-logs-%: ## Show logs for a specific Fly.io service (e.g., make fly-logs-oidc)
+	@fly logs -a $(FLY_ENV_PREFIX)-$* --no-tail
+
+fly-destroy: ## Destroy all Fly.io apps (requires FLY_CONFIRM=yes)
+	./fly/deploy.sh destroy --env $(FLY_ENV_PREFIX) $(if $(filter yes,$(FLY_CONFIRM)),--confirm)

@@ -7,12 +7,12 @@
 package apiv1_registry
 
 import (
+	apiv1_status "github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -324,7 +324,7 @@ var File_v1_registry_proto protoreflect.FileDescriptor
 
 const file_v1_registry_proto_rawDesc = "" +
 	"\n" +
-	"\x11v1-registry.proto\x12\vv1.registry\"9\n" +
+	"\x11v1-registry.proto\x12\vv1.registry\x1a\x15v1-status-model.proto\"9\n" +
 	"\x1fTokenStatusListAddStatusRequest\x12\x16\n" +
 	"\x06Status\x18\x01 \x01(\rR\x06Status\"u\n" +
 	"\x1dTokenStatusListAddStatusReply\x12\x18\n" +
@@ -342,11 +342,12 @@ const file_v1_registry_proto_rawDesc = "" +
 	"Identifier\x12\x18\n" +
 	"\aSection\x18\x02 \x01(\x03R\aSection\x12\x14\n" +
 	"\x05Index\x18\x03 \x01(\x03R\x05Index\"\x1c\n" +
-	"\x1aSaveCredentialSubjectReply2\xf9\x02\n" +
+	"\x1aSaveCredentialSubjectReply2\xb7\x03\n" +
 	"\x0fRegistryService\x12v\n" +
 	"\x18TokenStatusListAddStatus\x12,.v1.registry.TokenStatusListAddStatusRequest\x1a*.v1.registry.TokenStatusListAddStatusReply\"\x00\x12\x7f\n" +
 	"\x1bTokenStatusListUpdateStatus\x12/.v1.registry.TokenStatusListUpdateStatusRequest\x1a-.v1.registry.TokenStatusListUpdateStatusReply\"\x00\x12m\n" +
-	"\x15SaveCredentialSubject\x12).v1.registry.SaveCredentialSubjectRequest\x1a'.v1.registry.SaveCredentialSubjectReply\"\x00B)Z'vc/internal/gen/registry/apiv1_registryb\x06proto3"
+	"\x15SaveCredentialSubject\x12).v1.registry.SaveCredentialSubjectRequest\x1a'.v1.registry.SaveCredentialSubjectReply\"\x00\x12<\n" +
+	"\x06Status\x12\x18.v1.status.StatusRequest\x1a\x16.v1.status.StatusReply\"\x00B:Z8github.com/SUNET/vc/internal/gen/registry/apiv1_registryb\x06proto3"
 
 var (
 	file_v1_registry_proto_rawDescOnce sync.Once
@@ -368,16 +369,20 @@ var file_v1_registry_proto_goTypes = []any{
 	(*TokenStatusListUpdateStatusReply)(nil),   // 3: v1.registry.TokenStatusListUpdateStatusReply
 	(*SaveCredentialSubjectRequest)(nil),       // 4: v1.registry.SaveCredentialSubjectRequest
 	(*SaveCredentialSubjectReply)(nil),         // 5: v1.registry.SaveCredentialSubjectReply
+	(*apiv1_status.StatusRequest)(nil),         // 6: v1.status.StatusRequest
+	(*apiv1_status.StatusReply)(nil),           // 7: v1.status.StatusReply
 }
 var file_v1_registry_proto_depIdxs = []int32{
 	0, // 0: v1.registry.RegistryService.TokenStatusListAddStatus:input_type -> v1.registry.TokenStatusListAddStatusRequest
 	2, // 1: v1.registry.RegistryService.TokenStatusListUpdateStatus:input_type -> v1.registry.TokenStatusListUpdateStatusRequest
 	4, // 2: v1.registry.RegistryService.SaveCredentialSubject:input_type -> v1.registry.SaveCredentialSubjectRequest
-	1, // 3: v1.registry.RegistryService.TokenStatusListAddStatus:output_type -> v1.registry.TokenStatusListAddStatusReply
-	3, // 4: v1.registry.RegistryService.TokenStatusListUpdateStatus:output_type -> v1.registry.TokenStatusListUpdateStatusReply
-	5, // 5: v1.registry.RegistryService.SaveCredentialSubject:output_type -> v1.registry.SaveCredentialSubjectReply
-	3, // [3:6] is the sub-list for method output_type
-	0, // [0:3] is the sub-list for method input_type
+	6, // 3: v1.registry.RegistryService.Status:input_type -> v1.status.StatusRequest
+	1, // 4: v1.registry.RegistryService.TokenStatusListAddStatus:output_type -> v1.registry.TokenStatusListAddStatusReply
+	3, // 5: v1.registry.RegistryService.TokenStatusListUpdateStatus:output_type -> v1.registry.TokenStatusListUpdateStatusReply
+	5, // 6: v1.registry.RegistryService.SaveCredentialSubject:output_type -> v1.registry.SaveCredentialSubjectReply
+	7, // 7: v1.registry.RegistryService.Status:output_type -> v1.status.StatusReply
+	4, // [4:8] is the sub-list for method output_type
+	0, // [0:4] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
