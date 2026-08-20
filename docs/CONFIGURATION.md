@@ -1,7 +1,5 @@
 # Configuration Reference
 
-**Generated:** 2026-08-19
-
 Complete reference for all configuration parameters in the VC system.
 
 <!-- Auto-generated from Go source code. DO NOT EDIT MANUALLY. -->
