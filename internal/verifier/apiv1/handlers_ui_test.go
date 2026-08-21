@@ -161,9 +161,11 @@ func TestUIMetadata_MsoMdocScope(t *testing.T) {
 	assert.Empty(t, info.VCTValues,
 		"mso_mdoc has no vct - DCQL constrains it with doctype_value instead")
 
-	// The field must be OMITTED, not serialized as null: the UI's schema takes
-	// an optional array, so a null would fail validation and break
-	// /ui/metadata parsing for every configuration containing an mdoc.
+	// The field must be OMITTED, not serialized as null. Either form would
+	// parse - the UI's schema declares vct_values as nullish and falls back
+	// to [vct] for both absent and null - so this asserts wire-format
+	// cleanliness: an mdoc credential is identified by doctype, and has no
+	// business emitting a vct_values key at all.
 	encoded, err := json.Marshal(info)
 	require.NoError(t, err)
 	assert.NotContains(t, string(encoded), "vct_values",
