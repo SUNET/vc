@@ -15,6 +15,29 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+// newTestECJWKKey generates a fresh EC P-256 jwk.Key for cache round-trip
+// tests. Shared by every backend's JWKKey test.
+func newTestECJWKKey(t *testing.T) jwk.Key {
+	t.Helper()
+	raw, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	key, err := jwk.Import(raw)
+	require.NoError(t, err)
+	return key
+}
+
+// assertSameJWKKey asserts two jwk.Key values serialize identically, used to
+// confirm a key survived a cache round-trip. Shared by every backend's
+// JWKKey test.
+func assertSameJWKKey(t *testing.T, want, got jwk.Key) {
+	t.Helper()
+	wantJSON, err := json.Marshal(want)
+	require.NoError(t, err)
+	gotJSON, err := json.Marshal(got)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(wantJSON), string(gotJSON))
+}
+
 // runGenericCacheContractTests runs the shared contract tests that every
 // Cache[V] implementation must satisfy. Reused for both memory and mongo.
 func runGenericCacheContractTests[V comparable](t *testing.T, c Cache[V], val1, val2 V) {
@@ -340,22 +363,13 @@ func TestMongoCache_JWKKey(t *testing.T) {
 	}))
 	require.NoError(t, err)
 
-	// Generate a fresh EC key
-	raw, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-	key, err := jwk.Import(raw)
-	require.NoError(t, err)
+	key := newTestECJWKKey(t)
 
 	c.Set(ctx, "k1", key)
 	got, ok := c.Get(ctx, "k1")
 	require.True(t, ok, "expected jwk.Key to round-trip through MongoCache")
 
-	// Verify the key material survived by comparing JSON serializations
-	origJSON, err := json.Marshal(key)
-	require.NoError(t, err)
-	gotJSON, err := json.Marshal(got)
-	require.NoError(t, err)
-	assert.JSONEq(t, string(origJSON), string(gotJSON))
+	assertSameJWKKey(t, key, got)
 }
 
 func TestMongoCache_SetWithTTL_ShorterThanDefault(t *testing.T) {
