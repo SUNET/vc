@@ -18,8 +18,32 @@ import (
 
 // UICredentialInfo is a sanitized view of a credential for the UI.
 type UICredentialInfo struct {
-	Format     string                          `json:"format"`
-	VCT        string                          `json:"vct"`
+	Format string `json:"format"`
+	// VCT is the credential's own type identifier - the value
+	// BuildCredentialWithSigner embeds as the credential's "vct" claim. Kept
+	// as the single display identifier for the UI's credential picker.
+	VCT string `json:"vct"`
+	// VCTValues is every identifier a wallet might legitimately match this
+	// credential type by, for use as DCQL meta.vct_values.
+	//
+	// Both forms have to be offered, because deployed wallets disagree about
+	// which one identifies a credential, and each behaviour is live-verified
+	// in this repo:
+	//
+	//   - The EUDI reference wallet (multipaz) matches the ISSUER METADATA's
+	//     declared vct - our published type-metadata URL. Offer.kt sets
+	//     SdJwtVcFormat(vct = configuration.type) and DcqlRequestProcessor
+	//     filters on that tag before ever parsing the credential body. See
+	//     the finding-18 note in internal/apigw/apiv1/handlers_verifier.go.
+	//
+	//   - Other wallets (e.g. wwWallet/wallet-frontend) match the credential's
+	//     own embedded "vct" claim, i.e. VCTM.VCT. See the finding-16 note on
+	//     VCTIdentifiersForScopes in pkg/model/config.go.
+	//
+	// vct_values is an acceptable-value list by design (OpenID4VP DCQL), so
+	// emitting both satisfies either wallet instead of picking a winner and
+	// silently breaking the other.
+	VCTValues  []string                        `json:"vct_values"`
 	Attributes map[string]map[string][]*string `json:"attributes"`
 }
 
@@ -56,6 +80,34 @@ type UIMetadataReply struct {
 	// attempts the native W3C Digital Credentials API when an operator has
 	// opted in, rather than always trying it regardless of server config.
 	DCAPIEnabled bool `json:"dc_api_enabled"`
+}
+
+// vctIdentifiersFor returns every identifier a wallet might match this
+// credential type by, most-specific first: the credential's own embedded vct
+// (VCTM.VCT), then the published type-metadata URL. Duplicates are collapsed,
+// which is what happens for a VCTM file with no "vct" field - ResolveVCTUrls
+// back-fills VCTM.VCT from the URL, so both are the same string.
+//
+// Returns nil for mso_mdoc scopes: they have no vct at all, and DCQL
+// constrains them with doctype_value instead.
+func vctIdentifiersFor(constructor *model.CredentialMetadata) []string {
+	if constructor == nil {
+		return nil
+	}
+	var out []string
+	seen := make(map[string]bool, 2)
+	add := func(v string) {
+		if v == "" || seen[v] {
+			return
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	if vctm := constructor.GetVCTM(); vctm != nil {
+		add(vctm.VCT)
+	}
+	add(constructor.GetVCTURL())
+	return out
 }
 
 func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
@@ -96,9 +148,12 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 			info.VCT = v
 		} else if mddl := constructor.GetMDDL(); mddl != nil {
 			// mso_mdoc scopes have no VCTM/VCTURL — the doctype is the
-			// closest equivalent identifier.
+			// closest equivalent identifier. There is no vct_values for
+			// mdoc (the DCQL constraint is doctype_value), so leave the
+			// list empty and let the UI fall back to the single value.
 			info.VCT = mddl.DocType
 		}
+		info.VCTValues = vctIdentifiersFor(constructor)
 		reply.Credentials[scope] = info
 	}
 
@@ -136,14 +191,11 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				// Resolve format and VCT from credential_metadata
 				if meta != nil {
 					uiCred.Format = meta.Format
-					// VCTM.VCT first, for the same reason as UICredentialInfo
-					// above: vct_values is matched against the credential's
-					// vct claim, which comes from the VCTM, not from where
-					// the VCTM happens to be served.
-					if vctm := meta.GetVCTM(); vctm != nil && vctm.VCT != "" {
-						uiCred.Meta.VCTValues = []string{vctm.VCT}
-					} else if v := meta.GetVCTURL(); v != "" {
-						uiCred.Meta.VCTValues = []string{v}
+					// Both identifiers, for the reason documented on
+					// UICredentialInfo.VCTValues: wallets disagree about
+					// which one names a credential type.
+					if vs := vctIdentifiersFor(meta); len(vs) > 0 {
+						uiCred.Meta.VCTValues = vs
 					}
 				}
 

@@ -950,7 +950,7 @@ func applyPerScopeValidations(scopes []string, validations map[string][]openid4v
 // advertised https://apigw.example/type-metadata/pid for a credential whose
 // vct is urn:eudi:pid:1, so every presentation started from the UI matched
 // nothing.
-func TestUIMetadataPrefersVCTMOverVCTURL(t *testing.T) {
+func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
 	ctx := t.Context()
 
 	cfg := &model.Cfg{
@@ -992,16 +992,29 @@ func TestUIMetadataPrefersVCTMOverVCTURL(t *testing.T) {
 			"the identifier a wallet matches against is the VCTM's vct, not where the VCTM is served")
 	})
 
-	t.Run("preset vct_values use the VCTM vct", func(t *testing.T) {
+	t.Run("credential info offers both identifiers, VCTM vct first", func(t *testing.T) {
+		assert.Equal(t,
+			[]string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
+			reply.Credentials["pid"].VCTValues,
+			"wallets disagree on which identifier names a credential type: multipaz "+
+				"matches the metadata URL, wwWallet the credential's own vct - so offer both")
+	})
+
+	t.Run("preset vct_values offer both identifiers", func(t *testing.T) {
 		preset := reply.Presets["PID"]
 		require.NotNil(t, preset)
 		require.Len(t, preset.Credentials, 1)
-		assert.Equal(t, []string{"urn:eudi:pid:1"}, preset.Credentials[0].Meta.VCTValues,
-			"DCQL meta.vct_values is matched against the credential's vct claim")
+		assert.Equal(t,
+			[]string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
+			preset.Credentials[0].Meta.VCTValues,
+			"DCQL meta.vct_values is an acceptable-value list, so both forms belong in it")
 	})
 
 	t.Run("falls back to the URL when the VCTM has no vct", func(t *testing.T) {
 		assert.Equal(t, "https://apigw.example/type-metadata/novct", reply.Credentials["novct"].VCT,
 			"a VCTM with no vct still needs a usable identifier")
+		assert.Equal(t, []string{"https://apigw.example/type-metadata/novct"},
+			reply.Credentials["novct"].VCTValues,
+			"ResolveVCTUrls back-fills VCTM.VCT from the URL, so the two collapse to one value")
 	})
 }

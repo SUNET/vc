@@ -11,6 +11,9 @@ import {
 const credentialAttributesSchema = v.object({
     format: v.string(),
     vct: v.string(),
+    // Optional so an older server that only sends "vct" still validates; the
+    // query builder falls back to [vct] when this is absent.
+    vct_values: v.optional(v.array(v.string())),
     attributes: v.record(
         v.string(),
         v.record(
@@ -436,9 +439,20 @@ Alpine.data("app", () => ({
         // vct_values for an mdoc credential matches nothing on the wallet
         // side (no mdoc credential has a vct), so the request always comes
         // back empty.
+        // vct_values carries EVERY identifier a wallet might match this
+        // credential type by, not just one: the EUDI reference wallet
+        // (multipaz) matches the issuer metadata's declared vct (our
+        // type-metadata URL), while others (wwWallet) match the credential's
+        // own embedded vct claim. DCQL treats vct_values as an
+        // acceptable-value list, so sending both satisfies either wallet.
+        // Falls back to the single vct for an older server that doesn't
+        // send the list.
+        const vctValues = this.credentialAttributes.vct_values?.length
+            ? this.credentialAttributes.vct_values
+            : [this.credentialAttributes.vct];
         const meta = this.credentialAttributes.format === "mso_mdoc"
             ? { doctype_value: this.credentialAttributes.vct }
-            : { vct_values: [this.credentialAttributes.vct] };
+            : { vct_values: vctValues };
 
         /** @satisfies {DCQLQueryCredential} */
         const credential = {
