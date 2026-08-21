@@ -70,10 +70,30 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 			Format:     constructor.Format,
 			Attributes: constructor.GetAttributes(),
 		}
-		if v := constructor.GetVCTURL(); v != "" {
-			info.VCT = v
-		} else if vctm := constructor.GetVCTM(); vctm != nil {
+		// VCTM.VCT, not VCTURL: the credential's own vct claim is built from
+		// the VCTM's vct field (BuildCredentialWithSigner -> body["vct"] =
+		// vctm.VCT), so that is the value a wallet matches a DCQL query
+		// against. VCTURL is where the VCTM document is *served* from, which
+		// ResolveVCTUrls derives as apigwPublicURL + /type-metadata/{scope}
+		// and deliberately keeps distinct from the identifier ("VCTM.VCT [is]
+		// left unchanged — the served VCTM document preserves the original
+		// VCT identifier from the VCTM file (e.g. a URN)").
+		//
+		// Preferring the URL made the UI advertise, and query for, a type
+		// identifier no credential ever carries: a PID issued by this very
+		// stack has vct "urn:eudi:pid:arf-1.8:1" while the UI asked for
+		// "https://<apigw>/type-metadata/pid_1_8", so every presentation
+		// started from the UI failed with "No credentials match DCQL query".
+		// The VCTM.VCT branch below was also unreachable in practice, since
+		// ResolveVCTUrls requires a non-empty VCTURL for every VCTM scope.
+		//
+		// Falling back to VCTURL still covers a VCTM file with no vct field:
+		// ResolveVCTUrls back-fills VCTM.VCT from the URL in that case, so
+		// both branches agree and the identifier stays dereferenceable.
+		if vctm := constructor.GetVCTM(); vctm != nil && vctm.VCT != "" {
 			info.VCT = vctm.VCT
+		} else if v := constructor.GetVCTURL(); v != "" {
+			info.VCT = v
 		} else if mddl := constructor.GetMDDL(); mddl != nil {
 			// mso_mdoc scopes have no VCTM/VCTURL — the doctype is the
 			// closest equivalent identifier.
@@ -116,10 +136,14 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				// Resolve format and VCT from credential_metadata
 				if meta != nil {
 					uiCred.Format = meta.Format
-					if v := meta.GetVCTURL(); v != "" {
-						uiCred.Meta.VCTValues = []string{v}
-					} else if vctm := meta.GetVCTM(); vctm != nil {
+					// VCTM.VCT first, for the same reason as UICredentialInfo
+					// above: vct_values is matched against the credential's
+					// vct claim, which comes from the VCTM, not from where
+					// the VCTM happens to be served.
+					if vctm := meta.GetVCTM(); vctm != nil && vctm.VCT != "" {
 						uiCred.Meta.VCTValues = []string{vctm.VCT}
+					} else if v := meta.GetVCTURL(); v != "" {
+						uiCred.Meta.VCTValues = []string{v}
 					}
 				}
 
