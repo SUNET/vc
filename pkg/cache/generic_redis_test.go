@@ -202,7 +202,14 @@ func TestRedisCache_KeysNamespacedByCollection(t *testing.T) {
 // TestRedisCache_TTLExpiration confirms Redis's native per-key TTL (not
 // MongoCache's created_at-shift approximation) actually expires entries.
 func TestRedisCache_TTLExpiration(t *testing.T) {
-	client, cleanup := startRedisContainer(t)
+	testCacheTTLExpiration(t, startRedisContainer)
+}
+
+// testCacheTTLExpiration is shared by the Redis and Valkey variants above/
+// below - the assertion is backend-agnostic, only the container differs.
+func testCacheTTLExpiration(t *testing.T, startContainer func(*testing.T) (redis.UniversalClient, func())) {
+	t.Helper()
+	client, cleanup := startContainer(t)
 	defer cleanup()
 
 	ctx := t.Context()
@@ -283,18 +290,5 @@ func TestValkeyCache_String(t *testing.T) {
 // TestValkeyCache_TTLExpiration confirms Valkey actually expires keys via
 // native per-key EXPIRE, matching TestRedisCache_TTLExpiration.
 func TestValkeyCache_TTLExpiration(t *testing.T) {
-	client, cleanup := startValkeyContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	c, err := NewRedisCache[string](client, "cache_ttl", 200*time.Millisecond, nil)
-	require.NoError(t, err)
-
-	c.Set(ctx, "expiring", "value")
-	_, ok := c.Get(ctx, "expiring")
-	require.True(t, ok, "value should be present immediately after Set")
-
-	time.Sleep(400 * time.Millisecond)
-	_, ok = c.Get(ctx, "expiring")
-	assert.False(t, ok, "value should have expired")
+	testCacheTTLExpiration(t, startValkeyContainer)
 }

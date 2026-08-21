@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,7 +79,15 @@ func TestRedisRateLimitCounter_IndependentKeys(t *testing.T) {
 // TTL (rather than living forever), matching MongoRateLimitCounter's
 // TTL-indexed cleanup.
 func TestRedisRateLimitCounter_TTLSetOnFreshWindowKey(t *testing.T) {
-	client, cleanup := startRedisContainer(t)
+	testRateLimitTTLSetOnFreshWindowKey(t, startRedisContainer)
+}
+
+// testRateLimitTTLSetOnFreshWindowKey is shared by the Redis and Valkey
+// variants above/below - the assertion is backend-agnostic, only the
+// container differs.
+func testRateLimitTTLSetOnFreshWindowKey(t *testing.T, startContainer func(*testing.T) (redis.UniversalClient, func())) {
+	t.Helper()
+	client, cleanup := startContainer(t)
 	defer cleanup()
 
 	rl, err := NewRedisRateLimitCounter(client, "ratelimit_test", nil)
@@ -134,30 +143,5 @@ func TestValkeyRateLimitCounter_FirstIncrement(t *testing.T) {
 // TestRedisRateLimitCounter_TTLSetOnFreshWindowKey, confirming the Lua
 // script's conditional EXPIRE call actually takes effect on Valkey.
 func TestValkeyRateLimitCounter_TTLSetOnFreshWindowKey(t *testing.T) {
-	client, cleanup := startValkeyContainer(t)
-	defer cleanup()
-
-	rl, err := NewRedisRateLimitCounter(client, "ratelimit_test", nil)
-	require.NoError(t, err)
-
-	ctx := t.Context()
-	window := time.Minute
-	before := time.Now()
-	_, err = rl.IncrementWithTTL(ctx, "ttl-check", window)
-	require.NoError(t, err)
-	after := time.Now()
-
-	windowSecs := int64(window.Seconds())
-	candidates := []int64{before.Unix() / windowSecs, after.Unix() / windowSecs}
-
-	var ttl time.Duration
-	for _, id := range candidates {
-		key := "ratelimit_test:ttl-check:" + strconv.FormatInt(id, 10)
-		v, err := client.TTL(ctx, key).Result()
-		require.NoError(t, err)
-		if v > ttl {
-			ttl = v
-		}
-	}
-	assert.Greater(t, ttl, time.Duration(0), "fresh window key must have a TTL set")
+	testRateLimitTTLSetOnFreshWindowKey(t, startValkeyContainer)
 }
