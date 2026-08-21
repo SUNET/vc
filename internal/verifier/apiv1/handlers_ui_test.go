@@ -943,23 +943,28 @@ func applyPerScopeValidations(scopes []string, validations map[string][]openid4v
 	return nil
 }
 
-// TestUIMetadataPrefersVCTMOverVCTURL pins the identifier the UI advertises and
-// queries for to the VCTM's own vct, not the URL the VCTM is served from.
+// TestUIMetadataOffersBothVCTIdentifiers pins the UI to advertising BOTH
+// identifiers a wallet might match a credential type by: the VCTM's own vct
+// first, then the URL the VCTM is served from.
 //
-// These are different things and must not be conflated: a credential's vct
-// claim is built from the VCTM (BuildCredentialWithSigner sets
-// body["vct"] = vctm.VCT), so that is what a wallet matches a DCQL
-// meta.vct_values against, whereas VCTURL is a location ResolveVCTUrls derives
-// as apigwPublicURL + /type-metadata/{scope}.
+// Both are needed, because deployed wallets disagree about which one names a
+// credential type, and each behaviour is live-verified in this repo. The EUDI
+// reference wallet (multipaz) matches the issuer metadata's declared vct - the
+// type-metadata URL - per the finding-18 note in
+// internal/apigw/apiv1/handlers_verifier.go. Other wallets match the
+// credential's own vct claim, built from the VCTM (BuildCredentialWithSigner
+// sets body["vct"] = vctm.VCT), per the finding-16 note on
+// VCTIdentifiersForScopes in pkg/model/config.go. DCQL's meta.vct_values is an
+// acceptable-value list, so emitting both satisfies either wallet.
 //
 // The existing TestUIMetadata already asserts "VCT should be populated from
-// VCTM", but could not catch this: it builds CredentialMetadata directly and
-// never sets VCTURL, so the empty-URL path was the only one exercised. In
-// production ResolveVCTUrls guarantees VCTURL is non-empty for every
-// VCTM-backed scope, which is exactly the case that regressed - the UI
-// advertised https://apigw.example/type-metadata/pid for a credential whose
-// vct is urn:eudi:pid:1, so every presentation started from the UI matched
-// nothing.
+// VCTM", but could not catch the original regression: it builds
+// CredentialMetadata directly and never sets VCTURL, so the empty-URL path was
+// the only one exercised. In production ResolveVCTUrls guarantees VCTURL is
+// non-empty for every VCTM-backed scope, which is exactly the case that
+// regressed - the UI advertised only https://apigw.example/type-metadata/pid
+// for a credential whose vct is urn:eudi:pid:1, so presentations started from
+// the UI matched nothing in wallets of the second kind.
 func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
 	ctx := t.Context()
 
