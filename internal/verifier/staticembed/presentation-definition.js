@@ -99,8 +99,14 @@ const metadataResponseSchema = v.object({
         credentials: v.array(v.object({
             id: v.string(),
             format: v.string(),
+            // vct_values (sd-jwt) and doctype_value (mso_mdoc) are mutually
+            // exclusive and both optional: which one applies depends on the
+            // credential's format (OpenID4VP 1.0 6.4.1). Declaring only
+            // vct_values here meant an mdoc preset's doctype_value was
+            // silently stripped by the schema before reaching the query.
             meta: v.object({
-                vct_values: v.array(v.string()),
+                vct_values: v.optional(v.array(v.string())),
+                doctype_value: v.optional(v.string()),
             }),
             claims: v.optional(v.array(v.object({
                 path: v.array(v.nullable(v.string())),
