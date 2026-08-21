@@ -22,6 +22,7 @@ import (
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/sqlstore"
+	ts11client "github.com/sirosfoundation/go-ts11client"
 )
 
 // BoolVal safely dereferences a *bool, returning the pointed-to value or
@@ -168,6 +169,13 @@ type Common struct {
 	// HA configures high-availability mode. When Enable is true, caches use MongoDB
 	// (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.
 	HA HAConfig `yaml:"ha" validate:"omitempty"`
+	// CredentialRegistry configures an optional TS11 credential metadata
+	// registry client, used as an add-on to (not a replacement for) the
+	// existing vctm_file_path/vctm_url/mddl_file_path/mddl_url per-scope
+	// configuration: disabled by default, so existing deployments are
+	// unaffected until this is explicitly enabled and at least one scope
+	// sets vct or doctype instead of a file/URL.
+	CredentialRegistry CredentialRegistry `yaml:"credential_registry" validate:"omitempty"`
 
 	// Branding holds custom branding configuration (logo and favicon paths)
 	Branding Branding `yaml:"branding"`
@@ -1272,25 +1280,92 @@ func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 	return ids
 }
 
+// CredentialRegistry configures an optional TS11 credential metadata registry client (github.com/sirosfoundation/go-ts11client), disabled by default. When enabled, Registries is an ordered list of logical registries: a later entry overrides an earlier one for the same vct/doctype, so distinct registries are tried in that order rather than raced - only the mirrors within a single logical registry are queried concurrently, first hit wins, since only mirrors are expected to hold identical content.
+type CredentialRegistry struct {
+	// Enable turns on registry-backed resolution for any scope that sets
+	// vct or doctype instead of a local file/URL. Existing
+	// vctm_file_path/vctm_url/mddl_file_path/mddl_url-configured scopes
+	// are entirely unaffected either way.
+	Enable bool `yaml:"enable" default:"false"`
+	// Registries is an ordered list of logical (independent) registries.
+	// A later entry overrides an earlier one for the same vct/doctype.
+	// Required if Enable is true.
+	Registries []CredentialRegistryLogical `yaml:"registries" validate:"required_if=Enable true,omitempty,dive"`
+	// RefreshInterval controls how long a registry's discovery index is
+	// trusted before being re-fetched. Zero means fetch once and cache
+	// forever for the lifetime of this process.
+	RefreshInterval time.Duration `yaml:"refresh_interval" default:"1h"`
+}
+
+// CredentialRegistryLogical is one independent TS11 registry, optionally served by more than one mirror endpoint holding equivalent content, queried concurrently and raced - first hit wins.
+type CredentialRegistryLogical struct {
+	// Mirrors is the set of endpoints serving this logical registry's
+	// content. At least one is required.
+	Mirrors []CredentialRegistryEndpoint `yaml:"mirrors" validate:"required,min=1,dive"`
+}
+
+// CredentialRegistryEndpoint identifies one TS11 registry endpoint to query.
+type CredentialRegistryEndpoint struct {
+	// BaseURL is the registry's origin, e.g. "https://registry.siros.org".
+	BaseURL string `yaml:"base_url" validate:"required,url" doc_example:"\"https://registry.siros.org\""`
+	// Timeout bounds each HTTP request to this registry.
+	Timeout time.Duration `yaml:"timeout" default:"10s"`
+}
+
+// NewClient builds a ts11client.Client from this configuration, or returns
+// (nil, nil) when Enable is false - callers pass the (possibly nil)
+// result straight through to CredentialMetadata.LoadCredentialSchema,
+// which treats a nil registry as "not configured" rather than a special case.
+func (cr *CredentialRegistry) NewClient() (ts11client.Client, error) {
+	if cr == nil || !cr.Enable {
+		return nil, nil
+	}
+	registries := make([]ts11client.LogicalRegistry, 0, len(cr.Registries))
+	for _, lr := range cr.Registries {
+		mirrors := make([]ts11client.RegistryConfig, 0, len(lr.Mirrors))
+		for _, m := range lr.Mirrors {
+			mirrors = append(mirrors, ts11client.RegistryConfig{BaseURL: m.BaseURL, Timeout: m.Timeout})
+		}
+		registries = append(registries, ts11client.LogicalRegistry{Mirrors: mirrors})
+	}
+	return ts11client.New(ts11client.Config{
+		Registries:      registries,
+		RefreshInterval: cr.RefreshInterval,
+	})
+}
+
 type CredentialMetadata struct {
 	// VCTMFilePath is the path to a local VCTM JSON file.
 	// When set, apigw will publish the VCTM at /type-metadata/:scope.
 	// Used for every format except mso_mdoc.
-	VCTMFilePath string `yaml:"vctm_file_path" json:"-" validate:"required_without_all=VCTMUrl MDDLFilePath MDDLUrl"`
+	VCTMFilePath string `yaml:"vctm_file_path" json:"-" validate:"required_without_all=VCTMUrl MDDLFilePath MDDLUrl VCT Doctype"`
 	// VCTMUrl is the URL where the VCTM is already published externally.
 	// When set, the VCTM is fetched from this URL at startup for internal use
 	// but NOT re-published by apigw.
 	// Used for every format except mso_mdoc.
-	VCTMUrl string `yaml:"vctm_url" json:"-" validate:"required_without_all=VCTMFilePath MDDLFilePath MDDLUrl,omitempty,url"`
+	VCTMUrl string `yaml:"vctm_url" json:"-" validate:"required_without_all=VCTMFilePath MDDLFilePath MDDLUrl VCT Doctype,omitempty,url"`
+
+	// VCT is the vct claim value to resolve via Common.CredentialRegistry
+	// (a TS11 registry client), used only when neither VCTMFilePath nor
+	// VCTMUrl is set. Requires Common.CredentialRegistry.Enable - this
+	// field being present in a scope's config does not itself turn
+	// registry lookups on. Used for every format except mso_mdoc.
+	VCT string `yaml:"vct,omitempty" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath MDDLUrl Doctype"`
 
 	VCTM *sdjwtvc.VCTM `yaml:"-" json:"-"`
 
 	// MDDLFilePath is the path to a local MDDL (mso_mdoc) schema JSON file,
 	// as produced by registry-cli's mddl format generator.
-	MDDLFilePath string `yaml:"mddl_file_path" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLUrl"`
+	MDDLFilePath string `yaml:"mddl_file_path" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLUrl VCT Doctype"`
 	// MDDLUrl is the URL where the MDDL schema is already published
 	// externally. The mso_mdoc analogue of vctm_url.
-	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath,omitempty,url"`
+	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath VCT Doctype,omitempty,url"`
+
+	// Doctype is the mdoc doctype value to resolve via
+	// Common.CredentialRegistry, used only when neither MDDLFilePath nor
+	// MDDLUrl is set. Requires Common.CredentialRegistry.Enable, same as
+	// VCT. Used only for mso_mdoc.
+	Doctype string `yaml:"doctype,omitempty" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath MDDLUrl VCT"`
 
 	MDDL *mdoc.MDDLSchema `yaml:"-" json:"-"`
 
@@ -1326,17 +1401,20 @@ type CredentialMetadata struct {
 // LoadCredentialSchema loads this scope's credential schema — a VCTM for every
 // format except mso_mdoc, which instead loads an MDDL schema (registry-cli's
 // mso_mdoc analogue of VCTM). The scope parameter is used only for error
-// messages.
-func (c *CredentialMetadata) LoadCredentialSchema(ctx context.Context, scope string) error {
+// messages. registry is consulted only when this scope has no
+// VCTMFilePath/VCTMUrl (or MDDLFilePath/MDDLUrl) and instead sets VCT (or
+// Doctype) - it may be nil, in which case a scope relying on VCT/Doctype
+// fails with a clear error rather than silently having no schema.
+func (c *CredentialMetadata) LoadCredentialSchema(ctx context.Context, scope string, registry ts11client.Client) error {
 	if c.Format == "mso_mdoc" {
-		return c.loadMDDLSchema(ctx, scope)
+		return c.loadMDDLSchema(ctx, scope, registry)
 	}
-	return c.loadVCTM(ctx, scope)
+	return c.loadVCTM(ctx, scope, registry)
 }
 
-func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string) error {
-	if c.VCTMFilePath == "" && c.VCTMUrl == "" {
-		return fmt.Errorf("scope %s: vctm_file_path or vctm_url is required for format %q", scope, c.Format)
+func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string, registry ts11client.Client) error {
+	if c.VCTMFilePath == "" && c.VCTMUrl == "" && c.VCT == "" {
+		return fmt.Errorf("scope %s: vctm_file_path, vctm_url, or vct is required for format %q", scope, c.Format)
 	}
 
 	var (
@@ -1370,6 +1448,16 @@ func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string) error {
 			return fmt.Errorf("failed to read VCTM response from %s for scope %s: %w", c.VCTMUrl, scope, err)
 		}
 		rawBytes = data
+
+	case c.VCT != "":
+		if registry == nil {
+			return fmt.Errorf("scope %s: vct %q is configured but common.credential_registry is not enabled", scope, c.VCT)
+		}
+		resolved, err := registry.ResolveVCT(ctx, c.VCT)
+		if err != nil {
+			return fmt.Errorf("failed to resolve vct %q for scope %s: %w", c.VCT, scope, err)
+		}
+		rawBytes = resolved.Data
 	}
 
 	var vctm sdjwtvc.VCTM
@@ -1396,9 +1484,9 @@ func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string) error {
 	return nil
 }
 
-func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string) error {
-	if c.MDDLFilePath == "" && c.MDDLUrl == "" {
-		return fmt.Errorf("scope %s: mddl_file_path or mddl_url is required for format %q", scope, c.Format)
+func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string, registry ts11client.Client) error {
+	if c.MDDLFilePath == "" && c.MDDLUrl == "" && c.Doctype == "" {
+		return fmt.Errorf("scope %s: mddl_file_path, mddl_url, or doctype is required for format %q", scope, c.Format)
 	}
 
 	var rawBytes []byte
@@ -1429,6 +1517,16 @@ func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string) e
 			return fmt.Errorf("failed to read MDDL response from %s for scope %s: %w", c.MDDLUrl, scope, err)
 		}
 		rawBytes = data
+
+	case c.Doctype != "":
+		if registry == nil {
+			return fmt.Errorf("scope %s: doctype %q is configured but common.credential_registry is not enabled", scope, c.Doctype)
+		}
+		resolved, err := registry.ResolveDoctype(ctx, c.Doctype)
+		if err != nil {
+			return fmt.Errorf("failed to resolve doctype %q for scope %s: %w", c.Doctype, scope, err)
+		}
+		rawBytes = resolved.Data
 	}
 
 	schema, err := mdoc.LoadMDDLSchema(rawBytes)
@@ -1542,6 +1640,8 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 			vctURL = u
 		case constructor.VCTMUrl != "":
 			vctURL = constructor.VCTMUrl
+		case constructor.VCT != "":
+			vctURL = constructor.VCT
 		}
 
 		constructor.mu.Lock()
@@ -1574,7 +1674,7 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 			continue
 		}
 		if constructor.GetVCTURL() == "" {
-			return fmt.Errorf("VCTURL is empty for scope %q after resolution (check vctm_file_path or vctm_url)", scope)
+			return fmt.Errorf("VCTURL is empty for scope %q after resolution (check vctm_file_path, vctm_url, or vct)", scope)
 		}
 	}
 
