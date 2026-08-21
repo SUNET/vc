@@ -158,6 +158,16 @@ func TestUIMetadata_MsoMdocScope(t *testing.T) {
 	require.True(t, ok, "mdl scope should be present")
 	assert.Equal(t, "org.iso.18013.5.1.mDL", info.VCT, "VCT should fall back to the MDDL doctype")
 	assert.NotEmpty(t, info.Attributes, "Attributes should be derived from the MDDL schema, not left empty")
+	assert.Empty(t, info.VCTValues,
+		"mso_mdoc has no vct - DCQL constrains it with doctype_value instead")
+
+	// The field must be OMITTED, not serialized as null: the UI's schema takes
+	// an optional array, so a null would fail validation and break
+	// /ui/metadata parsing for every configuration containing an mdoc.
+	encoded, err := json.Marshal(info)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "vct_values",
+		"vct_values must be omitted entirely for mso_mdoc, not emitted as null")
 }
 
 // TestUIMetadataPresetValidationsPerScope verifies that validations are attached

@@ -43,7 +43,11 @@ type UICredentialInfo struct {
 	// vct_values is an acceptable-value list by design (OpenID4VP DCQL), so
 	// emitting both satisfies either wallet instead of picking a winner and
 	// silently breaking the other.
-	VCTValues  []string                        `json:"vct_values"`
+	// omitempty: mso_mdoc scopes get no list, and a nil slice would otherwise
+	// serialize as "vct_values": null, which the UI's schema rejects (it accepts
+	// an optional array, not null) - breaking /ui/metadata parsing for any
+	// configuration that contains an mdoc credential.
+	VCTValues  []string                        `json:"vct_values,omitempty"`
 	Attributes map[string]map[string][]*string `json:"attributes"`
 }
 

@@ -11,9 +11,10 @@ import {
 const credentialAttributesSchema = v.object({
     format: v.string(),
     vct: v.string(),
-    // Optional so an older server that only sends "vct" still validates; the
-    // query builder falls back to [vct] when this is absent.
-    vct_values: v.optional(v.array(v.string())),
+    // nullish, not optional: absent for an older server that only sends "vct",
+    // and null for one that emits the field without omitempty. The query
+    // builder falls back to [vct] in both cases.
+    vct_values: v.nullish(v.array(v.string())),
     attributes: v.record(
         v.string(),
         v.record(
@@ -223,7 +224,7 @@ Alpine.data("app", () => ({
     /** @type {boolean} Whether the server has opted in to native DC API attempts. */
     dcApiEnabled: false,
 
-     /** @type {{ id: string; format: string; vct: string; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
+     /** @type {{ id: string; format: string; vct: string; vct_values?: string[]; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
     credentialAttributes: null,
 
     /** 
@@ -364,6 +365,10 @@ Alpine.data("app", () => ({
             id: credential,
             format: chosenCredential.format,
             vct: chosenCredential.vct,
+            // Carried through so the custom-credential flow builds the same
+            // multi-value vct_values the presets do; without it this path
+            // silently falls back to [vct] and only presets interoperate.
+            vct_values: chosenCredential.vct_values,
             claims,
             claimTree: buildClaimTree(claims),
         }
