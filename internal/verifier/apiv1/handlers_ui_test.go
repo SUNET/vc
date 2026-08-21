@@ -932,3 +932,76 @@ func applyPerScopeValidations(scopes []string, validations map[string][]openid4v
 	}
 	return nil
 }
+
+// TestUIMetadataPrefersVCTMOverVCTURL pins the identifier the UI advertises and
+// queries for to the VCTM's own vct, not the URL the VCTM is served from.
+//
+// These are different things and must not be conflated: a credential's vct
+// claim is built from the VCTM (BuildCredentialWithSigner sets
+// body["vct"] = vctm.VCT), so that is what a wallet matches a DCQL
+// meta.vct_values against, whereas VCTURL is a location ResolveVCTUrls derives
+// as apigwPublicURL + /type-metadata/{scope}.
+//
+// The existing TestUIMetadata already asserts "VCT should be populated from
+// VCTM", but could not catch this: it builds CredentialMetadata directly and
+// never sets VCTURL, so the empty-URL path was the only one exercised. In
+// production ResolveVCTUrls guarantees VCTURL is non-empty for every
+// VCTM-backed scope, which is exactly the case that regressed - the UI
+// advertised https://apigw.example/type-metadata/pid for a credential whose
+// vct is urn:eudi:pid:1, so every presentation started from the UI matched
+// nothing.
+func TestUIMetadataPrefersVCTMOverVCTURL(t *testing.T) {
+	ctx := t.Context()
+
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				// Both set, as they always are in production.
+				"pid": {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/path/to/vctm",
+					VCTURL:       "https://apigw.example/type-metadata/pid",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+				// A VCTM file with no vct: ResolveVCTUrls back-fills VCTM.VCT
+				// from the URL, so both agree and the URL is still correct.
+				"novct": {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/path/to/novct",
+					VCTURL:       "https://apigw.example/type-metadata/novct",
+					VCTM:         &sdjwtvc.VCTM{VCT: ""},
+				},
+			},
+		},
+		Verifier: &model.Verifier{
+			Presets: map[string]model.VerificationPreset{
+				"PID": {"pid": nil},
+			},
+		},
+	}
+
+	client, _ := CreateTestClientWithMock(cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, reply)
+
+	t.Run("credential info uses the VCTM vct", func(t *testing.T) {
+		assert.Equal(t, "urn:eudi:pid:1", reply.Credentials["pid"].VCT,
+			"the identifier a wallet matches against is the VCTM's vct, not where the VCTM is served")
+	})
+
+	t.Run("preset vct_values use the VCTM vct", func(t *testing.T) {
+		preset := reply.Presets["PID"]
+		require.NotNil(t, preset)
+		require.Len(t, preset.Credentials, 1)
+		assert.Equal(t, []string{"urn:eudi:pid:1"}, preset.Credentials[0].Meta.VCTValues,
+			"DCQL meta.vct_values is matched against the credential's vct claim")
+	})
+
+	t.Run("falls back to the URL when the VCTM has no vct", func(t *testing.T) {
+		assert.Equal(t, "https://apigw.example/type-metadata/novct", reply.Credentials["novct"].VCT,
+			"a VCTM with no vct still needs a usable identifier")
+	})
+}
