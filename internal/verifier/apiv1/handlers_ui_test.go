@@ -966,19 +966,20 @@ func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
 	cfg := &model.Cfg{
 		Common: &model.Common{
 			CredentialMetadata: map[string]*model.CredentialMetadata{
-				// Both set, as they always are in production.
+				// VCTURL is deliberately NOT hand-set: ResolveVCTUrls below
+				// derives it exactly as production does, so this fixture
+				// exercises the real code path rather than a hand-built
+				// approximation of it.
 				"pid": {
 					Format:       "dc+sd-jwt",
 					VCTMFilePath: "/path/to/vctm",
-					VCTURL:       "https://apigw.example/type-metadata/pid",
 					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 				},
 				// A VCTM file with no vct: ResolveVCTUrls back-fills VCTM.VCT
-				// from the URL, so both agree and the URL is still correct.
+				// from the derived URL, so the two collapse to one value.
 				"novct": {
 					Format:       "dc+sd-jwt",
 					VCTMFilePath: "/path/to/novct",
-					VCTURL:       "https://apigw.example/type-metadata/novct",
 					VCTM:         &sdjwtvc.VCTM{VCT: ""},
 				},
 			},
@@ -989,6 +990,14 @@ func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
 			},
 		},
 	}
+
+	// Resolve as the server does at startup: this is what populates VCTURL and
+	// back-fills an empty VCTM.VCT from it. Without this the "novct" case would
+	// only prove the URL fallback and never reach the de-duplication branch.
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+	require.Equal(t, "https://apigw.example/type-metadata/novct",
+		cfg.Common.CredentialMetadata["novct"].GetVCTM().VCT,
+		"precondition: ResolveVCTUrls should have back-filled the empty vct from the URL")
 
 	client, _ := CreateTestClientWithMock(cfg)
 	client.cfg = cfg
@@ -1020,11 +1029,12 @@ func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
 			"DCQL meta.vct_values is an acceptable-value list, so both forms belong in it")
 	})
 
-	t.Run("falls back to the URL when the VCTM has no vct", func(t *testing.T) {
+	t.Run("collapses to one value when the VCTM had no vct", func(t *testing.T) {
 		assert.Equal(t, "https://apigw.example/type-metadata/novct", reply.Credentials["novct"].VCT,
 			"a VCTM with no vct still needs a usable identifier")
 		assert.Equal(t, []string{"https://apigw.example/type-metadata/novct"},
 			reply.Credentials["novct"].VCTValues,
-			"ResolveVCTUrls back-fills VCTM.VCT from the URL, so the two collapse to one value")
+			"ResolveVCTUrls back-filled VCTM.VCT from the URL, so the two are the same "+
+				"string and must be de-duplicated rather than listed twice")
 	})
 }
