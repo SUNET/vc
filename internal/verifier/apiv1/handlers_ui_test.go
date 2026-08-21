@@ -987,6 +987,12 @@ func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
 		Verifier: &model.Verifier{
 			Presets: map[string]model.VerificationPreset{
 				"PID": {"pid": nil},
+				// Its own preset, not folded into "PID": the preset path
+				// resolves vct_values independently of reply.Credentials, so
+				// without a preset covering this scope Meta.VCTValues could
+				// regress for a back-filled VCTM while the credential-info
+				// assertions still passed.
+				"NOVCT": {"novct": nil},
 			},
 		},
 	}
@@ -1027,6 +1033,17 @@ func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
 			[]string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
 			preset.Credentials[0].Meta.VCTValues,
 			"DCQL meta.vct_values is an acceptable-value list, so both forms belong in it")
+	})
+
+	t.Run("preset vct_values also collapse for a back-filled VCTM", func(t *testing.T) {
+		preset := reply.Presets["NOVCT"]
+		require.NotNil(t, preset)
+		require.Len(t, preset.Credentials, 1)
+		assert.Equal(t,
+			[]string{"https://apigw.example/type-metadata/novct"},
+			preset.Credentials[0].Meta.VCTValues,
+			"the preset path resolves vct_values separately from reply.Credentials, "+
+				"so it needs its own coverage of the de-duplicated case")
 	})
 
 	t.Run("collapses to one value when the VCTM had no vct", func(t *testing.T) {
