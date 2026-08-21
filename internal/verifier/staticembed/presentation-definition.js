@@ -368,7 +368,12 @@ Alpine.data("app", () => ({
             // Carried through so the custom-credential flow builds the same
             // multi-value vct_values the presets do; without it this path
             // silently falls back to [vct] and only presets interoperate.
-            vct_values: chosenCredential.vct_values,
+            //
+            // ?? undefined normalizes the schema's legacy null (accepted so a
+            // server that emits the field without omitempty doesn't break the
+            // page) to the absent form this object's type declares, keeping
+            // the strict checkJs contract consistent.
+            vct_values: chosenCredential.vct_values ?? undefined,
             claims,
             claimTree: buildClaimTree(claims),
         }
