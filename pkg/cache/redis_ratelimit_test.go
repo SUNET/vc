@@ -46,9 +46,14 @@ func TestRedisRateLimitCounter_MultipleIncrementsInSameWindow(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := t.Context()
+	// A much larger-than-necessary window keeps the whole loop safely
+	// inside a single sub-window - with time.Minute, a run starting close
+	// to a minute boundary could cross into the next window mid-loop and
+	// make the final estimate != 5 even though nothing is actually wrong.
+	const window = time.Hour
 	var last int64
 	for range 5 {
-		count, err := rl.IncrementWithTTL(ctx, "test-key-multi", time.Minute)
+		count, err := rl.IncrementWithTTL(ctx, "test-key-multi", window)
 		require.NoError(t, err)
 		last = count
 	}

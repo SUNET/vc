@@ -155,6 +155,20 @@ func TestRedisCache_EmptyCollection(t *testing.T) {
 	assert.Error(t, err, "an empty collection breaks key namespacing and widens Len()'s scan pattern, so it must be rejected")
 }
 
+// TestRedisCache_CollectionWithGlobMetacharacters confirms a collection
+// name containing SCAN glob metacharacters is rejected, since Len()'s
+// "<collection>:*" MATCH pattern would otherwise match keys outside this
+// cache's own namespace.
+func TestRedisCache_CollectionWithGlobMetacharacters(t *testing.T) {
+	client, cleanup := startRedisContainer(t)
+	defer cleanup()
+
+	for _, collection := range []string{"cache*", "cache?", "cache[a]", `cache\x`} {
+		_, err := NewRedisCache[string](client, collection, 5*time.Minute, nil)
+		assert.Error(t, err, "collection %q contains a glob metacharacter and must be rejected", collection)
+	}
+}
+
 func TestRedisCache_JWKKey(t *testing.T) {
 	client, cleanup := startRedisContainer(t)
 	defer cleanup()

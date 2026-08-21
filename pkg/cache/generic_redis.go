@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -57,6 +58,14 @@ func NewRedisCache[V any](client redis.UniversalClient, collection string, ttl t
 	}
 	if collection == "" {
 		return nil, fmt.Errorf("redis cache: collection cannot be empty")
+	}
+	// Len() scans "<collection>:*" as a glob pattern - a collection name
+	// containing glob metacharacters would make that pattern match keys
+	// outside this cache's own namespace (or scan far more broadly than
+	// intended), silently breaking the per-collection isolation every
+	// other method relies on.
+	if strings.ContainsAny(collection, "*?[]\\") {
+		return nil, fmt.Errorf("redis cache: collection %q must not contain glob metacharacters (*?[]\\)", collection)
 	}
 	if log == nil {
 		log = nopLogger{}
