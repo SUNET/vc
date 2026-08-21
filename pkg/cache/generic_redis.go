@@ -15,7 +15,12 @@ import (
 // identifiable in shared logs alongside MongoCache/MemoryCache.
 const logPrefix = "redis cache "
 
-// RedisCache is a generic cache backed by Redis. Values are JSON-encoded
+// RedisCache is a generic cache backed by Redis or any RESP-protocol
+// server compatible with it (e.g. Valkey, the open-source Redis fork
+// maintained under the Linux Foundation) - this implementation only ever
+// issues standard GET/SET/DEL/GETDEL/SCAN/SETNX commands through
+// redis.UniversalClient, none of which are Redis-specific. Values are
+// JSON-encoded
 // before storage (matching MongoCache's approach), which allows interface
 // types (e.g. jwk.Key) to round-trip correctly via a custom decoder. Unlike
 // MongoCache, which approximates per-entry TTL by shifting created_at under

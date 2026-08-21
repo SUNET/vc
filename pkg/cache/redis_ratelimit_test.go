@@ -111,3 +111,53 @@ func TestRedisRateLimitCounter_TTLSetOnFreshWindowKey(t *testing.T) {
 	}
 	assert.Greater(t, ttl, time.Duration(0), "fresh window key must have a TTL set")
 }
+
+// --- RedisRateLimitCounter-against-Valkey tests (require Docker) ---
+//
+// IncrementWithTTL's correctness hinges on Valkey executing incrWithTTLScript
+// (a Lua script run via EVAL) atomically, the same way Redis does. These
+// tests confirm that against a real Valkey server.
+
+func TestValkeyRateLimitCounter_FirstIncrement(t *testing.T) {
+	client, cleanup := startValkeyContainer(t)
+	defer cleanup()
+
+	rl, err := NewRedisRateLimitCounter(client, "ratelimit_test", nil)
+	require.NoError(t, err)
+
+	count, err := rl.IncrementWithTTL(t.Context(), "test-key", time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count, "first increment in a fresh window should report exactly 1")
+}
+
+// TestValkeyRateLimitCounter_TTLSetOnFreshWindowKey mirrors
+// TestRedisRateLimitCounter_TTLSetOnFreshWindowKey, confirming the Lua
+// script's conditional EXPIRE call actually takes effect on Valkey.
+func TestValkeyRateLimitCounter_TTLSetOnFreshWindowKey(t *testing.T) {
+	client, cleanup := startValkeyContainer(t)
+	defer cleanup()
+
+	rl, err := NewRedisRateLimitCounter(client, "ratelimit_test", nil)
+	require.NoError(t, err)
+
+	ctx := t.Context()
+	window := time.Minute
+	before := time.Now()
+	_, err = rl.IncrementWithTTL(ctx, "ttl-check", window)
+	require.NoError(t, err)
+	after := time.Now()
+
+	windowSecs := int64(window.Seconds())
+	candidates := []int64{before.Unix() / windowSecs, after.Unix() / windowSecs}
+
+	var ttl time.Duration
+	for _, id := range candidates {
+		key := "ratelimit_test:ttl-check:" + strconv.FormatInt(id, 10)
+		v, err := client.TTL(ctx, key).Result()
+		require.NoError(t, err)
+		if v > ttl {
+			ttl = v
+		}
+	}
+	assert.Greater(t, ttl, time.Duration(0), "fresh window key must have a TTL set")
+}

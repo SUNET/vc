@@ -23,8 +23,12 @@ end
 return count
 `)
 
-// RedisRateLimitCounter is a Redis-backed sliding-window rate limit counter.
-// It mirrors MongoRateLimitCounter's algorithm exactly (two fixed
+// RedisRateLimitCounter is a Redis-backed sliding-window rate limit
+// counter. It also works unmodified against Valkey and other
+// RESP-compatible servers, since its only backend-specific operation -
+// incrWithTTLScript - is a plain Lua script run via EVAL, a standard RESP
+// command Valkey executes identically. It mirrors MongoRateLimitCounter's
+// algorithm exactly (two fixed
 // sub-windows per key, weighted to approximate a sliding window), but the
 // current sub-window's counter is incremented via Redis's native atomic
 // INCR rather than a MongoDB FindOneAndUpdate upsert - the "insert or

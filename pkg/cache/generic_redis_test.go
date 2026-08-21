@@ -17,33 +17,54 @@ import (
 // Mirrors startMongoContainer's shape for this package's other backends.
 func startRedisContainer(t *testing.T) (redis.UniversalClient, func()) {
 	t.Helper()
+	return startRedisCompatibleContainer(t, "redis:7")
+}
+
+// startValkeyContainer spins up a throwaway Valkey (the open-source Redis
+// fork maintained under the Linux Foundation) via the same testcontainers
+// module used for Redis. Valkey speaks the same RESP protocol and exposes
+// the same port/startup log line Redis does, so no dedicated
+// testcontainers module is needed - only the image differs. Its tests
+// exist to prove RedisCache/RedisRateLimitCounter genuinely work against
+// Valkey, not just Redis, since nothing else in this package would catch
+// a protocol divergence.
+func startValkeyContainer(t *testing.T) (redis.UniversalClient, func()) {
+	t.Helper()
+	return startRedisCompatibleContainer(t, "valkey/valkey:8")
+}
+
+// startRedisCompatibleContainer spins up img (any RESP-protocol server
+// exposing the standard Redis port 6379) via testcontainers and returns a
+// connected redis.UniversalClient plus a cleanup function.
+func startRedisCompatibleContainer(t *testing.T, img string) (redis.UniversalClient, func()) {
+	t.Helper()
 	if !isDockerAvailable() {
 		t.Skip("Skipping test: Docker is not available")
 	}
 	ctx := t.Context()
 
-	container, err := tcredis.Run(ctx, "redis:7")
+	container, err := tcredis.Run(ctx, img)
 	if err != nil {
-		t.Fatalf("start redis container: %v", err)
+		t.Fatalf("start %s container: %v", img, err)
 	}
 
 	connStr, err := container.ConnectionString(ctx)
 	if err != nil {
 		_ = container.Terminate(context.Background())
-		t.Fatalf("redis connection string: %v", err)
+		t.Fatalf("%s connection string: %v", img, err)
 	}
 
 	opts, err := redis.ParseURL(connStr)
 	if err != nil {
 		_ = container.Terminate(context.Background())
-		t.Fatalf("parse redis url: %v", err)
+		t.Fatalf("parse %s url: %v", img, err)
 	}
 	client := redis.NewClient(opts)
 
 	if err := client.Ping(ctx).Err(); err != nil {
 		_ = client.Close()
 		_ = container.Terminate(context.Background())
-		t.Fatalf("ping redis: %v", err)
+		t.Fatalf("ping %s: %v", img, err)
 	}
 
 	cleanup := func() {
@@ -239,4 +260,41 @@ func TestRedisCache_SetNX_NonPositiveDefaultTTLExpiresImmediately(t *testing.T) 
 	time.Sleep(50 * time.Millisecond)
 	_, ok = c.Get(ctx, "zero-default-ttl")
 	assert.False(t, ok, "SetNX must not cache the value permanently when the cache's default ttl is non-positive")
+}
+
+// --- RedisCache-against-Valkey tests (require Docker) ---
+//
+// RedisCache talks to its backend only through redis.UniversalClient's
+// RESP commands (GET/SET/DEL/GETDEL/SCAN/SETNX+EX), with no
+// Redis-specific behavior beyond that protocol surface. These tests run
+// the same contract/TTL assertions used above against a real Valkey
+// server to confirm that's actually true, rather than assuming
+// wire-compatibility from Valkey's project description.
+
+func TestValkeyCache_String(t *testing.T) {
+	client, cleanup := startValkeyContainer(t)
+	defer cleanup()
+
+	c, err := NewRedisCache[string](client, "cache_string", 10*time.Minute, nil)
+	require.NoError(t, err)
+	runGenericCacheContractTests(t, c, "hello", "world")
+}
+
+// TestValkeyCache_TTLExpiration confirms Valkey actually expires keys via
+// native per-key EXPIRE, matching TestRedisCache_TTLExpiration.
+func TestValkeyCache_TTLExpiration(t *testing.T) {
+	client, cleanup := startValkeyContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	c, err := NewRedisCache[string](client, "cache_ttl", 200*time.Millisecond, nil)
+	require.NoError(t, err)
+
+	c.Set(ctx, "expiring", "value")
+	_, ok := c.Get(ctx, "expiring")
+	require.True(t, ok, "value should be present immediately after Set")
+
+	time.Sleep(400 * time.Millisecond)
+	_, ok = c.Get(ctx, "expiring")
+	assert.False(t, ok, "value should have expired")
 }
