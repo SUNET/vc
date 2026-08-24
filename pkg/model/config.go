@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -567,9 +568,12 @@ type Verifier struct {
 	// KeyConfig is the signing key configuration
 	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
 	// ClientIDScheme determines how the verifier identifies itself to wallets.
-	// Supported values: "x509_san_dns" (default), "did".
+	// Supported values: "x509_san_dns" (default), "x509_hash", "did".
 	// When "did", the DID field must be set and /.well-known/did.json is served.
-	ClientIDScheme string `yaml:"client_id_scheme,omitempty" default:"x509_san_dns" validate:"omitempty,oneof=x509_san_dns did"`
+	// When "x509_hash" (the scheme the EUDI ARF mandates for Relying Party
+	// authentication), the client_id is the base64url SHA-256 of the signing
+	// certificate, so key_config must supply one and it is always sent in x5c.
+	ClientIDScheme string `yaml:"client_id_scheme,omitempty" default:"x509_san_dns" validate:"omitempty,oneof=x509_san_dns x509_hash did"`
 	// DID is the verifier's DID identity.
 	DID string `yaml:"did,omitempty" validate:"required_if=ClientIDScheme did" doc_example:"\"did:web:verifier.example.com\""`
 	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets
@@ -638,14 +642,32 @@ type RevocationConfig struct {
 
 // VerifierClientID returns the client_id value the verifier uses in OID4VP requests.
 // For "x509_san_dns" (default): returns "x509_san_dns:{hostname}".
+// For "x509_hash": returns "x509_hash:{base64url(SHA-256(DER))}" of leaf.
 // For "did": returns the configured DID value directly.
-func (v *Verifier) VerifierClientID() (string, error) {
+//
+// leaf is the verifier's own signing certificate. It is required for
+// "x509_hash" and ignored by every other scheme, so callers that have not
+// loaded a certificate may pass nil as long as they are not configured for
+// "x509_hash".
+func (v *Verifier) VerifierClientID(leaf *x509.Certificate) (string, error) {
 	switch v.ClientIDScheme {
 	case "did":
 		if v.DID == "" {
 			return "", fmt.Errorf("client_id_scheme is \"did\" but no DID is configured")
 		}
 		return v.DID, nil
+	case "x509_hash":
+		if leaf == nil {
+			return "", fmt.Errorf("client_id_scheme is \"x509_hash\" but no signing certificate is loaded: key_config must supply a certificate")
+		}
+		// OpenID4VP 1.0: the value MUST be the base64url-encoded SHA-256
+		// hash of the DER-encoded leaf certificate. x509.Certificate.Raw is
+		// already the DER bytes. Encoding is unpadded base64url, NOT hex -
+		// go-trust's VerifyLeafBinding also accepts hex, but that leniency
+		// is for validating other parties; emitting hex would interoperate
+		// with our own stack and fail against a spec-strict wallet.
+		digest := sha256.Sum256(leaf.Raw)
+		return "x509_hash:" + base64.RawURLEncoding.EncodeToString(digest[:]), nil
 	default:
 		// x509_san_dns (default)
 		u, err := url.Parse(v.PublicURL)

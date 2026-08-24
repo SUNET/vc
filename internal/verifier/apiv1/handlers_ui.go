@@ -305,7 +305,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// them using the VCTM so wallets disclose nested content correctly.
 	c.augmentDCQLFromVCTM(req.DCQLQuery)
 
-	uiClientID, err := c.cfg.Verifier.VerifierClientID()
+	uiClientID, err := c.cfg.Verifier.VerifierClientID(c.pkiSigningCert)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine verifier client_id: %w", err)
 	}
