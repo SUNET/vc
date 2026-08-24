@@ -580,6 +580,8 @@ type Verifier struct {
 	DID string `yaml:"did,omitempty" validate:"required_if=ClientIDScheme did" doc_example:"\"did:web:verifier.example.com\""`
 	// AccessCertificate validates the verifier's own wallet-facing certificate as an EUDI Relying Party access certificate (WRPAC, ETSI TS 119 411-8). Off by default; deployments outside an ARF trust framework are unaffected.
 	AccessCertificate *AccessCertificate `yaml:"access_certificate,omitempty"`
+	// RegistrationCertificate points at a Relying Party registration certificate (WRPRC, ETSI TS 119 475) issued to this verifier by a national Registrar, to be presented to wallets in the OpenID4VP verifier_info parameter. vc does not issue these.
+	RegistrationCertificate *RegistrationCertificate `yaml:"registration_certificate,omitempty"`
 	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets
 	PreferredVPFormats *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"`
 	// SupportedWallets holds supported wallet configurations
