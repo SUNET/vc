@@ -101,18 +101,11 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		c.log.Info("PKI signing key not loaded", "error", err)
 	}
 
-	// client_id_scheme "x509_hash" pins the exact leaf certificate: the
-	// client_id IS its SHA-256 digest, so a wallet can only verify the
-	// binding if that same certificate travels with the request in x5c.
-	// Every other scheme can still authenticate without one. Fail at
-	// startup rather than emit requests no wallet can validate.
-	if c.cfg.Verifier.ClientIDScheme == "x509_hash" {
-		if c.pkiSigningCert == nil {
-			return nil, fmt.Errorf("client_id_scheme is \"x509_hash\" but no signing certificate was loaded from key_config")
-		}
-		if len(c.pkiSignerChain) == 0 {
-			return nil, fmt.Errorf("client_id_scheme is \"x509_hash\" but key_config supplied no certificate chain: the leaf must be sent in x5c for the wallet to verify the client_id")
-		}
+	// Fail at startup if the loaded key material cannot satisfy the
+	// configured client_id_scheme, rather than emitting requests no wallet
+	// can validate. See model.Verifier.ValidateClientIDMaterial.
+	if err := c.cfg.Verifier.ValidateClientIDMaterial(c.pkiSigningCert, c.pkiSignerChain); err != nil {
+		return nil, err
 	}
 
 	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand in handler)

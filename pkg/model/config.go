@@ -640,6 +640,29 @@ type RevocationConfig struct {
 	SkipScopes []string `yaml:"skip_scopes,omitempty" json:"skip_scopes,omitempty"`
 }
 
+// ValidateClientIDMaterial checks that the key material loaded at startup can
+// actually satisfy the configured client_id_scheme, so a misconfiguration
+// surfaces as a boot failure rather than as requests no wallet can validate.
+//
+// Only "x509_hash" constrains the material: it pins the exact leaf
+// certificate, so that certificate must both exist and travel with every
+// request in x5c - the wallet has nothing else to hash. "x509_san_dns" and
+// "did" authenticate without one, so both are accepted with nil/empty input.
+func (v *Verifier) ValidateClientIDMaterial(leaf *x509.Certificate, chain []string) error {
+	if v.ClientIDScheme != "x509_hash" {
+		return nil
+	}
+	// Derive the client_id rather than re-checking leaf by hand: it applies
+	// the same nil and empty-DER rules, so the two cannot drift apart.
+	if _, err := v.VerifierClientID(leaf); err != nil {
+		return err
+	}
+	if len(chain) == 0 {
+		return fmt.Errorf("client_id_scheme is \"x509_hash\" but key_config supplied no certificate chain: the leaf must be sent in x5c for the wallet to verify the client_id")
+	}
+	return nil
+}
+
 // VerifierClientID returns the client_id value the verifier uses in OID4VP requests.
 // For "x509_san_dns" (default): returns "x509_san_dns:{hostname}".
 // For "x509_hash": returns "x509_hash:{base64url(SHA-256(DER))}" of leaf.
@@ -659,6 +682,15 @@ func (v *Verifier) VerifierClientID(leaf *x509.Certificate) (string, error) {
 	case "x509_hash":
 		if leaf == nil {
 			return "", fmt.Errorf("client_id_scheme is \"x509_hash\" but no signing certificate is loaded: key_config must supply a certificate")
+		}
+		// A hand-built x509.Certificate (rather than one from
+		// x509.ParseCertificate) can have no DER bytes. Hashing that empty
+		// slice would not fail - it would yield SHA-256 of the empty string,
+		// a fixed value every such verifier would advertise as its identity,
+		// and binding checks would then fail for reasons pointing nowhere
+		// near the real cause.
+		if len(leaf.Raw) == 0 {
+			return "", fmt.Errorf("client_id_scheme is \"x509_hash\" but the signing certificate carries no DER bytes (Raw is empty): it must be parsed from DER, not constructed in memory")
 		}
 		// OpenID4VP 1.0: the value MUST be the base64url-encoded SHA-256
 		// hash of the DER-encoded leaf certificate. x509.Certificate.Raw is

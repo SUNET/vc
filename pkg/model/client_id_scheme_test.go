@@ -118,6 +118,101 @@ func TestVerifierClientID_X509Hash_RequiresCertificate(t *testing.T) {
 	assert.Contains(t, err.Error(), "x509_hash")
 }
 
+// TestVerifierClientID_X509Hash_RejectsCertificateWithoutDER guards a silent
+// failure mode: sha256 over an empty Raw does not error, it returns the
+// SHA-256 of the empty string. Every verifier holding a hand-built
+// certificate would then advertise that same constant as its identity, and
+// the resulting binding failures would point nowhere near the cause.
+func TestVerifierClientID_X509Hash_RejectsCertificateWithoutDER(t *testing.T) {
+	v := &Verifier{ClientIDScheme: "x509_hash", PublicURL: "https://verifier.example.com"}
+
+	// Constructed in memory rather than parsed from DER, so Raw is empty -
+	// exactly what a caller building a template certificate would hold.
+	_, err := v.VerifierClientID(&x509.Certificate{})
+	require.Error(t, err, "a certificate with no DER bytes must be rejected, not hashed")
+	assert.Contains(t, err.Error(), "DER")
+
+	// The constant that would otherwise be emitted, pinned so this test
+	// fails loudly if the guard is ever dropped.
+	empty := sha256.Sum256(nil)
+	assert.Equal(t, "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU",
+		base64.RawURLEncoding.EncodeToString(empty[:]),
+		"documents the fixed value an unguarded implementation would advertise")
+}
+
+// TestValidateClientIDMaterial covers the startup gate that decides whether
+// the verifier may boot at all. It lives on the config type precisely so it
+// can be exercised without standing up New()'s db/notify/cache/tracer graph.
+func TestValidateClientIDMaterial(t *testing.T) {
+	cert := newClientIDTestCert(t, "verifier.example.com")
+	chain := []string{"MIIBdummy"} // x5c is opaque here; only presence matters
+
+	tests := []struct {
+		name    string
+		scheme  string
+		leaf    *x509.Certificate
+		chain   []string
+		wantErr string
+	}{
+		{
+			name:   "x509_hash with certificate and chain boots",
+			scheme: "x509_hash",
+			leaf:   cert,
+			chain:  chain,
+		},
+		{
+			name:    "x509_hash without certificate fails",
+			scheme:  "x509_hash",
+			leaf:    nil,
+			chain:   chain,
+			wantErr: "no signing certificate",
+		},
+		{
+			name:    "x509_hash without chain fails",
+			scheme:  "x509_hash",
+			leaf:    cert,
+			chain:   nil,
+			wantErr: "no certificate chain",
+		},
+		{
+			name:    "x509_hash with an unparsed certificate fails",
+			scheme:  "x509_hash",
+			leaf:    &x509.Certificate{},
+			chain:   chain,
+			wantErr: "DER",
+		},
+		// The other two schemes authenticate without a certificate, so
+		// requiring one would break existing deployments that configure
+		// neither key_config chain nor a leaf.
+		{
+			name:   "x509_san_dns needs no material",
+			scheme: "x509_san_dns",
+		},
+		{
+			name:   "did needs no material",
+			scheme: "did",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &Verifier{
+				ClientIDScheme: tt.scheme,
+				PublicURL:      "https://verifier.example.com",
+				DID:            "did:web:verifier.example.com",
+			}
+
+			err := v.ValidateClientIDMaterial(tt.leaf, tt.chain)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
 // TestVerifierClientID_X509SANDNS_RoundTripsThroughGoTrust covers the default
 // scheme through the same validator, so the two schemes stay consistent about
 // how the client_id is shaped.
