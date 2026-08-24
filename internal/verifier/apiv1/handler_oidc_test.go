@@ -5,6 +5,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -14,11 +16,16 @@ import (
 	"github.com/SUNET/vc/internal/verifier/db"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
+	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/trace"
 
+	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1556,13 +1563,101 @@ func TestAuthorize_NoWalletLinks(t *testing.T) {
 	assert.Empty(t, resp.WalletLinks)
 }
 
+// TestAuthorize_NonASCIIWalletQRCodeBinding is a regression test for non-ASCII
+// supported wallet display names (e.g. "Möbius Wallet"). Authorize must emit a
+// QueryEscaped wallet= query parameter, and Binding.Request for
+// GET /qr/:session_id?wallet=... must accept that value. Previously printascii
+// on GetQRCodeRequest.WalletName caused a 400 after the browser followed the
+// authorize QR URL.
+func TestAuthorize_NonASCIIWalletQRCodeBinding(t *testing.T) {
+	ctx := t.Context()
+	const walletName = "Möbius Wallet"
+
+	client, mockDB := CreateTestClientWithMock(nil)
+	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
+	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
+	client.cfg.Verifier.SupportedWallets = map[string]string{
+		walletName: "https://wallet.moebius.example/cb",
+	}
+
+	template := createSimplePresentationTemplate(t, []string{"openid", "profile"})
+	client.AddPresentationTemplateForTesting(template)
+
+	dbClient := &db.Client{
+		ClientID:      "non-ascii-wallet-client",
+		RedirectURIs:  []string{"https://example.com/callback"},
+		ResponseTypes: []string{"code"},
+		AllowedScopes: []string{"openid", "profile"},
+	}
+	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
+
+	resp, err := client.Authorize(ctx, &AuthorizeRequest{
+		ResponseType: "code",
+		ClientID:     "non-ascii-wallet-client",
+		RedirectURI:  "https://example.com/callback",
+		Scope:        "openid profile",
+		State:        "test-state",
+		Nonce:        "test-nonce",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.WalletLinks, 1)
+
+	link := resp.WalletLinks[0]
+	assert.Equal(t, walletName, link.Name)
+	assert.Contains(t, link.QRCodeImageURL, "/qr/"+resp.SessionID)
+	assert.Contains(t, link.QRCodeImageURL, "wallet="+url.QueryEscape(walletName))
+
+	httpHelpers := installProductionGinValidator(t)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, link.QRCodeImageURL, nil)
+	c.Params = gin.Params{{Key: "session_id", Value: resp.SessionID}}
+
+	bound := &GetQRCodeRequest{}
+	err = httpHelpers.Binding.Request(ctx, c, bound)
+	require.NoError(t, err, "GET /qr/:session_id?wallet=... must accept QueryEscaped non-ASCII wallet names")
+	assert.Equal(t, resp.SessionID, bound.SessionID)
+	assert.Equal(t, walletName, bound.WalletName)
+
+	qrResp, err := client.GetQRCode(ctx, bound)
+	require.NoError(t, err)
+	require.NotNil(t, qrResp)
+	assert.NotEmpty(t, qrResp.ImageData)
+}
+
+// installProductionGinValidator installs the same gin struct validator used by
+// the verifier HTTP server so Binding.Request exercises printascii/max tags.
+func installProductionGinValidator(t *testing.T) *httphelpers.Client {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	log := logger.NewSimple("httphelper")
+	tracer, err := trace.NewForTesting(t.Context(), "httphelper", log)
+	require.NoError(t, err)
+
+	helpers, err := httphelpers.New(t.Context(), tracer, &model.Cfg{}, log)
+	require.NoError(t, err)
+
+	validator, err := helpers.Binding.Validator()
+	require.NoError(t, err)
+
+	original := binding.Validator
+	binding.Validator = validator
+	t.Cleanup(func() { binding.Validator = original })
+
+	return helpers
+}
+
 // TestGetQRCode tests QR code generation
 func TestGetQRCode(t *testing.T) {
 	ctx := t.Context()
 	client, _ := CreateTestClientWithMock(nil)
 	client.cfg.Verifier.SupportedWallets = map[string]string{
-		"SUNET Wallet": "https://wallet.sunet.se/cb",
-		"Test Wallet":  "https://test-wallet.example.com/authorize",
+		"SUNET Wallet":  "https://wallet.sunet.se/cb",
+		"Test Wallet":   "https://test-wallet.example.com/authorize",
+		"Möbius Wallet": "https://wallet.moebius.example/cb",
 	}
 
 	// Create a test session
@@ -1606,6 +1701,19 @@ func TestGetQRCode(t *testing.T) {
 			req: &GetQRCodeRequest{
 				SessionID:  "test-session-123",
 				WalletName: "SUNET Wallet",
+			},
+			wantErr: nil,
+			checkResp: func(t *testing.T, resp *GetQRCodeResponse) {
+				assert.NotNil(t, resp)
+				assert.NotEmpty(t, resp.ImageData)
+				assert.True(t, len(resp.ImageData) > 0)
+			},
+		},
+		{
+			name: "non-ASCII web wallet name",
+			req: &GetQRCodeRequest{
+				SessionID:  "test-session-123",
+				WalletName: "Möbius Wallet",
 			},
 			wantErr: nil,
 			checkResp: func(t *testing.T, resp *GetQRCodeResponse) {
