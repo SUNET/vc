@@ -7,6 +7,13 @@ bin/
 # zk-cred-longfellow checkout + staged Go C-ABI library/header, populated by
 # `make zk-native-lib`. Never committed - fetched/built on demand.
 /third_party/
+
+# zk-cred-vega's verifier-key test fixture (~105MB decompressed) - unlike
+# pkg/mdoc/testdata/zk_native's small Longfellow fixtures, this one is too
+# large to commit. Regenerate via `cargo test --release
+# go_ffi::tests::dump_golden_fixture_for_go_smoke_test -- --ignored` in a
+# zk-cred-vega checkout (see pkg/mdoc/zknative_vega/verifier_test.go).
+/pkg/mdoc/zknative_vega/testdata/
 pki/*
 !pki/create_pki.sh
 redis-data/
