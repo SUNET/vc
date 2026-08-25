@@ -4,7 +4,7 @@ common:
   skip_secrets_perm_check: true
   production: true
   mongo:
-    uri: "mongodb://sunet-vc-mongodb.internal:27017"
+    uri: ""
 
   credential_metadata:
     pid:

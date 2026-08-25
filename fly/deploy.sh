@@ -106,7 +106,8 @@ cmd_launch() {
     local mongo_app mongo_pass mongo_user mongo_uri
     mongo_app="$(app_name "mongodb")"
     mongo_user="admin"
-    mongo_pass="$(openssl rand -base64 24)"
+    # hex, not base64: password is embedded in a URI, must be URL-safe.
+    mongo_pass="$(openssl rand -hex 24)"
     mongo_uri="mongodb://${mongo_user}:${mongo_pass}@${mongo_app}.internal:27017/?authSource=admin"
 
     echo "==> Setting MongoDB secrets for $mongo_app"
@@ -122,6 +123,52 @@ cmd_launch() {
     fi
     sed -i "s|uri:.*|uri: \"${mongo_uri}\"|" "$secrets_file"
     echo "    Updated $secrets_file with MongoDB URI"
+
+    # Generate OIDC secrets consumed by the Keycloak realm import
+    # (fly/oidc/realm-vc.json uses ${env.APIGW_OIDC_CLIENT_SECRET} and
+    # ${env.DEMO_USER_PASSWORD}) and propagate the client secret to apigw
+    # via secrets.yaml so both sides agree.
+    local oidc_app apigw_client_secret demo_user_password
+    oidc_app="$(app_name "oidc")"
+    apigw_client_secret="$(openssl rand -hex 24)"
+    # 4 chars for live demos: 3 lowercase letters + 1 trailing digit.
+    demo_user_password="$(LC_ALL=C awk 'BEGIN{srand();s="";for(i=0;i<3;i++)s=s substr("abcdefghjkmnpqrstuvwxyz",int(rand()*23)+1,1);print s int(rand()*10)}')"
+
+    echo "==> Setting OIDC secrets for $oidc_app"
+    fly secrets set --app "$oidc_app" \
+        APIGW_OIDC_CLIENT_SECRET="$apigw_client_secret" \
+        DEMO_USER_PASSWORD="$demo_user_password" \
+        2>/dev/null && echo "    OIDC secrets set" || echo "    (secrets already set or app missing)"
+
+    if command -v yq >/dev/null 2>&1; then
+        yq -i ".apigw.auth_providers.oidc.registration.preconfigured.client_secret = \"$apigw_client_secret\"" "$secrets_file"
+        echo "    Updated $secrets_file with apigw OIDC client_secret"
+    else
+        echo "    WARNING: yq not found; set apigw.auth_providers.oidc.registration.preconfigured.client_secret in $secrets_file manually to: $apigw_client_secret"
+    fi
+    echo "    Demo user password (Keycloak realm users): $demo_user_password"
+
+    # AS signing key for the go-wallet-backend Authorization Server (/auth/*).
+    # Mounted into the container by fly/wallet-backend/fly.toml's [[files]] block.
+    local wallet_backend_app as_key_pem as_key_b64
+    wallet_backend_app="$(app_name "wallet-backend")"
+    echo "==> Setting AS signing key for $wallet_backend_app"
+    if fly secrets list --app "$wallet_backend_app" 2>/dev/null | grep -q "^AS_SIGNING_KEY_PEM"; then
+        echo "    (AS_SIGNING_KEY_PEM already set, leaving in place)"
+    else
+        as_key_pem="$(openssl ecparam -name prime256v1 -genkey -noout)"
+        as_key_b64="$(printf '%s' "$as_key_pem" | base64 | tr -d '\n')"
+        fly secrets set --app "$wallet_backend_app" \
+            AS_SIGNING_KEY_PEM="$as_key_b64" \
+            2>/dev/null && echo "    AS signing key set" || echo "    (failed to set AS_SIGNING_KEY_PEM; app missing?)"
+    fi
+
+    # Authenticated Mongo URI for wallet-backend (fly.toml only ships the
+    # unauthenticated form; the Fly secret overrides it at runtime).
+    echo "==> Setting Mongo URI for $wallet_backend_app"
+    fly secrets set --app "$wallet_backend_app" \
+        WALLET_STORAGE_MONGODB_URI="$mongo_uri" \
+        2>/dev/null && echo "    Mongo URI set" || echo "    (failed to set WALLET_STORAGE_MONGODB_URI; app missing?)"
 
     echo ""
     echo "==> Apps created. Next: ./fly/deploy.sh deploy"

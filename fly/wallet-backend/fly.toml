@@ -4,6 +4,15 @@ primary_region = "arn"
 [build]
   image = "ghcr.io/sirosfoundation/go-wallet-backend:latest"
 
+# Enables the Authorization Server (/auth/*) alongside the backend role.
+[processes]
+  app = "--mode=backend,auth"
+
+# AS signing key, provisioned as a base64-encoded Fly secret (see fly/deploy.sh).
+[[files]]
+  guest_path = "/secrets/as_signing_key.pem"
+  secret_name = "AS_SIGNING_KEY_PEM"
+
 [env]
   WALLET_SERVER_HOST = "0.0.0.0"
   WALLET_SERVER_PORT = "8080"
@@ -19,6 +28,9 @@ primary_region = "arn"
   WALLET_STORAGE_MONGODB_DATABASE = "wallet"
   WALLET_LOGGING_LEVEL = "info"
   WALLET_LOGGING_FORMAT = "json"
+  WALLET_AS_SIGNING_KEY_PATH = "/secrets/as_signing_key.pem"
+  WALLET_AS_EXTERNAL_URL = "https://sunet-vc-wallet-backend.fly.dev"
+  WALLET_AS_AUDIENCES = "wallet-backend"
 
 [http_service]
   internal_port = 8080
@@ -26,6 +38,7 @@ primary_region = "arn"
   auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 1
+  processes = ["app"]
   [http_service.concurrency]
     type = "requests"
     soft_limit = 200

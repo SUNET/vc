@@ -856,7 +856,8 @@ vscode: test-env ## Set up VS Code development environment
 	curl -sfL https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash -s -- -b /usr/local/bin
 	$(info Installing flyctl)
 	curl -sL https://fly.io/install.sh | sh
-	export FLYCTL_INSTALL="$$HOME/.fly" && export PATH="$$FLYCTL_INSTALL/bin:$$PATH"
+	sudo ln -sf "$$HOME/.fly/bin/flyctl" /usr/local/bin/flyctl
+	sudo ln -sf "$$HOME/.fly/bin/flyctl" /usr/local/bin/fly
 	$(info Installing GitHub CLI (gh))
 	curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
 	sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \

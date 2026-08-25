@@ -103,6 +103,8 @@ func New(serviceName string, opts ...Option) *Aggregator {
 // Register adds a local component to be probed. The probe will appear in
 // the reply as "<serviceName>.<name>".
 func (a *Aggregator) Register(name string, p Prober) *Aggregator {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.local = append(a.local, namedProber{name: name, prober: p})
 	return a
 }
@@ -116,6 +118,8 @@ func (a *Aggregator) RegisterFunc(name string, fn func(ctx context.Context) erro
 // into the aggregated reply. If fetch returns an error, a single failing
 // probe named after the downstream is emitted instead.
 func (a *Aggregator) RegisterDownstream(name string, fetch DownstreamFetcher) *Aggregator {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.downstream = append(a.downstream, namedDownstream{name: name, fetch: fetch})
 	return a
 }
@@ -137,8 +141,16 @@ func (a *Aggregator) Reply(ctx context.Context) *apiv1_status.StatusReply {
 	}
 	if a.refreshing {
 		ch := a.refreshedCh
+		last := a.cached
 		a.mu.Unlock()
-		<-ch
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			if last != nil {
+				return last
+			}
+			return Probes{}.Check(a.serviceName)
+		}
 		a.mu.Lock()
 		r := a.cached
 		a.mu.Unlock()
@@ -162,14 +174,22 @@ func (a *Aggregator) Reply(ctx context.Context) *apiv1_status.StatusReply {
 }
 
 func (a *Aggregator) build(ctx context.Context) *apiv1_status.StatusReply {
+	local, downstream := a.snapshot()
+
 	probes := Probes{}
-	for _, np := range a.local {
+	for _, np := range local {
 		probes = append(probes, runProbe(ctx, np.name, np.prober, a.probeTimeout))
 	}
-	for _, nd := range a.downstream {
+	for _, nd := range downstream {
 		probes = append(probes, fetchDownstream(ctx, nd.name, nd.fetch, a.probeTimeout)...)
 	}
 	return probes.Check(a.serviceName)
+}
+
+func (a *Aggregator) snapshot() ([]namedProber, []namedDownstream) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]namedProber(nil), a.local...), append([]namedDownstream(nil), a.downstream...)
 }
 
 func runProbe(ctx context.Context, name string, p Prober, timeout time.Duration) *apiv1_status.StatusProbe {
@@ -196,6 +216,9 @@ func fetchDownstream(ctx context.Context, name string, fetch DownstreamFetcher, 
 	reply, err := fetch(callCtx)
 	if err != nil {
 		return []*apiv1_status.StatusProbe{unreachable(name, err.Error())}
+	}
+	if reply == nil {
+		return []*apiv1_status.StatusProbe{unreachable(name, "nil status reply")}
 	}
 	data := reply.GetData()
 	if data == nil {

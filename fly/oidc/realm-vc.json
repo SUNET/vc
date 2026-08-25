@@ -13,7 +13,7 @@
       "name": "VC Issuer (apigw)",
       "enabled": true,
       "clientAuthenticatorType": "client-secret",
-      "secret": "10zbIalXeVYQpwMni29iq",
+      "secret": "${env.APIGW_OIDC_CLIENT_SECRET}",
       "redirectUris": [
         "https://sunet-vc-apigw.fly.dev/*"
       ],
@@ -82,7 +82,7 @@
         "birthdate": ["1990-05-15"]
       },
       "credentials": [
-        { "type": "password", "value": "admin", "temporary": false }
+        { "type": "password", "value": "${env.DEMO_USER_PASSWORD}", "temporary": false }
       ]
     },
     {
@@ -96,7 +96,7 @@
         "birthdate": ["1985-03-22"]
       },
       "credentials": [
-        { "type": "password", "value": "admin", "temporary": false }
+        { "type": "password", "value": "${env.DEMO_USER_PASSWORD}", "temporary": false }
       ]
     },
     {
@@ -110,7 +110,7 @@
         "birthdate": ["1996-01-30"]
       },
       "credentials": [
-        { "type": "password", "value": "admin", "temporary": false }
+        { "type": "password", "value": "${env.DEMO_USER_PASSWORD}", "temporary": false }
       ]
     },
     {
@@ -124,7 +124,7 @@
         "birthdate": ["1988-09-09"]
       },
       "credentials": [
-        { "type": "password", "value": "admin", "temporary": false }
+        { "type": "password", "value": "${env.DEMO_USER_PASSWORD}", "temporary": false }
       ]
     }
   ]

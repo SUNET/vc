@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -41,8 +43,9 @@ var (
 // see "apigw.db" etc.); probes forwarded from a downstream service already
 // carry their own "<svc>." prefix and are left untouched.
 //
-// Note: mutates each probe's Name and Status in place, so callers should
-// pass freshly-built probes rather than sharing them across Check calls.
+// Each input probe is shallow-copied before being adjusted so callers can
+// safely pass probes that originated from shared/cached protobuf messages
+// (e.g. downstream StatusReply objects) without side effects.
 func (probes Probes) Check(serviceName string) *apiv1_status.StatusReply {
 	health := &apiv1_status.StatusReply{
 		Data: &apiv1_status.StatusReply_Data{
@@ -64,16 +67,17 @@ func (probes Probes) Check(serviceName string) *apiv1_status.StatusReply {
 		if probe == nil {
 			continue
 		}
-		if !strings.Contains(probe.Name, ".") {
-			probe.Name = serviceName + "." + probe.Name
+		p := proto.Clone(probe).(*apiv1_status.StatusProbe)
+		if !strings.Contains(p.Name, ".") {
+			p.Name = serviceName + "." + p.Name
 		}
-		if probe.Healthy {
-			probe.Status = StatusOK
+		if p.Healthy {
+			p.Status = StatusOK
 		} else {
-			probe.Status = StatusFail
+			p.Status = StatusFail
 			health.Data.Status = fmt.Sprintf(ServiceStatusFail, serviceName)
 		}
-		health.Data.Probes = append(health.Data.Probes, probe)
+		health.Data.Probes = append(health.Data.Probes, p)
 	}
 
 	return health
