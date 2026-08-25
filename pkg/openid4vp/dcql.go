@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 )
 
@@ -299,11 +300,13 @@ func validateClaimValues(values []any, present bool) error {
 		switch t := v.(type) {
 		case string, bool, int, int32, int64, uint, uint32, uint64:
 		case float64:
-			if t != float64(int64(t)) {
+			// Reject NaN/Inf and out-of-int64-range floats before the int64 conversion to avoid overflow.
+			if math.IsNaN(t) || math.IsInf(t, 0) || t < math.MinInt64 || t > math.MaxInt64 || t != math.Trunc(t) {
 				return fmt.Errorf("claim values[%d] must be a string, integer, or boolean", i)
 			}
 		case float32:
-			if t != float32(int32(t)) {
+			f := float64(t)
+			if math.IsNaN(f) || math.IsInf(f, 0) || f < math.MinInt32 || f > math.MaxInt32 || f != math.Trunc(f) {
 				return fmt.Errorf("claim values[%d] must be a string, integer, or boolean", i)
 			}
 		default:

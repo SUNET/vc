@@ -2,6 +2,7 @@ package openid4vp
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -385,4 +386,43 @@ func TestClaimQueryValues_YAMLRoundTrip(t *testing.T) {
 	assert.NoError(t, yaml.Unmarshal(src, &cq))
 	assert.Equal(t, StringPath("postal_code"), cq.Path)
 	assert.Equal(t, []any{"90210", "90211"}, cq.Values)
+}
+
+// TestValidateClaimValues_FloatBounds guards the pre-conversion range check
+// added to validateClaimValues so out-of-range or non-finite floats can never
+// reach the int64 conversion.
+func TestValidateClaimValues_FloatBounds(t *testing.T) {
+	// A float64 just above math.MaxInt64 that is still finite and integer-valued.
+	overflowFloat64 := math.Nextafter(float64(math.MaxInt64), math.MaxFloat64)
+	underflowFloat64 := math.Nextafter(float64(math.MinInt64), -math.MaxFloat64)
+
+	tts := []struct {
+		name    string
+		values  []any
+		wantErr bool
+	}{
+		{"NaN float64", []any{math.NaN()}, true},
+		{"+Inf float64", []any{math.Inf(1)}, true},
+		{"-Inf float64", []any{math.Inf(-1)}, true},
+		{"overflow float64", []any{overflowFloat64}, true},
+		{"underflow float64", []any{underflowFloat64}, true},
+		{"non-integer float64", []any{1.5}, true},
+		{"NaN float32", []any{float32(math.NaN())}, true},
+		{"+Inf float32", []any{float32(math.Inf(1))}, true},
+		{"overflow float32", []any{float32(math.MaxFloat32)}, true},
+		{"non-integer float32", []any{float32(1.5)}, true},
+		{"integer float64", []any{float64(42)}, false},
+		{"integer float32", []any{float32(42)}, false},
+		{"zero float64", []any{0.0}, false},
+	}
+	for _, tt := range tts {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateClaimValues(tt.values, true)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
