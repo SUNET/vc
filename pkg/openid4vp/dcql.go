@@ -333,19 +333,25 @@ func validateClaimValues(values []any, present bool) error {
 	for i, v := range values {
 		switch t := v.(type) {
 		case string, bool, int, int32, int64, uint, uint32, uint64:
-		case float64:
-			const maxSafeInt = float64(1<<53 - 1)
-			if math.IsNaN(t) || math.IsInf(t, 0) || t < -maxSafeInt || t > maxSafeInt || t != math.Trunc(t) {
-				return fmt.Errorf("claim values[%d] must be a string, integer, or boolean", i)
-			}
 		case float32:
-			f := float64(t)
-			if math.IsNaN(f) || math.IsInf(f, 0) || f < math.MinInt32 || f > math.MaxInt32 || f != math.Trunc(f) {
-				return fmt.Errorf("claim values[%d] must be a string, integer, or boolean", i)
+			if err := checkIntegralFloat(float64(t), i); err != nil {
+				return err
+			}
+		case float64:
+			if err := checkIntegralFloat(t, i); err != nil {
+				return err
 			}
 		default:
 			return fmt.Errorf("claim values[%d] must be a string, integer, or boolean", i)
 		}
+	}
+	return nil
+}
+
+func checkIntegralFloat(f float64, i int) error {
+	const maxSafeInt = float64(1<<53 - 1)
+	if math.IsNaN(f) || math.IsInf(f, 0) || f < -maxSafeInt || f > maxSafeInt || f != math.Trunc(f) {
+		return fmt.Errorf("claim values[%d] must be a string, integer, or boolean", i)
 	}
 	return nil
 }
