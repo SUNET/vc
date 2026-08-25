@@ -233,7 +233,7 @@ Optional features are enabled via Go build tags. The following tags are availabl
 | `saml,oidcrp` | All optional apigw features    | apigw               | static      | `make build-apigw-all`        |
 | `pkcs11`      | PKCS#11 HSM signing            | issuer              | **dynamic** | `make build-issuer-hsm`       |
 | `vc20`        | W3C Verifiable Credentials 2.0 | vc20-test-server    | static      | `make build-vc20-test-server` |
-| `zknative`    | Native ZK/PPID proof verification (mso_mdoc_zk) | verifier | **dynamic** | `make build-verifier-zknative` |
+| `zknative`    | Native ZK/PPID proof verification (mso_mdoc_zk) - Longfellow + Vega | verifier | **dynamic** | `make build-verifier-zknative` (+ `make build-zkvegaverifyworker` for Vega) |
 
 > **Note:** The `pkcs11` and `zknative` tags require CGO (`CGO_ENABLED=1`) and produce dynamically linked binaries. See "Native ZK/PPID proof verification" below for `zknative` setup.
 
@@ -260,46 +260,77 @@ Set the image version with `VERSION=x.x.x` (default: `latest`).
 
 ### Native ZK/PPID proof verification
 
-vc-verifier can verify "mso_mdoc_zk" presentations (zero-knowledge
-Longfellow proof-of-possession, with an optional pairwise pseudonym over an
-mdoc credential) natively, via a cgo binding to
-[zk-cred-longfellow](https://github.com/sirosfoundation/zk-cred-longfellow)'s
-plain C-ABI Go verifier build. This is **opt-in** (the `zknative` build
-tag) - the default `make build-verifier`/Docker build stays
-`CGO_ENABLED=0` and fully static, exactly like the `pkcs11` tag above, and
-for the same reason: cgo requires a C compiler/linker and a locally built
-shared library that a static build has no use for.
+vc-verifier can verify "mso_mdoc_zk" presentations natively for **two**
+independent ZK systems, both **opt-in** via the `zknative` build tag (the
+default `make build-verifier`/Docker build stays `CGO_ENABLED=0` and
+fully static, exactly like the `pkcs11` tag above):
+
+- **Longfellow** - zero-knowledge proof-of-possession with an optional
+  pairwise pseudonym, via a cgo binding to
+  [zk-cred-longfellow](https://github.com/sirosfoundation/zk-cred-longfellow)'s
+  plain C-ABI Go verifier build, linked directly into the main verifier
+  process (`pkg/mdoc/zknative`).
+- **Vega** - a second, general-purpose ZK circuit backend
+  ([zk-cred-vega](https://github.com/sirosfoundation/zk-cred-vega)),
+  currently only publishing an mdoc circuit but designed for a wider
+  range of provable statements over time. Unlike Longfellow, Vega's cgo
+  binding (`pkg/mdoc/zknative_vega`) is **never linked into the main
+  verifier process** - it's linked only into a small standalone
+  `cmd/zkvegaverifyworker` subprocess binary, which the verifier execs
+  per-call over stdin/stdout. This isolates the actual cgo call touching
+  attacker-controlled proof bytes: a memory-safety fault in the native
+  library takes down one worker process, not the verifier serving other
+  in-flight requests. See `pkg/mdoc/zkvegaworker`'s package doc for the
+  wire protocol and `docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md` for a real
+  wire-format addition Vega's verification needed (flagged there, not yet
+  raised with multipaz upstream).
 
 Setup:
 
 ```sh
-# 1. Clone + build zk-cred-longfellow's `go-cabi` target, staging the
-#    resulting shared library + header under third_party/zk-cred-longfellow/
-#    (gitignored - never committed). Override ZK_CRED_LONGFELLOW_REPO/_REF
-#    to build a fork or pin a specific tag, branch, OR commit SHA - the
-#    target fetches whichever ref is given directly (`git fetch --depth 1
-#    origin $(REF)`), which works for all three ref types.
-make zk-native-lib
+# 1. Clone + build both crates' `go-cabi` targets, staging the resulting
+#    shared libraries + headers under third_party/ (gitignored - never
+#    committed). Override ZK_CRED_LONGFELLOW_REPO/_REF or
+#    ZK_CRED_VEGA_REPO/_REF to build a fork or pin a specific tag, branch,
+#    OR commit SHA - each target fetches whichever ref is given directly
+#    (`git fetch --depth 1 origin $(REF)`), which works for all three ref
+#    types.
+make zk-native-lib        # Longfellow
+make zk-native-lib-vega   # Vega
 
-# 2. Build the verifier with native ZK/PPID verification.
+# 2. Build the verifier (links Longfellow only - see above for why Vega
+#    doesn't need to be here) and, separately, the Vega worker subprocess.
 make build-verifier-zknative
+make build-zkvegaverifyworker
 
-# 3. Run it (needs the shared library on the loader path).
-LD_LIBRARY_PATH=$(pwd)/third_party/zk-cred-longfellow/lib ./bin/vc_verifier-zknative
+# 3. Run the verifier - it needs Longfellow's shared library on the
+#    loader path, and zkvegaverifyworker's binary somewhere on PATH (or
+#    point ZkVerifierConfig.VegaWorkerPath at it directly).
+LD_LIBRARY_PATH=$(pwd)/third_party/zk-cred-longfellow/lib \
+  PATH=$(pwd)/bin:$PATH \
+  ./bin/vc_verifier-zknative
 
-# ...or run pkg/mdoc's zknative-tagged tests directly:
+# ...or run pkg/mdoc's zknative-tagged tests directly (covers both
+# systems - the Vega package's own cgo tests need its library staged
+# too, via LD_LIBRARY_PATH, even though the verifier binary itself
+# doesn't link it):
 make test-zknative
 ```
 
 Configuration: the circuit catalog service vc-verifier fetches circuits
 from is configurable via `verifier.zk_circuits.sources` in YAML config
 (defaults to the live `https://zk-circuits.fly.dev` service if unset) -
-see `docs/CONFIGURATION.md`'s `zk_circuits` section.
+see `docs/CONFIGURATION.md`'s `zk_circuits` section. This applies to both
+systems; Vega additionally resolves a verifier-key catalog entry from the
+wallet-declared prover-key entry via the manifest (see
+`getOrLoadVegaVerifierKey`'s doc comment in `pkg/mdoc/zk_native_cgo_vega.go`).
 
-See `docs/ZK_PPID_VERIFICATION_PLAN.md` for the full design writeup: what
-this verifies, the confirmed `verifier_context`/pseudonym-derivation wire
-formula, and exactly what's still out of scope (the W3C Digital
-Credentials API and older OpenID4VP session-transcript variants).
+See `docs/ZK_PPID_VERIFICATION_PLAN.md` for the full Longfellow design
+writeup: what this verifies, the confirmed
+`verifier_context`/pseudonym-derivation wire formula, and exactly what's
+still out of scope (the W3C Digital Credentials API and older OpenID4VP
+session-transcript variants - both apply to Vega too, which has no
+pseudonym concept of its own yet either).
 
 ## Start, Stop & Restart
 
@@ -320,7 +351,7 @@ Credentials API and older OpenID4VP session-transcript variants).
 | `make test-oidcrp`   | Test with `oidcrp` build tag                                  |
 | `make test-vc20`     | Test with `vc20` build tag                                    |
 | `make test-pkcs11`   | Test with `pkcs11` build tag (requires `make test-env`)       |
-| `make test-zknative` | Test with `zknative` build tag (requires `make zk-native-lib`) |
+| `make test-zknative` | Test with `zknative` build tag (requires `make zk-native-lib zk-native-lib-vega`) |
 | `make test-all-tags` | Test with all build tags                                      |
 | `make test-env`      | Install test dependencies (softhsm2, opensc)                  |
 
