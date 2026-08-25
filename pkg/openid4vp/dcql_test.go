@@ -316,6 +316,28 @@ func TestClaimQueryValues_MarshalRejectsInvalid(t *testing.T) {
 	}
 }
 
+// TestClaimQueryPath_MarshalRejectsInvalid enforces that MarshalJSON refuses
+// to emit output when Path violates OpenID4VP §6.3 (missing or empty-string
+// element). Path is REQUIRED, so an in-memory struct with a bad path must
+// fail fast rather than produce non-spec-compliant output.
+func TestClaimQueryPath_MarshalRejectsInvalid(t *testing.T) {
+	empty := ""
+	tts := []struct {
+		name  string
+		query ClaimQuery
+	}{
+		{"nil path", ClaimQuery{}},
+		{"empty path", ClaimQuery{Path: []*string{}}},
+		{"empty-string element", ClaimQuery{Path: []*string{&empty}}},
+	}
+	for _, tt := range tts {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := json.Marshal(tt.query)
+			assert.Error(t, err)
+		})
+	}
+}
+
 // TestClaimQueryValues_RejectsInvalid enforces validateClaimValues at the
 // UnmarshalJSON boundary. Nested objects/arrays, non-integer floats, and null
 // elements are not permitted by OpenID4VP §6.3.

@@ -174,6 +174,9 @@ type ClaimQuery struct {
 // Nil path elements are serialized as JSON null (for DCQL array element access).
 // A non-nil Values slice is validated against OpenID4VP §6.3; use nil to omit.
 func (cq ClaimQuery) MarshalJSON() ([]byte, error) {
+	if err := validateClaimPath(cq.Path); err != nil {
+		return nil, err
+	}
 	if cq.Values != nil {
 		if err := validateClaimValues(cq.Values, true); err != nil {
 			return nil, err
