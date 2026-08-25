@@ -292,6 +292,29 @@ func TestClaimQueryValues_OmittedWhenAbsent(t *testing.T) {
 	assert.NotContains(t, string(data), `"values"`)
 }
 
+// TestClaimQueryValues_MarshalRejectsInvalid enforces that MarshalJSON refuses
+// to emit output when Values is non-nil but violates OpenID4VP §6.3 (empty
+// slice, unsupported element types). A nil Values slice must still be silently
+// omitted via omitempty.
+func TestClaimQueryValues_MarshalRejectsInvalid(t *testing.T) {
+	tts := []struct {
+		name  string
+		query ClaimQuery
+	}{
+		{"empty slice", ClaimQuery{Path: StringPath("x"), Values: []any{}}},
+		{"nil element", ClaimQuery{Path: StringPath("x"), Values: []any{nil}}},
+		{"nested map", ClaimQuery{Path: StringPath("x"), Values: []any{map[string]any{"k": "v"}}}},
+		{"nested slice", ClaimQuery{Path: StringPath("x"), Values: []any{[]any{1, 2}}}},
+		{"non-integer float", ClaimQuery{Path: StringPath("x"), Values: []any{1.5}}},
+	}
+	for _, tt := range tts {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := json.Marshal(tt.query)
+			assert.Error(t, err)
+		})
+	}
+}
+
 // TestClaimQueryValues_RejectsInvalid enforces validateClaimValues at the
 // UnmarshalJSON boundary. Nested objects/arrays, non-integer floats, and null
 // elements are not permitted by OpenID4VP §6.3.

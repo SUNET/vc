@@ -171,7 +171,13 @@ type ClaimQuery struct {
 
 // MarshalJSON implements custom JSON marshaling for ClaimQuery.
 // Nil path elements are serialized as JSON null (for DCQL array element access).
+// A non-nil Values slice is validated against OpenID4VP §6.3; use nil to omit.
 func (cq ClaimQuery) MarshalJSON() ([]byte, error) {
+	if cq.Values != nil {
+		if err := validateClaimValues(cq.Values, true); err != nil {
+			return nil, err
+		}
+	}
 	path := make([]any, len(cq.Path))
 	for i, p := range cq.Path {
 		if p == nil {
