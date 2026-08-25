@@ -47,11 +47,20 @@ type CredentialSetQuery struct {
 	// Options REQUIRED A non-empty array, where each value in the array is a list of Credential Query identifiers representing one set of Credentials that satisfies the use case. The value of each element in the options array is a non-empty array of identifiers which reference elements in credentials.
 	Options [][]string `json:"options" yaml:"options" validate:"required,min=1,dive,required,min=1,dive,required"`
 
-	// Required OPTIONAL A boolean which indicates whether this set of Credentials is required to satisfy the particular use case at the Verifier. If omitted, the default value is true.
-	Required bool `json:"required,omitempty" yaml:"required,omitempty"`
+	// Required OPTIONAL. Spec default is true when omitted; nil pointer preserves that distinction from an explicit false.
+	Required *bool `json:"required,omitempty" yaml:"required,omitempty"`
 
 	// Purpose Can't find in spec, but in example from wwwallet
 	Purpose string `json:"purpose,omitempty" yaml:"purpose,omitempty"`
+}
+
+// IsRequired returns the effective value of Required, applying the OpenID4VP
+// draft 24 §6.2 default (true) when the field was omitted.
+func (q CredentialSetQuery) IsRequired() bool {
+	if q.Required == nil {
+		return true
+	}
+	return *q.Required
 }
 
 // MetaQuery represents format-specific metadata constraints for credential queries.

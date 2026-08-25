@@ -235,9 +235,12 @@ func copyDCQL(src *DCQL) *DCQL {
 	// Copy credential sets
 	for i, cs := range src.CredentialSets {
 		dst.CredentialSets[i] = CredentialSetQuery{
-			Required: cs.Required,
-			Purpose:  cs.Purpose,
-			Options:  make([][]string, len(cs.Options)),
+			Purpose: cs.Purpose,
+			Options: make([][]string, len(cs.Options)),
+		}
+		if cs.Required != nil {
+			v := *cs.Required
+			dst.CredentialSets[i].Required = &v
 		}
 		for j, opt := range cs.Options {
 			dst.CredentialSets[i].Options[j] = append([]string{}, opt...)

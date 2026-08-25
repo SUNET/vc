@@ -104,7 +104,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		CredentialSets: []openid4vp.CredentialSetQuery{
 			{
 				Options:  options,
-				Required: false,
+				Required: new(false),
 				Purpose:  "authenticate for " + scope,
 			},
 		},
