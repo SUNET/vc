@@ -231,6 +231,34 @@ func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalYAML implements gopkg.in/yaml.v2's Marshaler interface for ClaimQuery.
+// Mirrors MarshalJSON: the ClaimQuery fields carry yaml:"-" tags to route
+// through this method, so without it yaml.Marshal would emit an empty mapping
+// and drop id/path/values.
+func (cq ClaimQuery) MarshalYAML() (any, error) {
+	if err := validateClaimPath(cq.Path); err != nil {
+		return nil, err
+	}
+	if cq.Values != nil {
+		if err := validateClaimValues(cq.Values, true); err != nil {
+			return nil, err
+		}
+	}
+	path := make([]any, len(cq.Path))
+	for i, p := range cq.Path {
+		if p == nil {
+			path[i] = nil
+		} else {
+			path[i] = *p
+		}
+	}
+	return struct {
+		ID     string `yaml:"id,omitempty"`
+		Path   []any  `yaml:"path"`
+		Values []any  `yaml:"values,omitempty"`
+	}{ID: cq.ID, Path: path, Values: cq.Values}, nil
+}
+
 // UnmarshalYAML implements custom YAML unmarshaling for ClaimQuery.
 // YAML null path elements are deserialized as nil pointers; non-string/non-null
 // elements cause an unmarshal error.

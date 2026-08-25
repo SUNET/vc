@@ -410,6 +410,50 @@ func TestClaimQueryValues_YAMLRoundTrip(t *testing.T) {
 	assert.Equal(t, []any{"90210", "90211"}, cq.Values)
 }
 
+// TestClaimQuery_MarshalYAML_RoundTrip guards that MarshalYAML emits id/path/
+// values instead of an empty mapping. The yaml:"-" tags on the struct fields
+// would otherwise drop everything.
+func TestClaimQuery_MarshalYAML_RoundTrip(t *testing.T) {
+	orig := ClaimQuery{
+		ID:     "postal",
+		Path:   ArrayElementPath("addresses"),
+		Values: []any{"90210", "90211"},
+	}
+	out, err := yaml.Marshal(orig)
+	assert.NoError(t, err)
+	assert.Contains(t, string(out), "id: postal")
+	assert.Contains(t, string(out), "path:")
+	assert.Contains(t, string(out), "values:")
+
+	var decoded ClaimQuery
+	assert.NoError(t, yaml.Unmarshal(out, &decoded))
+	assert.Equal(t, orig.ID, decoded.ID)
+	assert.Equal(t, orig.Path, decoded.Path)
+	assert.Equal(t, orig.Values, decoded.Values)
+}
+
+// TestDCQL_MarshalYAML_RoundTrip guards that a full DCQL query round-trips
+// through YAML with claim id/path/values preserved.
+func TestDCQL_MarshalYAML_RoundTrip(t *testing.T) {
+	orig := DCQL{
+		Credentials: []CredentialQuery{{
+			ID:     "pid",
+			Format: FormatSDJWTVC,
+			Meta:   MetaQuery{VCTValues: []string{"urn:eu:pid"}},
+			Claims: []ClaimQuery{
+				{ID: "fn", Path: StringPath("family_name")},
+				{ID: "pc", Path: StringPath("address", "postal_code"), Values: []any{"90210"}},
+			},
+		}},
+	}
+	out, err := yaml.Marshal(orig)
+	assert.NoError(t, err)
+
+	var decoded DCQL
+	assert.NoError(t, yaml.Unmarshal(out, &decoded))
+	assert.Equal(t, orig, decoded)
+}
+
 // TestValidateClaimValues_FloatBounds guards the pre-conversion range check
 // added to validateClaimValues so out-of-range or non-finite floats can never
 // reach the int64 conversion.
