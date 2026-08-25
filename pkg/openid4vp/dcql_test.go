@@ -305,12 +305,51 @@ func TestClaimQueryValues_RejectsInvalid(t *testing.T) {
 		{"nested object", `{"path":["x"],"values":[{"k":"v"}]}`},
 		{"nested array", `{"path":["x"],"values":[[1,2]]}`},
 		{"non-integer float", `{"path":["x"],"values":[1.5]}`},
+		{"explicit null", `{"path":["x"],"values":null}`},
+		{"scalar string", `{"path":["x"],"values":"nope"}`},
+		{"scalar number", `{"path":["x"],"values":42}`},
+		{"scalar bool", `{"path":["x"],"values":true}`},
+		{"object", `{"path":["x"],"values":{"a":1}}`},
 	}
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
 			var cq ClaimQuery
 			assert.Error(t, json.Unmarshal([]byte(tt.body), &cq))
+		})
+	}
+}
+
+// TestClaimQueryValues_AbsentIsAccepted confirms that a claim without a
+// "values" key unmarshals cleanly (values is OPTIONAL per §6.3) and marshals
+// back without leaking a "values" key.
+func TestClaimQueryValues_AbsentIsAccepted(t *testing.T) {
+	var cq ClaimQuery
+	assert.NoError(t, json.Unmarshal([]byte(`{"path":["family_name"]}`), &cq))
+	assert.Nil(t, cq.Values)
+
+	out, err := json.Marshal(cq)
+	assert.NoError(t, err)
+	assert.NotContains(t, string(out), `"values"`)
+}
+
+// TestClaimQueryValues_YAMLRejectsNullAndScalars mirrors the JSON boundary tests
+// through the two-pass UnmarshalYAML.
+func TestClaimQueryValues_YAMLRejectsNullAndScalars(t *testing.T) {
+	tts := []struct {
+		name string
+		body string
+	}{
+		{"explicit null", "path:\n  - x\nvalues: null\n"},
+		{"empty inline", "path:\n  - x\nvalues: []\n"},
+		{"scalar string", "path:\n  - x\nvalues: nope\n"},
+		{"scalar number", "path:\n  - x\nvalues: 42\n"},
+		{"scalar bool", "path:\n  - x\nvalues: true\n"},
+	}
+	for _, tt := range tts {
+		t.Run(tt.name, func(t *testing.T) {
+			var cq ClaimQuery
+			assert.Error(t, yaml.Unmarshal([]byte(tt.body), &cq))
 		})
 	}
 }

@@ -1,6 +1,7 @@
 package openid4vp
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -192,9 +193,9 @@ func (cq ClaimQuery) MarshalJSON() ([]byte, error) {
 // elements cause an unmarshal error (Go's json package rejects them for *string).
 func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		ID     string    `json:"id"`
-		Path   []*string `json:"path"`
-		Values []any     `json:"values"`
+		ID     string          `json:"id"`
+		Path   []*string       `json:"path"`
+		Values json.RawMessage `json:"values"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -202,12 +203,21 @@ func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 	if err := validateClaimPath(raw.Path); err != nil {
 		return err
 	}
-	if err := validateClaimValues(raw.Values); err != nil {
+	var values []any
+	if len(raw.Values) > 0 {
+		if bytes.Equal(bytes.TrimSpace(raw.Values), []byte("null")) {
+			return fmt.Errorf(`claim "values" must not be null`)
+		}
+		if err := json.Unmarshal(raw.Values, &values); err != nil {
+			return fmt.Errorf(`claim "values" must be an array of strings, integers, or booleans: %w`, err)
+		}
+	}
+	if err := validateClaimValues(values, len(raw.Values) > 0); err != nil {
 		return err
 	}
 	cq.ID = raw.ID
 	cq.Path = raw.Path
-	cq.Values = raw.Values
+	cq.Values = values
 	return nil
 }
 
@@ -216,9 +226,8 @@ func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 // elements cause an unmarshal error.
 func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	var raw struct {
-		ID     string    `yaml:"id"`
-		Path   []*string `yaml:"path"`
-		Values []any     `yaml:"values"`
+		ID   string    `yaml:"id"`
+		Path []*string `yaml:"path"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -226,12 +235,31 @@ func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	if err := validateClaimPath(raw.Path); err != nil {
 		return err
 	}
-	if err := validateClaimValues(raw.Values); err != nil {
+	// Second pass into a generic map so we can distinguish an absent "values"
+	// key from an explicit YAML null — yaml.v2 unmarshals both into the same
+	// zero value when the target field type is []any.
+	var check map[string]any
+	if err := unmarshal(&check); err != nil {
+		return err
+	}
+	var values []any
+	rawValues, present := check["values"]
+	if present {
+		if rawValues == nil {
+			return fmt.Errorf(`claim "values" must not be null`)
+		}
+		arr, ok := rawValues.([]any)
+		if !ok {
+			return fmt.Errorf(`claim "values" must be an array of strings, integers, or booleans`)
+		}
+		values = arr
+	}
+	if err := validateClaimValues(values, present); err != nil {
 		return err
 	}
 	cq.ID = raw.ID
 	cq.Path = raw.Path
-	cq.Values = raw.Values
+	cq.Values = values
 	return nil
 }
 
@@ -252,12 +280,14 @@ func validateClaimPath(path []*string) error {
 // validateClaimValues enforces the OpenID4VP Section 6.3 rule that "values" must be
 // a non-empty array of strings, integers, or booleans when present. JSON decoding
 // widens numeric values into float64, so integer-valued floats are accepted.
-func validateClaimValues(values []any) error {
-	if values == nil {
+// present tells the validator that the key existed on the wire so an empty array
+// can be rejected (an absent key is legal — "values" is OPTIONAL).
+func validateClaimValues(values []any, present bool) error {
+	if !present {
 		return nil
 	}
 	if len(values) == 0 {
-		return fmt.Errorf("claim values must not be empty when present")
+		return fmt.Errorf(`claim "values" must not be empty when present`)
 	}
 	for i, v := range values {
 		switch t := v.(type) {
