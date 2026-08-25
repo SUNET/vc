@@ -33,8 +33,8 @@ type CredentialQuery struct {
 	// TrustedAuthorities OPTIONAL. A non-empty array of objects as defined in Section 6.1.1 that specifies expected authorities or trust frameworks that certify Issuers, that the Verifier will accept. Every Credential returned by the Wallet SHOULD match at least one of the conditions present in the corresponding trusted_authorities array if present.
 	TrustedAuthorities []TrustedAuthority `json:"trusted_authorities,omitempty" yaml:"trusted_authorities,omitempty"`
 
-	// RequireCryptographicHolderBinding OPTIONAL. A boolean which indicates whether the Verifier requires a Cryptographic Holder Binding proof. The default value is true, i.e., a Verifiable Presentation with Cryptographic Holder Binding is required. If set to false, the Verifier accepts a Credential without Cryptographic Holder Binding proof.
-	RequireCryptographicHolderBinding bool `json:"require_cryptographic_holder_binding,omitempty" yaml:"require_cryptographic_holder_binding,omitempty"`
+	// RequireCryptographicHolderBinding OPTIONAL. Spec default is true when omitted; nil pointer preserves that distinction from an explicit false.
+	RequireCryptographicHolderBinding *bool `json:"require_cryptographic_holder_binding,omitempty" yaml:"require_cryptographic_holder_binding,omitempty"`
 
 	// Claims OPTIONAL. A non-empty array of objects as defined in Section 6.3 that specifies claims in the requested Credential. Verifiers MUST NOT point to the same claim more than once in a single query. Wallets SHOULD ignore such duplicate claim queries.
 	Claims []ClaimQuery `json:"claims,omitempty" yaml:"claims,omitempty"`
@@ -61,6 +61,16 @@ func (q CredentialSetQuery) IsRequired() bool {
 		return true
 	}
 	return *q.Required
+}
+
+// RequiresCryptographicHolderBinding returns the effective value of
+// RequireCryptographicHolderBinding, applying the OpenID4VP draft 24 §6.1
+// default (true) when the field was omitted.
+func (q CredentialQuery) RequiresCryptographicHolderBinding() bool {
+	if q.RequireCryptographicHolderBinding == nil {
+		return true
+	}
+	return *q.RequireCryptographicHolderBinding
 }
 
 // MetaQuery represents format-specific metadata constraints for credential queries.
@@ -664,7 +674,7 @@ func NewVC20CredentialQuery(id string, typeValues [][]string, claims []ClaimQuer
 			TypeValues: typeValues,
 		},
 		Claims:                            claims,
-		RequireCryptographicHolderBinding: true,
+		RequireCryptographicHolderBinding: new(true),
 	}
 }
 

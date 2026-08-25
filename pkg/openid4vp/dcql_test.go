@@ -560,3 +560,60 @@ func TestCredentialSetRequiredTriState(t *testing.T) {
 		})
 	}
 }
+
+// TestCredentialQueryRequireCryptographicHolderBindingTriState verifies that
+// CredentialQuery.RequireCryptographicHolderBinding distinguishes "omitted"
+// (spec default true), "explicit false", and "explicit true" across a JSON
+// round-trip, per OpenID4VP draft 24 §6.1.
+func TestCredentialQueryRequireCryptographicHolderBindingTriState(t *testing.T) {
+	base := `"id":"c","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]}`
+
+	tts := []struct {
+		name            string
+		raw             string
+		wantRequiredPtr *bool
+		wantEffective   bool
+		wantRoundTrip   string
+	}{
+		{
+			name:            "omitted means spec default true",
+			raw:             `{` + base + `}`,
+			wantRequiredPtr: nil,
+			wantEffective:   true,
+			wantRoundTrip:   `{` + base + `}`,
+		},
+		{
+			name:            "explicit false is preserved",
+			raw:             `{` + base + `,"require_cryptographic_holder_binding":false}`,
+			wantRequiredPtr: new(false),
+			wantEffective:   false,
+			wantRoundTrip:   `{` + base + `,"require_cryptographic_holder_binding":false}`,
+		},
+		{
+			name:            "explicit true is preserved",
+			raw:             `{` + base + `,"require_cryptographic_holder_binding":true}`,
+			wantRequiredPtr: new(true),
+			wantEffective:   true,
+			wantRoundTrip:   `{` + base + `,"require_cryptographic_holder_binding":true}`,
+		},
+	}
+
+	for _, tt := range tts {
+		t.Run(tt.name, func(t *testing.T) {
+			var got CredentialQuery
+			require.NoError(t, json.Unmarshal([]byte(tt.raw), &got))
+
+			if tt.wantRequiredPtr == nil {
+				require.Nil(t, got.RequireCryptographicHolderBinding)
+			} else {
+				require.NotNil(t, got.RequireCryptographicHolderBinding)
+				require.Equal(t, *tt.wantRequiredPtr, *got.RequireCryptographicHolderBinding)
+			}
+			require.Equal(t, tt.wantEffective, got.RequiresCryptographicHolderBinding())
+
+			out, err := json.Marshal(got)
+			require.NoError(t, err)
+			require.JSONEq(t, tt.wantRoundTrip, string(out))
+		})
+	}
+}

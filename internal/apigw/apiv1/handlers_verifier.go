@@ -93,7 +93,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 				// introduce a new server-side vct mismatch.
 				VCTValues: c.cfg.VCTUrlsForScopes([]string{authScope}),
 			},
-			RequireCryptographicHolderBinding: false,
+			RequireCryptographicHolderBinding: new(false),
 			Claims:                            scopeClaimQueries,
 		})
 		options = append(options, []string{authScope})

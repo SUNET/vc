@@ -182,11 +182,14 @@ func copyDCQL(src *DCQL) *DCQL {
 			}
 		}
 		dst.Credentials[i] = CredentialQuery{
-			ID:                                cred.ID,
-			Format:                            cred.Format,
-			Multiple:                          cred.Multiple,
-			Meta:                              meta,
-			RequireCryptographicHolderBinding: cred.RequireCryptographicHolderBinding,
+			ID:       cred.ID,
+			Format:   cred.Format,
+			Multiple: cred.Multiple,
+			Meta:     meta,
+		}
+		if cred.RequireCryptographicHolderBinding != nil {
+			v := *cred.RequireCryptographicHolderBinding
+			dst.Credentials[i].RequireCryptographicHolderBinding = &v
 		}
 
 		// Copy trusted authorities
