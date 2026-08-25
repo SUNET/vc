@@ -731,7 +731,8 @@ func VerifyCOSEMac0(mac0 *COSEMac0, key []byte, externalAAD []byte) error {
 // the damage only surfaces here, where x5chain is needed. Since we are the
 // verifier and the label is unambiguous, accepting it costs nothing and
 // keeps a wallet's storage bug from being indistinguishable from an
-// unsigned credential.
+// unverifiable credential - the credential is signed, and the signature
+// checks out; only the chain needed to judge that signature went missing.
 func lookupUnprotectedHeader(m map[any]any, label int64) (any, bool) {
 	if v, ok := m[label]; ok {
 		return v, true
