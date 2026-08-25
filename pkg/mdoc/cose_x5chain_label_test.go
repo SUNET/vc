@@ -125,7 +125,11 @@ func TestRealVPTokenWithStringX5ChainLabel(t *testing.T) {
 	certs, err := GetCertificateChainFromSign1(sign1)
 	require.NoError(t, err, "this token previously failed with \"no x5chain in headers\"")
 	require.Len(t, certs, 2)
-	assert.Equal(t, "native-dcapi-test.issuer.id.siros.org", certs[0].Subject.Country[0],
+	// Compared as a slice so a changed subject encoding fails the assertion
+	// rather than panicking on an empty one. The value is a domain because
+	// the issuer populates countryName with one - noted, not asserted upon
+	// beyond pinning the fixture's identity.
+	assert.Equal(t, []string{"native-dcapi-test.issuer.id.siros.org"}, certs[0].Subject.Country,
 		"leaf is the issuing signer")
 	assert.Equal(t, "creds", certs[1].Subject.CommonName, "followed by its CA")
 }
@@ -155,16 +159,24 @@ func realVPTokenSign1(t *testing.T) (*COSESign1, map[any]any) {
 	require.NoError(t, cbor.Unmarshal(raw, &resp))
 	require.Len(t, resp.Documents, 1)
 
+	// Assert each element's type rather than discarding the ok result: a
+	// changed fixture shape would otherwise yield nils here and surface as a
+	// confusing panic further down, instead of failing at the decode step.
 	ia := resp.Documents[0].IssuerSigned.IssuerAuth
 	require.Len(t, ia, 4)
-	protected, _ := ia[0].([]byte)
-	unprotected, _ := ia[1].(map[any]any)
-	payload, _ := ia[2].([]byte)
-	signature, _ := ia[3].([]byte)
+	protected, ok := ia[0].([]byte)
+	require.True(t, ok, "issuerAuth[0] (protected) must be a byte string")
+	unprotected, ok := ia[1].(map[any]any)
+	require.True(t, ok, "issuerAuth[1] (unprotected) must be a map")
+	payload, ok := ia[2].([]byte)
+	require.True(t, ok, "issuerAuth[2] (payload) must be a byte string")
+	signature, ok := ia[3].([]byte)
+	require.True(t, ok, "issuerAuth[3] (signature) must be a byte string")
 
 	ds := resp.Documents[0].DeviceSigned.DeviceAuth.DeviceSignature
 	require.Len(t, ds, 4)
-	dsUnprotected, _ := ds[1].(map[any]any)
+	dsUnprotected, ok := ds[1].(map[any]any)
+	require.True(t, ok, "deviceSignature[1] (unprotected) must be a map")
 
 	return &COSESign1{
 		Protected:   protected,
