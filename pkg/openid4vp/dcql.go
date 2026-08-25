@@ -160,6 +160,12 @@ type ClaimQuery struct {
 	// that specifies the path to a claim within the Credential, as defined in Section 7.
 	// Elements are strings (object keys) or nil (representing null for array element access).
 	Path []*string `json:"-" yaml:"-" validate:"required,min=1"`
+
+	// Values OPTIONAL A non-empty array of strings, integers or boolean values that
+	// specifies the expected values of the claim. If present, the Wallet SHOULD return
+	// the claim only if the type and value of the claim both match exactly for at least
+	// one of the elements in the array. See OpenID4VP Section 6.3 and 6.4.1.
+	Values []any `json:"-" yaml:"-" validate:"omitempty,min=1,dive,required"`
 }
 
 // MarshalJSON implements custom JSON marshaling for ClaimQuery.
@@ -174,10 +180,11 @@ func (cq ClaimQuery) MarshalJSON() ([]byte, error) {
 		}
 	}
 	type wire struct {
-		ID   string `json:"id,omitempty"`
-		Path []any  `json:"path"`
+		ID     string `json:"id,omitempty"`
+		Path   []any  `json:"path"`
+		Values []any  `json:"values,omitempty"`
 	}
-	return json.Marshal(wire{ID: cq.ID, Path: path})
+	return json.Marshal(wire{ID: cq.ID, Path: path, Values: cq.Values})
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for ClaimQuery.
@@ -185,8 +192,9 @@ func (cq ClaimQuery) MarshalJSON() ([]byte, error) {
 // elements cause an unmarshal error (Go's json package rejects them for *string).
 func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		ID   string    `json:"id"`
-		Path []*string `json:"path"`
+		ID     string    `json:"id"`
+		Path   []*string `json:"path"`
+		Values []any     `json:"values"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -194,8 +202,12 @@ func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 	if err := validateClaimPath(raw.Path); err != nil {
 		return err
 	}
+	if err := validateClaimValues(raw.Values); err != nil {
+		return err
+	}
 	cq.ID = raw.ID
 	cq.Path = raw.Path
+	cq.Values = raw.Values
 	return nil
 }
 
@@ -204,8 +216,9 @@ func (cq *ClaimQuery) UnmarshalJSON(data []byte) error {
 // elements cause an unmarshal error.
 func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	var raw struct {
-		ID   string    `yaml:"id"`
-		Path []*string `yaml:"path"`
+		ID     string    `yaml:"id"`
+		Path   []*string `yaml:"path"`
+		Values []any     `yaml:"values"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -213,8 +226,12 @@ func (cq *ClaimQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	if err := validateClaimPath(raw.Path); err != nil {
 		return err
 	}
+	if err := validateClaimValues(raw.Values); err != nil {
+		return err
+	}
 	cq.ID = raw.ID
 	cq.Path = raw.Path
+	cq.Values = raw.Values
 	return nil
 }
 
@@ -227,6 +244,34 @@ func validateClaimPath(path []*string) error {
 	for i, p := range path {
 		if p != nil && *p == "" {
 			return fmt.Errorf("claim path element at index %d must not be empty", i)
+		}
+	}
+	return nil
+}
+
+// validateClaimValues enforces the OpenID4VP Section 6.3 rule that "values" must be
+// a non-empty array of strings, integers, or booleans when present. JSON decoding
+// widens numeric values into float64, so integer-valued floats are accepted.
+func validateClaimValues(values []any) error {
+	if values == nil {
+		return nil
+	}
+	if len(values) == 0 {
+		return fmt.Errorf("claim values must not be empty when present")
+	}
+	for i, v := range values {
+		switch t := v.(type) {
+		case string, bool, int, int32, int64, uint, uint32, uint64:
+		case float64:
+			if t != float64(int64(t)) {
+				return fmt.Errorf("claim values[%d] must be a string, integer, or boolean", i)
+			}
+		case float32:
+			if t != float32(int32(t)) {
+				return fmt.Errorf("claim values[%d] must be a string, integer, or boolean", i)
+			}
+		default:
+			return fmt.Errorf("claim values[%d] must be a string, integer, or boolean", i)
 		}
 	}
 	return nil
@@ -254,17 +299,6 @@ func ArrayElementPath(parts ...string) []*string {
 	path[len(parts)] = nil // null for array element access
 	return path
 }
-
-//type ClaimQuery struct {
-//	// ID REQUIRED if claim_sets is present in the Credential Query; OPTIONAL otherwise. A string identifying the particular claim. The value MUST be a non-empty string consisting of alphanumeric, underscore (_), or hyphen (-) characters. Within the particular claims array, the same id MUST NOT be present more than once.
-//	ID string `json:"id,omitempty" validate:"omitempty,alphanumunicode"`
-//
-//	// Path REQUIRED The value MUST be a non-empty array representing a claims path pointer that specifies the path to a claim within the Credential, as defined in Section 7.
-//	Path []string `json:"path" validate:"required,min=1,dive,required"`
-//
-//	// Values OPTIONAL A non-empty array of strings, integers or boolean values that specifies the expected values of the claim. If the values property is present, the Wallet SHOULD return the claim only if the type and value of the claim both match exactly for at least one of the elements in the array. Details of the processing rules are defined in Section 6.4.1.
-//	Values []any `json:"values,omitempty" validate:"omitempty,min=1,dive,required"`
-//}
 
 // Credential format identifiers as defined in OpenID4VP Appendix B.
 // Note: FormatLdpVC is defined in vc20_handler.go (vc20 build tag)

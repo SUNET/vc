@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/yaml.v2"
 )
 
 var mockDCQLExample = []byte(`{
@@ -221,4 +222,105 @@ func TestClaimSetsRoundTrip(t *testing.T) {
 	// Verify the JSON contains expected structure
 	assert.Contains(t, string(data), `"claim_sets"`)
 	assert.Contains(t, string(data), `"id":"name"`)
+}
+
+// TestClaimQueryValues_RoundTrip verifies OpenID4VP §6.3 "values": strings,
+// integers, and booleans round-trip through JSON and reach the wire under the
+// "values" key. Uses the exact query from Appendix D of the spec plus a mixed-
+// type case.
+func TestClaimQueryValues_RoundTrip(t *testing.T) {
+	tts := []struct {
+		name       string
+		query      ClaimQuery
+		wantOnWire string
+	}{
+		{
+			name: "strings (spec Appendix D example)",
+			query: ClaimQuery{
+				Path:   StringPath("postal_code"),
+				Values: []any{"90210", "90211"},
+			},
+			wantOnWire: `{"path":["postal_code"],"values":["90210","90211"]}`,
+		},
+		{
+			name: "integers",
+			query: ClaimQuery{
+				Path:   StringPath("age_in_years"),
+				Values: []any{18, 21},
+			},
+			wantOnWire: `{"path":["age_in_years"],"values":[18,21]}`,
+		},
+		{
+			name: "booleans",
+			query: ClaimQuery{
+				Path:   StringPath("is_adult"),
+				Values: []any{true, false},
+			},
+			wantOnWire: `{"path":["is_adult"],"values":[true,false]}`,
+		},
+		{
+			name: "mixed string int bool",
+			query: ClaimQuery{
+				ID:     "mix",
+				Path:   StringPath("mixed"),
+				Values: []any{"x", 1, true},
+			},
+			wantOnWire: `{"id":"mix","path":["mixed"],"values":["x",1,true]}`,
+		},
+	}
+
+	for _, tt := range tts {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.query)
+			assert.NoError(t, err)
+			assert.JSONEq(t, tt.wantOnWire, string(data))
+
+			var decoded ClaimQuery
+			assert.NoError(t, json.Unmarshal(data, &decoded))
+			assert.Equal(t, tt.query.ID, decoded.ID)
+			assert.Equal(t, tt.query.Path, decoded.Path)
+			assert.Len(t, decoded.Values, len(tt.query.Values))
+		})
+	}
+}
+
+// TestClaimQueryValues_OmittedWhenAbsent guards the omitempty semantics on the
+// wire tag: a ClaimQuery with no Values MUST NOT emit a "values" key.
+func TestClaimQueryValues_OmittedWhenAbsent(t *testing.T) {
+	data, err := json.Marshal(ClaimQuery{Path: StringPath("family_name")})
+	assert.NoError(t, err)
+	assert.NotContains(t, string(data), `"values"`)
+}
+
+// TestClaimQueryValues_RejectsInvalid enforces validateClaimValues at the
+// UnmarshalJSON boundary. Nested objects/arrays, non-integer floats, and null
+// elements are not permitted by OpenID4VP §6.3.
+func TestClaimQueryValues_RejectsInvalid(t *testing.T) {
+	tts := []struct {
+		name string
+		body string
+	}{
+		{"empty array", `{"path":["x"],"values":[]}`},
+		{"null element", `{"path":["x"],"values":[null]}`},
+		{"nested object", `{"path":["x"],"values":[{"k":"v"}]}`},
+		{"nested array", `{"path":["x"],"values":[[1,2]]}`},
+		{"non-integer float", `{"path":["x"],"values":[1.5]}`},
+	}
+
+	for _, tt := range tts {
+		t.Run(tt.name, func(t *testing.T) {
+			var cq ClaimQuery
+			assert.Error(t, json.Unmarshal([]byte(tt.body), &cq))
+		})
+	}
+}
+
+// TestClaimQueryValues_YAMLRoundTrip mirrors the JSON test path through the
+// custom UnmarshalYAML.
+func TestClaimQueryValues_YAMLRoundTrip(t *testing.T) {
+	src := []byte("path:\n  - postal_code\nvalues:\n  - \"90210\"\n  - \"90211\"\n")
+	var cq ClaimQuery
+	assert.NoError(t, yaml.Unmarshal(src, &cq))
+	assert.Equal(t, StringPath("postal_code"), cq.Path)
+	assert.Equal(t, []any{"90210", "90211"}, cq.Values)
 }
