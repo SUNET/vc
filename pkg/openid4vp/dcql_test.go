@@ -505,3 +505,58 @@ func TestValidateClaimValues_FloatBounds(t *testing.T) {
 		})
 	}
 }
+
+// TestCredentialSetRequiredTriState verifies that CredentialSetQuery.Required
+// distinguishes "omitted" (spec default true), "explicit false", and
+// "explicit true" across a JSON round-trip, per OpenID4VP draft 24 §6.2.
+func TestCredentialSetRequiredTriState(t *testing.T) {
+	tts := []struct {
+		name            string
+		raw             string
+		wantRequiredPtr *bool
+		wantIsRequired  bool
+		wantRoundTrip   string
+	}{
+		{
+			name:            "omitted required means spec default true",
+			raw:             `{"options":[["a"]]}`,
+			wantRequiredPtr: nil,
+			wantIsRequired:  true,
+			wantRoundTrip:   `{"options":[["a"]]}`,
+		},
+		{
+			name:            "explicit false is preserved",
+			raw:             `{"options":[["a"]],"required":false}`,
+			wantRequiredPtr: new(false),
+			wantIsRequired:  false,
+			wantRoundTrip:   `{"options":[["a"]],"required":false}`,
+		},
+		{
+			name:            "explicit true is preserved",
+			raw:             `{"options":[["a"]],"required":true}`,
+			wantRequiredPtr: new(true),
+			wantIsRequired:  true,
+			wantRoundTrip:   `{"options":[["a"]],"required":true}`,
+		},
+	}
+
+	for _, tt := range tts {
+		t.Run(tt.name, func(t *testing.T) {
+			var got CredentialSetQuery
+			require := assert.New(t)
+			require.NoError(json.Unmarshal([]byte(tt.raw), &got))
+
+			if tt.wantRequiredPtr == nil {
+				require.Nil(got.Required)
+			} else {
+				require.NotNil(got.Required)
+				require.Equal(*tt.wantRequiredPtr, *got.Required)
+			}
+			require.Equal(tt.wantIsRequired, got.IsRequired())
+
+			out, err := json.Marshal(got)
+			require.NoError(err)
+			require.JSONEq(tt.wantRoundTrip, string(out))
+		})
+	}
+}
