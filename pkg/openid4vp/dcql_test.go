@@ -281,6 +281,10 @@ func TestClaimQueryValues_RoundTrip(t *testing.T) {
 			assert.Equal(t, tt.query.ID, decoded.ID)
 			assert.Equal(t, tt.query.Path, decoded.Path)
 			assert.Len(t, decoded.Values, len(tt.query.Values))
+
+			reMarshaled, err := json.Marshal(decoded)
+			assert.NoError(t, err)
+			assert.JSONEq(t, tt.wantOnWire, string(reMarshaled))
 		})
 	}
 }
