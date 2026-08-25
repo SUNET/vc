@@ -116,6 +116,18 @@ type ZkDocumentDataMdoc struct {
 type ZkSignedItemMdoc struct {
 	ElementIdentifier string `cbor:"elementIdentifier"`
 	ElementValue      any    `cbor:"elementValue"`
+
+	// DigestID is the credential's own real ISO 18013-5 IssuerSignedItem
+	// digestID for this element - an ADDITIVE, optional extension to
+	// multipaz's own zkDocuments wire shape (see
+	// docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md for the full rationale and
+	// its "not yet proposed upstream" status). nil when absent - a
+	// Longfellow presentation never needs this (attributes are matched by
+	// request-order position, not digestID - see
+	// ZkPresentationContext.RequestedClaimIDs's doc comment), so only
+	// Vega-producing wallets (siros-sdk-kotlin as of this field's
+	// addition - siros-sdk-swift does not yet emit it) populate it.
+	DigestID *uint32 `cbor:"digestId,omitempty"`
 }
 
 // FlattenIssuerSigned converts IssuerSigned into the same
@@ -128,6 +140,38 @@ func (dd *ZkDocumentDataMdoc) FlattenIssuerSigned() map[string]map[string]any {
 // FlattenDeviceSigned is the DeviceSigned equivalent of FlattenIssuerSigned.
 func (dd *ZkDocumentDataMdoc) FlattenDeviceSigned() map[string]map[string]any {
 	return flattenZkSignedItems(dd.DeviceSigned)
+}
+
+// IssuerSignedItemsByDigestID indexes IssuerSigned by DigestID, across all
+// namespaces - the lookup a Vega presentation's verify path needs (see
+// docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md): the returned proof's disclosed
+// claims are matched to a requested identifier via digestID, not position,
+// so the verifier needs the wire-declared elementValue for that same
+// digestID to compare against.
+//
+// Returns an error if any disclosed item has no DigestID at all (expected
+// only from a pre-digestId-extension wallet, or a non-Vega presentation
+// mistakenly routed through this path), or if the same DigestID appears
+// more than once (ambiguous - refuses to guess which one was intended,
+// mirroring findClaimInNamespaces' identical stance on a duplicate
+// elementIdentifier).
+func (dd *ZkDocumentDataMdoc) IssuerSignedItemsByDigestID() (map[uint32]ZkSignedItemMdoc, error) {
+	out := make(map[uint32]ZkSignedItemMdoc)
+	for ns, items := range dd.IssuerSigned {
+		for _, item := range items {
+			if item.DigestID == nil {
+				return nil, fmt.Errorf("issuerSigned item %q (namespace %q) has no digestId - required for Vega claim matching", item.ElementIdentifier, ns)
+			}
+			if existing, ok := out[*item.DigestID]; ok {
+				return nil, fmt.Errorf(
+					"digestId %d is disclosed more than once (%q and %q) - ambiguous, refusing to guess which one was intended",
+					*item.DigestID, existing.ElementIdentifier, item.ElementIdentifier,
+				)
+			}
+			out[*item.DigestID] = item
+		}
+	}
+	return out, nil
 }
 
 func flattenZkSignedItems(m map[string][]ZkSignedItemMdoc) map[string]map[string]any {
