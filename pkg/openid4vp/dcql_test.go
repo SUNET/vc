@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v2"
 )
 
@@ -543,20 +544,19 @@ func TestCredentialSetRequiredTriState(t *testing.T) {
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
 			var got CredentialSetQuery
-			require := assert.New(t)
-			require.NoError(json.Unmarshal([]byte(tt.raw), &got))
+			require.NoError(t, json.Unmarshal([]byte(tt.raw), &got))
 
 			if tt.wantRequiredPtr == nil {
-				require.Nil(got.Required)
+				require.Nil(t, got.Required)
 			} else {
-				require.NotNil(got.Required)
-				require.Equal(*tt.wantRequiredPtr, *got.Required)
+				require.NotNil(t, got.Required)
+				require.Equal(t, *tt.wantRequiredPtr, *got.Required)
 			}
-			require.Equal(tt.wantIsRequired, got.IsRequired())
+			require.Equal(t, tt.wantIsRequired, got.IsRequired())
 
 			out, err := json.Marshal(got)
-			require.NoError(err)
-			require.JSONEq(tt.wantRoundTrip, string(out))
+			require.NoError(t, err)
+			require.JSONEq(t, tt.wantRoundTrip, string(out))
 		})
 	}
 }
