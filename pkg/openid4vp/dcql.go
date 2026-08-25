@@ -317,7 +317,10 @@ func validateClaimPath(path []*string) error {
 
 // validateClaimValues enforces the OpenID4VP Section 6.3 rule that "values" must be
 // a non-empty array of strings, integers, or booleans when present. JSON decoding
-// widens numeric values into float64, so integer-valued floats are accepted.
+// widens numeric values into float64, so integer-valued floats are accepted — but
+// only within the IEEE-754 safe integer range (±(2^53-1)); larger magnitudes may
+// have been silently rounded by the decoder and can no longer be trusted to
+// "match exactly" per the spec.
 // present tells the validator that the key existed on the wire so an empty array
 // can be rejected (an absent key is legal — "values" is OPTIONAL).
 func validateClaimValues(values []any, present bool) error {
@@ -331,8 +334,8 @@ func validateClaimValues(values []any, present bool) error {
 		switch t := v.(type) {
 		case string, bool, int, int32, int64, uint, uint32, uint64:
 		case float64:
-			// Reject NaN/Inf and out-of-int64-range floats before the int64 conversion to avoid overflow.
-			if math.IsNaN(t) || math.IsInf(t, 0) || t < math.MinInt64 || t > math.MaxInt64 || t != math.Trunc(t) {
+			const maxSafeInt = float64(1<<53 - 1)
+			if math.IsNaN(t) || math.IsInf(t, 0) || t < -maxSafeInt || t > maxSafeInt || t != math.Trunc(t) {
 				return fmt.Errorf("claim values[%d] must be a string, integer, or boolean", i)
 			}
 		case float32:

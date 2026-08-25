@@ -456,11 +456,16 @@ func TestDCQL_MarshalYAML_RoundTrip(t *testing.T) {
 
 // TestValidateClaimValues_FloatBounds guards the pre-conversion range check
 // added to validateClaimValues so out-of-range or non-finite floats can never
-// reach the int64 conversion.
+// reach the int64 conversion, and integer-valued floats beyond the IEEE-754
+// safe integer range (±(2^53-1)) are rejected because JSON decoding may have
+// silently rounded them.
 func TestValidateClaimValues_FloatBounds(t *testing.T) {
 	// A float64 just above math.MaxInt64 that is still finite and integer-valued.
 	overflowFloat64 := math.Nextafter(float64(math.MaxInt64), math.MaxFloat64)
 	underflowFloat64 := math.Nextafter(float64(math.MinInt64), -math.MaxFloat64)
+	// Just outside the JSON-safe integer range.
+	aboveSafeInt := float64(1<<53) // 2^53 is representable but 2^53+1 is not; anything > 2^53-1 is unsafe.
+	belowSafeInt := -float64(1<<53)
 
 	tts := []struct {
 		name    string
@@ -472,12 +477,16 @@ func TestValidateClaimValues_FloatBounds(t *testing.T) {
 		{"-Inf float64", []any{math.Inf(-1)}, true},
 		{"overflow float64", []any{overflowFloat64}, true},
 		{"underflow float64", []any{underflowFloat64}, true},
+		{"above safe int float64", []any{aboveSafeInt}, true},
+		{"below safe int float64", []any{belowSafeInt}, true},
 		{"non-integer float64", []any{1.5}, true},
 		{"NaN float32", []any{float32(math.NaN())}, true},
 		{"+Inf float32", []any{float32(math.Inf(1))}, true},
 		{"overflow float32", []any{float32(math.MaxFloat32)}, true},
 		{"non-integer float32", []any{float32(1.5)}, true},
 		{"integer float64", []any{float64(42)}, false},
+		{"max safe int float64", []any{float64(1<<53 - 1)}, false},
+		{"min safe int float64", []any{-float64(1<<53 - 1)}, false},
 		{"integer float32", []any{float32(42)}, false},
 		{"zero float64", []any{0.0}, false},
 	}
