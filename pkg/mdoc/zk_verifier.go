@@ -25,6 +25,7 @@ package mdoc
 // verification is opt-in. See docs/ZK_PPID_VERIFICATION_PLAN.md and
 // README.md's "Native ZK/PPID proof verification" section for setup.
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
@@ -36,6 +37,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/pkg/mdoc/zkvegaworker"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/trust"
 
@@ -92,6 +94,16 @@ type ZkVerifierConfig struct {
 	// default stub. If empty, zkcircuit.DefaultZkCircuitURL is used.
 	ZkCircuitSources []string
 
+	// VegaWorkerPath is the path (or bare name, resolved via PATH) to the
+	// cmd/zkvegaverifyworker binary - see nativeVerifyZkProofVega's doc
+	// comment for why Vega verification execs an isolated subprocess
+	// rather than linking zk-cred-vega's cgo binding directly into this
+	// process. Only consulted when built with the "zknative" tag AND a
+	// presented document's zkSystemId identifies a Vega circuit; ignored
+	// otherwise. Defaults to nativeVerifyZkProofVega's own
+	// DefaultZkVegaWorkerPath if empty.
+	VegaWorkerPath string
+
 	// Clock is an optional function that returns the current time. Defaults
 	// to time.Now.
 	Clock func() time.Time
@@ -103,6 +115,7 @@ type ZkHandler struct {
 	trustEvaluator   trust.TrustEvaluator
 	issuerURL        string
 	zkCircuitSources []string
+	vegaWorkerPath   string
 	clock            func() time.Time
 }
 
@@ -119,6 +132,7 @@ func NewZkHandler(cfg ZkVerifierConfig) (*ZkHandler, error) {
 		trustEvaluator:   cfg.TrustEvaluator,
 		issuerURL:        cfg.IssuerURL,
 		zkCircuitSources: cfg.ZkCircuitSources,
+		vegaWorkerPath:   cfg.VegaWorkerPath,
 		clock:            clock,
 	}, nil
 }
@@ -347,7 +361,19 @@ func (h *ZkHandler) verifyOneDocument(ctx context.Context, zkDoc *ZkDocumentMdoc
 		return nil, fmt.Errorf("issuer not trusted: %s", decision.Reason)
 	}
 
-	// 3. Assemble the native call's arguments.
+	// 3. Call into the native ZK verifier - the two system families have
+	// genuinely different verify shapes (see nativeVerifyZkProofVega's doc
+	// comment), so this branches BEFORE any Longfellow-specific argument
+	// assembly below, not just at the final native-call site. Vega
+	// presentations never carry a pseudonym in the first place (no PPID
+	// concept in this v1 circuit - see verifyVegaDocument's own doc
+	// comment), so "which system" and "PPID or not" are kept as two
+	// independent axes rather than folded into one three-way if/else.
+	if strings.HasPrefix(dd.ZkSystemID, "vega-mc") {
+		return h.verifyVegaDocument(ctx, zkDoc, dd, dsCert)
+	}
+
+	// 4. Assemble the native call's arguments (Longfellow only).
 	issuerSigned := dd.FlattenIssuerSigned()
 	attributes, pseudonym, err := buildZkAttributes(issuerSigned, pctx.RequestedClaimIDs)
 	if err != nil {
@@ -380,7 +406,7 @@ func (h *ZkHandler) verifyOneDocument(ctx context.Context, zkDoc *ZkDocumentMdoc
 
 	timeStr := string(dd.Timestamp)
 
-	// 4. Call into the native ZK verifier.
+	// 5. Call into the native ZK verifier (Longfellow).
 	if pseudonym != nil {
 		verifierContext := ComputeZkVerifierContext(pctx.SessionID, pctx.ClientID, pctx.PPIDContext)
 		if err := nativeVerifyZkProofWithPPID(
@@ -405,6 +431,167 @@ func (h *ZkHandler) verifyOneDocument(ctx context.Context, zkDoc *ZkDocumentMdoc
 		Claims:     issuerSigned,
 		Pseudonym:  pseudonym,
 	}, nil
+}
+
+// verifyVegaDocument verifies a Vega ("vega-mc*") presentation -
+// nativeVerifyZkProofVega's own doc comment explains why this is a
+// genuinely different verify shape from the Longfellow path above, not a
+// drop-in call: Vega's verify only returns the RECOMPUTED public values,
+// so every check below - tying the proof to the trust-evaluated issuer,
+// checking disclosed claims against what the wire declares, checking the
+// credential's own validity window - is real, new comparison logic the
+// Longfellow path never needed (it hands its own expected values IN and
+// gets a bare pass/fail back). Vega presentations never carry a
+// pseudonym - this v1 circuit has no PPID concept at all (see
+// [[project_vega_broader_circuit_ambitions]] / the tracked plan's Phase 6
+// for the real research task pseudonym support needs before that
+// changes).
+func (h *ZkHandler) verifyVegaDocument(ctx context.Context, zkDoc *ZkDocumentMdoc, dd *ZkDocumentDataMdoc, dsCert *x509.Certificate) (*ZkDocumentResult, error) {
+	result, err := nativeVerifyZkProofVega(ctx, dd.ZkSystemID, zkDoc.Proof, h.zkCircuitSources, h.vegaWorkerPath)
+	if err != nil {
+		return nil, err
+	}
+
+	issuerPubKeySEC1, err := sec1PublicKeyFromCert(dsCert)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract issuer public key: %w", err)
+	}
+	if err := checkVegaIssuerKeyMatches(issuerPubKeySEC1, result.Qx, result.Qy); err != nil {
+		return nil, err
+	}
+
+	if err := checkVegaDisclosedClaimsMatchWire(dd, result.Claims); err != nil {
+		return nil, err
+	}
+
+	if err := checkVegaValidityWindow(result.ValidFromTs, result.ValidUntilTs, h.clock()); err != nil {
+		return nil, err
+	}
+
+	return &ZkDocumentResult{
+		DocType:    dd.DocType,
+		ZkSystemID: dd.ZkSystemID,
+		Claims:     dd.FlattenIssuerSigned(),
+		Pseudonym:  nil,
+	}, nil
+}
+
+// checkVegaIssuerKeyMatches rejects a proof whose recomputed issuer public
+// key (qx/qy) doesn't match the certificate the trust decision was made
+// about - the check that ties the ZK proof to the SAME issuer as the
+// x5chain, not merely to "some trusted issuer".
+//
+// issuerPubKeySEC1 must be a 65-byte uncompressed SEC1 point
+// (0x04 || X(32) || Y(32) - sec1PublicKeyFromCert's own return shape);
+// qx/qy are each exactly 32 bytes (zk-cred-vega's fixed P-256 coordinate
+// width).
+func checkVegaIssuerKeyMatches(issuerPubKeySEC1, qx, qy []byte) error {
+	const sec1UncompressedLen = 1 + 32 + 32
+	if len(issuerPubKeySEC1) != sec1UncompressedLen || issuerPubKeySEC1[0] != 0x04 {
+		return fmt.Errorf("issuer certificate public key is not a %d-byte uncompressed SEC1 point (got %d bytes)", sec1UncompressedLen, len(issuerPubKeySEC1))
+	}
+	if !bytes.Equal(issuerPubKeySEC1[1:33], qx) || !bytes.Equal(issuerPubKeySEC1[33:65], qy) {
+		return fmt.Errorf("Vega proof's recomputed issuer public key does not match the trust-evaluated certificate's public key")
+	}
+	return nil
+}
+
+// vegaIssuerSignedItemPlaintext is the CBOR shape of the plaintext bytes
+// zk-cred-vega's verify returns for a disclosed claim: the FULL, original
+// IssuerSignedItem structure (see VegaProofSystem.buildWitness's doc
+// comment in siros-sdk-kotlin: `issuerSignedItemBytes =
+// entry.original.EncodeToBytes()`), not just the bare elementValue -
+// checkVegaDisclosedClaimsMatchWire decodes this to extract ElementValue
+// for comparison against the wire-declared value.
+type vegaIssuerSignedItemPlaintext struct {
+	DigestID          uint32 `cbor:"digestID"`
+	Random            []byte `cbor:"random"`
+	ElementIdentifier string `cbor:"elementIdentifier"`
+	ElementValue      any    `cbor:"elementValue"`
+}
+
+// checkVegaDisclosedClaimsMatchWire is the check that prevents a wallet
+// from proving one claim value while declaring a different one on the
+// wire: for every claim declared in dd.IssuerSigned (indexed by digestId -
+// see ZkDocumentDataMdoc.IssuerSignedItemsByDigestID and
+// docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md), the proof must have actually
+// disclosed that same digestId, and the plaintext it proved must
+// canonical-CBOR-match the wire-declared elementValue.
+//
+// Deliberately does NOT require the reverse (every proof-disclosed slot
+// also appearing on the wire) - a wallet choosing not to reveal something
+// the proof could have revealed is harmless.
+func checkVegaDisclosedClaimsMatchWire(dd *ZkDocumentDataMdoc, claims []zkvegaworker.DisclosedClaim) error {
+	wireByDigestID, err := dd.IssuerSignedItemsByDigestID()
+	if err != nil {
+		return fmt.Errorf("indexing wire-declared claims by digestId: %w", err)
+	}
+
+	proofByDigestID := make(map[uint32]zkvegaworker.DisclosedClaim, len(claims))
+	for _, c := range claims {
+		if !c.Disclosed {
+			continue
+		}
+		if _, dup := proofByDigestID[c.DigestID]; dup {
+			return fmt.Errorf("proof discloses digestId %d more than once - ambiguous, refusing to guess which slot was intended", c.DigestID)
+		}
+		proofByDigestID[c.DigestID] = c
+	}
+
+	// Canonical (sorted-map-key) CBOR encoding for comparison-safe values -
+	// see buildZkAttributes' own doc comment for why raw Go-value equality
+	// (e.g. reflect.DeepEqual) isn't used here.
+	cborEncoder, err := NewCBOREncoder()
+	if err != nil {
+		return fmt.Errorf("failed to create CBOR encoder: %w", err)
+	}
+
+	for digestID, wireItem := range wireByDigestID {
+		proofClaim, ok := proofByDigestID[digestID]
+		if !ok {
+			return fmt.Errorf("claim %q (digestId %d) is declared on the wire but the ZK proof never disclosed that digestId", wireItem.ElementIdentifier, digestID)
+		}
+
+		var plaintext vegaIssuerSignedItemPlaintext
+		if err := cborEncoder.Unmarshal(proofClaim.Plaintext, &plaintext); err != nil {
+			return fmt.Errorf("failed to decode proof-disclosed plaintext for digestId %d: %w", digestID, err)
+		}
+
+		wireValueCBOR, err := cborEncoder.Marshal(wireItem.ElementValue)
+		if err != nil {
+			return fmt.Errorf("failed to encode wire-declared value for claim %q: %w", wireItem.ElementIdentifier, err)
+		}
+		proofValueCBOR, err := cborEncoder.Marshal(plaintext.ElementValue)
+		if err != nil {
+			return fmt.Errorf("failed to encode proof-disclosed value for digestId %d: %w", digestID, err)
+		}
+		if !bytes.Equal(wireValueCBOR, proofValueCBOR) {
+			return fmt.Errorf("claim %q (digestId %d): wire-declared value does not match the ZK proof's disclosed value", wireItem.ElementIdentifier, digestID)
+		}
+	}
+	return nil
+}
+
+// checkVegaValidityWindow checks the credential's own MSO validity window
+// (proven by the circuit, not otherwise carried by a Vega presentation -
+// unlike the Longfellow path, which has no MSO validity concept at all)
+// against now.
+func checkVegaValidityWindow(validFromTs, validUntilTs []byte, now time.Time) error {
+	validFrom, err := time.Parse(time.RFC3339, string(validFromTs))
+	if err != nil {
+		return fmt.Errorf("failed to parse Vega proof's valid_from_ts %q: %w", validFromTs, err)
+	}
+	validUntil, err := time.Parse(time.RFC3339, string(validUntilTs))
+	if err != nil {
+		return fmt.Errorf("failed to parse Vega proof's valid_until_ts %q: %w", validUntilTs, err)
+	}
+	if now.Before(validFrom) {
+		return fmt.Errorf("credential not yet valid: valid from %s", validFrom)
+	}
+	if now.After(validUntil) {
+		return fmt.Errorf("credential expired: valid until %s", validUntil)
+	}
+	return nil
 }
 
 // buildZkAttributes converts a flattened issuerSigned claim map into the

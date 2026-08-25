@@ -14,7 +14,11 @@ package mdoc
 // argument assembly, verifier_context derivation - see zk_verifier.go) is
 // real and already runs before either of these functions is reached.
 
-import "context"
+import (
+	"context"
+
+	"github.com/SUNET/vc/pkg/mdoc/zkvegaworker"
+)
 
 // nativeVerifyZkProof is the (stubbed) call site for a non-PPID native ZK
 // verify. See docs/ZK_PPID_VERIFICATION_PLAN.md for what a real binding
@@ -55,4 +59,16 @@ func nativeVerifyZkProofWithPPID(
 	zkCircuitSources []string,
 ) error {
 	return ErrNativeZkVerifyNotImplemented
+}
+
+// nativeVerifyZkProofVega is the (stubbed) call site for Vega verification.
+// Real with the "zknative" build tag - see zk_native_cgo_vega.go.
+func nativeVerifyZkProofVega(
+	ctx context.Context,
+	zkSystemID string,
+	proof []byte,
+	zkCircuitSources []string,
+	workerPath string,
+) (zkvegaworker.VerifyResult, error) {
+	return zkvegaworker.VerifyResult{}, ErrNativeZkVerifyNotImplemented
 }
