@@ -211,9 +211,14 @@ func copyDCQL(src *DCQL) *DCQL {
 						pathCopy[k] = &s
 					}
 				}
+				var valuesCopy []any
+				if claim.Values != nil {
+					valuesCopy = append([]any{}, claim.Values...)
+				}
 				dst.Credentials[i].Claims[j] = ClaimQuery{
-					ID:   claim.ID,
-					Path: pathCopy,
+					ID:     claim.ID,
+					Path:   pathCopy,
+					Values: valuesCopy,
 				}
 			}
 		}
