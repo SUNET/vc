@@ -1,7 +1,6 @@
 package model
 
 import (
-	"context"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -9,7 +8,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirosfoundation/go-trust/pkg/registry/rpcert"
 )
 
@@ -30,17 +31,129 @@ type RegistrationCertificate struct {
 	// that has profiled a different identifier for the same document.
 	Format string `yaml:"format,omitempty" doc_example:"\"rc-wrp+jwt\""`
 	// TrustedRootsPath optionally points at a PEM bundle of the Registrar's
-	// root certificates. When set, the WRPRC's own x5c chain is validated
-	// against it at startup and its entitlements are checked for consistency
-	// with the access certificate. When unset, only the document's structure
-	// is checked, since chain validation without trust anchors would be
-	// theatre.
+	// root certificates. When set, the certificate's own x5c chain is
+	// evaluated against it at startup and the attested identity is checked
+	// against the access certificate. When unset, the document is still
+	// signature-checked and parsed, but nothing establishes that its issuer
+	// is a Registrar we accept.
 	TrustedRootsPath string `yaml:"trusted_roots_path,omitempty"`
 }
 
 // DefaultRegistrationCertificateFormat is the verifier_info format
 // identifier for a WRPRC, matching its JWT media type.
 const DefaultRegistrationCertificateFormat = rpcert.WRPRCTyp
+
+// wrprcSigningAlgorithms are the JWS algorithms accepted on a registration
+// certificate. Listed explicitly so "none" and the RSA-PKCS1 family can
+// never be negotiated by an attacker-supplied header.
+var wrprcSigningAlgorithms = []string{
+	"ES256", "ES384", "ES512",
+	"PS256", "PS384", "PS512",
+	"EdDSA",
+}
+
+// WRPRCClaims is the registration-certificate payload, in the shape
+// Registrars actually emit.
+//
+// Extraction is deliberately ours rather than delegated. Validating a signed
+// object has three steps - verify the signature, extract the trust
+// information, evaluate it - and only the third belongs to go-trust. Owning
+// the second here also means we track what real Registrars emit: the German
+// sandbox sends `sub` as a bare identifier string with the legal name in
+// `sub_ln`, and names the DCQL claim list `claim`, both of which differ from
+// a strict reading of the tables.
+type WRPRCClaims struct {
+	// SubjectID is the semantic organisation identifier, e.g.
+	// "NTRDE-BD7070256AF93987". It is what binds this document to an access
+	// certificate.
+	SubjectID string
+	// LegalName is the registered legal name of the Relying Party.
+	LegalName string
+	// TradeName is the user-facing name, from the `name` claim.
+	TradeName string
+	// Country is the ISO 3166-1 code where the RP is established.
+	Country string
+	// EntitlementURIs are the Annex A role entitlements the Registrar granted.
+	EntitlementURIs []string
+	// AllowedAttributes are the top-level claim names this RP is registered
+	// to request, flattened from the DCQL credential queries. Used for
+	// over-request detection.
+	AllowedAttributes []string
+	// Purpose holds the multi-language purpose descriptions shown to users.
+	Purpose []WRPRCLocalizedText
+	// PrivacyPolicyURI, InfoURI and RegistryURI are display/reference links.
+	PrivacyPolicyURI string
+	InfoURI          string
+	RegistryURI      string
+}
+
+// WRPRCLocalizedText is one language variant of a displayable string.
+type WRPRCLocalizedText struct {
+	Lang  string `json:"lang"`
+	Value string `json:"value"`
+}
+
+// wrprcPayload mirrors the wire format, tolerating the shape variations seen
+// in the wild before being reduced to WRPRCClaims.
+type wrprcPayload struct {
+	Name          string               `json:"name"`
+	Sub           wrprcSubject         `json:"sub"`
+	SubLegalName  string               `json:"sub_ln"`
+	Country       string               `json:"country"`
+	Entitlements  []string             `json:"entitlements"`
+	PrivacyPolicy string               `json:"privacy_policy"`
+	InfoURI       string               `json:"info_uri"`
+	RegistryURI   string               `json:"registry_uri"`
+	Purpose       []WRPRCLocalizedText `json:"purpose"`
+	Credentials   []wrprcCredential    `json:"credentials"`
+}
+
+// wrprcSubject accepts `sub` either as a bare identifier string or as the
+// structured object, since Registrars differ on this.
+type wrprcSubject struct {
+	ID         string
+	LegalName  string
+	GivenName  string
+	FamilyName string
+}
+
+// UnmarshalJSON accepts both `"sub": "NTRDE-..."` and
+// `"sub": {"id": "...", "legal_name": "..."}`.
+func (s *wrprcSubject) UnmarshalJSON(data []byte) error {
+	var asString string
+	if err := json.Unmarshal(data, &asString); err == nil {
+		s.ID = asString
+		return nil
+	}
+	var asObject struct {
+		ID         string `json:"id"`
+		LegalName  string `json:"legal_name"`
+		GivenName  string `json:"given_name"`
+		FamilyName string `json:"family_name"`
+	}
+	if err := json.Unmarshal(data, &asObject); err != nil {
+		return fmt.Errorf("sub claim is neither an identifier string nor an object: %w", err)
+	}
+	s.ID = asObject.ID
+	s.LegalName = asObject.LegalName
+	s.GivenName = asObject.GivenName
+	s.FamilyName = asObject.FamilyName
+	return nil
+}
+
+// wrprcCredential is one DCQL credential query. The claim list appears as
+// both `claim` and `claims` in practice; missing it would silently yield an
+// empty allowed-attribute set, which reads as "this RP may request nothing"
+// and would make over-request detection inert rather than failing loudly.
+type wrprcCredential struct {
+	Format string       `json:"format"`
+	Claim  []wrprcClaim `json:"claim"`
+	Claims []wrprcClaim `json:"claims"`
+}
+
+type wrprcClaim struct {
+	Path []string `json:"path"`
+}
 
 // LoadedRegistrationCertificate holds a registration certificate read at
 // startup, ready to be attached to outgoing authorization requests.
@@ -49,11 +162,13 @@ type LoadedRegistrationCertificate struct {
 	JWT string
 	// Format is the verifier_info format identifier to advertise.
 	Format string
-	// Entitlements is what the Registrar attested, populated only when
-	// trusted_roots_path was configured and validation succeeded. It is nil
-	// for a structurally-checked-only certificate, so callers must not treat
-	// a nil value as "no entitlements".
-	Entitlements *rpcert.RPEntitlements
+	// Claims is what the Registrar attested, extracted after the signature
+	// was verified. Always populated for a successfully loaded certificate.
+	Claims *WRPRCClaims
+	// TrustEvaluated reports whether the issuing chain was actually checked
+	// against configured Registrar roots. False means the document is
+	// authentic but nothing establishes that we accept its issuer.
+	TrustEvaluated bool
 }
 
 // VerifierInfo renders the certificate as OpenID4VP verifier_info entries.
@@ -72,13 +187,20 @@ func (l *LoadedRegistrationCertificate) VerifierInfo() []openid4vp.VerifierInfo 
 	}}
 }
 
-// LoadRegistrationCertificate reads and checks the configured registration
-// certificate. It returns (nil, nil) when none is configured, so a
-// deployment outside an ARF trust framework is unaffected.
+// LoadRegistrationCertificate reads, verifies and extracts the configured
+// registration certificate. It returns (nil, nil) when none is configured,
+// so a deployment outside an ARF trust framework is unaffected.
 //
-// accessCert is the verifier's own access certificate, used only to confirm
-// the two documents describe the same organisation (ARF RPRC_16). Pass nil
-// when none is loaded; the binding check is then skipped.
+// The three steps of validating a signed object are kept distinct:
+//
+//  1. verify the signature against the certificate in the document's own x5c;
+//  2. extract the attested claims;
+//  3. evaluate whether that issuer is one we trust - the only step that is
+//     a trust decision, and the only one delegated.
+//
+// accessCert is the verifier's own access certificate, used in step 3 to
+// confirm both documents describe the same organisation (ARF RPRC_16). Pass
+// nil when none is loaded; the binding check is then skipped.
 func (v *Verifier) LoadRegistrationCertificate(accessCert *x509.Certificate) (*LoadedRegistrationCertificate, error) {
 	cfg := v.RegistrationCertificate
 	if cfg == nil || cfg.FilePath == "" {
@@ -94,16 +216,31 @@ func (v *Verifier) LoadRegistrationCertificate(accessCert *x509.Certificate) (*L
 		return nil, fmt.Errorf("registration certificate %q is empty", cfg.FilePath)
 	}
 
-	// Structural check, always: a misconfigured path pointing at some other
-	// PEM or JSON file should fail here, at startup, rather than by being
-	// handed to wallets as an unparseable attestation.
-	if err := checkWRPRCStructure(token); err != nil {
+	// Step 0 - shape. A path pointing at some other PEM or JSON file should
+	// fail here rather than by being handed to wallets as an unusable
+	// attestation.
+	chain, err := wrprcChain(token)
+	if err != nil {
+		return nil, fmt.Errorf("registration certificate %q: %w", cfg.FilePath, err)
+	}
+
+	// Step 1 - signature, against the leaf of the document's own x5c. This
+	// proves only that the payload is the one the holder of that certificate
+	// signed; whether that certificate is acceptable is step 3.
+	if err := verifyWRPRCSignature(token, chain[0]); err != nil {
+		return nil, fmt.Errorf("registration certificate %q: %w", cfg.FilePath, err)
+	}
+
+	// Step 2 - extract.
+	claims, err := extractWRPRCClaims(token)
+	if err != nil {
 		return nil, fmt.Errorf("registration certificate %q: %w", cfg.FilePath, err)
 	}
 
 	loaded := &LoadedRegistrationCertificate{
 		JWT:    token,
 		Format: cfg.Format,
+		Claims: claims,
 	}
 	if loaded.Format == "" {
 		loaded.Format = DefaultRegistrationCertificateFormat
@@ -113,28 +250,28 @@ func (v *Verifier) LoadRegistrationCertificate(accessCert *x509.Certificate) (*L
 		return loaded, nil
 	}
 
-	// Full validation: chain the WRPRC's x5c to the Registrar's roots and
-	// extract what it attests.
+	// Step 3 - evaluate. Does this chain lead to a Registrar we accept, and
+	// does the document describe the same organisation as our access
+	// certificate?
 	roots, err := loadCertPool(cfg.TrustedRootsPath)
 	if err != nil {
 		return nil, fmt.Errorf("registration certificate trusted roots %q: %w", cfg.TrustedRootsPath, err)
 	}
-	entitlements, err := rpcert.NewJWTRegistrationCertValidator(roots).Validate(context.Background(), []byte(token))
-	if err != nil {
-		return nil, fmt.Errorf("registration certificate %q failed validation: %w", cfg.FilePath, err)
+	if err := evaluateWRPRCChain(chain, roots); err != nil {
+		return nil, fmt.Errorf("registration certificate %q: %w", cfg.FilePath, err)
 	}
-	loaded.Entitlements = entitlements
+	loaded.TrustEvaluated = true
 
-	// ARF RPRC_16: the registration certificate must describe the same
-	// organisation as the access certificate. Presenting a mismatched pair
-	// would let a wallet attribute one organisation's entitlements to
-	// another.
+	// ARF RPRC_16: a mismatched pair would let a wallet attribute one
+	// organisation's entitlements to another.
 	if accessCert != nil {
 		orgID, err := wrpacOrganizationIdentifier(accessCert)
 		if err != nil {
 			return nil, fmt.Errorf("registration certificate: reading access certificate organisation identifier: %w", err)
 		}
-		if err := rpcert.CheckWRPACWRPRCBinding(orgID, entitlements); err != nil {
+		if err := rpcert.CheckWRPACWRPRCBinding(orgID, &rpcert.RPEntitlements{
+			Subject: rpcert.WRPRCSubject{ID: claims.SubjectID},
+		}); err != nil {
 			return nil, fmt.Errorf("registration certificate does not match the access certificate: %w", err)
 		}
 	}
@@ -142,25 +279,129 @@ func (v *Verifier) LoadRegistrationCertificate(accessCert *x509.Certificate) (*L
 	return loaded, nil
 }
 
-// checkWRPRCStructure verifies the token is a compact JWT carrying the
-// WRPRC media type, without needing trust anchors.
-func checkWRPRCStructure(token string) error {
+// wrprcChain checks the token is a compact JWT carrying the WRPRC media type
+// and returns the certificate chain from its x5c header.
+func wrprcChain(token string) ([]*x509.Certificate, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return fmt.Errorf("not a compact JWT: expected 3 dot-separated parts, got %d", len(parts))
+		return nil, fmt.Errorf("not a compact JWT: expected 3 dot-separated parts, got %d", len(parts))
 	}
 	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return fmt.Errorf("decoding JWT header: %w", err)
+		return nil, fmt.Errorf("decoding JWT header: %w", err)
 	}
 	var header struct {
 		Typ string `json:"typ"`
+		X5C any    `json:"x5c"`
 	}
 	if err := json.Unmarshal(headerBytes, &header); err != nil {
-		return fmt.Errorf("parsing JWT header: %w", err)
+		return nil, fmt.Errorf("parsing JWT header: %w", err)
 	}
 	if !strings.EqualFold(header.Typ, rpcert.WRPRCTyp) {
-		return fmt.Errorf("unexpected JWT typ %q, want %q", header.Typ, rpcert.WRPRCTyp)
+		return nil, fmt.Errorf("unexpected JWT typ %q, want %q", header.Typ, rpcert.WRPRCTyp)
+	}
+	if header.X5C == nil {
+		return nil, fmt.Errorf("JWT header has no x5c certificate chain to verify against")
+	}
+	chain, err := jose.ParseX5CHeader(header.X5C)
+	if err != nil {
+		return nil, fmt.Errorf("parsing x5c header: %w", err)
+	}
+	if len(chain) == 0 {
+		return nil, fmt.Errorf("x5c header contains no certificates")
+	}
+	return chain, nil
+}
+
+// verifyWRPRCSignature verifies the compact JWS against leaf's public key,
+// restricted to the algorithms in wrprcSigningAlgorithms.
+func verifyWRPRCSignature(token string, leaf *x509.Certificate) error {
+	parser := jwt.NewParser(
+		jwt.WithValidMethods(wrprcSigningAlgorithms),
+		// A registration certificate need not carry exp/iat, and its
+		// lifetime is governed by the Registrar's own status list rather
+		// than JWT expiry, so claim-time validation is not applied here.
+		jwt.WithoutClaimsValidation(),
+	)
+	if _, err := parser.Parse(token, func(*jwt.Token) (any, error) {
+		return leaf.PublicKey, nil
+	}); err != nil {
+		return fmt.Errorf("signature verification failed: %w", err)
+	}
+	return nil
+}
+
+// extractWRPRCClaims decodes the payload into the fields we act on.
+func extractWRPRCClaims(token string) (*WRPRCClaims, error) {
+	parts := strings.Split(token, ".")
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("decoding JWT payload: %w", err)
+	}
+	var payload wrprcPayload
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		return nil, fmt.Errorf("parsing JWT payload: %w", err)
+	}
+
+	if payload.Sub.ID == "" && payload.Sub.LegalName == "" && payload.SubLegalName == "" {
+		return nil, fmt.Errorf("payload has no usable sub claim")
+	}
+	if len(payload.Entitlements) == 0 {
+		return nil, fmt.Errorf("payload has no entitlements claim (GEN-5.2.4-03)")
+	}
+
+	legalName := payload.SubLegalName
+	if legalName == "" {
+		legalName = payload.Sub.LegalName
+	}
+
+	claims := &WRPRCClaims{
+		SubjectID:        payload.Sub.ID,
+		LegalName:        legalName,
+		TradeName:        payload.Name,
+		Country:          payload.Country,
+		EntitlementURIs:  payload.Entitlements,
+		Purpose:          payload.Purpose,
+		PrivacyPolicyURI: payload.PrivacyPolicy,
+		InfoURI:          payload.InfoURI,
+		RegistryURI:      payload.RegistryURI,
+	}
+
+	seen := map[string]bool{}
+	for _, cred := range payload.Credentials {
+		entries := cred.Claim
+		if len(entries) == 0 {
+			entries = cred.Claims
+		}
+		for _, c := range entries {
+			if len(c.Path) == 0 || c.Path[0] == "" || seen[c.Path[0]] {
+				continue
+			}
+			seen[c.Path[0]] = true
+			claims.AllowedAttributes = append(claims.AllowedAttributes, c.Path[0])
+		}
+	}
+
+	return claims, nil
+}
+
+// evaluateWRPRCChain checks the document's chain leads to a trusted Registrar.
+func evaluateWRPRCChain(chain []*x509.Certificate, roots *x509.CertPool) error {
+	opts := x509.VerifyOptions{
+		Roots: roots,
+		// A Registrar's signing certificate commonly carries no EKU, and
+		// Go's zero value would otherwise demand serverAuth.
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	}
+	if len(chain) > 1 {
+		intermediates := x509.NewCertPool()
+		for _, c := range chain[1:] {
+			intermediates.AddCert(c)
+		}
+		opts.Intermediates = intermediates
+	}
+	if _, err := chain[0].Verify(opts); err != nil {
+		return fmt.Errorf("x5c chain does not lead to a configured Registrar root: %w", err)
 	}
 	return nil
 }
