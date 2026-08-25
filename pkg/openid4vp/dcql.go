@@ -167,7 +167,7 @@ type ClaimQuery struct {
 	// specifies the expected values of the claim. If present, the Wallet SHOULD return
 	// the claim only if the type and value of the claim both match exactly for at least
 	// one of the elements in the array. See OpenID4VP Section 6.3 and 6.4.1.
-	Values []any `json:"-" yaml:"-" validate:"omitempty,min=1"`
+	Values []any `json:"-" yaml:"-" validate:"omitnil,min=1"`
 }
 
 // MarshalJSON implements custom JSON marshaling for ClaimQuery.
