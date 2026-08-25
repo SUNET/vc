@@ -79,8 +79,7 @@ var mockDCQLExampleFromWWWallet = []byte(`{
     {
       "options": [
         ["CustomVerifiableId0"]
-      ],
-      "purpose": "Purpose not specified"
+      ]
     }
   ]
 }`)
@@ -117,7 +116,6 @@ func TestExample(t *testing.T) {
 				CredentialSets: []CredentialSetQuery{
 					{
 						Options: [][]string{{"CustomVerifiableId0"}},
-						Purpose: "Purpose not specified",
 					},
 				},
 				Credentials: []CredentialQuery{

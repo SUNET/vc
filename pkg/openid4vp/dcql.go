@@ -49,9 +49,6 @@ type CredentialSetQuery struct {
 
 	// Required OPTIONAL. Spec default is true when omitted; nil pointer preserves that distinction from an explicit false.
 	Required *bool `json:"required,omitempty" yaml:"required,omitempty"`
-
-	// Purpose Can't find in spec, but in example from wwwallet
-	Purpose string `json:"purpose,omitempty" yaml:"purpose,omitempty"`
 }
 
 // IsRequired returns the effective value of Required, applying the OpenID4VP
