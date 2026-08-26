@@ -101,7 +101,20 @@ const metadataResponseSchema = v.object({
             id: v.string(),
             format: v.string(),
             meta: v.object({
-                vct_values: v.array(v.string()),
+                vct_values: v.optional(v.array(v.string())),
+                doctype_value: v.optional(v.string()),
+                // zk_system_type entries are a flat {id, system, ...params}
+                // string-keyed object on the wire (ZKSystemTypeSpec's own
+                // MarshalJSON flattens params to the top level, no nested
+                // "params" key) - v.record(string,string), not a fixed
+                // {id, system} shape, so an arbitrary param (e.g.
+                // num_attributes, circuit_hash) isn't silently dropped.
+                // Without this field declared at all, v.object() stripped
+                // it from every parsed preset - the verifier's own
+                // zk_system_type was present on the wire but never reached
+                // the DCQL query the wallet received, which is
+                // indistinguishable from "no ZK system offered" wallet-side.
+                zk_system_type: v.optional(v.array(v.record(v.string(), v.string()))),
             }),
             claims: v.optional(v.array(v.object({
                 path: v.array(v.nullable(v.string())),
