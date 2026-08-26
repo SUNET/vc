@@ -538,6 +538,16 @@ type VerificationPresetScope struct {
 	ExcludeClaims []VerificationPresetClaim `yaml:"exclude_claims,omitempty" validate:"omitempty,dive"`
 	// Validations are optional rules applied server-side after claims extraction
 	Validations []openid4vp.ClaimValidation `yaml:"validations,omitempty" validate:"omitempty,dive"`
+	// Format overrides the scope's own credential_metadata format (e.g.
+	// requesting "mso_mdoc_zk" - a zero-knowledge proof - over a scope whose
+	// credential_metadata format is the plain "mso_mdoc" it's actually
+	// issued as). Empty means use the scope's own format unchanged.
+	Format string `yaml:"format,omitempty" validate:"omitempty"`
+	// ZKSystemType overrides meta.zk_system_type - required whenever Format
+	// is set to "mso_mdoc_zk" (openid4vp.FormatMsoMdocZk), since a ZK-mdoc
+	// DCQL query has no other way to say which proof system/circuit a
+	// verifier accepts. See openid4vp.ZKSystemTypeSpec's own doc comment.
+	ZKSystemType []openid4vp.ZKSystemTypeSpec `yaml:"zk_system_type,omitempty" validate:"omitempty,dive"`
 }
 
 // VerificationPresetClaim defines a claim path to request within a credential.
