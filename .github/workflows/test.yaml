@@ -41,3 +41,62 @@ jobs:
             echo "::error::docs/CONFIGURATION.md is out of date. Run 'make gen-config-docs' and commit the result."
             exit 1
           fi
+  # The zknative build tag gates pkg/mdoc's cgo path onto
+  # zk-cred-longfellow's C ABI. Until this job existed, neither that cgo
+  # code nor any of its four tagged test files was ever compiled by CI —
+  # so a change to the crate's ABI, or to the Go wrapper, could only be
+  # discovered by hand on a developer machine.
+  #
+  # The live-service tests already skip cleanly when
+  # https://zk-circuits.fly.dev is unreachable (6fe7e96a and its sibling
+  # guard), so a catalog outage cannot redden this job.
+  zknative:
+    name: Native ZK verification (cgo)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/*.sum"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # zk-cred-longfellow is fetched and built from source by
+      # `make zk-native-lib`, which is a release-mode Rust build — cache it
+      # on the resolved crate revision so only the first run after a bump
+      # pays for it.
+      - name: Resolve the zk-cred-longfellow revision
+        id: crate
+        run: |
+          sha=$(git ls-remote https://github.com/sirosfoundation/zk-cred-longfellow.git \
+                  "${ZK_CRED_LONGFELLOW_REF:-main}" | cut -f1)
+          if [ -z "$sha" ]; then
+            echo "::error::could not resolve zk-cred-longfellow ref"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the built C ABI library
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/zk-cred-longfellow
+            third_party/.zk-cred-longfellow-src/target
+          key: zk-cred-longfellow-${{ runner.os }}-${{ steps.crate.outputs.sha }}
+
+      - name: Build the native library
+        run: make zk-native-lib
+
+      - name: Run the zknative-tagged tests
+        run: make test-zknative
+
+      # Compiling the tests is not the same as compiling the binary that
+      # ships: build-verifier-zknative exercises the link step the tests
+      # never reach.
+      - name: Build the verifier with the tag
+        run: make build-verifier-zknative
