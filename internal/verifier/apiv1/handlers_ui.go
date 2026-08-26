@@ -387,8 +387,21 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// encryption and produce a payload this page can't submit at all, so
 	// it's ignored here to keep request/response shapes consistent
 	// end-to-end for this specific flow.
+	// Also gated on AutoAttempt (default true): when it's false,
+	// _tryNativeDCAPI() never runs client-side at all (no manual retry
+	// button exists either - see presentation-definition.js's
+	// dcApiAutoAttempt check) and every request goes out through
+	// _setupFallbackFlow()'s QR/same-device-link path instead, which
+	// submits via /verification/direct_post through the ordinary
+	// WS-engine relay - NOT the DC API response channel. Serving
+	// "dc_api.jwt" there anyway produced a real, confirmed-live bug:
+	// go-wallet-backend's oid4vp.go correctly refuses to submit a
+	// dc_api.jwt-mode VP ("unsupported response_mode: dc_api.jwt"), since
+	// that response mode is JWE-encrypted specifically for
+	// navigator.credentials.get()'s own response construction, not a
+	// redirect/relay POST body.
 	responseMode := "direct_post.jwt"
-	if c.cfg.Verifier.DigitalCredentials.Enable {
+	if c.cfg.Verifier.DigitalCredentials.Enable && model.BoolVal(c.cfg.Verifier.DigitalCredentials.AutoAttempt, true) {
 		responseMode = "dc_api.jwt"
 	}
 
