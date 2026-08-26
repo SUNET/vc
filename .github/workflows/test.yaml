@@ -41,3 +41,79 @@ jobs:
             echo "::error::docs/CONFIGURATION.md is out of date. Run 'make gen-config-docs' and commit the result."
             exit 1
           fi
+  # The zknative build tag gates pkg/mdoc's cgo path onto
+  # zk-cred-longfellow's C ABI. Until this job existed, neither that cgo
+  # code nor any of its four tagged test files was ever compiled by CI —
+  # so a change to the crate's ABI, or to the Go wrapper, could only be
+  # discovered by hand on a developer machine.
+  #
+  # The live-service tests already skip cleanly when
+  # https://zk-circuits.fly.dev is unreachable (6fe7e96a and its sibling
+  # guard), so a catalog outage cannot redden this job.
+  zknative:
+    name: Native ZK verification (cgo)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/*.sum"
+
+      - name: Install Rust
+        # Pinned to a commit SHA: "stable" is a mutable branch ref, so an
+        # unpinned use is a moving third-party dependency in the build.
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+
+      # zk-cred-longfellow is fetched and built from source by
+      # `make zk-native-lib`, which is a release-mode Rust build — cache it
+      # on the resolved crate revision so only the first run after a bump
+      # pays for it.
+      - name: Resolve the zk-cred-longfellow revision
+        id: crate
+        run: |
+          set -euo pipefail
+          repo=https://github.com/sirosfoundation/zk-cred-longfellow.git
+          ref="${ZK_CRED_LONGFELLOW_REF:-main}"
+          if printf '%s' "$ref" | grep -Eiq '^[0-9a-f]{40}$'; then
+            # The Makefile accepts a raw commit SHA (and pinning the ref to
+            # one is the intended direction), but `git ls-remote` does not
+            # resolve a SHA - it would return nothing. Use it as-is.
+            sha="$ref"
+          else
+            refs=$(git ls-remote "$repo" "$ref")
+            # An annotated tag resolves to two lines; the peeled "^{}" entry
+            # is the commit `git checkout FETCH_HEAD` actually lands on.
+            sha=$(printf '%s\n' "$refs" | awk '$2 ~ /\^\{\}$/ { print $1; exit }')
+            [ -n "$sha" ] || sha=$(printf '%s\n' "$refs" | awk 'NR==1 { print $1 }')
+          fi
+          # Also guarantees a single-line value, so GITHUB_OUTPUT cannot be
+          # corrupted by an unexpected ls-remote result.
+          if ! printf '%s' "$sha" | grep -Eiq '^[0-9a-f]{40}$'; then
+            echo "::error::could not resolve zk-cred-longfellow ref '$ref'"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the built C ABI library
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            third_party/zk-cred-longfellow
+            third_party/.zk-cred-longfellow-src/target
+          key: zk-cred-longfellow-${{ runner.os }}-${{ steps.crate.outputs.sha }}
+
+      - name: Build the native library
+        run: make zk-native-lib
+
+      - name: Run the zknative-tagged tests
+        run: make test-zknative
+
+      # Compiling the tests is not the same as compiling the binary that
+      # ships: build-verifier-zknative exercises the link step the tests
+      # never reach.
+      - name: Build the verifier with the tag
+        run: make build-verifier-zknative
