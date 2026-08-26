@@ -817,8 +817,8 @@ github.com/redis/go-redis/v9/internal/routing
 github.com/redis/go-redis/v9/internal/util
 github.com/redis/go-redis/v9/maintnotifications
 github.com/redis/go-redis/v9/push
-# github.com/russellhaering/goxmldsig v1.6.1
-## explicit; go 1.23.0
+# github.com/russellhaering/goxmldsig v1.6.1 => github.com/sirosfoundation/goxmldsig v1.6.1-siros1
+## explicit; go 1.26
 github.com/russellhaering/goxmldsig
 github.com/russellhaering/goxmldsig/etreeutils
 github.com/russellhaering/goxmldsig/types
@@ -1357,3 +1357,4 @@ gotest.tools/v3/internal/assert
 gotest.tools/v3/internal/difflib
 gotest.tools/v3/internal/format
 gotest.tools/v3/internal/source
+# github.com/russellhaering/goxmldsig => github.com/sirosfoundation/goxmldsig v1.6.1-siros1
