@@ -189,7 +189,7 @@ pki-clean: ## Clean PKI material
 # Testing Targets
 # ==============================================================================
 
-test: $(addprefix test-,$(SERVICES)) test-js ## Run all service tests
+test: $(addprefix test-,$(SERVICES)) test-pkg test-js ## Run all service tests
 
 # Generate test-SERVICE targets dynamically
 define TEST_TEMPLATE
@@ -204,6 +204,10 @@ $(foreach service,$(SERVICES),$(eval $(call TEST_TEMPLATE,$(service))))
 test-env: ## Set up test environment
 	$(info Setting up test environment)
 	sudo apt-get update && sudo apt-get install -y softhsm2 opensc nodejs npm
+
+test-pkg: ## Test the shared packages under pkg/
+	$(info Testing pkg)
+	go test ./pkg/...
 
 test-js: ## Run JS unit tests for staticembed helpers
 	$(info Running JS unit tests)
