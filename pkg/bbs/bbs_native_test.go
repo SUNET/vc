@@ -193,6 +193,25 @@ func TestVerifyProof(t *testing.T) {
 // An unknown suite must be an error, not a silent fallback to one the
 // caller did not ask for — the suite selects domain separation, so a
 // fallback would produce values that verify against nothing.
+// A verification failure must not arrive as ErrInternal, and vice versa.
+// Collapsing the two would hide a crashed prover inside an expected
+// failure path, so the distinction is worth asserting rather than assuming.
+func TestFailuresAreClassifiedAsVerificationNotInternal(t *testing.T) {
+	hw := load(t).HardwareKeybind
+	bad := unhex(t, hw.Proof)
+	bad[len(bad)/2] ^= 0x01
+
+	err := Native().VerifyProof(SuiteSchnorr, unhex(t, hw.PK), bad,
+		unhex(t, hw.Header), unhex(t, hw.PresentationHeader),
+		len(hw.SignerMessages), nil, disclosures(t, hw.Disclosures))
+	if !errors.Is(err, ErrVerification) {
+		t.Fatalf("a bad proof should be ErrVerification, got %v", err)
+	}
+	if errors.Is(err, ErrInternal) {
+		t.Fatalf("a bad proof must not be reported as an internal failure: %v", err)
+	}
+}
+
 func TestUnknownSuiteIsRejected(t *testing.T) {
 	hw := load(t).HardwareKeybind
 	err := Native().VerifyProof(Suite(99), unhex(t, hw.PK), unhex(t, hw.Proof),

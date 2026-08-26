@@ -65,9 +65,26 @@ var (
 	ErrUnavailable = errors.New("bbs: native support not compiled in (build with -tags bbsnative)")
 
 	// ErrVerification is returned when a commitment or proof does not
-	// verify. It deliberately carries no detail about which check failed:
-	// a relying party learns "invalid", not where to aim next.
+	// verify.
+	//
+	// The wrapped message is a coarse discriminator meant for logs — which
+	// check failed, and structural facts like a length mismatch. It never
+	// contains key material or message contents. **It must not be
+	// forwarded to a relying party**: an RP learns "invalid", not where to
+	// aim next. Callers surfacing a failure outward should match with
+	// errors.Is and emit their own opaque response.
 	ErrVerification = errors.New("bbs: verification failed")
+
+	// ErrInternal is returned when the native layer failed for a reason
+	// that is not a verdict on the input — today, a panic caught crossing
+	// the FFI boundary.
+	//
+	// Kept distinct from ErrVerification on purpose. "This proof is
+	// invalid" and "our prover crashed" call for different responses:
+	// the first is a normal outcome to be reported to the caller, the
+	// second is an incident. Collapsing them into one error hides
+	// breakage inside an expected failure path.
+	ErrInternal = errors.New("bbs: native call failed")
 )
 
 // BlindSigner is the issuer's half.
