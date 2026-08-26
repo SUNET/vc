@@ -299,8 +299,25 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// rather than silently skipping either check.
 			var zkMeta openid4vp.MetaQuery
 			var requestedClaimIDs []string
-			if authCtx.DCQLQuery != nil {
-				for _, cq := range authCtx.DCQLQuery.Credentials {
+			// authCtx.DCQLQuery is the Mongo-persisted copy - confirmed live
+			// (via a temporary debug log, since removed) that it comes back
+			// nil here even for a session whose consent screen the wallet
+			// just correctly rendered from the SAME original DCQL query,
+			// meaning the query itself was never lost, only this particular
+			// round-trip through AuthContext's Mongo store. Fall back to
+			// RequestObjectCache (an in-memory, non-Mongo cache keyed by
+			// RequestObjectID) - it holds the exact RequestObject that was
+			// signed and served to the wallet at /verification/request-object
+			// (see VerificationRequestObject), which necessarily carries the
+			// same DCQLQuery the wallet just demonstrably parsed correctly.
+			dcqlQuery := authCtx.DCQLQuery
+			if dcqlQuery == nil {
+				if requestObject, found := c.openid4vp.RequestObjectCache.Get(authCtx.RequestObjectID); found {
+					dcqlQuery = requestObject.DCQLQuery
+				}
+			}
+			if dcqlQuery != nil {
+				for _, cq := range dcqlQuery.Credentials {
 					if cq.ID == scope && openid4vp.IsMdocZkFormat(cq.Format) {
 						zkMeta = cq.Meta
 						for _, claim := range cq.Claims {
