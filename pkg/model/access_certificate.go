@@ -4,7 +4,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"net/url"
 	"time"
 
 	"github.com/sirosfoundation/go-trust/pkg/registry"
@@ -116,19 +115,29 @@ func (v *Verifier) CheckPublicURLMatchesCertificate(leaf *x509.Certificate) erro
 	if v.ClientIDScheme != "x509_san_dns" || leaf == nil {
 		return nil
 	}
-	u, err := url.Parse(v.PublicURL)
+	// Check the value we actually advertise, not a separately-derived host.
+	// VerifierClientID builds the identifier from PublicURL's Host, which
+	// keeps any port; deriving Hostname() here instead would strip it and
+	// report a match for a PublicURL that no wallet can ever resolve - a
+	// port makes the value not a DNS name, so it cannot appear in a SAN.
+	// Asking the emitter removes the chance of the two drifting.
+	clientID, err := v.VerifierClientID(leaf)
 	if err != nil {
-		return fmt.Errorf("failed to parse PublicURL: %w", err)
+		return err
 	}
-	if u.Host == "" {
+	scheme, host, ok := registry.ParseClientIDScheme(clientID)
+	if !ok || scheme != registry.ClientIDSchemeX509SANDNS {
+		return fmt.Errorf("expected an x509_san_dns client_id, got %q", clientID)
+	}
+	if host == "" {
 		return fmt.Errorf("PublicURL %q has no host component", v.PublicURL)
 	}
 	// Reuse the wallet-side matcher so this agrees with what a relying
 	// party actually checks, wildcards included, rather than a separate
 	// string comparison that could drift from it.
-	if !registry.DNSSANMatches(u.Hostname(), leaf.DNSNames) {
-		return fmt.Errorf("client_id_scheme is \"x509_san_dns\" but PublicURL host %q is not present in the certificate's DNS SANs %v: wallets will reject every request object",
-			u.Hostname(), leaf.DNSNames)
+	if !registry.DNSSANMatches(host, leaf.DNSNames) {
+		return fmt.Errorf("client_id_scheme is \"x509_san_dns\" but the advertised client_id host %q is not present in the certificate's DNS SANs %v: wallets will reject every request object",
+			host, leaf.DNSNames)
 	}
 	return nil
 }

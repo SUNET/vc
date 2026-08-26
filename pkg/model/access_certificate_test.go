@@ -246,6 +246,19 @@ func TestCheckPublicURLMatchesCertificate(t *testing.T) {
 		require.NoError(t, v.CheckPublicURLMatchesCertificate(mismatched))
 	})
 
+	// The advertised client_id keeps PublicURL's port, and a value with a
+	// port can never appear in a DNS SAN - so a ported PublicURL is always
+	// broken for this scheme. Deriving the host separately here (Hostname(),
+	// which strips the port) would report a match for exactly that case and
+	// hide it until wallets rejected every request.
+	t.Run("a port makes the advertised client_id unmatchable", func(t *testing.T) {
+		v := &Verifier{ClientIDScheme: "x509_san_dns", PublicURL: "https://verifier.example.com:444"}
+		err := v.CheckPublicURLMatchesCertificate(matching)
+		require.Error(t, err, "a ported PublicURL cannot match any DNS SAN")
+		assert.Contains(t, err.Error(), "verifier.example.com:444",
+			"the error must name the value actually advertised, port included")
+	})
+
 	t.Run("no certificate loaded is not an error", func(t *testing.T) {
 		v := &Verifier{ClientIDScheme: "x509_san_dns", PublicURL: "https://verifier.example.com"}
 		require.NoError(t, v.CheckPublicURLMatchesCertificate(nil))
