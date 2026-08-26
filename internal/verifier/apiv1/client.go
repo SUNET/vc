@@ -49,11 +49,11 @@ type Client struct {
 	pkiSignerChain []string
 
 	// Clients and services
-	openid4vp        *openid4vp.Client
-	trustService     *openid4vp.TrustService
-	trustEvaluator   trust.TrustEvaluator
-	jwksResolver     *trust.JWKSKeyResolver
-	jwtTrustVerifier *trust.JWTTrustVerifier
+	openid4vp          *openid4vp.Client
+	trustService       *openid4vp.TrustService
+	trustEvaluator     trust.TrustEvaluator
+	jwksResolver       *trust.JWKSKeyResolver
+	jwtTrustVerifier   *trust.JWTTrustVerifier
 	revocationRegistry *revocation.Registry
 
 	// Cache
@@ -106,6 +106,25 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	// can validate. See model.Verifier.ValidateClientIDMaterial.
 	if err := c.cfg.Verifier.ValidateClientIDMaterial(c.pkiSigningCert, c.pkiSignerChain); err != nil {
 		return nil, err
+	}
+
+	// Validate our own certificate against the EUDI WRPAC profile when the
+	// deployment opts in. Offline profile conformance only - judging other
+	// parties' certificates is a trust decision and belongs to the PDP.
+	if err := c.cfg.Verifier.ValidateAccessCertificate(c.pkiSigningCert, time.Now()); err != nil {
+		return nil, fmt.Errorf("access certificate validation failed: %w", err)
+	}
+
+	// A PublicURL host missing from the certificate's DNS SANs means wallets
+	// reject every request object under x509_san_dns. That is fatal when the
+	// deployment has opted into access-certificate validation; otherwise it
+	// is only warned about, since an existing deployment may already be
+	// running this way and a hard failure would take it down on upgrade.
+	if err := c.cfg.Verifier.CheckPublicURLMatchesCertificate(c.pkiSigningCert); err != nil {
+		if c.cfg.Verifier.AccessCertificate != nil && c.cfg.Verifier.AccessCertificate.Validate {
+			return nil, fmt.Errorf("access certificate validation failed: %w", err)
+		}
+		c.log.Warn("certificate does not cover PublicURL host", "error", err)
 	}
 
 	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand in handler)
