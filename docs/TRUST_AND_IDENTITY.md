@@ -115,6 +115,84 @@ apigw:
 Per the draft, the WIA's `sub` claim must be the client_id value the wallet uses in the *same* OAuth transaction — i.e. whatever APIGW resolves as `req.ClientID` for an unregistered client (its `redirect_uri`, OID4VCI §7.1 convention). A wallet that puts a different value there (e.g. the credential issuer's own URL) gets a clear `wallet attestation subject does not match client_id` rejection at PAR — this was a real bug hit while integrating wallet-frontend's WIA support.
 :::
 
+## EUDI Relying Party Certificates (PR #613, PR #614)
+
+Under the EUDI ARF a Relying Party authenticates itself to a wallet with two documents issued by two different authorities, answering two different questions:
+
+| | Issued by | Answers | Format |
+| --- | --- | --- | --- |
+| **Access certificate** (WRPAC, ETSI TS 119 411-8) | an Access CA | who is this party, and may it talk to wallets at all | X.509 |
+| **Registration certificate** (WRPRC, ETSI TS 119 475) | a national Registrar | what is it registered to request | signed JWT, `rc-wrp+jwt` |
+
+vc issues neither. Both arrive out of band and are configured by path.
+
+Both are **off by default**. A deployment outside an ARF trust framework is unaffected by everything below.
+
+### Access certificate
+
+This is the certificate the verifier *already* signs request objects with — it does not introduce a second one. Enabling validation asserts that it conforms to the WRPAC profile:
+
+```yaml
+verifier:
+  access_certificate:
+    validate: true
+    # Optional: require a specific assurance level. When empty, all four
+    # TS 119 411-8 WRPAC policy OIDs are accepted.
+    allowed_policy_oids: ["0.4.0.194118.1.3"]
+```
+
+At startup the leaf must satisfy: `keyUsage` including `nonRepudiation` (contentCommitment), a `subjectAltName` carrying contact information (URI or email), and a `certificatePolicies` entry with a WRPAC policy OID. It must also be inside its own validity window. **Startup fails if it does not conform** — the point is to find out before wallets do.
+
+The check is deliberately offline. Every rule reads the certificate's own attributes, so this is profile conformance, not a trust decision; deciding whether some *other* party's certificate is trusted belongs to the PDP.
+
+### Registration certificate
+
+Conveyed to wallets in the OpenID4VP `verifier_info` request parameter, where it informs the consent dialog and the wallet's own policy checks:
+
+```yaml
+verifier:
+  registration_certificate:
+    file_path: /etc/vc/registration-certificate.jwt
+    # Optional but strongly recommended — see below.
+    trusted_roots_path: /etc/vc/registrar-roots.pem
+```
+
+At startup vc verifies the JWT signature against the leaf in its own `x5c` header, parses the claims, and — when `trusted_roots_path` is set — evaluates that chain against the configured Registrar roots and enforces the binding below.
+
+:::note `trusted_roots_path` is what makes this mean anything
+With it unset the document is still signature-checked and parsed, but nothing establishes that its issuer is a Registrar you accept — a self-signed WRPRC asserting any entitlements you like would load cleanly. Set it in any deployment where the certificate is doing real work.
+:::
+
+### How the two are bound (ARF RPRC_16)
+
+A registration certificate is only meaningful for the party named in the access certificate. The two are bound by the organisation identifier: the WRPRC's `sub` must equal the WRPAC's `organizationIdentifier` (OID 2.5.4.97, per EN 319 412-3 clause 4.2.1).
+
+vc enforces this **explicitly**, and fails when either side is absent rather than skipping:
+
+```
+registration certificate: cannot enforce the access-certificate binding
+(ARF RPRC_16) because the access certificate carries no organisation identifier
+```
+
+That is deliberate. go-trust's `CheckWRPACWRPRCBinding` returns nil when either value is empty — reasonable for a library serving WRPRC-only flows, but as a startup check "I could not compare them" must not read the same as "they matched".
+
+:::note Requires go-trust ≥ v0.20.0
+Earlier versions read `Subject.SerialNumber` (2.5.4.5) and reported *that* as the organisation identifier. A **conformant** access certificate therefore surfaced none at all, so this binding refused to enforce itself on exactly the certificates that follow the standard.
+:::
+
+### Wire-format tolerance
+
+Registrars differ from a strict reading of the TS 119 475 tables. Parsing lives in go-trust's `rpcert.ParseWRPRCClaims`, which accepts both v1.1.1 and v1.2.1 spellings — `sub` as a bare string or an object, the legal name in `sub_ln` or nested, the DCQL claim list named `claim` or `claims`, `srv_description` flat or nested, and `provides_attestations` or `provided_attestations`.
+
+All four of the first quirks appear together in a single real certificate from the German sandbox Registrar, which is carried as a conformance fixture. The `claim`/`claims` one is the dangerous one: tolerating only one spelling does not fail loudly, it yields an empty allowed-attribute set, which reads downstream as *"this RP may request nothing"*.
+
+### What is not enforced yet
+
+Being explicit, because carrying a certificate is not the same as anything checking it:
+
+- **Revocation.** A WRPAC is revoked through a CRL or OCSP and a WRPRC through the Token Status List in its `status` claim. go-trust ≥ v0.20.0 surfaces both references and owns the decision, but **nothing fetches them yet**, so a revoked certificate is presently indistinguishable from a valid one.
+- **Wallet-side verification.** No wallet surface reads `verifier_info` today. Until one does, these certificates are carried and unread — acceptable as sequencing, but it should not be mistaken for coverage. The control only exists once the wallet checks it.
+
 ## Issuer Access Certificate (PR #617)
 
 Under CIR (EU) 2025/848 a PID or attestation provider is a registered wallet-relying party **in its own right**. The certificate that authenticates an issuer to a wallet is therefore an access certificate (WRPAC, ETSI TS 119 411-8) — the same document, under the same profile, the verifier uses.
