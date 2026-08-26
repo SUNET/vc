@@ -94,6 +94,7 @@ const metadataResponseSchema = v.object({
     // actually tolerate that, not v.optional().
     supported_wallets: v.nullish(v.record(v.string(), v.string()), {}),
     dc_api_enabled: v.optional(v.boolean(), false),
+    dc_api_auto_attempt: v.optional(v.boolean(), true),
     presets: v.optional(v.record(v.string(), v.object({
         label: v.string(),
         credentials: v.array(v.object({
@@ -224,6 +225,9 @@ Alpine.data("app", () => ({
     /** @type {boolean} Whether the server has opted in to native DC API attempts. */
     dcApiEnabled: false,
 
+    /** @type {boolean} Whether to call navigator.credentials.get() automatically on page load - see DigitalCredentialsConfig.AutoAttempt's own doc comment for why this is separate from dcApiEnabled. */
+    dcApiAutoAttempt: true,
+
      /** @type {{ id: string; format: string; vct: string; vct_values?: string[]; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
     credentialAttributes: null,
 
@@ -271,6 +275,7 @@ Alpine.data("app", () => ({
         this.credentialsList = data.credentials;
         this.walletInstances = data.supported_wallets;
         this.dcApiEnabled = data.dc_api_enabled;
+        this.dcApiAutoAttempt = data.dc_api_auto_attempt;
 
         // Load presets from backend config
         if (data.presets) {
@@ -547,6 +552,7 @@ Alpine.data("app", () => ({
      */
     async _tryNativeDCAPI() {
         if (!this.dcApiEnabled) return false;
+        if (!this.dcApiAutoAttempt) return false;
         if (!isNativeDCAPIAvailable() || !getBestSupportedProtocol()) return false;
 
         try {
