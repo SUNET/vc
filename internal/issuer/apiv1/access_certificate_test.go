@@ -185,3 +185,27 @@ func TestInitAccessCertificate_LoadsWithoutValidation(t *testing.T) {
 	require.Len(t, client.metadataChain, 1)
 	assert.Equal(t, wantX5C, client.metadataChain[0])
 }
+
+// TestInitAccessCertificate_RejectsKeyWithoutCertificate covers a
+// configuration that would otherwise start and achieve nothing: a key with no
+// chain_path signs metadata with no x5c header, leaving a wallet unable to
+// verify or chain the signature. With validate unset nothing else would have
+// caught it.
+func TestInitAccessCertificate_RejectsKeyWithoutCertificate(t *testing.T) {
+	keyConfig, _ := writeWRPACKeyPair(t)
+	keyConfig.ChainPath = "" // key only
+
+	for _, validate := range []bool{false, true} {
+		t.Run(map[bool]string{false: "validation off", true: "validation on"}[validate], func(t *testing.T) {
+			client := newSignMetadataClient(t)
+			client.cfg.Issuer.AccessCertificate = &model.IssuerAccessCertificate{
+				Validate:  validate,
+				KeyConfig: keyConfig,
+			}
+
+			err := client.initAccessCertificate(t.Context())
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "no certificate")
+		})
+	}
+}

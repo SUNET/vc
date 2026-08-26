@@ -147,6 +147,15 @@ func (c *Client) initAccessCertificate(_ context.Context) error {
 		return fmt.Errorf("failed to load access certificate key: %w", err)
 	}
 
+	// A key without its certificate is not an access certificate. It would
+	// load, sign metadata, and emit no x5c - leaving a wallet with no way to
+	// verify or chain the signature, which is the entire purpose of
+	// configuring one. Refuse it rather than start in a configuration that
+	// looks enabled and achieves nothing.
+	if leaf == nil || len(chain) == 0 {
+		return fmt.Errorf("issuer.access_certificate.key_config loads a key but no certificate: set chain_path, otherwise issuer metadata is signed without an x5c header and wallets cannot verify it")
+	}
+
 	if err := c.cfg.Issuer.ValidateAccessCertificate(leaf, time.Now()); err != nil {
 		return fmt.Errorf("access certificate validation failed: %w", err)
 	}
