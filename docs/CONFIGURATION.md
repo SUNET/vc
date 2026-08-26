@@ -939,9 +939,6 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 
 > **Path:** `.verifier.access_certificate`
 
-wallet-facing certificate as an EUDI Relying Party access certificate
-(WRPAC, ETSI TS 119 411-8).
-
 This validates the certificate the verifier already signs request objects
 with - it does not introduce a second certificate. Deployments not
 participating in an ARF trust framework can leave it disabled and are

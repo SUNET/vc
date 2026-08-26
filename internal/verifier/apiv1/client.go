@@ -49,11 +49,11 @@ type Client struct {
 	pkiSignerChain []string
 
 	// Clients and services
-	openid4vp        *openid4vp.Client
-	trustService     *openid4vp.TrustService
-	trustEvaluator   trust.TrustEvaluator
-	jwksResolver     *trust.JWKSKeyResolver
-	jwtTrustVerifier *trust.JWTTrustVerifier
+	openid4vp          *openid4vp.Client
+	trustService       *openid4vp.TrustService
+	trustEvaluator     trust.TrustEvaluator
+	jwksResolver       *trust.JWKSKeyResolver
+	jwtTrustVerifier   *trust.JWTTrustVerifier
 	revocationRegistry *revocation.Registry
 
 	// Cache
@@ -124,7 +124,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		if c.cfg.Verifier.AccessCertificate != nil && c.cfg.Verifier.AccessCertificate.Validate {
 			return nil, fmt.Errorf("access certificate validation failed: %w", err)
 		}
-		c.log.Info("certificate does not cover PublicURL host", "error", err)
+		c.log.Warn("certificate does not cover PublicURL host", "error", err)
 	}
 
 	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand in handler)

@@ -10,9 +10,7 @@ import (
 	"github.com/sirosfoundation/go-trust/pkg/registry/rpcert"
 )
 
-// AccessCertificate configures validation of the verifier's own
-// wallet-facing certificate as an EUDI Relying Party access certificate
-// (WRPAC, ETSI TS 119 411-8).
+// AccessCertificate configures validation of the verifier's own wallet-facing certificate as an EUDI Relying Party access certificate (WRPAC, ETSI TS 119 411-8).
 //
 // This validates the certificate the verifier already signs request objects
 // with - it does not introduce a second certificate. Deployments not
