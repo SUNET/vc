@@ -1062,3 +1062,73 @@ func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
 				"string and must be de-duplicated rather than listed twice")
 	})
 }
+
+// TestUIMetadataPresetMsoMdocUsesDoctypeValue pins the DCQL type constraint a
+// preset emits per format. An mso_mdoc credential has no vct at all, so
+// OpenID4VP 1.0 6.4.1 constrains it with doctype_value; a preset that sends an
+// empty vct_values and no doctype matches nothing in any wallet.
+func TestUIMetadataPresetMsoMdocUsesDoctypeValue(t *testing.T) {
+	ctx := t.Context()
+
+	schema := &mdoc.MDDLSchema{
+		Format:  "mso_mdoc",
+		DocType: "org.iso.18013.5.1.mDL",
+		Claims: map[string]mdoc.NamespaceClaims{
+			"org.iso.18013.5.1": {
+				"family_name": {Mandatory: true, ValueType: "tstr"},
+			},
+		},
+	}
+
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"mdl": {
+					Format:     "mso_mdoc",
+					MDDL:       schema,
+					Attributes: schema.Attributes(),
+				},
+				"pid": {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/path/to/vctm",
+					VCTURL:       "https://apigw.example/type-metadata/pid",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+			},
+		},
+		Verifier: &model.Verifier{
+			Presets: map[string]model.VerificationPreset{
+				"MDL": {"mdl": nil},
+				"PID": {"pid": nil},
+			},
+		},
+	}
+
+	client, _ := CreateTestClientWithMock(cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, reply)
+
+	t.Run("mdoc preset constrains by doctype_value", func(t *testing.T) {
+		preset := reply.Presets["MDL"]
+		require.NotNil(t, preset)
+		require.Len(t, preset.Credentials, 1)
+		meta := preset.Credentials[0].Meta
+		assert.Equal(t, "org.iso.18013.5.1.mDL", meta.DoctypeValue,
+			"mso_mdoc has no vct - DCQL constrains it by doctype (OpenID4VP 1.0 6.4.1)")
+		assert.Empty(t, meta.VCTValues,
+			"sending vct_values for an mdoc credential matches nothing; it must be omitted")
+	})
+
+	t.Run("sd-jwt preset still constrains by vct_values", func(t *testing.T) {
+		preset := reply.Presets["PID"]
+		require.NotNil(t, preset)
+		require.Len(t, preset.Credentials, 1)
+		meta := preset.Credentials[0].Meta
+		assert.NotEmpty(t, meta.VCTValues, "sd-jwt credentials are still matched by vct")
+		assert.Empty(t, meta.DoctypeValue,
+			"doctype_value is meaningless for sd-jwt and must not be sent")
+	})
+}
