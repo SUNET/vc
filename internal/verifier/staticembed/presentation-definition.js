@@ -136,7 +136,6 @@ const dcqlQueryCredentialSchema = v.object({
 const credentialSetQuerySchema = v.object({
     options: v.array(v.array(v.string())),
     required: v.optional(v.boolean()),
-    purpose: v.optional(v.string()),
 });
 
 /** @typedef {v.InferOutput<typeof dcqlQuerySchema>} DCQLQuery */
