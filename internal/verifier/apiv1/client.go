@@ -101,6 +101,13 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		c.log.Info("PKI signing key not loaded", "error", err)
 	}
 
+	// Fail at startup if the loaded key material cannot satisfy the
+	// configured client_id_scheme, rather than emitting requests no wallet
+	// can validate. See model.Verifier.ValidateClientIDMaterial.
+	if err := c.cfg.Verifier.ValidateClientIDMaterial(c.pkiSigningCert, c.pkiSignerChain); err != nil {
+		return nil, err
+	}
+
 	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand in handler)
 	c.oauth2Metadata = c.cfg.Verifier.Inbound.OpenID4VP.GenerateMetadata(ctx, c.cfg.Verifier.PublicURL)
 
