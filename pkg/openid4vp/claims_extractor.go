@@ -169,6 +169,19 @@ func extractMDocClaimsFromToken(vpToken string) (map[string]any, error) {
 				NameSpaces map[string][]any `cbor:"nameSpaces"`
 			} `cbor:"issuerSigned"`
 		} `cbor:"documents"`
+		// A "mso_mdoc_zk" presentation (multipaz's zkDocuments extension,
+		// see pkg/mdoc/zk.go) carries its documents here instead of
+		// "documents" - checked only to distinguish "genuinely empty
+		// DeviceResponse" from "a ZK-proof response this best-effort,
+		// pre-verification preview extractor doesn't understand yet".
+		// Real claim extraction+verification for these happens in the
+		// dedicated pkg/mdoc/zk_verifier.go path elsewhere in the pipeline
+		// (can't import it directly here - it already imports this
+		// package). Confirmed live: without this check, every ZK mdoc
+		// presentation failed the whole /verification/direct_post
+		// submission with "no documents in DeviceResponse", even though
+		// the proof itself was valid and never got a chance to verify.
+		ZkDocuments []cbor.RawMessage `cbor:"zkDocuments,omitempty"`
 	}
 
 	if err := cbor.Unmarshal(data, &deviceResponse); err != nil {
@@ -176,6 +189,9 @@ func extractMDocClaimsFromToken(vpToken string) (map[string]any, error) {
 	}
 
 	if len(deviceResponse.Documents) == 0 {
+		if len(deviceResponse.ZkDocuments) > 0 {
+			return make(map[string]any), nil
+		}
 		return nil, fmt.Errorf("no documents in DeviceResponse")
 	}
 
