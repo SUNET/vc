@@ -56,16 +56,20 @@ var wrprcSigningAlgorithms = []string{
 	"EdDSA",
 }
 
-// WRPRCClaims is the registration-certificate payload, in the shape
-// Registrars actually emit.
+// WRPRCClaims is the registration-certificate payload reduced to the fields
+// vc acts on.
 //
-// Extraction is deliberately ours rather than delegated. Validating a signed
-// object has three steps - verify the signature, extract the trust
-// information, evaluate it - and only the third belongs to go-trust. Owning
-// the second here also means we track what real Registrars emit: the German
-// sandbox sends `sub` as a bare identifier string with the legal name in
-// `sub_ln`, and names the DCQL claim list `claim`, both of which differ from
-// a strict reading of the tables.
+// Validating a signed object has three steps - verify the signature, extract
+// the trust information, evaluate it - and vc owns the first and third:
+// verifyWRPRCSignature and evaluateWRPRCChain below, plus the ARF RPRC_16
+// binding. The second is delegated to go-trust's rpcert.ParseWRPRCClaims,
+// which decodes the wire format and nothing else.
+//
+// It was originally implemented here, because tolerating what Registrars
+// actually emit needed somewhere to live and go-trust had no parser. That
+// decoder has since been upstreamed along with the German sandbox fixture
+// that motivated it, so the tolerance is shared rather than duplicated - see
+// extractWRPRCClaims.
 type WRPRCClaims struct {
 	// SubjectID is the semantic organisation identifier, e.g.
 	// "NTRDE-BD7070256AF93987". It is what binds this document to an access
