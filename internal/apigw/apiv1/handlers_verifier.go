@@ -105,7 +105,6 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 			{
 				Options:  options,
 				Required: new(false),
-				Purpose:  "authenticate for " + scope,
 			},
 		},
 	}
