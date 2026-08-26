@@ -114,3 +114,49 @@ apigw:
 :::note `sub` must equal the OAuth `client_id`, not the credential issuer
 Per the draft, the WIA's `sub` claim must be the client_id value the wallet uses in the *same* OAuth transaction — i.e. whatever APIGW resolves as `req.ClientID` for an unregistered client (its `redirect_uri`, OID4VCI §7.1 convention). A wallet that puts a different value there (e.g. the credential issuer's own URL) gets a clear `wallet attestation subject does not match client_id` rejection at PAR — this was a real bug hit while integrating wallet-frontend's WIA support.
 :::
+
+## Issuer Access Certificate (PR #617)
+
+Under CIR (EU) 2025/848 a PID or attestation provider is a registered wallet-relying party **in its own right**. The certificate that authenticates an issuer to a wallet is therefore an access certificate (WRPAC, ETSI TS 119 411-8) — the same document, under the same profile, the verifier uses.
+
+### Why the issuer signs metadata with it
+
+Credential Issuer Metadata was signed with the issuer's credential key, whose only claim to authority is that it appears in the issuer's own `/jwks`. That is self-asserted: **a wallet cannot establish from it who the issuer is.** Signing with the access certificate and advertising its chain in the JWT's `x5c` header is what makes the signature mean something.
+
+### Configuration
+
+```yaml
+issuer:
+  key_config:                          # unchanged — still signs credentials
+    private_key_path: /etc/vc/credential.key
+  access_certificate:
+    validate: true                     # enforce the WRPAC profile at startup
+    key_config:                        # signs issuer metadata
+      private_key_path: /etc/vc/wrpac.key
+      chain_path: /etc/vc/wrpac.pem
+```
+
+The profile rules and `allowed_policy_oids` are exactly the verifier's — one implementation, so an issuer and a verifier cannot reach different verdicts on the same certificate.
+
+### The two keys are deliberately separate
+
+The equivalent split was correctly *declined* on the verifier side, because the WRPAC profile requires `contentCommitment` to be present rather than exclusive, so one certificate can serve both roles there. That argument does not carry to the issuer:
+
+- the credential key is published in `/jwks`;
+- an mdoc document-signer certificate chains to an IACA under an entirely different profile;
+- the two rotate on independent schedules — conflating them means a WRPAC rotation forces a credential-key rotation.
+
+### Upgrading an existing deployment
+
+This is the one breaking change in the certificate work, so it is opt-in and **an existing single-key deployment keeps booting**: with no `access_certificate.key_config`, metadata is signed with the credential key exactly as before and a warning is logged.
+
+Two guards make partial configurations fail loudly rather than quietly:
+
+- `validate: true` **without** a separate key still validates the certificate actually being presented — so opting in is never vacuous.
+- A `key_config` that loads a key but **no certificate** is refused at startup. It would otherwise sign metadata with no `x5c` header at all, leaving a wallet no way to verify or chain the signature — the entire purpose of configuring one. With `validate` unset nothing else would have caught it.
+
+### What is not enforced yet
+
+- **`issuer_info`.** The issuer does not yet convey its registration certificate (WRPRC) in metadata, so wallets cannot see what attestation types it is registered to provide.
+- **Revocation.** As on the verifier side, nothing fetches the CRL or status list yet.
+- **Wallet-side verification.** No wallet checks issuer metadata against an access certificate today, so this is currently carried and unread.
