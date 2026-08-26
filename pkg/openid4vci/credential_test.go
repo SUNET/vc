@@ -1,6 +1,7 @@
 package openid4vci
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"testing"
@@ -562,6 +563,46 @@ func TestResolveCredentialFormat(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.wantFormat, format)
+			}
+		})
+	}
+}
+
+// A commitment that cannot be decoded must be rejected at the request
+// boundary, where the error can say the transport encoding was wrong,
+// rather than deeper in where it surfaces as an opaque verification
+// failure.
+func TestCredentialRequestValidatesBBSCommitment(t *testing.T) {
+	base := func() *CredentialRequest {
+		return &CredentialRequest{
+			Authorization:             "Bearer x",
+			CredentialConfigurationID: "cfg",
+		}
+	}
+
+	t.Run("absent is fine", func(t *testing.T) {
+		if err := base().Validate(context.Background(), nil); err != nil {
+			t.Fatalf("a request without a commitment must still validate: %v", err)
+		}
+	})
+
+	t.Run("valid base64url accepted", func(t *testing.T) {
+		r := base()
+		r.BBSCommitment = "AQIDBAU"
+		if err := r.Validate(context.Background(), nil); err != nil {
+			t.Fatalf("valid commitment rejected: %v", err)
+		}
+	})
+
+	for _, tc := range []struct{ name, value string }{
+		{"not base64url", "!!!!"},
+		{"standard base64 alphabet", "a+/b=="},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := base()
+			r.BBSCommitment = tc.value
+			if err := r.Validate(context.Background(), nil); err == nil {
+				t.Fatalf("accepted %q", tc.value)
 			}
 		})
 	}

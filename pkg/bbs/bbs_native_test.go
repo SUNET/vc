@@ -220,3 +220,93 @@ func TestUnknownSuiteIsRejected(t *testing.T) {
 		t.Fatal("an unknown suite selector was accepted")
 	}
 }
+
+// The whole issuer path, end to end through the real signer: canonicalise
+// claims, verify the holder's commitment, blind-sign, and confirm the
+// result is a signature over exactly the messages the layout produced.
+//
+// This is the test that would catch a mismatch between the claim mapping
+// and what actually gets signed — the two are derived in different places
+// and nothing else ties them together.
+func TestIssueEndToEnd(t *testing.T) {
+	hw := load(t).HardwareKeybind
+
+	doc := []byte(`{"family_name":"Andersson","given_name":"Ada","birth_date":"1815-12-10"}`)
+	cred, err := Issue(Native(), IssueParams{
+		Suite:        SuiteSchnorr,
+		SecretKey:    unhex(t, hw.SK),
+		PublicKey:    unhex(t, hw.PK),
+		Header:       unhex(t, hw.Header),
+		Commitment:   unhex(t, hw.CommitmentWithProof),
+		DocumentData: doc,
+	})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	if cred.Layout != LayoutVersion {
+		t.Fatalf("layout %q, want %q", cred.Layout, LayoutVersion)
+	}
+	if len(cred.Messages) != 3 || len(cred.Pointers) != 3 {
+		t.Fatalf("expected 3 messages/pointers, got %d/%d", len(cred.Messages), len(cred.Pointers))
+	}
+	// Sorted by pointer, not by document order.
+	want := []string{"/birth_date", "/family_name", "/given_name"}
+	for i, p := range want {
+		if cred.Pointers[i] != p {
+			t.Fatalf("pointer %d is %q, want %q", i, cred.Pointers[i], p)
+		}
+	}
+	if len(cred.Signature) == 0 {
+		t.Fatal("no signature produced")
+	}
+
+	// Issuing the same claims against the same commitment must reproduce
+	// the same signature: BlindSign is deterministic given its inputs, so
+	// any difference would mean the message list moved.
+	again, err := Issue(Native(), IssueParams{
+		Suite: SuiteSchnorr, SecretKey: unhex(t, hw.SK), PublicKey: unhex(t, hw.PK),
+		Header: unhex(t, hw.Header), Commitment: unhex(t, hw.CommitmentWithProof),
+		DocumentData: doc,
+	})
+	if err != nil {
+		t.Fatalf("second Issue: %v", err)
+	}
+	if string(again.Signature) != string(cred.Signature) {
+		t.Fatal("issuing the same claims twice produced different signatures")
+	}
+
+	// And a changed claim must change the signature, or the mapping is not
+	// actually feeding the signer.
+	changed, err := Issue(Native(), IssueParams{
+		Suite: SuiteSchnorr, SecretKey: unhex(t, hw.SK), PublicKey: unhex(t, hw.PK),
+		Header: unhex(t, hw.Header), Commitment: unhex(t, hw.CommitmentWithProof),
+		DocumentData: []byte(`{"family_name":"Lovelace","given_name":"Ada","birth_date":"1815-12-10"}`),
+	})
+	if err != nil {
+		t.Fatalf("third Issue: %v", err)
+	}
+	if string(changed.Signature) == string(cred.Signature) {
+		t.Fatal("changing a claim did not change the signature")
+	}
+}
+
+// An issuer must refuse to sign against a commitment it cannot verify,
+// even when the claims are perfectly good.
+func TestIssueRejectsUnverifiableCommitment(t *testing.T) {
+	hw := load(t).HardwareKeybind
+	commitment := unhex(t, hw.CommitmentWithProof)
+	commitment[len(commitment)-1] ^= 0x01
+
+	_, err := Issue(Native(), IssueParams{
+		Suite: SuiteSchnorr, SecretKey: unhex(t, hw.SK), PublicKey: unhex(t, hw.PK),
+		Header: unhex(t, hw.Header), Commitment: commitment,
+		DocumentData: []byte(`{"a":1}`),
+	})
+	if err == nil {
+		t.Fatal("issued against a commitment that does not verify")
+	}
+	if !errors.Is(err, ErrVerification) {
+		t.Fatalf("want ErrVerification, got %v", err)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/pkg/bbs"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -59,6 +60,23 @@ type CredentialRequest struct {
 	// Deprecated: Use Proofs instead. This field is kept for backward compatibility with older wallets.
 	Proof *Proof `json:"proof,omitempty" validate:"omitempty"`
 
+	// BBSCommitment OPTIONAL. Base64url-encoded `commitment_with_proof`
+	// for a blind BBS credential.
+	//
+	// Unlike the mdoc and SD-JWT paths, a BBS credential is signed over a
+	// commitment the WALLET produces: it commits to messages the issuer
+	// never sees, and to the public keys of its device-held key binding
+	// keys, together with proof it actually holds them. So the wallet
+	// participates at issuance and an issuer cannot add BBS afterwards.
+	//
+	// This needs no extra round-trip. The commitment challenge is computed
+	// wallet-locally by Fiat-Shamir with no issuer nonce, so the finished
+	// commitment simply rides alongside the key proof. Freshness still
+	// comes from the c_nonce-bound key proof; a commitment proof
+	// demonstrates knowledge, not recency, and must not be relied on for
+	// the latter.
+	BBSCommitment string `json:"bbs_commitment,omitempty" validate:"omitempty"`
+
 	// CredentialResponseEncryption OPTIONAL. Object containing information for encrypting the Credential Response.
 	// If this request element is not present, the corresponding credential response returned is not encrypted.
 	CredentialResponseEncryption *CredentialResponseEncryption `json:"credential_response_encryption,omitempty" validate:"omitempty"`
@@ -97,6 +115,16 @@ func (c *CredentialRequest) Validate(ctx context.Context, authorizationDetails [
 		}
 		if proofTypeCount != 1 {
 			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "proofs must declare exactly one proof type"}
+		}
+	}
+
+	// A commitment that cannot be decoded is rejected here rather than
+	// deeper in, where the failure would surface as an opaque
+	// verification error with no indication that the transport encoding
+	// was the problem.
+	if c.BBSCommitment != "" {
+		if _, err := bbs.DecodeCommitment(c.BBSCommitment); err != nil {
+			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: err.Error()}
 		}
 	}
 
