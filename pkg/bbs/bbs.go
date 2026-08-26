@@ -1,0 +1,95 @@
+// Package bbs is this repo's interface to blind BBS credentials.
+//
+// A BBS credential is signed once over a list of messages and later
+// presented with only the messages the holder chooses to reveal. Two
+// things distinguish it from the mdoc/SD-JWT paths already here:
+//
+//   - The wallet participates at ISSUANCE. It commits to messages the
+//     issuer never sees, and to the public key of a device-held key
+//     binding key, and the issuer signs that commitment. So unlike
+//     Longfellow and Vega — which are post-issuance transforms over a
+//     credential someone else already signed — an issuer cannot bolt BBS
+//     on afterwards.
+//   - Consequently `vc` needs this on BOTH sides: the issuer verifies a
+//     commitment and blind-signs it, the verifier checks a presentation.
+//
+// # Why these are interfaces
+//
+// The implementation is cgo over zk-cred-bbs's C ABI, behind the
+// `bbsnative` build tag. Everything here is defined in terms of the two
+// interfaces below so that an out-of-process implementation later is a
+// constructor swap rather than a rewrite of every call site — a decision
+// taken deliberately before the call sites exist, since retrofitting a
+// seam is the part that never happens.
+//
+// # Availability
+//
+// Without the `bbsnative` tag, [Native] returns an implementation whose
+// every method fails with [ErrUnavailable]. The default vc builds are
+// CGO_ENABLED=0 and fully static and must stay that way; see the
+// repository Makefile's `bbs-native-lib` target and the equivalent
+// reasoning for `zknative`.
+package bbs
+
+import "errors"
+
+// Suite selects the key binding construction, and with it the domain
+// separation the whole credential is bound to. Getting this wrong does not
+// produce an error — it produces values that verify against nothing.
+type Suite uint32
+
+const (
+	// SuitePlain is blind BBS with no device binding.
+	SuitePlain Suite = 0
+	// SuiteSchnorr is blind BBS with a Schnorr-over-BLS12-381-G1 key
+	// binding key, the construction described in zk-cred-bbs's PROFILE.md.
+	SuiteSchnorr Suite = 1
+)
+
+// Disclosure is what the holder asked to happen to one message.
+type Disclosure uint8
+
+const (
+	// Disclose reveals the message to the verifier.
+	Disclose Disclosure = 0
+	// Hide proves knowledge of it without revealing it.
+	Hide Disclosure = 1
+	// Commit hides it and emits a Pedersen commitment the verifier can
+	// carry into a further proof.
+	Commit Disclosure = 2
+)
+
+var (
+	// ErrUnavailable is returned by every operation when the binary was
+	// built without the `bbsnative` tag.
+	ErrUnavailable = errors.New("bbs: native support not compiled in (build with -tags bbsnative)")
+
+	// ErrVerification is returned when a commitment or proof does not
+	// verify. It deliberately carries no detail about which check failed:
+	// a relying party learns "invalid", not where to aim next.
+	ErrVerification = errors.New("bbs: verification failed")
+)
+
+// BlindSigner is the issuer's half.
+type BlindSigner interface {
+	// BlindSign verifies the holder's commitment — including each
+	// authenticator's proof of possession of its key binding key — and
+	// signs it together with the issuer's own messages.
+	//
+	// A commitment that does not verify is rejected, never signed.
+	BlindSign(suite Suite, secretKey, publicKey, commitment, header []byte, messages [][]byte) ([]byte, error)
+}
+
+// ProofVerifier is the relying party's half.
+type ProofVerifier interface {
+	// VerifyProof returns nil only if the proof is valid for exactly these
+	// disclosed messages, this disclosure pattern, these headers and this
+	// issuer key.
+	//
+	// issuerKnownMessages is how many of the credential's messages the
+	// issuer supplied itself; the rest were committed by the holder. It is
+	// part of what the signature covers, so a wrong value fails to verify
+	// rather than being ignored.
+	VerifyProof(suite Suite, publicKey, proof, header, presentationHeader []byte,
+		issuerKnownMessages int, disclosedMessages [][]byte, disclosures []Disclosure) error
+}

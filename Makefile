@@ -49,6 +49,19 @@ ZK_CRED_LONGFELLOW_REF  ?= main
 ZK_CRED_LONGFELLOW_CHECKOUT := third_party/.zk-cred-longfellow-src
 ZK_CRED_LONGFELLOW_STAGE    := third_party/zk-cred-longfellow
 
+# bbsnative: blind BBS issuance (pkg/bbs), via cgo against zk-cred-bbs's
+# Go C-ABI build. Same opt-in shape and same reason as zknative above.
+# Unlike Longfellow, this one is needed on the ISSUER side: an issuer
+# offering BBS credentials must verify the holder's commitment and
+# blind-sign it, and neither has a pure-Go implementation.
+BBSNATIVE_TAG        := bbsnative
+ZK_CRED_BBS_REPO     ?= https://github.com/sirosfoundation/zk-cred-bbs.git
+# Pinned, not floating: CI should not silently start testing a different
+# crate revision. Bump deliberately.
+ZK_CRED_BBS_REF      ?= v0.0.1
+ZK_CRED_BBS_CHECKOUT := third_party/.zk-cred-bbs-src
+ZK_CRED_BBS_STAGE    := third_party/zk-cred-bbs
+
 # Service Build Configuration (service -> static/dynamic, tags)
 # Format: service_name:cgo_mode:build_tags
 BUILD_CONFIGS           := \
@@ -105,6 +118,8 @@ help: ## Show this help message
 	$(info Optional Build Features:)
 	$(info   make build-issuer-hsm         - Build issuer with PKCS#11 HSM support)
 	$(info   make zk-native-lib            - Fetch/build zk-cred-longfellow's Go C-ABI lib for native ZK/PPID verification)
+	$(info   make bbs-native-lib           - Fetch/build zk-cred-bbs's Go C-ABI lib for blind BBS issuance)
+	$(info   make test-bbsnative           - Run pkg/bbs's bbsnative-tagged tests (requires bbs-native-lib))
 	$(info   make build-verifier-zknative  - Build verifier with native ZK/PPID proof verification (requires zk-native-lib))
 	$(info   make test-zknative            - Run pkg/mdoc's zknative-tagged tests (requires zk-native-lib))
 	$(info )
@@ -256,6 +271,30 @@ zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native Z
 	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi"/libzk_cred_longfellow.* "$(ZK_CRED_LONGFELLOW_STAGE)/lib/"
 	@echo "Staged zk-cred-longfellow's Go C-ABI lib + header in $(ZK_CRED_LONGFELLOW_STAGE)"
 	@echo "Build/test with: CGO_ENABLED=1 LD_LIBRARY_PATH=\$$(pwd)/$(ZK_CRED_LONGFELLOW_STAGE)/lib go {build,test} -tags $(ZKNATIVE_TAG) ./..."
+
+bbs-native-lib: ## Fetch/build zk-cred-bbs's Go C-ABI library for blind BBS issuance
+	$(info Fetching/building zk-cred-bbs's go-cabi target from $(ZK_CRED_BBS_REPO)@$(ZK_CRED_BBS_REF))
+	@if [ ! -d "$(ZK_CRED_BBS_CHECKOUT)/.git" ]; then \
+		mkdir -p "$(ZK_CRED_BBS_CHECKOUT)" && \
+		git -C "$(ZK_CRED_BBS_CHECKOUT)" init -q && \
+		git -C "$(ZK_CRED_BBS_CHECKOUT)" remote add origin "$(ZK_CRED_BBS_REPO)"; \
+	fi
+	git -C "$(ZK_CRED_BBS_CHECKOUT)" fetch --depth 1 origin "$(ZK_CRED_BBS_REF)"
+	git -C "$(ZK_CRED_BBS_CHECKOUT)" checkout FETCH_HEAD
+	$(MAKE) -C "$(ZK_CRED_BBS_CHECKOUT)" go-cabi
+	@mkdir -p "$(ZK_CRED_BBS_STAGE)/include" "$(ZK_CRED_BBS_STAGE)/lib" "$(ZK_CRED_BBS_STAGE)/test-vectors"
+	cp "$(ZK_CRED_BBS_CHECKOUT)/target/go-cabi/zk_cred_bbs_go.h" "$(ZK_CRED_BBS_STAGE)/include/"
+	cp "$(ZK_CRED_BBS_CHECKOUT)/target/go-cabi"/libzk_cred_bbs.* "$(ZK_CRED_BBS_STAGE)/lib/"
+	@# The crate's own reference vectors, so pkg/bbs's tests check against
+	@# the same ground truth the Rust and TypeScript sides do rather than a
+	@# second copy that can drift.
+	cp "$(ZK_CRED_BBS_CHECKOUT)/test-vectors/emlun_reference.json" "$(ZK_CRED_BBS_STAGE)/test-vectors/"
+	@echo "Staged zk-cred-bbs's Go C-ABI lib + header in $(ZK_CRED_BBS_STAGE)"
+
+test-bbsnative: ## Run pkg/bbs's bbsnative-tagged tests (requires: make bbs-native-lib)
+	$(info Testing with bbsnative build tag - requires 'make bbs-native-lib' first)
+	CGO_ENABLED=1 LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_BBS_STAGE)/lib \
+		go test -tags $(BBSNATIVE_TAG) -v ./pkg/bbs/...
 
 test-zknative: ## Run pkg/mdoc's zknative-tagged tests (requires: make zk-native-lib)
 	$(info Testing with zknative build tag - requires 'make zk-native-lib' first)
