@@ -152,7 +152,19 @@ const dcqlQueryCredentialSchema = v.object({
             // rejects the whole query instead).
             zk_system_type: v.optional(v.array(v.record(v.string(), v.string()))),
         }),
-        v.record(v.string(), v.union([v.string(), v.array(v.string())])),
+        // v.intersect validates the object against EVERY member schema, not
+        // just "whichever keys aren't already declared above" - confirmed
+        // live (both via the deployed error and a local valibot repro):
+        // this catch-all record still runs against the ENTIRE meta object,
+        // zk_system_type included, so its value union has to independently
+        // accept zk_system_type's own array-of-objects shape too, or the
+        // intersection fails even though the object schema above already
+        // declared and accepted the field.
+        v.record(v.string(), v.union([
+            v.string(),
+            v.array(v.string()),
+            v.array(v.record(v.string(), v.string())),
+        ])),
     ]),
     claims: v.optional(v.array(v.object({
         path: v.array(v.nullable(v.string())),
