@@ -25,9 +25,14 @@ type RegistrationCertificate struct {
 	// FilePath is the path to the Registrar-issued WRPRC, a compact JWT with
 	// media type "rc-wrp+jwt".
 	FilePath string `yaml:"file_path,omitempty" doc_example:"\"/etc/vc/registration-certificate.jwt\""`
-	// Format is the verifier_info format identifier advertised alongside the
-	// certificate. Defaults to "rc-wrp+jwt"; override only for an ecosystem
-	// that has profiled a different identifier for the same document.
+	// Format is the format identifier advertised alongside the certificate
+	// in the verifier_info parameter. Defaults to "rc-wrp+jwt"; override
+	// only for an ecosystem that has profiled a different identifier for
+	// the same document.
+	//
+	// Worded to survive the configuration-reference generator, which strips
+	// the leading "Format is the " and capitalises what follows - leaving a
+	// lowercase protocol term first would render it as "Verifier_info".
 	Format string `yaml:"format,omitempty" doc_example:"\"rc-wrp+jwt\""`
 	// TrustedRootsPath optionally points at a PEM bundle of the Registrar's
 	// root certificates. When set, the certificate's own x5c chain is
