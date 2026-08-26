@@ -92,68 +92,6 @@ type WRPRCLocalizedText struct {
 	Value string `json:"value"`
 }
 
-// wrprcPayload mirrors the wire format, tolerating the shape variations seen
-// in the wild before being reduced to WRPRCClaims.
-type wrprcPayload struct {
-	Name          string               `json:"name"`
-	Sub           wrprcSubject         `json:"sub"`
-	SubLegalName  string               `json:"sub_ln"`
-	Country       string               `json:"country"`
-	Entitlements  []string             `json:"entitlements"`
-	PrivacyPolicy string               `json:"privacy_policy"`
-	InfoURI       string               `json:"info_uri"`
-	RegistryURI   string               `json:"registry_uri"`
-	Purpose       []WRPRCLocalizedText `json:"purpose"`
-	Credentials   []wrprcCredential    `json:"credentials"`
-}
-
-// wrprcSubject accepts `sub` either as a bare identifier string or as the
-// structured object, since Registrars differ on this.
-type wrprcSubject struct {
-	ID         string
-	LegalName  string
-	GivenName  string
-	FamilyName string
-}
-
-// UnmarshalJSON accepts both `"sub": "NTRDE-..."` and
-// `"sub": {"id": "...", "legal_name": "..."}`.
-func (s *wrprcSubject) UnmarshalJSON(data []byte) error {
-	var asString string
-	if err := json.Unmarshal(data, &asString); err == nil {
-		s.ID = asString
-		return nil
-	}
-	var asObject struct {
-		ID         string `json:"id"`
-		LegalName  string `json:"legal_name"`
-		GivenName  string `json:"given_name"`
-		FamilyName string `json:"family_name"`
-	}
-	if err := json.Unmarshal(data, &asObject); err != nil {
-		return fmt.Errorf("sub claim is neither an identifier string nor an object: %w", err)
-	}
-	s.ID = asObject.ID
-	s.LegalName = asObject.LegalName
-	s.GivenName = asObject.GivenName
-	s.FamilyName = asObject.FamilyName
-	return nil
-}
-
-// wrprcCredential is one DCQL credential query. The claim list appears as
-// both `claim` and `claims` in practice; missing it would silently yield an
-// empty allowed-attribute set, which reads as "this RP may request nothing"
-// and would make over-request detection inert rather than failing loudly.
-type wrprcCredential struct {
-	Format string       `json:"format"`
-	Claim  []wrprcClaim `json:"claim"`
-	Claims []wrprcClaim `json:"claims"`
-}
-
-type wrprcClaim struct {
-	Path []string `json:"path"`
-}
-
 // LoadedRegistrationCertificate holds a registration certificate read at
 // startup, ready to be attached to outgoing authorization requests.
 type LoadedRegistrationCertificate struct {
@@ -344,56 +282,41 @@ func verifyWRPRCSignature(token string, leaf *x509.Certificate) error {
 }
 
 // extractWRPRCClaims decodes the payload into the fields we act on.
+//
+// The wire format lives in go-trust's rpcert.ParseWRPRCClaims, which is
+// tolerant of both TS 119 475 v1.1.1 and v1.2.1 spellings. It used to be
+// duplicated here; keeping one implementation means a Registrar quirk found
+// by any consumer is fixed for all of them, rather than in whichever copy
+// happened to hit it.
+//
+// Note what this deliberately is not: rpcert.ParseWRPRCClaims performs no
+// cryptographic verification whatsoever. The signature is verified in
+// verifyWRPRCSignature and the chain in evaluateWRPRCChain - steps one and
+// three, which stay here because they are the caller's to own.
 func extractWRPRCClaims(token string) (*WRPRCClaims, error) {
-	parts := strings.Split(token, ".")
-	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	payload, err := rpcert.ParseWRPRCJWTPayload(token)
 	if err != nil {
-		return nil, fmt.Errorf("decoding JWT payload: %w", err)
+		return nil, err
 	}
-	var payload wrprcPayload
-	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-		return nil, fmt.Errorf("parsing JWT payload: %w", err)
-	}
-
-	if payload.Sub.ID == "" && payload.Sub.LegalName == "" && payload.SubLegalName == "" {
-		return nil, fmt.Errorf("payload has no usable sub claim")
-	}
-	if len(payload.Entitlements) == 0 {
-		return nil, fmt.Errorf("payload has no entitlements claim (GEN-5.2.4-03)")
-	}
-
-	legalName := payload.SubLegalName
-	if legalName == "" {
-		legalName = payload.Sub.LegalName
+	ent, err := rpcert.ParseWRPRCClaims(payload)
+	if err != nil {
+		return nil, err
 	}
 
 	claims := &WRPRCClaims{
-		SubjectID:        payload.Sub.ID,
-		LegalName:        legalName,
-		TradeName:        payload.Name,
-		Country:          payload.Country,
-		EntitlementURIs:  payload.Entitlements,
-		Purpose:          payload.Purpose,
-		PrivacyPolicyURI: payload.PrivacyPolicy,
-		InfoURI:          payload.InfoURI,
-		RegistryURI:      payload.RegistryURI,
+		SubjectID:         ent.Subject.ID,
+		LegalName:         ent.Subject.LegalName,
+		TradeName:         ent.TradeName,
+		Country:           ent.Country,
+		EntitlementURIs:   ent.EntitlementURIs,
+		AllowedAttributes: ent.AllowedAttributes,
+		PrivacyPolicyURI:  ent.PrivacyPolicyURI,
+		InfoURI:           ent.InfoURI,
+		RegistryURI:       ent.RegistryURI,
 	}
-
-	seen := map[string]bool{}
-	for _, cred := range payload.Credentials {
-		entries := cred.Claim
-		if len(entries) == 0 {
-			entries = cred.Claims
-		}
-		for _, c := range entries {
-			if len(c.Path) == 0 || c.Path[0] == "" || seen[c.Path[0]] {
-				continue
-			}
-			seen[c.Path[0]] = true
-			claims.AllowedAttributes = append(claims.AllowedAttributes, c.Path[0])
-		}
+	for _, p := range ent.Purpose {
+		claims.Purpose = append(claims.Purpose, WRPRCLocalizedText{Lang: p.Lang, Value: p.Value})
 	}
-
 	return claims, nil
 }
 

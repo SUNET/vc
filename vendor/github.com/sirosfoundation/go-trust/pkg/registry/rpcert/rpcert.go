@@ -1,15 +1,8 @@
-// Package rpcert provides an abstraction layer for Relying Party registration
-// certificate (WRPRC) validation and entitlement extraction.
+// Core WRPRC types: the entitlement model, the subject shape, and the
+// format-agnostic validator interfaces.
 //
-// The WRPRC is a signed JWT (rc-wrp+jwt) or CWT (rc-wrp+cwt) per ETSI TS 119 475
-// v1.1.1. It carries the RP's registered entitlements, intended use, and DCQL
-// attribute queries. This package defines format-agnostic interfaces so the
-// validation pipeline works regardless of the token format.
-//
-// References:
-//   - ETSI TS 119 475 v1.1.1 — RP attributes supporting Wallet user's authorisation decisions
-//   - ETSI TS 119 411-8 v1.1.1 — Access Certificate Policy for EUDI Wallet Relying Parties
-//   - ARF RPRC_16 to RPRC_21 — Registration certificate validation requirements
+// See doc.go for the package overview and the three-step model.
+
 package rpcert
 
 import (
@@ -89,9 +82,30 @@ type RPEntitlements struct {
 	// InfoURI is the general-purpose web address of the WRP (`info_uri`).
 	InfoURI string `json:"info_uri,omitempty"`
 
+	// SupportURI is the WRP's user-support address (`support_uri`, Table 10).
+	SupportURI string `json:"support_uri,omitempty"`
+
+	// ServiceDescriptions holds the multi-language descriptions of the
+	// service the WRP offers, from the `srv_description` claim (v1.2.1) or
+	// its former name `service` (v1.1.1). Displayed to users alongside
+	// Purpose.
+	ServiceDescriptions []MultiLangString `json:"srv_description,omitempty"`
+
 	// RegistryURI is the URL to the national registry entry for this WRP
 	// (`registry_uri`, Table 7). Used to resolve registration data.
 	RegistryURI string `json:"registry_uri,omitempty"`
+
+	// ServiceIdentifier is a URI that identifies the specific service instance
+	// this registration is valid for. Carried in the WRPRC JWT as the
+	// "service_identifier" claim (Stefan Santesson's de-facto convention,
+	// not yet in ETSI TS 119 475 v1.1.1).
+	//
+	// When the corresponding WRPAC also carries the same URI under Subject
+	// attribute OIDWRPACServiceIdentifier (0.4.0.19475.99.1), the values
+	// MUST match — enforced by CheckWRPACWRPRCServiceBinding.
+	//
+	// TODO(etsi): standardise the WRPRC claim name once ETSI TS 119 475 is updated.
+	ServiceIdentifier string `json:"service_identifier,omitempty"`
 
 	// PolicyIDs contains the WRPRC certificate policy identifiers from the
 	// `policy_id` claim (OVR-6.1.3-01). The standard WRPRC OID is
