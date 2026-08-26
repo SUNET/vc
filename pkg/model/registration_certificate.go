@@ -14,8 +14,7 @@ import (
 	"github.com/sirosfoundation/go-trust/pkg/registry/rpcert"
 )
 
-// RegistrationCertificate configures the EUDI Relying Party registration
-// certificate (WRPRC, ETSI TS 119 475) this verifier presents to wallets.
+// RegistrationCertificate configures the EUDI Relying Party registration certificate (WRPRC, ETSI TS 119 475) this verifier presents to wallets.
 //
 // vc does not issue these. A national Registrar in the eIDAS ecosystem
 // issues a WRPRC to the Relying Party out of band, attesting what the RP is
@@ -268,6 +267,19 @@ func (v *Verifier) LoadRegistrationCertificate(accessCert *x509.Certificate) (*L
 		orgID, err := wrpacOrganizationIdentifier(accessCert)
 		if err != nil {
 			return nil, fmt.Errorf("registration certificate: reading access certificate organisation identifier: %w", err)
+		}
+		// go-trust's binding check treats an empty value on either side as
+		// "not present" and returns nil. That is right for its WRPRC-only
+		// callers, and wrong here: an access certificate was supplied, so
+		// RPRC_16 is meant to be enforced, and an absent identifier means
+		// the binding cannot be checked at all. Letting that read as a pass
+		// would leave a certificate that simply omits the field bypassing
+		// the check while appearing to satisfy it.
+		if orgID == "" {
+			return nil, fmt.Errorf("registration certificate: cannot enforce the access-certificate binding (ARF RPRC_16) because the access certificate carries no organisation identifier")
+		}
+		if claims.SubjectID == "" {
+			return nil, fmt.Errorf("registration certificate: cannot enforce the access-certificate binding (ARF RPRC_16) because the certificate's sub claim carries no identifier")
 		}
 		if err := rpcert.CheckWRPACWRPRCBinding(orgID, &rpcert.RPEntitlements{
 			Subject: rpcert.WRPRCSubject{ID: claims.SubjectID},

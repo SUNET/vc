@@ -980,8 +980,6 @@ unaffected.
 
 > **Path:** `.verifier.registration_certificate`
 
-certificate (WRPRC, ETSI TS 119 475) this verifier presents to wallets.
-
 vc does not issue these. A national Registrar in the eIDAS ecosystem
 issues a WRPRC to the Relying Party out of band, attesting what the RP is
 registered to request; this configuration points at the resulting file so

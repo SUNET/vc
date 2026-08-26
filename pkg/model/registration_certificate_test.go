@@ -275,6 +275,31 @@ func TestLoadRegistrationCertificate_AccessCertificateBinding(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	// go-trust's binding check returns nil when either identifier is empty -
+	// correct for its WRPRC-only callers, but here an access certificate was
+	// supplied and RPRC_16 is meant to be enforced. A certificate that simply
+	// omits the field must not slip through looking checked.
+	t.Run("access certificate without an organisation identifier", func(t *testing.T) {
+		v := newVerifierWithCert(t, jwtStr, ca.rootPEM)
+		_, err := v.LoadRegistrationCertificate(accessCertWithOrgID(t, ""))
+		require.Error(t, err, "an unbindable access certificate must not pass silently")
+		assert.Contains(t, err.Error(), "no organisation identifier")
+	})
+
+	t.Run("registration certificate without a sub identifier", func(t *testing.T) {
+		// Legal name only: extraction accepts it, but there is no identifier
+		// to bind against.
+		noSubID := ca.sign(t, rpcert.WRPRCTyp, map[string]any{
+			"sub_ln":       "Test RP",
+			"name":         "Test RP",
+			"entitlements": []string{rpcert.EntitlementServiceProvider},
+		})
+		v := newVerifierWithCert(t, noSubID, ca.rootPEM)
+		_, err := v.LoadRegistrationCertificate(accessCertWithOrgID(t, orgID))
+		require.Error(t, err, "a certificate with no sub identifier cannot be bound")
+		assert.Contains(t, err.Error(), "no identifier")
+	})
+
 	t.Run("mismatched organisation", func(t *testing.T) {
 		v := newVerifierWithCert(t, jwtStr, ca.rootPEM)
 		_, err := v.LoadRegistrationCertificate(accessCertWithOrgID(t, "NTRSE-9999999999"))
