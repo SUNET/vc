@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/time/rate"
 
@@ -30,13 +31,19 @@ import (
 
 // Client holds the public api object
 type Client struct {
-	cfg            *model.Cfg
-	log            *logger.Log
-	tracer         *trace.Tracer
-	auditLog       *auditlog.Service
-	signer         pki.Signer
-	signerChain    []string // Base64-encoded DER x5c certificate chain (optional)
-	privateKey     any      // Raw key (*ecdsa.PrivateKey or *rsa.PrivateKey) needed for mDL COSE signing and VC 2.0 Data Integrity proofs (ecdsa-rdfc-2019, eddsa-rdfc-2022) which require direct key access beyond the pki.Signer interface
+	cfg         *model.Cfg
+	log         *logger.Log
+	tracer      *trace.Tracer
+	auditLog    *auditlog.Service
+	signer      pki.Signer
+	signerChain []string // Base64-encoded DER x5c certificate chain (optional)
+	// metadataSigner and metadataChain sign Credential Issuer Metadata. They
+	// are the access certificate (WRPAC) when one is configured, and fall
+	// back to the credential signer above when it is not.
+	metadataSigner pki.Signer
+	metadataChain  []string
+	signingCert    *x509.Certificate // Leaf of signerChain, kept for profile validation
+	privateKey     any               // Raw key (*ecdsa.PrivateKey or *rsa.PrivateKey) needed for mDL COSE signing and VC 2.0 Data Integrity proofs (ecdsa-rdfc-2019, eddsa-rdfc-2022) which require direct key access beyond the pki.Signer interface
 	jwkProto       *apiv1_issuer.Jwk
 	registryConn   *grpc.ClientConn
 	registryClient apiv1_registry.RegistryServiceClient
@@ -56,6 +63,10 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 	}
 
 	if err := c.initSigner(ctx); err != nil {
+		return nil, err
+	}
+
+	if err := c.initAccessCertificate(ctx); err != nil {
 		return nil, err
 	}
 
@@ -87,6 +98,7 @@ func (c *Client) initSigner(ctx context.Context) error {
 	// Create signer from key material
 	c.signer = pki.NewKeyMaterialSigner(km)
 	c.signerChain = km.Chain
+	c.signingCert = km.Cert
 
 	// Store private key for mDL issuer and VC 2.0 Data Integrity signing
 	c.privateKey = km.PrivateKey
@@ -97,6 +109,52 @@ func (c *Client) initSigner(ctx context.Context) error {
 		return err
 	}
 
+	return nil
+}
+
+// initAccessCertificate loads the access certificate (WRPAC) that issuer
+// metadata is signed with, and validates it against the WRPAC profile.
+//
+// The access certificate is what authenticates the issuer to a wallet, so it
+// is deliberately separate from the credential key: that key is published in
+// /jwks and signs credentials, and the two rotate independently.
+//
+// When no access certificate is configured the credential key is used
+// instead and a warning is logged. That is a degraded configuration rather
+// than an error, so an existing deployment keeps booting across an upgrade -
+// but it means wallets see metadata signed by a certificate that was never
+// meant to identify the issuer to them.
+func (c *Client) initAccessCertificate(_ context.Context) error {
+	keyConfig := c.cfg.Issuer.AccessCertificateKeyConfig()
+	if keyConfig == nil {
+		c.metadataSigner = c.signer
+		c.metadataChain = c.signerChain
+
+		// Still validate whatever we will actually present, so opting into
+		// validation without a separate key is honest rather than vacuous.
+		if err := c.cfg.Issuer.ValidateAccessCertificate(c.signingCert, time.Now()); err != nil {
+			return fmt.Errorf("access certificate validation failed: %w", err)
+		}
+		if c.cfg.Issuer.AccessCertificate != nil {
+			c.log.Warn("no access certificate key configured; signing issuer metadata with the credential key",
+				"remedy", "set issuer.access_certificate.key_config")
+		}
+		return nil
+	}
+
+	signer, leaf, chain, err := pki.LoadSigner(keyConfig)
+	if err != nil {
+		return fmt.Errorf("failed to load access certificate key: %w", err)
+	}
+
+	if err := c.cfg.Issuer.ValidateAccessCertificate(leaf, time.Now()); err != nil {
+		return fmt.Errorf("access certificate validation failed: %w", err)
+	}
+
+	c.metadataSigner = signer
+	c.metadataChain = chain
+	c.log.Info("Initialized access certificate for issuer metadata",
+		"algorithm", signer.Algorithm(), "keyID", signer.KeyID(), "x5c_certs", len(chain))
 	return nil
 }
 

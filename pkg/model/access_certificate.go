@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/SUNET/vc/pkg/pki"
 	"github.com/sirosfoundation/go-trust/pkg/registry"
 	"github.com/sirosfoundation/go-trust/pkg/registry/rpcert"
 )
@@ -44,7 +45,22 @@ var ErrNoAccessCertificate = errors.New("access_certificate.validate is set but 
 // now is injected so the validity-window check is testable; callers pass
 // time.Now().
 func (v *Verifier) ValidateAccessCertificate(leaf *x509.Certificate, now time.Time) error {
-	if v.AccessCertificate == nil || !v.AccessCertificate.Validate {
+	return v.AccessCertificate.ValidateCertificate(leaf, now)
+}
+
+// ValidateCertificate checks a certificate against the WRPAC profile and its
+// own validity window.
+//
+// This is the shared implementation behind both the verifier's and the
+// issuer's startup check. Under CIR (EU) 2025/848 a PID or attestation
+// provider is a registered wallet-relying party in its own right, so the
+// same profile governs the certificate an issuer presents - one rule, not
+// two copies that drift.
+//
+// A nil receiver, or one with Validate unset, passes: a deployment outside
+// an ARF trust framework is unaffected.
+func (a *AccessCertificate) ValidateCertificate(leaf *x509.Certificate, now time.Time) error {
+	if a == nil || !a.Validate {
 		return nil
 	}
 	if leaf == nil {
@@ -71,11 +87,11 @@ func (v *Verifier) ValidateAccessCertificate(leaf *x509.Certificate, now time.Ti
 	// Optional narrowing to specific policy OIDs. The profile check above
 	// already proved at least one WRPAC OID is present; this additionally
 	// requires it to be one the deployment accepts.
-	if len(v.AccessCertificate.AllowedPolicyOIDs) > 0 {
+	if len(a.AllowedPolicyOIDs) > 0 {
 		present := rpcert.CertPolicyOIDStrings(leaf)
-		if !containsAny(present, v.AccessCertificate.AllowedPolicyOIDs) {
+		if !containsAny(present, a.AllowedPolicyOIDs) {
 			return fmt.Errorf("access certificate policy OIDs %v include none of the allowed %v",
-				present, v.AccessCertificate.AllowedPolicyOIDs)
+				present, a.AllowedPolicyOIDs)
 		}
 	}
 
@@ -138,4 +154,77 @@ func (v *Verifier) CheckPublicURLMatchesCertificate(leaf *x509.Certificate) erro
 			host, leaf.DNSNames)
 	}
 	return nil
+}
+
+// IssuerAccessCertificate configures the EUDI Relying Party access certificate (WRPAC, ETSI TS 119 411-8) the issuer presents to wallets, and optionally gives it its own key.
+//
+// Under CIR (EU) 2025/848 a PID or attestation provider is a registered
+// wallet-relying party in its own right, so the certificate that
+// authenticates the issuer to a wallet is a WRPAC, governed by the same
+// profile the verifier uses.
+//
+// The access certificate is kept separate from Issuer.KeyConfig on purpose.
+// The credential key is published in /jwks and signs credentials; an mdoc
+// document-signer certificate chains to an IACA under an entirely different
+// profile; and the two have independent rotation lifecycles. Conflating them
+// means a WRPAC rotation forces a credential-key rotation.
+//
+// When KeyConfig is unset the issuer falls back to signing metadata with the
+// credential key, logging a warning. That keeps an existing single-key
+// deployment booting across an upgrade rather than failing on start.
+type IssuerAccessCertificate struct {
+	// Validate enforces the WRPAC certificate profile at startup: keyUsage
+	// must include nonRepudiation (contentCommitment), subjectAltName must
+	// carry contact information (URI or email), and certificatePolicies must
+	// contain a WRPAC policy OID. Startup fails when the certificate does
+	// not conform.
+	Validate bool `yaml:"validate,omitempty"`
+	// AllowedPolicyOIDs optionally narrows which WRPAC certificate policy
+	// OIDs are accepted, for a deployment that must assert a specific
+	// assurance level. When empty, all four TS 119 411-8 WRPAC policy OIDs
+	// are accepted.
+	AllowedPolicyOIDs []string `yaml:"allowed_policy_oids,omitempty" doc_example:"[\"0.4.0.194118.1.3\",\"0.4.0.194118.1.4\"]"`
+	// KeyConfig is the signing key and certificate chain for the access
+	// certificate. When set, issuer metadata is signed with this key and
+	// the chain is advertised in the JWT's x5c header; credentials continue
+	// to be signed with Issuer.KeyConfig.
+	KeyConfig *pki.KeyConfig `yaml:"key_config,omitempty" validate:"omitempty"`
+}
+
+// profile returns the shared profile-validation rule for this configuration.
+//
+// The two knobs are declared on IssuerAccessCertificate rather than embedded
+// from AccessCertificate because the configuration-reference generator does
+// not follow yaml-inline embedded structs: embedding left validate and
+// allowed_policy_oids working but undocumented. The rule itself still lives
+// in one place, which is what matters.
+func (i *IssuerAccessCertificate) profile() *AccessCertificate {
+	if i == nil {
+		return nil
+	}
+	return &AccessCertificate{Validate: i.Validate, AllowedPolicyOIDs: i.AllowedPolicyOIDs}
+}
+
+// ValidateAccessCertificate checks the certificate the issuer signs metadata
+// with against the WRPAC profile.
+//
+// now is injected so the validity-window check is testable; callers pass
+// time.Now().
+func (i *Issuer) ValidateAccessCertificate(leaf *x509.Certificate, now time.Time) error {
+	if i == nil || i.AccessCertificate == nil {
+		return nil
+	}
+	return i.AccessCertificate.profile().ValidateCertificate(leaf, now)
+}
+
+// AccessCertificateKeyConfig returns the access certificate's own key
+// configuration, or nil when the issuer has not been given one.
+//
+// A nil result is the signal to fall back to the credential key, which is a
+// degraded but supported configuration - see IssuerAccessCertificate.
+func (i *Issuer) AccessCertificateKeyConfig() *pki.KeyConfig {
+	if i == nil || i.AccessCertificate == nil {
+		return nil
+	}
+	return i.AccessCertificate.KeyConfig
 }

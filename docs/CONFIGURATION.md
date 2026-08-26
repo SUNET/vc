@@ -366,7 +366,7 @@ an authorization-code redirect flow so admins log in via the OIDC provider.
 
 ### `key_config`
 
-> **Path:** `.apigw.key_config`, `.issuer.key_config`, `.verifier.key_config`, `.registry.token_status_lists.key_config`
+> **Path:** `.apigw.key_config`, `.issuer.key_config`, `.issuer.access_certificate.key_config`, `.verifier.key_config`, `.registry.token_status_lists.key_config`
 
 Supports both file-based and HSM-based keys with explicit control.
 
@@ -382,7 +382,7 @@ Supports both file-based and HSM-based keys with explicit control.
 
 ### `pkcs11`
 
-> **Path:** `.apigw.key_config.pkcs11`, `.issuer.key_config.pkcs11`, `.verifier.key_config.pkcs11`, `.registry.token_status_lists.key_config.pkcs11`
+> **Path:** `.apigw.key_config.pkcs11`, `.issuer.key_config.pkcs11`, `.issuer.access_certificate.key_config.pkcs11`, `.verifier.key_config.pkcs11`, `.registry.token_status_lists.key_config.pkcs11`
 
 | Field         | Type     | Description                       | Example                             | Default | Required |
 | ------------- | -------- | --------------------------------- | ----------------------------------- | ------- | -------- |
@@ -837,6 +837,7 @@ Configuration for the Issuer service that signs and issues verifiable credential
 | `audit_log`                | `object` | Audit log configuration                                                                                                                                                                                           | -                           | -       | No       |
 | `sign_metadata_rate_limit` | `object` | The rate limiter for the SignMetadata gRPC endpoint. In HA setups each APIGW node refreshes two documents (VCI+OAuth2), so the defaults should accommodate the expected cluster size. Default: 2 req/s, burst 20. | -                           | -       | No       |
 | `pseudonym_seed`           | `bool`   | PseudonymSeed, if true, makes the issuer attach a random seed as the pseudonym_seed claim.                                                                                                                        | -                           | -       | No       |
+| `access_certificate`       | `object` | The EUDI access certificate (WRPAC) the issuer presents to wallets, optionally with its own key separate from KeyConfig. Off by default; deployments outside an ARF trust framework are unaffected.               | -                           | -       | No       |
 
 ### `grpc_server`
 
@@ -904,6 +905,31 @@ In a later state this should be placed under authentic source in order to issue 
 | --------------------- | --------- | ----------------------------------------------------------------- | ------- | ------- | -------- |
 | `requests_per_second` | `float64` | Sustained rate limit in requests per second. Default: 2           | -       | `2`     | No       |
 | `burst`               | `int`     | Maximum number of requests allowed in a single burst. Default: 20 | -       | `20`    | No       |
+
+### `access_certificate`
+
+> **Path:** `.issuer.access_certificate`
+
+Under CIR (EU) 2025/848 a PID or attestation provider is a registered
+wallet-relying party in its own right, so the certificate that
+authenticates the issuer to a wallet is a WRPAC, governed by the same
+profile the verifier uses.
+
+The access certificate is kept separate from Issuer.KeyConfig on purpose.
+The credential key is published in /jwks and signs credentials; an mdoc
+document-signer certificate chains to an IACA under an entirely different
+profile; and the two have independent rotation lifecycles. Conflating them
+means a WRPAC rotation forces a credential-key rotation.
+
+When KeyConfig is unset the issuer falls back to signing metadata with the
+credential key, logging a warning. That keeps an existing single-key
+deployment booting across an upgrade rather than failing on start.
+
+| Field                 | Type       | Description                                                                                                                                                                                                                                                                                       | Example                                   | Default | Required |
+| --------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | -------- |
+| `validate`            | `bool`     | Validate enforces the WRPAC certificate profile at startup: keyUsage must include nonRepudiation (contentCommitment), subjectAltName must carry contact information (URI or email), and certificatePolicies must contain a WRPAC policy OID. Startup fails when the certificate does not conform. | -                                         | -       | No       |
+| `allowed_policy_oids` | `[]string` | AllowedPolicyOIDs optionally narrows which WRPAC certificate policy OIDs are accepted, for a deployment that must assert a specific assurance level. When empty, all four TS 119 411-8 WRPAC policy OIDs are accepted.                                                                            | `["0.4.0.194118.1.3","0.4.0.194118.1.4"]` | -       | No       |
+| `key_config`          | `object`   | Signing key and certificate chain for the access certificate. When set, issuer metadata is signed with this key and the chain is advertised in the JWT's x5c header; credentials continue to be signed with Issuer.KeyConfig.                                                                     | -                                         | -       | No       |
 
 ## `verifier` (Top-level)
 
