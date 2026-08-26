@@ -75,10 +75,25 @@ jobs:
       - name: Resolve the zk-cred-longfellow revision
         id: crate
         run: |
-          sha=$(git ls-remote https://github.com/sirosfoundation/zk-cred-longfellow.git \
-                  "${ZK_CRED_LONGFELLOW_REF:-main}" | cut -f1)
-          if [ -z "$sha" ]; then
-            echo "::error::could not resolve zk-cred-longfellow ref"
+          set -euo pipefail
+          repo=https://github.com/sirosfoundation/zk-cred-longfellow.git
+          ref="${ZK_CRED_LONGFELLOW_REF:-main}"
+          if printf '%s' "$ref" | grep -Eiq '^[0-9a-f]{40}$'; then
+            # The Makefile accepts a raw commit SHA (and pinning the ref to
+            # one is the intended direction), but `git ls-remote` does not
+            # resolve a SHA - it would return nothing. Use it as-is.
+            sha="$ref"
+          else
+            refs=$(git ls-remote "$repo" "$ref")
+            # An annotated tag resolves to two lines; the peeled "^{}" entry
+            # is the commit `git checkout FETCH_HEAD` actually lands on.
+            sha=$(printf '%s\n' "$refs" | awk '$2 ~ /\^\{\}$/ { print $1; exit }')
+            [ -n "$sha" ] || sha=$(printf '%s\n' "$refs" | awk 'NR==1 { print $1 }')
+          fi
+          # Also guarantees a single-line value, so GITHUB_OUTPUT cannot be
+          # corrupted by an unexpected ls-remote result.
+          if ! printf '%s' "$sha" | grep -Eiq '^[0-9a-f]{40}$'; then
+            echo "::error::could not resolve zk-cred-longfellow ref '$ref'"
             exit 1
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
