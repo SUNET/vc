@@ -22,4 +22,10 @@ func TestWithoutTagEverythingIsUnavailable(t *testing.T) {
 	if err := n.VerifyProof(SuiteSchnorr, nil, nil, nil, nil, 0, nil, nil); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("VerifyProof: want ErrUnavailable, got %v", err)
 	}
+	if _, err := n.Issue(IssueParams{}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Issue: want ErrUnavailable, got %v", err)
+	}
+	if _, err := n.VerifyPresentation(SuiteSchnorr, "", nil); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("VerifyPresentation: want ErrUnavailable, got %v", err)
+	}
 }

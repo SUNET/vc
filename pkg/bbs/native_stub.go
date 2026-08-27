@@ -8,8 +8,10 @@ package bbs
 type unavailable struct{}
 
 var (
-	_ BlindSigner   = unavailable{}
-	_ ProofVerifier = unavailable{}
+	_ BlindSigner          = unavailable{}
+	_ ProofVerifier        = unavailable{}
+	_ Issuer               = unavailable{}
+	_ PresentationVerifier = unavailable{}
 )
 
 func (unavailable) BlindSign(Suite, []byte, []byte, []byte, []byte, [][]byte) ([]byte, error) {
@@ -20,11 +22,19 @@ func (unavailable) VerifyProof(Suite, []byte, []byte, []byte, []byte, int, [][]b
 	return ErrUnavailable
 }
 
+func (unavailable) Issue(IssueParams) (string, error) { return "", ErrUnavailable }
+
+func (unavailable) VerifyPresentation(Suite, string, []byte) (*Presentation, error) {
+	return nil, ErrUnavailable
+}
+
 // Native returns the platform implementation. Without the `bbsnative`
 // build tag that is a stub whose every method returns [ErrUnavailable].
 func Native() interface {
 	BlindSigner
 	ProofVerifier
+	Issuer
+	PresentationVerifier
 } {
 	return unavailable{}
 }

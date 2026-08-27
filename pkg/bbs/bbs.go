@@ -31,7 +31,10 @@
 // reasoning for `zknative`.
 package bbs
 
-import "errors"
+import (
+	"encoding/json"
+	"errors"
+)
 
 // Suite selects the key binding construction, and with it the domain
 // separation the whole credential is bound to. Getting this wrong does not
@@ -95,6 +98,57 @@ type BlindSigner interface {
 	//
 	// A commitment that does not verify is rejected, never signed.
 	BlindSign(suite Suite, secretKey, publicKey, commitment, header []byte, messages [][]byte) ([]byte, error)
+}
+
+// KeyBinding selects the credential's device-binding layout, and with it
+// which message indices are reserved.
+type KeyBinding uint32
+
+const (
+	// NoKeyBinding issues a credential bound to no device key.
+	NoKeyBinding KeyBinding = 0
+	// SchnorrKeyBinding is this profile's Schnorr-on-BLS12-381-G1 binding.
+	SchnorrKeyBinding KeyBinding = 1
+)
+
+// Issuer is the issuer's half at the level of a whole credential, as
+// opposed to [BlindSigner]'s raw algebra over an ordered message list.
+//
+// Prefer this. The mapping from named claims onto that message list lives
+// in the native crate, shared with the wallet SDKs and the browser,
+// precisely so no two of them can derive it differently — a claim ordered
+// differently produces a credential whose every proof fails, with nothing
+// in the failure pointing at why.
+type Issuer interface {
+	// Issue verifies the holder's commitment and returns a finished
+	// credential in JWP Compact Serialization.
+	Issue(p IssueParams) (string, error)
+}
+
+// PresentationVerifier is the relying party's half at the level of a whole
+// presentation.
+type PresentationVerifier interface {
+	// VerifyPresentation returns what the presentation disclosed, or an
+	// error if it does not verify. A non-nil result means the issuer really
+	// signed every claim in it.
+	VerifyPresentation(suite Suite, presentedJWP string, publicKey []byte) (*Presentation, error)
+}
+
+// DisclosedClaim is one claim a verifier learned from a presentation.
+type DisclosedClaim struct {
+	// Pointer is the claim's RFC 6901 pointer within the credential.
+	Pointer string `json:"pointer"`
+	// Value is the claim's JSON value, so a number stays a number and a
+	// string stays quoted.
+	Value json.RawMessage `json:"value"`
+}
+
+// Presentation is what a verified presentation revealed. Withheld claims
+// are absent rather than null — the verifier does not learn they were
+// withheld beyond their pointer appearing in the credential's map.
+type Presentation struct {
+	Vct       string           `json:"vct"`
+	Disclosed []DisclosedClaim `json:"disclosed"`
 }
 
 // ProofVerifier is the relying party's half.

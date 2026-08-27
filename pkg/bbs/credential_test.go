@@ -1,185 +1,145 @@
 package bbs
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
 
-// Map iteration in Go is randomised, so a mapping that derived order from
-// iteration would produce a different credential on every call — and the
-// resulting proof would fail to verify with nothing to point at. This is
-// the single most important property of the layout.
-func TestCanonicalMessagesIsDeterministic(t *testing.T) {
-	doc := []byte(`{"family_name":"Andersson","given_name":"Ada","address":{"city":"Uppsala","zip":"75105"},"tags":["a","b"]}`)
-
-	first, firstPtrs, err := CanonicalMessages(doc)
-	if err != nil {
-		t.Fatalf("CanonicalMessages: %v", err)
-	}
-	for i := 0; i < 50; i++ {
-		got, gotPtrs, err := CanonicalMessages(doc)
-		if err != nil {
-			t.Fatalf("iteration %d: %v", i, err)
-		}
-		if len(got) != len(first) {
-			t.Fatalf("iteration %d: message count changed", i)
-		}
-		for j := range got {
-			if string(got[j]) != string(first[j]) {
-				t.Fatalf("iteration %d, message %d: %q != %q", i, j, got[j], first[j])
-			}
-			if gotPtrs[j] != firstPtrs[j] {
-				t.Fatalf("iteration %d: pointer %d changed", i, j)
-			}
-		}
-	}
+// recordingIssuer stands in for the native side so the argument handling in
+// [Issue] can be tested without cgo. It asserts nothing about BBS - the
+// cgo-tagged tests do that against real vectors - only that what a caller
+// passes arrives intact.
+type recordingIssuer struct {
+	got  IssueParams
+	err  error
+	jwp  string
+	call int
 }
 
-// Every message carries its own pointer. Without that, a holder could
-// present the value of one claim as though it were another — the
-// signature covers the value either way.
-func TestMessagesBindTheClaimName(t *testing.T) {
-	a, _, err := CanonicalMessages([]byte(`{"role":"admin","name":"x"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _, err := CanonicalMessages([]byte(`{"role":"x","name":"admin"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := range a {
-		if string(a[i]) == string(b[i]) {
-			t.Fatalf("swapping two claim values produced an identical message at %d: %q", i, a[i])
-		}
-	}
+func (r *recordingIssuer) Issue(p IssueParams) (string, error) {
+	r.got = p
+	r.call++
+	return r.jwp, r.err
 }
 
-// Round-tripping numbers through float64 would rewrite 1.0 as 1 and lose
-// precision on large integers, silently changing the signed bytes for a
-// document that never changed.
-func TestNumbersKeepTheirLiteralForm(t *testing.T) {
-	for _, tc := range []struct{ doc, want string }{
-		{`{"n":1.0}`, `1.0`},
-		{`{"n":1}`, `1`},
-		{`{"n":10000000000000000000000}`, `10000000000000000000000`},
-		{`{"n":1.7976931348623157e+308}`, `1.7976931348623157e+308`},
-	} {
-		msgs, _, err := CanonicalMessages([]byte(tc.doc))
-		if err != nil {
-			t.Fatalf("%s: %v", tc.doc, err)
-		}
-		if !strings.Contains(string(msgs[0]), tc.want) {
-			t.Fatalf("%s: message %q lost the literal %q", tc.doc, msgs[0], tc.want)
-		}
+func TestIssueRequiresACommitmentAndAType(t *testing.T) {
+	valid := IssueParams{
+		Commitment:   []byte{1, 2, 3},
+		Vct:          "https://example.test/id-card",
+		DocumentData: json.RawMessage(`{"given_name":"Ada"}`),
 	}
-}
 
-// A claim named "a/b" must not collide with a nested "a" containing "b" —
-// RFC 6901 escaping exists for exactly this.
-func TestPointerEscapingPreventsCollisions(t *testing.T) {
-	flat, flatPtrs, err := CanonicalMessages([]byte(`{"a/b":1}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	nested, nestedPtrs, err := CanonicalMessages([]byte(`{"a":{"b":1}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(flat[0]) == string(nested[0]) {
-		t.Fatalf("%q and %q produced the same message", flatPtrs[0], nestedPtrs[0])
-	}
-	if flatPtrs[0] != "/a~1b" {
-		t.Fatalf("expected escaped pointer /a~1b, got %q", flatPtrs[0])
-	}
-}
-
-// Dropping empty containers would make {"a":{}} and {} sign identically,
-// so a holder could claim a credential said nothing about "a".
-func TestEmptyContainersAreSigned(t *testing.T) {
-	msgs, ptrs, err := CanonicalMessages([]byte(`{"a":{},"b":[]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(msgs) != 2 {
-		t.Fatalf("expected empty object and array to each be a message, got %d: %v", len(msgs), ptrs)
-	}
-}
-
-func TestCanonicalMessagesRejectsBadInput(t *testing.T) {
-	for _, tc := range []struct{ name, doc string }{
-		{"not JSON", `not json`},
-		{"not an object", `["a"]`},
-		{"empty object", `{}`},
-		{"trailing content", `{"a":1} {"b":2}`},
-		{"empty input", ``},
+	for _, tc := range []struct {
+		name   string
+		mutate func(*IssueParams)
+		want   string
+	}{
+		{"no commitment", func(p *IssueParams) { p.Commitment = nil }, "commitment is required"},
+		{"empty commitment", func(p *IssueParams) { p.Commitment = []byte{} }, "commitment is required"},
+		{"no vct", func(p *IssueParams) { p.Vct = "" }, "vct is required"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, _, err := CanonicalMessages([]byte(tc.doc)); err == nil {
-				t.Fatalf("accepted %q", tc.doc)
+			p := valid
+			tc.mutate(&p)
+			issuer := &recordingIssuer{}
+			_, err := Issue(issuer, p)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
+			}
+			// Rejected before anything reaches the signing key.
+			if issuer.call != 0 {
+				t.Fatal("a rejected request still reached the issuer")
 			}
 		})
 	}
 }
 
-// The count comes from caller-supplied claims, so it must be bounded:
-// otherwise a caller dictates how much work the issuer does.
-func TestCanonicalMessagesBoundsMessageCount(t *testing.T) {
-	m := map[string]int{}
-	for i := 0; i <= MaxMessages; i++ {
-		m[string(rune('a'+i%26))+string(rune(i))] = i
+// The bound exists so a caller cannot dictate how much work the issuer
+// does: message count drives generator derivation and proof size.
+func TestIssueRejectsTooManyHolderPointers(t *testing.T) {
+	pointers := make([]string, MaxMessages+1)
+	for i := range pointers {
+		pointers[i] = "/claim"
 	}
-	doc, err := json.Marshal(m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := CanonicalMessages(doc); err == nil {
-		t.Fatal("accepted a document over the message limit")
-	}
-}
-
-// An issuer must never sign without a commitment: the commitment is what
-// carries the holder's key binding keys and the proof it holds them.
-func TestIssueRequiresACommitment(t *testing.T) {
-	_, err := Issue(Native(), IssueParams{DocumentData: []byte(`{"a":1}`)})
-	if err == nil {
-		t.Fatal("issued a credential with no commitment")
-	}
-	if !strings.Contains(err.Error(), "commitment") {
-		t.Fatalf("error should name the missing commitment, got %v", err)
-	}
-}
-
-// Claims are canonicalised before the signer is reached, so a malformed
-// document fails without consuming the issuer key at all.
-func TestIssueRejectsBadClaimsBeforeSigning(t *testing.T) {
-	_, err := Issue(Native(), IssueParams{
-		Commitment:   []byte{1, 2, 3},
-		DocumentData: []byte(`not json`),
+	issuer := &recordingIssuer{}
+	_, err := Issue(issuer, IssueParams{
+		Commitment:     []byte{1},
+		Vct:            "https://example.test/id-card",
+		HolderPointers: pointers,
 	})
-	if err == nil {
-		t.Fatal("issued a credential from malformed claims")
+	if err == nil || !strings.Contains(err.Error(), "over the") {
+		t.Fatalf("err = %v, want one mentioning the limit", err)
 	}
-	if !strings.Contains(err.Error(), "valid JSON") {
-		t.Fatalf("want a JSON error, got %v", err)
+	if issuer.call != 0 {
+		t.Fatal("an over-long request still reached the issuer")
+	}
+}
+
+func TestIssuePassesEverythingThrough(t *testing.T) {
+	want := IssueParams{
+		Suite:          SuiteSchnorr,
+		SecretKey:      []byte{9, 9},
+		PublicKey:      []byte{8, 8},
+		Commitment:     []byte{7, 7},
+		Vct:            "https://example.test/id-card",
+		DocumentData:   json.RawMessage(`{"given_name":"Ada"}`),
+		HolderPointers: []string{"/device_pin_hash"},
+		ExtraHeader:    json.RawMessage(`{"iss":"https://issuer.test"}`),
+		KeyBinding:     SchnorrKeyBinding,
+	}
+	issuer := &recordingIssuer{jwp: "a.b.c"}
+	got, err := Issue(issuer, want)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if got != "a.b.c" {
+		t.Fatalf("returned %q", got)
+	}
+	if issuer.got.Suite != want.Suite || issuer.got.Vct != want.Vct ||
+		issuer.got.KeyBinding != want.KeyBinding ||
+		string(issuer.got.DocumentData) != string(want.DocumentData) ||
+		string(issuer.got.ExtraHeader) != string(want.ExtraHeader) ||
+		len(issuer.got.HolderPointers) != 1 || issuer.got.HolderPointers[0] != "/device_pin_hash" {
+		t.Fatalf("params were altered in transit: %+v", issuer.got)
+	}
+}
+
+func TestIssuePropagatesTheIssuersError(t *testing.T) {
+	sentinel := errors.New("native said no")
+	_, err := Issue(&recordingIssuer{err: sentinel}, IssueParams{
+		Commitment: []byte{1},
+		Vct:        "https://example.test/id-card",
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v, want the issuer's own", err)
 	}
 }
 
 func TestDecodeCommitment(t *testing.T) {
-	if _, err := DecodeCommitment(""); err == nil {
-		t.Fatal("accepted an empty commitment")
+	raw := []byte{0xde, 0xad, 0xbe, 0xef}
+	encoded := base64.RawURLEncoding.EncodeToString(raw)
+
+	got, err := DecodeCommitment(encoded)
+	if err != nil {
+		t.Fatalf("DecodeCommitment: %v", err)
 	}
-	if _, err := DecodeCommitment("!!!not base64!!!"); err == nil {
-		t.Fatal("accepted invalid base64url")
+	if string(got) != string(raw) {
+		t.Fatalf("decoded %x, want %x", got, raw)
 	}
-	// Padded and unpadded must both work: wallets differ.
-	for _, s := range []string{"AQID", "AQID=="} {
-		got, err := DecodeCommitment(s)
-		if err != nil {
-			t.Fatalf("%q: %v", s, err)
-		}
-		if string(got) != "\x01\x02\x03" {
-			t.Fatalf("%q decoded to %x", s, got)
+
+	// Padded input is accepted too: the wire form is unpadded base64url,
+	// but a client that pads is easy to be lenient about and impossible to
+	// confuse with anything else.
+	if _, err := DecodeCommitment(base64.URLEncoding.EncodeToString(raw)); err != nil {
+		t.Fatalf("padded input: %v", err)
+	}
+
+	for _, bad := range []string{"", "not base64!", "///"} {
+		if _, err := DecodeCommitment(bad); err == nil {
+			t.Fatalf("accepted %q", bad)
 		}
 	}
 }

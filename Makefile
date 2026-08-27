@@ -58,7 +58,7 @@ BBSNATIVE_TAG        := bbsnative
 ZK_CRED_BBS_REPO     ?= https://github.com/sirosfoundation/zk-cred-bbs.git
 # Pinned, not floating: CI should not silently start testing a different
 # crate revision. Bump deliberately.
-ZK_CRED_BBS_REF      ?= v0.0.1
+ZK_CRED_BBS_REF      ?= v0.0.5
 ZK_CRED_BBS_CHECKOUT := third_party/.zk-cred-bbs-src
 ZK_CRED_BBS_STAGE    := third_party/zk-cred-bbs
 

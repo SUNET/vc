@@ -3,10 +3,12 @@
 package bbs
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -19,6 +21,22 @@ import (
 // captured from a real YubiKey prototype, so a passing BlindSign here is
 // agreement with hardware-produced data, not just internal consistency.
 const vectorPath = "../../third_party/zk-cred-bbs/test-vectors/emlun_reference.json"
+
+// holderPointers names one claim per committed message in the hardware
+// vector's commitment.
+//
+// The count is not decorative: the native side reads the real number out of
+// the commitment and refuses to sign a credential whose header would
+// describe a different message vector. The first draft of these tests named
+// a single pointer and was rejected for exactly that reason - which is the
+// check doing its job, and the reason these are not just "/a", "/b".
+var holderPointers = []string{
+	"/device_pin_hash",
+	"/recovery_code",
+	"/enrollment_nonce",
+	"/binding_salt",
+	"/holder_secret",
+}
 
 type vectors struct {
 	HardwareKeybind struct {
@@ -228,71 +246,134 @@ func TestUnknownSuiteIsRejected(t *testing.T) {
 // This is the test that would catch a mismatch between the claim mapping
 // and what actually gets signed — the two are derived in different places
 // and nothing else ties them together.
+// The issuer's whole job, against a commitment produced by a real
+// authenticator: verify it, sign it, and hand back a credential a wallet
+// can read.
+//
+// The credential's shape is not asserted here field by field the way an
+// earlier version of this test did, because the shape is no longer this
+// package's to define — the native crate builds the container, and its own
+// tests pin it byte for byte against the TypeScript reference. What is
+// worth checking on this side is that a real commitment goes in and a
+// well-formed credential comes out.
 func TestIssueEndToEnd(t *testing.T) {
 	hw := load(t).HardwareKeybind
+	doc := []byte(`{"given_name":"Ada","family_name":"Andersson","birth_date":"1985-06-05"}`)
 
-	doc := []byte(`{"family_name":"Andersson","given_name":"Ada","birth_date":"1815-12-10"}`)
-	cred, err := Issue(Native(), IssueParams{
-		Suite:        SuiteSchnorr,
-		SecretKey:    unhex(t, hw.SK),
-		PublicKey:    unhex(t, hw.PK),
-		Header:       unhex(t, hw.Header),
-		Commitment:   unhex(t, hw.CommitmentWithProof),
-		DocumentData: doc,
+	jwp, err := Issue(Native(), IssueParams{
+		Suite:      SuiteSchnorr,
+		SecretKey:  unhex(t, hw.SK),
+		PublicKey:  unhex(t, hw.PK),
+		Commitment: unhex(t, hw.CommitmentWithProof),
+		Vct:        "https://example.test/id-card",
+		// The hardware vector's commitment carries five committed messages,
+		// so exactly five holder pointers must be named. The native side
+		// checks that against the commitment rather than taking our word
+		// for it - which is how the first draft of this test, which named
+		// one, was caught.
+		HolderPointers: holderPointers,
+		DocumentData:   doc,
+		ExtraHeader:    json.RawMessage(`{"iss":"https://issuer.test"}`),
+		KeyBinding:     SchnorrKeyBinding,
 	})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
 
-	if cred.Layout != LayoutVersion {
-		t.Fatalf("layout %q, want %q", cred.Layout, LayoutVersion)
+	parts := strings.Split(jwp, ".")
+	if len(parts) != 3 {
+		t.Fatalf("an issued JWP has 3 dot-separated parts, got %d: %q", len(parts), jwp)
 	}
-	if len(cred.Messages) != 3 || len(cred.Pointers) != 3 {
-		t.Fatalf("expected 3 messages/pointers, got %d/%d", len(cred.Messages), len(cred.Pointers))
+	header, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatalf("issuer header is not base64url: %v", err)
 	}
-	// Sorted by pointer, not by document order.
-	want := []string{"/birth_date", "/family_name", "/given_name"}
-	for i, p := range want {
-		if cred.Pointers[i] != p {
-			t.Fatalf("pointer %d is %q, want %q", i, cred.Pointers[i], p)
+	var parsed map[string]any
+	if err := json.Unmarshal(header, &parsed); err != nil {
+		t.Fatalf("issuer header is not JSON: %v", err)
+	}
+	for k, want := range map[string]any{
+		"alg": "BBS-MOD",
+		"vct": "https://example.test/id-card",
+		"iss": "https://issuer.test",
+	} {
+		if parsed[k] != want {
+			t.Fatalf("header %s = %v, want %v", k, parsed[k], want)
 		}
 	}
-	if len(cred.Signature) == 0 {
-		t.Fatal("no signature produced")
+	// Three issuer claims and one holder claim, each named in one of the
+	// two maps.
+	if _, ok := parsed["cmap"]; !ok {
+		t.Fatal("header carries no cmap")
 	}
-
-	// Issuing the same claims against the same commitment must reproduce
-	// the same signature: BlindSign is deterministic given its inputs, so
-	// any difference would mean the message list moved.
-	again, err := Issue(Native(), IssueParams{
-		Suite: SuiteSchnorr, SecretKey: unhex(t, hw.SK), PublicKey: unhex(t, hw.PK),
-		Header: unhex(t, hw.Header), Commitment: unhex(t, hw.CommitmentWithProof),
-		DocumentData: doc,
-	})
-	if err != nil {
-		t.Fatalf("second Issue: %v", err)
+	if _, ok := parsed["hcmap"]; !ok {
+		t.Fatal("header carries no hcmap for the committed claim")
 	}
-	if string(again.Signature) != string(cred.Signature) {
-		t.Fatal("issuing the same claims twice produced different signatures")
+	if parsed["kb"] == nil {
+		t.Fatal("a key-bound credential must say so in kb")
 	}
-
-	// And a changed claim must change the signature, or the mapping is not
-	// actually feeding the signer.
-	changed, err := Issue(Native(), IssueParams{
-		Suite: SuiteSchnorr, SecretKey: unhex(t, hw.SK), PublicKey: unhex(t, hw.PK),
-		Header: unhex(t, hw.Header), Commitment: unhex(t, hw.CommitmentWithProof),
-		DocumentData: []byte(`{"family_name":"Lovelace","given_name":"Ada","birth_date":"1815-12-10"}`),
-	})
-	if err != nil {
-		t.Fatalf("third Issue: %v", err)
-	}
-	if string(changed.Signature) == string(cred.Signature) {
-		t.Fatal("changing a claim did not change the signature")
+	if payloads := strings.Split(parts[1], "~"); len(payloads) != 3 {
+		t.Fatalf("expected 3 issuer payloads, got %d", len(payloads))
 	}
 }
 
-// An issuer must refuse to sign against a commitment it cannot verify,
-// even when the claims are perfectly good.
+// The issuer must refuse a credential whose header would describe a
+// different message vector than the commitment actually fixes.
+//
+// This is not a theoretical guard: blind_sign never sees the header's map,
+// so without the check it signs happily and the mismatch surfaces only much
+// later, as a presentation that will not verify, pointing at nothing.
+func TestIssueRejectsAHeaderThatMisdescribesTheCommitment(t *testing.T) {
+	hw := load(t).HardwareKeybind
+	base := IssueParams{
+		Suite:          SuiteSchnorr,
+		SecretKey:      unhex(t, hw.SK),
+		PublicKey:      unhex(t, hw.PK),
+		Commitment:     unhex(t, hw.CommitmentWithProof),
+		Vct:            "https://example.test/id-card",
+		HolderPointers: holderPointers,
+		DocumentData:   []byte(`{"given_name":"Ada"}`),
+		KeyBinding:     SchnorrKeyBinding,
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*IssueParams)
+	}{
+		{"one holder pointer too many", func(p *IssueParams) {
+			p.HolderPointers = append(append([]string{}, holderPointers...), "/an_extra_claim")
+		}},
+		{"no holder pointers when the commitment has one", func(p *IssueParams) {
+			p.HolderPointers = nil
+		}},
+		{"claiming no key binding over a key-bound commitment", func(p *IssueParams) {
+			p.KeyBinding = NoKeyBinding
+		}},
+		{"a duplicate holder pointer", func(p *IssueParams) {
+			dup := append([]string{}, holderPointers...)
+			dup[1] = dup[0]
+			p.HolderPointers = dup
+		}},
+		{"claims that are not a JSON object", func(p *IssueParams) {
+			p.DocumentData = []byte(`["not","an","object"]`)
+		}},
+		{"no claims to sign", func(p *IssueParams) {
+			p.DocumentData = []byte(`{}`)
+		}},
+		{"an extra header parameter restating a reserved one", func(p *IssueParams) {
+			p.ExtraHeader = json.RawMessage(`{"vct":"https://elsewhere.test/other"}`)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := base
+			tc.mutate(&p)
+			if _, err := Issue(Native(), p); err == nil {
+				t.Fatal("issuer accepted it")
+			}
+		})
+	}
+}
+
 func TestIssueRejectsUnverifiableCommitment(t *testing.T) {
 	hw := load(t).HardwareKeybind
 	commitment := unhex(t, hw.CommitmentWithProof)
@@ -300,8 +381,10 @@ func TestIssueRejectsUnverifiableCommitment(t *testing.T) {
 
 	_, err := Issue(Native(), IssueParams{
 		Suite: SuiteSchnorr, SecretKey: unhex(t, hw.SK), PublicKey: unhex(t, hw.PK),
-		Header: unhex(t, hw.Header), Commitment: commitment,
-		DocumentData: []byte(`{"a":1}`),
+		Vct: "https://example.test/id-card", Commitment: commitment,
+		HolderPointers: holderPointers,
+		KeyBinding:     SchnorrKeyBinding,
+		DocumentData:   []byte(`{"a":1}`),
 	})
 	if err == nil {
 		t.Fatal("issued against a commitment that does not verify")

@@ -3,6 +3,7 @@
 package bbs
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/SUNET/vc/pkg/bbs/bbsnative"
@@ -13,8 +14,10 @@ import (
 type native struct{ backend bbsnative.Backend }
 
 var (
-	_ BlindSigner   = native{}
-	_ ProofVerifier = native{}
+	_ BlindSigner          = native{}
+	_ ProofVerifier        = native{}
+	_ Issuer               = native{}
+	_ PresentationVerifier = native{}
 )
 
 // classify maps an ABI status onto this package's sentinels. A panic is
@@ -49,10 +52,48 @@ func (n native) VerifyProof(suite Suite, publicKey, proof, header, presentationH
 	return nil
 }
 
+func (n native) Issue(p IssueParams) (string, error) {
+	claims := p.DocumentData
+	if len(claims) == 0 {
+		claims = json.RawMessage("{}")
+	}
+	// Marshaled here rather than taken pre-encoded so the empty case — a
+	// credential with no holder-committed claims — does not have to be
+	// spelled "[]" by every caller.
+	pointers, err := json.Marshal(p.HolderPointers)
+	if err != nil {
+		return "", fmt.Errorf("%w: encoding holder pointers: %v", ErrInternal, err)
+	}
+
+	jwp, status, msg := n.backend.Issue(uint32(p.Suite), p.SecretKey, p.PublicKey, p.Commitment,
+		p.Vct, claims, pointers, p.ExtraHeader, uint32(p.KeyBinding))
+	if status != bbsnative.StatusOK {
+		return "", classify(status, msg)
+	}
+	return jwp, nil
+}
+
+func (n native) VerifyPresentation(suite Suite, presentedJWP string, publicKey []byte) (*Presentation, error) {
+	raw, status, msg := n.backend.VerifyPresentation(uint32(suite), presentedJWP, publicKey)
+	if status != bbsnative.StatusOK {
+		return nil, classify(status, msg)
+	}
+	var out Presentation
+	if err := json.Unmarshal(raw, &out); err != nil {
+		// The native side produced this JSON, so a decode failure here is a
+		// bug on our side of the boundary, not a verdict on the caller's
+		// presentation.
+		return nil, fmt.Errorf("%w: decoding verification result: %v", ErrInternal, err)
+	}
+	return &out, nil
+}
+
 // Native returns the cgo-backed implementation.
 func Native() interface {
 	BlindSigner
 	ProofVerifier
+	Issuer
+	PresentationVerifier
 } {
 	return native{}
 }

@@ -1,171 +1,20 @@
 package bbs
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 )
-
-// LayoutVersion identifies the claim-to-message mapping below.
-//
-// A BBS signature covers an *ordered list of messages*. Issuer and holder
-// must derive byte-identical lists from the same claims or nothing
-// verifies — and the failure is silent, appearing only as a proof that
-// will not verify, with nothing to point at. So the mapping is pinned, and
-// pinned visibly.
-//
-// It is also frozen per credential: messages cannot be added, removed or
-// reordered after issuance without re-issuing. Carrying the version with
-// the credential is what turns a future change into a detectable migration
-// ("this one is v0, we now issue v1, re-issue it") rather than a
-// verification failure that looks like a bug.
-const LayoutVersion = "siros-bbs-layout-v0"
 
 // MaxMessages bounds how many messages one credential may carry.
 //
 // Not a protocol limit — a guard. Message count drives generator
 // derivation and proof size, and the count comes from caller-supplied
 // claims, so an unbounded document would let a caller dictate how much
-// work the issuer does.
+// work the issuer does. The native crate enforces the same bound; this
+// copy exists to reject early, with a better message.
 const MaxMessages = 512
-
-// Credential is what an issuer produces for a holder.
-//
-// It is deliberately not a serialized container. The standards-track
-// container is JWP (draft-bormann-jwp-modular-bbs), which is not
-// implemented here yet; these are the values a JWP would carry, and the
-// values the holder needs to produce a presentation regardless of framing.
-type Credential struct {
-	// Signature is the blind BBS signature over Messages plus the
-	// holder's committed messages.
-	Signature []byte `json:"signature"`
-
-	// Messages are the issuer-known messages, in the exact order they
-	// were signed. Order is part of what the signature covers.
-	Messages [][]byte `json:"messages"`
-
-	// Pointers names the claim each message came from, in the same order,
-	// so a holder can map "disclose the birth date" onto a message index
-	// without re-deriving the layout.
-	Pointers []string `json:"pointers"`
-
-	// Layout is the mapping version these messages were derived under.
-	Layout string `json:"layout"`
-
-	// Suite is the key binding construction the credential is bound to.
-	Suite Suite `json:"suite"`
-}
-
-// CanonicalMessages flattens a JSON claims document into the ordered
-// message list a BBS signature covers.
-//
-// Each leaf becomes one message, encoded as the canonical JSON array
-// `["<RFC 6901 pointer>",<value>]`. Two properties matter and are the
-// reason this is not just `range` over a map:
-//
-//   - **Total order.** Messages are sorted by pointer. Go map iteration is
-//     deliberately randomised, so deriving order from iteration would
-//     produce a different credential on every call.
-//   - **Stable number encoding.** Numbers are decoded as json.Number and
-//     re-emitted as their original literal. Round-tripping through float64
-//     would rewrite `1.0` as `1` and lose precision on large integers,
-//     changing the message bytes for a document that never changed.
-//
-// Binding the pointer into the message, rather than signing bare values,
-// is what stops a holder presenting the value of one claim as though it
-// were another.
-func CanonicalMessages(documentData []byte) ([][]byte, []string, error) {
-	dec := json.NewDecoder(bytes.NewReader(documentData))
-	dec.UseNumber()
-
-	var root any
-	if err := dec.Decode(&root); err != nil {
-		return nil, nil, fmt.Errorf("bbs: claims are not valid JSON: %w", err)
-	}
-	if dec.More() {
-		return nil, nil, fmt.Errorf("bbs: claims contain trailing content after the JSON document")
-	}
-	obj, ok := root.(map[string]any)
-	if !ok {
-		return nil, nil, fmt.Errorf("bbs: claims must be a JSON object, got %T", root)
-	}
-	// The empty-container rule below deliberately treats `{}` as a leaf, so
-	// that `{"a":{}}` and `{}` do not sign identically. At the ROOT that
-	// rule would turn a claimless document into a one-message credential
-	// instead of an error, so the root is checked separately. Found by the
-	// test for this, not by inspection.
-	if len(obj) == 0 {
-		return nil, nil, fmt.Errorf("bbs: claims contain no values to sign")
-	}
-
-	leaves := map[string]any{}
-	flatten("", root, leaves)
-
-	pointers := make([]string, 0, len(leaves))
-	for p := range leaves {
-		pointers = append(pointers, p)
-	}
-	sort.Strings(pointers)
-
-	if len(pointers) == 0 {
-		return nil, nil, fmt.Errorf("bbs: claims contain no values to sign")
-	}
-	if len(pointers) > MaxMessages {
-		return nil, nil, fmt.Errorf("bbs: claims contain %d values, over the %d limit", len(pointers), MaxMessages)
-	}
-
-	messages := make([][]byte, 0, len(pointers))
-	for _, p := range pointers {
-		msg, err := json.Marshal([]any{p, leaves[p]})
-		if err != nil {
-			return nil, nil, fmt.Errorf("bbs: encoding claim %q: %w", p, err)
-		}
-		messages = append(messages, msg)
-	}
-	return messages, pointers, nil
-}
-
-// flatten walks a decoded JSON value, recording each leaf against its
-// RFC 6901 pointer. Empty objects and arrays are leaves in their own
-// right: dropping them would make `{"a":{}}` and `{}` sign identically.
-func flatten(prefix string, v any, out map[string]any) {
-	switch t := v.(type) {
-	case map[string]any:
-		if len(t) == 0 {
-			out[pointerOr(prefix)] = t
-			return
-		}
-		for k, child := range t {
-			flatten(prefix+"/"+escapePointer(k), child, out)
-		}
-	case []any:
-		if len(t) == 0 {
-			out[pointerOr(prefix)] = t
-			return
-		}
-		for i, child := range t {
-			flatten(fmt.Sprintf("%s/%d", prefix, i), child, out)
-		}
-	default:
-		out[pointerOr(prefix)] = v
-	}
-}
-
-func pointerOr(prefix string) string {
-	if prefix == "" {
-		return "/"
-	}
-	return prefix
-}
-
-// escapePointer applies RFC 6901's escaping, without which a claim named
-// "a/b" would be indistinguishable from a nested "a" containing "b".
-func escapePointer(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(s, "~", "~0"), "/", "~1")
-}
 
 // IssueParams is everything an issuer needs to produce a BBS credential.
 type IssueParams struct {
@@ -181,47 +30,76 @@ type IssueParams struct {
 	SecretKey []byte
 	PublicKey []byte
 
-	// Header is bound into the signature and must be reproduced verbatim
-	// at presentation time.
-	Header []byte
-
 	// Commitment is the holder's `commitment_with_proof`, carrying the
 	// messages the issuer never sees and the key binding public keys,
 	// together with proof the holder actually holds those keys.
 	Commitment []byte
 
+	// Vct is the SD-JWT VC credential type identifier.
+	Vct string
+
 	// DocumentData is the issuer's own claims, as a JSON object.
-	DocumentData []byte
+	DocumentData json.RawMessage
+
+	// HolderPointers names the claims the holder committed to, as RFC 6901
+	// pointers. The issuer never sees those values — that is the point —
+	// but it must still place them in the message vector, and the count has
+	// to match what the holder actually committed. The native side checks
+	// that against the commitment and refuses a credential whose header
+	// would describe a different message vector than the one being signed.
+	HolderPointers []string
+
+	// ExtraHeader, if non-empty, is a JSON object merged into the Issuer
+	// Header — `iss`, `iat`, `exp` and the like. It may not restate the
+	// parameters the container builds itself.
+	ExtraHeader json.RawMessage
+
+	// KeyBinding must agree with whether Commitment carries key binding
+	// keys: it selects the message layout a verifier will read under.
+	KeyBinding KeyBinding
 }
 
 // Issue verifies the holder's commitment and blind-signs it together with
-// the issuer's claims.
+// the issuer's claims, returning a credential in JWP Compact
+// Serialization.
 //
 // The commitment is verified before anything is signed — including each
-// authenticator's proof of possession of its key binding key. That check
-// is what stops a holder binding a credential to a key it does not
-// control, so it is not optional and not deferred to presentation time.
-func Issue(signer BlindSigner, p IssueParams) (*Credential, error) {
+// authenticator's proof of possession of its key binding key. That check is
+// what stops a holder binding a credential to a key it does not control, so
+// it is not optional and not deferred to presentation time.
+//
+// # Where the claim mapping went
+//
+// An earlier version of this file derived the message list here, in Go:
+// each JSON leaf became `["<RFC 6901 pointer>",<value>]`, sorted by
+// pointer, under a `LayoutVersion` constant. That is gone, and deliberately
+// so.
+//
+// A BBS signature covers an ordered list of messages, and the issuer, the
+// wallet and the verifier must derive byte-identical lists from the same
+// claims or nothing verifies — with the failure appearing only as a proof
+// that will not check, pointing at nothing. Three implementations of that
+// mapping is three chances to disagree. It now lives once, in the native
+// crate, which the wallet SDKs and the browser build share; the crate
+// follows draft-bormann-jwp-modular-bbs, where the header's `cmap` names
+// each claim's index and the header is itself the BBS `header` input, so
+// the name-to-position binding is authenticated rather than re-derived.
+//
+// The `LayoutVersion` constant went with it. Its job — making a layout
+// change a detectable migration rather than a silent verification failure —
+// is done by the header's own `kb` value and `cmap`, which travel with
+// every credential.
+func Issue(issuer Issuer, p IssueParams) (string, error) {
 	if len(p.Commitment) == 0 {
-		return nil, fmt.Errorf("bbs: commitment is required")
+		return "", fmt.Errorf("bbs: commitment is required")
 	}
-	messages, pointers, err := CanonicalMessages(p.DocumentData)
-	if err != nil {
-		return nil, err
+	if p.Vct == "" {
+		return "", fmt.Errorf("bbs: vct is required")
 	}
-
-	signature, err := signer.BlindSign(p.Suite, p.SecretKey, p.PublicKey, p.Commitment, p.Header, messages)
-	if err != nil {
-		return nil, err
+	if len(p.HolderPointers) > MaxMessages {
+		return "", fmt.Errorf("bbs: %d holder claim pointers, over the %d limit", len(p.HolderPointers), MaxMessages)
 	}
-
-	return &Credential{
-		Signature: signature,
-		Messages:  messages,
-		Pointers:  pointers,
-		Layout:    LayoutVersion,
-		Suite:     p.Suite,
-	}, nil
+	return issuer.Issue(p)
 }
 
 // DecodeCommitment decodes a base64url-encoded `commitment_with_proof` as

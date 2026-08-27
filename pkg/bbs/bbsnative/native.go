@@ -173,3 +173,81 @@ func Describe(status int32, msg string) string {
 	}
 	return msg
 }
+
+// Issue verifies the holder's commitment and returns a finished credential
+// in JWP Compact Serialization.
+//
+// The claim-to-message mapping happens on the Rust side, not here. It has
+// to be byte-identical in the issuer, the wallet and the verifier, and when
+// it is not every proof fails with nothing pointing at the cause - so there
+// is exactly one implementation of it.
+func (Backend) Issue(suite uint32, secretKey, publicKey, commitment []byte,
+	vct string, issuerClaimsJSON, holderPointersJSON, extraHeaderJSON []byte,
+	keybind uint32) (string, int32, string) {
+
+	skPtr, skLen := cBytes(secretKey)
+	pkPtr, pkLen := cBytes(publicKey)
+	comPtr, comLen := cBytes(commitment)
+	vctBytes := []byte(vct)
+	vctPtr, vctLen := cBytes(vctBytes)
+	claimsPtr, claimsLen := cBytes(issuerClaimsJSON)
+	ptrsPtr, ptrsLen := cBytes(holderPointersJSON)
+	extraPtr, extraLen := cBytes(extraHeaderJSON)
+
+	var out *C.uint8_t
+	var outLen C.size_t
+	var errOut *C.char
+
+	status := C.zk_cred_bbs_jwp_issue(
+		C.uint32_t(suite),
+		skPtr, skLen, pkPtr, pkLen, comPtr, comLen,
+		vctPtr, vctLen,
+		claimsPtr, claimsLen,
+		ptrsPtr, ptrsLen,
+		extraPtr, extraLen,
+		C.uint32_t(keybind),
+		&out, &outLen, &errOut,
+	)
+	runtime.KeepAlive(secretKey)
+	runtime.KeepAlive(publicKey)
+	runtime.KeepAlive(commitment)
+	runtime.KeepAlive(vctBytes)
+	runtime.KeepAlive(issuerClaimsJSON)
+	runtime.KeepAlive(holderPointersJSON)
+	runtime.KeepAlive(extraHeaderJSON)
+
+	if status != C.ZK_CRED_BBS_OK {
+		return "", int32(status), takeError(errOut)
+	}
+	takeError(errOut)
+	jwp := C.GoBytes(unsafe.Pointer(out), C.int(outLen))
+	C.zk_cred_bbs_free_buffer(out, outLen)
+	return string(jwp), int32(status), ""
+}
+
+// VerifyPresentation checks a presentation and returns the raw JSON
+// describing what it disclosed. Decoding that is the caller's job, so this
+// layer stays free of the package's own types.
+func (Backend) VerifyPresentation(suite uint32, presentedJWP string, publicKey []byte) ([]byte, int32, string) {
+	jwpBytes := []byte(presentedJWP)
+	jwpPtr, jwpLen := cBytes(jwpBytes)
+	pkPtr, pkLen := cBytes(publicKey)
+
+	var out *C.uint8_t
+	var outLen C.size_t
+	var errOut *C.char
+
+	status := C.zk_cred_bbs_jwp_verify(
+		C.uint32_t(suite), jwpPtr, jwpLen, pkPtr, pkLen, &out, &outLen, &errOut,
+	)
+	runtime.KeepAlive(jwpBytes)
+	runtime.KeepAlive(publicKey)
+
+	if status != C.ZK_CRED_BBS_OK {
+		return nil, int32(status), takeError(errOut)
+	}
+	takeError(errOut)
+	raw := C.GoBytes(unsafe.Pointer(out), C.int(outLen))
+	C.zk_cred_bbs_free_buffer(out, outLen)
+	return raw, int32(status), ""
+}
