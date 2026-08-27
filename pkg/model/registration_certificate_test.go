@@ -481,29 +481,68 @@ func TestLoadedRegistrationCertificate_VerifierInfo(t *testing.T) {
 // fixtures only prove the code agrees with itself; this proves it agrees with
 // what a Registrar actually emits.
 func TestGermanSandboxRegistrationCertificate(t *testing.T) {
-	v := &Verifier{RegistrationCertificate: &RegistrationCertificate{
-		FilePath:         "testdata/german-sandbox-wrprc.jwt",
-		TrustedRootsPath: "testdata/german-sandbox-registrar-root.pem",
-	}}
+	// The wire-format assertions are the point of this fixture and must not
+	// depend on the clock. Signature verification does not either - the JWT
+	// carries no exp and verifyWRPRCSignature disables claim validation - so
+	// only the chain evaluation below is time-bounded.
+	t.Run("wire format", func(t *testing.T) {
+		v := &Verifier{RegistrationCertificate: &RegistrationCertificate{
+			FilePath: "testdata/german-sandbox-wrprc.jwt",
+		}}
 
-	loaded, err := v.LoadRegistrationCertificate(nil)
-	require.NoError(t, err, "the German sandbox certificate must load")
-	require.True(t, loaded.TrustEvaluated)
-	require.NotNil(t, loaded.Claims)
+		loaded, err := v.LoadRegistrationCertificate(nil)
+		require.NoError(t, err, "the German sandbox certificate must load")
+		require.NotNil(t, loaded.Claims)
 
-	c := loaded.Claims
-	assert.Equal(t, "NTRDE-BD7070256AF93987", c.SubjectID, "sub arrives as a bare identifier string")
-	assert.Equal(t, "Siros Foundation", c.LegalName, "legal name arrives in sub_ln, not inside sub")
-	assert.Equal(t, "Siros Foundation", c.TradeName)
-	assert.Equal(t, "DE", c.Country)
-	assert.Equal(t, []string{rpcert.EntitlementServiceProvider}, c.EntitlementURIs)
-	assert.Equal(t, []string{"birth_date", "family_name", "given_name"}, c.AllowedAttributes,
-		"the DCQL list is spelled \"claim\" here; missing it would silently permit nothing")
-	require.Len(t, c.Purpose, 1)
-	assert.Equal(t, "Demo", c.Purpose[0].Value)
-	assert.Equal(t, "https://siros.org/privacy-policy", c.PrivacyPolicyURI)
+		c := loaded.Claims
+		assert.Equal(t, "NTRDE-BD7070256AF93987", c.SubjectID, "sub arrives as a bare identifier string")
+		assert.Equal(t, "Siros Foundation", c.LegalName, "legal name arrives in sub_ln, not inside sub")
+		assert.Equal(t, "Siros Foundation", c.TradeName)
+		assert.Equal(t, "DE", c.Country)
+		assert.Equal(t, []string{rpcert.EntitlementServiceProvider}, c.EntitlementURIs)
+		assert.Equal(t, []string{"birth_date", "family_name", "given_name"}, c.AllowedAttributes,
+			"the DCQL list is spelled \"claim\" here; missing it would silently permit nothing")
+		require.Len(t, c.Purpose, 1)
+		assert.Equal(t, "Demo", c.Purpose[0].Value)
+		assert.Equal(t, "https://siros.org/privacy-policy", c.PrivacyPolicyURI)
 
-	info := loaded.VerifierInfo()
-	require.Len(t, info, 1)
-	assert.Equal(t, rpcert.WRPRCTyp, info[0].Format)
+		info := loaded.VerifierInfo()
+		require.Len(t, info, 1)
+		assert.Equal(t, rpcert.WRPRCTyp, info[0].Format)
+	})
+
+	// Chain evaluation calls x509.Certificate.Verify against the current
+	// time, so this half stops working when the sandbox material expires.
+	// Skipped rather than left to fail as a mystery on some future morning -
+	// and kept separate so the conformance assertions above keep running
+	// when it does.
+	t.Run("chain evaluation against the Registrar root", func(t *testing.T) {
+		root := sandboxRegistrarRoot(t)
+		if time.Now().After(root.NotAfter) {
+			t.Skipf("sandbox Registrar root expired %s - refresh testdata/german-sandbox-*.{jwt,pem} from the sandbox to re-enable this check",
+				root.NotAfter.Format("2006-01-02"))
+		}
+
+		v := &Verifier{RegistrationCertificate: &RegistrationCertificate{
+			FilePath:         "testdata/german-sandbox-wrprc.jwt",
+			TrustedRootsPath: "testdata/german-sandbox-registrar-root.pem",
+		}}
+
+		loaded, err := v.LoadRegistrationCertificate(nil)
+		require.NoError(t, err)
+		require.True(t, loaded.TrustEvaluated, "the chain must lead to the configured Registrar root")
+	})
+}
+
+// sandboxRegistrarRoot parses the pinned Registrar root so its validity can
+// be checked before relying on it.
+func sandboxRegistrarRoot(t *testing.T) *x509.Certificate {
+	t.Helper()
+	pemBytes, err := os.ReadFile("testdata/german-sandbox-registrar-root.pem")
+	require.NoError(t, err)
+	block, _ := pem.Decode(pemBytes)
+	require.NotNil(t, block, "sandbox Registrar root must be PEM")
+	cert, err := x509.ParseCertificate(block.Bytes)
+	require.NoError(t, err)
+	return cert
 }
