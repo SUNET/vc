@@ -36,8 +36,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/SUNET/vc/pkg/mdoc/zkvegaworker"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/trust"
 
@@ -447,7 +445,12 @@ func (h *ZkHandler) verifyOneDocument(ctx context.Context, zkDoc *ZkDocumentMdoc
 // for the real research task pseudonym support needs before that
 // changes).
 func (h *ZkHandler) verifyVegaDocument(ctx context.Context, zkDoc *ZkDocumentMdoc, dd *ZkDocumentDataMdoc, dsCert *x509.Certificate) (*ZkDocumentResult, error) {
-	result, err := nativeVerifyZkProofVega(ctx, dd.ZkSystemID, zkDoc.Proof, h.zkCircuitSources, h.vegaWorkerPath)
+	disclosedBytes, err := BuildVegaDisclosedBytes(dd)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := nativeVerifyZkProofVega(ctx, dd.ZkSystemID, zkDoc.Proof, disclosedBytes, h.zkCircuitSources, h.vegaWorkerPath)
 	if err != nil {
 		return nil, err
 	}
@@ -460,9 +463,11 @@ func (h *ZkHandler) verifyVegaDocument(ctx context.Context, zkDoc *ZkDocumentMdo
 		return nil, err
 	}
 
-	if err := checkVegaDisclosedClaimsMatchWire(dd, result.Claims); err != nil {
-		return nil, err
-	}
+	// checkVegaDisclosedClaimsMatchWire's job (pre-r12) is now done more
+	// strongly, and earlier, by BuildVegaDisclosedBytes + verify() itself:
+	// disclosedBytes above IS the wire's own issuerSignedItemBytes, so a
+	// successful verify() already proves the proof's binding matches the
+	// EXACT wire bytes, not just their decoded elementValue.
 
 	if err := checkVegaValidityWindow(result.ValidFromTs, result.ValidUntilTs, h.clock()); err != nil {
 		return nil, err
@@ -474,6 +479,58 @@ func (h *ZkHandler) verifyVegaDocument(ctx context.Context, zkDoc *ZkDocumentMdo
 		Claims:     dd.FlattenIssuerSigned(),
 		Pseudonym:  nil,
 	}, nil
+}
+
+// vegaMaxClaims mirrors zk-cred-vega's MAX_CLAIMS_V1 (also
+// VegaProofSystem.MAX_CLAIMS_V1 in siros-sdk-kotlin, ZK_CRED_VEGA_MAX_CLAIMS
+// in zk_cred_vega_go.h) - duplicated here (not imported from the
+// "zknative"-tagged zknative_vega package) since this file has no zknative
+// build tag and must compile in both configurations.
+const vegaMaxClaims = 4
+
+// BuildVegaDisclosedBytes builds zk_cred_vega's r12 verify() input: exactly
+// vegaMaxClaims entries, in claim-slot order, each either a disclosed
+// slot's real IssuerSignedItemBytes or an empty slice for an undisclosed
+// one - see docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md's r12 addendum for the
+// full rationale.
+//
+// Returns an error if dd.ClaimSlotDigestIds is absent or the wrong length
+// (a pre-r12 Vega artifact, or a non-Vega presentation mistakenly routed
+// here), if a disclosed wire item has no issuerSignedItemBytes, or if a
+// disclosed wire item's digestId doesn't appear in ClaimSlotDigestIds at
+// all (a claim the wallet declared disclosed with no proof slot binding
+// for it - reject rather than silently drop it).
+func BuildVegaDisclosedBytes(dd *ZkDocumentDataMdoc) ([][]byte, error) {
+	if len(dd.ClaimSlotDigestIds) != vegaMaxClaims {
+		return nil, fmt.Errorf("expected exactly %d claimSlotDigestIds (one per Vega circuit slot), got %d", vegaMaxClaims, len(dd.ClaimSlotDigestIds))
+	}
+
+	byDigestID, err := dd.IssuerSignedItemsByDigestID()
+	if err != nil {
+		return nil, err
+	}
+
+	used := make(map[uint32]bool, len(byDigestID))
+	disclosedBytes := make([][]byte, vegaMaxClaims)
+	for i, digestID := range dd.ClaimSlotDigestIds {
+		item, ok := byDigestID[digestID]
+		if !ok {
+			continue // undisclosed slot - leave disclosedBytes[i] nil (empty).
+		}
+		if len(item.IssuerSignedItemBytes) == 0 {
+			return nil, fmt.Errorf("claim %q (digestId %d) is disclosed but has no issuerSignedItemBytes on the wire", item.ElementIdentifier, digestID)
+		}
+		disclosedBytes[i] = item.IssuerSignedItemBytes
+		used[digestID] = true
+	}
+
+	for digestID, item := range byDigestID {
+		if !used[digestID] {
+			return nil, fmt.Errorf("claim %q (digestId %d) is disclosed on the wire but does not appear in claimSlotDigestIds - no proof slot binds it", item.ElementIdentifier, digestID)
+		}
+	}
+
+	return disclosedBytes, nil
 }
 
 // checkVegaIssuerKeyMatches rejects a proof whose recomputed issuer public
@@ -492,94 +549,6 @@ func checkVegaIssuerKeyMatches(issuerPubKeySEC1, qx, qy []byte) error {
 	}
 	if !bytes.Equal(issuerPubKeySEC1[1:33], qx) || !bytes.Equal(issuerPubKeySEC1[33:65], qy) {
 		return fmt.Errorf("Vega proof's recomputed issuer public key does not match the trust-evaluated certificate's public key")
-	}
-	return nil
-}
-
-// vegaIssuerSignedItemPlaintext is the CBOR shape of the plaintext bytes
-// zk-cred-vega's verify returns for a disclosed claim: the FULL, original
-// IssuerSignedItem structure (see VegaProofSystem.buildWitness's doc
-// comment in siros-sdk-kotlin: `issuerSignedItemBytes =
-// entry.original.EncodeToBytes()`), not just the bare elementValue -
-// checkVegaDisclosedClaimsMatchWire decodes this to extract ElementValue
-// for comparison against the wire-declared value.
-//
-// The returned plaintext is the item's real wire bytes verbatim - a
-// #6.24(bstr <map>)-wrapped CBOR item, not a bare map (confirmed against a
-// real device presentation's captured claim bytes: `d818 58XX a4...`) -
-// so it must be unwrapped via EncodedCBORBytes before unmarshaling into
-// this struct; unmarshaling the tagged bytes directly fails with "cannot
-// unmarshal byte string into" this type, since the top-level CBOR item is
-// a tagged byte string, not a map.
-type vegaIssuerSignedItemPlaintext struct {
-	DigestID          uint32 `cbor:"digestID"`
-	Random            []byte `cbor:"random"`
-	ElementIdentifier string `cbor:"elementIdentifier"`
-	ElementValue      any    `cbor:"elementValue"`
-}
-
-// checkVegaDisclosedClaimsMatchWire is the check that prevents a wallet
-// from proving one claim value while declaring a different one on the
-// wire: for every claim declared in dd.IssuerSigned (indexed by digestId -
-// see ZkDocumentDataMdoc.IssuerSignedItemsByDigestID and
-// docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md), the proof must have actually
-// disclosed that same digestId, and the plaintext it proved must
-// canonical-CBOR-match the wire-declared elementValue.
-//
-// Deliberately does NOT require the reverse (every proof-disclosed slot
-// also appearing on the wire) - a wallet choosing not to reveal something
-// the proof could have revealed is harmless.
-func checkVegaDisclosedClaimsMatchWire(dd *ZkDocumentDataMdoc, claims []zkvegaworker.DisclosedClaim) error {
-	wireByDigestID, err := dd.IssuerSignedItemsByDigestID()
-	if err != nil {
-		return fmt.Errorf("indexing wire-declared claims by digestId: %w", err)
-	}
-
-	proofByDigestID := make(map[uint32]zkvegaworker.DisclosedClaim, len(claims))
-	for _, c := range claims {
-		if !c.Disclosed {
-			continue
-		}
-		if _, dup := proofByDigestID[c.DigestID]; dup {
-			return fmt.Errorf("proof discloses digestId %d more than once - ambiguous, refusing to guess which slot was intended", c.DigestID)
-		}
-		proofByDigestID[c.DigestID] = c
-	}
-
-	// Canonical (sorted-map-key) CBOR encoding for comparison-safe values -
-	// see buildZkAttributes' own doc comment for why raw Go-value equality
-	// (e.g. reflect.DeepEqual) isn't used here.
-	cborEncoder, err := NewCBOREncoder()
-	if err != nil {
-		return fmt.Errorf("failed to create CBOR encoder: %w", err)
-	}
-
-	for digestID, wireItem := range wireByDigestID {
-		proofClaim, ok := proofByDigestID[digestID]
-		if !ok {
-			return fmt.Errorf("claim %q (digestId %d) is declared on the wire but the ZK proof never disclosed that digestId", wireItem.ElementIdentifier, digestID)
-		}
-
-		var wrapped EncodedCBORBytes
-		if err := cborEncoder.Unmarshal(proofClaim.Plaintext, &wrapped); err != nil {
-			return fmt.Errorf("failed to unwrap tag(24) from proof-disclosed plaintext for digestId %d: %w", digestID, err)
-		}
-		var plaintext vegaIssuerSignedItemPlaintext
-		if err := cborEncoder.Unmarshal(wrapped, &plaintext); err != nil {
-			return fmt.Errorf("failed to decode proof-disclosed plaintext for digestId %d: %w", digestID, err)
-		}
-
-		wireValueCBOR, err := cborEncoder.Marshal(wireItem.ElementValue)
-		if err != nil {
-			return fmt.Errorf("failed to encode wire-declared value for claim %q: %w", wireItem.ElementIdentifier, err)
-		}
-		proofValueCBOR, err := cborEncoder.Marshal(plaintext.ElementValue)
-		if err != nil {
-			return fmt.Errorf("failed to encode proof-disclosed value for digestId %d: %w", digestID, err)
-		}
-		if !bytes.Equal(wireValueCBOR, proofValueCBOR) {
-			return fmt.Errorf("claim %q (digestId %d): wire-declared value does not match the ZK proof's disclosed value", wireItem.ElementIdentifier, digestID)
-		}
 	}
 	return nil
 }

@@ -64,7 +64,7 @@ func verify(req zkvegaworker.Request) (*zkvegaworker.VerifyResult, error) {
 	}
 	defer vk.Close()
 
-	result, err := vk.Verify(req.ProofBytes)
+	result, err := vk.Verify(req.ProofBytes, req.DisclosedBytes)
 	if err != nil {
 		return nil, fmt.Errorf("verifying proof: %w", err)
 	}

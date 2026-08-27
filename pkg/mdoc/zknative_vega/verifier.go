@@ -137,15 +137,25 @@ type VerifyResult struct {
 // call via zk-cred-vega's real zk_cred_vega_verify - a thin cgo marshaling
 // wrapper, not a separate/weaker check.
 //
+// disclosedBytes is the r12 circuit revision's required input: exactly
+// MaxClaims entries, in claim-slot order - a disclosed slot's real
+// IssuerSignedItem bytes, or an empty/nil slice for an undisclosed one.
+// These bytes are no longer part of the proof itself (see this package's
+// own doc comment on CDisclosedInput's rationale); a mismatch between what
+// is supplied here and what the proof committed to fails the WHOLE call,
+// not just that slot. See pkg/mdoc/zk_verifier.go's BuildVegaDisclosedBytes
+// for how the caller builds this slice from the presentation's wire data.
+//
 // A REAL SHAPE DIFFERENCE from zknative.Verifier.VerifyWithPPID: that
 // function takes the *expected* attribute values as input and returns only
 // an error (pass/fail) - the caller already knows what should be true and
-// just asks Rust to confirm it. This function takes ONLY the proof and
-// *returns* the recomputed public values (issuer pubkey, disclosed claims,
-// MSO-body fields) - the caller must independently check them against
-// whatever it already knows. See pkg/mdoc/zk_verifier.go's Vega dispatch
-// branch for exactly that comparison logic.
-func (k *VerifierKey) Verify(proof []byte) (VerifyResult, error) {
+// just asks Rust to confirm it. This function takes the proof PLUS
+// disclosedBytes and *returns* the recomputed public values (issuer
+// pubkey, disclosed claims, MSO-body fields) - the caller must
+// independently check them against whatever it already knows. See
+// pkg/mdoc/zk_verifier.go's Vega dispatch branch for exactly that
+// comparison logic.
+func (k *VerifierKey) Verify(proof []byte, disclosedBytes [][]byte) (VerifyResult, error) {
 	if k == nil || k.handle == nil {
 		return VerifyResult{}, errors.New("zknative_vega: verifier key is closed or nil")
 	}
@@ -153,10 +163,15 @@ func (k *VerifierKey) Verify(proof []byte) (VerifyResult, error) {
 		return VerifyResult{}, errors.New("zknative_vega: proof must not be empty")
 	}
 
+	cDisclosed, err := cDisclosedInputs(disclosedBytes)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+
 	proofPtr, proofLen := bytesPtr(proof)
 	var cResult C.CVerifyResult
 	var errOut *C.char
-	status := C.zk_cred_vega_verify(k.handle, proofPtr, proofLen, &cResult, &errOut)
+	status := C.zk_cred_vega_verify(k.handle, proofPtr, proofLen, &cDisclosed[0], C.size_t(MaxClaims), &cResult, &errOut)
 	// proofPtr points into proof's backing array - KeepAlive guarantees proof
 	// can't be GC'd before the (synchronous) C call above returns.
 	runtime.KeepAlive(proof)
@@ -167,6 +182,32 @@ func (k *VerifierKey) Verify(proof []byte) (VerifyResult, error) {
 		_ = takeErrorString(errOut)
 	}
 	return fromCResult(&cResult), nil
+}
+
+// cDisclosedInputs builds the fixed-size CDisclosedInput array
+// zk_cred_vega_verify requires, copying each slot's bytes directly into
+// the C struct's embedded (not pointer) byte array - no separate C
+// allocation needed, since CDisclosedInput.bytes is a fixed-size field the
+// struct owns by value.
+func cDisclosedInputs(disclosedBytes [][]byte) ([MaxClaims]C.CDisclosedInput, error) {
+	var out [MaxClaims]C.CDisclosedInput
+	if len(disclosedBytes) != MaxClaims {
+		return out, fmt.Errorf("zknative_vega: expected exactly %d disclosed-bytes entries (one per claim slot), got %d", MaxClaims, len(disclosedBytes))
+	}
+	for i, b := range disclosedBytes {
+		if len(b) == 0 {
+			continue // present stays 0 (Go zero value) - undisclosed slot.
+		}
+		if len(b) > MaxClaimBytes {
+			return out, fmt.Errorf("zknative_vega: disclosed-bytes slot %d is %d bytes, exceeds MaxClaimBytes (%d)", i, len(b), MaxClaimBytes)
+		}
+		out[i].present = 1
+		out[i].len = C.size_t(len(b))
+		for j, bb := range b {
+			out[i].bytes[j] = C.uint8_t(bb)
+		}
+	}
+	return out, nil
 }
 
 // fromCResult copies a C.CVerifyResult (backed by C memory that becomes

@@ -41,6 +41,19 @@ type Request struct {
 
 	// ProofBytes is the presented ZK proof to verify.
 	ProofBytes []byte `json:"proof_bytes"`
+
+	// DisclosedBytes is the r12 circuit revision's required verify()
+	// input: exactly MAX_CLAIMS_V1 entries, one per circuit claim slot, in
+	// slot order - a disclosed slot's real IssuerSignedItemBytes, or an
+	// empty slice for an undisclosed one. zk_cred_vega no longer returns a
+	// disclosed claim's plaintext from the proof itself; the caller
+	// supplies it here and verify() re-derives + checks its blinded
+	// digest against the proof's own binding (a hard failure of the WHOLE
+	// call if any slot's bytes don't match). See
+	// BuildVegaDisclosedBytes's doc comment (in zk_verifier.go) for how
+	// the main process builds this slice from the wire's
+	// claimSlotDigestIds + per-item issuerSignedItemBytes fields.
+	DisclosedBytes [][]byte `json:"disclosed_bytes"`
 }
 
 // DisclosedClaim mirrors zknative_vega.DisclosedClaim over the wire.

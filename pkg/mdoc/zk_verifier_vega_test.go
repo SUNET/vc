@@ -1,16 +1,15 @@
 package mdoc
 
 // Unit tests for the Vega comparison logic (checkVegaIssuerKeyMatches /
-// checkVegaDisclosedClaimsMatchWire / checkVegaValidityWindow) - pure Go
-// functions, testable without the "zknative" build tag or any native
-// library, independent of the full cgo/subprocess round trip already
-// verified end-to-end in pkg/mdoc/zknative_vega's own tests.
+// BuildVegaDisclosedBytes / checkVegaValidityWindow) - pure Go functions,
+// testable without the "zknative" build tag or any native library,
+// independent of the full cgo/subprocess round trip already verified
+// end-to-end in pkg/mdoc/zknative_vega's own tests.
 
 import (
+	"bytes"
 	"testing"
 	"time"
-
-	"github.com/SUNET/vc/pkg/mdoc/zkvegaworker"
 )
 
 func digestIDPtr(v uint32) *uint32 { return &v }
@@ -51,29 +50,43 @@ func TestCheckVegaIssuerKeyMatches(t *testing.T) {
 	})
 }
 
-// buildVegaPlaintext CBOR-encodes a vegaIssuerSignedItemPlaintext - the
-// shape zk-cred-vega's verify returns as a disclosed claim's plaintext
-// bytes (the full original IssuerSignedItem, not just elementValue).
-func buildVegaPlaintext(t *testing.T, digestID uint32, identifier string, value any) []byte {
-	t.Helper()
-	encoder, err := NewCBOREncoder()
-	if err != nil {
-		t.Fatalf("NewCBOREncoder: %v", err)
-	}
-	b, err := encoder.Marshal(vegaIssuerSignedItemPlaintext{
-		DigestID:          digestID,
-		Random:            []byte{0x01, 0x02, 0x03},
-		ElementIdentifier: identifier,
-		ElementValue:      value,
+func TestBuildVegaDisclosedBytes(t *testing.T) {
+	t.Run("disclosed slot gets its wire bytes, undisclosed slots are empty", func(t *testing.T) {
+		givenNameBytes := []byte{0xd8, 0x18, 0x01, 0x02, 0x03}
+		dd := &ZkDocumentDataMdoc{
+			ClaimSlotDigestIds: []uint32{26, 300, 4444, 55555},
+			IssuerSigned: map[string][]ZkSignedItemMdoc{
+				Namespace: {
+					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: digestIDPtr(300), IssuerSignedItemBytes: givenNameBytes},
+				},
+			},
+		}
+		out, err := BuildVegaDisclosedBytes(dd)
+		if err != nil {
+			t.Fatalf("expected success, got error: %v", err)
+		}
+		if len(out) != 4 {
+			t.Fatalf("expected 4 slots, got %d", len(out))
+		}
+		if len(out[0]) != 0 || len(out[2]) != 0 || len(out[3]) != 0 {
+			t.Fatalf("expected undisclosed slots empty, got %v", out)
+		}
+		if !bytes.Equal(out[1], givenNameBytes) {
+			t.Fatalf("expected slot 1 (digestId 300) to carry given_name's wire bytes, got %v", out[1])
+		}
 	})
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	return b
-}
 
-func TestCheckVegaDisclosedClaimsMatchWire(t *testing.T) {
-	t.Run("matching disclosed claim succeeds", func(t *testing.T) {
+	t.Run("wrong claimSlotDigestIds length is rejected", func(t *testing.T) {
+		dd := &ZkDocumentDataMdoc{
+			ClaimSlotDigestIds: []uint32{26, 300},
+			IssuerSigned:       map[string][]ZkSignedItemMdoc{},
+		}
+		if _, err := BuildVegaDisclosedBytes(dd); err == nil {
+			t.Fatal("expected wrong-length claimSlotDigestIds to be rejected")
+		}
+	})
+
+	t.Run("missing claimSlotDigestIds (pre-r12 or non-Vega artifact) is rejected", func(t *testing.T) {
 		dd := &ZkDocumentDataMdoc{
 			IssuerSigned: map[string][]ZkSignedItemMdoc{
 				Namespace: {
@@ -81,82 +94,51 @@ func TestCheckVegaDisclosedClaimsMatchWire(t *testing.T) {
 				},
 			},
 		}
-		claims := []zkvegaworker.DisclosedClaim{
-			{Disclosed: true, DigestID: 26, Plaintext: buildVegaPlaintext(t, 26, "given_name", "Jane")},
-		}
-		if err := checkVegaDisclosedClaimsMatchWire(dd, claims); err != nil {
-			t.Fatalf("expected match, got error: %v", err)
+		if _, err := BuildVegaDisclosedBytes(dd); err == nil {
+			t.Fatal("expected absent claimSlotDigestIds to be rejected")
 		}
 	})
 
-	t.Run("wire value not matching proof-disclosed value is rejected", func(t *testing.T) {
+	t.Run("disclosed wire item missing issuerSignedItemBytes is rejected", func(t *testing.T) {
 		dd := &ZkDocumentDataMdoc{
+			ClaimSlotDigestIds: []uint32{26, 300, 4444, 55555},
 			IssuerSigned: map[string][]ZkSignedItemMdoc{
 				Namespace: {
-					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: digestIDPtr(26)},
+					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: digestIDPtr(300)},
 				},
 			},
 		}
-		claims := []zkvegaworker.DisclosedClaim{
-			// Proof actually attests a DIFFERENT value than what the wire
-			// declares for the same digestId - the exact attack this check
-			// exists to catch.
-			{Disclosed: true, DigestID: 26, Plaintext: buildVegaPlaintext(t, 26, "given_name", "NotJane")},
-		}
-		if err := checkVegaDisclosedClaimsMatchWire(dd, claims); err == nil {
-			t.Fatal("expected value mismatch to be rejected")
+		if _, err := BuildVegaDisclosedBytes(dd); err == nil {
+			t.Fatal("expected missing issuerSignedItemBytes to be rejected")
 		}
 	})
 
-	t.Run("wire claim with no matching disclosed proof slot is rejected", func(t *testing.T) {
+	t.Run("wire claim whose digestId is absent from claimSlotDigestIds is rejected", func(t *testing.T) {
 		dd := &ZkDocumentDataMdoc{
+			// 300 (given_name's digestId below) is not one of these four.
+			ClaimSlotDigestIds: []uint32{1, 2, 3, 4},
 			IssuerSigned: map[string][]ZkSignedItemMdoc{
 				Namespace: {
-					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: digestIDPtr(26)},
+					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: digestIDPtr(300), IssuerSignedItemBytes: []byte{0x01}},
 				},
 			},
 		}
-		claims := []zkvegaworker.DisclosedClaim{
-			// The proof never disclosed digestId 26 at all.
-			{Disclosed: false, DigestID: 26, Plaintext: nil},
-		}
-		if err := checkVegaDisclosedClaimsMatchWire(dd, claims); err == nil {
-			t.Fatal("expected undisclosed-on-proof claim to be rejected")
+		if _, err := BuildVegaDisclosedBytes(dd); err == nil {
+			t.Fatal("expected a wire claim with no matching circuit slot to be rejected")
 		}
 	})
 
 	t.Run("wire item missing digestId is rejected", func(t *testing.T) {
 		dd := &ZkDocumentDataMdoc{
+			ClaimSlotDigestIds: []uint32{26, 300, 4444, 55555},
 			IssuerSigned: map[string][]ZkSignedItemMdoc{
 				Namespace: {
-					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: nil},
+					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: nil, IssuerSignedItemBytes: []byte{0x01}},
 				},
 			},
 		}
-		claims := []zkvegaworker.DisclosedClaim{
-			{Disclosed: true, DigestID: 26, Plaintext: buildVegaPlaintext(t, 26, "given_name", "Jane")},
-		}
-		if err := checkVegaDisclosedClaimsMatchWire(dd, claims); err == nil {
+		if _, err := BuildVegaDisclosedBytes(dd); err == nil {
 			t.Fatal("expected missing-digestId wire item to be rejected")
-		}
-	})
-
-	t.Run("undisclosed proof claims not on the wire are ignored", func(t *testing.T) {
-		dd := &ZkDocumentDataMdoc{
-			IssuerSigned: map[string][]ZkSignedItemMdoc{
-				Namespace: {
-					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: digestIDPtr(26)},
-				},
-			},
-		}
-		claims := []zkvegaworker.DisclosedClaim{
-			{Disclosed: true, DigestID: 26, Plaintext: buildVegaPlaintext(t, 26, "given_name", "Jane")},
-			// A second, undisclosed slot the wallet chose not to reveal -
-			// harmless, must not cause a rejection.
-			{Disclosed: false, DigestID: 300, Plaintext: nil},
-		}
-		if err := checkVegaDisclosedClaimsMatchWire(dd, claims); err != nil {
-			t.Fatalf("expected undisclosed unrelated claim to be ignored, got error: %v", err)
 		}
 	})
 }

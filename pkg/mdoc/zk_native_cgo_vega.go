@@ -52,6 +52,7 @@ func nativeVerifyZkProofVega(
 	ctx context.Context,
 	zkSystemID string,
 	proof []byte,
+	disclosedBytes [][]byte,
 	zkCircuitSources []string,
 	workerPath string,
 ) (zkvegaworker.VerifyResult, error) {
@@ -63,7 +64,7 @@ func nativeVerifyZkProofVega(
 	if workerPath == "" {
 		workerPath = DefaultZkVegaWorkerPath
 	}
-	result, err := runZkVegaVerifyWorker(ctx, workerPath, verifierKeyBytes, proof)
+	result, err := runZkVegaVerifyWorker(ctx, workerPath, verifierKeyBytes, proof, disclosedBytes)
 	if err != nil {
 		return zkvegaworker.VerifyResult{}, fmt.Errorf("Vega ZK proof verification failed: %w", err)
 	}
@@ -75,10 +76,11 @@ func nativeVerifyZkProofVega(
 // stdout - see pkg/mdoc/zkvegaworker's package doc for the full protocol
 // and subprocess-isolation rationale. One process per call (see that
 // package's doc on why this isn't pooled yet).
-func runZkVegaVerifyWorker(ctx context.Context, workerPath string, verifierKeyBytes, proof []byte) (zkvegaworker.VerifyResult, error) {
+func runZkVegaVerifyWorker(ctx context.Context, workerPath string, verifierKeyBytes, proof []byte, disclosedBytes [][]byte) (zkvegaworker.VerifyResult, error) {
 	reqBytes, err := json.Marshal(zkvegaworker.Request{
 		VerifierKeyBytes: verifierKeyBytes,
 		ProofBytes:       proof,
+		DisclosedBytes:   disclosedBytes,
 	})
 	if err != nil {
 		return zkvegaworker.VerifyResult{}, fmt.Errorf("encoding worker request: %w", err)

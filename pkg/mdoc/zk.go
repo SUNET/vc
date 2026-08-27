@@ -109,6 +109,16 @@ type ZkDocumentDataMdoc struct {
 	// convention as a COSE x5chain header (see cose.go). May be absent.
 	// Use X5ChainCertificates to get parsed *x509.Certificate values.
 	MsoX5Chain any `cbor:"msoX5chain,omitempty"`
+
+	// ClaimSlotDigestIds is Vega-only (r12 circuit revision addendum to
+	// docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md): the credential's FULL,
+	// fixed-shape claim-slot list, in the credential's own document order
+	// (VegaProofSystem.MAX_CLAIMS_V1 entries in siros-sdk-kotlin), each
+	// entry being that slot's digestID regardless of whether this
+	// presentation discloses it. nil for a Longfellow presentation or a
+	// pre-r12 Vega artifact. See BuildVegaDisclosedBytes's doc comment for
+	// why the verifier needs this to call zk_cred_vega's r12 verify().
+	ClaimSlotDigestIds []uint32 `cbor:"claimSlotDigestIds,omitempty"`
 }
 
 // ZkSignedItemMdoc is one disclosed element inside a ZkDocumentDataMdoc's
@@ -128,6 +138,14 @@ type ZkSignedItemMdoc struct {
 	// Vega-producing wallets (siros-sdk-kotlin as of this field's
 	// addition - siros-sdk-swift does not yet emit it) populate it.
 	DigestID *uint32 `cbor:"digestId,omitempty"`
+
+	// IssuerSignedItemBytes is Vega-only (r12 circuit revision addendum to
+	// docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md): this element's exact
+	// original IssuerSignedItem bytes. nil for a Longfellow presentation
+	// or a pre-r12 Vega artifact - see BuildVegaDisclosedBytes's doc
+	// comment for why r12 needs it (verify() takes disclosed bytes as an
+	// input rather than returning them from the proof).
+	IssuerSignedItemBytes []byte `cbor:"issuerSignedItemBytes,omitempty"`
 }
 
 // FlattenIssuerSigned converts IssuerSigned into the same
