@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -269,10 +270,31 @@ func TestLoadRegistrationCertificate_AccessCertificateBinding(t *testing.T) {
 	const orgID = "NTRSE-5560000000"
 	jwtStr := ca.sign(t, rpcert.WRPRCTyp, validPayload(orgID))
 
-	t.Run("matching organisation", func(t *testing.T) {
+	// The conformant path: EN 319 412-3 clause 4.2.1 puts the identifier in
+	// organizationIdentifier (2.5.4.97). This is what a real Access CA
+	// issues, and it only resolves from go-trust v0.20.0 onwards - before
+	// that the binding refused to enforce itself on exactly these
+	// certificates.
+	t.Run("matching organisation, conformant certificate", func(t *testing.T) {
 		v := newVerifierWithCert(t, jwtStr, ca.rootPEM)
 		_, err := v.LoadRegistrationCertificate(accessCertWithOrgID(t, orgID))
 		require.NoError(t, err)
+	})
+
+	// The fallback: earlier certificates put it in serialNumber (2.5.4.5).
+	// Both must resolve, or upgrading go-trust would quietly stop enforcing
+	// the binding for deployments still holding one of those.
+	t.Run("matching organisation, legacy serialNumber certificate", func(t *testing.T) {
+		v := newVerifierWithCert(t, jwtStr, ca.rootPEM)
+		_, err := v.LoadRegistrationCertificate(accessCertWithLegacyOrgID(t, orgID))
+		require.NoError(t, err)
+	})
+
+	t.Run("mismatch is caught on the legacy path too", func(t *testing.T) {
+		v := newVerifierWithCert(t, jwtStr, ca.rootPEM)
+		_, err := v.LoadRegistrationCertificate(accessCertWithLegacyOrgID(t, "NTRSE-9999999999"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not match the access certificate")
 	})
 
 	// go-trust's binding check returns nil when either identifier is empty -
@@ -308,21 +330,49 @@ func TestLoadRegistrationCertificate_AccessCertificateBinding(t *testing.T) {
 	})
 }
 
-// accessCertWithOrgID mints an access certificate asserting an organisation
-// identifier, which the WRPAC profile reads from the subject serial number.
+// oidOrganizationIdentifier is EN 319 412-3 clause 4.2.1's
+// organizationIdentifier. Go's pkix.Name has no field for it, so a
+// conformant certificate can only carry it through ExtraNames.
+var oidOrganizationIdentifier = asn1.ObjectIdentifier{2, 5, 4, 97}
+
+// accessCertWithOrgID mints a conformant access certificate, carrying the
+// organisation identifier in organizationIdentifier (2.5.4.97).
+//
+// This is the primary extraction path. Minting only into serialNumber would
+// exercise go-trust's fallback and leave the path real Registrars actually
+// use untested - see accessCertWithLegacyOrgID.
 func accessCertWithOrgID(t *testing.T, orgID string) *x509.Certificate {
+	t.Helper()
+	return mintAccessCert(t, pkix.Name{
+		CommonName:   "verifier.example.com",
+		Organization: []string{"Test RP"},
+		ExtraNames: []pkix.AttributeTypeAndValue{
+			{Type: oidOrganizationIdentifier, Value: orgID},
+		},
+	})
+}
+
+// accessCertWithLegacyOrgID mints a certificate carrying the identifier in
+// serialNumber (2.5.4.5) instead, which earlier certificates and fixtures
+// used and go-trust still accepts as a fallback.
+func accessCertWithLegacyOrgID(t *testing.T, orgID string) *x509.Certificate {
+	t.Helper()
+	return mintAccessCert(t, pkix.Name{
+		CommonName:   "verifier.example.com",
+		Organization: []string{"Test RP"},
+		SerialNumber: orgID,
+	})
+}
+
+func mintAccessCert(t *testing.T, subject pkix.Name) *x509.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(3),
-		Subject: pkix.Name{
-			CommonName:   "verifier.example.com",
-			Organization: []string{"Test RP"},
-			SerialNumber: orgID,
-		},
-		NotBefore: time.Now().Add(-time.Hour),
-		NotAfter:  time.Now().Add(24 * time.Hour),
+		Subject:      subject,
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	require.NoError(t, err)
