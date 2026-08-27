@@ -140,9 +140,12 @@ func (l *LoadedRegistrationCertificate) VerifierInfo() []openid4vp.VerifierInfo 
 // The three steps of validating a signed object are kept distinct:
 //
 //  1. verify the signature against the certificate in the document's own x5c;
-//  2. extract the attested claims;
-//  3. evaluate whether that issuer is one we trust - the only step that is
-//     a trust decision, and the only one delegated.
+//  2. extract the attested claims - the only step delegated, to go-trust's
+//     rpcert.ParseWRPRCClaims, which decodes the wire format and decides
+//     nothing;
+//  3. evaluate whether that issuer is one we trust - the only step that is a
+//     trust decision, and it stays here: evaluateWRPRCChain plus the
+//     binding check below.
 //
 // accessCert is the verifier's own access certificate, used in step 3 to
 // confirm both documents describe the same organisation (ARF RPRC_16). Pass
