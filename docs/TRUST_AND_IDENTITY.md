@@ -167,7 +167,7 @@ With it unset the document is still signature-checked and parsed, but nothing es
 
 A registration certificate is only meaningful for the party named in the access certificate. The two are bound by the organisation identifier: the WRPRC's `sub` must equal the WRPAC's `organizationIdentifier` (OID 2.5.4.97, per EN 319 412-3 clause 4.2.1).
 
-vc enforces this **explicitly**, and fails when either side is absent rather than skipping:
+When an access certificate is loaded, vc enforces this **explicitly** and fails when either side is absent, rather than treating "could not compare" as a match:
 
 ```
 registration certificate: cannot enforce the access-certificate binding
@@ -175,6 +175,10 @@ registration certificate: cannot enforce the access-certificate binding
 ```
 
 That is deliberate. go-trust's `CheckWRPACWRPRCBinding` returns nil when either value is empty — reasonable for a library serving WRPRC-only flows, but as a startup check "I could not compare them" must not read the same as "they matched".
+
+:::note The binding needs an access certificate to compare against
+It compares the two documents' organisation identifiers, so it is **skipped entirely** when `key_config` supplies no certificate chain — `trusted_roots_path` alone does not enable it. In that configuration the chain is still evaluated against the Registrar roots, but nothing checks that the registration certificate describes *this* Relying Party. Configure `key_config.chain_path` if you want RPRC_16 enforced.
+:::
 
 :::note Requires go-trust ≥ v0.20.0
 Earlier versions read `Subject.SerialNumber` (2.5.4.5) and reported *that* as the organisation identifier. A **conformant** access certificate therefore surfaced none at all, so this binding refused to enforce itself on exactly the certificates that follow the standard.

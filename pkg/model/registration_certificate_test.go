@@ -290,6 +290,18 @@ func TestLoadRegistrationCertificate_AccessCertificateBinding(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	// The binding compares two organisation identifiers, so with no access
+	// certificate there is nothing to compare and it is skipped - even with
+	// trusted roots configured. Pinned because a deployment can set
+	// trusted_roots_path, see the chain evaluated, and reasonably assume
+	// RPRC_16 is being enforced when it is not.
+	t.Run("skipped entirely without an access certificate", func(t *testing.T) {
+		v := newVerifierWithCert(t, jwtStr, ca.rootPEM)
+		loaded, err := v.LoadRegistrationCertificate(nil)
+		require.NoError(t, err)
+		require.True(t, loaded.TrustEvaluated, "the chain is still evaluated")
+	})
+
 	t.Run("mismatch is caught on the legacy path too", func(t *testing.T) {
 		v := newVerifierWithCert(t, jwtStr, ca.rootPEM)
 		_, err := v.LoadRegistrationCertificate(accessCertWithLegacyOrgID(t, "NTRSE-9999999999"))

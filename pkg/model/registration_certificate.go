@@ -29,17 +29,17 @@ type RegistrationCertificate struct {
 	// in the verifier_info parameter. Defaults to "rc-wrp+jwt"; override
 	// only for an ecosystem that has profiled a different identifier for
 	// the same document.
-	//
-	// Worded to survive the configuration-reference generator, which strips
-	// the leading "Format is the " and capitalises what follows - leaving a
-	// lowercase protocol term first would render it as "Verifier_info".
 	Format string `yaml:"format,omitempty" doc_example:"\"rc-wrp+jwt\""`
 	// TrustedRootsPath optionally points at a PEM bundle of the Registrar's
 	// root certificates. When set, the certificate's own x5c chain is
-	// evaluated against it at startup and the attested identity is checked
-	// against the access certificate. When unset, the document is still
+	// evaluated against it at startup. When unset, the document is still
 	// signature-checked and parsed, but nothing establishes that its issuer
 	// is a Registrar we accept.
+	//
+	// The ARF RPRC_16 binding needs both this and an access certificate:
+	// it compares the two documents' organisation identifiers, so it is
+	// skipped when key_config supplies no certificate chain to compare
+	// against.
 	TrustedRootsPath string `yaml:"trusted_roots_path,omitempty"`
 }
 
