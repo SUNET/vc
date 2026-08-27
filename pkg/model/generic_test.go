@@ -68,8 +68,12 @@ func TestDecodeCredentialOffer(t *testing.T) {
 }
 
 func TestIdentity_GetOver14(t *testing.T) {
-	currentYear := time.Now().UTC().Year()
-	currentDate := time.Now().UTC()
+	// One reading, used everywhere below. Sampling the clock per row would
+	// reintroduce the flakiness this test was just fixed for, one boundary
+	// further out: a table built across midnight UTC mixes two dates.
+	now := time.Now().UTC()
+	currentYear := now.Year()
+	currentDate := now
 
 	tests := []struct {
 		name      string
@@ -79,19 +83,19 @@ func TestIdentity_GetOver14(t *testing.T) {
 	}{
 		{
 			name:      "person exactly 14 years old today",
-			birthDate: time.Now().UTC().AddDate(-14, 0, 0).Format("2006-01-02"),
+			birthDate: now.AddDate(-14, 0, 0).Format("2006-01-02"),
 			want:      true,
 			wantErr:   false,
 		},
 		{
 			name:      "person 14 years and 1 day old",
-			birthDate: time.Now().UTC().AddDate(-14, 0, -1).Format("2006-01-02"),
+			birthDate: now.AddDate(-14, 0, -1).Format("2006-01-02"),
 			want:      true,
 			wantErr:   false,
 		},
 		{
 			name:      "person 13 years 364 days old",
-			birthDate: time.Now().UTC().AddDate(-14, 0, 1).Format("2006-01-02"),
+			birthDate: now.AddDate(-14, 0, 1).Format("2006-01-02"),
 			want:      false,
 			wantErr:   false,
 		},
@@ -195,9 +199,12 @@ func TestIdentity_GetOver14(t *testing.T) {
 }
 
 func TestIdentity_GetOver14_EdgeCases(t *testing.T) {
+	// Single clock reading, shared by every subtest - see TestIdentity_GetOver14.
+	now := time.Now().UTC()
+
 	t.Run("birthday today - exactly 14 years", func(t *testing.T) {
 		// Person who turns 14 today
-		today := time.Now().UTC()
+		today := now
 		birthDate := today.AddDate(-14, 0, 0).Format("2006-01-02")
 
 		identity := &Identity{
@@ -211,7 +218,7 @@ func TestIdentity_GetOver14_EdgeCases(t *testing.T) {
 
 	t.Run("birthday tomorrow - still 13", func(t *testing.T) {
 		// Person who turns 14 tomorrow
-		tomorrow := time.Now().UTC().AddDate(0, 0, 1)
+		tomorrow := now.AddDate(0, 0, 1)
 		birthDate := tomorrow.AddDate(-14, 0, 0).Format("2006-01-02")
 
 		identity := &Identity{
@@ -225,7 +232,7 @@ func TestIdentity_GetOver14_EdgeCases(t *testing.T) {
 
 	t.Run("birthday yesterday - just turned 14", func(t *testing.T) {
 		// Person who turned 14 yesterday
-		yesterday := time.Now().UTC().AddDate(0, 0, -1)
+		yesterday := now.AddDate(0, 0, -1)
 		birthDate := yesterday.AddDate(-14, 0, 0).Format("2006-01-02")
 
 		identity := &Identity{
@@ -239,10 +246,13 @@ func TestIdentity_GetOver14_EdgeCases(t *testing.T) {
 }
 
 func TestIdentity_GetOver14_LeapYear(t *testing.T) {
+	// Single clock reading, shared by every subtest - see TestIdentity_GetOver14.
+	now := time.Now().UTC()
+
 	t.Run("born on leap day - 15 years ago", func(t *testing.T) {
 		// Testing over-14 age verification with a person born 15 years ago
 		// Using 15 years ensures the person is definitively over the 14-year threshold
-		currentYear := time.Now().UTC().Year()
+		currentYear := now.Year()
 
 		// Find the most recent leap year that was at least 15 years ago
 		leapYear := currentYear - 15
