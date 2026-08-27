@@ -67,6 +67,7 @@ func nativeVerifyZkProofVega(
 	ctx context.Context,
 	zkSystemID string,
 	proof []byte,
+	disclosedBytes [][]byte,
 	zkCircuitSources []string,
 	workerPath string,
 ) (zkvegaworker.VerifyResult, error) {

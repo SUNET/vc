@@ -35,7 +35,7 @@ func TestVerify_RealGoldenProof(t *testing.T) {
 	}
 	defer vk.Close()
 
-	result, err := vk.Verify(proofBytes)
+	result, err := vk.Verify(proofBytes, disclosedBytesForFixture(claim0))
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestVerify_RealGoldenProof(t *testing.T) {
 
 // A tampered proof must be rejected with a real, non-empty error message.
 func TestVerify_RejectsTamperedProof(t *testing.T) {
-	vkBytes, proofBytes, _ := loadFixtures(t)
+	vkBytes, proofBytes, claim0 := loadFixtures(t)
 
 	vk, err := NewVerifierKey(vkBytes)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestVerify_RejectsTamperedProof(t *testing.T) {
 	tampered := append([]byte(nil), proofBytes...)
 	tampered[len(tampered)-1] ^= 0xff
 
-	if _, err := vk.Verify(tampered); err == nil {
+	if _, err := vk.Verify(tampered, disclosedBytesForFixture(claim0)); err == nil {
 		t.Fatal("expected tampered proof to fail verification")
 	}
 }
@@ -90,7 +90,7 @@ func TestNewVerifierKey_RejectsEmptyBytes(t *testing.T) {
 }
 
 func TestVerify_RejectsClosedKey(t *testing.T) {
-	vkBytes, proofBytes, _ := loadFixtures(t)
+	vkBytes, proofBytes, claim0 := loadFixtures(t)
 
 	vk, err := NewVerifierKey(vkBytes)
 	if err != nil {
@@ -99,9 +99,21 @@ func TestVerify_RejectsClosedKey(t *testing.T) {
 	vk.Close()
 	vk.Close() // Close must be idempotent.
 
-	if _, err := vk.Verify(proofBytes); err == nil {
+	if _, err := vk.Verify(proofBytes, disclosedBytesForFixture(claim0)); err == nil {
 		t.Fatal("expected Verify on a closed key to fail")
 	}
+}
+
+// disclosedBytesForFixture builds the MaxClaims-length disclosedBytes
+// Verify now requires, for this package's golden-fixture tests: slot 0
+// gets claim0 (the fixture's own disclosed claim, matching the assertions
+// below), every other slot is left empty (undisclosed) - this fixture
+// predates r12 and was never regenerated to dump every slot's bytes, only
+// claim0's; see this file's own package doc for the regeneration command.
+func disclosedBytesForFixture(claim0 []byte) [][]byte {
+	out := make([][]byte, MaxClaims)
+	out[0] = claim0
+	return out
 }
 
 func loadFixtures(t *testing.T) (vkBytes, proofBytes, claim0 []byte) {

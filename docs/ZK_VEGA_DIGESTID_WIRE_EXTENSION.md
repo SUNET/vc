@@ -75,6 +75,82 @@ proof's disclosed plaintext against. That's what this field is for.
   (including the third-party multipaz-based one this org has
   interop-tested against, `siros-multipaz-verifier.fly.dev`) reads it.
 
+## r12 addendum: `issuerSignedItemBytes` and `claimSlotDigestIds`
+
+**Status: implemented in siros-sdk-kotlin (wallet, producer); vc's own
+consumer side is the change this addendum documents.**
+
+The original `digestId` field above assumed the proof itself would keep
+reporting each disclosed slot's plaintext, so the verifier only ever
+needed to match an ALREADY-RETURNED slot to a wire-declared claim
+*after* a successful `verify()` call - `digestId` was purely a post-hoc
+join key.
+
+`zk-cred-vega`'s r12 circuit revision (shrunk blinding nonce, disclosed
+bytes moved out of proof public IO - see that repo's own release notes)
+changes this: `zk_cred_vega::verify()` no longer returns a disclosed
+claim's plaintext at all. Instead, the **caller** must supply, as an
+input to `verify()`, the real bytes for every disclosed slot (empty for
+undisclosed ones) - the function re-derives each slot's blinded digest
+from those bytes and rejects the whole proof (a hard error, not a
+per-slot soft-fail) if any slot's supplied bytes don't match what the
+proof committed to. `digestId` alone is no longer enough: the verifier
+needs it BEFORE calling `verify()`, not after, and it needs to know
+ALL `MAX_CLAIMS_V1` slots' identities, not just the disclosed ones, to
+build a correctly-shaped and correctly-ordered input.
+
+Two more fields cover this:
+
+```
+{ "elementIdentifier": tstr, "elementValue": any, "digestId": uint / omitted,
+  "issuerSignedItemBytes": bstr / omitted }
+```
+
+- `issuerSignedItemBytes` (per disclosed item, Vega-only): that element's
+  exact original `IssuerSignedItem` bytes
+  (`NamespaceItem.original.EncodeToBytes()` in siros-sdk-kotlin - the same
+  bytes `VegaProofSystem.buildWitness` feeds into `FfiClaim
+  .issuerSignedItemBytes` at proving time). This is what the verifier now
+  passes as `verify()`'s per-slot disclosed-bytes input for this claim's
+  slot - not a re-derivation from `elementValue`, since the circuit's
+  digest is over the FULL original item bytes (digestID + random salt +
+  elementIdentifier + elementValue, CBOR-encoded), and `random` never
+  otherwise crosses the wire.
+
+And, at the `documentData` level rather than per-item:
+
+```
+{ ..., "claimSlotDigestIds": [uint, uint, uint, uint] / omitted }
+```
+
+- `claimSlotDigestIds` (Vega-only): the credential's FULL, fixed-shape
+  claim-slot list - `VegaProofSystem.MAX_CLAIMS_V1` entries, in the
+  credential's own document order (the same order `buildWitness` assigns
+  to `FfiClaim` slots) - each entry being that slot's `digestID`
+  regardless of whether THIS presentation discloses it. Populated from
+  the wallet's own stored credential (`storedItems.map { it.item.digestId
+  }}` in siros-sdk-kotlin, already in document order - see
+  `SirosWallet.buildZkPresentationToken`), since a presentation on its own
+  only ever carries the DISCLOSED subset and undisclosed slots have no
+  serialized representation to derive an order from. Without this, a
+  verifier has no way to place a wire-disclosed item at the correct proof
+  slot index at all: `digestId` alone identifies WHICH claim was disclosed,
+  never WHERE (slot 0-3) it lives in the fixed-shape circuit.
+
+Verifier-side reconstruction (`vc`'s `pkg/mdoc/zk_verifier.go`): for each
+index `i` in `claimSlotDigestIds`, look up that digestID in the
+presentation's wire-disclosed items; if found, `disclosedBytes[i]` is that
+item's `issuerSignedItemBytes`; if not found (the slot wasn't disclosed),
+`disclosedBytes[i]` is empty. This ordered array is exactly what
+`zk_cred_vega`'s `verify()` (Go C-ABI: `CDisclosedInput[MAX_CLAIMS_V1]`)
+requires.
+
+Same additive/optional shape as the original `digestId` field - both are
+`omitempty`/absent for Longfellow presentations and for any pre-r12 Vega
+artifact, and a verifier that doesn't understand them simply never sees
+the keys. Same siros-sdk-swift parity gap as `digestId` above (Vega isn't
+implemented in the Swift SDK at all yet, so this is moot until it is).
+
 ## What needs to happen before wider interop
 
 This is exactly the kind of change that's easy to get away with unilaterally
