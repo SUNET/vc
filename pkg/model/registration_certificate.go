@@ -259,7 +259,11 @@ func wrprcChain(token string) ([]*x509.Certificate, error) {
 	if err := json.Unmarshal(headerBytes, &header); err != nil {
 		return nil, fmt.Errorf("parsing JWT header: %w", err)
 	}
-	if !strings.EqualFold(header.Typ, rpcert.WRPRCTyp) {
+	// Exact match, matching how pkg/trust compares the attestation typ.
+	// JWT typ is nominally a media type and so case-insensitive, but every
+	// Registrar emits the lowercase form and the codebase compares these
+	// exactly elsewhere; one rule is worth more than the latitude.
+	if header.Typ != rpcert.WRPRCTyp {
 		return nil, fmt.Errorf("unexpected JWT typ %q, want %q", header.Typ, rpcert.WRPRCTyp)
 	}
 	if header.X5C == nil {

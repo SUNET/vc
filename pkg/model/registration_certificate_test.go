@@ -151,6 +151,14 @@ func TestLoadRegistrationCertificate_Rejects(t *testing.T) {
 			wantErr: "unexpected JWT typ",
 		},
 		{
+			// typ is compared exactly, matching pkg/trust. A media type is
+			// nominally case-insensitive, so this pins the stricter reading
+			// rather than leaving it to be softened back by accident.
+			name:    "a case variant of the media type",
+			content: ca.sign(t, "RC-WRP+JWT", validPayload("NTRSE-1")),
+			wantErr: "unexpected JWT typ",
+		},
+		{
 			name:    "an empty file",
 			content: "   \n",
 			wantErr: "is empty",
