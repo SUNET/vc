@@ -62,7 +62,7 @@ BUILD_CONFIGS           := \
 # Phony Targets Declaration
 # ==============================================================================
 
-.PHONY: help pki pki-clean test test-env test-js \
+.PHONY: help pki pki-clean test test-env test-js test-pkg \
 	build build-% \
 	docker-build docker-build-% docker-push docker-push-% docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
