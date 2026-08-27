@@ -385,7 +385,6 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				c.log.Error(err, "failed to build ZK session transcript", "scope", scope)
 				return nil, fmt.Errorf("failed to build ZK session transcript for scope %s: %w", scope, err)
 			}
-
 			zkResult, err := zkHandler.VerifyAndExtract(ctx, vpToken, mdoc.ZkPresentationContext{
 				SessionID:          authCtx.SessionID,
 				ClientID:           authCtx.ClientID,

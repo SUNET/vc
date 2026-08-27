@@ -1,0 +1,103 @@
+# Dockerfile for the "zknative" native ZK/PPID verifier build (Longfellow +
+# Vega) - see README.md's "Native ZK/PPID proof verification" section and
+# docs/ZK_PPID_VERIFICATION_PLAN.md.
+#
+# Deliberately NOT based on dockerfiles/worker: that Dockerfile always
+# passes `--extldflags '-static'`, which is fine for the pkcs11 build
+# (dlopen's an HSM driver at runtime, unrelated to link-time linking) but
+# incompatible with this build - zk-cred-longfellow's cgo binding links
+# directly against libzk_cred_longfellow.so at link time, which a fully
+# static executable cannot do. This mirrors the Makefile's own
+# build-verifier-zknative target, which already uses LDFLAGS_DYNAMIC
+# (`-w -s`, no `-static`) instead of the default LDFLAGS for exactly this
+# reason.
+#
+# EARLY-TESTING SHORTCUT (see this repo's own Phase 5 notes): this
+# Dockerfile expects the native libraries to already be staged under
+# third_party/{zk-cred-longfellow,zk-cred-vega}/{include,lib} in the BUILD
+# CONTEXT (i.e. `make zk-native-lib zk-native-lib-vega` already run on the
+# host before `docker build`), rather than building them fresh from source
+# inside this Dockerfile. A production version of this Dockerfile should
+# add a builder stage that runs those make targets itself (needs a Rust
+# toolchain) for full reproducibility; that's explicitly deferred here to
+# keep this one-off test deployment simple.
+#
+# The runtime stage uses a glibc base (debian:bookworm-slim), NOT Alpine
+# (musl libc) like dockerfiles/worker - the native .so files here are
+# built against glibc, and Alpine's musl libc cannot load them.
+
+ARG GOBUILD_IMAGE=golang:1.26.6
+FROM ${GOBUILD_IMAGE} AS gobuild
+WORKDIR /go/src/app
+COPY Makefile .
+RUN make install-tools
+RUN make clean-apt-cache
+
+ARG BUILDPLATFORM
+FROM --platform=$BUILDPLATFORM gobuild AS builder
+
+ARG BUILDTAG
+
+ENV GOTOOLCHAIN=local
+ENV GOFLAGS=-mod=vendor
+ENV GOPROXY=off
+ENV GONOSUMDB=*
+ENV GONOSUMCHECK=*
+
+COPY . .
+
+RUN make swagger-verifier swagger-fmt
+RUN make proto-verifier
+
+ARG TARGETARCH=amd64
+ENV CGO_ENABLED=1
+ENV CGO_CFLAGS="-I/go/src/app/third_party/zk-cred-longfellow/include -I/go/src/app/third_party/zk-cred-vega/include"
+ENV CGO_LDFLAGS="-L/go/src/app/third_party/zk-cred-longfellow/lib -L/go/src/app/third_party/zk-cred-vega/lib -lzk_cred_longfellow -lzk_cred_vega"
+
+# The verifier binary itself only ever links Longfellow's cgo binding -
+# see nativeVerifyZkProofVega's own doc comment for why Vega's is confined
+# to the separate zkvegaverifyworker binary below instead. Harmless that
+# CGO_LDFLAGS above names both libraries for this build: an unused
+# -l flag is not an error, and keeping one shared CGO_CFLAGS/LDFLAGS
+# environment for both `go build` invocations in this Dockerfile is
+# simpler than threading two different sets through.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -v -tags zknative -o bin/vc_verifier -ldflags \
+    "-X vc/pkg/model.BuildVariableGitCommit=$(git rev-list -1 HEAD) \
+    -X vc/pkg/model.BuildVariableGitBranch=$(git rev-parse --abbrev-ref HEAD) \
+    -X vc/pkg/model.BuildVariableTimestamp=$(date +'%F:T%TZ') \
+    -X vc/pkg/model.BuildVariableGoVersion=$(go version|awk '{print $3}') \
+    -X vc/pkg/model.BuildVariableGoArch=$(go version|awk '{print $4}') \
+    -X vc/pkg/model.BuildVersion=$(echo $BUILDTAG) \
+    -w -s" ./cmd/verifier
+
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -v -tags zknative -o bin/zkvegaverifyworker -ldflags "-w -s" ./cmd/zkvegaverifyworker
+
+# Deploy — glibc base required for the native .so files (see top-of-file note).
+FROM debian:bookworm-slim
+
+WORKDIR /
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -r vcservice && useradd -r -g vcservice vcservice
+
+COPY --from=builder /go/src/app/bin/vc_verifier /vc_service
+COPY --from=builder /go/src/app/bin/zkvegaverifyworker /usr/local/bin/zkvegaverifyworker
+COPY --from=builder /go/src/app/docs /docs
+COPY --from=builder /go/src/app/standards /standards
+COPY --from=builder /go/src/app/third_party/zk-cred-longfellow/lib/libzk_cred_longfellow.so /usr/lib/libzk_cred_longfellow.so
+COPY --from=builder /go/src/app/third_party/zk-cred-vega/lib/libzk_cred_vega.so /usr/lib/libzk_cred_vega.so
+RUN ldconfig
+
+EXPOSE 8080
+
+USER vcservice
+
+HEALTHCHECK --interval=20s --timeout=10s CMD curl -k --connect-timeout 5 https://localhost:8080/health | grep -q STATUS_OK
+
+CMD [ "./vc_service" ]
