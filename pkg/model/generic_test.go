@@ -390,7 +390,9 @@ func TestAgeThresholdDate(t *testing.T) {
 			want:  date(2026, time.June, 15),
 		},
 		{
-			name:  "day before a birthday is not yet the threshold",
+			// The threshold tracks the birth date exactly, so a birth one
+			// day later yields a threshold one day later.
+			name:  "one day later birth, one day later threshold",
 			birth: date(2012, time.June, 16),
 			years: 14,
 			want:  date(2026, time.June, 16),

@@ -189,7 +189,7 @@ pki-clean: ## Clean PKI material
 # Testing Targets
 # ==============================================================================
 
-test: $(addprefix test-,$(SERVICES)) test-pkg test-js ## Run all service tests
+test: $(addprefix test-,$(SERVICES)) test-pkg test-js ## Run all Go tests (services and pkg/) plus the JS unit tests
 
 # Generate test-SERVICE targets dynamically
 define TEST_TEMPLATE
