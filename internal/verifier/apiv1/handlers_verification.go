@@ -331,18 +331,23 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				}
 			}
 
-			// SessionTranscript for the OpenID4VP redirect flow. Its wire
-			// format is cross-checked against an independent CBOR library
-			// (see pkg/mdoc.TestBuildOID4VPSessionTranscript_MatchesIndependentKotlinCBORLibraryCrossCheck),
-			// but is STILL NOT confirmed against a real wallet's own
-			// transcript bytes from a live session - no such fixture could
-			// be found (checked siros-sdk-kotlin, siros-sdk-swift,
-			// go-wallet-backend, multipaz). TRACKED GAP: if native ZK
-			// verification of a real presentation fails in a way that looks
-			// like a transcript/binding mismatch, treat
-			// BuildOID4VPSessionTranscript's exact byte layout as a prime
-			// suspect and get a real captured transcript to compare against.
-			responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "oidc-direct_post")
+			// SessionTranscript for the OpenID4VP redirect flow. CONFIRMED
+			// LIVE as the exact cause of a real "InvalidSumcheckProof"
+			// rejection of a genuinely valid proof: this endpoint path MUST
+			// match the responseURI actually sent to the wallet as
+			// requestObject.ResponseURI (see UIInteraction/CreateRequestObject,
+			// which use "direct_post", not "oidc-direct_post" - the latter
+			// belongs to a wholly separate OIDC RP flow with its own
+			// session/state cache namespace, see _submitDCAPIResponse's
+			// identical distinction in presentation-definition.js). Any
+			// difference here changes handoverInfo's encoded bytes, which
+			// changes its SHA-256 digest, which changes the whole
+			// SessionTranscript the ZK proof's Fiat-Shamir transcript was
+			// built against - a wallet-side proof built over the real
+			// "direct_post" responseURI can never verify against a
+			// recomputed transcript using a different one, regardless of
+			// whether the underlying disclosed claims are correct.
+			responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "direct_post")
 			if err != nil {
 				c.log.Error(err, "failed to construct response URI for ZK session transcript", "scope", scope)
 				return nil, fmt.Errorf("failed to construct response URI for scope %s: %w", scope, err)
