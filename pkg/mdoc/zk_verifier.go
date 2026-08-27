@@ -503,6 +503,14 @@ func checkVegaIssuerKeyMatches(issuerPubKeySEC1, qx, qy []byte) error {
 // entry.original.EncodeToBytes()`), not just the bare elementValue -
 // checkVegaDisclosedClaimsMatchWire decodes this to extract ElementValue
 // for comparison against the wire-declared value.
+//
+// The returned plaintext is the item's real wire bytes verbatim - a
+// #6.24(bstr <map>)-wrapped CBOR item, not a bare map (confirmed against a
+// real device presentation's captured claim bytes: `d818 58XX a4...`) -
+// so it must be unwrapped via EncodedCBORBytes before unmarshaling into
+// this struct; unmarshaling the tagged bytes directly fails with "cannot
+// unmarshal byte string into" this type, since the top-level CBOR item is
+// a tagged byte string, not a map.
 type vegaIssuerSignedItemPlaintext struct {
 	DigestID          uint32 `cbor:"digestID"`
 	Random            []byte `cbor:"random"`
@@ -552,8 +560,12 @@ func checkVegaDisclosedClaimsMatchWire(dd *ZkDocumentDataMdoc, claims []zkvegawo
 			return fmt.Errorf("claim %q (digestId %d) is declared on the wire but the ZK proof never disclosed that digestId", wireItem.ElementIdentifier, digestID)
 		}
 
+		var wrapped EncodedCBORBytes
+		if err := cborEncoder.Unmarshal(proofClaim.Plaintext, &wrapped); err != nil {
+			return fmt.Errorf("failed to unwrap tag(24) from proof-disclosed plaintext for digestId %d: %w", digestID, err)
+		}
 		var plaintext vegaIssuerSignedItemPlaintext
-		if err := cborEncoder.Unmarshal(proofClaim.Plaintext, &plaintext); err != nil {
+		if err := cborEncoder.Unmarshal(wrapped, &plaintext); err != nil {
 			return fmt.Errorf("failed to decode proof-disclosed plaintext for digestId %d: %w", digestID, err)
 		}
 
