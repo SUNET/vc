@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"crypto"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -352,7 +353,34 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				c.log.Error(err, "failed to construct response URI for ZK session transcript", "scope", scope)
 				return nil, fmt.Errorf("failed to construct response URI for scope %s: %w", scope, err)
 			}
-			sessionTranscript, err := mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, nil)
+			// BuildOID4VPSessionTranscript's own doc comment: the JWK
+			// thumbprint is nil "unless the request advertised an
+			// encryption key for the response" - this request always does
+			// (CreateRequestObject sets ClientMetadata.JWKS to the same
+			// ephemeral key cached under EphemeralEncryptionKeyID, and
+			// response_mode is "direct_post.jwt"/"dc_api.jwt" whenever
+			// AutoAttempt is off, per UIInteraction's own responseMode
+			// comment), so passing nil unconditionally contradicted the
+			// documented condition and silently left the ZK proof's
+			// Fiat-Shamir transcript unbound from the actual encryption
+			// key the wallet saw and included in its own transcript.
+			var readerPubKeyThumbprint []byte
+			if authCtx.EphemeralEncryptionKeyID != "" {
+				if privKey, found := c.openid4vp.EphemeralKeyCache.Get(authCtx.EphemeralEncryptionKeyID); found {
+					pubKeyIface, err := privKey.PublicKey()
+					if err != nil {
+						c.log.Error(err, "failed to derive public key for ZK session transcript", "scope", scope)
+						return nil, fmt.Errorf("failed to derive public key for scope %s: %w", scope, err)
+					}
+					tp, err := pubKeyIface.Thumbprint(crypto.SHA256)
+					if err != nil {
+						c.log.Error(err, "failed to compute JWK thumbprint for ZK session transcript", "scope", scope)
+						return nil, fmt.Errorf("failed to compute JWK thumbprint for scope %s: %w", scope, err)
+					}
+					readerPubKeyThumbprint = tp
+				}
+			}
+			sessionTranscript, err := mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)
 			if err != nil {
 				c.log.Error(err, "failed to build ZK session transcript", "scope", scope)
 				return nil, fmt.Errorf("failed to build ZK session transcript for scope %s: %w", scope, err)
