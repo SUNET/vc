@@ -1,15 +1,10 @@
 package openid4vci
 
 import (
-	"context"
-	"crypto/ecdsa"
 	"encoding/json"
 	"testing"
 
-	"github.com/SUNET/vc/pkg/pki"
-
 	"github.com/creasty/defaults"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v2"
@@ -211,50 +206,6 @@ func TestMarshalMetadata(t *testing.T) {
 			assert.NoError(t, err)
 
 			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
-func TestSignIssuerMetadata(t *testing.T) {
-	tts := []struct {
-		name           string
-		issuerMetadata *CredentialIssuerMetadataParameters
-	}{
-		{
-			name:           "test",
-			issuerMetadata: mockIssuerMetadata,
-		},
-	}
-
-	for _, tt := range tts {
-		t.Run(tt.name, func(t *testing.T) {
-			metadata := tt.issuerMetadata
-
-			signingKey, cert := mockGenerateECDSAKey(t)
-			pubKey := signingKey.Public()
-
-			// Create pki.Signer
-			signer, err := pki.NewSoftwareSigner(signingKey, "test-key-id")
-			require.NoError(t, err)
-
-			metadataWithSignature, err := metadata.Sign(context.Background(), signer, []string{cert})
-			assert.NoError(t, err)
-
-			assert.NotEmpty(t, metadataWithSignature)
-
-			claims := jwt.MapClaims{}
-
-			token, err := jwt.ParseWithClaims(metadataWithSignature.SignedMetadata, claims, func(token *jwt.Token) (any, error) {
-				return pubKey.(*ecdsa.PublicKey), nil
-			})
-			assert.NoError(t, err)
-
-			assert.True(t, token.Valid)
-
-			// ensure the signed claim does not have signed_metadata in it self
-			assert.Empty(t, claims["signed_metadata"])
-
-			assert.Len(t, token.Header["x5c"], 1)
 		})
 	}
 }

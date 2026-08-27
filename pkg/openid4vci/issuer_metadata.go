@@ -1,12 +1,7 @@
 package openid4vci
 
 import (
-	"context"
 	"encoding/json"
-	"time"
-
-	"github.com/SUNET/vc/pkg/jose"
-	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -71,37 +66,6 @@ func (c *CredentialIssuerMetadataParameters) MarshalJWTClaims() (jwt.MapClaims, 
 		return nil, err
 	}
 	return claims, nil
-}
-
-// Sign creates a signed JWT representation of the metadata and sets the signed_metadata field.
-// Per OID4VCI 1.0 Section 12.2.4, signed_metadata is an OPTIONAL JWT that contains the
-// Credential Issuer metadata parameters as claims, using typ "openidvci-issuer-metadata+jwt".
-func (c *CredentialIssuerMetadataParameters) Sign(ctx context.Context, signer pki.Signer, x5c []string) (*CredentialIssuerMetadataParameters, error) {
-	header := jwt.MapClaims{
-		"typ": "openidvci-issuer-metadata+jwt",
-		"x5c": x5c,
-	}
-
-	body, err := c.MarshalJWTClaims()
-	if err != nil {
-		return nil, err
-	}
-
-	body["iat"] = time.Now().Unix()
-	body["iss"] = c.CredentialIssuer
-	body["sub"] = c.CredentialIssuer
-
-	// Remove signed_metadata from the JWT payload to avoid self-referencing
-	delete(body, "signed_metadata")
-
-	reply, err := jose.MakeJWT(ctx, header, body, signer)
-	if err != nil {
-		return nil, err
-	}
-
-	c.SignedMetadata = reply
-
-	return c, nil
 }
 
 // MetadataCredentialResponseEncryption Object containing information about whether the Credential Issuer supports encryption of the Credential and Batch Credential Response on top of TLS.

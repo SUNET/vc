@@ -436,6 +436,8 @@ type Issuer struct {
 	SignMetadataRateLimit SignMetadataRateLimitConfig `yaml:"sign_metadata_rate_limit"`
 	// PseudonymSeed, if true, makes the issuer attach a random seed as the pseudonym_seed claim.
 	PseudonymSeed *bool `yaml:"pseudonym_seed" validate:"omitempty"`
+	// AccessCertificate configures the EUDI access certificate (WRPAC) the issuer presents to wallets, optionally with its own key separate from KeyConfig. Off by default; deployments outside an ARF trust framework are unaffected.
+	AccessCertificate *IssuerAccessCertificate `yaml:"access_certificate,omitempty"`
 }
 
 // SignMetadataRateLimitConfig configures the SignMetadata gRPC rate limiter.

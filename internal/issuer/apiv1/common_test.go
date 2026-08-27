@@ -84,6 +84,13 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 		// Also update the signer to use RSA
 		signer, err := pki.NewSoftwareSigner(rsaKey, "test-rsa-kid")
 		assert.NoError(t, err)
+		// Metadata signing follows the credential signer here because this
+		// fixture configures no separate access certificate. Leaving it
+		// behind would silently keep signing metadata with the ECDSA key
+		// this override exists to replace.
+		if client.metadataSigner == client.signer {
+			client.metadataSigner = signer
+		}
 		client.signer = signer
 	}
 
