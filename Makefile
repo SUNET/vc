@@ -207,7 +207,7 @@ test-env: ## Set up test environment
 
 test-pkg: ## Test the shared packages under pkg/
 	$(info Testing pkg)
-	go test -v ./pkg/...
+	go test ./pkg/...
 
 test-js: ## Run JS unit tests for staticembed helpers
 	$(info Running JS unit tests)
