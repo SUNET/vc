@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"sort"
 	"time"
 
 	"github.com/SUNET/vc/internal/apigw/auth_providers/oidcrp"
@@ -166,8 +167,13 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 			return nil, err
 		}
 	} else {
-		// No mapping configured — pass through raw claims
-		claims = authResp.Claims
+		// No mapping configured. Raw OIDC claims used to pass through
+		// verbatim, which put every ID-token claim into the credential -
+		// including ones the credential type never declares. Those can
+		// never be selectively disclosed, so a wallet has to present them
+		// every time, and the standard ones (iss, aud, exp, iat, nonce)
+		// collide with the envelope the issuer fills in at signing.
+		claims = c.filterClaimsByCredentialType(session.CredentialType, authResp.Claims)
 	}
 
 	// Log the resulting document data for diagnostics.
@@ -416,4 +422,55 @@ func (c *Client) createCredentialViaOIDCRP(ctx context.Context, credentialType s
 	}
 
 	return reply.Credentials[0].Credential, nil
+}
+
+// filterClaimsByCredentialType drops claims the credential type does not
+// declare, so an assertion-sourced credential carries only what its VCTM or
+// MDDL describes.
+//
+// It is deliberately conservative about not having metadata: when no VCTM or
+// MDDL is loaded for the scope there is nothing to filter against, and
+// silently emptying the credential would be worse than the over-sharing this
+// exists to prevent, so the claims pass through unchanged and the reason is
+// logged.
+func (c *Client) filterClaimsByCredentialType(credentialType string, claims map[string]any) map[string]any {
+	if len(claims) == 0 {
+		return claims
+	}
+
+	metadata := c.cfg.Common.CredentialMetadata[credentialType]
+	if metadata == nil {
+		c.log.Warn("assertion claims not filtered: no credential metadata configured for scope",
+			"credential_type", credentialType, "claim_count", len(claims))
+		return claims
+	}
+
+	allowed, loaded := metadata.DeclaredClaimNames()
+	if !loaded {
+		c.log.Warn("assertion claims not filtered: neither VCTM nor MDDL loaded for scope",
+			"credential_type", credentialType, "claim_count", len(claims))
+		return claims
+	}
+
+	filtered := make(map[string]any, len(claims))
+	dropped := make([]string, 0)
+	for name, value := range claims {
+		if allowed[name] {
+			filtered[name] = value
+			continue
+		}
+		dropped = append(dropped, name)
+	}
+
+	if len(dropped) > 0 {
+		// Named rather than counted: this changes what a credential
+		// contains, and an operator upgrading into it should be able to see
+		// exactly which claims stopped being issued rather than infer it
+		// from missing data.
+		sort.Strings(dropped)
+		c.log.Info("assertion claims dropped: not declared by the credential type",
+			"credential_type", credentialType, "dropped", dropped, "kept", len(filtered))
+	}
+
+	return filtered
 }

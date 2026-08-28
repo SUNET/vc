@@ -2112,3 +2112,44 @@ func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string) 
 
 	return metadata
 }
+
+// DeclaredClaimNames returns the top-level claim names this credential type
+// declares, across both VCTM and MDDL. The boolean reports whether any
+// metadata was available to derive them from - an empty set from a loaded
+// document means "declares nothing", which is different from "nothing
+// loaded", and callers must not treat the two alike.
+//
+// Names are top-level because the claim maps produced by external identity
+// providers are flat. For a VCTM the name is the first path segment, so a
+// nested claim like ["address","street_address"] admits an "address" object
+// and lets the existing pipeline handle its interior. For an MDDL it is the
+// element ID, since document data is keyed by element directly rather than
+// nested under the mdoc namespace - see MDDLSchema.Presentation.
+func (c *CredentialMetadata) DeclaredClaimNames() (map[string]bool, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	names := map[string]bool{}
+	loaded := false
+
+	if c.VCTM != nil {
+		loaded = true
+		for _, claim := range c.VCTM.Claims {
+			if len(claim.Path) == 0 || claim.Path[0] == nil {
+				continue
+			}
+			names[*claim.Path[0]] = true
+		}
+	}
+
+	if c.MDDL != nil {
+		loaded = true
+		for _, elements := range c.MDDL.Claims {
+			for elementID := range elements {
+				names[elementID] = true
+			}
+		}
+	}
+
+	return names, loaded
+}
