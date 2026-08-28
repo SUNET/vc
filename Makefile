@@ -62,7 +62,7 @@ BUILD_CONFIGS           := \
 # Phony Targets Declaration
 # ==============================================================================
 
-.PHONY: help pki pki-clean test test-env test-js \
+.PHONY: help pki pki-clean test test-env test-js test-pkg \
 	build build-% \
 	docker-build docker-build-% docker-push docker-push-% docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
@@ -189,7 +189,7 @@ pki-clean: ## Clean PKI material
 # Testing Targets
 # ==============================================================================
 
-test: $(addprefix test-,$(SERVICES)) test-js ## Run all service tests
+test: $(addprefix test-,$(SERVICES)) test-pkg test-js ## Run all Go tests (services and pkg/) plus the JS unit tests
 
 # Generate test-SERVICE targets dynamically
 define TEST_TEMPLATE
@@ -204,6 +204,10 @@ $(foreach service,$(SERVICES),$(eval $(call TEST_TEMPLATE,$(service))))
 test-env: ## Set up test environment
 	$(info Setting up test environment)
 	sudo apt-get update && sudo apt-get install -y softhsm2 opensc nodejs npm
+
+test-pkg: ## Test the shared packages under pkg/
+	$(info Testing pkg)
+	go test -v ./pkg/...
 
 test-js: ## Run JS unit tests for staticembed helpers
 	$(info Running JS unit tests)
