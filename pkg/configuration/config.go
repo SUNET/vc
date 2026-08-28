@@ -28,6 +28,20 @@ var servicesRequiringVCTM = map[string]bool{
 	"verifier": true,
 }
 
+// servicesRequiringMongo lists the services that open a MongoDB store, and
+// so need common.mongo.uri. The issuer is deliberately absent: it holds no
+// database at all, and requiring a connection string it will never dial made
+// it impossible to run without one (issue #622).
+//
+// The check cannot live with the other config validations in
+// pkg/helpers/validate.go, because a struct validation on Common has no way
+// to know which service is starting.
+var servicesRequiringMongo = map[string]bool{
+	"apigw":    true,
+	"registry": true,
+	"verifier": true,
+}
+
 // New parses config file from VC_CONFIG_YAML environment variable.
 // serviceName identifies the calling service so that steps like VCTM loading
 // can be skipped for services that do not use credential constructors (e.g.
@@ -123,7 +137,39 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkMongoRequirement(cfg, serviceName); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// checkMongoRequirement enforces common.mongo.uri for the services that
+// actually open a MongoDB store.
+//
+// Mongo is the default primary-store backend, so an unset SQL.Backend means
+// Mongo. HA caching has no relational backend yet and always uses Mongo, so
+// it pulls the requirement in regardless of the primary store.
+func checkMongoRequirement(cfg *model.Cfg, serviceName string) error {
+	if !servicesRequiringMongo[serviceName] || cfg.Common == nil {
+		return nil
+	}
+
+	backend := cfg.Common.SQL.Backend
+	if backend == "" {
+		backend = "mongo"
+	}
+
+	switch {
+	case cfg.Common.Mongo.URI != "":
+		return nil
+	case backend == "mongo":
+		return fmt.Errorf("common.mongo.uri is required for the %s service when common.sql.backend is %q", serviceName, backend)
+	case cfg.Common.HA.Enable:
+		return fmt.Errorf("common.mongo.uri is required for the %s service because common.ha.enable is set and HA caching has no relational backend", serviceName)
+	}
+
+	return nil
 }
 
 // LoadSecrets reads and parses the secrets YAML file.
