@@ -55,7 +55,17 @@ type UICredentialInfo struct {
 
 // UIPreset is a verification preset served to the UI.
 type UIPreset struct {
-	Label       string               `json:"label"`
+	Label string `json:"label"`
+	// Category groups this preset with every other preset sharing the same
+	// string, for progressive/grouped rendering - empty for an uncategorized
+	// preset. See model.PresetDefinition.Category.
+	Category string `json:"category,omitempty"`
+	// Order is this preset's position within its Category (ascending; ties,
+	// including the default 0, broken alphabetically by Label client-side).
+	Order int `json:"order"`
+	// Featured presets are shown immediately rather than behind the
+	// progressive-disclosure grouping. See model.PresetDefinition.Featured.
+	Featured    bool                 `json:"featured"`
 	Credentials []UIPresetCredential `json:"credentials"`
 }
 
@@ -88,6 +98,16 @@ type UIMetadataReply struct {
 	Credentials      map[string]*UICredentialInfo `json:"credentials"`
 	SupportedWallets map[string]string            `json:"supported_wallets"`
 	Presets          map[string]*UIPreset         `json:"presets,omitempty"`
+	// PresetCategoryOrder lists every distinct non-empty Category found
+	// across Presets, in display order - lowest-Order preset within the
+	// category first, ties broken alphabetically by category name. JSON map
+	// keys always serialize alphabetically (encoding/json), so this is the
+	// only way an operator's intended category ordering (via
+	// PresetDefinition.Order) survives onto the wire; the UI groups/orders
+	// preset buttons by this list rather than alphabetizing category names
+	// itself. Excludes the empty/uncategorized group, which the UI always
+	// renders last under its own generic heading.
+	PresetCategoryOrder []string `json:"preset_category_order,omitempty"`
 	// DCAPIEnabled mirrors verifier.digital_credentials.enable, so the UI only
 	// attempts the native W3C Digital Credentials API when an operator has
 	// opted in, rather than always trying it regardless of server config.
@@ -177,10 +197,40 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 			presetLabels = append(presetLabels, label)
 		}
 		sort.Strings(presetLabels)
+		// Lowest Order seen so far for each non-empty Category, used below
+		// to derive PresetCategoryOrder - the wire's only carrier of an
+		// operator's intended category ordering (see that field's own doc
+		// comment for why a plain map can't do this).
+		categoryMinOrder := make(map[string]int)
 		for _, label := range presetLabels {
-			preset := c.cfg.Verifier.Presets[label]
+			def := c.cfg.Verifier.Presets[label]
+			if def.Category == "" {
+				continue
+			}
+			if existing, ok := categoryMinOrder[def.Category]; !ok || def.Order < existing {
+				categoryMinOrder[def.Category] = def.Order
+			}
+		}
+		categories := make([]string, 0, len(categoryMinOrder))
+		for category := range categoryMinOrder {
+			categories = append(categories, category)
+		}
+		sort.Slice(categories, func(i, j int) bool {
+			if categoryMinOrder[categories[i]] != categoryMinOrder[categories[j]] {
+				return categoryMinOrder[categories[i]] < categoryMinOrder[categories[j]]
+			}
+			return categories[i] < categories[j]
+		})
+		reply.PresetCategoryOrder = categories
+
+		for _, label := range presetLabels {
+			def := c.cfg.Verifier.Presets[label]
+			preset := def.Credentials
 			uiPreset := &UIPreset{
 				Label:       label,
+				Category:    def.Category,
+				Order:       def.Order,
+				Featured:    model.BoolVal(def.Featured, false),
 				Credentials: make([]UIPresetCredential, 0, len(preset)),
 			}
 			scopeKeys := make([]string, 0, len(preset))

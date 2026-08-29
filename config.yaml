@@ -78,20 +78,26 @@ verifier:
             - "ehic"
   presets:
     "PID":
-      pid:
-        exclude_claims:
-          - path: ["trust_anchor"]
-          - path: ["attestation_legal_category"]
+      featured: true
+      credentials:
+        pid:
+          exclude_claims:
+            - path: ["trust_anchor"]
+            - path: ["attestation_legal_category"]
     "EHIC":
-      ehic:
+      featured: true
+      credentials:
+        ehic:
     "PID Age Over 18":
-      pid:
-        claims:
-          - path: ["birthdate"]
-        validations:
-          - rule: "age_over"
-            path: ["birthdate"]
-            value: 18
+      category: "Selective disclosure"
+      credentials:
+        pid:
+          claims:
+            - path: ["birthdate"]
+          validations:
+            - rule: "age_over"
+              path: ["birthdate"]
+              value: 18
     "PID + EHIC":
       pid:
         exclude_claims:

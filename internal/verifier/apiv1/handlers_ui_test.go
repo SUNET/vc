@@ -204,8 +204,8 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 			},
 		},
 		Verifier: &model.Verifier{
-			Presets: map[string]model.VerificationPreset{
-				"PID Age Over 18": {
+			Presets: map[string]model.PresetDefinition{
+				"PID Age Over 18": {Credentials: model.VerificationPreset{
 					"pid": &model.VerificationPresetScope{
 						Claims: []model.VerificationPresetClaim{
 							{Path: []string{"birthdate"}},
@@ -214,8 +214,8 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 							{Rule: "age_over", Path: []string{"birthdate"}, Value: 18},
 						},
 					},
-				},
-				"PID + EHIC": {
+				}},
+				"PID + EHIC": {Credentials: model.VerificationPreset{
 					"pid": &model.VerificationPresetScope{
 						ExcludeClaims: []model.VerificationPresetClaim{
 							{Path: []string{"family_name"}},
@@ -225,7 +225,7 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 						},
 					},
 					"ehic": nil, // no overrides, no validations
-				},
+				}},
 			},
 		},
 	}
@@ -334,10 +334,10 @@ func TestUIMetadataPresetFormatFromMetadata(t *testing.T) {
 			},
 		},
 		Verifier: &model.Verifier{
-			Presets: map[string]model.VerificationPreset{
-				"PID": {
+			Presets: map[string]model.PresetDefinition{
+				"PID": {Credentials: model.VerificationPreset{
 					"pid": nil,
-				},
+				}},
 			},
 		},
 	}
@@ -992,14 +992,14 @@ func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
 			},
 		},
 		Verifier: &model.Verifier{
-			Presets: map[string]model.VerificationPreset{
-				"PID": {"pid": nil},
+			Presets: map[string]model.PresetDefinition{
+				"PID": {Credentials: model.VerificationPreset{"pid": nil}},
 				// Its own preset, not folded into "PID": the preset path
 				// resolves vct_values independently of reply.Credentials, so
 				// without a preset covering this scope Meta.VCTValues could
 				// regress for a back-filled VCTM while the credential-info
 				// assertions still passed.
-				"NOVCT": {"novct": nil},
+				"NOVCT": {Credentials: model.VerificationPreset{"novct": nil}},
 			},
 		},
 	}
@@ -1097,9 +1097,9 @@ func TestUIMetadataPresetMsoMdocUsesDoctypeValue(t *testing.T) {
 			},
 		},
 		Verifier: &model.Verifier{
-			Presets: map[string]model.VerificationPreset{
-				"MDL": {"mdl": nil},
-				"PID": {"pid": nil},
+			Presets: map[string]model.PresetDefinition{
+				"MDL": {Credentials: model.VerificationPreset{"mdl": nil}},
+				"PID": {Credentials: model.VerificationPreset{"pid": nil}},
 			},
 		},
 	}
@@ -1131,4 +1131,56 @@ func TestUIMetadataPresetMsoMdocUsesDoctypeValue(t *testing.T) {
 		assert.Empty(t, meta.DoctypeValue,
 			"doctype_value is meaningless for sd-jwt and must not be sent")
 	})
+}
+
+// TestUIMetadataPresetCategoryOrder pins the ordering contract
+// PresetCategoryOrder documents: category display order is derived from
+// each category's lowest PresetDefinition.Order (ties broken alphabetically
+// by category name), independent of the categories' own alphabetical names
+// and independent of Go's alphabetical JSON map-key serialization of
+// Presets itself - a category named "Z" with Order 0 must still sort before
+// a category named "A" with Order 5.
+func TestUIMetadataPresetCategoryOrder(t *testing.T) {
+	ctx := t.Context()
+
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"pid":  {Format: "dc+sd-jwt", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}},
+				"ehic": {Format: "dc+sd-jwt", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"}},
+				"mdl":  {Format: "mso_mdoc", MDDL: &mdoc.MDDLSchema{DocType: "org.iso.18013.5.1.mDL"}},
+			},
+		},
+		Verifier: &model.Verifier{
+			Presets: map[string]model.PresetDefinition{
+				// "Z" category's lowest Order (0) beats "A" category's (5) -
+				// alphabetical category-name sorting would get this backwards.
+				"Zebra preset":    {Category: "Z category", Order: 0, Credentials: model.VerificationPreset{"pid": nil}},
+				"Apple preset":    {Category: "A category", Order: 5, Credentials: model.VerificationPreset{"ehic": nil}},
+				"Featured preset": {Featured: model.BoolPtr(true), Credentials: model.VerificationPreset{"mdl": nil}},
+				"Uncategorized":   {Credentials: model.VerificationPreset{"pid": nil}},
+			},
+		},
+	}
+
+	client, _ := CreateTestClientWithMock(cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, reply)
+
+	assert.Equal(t, []string{"Z category", "A category"}, reply.PresetCategoryOrder,
+		"category order follows each category's lowest Order, not alphabetical category name")
+
+	require.NotNil(t, reply.Presets["Featured preset"])
+	assert.True(t, reply.Presets["Featured preset"].Featured)
+	assert.False(t, reply.Presets["Zebra preset"].Featured)
+
+	assert.Equal(t, "Z category", reply.Presets["Zebra preset"].Category)
+	assert.Equal(t, 0, reply.Presets["Zebra preset"].Order)
+	assert.Equal(t, "A category", reply.Presets["Apple preset"].Category)
+	assert.Equal(t, 5, reply.Presets["Apple preset"].Order)
+	assert.Empty(t, reply.Presets["Uncategorized"].Category,
+		"an uncategorized preset carries no Category, distinct from any named group")
 }

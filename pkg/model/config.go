@@ -528,10 +528,33 @@ type AdminGUI struct {
 }
 
 // VerificationPreset is a map of scope name to optional credential query overrides.
-// The preset's map key (in the parent Presets map) serves as the human-readable label.
 // Each key in this map references a credential_metadata scope (e.g., "pid", "ehic").
 // A nil value means "request all VCTM claims with no overrides".
 type VerificationPreset map[string]*VerificationPresetScope
+
+// PresetDefinition is a single named verification preset - what it requests,
+// plus how it should be organized in the UI. The parent Presets map's key
+// serves as the human-readable label.
+type PresetDefinition struct {
+	// Credentials maps credential_metadata scopes to optional overrides. At
+	// least one scope is required - see VerificationPreset's own doc comment
+	// for what a nil scope value means.
+	Credentials VerificationPreset `yaml:"credentials" validate:"required,dive"`
+	// Category groups this preset under a UI heading shared with every
+	// other preset carrying the same Category string. Presets with no
+	// Category fall into a generic catch-all group. Purely cosmetic - does
+	// not affect matching/verification behavior in any way.
+	Category string `yaml:"category,omitempty"`
+	// Order controls this preset's position within its Category, ascending;
+	// ties (including the default 0) are broken alphabetically by label.
+	// Purely cosmetic.
+	Order int `yaml:"order,omitempty"`
+	// Featured presets are always shown; the rest are revealed
+	// progressively (grouped by Category, initially collapsed) so an
+	// operator with a large preset catalog doesn't force every wallet
+	// integrator to scan a long flat list before finding the common cases.
+	Featured *bool `yaml:"featured,omitempty" default:"false"`
+}
 
 // VerificationPresetScope defines optional overrides for a credential query within a preset.
 type VerificationPresetScope struct {
@@ -600,10 +623,9 @@ type Verifier struct {
 	// When enabled, serves /.well-known/openid-federation as a self-signed JWT.
 	OpenIDFederation *openidfederation.Config `yaml:"federation,omitempty"`
 	// Presets holds predefined verification request presets shown in the UI.
-	// The map key is the human-readable label.
-	// Each preset maps credential_metadata scopes to optional claim overrides.
-	// A nil scope value requests all VCTM claims; use claims/exclude_claims to narrow.
-	Presets map[string]VerificationPreset `yaml:"presets,omitempty" validate:"omitempty,dive,dive" doc_key:"preset label" doc_value_key:"scope" doc_example:"\"PID\":{\"pid\":null},\"PID + EHIC\":{\"pid\":null,\"ehic\":null}"`
+	// The map key is the human-readable label; see PresetDefinition for what
+	// each entry configures.
+	Presets map[string]PresetDefinition `yaml:"presets,omitempty" validate:"omitempty,dive" doc_key:"preset label" doc_example:"\"PID\":{\"credentials\":{\"pid\":null}},\"PID + EHIC\":{\"credentials\":{\"pid\":null,\"ehic\":null},\"category\":\"Combined\"}"`
 	// CombinedPresentation configures combined presentation verification (ARF 3.0 §6.6.3.10).
 	// When multiple credentials are presented, this verifies they belong to the same holder.
 	CombinedPresentation *openid4vp.CombinedPresentationConfig `yaml:"combined_presentation,omitempty"`
