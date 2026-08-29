@@ -94,8 +94,15 @@ const metadataResponseSchema = v.object({
     // actually tolerate that, not v.optional().
     supported_wallets: v.nullish(v.record(v.string(), v.string()), {}),
     dc_api_enabled: v.optional(v.boolean(), false),
+    // preset_category_order lists every distinct category name in display
+    // order - see UIMetadataReply.PresetCategoryOrder's own doc comment for
+    // why this can't just be derived by sorting category names client-side.
+    preset_category_order: v.optional(v.array(v.string()), []),
     presets: v.optional(v.record(v.string(), v.object({
         label: v.string(),
+        category: v.optional(v.string(), ""),
+        order: v.optional(v.number(), 0),
+        featured: v.optional(v.boolean(), false),
         credentials: v.array(v.object({
             id: v.string(),
             format: v.string(),
@@ -232,10 +239,16 @@ Alpine.data("app", () => ({
      /** @type {{ id: string; format: string; vct: string; vct_values?: string[]; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
     credentialAttributes: null,
 
-    /** 
-     * @type {Record<string, object>} 
+    /**
+     * @type {Record<string, object>}
      */
     predefinedPresentationDefinitions: {},
+
+    /** @type {string[]} Category display order - see metadataResponseSchema's own doc comment. */
+    presetCategoryOrder: [],
+
+    /** @type {boolean} Whether the non-featured/categorized preset groups are expanded. */
+    showMorePresets: false,
 
     /** @type {DCQLQuery | null} */
     dcqlQuery: null,
@@ -281,6 +294,46 @@ Alpine.data("app", () => ({
         if (data.presets) {
             this.predefinedPresentationDefinitions = data.presets;
         }
+        this.presetCategoryOrder = data.preset_category_order;
+    },
+
+    /**
+     * Groups predefinedPresentationDefinitions for progressive rendering:
+     * featured presets are always shown; everything else is grouped by
+     * category (an "Other presets" catch-all for uncategorized ones) and
+     * left collapsed behind showMorePresets, so an operator with a large
+     * preset catalog doesn't force every visitor to scan a long flat list
+     * before finding the common cases. Falls back to showing every preset
+     * as a single flat "featured" list when none carry category/featured
+     * metadata, preserving the old flat-grid behavior for a simple config.
+     * @returns {{ featured: [string, any][], groups: { category: string, presets: [string, any][] }[] }}
+     */
+    groupedPresets() {
+        const entries = Object.entries(this.predefinedPresentationDefinitions);
+        const anyMetadata = entries.some(([, p]) => p.featured || p.category);
+        if (!anyMetadata) {
+            return { featured: entries, groups: [] };
+        }
+
+        const featured = entries.filter(([, p]) => p.featured);
+        const rest = entries.filter(([, p]) => !p.featured);
+
+        const byCategory = new Map();
+        const otherCategory = "Other presets";
+        for (const entry of rest) {
+            const category = entry[1].category || otherCategory;
+            if (!byCategory.has(category)) byCategory.set(category, []);
+            byCategory.get(category).push(entry);
+        }
+
+        const orderedCategories = [...this.presetCategoryOrder];
+        if (byCategory.has(otherCategory)) orderedCategories.push(otherCategory);
+
+        const groups = orderedCategories
+            .filter((category) => byCategory.has(category))
+            .map((category) => ({ category, presets: byCategory.get(category) }));
+
+        return { featured, groups };
     },
 
     /** @param {string} id */
