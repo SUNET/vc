@@ -846,7 +846,7 @@ func (c *Client) ProcessCallback(ctx context.Context, req *CallbackRequest) (*Ca
 // GetQRCodeRequest represents a request for a QR code image
 type GetQRCodeRequest struct {
 	SessionID  string `json:"-" uri:"session_id" validate:"required,max=128,printascii"`
-	WalletName string `json:"-" form:"wallet" validate:"omitempty,max=128,printascii"` // Optional: generate QR for a specific web wallet
+	WalletName string `json:"-" form:"wallet" validate:"omitempty,max=128"` // Optional: generate QR for a specific web wallet (display names may contain non-ASCII)
 }
 
 // GetQRCodeResponse contains the QR code image data
