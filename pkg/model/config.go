@@ -91,12 +91,16 @@ type MTLS struct {
 
 // Mongo holds the MongoDB configuration
 type Mongo struct {
-	// URI is the MongoDB connection URI. Required when Common.SQL.Backend is
+	// URI is the MongoDB connection URI. Required by the services that open a
+	// MongoDB store (apigw, registry, verifier) when Common.SQL.Backend is
 	// "mongo" (the default primary-store backend) or when Common.HA.Enable is
 	// true (pkg/cache has no relational backend yet, so HA caching always
-	// uses Mongo regardless of the primary store's backend). Enforced by a
-	// Common-level struct validation rather than a plain "required" tag here,
-	// since the requirement depends on sibling fields of Common, not of Mongo.
+	// uses Mongo regardless of the primary store's backend). Not required by
+	// the issuer, which opens no database at all.
+	//
+	// Enforced in configuration.New rather than by a validation tag here,
+	// because the requirement depends both on sibling fields of Common and on
+	// which service is starting - something a struct validation cannot see.
 	URI string `yaml:"uri" validate:"omitempty" doc_example:"\"mongodb://user:password@mongo:27017/vc\""`
 	// TLS enables TLS for the MongoDB connection.
 	// Can also be enabled via the connection URI parameter "tls=true".
