@@ -939,8 +939,15 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 	if err != nil {
 		// Validate() already decoded this once, so reaching here means the
 		// request changed underneath us rather than that a client sent
-		// something malformed.
-		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidCredentialRequest, ErrorDescription: err.Error()}
+		// something malformed. Answering invalid_credential_request would
+		// tell a wallet to fix a request that is not wrong, and hand it the
+		// decoder's internal wording to act on; this is our invariant that
+		// broke, so it is logged here and reported as server_error.
+		c.log.Error(err, "bbs_commitment decoded during Validate but not here", "scope", scope)
+		return nil, &openid4vci.Error{
+			Err:              openid4vci.ErrServerError,
+			ErrorDescription: "the credential request could not be processed",
+		}
 	}
 
 	vctm := credentialMetadata.GetVCTM()

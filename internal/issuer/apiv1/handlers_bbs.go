@@ -51,14 +51,17 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	ctx, span := c.tracer.Start(ctx, "apiv1:MakeJWP")
 	defer span.End()
 
+	// Explicit codes throughout, so a caller can tell "your request is
+	// wrong" from "this deployment cannot do this" without parsing strings.
+	// A plain error crosses gRPC as codes.Unknown, which conveys neither.
 	if c.bbsKeys == nil {
-		return nil, fmt.Errorf("bbs issuance is not configured on this issuer")
+		return nil, grpcstatus.Error(codes.FailedPrecondition, "bbs issuance is not configured on this issuer")
 	}
 	if len(req.Commitment) == 0 {
-		return nil, fmt.Errorf("commitment is required")
+		return nil, grpcstatus.Error(codes.InvalidArgument, "commitment is required")
 	}
 	if req.VCT == "" {
-		return nil, fmt.Errorf("vct is required")
+		return nil, grpcstatus.Error(codes.InvalidArgument, "vct is required")
 	}
 	// Bounds-checked here, not left to bbs.Issue, for the same reason as
 	// the availability check below: the status list entry is allocated
@@ -77,7 +80,7 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	// be one of the signed messages and so selectively disclosable - and
 	// revocation status a holder can decline to reveal is not revocation.
 	if c.registryClient == nil {
-		return nil, fmt.Errorf("registry client not configured")
+		return nil, grpcstatus.Error(codes.FailedPrecondition, "registry client not configured")
 	}
 	// Checked here rather than left to bbs.Issue's ErrUnavailable, because
 	// the status list entry below is allocated before that call and is not
