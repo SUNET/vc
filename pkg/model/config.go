@@ -91,12 +91,14 @@ type MTLS struct {
 
 // Mongo holds the MongoDB configuration
 type Mongo struct {
-	// URI is the MongoDB connection URI. Required by the services that open a
-	// MongoDB store (apigw, registry, verifier) when Common.SQL.Backend is
-	// "mongo" (the default primary-store backend) or when Common.HA.Enable is
-	// true (pkg/cache has no relational backend yet, so HA caching always
-	// uses Mongo regardless of the primary store's backend). Not required by
-	// the issuer, which opens no database at all.
+	// URI is the MongoDB connection URI. Required by registry
+	// unconditionally, which connects to MongoDB whatever
+	// Common.SQL.Backend says. Required by apigw and verifier when
+	// Common.SQL.Backend is "mongo" (the default primary-store backend) or
+	// when Common.HA.Enable is true (pkg/cache has no relational backend
+	// yet, so HA caching always uses Mongo regardless of the primary
+	// store's backend). Never required by the issuer, which opens no
+	// database at all.
 	//
 	// Enforced in configuration.New rather than by a validation tag here,
 	// because the requirement depends both on sibling fields of Common and on

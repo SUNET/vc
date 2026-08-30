@@ -28,18 +28,35 @@ var servicesRequiringVCTM = map[string]bool{
 	"verifier": true,
 }
 
-// servicesRequiringMongo lists the services that open a MongoDB store, and
-// so need common.mongo.uri. The issuer is deliberately absent: it holds no
-// database at all, and requiring a connection string it will never dial made
-// it impossible to run without one (issue #622).
+// mongoRequirement describes when a service needs common.mongo.uri.
+type mongoRequirement int
+
+const (
+	// mongoNotRequired is the zero value, and covers every service not
+	// listed below - notably the issuer, which opens no database at all
+	// (issue #622).
+	mongoNotRequired mongoRequirement = iota
+
+	// mongoWhenPrimaryStoreUsesIt covers services that can run on a
+	// relational primary store: they need Mongo only when it is the
+	// selected backend, or when HA caching pulls it in regardless.
+	mongoWhenPrimaryStoreUsesIt
+
+	// mongoAlways covers services that connect to Mongo unconditionally,
+	// whatever common.sql.backend says.
+	mongoAlways
+)
+
+// serviceMongoRequirement maps each service to when it needs the URI.
 //
-// The check cannot live with the other config validations in
-// pkg/helpers/validate.go, because a struct validation on Common has no way
-// to know which service is starting.
-var servicesRequiringMongo = map[string]bool{
-	"apigw":    true,
-	"registry": true,
-	"verifier": true,
+// registry is mongoAlways rather than backend-gated: internal/registry/db
+// calls connectMongo unconditionally and has no sqlstore path at all, so
+// gating it on the backend would let registry pass validation with a
+// relational backend and no URI, then fail when it dialled.
+var serviceMongoRequirement = map[string]mongoRequirement{
+	"apigw":    mongoWhenPrimaryStoreUsesIt,
+	"verifier": mongoWhenPrimaryStoreUsesIt,
+	"registry": mongoAlways,
 }
 
 // New parses config file from VC_CONFIG_YAML environment variable.
@@ -151,8 +168,25 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 // Mongo. HA caching has no relational backend yet and always uses Mongo, so
 // it pulls the requirement in regardless of the primary store.
 func checkMongoRequirement(cfg *model.Cfg, serviceName string) error {
-	if !servicesRequiringMongo[serviceName] || cfg.Common == nil {
+	requirement := serviceMongoRequirement[serviceName]
+	if requirement == mongoNotRequired {
 		return nil
+	}
+
+	// Cfg.Common carries no "required" tag, so a config with no common
+	// block at all reaches here. For a service that needs Mongo that is
+	// not "nothing to check" - there is no URI, and letting it through
+	// only moves the failure to the first dereference.
+	if cfg.Common == nil {
+		return fmt.Errorf("common is required for the %s service, which needs common.mongo.uri", serviceName)
+	}
+
+	if cfg.Common.Mongo.URI != "" {
+		return nil
+	}
+
+	if requirement == mongoAlways {
+		return fmt.Errorf("common.mongo.uri is required for the %s service, which connects to MongoDB regardless of common.sql.backend", serviceName)
 	}
 
 	backend := cfg.Common.SQL.Backend
@@ -161,8 +195,6 @@ func checkMongoRequirement(cfg *model.Cfg, serviceName string) error {
 	}
 
 	switch {
-	case cfg.Common.Mongo.URI != "":
-		return nil
 	case backend == "mongo":
 		return fmt.Errorf("common.mongo.uri is required for the %s service when common.sql.backend is %q", serviceName, backend)
 	case cfg.Common.HA.Enable:
