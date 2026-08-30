@@ -62,13 +62,43 @@ ZK_CRED_BBS_REF      ?= v0.0.5
 ZK_CRED_BBS_CHECKOUT := third_party/.zk-cred-bbs-src
 ZK_CRED_BBS_STAGE    := third_party/zk-cred-bbs
 
-# Service Build Configuration (service -> static/dynamic, tags)
-# Format: service_name:cgo_mode:build_tags
+# Service Build Configuration (service -> link mode, tags)
+# Format: service_name:link_mode:build_tags
+#
+# Link modes:
+#   static      pure Go, CGO off, statically linked
+#   cgo-static  CGO on, still statically linked - for a service that must
+#               call into a native library but should keep shipping as one
+#               self-contained binary with no .so to mount or version
+#   dynamic     CGO on, dynamically linked
+#
+# The issuer is cgo-static because blind BBS issuance has no pure-Go path:
+# a BBS secret is a BLS12-381 scalar consumed inside the signing algebra,
+# and the only implementation is zk-cred-bbs's Rust one. Without the
+# bbsnative tag the issuer builds against pkg/bbs's stub, where every call
+# returns ErrUnavailable - so a `format: jwp` credential configuration
+# resolves, passes every check, and then fails at the signer. Wired but
+# dead.
+#
+# netgo and osusergo ride along because CGO is now on: without them Go
+# resolves DNS and user lookups through glibc's NSS, which a statically
+# linked binary cannot do reliably. They restore the pure-Go
+# implementations this service had when it was CGO_ENABLED=0.
+#
+# Requires `make bbs-native-lib` first. The linker still warns about
+# getaddrinfo/getpwuid_r reached from Rust's std - those are in std's
+# networking and home-directory paths, which this crate (pure algebra, no
+# I/O) never calls.
+#
+# Known limitation: the staged library is built for the host architecture,
+# and cgo cross-compilation needs a cross C toolchain, so `docker-build-issuer`
+# only produces an image for the machine it runs on. The other three services
+# are unaffected and still cross-compile freely.
 BUILD_CONFIGS           := \
 	verifier:static: \
 	registry:static: \
 	apigw:static: \
-	issuer:static: \
+	issuer:cgo-static:bbsnative,netgo,osusergo \
 	vc20-test-server:static:
 
 # ==============================================================================
@@ -80,6 +110,7 @@ BUILD_CONFIGS           := \
 	docker-build docker-build-% docker-push docker-push-% docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
 	proto proto-% swagger swagger-% swagger-fmt \
+	bbs-native-lib bbs-native-lib-staged \
 	check-protoc diagram install-tools clean-apt-cache vscode vendor-js update formatting \
 	gosec staticcheck vulncheck \
 	test-pkcs11 \
@@ -147,8 +178,12 @@ help: ## Show this help message
 # ==============================================================================
 
 # Get CGO setting for a service: $(call get-cgo,service)
+define get-mode
+$(word 2,$(subst :, ,$(filter $1:%,$(BUILD_CONFIGS))))
+endef
+
 define get-cgo
-$(if $(filter static,$(word 2,$(subst :, ,$(filter $1:%,$(BUILD_CONFIGS))))),$(CGO_ENABLED_STATIC),$(CGO_ENABLED_DYNAMIC))
+$(if $(filter static,$(call get-mode,$1)),$(CGO_ENABLED_STATIC),$(CGO_ENABLED_DYNAMIC))
 endef
 
 # Get build tags for a service: $(call get-tags,service)
@@ -156,9 +191,16 @@ define get-tags
 $(word 3,$(subst :, ,$(filter $1:%,$(BUILD_CONFIGS))))
 endef
 
+# Docker build tags for a service: the manual GO_BUILD_TAGS override when
+# set, otherwise whatever BUILD_CONFIGS declares. One source of truth, so an
+# image cannot quietly ship without a tag `make build-<service>` compiles in.
+define docker-tags
+$(if $(GO_BUILD_TAGS),$(GO_BUILD_TAGS),$(call get-tags,$1))
+endef
+
 # Get LDFLAGS for a service: $(call get-ldflags,service)
 define get-ldflags
-$(if $(filter static,$(word 2,$(subst :, ,$(filter $1:%,$(BUILD_CONFIGS))))),$(LDFLAGS),$(LDFLAGS_DYNAMIC))
+$(if $(filter static cgo-static,$(call get-mode,$1)),$(LDFLAGS),$(LDFLAGS_DYNAMIC))
 endef
 
 # Docker image tag: $(call docker-tag,service,version)
@@ -271,6 +313,12 @@ zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native Z
 	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi"/libzk_cred_longfellow.* "$(ZK_CRED_LONGFELLOW_STAGE)/lib/"
 	@echo "Staged zk-cred-longfellow's Go C-ABI lib + header in $(ZK_CRED_LONGFELLOW_STAGE)"
 	@echo "Build/test with: CGO_ENABLED=1 LD_LIBRARY_PATH=\$$(pwd)/$(ZK_CRED_LONGFELLOW_STAGE)/lib go {build,test} -tags $(ZKNATIVE_TAG) ./..."
+
+bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not staged
+	@test -f "$(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a" || ( \
+		echo "zk-cred-bbs is not staged: the issuer links it for blind BBS issuance." >&2; \
+		echo "Run 'make bbs-native-lib' first (needs network and a Rust toolchain)." >&2; \
+		exit 1)
 
 bbs-native-lib: ## Fetch/build zk-cred-bbs's Go C-ABI library for blind BBS issuance
 	$(info Fetching/building zk-cred-bbs's go-cabi target from $(ZK_CRED_BBS_REPO)@$(ZK_CRED_BBS_REF))
@@ -542,11 +590,12 @@ docker-build: $(addprefix docker-build-,$(SERVICES)) ## Build all Docker images
 
 # Generate docker-build targets for workers
 define DOCKER_BUILD_WORKER_TEMPLATE
-docker-build-$(1): _check-reserved-tag ## Build Docker image for $(1)
+docker-build-$(1): _check-reserved-tag $$(if $$(filter cgo-static dynamic,$$(call get-mode,$(1))),bbs-native-lib-staged) ## Build Docker image for $(1)
 	$$(info Docker Building $(1) with tag: $$(VERSION))
 	docker build --build-arg SERVICE_NAME=$(1) \
 		$$(if $$(filter apigw,$(1)),--build-arg BUILDTAG=$$(VERSION)) \
-		$$(if $$(GO_BUILD_TAGS),--build-arg GO_BUILD_TAGS=$$(GO_BUILD_TAGS)) \
+		$$(if $$(call docker-tags,$(1)),--build-arg GO_BUILD_TAGS="$$(call docker-tags,$(1))") \
+		$$(if $$(filter-out static,$$(call get-mode,$(1))),--build-arg CGO_ENABLED=1) \
 		$$(if $$(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$$(GOBUILD_IMAGE)) \
 		--tag $$(call docker-tag,$(1),$$(VERSION)) \
 		--file dockerfiles/worker .

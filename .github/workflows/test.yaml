@@ -158,7 +158,15 @@ jobs:
       - name: Run the bbsnative-tagged tests
         run: make test-bbsnative
 
-      # The default build must keep working without the tag: vc's shipped
-      # binaries are CGO_ENABLED=0 and fully static.
+      # Compiling the tests is not the same as compiling the binary that
+      # ships. The issuer is the binary that links this library, and its
+      # link step - cgo objects into a statically linked executable - is
+      # reached by nothing else here.
+      - name: Build the issuer
+        run: make build-issuer
+
+      # pkg/bbs must still compile and pass without the tag. Every other
+      # service is CGO_ENABLED=0 and fully static, and the package is
+      # imported by openid4vci, which they all use.
       - name: Check the untagged, static build still compiles
         run: CGO_ENABLED=0 go build ./pkg/bbs/... && go test ./pkg/bbs/...
