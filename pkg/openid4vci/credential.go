@@ -474,27 +474,11 @@ func (c *CredentialRequest) validateBBS() error {
 		return reject("bbs_commitment is not a valid base64url-encoded commitment")
 	}
 
-	if len(c.BBSCommittedClaims) > bbs.MaxMessages {
-		return reject(fmt.Sprintf(
-			"bbs_committed_claims has %d entries, over the %d limit",
-			len(c.BBSCommittedClaims), bbs.MaxMessages))
-	}
-
-	seen := make(map[string]struct{}, len(c.BBSCommittedClaims))
-	for _, pointer := range c.BBSCommittedClaims {
-		// A pointer is what places a committed message in the claim map. An
-		// empty one names the whole document, and RFC 6901 requires the
-		// rest to start with "/", so neither can identify a claim.
-		if pointer == "" || !strings.HasPrefix(pointer, "/") {
-			return reject("bbs_committed_claims entries must be RFC 6901 pointers beginning with '/'")
-		}
-		// Two messages cannot occupy one position in the claim map, so a
-		// duplicate means the header would describe fewer claims than the
-		// signature covers.
-		if _, duplicate := seen[pointer]; duplicate {
-			return reject("bbs_committed_claims contains a duplicate pointer: " + pointer)
-		}
-		seen[pointer] = struct{}{}
+	if err := bbs.ValidateHolderPointers(c.BBSCommittedClaims); err != nil {
+		// One implementation of the rules, in pkg/bbs, prefixed with the
+		// name of the member this layer actually received - the OID4VCI
+		// client sent `bbs_committed_claims`, not `holder_pointers`.
+		return reject("bbs_committed_claims " + err.Error())
 	}
 
 	return nil

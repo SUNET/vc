@@ -3,6 +3,7 @@ package bbs
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -22,6 +23,39 @@ import (
 // the cheap abuse early, with a message naming the field, and the crate
 // still refuses whatever gets past it.
 const MaxMessages = 512
+
+// ValidateHolderPointers checks a holder pointer list against the rules the
+// credential's claim map depends on, so a caller can refuse a request before
+// paying for it.
+//
+// The messages are phrased to read after the caller's own field name -
+// `bbs_committed_claims` on the OID4VCI request, `holder_pointers` on the
+// gRPC one - because that is the name whoever has to fix it actually sent.
+// One implementation, because these are correctness rules and not style:
+// each of them describes a credential that cannot be built, and two copies
+// is two chances to disagree about which.
+func ValidateHolderPointers(pointers []string) error {
+	if len(pointers) > MaxMessages {
+		return fmt.Errorf("has %d entries, over the %d limit", len(pointers), MaxMessages)
+	}
+	seen := make(map[string]struct{}, len(pointers))
+	for _, pointer := range pointers {
+		// A pointer is what places a committed message in the claim map. An
+		// empty one names the whole document, and RFC 6901 requires the rest
+		// to start with "/", so neither can identify a claim.
+		if pointer == "" || !strings.HasPrefix(pointer, "/") {
+			return errors.New("must contain RFC 6901 pointers beginning with '/'")
+		}
+		// Two messages cannot occupy one position in the claim map, so a
+		// duplicate means the header would describe fewer claims than the
+		// signature covers.
+		if _, duplicate := seen[pointer]; duplicate {
+			return fmt.Errorf("contains a duplicate pointer: %s", pointer)
+		}
+		seen[pointer] = struct{}{}
+	}
+	return nil
+}
 
 // IssueParams is everything an issuer needs to produce a BBS credential.
 type IssueParams struct {
@@ -103,8 +137,8 @@ func Issue(issuer Issuer, p IssueParams) (string, error) {
 	if p.Vct == "" {
 		return "", fmt.Errorf("bbs: vct is required")
 	}
-	if len(p.HolderPointers) > MaxMessages {
-		return "", fmt.Errorf("bbs: %d holder claim pointers, over the %d limit", len(p.HolderPointers), MaxMessages)
+	if err := ValidateHolderPointers(p.HolderPointers); err != nil {
+		return "", fmt.Errorf("bbs: holder claim pointer list %w", err)
 	}
 	return issuer.Issue(p)
 }

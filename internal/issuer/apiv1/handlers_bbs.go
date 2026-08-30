@@ -76,14 +76,14 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 			return nil, grpcstatus.Error(codes.InvalidArgument, "document_data must be a JSON object")
 		}
 	}
-	// Bounds-checked here, not left to bbs.Issue, for the same reason as
-	// the availability check below: the status list entry is allocated
-	// before signing and never handed back. holder_pointers is entirely
-	// caller-controlled, so a request that cannot possibly be signed would
-	// otherwise cost a revocation entry to find that out.
-	if len(req.HolderPointers) > bbs.MaxMessages {
-		return nil, grpcstatus.Errorf(codes.InvalidArgument,
-			"holder_pointers has %d entries, over the %d limit", len(req.HolderPointers), bbs.MaxMessages)
+	// Validated here, not left to bbs.Issue, for the same reason as the
+	// availability check below: the status list entry is allocated before
+	// signing and never handed back. holder_pointers is entirely
+	// caller-controlled - count, syntax and duplicates alike - so a request
+	// that cannot possibly be signed would otherwise cost a revocation
+	// entry to find that out.
+	if err := bbs.ValidateHolderPointers(req.HolderPointers); err != nil {
+		return nil, grpcstatus.Error(codes.InvalidArgument, "holder_pointers "+err.Error())
 	}
 
 	// Same status list allocation the SD-JWT path performs, and for the

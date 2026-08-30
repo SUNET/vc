@@ -122,29 +122,41 @@ func TestMakeJWPDoesNotConsumeAStatusEntryWithoutNativeSupport(t *testing.T) {
 // Same argument as the availability check, one layer up: `holder_pointers` is
 // entirely caller-controlled, and a list that cannot possibly be signed must
 // not cost a revocation entry to discover.
-func TestMakeJWPRejectsTooManyHolderPointersWithoutConsumingAStatusEntry(t *testing.T) {
-	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
-	registry := &mockRegistryClient{}
-	c.registryClient = registry
-
-	pointers := make([]string, bbs.MaxMessages+1)
-	for i := range pointers {
-		pointers[i] = fmt.Sprintf("/claim%d", i)
+func TestMakeJWPRejectsUnusableHolderPointersWithoutConsumingAStatusEntry(t *testing.T) {
+	overLimit := make([]string, bbs.MaxMessages+1)
+	for i := range overLimit {
+		overLimit[i] = fmt.Sprintf("/claim%d", i)
 	}
 
-	_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
-		Commitment:     []byte{1, 2, 3},
-		VCT:            "urn:example:pid",
-		HolderPointers: pointers,
-	})
-	if err == nil {
-		t.Fatal("a pointer list over the limit must be rejected")
-	}
-	if got := grpcstatus.Code(err); got != codes.InvalidArgument {
-		t.Fatalf("want codes.InvalidArgument, got %v (%v)", got, err)
-	}
-	if registry.index != 0 {
-		t.Fatalf("a refused issuance must consume no status entry, %d consumed", registry.index)
+	for _, tc := range []struct {
+		name     string
+		pointers []string
+	}{
+		{"over the limit", overLimit},
+		{"empty pointer", []string{""}},
+		{"no leading slash", []string{"device_pin_hash"}},
+		{"duplicate", []string{"/a", "/a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+			registry := &mockRegistryClient{}
+			c.registryClient = registry
+
+			_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+				Commitment:     []byte{1, 2, 3},
+				VCT:            "urn:example:pid",
+				HolderPointers: tc.pointers,
+			})
+			if err == nil {
+				t.Fatalf("a %s pointer list must be rejected", tc.name)
+			}
+			if got := grpcstatus.Code(err); got != codes.InvalidArgument {
+				t.Fatalf("want codes.InvalidArgument, got %v (%v)", got, err)
+			}
+			if registry.index != 0 {
+				t.Fatalf("a refused issuance must consume no status entry, %d consumed", registry.index)
+			}
+		})
 	}
 }
 
