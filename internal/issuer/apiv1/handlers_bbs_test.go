@@ -20,6 +20,10 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 )
 
+// A minimal well-formed claim set, so a test aiming at some other refusal
+// does not trip the document_data guard first.
+var validDocumentData = []byte(`{"given_name":"Ada"}`)
+
 func bbsClient(t *testing.T, keys *bbsKeyPair) *Client {
 	t.Helper()
 	tracer, err := trace.NewForTesting(context.Background(), "test", logger.NewSimple("trace"))
@@ -44,8 +48,9 @@ func bbsClient(t *testing.T, keys *bbsKeyPair) *Client {
 // by the holder at presentation time.
 func TestMakeJWPWithoutAConfiguredKey(t *testing.T) {
 	_, err := bbsClient(t, nil).MakeJWP(context.Background(), &CreateJWPRequest{
-		Commitment: []byte{1, 2, 3},
-		VCT:        "urn:example:pid",
+		Commitment:   []byte{1, 2, 3},
+		VCT:          "urn:example:pid",
+		DocumentData: validDocumentData,
 	})
 	if err == nil {
 		t.Fatal("an unconfigured issuer must refuse to issue")
@@ -83,8 +88,9 @@ func TestMakeJWPRequiresARegistry(t *testing.T) {
 	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
 
 	_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
-		Commitment: []byte{1, 2, 3},
-		VCT:        "urn:example:pid",
+		Commitment:   []byte{1, 2, 3},
+		VCT:          "urn:example:pid",
+		DocumentData: validDocumentData,
 	})
 	if err == nil || !strings.Contains(err.Error(), "registry") {
 		t.Fatalf("issuance without a registry must fail loudly, got: %v", err)
@@ -105,8 +111,9 @@ func TestMakeJWPDoesNotConsumeAStatusEntryWithoutNativeSupport(t *testing.T) {
 	c.registryClient = registry
 
 	_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
-		Commitment: []byte{1, 2, 3},
-		VCT:        "urn:example:pid",
+		Commitment:   []byte{1, 2, 3},
+		VCT:          "urn:example:pid",
+		DocumentData: validDocumentData,
 	})
 	if err == nil {
 		t.Fatal("an issuer with no native support must refuse to issue")
@@ -145,6 +152,7 @@ func TestMakeJWPRejectsUnusableHolderPointersWithoutConsumingAStatusEntry(t *tes
 			_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
 				Commitment:     []byte{1, 2, 3},
 				VCT:            "urn:example:pid",
+				DocumentData:   validDocumentData,
 				HolderPointers: tc.pointers,
 			})
 			if err == nil {
@@ -164,13 +172,18 @@ func TestMakeJWPRejectsUnusableHolderPointersWithoutConsumingAStatusEntry(t *tes
 // not a JSON object cannot be signed - and the same "never handed back"
 // argument applies: discovering it inside the native signer costs a status
 // list entry.
-func TestMakeJWPRejectsNonObjectDocumentDataWithoutConsumingAStatusEntry(t *testing.T) {
+func TestMakeJWPRejectsUnusableDocumentDataWithoutConsumingAStatusEntry(t *testing.T) {
 	for _, tc := range []struct{ name, data string }{
 		{"array", `["not","an","object"]`},
 		{"string", `"nope"`},
 		{"number", `7`},
 		{"null", `null`},
 		{"not json", `{`},
+		{"absent", ``},
+		// The crate's own vectors assert this one - "no claims to sign" -
+		// so a credential with nothing in its claim map is not a smaller
+		// credential, it is not a credential.
+		{"empty object", `{}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})

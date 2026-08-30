@@ -64,17 +64,13 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	if req.VCT == "" {
 		return nil, grpcstatus.Error(codes.InvalidArgument, "vct is required")
 	}
-	// Same reason as the bound below: the issuer's claims become the
-	// credential's claim map, so anything that is not a JSON object cannot
-	// be signed - and finding that out inside the native signer costs a
-	// status list entry that is never handed back. `null` is rejected with
-	// the rest: it unmarshals into a map without complaint but is not an
-	// object.
-	if len(req.DocumentData) > 0 {
-		var probe map[string]json.RawMessage
-		if err := json.Unmarshal(req.DocumentData, &probe); err != nil || probe == nil {
-			return nil, grpcstatus.Error(codes.InvalidArgument, "document_data must be a JSON object")
-		}
+	// Same reason as the pointer rules below: the issuer's claims become the
+	// credential's claim map, so claims that are not a JSON object - or an
+	// object with nothing in it - cannot be signed, and finding that out
+	// inside the native signer costs a status list entry that is never
+	// handed back.
+	if err := bbs.ValidateDocumentData(req.DocumentData); err != nil {
+		return nil, grpcstatus.Error(codes.InvalidArgument, "document_data "+err.Error())
 	}
 	// Validated here, not left to bbs.Issue, for the same reason as the
 	// availability check below: the status list entry is allocated before

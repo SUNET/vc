@@ -57,6 +57,28 @@ func ValidateHolderPointers(pointers []string) error {
 	return nil
 }
 
+// ValidateDocumentData checks the issuer's own claims against what the
+// credential can actually be built from.
+//
+// A JSON object, and a non-empty one. The object part is structural - the
+// claims become the credential's claim map. The non-empty part is less
+// obvious and is the native crate's rule, asserted by its own vector tests:
+// a credential with nothing to sign is not a smaller credential, it is not
+// a credential. Checked here so a caller can refuse before paying for a
+// status list entry, rather than learning it from the signer afterwards.
+func ValidateDocumentData(data json.RawMessage) error {
+	var claims map[string]json.RawMessage
+	if err := json.Unmarshal(data, &claims); err != nil || claims == nil {
+		// `null` unmarshals into a map without complaint and is still not
+		// an object, so the nil check is not redundant.
+		return errors.New("must be a JSON object")
+	}
+	if len(claims) == 0 {
+		return errors.New("must carry at least one claim")
+	}
+	return nil
+}
+
 // IssueParams is everything an issuer needs to produce a BBS credential.
 type IssueParams struct {
 	// Suite is the key binding construction. Must match what the holder
@@ -139,6 +161,9 @@ func Issue(issuer Issuer, p IssueParams) (string, error) {
 	}
 	if err := ValidateHolderPointers(p.HolderPointers); err != nil {
 		return "", fmt.Errorf("bbs: holder claim pointer list %w", err)
+	}
+	if err := ValidateDocumentData(p.DocumentData); err != nil {
+		return "", fmt.Errorf("bbs: document data %w", err)
 	}
 	return issuer.Issue(p)
 }

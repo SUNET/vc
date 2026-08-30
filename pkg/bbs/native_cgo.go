@@ -61,10 +61,6 @@ func (n native) VerifyProof(suite Suite, publicKey, proof, header, presentationH
 }
 
 func (n native) Issue(p IssueParams) (string, error) {
-	claims := p.DocumentData
-	if len(claims) == 0 {
-		claims = json.RawMessage("{}")
-	}
 	// Marshaled here rather than taken pre-encoded so the empty case — a
 	// credential with no holder-committed claims — does not have to be
 	// spelled "[]" by every caller.
@@ -84,7 +80,7 @@ func (n native) Issue(p IssueParams) (string, error) {
 	}
 
 	jwp, status, msg := n.backend.Issue(uint32(p.Suite), p.SecretKey, p.PublicKey, p.Commitment,
-		p.Vct, claims, pointers, p.ExtraHeader, uint32(p.KeyBinding))
+		p.Vct, p.DocumentData, pointers, p.ExtraHeader, uint32(p.KeyBinding))
 	if status != bbsnative.StatusOK {
 		return "", classify(status, msg)
 	}

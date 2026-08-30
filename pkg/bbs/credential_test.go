@@ -110,8 +110,9 @@ func TestIssuePassesEverythingThrough(t *testing.T) {
 func TestIssuePropagatesTheIssuersError(t *testing.T) {
 	sentinel := errors.New("native said no")
 	_, err := Issue(&recordingIssuer{err: sentinel}, IssueParams{
-		Commitment: []byte{1},
-		Vct:        "https://example.test/id-card",
+		Commitment:   []byte{1},
+		Vct:          "https://example.test/id-card",
+		DocumentData: json.RawMessage(`{"given_name":"Ada"}`),
 	})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("err = %v, want the issuer's own", err)
