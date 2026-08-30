@@ -60,6 +60,15 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	if req.VCT == "" {
 		return nil, fmt.Errorf("vct is required")
 	}
+	// Bounds-checked here, not left to bbs.Issue, for the same reason as
+	// the availability check below: the status list entry is allocated
+	// before signing and never handed back. holder_pointers is entirely
+	// caller-controlled, so a request that cannot possibly be signed would
+	// otherwise cost a revocation entry to find that out.
+	if len(req.HolderPointers) > bbs.MaxMessages {
+		return nil, grpcstatus.Errorf(codes.InvalidArgument,
+			"holder_pointers has %d entries, over the %d limit", len(req.HolderPointers), bbs.MaxMessages)
+	}
 
 	// Same status list allocation the SD-JWT path performs, and for the
 	// same reason: a credential that cannot be revoked is a credential

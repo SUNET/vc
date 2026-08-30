@@ -60,7 +60,17 @@ func (n native) Issue(p IssueParams) (string, error) {
 	// Marshaled here rather than taken pre-encoded so the empty case — a
 	// credential with no holder-committed claims — does not have to be
 	// spelled "[]" by every caller.
-	pointers, err := json.Marshal(p.HolderPointers)
+	//
+	// Which only works if nil actually encodes as `[]`, and it does not:
+	// `json.Marshal` writes `null` for a nil slice, and the native side is
+	// given a JSON array. A credential committing only key binding keys and
+	// no claims at all — the very case the paragraph above promises to
+	// handle — is exactly when this field is nil.
+	holderPointers := p.HolderPointers
+	if holderPointers == nil {
+		holderPointers = []string{}
+	}
+	pointers, err := json.Marshal(holderPointers)
 	if err != nil {
 		return "", fmt.Errorf("%w: encoding holder pointers: %v", ErrInternal, err)
 	}
