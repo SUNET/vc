@@ -146,6 +146,41 @@ func TestMakeJWPRejectsTooManyHolderPointersWithoutConsumingAStatusEntry(t *test
 	}
 }
 
+// The issuer's claims become the credential's claim map, so anything that is
+// not a JSON object cannot be signed - and the same "never handed back"
+// argument applies: discovering it inside the native signer costs a status
+// list entry.
+func TestMakeJWPRejectsNonObjectDocumentDataWithoutConsumingAStatusEntry(t *testing.T) {
+	for _, tc := range []struct{ name, data string }{
+		{"array", `["not","an","object"]`},
+		{"string", `"nope"`},
+		{"number", `7`},
+		{"null", `null`},
+		{"not json", `{`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+			registry := &mockRegistryClient{}
+			c.registryClient = registry
+
+			_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+				Commitment:   []byte{1, 2, 3},
+				VCT:          "urn:example:pid",
+				DocumentData: []byte(tc.data),
+			})
+			if err == nil {
+				t.Fatalf("accepted %s as document_data", tc.name)
+			}
+			if got := grpcstatus.Code(err); got != codes.InvalidArgument {
+				t.Fatalf("want codes.InvalidArgument, got %v (%v)", got, err)
+			}
+			if registry.index != 0 {
+				t.Fatalf("a refused issuance must consume no status entry, %d consumed", registry.index)
+			}
+		})
+	}
+}
+
 // Revocation status and issuer identity go in the header, not the claims.
 //
 // A claim is one of the signed messages and therefore selectively
