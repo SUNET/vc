@@ -9,9 +9,12 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
+	"github.com/SUNET/vc/pkg/bbs"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/trace"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 func bbsClient(t *testing.T, keys *bbsKeyPair) *Client {
@@ -82,6 +85,34 @@ func TestMakeJWPRequiresARegistry(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "registry") {
 		t.Fatalf("issuance without a registry must fail loudly, got: %v", err)
+	}
+}
+
+// A status list entry is consumed before anything is signed, and it is never
+// handed back. An issuer configured with BBS keys but built without
+// `-tags bbsnative` would therefore burn one registry entry per request while
+// never issuing a credential - a slow leak in the revocation list rather than
+// a visible failure. The availability check has to come first.
+func TestMakeJWPDoesNotConsumeAStatusEntryWithoutNativeSupport(t *testing.T) {
+	if bbs.Available() {
+		t.Skip("this is the untagged build's failure mode; native support is compiled in")
+	}
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+	registry := &mockRegistryClient{}
+	c.registryClient = registry
+
+	_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+		Commitment: []byte{1, 2, 3},
+		VCT:        "urn:example:pid",
+	})
+	if err == nil {
+		t.Fatal("an issuer with no native support must refuse to issue")
+	}
+	if got := grpcstatus.Code(err); got != codes.Unimplemented {
+		t.Fatalf("want codes.Unimplemented, got %v (%v)", got, err)
+	}
+	if registry.index != 0 {
+		t.Fatalf("a refused issuance must consume no status entry, %d consumed", registry.index)
 	}
 }
 

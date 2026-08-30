@@ -70,6 +70,15 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	if c.registryClient == nil {
 		return nil, fmt.Errorf("registry client not configured")
 	}
+	// Checked here rather than left to bbs.Issue's ErrUnavailable, because
+	// the status list entry below is allocated before that call and is not
+	// handed back when it fails. An issuer configured with BBS keys but
+	// built without `-tags bbsnative` would burn one registry entry per
+	// request while never issuing anything - a slow leak in the revocation
+	// list rather than a visible failure.
+	if !bbs.Available() {
+		return nil, grpcstatus.Error(codes.Unimplemented, "bbs issuance is not available on this issuer")
+	}
 	statusEntry, err := c.registryClient.TokenStatusListAddStatus(ctx, &apiv1_registry.TokenStatusListAddStatusRequest{
 		Status: 0, // VALID status for new credential
 	})
