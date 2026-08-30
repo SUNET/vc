@@ -65,7 +65,7 @@ message MakeJWPRequest {
     bytes document_data = 2;      // JSON encoded issuer claims
     bytes commitment = 3;         // Holder's commitment_with_proof, raw bytes (already base64url-decoded)
     repeated string holder_pointers = 4; // RFC 6901 pointers naming the committed claims, in message order
-    string vct = 5;               // SD-JWT VC type identifier
+    string vct = 5;               // Credential type identifier, stamped into the JWP issuer header. Spelled the way SD-JWT VC spells it, on purpose: one type identifier across formats.
     bool key_binding = 6;         // Whether the commitment carries key binding keys
 }
 

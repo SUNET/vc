@@ -332,7 +332,7 @@ type MakeJWPRequest struct {
 	DocumentData   []byte                 `protobuf:"bytes,2,opt,name=document_data,json=documentData,proto3" json:"document_data,omitempty"`       // JSON encoded issuer claims
 	Commitment     []byte                 `protobuf:"bytes,3,opt,name=commitment,proto3" json:"commitment,omitempty"`                               // Holder's commitment_with_proof, raw bytes (already base64url-decoded)
 	HolderPointers []string               `protobuf:"bytes,4,rep,name=holder_pointers,json=holderPointers,proto3" json:"holder_pointers,omitempty"` // RFC 6901 pointers naming the committed claims, in message order
-	Vct            string                 `protobuf:"bytes,5,opt,name=vct,proto3" json:"vct,omitempty"`                                             // SD-JWT VC type identifier
+	Vct            string                 `protobuf:"bytes,5,opt,name=vct,proto3" json:"vct,omitempty"`                                             // Credential type identifier, stamped into the JWP issuer header. Spelled the way SD-JWT VC spells it, on purpose: one type identifier across formats.
 	KeyBinding     bool                   `protobuf:"varint,6,opt,name=key_binding,json=keyBinding,proto3" json:"key_binding,omitempty"`            // Whether the commitment carries key binding keys
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
