@@ -10,6 +10,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/bbs"
+	"github.com/SUNET/vc/pkg/tokenstatuslist"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 )
@@ -111,8 +112,20 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
 	}
 
+	// The entry above is now allocated and marked VALID for a credential
+	// that does not exist yet. Every path from here that fails leaves it
+	// that way, so each one hands it back: an entry saying VALID with
+	// nothing referencing it is not exploitable - no credential carries
+	// that index - but it is a wrong answer sitting in a list whose whole
+	// job is answering that question, and it accumulates.
+	//
+	// Best-effort by construction: the issuance has already failed, and a
+	// registry that cannot be reached to invalidate could not have been
+	// reached to allocate either. Logged, never returned in place of the
+	// real error.
 	extraHeader, err := c.bbsIssuerHeader(statusEntry)
 	if err != nil {
+		c.invalidateStatusEntry(ctx, statusEntry)
 		return nil, err
 	}
 
@@ -142,6 +155,7 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 		// a caller which check failed and how - and did it under whatever
 		// gRPC code the transport picked by default.
 		c.log.Error(err, "failed to issue bbs credential", "scope", req.Scope, "vct", req.VCT)
+		c.invalidateStatusEntry(ctx, statusEntry)
 		switch {
 		case errors.Is(err, bbs.ErrVerification):
 			return nil, grpcstatus.Error(codes.InvalidArgument, "commitment did not verify")
@@ -161,6 +175,30 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 		TokenStatusListSection: statusEntry.GetSection(),
 		TokenStatusListIndex:   statusEntry.GetIndex(),
 	}, nil
+}
+
+// invalidateStatusEntry hands back a status list entry allocated for a
+// credential that was never issued.
+//
+// The entry is allocated and marked VALID before signing, so every failure
+// after that point leaves a list saying VALID about a credential that does
+// not exist. Not exploitable - nothing carries that index - but it is a
+// wrong answer sitting in a list whose entire job is answering that
+// question, and it accumulates one per failed issuance.
+//
+// Best-effort by construction, and it has to be: the issuance has already
+// failed, and a registry unreachable for this call was reachable for the
+// allocation moments ago, so there is nothing better to do than say so.
+// Logged, never returned in place of the real error.
+func (c *Client) invalidateStatusEntry(ctx context.Context, entry *apiv1_registry.TokenStatusListAddStatusReply) {
+	if _, err := c.registryClient.TokenStatusListUpdateStatus(ctx, &apiv1_registry.TokenStatusListUpdateStatusRequest{
+		Section: entry.GetSection(),
+		Index:   entry.GetIndex(),
+		Status:  uint32(tokenstatuslist.StatusInvalid),
+	}); err != nil {
+		c.log.Error(err, "could not invalidate the status entry of a failed bbs issuance",
+			"section", entry.GetSection(), "index", entry.GetIndex())
+	}
 }
 
 // bbsIssuerHeader builds the issuer header members the container does not

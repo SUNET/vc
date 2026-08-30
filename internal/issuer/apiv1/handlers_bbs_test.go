@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/SUNET/vc/pkg/bbs"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/tokenstatuslist"
 	"github.com/SUNET/vc/pkg/trace"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -179,6 +181,47 @@ func TestMakeJWPRejectsNonObjectDocumentDataWithoutConsumingAStatusEntry(t *test
 			}
 		})
 	}
+}
+
+// An entry is allocated and marked VALID before signing, so a failure after
+// that point leaves the list asserting VALID about a credential that does not
+// exist. Not exploitable - nothing carries the index - but it is a wrong
+// answer in a list whose entire job is answering that question, and it
+// accumulates one per failed issuance.
+//
+// Exercised directly rather than through MakeJWP: the only failure that
+// reaches it is bbs.Issue returning, which needs the `bbsnative` build and
+// the crate's header, neither of which a plain checkout has.
+func TestInvalidateStatusEntryHandsTheEntryBack(t *testing.T) {
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+	registry := &mockRegistryClient{}
+	c.registryClient = registry
+
+	c.invalidateStatusEntry(context.Background(), &apiv1_registry.TokenStatusListAddStatusReply{
+		Section: 7,
+		Index:   42,
+	})
+
+	if len(registry.updates) != 1 {
+		t.Fatalf("want exactly one status update, got %d", len(registry.updates))
+	}
+	got := registry.updates[0]
+	if got.GetSection() != 7 || got.GetIndex() != 42 {
+		t.Fatalf("wrong entry invalidated: section %d index %d", got.GetSection(), got.GetIndex())
+	}
+	if got.GetStatus() != uint32(tokenstatuslist.StatusInvalid) {
+		t.Fatalf("want StatusInvalid (%d), got %d", tokenstatuslist.StatusInvalid, got.GetStatus())
+	}
+}
+
+// The issuance has already failed by the time this runs, so a registry that
+// cannot be reached must not turn one failure into two - the caller still has
+// to receive the real error.
+func TestInvalidateStatusEntrySwallowsRegistryFailure(t *testing.T) {
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+	c.registryClient = &mockRegistryClient{updateErr: errors.New("registry unreachable")}
+
+	c.invalidateStatusEntry(context.Background(), &apiv1_registry.TokenStatusListAddStatusReply{Section: 1, Index: 2})
 }
 
 // Revocation status and issuer identity go in the header, not the claims.

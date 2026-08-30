@@ -25,10 +25,20 @@
 // # Availability
 //
 // Without the `bbsnative` tag, [Native] returns an implementation whose
-// every method fails with [ErrUnavailable]. The default vc builds are
-// CGO_ENABLED=0 and fully static and must stay that way; see the
-// repository Makefile's `bbs-native-lib` target and the equivalent
-// reasoning for `zknative`.
+// every method fails with [ErrUnavailable].
+//
+// The issuer builds with the tag by default, because blind BBS has no
+// pure-Go path and an issuer built without it resolves a `format: jwp`
+// credential configuration, passes every check, and then fails at the
+// signer — wired but dead. It stays statically linked while doing it:
+// `cgo-static` in the Makefile's BUILD_CONFIGS, with `netgo` and
+// `osusergo` restoring the pure-Go DNS and user lookups that turning CGO
+// on would otherwise hand to glibc's NSS.
+//
+// Every other service stays CGO_ENABLED=0 and fully static, and must —
+// this tag buys a native dependency, and nothing that does not need blind
+// BBS should pay for it. See the repository Makefile's `bbs-native-lib`
+// target and the equivalent reasoning for `zknative`.
 package bbs
 
 import (
