@@ -393,3 +393,33 @@ func TestIssueRejectsUnverifiableCommitment(t *testing.T) {
 		t.Fatalf("want ErrVerification, got %v", err)
 	}
 }
+
+// The real derivation, against the reference vectors' own key pair.
+//
+// The width checks in keypair_test.go run without the native library; this
+// is the half that decides, and it is checked against an (sk, pk) pair a
+// separate implementation produced rather than one this code generated.
+func TestSkToPkAgreesWithTheReferenceVectors(t *testing.T) {
+	v := load(t)
+	sk := unhex(t, v.HardwareKeybind.SK)
+	pk := unhex(t, v.HardwareKeybind.PK)
+
+	derived, err := Native().SkToPk(sk)
+	if err != nil {
+		t.Fatalf("SkToPk: %v", err)
+	}
+	if hex.EncodeToString(derived) != v.HardwareKeybind.PK {
+		t.Fatalf("derived public key\n got: %s\nwant: %s", hex.EncodeToString(derived), v.HardwareKeybind.PK)
+	}
+
+	if err := KeyPairMatches(Native(), sk, pk); err != nil {
+		t.Fatalf("the reference pair must validate: %v", err)
+	}
+	// And the check must say no. Flipping the last octet keeps the width
+	// and the point encoding plausible; only the derivation catches it.
+	wrong := append([]byte(nil), pk...)
+	wrong[len(wrong)-1] ^= 0x01
+	if err := KeyPairMatches(Native(), sk, wrong); err == nil {
+		t.Fatal("a public key one bit away from the right one must be rejected")
+	}
+}

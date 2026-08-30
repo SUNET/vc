@@ -24,6 +24,8 @@ func (unavailable) VerifyProof(Suite, []byte, []byte, []byte, []byte, int, [][]b
 
 func (unavailable) Issue(IssueParams) (string, error) { return "", ErrUnavailable }
 
+func (unavailable) SkToPk([]byte) ([]byte, error) { return nil, ErrUnavailable }
+
 func (unavailable) VerifyPresentation(Suite, string, []byte) (*Presentation, error) {
 	return nil, ErrUnavailable
 }
@@ -34,6 +36,7 @@ func Native() interface {
 	BlindSigner
 	ProofVerifier
 	Issuer
+	KeyDeriver
 	PresentationVerifier
 } {
 	return unavailable{}

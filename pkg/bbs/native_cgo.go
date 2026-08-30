@@ -17,6 +17,7 @@ var (
 	_ BlindSigner          = native{}
 	_ ProofVerifier        = native{}
 	_ Issuer               = native{}
+	_ KeyDeriver           = native{}
 	_ PresentationVerifier = native{}
 )
 
@@ -107,6 +108,7 @@ func Native() interface {
 	BlindSigner
 	ProofVerifier
 	Issuer
+	KeyDeriver
 	PresentationVerifier
 } {
 	return native{}
@@ -114,3 +116,11 @@ func Native() interface {
 
 // Available reports whether native BBS support was compiled in.
 func Available() bool { return true }
+
+func (n native) SkToPk(secretKey []byte) ([]byte, error) {
+	pk, status, msg := n.backend.SkToPk(secretKey)
+	if status != bbsnative.StatusOK {
+		return nil, classify(status, msg)
+	}
+	return pk, nil
+}

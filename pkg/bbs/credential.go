@@ -1,6 +1,7 @@
 package bbs
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -179,4 +180,38 @@ func DecodeCommitment(s string) ([]byte, error) {
 		return nil, fmt.Errorf("bbs: commitment is empty")
 	}
 	return b, nil
+}
+
+// OctetSecretKeyLength is the width of a serialised BBS secret scalar.
+const OctetSecretKeyLength = 32
+
+// OctetPublicKeyLength is the width of a compressed G2 public key.
+const OctetPublicKeyLength = 96
+
+// KeyPairMatches reports whether two serialised halves really are a pair.
+//
+// Worth doing once at startup rather than discovering on the first
+// issuance. A mismatched pair signs perfectly well; what fails is every
+// verification afterwards, reporting only "does not verify" — a failure
+// with nothing in it pointing at the configuration that caused it.
+//
+// The widths are checked first only so the common misconfiguration (the
+// wrong file, or a PEM where raw octets were expected) gets an error that
+// names the problem rather than one from inside the curve arithmetic. The
+// derivation is what actually decides.
+func KeyPairMatches(deriver KeyDeriver, secretKey, publicKey []byte) error {
+	if len(secretKey) != OctetSecretKeyLength {
+		return fmt.Errorf("bbs: secret key is %d octets, want %d", len(secretKey), OctetSecretKeyLength)
+	}
+	if len(publicKey) != OctetPublicKeyLength {
+		return fmt.Errorf("bbs: public key is %d octets, want %d", len(publicKey), OctetPublicKeyLength)
+	}
+	derived, err := deriver.SkToPk(secretKey)
+	if err != nil {
+		return fmt.Errorf("bbs: could not derive the public key: %w", err)
+	}
+	if !bytes.Equal(derived, publicKey) {
+		return fmt.Errorf("bbs: the configured public key does not belong to the configured secret key")
+	}
+	return nil
 }

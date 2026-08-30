@@ -251,3 +251,29 @@ func (Backend) VerifyPresentation(suite uint32, presentedJWP string, publicKey [
 	C.zk_cred_bbs_free_buffer(out, outLen)
 	return raw, int32(status), ""
 }
+
+// SkToPk derives the public key belonging to a secret key.
+//
+// The one call here that is not about signing or verifying a credential.
+// It exists so an issuer can check, once at startup, that the two halves of
+// a configured key pair belong together - a mismatch otherwise surfaces as
+// credentials that fail at every relying party reporting only "does not
+// verify", with nothing in the failure pointing at the configuration.
+func (Backend) SkToPk(secretKey []byte) ([]byte, int32, string) {
+	skPtr, skLen := cBytes(secretKey)
+
+	var out *C.uint8_t
+	var outLen C.size_t
+	var errOut *C.char
+
+	status := C.zk_cred_bbs_sk_to_pk(skPtr, skLen, &out, &outLen, &errOut)
+	runtime.KeepAlive(secretKey)
+
+	if status != C.ZK_CRED_BBS_OK {
+		return nil, int32(status), takeError(errOut)
+	}
+	takeError(errOut)
+	pk := C.GoBytes(unsafe.Pointer(out), C.int(outLen))
+	C.zk_cred_bbs_free_buffer(out, outLen)
+	return pk, int32(status), ""
+}

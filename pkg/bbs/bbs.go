@@ -135,6 +135,21 @@ type Issuer interface {
 	Issue(p IssueParams) (string, error)
 }
 
+// KeyDeriver derives a public key from a secret one.
+//
+// Separate from [Issuer] because it is not part of issuing anything: it
+// exists so a holder of a key *pair* can establish that the two halves
+// belong together, which nothing else here can do. A length check confirms
+// the widths and says nothing about the pair, and signing with a mismatched
+// one produces credentials that fail at every relying party reporting only
+// "does not verify" - a failure with nothing in it pointing at the
+// configuration that caused it.
+type KeyDeriver interface {
+	// SkToPk returns the 96-octet compressed G2 public key for a 32-octet
+	// secret scalar (draft-irtf-cfrg-bbs-signatures-08 §3.4.2).
+	SkToPk(secretKey []byte) ([]byte, error)
+}
+
 // PresentationVerifier is the relying party's half at the level of a whole
 // presentation.
 type PresentationVerifier interface {

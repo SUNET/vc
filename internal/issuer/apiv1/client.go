@@ -17,6 +17,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/internal/issuer/auditlog"
+	"github.com/SUNET/vc/pkg/bbs"
 	"github.com/SUNET/vc/pkg/grpchelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
@@ -353,12 +354,29 @@ func (c *Client) initBBSKeys() error {
 		return fmt.Errorf("failed to load BBS public key: %w", err)
 	}
 
-	// Deliberately not checked here: that these two actually form a pair.
-	// The native crate exposes no way to derive the public key from the
-	// secret, and every cheaper stand-in - a length check against a size
-	// this code has not verified against the crate's own encoding - would
-	// be a guess dressed as a check. A mismatched pair therefore surfaces
-	// on the first issuance, where the native signer is the authority.
+	// Check the two halves actually form a pair. This was previously left
+	// undone because the crate exposed no way to derive a public key from a
+	// secret one, and a length check would have confirmed the widths and
+	// nothing about whether the pair is a pair; zk-cred-bbs v0.0.7 added
+	// SkToPk, so it can be checked properly.
+	//
+	// Worth the one derivation at startup: a mismatched pair signs
+	// perfectly well, and what fails is every verification afterwards,
+	// reporting only "does not verify" - a failure with nothing in it
+	// pointing at the configuration that caused it.
+	//
+	// Skipped when the native library is absent, because then there is no
+	// deriver and no issuance either: MakeJWP fails on its own with a
+	// clearer message than a startup error about an unavailable backend
+	// would give.
+	if bbs.Available() {
+		if err := bbs.KeyPairMatches(bbs.Native(), secret, public); err != nil {
+			return err
+		}
+	} else {
+		c.log.Info("BBS keys loaded but not verified: this build has no native BBS support")
+	}
+
 	c.bbsKeys = &bbsKeyPair{secret: secret, public: public}
 	c.log.Info("Initialized BBS issuance key")
 	return nil
