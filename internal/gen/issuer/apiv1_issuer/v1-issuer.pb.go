@@ -410,6 +410,15 @@ func (x *MakeJWPRequest) GetKeyBinding() bool {
 	return false
 }
 
+// `credentials` carries EXACTLY ONE entry, and a client must reject any
+// other count rather than take the first. The shape mirrors MakeSDJWTReply
+// because this is the same RPC family, but the rule is different: the other
+// formats issue one credential per holder key so a wallet gets unlinkable
+// copies, while a BBS credential needs no copies - each presentation
+// re-randomises the proof afresh. A second one would require a second
+// commitment and a second blinding factor from the wallet, which is a
+// different request, not a longer list. A wallet handed credential #2
+// against commitment #1 holds bytes it can never present.
 type MakeJWPReply struct {
 	state                  protoimpl.MessageState `protogen:"open.v1"`
 	Credentials            []*Credential          `protobuf:"bytes,1,rep,name=credentials,proto3" json:"credentials,omitempty"`
