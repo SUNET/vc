@@ -10,10 +10,17 @@ import (
 // MaxMessages bounds how many messages one credential may carry.
 //
 // Not a protocol limit — a guard. Message count drives generator
-// derivation and proof size, and the count comes from caller-supplied
-// claims, so an unbounded document would let a caller dictate how much
-// work the issuer does. The native crate enforces the same bound; this
-// copy exists to reject early, with a better message.
+// derivation and proof size, so an unbounded document would let a caller
+// dictate how much work the issuer does.
+//
+// The bound on the whole message vector is the native crate's, and has to
+// be: the claim-to-message mapping lives there, so this side cannot count
+// the issuer's own claims without re-deriving that mapping — the exact
+// duplication it was moved into the crate to avoid. What Go checks against
+// this constant is [IssueParams.HolderPointers]: the one input that
+// arrives already counted and is entirely caller-controlled. That rejects
+// the cheap abuse early, with a message naming the field, and the crate
+// still refuses whatever gets past it.
 const MaxMessages = 512
 
 // IssueParams is everything an issuer needs to produce a BBS credential.
