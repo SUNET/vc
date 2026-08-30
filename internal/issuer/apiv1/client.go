@@ -343,10 +343,6 @@ func (c *Client) initBBSKeys() error {
 		return nil
 	}
 	cfg := c.cfg.Issuer.BBS
-	if cfg == nil {
-		c.log.Info("BBS issuance not configured")
-		return nil
-	}
 
 	secret, err := readBase64URLFile(cfg.SecretKeyPath)
 	if err != nil {
