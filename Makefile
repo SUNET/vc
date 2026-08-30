@@ -315,8 +315,12 @@ zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native Z
 	@echo "Build/test with: CGO_ENABLED=1 LD_LIBRARY_PATH=\$$(pwd)/$(ZK_CRED_LONGFELLOW_STAGE)/lib go {build,test} -tags $(ZKNATIVE_TAG) ./..."
 
 bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not staged
-	@test -f "$(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a" || ( \
+	@# Both halves, not just the archive: cgo needs the header to compile at
+	@# all, and a stage with one and not the other passed this check and then
+	@# failed deep in the build with "zk_cred_bbs_go.h: No such file".
+	@test -f "$(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a" -a -f "$(ZK_CRED_BBS_STAGE)/include/zk_cred_bbs_go.h" || ( \
 		echo "zk-cred-bbs is not staged: the issuer links it for blind BBS issuance." >&2; \
+		echo "Both $(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a and $(ZK_CRED_BBS_STAGE)/include/zk_cred_bbs_go.h are required." >&2; \
 		echo "Run 'make bbs-native-lib' first (needs network and a Rust toolchain)." >&2; \
 		exit 1)
 
