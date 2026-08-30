@@ -40,6 +40,14 @@ func (n native) BlindSign(suite Suite, secretKey, publicKey, commitment, header 
 func (n native) VerifyProof(suite Suite, publicKey, proof, header, presentationHeader []byte,
 	issuerKnownMessages int, disclosedMessages [][]byte, disclosures []Disclosure) error {
 
+	// Rejected before the FFI boundary, not after it. This crosses as a
+	// C.size_t, so a negative count does not arrive as a negative number -
+	// it arrives as an enormous one, and the native verifier is then asked
+	// to read a message vector that cannot exist. A Go-side refusal is the
+	// last place this is still a small number.
+	if issuerKnownMessages < 0 {
+		return fmt.Errorf("%w: negative issuer-known message count (%d)", ErrVerification, issuerKnownMessages)
+	}
 	codes := make([]byte, len(disclosures))
 	for i, d := range disclosures {
 		codes[i] = byte(d)
