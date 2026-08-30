@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
@@ -603,10 +605,44 @@ func TestCredentialRequestValidatesBBSCommitment(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := base()
 			r.BBSCommitment = tc.value
-			if err := r.Validate(context.Background(), nil); err == nil {
+			err := r.Validate(context.Background(), nil)
+			if err == nil {
 				t.Fatalf("accepted %q", tc.value)
 			}
+			// The description is what a wallet developer reads, so it has
+			// to name the member they sent - `bbs_commitment` - rather than
+			// pass bbs.DecodeCommitment's wording through. That message is
+			// written for Go callers, says "commitment", and would tie this
+			// endpoint's response text to an internal package.
+			var e *Error
+			if !errors.As(err, &e) {
+				t.Fatalf("want *Error, got %T", err)
+			}
+			description, _ := e.ErrorDescription.(string)
+			if !strings.Contains(description, "bbs_commitment") {
+				t.Fatalf("error_description must name the wire member, got %q", description)
+			}
+			if strings.Contains(description, "bbs:") {
+				t.Fatalf("internal package wording reached the wire: %q", description)
+			}
 		})
+	}
+}
+
+// A commitment with no committed claims is legitimate rather than a mistake:
+// it is what a wallet sends when it binds a credential to a device key
+// without hiding any of its own values. BBSCommittedClaims' doc comment used
+// to call it "required with" the commitment, which said the opposite of what
+// this has always validated.
+func TestCredentialRequestAcceptsACommitmentWithNoCommittedClaims(t *testing.T) {
+	r := &CredentialRequest{
+		Authorization:             "Bearer x",
+		CredentialConfigurationID: "cfg",
+		BBSCommitment:             "AQIDBAU",
+		BBSKeyBinding:             true,
+	}
+	if err := r.Validate(context.Background(), nil); err != nil {
+		t.Fatalf("a commitment carrying only key binding keys must validate: %v", err)
 	}
 }
 

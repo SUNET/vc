@@ -3,12 +3,15 @@ package apiv1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/bbs"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 // CreateJWPRequest is the request for a blind BBS credential.
@@ -97,8 +100,23 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 		KeyBinding:     keyBinding,
 	})
 	if err != nil {
+		// Logged in full, returned coarse. This error crosses gRPC to the
+		// APIGW and ends up as the credential endpoint's response, so the
+		// wallet is the audience: bbs.ErrVerification's wrapped message is
+		// documented as a log-only discriminator that must not reach a
+		// relying party, and bbs.ErrInternal means the native layer broke
+		// rather than the input being bad. Forwarding either verbatim told
+		// a caller which check failed and how - and did it under whatever
+		// gRPC code the transport picked by default.
 		c.log.Error(err, "failed to issue bbs credential", "scope", req.Scope, "vct", req.VCT)
-		return nil, err
+		switch {
+		case errors.Is(err, bbs.ErrVerification):
+			return nil, grpcstatus.Error(codes.InvalidArgument, "commitment did not verify")
+		case errors.Is(err, bbs.ErrUnavailable):
+			return nil, grpcstatus.Error(codes.Unimplemented, "bbs issuance is not available on this issuer")
+		default:
+			return nil, grpcstatus.Error(codes.Internal, "failed to issue bbs credential")
+		}
 	}
 
 	return &CreateJWPReply{

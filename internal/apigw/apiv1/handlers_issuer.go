@@ -968,8 +968,18 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 		c.log.Error(err, "failed to call MakeJWP")
 		return nil, err
 	}
-	if reply == nil || len(reply.Credentials) == 0 {
-		return nil, errors.New("MakeJWP returned no credential")
+	// Exactly one, not at least one. A BBS credential needs no unlinkable
+	// copies - each presentation re-randomises the proof afresh - so a
+	// second credential would need a second commitment and a second
+	// blinding factor from the wallet, which is a different request. Taking
+	// the first of several would hand the wallet a credential whose
+	// blinding factor it may not hold, and do it silently.
+	if reply == nil || len(reply.Credentials) != 1 {
+		count := 0
+		if reply != nil {
+			count = len(reply.Credentials)
+		}
+		return nil, fmt.Errorf("MakeJWP returned %d credentials, want exactly 1", count)
 	}
 
 	if err := c.saveCredentialSubjects(ctx, identifier, []statusEntry{{

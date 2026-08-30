@@ -88,7 +88,11 @@ type CredentialRequest struct {
 	// message vector than the one being signed would verify against
 	// nothing, with the failure pointing nowhere.
 	//
-	// Meaningful only alongside BBSCommitment, and required with it.
+	// Meaningful only alongside BBSCommitment, and rejected without it.
+	// Empty alongside one is legitimate rather than a mistake: a commitment
+	// can carry key binding keys and no holder claims at all, which is what
+	// a wallet binding a credential to a device key without hiding any of
+	// its own values sends.
 	BBSCommittedClaims []string `json:"bbs_committed_claims,omitempty" validate:"omitempty"`
 
 	// BBSKeyBinding OPTIONAL. Whether the commitment carries key binding
@@ -461,8 +465,13 @@ func (c *CredentialRequest) validateBBS() error {
 		return nil
 	}
 
+	// Named for the wire field and phrased once here, rather than passing
+	// bbs.DecodeCommitment's message through. That message is written for
+	// Go callers - it says "commitment", not "bbs_commitment" - so
+	// forwarding it points a client at a field it did not send, and ties
+	// this endpoint's response text to an internal package's wording.
 	if _, err := bbs.DecodeCommitment(c.BBSCommitment); err != nil {
-		return reject(err.Error())
+		return reject("bbs_commitment is not a valid base64url-encoded commitment")
 	}
 
 	if len(c.BBSCommittedClaims) > bbs.MaxMessages {
