@@ -13,6 +13,7 @@ import (
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
+	"github.com/SUNET/vc/pkg/bbs"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
@@ -451,6 +452,8 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		credentials, issueErr = c.issueSDJWT(ctx, scope, documentData, jwks, identifier)
 	case "ldp_vc", "vc+ld+json":
 		credentials, issueErr = c.issueVC20(ctx, scope, documentData, identifier, req)
+	case "jwp":
+		credentials, issueErr = c.issueBBS(ctx, scope, documentData, identifier, req)
 	default:
 		c.log.Error(nil, "unsupported or missing credential format", "format", format)
 		issueErr = errors.New("unsupported or missing credential format: " + format)
@@ -905,4 +908,80 @@ func docLookupSessionID(authContext *cache.AuthorizationContext) string {
 		return authContext.SourceSessionID
 	}
 	return authContext.SessionID
+}
+
+// issueBBS issues a single blind BBS credential in JWP Compact
+// Serialization.
+//
+// This is the one format where the wallet has already spoken. It committed
+// to messages the issuer will never see and to the public key of whatever
+// device key the credential is being bound to, and the issuer signs that
+// commitment - so a request without one cannot be completed, and no issuer
+// can add BBS to a credential after the fact.
+//
+// One credential, never a batch. The other formats issue one per holder key
+// so the wallet gets unlinkable copies; BBS needs none, because each
+// presentation re-randomises. A second copy would need a second commitment,
+// which is a second request.
+func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte, identifier string, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
+	credentialMetadata := c.cfg.GetCredentialMetadata(scope)
+	if credentialMetadata == nil {
+		return nil, fmt.Errorf("unsupported scope: %s", scope)
+	}
+
+	if req.BBSCommitment == "" {
+		return nil, &openid4vci.Error{
+			Err:              openid4vci.ErrInvalidCredentialRequest,
+			ErrorDescription: "the jwp format requires bbs_commitment: this credential is signed over a commitment the wallet produces",
+		}
+	}
+	commitment, err := bbs.DecodeCommitment(req.BBSCommitment)
+	if err != nil {
+		// Validate() already decoded this once, so reaching here means the
+		// request changed underneath us rather than that a client sent
+		// something malformed.
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidCredentialRequest, ErrorDescription: err.Error()}
+	}
+
+	vctm := credentialMetadata.GetVCTM()
+	if vctm == nil || vctm.VCT == "" {
+		return nil, fmt.Errorf("scope %s has no vct: a bbs credential's type is signed into its header and cannot be omitted", scope)
+	}
+
+	// Note this is NOT derived from the request's proofs. Those are ECDSA
+	// proof-of-possession keys carrying c_nonce freshness, and a BBS
+	// issuance sends them whether or not the credential is key-bound. The
+	// key binding keys are BLS Schnorr keys sealed inside the commitment,
+	// which is why the wallet has to say. The native signer checks the
+	// assertion against the commitment before signing, so a wrong answer
+	// fails the issuance rather than producing an unbound credential that
+	// claims to be bound.
+	reply, err := c.issuerClient.MakeJWP(ctx, &apiv1_issuer.MakeJWPRequest{
+		Scope:          scope,
+		DocumentData:   documentData,
+		Commitment:     commitment,
+		HolderPointers: req.BBSCommittedClaims,
+		Vct:            vctm.VCT,
+		KeyBinding:     req.BBSKeyBinding,
+	})
+	if err != nil {
+		c.log.Error(err, "failed to call MakeJWP")
+		return nil, err
+	}
+	if reply == nil || len(reply.Credentials) == 0 {
+		return nil, errors.New("MakeJWP returned no credential")
+	}
+
+	if err := c.saveCredentialSubjects(ctx, identifier, []statusEntry{{
+		Section: reply.TokenStatusListSection,
+		Index:   reply.TokenStatusListIndex,
+	}}); err != nil {
+		return nil, err
+	}
+
+	// The JWP travels as-is. Unlike mso_mdoc there is nothing to base64url
+	// here: Compact Serialization is already a printable dot-separated
+	// string, and wrapping it again would leave the wallet decoding a layer
+	// the format does not have.
+	return []openid4vci.Credential{{Credential: reply.Credentials[0].Credential}}, nil
 }

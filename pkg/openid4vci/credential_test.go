@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/pkg/bbs"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -606,4 +608,92 @@ func TestCredentialRequestValidatesBBSCommitment(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The blind-BBS request members carry things the issuer cannot derive and
+// cannot check later. A commitment names messages the issuer never sees; the
+// pointers say where they go; the key binding flag selects the message
+// layout. Each is rejected at the request boundary, where the error can name
+// the member, rather than deeper in where all three surface identically as
+// "does not verify".
+func TestCredentialRequestValidatesBBSMembers(t *testing.T) {
+	base := func() *CredentialRequest {
+		return &CredentialRequest{
+			Authorization:             "Bearer x",
+			CredentialConfigurationID: "cfg",
+		}
+	}
+	const validCommitment = "AQIDBAU"
+
+	t.Run("committed claims without a commitment", func(t *testing.T) {
+		// Pointers alone name claims nothing committed to. Ignoring them
+		// would issue a credential whose claim map promises holder claims
+		// the signature does not cover.
+		r := base()
+		r.BBSCommittedClaims = []string{"/device_pin_hash"}
+		if err := r.Validate(context.Background(), nil); err == nil {
+			t.Fatal("bbs_committed_claims without bbs_commitment must be rejected")
+		}
+	})
+
+	t.Run("key binding without a commitment", func(t *testing.T) {
+		// The flag selects a layout for a commitment that is not there.
+		r := base()
+		r.BBSKeyBinding = true
+		if err := r.Validate(context.Background(), nil); err == nil {
+			t.Fatal("bbs_key_binding without bbs_commitment must be rejected")
+		}
+	})
+
+	t.Run("commitment with pointers accepted", func(t *testing.T) {
+		r := base()
+		r.BBSCommitment = validCommitment
+		r.BBSCommittedClaims = []string{"/device_pin_hash", "/recovery_secret"}
+		r.BBSKeyBinding = true
+		if err := r.Validate(context.Background(), nil); err != nil {
+			t.Fatalf("a well-formed blind BBS request was rejected: %v", err)
+		}
+	})
+
+	t.Run("commitment alone accepted", func(t *testing.T) {
+		// An issuance where the holder contributes no claims of its own is
+		// still blind issuance - the commitment can carry key binding keys
+		// and no messages.
+		r := base()
+		r.BBSCommitment = validCommitment
+		if err := r.Validate(context.Background(), nil); err != nil {
+			t.Fatalf("a commitment with no holder claims was rejected: %v", err)
+		}
+	})
+
+	for _, tc := range []struct {
+		name    string
+		claims  []string
+		because string
+	}{
+		{"empty pointer", []string{""}, "names the whole document, not a claim"},
+		{"pointer without a leading slash", []string{"device_pin_hash"}, "is not an RFC 6901 pointer"},
+		{"duplicate pointer", []string{"/a", "/a"}, "would put two messages in one claim map position"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := base()
+			r.BBSCommitment = validCommitment
+			r.BBSCommittedClaims = tc.claims
+			if err := r.Validate(context.Background(), nil); err == nil {
+				t.Fatalf("%v must be rejected: it %s", tc.claims, tc.because)
+			}
+		})
+	}
+
+	t.Run("more pointers than the message limit", func(t *testing.T) {
+		r := base()
+		r.BBSCommitment = validCommitment
+		r.BBSCommittedClaims = make([]string, bbs.MaxMessages+1)
+		for i := range r.BBSCommittedClaims {
+			r.BBSCommittedClaims[i] = fmt.Sprintf("/claim_%d", i)
+		}
+		if err := r.Validate(context.Background(), nil); err == nil {
+			t.Fatalf("more than %d committed claims must be rejected", bbs.MaxMessages)
+		}
+	})
 }

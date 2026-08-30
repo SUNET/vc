@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -49,6 +51,17 @@ type Client struct {
 	registryClient apiv1_registry.RegistryServiceClient
 	mdocIssuer     *mdoc.Issuer // mDL issuer for ISO 18013-5 credentials
 	signMetadataRL *rate.Limiter
+	bbsKeys        *bbsKeyPair // nil unless Issuer.BBS is configured; gates the "jwp" format
+}
+
+// bbsKeyPair is the issuer's BLS12-381 key pair, held as raw bytes.
+//
+// Raw bytes rather than a pki.Signer because it cannot be one: the secret is
+// a scalar consumed inside the BBS signing algebra, not a key that signs a
+// digest. See model.BBSConfig for why that rules out an HSM.
+type bbsKeyPair struct {
+	secret []byte
+	public []byte
 }
 
 // New creates a new instance of the public api
@@ -78,6 +91,15 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 	if err := c.initMDocIssuer(ctx); err != nil {
 		c.log.Info("mDL issuer not initialized", "error", err)
 		// Non-fatal: mDL issuance will be unavailable but SD-JWT will work
+	}
+
+	// Fatal, unlike the mDL case above: mDL is unconfigured by default and
+	// an absent certificate chain means "not offering that format". A
+	// present but unloadable BBS config means the operator asked for the
+	// format and it is broken, which should not start quietly and fail one
+	// request at a time.
+	if err := c.initBBSKeys(); err != nil {
+		return nil, err
 	}
 
 	c.log.Info("Started")
@@ -307,4 +329,59 @@ func (c *Client) Close() error {
 // RegistryClient returns the registry gRPC client, may be nil if not configured
 func (c *Client) RegistryClient() apiv1_registry.RegistryServiceClient {
 	return c.registryClient
+}
+
+// initBBSKeys loads the issuer's BBS key pair, if this issuer offers the
+// format at all.
+//
+// An absent Issuer.BBS section is not an error: it means this deployment
+// does not issue blind BBS credentials, and MakeJWP will say so rather than
+// signing with a zero key.
+func (c *Client) initBBSKeys() error {
+	if c.cfg.Issuer == nil || c.cfg.Issuer.BBS == nil {
+		c.log.Info("BBS issuance not configured")
+		return nil
+	}
+	cfg := c.cfg.Issuer.BBS
+	if cfg == nil {
+		c.log.Info("BBS issuance not configured")
+		return nil
+	}
+
+	secret, err := readBase64URLFile(cfg.SecretKeyPath)
+	if err != nil {
+		return fmt.Errorf("failed to load BBS secret key: %w", err)
+	}
+	public, err := readBase64URLFile(cfg.PublicKeyPath)
+	if err != nil {
+		return fmt.Errorf("failed to load BBS public key: %w", err)
+	}
+
+	// Deliberately not checked here: that these two actually form a pair.
+	// The native crate exposes no way to derive the public key from the
+	// secret, and every cheaper stand-in - a length check against a size
+	// this code has not verified against the crate's own encoding - would
+	// be a guess dressed as a check. A mismatched pair therefore surfaces
+	// on the first issuance, where the native signer is the authority.
+	c.bbsKeys = &bbsKeyPair{secret: secret, public: public}
+	c.log.Info("Initialized BBS issuance key")
+	return nil
+}
+
+// readBase64URLFile reads a file holding a single base64url-encoded value.
+func readBase64URLFile(path string) ([]byte, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	// Trailing newlines are what every editor and every `echo -n`-less
+	// pipeline leaves behind; rejecting them would be a needless trap.
+	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(strings.TrimSpace(string(raw)), "="))
+	if err != nil {
+		return nil, fmt.Errorf("%s is not valid base64url: %w", path, err)
+	}
+	if len(decoded) == 0 {
+		return nil, fmt.Errorf("%s is empty", path)
+	}
+	return decoded, nil
 }

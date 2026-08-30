@@ -77,6 +77,32 @@ type CredentialRequest struct {
 	// the latter.
 	BBSCommitment string `json:"bbs_commitment,omitempty" validate:"omitempty"`
 
+	// BBSCommittedClaims OPTIONAL. RFC 6901 pointers naming the claims the
+	// holder committed to, in message order.
+	//
+	// The issuer needs these and cannot derive them. It never sees the
+	// values — that is what blind issuance means — but it must still place
+	// those claims in the credential's claim map, and it cannot name what
+	// it cannot see. The count is checked against the commitment rather
+	// than taken on trust; a credential whose header described a different
+	// message vector than the one being signed would verify against
+	// nothing, with the failure pointing nowhere.
+	//
+	// Meaningful only alongside BBSCommitment, and required with it.
+	BBSCommittedClaims []string `json:"bbs_committed_claims,omitempty" validate:"omitempty"`
+
+	// BBSKeyBinding OPTIONAL. Whether the commitment carries key binding
+	// keys. Absent means it does not.
+	//
+	// This selects the message layout the credential is signed under, and a
+	// verifier reads it back out of the header, so the two ends must agree.
+	// It is on the wire because the issuer cannot see inside the commitment
+	// without the wallet saying so - but it is not taken on trust: the
+	// native signer checks the claim against the commitment it was given
+	// and refuses to sign a mismatch. A wallet that lies here gets a failed
+	// issuance, not a credential bound to nothing.
+	BBSKeyBinding bool `json:"bbs_key_binding,omitempty" validate:"omitempty"`
+
 	// CredentialResponseEncryption OPTIONAL. Object containing information for encrypting the Credential Response.
 	// If this request element is not present, the corresponding credential response returned is not encrypted.
 	CredentialResponseEncryption *CredentialResponseEncryption `json:"credential_response_encryption,omitempty" validate:"omitempty"`
@@ -122,10 +148,8 @@ func (c *CredentialRequest) Validate(ctx context.Context, authorizationDetails [
 	// deeper in, where the failure would surface as an opaque
 	// verification error with no indication that the transport encoding
 	// was the problem.
-	if c.BBSCommitment != "" {
-		if _, err := bbs.DecodeCommitment(c.BBSCommitment); err != nil {
-			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: err.Error()}
-		}
+	if err := c.validateBBS(); err != nil {
+		return err
 	}
 
 	// Neither identifier nor configuration ID provided
@@ -411,4 +435,58 @@ func (req *CredentialRequest) ResolveCredentialFormatWithAuthDetails(metadata *C
 	}
 
 	return "", &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "either credential_configuration_id or credential_identifier must be provided"}
+}
+
+// validateBBS checks the blind-BBS members of a credential request.
+//
+// Rejected here rather than deeper in, where the same problems surface as
+// opaque verification errors with nothing to say the request was the
+// problem. None of these are checks the native signer would skip; they are
+// checks whose failure is worth a useful message.
+func (c *CredentialRequest) validateBBS() error {
+	reject := func(description string) error {
+		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: description}
+	}
+
+	if c.BBSCommitment == "" {
+		// Pointers without a commitment name claims nothing committed to.
+		// Silently ignoring them would issue a credential whose claim map
+		// promises holder claims the signature does not cover.
+		if len(c.BBSCommittedClaims) > 0 {
+			return reject("bbs_committed_claims requires bbs_commitment")
+		}
+		if c.BBSKeyBinding {
+			return reject("bbs_key_binding requires bbs_commitment")
+		}
+		return nil
+	}
+
+	if _, err := bbs.DecodeCommitment(c.BBSCommitment); err != nil {
+		return reject(err.Error())
+	}
+
+	if len(c.BBSCommittedClaims) > bbs.MaxMessages {
+		return reject(fmt.Sprintf(
+			"bbs_committed_claims has %d entries, over the %d limit",
+			len(c.BBSCommittedClaims), bbs.MaxMessages))
+	}
+
+	seen := make(map[string]struct{}, len(c.BBSCommittedClaims))
+	for _, pointer := range c.BBSCommittedClaims {
+		// A pointer is what places a committed message in the claim map. An
+		// empty one names the whole document, and RFC 6901 requires the
+		// rest to start with "/", so neither can identify a claim.
+		if pointer == "" || !strings.HasPrefix(pointer, "/") {
+			return reject("bbs_committed_claims entries must be RFC 6901 pointers beginning with '/'")
+		}
+		// Two messages cannot occupy one position in the claim map, so a
+		// duplicate means the header would describe fewer claims than the
+		// signature covers.
+		if _, duplicate := seen[pointer]; duplicate {
+			return reject("bbs_committed_claims contains a duplicate pointer: " + pointer)
+		}
+		seen[pointer] = struct{}{}
+	}
+
+	return nil
 }

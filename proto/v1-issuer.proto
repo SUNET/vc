@@ -11,6 +11,7 @@ service IssuerService {
     rpc MakeSDJWT (MakeSDJWTRequest) returns (MakeSDJWTReply) {}
     rpc MakeMDoc (MakeMDocRequest) returns (MakeMDocReply) {}
     rpc MakeVC20 (MakeVC20Request) returns (MakeVC20Reply) {}
+    rpc MakeJWP (MakeJWPRequest) returns (MakeJWPReply) {}
     rpc JWKS (Empty) returns (JwksReply) {}
     rpc SignMetadata (SignMetadataRequest) returns (SignMetadataReply) {}
     rpc GetIACAs (Empty) returns (GetIACAsReply) {}
@@ -45,6 +46,30 @@ message MakeSDJWTRequest {
 }
 
 message MakeSDJWTReply {
+   repeated Credential credentials = 1;
+   int64 token_status_list_section = 2; // Token Status List section
+   int64 token_status_list_index = 3;   // Token Status List index
+}
+
+// MakeJWPRequest is the request for creating a blind BBS credential in JWP
+// Compact Serialization (draft-bormann-jwp-modular-bbs).
+//
+// Unlike every other Make* request here, this one carries material the
+// WALLET produced: the credential is signed over a commitment the holder
+// built, so the issuer cannot make one on its own. There is no `jwk`
+// field for the same reason - key binding is inside the commitment, as a
+// Schnorr key in the signature's own group, not an ECDSA proof-of-possession
+// key supplied alongside.
+message MakeJWPRequest {
+    string scope = 1;             // Credential scope (e.g., "pid_jwp")
+    bytes document_data = 2;      // JSON encoded issuer claims
+    bytes commitment = 3;         // Holder's commitment_with_proof, raw bytes (already base64url-decoded)
+    repeated string holder_pointers = 4; // RFC 6901 pointers naming the committed claims, in message order
+    string vct = 5;               // SD-JWT VC type identifier
+    bool key_binding = 6;         // Whether the commitment carries key binding keys
+}
+
+message MakeJWPReply {
    repeated Credential credentials = 1;
    int64 token_status_list_section = 2; // Token Status List section
    int64 token_status_list_index = 3;   // Token Status List index

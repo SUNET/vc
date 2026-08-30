@@ -438,6 +438,30 @@ type Issuer struct {
 	PseudonymSeed *bool `yaml:"pseudonym_seed" validate:"omitempty"`
 	// AccessCertificate configures the EUDI access certificate (WRPAC) the issuer presents to wallets, optionally with its own key separate from KeyConfig. Off by default; deployments outside an ARF trust framework are unaffected.
 	AccessCertificate *IssuerAccessCertificate `yaml:"access_certificate,omitempty"`
+	// BBS holds blind BBS issuance configuration. Absent disables the
+	// "jwp" credential format entirely.
+	BBS *BBSConfig `yaml:"bbs" validate:"omitempty"`
+}
+
+// BBSConfig holds the issuer's blind BBS key pair.
+//
+// Separate from Issuer.KeyConfig, and unavoidably so. Every other key this
+// issuer signs with is an ECDSA key that signs a digest, which is what
+// pki.KeyConfig and PKCS#11 are built around. A BBS secret key is a
+// BLS12-381 scalar consumed inside the signing algebra itself, so it cannot
+// be handed to an HSM that only offers "sign these bytes" — mainstream HSMs
+// do not implement the curve at all. It is therefore a software key, which
+// is a known and accepted property of this format rather than an oversight.
+type BBSConfig struct {
+	// SecretKeyPath is a file holding the raw BLS12-381 secret scalar,
+	// base64url-encoded. A path rather than an inline value so the key can
+	// be mounted as a secret and kept out of the config.
+	SecretKeyPath string `yaml:"secret_key_path" validate:"required" doc_example:"\"/etc/vc/bbs/issuer.sk\""`
+	// PublicKeyPath is a file holding the matching public key, base64url-encoded.
+	PublicKeyPath string `yaml:"public_key_path" validate:"required" doc_example:"\"/etc/vc/bbs/issuer.pk\""`
+	// DefaultValidity is how long an issued credential is valid for
+	// (default: 365 days), used to derive the `exp` header member.
+	DefaultValidity time.Duration `yaml:"default_validity" default:"8760h"`
 }
 
 // SignMetadataRateLimitConfig configures the SignMetadata gRPC rate limiter.

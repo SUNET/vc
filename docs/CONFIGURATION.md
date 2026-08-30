@@ -838,6 +838,7 @@ Configuration for the Issuer service that signs and issues verifiable credential
 | `sign_metadata_rate_limit` | `object` | The rate limiter for the SignMetadata gRPC endpoint. In HA setups each APIGW node refreshes two documents (VCI+OAuth2), so the defaults should accommodate the expected cluster size. Default: 2 req/s, burst 20. | -                           | -       | No       |
 | `pseudonym_seed`           | `bool`   | PseudonymSeed, if true, makes the issuer attach a random seed as the pseudonym_seed claim.                                                                                                                        | -                           | -       | No       |
 | `access_certificate`       | `object` | The EUDI access certificate (WRPAC) the issuer presents to wallets, optionally with its own key separate from KeyConfig. Off by default; deployments outside an ARF trust framework are unaffected.               | -                           | -       | No       |
+| `bbs`                      | `object` | Blind BBS issuance configuration. Absent disables the "jwp" credential format entirely.                                                                                                                           | -                           | -       | No       |
 
 ### `grpc_server`
 
@@ -930,6 +931,24 @@ deployment booting across an upgrade rather than failing on start.
 | `validate`            | `bool`     | Validate enforces the WRPAC certificate profile at startup: keyUsage must include nonRepudiation (contentCommitment), subjectAltName must carry contact information (URI or email), and certificatePolicies must contain a WRPAC policy OID. Startup fails when the certificate does not conform. | -                                         | -       | No       |
 | `allowed_policy_oids` | `[]string` | AllowedPolicyOIDs optionally narrows which WRPAC certificate policy OIDs are accepted, for a deployment that must assert a specific assurance level. When empty, all four TS 119 411-8 WRPAC policy OIDs are accepted.                                                                            | `["0.4.0.194118.1.3","0.4.0.194118.1.4"]` | -       | No       |
 | `key_config`          | `object`   | Signing key and certificate chain for the access certificate. When set, issuer metadata is signed with this key and the chain is advertised in the JWT's x5c header; credentials continue to be signed with Issuer.KeyConfig.                                                                     | -                                         | -       | No       |
+
+### `bbs`
+
+> **Path:** `.issuer.bbs`
+
+Separate from Issuer.KeyConfig, and unavoidably so. Every other key this
+issuer signs with is an ECDSA key that signs a digest, which is what
+pki.KeyConfig and PKCS#11 are built around. A BBS secret key is a
+BLS12-381 scalar consumed inside the signing algebra itself, so it cannot
+be handed to an HSM that only offers "sign these bytes" — mainstream HSMs
+do not implement the curve at all. It is therefore a software key, which
+is a known and accepted property of this format rather than an oversight.
+
+| Field              | Type       | Description                                                                                                                                                           | Example                   | Default | Required |
+| ------------------ | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ------- | -------- |
+| `secret_key_path`  | `string`   | File holding the raw BLS12-381 secret scalar, base64url-encoded. A path rather than an inline value so the key can be mounted as a secret and kept out of the config. | `"/etc/vc/bbs/issuer.sk"` | -       | Yes      |
+| `public_key_path`  | `string`   | File holding the matching public key, base64url-encoded.                                                                                                              | `"/etc/vc/bbs/issuer.pk"` | -       | Yes      |
+| `default_validity` | `duration` | How long an issued credential is valid for (default: 365 days), used to derive the `exp` header member.                                                               | -                         | `8760h` | No       |
 
 ## `verifier` (Top-level)
 
