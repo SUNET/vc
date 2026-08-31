@@ -1079,8 +1079,15 @@ type IssuerMetadata struct {
 	// Under CIR (EU) 2025/848 a PID or attestation provider is a registered
 	// wallet-relying party in its own right, so the document is the same kind
 	// a verifier presents in verifier_info - see Verifier.RegistrationCertificate.
-	// It is validated identically at startup, and left unset by deployments
-	// outside an ARF trust framework.
+	// The signature and the issuing chain are verified at startup, exactly as
+	// on the verifier. The ARF RPRC_16 binding is not: it compares this
+	// document against the presenting party's access certificate, which the
+	// issuer service holds rather than the apigw, and the rule is not settled
+	// enough to justify a cross-service check. A correctly-signed certificate
+	// naming a different organisation would therefore be accepted, so
+	// configure one that describes this deployment.
+	//
+	// Left unset by deployments outside an ARF trust framework.
 	RegistrationCertificate *RegistrationCertificate `yaml:"registration_certificate,omitempty"`
 	// AuthorizationServers lists the authorization server URLs
 	AuthorizationServers []string `yaml:"authorization_servers" validate:"omitempty"`
@@ -2111,12 +2118,19 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 	// Advertise the registration certificate, when one is configured, so a
 	// wallet can see what this Credential Issuer is registered to provide.
 	//
-	// No access certificate is passed: the ARF RPRC_16 binding compares the
-	// registration certificate against the access certificate of the party
-	// presenting it, and the issuer service holds that key, not the apigw
-	// that assembles this metadata. The binding is therefore checked where
-	// the pair actually lives - see the note in the PR - and this call
-	// performs the signature and chain steps only.
+	// nil access certificate, so the ARF RPRC_16 binding is not enforced
+	// here. That binding compares this document against the access
+	// certificate of the party presenting it, and after the issuer gained
+	// its own access certificate that key lives in the issuer service, not
+	// in the apigw that assembles this metadata.
+	//
+	// Deliberately not plumbed across the two services: RPRC_16 is not
+	// settled, and building a cross-service check for a rule that may change
+	// shape would cost more than it protects. The operator is trusted to
+	// configure a certificate that describes this deployment. The signature
+	// and chain are still verified, so a wrong or untrusted document is
+	// still rejected - what is not checked is whether a correctly-signed
+	// certificate describes somebody else.
 	loaded, err := cfg.RegistrationCertificate.Load(nil)
 	if err != nil {
 		return nil, fmt.Errorf("issuer registration certificate: %w", err)
