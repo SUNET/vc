@@ -50,6 +50,11 @@ type RegistrationCertificate struct {
 	// skipped when key_config supplies no certificate chain to compare
 	// against.
 	TrustedRootsPath string `yaml:"trusted_roots_path,omitempty"`
+	// Revocation configures checking this certificate against the Token
+	// Status List named in its own status claim. A WRPRC that carries no
+	// status reference cannot be checked at all, which reads as
+	// "could not determine" rather than as "not revoked".
+	Revocation *RevocationCheck `yaml:"revocation,omitempty"`
 }
 
 // DefaultRegistrationCertificateFormat is the verifier_info format

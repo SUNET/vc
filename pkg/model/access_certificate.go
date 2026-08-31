@@ -189,6 +189,11 @@ type IssuerAccessCertificate struct {
 	// the chain is advertised in the JWT's x5c header; credentials continue
 	// to be signed with Issuer.KeyConfig.
 	KeyConfig *pki.KeyConfig `yaml:"key_config,omitempty" validate:"omitempty"`
+	// Revocation configures checking this certificate against the CRL
+	// distribution points it names. A certificate naming none cannot be
+	// checked, which reads as "could not determine" rather than as
+	// "not revoked".
+	Revocation *RevocationCheck `yaml:"revocation,omitempty"`
 }
 
 // profile returns the shared profile-validation rule for this configuration.
