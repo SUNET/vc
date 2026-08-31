@@ -71,12 +71,7 @@ func TestCreateRequestObject(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(t, nil)
-
-			// Generate RSA key for signing
-			key, err := rsa.GenerateKey(rand.Reader, 2048)
-			require.NoError(t, err)
-			require.NoError(t, client.SetSigningKeyForTesting(key))
+			client := newSigningTestClient(t)
 
 			// Configure Digital Credentials API
 			client.cfg.Verifier.DigitalCredentials.Enable = tt.dcEnabled
@@ -410,15 +405,11 @@ func createTestDBSession(sessionID string) *cache.AuthorizationContext {
 // reading the credential query.
 func TestCreateRequestObject_EncryptedModeCarriesAKey(t *testing.T) {
 	ctx := t.Context()
-	client, _ := CreateTestClientWithMock(t, nil)
-
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-	require.NoError(t, client.SetSigningKeyForTesting(key))
+	client := newSigningTestClient(t)
 
 	client.cfg.Verifier.DigitalCredentials.Enable = true // response_mode defaults to dc_api.jwt
 
-	_, err = client.CreateRequestObject(ctx, "session-enc", createTestDCQLForVP(t), "nonce-enc", nil)
+	_, err := client.CreateRequestObject(ctx, "session-enc", createTestDCQLForVP(t), "nonce-enc", nil)
 	require.NoError(t, err)
 
 	cached, err := client.GetRequestObject(ctx, "session-enc")
@@ -447,15 +438,11 @@ func TestCreateRequestObject_EncryptedModeCarriesAKey(t *testing.T) {
 // there is no reason to mint or advertise a key.
 func TestCreateRequestObject_UnencryptedModeSendsNoKey(t *testing.T) {
 	ctx := t.Context()
-	client, _ := CreateTestClientWithMock(t, nil)
-
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-	require.NoError(t, client.SetSigningKeyForTesting(key))
+	client := newSigningTestClient(t)
 
 	client.cfg.Verifier.DigitalCredentials.Enable = false
 
-	_, err = client.CreateRequestObject(ctx, "session-plain", createTestDCQLForVP(t), "nonce-plain", nil)
+	_, err := client.CreateRequestObject(ctx, "session-plain", createTestDCQLForVP(t), "nonce-plain", nil)
 	require.NoError(t, err)
 
 	cached, err := client.GetRequestObject(ctx, "session-plain")
@@ -465,4 +452,19 @@ func TestCreateRequestObject_UnencryptedModeSendsNoKey(t *testing.T) {
 		assert.Nil(t, cached.ClientMetadata.JWKS)
 		assert.Empty(t, cached.ClientMetadata.EncryptedResponseEncValuesSupported)
 	}
+}
+
+// newSigningTestClient returns a mock-backed client with a signing key
+// installed, which every CreateRequestObject test needs before it can sign a
+// request object.
+func newSigningTestClient(t *testing.T) *Client {
+	t.Helper()
+
+	client, _ := CreateTestClientWithMock(t, nil)
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	require.NoError(t, client.SetSigningKeyForTesting(key))
+
+	return client
 }
