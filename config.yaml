@@ -59,6 +59,20 @@ verifier:
       access_token_duration: 3600
       id_token_duration: 3600
       refresh_token_duration: 86400
+    # Dynamic Client Registration authorization policy for POST /register
+    # Modes: open (default), static (file bearer token), jwt (JWKS validation)
+    # dynamic_registration_auth:
+    #   mode: "static"
+    #   static_bearer_token_file: "/run/secrets/verifier_dcr_initial_access_token"
+    # Or JWT mode:
+    # dynamic_registration_auth:
+    #   mode: "jwt"
+    #   jwt:
+    #     jwks_uri: "https://auth.example.com/.well-known/jwks.json"
+    #     issuer: "https://auth.example.com"
+    #     audience: "vc-verifier-register"
+    #     allowed_signing_algs: ["RS256", "ES256"]
+    #     clock_skew_seconds: 60
   inbound:
     openid4vp:
       token_endpoint: "https://verifier.vc.docker:8080/token"
