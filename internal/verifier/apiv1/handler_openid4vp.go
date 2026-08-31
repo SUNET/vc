@@ -64,6 +64,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		State:           sessionID,
 		DCQLQuery:       dcqlQuery,
 		TransactionData: encodedTxData,
+		VerifierInfo:    c.registrationCertificate.VerifierInfo(),
 	}
 
 	// Add vp_formats_supported to client_metadata if Digital Credentials API is enabled

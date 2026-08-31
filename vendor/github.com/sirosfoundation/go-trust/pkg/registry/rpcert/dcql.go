@@ -7,6 +7,7 @@
 // References:
 //   - OpenID4VP DCQL specification
 //   - ETSI TS 119 475 v1.1.1 — RP attributes supporting Wallet user's authorisation decisions
+
 package rpcert
 
 // DCQLQuery represents a DCQL query as defined in OpenID4VP.

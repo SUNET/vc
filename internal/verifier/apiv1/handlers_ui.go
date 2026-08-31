@@ -405,7 +405,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		Scope:            "",
 		DCQLQuery:        req.DCQLQuery,
 		RequestURIMethod: "",
-		VerifierInfo:     []openid4vp.VerifierInfo{},
+		VerifierInfo:     c.registrationCertificate.VerifierInfo(),
 	}
 
 	if err := c.cacheService.AuthContext.Save(ctx, authorizationContext); err != nil {

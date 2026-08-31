@@ -48,6 +48,10 @@ type Client struct {
 	pkiSigningCert *x509.Certificate
 	pkiSignerChain []string
 
+	// registrationCertificate is the Registrar-issued WRPRC presented to
+	// wallets in verifier_info. Nil when none is configured.
+	registrationCertificate *model.LoadedRegistrationCertificate
+
 	// Clients and services
 	openid4vp          *openid4vp.Client
 	trustService       *openid4vp.TrustService
@@ -125,6 +129,13 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 			return nil, fmt.Errorf("access certificate validation failed: %w", err)
 		}
 		c.log.Warn("certificate does not cover PublicURL host", "error", err)
+	}
+
+	// Load the Registrar-issued registration certificate, if this deployment
+	// has one, so it can be presented to wallets in verifier_info.
+	c.registrationCertificate, err = c.cfg.Verifier.LoadRegistrationCertificate(c.pkiSigningCert)
+	if err != nil {
+		return nil, err
 	}
 
 	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand in handler)
