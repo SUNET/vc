@@ -119,9 +119,11 @@ func (m *MockDBService) ToDBService() *db.Service {
 // when the test finishes; it starts a background expiry goroutine that would
 // otherwise outlive every test in the suite.
 //
-// Note the four cache.NewTestMemory* caches below start goroutines too, and
-// are not stopped here: pkg/cache's MemoryCache exposes no Stop method, so
-// cleaning those up needs an API change rather than a test-only one.
+// The cache.NewTestMemory* caches below start goroutines too. MemoryCache
+// has a Stop method, but cache.Service types those fields as the Cache
+// interface, which does not include it - so they are stopped through a type
+// assertion. AuthContext is backed by MemoryStore, which has no Stop at all,
+// and is the one goroutine left running.
 func CreateTestClientWithMock(t testing.TB, cfg *model.Cfg) (*Client, *MockDBService) {
 	ctx := context.TODO()
 
@@ -174,6 +176,19 @@ func CreateTestClientWithMock(t testing.TB, cfg *model.Cfg) (*Client, *MockDBSer
 	}
 
 	t.Cleanup(client.openid4vp.Close)
+
+	// Stop the memory caches that can be stopped. The Cache interface omits
+	// Stop, so this asserts for it rather than widening the interface for a
+	// test-only need.
+	for _, c := range []any{
+		client.cacheService.Credential,
+		client.cacheService.EphemeralEncryptionKey,
+		client.cacheService.RequestObject,
+	} {
+		if stoppable, ok := c.(interface{ Stop() }); ok {
+			t.Cleanup(stoppable.Stop)
+		}
+	}
 
 	return client, mockDB
 }
