@@ -612,7 +612,7 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		reply.CNonce = childNonce
 
 		childSession := &cache.AuthorizationContext{
-			SessionID:             childSessionID,
+			SessionID:            childSessionID,
 			SourceSessionID:      authorizationContext.SessionID,
 			Status:               cache.SessionStatusTokenIssued,
 			CreatedAt:            time.Now(),
@@ -1003,5 +1003,3 @@ func (c *Client) handleRefreshTokenGrant(ctx context.Context, start time.Time, r
 	c.log.Debug("refresh token grant complete", "session_id", authContext.SessionID)
 	return reply, nil
 }
-
-
