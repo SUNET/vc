@@ -16,6 +16,7 @@ func (s *Service) MakeJWP(ctx context.Context, in *apiv1_issuer.MakeJWPRequest) 
 		HolderPointers: in.HolderPointers,
 		VCT:            in.Vct,
 		KeyBinding:     in.KeyBinding,
+		Suite:          in.Suite,
 	})
 	if err != nil {
 		return nil, err

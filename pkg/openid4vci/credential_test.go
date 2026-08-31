@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -593,6 +594,7 @@ func TestCredentialRequestValidatesBBSCommitment(t *testing.T) {
 	t.Run("valid base64url accepted", func(t *testing.T) {
 		r := base()
 		r.BBSCommitment = "AQIDBAU"
+		r.BBSSuite = bbs.SuiteNameSchnorr
 		if err := r.Validate(context.Background(), nil); err != nil {
 			t.Fatalf("valid commitment rejected: %v", err)
 		}
@@ -605,6 +607,7 @@ func TestCredentialRequestValidatesBBSCommitment(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := base()
 			r.BBSCommitment = tc.value
+			r.BBSSuite = bbs.SuiteNameSchnorr
 			err := r.Validate(context.Background(), nil)
 			if err == nil {
 				t.Fatalf("accepted %q", tc.value)
@@ -639,6 +642,7 @@ func TestCredentialRequestAcceptsACommitmentWithNoCommittedClaims(t *testing.T) 
 		Authorization:             "Bearer x",
 		CredentialConfigurationID: "cfg",
 		BBSCommitment:             "AQIDBAU",
+		BBSSuite:                  bbs.SuiteNameSchnorr,
 		BBSKeyBinding:             true,
 	}
 	if err := r.Validate(context.Background(), nil); err != nil {
@@ -684,6 +688,7 @@ func TestCredentialRequestValidatesBBSMembers(t *testing.T) {
 	t.Run("commitment with pointers accepted", func(t *testing.T) {
 		r := base()
 		r.BBSCommitment = validCommitment
+		r.BBSSuite = bbs.SuiteNameSchnorr
 		r.BBSCommittedClaims = []string{"/device_pin_hash", "/recovery_secret"}
 		r.BBSKeyBinding = true
 		if err := r.Validate(context.Background(), nil); err != nil {
@@ -697,6 +702,7 @@ func TestCredentialRequestValidatesBBSMembers(t *testing.T) {
 		// and no messages.
 		r := base()
 		r.BBSCommitment = validCommitment
+		r.BBSSuite = bbs.SuiteNameSchnorr
 		if err := r.Validate(context.Background(), nil); err != nil {
 			t.Fatalf("a commitment with no holder claims was rejected: %v", err)
 		}
@@ -714,6 +720,8 @@ func TestCredentialRequestValidatesBBSMembers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := base()
 			r.BBSCommitment = validCommitment
+			r.BBSSuite = bbs.SuiteNameSchnorr
+			r.BBSSuite = bbs.SuiteNameSchnorr
 			r.BBSCommittedClaims = tc.claims
 			if err := r.Validate(context.Background(), nil); err == nil {
 				t.Fatalf("%v must be rejected: it %s", tc.claims, tc.because)
@@ -724,6 +732,7 @@ func TestCredentialRequestValidatesBBSMembers(t *testing.T) {
 	t.Run("more pointers than the message limit", func(t *testing.T) {
 		r := base()
 		r.BBSCommitment = validCommitment
+		r.BBSSuite = bbs.SuiteNameSchnorr
 		r.BBSCommittedClaims = make([]string, bbs.MaxMessages+1)
 		for i := range r.BBSCommittedClaims {
 			r.BBSCommittedClaims[i] = fmt.Sprintf("/claim_%d", i)
@@ -732,4 +741,89 @@ func TestCredentialRequestValidatesBBSMembers(t *testing.T) {
 			t.Fatalf("more than %d committed claims must be rejected", bbs.MaxMessages)
 		}
 	})
+}
+
+// The suite selects the domain separation the commitment was built under.
+// Holder and issuer must agree or nothing verifies, and a wrong guess is
+// indistinguishable from a corrupt commitment, a wrong issuer key, or a
+// tampered proof — so it is carried explicitly and required, not defaulted.
+func TestCredentialRequestValidatesBBSSuite(t *testing.T) {
+	base := func() *CredentialRequest {
+		return &CredentialRequest{
+			Authorization:             "Bearer x",
+			CredentialConfigurationID: "cfg",
+			BBSCommitment:             "AQIDBAU",
+		}
+	}
+
+	t.Run("both suites are accepted", func(t *testing.T) {
+		// Plain is a first-class choice, not a legacy value: an issuance
+		// with no device binding at all is a real configuration.
+		for _, name := range []string{bbs.SuiteNamePlain, bbs.SuiteNameSchnorr} {
+			r := base()
+			r.BBSSuite = name
+			if err := r.Validate(context.Background(), nil); err != nil {
+				t.Fatalf("suite %q was rejected: %v", name, err)
+			}
+		}
+	})
+
+	t.Run("a commitment without a suite is rejected", func(t *testing.T) {
+		if err := base().Validate(context.Background(), nil); err == nil {
+			t.Fatal("bbs_commitment without bbs_suite must be rejected rather than defaulted")
+		}
+	})
+
+	t.Run("a suite without a commitment is rejected", func(t *testing.T) {
+		r := base()
+		r.BBSCommitment = ""
+		r.BBSSuite = bbs.SuiteNameSchnorr
+		if err := r.Validate(context.Background(), nil); err == nil {
+			t.Fatal("bbs_suite alone names the domain separation of nothing")
+		}
+	})
+
+	for _, name := range []string{"", "SCHNORR", "Plain", "bbs", "1"} {
+		t.Run("unknown suite "+strconv.Quote(name), func(t *testing.T) {
+			r := base()
+			r.BBSSuite = name
+			if err := r.Validate(context.Background(), nil); err == nil {
+				t.Fatalf("%q is not a suite this issuer knows", name)
+			}
+		})
+	}
+
+	// "plain" is the suite with no device binding, so a request asking for
+	// both is describing two different things. The native side would refuse
+	// it anyway, but from deeper in and about the commitment rather than
+	// about the two members that disagree.
+	t.Run("plain with key binding is a contradiction", func(t *testing.T) {
+		r := base()
+		r.BBSSuite = bbs.SuiteNamePlain
+		r.BBSKeyBinding = true
+		if err := r.Validate(context.Background(), nil); err == nil {
+			t.Fatal("bbs_suite plain with bbs_key_binding must be rejected")
+		}
+	})
+
+	// The pairing that looks wrong and is not: an unbound issuance under
+	// the schnorr suite is what the wallet does today, and deriving the
+	// suite from key binding would break exactly this case.
+	t.Run("schnorr without key binding is the ordinary unbound issuance", func(t *testing.T) {
+		r := base()
+		r.BBSSuite = bbs.SuiteNameSchnorr
+		r.BBSKeyBinding = false
+		if err := r.Validate(context.Background(), nil); err != nil {
+			t.Fatalf("schnorr with no key binding keys must be allowed: %v", err)
+		}
+	})
+}
+
+func TestParseSuiteRoundTrips(t *testing.T) {
+	for _, s := range []bbs.Suite{bbs.SuitePlain, bbs.SuiteSchnorr} {
+		got, err := bbs.ParseSuite(s.String())
+		if err != nil || got != s {
+			t.Fatalf("%v did not round-trip through its wire name: %v %v", s, got, err)
+		}
+	}
 }

@@ -53,6 +53,13 @@ type Client struct {
 	mdocIssuer     *mdoc.Issuer // mDL issuer for ISO 18013-5 credentials
 	signMetadataRL *rate.Limiter
 	bbsKeys        *bbsKeyPair // nil unless Issuer.BBS is configured; gates the "jwp" format
+	// bbsIssuerOverride replaces the native signer in tests.
+	//
+	// A seam rather than a design choice: without it nothing could show
+	// that MakeJWP passes the caller's suite *through* to the signer, only
+	// that it rejects the ones it should. Those are different properties,
+	// and hardcoding the suite again passed every test until this existed.
+	bbsIssuerOverride bbs.Issuer
 }
 
 // bbsKeyPair is the issuer's BLS12-381 key pair, held as raw bytes.
@@ -438,4 +445,13 @@ func readBase64URLFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("%s %w", path, err)
 	}
 	return decoded, nil
+}
+
+// bbsIssuer is the signer MakeJWP blind-signs with — the native one unless
+// a test has replaced it.
+func (c *Client) bbsIssuer() bbs.Issuer {
+	if c.bbsIssuerOverride != nil {
+		return c.bbsIssuerOverride
+	}
+	return bbs.Native()
 }

@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/pkg/bbs"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -64,6 +65,7 @@ func bbsRequest() *openid4vci.CredentialRequest {
 		CredentialConfigurationID: "pid_jwp",
 		BBSCommitment:             "AQIDBAU",
 		BBSCommittedClaims:        []string{"/device_pin_hash"},
+		BBSSuite:                  bbs.SuiteNameSchnorr,
 	}
 }
 
@@ -193,5 +195,60 @@ func TestIssueBBSRejectsAnUnknownScope(t *testing.T) {
 
 	if _, err := c.issueBBS(context.Background(), "not_configured", validBBSDocumentData, "", bbsRequest()); err == nil {
 		t.Fatal("an unconfigured scope must fail")
+	}
+}
+
+// The suite must reach the signer as the holder chose it. Hardcoding it
+// worked only while both ends happened to agree; a wallet on the other
+// suite got "commitment does not verify", which is what a corrupt
+// commitment and a wrong issuer key also say.
+func TestIssueBBSForwardsTheSuiteTheHolderChose(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		wire  string
+		want  uint32
+		bound bool
+	}{
+		{"schnorr, bound", bbs.SuiteNameSchnorr, uint32(bbs.SuiteSchnorr), true},
+		{"schnorr, unbound", bbs.SuiteNameSchnorr, uint32(bbs.SuiteSchnorr), false},
+		{"plain", bbs.SuiteNamePlain, uint32(bbs.SuitePlain), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issuer := &recordingIssuerClient{
+				reply: &apiv1_issuer.MakeJWPReply{
+					Credentials: []*apiv1_issuer.Credential{{Credential: "a.b.c"}},
+				},
+			}
+			c := bbsTestClient(t, issuer)
+
+			req := bbsRequest()
+			req.BBSSuite = tc.wire
+			req.BBSKeyBinding = tc.bound
+
+			if _, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", req); err != nil {
+				t.Fatalf("issueBBS: %v", err)
+			}
+			if issuer.got.Suite != tc.want {
+				t.Fatalf("suite = %d, want %d (%q)", issuer.got.Suite, tc.want, tc.wire)
+			}
+		})
+	}
+}
+
+// An unresolvable suite must not reach the signer with a zero value, which
+// is a real suite (plain) and would silently issue under the wrong domain
+// separation.
+func TestIssueBBSRefusesAnUnknownSuite(t *testing.T) {
+	issuer := &recordingIssuerClient{}
+	c := bbsTestClient(t, issuer)
+
+	req := bbsRequest()
+	req.BBSSuite = "not-a-suite"
+
+	if _, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", req); err == nil {
+		t.Fatal("an unknown suite must fail")
+	}
+	if issuer.got != nil {
+		t.Fatal("the issuer must not be called with a suite that could not be resolved")
 	}
 }

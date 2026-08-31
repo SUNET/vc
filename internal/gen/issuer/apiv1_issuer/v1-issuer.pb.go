@@ -334,8 +334,17 @@ type MakeJWPRequest struct {
 	HolderPointers []string               `protobuf:"bytes,4,rep,name=holder_pointers,json=holderPointers,proto3" json:"holder_pointers,omitempty"` // RFC 6901 pointers naming the committed claims, in message order
 	Vct            string                 `protobuf:"bytes,5,opt,name=vct,proto3" json:"vct,omitempty"`                                             // Credential type identifier, stamped into the JWP issuer header. Spelled the way SD-JWT VC spells it, on purpose: one type identifier across formats.
 	KeyBinding     bool                   `protobuf:"varint,6,opt,name=key_binding,json=keyBinding,proto3" json:"key_binding,omitempty"`            // Whether the commitment carries key binding keys
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Cipher suite the commitment was built under, as bbs.Suite: 0 plain,
+	// 1 schnorr. Resolved from the request's wire name by the APIGW, the
+	// same boundary that decodes the commitment - so this side receives a
+	// value it can use rather than a string to re-parse.
+	//
+	// A different axis from key_binding above: the suite selects domain
+	// separation, key_binding selects the message layout. Schnorr with no
+	// key binding keys is the ordinary unbound issuance.
+	Suite         uint32 `protobuf:"varint,7,opt,name=suite,proto3" json:"suite,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MakeJWPRequest) Reset() {
@@ -408,6 +417,13 @@ func (x *MakeJWPRequest) GetKeyBinding() bool {
 		return x.KeyBinding
 	}
 	return false
+}
+
+func (x *MakeJWPRequest) GetSuite() uint32 {
+	if x != nil {
+		return x.Suite
+	}
+	return 0
 }
 
 // `credentials` carries EXACTLY ONE entry, and a client must reject any
@@ -1134,7 +1150,7 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\x0eMakeSDJWTReply\x127\n" +
 	"\vcredentials\x18\x01 \x03(\v2\x15.v1.issuer.CredentialR\vcredentials\x129\n" +
 	"\x19token_status_list_section\x18\x02 \x01(\x03R\x16tokenStatusListSection\x125\n" +
-	"\x17token_status_list_index\x18\x03 \x01(\x03R\x14tokenStatusListIndex\"\xc7\x01\n" +
+	"\x17token_status_list_index\x18\x03 \x01(\x03R\x14tokenStatusListIndex\"\xdd\x01\n" +
 	"\x0eMakeJWPRequest\x12\x14\n" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12#\n" +
 	"\rdocument_data\x18\x02 \x01(\fR\fdocumentData\x12\x1e\n" +
@@ -1144,7 +1160,8 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\x0fholder_pointers\x18\x04 \x03(\tR\x0eholderPointers\x12\x10\n" +
 	"\x03vct\x18\x05 \x01(\tR\x03vct\x12\x1f\n" +
 	"\vkey_binding\x18\x06 \x01(\bR\n" +
-	"keyBinding\"\xb9\x01\n" +
+	"keyBinding\x12\x14\n" +
+	"\x05suite\x18\a \x01(\rR\x05suite\"\xb9\x01\n" +
 	"\fMakeJWPReply\x127\n" +
 	"\vcredentials\x18\x01 \x03(\v2\x15.v1.issuer.CredentialR\vcredentials\x129\n" +
 	"\x19token_status_list_section\x18\x02 \x01(\x03R\x16tokenStatusListSection\x125\n" +

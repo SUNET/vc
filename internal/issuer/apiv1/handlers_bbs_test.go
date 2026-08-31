@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/grpc"
+
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/bbs"
 	"github.com/SUNET/vc/pkg/logger"
@@ -434,6 +436,107 @@ func TestInitBBSKeysAcceptsAPathOrAnInlineValue(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := newClient(tc.bbs).initBBSKeys(); err == nil {
 				t.Fatal("must fail startup rather than guess")
+			}
+		})
+	}
+}
+
+// The signer must refuse a suite it cannot name rather than fall through to
+// the zero value, which is a real suite (plain) and would sign under the
+// wrong domain separation without saying so.
+func TestMakeJWPRefusesAnUnknownSuite(t *testing.T) {
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+
+	_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+		Commitment:   []byte{1, 2, 3},
+		VCT:          "urn:example:pid",
+		DocumentData: validDocumentData,
+		Suite:        99,
+	})
+	if err == nil || !strings.Contains(err.Error(), "suite") {
+		t.Fatalf("an unknown suite must fail and say so, got: %v", err)
+	}
+}
+
+// "plain" is the suite with no device binding, so asking for both describes
+// two different things. Caught before a status list entry is spent.
+func TestMakeJWPRefusesPlainWithKeyBinding(t *testing.T) {
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+
+	_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+		Commitment:   []byte{1, 2, 3},
+		VCT:          "urn:example:pid",
+		DocumentData: validDocumentData,
+		Suite:        uint32(bbs.SuitePlain),
+		KeyBinding:   true,
+	})
+	if err == nil {
+		t.Fatal("plain with key binding must be refused")
+	}
+	if strings.Contains(err.Error(), "registry") {
+		t.Fatal("it must be refused before the registry is reached, not after")
+	}
+}
+
+// stubRegistry hands back a status list entry without a registry.
+type stubRegistry struct {
+	apiv1_registry.RegistryServiceClient
+}
+
+func (stubRegistry) TokenStatusListAddStatus(_ context.Context, _ *apiv1_registry.TokenStatusListAddStatusRequest, _ ...grpc.CallOption) (*apiv1_registry.TokenStatusListAddStatusReply, error) {
+	return &apiv1_registry.TokenStatusListAddStatusReply{Section: 1, Index: 7, StatusListUri: "https://issuer.example.com/sl/1"}, nil
+}
+
+// recordingIssuer captures the params MakeJWP hands the signer.
+type recordingIssuer struct{ got bbs.IssueParams }
+
+func (r *recordingIssuer) Issue(p bbs.IssueParams) (string, error) {
+	r.got = p
+	return "hdr.payloads.proof", nil
+}
+
+// The suite must reach the signer as the caller chose it.
+//
+// This test exists because hardcoding `Suite: bbs.SuiteSchnorr` here passed
+// every other test in this file: they cover which suites are *rejected*,
+// which is a different property from which suite is *used*. A credential
+// signed under a domain separation nobody asked for verifies against
+// nothing, and says only "does not verify".
+func TestMakeJWPSignsUnderTheSuiteItWasGiven(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		suite bbs.Suite
+		bound bool
+	}{
+		{"schnorr, bound", bbs.SuiteSchnorr, true},
+		{"schnorr, unbound", bbs.SuiteSchnorr, false},
+		{"plain", bbs.SuitePlain, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			signer := &recordingIssuer{}
+			c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+			c.bbsIssuerOverride = signer
+			c.registryClient = stubRegistry{}
+
+			_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+				Commitment:   []byte{1, 2, 3},
+				VCT:          "urn:example:pid",
+				DocumentData: validDocumentData,
+				Suite:        uint32(tc.suite),
+				KeyBinding:   tc.bound,
+			})
+			if err != nil {
+				t.Fatalf("MakeJWP: %v", err)
+			}
+			if signer.got.Suite != tc.suite {
+				t.Fatalf("signed under suite %v, want %v", signer.got.Suite, tc.suite)
+			}
+			wantBinding := bbs.NoKeyBinding
+			if tc.bound {
+				wantBinding = bbs.SchnorrKeyBinding
+			}
+			if signer.got.KeyBinding != wantBinding {
+				t.Fatalf("key binding = %v, want %v", signer.got.KeyBinding, wantBinding)
 			}
 		})
 	}

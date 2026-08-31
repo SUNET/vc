@@ -44,6 +44,7 @@ package bbs
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 )
 
 // Suite selects the key binding construction, and with it the domain
@@ -58,6 +59,46 @@ const (
 	// binding key, the construction described in zk-cred-bbs's PROFILE.md.
 	SuiteSchnorr Suite = 1
 )
+
+// Wire names for the suites, as they appear in a credential request.
+//
+// Names rather than the numbers above: the number is an FFI detail, and a
+// request member carrying `1` says nothing to anyone reading a log.
+const (
+	SuiteNamePlain   = "plain"
+	SuiteNameSchnorr = "schnorr"
+)
+
+// ParseSuite resolves a wire name to a suite.
+//
+// The suite selects the domain separation everything is computed under -
+// the api_id, and therefore generator derivation and every hash-to-scalar.
+// Holder and issuer must agree or the commitment verifies against nothing,
+// which is why this is carried explicitly rather than defaulted: a wrong
+// guess is indistinguishable from a corrupt commitment, a wrong issuer key,
+// or a tampered proof.
+func ParseSuite(name string) (Suite, error) {
+	switch name {
+	case SuiteNamePlain:
+		return SuitePlain, nil
+	case SuiteNameSchnorr:
+		return SuiteSchnorr, nil
+	default:
+		return 0, fmt.Errorf("bbs: unknown suite %q, want %q or %q", name, SuiteNamePlain, SuiteNameSchnorr)
+	}
+}
+
+// String returns the wire name.
+func (s Suite) String() string {
+	switch s {
+	case SuitePlain:
+		return SuiteNamePlain
+	case SuiteSchnorr:
+		return SuiteNameSchnorr
+	default:
+		return fmt.Sprintf("Suite(%d)", uint32(s))
+	}
+}
 
 // Disclosure is what the holder asked to happen to one message.
 type Disclosure uint8

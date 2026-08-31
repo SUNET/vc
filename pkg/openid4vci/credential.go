@@ -107,6 +107,24 @@ type CredentialRequest struct {
 	// issuance, not a credential bound to nothing.
 	BBSKeyBinding bool `json:"bbs_key_binding,omitempty" validate:"omitempty"`
 
+	// BBSSuite REQUIRED with BBSCommitment. Which cipher suite the
+	// commitment was built under: "plain" or "schnorr".
+	//
+	// The suite selects the domain separation everything is computed under
+	// - the api_id, and so generator derivation and every hash-to-scalar -
+	// so holder and issuer must agree or the commitment verifies against
+	// nothing. Carried explicitly, and required rather than defaulted,
+	// because a wrong guess is indistinguishable from a corrupt commitment,
+	// a wrong issuer key, or a tampered proof: the request fails either
+	// way, but only this way does the error say what to fix.
+	//
+	// A different axis from BBSKeyBinding despite the similar name. The
+	// suite picks the domain separation; key binding picks the message
+	// layout a verifier reads under. "schnorr" with no key binding keys is
+	// the ordinary unbound issuance, not a contradiction - which is why
+	// this cannot be derived from BBSKeyBinding.
+	BBSSuite string `json:"bbs_suite,omitempty" validate:"omitempty"`
+
 	// CredentialResponseEncryption OPTIONAL. Object containing information for encrypting the Credential Response.
 	// If this request element is not present, the corresponding credential response returned is not encrypted.
 	CredentialResponseEncryption *CredentialResponseEncryption `json:"credential_response_encryption,omitempty" validate:"omitempty"`
@@ -462,6 +480,9 @@ func (c *CredentialRequest) validateBBS() error {
 		if c.BBSKeyBinding {
 			return reject("bbs_key_binding requires bbs_commitment")
 		}
+		if c.BBSSuite != "" {
+			return reject("bbs_suite requires bbs_commitment")
+		}
 		return nil
 	}
 
@@ -472,6 +493,22 @@ func (c *CredentialRequest) validateBBS() error {
 	// this endpoint's response text to an internal package's wording.
 	if _, err := bbs.DecodeCommitment(c.BBSCommitment); err != nil {
 		return reject("bbs_commitment is not a valid base64url-encoded commitment")
+	}
+
+	if c.BBSSuite == "" {
+		return reject("bbs_commitment requires bbs_suite: the suite selects the domain " +
+			"separation the commitment was built under and cannot be guessed")
+	}
+	suite, err := bbs.ParseSuite(c.BBSSuite)
+	if err != nil {
+		return reject("bbs_suite must be \"plain\" or \"schnorr\"")
+	}
+	// "plain" is the suite with no device binding, so a commitment claiming
+	// both is describing two different things. The native side would refuse
+	// it too, but from deeper in and with a message about the commitment
+	// rather than about the two members that disagree.
+	if suite == bbs.SuitePlain && c.BBSKeyBinding {
+		return reject("bbs_key_binding is set but bbs_suite is \"plain\", which has no device binding")
 	}
 
 	if err := bbs.ValidateHolderPointers(c.BBSCommittedClaims); err != nil {

@@ -963,6 +963,14 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 	// assertion against the commitment before signing, so a wrong answer
 	// fails the issuance rather than producing an unbound credential that
 	// claims to be bound.
+	// Validate() already resolved this once, so a failure here means the
+	// request changed underneath us rather than that a client sent
+	// something malformed.
+	suite, err := bbs.ParseSuite(req.BBSSuite)
+	if err != nil {
+		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidCredentialRequest, ErrorDescription: err.Error()}
+	}
+
 	reply, err := c.issuerClient.MakeJWP(ctx, &apiv1_issuer.MakeJWPRequest{
 		Scope:          scope,
 		DocumentData:   documentData,
@@ -970,6 +978,7 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 		HolderPointers: req.BBSCommittedClaims,
 		Vct:            vctm.VCT,
 		KeyBinding:     req.BBSKeyBinding,
+		Suite:          uint32(suite),
 	})
 	if err != nil {
 		c.log.Error(err, "failed to call MakeJWP")

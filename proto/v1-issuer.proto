@@ -67,6 +67,15 @@ message MakeJWPRequest {
     repeated string holder_pointers = 4; // RFC 6901 pointers naming the committed claims, in message order
     string vct = 5;               // Credential type identifier, stamped into the JWP issuer header. Spelled the way SD-JWT VC spells it, on purpose: one type identifier across formats.
     bool key_binding = 6;         // Whether the commitment carries key binding keys
+    // Cipher suite the commitment was built under, as bbs.Suite: 0 plain,
+    // 1 schnorr. Resolved from the request's wire name by the APIGW, the
+    // same boundary that decodes the commitment - so this side receives a
+    // value it can use rather than a string to re-parse.
+    //
+    // A different axis from key_binding above: the suite selects domain
+    // separation, key_binding selects the message layout. Schnorr with no
+    // key binding keys is the ordinary unbound issuance.
+    uint32 suite = 7;
 }
 
 // `credentials` carries EXACTLY ONE entry, and a client must reject any

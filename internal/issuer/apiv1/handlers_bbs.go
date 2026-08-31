@@ -31,6 +31,9 @@ type CreateJWPRequest struct {
 	HolderPointers []string `json:"holder_pointers"`
 	VCT            string   `json:"vct" validate:"required"`
 	KeyBinding     bool     `json:"key_binding"`
+	// Suite is bbs.Suite as a number - the APIGW resolved the request's
+	// wire name before this call, the same way it decoded the commitment.
+	Suite uint32 `json:"suite"`
 }
 
 // CreateJWPReply is the reply for a blind BBS credential.
@@ -81,6 +84,25 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	if err := bbs.ValidateHolderPointers(req.HolderPointers); err != nil {
 		return nil, grpcstatus.Error(codes.InvalidArgument, "holder_pointers "+err.Error())
 	}
+	// The suite the holder built its commitment under, and up here with the
+	// other cheap checks for the same reason they are: the status list
+	// entry below is allocated before signing and never handed back.
+	//
+	// Rejecting an unrecognised value matters more than it looks. The zero
+	// value is a real suite (plain), so falling through would sign under a
+	// domain separation nobody asked for and say nothing - and the wallet
+	// would meet it later as "does not verify", which is also what a corrupt
+	// commitment and a wrong issuer key say.
+	suite := bbs.Suite(req.Suite)
+	if suite != bbs.SuitePlain && suite != bbs.SuiteSchnorr {
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, "unknown bbs suite %d", req.Suite)
+	}
+	// "plain" is the suite with no device binding, so a request asking for
+	// both is describing two different things.
+	if suite == bbs.SuitePlain && req.KeyBinding {
+		return nil, grpcstatus.Errorf(codes.InvalidArgument,
+			"bbs suite %q has no device binding, but key binding was requested", suite)
+	}
 
 	// Same status list allocation the SD-JWT path performs, and for the
 	// same reason: a credential that cannot be revoked is a credential
@@ -97,7 +119,12 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	// built without `-tags bbsnative` would burn one registry entry per
 	// request while never issuing anything - a slow leak in the revocation
 	// list rather than a visible failure.
-	if !bbs.Available() {
+	//
+	// The question is whether *this client* has a usable signer, not
+	// whether the process was built with the native backend: those are the
+	// same thing in every deployment and differ only where a signer has
+	// been supplied directly.
+	if c.bbsIssuerOverride == nil && !bbs.Available() {
 		return nil, grpcstatus.Error(codes.Unimplemented, "bbs issuance is not available on this issuer")
 	}
 	statusEntry, err := c.registryClient.TokenStatusListAddStatus(ctx, &apiv1_registry.TokenStatusListAddStatusRequest{
@@ -130,8 +157,8 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 		keyBinding = bbs.SchnorrKeyBinding
 	}
 
-	credential, err := bbs.Issue(bbs.Native(), bbs.IssueParams{
-		Suite:          bbs.SuiteSchnorr,
+	credential, err := bbs.Issue(c.bbsIssuer(), bbs.IssueParams{
+		Suite:          suite,
 		SecretKey:      c.bbsKeys.secret,
 		PublicKey:      c.bbsKeys.public,
 		Commitment:     req.Commitment,
