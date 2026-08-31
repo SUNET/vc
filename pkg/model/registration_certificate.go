@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirosfoundation/go-trust/pkg/registry/rpcert"
@@ -133,6 +134,22 @@ func (l *LoadedRegistrationCertificate) VerifierInfo() []openid4vp.VerifierInfo 
 	}}
 }
 
+// IssuerInfo renders the certificate as OpenID4VCI issuer_info entries.
+//
+// Same document and same shape as VerifierInfo; only the metadata parameter
+// carrying it differs. A credential issuer is a registered wallet-relying
+// party in its own right under CIR (EU) 2025/848, so what it presents to a
+// wallet is the same registration certificate a verifier presents.
+func (l *LoadedRegistrationCertificate) IssuerInfo() []openid4vci.IssuerInfo {
+	if l == nil || l.JWT == "" {
+		return nil
+	}
+	return []openid4vci.IssuerInfo{{
+		Format: l.Format,
+		Data:   l.JWT,
+	}}
+}
+
 // LoadRegistrationCertificate reads, verifies and extracts the configured
 // registration certificate. It returns (nil, nil) when none is configured,
 // so a deployment outside an ARF trust framework is unaffected.
@@ -151,7 +168,18 @@ func (l *LoadedRegistrationCertificate) VerifierInfo() []openid4vp.VerifierInfo 
 // confirm both documents describe the same organisation (ARF RPRC_16). Pass
 // nil when none is loaded; the binding check is then skipped.
 func (v *Verifier) LoadRegistrationCertificate(accessCert *x509.Certificate) (*LoadedRegistrationCertificate, error) {
-	cfg := v.RegistrationCertificate
+	return v.RegistrationCertificate.Load(accessCert)
+}
+
+// Load reads, verifies and extracts the certificate this configuration points
+// at, following the same three steps described on
+// Verifier.LoadRegistrationCertificate.
+//
+// It hangs off the configuration rather than off a service because the
+// document says the same thing wherever it is presented: a verifier conveys
+// it in verifier_info, a credential issuer in issuer_info, and neither
+// changes how it is validated.
+func (cfg *RegistrationCertificate) Load(accessCert *x509.Certificate) (*LoadedRegistrationCertificate, error) {
 	if cfg == nil || cfg.FilePath == "" {
 		return nil, nil
 	}

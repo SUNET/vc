@@ -1074,6 +1074,14 @@ type APIAuthOIDC struct {
 
 // IssuerMetadata holds the OpenID4VCI issuer metadata configuration
 type IssuerMetadata struct {
+	// RegistrationCertificate optionally points at a Registrar-issued WRPRC to advertise in the issuer_info metadata parameter, attesting what this Credential Issuer is registered to provide.
+	//
+	// Under CIR (EU) 2025/848 a PID or attestation provider is a registered
+	// wallet-relying party in its own right, so the document is the same kind
+	// a verifier presents in verifier_info - see Verifier.RegistrationCertificate.
+	// It is validated identically at startup, and left unset by deployments
+	// outside an ARF trust framework.
+	RegistrationCertificate *RegistrationCertificate `yaml:"registration_certificate,omitempty"`
 	// AuthorizationServers lists the authorization server URLs
 	AuthorizationServers []string `yaml:"authorization_servers" validate:"omitempty"`
 	// DeferredCredentialEndpoint is the deferred credential endpoint
@@ -2099,6 +2107,21 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 	}
 
 	metadata := metadataConfig.GenerateIssuerMetadata(ctx)
+
+	// Advertise the registration certificate, when one is configured, so a
+	// wallet can see what this Credential Issuer is registered to provide.
+	//
+	// No access certificate is passed: the ARF RPRC_16 binding compares the
+	// registration certificate against the access certificate of the party
+	// presenting it, and the issuer service holds that key, not the apigw
+	// that assembles this metadata. The binding is therefore checked where
+	// the pair actually lives - see the note in the PR - and this call
+	// performs the signature and chain steps only.
+	loaded, err := cfg.RegistrationCertificate.Load(nil)
+	if err != nil {
+		return nil, fmt.Errorf("issuer registration certificate: %w", err)
+	}
+	metadata.IssuerInfo = loaded.IssuerInfo()
 
 	return metadata, nil
 }
