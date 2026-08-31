@@ -3,6 +3,7 @@ package openid4vp
 import (
 	"crypto/ecdh"
 	"crypto/rand"
+	"fmt"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -71,6 +72,46 @@ func (e *EphemeralEncryptionKeyCache) Len() int {
 
 // GenerateAndStore generates a new ephemeral encryption key pair, stores the private key in the cache,
 // and returns both private and public JWKs. The key uses ECDH P-256.
+// GenerateAndStoreIfAbsent returns the public half of the key stored under
+// kid, generating and storing a new pair only when there is none.
+//
+// Reuse matters because a request object can be produced more than once for
+// the same session - GetOIDCRequestObject rebuilds and re-signs on every
+// call. Generating afresh each time would overwrite the private key under
+// an unchanged kid, so a wallet still holding an earlier request object
+// would encrypt to a public key whose private half no longer exists, and
+// the response would fail to decrypt with no obvious cause.
+func (e *EphemeralEncryptionKeyCache) GenerateAndStoreIfAbsent(kid string) (jwk.Key, error) {
+	if existing, found := e.Get(kid); found {
+		publicKey, err := existing.PublicKey()
+		if err != nil {
+			return nil, fmt.Errorf("deriving public key for kid %q: %w", kid, err)
+		}
+		// PublicKey copies the key material but not every parameter, so the
+		// members a wallet requires are restored here rather than assumed.
+		if err := decorateEncryptionKey(publicKey, kid); err != nil {
+			return nil, err
+		}
+		return publicKey, nil
+	}
+
+	_, publicKey, err := e.GenerateAndStore(kid)
+	return publicKey, err
+}
+
+// decorateEncryptionKey sets the parameters a wallet requires on a public
+// encryption key: the key ID it is advertised under, its use, and the
+// key-agreement algorithm to use with it.
+func decorateEncryptionKey(key jwk.Key, kid string) error {
+	if err := key.Set(jwk.KeyUsageKey, "enc"); err != nil {
+		return err
+	}
+	if err := key.Set(jwk.AlgorithmKey, jwa.ECDH_ES()); err != nil {
+		return err
+	}
+	return key.Set(jwk.KeyIDKey, kid)
+}
+
 func (e *EphemeralEncryptionKeyCache) GenerateAndStore(kid string) (privateKey jwk.Key, publicKey jwk.Key, err error) {
 	// Generate ECDH P-256 key pair
 	privKey, err := ecdh.P256().GenerateKey(rand.Reader)
@@ -99,19 +140,10 @@ func (e *EphemeralEncryptionKeyCache) GenerateAndStore(kid string) (privateKey j
 		return nil, nil, err
 	}
 
-	if err := publicJWK.Set(jwk.KeyUsageKey, "enc"); err != nil {
-		return nil, nil, err
-	}
-
-	// alg names the key-agreement algorithm the wallet should use with this
-	// key. Wallets reject a JWK without it - OpenID4VP requires each key in
-	// client_metadata.jwks to carry kty, crv, x, y and alg, and this key
-	// previously carried every member except alg.
-	if err := publicJWK.Set(jwk.AlgorithmKey, jwa.ECDH_ES()); err != nil {
-		return nil, nil, err
-	}
-
-	if err := publicJWK.Set(jwk.KeyIDKey, kid); err != nil {
+	// Sets use, alg and kid. alg in particular is required: OpenID4VP wants
+	// each key in client_metadata.jwks to carry kty, crv, x, y and alg, and
+	// this key previously carried every member except alg.
+	if err := decorateEncryptionKey(publicJWK, kid); err != nil {
 		return nil, nil, err
 	}
 

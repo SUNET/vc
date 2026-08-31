@@ -92,7 +92,12 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 			return "", fmt.Errorf("response_mode %q requires encryption but no ephemeral key cache is configured", responseMode)
 		}
 
-		_, ephemeralPublicJWK, err := c.openid4vp.EphemeralKeyCache.GenerateAndStore(sessionID)
+		// Reuse any key already held for this session. A request object can
+		// be built more than once for the same session - GetOIDCRequestObject
+		// rebuilds and re-signs on every call - and regenerating would
+		// replace the private key under an unchanged kid, stranding a wallet
+		// that still holds an earlier request object.
+		ephemeralPublicJWK, err := c.openid4vp.EphemeralKeyCache.GenerateAndStoreIfAbsent(sessionID)
 		if err != nil {
 			c.log.Error(err, "Failed to generate ephemeral encryption key")
 			return "", fmt.Errorf("generating ephemeral encryption key: %w", err)

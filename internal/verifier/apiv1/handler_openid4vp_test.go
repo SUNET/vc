@@ -1,8 +1,11 @@
 package apiv1
 
 import (
+	"crypto"
+
 	"crypto/rand"
 	"crypto/rsa"
+	"github.com/lestrrat-go/jwx/v3/jwk"
 	"testing"
 	"time"
 
@@ -467,4 +470,54 @@ func newSigningTestClient(t *testing.T) *Client {
 	require.NoError(t, client.SetSigningKeyForTesting(key))
 
 	return client
+}
+
+// TestCreateRequestObject_ReusesTheSessionKey covers a wallet fetching the
+// request object twice. GetOIDCRequestObject rebuilds and re-signs on every
+// call, so regenerating the key would replace the private half under an
+// unchanged kid: a wallet still holding the first request object would
+// encrypt to a public key whose private half no longer exists, and the
+// response would fail to decrypt for no visible reason.
+func TestCreateRequestObject_ReusesTheSessionKey(t *testing.T) {
+	ctx := t.Context()
+	client := newSigningTestClient(t)
+	client.cfg.Verifier.DigitalCredentials.Enable = true
+
+	firstKey := func(t *testing.T, sessionID string) jwk.Key {
+		t.Helper()
+		cached, err := client.GetRequestObject(ctx, sessionID)
+		require.NoError(t, err)
+		require.NotNil(t, cached.ClientMetadata)
+		require.NotNil(t, cached.ClientMetadata.JWKS)
+		require.Len(t, cached.ClientMetadata.JWKS.Keys, 1)
+		return cached.ClientMetadata.JWKS.Keys[0]
+	}
+
+	_, err := client.CreateRequestObject(ctx, "same-session", createTestDCQLForVP(t), "nonce-1", nil)
+	require.NoError(t, err)
+	before := firstKey(t, "same-session")
+
+	// Second fetch of the same session, as a wallet retry or reload would do.
+	_, err = client.CreateRequestObject(ctx, "same-session", createTestDCQLForVP(t), "nonce-2", nil)
+	require.NoError(t, err)
+	after := firstKey(t, "same-session")
+
+	beforeThumb, err := before.Thumbprint(crypto.SHA256)
+	require.NoError(t, err)
+	afterThumb, err := after.Thumbprint(crypto.SHA256)
+	require.NoError(t, err)
+	assert.Equal(t, beforeThumb, afterThumb,
+		"the advertised public key must not change between fetches of the same session")
+
+	// And the private half must still match what is advertised.
+	kid, ok := after.KeyID()
+	require.True(t, ok)
+	priv, found := client.openid4vp.EphemeralKeyCache.Get(kid)
+	require.True(t, found)
+	privPub, err := priv.PublicKey()
+	require.NoError(t, err)
+	privThumb, err := privPub.Thumbprint(crypto.SHA256)
+	require.NoError(t, err)
+	assert.Equal(t, afterThumb, privThumb,
+		"the cached private key must be the pair of the advertised public key")
 }
