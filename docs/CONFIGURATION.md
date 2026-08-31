@@ -673,10 +673,18 @@ persisted in the database.
 > **Path:** `.apigw.issuer_metadata.registration_certificate`, `.verifier.registration_certificate`
 
 vc does not issue these. A national Registrar in the eIDAS ecosystem
-issues a WRPRC to the Relying Party out of band, attesting what the RP is
-registered to request; this configuration points at the resulting file so
-it can be conveyed to wallets in the OpenID4VP verifier_info request
-parameter, where it informs the wallet's consent dialog and policy checks.
+issues a WRPRC out of band, attesting what the party is registered to do;
+this configuration points at the resulting file.
+
+The same document travels in both directions, which is why one type serves
+both:
+
+- a verifier conveys it in the OpenID4VP verifier_info request
+parameter, attesting what it is registered to request;
+- a credential issuer conveys it in the OpenID4VCI issuer_info metadata
+parameter, attesting what it is registered to provide.
+
+Either way it informs the wallet's consent dialog and policy checks.
 
 | Field                | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Example                                  | Default | Required |
 | -------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ------- | -------- |
