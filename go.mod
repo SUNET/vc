@@ -37,7 +37,7 @@ require (
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/kaptinlin/jsonschema v0.9.8
 	github.com/kelseyhightower/envconfig v1.4.0
-	github.com/klauspost/compress v1.19.1
+	github.com/klauspost/compress v1.19.2
 	github.com/lestrrat-go/jwx/v3 v3.2.0
 	github.com/lithammer/shortuuid/v4 v4.2.0
 	github.com/miekg/pkcs11 v1.1.2
