@@ -155,6 +155,12 @@ func CreateTestClientWithMock(cfg *model.Cfg) (*Client, *MockDBService) {
 			Credential:             cache.NewTestMemoryCache[[]sdjwtvc.CredentialCache](5 * time.Minute),
 		},
 		jwksResolver: trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{}),
+		// Production wires this in New(); without it any path that needs an
+		// ephemeral encryption key - such as an encrypted response_mode -
+		// has nothing to generate one from.
+		openid4vp: &openid4vp.Client{
+			EphemeralKeyCache: openid4vp.NewEphemeralEncryptionKeyCache(10 * time.Minute),
+		},
 	}
 
 	return client, mockDB

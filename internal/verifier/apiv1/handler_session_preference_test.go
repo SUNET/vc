@@ -331,11 +331,11 @@ func TestFlattenClaimsForDisplay(t *testing.T) {
 			name: "flat claims unchanged",
 			input: map[string]any{
 				"given_name": "Helen",
-				"birthdate": "1996-01-30",
+				"birthdate":  "1996-01-30",
 			},
 			expect: map[string]any{
 				"given_name": "Helen",
-				"birthdate": "1996-01-30",
+				"birthdate":  "1996-01-30",
 			},
 		},
 		{
@@ -352,7 +352,7 @@ func TestFlattenClaimsForDisplay(t *testing.T) {
 				},
 			},
 			expect: map[string]any{
-				"given_name":             "Helen",
+				"given_name":              "Helen",
 				"place_of_birth.locality": "Stockholm",
 				"place_of_birth.country":  "SE",
 				"address.street_address":  "Tulegatan",

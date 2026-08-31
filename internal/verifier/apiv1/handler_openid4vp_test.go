@@ -401,3 +401,68 @@ func createTestDBSession(sessionID string) *cache.AuthorizationContext {
 
 	return authCtx
 }
+
+// TestCreateRequestObject_EncryptedModeCarriesAKey covers what an external
+// wallet actually validates. A response_mode ending in .jwt asks the wallet
+// to encrypt its response; this path previously sent client_metadata with
+// only vp_formats_supported, so there was no key to encrypt to and no
+// encryption parameters, and a conformant wallet rejected the request before
+// reading the credential query.
+func TestCreateRequestObject_EncryptedModeCarriesAKey(t *testing.T) {
+	ctx := t.Context()
+	client, _ := CreateTestClientWithMock(nil)
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	require.NoError(t, client.SetSigningKeyForTesting(key))
+
+	client.cfg.Verifier.DigitalCredentials.Enable = true // response_mode defaults to dc_api.jwt
+
+	_, err = client.CreateRequestObject(ctx, "session-enc", createTestDCQLForVP(t), "nonce-enc", nil)
+	require.NoError(t, err)
+
+	cached, err := client.GetRequestObject(ctx, "session-enc")
+	require.NoError(t, err)
+	require.NotNil(t, cached.ClientMetadata, "client_metadata is required for an encrypted response mode")
+
+	md := cached.ClientMetadata
+	require.NotNil(t, md.JWKS, "the wallet needs a key to encrypt to")
+	require.Len(t, md.JWKS.Keys, 1)
+
+	assert.Equal(t, []string{"A256GCM"}, md.EncryptedResponseEncValuesSupported,
+		"OpenID4VP 1.0 expects an array under this name")
+	assert.Equal(t, "ECDH-ES", md.AuthorizationEncryptedResponseALG)
+	assert.Equal(t, "A256GCM", md.AuthorizationEncryptedResponseENC)
+
+	// The private half must be findable by the advertised kid, or the wallet
+	// encrypts to a key we cannot decrypt with.
+	kid, ok := md.JWKS.Keys[0].KeyID()
+	require.True(t, ok)
+	_, found := client.openid4vp.EphemeralKeyCache.Get(kid)
+	assert.True(t, found, "the ephemeral private key must be retrievable by the advertised kid")
+}
+
+// TestCreateRequestObject_UnencryptedModeSendsNoKey is the other side: with
+// DC API off the response mode is direct_post, which is not encrypted, so
+// there is no reason to mint or advertise a key.
+func TestCreateRequestObject_UnencryptedModeSendsNoKey(t *testing.T) {
+	ctx := t.Context()
+	client, _ := CreateTestClientWithMock(nil)
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	require.NoError(t, client.SetSigningKeyForTesting(key))
+
+	client.cfg.Verifier.DigitalCredentials.Enable = false
+
+	_, err = client.CreateRequestObject(ctx, "session-plain", createTestDCQLForVP(t), "nonce-plain", nil)
+	require.NoError(t, err)
+
+	cached, err := client.GetRequestObject(ctx, "session-plain")
+	require.NoError(t, err)
+	assert.Equal(t, "direct_post", cached.ResponseMode)
+	if cached.ClientMetadata != nil {
+		assert.Nil(t, cached.ClientMetadata.JWKS)
+		assert.Empty(t, cached.ClientMetadata.EncryptedResponseEncValuesSupported)
+	}
+}

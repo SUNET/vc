@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
@@ -99,6 +100,14 @@ func (e *EphemeralEncryptionKeyCache) GenerateAndStore(kid string) (privateKey j
 	}
 
 	if err := publicJWK.Set(jwk.KeyUsageKey, "enc"); err != nil {
+		return nil, nil, err
+	}
+
+	// alg names the key-agreement algorithm the wallet should use with this
+	// key. Wallets reject a JWK without it - OpenID4VP requires each key in
+	// client_metadata.jwks to carry kty, crv, x, y and alg, and this key
+	// previously carried every member except alg.
+	if err := publicJWK.Set(jwk.AlgorithmKey, jwa.ECDH_ES()); err != nil {
 		return nil, nil, err
 	}
 

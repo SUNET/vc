@@ -547,5 +547,3 @@ func ecCoordinates(t *testing.T, pub *ecdsa.PublicKey) (x, y []byte) {
 	require.Equal(t, 65, len(raw), "unexpected uncompressed P-256 point length")
 	return raw[1:33], raw[33:65]
 }
-
-
