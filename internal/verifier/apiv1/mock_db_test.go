@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/SUNET/vc/internal/verifier/cache"
@@ -112,7 +113,16 @@ func (m *MockDBService) ToDBService() *db.Service {
 }
 
 // CreateTestClientWithMock creates a test Client with a mock database for testing handlers
-func CreateTestClientWithMock(cfg *model.Cfg) (*Client, *MockDBService) {
+// CreateTestClientWithMock builds a Client wired to mock dependencies.
+//
+// t is taken so the openid4vp client's ephemeral key cache can be stopped
+// when the test finishes; it starts a background expiry goroutine that would
+// otherwise outlive every test in the suite.
+//
+// Note the four cache.NewTestMemory* caches below start goroutines too, and
+// are not stopped here: pkg/cache's MemoryCache exposes no Stop method, so
+// cleaning those up needs an API change rather than a test-only one.
+func CreateTestClientWithMock(t testing.TB, cfg *model.Cfg) (*Client, *MockDBService) {
 	ctx := context.TODO()
 
 	if cfg == nil {
@@ -162,6 +172,8 @@ func CreateTestClientWithMock(cfg *model.Cfg) (*Client, *MockDBService) {
 			EphemeralKeyCache: openid4vp.NewEphemeralEncryptionKeyCache(10 * time.Minute),
 		},
 	}
+
+	t.Cleanup(client.openid4vp.Close)
 
 	return client, mockDB
 }

@@ -155,7 +155,7 @@ func TestVerificationCallback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Setup credential cache if needed
 			if tt.setupCache {
@@ -305,7 +305,7 @@ func TestVerificationDirectPost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Set up notify service
 			log := logger.NewSimple("test")
@@ -395,7 +395,7 @@ func TestVerificationDirectPostDecoyDisclosure(t *testing.T) {
 	sigKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(t, nil)
 	log := logger.NewSimple("test")
 	notifyService, _ := notify.New(ctx, client.cfg, log)
 	client.notify = notifyService

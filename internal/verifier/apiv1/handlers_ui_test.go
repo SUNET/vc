@@ -83,7 +83,7 @@ func TestUIMetadata(t *testing.T) {
 				},
 			}
 
-			client, _ := CreateTestClientWithMock(cfg)
+			client, _ := CreateTestClientWithMock(t, cfg)
 			// Override cfg with our test config
 			client.cfg = cfg
 
@@ -147,7 +147,7 @@ func TestUIMetadata_MsoMdocScope(t *testing.T) {
 		Verifier: &model.Verifier{},
 	}
 
-	client, _ := CreateTestClientWithMock(cfg)
+	client, _ := CreateTestClientWithMock(t, cfg)
 	client.cfg = cfg
 
 	reply, err := client.UIMetadata(ctx)
@@ -230,7 +230,7 @@ func TestUIMetadataPresetValidationsPerScope(t *testing.T) {
 		},
 	}
 
-	client, _ := CreateTestClientWithMock(cfg)
+	client, _ := CreateTestClientWithMock(t, cfg)
 	client.cfg = cfg
 
 	reply, err := client.UIMetadata(ctx)
@@ -342,7 +342,7 @@ func TestUIMetadataPresetFormatFromMetadata(t *testing.T) {
 		},
 	}
 
-	client, _ := CreateTestClientWithMock(cfg)
+	client, _ := CreateTestClientWithMock(t, cfg)
 	client.cfg = cfg
 
 	reply, err := client.UIMetadata(ctx)
@@ -377,7 +377,7 @@ func TestUIMetadataCredentialFormatFromMetadata(t *testing.T) {
 		Verifier: &model.Verifier{},
 	}
 
-	client, _ := CreateTestClientWithMock(cfg)
+	client, _ := CreateTestClientWithMock(t, cfg)
 	client.cfg = cfg
 
 	reply, err := client.UIMetadata(ctx)
@@ -499,7 +499,7 @@ func TestAugmentDCQLFromVCTM_ArraySelectiveDisclosure(t *testing.T) {
 				Verifier: &model.Verifier{},
 			}
 
-			client, _ := CreateTestClientWithMock(cfg)
+			client, _ := CreateTestClientWithMock(t, cfg)
 			client.cfg = cfg
 
 			dcql := &openid4vp.DCQL{
@@ -870,7 +870,7 @@ func TestAugmentDCQLFromVCTM_ComplexCredential(t *testing.T) {
 				Verifier: &model.Verifier{},
 			}
 
-			client, _ := CreateTestClientWithMock(cfg)
+			client, _ := CreateTestClientWithMock(t, cfg)
 			client.cfg = cfg
 
 			dcql := &openid4vp.DCQL{
@@ -1012,7 +1012,7 @@ func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
 		cfg.Common.CredentialMetadata["novct"].GetVCTM().VCT,
 		"precondition: ResolveVCTUrls should have back-filled the empty vct from the URL")
 
-	client, _ := CreateTestClientWithMock(cfg)
+	client, _ := CreateTestClientWithMock(t, cfg)
 	client.cfg = cfg
 
 	reply, err := client.UIMetadata(ctx)
@@ -1104,7 +1104,7 @@ func TestUIMetadataPresetMsoMdocUsesDoctypeValue(t *testing.T) {
 		},
 	}
 
-	client, _ := CreateTestClientWithMock(cfg)
+	client, _ := CreateTestClientWithMock(t, cfg)
 	client.cfg = cfg
 
 	reply, err := client.UIMetadata(ctx)

@@ -14,6 +14,7 @@ import (
 // wallets reject the whole request object over the one missing member.
 func TestEphemeralPublicJWK_CarriesEveryRequiredMember(t *testing.T) {
 	cache := NewEphemeralEncryptionKeyCache(5 * time.Minute)
+	t.Cleanup(cache.Stop)
 	_, pub, err := cache.GenerateAndStore("kid-1")
 	require.NoError(t, err)
 
@@ -40,6 +41,7 @@ func TestEphemeralPublicJWK_CarriesEveryRequiredMember(t *testing.T) {
 // half, or the wallet encrypts to a key we cannot find.
 func TestEphemeralKeyRoundTrip(t *testing.T) {
 	cache := NewEphemeralEncryptionKeyCache(5 * time.Minute)
+	t.Cleanup(cache.Stop)
 	priv, pub, err := cache.GenerateAndStore("session-42")
 	require.NoError(t, err)
 

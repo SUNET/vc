@@ -71,7 +71,7 @@ func TestCreateRequestObject(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Generate RSA key for signing
 			key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -147,7 +147,7 @@ func TestGetRequestObject(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Setup cache if needed
 			if tt.setupCache {
@@ -217,7 +217,7 @@ func TestHandleDirectPost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Setup session if needed
 			if tt.authCtxSetup != nil {
@@ -287,7 +287,7 @@ func TestGetPollStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Setup session if needed
 			if tt.authCtxSetup != nil {
@@ -369,7 +369,7 @@ func TestExtractAndMapClaimsEmpty(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Test with nil claims extractor (which is the default for test client)
 			claims, err := client.extractAndMapClaims(ctx, tt.vpToken, "")
@@ -410,7 +410,7 @@ func createTestDBSession(sessionID string) *cache.AuthorizationContext {
 // reading the credential query.
 func TestCreateRequestObject_EncryptedModeCarriesAKey(t *testing.T) {
 	ctx := t.Context()
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(t, nil)
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
@@ -447,7 +447,7 @@ func TestCreateRequestObject_EncryptedModeCarriesAKey(t *testing.T) {
 // there is no reason to mint or advertise a key.
 func TestCreateRequestObject_UnencryptedModeSendsNoKey(t *testing.T) {
 	ctx := t.Context()
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(t, nil)
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)

@@ -47,7 +47,7 @@ func TestUpdateSessionPreference(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Setup session if needed
 			if tt.sessionExists {
@@ -81,7 +81,7 @@ func TestUpdateSessionPreference(t *testing.T) {
 
 func TestUpdateSessionPreference_WalletFollowsRedirect(t *testing.T) {
 	ctx := t.Context()
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(t, nil)
 
 	authCtx := createTestDBSessionForPrefs("session-wallet-redirect")
 	authCtx.ShowCredentialDetails = true
@@ -171,7 +171,7 @@ func TestConfirmCredentialDisplay(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Setup session if needed
 			if tt.authCtxSetup != nil {
@@ -262,7 +262,7 @@ func TestGetCredentialDisplayData(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Setup session if needed
 			if tt.authCtxSetup != nil {
