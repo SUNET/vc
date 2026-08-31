@@ -95,8 +95,12 @@ func (v *JWTRegistrationCertValidator) Validate(_ context.Context, certData []by
 		return nil, fmt.Errorf("wrprc: parsing JWT header: %w", err)
 	}
 
-	// Validate typ = "rc-wrp+jwt" (GEN-5.2.2-01)
-	if !strings.EqualFold(header.Typ, WRPRCTyp) {
+	// Validate typ = "rc-wrp+jwt" (GEN-5.2.2-01), compared exactly.
+	//
+	// A JWT typ is nominally a media type and so case-insensitive, but
+	// Registrars emit the lowercase form and callers compare it exactly, so
+	// the latitude buys nothing and costs a second rule.
+	if header.Typ != WRPRCTyp {
 		return nil, fmt.Errorf("wrprc: unexpected JWT typ %q, want %q", header.Typ, WRPRCTyp)
 	}
 
