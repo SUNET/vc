@@ -345,13 +345,13 @@ func (c *Client) initBBSKeys() error {
 	}
 	cfg := c.cfg.Issuer.BBS
 
-	secret, err := readBase64URLFile(cfg.SecretKeyPath)
+	secret, err := bbsKeyMaterial("secret", cfg.SecretKeyPath, cfg.SecretKey)
 	if err != nil {
-		return fmt.Errorf("failed to load BBS secret key: %w", err)
+		return err
 	}
-	public, err := readBase64URLFile(cfg.PublicKeyPath)
+	public, err := bbsKeyMaterial("public", cfg.PublicKeyPath, cfg.PublicKey)
 	if err != nil {
-		return fmt.Errorf("failed to load BBS public key: %w", err)
+		return err
 	}
 
 	// Check the two halves actually form a pair. This was previously left
@@ -382,6 +382,49 @@ func (c *Client) initBBSKeys() error {
 	return nil
 }
 
+// bbsKeyMaterial resolves one half of the key pair from whichever of the
+// two ways it was configured.
+//
+// Both set, or neither, is refused rather than resolved by precedence. A
+// deployment that sets both has two sources of truth for a signing key and
+// no way to tell which one is live; silently preferring one would mean an
+// operator can edit the wrong half and see no effect at all.
+func bbsKeyMaterial(which, path, inline string) ([]byte, error) {
+	switch {
+	case path != "" && inline != "":
+		return nil, fmt.Errorf("BBS %s key: set %s_key_path or %s_key, not both", which, which, which)
+	case path != "":
+		decoded, err := readBase64URLFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load BBS %s key: %w", which, err)
+		}
+		return decoded, nil
+	case inline != "":
+		decoded, err := decodeBase64URL(inline)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load BBS %s key: %w", which, err)
+		}
+		return decoded, nil
+	default:
+		return nil, fmt.Errorf("BBS %s key: set either %s_key_path or %s_key", which, which, which)
+	}
+}
+
+// decodeBase64URL decodes a single unpadded base64url value.
+func decodeBase64URL(value string) ([]byte, error) {
+	// Trailing whitespace is what every editor and heredoc leaves behind;
+	// padding is what a standard-base64 tool leaves behind. Neither is a
+	// broken key.
+	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(strings.TrimSpace(value), "="))
+	if err != nil {
+		return nil, fmt.Errorf("not valid base64url: %w", err)
+	}
+	if len(decoded) == 0 {
+		return nil, fmt.Errorf("is empty")
+	}
+	return decoded, nil
+}
+
 // readBase64URLFile reads a file holding a single base64url-encoded value.
 func readBase64URLFile(path string) ([]byte, error) {
 	raw, err := os.ReadFile(path)
@@ -390,12 +433,9 @@ func readBase64URLFile(path string) ([]byte, error) {
 	}
 	// Trailing newlines are what every editor and every `echo -n`-less
 	// pipeline leaves behind; rejecting them would be a needless trap.
-	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(strings.TrimSpace(string(raw)), "="))
+	decoded, err := decodeBase64URL(string(raw))
 	if err != nil {
-		return nil, fmt.Errorf("%s is not valid base64url: %w", path, err)
-	}
-	if len(decoded) == 0 {
-		return nil, fmt.Errorf("%s is empty", path)
+		return nil, fmt.Errorf("%s %w", path, err)
 	}
 	return decoded, nil
 }

@@ -369,3 +369,72 @@ func TestInitBBSKeys(t *testing.T) {
 		}
 	})
 }
+
+// Either way of configuring a key must work, and setting both must not.
+//
+// The inline form exists because not every deployment can mount an
+// arbitrary file - a chart that models specific named secret volumes has no
+// way to add one for a key it does not know about. Both forms set is
+// refused rather than resolved by precedence: an operator editing the half
+// that is not live would see no effect at all.
+func TestInitBBSKeysAcceptsAPathOrAnInlineValue(t *testing.T) {
+	dir := t.TempDir()
+	const (
+		skB64 = "AQIDBAU"
+		pkB64 = "BgcICQo"
+	)
+	sk := []byte{1, 2, 3, 4, 5}
+	pk := []byte{6, 7, 8, 9, 10}
+
+	newClient := func(bbs *model.BBSConfig) *Client {
+		return &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Issuer: &model.Issuer{BBS: bbs}}}
+	}
+
+	t.Run("inline", func(t *testing.T) {
+		c := newClient(&model.BBSConfig{SecretKey: skB64, PublicKey: pkB64})
+		if err := c.initBBSKeys(); err != nil {
+			t.Fatalf("initBBSKeys: %v", err)
+		}
+		if string(c.bbsKeys.secret) != string(sk) || string(c.bbsKeys.public) != string(pk) {
+			t.Fatalf("inline keys decoded wrong: %v / %v", c.bbsKeys.secret, c.bbsKeys.public)
+		}
+	})
+
+	t.Run("path and inline agree on the same bytes", func(t *testing.T) {
+		c := newClient(&model.BBSConfig{
+			SecretKeyPath: writeKeyFile(t, dir, "both.sk", skB64+"\n"),
+			PublicKey:     pkB64,
+		})
+		if err := c.initBBSKeys(); err != nil {
+			t.Fatalf("mixing a path and an inline value for different halves is fine: %v", err)
+		}
+		if string(c.bbsKeys.secret) != string(sk) || string(c.bbsKeys.public) != string(pk) {
+			t.Fatal("mixed sources decoded wrong")
+		}
+	})
+
+	for _, tc := range []struct {
+		name string
+		bbs  *model.BBSConfig
+	}{
+		{"both forms for the secret", &model.BBSConfig{
+			SecretKeyPath: writeKeyFile(t, t.TempDir(), "k.sk", skB64),
+			SecretKey:     skB64,
+			PublicKey:     pkB64,
+		}},
+		{"both forms for the public key", &model.BBSConfig{
+			SecretKey:     skB64,
+			PublicKeyPath: writeKeyFile(t, t.TempDir(), "k.pk", pkB64),
+			PublicKey:     pkB64,
+		}},
+		{"neither form for the secret", &model.BBSConfig{PublicKey: pkB64}},
+		{"neither form for the public key", &model.BBSConfig{SecretKey: skB64}},
+		{"inline value is not base64url", &model.BBSConfig{SecretKey: "!!!!", PublicKey: pkB64}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := newClient(tc.bbs).initBBSKeys(); err == nil {
+				t.Fatal("must fail startup rather than guess")
+			}
+		})
+	}
+}

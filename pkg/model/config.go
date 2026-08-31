@@ -454,11 +454,27 @@ type Issuer struct {
 // is a known and accepted property of this format rather than an oversight.
 type BBSConfig struct {
 	// SecretKeyPath is a file holding the raw BLS12-381 secret scalar,
-	// base64url-encoded. A path rather than an inline value so the key can
-	// be mounted as a secret and kept out of the config.
-	SecretKeyPath string `yaml:"secret_key_path" validate:"required" doc_example:"\"/etc/vc/bbs/issuer.sk\""`
+	// base64url-encoded. Preferred where a file can be mounted, since it
+	// keeps the key out of the rendered config entirely.
+	SecretKeyPath string `yaml:"secret_key_path" validate:"omitempty" doc_example:"\"/etc/vc/bbs/issuer.sk\""`
 	// PublicKeyPath is a file holding the matching public key, base64url-encoded.
-	PublicKeyPath string `yaml:"public_key_path" validate:"required" doc_example:"\"/etc/vc/bbs/issuer.pk\""`
+	PublicKeyPath string `yaml:"public_key_path" validate:"omitempty" doc_example:"\"/etc/vc/bbs/issuer.pk\""`
+	// SecretKey is the same value inline, base64url-encoded.
+	//
+	// Exists because not every deployment can mount an arbitrary file. A
+	// Helm chart that models specific named secret volumes has no way to
+	// add one for a key it does not know about, so a path-only
+	// configuration cannot be deployed there at all without changing the
+	// chart. An inline value goes wherever the rest of the config goes, and
+	// the usual secret-injection machinery (env-var substitution into the
+	// rendered config) already handles it.
+	//
+	// Prefer SecretKeyPath where a file is possible: this puts the key in
+	// the config document, so it is only as protected as that document is.
+	// Exactly one of the two must be set.
+	SecretKey string `yaml:"secret_key" validate:"omitempty"`
+	// PublicKey is the matching public key inline, base64url-encoded.
+	PublicKey string `yaml:"public_key" validate:"omitempty"`
 	// DefaultValidity is how long an issued credential is valid for
 	// (default: 365 days), used to derive the `exp` header member.
 	DefaultValidity time.Duration `yaml:"default_validity" default:"8760h"`
