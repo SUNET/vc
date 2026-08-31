@@ -376,12 +376,25 @@ func (c *Client) initBBSKeys() error {
 	// deriver and no issuance either: MakeJWP fails on its own with a
 	// clearer message than a startup error about an unavailable backend
 	// would give.
+	// Refused, not warned about. An operator who configured Issuer.BBS
+	// asked for the format; a binary built without `-tags bbsnative` cannot
+	// provide it, and every jwp issuance would fail at the signer with
+	// "not available" long after deploy. This is exactly the trap a
+	// deployment hits when it pins the stock issuer image, which is built
+	// CGO_ENABLED=0 with no tags.
+	//
+	// As in MakeJWP, the question is whether *this client* has a usable
+	// signer rather than how the process was built: the same thing in every
+	// deployment, and different only where one was supplied directly.
+	if c.bbsIssuerOverride == nil && !bbs.Available() {
+		return fmt.Errorf(
+			"issuer.bbs is configured but this binary has no native BBS support: " +
+				"rebuild with -tags bbsnative, or remove the issuer.bbs section")
+	}
 	if bbs.Available() {
 		if err := bbs.KeyPairMatches(bbs.Native(), secret, public); err != nil {
 			return err
 		}
-	} else {
-		c.log.Info("BBS keys loaded but not verified: this build has no native BBS support")
 	}
 
 	c.bbsKeys = &bbsKeyPair{secret: secret, public: public}

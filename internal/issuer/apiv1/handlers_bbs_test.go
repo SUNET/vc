@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -301,6 +302,30 @@ func TestBBSIssuerHeaderCarriesWhatMustNotBeHidden(t *testing.T) {
 
 // --- key loading ---------------------------------------------------------
 
+// bbsTestKeyPair returns a key pair the startup check will accept.
+//
+// Toy byte strings will not do any more: under `-tags bbsnative` the pair
+// is verified by deriving the public key from the secret, so the two halves
+// have to actually belong together. The secret is a small in-range scalar
+// and the public half is derived from it - which also means these tests
+// exercise the real derivation whenever the native library is present, and
+// fall back to arbitrary bytes only where there is nothing to derive with.
+func bbsTestKeyPair(t *testing.T) (secretB64, publicB64 string) {
+	t.Helper()
+	secret := make([]byte, 32)
+	secret[31] = 7
+	public := make([]byte, 96)
+	if bbs.Available() {
+		derived, err := bbs.Native().SkToPk(secret)
+		if err != nil {
+			t.Fatalf("deriving a test public key: %v", err)
+		}
+		public = derived
+	}
+	enc := base64.RawURLEncoding
+	return enc.EncodeToString(secret), enc.EncodeToString(public)
+}
+
 func writeKeyFile(t *testing.T, dir, name, contents string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -312,6 +337,7 @@ func writeKeyFile(t *testing.T, dir, name, contents string) string {
 
 func TestInitBBSKeys(t *testing.T) {
 	dir := t.TempDir()
+	skB64, pkB64 := bbsTestKeyPair(t)
 
 	t.Run("absent config leaves the format off", func(t *testing.T) {
 		c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{}}
@@ -326,17 +352,19 @@ func TestInitBBSKeys(t *testing.T) {
 	t.Run("a trailing newline is not a broken key", func(t *testing.T) {
 		// Every editor and every shell redirect leaves one behind;
 		// rejecting it would be a needless trap.
-		c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Issuer: &model.Issuer{BBS: &model.BBSConfig{
-			SecretKeyPath: writeKeyFile(t, dir, "ok.sk", "AQIDBAU\n"),
-			PublicKeyPath: writeKeyFile(t, dir, "ok.pk", "BgcICQo\n"),
+		c := &Client{log: logger.NewSimple("test"), bbsIssuerOverride: &recordingIssuer{}, cfg: &model.Cfg{Issuer: &model.Issuer{BBS: &model.BBSConfig{
+			SecretKeyPath: writeKeyFile(t, dir, "ok.sk", skB64+"\n"),
+			PublicKeyPath: writeKeyFile(t, dir, "ok.pk", pkB64+"\n"),
 		}}}}
 		if err := c.initBBSKeys(); err != nil {
 			t.Fatalf("initBBSKeys: %v", err)
 		}
-		if string(c.bbsKeys.secret) != string([]byte{1, 2, 3, 4, 5}) {
+		wantSecret, _ := base64.RawURLEncoding.DecodeString(skB64)
+		wantPublic, _ := base64.RawURLEncoding.DecodeString(pkB64)
+		if string(c.bbsKeys.secret) != string(wantSecret) {
 			t.Fatalf("secret = %v, want the decoded bytes", c.bbsKeys.secret)
 		}
-		if string(c.bbsKeys.public) != string([]byte{6, 7, 8, 9, 10}) {
+		if string(c.bbsKeys.public) != string(wantPublic) {
 			t.Fatalf("public = %v, want the decoded bytes", c.bbsKeys.public)
 		}
 	})
@@ -381,15 +409,15 @@ func TestInitBBSKeys(t *testing.T) {
 // that is not live would see no effect at all.
 func TestInitBBSKeysAcceptsAPathOrAnInlineValue(t *testing.T) {
 	dir := t.TempDir()
-	const (
-		skB64 = "AQIDBAU"
-		pkB64 = "BgcICQo"
-	)
-	sk := []byte{1, 2, 3, 4, 5}
-	pk := []byte{6, 7, 8, 9, 10}
+	skB64, pkB64 := bbsTestKeyPair(t)
+	sk, _ := base64.RawURLEncoding.DecodeString(skB64)
+	pk, _ := base64.RawURLEncoding.DecodeString(pkB64)
 
 	newClient := func(bbs *model.BBSConfig) *Client {
-		return &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Issuer: &model.Issuer{BBS: bbs}}}
+		// An injected signer, so these exercise key decoding rather than
+		// whether this test binary was built with native BBS support.
+		return &Client{log: logger.NewSimple("test"), bbsIssuerOverride: &recordingIssuer{},
+			cfg: &model.Cfg{Issuer: &model.Issuer{BBS: bbs}}}
 	}
 
 	t.Run("inline", func(t *testing.T) {
@@ -539,5 +567,31 @@ func TestMakeJWPSignsUnderTheSuiteItWasGiven(t *testing.T) {
 				t.Fatalf("key binding = %v, want %v", signer.got.KeyBinding, wantBinding)
 			}
 		})
+	}
+}
+
+// Configuring BBS on a binary that cannot do it must fail the boot.
+//
+// This is the trap a deployment falls into by pinning the stock issuer
+// image, which is built CGO_ENABLED=0 with no tags: the config loads, the
+// service starts, `format: jwp` resolves, and every issuance dies at the
+// signer long after anyone was watching the deploy.
+func TestInitBBSKeysRefusesABuildWithoutNativeSupport(t *testing.T) {
+	if bbs.Available() {
+		t.Skip("this binary has native BBS support; the refusal cannot be reached")
+	}
+	dir := t.TempDir()
+	skB64, pkB64 := bbsTestKeyPair(t)
+	c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Issuer: &model.Issuer{BBS: &model.BBSConfig{
+		SecretKeyPath: writeKeyFile(t, dir, "n.sk", skB64),
+		PublicKeyPath: writeKeyFile(t, dir, "n.pk", pkB64),
+	}}}}
+
+	err := c.initBBSKeys()
+	if err == nil {
+		t.Fatal("a BBS-configured issuer without native support must not start")
+	}
+	if !strings.Contains(err.Error(), "bbsnative") {
+		t.Fatalf("the error should say how to fix it, got: %v", err)
 	}
 }
