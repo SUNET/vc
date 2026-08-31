@@ -70,8 +70,6 @@ func (e *EphemeralEncryptionKeyCache) Len() int {
 	return e.cache.Len()
 }
 
-// GenerateAndStore generates a new ephemeral encryption key pair, stores the private key in the cache,
-// and returns both private and public JWKs. The key uses ECDH P-256.
 // GenerateAndStoreIfAbsent returns the public half of the key stored under
 // kid, generating and storing a new pair only when there is none.
 //
@@ -112,6 +110,13 @@ func decorateEncryptionKey(key jwk.Key, kid string) error {
 	return key.Set(jwk.KeyIDKey, kid)
 }
 
+// GenerateAndStore generates a new ephemeral encryption key pair, stores the
+// private key in the cache, and returns both private and public JWKs. The key
+// uses ECDH P-256.
+//
+// Callers producing a request object should prefer
+// GenerateAndStoreIfAbsent, which does not replace a key the session is
+// already advertising.
 func (e *EphemeralEncryptionKeyCache) GenerateAndStore(kid string) (privateKey jwk.Key, publicKey jwk.Key, err error) {
 	// Generate ECDH P-256 key pair
 	privKey, err := ecdh.P256().GenerateKey(rand.Reader)

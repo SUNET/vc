@@ -2,16 +2,15 @@ package apiv1
 
 import (
 	"crypto"
-
 	"crypto/rand"
 	"crypto/rsa"
-	"github.com/lestrrat-go/jwx/v3/jwk"
 	"testing"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
+	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
