@@ -72,6 +72,15 @@ type DatastoreScope struct {
 	// of the listed scopes (OR logic). Each entry specifies which claims to extract
 	// from that particular credential type.
 	AuthScopes map[string]AuthScopeEntry `yaml:"auth_scopes,omitempty"`
+
+	// OIDCRequestParams configures additional parameters to include in the OIDC authorization request.
+	// Used when the authentic source needs to pass dynamic values to the OP.
+	OIDCRequestParams *OIDCRequestParams `yaml:"oidc_request_params,omitempty"`
+
+	// IssuancePolicy defines SPOCP rules that must be satisfied by the OIDC claims for credential issuance.
+	// If configured, a SPOCP query is built from the returned claims and evaluated against these rules.
+	// A query that does not match any rule results in a hard deny.
+	IssuancePolicy *IssuancePolicy `yaml:"issuance_policy,omitempty"`
 }
 
 // AuthScopeEntry configures per-scope authentication requirements for OpenID4VP.
@@ -127,6 +136,15 @@ type AssertionConfig struct {
 type AssertionScope struct {
 	// AuthProvider is the auth provider for this credential type (saml or oidc)
 	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=saml oidc"`
+
+	// OIDCRequestParams configures additional parameters to include in the OIDC authorization request.
+	// Used when the authentic source needs to pass dynamic values to the OP.
+	OIDCRequestParams *OIDCRequestParams `yaml:"oidc_request_params,omitempty"`
+
+	// IssuancePolicy defines SPOCP rules that must be satisfied by the OIDC claims for credential issuance.
+	// If configured, a SPOCP query is built from the returned claims and evaluated against these rules.
+	// A query that does not match any rule results in a hard deny.
+	IssuancePolicy *IssuancePolicy `yaml:"issuance_policy,omitempty"`
 }
 
 // ExternalAPIConfig groups external API credential scopes.
@@ -145,6 +163,15 @@ type ExternalAPIScope struct {
 
 	// AttributeMapping defines how to map API response data to credential claims
 	AttributeMapping AttributeMapping `yaml:"attribute_mapping,omitempty" doc_key:"attribute"`
+
+	// OIDCRequestParams configures additional parameters to include in the OIDC authorization request.
+	// Used when the authentic source needs to pass dynamic values to the OP.
+	OIDCRequestParams *OIDCRequestParams `yaml:"oidc_request_params,omitempty"`
+
+	// IssuancePolicy defines SPOCP rules that must be satisfied by the OIDC claims for credential issuance.
+	// If configured, a SPOCP query is built from the returned claims and evaluated against these rules.
+	// A query that does not match any rule results in a hard deny.
+	IssuancePolicy *IssuancePolicy `yaml:"issuance_policy,omitempty"`
 }
 
 // Remote defines an external API connection.
@@ -252,4 +279,95 @@ func (ds *DataSources) ResolveDataSource(credentialType, authProvider string) (C
 	return CredentialSource{}, fmt.Errorf(
 		"credential type %q has no data source configured for auth provider %q", credentialType, authProvider,
 	)
+}
+
+// OIDCRequestParams configures additional parameters to include in the OIDC authorization request.
+// These allow the authentic source to inject dynamic values into the authentication flow.
+type OIDCRequestParams struct {
+	// ACRValues requests specific authentication context class references from the OP.
+	// Supports Go template syntax for dynamic values: "{{.variable_name}}"
+	ACRValues string `yaml:"acr_values,omitempty" doc_example:"\"urn:example:loa3\""`
+
+	// Claims is a JSON string conforming to OIDC Core §5.5 claims request parameter.
+	// Supports Go template syntax for dynamic values: "{{.variable_name}}"
+	Claims string `yaml:"claims,omitempty" doc_example:"\"{\\\"id_token\\\":{\\\"org_id\\\":{\\\"value\\\":\\\"{{.org_id}}\\\"}}}\""`
+
+	// ExtraScopes are additional OAuth2 scopes to request beyond the default OIDC RP scopes.
+	ExtraScopes []string `yaml:"extra_scopes,omitempty" doc_example:"[\"organization\", \"address\"]"`
+
+	// CustomParams are arbitrary key-value pairs to add as query parameters to the authorization request.
+	// Keys are static; values support Go template syntax for dynamic substitution.
+	CustomParams map[string]string `yaml:"custom_params,omitempty"`
+}
+
+// IssuancePolicy defines SPOCP rules for credential issuance authorization.
+// After OIDC authentication completes, a SPOCP query is built from the returned
+// claims and evaluated against these rules. If no rule matches, issuance is denied.
+type IssuancePolicy struct {
+	// Rules are inline SPOCP S-expression rules (human-readable advanced form).
+	// Example: "(credential (scope org_credential)(acr (* prefix urn:example:loa))(org_id))"
+	// When QueryTemplate is set, each rule is validated at load time against
+	// the "credential" tag and the ("scope", <QueryTemplate dimensions>)
+	// shape -- a rule with the wrong number/order of dimensions fails
+	// startup instead of silently never matching at evaluation time. A
+	// dimension may be omitted (e.g. "(org_id)") to mean "any value".
+	Rules []string `yaml:"rules,omitempty" doc_example:"[\"(credential (scope my_cred)(acr urn:example:loa3)(email_verified true))\"]"`
+
+	// RulesFile is an optional path to a file containing SPOCP rules (one per line).
+	// Rules from this file are loaded in addition to the inline Rules list,
+	// and validated the same way when QueryTemplate is set.
+	RulesFile string `yaml:"rules_file,omitempty"`
+
+	// QueryTemplate defines how to build the SPOCP query from OIDC claims.
+	// The outer tag is always "credential". Each entry maps a SPOCP dimension name
+	// to the OIDC claim name whose value should populate it. The order of entries
+	// determines the positional order of dimensions in the SPOCP query, which must
+	// match the order used in the rules.
+	// Special dimension "scope" is auto-populated with the credential type name.
+	// If empty, a default query is built with all claims as dimensions (sorted by key).
+	QueryTemplate []QueryDimension `yaml:"query_template,omitempty"`
+}
+
+// QueryDimension maps a SPOCP dimension name to the OIDC claim whose value populates it.
+// Ordered slices of QueryDimension ensure deterministic query construction.
+type QueryDimension struct {
+	Dimension string `yaml:"dimension"`
+	Claim     string `yaml:"claim"`
+}
+
+// ScopePolicyConfig holds the per-scope issuance policy and OIDC request params.
+type ScopePolicyConfig struct {
+	OIDCRequestParams *OIDCRequestParams
+	IssuancePolicy    *IssuancePolicy
+}
+
+// LookupScopePolicyConfig returns the issuance policy and OIDC request params
+// for a credential scope across all data source types. Returns nil fields if none configured.
+func (ds *DataSources) LookupScopePolicyConfig(scope string) *ScopePolicyConfig {
+	if ds == nil {
+		return nil
+	}
+
+	if s, ok := ds.Assertion.Scopes[scope]; ok {
+		return &ScopePolicyConfig{
+			OIDCRequestParams: s.OIDCRequestParams,
+			IssuancePolicy:    s.IssuancePolicy,
+		}
+	}
+
+	if s, ok := ds.Datastore.Scopes[scope]; ok {
+		return &ScopePolicyConfig{
+			OIDCRequestParams: s.OIDCRequestParams,
+			IssuancePolicy:    s.IssuancePolicy,
+		}
+	}
+
+	if s, ok := ds.ExternalAPI.Scopes[scope]; ok {
+		return &ScopePolicyConfig{
+			OIDCRequestParams: s.OIDCRequestParams,
+			IssuancePolicy:    s.IssuancePolicy,
+		}
+	}
+
+	return nil
 }

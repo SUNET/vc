@@ -28,6 +28,7 @@ developer_tools/pki/*
 /persistent
 /registry
 /verifier
+/jwt_issuer
 
 # Working documents (not tracked in git)
 PR_STRATEGY.md

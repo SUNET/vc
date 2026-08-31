@@ -2,6 +2,7 @@ package cache
 
 import (
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -10,6 +11,14 @@ import (
 
 	"github.com/go-playground/validator/v10"
 )
+
+// safeKeyRe mirrors pkg/helpers.NewValidator's "safe_key" registration.
+// Duplicated here (rather than shared) since AuthorizationContext.Validate
+// intentionally builds its own minimal *validator.Validate with a different
+// tag-name resolution than pkg/helpers.NewValidator (json tag vs.
+// yaml-preferring) -- reusing that constructor here would change error
+// messages/behavior for every other field on this struct, not just this one.
+var safeKeyRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,63}$`)
 
 // SessionStatus represents the status of an OIDC session
 type SessionStatus string
@@ -87,6 +96,15 @@ type AuthorizationContext struct {
 	DataSource           string                                     `json:"data_source,omitempty" bson:"data_source,omitempty" validate:"omitempty,max=32,printascii"`
 	RemoteName           string                                     `json:"remote_name,omitempty" bson:"remote_name,omitempty" validate:"omitempty,max=128,printascii"`
 
+	// DynamicParams holds key-value parameters bound directly from the PAR
+	// caller's request body at flow initiation time (see PARRequest.DynamicParams
+	// for why the name is misleading: nothing here verifies these actually
+	// came from an authentic source business system). Used only for template
+	// substitution in outgoing OIDC request parameters (e.g., acr_values,
+	// claims) -- deliberately NOT used for issuance policy evaluation, which
+	// is gated on OP-asserted claims instead.
+	DynamicParams map[string]string `json:"dynamic_params,omitempty" bson:"dynamic_params,omitempty" validate:"omitempty,dive,keys,safe_key,endkeys,max=1024,printascii"`
+
 	// Verifier-specific fields (presentation/RP flows)
 	RedirectURI            string         `json:"redirect_uri,omitempty" bson:"redirect_uri,omitempty" validate:"omitempty,max=2048,printascii"`
 	ResponseType           string         `json:"response_type,omitempty" bson:"response_type,omitempty" validate:"omitempty,max=32,printascii"`
@@ -125,5 +143,10 @@ func (a *AuthorizationContext) Validate() error {
 		}
 		return name
 	})
+	if err := v.RegisterValidation("safe_key", func(fl validator.FieldLevel) bool {
+		return safeKeyRe.MatchString(fl.Field().String())
+	}); err != nil {
+		return err
+	}
 	return v.Struct(a)
 }

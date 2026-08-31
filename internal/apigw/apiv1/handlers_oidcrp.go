@@ -12,6 +12,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/grpchelpers"
+	"github.com/SUNET/vc/pkg/issuance"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
@@ -73,7 +74,13 @@ func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest,
 		return nil, fmt.Errorf("OIDC RP service not available")
 	}
 
-	authReq, err := service.InitiateAuth(ctx, req.CredentialType)
+	// Look up per-scope OIDC request params
+	var oidcParams *model.OIDCRequestParams
+	if scopeCfg := c.cfg.APIGW.DataSources.LookupScopePolicyConfig(req.CredentialType); scopeCfg != nil {
+		oidcParams = scopeCfg.OIDCRequestParams
+	}
+
+	authReq, err := service.InitiateAuth(ctx, req.CredentialType, oidcParams, nil)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -187,6 +194,43 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		"claims_count", len(claims),
 		"claim_keys", claimKeys,
 		"subject", authResp.IDToken.Subject)
+
+	// Evaluate issuance policy (if configured for this scope).
+	// This uses SPOCP rules to gate credential issuance on claim values.
+	// The raw OIDC claims (pre-transformation) are used for policy evaluation
+	// since the rules reference OIDC claim names, not mapped credential claim names.
+	if scopeCfg := c.cfg.APIGW.DataSources.LookupScopePolicyConfig(session.CredentialType); scopeCfg != nil && scopeCfg.IssuancePolicy != nil {
+		policyEngine, policyErr := issuance.GetPolicyEngine(scopeCfg.IssuancePolicy)
+		if policyErr != nil {
+			span.SetStatus(codes.Error, policyErr.Error())
+			return nil, fmt.Errorf("failed to initialize issuance policy engine: %w", policyErr)
+		}
+		if policyEngine != nil {
+			// Evaluate against the OIDC-provider-asserted claims only. Do NOT
+			// fall back to session.DynamicParams here: those are supplied by
+			// the caller in the PAR request body (nominally "from the
+			// authentic source business system", but nothing here verifies
+			// that), not validated by the OP. Letting them silently satisfy a
+			// missing OIDC claim would let a caller forge any policy
+			// dimension the OP didn't actually assert, defeating the point of
+			// gating issuance on the returned token. DynamicParams are still
+			// used (legitimately) to template the outgoing OIDC request
+			// parameters in resolveOIDCRequestParams - this is a separate,
+			// later use of the same data for a security decision.
+			policyClaims := maps.Clone(authResp.Claims)
+			if policyErr := policyEngine.Evaluate(session.CredentialType, policyClaims, scopeCfg.IssuancePolicy.QueryTemplate); policyErr != nil {
+				c.log.Warn("Issuance policy denied credential",
+					"credential_type", session.CredentialType,
+					"subject", authResp.IDToken.Subject,
+					"error", policyErr)
+				span.SetStatus(codes.Error, policyErr.Error())
+				return nil, fmt.Errorf("credential issuance denied: %w", policyErr)
+			}
+			c.log.Info("Issuance policy evaluation passed",
+				"credential_type", session.CredentialType,
+				"subject", authResp.IDToken.Subject)
+		}
+	}
 
 	// VCI mode: if the OIDC session was initiated from the OpenID4VCI consent flow,
 	// store the transformed claims as a document in the VCI session cache and signal
