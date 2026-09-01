@@ -132,7 +132,12 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	})
 	if err != nil {
 		c.log.Error(err, "failed to get status list entry from registry")
-		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
+		// Unavailable, not Internal: the registry is a separate service and
+		// this says nothing about the request, so a caller retrying later
+		// is doing the right thing. The wrapped cause stays in the log -
+		// returning it would cross gRPC into the APIGW and out of the
+		// credential endpoint to a wallet that can do nothing with it.
+		return nil, grpcstatus.Error(codes.Unavailable, "could not allocate a revocation entry")
 	}
 
 	// The entry above is now allocated and marked VALID for a credential
@@ -149,7 +154,10 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	extraHeader, err := c.bbsIssuerHeader(statusEntry)
 	if err != nil {
 		c.invalidateStatusEntry(ctx, statusEntry)
-		return nil, err
+		// Building our own header cannot be anything but our fault, and its
+		// error names internal structure. Coarse code, detail to the log.
+		c.log.Error(err, "failed to build the bbs issuer header", "scope", req.Scope)
+		return nil, grpcstatus.Error(codes.Internal, "failed to issue bbs credential")
 	}
 
 	keyBinding := bbs.NoKeyBinding

@@ -595,3 +595,51 @@ func TestInitBBSKeysRefusesABuildWithoutNativeSupport(t *testing.T) {
 		t.Fatalf("the error should say how to fix it, got: %v", err)
 	}
 }
+
+// failingRegistry stands in for a registry that cannot be reached.
+type failingRegistry struct {
+	apiv1_registry.RegistryServiceClient
+}
+
+func (failingRegistry) TokenStatusListAddStatus(_ context.Context, _ *apiv1_registry.TokenStatusListAddStatusRequest, _ ...grpc.CallOption) (*apiv1_registry.TokenStatusListAddStatusReply, error) {
+	return nil, errors.New("dial tcp 10.0.0.7:8090: connect: connection refused")
+}
+
+// Every failure MakeJWP returns carries an explicit gRPC status code.
+//
+// The file's own header comment promises this - "a plain error crosses gRPC
+// as codes.Unknown, which conveys neither" - and two paths did not keep the
+// promise, because nothing checked. They matter more than most: both run
+// after the request has been accepted, so their errors travel through the
+// APIGW and out of the credential endpoint to a wallet.
+func TestMakeJWPAlwaysReturnsAnExplicitStatusCode(t *testing.T) {
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+	c.bbsIssuerOverride = &recordingIssuer{}
+	c.registryClient = failingRegistry{}
+
+	_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+		Commitment:   []byte{1, 2, 3},
+		VCT:          "urn:example:pid",
+		DocumentData: validDocumentData,
+		Suite:        uint32(bbs.SuiteSchnorr),
+	})
+	if err == nil {
+		t.Fatal("an unreachable registry must fail the issuance")
+	}
+
+	st, ok := grpcstatus.FromError(err)
+	if !ok {
+		t.Fatalf("want a gRPC status error, got %T: %v", err, err)
+	}
+	if st.Code() == codes.Unknown {
+		t.Fatal("codes.Unknown is what a plain error becomes - the point is to not do that")
+	}
+	if st.Code() != codes.Unavailable {
+		t.Fatalf("code = %v, want Unavailable: the registry is a separate service and the "+
+			"request itself is fine, so retrying later is the right advice", st.Code())
+	}
+	// The dial error names internal topology. It belongs in the log.
+	if strings.Contains(st.Message(), "10.0.0.7") || strings.Contains(st.Message(), "connection refused") {
+		t.Fatalf("internal detail reached the caller: %q", st.Message())
+	}
+}
