@@ -1,7 +1,9 @@
 package openid4vp
 
 import (
+	"crypto"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -78,4 +80,56 @@ func TestClientMetadata_EncryptedResponseEncValuesSupportedIsAnArray(t *testing.
 	// The draft-era spellings stay so wallets that predate 1.0 keep working.
 	assert.Equal(t, "A256GCM", got["authorization_encrypted_response_enc"])
 	assert.Equal(t, "ECDH-ES", got["authorization_encrypted_response_alg"])
+}
+
+// TestGenerateAndStoreIfAbsent_Concurrent covers the check-then-act race.
+// Two request objects for one session can be built at the same time - a
+// wallet retry, a reload, two tabs. If both callers generated, the second
+// store would win and the first caller would already have returned a public
+// key whose private half was gone: the wallet encrypts, and we cannot
+// decrypt.
+func TestGenerateAndStoreIfAbsent_Concurrent(t *testing.T) {
+	cache := NewEphemeralEncryptionKeyCache(5 * time.Minute)
+	t.Cleanup(cache.Stop)
+
+	const callers = 32
+	var wg sync.WaitGroup
+	thumbs := make([][]byte, callers)
+	errs := make([]error, callers)
+
+	start := make(chan struct{})
+	for i := range callers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start // maximise the overlap
+			pub, err := cache.GenerateAndStoreIfAbsent("one-session")
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			thumbs[i], errs[i] = pub.Thumbprint(crypto.SHA256)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		require.NoError(t, err, "caller %d", i)
+	}
+
+	// Every caller must have been handed the same key.
+	for i := 1; i < callers; i++ {
+		assert.Equal(t, thumbs[0], thumbs[i], "caller %d got a different public key", i)
+	}
+
+	// And it must be the pair of the one private key left in the cache.
+	priv, found := cache.Get("one-session")
+	require.True(t, found)
+	privPub, err := priv.PublicKey()
+	require.NoError(t, err)
+	privThumb, err := privPub.Thumbprint(crypto.SHA256)
+	require.NoError(t, err)
+	assert.Equal(t, thumbs[0], privThumb,
+		"the advertised key must be the pair of the cached private key")
 }

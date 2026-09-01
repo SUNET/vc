@@ -4,6 +4,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -19,6 +20,15 @@ const (
 // EphemeralEncryptionKeyCache manages short-lived encryption keys for response encryption
 type EphemeralEncryptionKeyCache struct {
 	cache *ttlcache.Cache[string, jwk.Key]
+
+	// generate serialises GenerateAndStoreIfAbsent. Without it the
+	// check-then-act there races: two callers for the same kid both miss,
+	// both generate, and the second store wins - so the first caller has
+	// already returned a public key whose private half is gone.
+	//
+	// One mutex rather than one per kid: generating a P-256 key takes
+	// microseconds, so the contention is not worth the bookkeeping.
+	generate sync.Mutex
 }
 
 // NewEphemeralEncryptionKeyCache creates and starts a new ephemeral encryption key cache
@@ -79,7 +89,15 @@ func (e *EphemeralEncryptionKeyCache) Len() int {
 // an unchanged kid, so a wallet still holding an earlier request object
 // would encrypt to a public key whose private half no longer exists, and
 // the response would fail to decrypt with no obvious cause.
+//
+// Safe for concurrent use for the same kid: the lookup and the generate are
+// serialised, so every caller receives the same public key.
 func (e *EphemeralEncryptionKeyCache) GenerateAndStoreIfAbsent(kid string) (jwk.Key, error) {
+	// Held across the lookup and the generate, so a concurrent caller for
+	// the same kid waits and then finds the key rather than replacing it.
+	e.generate.Lock()
+	defer e.generate.Unlock()
+
 	if existing, found := e.Get(kid); found {
 		publicKey, err := existing.PublicKey()
 		if err != nil {
