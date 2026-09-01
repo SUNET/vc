@@ -11,6 +11,7 @@ var (
 	_ BlindSigner          = unavailable{}
 	_ ProofVerifier        = unavailable{}
 	_ Issuer               = unavailable{}
+	_ KeyDeriver           = unavailable{}
 	_ PresentationVerifier = unavailable{}
 )
 

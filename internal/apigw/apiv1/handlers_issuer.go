@@ -963,12 +963,19 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 	// assertion against the commitment before signing, so a wrong answer
 	// fails the issuance rather than producing an unbound credential that
 	// claims to be bound.
-	// Validate() already resolved this once, so a failure here means the
-	// request changed underneath us rather than that a client sent
-	// something malformed.
 	suite, err := bbs.ParseSuite(req.BBSSuite)
 	if err != nil {
-		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidCredentialRequest, ErrorDescription: err.Error()}
+		// Same invariant break as the commitment above, handled the same
+		// way: Validate() already resolved this suite name, so reaching
+		// here means the request changed underneath us. Reporting
+		// invalid_credential_request would tell a wallet to fix a request
+		// that is not wrong, and hand it ParseSuite's internal wording -
+		// written for Go callers - to act on.
+		c.log.Error(err, "bbs_suite resolved during Validate but not here", "scope", scope)
+		return nil, &openid4vci.Error{
+			Err:              openid4vci.ErrServerError,
+			ErrorDescription: "the credential request could not be processed",
+		}
 	}
 
 	reply, err := c.issuerClient.MakeJWP(ctx, &apiv1_issuer.MakeJWPRequest{

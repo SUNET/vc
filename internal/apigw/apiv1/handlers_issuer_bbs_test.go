@@ -2,6 +2,8 @@ package apiv1
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -245,10 +247,28 @@ func TestIssueBBSRefusesAnUnknownSuite(t *testing.T) {
 	req := bbsRequest()
 	req.BBSSuite = "not-a-suite"
 
-	if _, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", req); err == nil {
+	_, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", req)
+	if err == nil {
 		t.Fatal("an unknown suite must fail")
 	}
 	if issuer.got != nil {
 		t.Fatal("the issuer must not be called with a suite that could not be resolved")
+	}
+
+	// server_error, not invalid_credential_request, and with none of
+	// ParseSuite's own wording. Validate() already resolved this name, so
+	// reaching here is our invariant breaking rather than a bad request:
+	// telling the wallet to fix its request would send it chasing something
+	// that is not wrong, using an error message written for Go callers.
+	var vciErr *openid4vci.Error
+	if !errors.As(err, &vciErr) {
+		t.Fatalf("want an *openid4vci.Error, got %T: %v", err, err)
+	}
+	if vciErr.Err != openid4vci.ErrServerError {
+		t.Fatalf("error code = %q, want %q", vciErr.Err, openid4vci.ErrServerError)
+	}
+	desc := fmt.Sprint(vciErr.ErrorDescription)
+	if strings.Contains(desc, "not-a-suite") || strings.Contains(desc, "bbs:") {
+		t.Fatalf("internal wording reached the wallet: %q", desc)
 	}
 }

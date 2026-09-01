@@ -721,7 +721,6 @@ func TestCredentialRequestValidatesBBSMembers(t *testing.T) {
 			r := base()
 			r.BBSCommitment = validCommitment
 			r.BBSSuite = bbs.SuiteNameSchnorr
-			r.BBSSuite = bbs.SuiteNameSchnorr
 			r.BBSCommittedClaims = tc.claims
 			if err := r.Validate(context.Background(), nil); err == nil {
 				t.Fatalf("%v must be rejected: it %s", tc.claims, tc.because)
