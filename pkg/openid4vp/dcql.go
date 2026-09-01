@@ -52,7 +52,7 @@ type CredentialSetQuery struct {
 }
 
 // IsRequired returns the effective value of Required, applying the OpenID4VP
-// draft 24 §6.2 default (true) when the field was omitted.
+// 1.0 §6.2 default (true) when the field was omitted.
 func (q CredentialSetQuery) IsRequired() bool {
 	if q.Required == nil {
 		return true
@@ -61,7 +61,7 @@ func (q CredentialSetQuery) IsRequired() bool {
 }
 
 // RequiresCryptographicHolderBinding returns the effective value of
-// RequireCryptographicHolderBinding, applying the OpenID4VP draft 24 §6.1
+// RequireCryptographicHolderBinding, applying the OpenID4VP 1.0 §6.1
 // default (true) when the field was omitted.
 func (q CredentialQuery) RequiresCryptographicHolderBinding() bool {
 	if q.RequireCryptographicHolderBinding == nil {
