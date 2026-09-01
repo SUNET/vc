@@ -136,3 +136,28 @@ func TestCRLChecker_NilCertificate(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, StatusUnknown, got.Status)
 }
+
+// TestCRLChecker_RejectsNonHTTPScheme guards the SSRF surface. Reachable only
+// if fetch is called directly, since CRLDistributionPoints filters these out,
+// but the sibling StatusListChecker enforces it and one rule is better here.
+func TestCRLChecker_RejectsNonHTTPScheme(t *testing.T) {
+	_, err := NewCRLChecker().fetch(t.Context(), "file:///etc/passwd")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported CRL URI scheme")
+}
+
+// TestCRLChecker_OversizedIsReportedAsSuch covers a response past the limit.
+// Truncating at exactly the limit would hand ParseRevocationList half a CRL
+// and surface as a parse error, saying nothing about what went wrong.
+func TestCRLChecker_OversizedIsReportedAsSuch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// One byte past the cap.
+		_, _ = w.Write(make([]byte, maxCRLBytes+1))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := NewCRLChecker().fetch(t.Context(), srv.URL)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds maximum size",
+		"an oversized CRL must say so, not fail as malformed")
+}

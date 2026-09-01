@@ -17,10 +17,13 @@ import (
 type RevocationCheck struct {
 	// Mode is one of "off", "warn" or "fail".
 	//
-	// warn is the default, and deliberately so: an unreachable CRL or status
-	// list is not evidence of revocation, and treating it as such turns a
-	// Registrar outage into ours. fail is available for deployments that
-	// would rather stop than proceed without an answer.
+	// warn is the default, and deliberately so. An unreachable CRL or status
+	// list is evidence of nothing: not that the certificate is revoked, and
+	// not that it is valid. Reading it as revoked would turn a Registrar
+	// outage into ours; reading it as valid would make a fetch failure a
+	// silent pass. It is reported as undetermined and warn proceeds anyway,
+	// while fail is available for deployments that would rather stop than
+	// carry on without an answer.
 	Mode string `yaml:"mode,omitempty" validate:"omitempty,oneof=off warn fail" default:"warn" doc_example:"\"warn\""`
 
 	// RefreshInterval is how often the check repeats after startup.

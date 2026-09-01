@@ -106,6 +106,17 @@ func (c *CRLChecker) fetch(ctx context.Context, uri string) (*x509.RevocationLis
 		return nil, err
 	}
 
+	// Reject non-HTTP(S) schemes to reduce SSRF surface, as
+	// StatusListChecker does. CRLDistributionPoints already filters these
+	// out, so this guards fetch being called with anything else and keeps
+	// the error ours rather than the transport's.
+	switch req.URL.Scheme {
+	case "http", "https":
+		// allowed
+	default:
+		return nil, fmt.Errorf("unsupported CRL URI scheme: %q", req.URL.Scheme)
+	}
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -116,9 +127,16 @@ func (c *CRLChecker) fetch(ctx context.Context, uri string) (*x509.RevocationLis
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxCRLBytes))
+	// Read one byte past the limit so an oversized list is reported as
+	// such. Truncating at exactly the limit would hand ParseRevocationList
+	// a half a CRL and surface as a parse error, which says nothing about
+	// what actually went wrong.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxCRLBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(body)) > maxCRLBytes {
+		return nil, fmt.Errorf("CRL exceeds maximum size (%d bytes)", maxCRLBytes)
 	}
 
 	// A CRL is DER; some distribution points serve PEM despite the spec, so
