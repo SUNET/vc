@@ -12,6 +12,7 @@ bin/
 *.out
 cover.html
 coverage.html
+coverage.xml
 
 # IDE
 .idea/
