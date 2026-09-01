@@ -132,12 +132,15 @@ func (c *Client) SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadat
 		"typ": jwtTyp,
 	}
 
-	// Include x5c certificate chain if the issuer has one configured
-	if len(c.signerChain) > 0 {
-		header["x5c"] = c.signerChain
+	// Include the x5c chain of whatever key is signing this. Under an ARF
+	// trust framework that is the access certificate (WRPAC), which is what
+	// lets a wallet establish who the issuer is - JWKS is self-asserted and
+	// establishes nothing on its own.
+	if len(c.metadataChain) > 0 {
+		header["x5c"] = c.metadataChain
 	}
 
-	signed, err := jose.MakeJWT(ctx, header, body, c.signer)
+	signed, err := jose.MakeJWT(ctx, header, body, c.metadataSigner)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign metadata: %w", err)
 	}

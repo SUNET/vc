@@ -15,6 +15,7 @@ import (
 	"hash"
 	"math"
 	"math/big"
+	"strconv"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/sirosfoundation/go-cryptoutil"
@@ -720,6 +721,18 @@ func VerifyCOSEMac0(mac0 *COSEMac0, key []byte, externalAAD []byte) error {
 // lookup with an int64 label constant would silently never match - this
 // checks both representations (plus plain int, for maps built directly in
 // Go code rather than decoded from CBOR).
+//
+// It also accepts the label as a decimal string. That is not valid COSE -
+// RFC 9052 header labels are integers - but it is what a holder produces
+// when it decodes a credential into a structure with string-only keys
+// (a JSON object, a JavaScript object rather than a Map) and re-encodes it
+// at presentation time. The unprotected header is not covered by the
+// signature, so such a holder mangles it without any signature failure and
+// the damage only surfaces here, where x5chain is needed. Since we are the
+// verifier and the label is unambiguous, accepting it costs nothing and
+// keeps a wallet's storage bug from being indistinguishable from an
+// unverifiable credential - the credential is signed, and the signature
+// checks out; only the chain needed to judge that signature went missing.
 func lookupUnprotectedHeader(m map[any]any, label int64) (any, bool) {
 	if v, ok := m[label]; ok {
 		return v, true
@@ -728,6 +741,9 @@ func lookupUnprotectedHeader(m map[any]any, label int64) (any, bool) {
 		return v, true
 	}
 	if v, ok := m[int(label)]; ok {
+		return v, true
+	}
+	if v, ok := m[strconv.FormatInt(label, 10)]; ok {
 		return v, true
 	}
 	return nil, false

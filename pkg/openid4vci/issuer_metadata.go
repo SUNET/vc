@@ -1,12 +1,7 @@
 package openid4vci
 
 import (
-	"context"
 	"encoding/json"
-	"time"
-
-	"github.com/SUNET/vc/pkg/jose"
-	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -46,6 +41,12 @@ type CredentialIssuerMetadataParameters struct {
 	// SignedMetadata: OPTIONAL. A JWT that contains Credential Issuer metadata parameters as claims.
 	SignedMetadata string `json:"signed_metadata,omitempty" yaml:"signed_metadata,omitempty"`
 
+	// IssuerInfo: OPTIONAL. Attestations about the Credential Issuer, such as
+	// an ETSI TS 119 475 registration certificate. It is at the wallet's
+	// discretion whether it uses them; a wallet that does MUST validate the
+	// signature and check the binding, exactly as for verifier_info.
+	IssuerInfo []IssuerInfo `json:"issuer_info,omitempty" yaml:"issuer_info,omitempty" validate:"omitempty,dive"`
+
 	// CredentialConfigurationsSupported: REQUIRED. Object that describes specifics of the Credential that the Credential Issuer supports issuance of. This object contains a list of name/value pairs, where each name is a unique identifier of the supported Credential being described.
 	CredentialConfigurationsSupported map[string]CredentialConfigurationsSupported `json:"credential_configurations_supported" yaml:"credential_configurations_supported" validate:"required"`
 
@@ -71,37 +72,6 @@ func (c *CredentialIssuerMetadataParameters) MarshalJWTClaims() (jwt.MapClaims, 
 		return nil, err
 	}
 	return claims, nil
-}
-
-// Sign creates a signed JWT representation of the metadata and sets the signed_metadata field.
-// Per OID4VCI 1.0 Section 12.2.4, signed_metadata is an OPTIONAL JWT that contains the
-// Credential Issuer metadata parameters as claims, using typ "openidvci-issuer-metadata+jwt".
-func (c *CredentialIssuerMetadataParameters) Sign(ctx context.Context, signer pki.Signer, x5c []string) (*CredentialIssuerMetadataParameters, error) {
-	header := jwt.MapClaims{
-		"typ": "openidvci-issuer-metadata+jwt",
-		"x5c": x5c,
-	}
-
-	body, err := c.MarshalJWTClaims()
-	if err != nil {
-		return nil, err
-	}
-
-	body["iat"] = time.Now().Unix()
-	body["iss"] = c.CredentialIssuer
-	body["sub"] = c.CredentialIssuer
-
-	// Remove signed_metadata from the JWT payload to avoid self-referencing
-	delete(body, "signed_metadata")
-
-	reply, err := jose.MakeJWT(ctx, header, body, signer)
-	if err != nil {
-		return nil, err
-	}
-
-	c.SignedMetadata = reply
-
-	return c, nil
 }
 
 // MetadataCredentialResponseEncryption Object containing information about whether the Credential Issuer supports encryption of the Credential and Batch Credential Response on top of TLS.
@@ -355,4 +325,26 @@ type MetadataSvgTemplateProperties struct {
 type MetadataBackgroundImage struct {
 	// URI REQUIRED. String value that contains a URI where the Wallet can obtain the background image of the Credential from the Credential Issuer. The Wallet needs to determine the scheme, since the URI value could use the https: scheme, the data: scheme, etc.
 	URI string `json:"uri" yaml:"uri" validate:"required"`
+}
+
+// IssuerInfo is an attestation about the Credential Issuer, conveyed to
+// wallets in the issuer_info metadata parameter.
+//
+// It mirrors openid4vp.VerifierInfo, which carries the same documents in the
+// other direction: under CIR (EU) 2025/848 a PID or attestation provider is a
+// registered wallet-relying party in its own right, so the registration
+// certificate an issuer presents is the same kind of document a verifier
+// presents.
+//
+// VerifierInfo's credential_ids has no counterpart here. There it references
+// DCQL credential queries in a presentation request; issuer metadata
+// describes the issuer as a whole and has nothing to reference.
+type IssuerInfo struct {
+	// Format identifies the attestation format and how it is encoded, e.g.
+	// "rc-wrp+jwt" for an ETSI TS 119 475 registration certificate.
+	Format string `json:"format" bson:"format" validate:"required"`
+
+	// Data is the attestation itself - for rc-wrp+jwt, the compact JWT
+	// exactly as the Registrar issued it.
+	Data string `json:"data" bson:"data" validate:"required"`
 }

@@ -237,12 +237,12 @@ func TestIssuerMetadata_Generate_MDDLClaims_DisplayAndSVGID(t *testing.T) {
 
 func TestIssuerMetadata_Generate_VCTMDisplay_PartialRendering(t *testing.T) {
 	tests := []struct {
-		name            string
-		rendering       *sdjwtvc.Rendering
-		wantBgColor     string
-		wantTextColor   string
-		wantLogoNil     bool
-		wantLogoURI     string
+		name          string
+		rendering     *sdjwtvc.Rendering
+		wantBgColor   string
+		wantTextColor string
+		wantLogoNil   bool
+		wantLogoURI   string
 	}{
 		{
 			name: "simple rendering without logo",
@@ -572,12 +572,12 @@ func TestIssuerMetadata_Generate_DisclosurePolicy(t *testing.T) {
 	baseURL := "https://issuer.sunet.se"
 
 	tests := []struct {
-		name           string
-		policy         *openid4vci.EmbeddedDisclosurePolicy
-		expectPolicy   bool
-		expectType     string
-		expectRPs      []string
-		expectRoots    []string
+		name         string
+		policy       *openid4vci.EmbeddedDisclosurePolicy
+		expectPolicy bool
+		expectType   string
+		expectRPs    []string
+		expectRoots  []string
 	}{
 		{
 			name:         "no policy configured defaults to none",

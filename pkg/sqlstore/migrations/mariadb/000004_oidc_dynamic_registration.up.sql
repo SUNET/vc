@@ -3,6 +3,6 @@ CREATE TABLE oidc_dynamic_registration (
     client_secret                TEXT NOT NULL,
     registration_access_token    TEXT,
     registration_client_uri      TEXT,
-    client_secret_expires_at     BIGINT,
+    client_secret_expires_at     BIGINT NOT NULL DEFAULT 0,
     registered_at                TIMESTAMP NOT NULL
 ) ENGINE=InnoDB;

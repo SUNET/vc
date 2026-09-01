@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/sqlstore"
+	ts11client "github.com/sirosfoundation/go-ts11client"
 )
 
 // BoolVal safely dereferences a *bool, returning the pointed-to value or
@@ -170,6 +172,13 @@ type Common struct {
 	// HA configures high-availability mode. When Enable is true, caches use MongoDB
 	// (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.
 	HA HAConfig `yaml:"ha" validate:"omitempty"`
+	// CredentialRegistry configures an optional TS11 credential metadata
+	// registry client, used as an add-on to (not a replacement for) the
+	// existing vctm_file_path/vctm_url/mddl_file_path/mddl_url per-scope
+	// configuration: disabled by default, so existing deployments are
+	// unaffected until this is explicitly enabled and at least one scope
+	// sets vct or doctype instead of a file/URL.
+	CredentialRegistry CredentialRegistry `yaml:"credential_registry" validate:"omitempty"`
 
 	// Branding holds custom branding configuration (logo and favicon paths)
 	Branding Branding `yaml:"branding"`
@@ -429,6 +438,8 @@ type Issuer struct {
 	SignMetadataRateLimit SignMetadataRateLimitConfig `yaml:"sign_metadata_rate_limit"`
 	// PseudonymSeed, if true, makes the issuer attach a random seed as the pseudonym_seed claim.
 	PseudonymSeed *bool `yaml:"pseudonym_seed" validate:"omitempty"`
+	// AccessCertificate configures the EUDI access certificate (WRPAC) the issuer presents to wallets, optionally with its own key separate from KeyConfig. Off by default; deployments outside an ARF trust framework are unaffected.
+	AccessCertificate *IssuerAccessCertificate `yaml:"access_certificate,omitempty"`
 }
 
 // SignMetadataRateLimitConfig configures the SignMetadata gRPC rate limiter.
@@ -561,11 +572,18 @@ type Verifier struct {
 	// KeyConfig is the signing key configuration
 	KeyConfig *pki.KeyConfig `yaml:"key_config" validate:"required"`
 	// ClientIDScheme determines how the verifier identifies itself to wallets.
-	// Supported values: "x509_san_dns" (default), "did".
+	// Supported values: "x509_san_dns" (default), "x509_hash", "did".
 	// When "did", the DID field must be set and /.well-known/did.json is served.
-	ClientIDScheme string `yaml:"client_id_scheme,omitempty" default:"x509_san_dns" validate:"omitempty,oneof=x509_san_dns did"`
+	// When "x509_hash" (the scheme the EUDI ARF mandates for Relying Party
+	// authentication), the client_id is the base64url SHA-256 of the signing
+	// certificate, so key_config must supply one and it is always sent in x5c.
+	ClientIDScheme string `yaml:"client_id_scheme,omitempty" default:"x509_san_dns" validate:"omitempty,oneof=x509_san_dns x509_hash did"`
 	// DID is the verifier's DID identity.
 	DID string `yaml:"did,omitempty" validate:"required_if=ClientIDScheme did" doc_example:"\"did:web:verifier.example.com\""`
+	// AccessCertificate validates the verifier's own wallet-facing certificate as an EUDI Relying Party access certificate (WRPAC, ETSI TS 119 411-8). Off by default; deployments outside an ARF trust framework are unaffected.
+	AccessCertificate *AccessCertificate `yaml:"access_certificate,omitempty"`
+	// RegistrationCertificate points at a Relying Party registration certificate (WRPRC, ETSI TS 119 475) issued to this verifier by a national Registrar, to be presented to wallets in the OpenID4VP verifier_info parameter. vc does not issue these.
+	RegistrationCertificate *RegistrationCertificate `yaml:"registration_certificate,omitempty"`
 	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets
 	PreferredVPFormats *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"`
 	// SupportedWallets holds supported wallet configurations
@@ -630,16 +648,66 @@ type RevocationConfig struct {
 	SkipScopes []string `yaml:"skip_scopes,omitempty" json:"skip_scopes,omitempty"`
 }
 
+// ValidateClientIDMaterial checks that the key material loaded at startup can
+// actually satisfy the configured client_id_scheme, so a misconfiguration
+// surfaces as a boot failure rather than as requests no wallet can validate.
+//
+// Only "x509_hash" constrains the material: it pins the exact leaf
+// certificate, so that certificate must both exist and travel with every
+// request in x5c - the wallet has nothing else to hash. "x509_san_dns" and
+// "did" authenticate without one, so both are accepted with nil/empty input.
+func (v *Verifier) ValidateClientIDMaterial(leaf *x509.Certificate, chain []string) error {
+	if v.ClientIDScheme != "x509_hash" {
+		return nil
+	}
+	// Derive the client_id rather than re-checking leaf by hand: it applies
+	// the same nil and empty-DER rules, so the two cannot drift apart.
+	if _, err := v.VerifierClientID(leaf); err != nil {
+		return err
+	}
+	if len(chain) == 0 {
+		return fmt.Errorf("client_id_scheme is \"x509_hash\" but key_config supplied no certificate chain: the leaf must be sent in x5c for the wallet to verify the client_id")
+	}
+	return nil
+}
+
 // VerifierClientID returns the client_id value the verifier uses in OID4VP requests.
 // For "x509_san_dns" (default): returns "x509_san_dns:{hostname}".
+// For "x509_hash": returns "x509_hash:{base64url(SHA-256(DER))}" of leaf.
 // For "did": returns the configured DID value directly.
-func (v *Verifier) VerifierClientID() (string, error) {
+//
+// leaf is the verifier's own signing certificate. It is required for
+// "x509_hash" and ignored by every other scheme, so callers that have not
+// loaded a certificate may pass nil as long as they are not configured for
+// "x509_hash".
+func (v *Verifier) VerifierClientID(leaf *x509.Certificate) (string, error) {
 	switch v.ClientIDScheme {
 	case "did":
 		if v.DID == "" {
 			return "", fmt.Errorf("client_id_scheme is \"did\" but no DID is configured")
 		}
 		return v.DID, nil
+	case "x509_hash":
+		if leaf == nil {
+			return "", fmt.Errorf("client_id_scheme is \"x509_hash\" but no signing certificate is loaded: key_config must supply a certificate")
+		}
+		// A hand-built x509.Certificate (rather than one from
+		// x509.ParseCertificate) can have no DER bytes. Hashing that empty
+		// slice would not fail - it would yield SHA-256 of the empty string,
+		// a fixed value every such verifier would advertise as its identity,
+		// and binding checks would then fail for reasons pointing nowhere
+		// near the real cause.
+		if len(leaf.Raw) == 0 {
+			return "", fmt.Errorf("client_id_scheme is \"x509_hash\" but the signing certificate carries no DER bytes (Raw is empty): it must be parsed from DER, not constructed in memory")
+		}
+		// OpenID4VP 1.0: the value MUST be the base64url-encoded SHA-256
+		// hash of the DER-encoded leaf certificate. x509.Certificate.Raw is
+		// already the DER bytes. Encoding is unpadded base64url, NOT hex -
+		// go-trust's VerifyLeafBinding also accepts hex, but that leniency
+		// is for validating other parties; emitting hex would interoperate
+		// with our own stack and fail against a spec-strict wallet.
+		digest := sha256.Sum256(leaf.Raw)
+		return "x509_hash:" + base64.RawURLEncoding.EncodeToString(digest[:]), nil
 	default:
 		// x509_san_dns (default)
 		u, err := url.Parse(v.PublicURL)
@@ -1008,6 +1076,21 @@ type APIAuthOIDC struct {
 
 // IssuerMetadata holds the OpenID4VCI issuer metadata configuration
 type IssuerMetadata struct {
+	// RegistrationCertificate optionally points at a Registrar-issued WRPRC to advertise in the issuer_info metadata parameter, attesting what this Credential Issuer is registered to provide.
+	//
+	// Under CIR (EU) 2025/848 a PID or attestation provider is a registered
+	// wallet-relying party in its own right, so the document is the same kind
+	// a verifier presents in verifier_info - see Verifier.RegistrationCertificate.
+	// The signature and the issuing chain are verified at startup, exactly as
+	// on the verifier. The ARF RPRC_16 binding is not: it compares this
+	// document against the presenting party's access certificate, which the
+	// issuer service holds rather than the apigw, and the rule is not settled
+	// enough to justify a cross-service check. A correctly-signed certificate
+	// naming a different organisation would therefore be accepted, so
+	// configure one that describes this deployment.
+	//
+	// Left unset by deployments outside an ARF trust framework.
+	RegistrationCertificate *RegistrationCertificate `yaml:"registration_certificate,omitempty"`
 	// AuthorizationServers lists the authorization server URLs
 	AuthorizationServers []string `yaml:"authorization_servers" validate:"omitempty"`
 	// DeferredCredentialEndpoint is the deferred credential endpoint
@@ -1274,25 +1357,92 @@ func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 	return ids
 }
 
+// CredentialRegistry configures an optional TS11 credential metadata registry client (github.com/sirosfoundation/go-ts11client), disabled by default. When enabled, Registries is an ordered list of logical registries: a later entry overrides an earlier one for the same vct/doctype, so distinct registries are tried in that order rather than raced - only the mirrors within a single logical registry are queried concurrently, first hit wins, since only mirrors are expected to hold identical content.
+type CredentialRegistry struct {
+	// Enable turns on registry-backed resolution for any scope that sets
+	// vct or doctype instead of a local file/URL. Existing
+	// vctm_file_path/vctm_url/mddl_file_path/mddl_url-configured scopes
+	// are entirely unaffected either way.
+	Enable bool `yaml:"enable" default:"false"`
+	// Registries is an ordered list of logical (independent) registries.
+	// A later entry overrides an earlier one for the same vct/doctype.
+	// Required if Enable is true.
+	Registries []CredentialRegistryLogical `yaml:"registries" validate:"required_if=Enable true,omitempty,dive"`
+	// RefreshInterval controls how long a registry's discovery index is
+	// trusted before being re-fetched. Zero means fetch once and cache
+	// forever for the lifetime of this process.
+	RefreshInterval time.Duration `yaml:"refresh_interval" default:"1h"`
+}
+
+// CredentialRegistryLogical is one independent TS11 registry, optionally served by more than one mirror endpoint holding equivalent content, queried concurrently and raced - first hit wins.
+type CredentialRegistryLogical struct {
+	// Mirrors is the set of endpoints serving this logical registry's
+	// content. At least one is required.
+	Mirrors []CredentialRegistryEndpoint `yaml:"mirrors" validate:"required,min=1,dive"`
+}
+
+// CredentialRegistryEndpoint identifies one TS11 registry endpoint to query.
+type CredentialRegistryEndpoint struct {
+	// BaseURL is the registry's origin, e.g. "https://registry.siros.org".
+	BaseURL string `yaml:"base_url" validate:"required,url" doc_example:"\"https://registry.siros.org\""`
+	// Timeout bounds each HTTP request to this registry.
+	Timeout time.Duration `yaml:"timeout" default:"10s"`
+}
+
+// NewClient builds a ts11client.Client from this configuration, or returns
+// (nil, nil) when Enable is false - callers pass the (possibly nil)
+// result straight through to CredentialMetadata.LoadCredentialSchema,
+// which treats a nil registry as "not configured" rather than a special case.
+func (cr *CredentialRegistry) NewClient() (ts11client.Client, error) {
+	if cr == nil || !cr.Enable {
+		return nil, nil
+	}
+	registries := make([]ts11client.LogicalRegistry, 0, len(cr.Registries))
+	for _, lr := range cr.Registries {
+		mirrors := make([]ts11client.RegistryConfig, 0, len(lr.Mirrors))
+		for _, m := range lr.Mirrors {
+			mirrors = append(mirrors, ts11client.RegistryConfig{BaseURL: m.BaseURL, Timeout: m.Timeout})
+		}
+		registries = append(registries, ts11client.LogicalRegistry{Mirrors: mirrors})
+	}
+	return ts11client.New(ts11client.Config{
+		Registries:      registries,
+		RefreshInterval: cr.RefreshInterval,
+	})
+}
+
 type CredentialMetadata struct {
 	// VCTMFilePath is the path to a local VCTM JSON file.
 	// When set, apigw will publish the VCTM at /type-metadata/:scope.
 	// Used for every format except mso_mdoc.
-	VCTMFilePath string `yaml:"vctm_file_path" json:"-" validate:"required_without_all=VCTMUrl MDDLFilePath MDDLUrl"`
+	VCTMFilePath string `yaml:"vctm_file_path" json:"-" validate:"required_without_all=VCTMUrl MDDLFilePath MDDLUrl VCT Doctype"`
 	// VCTMUrl is the URL where the VCTM is already published externally.
 	// When set, the VCTM is fetched from this URL at startup for internal use
 	// but NOT re-published by apigw.
 	// Used for every format except mso_mdoc.
-	VCTMUrl string `yaml:"vctm_url" json:"-" validate:"required_without_all=VCTMFilePath MDDLFilePath MDDLUrl,omitempty,url"`
+	VCTMUrl string `yaml:"vctm_url" json:"-" validate:"required_without_all=VCTMFilePath MDDLFilePath MDDLUrl VCT Doctype,omitempty,url"`
+
+	// VCT is the vct claim value to resolve via Common.CredentialRegistry
+	// (a TS11 registry client), used only when neither VCTMFilePath nor
+	// VCTMUrl is set. Requires Common.CredentialRegistry.Enable - this
+	// field being present in a scope's config does not itself turn
+	// registry lookups on. Used for every format except mso_mdoc.
+	VCT string `yaml:"vct,omitempty" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath MDDLUrl Doctype"`
 
 	VCTM *sdjwtvc.VCTM `yaml:"-" json:"-"`
 
 	// MDDLFilePath is the path to a local MDDL (mso_mdoc) schema JSON file,
 	// as produced by registry-cli's mddl format generator.
-	MDDLFilePath string `yaml:"mddl_file_path" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLUrl"`
+	MDDLFilePath string `yaml:"mddl_file_path" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLUrl VCT Doctype"`
 	// MDDLUrl is the URL where the MDDL schema is already published
 	// externally. The mso_mdoc analogue of vctm_url.
-	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath,omitempty,url"`
+	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath VCT Doctype,omitempty,url"`
+
+	// Doctype is the mdoc doctype value to resolve via
+	// Common.CredentialRegistry, used only when neither MDDLFilePath nor
+	// MDDLUrl is set. Requires Common.CredentialRegistry.Enable, same as
+	// VCT. Used only for mso_mdoc.
+	Doctype string `yaml:"doctype,omitempty" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath MDDLUrl VCT"`
 
 	MDDL *mdoc.MDDLSchema `yaml:"-" json:"-"`
 
@@ -1328,17 +1478,20 @@ type CredentialMetadata struct {
 // LoadCredentialSchema loads this scope's credential schema — a VCTM for every
 // format except mso_mdoc, which instead loads an MDDL schema (registry-cli's
 // mso_mdoc analogue of VCTM). The scope parameter is used only for error
-// messages.
-func (c *CredentialMetadata) LoadCredentialSchema(ctx context.Context, scope string) error {
+// messages. registry is consulted only when this scope has no
+// VCTMFilePath/VCTMUrl (or MDDLFilePath/MDDLUrl) and instead sets VCT (or
+// Doctype) - it may be nil, in which case a scope relying on VCT/Doctype
+// fails with a clear error rather than silently having no schema.
+func (c *CredentialMetadata) LoadCredentialSchema(ctx context.Context, scope string, registry ts11client.Client) error {
 	if c.Format == "mso_mdoc" {
-		return c.loadMDDLSchema(ctx, scope)
+		return c.loadMDDLSchema(ctx, scope, registry)
 	}
-	return c.loadVCTM(ctx, scope)
+	return c.loadVCTM(ctx, scope, registry)
 }
 
-func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string) error {
-	if c.VCTMFilePath == "" && c.VCTMUrl == "" {
-		return fmt.Errorf("scope %s: vctm_file_path or vctm_url is required for format %q", scope, c.Format)
+func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string, registry ts11client.Client) error {
+	if c.VCTMFilePath == "" && c.VCTMUrl == "" && c.VCT == "" {
+		return fmt.Errorf("scope %s: vctm_file_path, vctm_url, or vct is required for format %q", scope, c.Format)
 	}
 
 	var (
@@ -1372,6 +1525,16 @@ func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string) error {
 			return fmt.Errorf("failed to read VCTM response from %s for scope %s: %w", c.VCTMUrl, scope, err)
 		}
 		rawBytes = data
+
+	case c.VCT != "":
+		if registry == nil {
+			return fmt.Errorf("scope %s: vct %q is configured but common.credential_registry is not enabled", scope, c.VCT)
+		}
+		resolved, err := registry.ResolveVCT(ctx, c.VCT)
+		if err != nil {
+			return fmt.Errorf("failed to resolve vct %q for scope %s: %w", c.VCT, scope, err)
+		}
+		rawBytes = resolved.Data
 	}
 
 	var vctm sdjwtvc.VCTM
@@ -1398,9 +1561,9 @@ func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string) error {
 	return nil
 }
 
-func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string) error {
-	if c.MDDLFilePath == "" && c.MDDLUrl == "" {
-		return fmt.Errorf("scope %s: mddl_file_path or mddl_url is required for format %q", scope, c.Format)
+func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string, registry ts11client.Client) error {
+	if c.MDDLFilePath == "" && c.MDDLUrl == "" && c.Doctype == "" {
+		return fmt.Errorf("scope %s: mddl_file_path, mddl_url, or doctype is required for format %q", scope, c.Format)
 	}
 
 	var rawBytes []byte
@@ -1431,6 +1594,16 @@ func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string) e
 			return fmt.Errorf("failed to read MDDL response from %s for scope %s: %w", c.MDDLUrl, scope, err)
 		}
 		rawBytes = data
+
+	case c.Doctype != "":
+		if registry == nil {
+			return fmt.Errorf("scope %s: doctype %q is configured but common.credential_registry is not enabled", scope, c.Doctype)
+		}
+		resolved, err := registry.ResolveDoctype(ctx, c.Doctype)
+		if err != nil {
+			return fmt.Errorf("failed to resolve doctype %q for scope %s: %w", c.Doctype, scope, err)
+		}
+		rawBytes = resolved.Data
 	}
 
 	schema, err := mdoc.LoadMDDLSchema(rawBytes)
@@ -1544,6 +1717,8 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 			vctURL = u
 		case constructor.VCTMUrl != "":
 			vctURL = constructor.VCTMUrl
+		case constructor.VCT != "":
+			vctURL = constructor.VCT
 		}
 
 		constructor.mu.Lock()
@@ -1576,7 +1751,7 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 			continue
 		}
 		if constructor.GetVCTURL() == "" {
-			return fmt.Errorf("VCTURL is empty for scope %q after resolution (check vctm_file_path or vctm_url)", scope)
+			return fmt.Errorf("VCTURL is empty for scope %q after resolution (check vctm_file_path, vctm_url, or vct)", scope)
 		}
 	}
 
@@ -1942,6 +2117,28 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 
 	metadata := metadataConfig.GenerateIssuerMetadata(ctx)
 
+	// Advertise the registration certificate, when one is configured, so a
+	// wallet can see what this Credential Issuer is registered to provide.
+	//
+	// nil access certificate, so the ARF RPRC_16 binding is not enforced
+	// here. That binding compares this document against the access
+	// certificate of the party presenting it, and after the issuer gained
+	// its own access certificate that key lives in the issuer service, not
+	// in the apigw that assembles this metadata.
+	//
+	// Deliberately not plumbed across the two services: RPRC_16 is not
+	// settled, and building a cross-service check for a rule that may change
+	// shape would cost more than it protects. The operator is trusted to
+	// configure a certificate that describes this deployment. The signature
+	// and chain are still verified, so a wrong or untrusted document is
+	// still rejected - what is not checked is whether a correctly-signed
+	// certificate describes somebody else.
+	loaded, err := cfg.RegistrationCertificate.Load(nil)
+	if err != nil {
+		return nil, fmt.Errorf("issuer registration certificate: %w", err)
+	}
+	metadata.IssuerInfo = loaded.IssuerInfo()
+
 	return metadata, nil
 }
 
@@ -1955,4 +2152,45 @@ func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string) 
 	})
 
 	return metadata
+}
+
+// DeclaredClaimNames returns the top-level claim names this credential type
+// declares, across both VCTM and MDDL. The boolean reports whether any
+// metadata was available to derive them from - an empty set from a loaded
+// document means "declares nothing", which is different from "nothing
+// loaded", and callers must not treat the two alike.
+//
+// Names are top-level because the claim maps produced by external identity
+// providers are flat. For a VCTM the name is the first path segment, so a
+// nested claim like ["address","street_address"] admits an "address" object
+// and lets the existing pipeline handle its interior. For an MDDL it is the
+// element ID, since document data is keyed by element directly rather than
+// nested under the mdoc namespace - see MDDLSchema.Presentation.
+func (c *CredentialMetadata) DeclaredClaimNames() (map[string]bool, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	names := map[string]bool{}
+	loaded := false
+
+	if c.VCTM != nil {
+		loaded = true
+		for _, claim := range c.VCTM.Claims {
+			if len(claim.Path) == 0 || claim.Path[0] == nil {
+				continue
+			}
+			names[*claim.Path[0]] = true
+		}
+	}
+
+	if c.MDDL != nil {
+		loaded = true
+		for _, elements := range c.MDDL.Claims {
+			for elementID := range elements {
+				names[elementID] = true
+			}
+		}
+	}
+
+	return names, loaded
 }

@@ -182,11 +182,14 @@ func copyDCQL(src *DCQL) *DCQL {
 			}
 		}
 		dst.Credentials[i] = CredentialQuery{
-			ID:                                cred.ID,
-			Format:                            cred.Format,
-			Multiple:                          cred.Multiple,
-			Meta:                              meta,
-			RequireCryptographicHolderBinding: cred.RequireCryptographicHolderBinding,
+			ID:       cred.ID,
+			Format:   cred.Format,
+			Multiple: cred.Multiple,
+			Meta:     meta,
+		}
+		if cred.RequireCryptographicHolderBinding != nil {
+			v := *cred.RequireCryptographicHolderBinding
+			dst.Credentials[i].RequireCryptographicHolderBinding = &v
 		}
 
 		// Copy trusted authorities
@@ -211,9 +214,14 @@ func copyDCQL(src *DCQL) *DCQL {
 						pathCopy[k] = &s
 					}
 				}
+				var valuesCopy []any
+				if claim.Values != nil {
+					valuesCopy = append([]any{}, claim.Values...)
+				}
 				dst.Credentials[i].Claims[j] = ClaimQuery{
-					ID:   claim.ID,
-					Path: pathCopy,
+					ID:     claim.ID,
+					Path:   pathCopy,
+					Values: valuesCopy,
 				}
 			}
 		}
@@ -230,9 +238,11 @@ func copyDCQL(src *DCQL) *DCQL {
 	// Copy credential sets
 	for i, cs := range src.CredentialSets {
 		dst.CredentialSets[i] = CredentialSetQuery{
-			Required: cs.Required,
-			Purpose:  cs.Purpose,
-			Options:  make([][]string, len(cs.Options)),
+			Options: make([][]string, len(cs.Options)),
+		}
+		if cs.Required != nil {
+			v := *cs.Required
+			dst.CredentialSets[i].Required = &v
 		}
 		for j, opt := range cs.Options {
 			dst.CredentialSets[i].Options[j] = append([]string{}, opt...)

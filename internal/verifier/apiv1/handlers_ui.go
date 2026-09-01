@@ -18,8 +18,38 @@ import (
 
 // UICredentialInfo is a sanitized view of a credential for the UI.
 type UICredentialInfo struct {
-	Format     string                          `json:"format"`
-	VCT        string                          `json:"vct"`
+	Format string `json:"format"`
+	// VCT is the credential's own type identifier - the value
+	// BuildCredentialWithSigner embeds as the credential's "vct" claim. Kept
+	// as the single display identifier for the UI's credential picker.
+	VCT string `json:"vct"`
+	// VCTValues is every identifier a wallet might legitimately match this
+	// credential type by, for use as DCQL meta.vct_values.
+	//
+	// Both forms have to be offered, because deployed wallets disagree about
+	// which one identifies a credential, and each behaviour is live-verified
+	// in this repo:
+	//
+	//   - The EUDI reference wallet (multipaz) matches the ISSUER METADATA's
+	//     declared vct - our published type-metadata URL. Offer.kt sets
+	//     SdJwtVcFormat(vct = configuration.type) and DcqlRequestProcessor
+	//     filters on that tag before ever parsing the credential body. See
+	//     the finding-18 note in internal/apigw/apiv1/handlers_verifier.go.
+	//
+	//   - Other wallets (e.g. wwWallet/wallet-frontend) match the credential's
+	//     own embedded "vct" claim, i.e. VCTM.VCT. See the finding-16 note on
+	//     VCTIdentifiersForScopes in pkg/model/config.go.
+	//
+	// vct_values is an acceptable-value list by design (OpenID4VP DCQL), so
+	// emitting both satisfies either wallet instead of picking a winner and
+	// silently breaking the other.
+	// omitempty: mso_mdoc scopes get no list (they're identified by doctype,
+	// not vct), so this drops the field entirely for them rather than
+	// emitting a meaningless "vct_values": null. The UI's schema tolerates
+	// either form - it declares vct_values as nullish and falls back to
+	// [vct] for both absent and null - so this is about not sending noise
+	// for mdoc credentials, not about satisfying a parsing constraint.
+	VCTValues  []string                        `json:"vct_values,omitempty"`
 	Attributes map[string]map[string][]*string `json:"attributes"`
 }
 
@@ -39,8 +69,14 @@ type UIPresetCredential struct {
 }
 
 // UIPresetMeta holds credential metadata for the preset.
+//
+// Which field applies depends on the credential's format (OpenID4VP 1.0
+// 6.4.1): vct_values for sd-jwt credentials, doctype_value for mso_mdoc.
+// They are mutually exclusive, hence omitempty on both - sending an empty
+// vct_values alongside a doctype, or vice versa, is a malformed query.
 type UIPresetMeta struct {
-	VCTValues []string `json:"vct_values"`
+	VCTValues    []string `json:"vct_values,omitempty"`
+	DoctypeValue string   `json:"doctype_value,omitempty"`
 }
 
 // UIPresetClaim is a claim path within a preset credential.
@@ -58,6 +94,34 @@ type UIMetadataReply struct {
 	DCAPIEnabled bool `json:"dc_api_enabled"`
 }
 
+// vctIdentifiersFor returns every identifier a wallet might match this
+// credential type by, most-specific first: the credential's own embedded vct
+// (VCTM.VCT), then the published type-metadata URL. Duplicates are collapsed,
+// which is what happens for a VCTM file with no "vct" field - ResolveVCTUrls
+// back-fills VCTM.VCT from the URL, so both are the same string.
+//
+// Returns nil for mso_mdoc scopes: they have no vct at all, and DCQL
+// constrains them with doctype_value instead.
+func vctIdentifiersFor(constructor *model.CredentialMetadata) []string {
+	if constructor == nil {
+		return nil
+	}
+	var out []string
+	seen := make(map[string]bool, 2)
+	add := func(v string) {
+		if v == "" || seen[v] {
+			return
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	if vctm := constructor.GetVCTM(); vctm != nil {
+		add(vctm.VCT)
+	}
+	add(constructor.GetVCTURL())
+	return out
+}
+
 func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 	reply := &UIMetadataReply{
 		Credentials:      make(map[string]*UICredentialInfo),
@@ -70,15 +134,38 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 			Format:     constructor.Format,
 			Attributes: constructor.GetAttributes(),
 		}
-		if v := constructor.GetVCTURL(); v != "" {
-			info.VCT = v
-		} else if vctm := constructor.GetVCTM(); vctm != nil {
+		// VCTM.VCT, not VCTURL: the credential's own vct claim is built from
+		// the VCTM's vct field (BuildCredentialWithSigner -> body["vct"] =
+		// vctm.VCT), so that is the value a wallet matches a DCQL query
+		// against. VCTURL is where the VCTM document is *served* from, which
+		// ResolveVCTUrls derives as apigwPublicURL + /type-metadata/{scope}
+		// and deliberately keeps distinct from the identifier ("VCTM.VCT [is]
+		// left unchanged — the served VCTM document preserves the original
+		// VCT identifier from the VCTM file (e.g. a URN)").
+		//
+		// Preferring the URL made the UI advertise, and query for, a type
+		// identifier no credential ever carries: a PID issued by this very
+		// stack has vct "urn:eudi:pid:arf-1.8:1" while the UI asked for
+		// "https://<apigw>/type-metadata/pid_1_8", so every presentation
+		// started from the UI failed with "No credentials match DCQL query".
+		// The VCTM.VCT branch below was also unreachable in practice, since
+		// ResolveVCTUrls requires a non-empty VCTURL for every VCTM scope.
+		//
+		// Falling back to VCTURL still covers a VCTM file with no vct field:
+		// ResolveVCTUrls back-fills VCTM.VCT from the URL in that case, so
+		// both branches agree and the identifier stays dereferenceable.
+		if vctm := constructor.GetVCTM(); vctm != nil && vctm.VCT != "" {
 			info.VCT = vctm.VCT
+		} else if v := constructor.GetVCTURL(); v != "" {
+			info.VCT = v
 		} else if mddl := constructor.GetMDDL(); mddl != nil {
 			// mso_mdoc scopes have no VCTM/VCTURL — the doctype is the
-			// closest equivalent identifier.
+			// closest equivalent identifier. There is no vct_values for
+			// mdoc (the DCQL constraint is doctype_value), so leave the
+			// list empty and let the UI fall back to the single value.
 			info.VCT = mddl.DocType
 		}
+		info.VCTValues = vctIdentifiersFor(constructor)
 		reply.Credentials[scope] = info
 	}
 
@@ -109,17 +196,26 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				}
 
 				uiCred := UIPresetCredential{
-					ID:   scope,
-					Meta: UIPresetMeta{VCTValues: []string{}},
+					ID: scope,
 				}
 
-				// Resolve format and VCT from credential_metadata
+				// Resolve format and the type constraint from
+				// credential_metadata. An mso_mdoc credential has no vct at
+				// all - DCQL constrains it by doctype_value instead
+				// (OpenID4VP 1.0 6.4.1) - so a preset over an mdoc scope was
+				// previously emitted with an empty vct_values and no doctype,
+				// which matches nothing in any wallet.
 				if meta != nil {
 					uiCred.Format = meta.Format
-					if v := meta.GetVCTURL(); v != "" {
-						uiCred.Meta.VCTValues = []string{v}
-					} else if vctm := meta.GetVCTM(); vctm != nil {
-						uiCred.Meta.VCTValues = []string{vctm.VCT}
+					if mddl := meta.GetMDDL(); mddl != nil && mddl.DocType != "" {
+						uiCred.Meta.DoctypeValue = mddl.DocType
+					} else if vs := vctIdentifiersFor(meta); len(vs) > 0 {
+						// Both identifiers, for the reason documented on
+						// UICredentialInfo.VCTValues: wallets disagree about
+						// which one names a credential type. Only reached for
+						// non-mdoc credentials - an mdoc is constrained by
+						// doctype_value above and has no vct to offer.
+						uiCred.Meta.VCTValues = vs
 					}
 				}
 
@@ -223,7 +319,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// them using the VCTM so wallets disclose nested content correctly.
 	c.augmentDCQLFromVCTM(req.DCQLQuery)
 
-	uiClientID, err := c.cfg.Verifier.VerifierClientID()
+	uiClientID, err := c.cfg.Verifier.VerifierClientID(c.pkiSigningCert)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine verifier client_id: %w", err)
 	}
@@ -309,7 +405,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		Scope:            "",
 		DCQLQuery:        req.DCQLQuery,
 		RequestURIMethod: "",
-		VerifierInfo:     []openid4vp.VerifierInfo{},
+		VerifierInfo:     c.registrationCertificate.VerifierInfo(),
 	}
 
 	if err := c.cacheService.AuthContext.Save(ctx, authorizationContext); err != nil {

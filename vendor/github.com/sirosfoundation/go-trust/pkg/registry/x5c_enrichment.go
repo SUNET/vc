@@ -40,8 +40,19 @@ type X5CEnrichmentResult struct {
 
 	// WRPACOrgID is the organization_identifier extracted from the WRPAC leaf
 	// certificate. Populated when the matched profile is "wrpac". Used by callers
-	// to perform WRPAC–WRPRC subject binding per ARF RPRC_16.
+	// to perform WRPAC–WRPRC organisation-level binding per ARF RPRC_16.
 	WRPACOrgID string
+
+	// WRPACServiceID is the service_identifier URI extracted from the WRPAC leaf
+	// certificate Subject attribute OIDWRPACServiceIdentifier (0.4.0.19475.99.1).
+	// Populated when the matched profile is "wrpac" AND the attribute is present.
+	// Empty for certificates that do not carry this attribute (e.g. Anna's certs
+	// following strict ETSI TS 119 411-8 v1.1.1 which does not define this OID).
+	//
+	// When non-empty, callers should additionally invoke
+	// rpcert.CheckWRPACWRPRCServiceBinding(WRPACServiceID, wrprc) after the
+	// organisation-level binding check.
+	WRPACServiceID string
 
 	// FailureReason is set when Decision is false, describing why.
 	FailureReason map[string]interface{}
@@ -115,18 +126,26 @@ func EnrichX5CResponseWithProfiles(req *authzen.EvaluationRequest, leaf *x509.Ce
 		}
 		result.RPIdentity = identity
 
-		// Populate WRPACOrgID for downstream WRPAC–WRPRC binding checks when
-		// the matched profile is "wrpac" (or any profile that exposes
-		// organization_identifier in its identity map).
+		// Populate WRPACOrgID and WRPACServiceID for downstream binding checks
+		// when the matched profile is "wrpac".
 		if id, ok := identity["organization_identifier"].(string); ok && id != "" {
 			result.WRPACOrgID = id
 		}
+		// WRPACServiceID: only present in certs using Stefan Santesson's
+		// de-facto convention (OIDWRPACServiceIdentifier 0.4.0.19475.99.1).
+		// Empty for strict ETSI TS 119 411-8 certs — that's intentional.
+		if svc, ok := identity["service_identifier"].(string); ok && svc != "" {
+			result.WRPACServiceID = svc
+		}
 	} else if matchedProfile != nil && matchedProfile.Name() == "wrpac" {
-		// Extract org ID for binding even when full identity extraction is not
-		// requested, so the binding check can run without leaking the full map.
+		// Extract IDs for binding even when full identity extraction is not
+		// requested, so binding checks can run without leaking the full map.
 		if identity, err := matchedProfile.ExtractIdentity(leaf); err == nil {
 			if id, ok := identity["organization_identifier"].(string); ok {
 				result.WRPACOrgID = id
+			}
+			if svc, ok := identity["service_identifier"].(string); ok {
+				result.WRPACServiceID = svc
 			}
 		}
 	}

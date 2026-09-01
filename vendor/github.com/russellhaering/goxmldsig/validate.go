@@ -2,16 +2,20 @@ package dsig
 
 import (
 	"bytes"
+	"crypto/ecdsa"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"math/big"
 	"regexp"
 
 	"github.com/beevik/etree"
 	"github.com/russellhaering/goxmldsig/etreeutils"
 	"github.com/russellhaering/goxmldsig/types"
+	"github.com/sirosfoundation/go-cryptoutil"
 )
 
 var uriRegexp = regexp.MustCompile("^#[a-zA-Z_][\\w.-]*$")
@@ -28,6 +32,7 @@ type ValidationContext struct {
 	CertificateStore X509CertificateStore
 	IdAttribute      string
 	Clock            *Clock
+	CryptoExtensions *cryptoutil.Extensions
 }
 
 func NewDefaultValidationContext(certificateStore X509CertificateStore) *ValidationContext {
@@ -246,7 +251,23 @@ func (ctx *ValidationContext) verifySignedInfo(sig *types.Signature, canonicaliz
 		return errors.New("Unknown signature method: " + signatureMethodId)
 	}
 
-	err = cert.CheckSignature(algo, canonical, decodedSignature)
+	// XML-DSig uses IEEE P1363 format for ECDSA signatures (r||s concatenation),
+	// but Go's x509.CheckSignature expects DER/ASN.1 encoding. Convert if needed.
+	sigForVerify := decodedSignature
+	if ecPub, ok := cert.PublicKey.(*ecdsa.PublicKey); ok {
+		byteLen := (ecPub.Curve.Params().BitSize + 7) / 8
+		if len(decodedSignature) == 2*byteLen {
+			r := new(big.Int).SetBytes(decodedSignature[:byteLen])
+			s := new(big.Int).SetBytes(decodedSignature[byteLen:])
+			var marshalErr error
+			sigForVerify, marshalErr = asn1.Marshal(struct{ R, S *big.Int }{r, s})
+			if marshalErr != nil {
+				return fmt.Errorf("failed to convert P1363 signature to DER: %w", marshalErr)
+			}
+		}
+	}
+
+	err = cert.CheckSignature(algo, canonical, sigForVerify)
 	if err != nil {
 		return err
 	}
@@ -268,11 +289,6 @@ func (ctx *ValidationContext) validateSignature(el *etree.Element, sig *types.Si
 		return nil, errors.New("Missing SignedInfo")
 	}
 
-	algo, ok := x509SignatureAlgorithmByIdentifier[signatureMethod]
-	if !ok {
-		return nil, errors.New("Unknown signature method: " + signatureMethod)
-	}
-
 	if sig.SignatureValue == nil {
 		return nil, errors.New("Signature could not be verified")
 	}
@@ -283,7 +299,33 @@ func (ctx *ValidationContext) validateSignature(el *etree.Element, sig *types.Si
 		return nil, errors.New("Could not decode signature")
 	}
 
-	err = cert.CheckSignature(algo, canonicalSignedInfoBytes, decodedSignature)
+	// Verify the signature using crypto extensions if available, otherwise
+	// fall back to the standard x509 algorithm map.
+	if ctx.CryptoExtensions != nil {
+		err = ctx.CryptoExtensions.CheckSignatureXMLDSIG(cert, signatureMethod, canonicalSignedInfoBytes, decodedSignature)
+	} else {
+		algo, ok := x509SignatureAlgorithmByIdentifier[signatureMethod]
+		if !ok {
+			return nil, errors.New("Unknown signature method: " + signatureMethod)
+		}
+
+		// XML-DSig uses IEEE P1363 format for ECDSA signatures (r||s concatenation),
+		// but Go's x509.CheckSignature expects DER/ASN.1 encoding. Convert if needed.
+		sigForVerify := decodedSignature
+		if ecPub, ok := cert.PublicKey.(*ecdsa.PublicKey); ok {
+			byteLen := (ecPub.Curve.Params().BitSize + 7) / 8
+			if len(decodedSignature) == 2*byteLen {
+				r := new(big.Int).SetBytes(decodedSignature[:byteLen])
+				s := new(big.Int).SetBytes(decodedSignature[byteLen:])
+				sigForVerify, err = asn1.Marshal(struct{ R, S *big.Int }{r, s})
+				if err != nil {
+					return nil, fmt.Errorf("failed to convert P1363 signature to DER: %w", err)
+				}
+			}
+		}
+
+		err = cert.CheckSignature(algo, canonicalSignedInfoBytes, sigForVerify)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -527,7 +569,11 @@ func (ctx *ValidationContext) verifyCertificate(sig *types.Signature) (*x509.Cer
 			return nil, errors.New("Failed to parse certificate")
 		}
 
-		untrustedCert, err = x509.ParseCertificate(certData)
+		if ctx.CryptoExtensions != nil {
+			untrustedCert, err = ctx.CryptoExtensions.ParseCertificate(certData)
+		} else {
+			untrustedCert, err = x509.ParseCertificate(certData)
+		}
 		if err != nil {
 			return nil, err
 		}

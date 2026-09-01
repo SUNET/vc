@@ -1,4 +1,4 @@
-// Package rpcert — structured trust evaluation error codes.
+// structured trust evaluation error codes.
 //
 // TrustEvaluationError wraps a machine-readable code with a human message so
 // callers can switch on the code to produce protocol-specific responses (AuthZen
@@ -9,6 +9,7 @@
 // type lives in the general rpcert package — it is not APTITUDE-specific.
 // Any caller mapping to a different protocol (e.g. OpenID4VP error codes)
 // can switch on the Code field and produce its own representation.
+
 package rpcert
 
 import "fmt"
@@ -29,6 +30,14 @@ const (
 	// ErrCodeBindingFailed is returned when the WRPAC organization_identifier
 	// does not match the WRPRC sub.id (ARF RPRC_16, TS 119 475 §5.1).
 	ErrCodeBindingFailed TrustEvaluationErrorCode = "BINDING_FAILED"
+
+	// ErrCodeServiceBindingFailed is returned when the WRPAC service_identifier
+	// (Subject attribute OID 0.4.0.19475.99.1) does not match the WRPRC
+	// "service_identifier" claim. This is a service-level check that complements
+	// the organisation-level ErrCodeBindingFailed check.
+	//
+	// TODO(etsi): rename/re-document once ETSI standardises the OID and claim name.
+	ErrCodeServiceBindingFailed TrustEvaluationErrorCode = "SERVICE_BINDING_FAILED"
 
 	// ErrCodeWrongEntitlement is returned when the RP's entitlements array does
 	// not include the role required for the requested operation.

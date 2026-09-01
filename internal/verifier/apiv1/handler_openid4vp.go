@@ -36,8 +36,8 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		c.log.Error(err, "Failed to construct response URI")
 		return "", err
 	}
-	// Determine client_id based on configured scheme (x509_san_dns or did)
-	clientID, err := c.cfg.Verifier.VerifierClientID()
+	// Determine client_id based on configured scheme (x509_san_dns, x509_hash or did)
+	clientID, err := c.cfg.Verifier.VerifierClientID(c.pkiSigningCert)
 	if err != nil {
 		return "", fmt.Errorf("failed to determine verifier client_id: %w", err)
 	}
@@ -64,6 +64,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		State:           sessionID,
 		DCQLQuery:       dcqlQuery,
 		TransactionData: encodedTxData,
+		VerifierInfo:    c.registrationCertificate.VerifierInfo(),
 	}
 
 	// Add vp_formats_supported to client_metadata if Digital Credentials API is enabled

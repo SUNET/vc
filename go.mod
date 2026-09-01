@@ -1,10 +1,10 @@
 module github.com/SUNET/vc
 
-go 1.26.5
+go 1.27
 
 require (
 	filippo.io/edwards25519 v1.2.0
-	github.com/IBM/sarama v1.60.1
+	github.com/IBM/sarama v1.60.2
 	github.com/PaesslerAG/jsonpath v0.1.1
 	github.com/beevik/etree v1.7.1
 	github.com/biter777/countries v1.7.5
@@ -21,7 +21,7 @@ require (
 	github.com/gin-contrib/sessions v1.1.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-jose/go-jose/v4 v4.1.4
-	github.com/go-json-experiment/json v0.0.0-20260819210203-93dd53efdd9e
+	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	github.com/go-logr/logr v1.4.4
 	github.com/go-logr/zapr v1.3.0
 	github.com/go-playground/validator/v10 v10.30.3
@@ -35,11 +35,11 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/jellydator/ttlcache/v3 v3.4.1
 	github.com/jmoiron/sqlx v1.4.0
-	github.com/kaptinlin/jsonschema v0.9.8
+	github.com/kaptinlin/jsonschema v0.9.9
 	github.com/kelseyhightower/envconfig v1.4.0
-	github.com/klauspost/compress v1.19.1
+	github.com/klauspost/compress v1.19.2
 	github.com/lestrrat-go/jwx/v3 v3.2.0
-	github.com/lithammer/shortuuid/v4 v4.2.0
+	github.com/lithammer/shortuuid/v4 v4.3.0
 	github.com/miekg/pkcs11 v1.1.2
 	github.com/moogar0880/problems v1.0.1
 	github.com/multiformats/go-multibase v0.3.0
@@ -47,10 +47,12 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/piprate/json-gold v0.8.0
 	github.com/prometheus/client_golang v1.24.1
+	github.com/redis/go-redis/v9 v9.22.0
 	github.com/russellhaering/goxmldsig v1.6.1
 	github.com/sirosfoundation/go-cryptoutil v0.6.0
 	github.com/sirosfoundation/go-spocp v0.1.0
-	github.com/sirosfoundation/go-trust v0.15.1
+	github.com/sirosfoundation/go-trust v0.20.5
+	github.com/sirosfoundation/go-ts11client v0.0.0-20260821071625-a8d5997107d0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/stretchr/testify v1.12.1
 	github.com/swaggo/files v1.0.1
@@ -59,23 +61,24 @@ require (
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/mariadb v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
+	github.com/testcontainers/testcontainers-go/modules/redis v0.44.0
 	github.com/xdg-go/scram v1.2.0
-	go.mongodb.org/mongo-driver/v2 v2.8.0
-	go.opentelemetry.io/contrib/propagators/jaeger v1.45.0
-	go.opentelemetry.io/otel v1.45.0
-	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.45.0
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.45.0
-	go.opentelemetry.io/otel/exporters/prometheus v0.67.0
-	go.opentelemetry.io/otel/metric v1.45.0
-	go.opentelemetry.io/otel/sdk v1.45.0
-	go.opentelemetry.io/otel/sdk/metric v1.45.0
-	go.opentelemetry.io/otel/trace v1.45.0
+	go.mongodb.org/mongo-driver/v2 v2.8.2
+	go.opentelemetry.io/contrib/propagators/jaeger v1.46.0
+	go.opentelemetry.io/otel v1.46.0
+	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.46.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.46.0
+	go.opentelemetry.io/otel/exporters/prometheus v0.68.0
+	go.opentelemetry.io/otel/metric v1.46.0
+	go.opentelemetry.io/otel/sdk v1.46.0
+	go.opentelemetry.io/otel/sdk/metric v1.46.0
+	go.opentelemetry.io/otel/trace v1.46.0
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.55.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/time v0.15.0
-	google.golang.org/grpc v1.83.1
+	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v2 v2.4.0
 	gotest.tools/v3 v3.5.2
@@ -89,7 +92,7 @@ require (
 	github.com/PaesslerAG/gval v1.2.4 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bytedance/gopkg v0.1.4 // indirect
-	github.com/bytedance/sonic v1.15.2 // indirect
+	github.com/bytedance/sonic v1.15.3 // indirect
 	github.com/bytedance/sonic/loader v0.5.2 // indirect
 	github.com/cayleygraph/quad v1.3.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
@@ -107,7 +110,7 @@ require (
 	github.com/docker/go-connections v0.8.1 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/eapache/go-resiliency v1.7.0 // indirect
-	github.com/ebitengine/purego v0.10.2 // indirect
+	github.com/ebitengine/purego v0.11.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.15 // indirect
 	github.com/gin-contrib/sse v1.1.1 // indirect
@@ -115,15 +118,15 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v1.0.0 // indirect
-	github.com/go-openapi/jsonreference v1.0.0 // indirect
-	github.com/go-openapi/spec v0.22.9 // indirect
-	github.com/go-openapi/swag/conv v0.29.0 // indirect
-	github.com/go-openapi/swag/jsonutils v0.29.0 // indirect
-	github.com/go-openapi/swag/loading v0.29.0 // indirect
-	github.com/go-openapi/swag/pools v0.29.0 // indirect
-	github.com/go-openapi/swag/stringutils v0.29.0 // indirect
-	github.com/go-openapi/swag/typeutils v0.29.0 // indirect
-	github.com/go-openapi/swag/yamlutils v0.29.0 // indirect
+	github.com/go-openapi/jsonreference v1.0.1 // indirect
+	github.com/go-openapi/spec v0.22.11 // indirect
+	github.com/go-openapi/swag/conv v0.29.1 // indirect
+	github.com/go-openapi/swag/jsonutils v0.29.1 // indirect
+	github.com/go-openapi/swag/loading v0.29.1 // indirect
+	github.com/go-openapi/swag/pools v0.29.1 // indirect
+	github.com/go-openapi/swag/stringutils v0.29.1 // indirect
+	github.com/go-openapi/swag/typeutils v0.29.1 // indirect
+	github.com/go-openapi/swag/yamlutils v0.29.1 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
@@ -161,6 +164,7 @@ require (
 	github.com/magiconair/properties v1.18.11 // indirect
 	github.com/mattermost/xml-roundtrip-validator v0.1.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
+	github.com/mdelapenya/tlscert v0.2.0 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/go-archive v0.3.3 // indirect
 	github.com/moby/moby/api v1.55.0 // indirect
@@ -182,18 +186,18 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.29 // indirect
 	github.com/power-devops/perfstat v0.0.0-20260805114148-88456608a4f6 // indirect
 	github.com/pquerna/cachecontrol v0.2.0 // indirect
-	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.70.1 // indirect
+	github.com/prometheus/client_model v0.6.3 // indirect
+	github.com/prometheus/common v0.71.0 // indirect
 	github.com/prometheus/otlptranslator v1.0.0 // indirect
-	github.com/prometheus/procfs v0.21.1 // indirect
+	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
-	github.com/quic-go/quic-go v0.61.0 // indirect
+	github.com/quic-go/quic-go v0.62.0 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
-	github.com/shirou/gopsutil/v4 v4.26.7 // indirect
+	github.com/shirou/gopsutil/v4 v4.26.8 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
-	github.com/sirosfoundation/g119612 v0.5.0 // indirect
-	github.com/sirupsen/logrus v1.10.1 // indirect
+	github.com/sirosfoundation/g119612 v0.7.0 // indirect
+	github.com/sirupsen/logrus v1.10.2 // indirect
 	github.com/tklauser/go-sysconf v0.4.0 // indirect
 	github.com/tklauser/numcpus v0.12.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
@@ -205,9 +209,10 @@ require (
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0 // indirect
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.45.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.46.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.11.0 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/arch v0.30.0 // indirect
@@ -216,6 +221,8 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260819154853-08b0e4226688 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260831171406-18b4a7587f8a // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260831171406-18b4a7587f8a // indirect
 )
+
+replace github.com/russellhaering/goxmldsig => github.com/sirosfoundation/goxmldsig v1.6.1-siros1

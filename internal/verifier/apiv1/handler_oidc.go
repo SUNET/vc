@@ -157,7 +157,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Generate OpenID4VP authorization request
-	clientID, err := c.cfg.Verifier.VerifierClientID()
+	clientID, err := c.cfg.Verifier.VerifierClientID(c.pkiSigningCert)
 	if err != nil {
 		c.log.Error(err, "Failed to determine verifier client_id")
 		return nil, ErrServerError
@@ -880,7 +880,7 @@ func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCo
 			return nil, fmt.Errorf("failed to construct request object path: %w", err)
 		}
 
-		qrClientID, err := c.cfg.Verifier.VerifierClientID()
+		qrClientID, err := c.cfg.Verifier.VerifierClientID(c.pkiSigningCert)
 		if err != nil {
 			return nil, fmt.Errorf("failed to determine verifier client_id: %w", err)
 		}
@@ -891,7 +891,7 @@ func (c *Client) GetQRCode(ctx context.Context, req *GetQRCodeRequest) (*GetQRCo
 		qrData = walletBaseURL + "?" + q.Encode()
 	} else {
 		// Standard flow: generate QR for openid4vp:// URI (native wallet)
-		qrClientID, err := c.cfg.Verifier.VerifierClientID()
+		qrClientID, err := c.cfg.Verifier.VerifierClientID(c.pkiSigningCert)
 		if err != nil {
 			return nil, fmt.Errorf("failed to determine verifier client_id: %w", err)
 		}

@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,8 @@ import (
 
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
+	"github.com/go-playground/validator/v10"
+	ts11client "github.com/sirosfoundation/go-ts11client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -172,7 +175,7 @@ func TestCredentialMetadata(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.TODO()
 
-			err := tt.constructor.LoadCredentialSchema(ctx, tt.scope)
+			err := tt.constructor.LoadCredentialSchema(ctx, tt.scope, nil)
 			assert.NoError(t, err)
 
 			// Verify VCTM was loaded
@@ -200,7 +203,7 @@ func TestCredentialMetadata_MDDL(t *testing.T) {
 			Format:       "mso_mdoc",
 			MDDLFilePath: "./testdata/mddl_pid.json",
 		}
-		err := c.LoadCredentialSchema(context.TODO(), "pid_mdoc")
+		err := c.LoadCredentialSchema(context.TODO(), "pid_mdoc", nil)
 		require.NoError(t, err)
 		assert.NotNil(t, c.MDDL, "MDDL schema should be loaded")
 		assert.Equal(t, "eu.europa.ec.eudi.pid.1", c.MDDL.DocType)
@@ -222,7 +225,7 @@ func TestCredentialMetadata_MDDL(t *testing.T) {
 			Format:  "mso_mdoc",
 			MDDLUrl: srv.URL,
 		}
-		err := c.LoadCredentialSchema(context.TODO(), "pid_mdoc")
+		err := c.LoadCredentialSchema(context.TODO(), "pid_mdoc", nil)
 		require.NoError(t, err)
 		assert.NotNil(t, c.MDDL, "MDDL schema should be loaded")
 		// This is the regression this test guards against: previously
@@ -232,6 +235,167 @@ func TestCredentialMetadata_MDDL(t *testing.T) {
 		assert.NotEmpty(t, c.GetMDDLRaw(), "MDDLRaw should also be kept for mddl_url-loaded schemas")
 		assert.False(t, c.IsLocalMDDL())
 	})
+}
+
+// stubRegistry is a minimal ts11client.Client double for testing the
+// vct/doctype-based loading path without a real registry.
+type stubRegistry struct {
+	vctm    map[string][]byte
+	doctype map[string][]byte
+}
+
+func (s *stubRegistry) ResolveVCT(_ context.Context, vct string) (*ts11client.Resolved, error) {
+	data, ok := s.vctm[vct]
+	if !ok {
+		return nil, fmt.Errorf("%w: vct=%s", ts11client.ErrNotFound, vct)
+	}
+	return &ts11client.Resolved{Data: data, Source: "stub"}, nil
+}
+
+func (s *stubRegistry) ResolveDoctype(_ context.Context, doctype string) (*ts11client.Resolved, error) {
+	data, ok := s.doctype[doctype]
+	if !ok {
+		return nil, fmt.Errorf("%w: doctype=%s", ts11client.ErrNotFound, doctype)
+	}
+	return &ts11client.Resolved{Data: data, Source: "stub"}, nil
+}
+
+func TestCredentialMetadata_VCT_ResolvesViaRegistry(t *testing.T) {
+	vctmBytes, err := os.ReadFile("./testdata/vctm_pid.json")
+	require.NoError(t, err)
+	registry := &stubRegistry{vctm: map[string][]byte{"urn:eudi:pid:1": vctmBytes}}
+
+	c := &CredentialMetadata{Format: "dc+sd-jwt", VCT: "urn:eudi:pid:1"}
+	err = c.LoadCredentialSchema(context.Background(), "pid", registry)
+	require.NoError(t, err)
+
+	assert.NotNil(t, c.VCTM)
+	assert.Equal(t, "urn:eudi:pid:1", c.VCTM.VCT)
+	assert.Contains(t, c.Integrity, "sha256-")
+	// Registry-resolved VCTMs aren't served by apigw (same as vctm_url),
+	// so raw bytes aren't kept for re-publishing.
+	assert.False(t, c.IsLocalVCTM())
+	assert.Empty(t, c.GetVCTMRaw())
+}
+
+func TestCredentialMetadata_VCT_NotFoundInRegistry(t *testing.T) {
+	registry := &stubRegistry{}
+	c := &CredentialMetadata{Format: "dc+sd-jwt", VCT: "urn:unknown"}
+	err := c.LoadCredentialSchema(context.Background(), "pid", registry)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ts11client.ErrNotFound)
+}
+
+func TestCredentialMetadata_VCT_NoRegistryConfigured(t *testing.T) {
+	c := &CredentialMetadata{Format: "dc+sd-jwt", VCT: "urn:eudi:pid:1"}
+	err := c.LoadCredentialSchema(context.Background(), "pid", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "credential_registry is not enabled")
+}
+
+func TestCredentialMetadata_Doctype_ResolvesViaRegistry(t *testing.T) {
+	mddlBytes, err := os.ReadFile("./testdata/mddl_pid.json")
+	require.NoError(t, err)
+	registry := &stubRegistry{doctype: map[string][]byte{"eu.europa.ec.eudi.pid.1": mddlBytes}}
+
+	c := &CredentialMetadata{Format: "mso_mdoc", Doctype: "eu.europa.ec.eudi.pid.1"}
+	err = c.LoadCredentialSchema(context.Background(), "pid_mdoc", registry)
+	require.NoError(t, err)
+
+	assert.NotNil(t, c.MDDL)
+	assert.Equal(t, "eu.europa.ec.eudi.pid.1", c.MDDL.DocType)
+	assert.Contains(t, c.Integrity, "sha256-")
+	// Unlike VCTMRaw, MDDLRaw is always required regardless of source.
+	assert.NotEmpty(t, c.GetMDDLRaw())
+}
+
+func TestCredentialMetadata_Doctype_NoRegistryConfigured(t *testing.T) {
+	c := &CredentialMetadata{Format: "mso_mdoc", Doctype: "eu.europa.ec.eudi.pid.1"}
+	err := c.LoadCredentialSchema(context.Background(), "pid_mdoc", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "credential_registry is not enabled")
+}
+
+// TestCredentialMetadata_ValidationTags_VCTAloneSatisfiesRequirement
+// guards against a real gap Copilot caught in review: VCT was only added
+// to some of the six fields' required_without_all lists, so a vct-only
+// scope config could still fail struct validation demanding
+// mddl_file_path/mddl_url even though vct is a legitimate standalone
+// source. Exercises the actual validator, not just LoadCredentialSchema
+// (which never runs struct-tag validation itself).
+func TestCredentialMetadata_ValidationTags_VCTAloneSatisfiesRequirement(t *testing.T) {
+	v := validator.New(validator.WithRequiredStructEnabled())
+	cm := &CredentialMetadata{Format: "dc+sd-jwt", VCT: "urn:eudi:pid:1"}
+	assert.NoError(t, v.Struct(cm))
+}
+
+func TestCredentialMetadata_ValidationTags_DoctypeAloneSatisfiesRequirement(t *testing.T) {
+	v := validator.New(validator.WithRequiredStructEnabled())
+	cm := &CredentialMetadata{Format: "mso_mdoc", Doctype: "org.iso.18013.5.1.mDL"}
+	assert.NoError(t, v.Struct(cm))
+}
+
+func TestCredentialMetadata_ValidationTags_NoneSetFailsValidation(t *testing.T) {
+	v := validator.New(validator.WithRequiredStructEnabled())
+	cm := &CredentialMetadata{Format: "dc+sd-jwt"}
+	assert.Error(t, v.Struct(cm))
+}
+
+func TestResolveVCTUrls_RegistryResolvedVCT(t *testing.T) {
+	cfg := &Cfg{
+		Common: &Common{
+			CredentialMetadata: map[string]*CredentialMetadata{
+				"pid": {
+					VCT:    "urn:eudi:pid:1",
+					Format: "dc+sd-jwt",
+					VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+			},
+		},
+	}
+
+	err := cfg.ResolveVCTUrls("https://apigw.example.com")
+	require.NoError(t, err)
+
+	meta := cfg.Common.CredentialMetadata["pid"]
+	assert.Equal(t, "urn:eudi:pid:1", meta.VCTURL,
+		"VCTURL should be the configured vct itself, not a served /type-metadata/ URL")
+	assert.False(t, meta.IsLocalVCTM())
+}
+
+func TestCredentialRegistry_NewClient_DisabledByDefault(t *testing.T) {
+	var cr CredentialRegistry
+	client, err := cr.NewClient()
+	require.NoError(t, err)
+	assert.Nil(t, client, "a disabled CredentialRegistry must produce a nil client so callers see zero behavior change")
+}
+
+func TestCredentialRegistry_NewClient_Enabled(t *testing.T) {
+	cr := CredentialRegistry{
+		Enable: true,
+		Registries: []CredentialRegistryLogical{
+			{Mirrors: []CredentialRegistryEndpoint{{BaseURL: "https://registry.siros.org"}}},
+		},
+	}
+	client, err := cr.NewClient()
+	require.NoError(t, err)
+	assert.NotNil(t, client)
+}
+
+func TestCredentialRegistry_NewClient_MultipleLogicalRegistriesAndMirrors(t *testing.T) {
+	cr := CredentialRegistry{
+		Enable: true,
+		Registries: []CredentialRegistryLogical{
+			{Mirrors: []CredentialRegistryEndpoint{
+				{BaseURL: "https://registry.siros.org"},
+				{BaseURL: "https://registry-mirror.siros.org"},
+			}},
+			{Mirrors: []CredentialRegistryEndpoint{{BaseURL: "https://registry.example.org"}}},
+		},
+	}
+	client, err := cr.NewClient()
+	require.NoError(t, err)
+	assert.NotNil(t, client, "a config with multiple logical registries, one of which has multiple mirrors, must build successfully")
 }
 
 func TestLookupCredentialSources(t *testing.T) {
@@ -486,7 +650,7 @@ func TestLoadFile(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
-			err := tt.constructor.LoadCredentialSchema(ctx, "test_scope")
+			err := tt.constructor.LoadCredentialSchema(ctx, "test_scope", nil)
 
 			if tt.wantErr {
 				assert.Error(t, err)

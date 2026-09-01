@@ -7,9 +7,9 @@ import (
 
 // BuildOID4VPSessionTranscript builds the ISO 18013-5 SessionTranscript CBOR
 // structure for the OpenID4VP browser-redirect flow (a response_uri is
-// present; this is OpenID4VP Draft 29's "Invocation via Redirects" case -
+// present; this is OpenID4VP 1.0 §B.2.6.1 "Invocation via Redirects" -
 // see multipaz's OpenID4VP.kt Version.DRAFT_29 branch, which this mirrors
-// exactly). It is needed by both plain "mso_mdoc" device-signature checks
+// exactly; multipaz's DRAFT_29 tag corresponds to the frozen 1.0 text). It is needed by both plain "mso_mdoc" device-signature checks
 // and "mso_mdoc_zk" ZK proof verification (see ZkPresentationContext.
 // SessionTranscript) - vc-verifier does not otherwise build one anywhere
 // today.

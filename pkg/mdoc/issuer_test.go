@@ -837,6 +837,23 @@ func TestIssuer_InjectPseudonymSeed(t *testing.T) {
 		t.Fatal("Issue() returned nil")
 	}
 
+	// Directly exercise injectPseudonymSeed against a plain claims map and
+	// assert the seed lands under the exact element identifier
+	// ("pseudonym_seed") the schema declares - not just that Issue()
+	// succeeds, which wouldn't catch a claim-name mismatch between this
+	// function and what the schema/circuit actually expect.
+	doc := map[string]any{}
+	if err := issuer.injectPseudonymSeed(schema, doc); err != nil {
+		t.Fatalf("injectPseudonymSeed() error = %v", err)
+	}
+	seed, ok := doc["pseudonym_seed"].([]byte)
+	if !ok {
+		t.Fatalf("doc[%q] = %v (%T), want a []byte seed", "pseudonym_seed", doc["pseudonym_seed"], doc["pseudonym_seed"])
+	}
+	if len(seed) != 32 {
+		t.Errorf("seed length = %d, want 32", len(seed))
+	}
+
 	// A schema that does NOT declare pseudonym_seed must not error even
 	// though the issuer has the feature enabled — it's driven by the
 	// schema, not by namespace/doctype.

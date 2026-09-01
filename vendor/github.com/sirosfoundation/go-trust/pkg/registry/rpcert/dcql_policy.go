@@ -1,4 +1,4 @@
-// Package rpcert — DCQL policy evaluator interface and built-in implementations.
+// DCQL policy evaluator interface and built-in implementations.
 //
 // DCQLPolicyEvaluator checks whether a credential request (DCQL query) is within
 // the scope authorised by the RP's WRPRC entitlements. The evaluation is invoked
@@ -16,6 +16,7 @@
 // References:
 //   - ETSI TS 119 475 v1.1.1 Tables 8–9 — WRPRC credential queries
 //   - RFC003 §10.2.3 AUTHZ-ENT-*, AUTHZ-EDPV-*
+
 package rpcert
 
 import (

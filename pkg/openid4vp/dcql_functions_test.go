@@ -518,7 +518,8 @@ func TestNewVC20CredentialQuery(t *testing.T) {
 	assert.NotNil(t, query)
 	assert.Equal(t, id, query.ID)
 	assert.Equal(t, "ldp_vc", query.Format)
-	assert.True(t, query.RequireCryptographicHolderBinding)
+	assert.NotNil(t, query.RequireCryptographicHolderBinding)
+	assert.True(t, query.RequiresCryptographicHolderBinding())
 	assert.Equal(t, typeValues, query.Meta.TypeValues)
 	assert.Equal(t, claims, query.Claims)
 }

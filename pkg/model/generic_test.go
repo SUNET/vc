@@ -68,8 +68,12 @@ func TestDecodeCredentialOffer(t *testing.T) {
 }
 
 func TestIdentity_GetOver14(t *testing.T) {
-	currentYear := time.Now().Year()
-	currentDate := time.Now()
+	// One reading, used everywhere below. Sampling the clock per row would
+	// reintroduce the flakiness this test was just fixed for, one boundary
+	// further out: a table built across midnight UTC mixes two dates.
+	now := time.Now().UTC()
+	currentYear := now.Year()
+	currentDate := now
 
 	tests := []struct {
 		name      string
@@ -79,19 +83,24 @@ func TestIdentity_GetOver14(t *testing.T) {
 	}{
 		{
 			name:      "person exactly 14 years old today",
-			birthDate: time.Now().AddDate(-14, 0, 0).Format("2006-01-02"),
+			birthDate: now.AddDate(-14, 0, 0).Format("2006-01-02"),
 			want:      true,
 			wantErr:   false,
 		},
 		{
 			name:      "person 14 years and 1 day old",
-			birthDate: time.Now().AddDate(-14, 0, -1).Format("2006-01-02"),
+			birthDate: now.AddDate(-14, 0, -1).Format("2006-01-02"),
 			want:      true,
 			wantErr:   false,
 		},
 		{
-			name:      "person 13 years 364 days old",
-			birthDate: time.Now().AddDate(-14, 0, 1).Format("2006-01-02"),
+			// Two days short, not one. GetOver14 reads its own clock, so a
+			// one-day margin still flips if the test captures now just
+			// before midnight UTC and the call lands just after. The exact
+			// boundary is covered deterministically in
+			// TestAgeThresholdDate, which needs no clock at all.
+			name:      "person 13 years 363 days old",
+			birthDate: now.AddDate(-14, 0, 2).Format("2006-01-02"),
 			want:      false,
 			wantErr:   false,
 		},
@@ -195,9 +204,12 @@ func TestIdentity_GetOver14(t *testing.T) {
 }
 
 func TestIdentity_GetOver14_EdgeCases(t *testing.T) {
+	// Single clock reading, shared by every subtest - see TestIdentity_GetOver14.
+	now := time.Now().UTC()
+
 	t.Run("birthday today - exactly 14 years", func(t *testing.T) {
 		// Person who turns 14 today
-		today := time.Now()
+		today := now
 		birthDate := today.AddDate(-14, 0, 0).Format("2006-01-02")
 
 		identity := &Identity{
@@ -209,10 +221,13 @@ func TestIdentity_GetOver14_EdgeCases(t *testing.T) {
 		assert.True(t, got, "Person turning 14 today should be considered over 14")
 	})
 
-	t.Run("birthday tomorrow - still 13", func(t *testing.T) {
-		// Person who turns 14 tomorrow
-		tomorrow := time.Now().AddDate(0, 0, 1)
-		birthDate := tomorrow.AddDate(-14, 0, 0).Format("2006-01-02")
+	t.Run("birthday in two days - still 13", func(t *testing.T) {
+		// Two days out rather than one: GetOver14 reads its own clock, so a
+		// single day's margin can be erased by a midnight-UTC crossing
+		// between capturing now and the call. See TestAgeThresholdDate for
+		// the exact boundary, tested without a clock.
+		soon := now.AddDate(0, 0, 2)
+		birthDate := soon.AddDate(-14, 0, 0).Format("2006-01-02")
 
 		identity := &Identity{
 			BirthDate: birthDate,
@@ -220,12 +235,12 @@ func TestIdentity_GetOver14_EdgeCases(t *testing.T) {
 
 		got, err := identity.GetOver14()
 		require.NoError(t, err)
-		assert.False(t, got, "Person turning 14 tomorrow should not be considered over 14 yet")
+		assert.False(t, got, "Person turning 14 in two days should not be considered over 14 yet")
 	})
 
 	t.Run("birthday yesterday - just turned 14", func(t *testing.T) {
 		// Person who turned 14 yesterday
-		yesterday := time.Now().AddDate(0, 0, -1)
+		yesterday := now.AddDate(0, 0, -1)
 		birthDate := yesterday.AddDate(-14, 0, 0).Format("2006-01-02")
 
 		identity := &Identity{
@@ -239,10 +254,13 @@ func TestIdentity_GetOver14_EdgeCases(t *testing.T) {
 }
 
 func TestIdentity_GetOver14_LeapYear(t *testing.T) {
+	// Single clock reading, shared by every subtest - see TestIdentity_GetOver14.
+	now := time.Now().UTC()
+
 	t.Run("born on leap day - 15 years ago", func(t *testing.T) {
 		// Testing over-14 age verification with a person born 15 years ago
 		// Using 15 years ensures the person is definitively over the 14-year threshold
-		currentYear := time.Now().Year()
+		currentYear := now.Year()
 
 		// Find the most recent leap year that was at least 15 years ago
 		leapYear := currentYear - 15
@@ -345,4 +363,66 @@ func TestIdentity_Marshal_EmptyFields(t *testing.T) {
 
 	// Optional fields should not be present or be empty
 	// (depending on omitempty tag behavior)
+}
+
+// TestAgeThresholdDate covers the exact age boundary without a clock.
+//
+// The GetOverNN tests cannot: they build a fixture from one reading of the
+// clock while the helper compares against another, so anything within a day
+// of the threshold can flip when the two readings straddle midnight UTC.
+// ageThresholdDate is pure, so the boundary is pinned exactly here and the
+// clock-dependent tests stay well clear of it.
+func TestAgeThresholdDate(t *testing.T) {
+	date := func(y int, m time.Month, d int) time.Time {
+		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	}
+
+	tests := []struct {
+		name  string
+		birth time.Time
+		years int
+		want  time.Time
+	}{
+		{
+			name:  "ordinary date",
+			birth: date(2012, time.June, 15),
+			years: 14,
+			want:  date(2026, time.June, 15),
+		},
+		{
+			// The threshold tracks the birth date exactly, so a birth one
+			// day later yields a threshold one day later.
+			name:  "one day later birth, one day later threshold",
+			birth: date(2012, time.June, 16),
+			years: 14,
+			want:  date(2026, time.June, 16),
+		},
+		{
+			// Feb 29 into a non-leap year: EU convention puts the threshold
+			// on Feb 28 rather than letting AddDate normalise to Mar 1,
+			// which would delay it by a day.
+			name:  "leap-day birth, non-leap target year",
+			birth: date(2012, time.February, 29),
+			years: 14,
+			want:  date(2026, time.February, 28),
+		},
+		{
+			name:  "leap-day birth, leap target year",
+			birth: date(2012, time.February, 29),
+			years: 16,
+			want:  date(2028, time.February, 29),
+		},
+		{
+			name:  "Feb 28 is unaffected",
+			birth: date(2012, time.February, 28),
+			years: 14,
+			want:  date(2026, time.February, 28),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ageThresholdDate(tt.birth, tt.years))
+		})
+	}
 }

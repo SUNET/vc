@@ -1,0 +1,36 @@
+package db
+
+import (
+	"testing"
+
+	"github.com/SUNET/vc/pkg/testsupport/sqltest"
+
+	"github.com/stretchr/testify/require"
+)
+
+// TestNewService exercises the real New()/newSQL() code path end to end
+// (config -> sqlstore.Connect -> sqlstore.ApplySchema -> store wiring)
+// against both Postgres and MariaDB.
+func TestNewService(t *testing.T) {
+	sqltest.RunPostgresAndMariaDBContract(t, "verifier-db-sql-service-test", New, func(t *testing.T, svc *Service) {
+		ctx := t.Context()
+
+		require.NotNil(t, svc.Clients)
+
+		require.NoError(t, svc.Clients.Create(ctx, &Client{
+			ClientID:                "svc-test-client",
+			TokenEndpointAuthMethod: "none",
+			RedirectURIs:            []string{"https://example.com/cb"},
+			GrantTypes:              []string{"authorization_code"},
+			ResponseTypes:           []string{"code"},
+			AllowedScopes:           []string{"openid"},
+			SubjectType:             "public",
+		}))
+		got, err := svc.Clients.GetByClientID(ctx, "svc-test-client")
+		require.NoError(t, err)
+		require.NotNil(t, got)
+
+		probe := svc.HealthProbe(ctx)
+		require.NoError(t, probe)
+	})
+}

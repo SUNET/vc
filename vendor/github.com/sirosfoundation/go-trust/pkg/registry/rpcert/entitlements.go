@@ -7,9 +7,13 @@
 //
 // Sub-entitlement URIs for Payment Service Providers are defined in Annex A.3.1
 // and are in the /SubEntitlement/ path.
+
 package rpcert
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // Entitlement role URIs (Annex A.2, id-etsi-wrpa-entitlement 1–10).
 const (
@@ -113,6 +117,87 @@ func (e *RPEntitlements) IsEAAProvider() bool {
 		e.HasEntitlement(EntitlementPUBEAAProvider)
 }
 
+// IsAttestationProvider returns true when the RP holds an entitlement to
+// issue attestations to wallets - any of the three EAA roles, or PID.
+//
+// This is the issuer-side question: under CIR (EU) 2025/848 a PID or
+// attestation provider is a registered wallet-relying party in its own
+// right, so a wallet asked to accept a credential checks that the issuer is
+// entitled to provide one. IsEAAProvider deliberately excludes PID, since
+// PID is not an EAA; use this when the distinction does not matter.
+func (e *RPEntitlements) IsAttestationProvider() bool {
+	return e.IsEAAProvider() || e.HasEntitlement(EntitlementPIDProvider)
+}
+
+// ProvidesAttestation reports whether the RP is registered to provide an
+// attestation of the given format and type, per the provides_attestations
+// claim (Table 8, GEN-5.2.4-05).
+//
+// format is a credential format identifier such as "mso_mdoc" or
+// "dc+sd-jwt". typeValue is the format's type discriminator - the doctype
+// for mdoc, the vct for SD-JWT VC. An empty typeValue asks only whether the
+// format is covered at all.
+//
+// A registered query that names a format but constrains no type covers
+// every type in that format: the Registrar entitled the RP to the format
+// without narrowing it, and reading that as "no types" would invert the
+// meaning.
+func (e *RPEntitlements) ProvidesAttestation(format, typeValue string) bool {
+	for _, q := range e.ProvidedAttestations {
+		if q.Format != format {
+			continue
+		}
+		if typeValue == "" || queryCoversType(q, typeValue) {
+			return true
+		}
+	}
+	return false
+}
+
+// queryCoversType reports whether a credential query's meta constrains the
+// credential type to, or permits, typeValue.
+//
+// DCQL defines the constraint per format: mso_mdoc uses a single
+// `doctype_value`, SD-JWT VC uses a `vct_values` list. Anything else is
+// treated as unconstrained rather than as non-matching, so a format this
+// code does not know about is not silently rejected.
+func queryCoversType(q CredentialQuery, typeValue string) bool {
+	constrained := false
+	for _, key := range []string{"doctype_value", "vct_values", "doctype_values"} {
+		raw, ok := q.Meta[key]
+		if !ok {
+			continue
+		}
+		constrained = true
+		if metaValueMatches(raw, typeValue) {
+			return true
+		}
+	}
+	return !constrained
+}
+
+// metaValueMatches reports whether a DCQL meta value - a bare string or a
+// list of them - contains typeValue.
+func metaValueMatches(raw any, typeValue string) bool {
+	switch v := raw.(type) {
+	case string:
+		return v == typeValue
+	case []string:
+		for _, s := range v {
+			if s == typeValue {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok && s == typeValue {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // BindingError is returned when WRPAC and WRPRC subject identifiers do not match.
 type BindingError struct {
 	WRPACOrgID string
@@ -135,6 +220,86 @@ func CheckWRPACWRPRCBinding(wrpacOrgID string, wrprc *RPEntitlements) error {
 	}
 	if wrpacOrgID != wrprc.Subject.ID {
 		return &BindingError{WRPACOrgID: wrpacOrgID, WRPRCSubID: wrprc.Subject.ID}
+	}
+	return nil
+}
+
+// ServiceBindingError is returned when WRPAC and WRPRC service identifiers do
+// not match. A nil WRPACServiceID or a WRPRC without service_identifier are
+// both treated as "absent" and cause no error — see CheckWRPACWRPRCServiceBinding.
+type ServiceBindingError struct {
+	WRPACServiceID string
+	WRPRCServiceID string
+}
+
+func (e *ServiceBindingError) Error() string {
+	return fmt.Sprintf(
+		"WRPAC service_identifier %q does not match WRPRC service_identifier %q"+
+			" — service-level binding check failed (Stefan Santesson convention,"+
+			" OID 0.4.0.19475.99.1 pending ETSI standardisation)",
+		e.WRPACServiceID, e.WRPRCServiceID,
+	)
+}
+
+// CheckWRPACWRPRCServiceBinding verifies that the service_identifier from the
+// WRPAC Subject DN (OIDWRPACServiceIdentifier = 0.4.0.19475.99.1) matches the
+// "service_identifier" claim in the WRPRC JWT.
+//
+// This is a service-level binding check that complements the organisation-level
+// binding performed by CheckWRPACWRPRCBinding. It allows distinguishing between
+// multiple WRPAC/WRPRC pairs issued to the same organisation for different
+// services (e.g. a sign-in service and a payment service).
+//
+// The check is OPTIONAL and only enforced when BOTH sides carry the value:
+//   - wrpacServiceID is the value from X5CEnrichmentResult.WRPACServiceID.
+//     If empty (strict ETSI cert without the attribute), the check is skipped.
+//   - wrprc.ServiceIdentifier is the WRPRC JWT "service_identifier" claim.
+//     If empty (WRPRC issued before this convention), the check is skipped.
+//
+// Callers MUST still call CheckWRPACWRPRCBinding for organisation-level binding
+// before calling this function — the two checks are complementary, not alternatives.
+//
+// Background: Stefan Santesson (PTS Sweden) proposed this convention as a
+// de-facto interoperability mechanism pending ETSI standardisation. It is NOT
+// part of ETSI TS 119 411-8 v1.1.1 or TS 119 475 v1.1.1.
+//
+// TODO(etsi): Once ETSI formally assigns the OID and standardises the WRPRC
+// claim name, update OIDWRPACServiceIdentifier (wrpac.go) and the JSON tag
+// on RPEntitlements.ServiceIdentifier to match.
+func CheckWRPACWRPRCServiceBinding(wrpacServiceID string, wrprc *RPEntitlements) error {
+	if wrpacServiceID == "" || wrprc == nil || wrprc.ServiceIdentifier == "" {
+		// One or both sides absent — check is not applicable.
+		return nil
+	}
+	if wrpacServiceID != wrprc.ServiceIdentifier {
+		return &ServiceBindingError{
+			WRPACServiceID: wrpacServiceID,
+			WRPRCServiceID: wrprc.ServiceIdentifier,
+		}
+	}
+	return nil
+}
+
+// CheckWRPRCValidityPeriod enforces GEN-5.2.4-08: a WRPRC must not be valid
+// for more than 12 months from issuance.
+//
+// This is a conformance rule about the document, not a check of whether it
+// is currently within its validity window - use RPEntitlements.IsValid for
+// that. Kept out of ParseWRPRCClaims so that parsing stays free of any
+// notion of time, and because a caller may want to report a non-conformant
+// certificate rather than refuse to read it.
+//
+// A certificate missing either timestamp is passed: absence is not evidence
+// of an over-long validity period, and treating it as a violation would
+// reject documents the rule does not speak to.
+func CheckWRPRCValidityPeriod(ent *RPEntitlements) error {
+	if ent == nil || ent.ValidFrom == nil || ent.ValidUntil == nil {
+		return nil
+	}
+	maxExp := ent.ValidFrom.AddDate(0, 12, 0)
+	if ent.ValidUntil.After(maxExp) {
+		return fmt.Errorf("wrprc: validity ends %s, more than 12 months after issuance %s (GEN-5.2.4-08 allows at most %s)",
+			ent.ValidUntil.Format(time.RFC3339), ent.ValidFrom.Format(time.RFC3339), maxExp.Format(time.RFC3339))
 	}
 	return nil
 }

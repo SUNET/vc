@@ -11,6 +11,10 @@ import {
 const credentialAttributesSchema = v.object({
     format: v.string(),
     vct: v.string(),
+    // nullish, not optional: absent for an older server that only sends "vct",
+    // and null for one that emits the field without omitempty. The query
+    // builder falls back to [vct] in both cases.
+    vct_values: v.nullish(v.array(v.string())),
     attributes: v.record(
         v.string(),
         v.record(
@@ -95,8 +99,14 @@ const metadataResponseSchema = v.object({
         credentials: v.array(v.object({
             id: v.string(),
             format: v.string(),
+            // vct_values (sd-jwt) and doctype_value (mso_mdoc) are mutually
+            // exclusive and both optional: which one applies depends on the
+            // credential's format (OpenID4VP 1.0 6.4.1). Declaring only
+            // vct_values here meant an mdoc preset's doctype_value was
+            // silently stripped by the schema before reaching the query.
             meta: v.object({
-                vct_values: v.array(v.string()),
+                vct_values: v.optional(v.array(v.string())),
+                doctype_value: v.optional(v.string()),
             }),
             claims: v.optional(v.array(v.object({
                 path: v.array(v.nullable(v.string())),
@@ -132,7 +142,6 @@ const dcqlQueryCredentialSchema = v.object({
 const credentialSetQuerySchema = v.object({
     options: v.array(v.array(v.string())),
     required: v.optional(v.boolean()),
-    purpose: v.optional(v.string()),
 });
 
 /** @typedef {v.InferOutput<typeof dcqlQuerySchema>} DCQLQuery */
@@ -220,7 +229,7 @@ Alpine.data("app", () => ({
     /** @type {boolean} Whether the server has opted in to native DC API attempts. */
     dcApiEnabled: false,
 
-     /** @type {{ id: string; format: string; vct: string; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
+     /** @type {{ id: string; format: string; vct: string; vct_values?: string[]; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
     credentialAttributes: null,
 
     /** 
@@ -361,6 +370,15 @@ Alpine.data("app", () => ({
             id: credential,
             format: chosenCredential.format,
             vct: chosenCredential.vct,
+            // Carried through so the custom-credential flow builds the same
+            // multi-value vct_values the presets do; without it this path
+            // silently falls back to [vct] and only presets interoperate.
+            //
+            // ?? undefined normalizes the schema's legacy null (accepted so a
+            // server that emits the field without omitempty doesn't break the
+            // page) to the absent form this object's type declares, keeping
+            // the strict checkJs contract consistent.
+            vct_values: chosenCredential.vct_values ?? undefined,
             claims,
             claimTree: buildClaimTree(claims),
         }
@@ -436,9 +454,20 @@ Alpine.data("app", () => ({
         // vct_values for an mdoc credential matches nothing on the wallet
         // side (no mdoc credential has a vct), so the request always comes
         // back empty.
+        // vct_values carries EVERY identifier a wallet might match this
+        // credential type by, not just one: the EUDI reference wallet
+        // (multipaz) matches the issuer metadata's declared vct (our
+        // type-metadata URL), while others (wwWallet) match the credential's
+        // own embedded vct claim. DCQL treats vct_values as an
+        // acceptable-value list, so sending both satisfies either wallet.
+        // Falls back to the single vct for an older server that doesn't
+        // send the list.
+        const vctValues = this.credentialAttributes.vct_values?.length
+            ? this.credentialAttributes.vct_values
+            : [this.credentialAttributes.vct];
         const meta = this.credentialAttributes.format === "mso_mdoc"
             ? { doctype_value: this.credentialAttributes.vct }
-            : { vct_values: [this.credentialAttributes.vct] };
+            : { vct_values: vctValues };
 
         /** @satisfies {DCQLQueryCredential} */
         const credential = {

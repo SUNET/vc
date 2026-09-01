@@ -17,7 +17,6 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/iancoleman/strcase"
@@ -1291,7 +1290,6 @@ func renderDocument(sections []*DocSection) string {
 	var buf strings.Builder
 
 	buf.WriteString("# Configuration Reference\n\n")
-	buf.WriteString(fmt.Sprintf("**Generated:** %s\n\n", time.Now().Format("2006-01-02")))
 	buf.WriteString("Complete reference for all configuration parameters in the VC system.\n\n")
 	buf.WriteString("<!-- Auto-generated from Go source code. DO NOT EDIT MANUALLY. -->\n")
 	buf.WriteString("<!-- Regenerate with: go run developer_tools/scripts/gen_config_docs/main.go -->\n\n")

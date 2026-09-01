@@ -541,6 +541,6 @@ issuer:
 - [W3C VC Data Integrity 1.0](https://www.w3.org/TR/vc-data-integrity/)
 - [W3C ECDSA Cryptosuite v1.0](https://www.w3.org/TR/vc-di-ecdsa/)
 - [OpenID4VCI Draft 14](https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html)
-- [OpenID4VP Draft 21](https://openid.net/specs/openid-4-verifiable-presentations-1_0.html)
+- [OpenID4VP 1.0](https://openid.net/specs/openid-4-verifiable-presentations-1_0.html)
 - [DCQL (Digital Credentials Query Language)](https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-digital-credentials-query-l)
 - ADR-10 through ADR-13: ECDSA-SD-2023 implementation learnings
