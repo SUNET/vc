@@ -108,7 +108,8 @@ not depend on any native ZK library:
    today - a separate, pre-existing gap, not introduced or fixed here).
    This implements the OpenID4VP redirect-flow handover construction
    (mirrors multipaz's `OpenID4VP.kt` `Version.DRAFT_29` "Invocation via
-   Redirects" case exactly). **Caveat**: not yet checked against a real
+   Redirects" case exactly; multipaz's `DRAFT_29` tag matches the frozen
+   OpenID4VP 1.0 text used by this repo). **Caveat**: not yet checked against a real
    wallet's own transcript bytes - treat as a spec-derived best-effort
    construction until confirmed live. The DC API variant and older OpenID4VP
    drafts are not implemented.
@@ -205,7 +206,7 @@ Cargo features.
   implementation could match by `system` + individual params
   (`circuit_hash`, `num_attributes`) instead. Documented as a known
   simplification in `MatchZKSystemType`'s doc comment.
-- `BuildOID4VPSessionTranscript` implements only the OpenID4VP Draft 29
+- `BuildOID4VPSessionTranscript` implements only the OpenID4VP 1.0
   redirect-flow case. The Digital Credentials API variant (`origin` instead
   of `client_id`+`response_uri`) and older draft session-transcript shapes
   are not implemented - needed if/when ZK verification is wired up for

@@ -507,7 +507,7 @@ func TestValidateClaimValues_FloatBounds(t *testing.T) {
 
 // TestCredentialSetRequiredTriState verifies that CredentialSetQuery.Required
 // distinguishes "omitted" (spec default true), "explicit false", and
-// "explicit true" across a JSON round-trip, per OpenID4VP draft 24 §6.2.
+// "explicit true" across a JSON round-trip, per OpenID4VP 1.0 §6.2.
 func TestCredentialSetRequiredTriState(t *testing.T) {
 	tts := []struct {
 		name            string
@@ -562,7 +562,7 @@ func TestCredentialSetRequiredTriState(t *testing.T) {
 // TestCredentialQueryRequireCryptographicHolderBindingTriState verifies that
 // CredentialQuery.RequireCryptographicHolderBinding distinguishes "omitted"
 // (spec default true), "explicit false", and "explicit true" across a JSON
-// round-trip, per OpenID4VP draft 24 §6.1.
+// round-trip, per OpenID4VP 1.0 §6.1.
 func TestCredentialQueryRequireCryptographicHolderBindingTriState(t *testing.T) {
 	base := `"id":"c","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]}`
 
