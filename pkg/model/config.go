@@ -103,7 +103,14 @@ type Mongo struct {
 	// Enforced in configuration.New rather than by a validation tag here,
 	// because the requirement depends both on sibling fields of Common and on
 	// which service is starting - something a struct validation cannot see.
-	URI string `yaml:"uri" validate:"omitempty" doc_example:"\"mongodb://user:password@mongo:27017/vc\""`
+	//
+	// Credentials may be embedded in the URI in the usual MongoDB way,
+	// though Common.SecretFilePath keeps them out of the main configuration.
+	// The example is deliberately credential-free: an inline userinfo
+	// component matches the secret-detection patterns some review and diff
+	// tools apply, and they redact it and then report the redaction as a
+	// malformed URI.
+	URI string `yaml:"uri" validate:"omitempty" doc_example:"\"mongodb://mongo:27017/vc\""`
 	// TLS enables TLS for the MongoDB connection.
 	// Can also be enabled via the connection URI parameter "tls=true".
 	TLS bool `yaml:"tls" default:"false"`
