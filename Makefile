@@ -609,10 +609,16 @@ endef
 $(foreach service,$(WORKER_SERVICES),$(eval $(call DOCKER_BUILD_WORKER_TEMPLATE,$(service))))
 
 # Docker build with PKCS#11 feature
-docker-build-issuer-hsm: _check-reserved-tag ## Build issuer Docker image with PKCS#11 HSM support
+# pkcs11 PLUS the issuer's own default tags, not instead of them. Hardcoding
+# just pkcs11 here used to be harmless, because the issuer had no default
+# tags to lose; now it has bbsnative, and an HSM image built without it
+# REFUSES TO START whenever issuer.bbs is configured. Those two are not
+# alternatives - a deployment can perfectly well keep its ECDSA signing key
+# in an HSM and still issue BBS, whose key cannot live in one anyway.
+docker-build-issuer-hsm: _check-reserved-tag bbs-native-lib-staged ## Build issuer Docker image with PKCS#11 HSM support
 	$(info Docker building issuer with PKCS#11 HSM support, tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=issuer --build-arg BUILDTAG=$(VERSION) \
-		--build-arg GO_BUILD_TAGS=$(PKCS11_TAG) \
+		--build-arg GO_BUILD_TAGS="$(call docker-tags,issuer),$(PKCS11_TAG)" \
 		--build-arg CGO_ENABLED=1 \
 		$(if $(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$(GOBUILD_IMAGE)) \
 		--tag $(call docker-tag,issuer-hsm,$(VERSION)) \
