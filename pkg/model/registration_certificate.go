@@ -9,18 +9,27 @@ import (
 	"strings"
 
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirosfoundation/go-trust/pkg/registry/rpcert"
 )
 
-// RegistrationCertificate configures the EUDI Relying Party registration certificate (WRPRC, ETSI TS 119 475) this verifier presents to wallets.
+// RegistrationCertificate configures the EUDI registration certificate (WRPRC, ETSI TS 119 475) a verifier or a credential issuer presents to wallets.
 //
 // vc does not issue these. A national Registrar in the eIDAS ecosystem
-// issues a WRPRC to the Relying Party out of band, attesting what the RP is
-// registered to request; this configuration points at the resulting file so
-// it can be conveyed to wallets in the OpenID4VP verifier_info request
-// parameter, where it informs the wallet's consent dialog and policy checks.
+// issues a WRPRC out of band, attesting what the party is registered to do;
+// this configuration points at the resulting file.
+//
+// The same document travels in both directions, which is why one type serves
+// both:
+//
+//   - a verifier conveys it in the OpenID4VP verifier_info request
+//     parameter, attesting what it is registered to request;
+//   - a credential issuer conveys it in the OpenID4VCI issuer_info metadata
+//     parameter, attesting what it is registered to provide.
+//
+// Either way it informs the wallet's consent dialog and policy checks.
 type RegistrationCertificate struct {
 	// FilePath is the path to the Registrar-issued WRPRC, a compact JWT with
 	// media type "rc-wrp+jwt".
@@ -133,6 +142,22 @@ func (l *LoadedRegistrationCertificate) VerifierInfo() []openid4vp.VerifierInfo 
 	}}
 }
 
+// IssuerInfo renders the certificate as OpenID4VCI issuer_info entries.
+//
+// Same document and same shape as VerifierInfo; only the metadata parameter
+// carrying it differs. A credential issuer is a registered wallet-relying
+// party in its own right under CIR (EU) 2025/848, so what it presents to a
+// wallet is the same registration certificate a verifier presents.
+func (l *LoadedRegistrationCertificate) IssuerInfo() []openid4vci.IssuerInfo {
+	if l == nil || l.JWT == "" {
+		return nil
+	}
+	return []openid4vci.IssuerInfo{{
+		Format: l.Format,
+		Data:   l.JWT,
+	}}
+}
+
 // LoadRegistrationCertificate reads, verifies and extracts the configured
 // registration certificate. It returns (nil, nil) when none is configured,
 // so a deployment outside an ARF trust framework is unaffected.
@@ -151,7 +176,18 @@ func (l *LoadedRegistrationCertificate) VerifierInfo() []openid4vp.VerifierInfo 
 // confirm both documents describe the same organisation (ARF RPRC_16). Pass
 // nil when none is loaded; the binding check is then skipped.
 func (v *Verifier) LoadRegistrationCertificate(accessCert *x509.Certificate) (*LoadedRegistrationCertificate, error) {
-	cfg := v.RegistrationCertificate
+	return v.RegistrationCertificate.Load(accessCert)
+}
+
+// Load reads, verifies and extracts the certificate this configuration points
+// at, following the same three steps described on
+// Verifier.LoadRegistrationCertificate.
+//
+// It hangs off the configuration rather than off a service because the
+// document says the same thing wherever it is presented: a verifier conveys
+// it in verifier_info, a credential issuer in issuer_info, and neither
+// changes how it is validated.
+func (cfg *RegistrationCertificate) Load(accessCert *x509.Certificate) (*LoadedRegistrationCertificate, error) {
 	if cfg == nil || cfg.FilePath == "" {
 		return nil, nil
 	}
