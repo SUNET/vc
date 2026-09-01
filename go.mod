@@ -4,7 +4,7 @@ go 1.26.6
 
 require (
 	filippo.io/edwards25519 v1.2.0
-	github.com/IBM/sarama v1.60.1
+	github.com/IBM/sarama v1.60.2
 	github.com/PaesslerAG/jsonpath v0.1.1
 	github.com/beevik/etree v1.7.1
 	github.com/biter777/countries v1.7.5
@@ -37,7 +37,7 @@ require (
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/kaptinlin/jsonschema v0.9.8
 	github.com/kelseyhightower/envconfig v1.4.0
-	github.com/klauspost/compress v1.19.1
+	github.com/klauspost/compress v1.19.2
 	github.com/lestrrat-go/jwx/v3 v3.2.0
 	github.com/lithammer/shortuuid/v4 v4.2.0
 	github.com/miekg/pkcs11 v1.1.2
