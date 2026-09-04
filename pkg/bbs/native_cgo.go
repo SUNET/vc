@@ -67,10 +67,11 @@ func (n native) Issue(p IssueParams) (string, error) {
 	// spelled "[]" by every caller.
 	//
 	// Which only works if nil actually encodes as `[]`, and it does not:
-	// `json.Marshal` writes `null` for a nil slice, and the native side is
-	// given a JSON array. A credential committing only key binding keys and
-	// no claims at all — the very case the paragraph above promises to
-	// handle — is exactly when this field is nil.
+	// `json.Marshal` writes `null` for a nil slice, while the native side
+	// requires a JSON array. A credential committing only key binding keys
+	// and no claims at all — the very case the paragraph above promises to
+	// handle — is exactly when this field is nil, so without the
+	// normalization below that case sends `null` and fails.
 	holderPointers := p.HolderPointers
 	if holderPointers == nil {
 		holderPointers = []string{}

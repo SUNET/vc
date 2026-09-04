@@ -457,7 +457,9 @@ type BBSConfig struct {
 	// base64url-encoded. Preferred where a file can be mounted, since it
 	// keeps the key out of the rendered config entirely.
 	SecretKeyPath string `yaml:"secret_key_path" validate:"omitempty" doc_example:"\"/etc/vc/bbs/issuer.sk\""`
-	// PublicKeyPath is a file holding the matching public key, base64url-encoded.
+	// PublicKeyPath is a file holding the matching public key,
+	// base64url-encoded. Preferred over PublicKey for the same reason as
+	// SecretKeyPath, though the public half is not secret.
 	PublicKeyPath string `yaml:"public_key_path" validate:"omitempty" doc_example:"\"/etc/vc/bbs/issuer.pk\""`
 	// SecretKey is the same value inline, base64url-encoded.
 	//
@@ -471,9 +473,20 @@ type BBSConfig struct {
 	//
 	// Prefer SecretKeyPath where a file is possible: this puts the key in
 	// the config document, so it is only as protected as that document is.
-	// Exactly one of the two must be set.
+	//
+	// Exactly one of secret_key_path and secret_key must be set. Both, or
+	// neither, is refused at startup rather than resolved by precedence: a
+	// deployment with two sources of truth for a signing key has no way to
+	// tell which one is live, and an operator editing the half that is not
+	// would see no effect at all.
 	SecretKey string `yaml:"secret_key" validate:"omitempty"`
 	// PublicKey is the matching public key inline, base64url-encoded.
+	//
+	// The same exactly-one rule applies to this half independently:
+	// exactly one of public_key_path and public_key must be set. The two
+	// halves are resolved separately, so a path for one and an inline value
+	// for the other is fine - which is what a deployment that can mount the
+	// public key but must inject the secret one will want.
 	PublicKey string `yaml:"public_key" validate:"omitempty"`
 	// DefaultValidity is how long an issued credential is valid for
 	// (default: 365 days), used to derive the `exp` header member.
