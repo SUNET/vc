@@ -1,6 +1,7 @@
 package revocation
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/pem"
@@ -60,10 +61,17 @@ func NewCRLChecker(opts ...CRLCheckerOption) *CRLChecker {
 //
 // A certificate found on any fetched list is StatusInvalid immediately: one
 // authority saying "revoked" is not softened by another failing to answer.
-func (c *CRLChecker) CheckCertificate(ctx context.Context, cert *x509.Certificate) (*CheckResult, error) {
+//
+// issuer is the CA certificate that signed cert, and is required: a CRL is
+// otherwise just bytes from a URL, and only its signature makes it evidence
+// of anything. A nil issuer is StatusUnknown, not StatusValid.
+func (c *CRLChecker) CheckCertificate(ctx context.Context, cert, issuer *x509.Certificate) (*CheckResult, error) {
 	result := &CheckResult{Status: StatusUnknown, CheckedAt: time.Now()}
 	if cert == nil {
 		return result, fmt.Errorf("no certificate to check")
+	}
+	if issuer == nil {
+		return result, fmt.Errorf("no issuer certificate to authenticate the CRL against")
 	}
 
 	endpoints := rpcert.CRLDistributionPoints(cert)
@@ -80,6 +88,13 @@ func (c *CRLChecker) CheckCertificate(ctx context.Context, cert *x509.Certificat
 			lastErr = fmt.Errorf("%s: %w", uri, err)
 			continue
 		}
+		// An unauthenticated list is not a reached distribution point. It
+		// must not set reached, or a forged empty CRL would end the loop at
+		// StatusValid - the exact silent pass this type exists to avoid.
+		if err := verifyList(list, cert, issuer, result.CheckedAt); err != nil {
+			lastErr = fmt.Errorf("%s: %w", uri, err)
+			continue
+		}
 		reached = true
 		result.URI = uri
 
@@ -92,7 +107,7 @@ func (c *CRLChecker) CheckCertificate(ctx context.Context, cert *x509.Certificat
 	}
 
 	if !reached {
-		return result, fmt.Errorf("no CRL distribution point could be fetched: %w", lastErr)
+		return result, fmt.Errorf("no CRL distribution point yielded an authenticated list: %w", lastErr)
 	}
 
 	result.Status = StatusValid
@@ -141,8 +156,14 @@ func (c *CRLChecker) fetch(ctx context.Context, uri string) (*x509.RevocationLis
 
 	// A CRL is DER; some distribution points serve PEM despite the spec, so
 	// both are accepted rather than failing on a list we could plainly read.
-	if der, ok := pemToDER(body); ok {
-		body = der
+	// The block type is checked so an endpoint serving some other PEM object
+	// - a certificate, most likely - fails as "not a CRL" rather than as an
+	// opaque DER parse error further down.
+	if block, _ := pem.Decode(body); block != nil {
+		if block.Type != "X509 CRL" && block.Type != "CRL" {
+			return nil, fmt.Errorf("PEM block is %q, not a CRL", block.Type)
+		}
+		body = block.Bytes
 	}
 
 	list, err := x509.ParseRevocationList(body)
@@ -152,11 +173,32 @@ func (c *CRLChecker) fetch(ctx context.Context, uri string) (*x509.RevocationLis
 	return list, nil
 }
 
-// pemToDER unwraps a PEM-encoded CRL, reporting whether the input was PEM.
-func pemToDER(body []byte) ([]byte, bool) {
-	block, _ := pem.Decode(body)
-	if block == nil {
-		return nil, false
+// verifyList authenticates a fetched CRL against the CA that issued the
+// certificate under test.
+//
+// Without this the list is attacker-controlled input: whoever can answer the
+// distribution point URI - a compromised CA endpoint, anyone on the path of a
+// plain-http one - could hand us a list naming our own serial and have us
+// report ourselves revoked, or an empty list and have us report a genuinely
+// revoked certificate as good.
+func verifyList(list *x509.RevocationList, cert, issuer *x509.Certificate, now time.Time) error {
+	// RFC 5280 clause 6.3.3: the CRL must come from the certificate's own
+	// issuer. Checking the signature alone would accept a validly signed
+	// list from some other CA that happens to reuse a serial number.
+	if !bytes.Equal(list.RawIssuer, cert.RawIssuer) {
+		return fmt.Errorf("CRL issuer %q is not the certificate issuer %q", list.Issuer, cert.Issuer)
 	}
-	return block.Bytes, true
+	if err := list.CheckSignatureFrom(issuer); err != nil {
+		return fmt.Errorf("CRL signature: %w", err)
+	}
+	// An expired list is stale evidence, not evidence of validity: honouring
+	// it would freeze our answer at whatever a CA said before it stopped
+	// publishing. Undetermined is the honest reading.
+	if !list.NextUpdate.IsZero() && now.After(list.NextUpdate) {
+		return fmt.Errorf("CRL expired at %s", list.NextUpdate.Format(time.RFC3339))
+	}
+	if !list.ThisUpdate.IsZero() && now.Before(list.ThisUpdate) {
+		return fmt.Errorf("CRL is not valid until %s", list.ThisUpdate.Format(time.RFC3339))
+	}
+	return nil
 }

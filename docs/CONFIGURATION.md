@@ -699,14 +699,20 @@ Either way it informs the wallet's consent dialog and policy checks.
 
 This is operational hygiene rather than a security control. An operator who
 wants to present a revoked certificate can switch it off, and a wallet
-checks independently regardless. What it buys is finding out at startup
+checks independently regardless. What it buys is finding out ourselves
 instead of finding out from users, because a revoked certificate means
 wallets reject us.
+
+This type is the policy half only: it decides what a check result means.
+Nothing here runs a check. Deciding when to check - at startup, and on
+what schedule after that - belongs to each service's lifecycle, and that
+wiring is not in place yet, so configuring this today records the intended
+policy without any check being performed.
 
 | Field              | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Example  | Default | Required |
 | ------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
 | `mode`             | `string`   | One of "off", "warn" or "fail". warn is the default, and deliberately so. An unreachable CRL or status list is evidence of nothing: not that the certificate is revoked, and not that it is valid. Reading it as revoked would turn a Registrar outage into ours; reading it as valid would make a fetch failure a silent pass. It is reported as undetermined and warn proceeds anyway, while fail is available for deployments that would rather stop than carry on without an answer. | `"warn"` | `warn`  | No       |
-| `refresh_interval` | `duration` | How often the check repeats after startup. Revocation is a fact that changes while a process runs, so a boot-time-only check goes stale. Zero disables rechecking.                                                                                                                                                                                                                                                                                                                       | `"1h"`   | `1h`    | No       |
+| `refresh_interval` | `duration` | How often the check should repeat after startup. Revocation is a fact that changes while a process runs, so a boot-time-only check goes stale. Zero disables rechecking. No scheduler reads this yet - see RevocationCheck. It is the interval the service lifecycle will use once the checks are wired in.                                                                                                                                                                              | `"1h"`   | `1h`    | No       |
 
 ### `credential_response_encryption`
 

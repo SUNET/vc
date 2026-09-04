@@ -11,9 +11,15 @@ import (
 //
 // This is operational hygiene rather than a security control. An operator who
 // wants to present a revoked certificate can switch it off, and a wallet
-// checks independently regardless. What it buys is finding out at startup
+// checks independently regardless. What it buys is finding out ourselves
 // instead of finding out from users, because a revoked certificate means
 // wallets reject us.
+//
+// This type is the policy half only: it decides what a check result means.
+// Nothing here runs a check. Deciding when to check - at startup, and on
+// what schedule after that - belongs to each service's lifecycle, and that
+// wiring is not in place yet, so configuring this today records the intended
+// policy without any check being performed.
 type RevocationCheck struct {
 	// Mode is one of "off", "warn" or "fail".
 	//
@@ -26,9 +32,12 @@ type RevocationCheck struct {
 	// carry on without an answer.
 	Mode string `yaml:"mode,omitempty" validate:"omitempty,oneof=off warn fail" default:"warn" doc_example:"\"warn\""`
 
-	// RefreshInterval is how often the check repeats after startup.
+	// RefreshInterval is how often the check should repeat after startup.
 	// Revocation is a fact that changes while a process runs, so a
 	// boot-time-only check goes stale. Zero disables rechecking.
+	//
+	// No scheduler reads this yet - see RevocationCheck. It is the interval
+	// the service lifecycle will use once the checks are wired in.
 	RefreshInterval time.Duration `yaml:"refresh_interval,omitempty" default:"1h" doc_example:"\"1h\""`
 }
 
