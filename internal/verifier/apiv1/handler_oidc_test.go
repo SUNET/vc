@@ -365,7 +365,7 @@ func TestStandardClaims(t *testing.T) {
 // Note: Full Authorize flow requires CredentialMetadata config which is complex to mock
 func TestAuthorize_ClientValidation(t *testing.T) {
 	ctx := t.Context()
-	client, mockDB := CreateTestClientWithMock(nil)
+	client, mockDB := CreateTestClientWithMock(t, nil)
 
 	// Add a test client to the mock
 	mockDB.Clients.AddClient(&db.Client{
@@ -428,7 +428,7 @@ func TestAuthorize_ClientValidation(t *testing.T) {
 // TestAuthorize_PKCEValidation tests PKCE enforcement in the Authorize handler
 func TestAuthorize_PKCEValidation(t *testing.T) {
 	ctx := t.Context()
-	client, mockDB := CreateTestClientWithMock(nil)
+	client, mockDB := CreateTestClientWithMock(t, nil)
 
 	// Add a client that requires PKCE
 	mockDB.Clients.AddClient(&db.Client{
@@ -877,7 +877,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, mockDB := CreateTestClientWithMock(nil)
+			client, mockDB := CreateTestClientWithMock(t, nil)
 			tt.setupMock(t, client.cacheService.AuthContext, mockDB.Clients)
 
 			// Set up test signing key
@@ -921,7 +921,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 func TestToken_EnableUserInfoTrue(t *testing.T) {
 	ctx := t.Context()
 
-	client, mockDB := CreateTestClientWithMock(nil)
+	client, mockDB := CreateTestClientWithMock(t, nil)
 	client.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo = true
 	client.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration = 3600
 
@@ -993,7 +993,7 @@ func TestToken_EnableUserInfoTrue(t *testing.T) {
 // TestToken_RefreshTokenGrant tests the refresh token grant (currently unimplemented)
 func TestToken_RefreshTokenGrant(t *testing.T) {
 	ctx := t.Context()
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(t, nil)
 
 	req := &TokenRequest{
 		GrantType:    "refresh_token",
@@ -1041,7 +1041,7 @@ func TestGenerateIDToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
 
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 			client.cfg.Verifier.Outbound.OIDCProvider.Issuer = "https://issuer.example.com"
 			client.cfg.Verifier.Outbound.OIDCProvider.IDTokenDuration = 3600
 			client.cfg.Verifier.Outbound.OIDCProvider.SubjectType = "public"
@@ -1097,7 +1097,7 @@ func TestGenerateIDToken(t *testing.T) {
 
 // TestAuthenticateOIDCClient tests client authentication
 func TestAuthenticateOIDCClient(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(t, nil)
 
 	tests := []struct {
 		name         string
@@ -1331,7 +1331,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, mockDB := CreateTestClientWithMock(nil)
+			client, mockDB := CreateTestClientWithMock(t, nil)
 			client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 			client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 			client.cfg.Verifier.DigitalCredentials.Enable = true
@@ -1403,7 +1403,7 @@ func TestAuthorize_FullFlow(t *testing.T) {
 func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 	ctx := t.Context()
 
-	client, mockDB := CreateTestClientWithMock(nil)
+	client, mockDB := CreateTestClientWithMock(t, nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 	// Explicitly disable Digital Credentials API
@@ -1453,7 +1453,7 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 func TestAuthorize_WalletLinks(t *testing.T) {
 	ctx := t.Context()
 
-	client, mockDB := CreateTestClientWithMock(nil)
+	client, mockDB := CreateTestClientWithMock(t, nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 	client.cfg.Verifier.SupportedWallets = map[string]string{
@@ -1526,7 +1526,7 @@ func TestAuthorize_WalletLinks(t *testing.T) {
 func TestAuthorize_NoWalletLinks(t *testing.T) {
 	ctx := t.Context()
 
-	client, mockDB := CreateTestClientWithMock(nil)
+	client, mockDB := CreateTestClientWithMock(t, nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 	// No supported wallets configured
@@ -1562,7 +1562,7 @@ func TestAuthorize_NoWalletLinks(t *testing.T) {
 // TestGetQRCode tests QR code generation
 func TestGetQRCode(t *testing.T) {
 	ctx := t.Context()
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(t, nil)
 	client.cfg.Verifier.SupportedWallets = map[string]string{
 		"SUNET Wallet": "https://wallet.sunet.se/cb",
 		"Test Wallet":  "https://test-wallet.example.com/authorize",
@@ -1646,7 +1646,7 @@ func TestGetQRCode(t *testing.T) {
 // TestPollSession tests session polling
 func TestPollSession(t *testing.T) {
 	ctx := t.Context()
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(t, nil)
 
 	// Create test sessions with different statuses
 	pendingSession := &cache.AuthorizationContext{
@@ -1728,7 +1728,7 @@ func TestPollSession(t *testing.T) {
 // TestGetUserInfo tests the stateless UserInfo endpoint with JWT access tokens
 func TestGetUserInfo(t *testing.T) {
 	ctx := t.Context()
-	client, _ := CreateTestClientWithMock(&model.Cfg{
+	client, _ := CreateTestClientWithMock(t, &model.Cfg{
 		Verifier: &model.Verifier{
 			PublicURL: "https://verifier.example.com",
 			Outbound: model.VerifierOutbound{
@@ -1940,7 +1940,7 @@ func TestGetOIDCRequestObject(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Generate RSA key for signing
 			key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -2032,7 +2032,7 @@ func TestProcessCallback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Setup session if needed
 			if tt.authCtxSetup != nil {
@@ -2140,7 +2140,7 @@ func TestGetJWKS_KeyTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Setup key
 			key := tt.setupKey()
@@ -2304,7 +2304,7 @@ func TestProcessDirectPost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Setup session if needed
 			if tt.authCtxSetup != nil {
@@ -2393,7 +2393,7 @@ func TestAuthorizationCodeRedirectURI(t *testing.T) {
 
 // TestContainsOIDC tests the containsOIDC helper method
 func TestContainsOIDC(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(t, nil)
 
 	tests := []struct {
 		name     string
@@ -2466,7 +2466,7 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 		},
 	}
 
-	client, _ := CreateTestClientWithMock(cfg)
+	client, _ := CreateTestClientWithMock(t, cfg)
 
 	// Test getting discovery metadata
 	metadata, err := client.GetDiscoveryMetadata(ctx)
@@ -2538,7 +2538,7 @@ func TestGetDiscoveryMetadata_NoCredentials(t *testing.T) {
 		},
 	}
 
-	client, _ := CreateTestClientWithMock(cfg)
+	client, _ := CreateTestClientWithMock(t, cfg)
 
 	metadata, err := client.GetDiscoveryMetadata(ctx)
 	assert.NoError(t, err)
@@ -2597,7 +2597,7 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 				},
 			}
 
-			client, _ := CreateTestClientWithMock(cfg)
+			client, _ := CreateTestClientWithMock(t, cfg)
 
 			metadata, err := client.GetDiscoveryMetadata(ctx)
 			assert.NoError(t, err)
@@ -2628,7 +2628,7 @@ func TestGetJWKS(t *testing.T) {
 	}
 
 	t.Run("RSA key", func(t *testing.T) {
-		client, _ := CreateTestClientWithMock(cfg)
+		client, _ := CreateTestClientWithMock(t, cfg)
 
 		// Set signing key for testing
 		privateKey := generateTestRSAKey(t)
@@ -2652,7 +2652,7 @@ func TestGetJWKS(t *testing.T) {
 	})
 
 	t.Run("ECDSA key", func(t *testing.T) {
-		client, _ := CreateTestClientWithMock(cfg)
+		client, _ := CreateTestClientWithMock(t, cfg)
 
 		// Set ECDSA signing key for testing
 		privateKey := generateTestECDSAKey(t)
@@ -2676,7 +2676,7 @@ func TestGetJWKS(t *testing.T) {
 	})
 
 	t.Run("unsupported key type", func(t *testing.T) {
-		client, _ := CreateTestClientWithMock(cfg)
+		client, _ := CreateTestClientWithMock(t, cfg)
 
 		// Set an unsupported key type (string instead of crypto key)
 		err := client.SetSigningKeyForTesting("not-a-crypto-key")
@@ -2687,7 +2687,7 @@ func TestGetJWKS(t *testing.T) {
 	})
 
 	t.Run("no signing key set", func(t *testing.T) {
-		client, _ := CreateTestClientWithMock(cfg)
+		client, _ := CreateTestClientWithMock(t, cfg)
 
 		// Don't set any signing key - signingKey will be nil
 
@@ -2724,7 +2724,7 @@ func BenchmarkGetDiscoveryMetadata(b *testing.B) {
 		},
 	}
 
-	client, _ := CreateTestClientWithMock(cfg)
+	client, _ := CreateTestClientWithMock(b, cfg)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -2747,7 +2747,7 @@ func BenchmarkGetJWKS(b *testing.B) {
 		},
 	}
 
-	client, _ := CreateTestClientWithMock(cfg)
+	client, _ := CreateTestClientWithMock(b, cfg)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -2823,7 +2823,7 @@ func TestMatchRedirectURI(t *testing.T) {
 			},
 		},
 	}
-	client, _ := CreateTestClientWithMock(cfg)
+	client, _ := CreateTestClientWithMock(t, cfg)
 
 	tests := []struct {
 		name       string

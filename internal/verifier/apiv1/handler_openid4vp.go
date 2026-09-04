@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/lestrrat-go/jwx/v3/jwk"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -72,6 +74,42 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		requestObject.ClientMetadata = &openid4vp.ClientMetadata{
 			VPFormatsSupported: c.cfg.Verifier.PreferredVPFormats,
 		}
+	}
+
+	// A response mode ending in .jwt asks the wallet to encrypt its response,
+	// which it can only do with a key. This path previously sent neither a
+	// key nor the encryption parameters, so a conformant wallet rejected the
+	// request before it got as far as the credential query.
+	//
+	// The key is stored under the session ID, and VerificationDirectPost
+	// looks the private half up by the kid in the JWE header, so the two
+	// halves meet without extra plumbing.
+	if responseModeRequiresEncryption(responseMode) {
+		if c.openid4vp == nil || c.openid4vp.EphemeralKeyCache == nil {
+			// Better a named error than a nil dereference: response_mode
+			// asks the wallet to encrypt, and without a key cache we cannot
+			// give it anything to encrypt to.
+			return "", fmt.Errorf("response_mode %q requires encryption but no ephemeral key cache is configured", responseMode)
+		}
+
+		// Reuse any key already held for this session. A request object can
+		// be built more than once for the same session - GetOIDCRequestObject
+		// rebuilds and re-signs on every call - and regenerating would
+		// replace the private key under an unchanged kid, stranding a wallet
+		// that still holds an earlier request object.
+		ephemeralPublicJWK, err := c.openid4vp.EphemeralKeyCache.GenerateAndStoreIfAbsent(sessionID)
+		if err != nil {
+			c.log.Error(err, "Failed to generate ephemeral encryption key")
+			return "", fmt.Errorf("generating ephemeral encryption key: %w", err)
+		}
+
+		if requestObject.ClientMetadata == nil {
+			requestObject.ClientMetadata = &openid4vp.ClientMetadata{}
+		}
+		requestObject.ClientMetadata.JWKS = &openid4vp.Keys{Keys: []jwk.Key{ephemeralPublicJWK}}
+		requestObject.ClientMetadata.AuthorizationEncryptedResponseALG = "ECDH-ES"
+		requestObject.ClientMetadata.AuthorizationEncryptedResponseENC = "A256GCM"
+		requestObject.ClientMetadata.EncryptedResponseEncValuesSupported = []string{"A256GCM"}
 	}
 
 	// Sign the request object with X.509 certificate chain for x509_san_dns verification
@@ -204,4 +242,15 @@ type SessionPollResponse struct {
 	AuthorizationCode string `json:"authorization_code,omitempty"`
 	RedirectURI       string `json:"redirect_uri,omitempty"`
 	State             string `json:"state,omitempty"`
+}
+
+// responseModeRequiresEncryption reports whether a response mode obliges the
+// wallet to encrypt its response to us.
+//
+// OpenID4VP spells these as a ".jwt" suffix: dc_api.jwt and direct_post.jwt
+// are the encrypted forms of dc_api and direct_post. Matching on the suffix
+// rather than listing the two keeps a future encrypted mode from silently
+// falling through to the unencrypted branch.
+func responseModeRequiresEncryption(responseMode string) bool {
+	return strings.HasSuffix(responseMode, ".jwt")
 }

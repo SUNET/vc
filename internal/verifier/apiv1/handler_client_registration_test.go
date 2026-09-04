@@ -374,7 +374,7 @@ func TestClientRegistrationRequest_Defaults(t *testing.T) {
 // TestAuthenticateClient tests client authentication
 func TestAuthenticateClient(t *testing.T) {
 	ctx := t.Context()
-	client, mockDB := CreateTestClientWithMock(nil)
+	client, mockDB := CreateTestClientWithMock(t, nil)
 
 	// Create a test client with a bcrypt-hashed credential
 	// Generate test value dynamically to avoid static analysis false positives
@@ -542,7 +542,7 @@ func TestRegisterClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, mockDB := CreateTestClientWithMock(nil)
+			client, mockDB := CreateTestClientWithMock(t, nil)
 			client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 
 			// Simulate HTTP layer: apply defaults and validate
@@ -647,7 +647,7 @@ func TestGetClientInformation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, mockDB := CreateTestClientWithMock(nil)
+			client, mockDB := CreateTestClientWithMock(t, nil)
 			client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 
 			clientID, token := tt.setupMock(t, mockDB.Clients)
@@ -724,7 +724,7 @@ func TestDeleteClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, mockDB := CreateTestClientWithMock(nil)
+			client, mockDB := CreateTestClientWithMock(t, nil)
 
 			clientID, token := tt.setupMock(t, mockDB.Clients)
 
@@ -903,7 +903,7 @@ func TestUpdateClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, mockDB := CreateTestClientWithMock(nil)
+			client, mockDB := CreateTestClientWithMock(t, nil)
 			client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 
 			clientID, token := tt.setupMock(t, mockDB.Clients)
@@ -1106,7 +1106,7 @@ func TestGetClientByID(t *testing.T) {
 		},
 	}
 
-	client, mockDB := CreateTestClientWithMock(&model.Cfg{
+	client, mockDB := CreateTestClientWithMock(t, &model.Cfg{
 		Verifier: &model.Verifier{
 			Outbound: model.VerifierOutbound{
 				OIDCProvider: &model.OIDCOP{
@@ -1228,7 +1228,7 @@ func TestAuthenticateClientWithStaticClients(t *testing.T) {
 		},
 	}
 
-	client, _ := CreateTestClientWithMock(&model.Cfg{
+	client, _ := CreateTestClientWithMock(t, &model.Cfg{
 		Verifier: &model.Verifier{
 			Outbound: model.VerifierOutbound{
 				OIDCProvider: &model.OIDCOP{

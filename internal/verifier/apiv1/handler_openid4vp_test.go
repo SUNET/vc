@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
+	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -71,12 +73,7 @@ func TestCreateRequestObject(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
-
-			// Generate RSA key for signing
-			key, err := rsa.GenerateKey(rand.Reader, 2048)
-			require.NoError(t, err)
-			require.NoError(t, client.SetSigningKeyForTesting(key))
+			client := newSigningTestClient(t)
 
 			// Configure Digital Credentials API
 			client.cfg.Verifier.DigitalCredentials.Enable = tt.dcEnabled
@@ -147,7 +144,7 @@ func TestGetRequestObject(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Setup cache if needed
 			if tt.setupCache {
@@ -217,7 +214,7 @@ func TestHandleDirectPost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Setup session if needed
 			if tt.authCtxSetup != nil {
@@ -287,7 +284,7 @@ func TestGetPollStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Setup session if needed
 			if tt.authCtxSetup != nil {
@@ -369,7 +366,7 @@ func TestExtractAndMapClaimsEmpty(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, _ := CreateTestClientWithMock(nil)
+			client, _ := CreateTestClientWithMock(t, nil)
 
 			// Test with nil claims extractor (which is the default for test client)
 			claims, err := client.extractAndMapClaims(ctx, tt.vpToken, "")
@@ -400,4 +397,126 @@ func createTestDBSession(sessionID string) *cache.AuthorizationContext {
 	}
 
 	return authCtx
+}
+
+// TestCreateRequestObject_EncryptedModeCarriesAKey covers what an external
+// wallet actually validates. A response_mode ending in .jwt asks the wallet
+// to encrypt its response; this path previously sent client_metadata with
+// only vp_formats_supported, so there was no key to encrypt to and no
+// encryption parameters, and a conformant wallet rejected the request before
+// reading the credential query.
+func TestCreateRequestObject_EncryptedModeCarriesAKey(t *testing.T) {
+	ctx := t.Context()
+	client := newSigningTestClient(t)
+
+	client.cfg.Verifier.DigitalCredentials.Enable = true // response_mode defaults to dc_api.jwt
+
+	_, err := client.CreateRequestObject(ctx, "session-enc", createTestDCQLForVP(t), "nonce-enc", nil)
+	require.NoError(t, err)
+
+	cached, err := client.GetRequestObject(ctx, "session-enc")
+	require.NoError(t, err)
+	require.NotNil(t, cached.ClientMetadata, "client_metadata is required for an encrypted response mode")
+
+	md := cached.ClientMetadata
+	require.NotNil(t, md.JWKS, "the wallet needs a key to encrypt to")
+	require.Len(t, md.JWKS.Keys, 1)
+
+	assert.Equal(t, []string{"A256GCM"}, md.EncryptedResponseEncValuesSupported,
+		"OpenID4VP 1.0 expects an array under this name")
+	assert.Equal(t, "ECDH-ES", md.AuthorizationEncryptedResponseALG)
+	assert.Equal(t, "A256GCM", md.AuthorizationEncryptedResponseENC)
+
+	// The private half must be findable by the advertised kid, or the wallet
+	// encrypts to a key we cannot decrypt with.
+	kid, ok := md.JWKS.Keys[0].KeyID()
+	require.True(t, ok)
+	_, found := client.openid4vp.EphemeralKeyCache.Get(kid)
+	assert.True(t, found, "the ephemeral private key must be retrievable by the advertised kid")
+}
+
+// TestCreateRequestObject_UnencryptedModeSendsNoKey is the other side: with
+// DC API off the response mode is direct_post, which is not encrypted, so
+// there is no reason to mint or advertise a key.
+func TestCreateRequestObject_UnencryptedModeSendsNoKey(t *testing.T) {
+	ctx := t.Context()
+	client := newSigningTestClient(t)
+
+	client.cfg.Verifier.DigitalCredentials.Enable = false
+
+	_, err := client.CreateRequestObject(ctx, "session-plain", createTestDCQLForVP(t), "nonce-plain", nil)
+	require.NoError(t, err)
+
+	cached, err := client.GetRequestObject(ctx, "session-plain")
+	require.NoError(t, err)
+	assert.Equal(t, "direct_post", cached.ResponseMode)
+	if cached.ClientMetadata != nil {
+		assert.Nil(t, cached.ClientMetadata.JWKS)
+		assert.Empty(t, cached.ClientMetadata.EncryptedResponseEncValuesSupported)
+	}
+}
+
+// newSigningTestClient returns a mock-backed client with a signing key
+// installed, which every CreateRequestObject test needs before it can sign a
+// request object.
+func newSigningTestClient(t *testing.T) *Client {
+	t.Helper()
+
+	client, _ := CreateTestClientWithMock(t, nil)
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	require.NoError(t, client.SetSigningKeyForTesting(key))
+
+	return client
+}
+
+// TestCreateRequestObject_ReusesTheSessionKey covers a wallet fetching the
+// request object twice. GetOIDCRequestObject rebuilds and re-signs on every
+// call, so regenerating the key would replace the private half under an
+// unchanged kid: a wallet still holding the first request object would
+// encrypt to a public key whose private half no longer exists, and the
+// response would fail to decrypt for no visible reason.
+func TestCreateRequestObject_ReusesTheSessionKey(t *testing.T) {
+	ctx := t.Context()
+	client := newSigningTestClient(t)
+	client.cfg.Verifier.DigitalCredentials.Enable = true
+
+	firstKey := func(t *testing.T, sessionID string) jwk.Key {
+		t.Helper()
+		cached, err := client.GetRequestObject(ctx, sessionID)
+		require.NoError(t, err)
+		require.NotNil(t, cached.ClientMetadata)
+		require.NotNil(t, cached.ClientMetadata.JWKS)
+		require.Len(t, cached.ClientMetadata.JWKS.Keys, 1)
+		return cached.ClientMetadata.JWKS.Keys[0]
+	}
+
+	_, err := client.CreateRequestObject(ctx, "same-session", createTestDCQLForVP(t), "nonce-1", nil)
+	require.NoError(t, err)
+	before := firstKey(t, "same-session")
+
+	// Second fetch of the same session, as a wallet retry or reload would do.
+	_, err = client.CreateRequestObject(ctx, "same-session", createTestDCQLForVP(t), "nonce-2", nil)
+	require.NoError(t, err)
+	after := firstKey(t, "same-session")
+
+	beforeThumb, err := before.Thumbprint(crypto.SHA256)
+	require.NoError(t, err)
+	afterThumb, err := after.Thumbprint(crypto.SHA256)
+	require.NoError(t, err)
+	assert.Equal(t, beforeThumb, afterThumb,
+		"the advertised public key must not change between fetches of the same session")
+
+	// And the private half must still match what is advertised.
+	kid, ok := after.KeyID()
+	require.True(t, ok)
+	priv, found := client.openid4vp.EphemeralKeyCache.Get(kid)
+	require.True(t, found)
+	privPub, err := priv.PublicKey()
+	require.NoError(t, err)
+	privThumb, err := privPub.Thumbprint(crypto.SHA256)
+	require.NoError(t, err)
+	assert.Equal(t, afterThumb, privThumb,
+		"the cached private key must be the pair of the advertised public key")
 }

@@ -399,6 +399,11 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 			AuthorizationSignedResponseALG:    "",
 			AuthorizationEncryptedResponseALG: "ECDH-ES",
 			AuthorizationEncryptedResponseENC: "A256GCM",
+			// OpenID4VP 1.0 renamed authorization_encrypted_response_enc to
+			// encrypted_response_enc_values_supported and made it an array.
+			// Both are sent: a 1.0 wallet rejects a request carrying only the
+			// old name, and a draft-era wallet ignores the new one.
+			EncryptedResponseEncValuesSupported: []string{"A256GCM"},
 		},
 		IAT:              time.Now().UTC().Unix(),
 		RedirectURI:      "",
