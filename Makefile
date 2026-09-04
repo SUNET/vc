@@ -49,13 +49,56 @@ ZK_CRED_LONGFELLOW_REF  ?= main
 ZK_CRED_LONGFELLOW_CHECKOUT := third_party/.zk-cred-longfellow-src
 ZK_CRED_LONGFELLOW_STAGE    := third_party/zk-cred-longfellow
 
-# Service Build Configuration (service -> static/dynamic, tags)
-# Format: service_name:cgo_mode:build_tags
+# bbsnative: blind BBS issuance (pkg/bbs), via cgo against zk-cred-bbs's
+# Go C-ABI build. Same opt-in shape and same reason as zknative above.
+# Unlike Longfellow, this one is needed on the ISSUER side: an issuer
+# offering BBS credentials must verify the holder's commitment and
+# blind-sign it, and neither has a pure-Go implementation.
+BBSNATIVE_TAG        := bbsnative
+ZK_CRED_BBS_REPO     ?= https://github.com/sirosfoundation/zk-cred-bbs.git
+# Pinned, not floating: CI should not silently start testing a different
+# crate revision. Bump deliberately.
+ZK_CRED_BBS_REF      ?= v0.0.7
+ZK_CRED_BBS_CHECKOUT := third_party/.zk-cred-bbs-src
+ZK_CRED_BBS_STAGE    := third_party/zk-cred-bbs
+
+# Service Build Configuration (service -> link mode, tags)
+# Format: service_name:link_mode:build_tags
+#
+# Link modes:
+#   static      pure Go, CGO off, statically linked
+#   cgo-static  CGO on, still statically linked - for a service that must
+#               call into a native library but should keep shipping as one
+#               self-contained binary with no .so to mount or version
+#   dynamic     CGO on, dynamically linked
+#
+# The issuer is cgo-static because blind BBS issuance has no pure-Go path:
+# a BBS secret is a BLS12-381 scalar consumed inside the signing algebra,
+# and the only implementation is zk-cred-bbs's Rust one. Without the
+# bbsnative tag the issuer builds against pkg/bbs's stub, where every call
+# returns ErrUnavailable - so a `format: jwp` credential configuration
+# resolves, passes every check, and then fails at the signer. Wired but
+# dead.
+#
+# netgo and osusergo ride along because CGO is now on: without them Go
+# resolves DNS and user lookups through glibc's NSS, which a statically
+# linked binary cannot do reliably. They restore the pure-Go
+# implementations this service had when it was CGO_ENABLED=0.
+#
+# Requires `make bbs-native-lib` first. The linker still warns about
+# getaddrinfo/getpwuid_r reached from Rust's std - those are in std's
+# networking and home-directory paths, which this crate (pure algebra, no
+# I/O) never calls.
+#
+# Known limitation: the staged library is built for the host architecture,
+# and cgo cross-compilation needs a cross C toolchain, so `docker-build-issuer`
+# only produces an image for the machine it runs on. The other three services
+# are unaffected and still cross-compile freely.
 BUILD_CONFIGS           := \
 	verifier:static: \
 	registry:static: \
 	apigw:static: \
-	issuer:static: \
+	issuer:cgo-static:bbsnative,netgo,osusergo \
 	vc20-test-server:static:
 
 # ==============================================================================
@@ -67,6 +110,7 @@ BUILD_CONFIGS           := \
 	docker-build docker-build-% docker-push docker-push-% docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
 	proto proto-% swagger swagger-% swagger-fmt \
+	bbs-native-lib bbs-native-lib-staged \
 	check-protoc diagram install-tools clean-apt-cache vscode vendor-js update formatting \
 	gosec staticcheck vulncheck \
 	test-pkcs11 \
@@ -105,6 +149,8 @@ help: ## Show this help message
 	$(info Optional Build Features:)
 	$(info   make build-issuer-hsm         - Build issuer with PKCS#11 HSM support)
 	$(info   make zk-native-lib            - Fetch/build zk-cred-longfellow's Go C-ABI lib for native ZK/PPID verification)
+	$(info   make bbs-native-lib           - Fetch/build zk-cred-bbs's Go C-ABI lib for blind BBS issuance)
+	$(info   make test-bbsnative           - Run pkg/bbs's bbsnative-tagged tests (requires bbs-native-lib))
 	$(info   make build-verifier-zknative  - Build verifier with native ZK/PPID proof verification (requires zk-native-lib))
 	$(info   make test-zknative            - Run pkg/mdoc's zknative-tagged tests (requires zk-native-lib))
 	$(info )
@@ -132,8 +178,12 @@ help: ## Show this help message
 # ==============================================================================
 
 # Get CGO setting for a service: $(call get-cgo,service)
+define get-mode
+$(word 2,$(subst :, ,$(filter $1:%,$(BUILD_CONFIGS))))
+endef
+
 define get-cgo
-$(if $(filter static,$(word 2,$(subst :, ,$(filter $1:%,$(BUILD_CONFIGS))))),$(CGO_ENABLED_STATIC),$(CGO_ENABLED_DYNAMIC))
+$(if $(filter static,$(call get-mode,$1)),$(CGO_ENABLED_STATIC),$(CGO_ENABLED_DYNAMIC))
 endef
 
 # Get build tags for a service: $(call get-tags,service)
@@ -141,9 +191,16 @@ define get-tags
 $(word 3,$(subst :, ,$(filter $1:%,$(BUILD_CONFIGS))))
 endef
 
+# Docker build tags for a service: the manual GO_BUILD_TAGS override when
+# set, otherwise whatever BUILD_CONFIGS declares. One source of truth, so an
+# image cannot quietly ship without a tag `make build-<service>` compiles in.
+define docker-tags
+$(if $(GO_BUILD_TAGS),$(GO_BUILD_TAGS),$(call get-tags,$1))
+endef
+
 # Get LDFLAGS for a service: $(call get-ldflags,service)
 define get-ldflags
-$(if $(filter static,$(word 2,$(subst :, ,$(filter $1:%,$(BUILD_CONFIGS))))),$(LDFLAGS),$(LDFLAGS_DYNAMIC))
+$(if $(filter static cgo-static,$(call get-mode,$1)),$(LDFLAGS),$(LDFLAGS_DYNAMIC))
 endef
 
 # Docker image tag: $(call docker-tag,service,version)
@@ -256,6 +313,40 @@ zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native Z
 	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi"/libzk_cred_longfellow.* "$(ZK_CRED_LONGFELLOW_STAGE)/lib/"
 	@echo "Staged zk-cred-longfellow's Go C-ABI lib + header in $(ZK_CRED_LONGFELLOW_STAGE)"
 	@echo "Build/test with: CGO_ENABLED=1 LD_LIBRARY_PATH=\$$(pwd)/$(ZK_CRED_LONGFELLOW_STAGE)/lib go {build,test} -tags $(ZKNATIVE_TAG) ./..."
+
+bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not staged
+	@# Both halves, not just the archive: cgo needs the header to compile at
+	@# all, and a stage with one and not the other passed this check and then
+	@# failed deep in the build with "zk_cred_bbs_go.h: No such file".
+	@test -f "$(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a" -a -f "$(ZK_CRED_BBS_STAGE)/include/zk_cred_bbs_go.h" || ( \
+		echo "zk-cred-bbs is not staged: the issuer links it for blind BBS issuance." >&2; \
+		echo "Both $(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a and $(ZK_CRED_BBS_STAGE)/include/zk_cred_bbs_go.h are required." >&2; \
+		echo "Run 'make bbs-native-lib' first (needs network and a Rust toolchain)." >&2; \
+		exit 1)
+
+bbs-native-lib: ## Fetch/build zk-cred-bbs's Go C-ABI library for blind BBS issuance
+	$(info Fetching/building zk-cred-bbs's go-cabi target from $(ZK_CRED_BBS_REPO)@$(ZK_CRED_BBS_REF))
+	@if [ ! -d "$(ZK_CRED_BBS_CHECKOUT)/.git" ]; then \
+		mkdir -p "$(ZK_CRED_BBS_CHECKOUT)" && \
+		git -C "$(ZK_CRED_BBS_CHECKOUT)" init -q && \
+		git -C "$(ZK_CRED_BBS_CHECKOUT)" remote add origin "$(ZK_CRED_BBS_REPO)"; \
+	fi
+	git -C "$(ZK_CRED_BBS_CHECKOUT)" fetch --depth 1 origin "$(ZK_CRED_BBS_REF)"
+	git -C "$(ZK_CRED_BBS_CHECKOUT)" checkout FETCH_HEAD
+	$(MAKE) -C "$(ZK_CRED_BBS_CHECKOUT)" go-cabi
+	@mkdir -p "$(ZK_CRED_BBS_STAGE)/include" "$(ZK_CRED_BBS_STAGE)/lib" "$(ZK_CRED_BBS_STAGE)/test-vectors"
+	cp "$(ZK_CRED_BBS_CHECKOUT)/target/go-cabi/zk_cred_bbs_go.h" "$(ZK_CRED_BBS_STAGE)/include/"
+	cp "$(ZK_CRED_BBS_CHECKOUT)/target/go-cabi"/libzk_cred_bbs.* "$(ZK_CRED_BBS_STAGE)/lib/"
+	@# The crate's own reference vectors, so pkg/bbs's tests check against
+	@# the same ground truth the Rust and TypeScript sides do rather than a
+	@# second copy that can drift.
+	cp "$(ZK_CRED_BBS_CHECKOUT)/test-vectors/emlun_reference.json" "$(ZK_CRED_BBS_STAGE)/test-vectors/"
+	@echo "Staged zk-cred-bbs's Go C-ABI lib + header in $(ZK_CRED_BBS_STAGE)"
+
+test-bbsnative: ## Run pkg/bbs's bbsnative-tagged tests (requires: make bbs-native-lib)
+	$(info Testing with bbsnative build tag - requires 'make bbs-native-lib' first)
+	CGO_ENABLED=1 LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_BBS_STAGE)/lib \
+		go test -tags $(BBSNATIVE_TAG) -v ./pkg/bbs/...
 
 test-zknative: ## Run pkg/mdoc's zknative-tagged tests (requires: make zk-native-lib)
 	$(info Testing with zknative build tag - requires 'make zk-native-lib' first)
@@ -503,11 +594,12 @@ docker-build: $(addprefix docker-build-,$(SERVICES)) ## Build all Docker images
 
 # Generate docker-build targets for workers
 define DOCKER_BUILD_WORKER_TEMPLATE
-docker-build-$(1): _check-reserved-tag ## Build Docker image for $(1)
+docker-build-$(1): _check-reserved-tag $$(if $$(filter cgo-static dynamic,$$(call get-mode,$(1))),bbs-native-lib-staged) ## Build Docker image for $(1)
 	$$(info Docker Building $(1) with tag: $$(VERSION))
 	docker build --build-arg SERVICE_NAME=$(1) \
 		$$(if $$(filter apigw,$(1)),--build-arg BUILDTAG=$$(VERSION)) \
-		$$(if $$(GO_BUILD_TAGS),--build-arg GO_BUILD_TAGS=$$(GO_BUILD_TAGS)) \
+		$$(if $$(call docker-tags,$(1)),--build-arg GO_BUILD_TAGS="$$(call docker-tags,$(1))") \
+		$$(if $$(filter-out static,$$(call get-mode,$(1))),--build-arg CGO_ENABLED=1) \
 		$$(if $$(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$$(GOBUILD_IMAGE)) \
 		--tag $$(call docker-tag,$(1),$$(VERSION)) \
 		--file dockerfiles/worker .
@@ -517,10 +609,16 @@ endef
 $(foreach service,$(WORKER_SERVICES),$(eval $(call DOCKER_BUILD_WORKER_TEMPLATE,$(service))))
 
 # Docker build with PKCS#11 feature
-docker-build-issuer-hsm: _check-reserved-tag ## Build issuer Docker image with PKCS#11 HSM support
+# pkcs11 PLUS the issuer's own default tags, not instead of them. Hardcoding
+# just pkcs11 here used to be harmless, because the issuer had no default
+# tags to lose; now it has bbsnative, and an HSM image built without it
+# REFUSES TO START whenever issuer.bbs is configured. Those two are not
+# alternatives - a deployment can perfectly well keep its ECDSA signing key
+# in an HSM and still issue BBS, whose key cannot live in one anyway.
+docker-build-issuer-hsm: _check-reserved-tag bbs-native-lib-staged ## Build issuer Docker image with PKCS#11 HSM support
 	$(info Docker building issuer with PKCS#11 HSM support, tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=issuer --build-arg BUILDTAG=$(VERSION) \
-		--build-arg GO_BUILD_TAGS=$(PKCS11_TAG) \
+		--build-arg GO_BUILD_TAGS="$(call docker-tags,issuer),$(PKCS11_TAG)" \
 		--build-arg CGO_ENABLED=1 \
 		$(if $(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$(GOBUILD_IMAGE)) \
 		--tag $(call docker-tag,issuer-hsm,$(VERSION)) \

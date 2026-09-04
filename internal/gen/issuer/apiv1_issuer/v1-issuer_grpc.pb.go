@@ -8,7 +8,6 @@ package apiv1_issuer
 
 import (
 	context "context"
-
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -26,6 +25,7 @@ type IssuerServiceClient interface {
 	MakeSDJWT(ctx context.Context, in *MakeSDJWTRequest, opts ...grpc.CallOption) (*MakeSDJWTReply, error)
 	MakeMDoc(ctx context.Context, in *MakeMDocRequest, opts ...grpc.CallOption) (*MakeMDocReply, error)
 	MakeVC20(ctx context.Context, in *MakeVC20Request, opts ...grpc.CallOption) (*MakeVC20Reply, error)
+	MakeJWP(ctx context.Context, in *MakeJWPRequest, opts ...grpc.CallOption) (*MakeJWPReply, error)
 	JWKS(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*JwksReply, error)
 	SignMetadata(ctx context.Context, in *SignMetadataRequest, opts ...grpc.CallOption) (*SignMetadataReply, error)
 	GetIACAs(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*GetIACAsReply, error)
@@ -66,6 +66,15 @@ func (c *issuerServiceClient) MakeVC20(ctx context.Context, in *MakeVC20Request,
 	return out, nil
 }
 
+func (c *issuerServiceClient) MakeJWP(ctx context.Context, in *MakeJWPRequest, opts ...grpc.CallOption) (*MakeJWPReply, error) {
+	out := new(MakeJWPReply)
+	err := c.cc.Invoke(ctx, "/v1.issuer.IssuerService/MakeJWP", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *issuerServiceClient) JWKS(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*JwksReply, error) {
 	out := new(JwksReply)
 	err := c.cc.Invoke(ctx, "/v1.issuer.IssuerService/JWKS", in, out, opts...)
@@ -100,6 +109,7 @@ type IssuerServiceServer interface {
 	MakeSDJWT(context.Context, *MakeSDJWTRequest) (*MakeSDJWTReply, error)
 	MakeMDoc(context.Context, *MakeMDocRequest) (*MakeMDocReply, error)
 	MakeVC20(context.Context, *MakeVC20Request) (*MakeVC20Reply, error)
+	MakeJWP(context.Context, *MakeJWPRequest) (*MakeJWPReply, error)
 	JWKS(context.Context, *Empty) (*JwksReply, error)
 	SignMetadata(context.Context, *SignMetadataRequest) (*SignMetadataReply, error)
 	GetIACAs(context.Context, *Empty) (*GetIACAsReply, error)
@@ -118,6 +128,9 @@ func (UnimplementedIssuerServiceServer) MakeMDoc(context.Context, *MakeMDocReque
 }
 func (UnimplementedIssuerServiceServer) MakeVC20(context.Context, *MakeVC20Request) (*MakeVC20Reply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method MakeVC20 not implemented")
+}
+func (UnimplementedIssuerServiceServer) MakeJWP(context.Context, *MakeJWPRequest) (*MakeJWPReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MakeJWP not implemented")
 }
 func (UnimplementedIssuerServiceServer) JWKS(context.Context, *Empty) (*JwksReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method JWKS not implemented")
@@ -195,6 +208,24 @@ func _IssuerService_MakeVC20_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IssuerService_MakeJWP_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MakeJWPRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IssuerServiceServer).MakeJWP(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/v1.issuer.IssuerService/MakeJWP",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IssuerServiceServer).MakeJWP(ctx, req.(*MakeJWPRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IssuerService_JWKS_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(Empty)
 	if err := dec(in); err != nil {
@@ -267,6 +298,10 @@ var IssuerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MakeVC20",
 			Handler:    _IssuerService_MakeVC20_Handler,
+		},
+		{
+			MethodName: "MakeJWP",
+			Handler:    _IssuerService_MakeJWP_Handler,
 		},
 		{
 			MethodName: "JWKS",

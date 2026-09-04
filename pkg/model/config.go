@@ -451,6 +451,59 @@ type Issuer struct {
 	PseudonymSeed *bool `yaml:"pseudonym_seed" validate:"omitempty"`
 	// AccessCertificate configures the EUDI access certificate (WRPAC) the issuer presents to wallets, optionally with its own key separate from KeyConfig. Off by default; deployments outside an ARF trust framework are unaffected.
 	AccessCertificate *IssuerAccessCertificate `yaml:"access_certificate,omitempty"`
+	// BBS holds blind BBS issuance configuration. Absent disables the
+	// "jwp" credential format entirely.
+	BBS *BBSConfig `yaml:"bbs" validate:"omitempty"`
+}
+
+// BBSConfig holds the issuer's blind BBS key pair.
+//
+// Separate from Issuer.KeyConfig, and unavoidably so. Every other key this
+// issuer signs with is an ECDSA key that signs a digest, which is what
+// pki.KeyConfig and PKCS#11 are built around. A BBS secret key is a
+// BLS12-381 scalar consumed inside the signing algebra itself, so it cannot
+// be handed to an HSM that only offers "sign these bytes" — mainstream HSMs
+// do not implement the curve at all. It is therefore a software key, which
+// is a known and accepted property of this format rather than an oversight.
+type BBSConfig struct {
+	// SecretKeyPath is a file holding the raw BLS12-381 secret scalar,
+	// base64url-encoded. Preferred where a file can be mounted, since it
+	// keeps the key out of the rendered config entirely.
+	SecretKeyPath string `yaml:"secret_key_path" validate:"omitempty" doc_example:"\"/etc/vc/bbs/issuer.sk\""`
+	// PublicKeyPath is a file holding the matching public key,
+	// base64url-encoded. Preferred over PublicKey for the same reason as
+	// SecretKeyPath, though the public half is not secret.
+	PublicKeyPath string `yaml:"public_key_path" validate:"omitempty" doc_example:"\"/etc/vc/bbs/issuer.pk\""`
+	// SecretKey is the same value inline, base64url-encoded.
+	//
+	// Exists because not every deployment can mount an arbitrary file. A
+	// Helm chart that models specific named secret volumes has no way to
+	// add one for a key it does not know about, so a path-only
+	// configuration cannot be deployed there at all without changing the
+	// chart. An inline value goes wherever the rest of the config goes, and
+	// the usual secret-injection machinery (env-var substitution into the
+	// rendered config) already handles it.
+	//
+	// Prefer SecretKeyPath where a file is possible: this puts the key in
+	// the config document, so it is only as protected as that document is.
+	//
+	// Exactly one of secret_key_path and secret_key must be set. Both, or
+	// neither, is refused at startup rather than resolved by precedence: a
+	// deployment with two sources of truth for a signing key has no way to
+	// tell which one is live, and an operator editing the half that is not
+	// would see no effect at all.
+	SecretKey string `yaml:"secret_key" validate:"omitempty"`
+	// PublicKey is the matching public key inline, base64url-encoded.
+	//
+	// The same exactly-one rule applies to this half independently:
+	// exactly one of public_key_path and public_key must be set. The two
+	// halves are resolved separately, so a path for one and an inline value
+	// for the other is fine - which is what a deployment that can mount the
+	// public key but must inject the secret one will want.
+	PublicKey string `yaml:"public_key" validate:"omitempty"`
+	// DefaultValidity is how long an issued credential is valid for
+	// (default: 365 days), used to derive the `exp` header member.
+	DefaultValidity time.Duration `yaml:"default_validity" default:"8760h"`
 }
 
 // SignMetadataRateLimitConfig configures the SignMetadata gRPC rate limiter.

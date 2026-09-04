@@ -1,0 +1,645 @@
+package apiv1
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"google.golang.org/grpc"
+
+	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
+	"github.com/SUNET/vc/pkg/bbs"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/tokenstatuslist"
+	"github.com/SUNET/vc/pkg/trace"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
+)
+
+// A minimal well-formed claim set, so a test aiming at some other refusal
+// does not trip the document_data guard first.
+var validDocumentData = []byte(`{"given_name":"Ada"}`)
+
+func bbsClient(t *testing.T, keys *bbsKeyPair) *Client {
+	t.Helper()
+	tracer, err := trace.NewForTesting(context.Background(), "test", logger.NewSimple("trace"))
+	if err != nil {
+		t.Fatalf("tracer: %v", err)
+	}
+	return &Client{
+		log:     logger.NewSimple("test"),
+		tracer:  tracer,
+		bbsKeys: keys,
+		cfg: &model.Cfg{
+			Issuer: &model.Issuer{
+				JWTAttribute: model.JWTAttribute{Issuer: "https://issuer.example.com"},
+				BBS:          &model.BBSConfig{},
+			},
+		},
+	}
+}
+
+// An issuer with no BBS key must say so rather than sign with a zero key.
+// The alternative is a credential that verifies against nothing, discovered
+// by the holder at presentation time.
+func TestMakeJWPWithoutAConfiguredKey(t *testing.T) {
+	_, err := bbsClient(t, nil).MakeJWP(context.Background(), &CreateJWPRequest{
+		Commitment:   []byte{1, 2, 3},
+		VCT:          "urn:example:pid",
+		DocumentData: validDocumentData,
+	})
+	if err == nil {
+		t.Fatal("an unconfigured issuer must refuse to issue")
+	}
+	if !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("the error should say the format is unconfigured, got: %v", err)
+	}
+}
+
+// Both are things the signature covers and the credential cannot be built
+// without: there is nothing to blind-sign without a commitment, and the type
+// is stamped into the header a verifier reads back.
+func TestMakeJWPRequiresCommitmentAndVCT(t *testing.T) {
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+
+	for _, tc := range []struct {
+		name string
+		req  *CreateJWPRequest
+	}{
+		{"no commitment", &CreateJWPRequest{VCT: "urn:example:pid"}},
+		{"no vct", &CreateJWPRequest{Commitment: []byte{1, 2, 3}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := c.MakeJWP(context.Background(), tc.req); err == nil {
+				t.Fatal("must be rejected")
+			}
+		})
+	}
+}
+
+// Reaching the signer without a registry means issuing a credential that can
+// never be revoked. That is a worse outcome than a failed issuance, so the
+// check comes before any signing.
+func TestMakeJWPRequiresARegistry(t *testing.T) {
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+
+	_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+		Commitment:   []byte{1, 2, 3},
+		VCT:          "urn:example:pid",
+		DocumentData: validDocumentData,
+	})
+	if err == nil || !strings.Contains(err.Error(), "registry") {
+		t.Fatalf("issuance without a registry must fail loudly, got: %v", err)
+	}
+}
+
+// A status list entry is consumed before anything is signed, and it is never
+// handed back. An issuer configured with BBS keys but built without
+// `-tags bbsnative` would therefore burn one registry entry per request while
+// never issuing a credential - a slow leak in the revocation list rather than
+// a visible failure. The availability check has to come first.
+func TestMakeJWPDoesNotConsumeAStatusEntryWithoutNativeSupport(t *testing.T) {
+	if bbs.Available() {
+		t.Skip("this is the untagged build's failure mode; native support is compiled in")
+	}
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+	registry := &mockRegistryClient{}
+	c.registryClient = registry
+
+	_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+		Commitment:   []byte{1, 2, 3},
+		VCT:          "urn:example:pid",
+		DocumentData: validDocumentData,
+	})
+	if err == nil {
+		t.Fatal("an issuer with no native support must refuse to issue")
+	}
+	if got := grpcstatus.Code(err); got != codes.Unimplemented {
+		t.Fatalf("want codes.Unimplemented, got %v (%v)", got, err)
+	}
+	if registry.index != 0 {
+		t.Fatalf("a refused issuance must consume no status entry, %d consumed", registry.index)
+	}
+}
+
+// Same argument as the availability check, one layer up: `holder_pointers` is
+// entirely caller-controlled, and a list that cannot possibly be signed must
+// not cost a revocation entry to discover.
+func TestMakeJWPRejectsUnusableHolderPointersWithoutConsumingAStatusEntry(t *testing.T) {
+	overLimit := make([]string, bbs.MaxMessages+1)
+	for i := range overLimit {
+		overLimit[i] = fmt.Sprintf("/claim%d", i)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		pointers []string
+	}{
+		{"over the limit", overLimit},
+		{"empty pointer", []string{""}},
+		{"no leading slash", []string{"device_pin_hash"}},
+		{"duplicate", []string{"/a", "/a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+			registry := &mockRegistryClient{}
+			c.registryClient = registry
+
+			_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+				Commitment:     []byte{1, 2, 3},
+				VCT:            "urn:example:pid",
+				DocumentData:   validDocumentData,
+				HolderPointers: tc.pointers,
+			})
+			if err == nil {
+				t.Fatalf("a %s pointer list must be rejected", tc.name)
+			}
+			if got := grpcstatus.Code(err); got != codes.InvalidArgument {
+				t.Fatalf("want codes.InvalidArgument, got %v (%v)", got, err)
+			}
+			if registry.index != 0 {
+				t.Fatalf("a refused issuance must consume no status entry, %d consumed", registry.index)
+			}
+		})
+	}
+}
+
+// The issuer's claims become the credential's claim map, so anything that is
+// not a JSON object cannot be signed - and the same "never handed back"
+// argument applies: discovering it inside the native signer costs a status
+// list entry.
+func TestMakeJWPRejectsUnusableDocumentDataWithoutConsumingAStatusEntry(t *testing.T) {
+	for _, tc := range []struct{ name, data string }{
+		{"array", `["not","an","object"]`},
+		{"string", `"nope"`},
+		{"number", `7`},
+		{"null", `null`},
+		{"not json", `{`},
+		{"absent", ``},
+		// The crate's own vectors assert this one - "no claims to sign" -
+		// so a credential with nothing in its claim map is not a smaller
+		// credential, it is not a credential.
+		{"empty object", `{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+			registry := &mockRegistryClient{}
+			c.registryClient = registry
+
+			_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+				Commitment:   []byte{1, 2, 3},
+				VCT:          "urn:example:pid",
+				DocumentData: []byte(tc.data),
+			})
+			if err == nil {
+				t.Fatalf("accepted %s as document_data", tc.name)
+			}
+			if got := grpcstatus.Code(err); got != codes.InvalidArgument {
+				t.Fatalf("want codes.InvalidArgument, got %v (%v)", got, err)
+			}
+			if registry.index != 0 {
+				t.Fatalf("a refused issuance must consume no status entry, %d consumed", registry.index)
+			}
+		})
+	}
+}
+
+// An entry is allocated and marked VALID before signing, so a failure after
+// that point leaves the list asserting VALID about a credential that does not
+// exist. Not exploitable - nothing carries the index - but it is a wrong
+// answer in a list whose entire job is answering that question, and it
+// accumulates one per failed issuance.
+//
+// Exercised directly rather than through MakeJWP: the only failure that
+// reaches it is bbs.Issue returning, which needs the `bbsnative` build and
+// the crate's header, neither of which a plain checkout has.
+func TestInvalidateStatusEntryHandsTheEntryBack(t *testing.T) {
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+	registry := &mockRegistryClient{}
+	c.registryClient = registry
+
+	c.invalidateStatusEntry(context.Background(), &apiv1_registry.TokenStatusListAddStatusReply{
+		Section: 7,
+		Index:   42,
+	})
+
+	if len(registry.updates) != 1 {
+		t.Fatalf("want exactly one status update, got %d", len(registry.updates))
+	}
+	got := registry.updates[0]
+	if got.GetSection() != 7 || got.GetIndex() != 42 {
+		t.Fatalf("wrong entry invalidated: section %d index %d", got.GetSection(), got.GetIndex())
+	}
+	if got.GetStatus() != uint32(tokenstatuslist.StatusInvalid) {
+		t.Fatalf("want StatusInvalid (%d), got %d", tokenstatuslist.StatusInvalid, got.GetStatus())
+	}
+}
+
+// The issuance has already failed by the time this runs, so a registry that
+// cannot be reached must not turn one failure into two - the caller still has
+// to receive the real error.
+func TestInvalidateStatusEntrySwallowsRegistryFailure(t *testing.T) {
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+	c.registryClient = &mockRegistryClient{updateErr: errors.New("registry unreachable")}
+
+	c.invalidateStatusEntry(context.Background(), &apiv1_registry.TokenStatusListAddStatusReply{Section: 1, Index: 2})
+}
+
+// Revocation status and issuer identity go in the header, not the claims.
+//
+// A claim is one of the signed messages and therefore selectively
+// disclosable, and revocation a holder can decline to reveal is not
+// revocation at all. The same argument covers `iss`: a credential whose
+// issuer could be withheld is one no verifier can attribute.
+func TestBBSIssuerHeaderCarriesWhatMustNotBeHidden(t *testing.T) {
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+
+	raw, err := c.bbsIssuerHeader(&apiv1_registry.TokenStatusListAddStatusReply{
+		Index:         42,
+		StatusListUri: "https://issuer.example.com/statuslists/1",
+	})
+	if err != nil {
+		t.Fatalf("bbsIssuerHeader: %v", err)
+	}
+
+	var header map[string]any
+	if err := json.Unmarshal(raw, &header); err != nil {
+		t.Fatalf("header is not a JSON object: %v", err)
+	}
+
+	if header["iss"] != "https://issuer.example.com" {
+		t.Fatalf("iss = %v, want the configured issuer", header["iss"])
+	}
+	iat, iatOK := header["iat"].(float64)
+	exp, expOK := header["exp"].(float64)
+	if !iatOK || !expOK {
+		t.Fatalf("iat/exp missing or not numeric: %v", header)
+	}
+	// The default applies when DefaultValidity is unset, rather than
+	// producing a credential that expired at the moment it was issued.
+	if exp <= iat {
+		t.Fatalf("exp (%v) must be after iat (%v)", exp, iat)
+	}
+
+	statusList, ok := header["status"].(map[string]any)["status_list"].(map[string]any)
+	if !ok {
+		t.Fatalf("no status.status_list in header: %v", header)
+	}
+	if statusList["idx"] != float64(42) {
+		t.Fatalf("status idx = %v, want the allocated index", statusList["idx"])
+	}
+	if statusList["uri"] != "https://issuer.example.com/statuslists/1" {
+		t.Fatalf("status uri = %v, want the allocated uri", statusList["uri"])
+	}
+}
+
+// --- key loading ---------------------------------------------------------
+
+// bbsTestKeyPair returns a key pair the startup check will accept.
+//
+// Toy byte strings will not do any more: under `-tags bbsnative` the pair
+// is verified by deriving the public key from the secret, so the two halves
+// have to actually belong together. The secret is a small in-range scalar
+// and the public half is derived from it - which also means these tests
+// exercise the real derivation whenever the native library is present, and
+// fall back to arbitrary bytes only where there is nothing to derive with.
+func bbsTestKeyPair(t *testing.T) (secretB64, publicB64 string) {
+	t.Helper()
+	secret := make([]byte, 32)
+	secret[31] = 7
+	public := make([]byte, 96)
+	if bbs.Available() {
+		derived, err := bbs.Native().SkToPk(secret)
+		if err != nil {
+			t.Fatalf("deriving a test public key: %v", err)
+		}
+		public = derived
+	}
+	enc := base64.RawURLEncoding
+	return enc.EncodeToString(secret), enc.EncodeToString(public)
+}
+
+func writeKeyFile(t *testing.T, dir, name, contents string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("writing %s: %v", path, err)
+	}
+	return path
+}
+
+func TestInitBBSKeys(t *testing.T) {
+	dir := t.TempDir()
+	skB64, pkB64 := bbsTestKeyPair(t)
+
+	t.Run("absent config leaves the format off", func(t *testing.T) {
+		c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{}}
+		if err := c.initBBSKeys(); err != nil {
+			t.Fatalf("an issuer that does not offer BBS must start: %v", err)
+		}
+		if c.bbsKeys != nil {
+			t.Fatal("no keys should have been loaded")
+		}
+	})
+
+	t.Run("a trailing newline is not a broken key", func(t *testing.T) {
+		// Every editor and every shell redirect leaves one behind;
+		// rejecting it would be a needless trap.
+		c := &Client{log: logger.NewSimple("test"), bbsIssuerOverride: &recordingIssuer{}, cfg: &model.Cfg{Issuer: &model.Issuer{BBS: &model.BBSConfig{
+			SecretKeyPath: writeKeyFile(t, dir, "ok.sk", skB64+"\n"),
+			PublicKeyPath: writeKeyFile(t, dir, "ok.pk", pkB64+"\n"),
+		}}}}
+		if err := c.initBBSKeys(); err != nil {
+			t.Fatalf("initBBSKeys: %v", err)
+		}
+		wantSecret, _ := base64.RawURLEncoding.DecodeString(skB64)
+		wantPublic, _ := base64.RawURLEncoding.DecodeString(pkB64)
+		if string(c.bbsKeys.secret) != string(wantSecret) {
+			t.Fatalf("secret = %v, want the decoded bytes", c.bbsKeys.secret)
+		}
+		if string(c.bbsKeys.public) != string(wantPublic) {
+			t.Fatalf("public = %v, want the decoded bytes", c.bbsKeys.public)
+		}
+	})
+
+	// A configured-but-broken key means the operator asked for the format
+	// and it does not work. Starting anyway would turn one startup failure
+	// into a failure per issuance request.
+	for _, tc := range []struct{ name, secret, public string }{
+		{"secret not base64url", "!!!!", "BgcICQo"},
+		{"public not base64url", "AQIDBAU", "!!!!"},
+		{"empty secret", "", "BgcICQo"},
+		{"standard base64 alphabet", "a+/b", "BgcICQo"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Issuer: &model.Issuer{BBS: &model.BBSConfig{
+				SecretKeyPath: writeKeyFile(t, t.TempDir(), "k.sk", tc.secret),
+				PublicKeyPath: writeKeyFile(t, t.TempDir(), "k.pk", tc.public),
+			}}}}
+			if err := c.initBBSKeys(); err == nil {
+				t.Fatal("a broken key must fail startup, not one request at a time")
+			}
+		})
+	}
+
+	t.Run("a missing file fails startup", func(t *testing.T) {
+		c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Issuer: &model.Issuer{BBS: &model.BBSConfig{
+			SecretKeyPath: filepath.Join(dir, "does-not-exist.sk"),
+			PublicKeyPath: writeKeyFile(t, dir, "present.pk", "BgcICQo"),
+		}}}}
+		if err := c.initBBSKeys(); err == nil {
+			t.Fatal("a missing key file must fail startup")
+		}
+	})
+}
+
+// Either way of configuring a key must work, and setting both must not.
+//
+// The inline form exists because not every deployment can mount an
+// arbitrary file - a chart that models specific named secret volumes has no
+// way to add one for a key it does not know about. Both forms set is
+// refused rather than resolved by precedence: an operator editing the half
+// that is not live would see no effect at all.
+func TestInitBBSKeysAcceptsAPathOrAnInlineValue(t *testing.T) {
+	dir := t.TempDir()
+	skB64, pkB64 := bbsTestKeyPair(t)
+	sk, _ := base64.RawURLEncoding.DecodeString(skB64)
+	pk, _ := base64.RawURLEncoding.DecodeString(pkB64)
+
+	newClient := func(bbs *model.BBSConfig) *Client {
+		// An injected signer, so these exercise key decoding rather than
+		// whether this test binary was built with native BBS support.
+		return &Client{log: logger.NewSimple("test"), bbsIssuerOverride: &recordingIssuer{},
+			cfg: &model.Cfg{Issuer: &model.Issuer{BBS: bbs}}}
+	}
+
+	t.Run("inline", func(t *testing.T) {
+		c := newClient(&model.BBSConfig{SecretKey: skB64, PublicKey: pkB64})
+		if err := c.initBBSKeys(); err != nil {
+			t.Fatalf("initBBSKeys: %v", err)
+		}
+		if string(c.bbsKeys.secret) != string(sk) || string(c.bbsKeys.public) != string(pk) {
+			t.Fatalf("inline keys decoded wrong: %v / %v", c.bbsKeys.secret, c.bbsKeys.public)
+		}
+	})
+
+	t.Run("path and inline agree on the same bytes", func(t *testing.T) {
+		c := newClient(&model.BBSConfig{
+			SecretKeyPath: writeKeyFile(t, dir, "both.sk", skB64+"\n"),
+			PublicKey:     pkB64,
+		})
+		if err := c.initBBSKeys(); err != nil {
+			t.Fatalf("mixing a path and an inline value for different halves is fine: %v", err)
+		}
+		if string(c.bbsKeys.secret) != string(sk) || string(c.bbsKeys.public) != string(pk) {
+			t.Fatal("mixed sources decoded wrong")
+		}
+	})
+
+	for _, tc := range []struct {
+		name string
+		bbs  *model.BBSConfig
+	}{
+		{"both forms for the secret", &model.BBSConfig{
+			SecretKeyPath: writeKeyFile(t, t.TempDir(), "k.sk", skB64),
+			SecretKey:     skB64,
+			PublicKey:     pkB64,
+		}},
+		{"both forms for the public key", &model.BBSConfig{
+			SecretKey:     skB64,
+			PublicKeyPath: writeKeyFile(t, t.TempDir(), "k.pk", pkB64),
+			PublicKey:     pkB64,
+		}},
+		{"neither form for the secret", &model.BBSConfig{PublicKey: pkB64}},
+		{"neither form for the public key", &model.BBSConfig{SecretKey: skB64}},
+		{"inline value is not base64url", &model.BBSConfig{SecretKey: "!!!!", PublicKey: pkB64}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := newClient(tc.bbs).initBBSKeys(); err == nil {
+				t.Fatal("must fail startup rather than guess")
+			}
+		})
+	}
+}
+
+// The signer must refuse a suite it cannot name rather than fall through to
+// the zero value, which is a real suite (plain) and would sign under the
+// wrong domain separation without saying so.
+func TestMakeJWPRefusesAnUnknownSuite(t *testing.T) {
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+
+	_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+		Commitment:   []byte{1, 2, 3},
+		VCT:          "urn:example:pid",
+		DocumentData: validDocumentData,
+		Suite:        99,
+	})
+	if err == nil || !strings.Contains(err.Error(), "suite") {
+		t.Fatalf("an unknown suite must fail and say so, got: %v", err)
+	}
+}
+
+// "plain" is the suite with no device binding, so asking for both describes
+// two different things. Caught before a status list entry is spent.
+func TestMakeJWPRefusesPlainWithKeyBinding(t *testing.T) {
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+
+	_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+		Commitment:   []byte{1, 2, 3},
+		VCT:          "urn:example:pid",
+		DocumentData: validDocumentData,
+		Suite:        uint32(bbs.SuitePlain),
+		KeyBinding:   true,
+	})
+	if err == nil {
+		t.Fatal("plain with key binding must be refused")
+	}
+	if strings.Contains(err.Error(), "registry") {
+		t.Fatal("it must be refused before the registry is reached, not after")
+	}
+}
+
+// stubRegistry hands back a status list entry without a registry.
+type stubRegistry struct {
+	apiv1_registry.RegistryServiceClient
+}
+
+func (stubRegistry) TokenStatusListAddStatus(_ context.Context, _ *apiv1_registry.TokenStatusListAddStatusRequest, _ ...grpc.CallOption) (*apiv1_registry.TokenStatusListAddStatusReply, error) {
+	return &apiv1_registry.TokenStatusListAddStatusReply{Section: 1, Index: 7, StatusListUri: "https://issuer.example.com/sl/1"}, nil
+}
+
+// recordingIssuer captures the params MakeJWP hands the signer.
+type recordingIssuer struct{ got bbs.IssueParams }
+
+func (r *recordingIssuer) Issue(p bbs.IssueParams) (string, error) {
+	r.got = p
+	return "hdr.payloads.proof", nil
+}
+
+// The suite must reach the signer as the caller chose it.
+//
+// This test exists because hardcoding `Suite: bbs.SuiteSchnorr` here passed
+// every other test in this file: they cover which suites are *rejected*,
+// which is a different property from which suite is *used*. A credential
+// signed under a domain separation nobody asked for verifies against
+// nothing, and says only "does not verify".
+func TestMakeJWPSignsUnderTheSuiteItWasGiven(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		suite bbs.Suite
+		bound bool
+	}{
+		{"schnorr, bound", bbs.SuiteSchnorr, true},
+		{"schnorr, unbound", bbs.SuiteSchnorr, false},
+		{"plain", bbs.SuitePlain, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			signer := &recordingIssuer{}
+			c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+			c.bbsIssuerOverride = signer
+			c.registryClient = stubRegistry{}
+
+			_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+				Commitment:   []byte{1, 2, 3},
+				VCT:          "urn:example:pid",
+				DocumentData: validDocumentData,
+				Suite:        uint32(tc.suite),
+				KeyBinding:   tc.bound,
+			})
+			if err != nil {
+				t.Fatalf("MakeJWP: %v", err)
+			}
+			if signer.got.Suite != tc.suite {
+				t.Fatalf("signed under suite %v, want %v", signer.got.Suite, tc.suite)
+			}
+			wantBinding := bbs.NoKeyBinding
+			if tc.bound {
+				wantBinding = bbs.SchnorrKeyBinding
+			}
+			if signer.got.KeyBinding != wantBinding {
+				t.Fatalf("key binding = %v, want %v", signer.got.KeyBinding, wantBinding)
+			}
+		})
+	}
+}
+
+// Configuring BBS on a binary that cannot do it must fail the boot.
+//
+// This is the trap a deployment falls into by pinning the stock issuer
+// image, which is built CGO_ENABLED=0 with no tags: the config loads, the
+// service starts, `format: jwp` resolves, and every issuance dies at the
+// signer long after anyone was watching the deploy.
+func TestInitBBSKeysRefusesABuildWithoutNativeSupport(t *testing.T) {
+	if bbs.Available() {
+		t.Skip("this binary has native BBS support; the refusal cannot be reached")
+	}
+	dir := t.TempDir()
+	skB64, pkB64 := bbsTestKeyPair(t)
+	c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Issuer: &model.Issuer{BBS: &model.BBSConfig{
+		SecretKeyPath: writeKeyFile(t, dir, "n.sk", skB64),
+		PublicKeyPath: writeKeyFile(t, dir, "n.pk", pkB64),
+	}}}}
+
+	err := c.initBBSKeys()
+	if err == nil {
+		t.Fatal("a BBS-configured issuer without native support must not start")
+	}
+	if !strings.Contains(err.Error(), "bbsnative") {
+		t.Fatalf("the error should say how to fix it, got: %v", err)
+	}
+}
+
+// failingRegistry stands in for a registry that cannot be reached.
+type failingRegistry struct {
+	apiv1_registry.RegistryServiceClient
+}
+
+func (failingRegistry) TokenStatusListAddStatus(_ context.Context, _ *apiv1_registry.TokenStatusListAddStatusRequest, _ ...grpc.CallOption) (*apiv1_registry.TokenStatusListAddStatusReply, error) {
+	return nil, errors.New("dial tcp 10.0.0.7:8090: connect: connection refused")
+}
+
+// Every failure MakeJWP returns carries an explicit gRPC status code.
+//
+// The file's own header comment promises this - "a plain error crosses gRPC
+// as codes.Unknown, which conveys neither" - and two paths did not keep the
+// promise, because nothing checked. They matter more than most: both run
+// after the request has been accepted, so their errors travel through the
+// APIGW and out of the credential endpoint to a wallet.
+func TestMakeJWPAlwaysReturnsAnExplicitStatusCode(t *testing.T) {
+	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
+	c.bbsIssuerOverride = &recordingIssuer{}
+	c.registryClient = failingRegistry{}
+
+	_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
+		Commitment:   []byte{1, 2, 3},
+		VCT:          "urn:example:pid",
+		DocumentData: validDocumentData,
+		Suite:        uint32(bbs.SuiteSchnorr),
+	})
+	if err == nil {
+		t.Fatal("an unreachable registry must fail the issuance")
+	}
+
+	st, ok := grpcstatus.FromError(err)
+	if !ok {
+		t.Fatalf("want a gRPC status error, got %T: %v", err, err)
+	}
+	if st.Code() == codes.Unknown {
+		t.Fatal("codes.Unknown is what a plain error becomes - the point is to not do that")
+	}
+	if st.Code() != codes.Unavailable {
+		t.Fatalf("code = %v, want Unavailable: the registry is a separate service and the "+
+			"request itself is fine, so retrying later is the right advice", st.Code())
+	}
+	// The dial error names internal topology. It belongs in the log.
+	if strings.Contains(st.Message(), "10.0.0.7") || strings.Contains(st.Message(), "connection refused") {
+		t.Fatalf("internal detail reached the caller: %q", st.Message())
+	}
+}
