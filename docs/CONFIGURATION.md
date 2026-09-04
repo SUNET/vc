@@ -691,6 +691,28 @@ Either way it informs the wallet's consent dialog and policy checks.
 | `file_path`          | `string` | Path to the Registrar-issued WRPRC, a compact JWT with media type "rc-wrp+jwt".                                                                                                                                                                                                                                                                                                                                                                                                                                         | `"/etc/vc/registration-certificate.jwt"` | -       | No       |
 | `format`             | `string` | Format identifier advertised alongside the certificate in the verifier_info parameter. Defaults to "rc-wrp+jwt"; override only for an ecosystem that has profiled a different identifier for the same document.                                                                                                                                                                                                                                                                                                         | `"rc-wrp+jwt"`                           | -       | No       |
 | `trusted_roots_path` | `string` | TrustedRootsPath optionally points at a PEM bundle of the Registrar's root certificates. When set, the certificate's own x5c chain is evaluated against it at startup. When unset, the document is still signature-checked and parsed, but nothing establishes that its issuer is a Registrar we accept. The ARF RPRC_16 binding needs both this and an access certificate: it compares the two documents' organisation identifiers, so it is skipped when key_config supplies no certificate chain to compare against. | -                                        | -       | No       |
+| `revocation`         | `object` | Checking this certificate against the Token Status List named in its own status claim. A WRPRC that carries no status reference cannot be checked at all, which reads as "could not determine" rather than as "not revoked".                                                                                                                                                                                                                                                                                            | -                                        | -       | No       |
+
+### `revocation`
+
+> **Path:** `.apigw.issuer_metadata.registration_certificate.revocation`, `.issuer.access_certificate.revocation`, `.verifier.registration_certificate.revocation`
+
+This is operational hygiene rather than a security control. An operator who
+wants to present a revoked certificate can switch it off, and a wallet
+checks independently regardless. What it buys is finding out ourselves
+instead of finding out from users, because a revoked certificate means
+wallets reject us.
+
+This type is the policy half only: it decides what a check result means.
+Nothing here runs a check. Deciding when to check - at startup, and on
+what schedule after that - belongs to each service's lifecycle, and that
+wiring is not in place yet, so configuring this today records the intended
+policy without any check being performed.
+
+| Field              | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Example  | Default | Required |
+| ------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
+| `mode`             | `string`   | One of "off", "warn" or "fail". warn is the default, and deliberately so. An unreachable CRL or status list is evidence of nothing: not that the certificate is revoked, and not that it is valid. Reading it as revoked would turn a Registrar outage into ours; reading it as valid would make a fetch failure a silent pass. It is reported as undetermined and warn proceeds anyway, while fail is available for deployments that would rather stop than carry on without an answer. | `"warn"` | `warn`  | No       |
+| `refresh_interval` | `duration` | How often the check should repeat after startup. Revocation is a fact that changes while a process runs, so a boot-time-only check goes stale. Zero disables rechecking. No scheduler reads this yet - see RevocationCheck. It is the interval the service lifecycle will use once the checks are wired in.                                                                                                                                                                              | `"1h"`   | `1h`    | No       |
 
 ### `credential_response_encryption`
 
@@ -955,6 +977,7 @@ deployment booting across an upgrade rather than failing on start.
 | `validate`            | `bool`     | Validate enforces the WRPAC certificate profile at startup: keyUsage must include nonRepudiation (contentCommitment), subjectAltName must carry contact information (URI or email), and certificatePolicies must contain a WRPAC policy OID. Startup fails when the certificate does not conform. | -                                         | -       | No       |
 | `allowed_policy_oids` | `[]string` | AllowedPolicyOIDs optionally narrows which WRPAC certificate policy OIDs are accepted, for a deployment that must assert a specific assurance level. When empty, all four TS 119 411-8 WRPAC policy OIDs are accepted.                                                                            | `["0.4.0.194118.1.3","0.4.0.194118.1.4"]` | -       | No       |
 | `key_config`          | `object`   | Signing key and certificate chain for the access certificate. When set, issuer metadata is signed with this key and the chain is advertised in the JWT's x5c header; credentials continue to be signed with Issuer.KeyConfig.                                                                     | -                                         | -       | No       |
+| `revocation`          | `object`   | Checking this certificate against the CRL distribution points it names. A certificate naming none cannot be checked, which reads as "could not determine" rather than as "not revoked".                                                                                                           | -                                         | -       | No       |
 
 ## `verifier` (Top-level)
 

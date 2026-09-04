@@ -50,6 +50,11 @@ type RegistrationCertificate struct {
 	// skipped when key_config supplies no certificate chain to compare
 	// against.
 	TrustedRootsPath string `yaml:"trusted_roots_path,omitempty"`
+	// Revocation configures checking this certificate against the Token
+	// Status List named in its own status claim. A WRPRC that carries no
+	// status reference cannot be checked at all, which reads as
+	// "could not determine" rather than as "not revoked".
+	Revocation *RevocationCheck `yaml:"revocation,omitempty"`
 }
 
 // DefaultRegistrationCertificateFormat is the verifier_info format
@@ -102,6 +107,24 @@ type WRPRCClaims struct {
 	PrivacyPolicyURI string
 	InfoURI          string
 	RegistryURI      string
+	// StatusListURI and StatusListIndex locate this certificate's entry in
+	// the Registrar's Token Status List, which is how a WRPRC is revoked.
+	// Empty when the Registrar issued no status reference, in which case the
+	// certificate cannot be checked for revocation at all.
+	StatusListURI   string
+	StatusListIndex int
+}
+
+// StatusReference returns the certificate's Token Status List entry, and
+// whether it carried one.
+//
+// A WRPRC without a status reference is not revocable, which a caller must
+// treat as "could not determine" rather than as "not revoked".
+func (c *WRPRCClaims) StatusReference() (uri string, index int, ok bool) {
+	if c == nil || c.StatusListURI == "" {
+		return "", 0, false
+	}
+	return c.StatusListURI, c.StatusListIndex, true
 }
 
 // WRPRCLocalizedText is one language variant of a displayable string.
@@ -365,6 +388,8 @@ func extractWRPRCClaims(token string) (*WRPRCClaims, error) {
 		PrivacyPolicyURI:  ent.PrivacyPolicyURI,
 		InfoURI:           ent.InfoURI,
 		RegistryURI:       ent.RegistryURI,
+		StatusListURI:     ent.StatusListURI,
+		StatusListIndex:   ent.StatusListIndex,
 	}
 	for _, p := range ent.Purpose {
 		claims.Purpose = append(claims.Purpose, WRPRCLocalizedText{Lang: p.Lang, Value: p.Value})
