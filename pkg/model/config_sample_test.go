@@ -12,9 +12,13 @@ import (
 //
 // The presets shape is a breaking change, and a preset left in the old form
 // (scopes directly under the label, with no credentials key) decodes without
-// error into a PresetDefinition with no credentials - so it survives config
-// load and shows up as a button that selects nothing. Nothing about the YAML
-// looks wrong, which is why this is a test rather than a review item.
+// any error at all into a PresetDefinition with no credentials - YAML
+// decoding cannot tell that the scopes went somewhere the new shape does not
+// read. Credentials carries required,min=1, so configuration.New's own
+// helpers.Check would reject it at startup; this test is what turns that
+// into a failure here, on the repository's own sample config, rather than on
+// whoever next boots it. Nothing about the YAML looks wrong, which is why it
+// is worth pinning.
 func TestSampleConfigPresetsMatchSchema(t *testing.T) {
 	b, err := os.ReadFile("../../config.yaml")
 	if err != nil {
