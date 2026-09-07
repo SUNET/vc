@@ -30,6 +30,11 @@ const (
 	errDescMissingOrInvalidBearerToken           = "missing or invalid bearer token"
 )
 
+// jwksFetchTimeout bounds one JWKS fetch. Shorter than the per-request
+// verification deadline below, so a slow endpoint fails the fetch rather
+// than the request that triggered it.
+const jwksFetchTimeout = 5 * time.Second
+
 // RegistrationAuthValidator validates initial access tokens for dynamic client registration.
 type RegistrationAuthValidator interface {
 	Validate(ctx context.Context, token string) error
@@ -208,7 +213,18 @@ func newJWTBearerValidator(cfg *model.DynamicRegistrationJWTAuthConfig) (*jwtBea
 
 	// NOTE: Introspection mode is intentionally deferred.
 	// JWT mode validates token signature and claims locally against JWKS.
-	keySet := oidc.NewRemoteKeySet(context.Background(), cfg.JWKSURI)
+	//
+	// The key set gets its own client with a timeout, because the context
+	// handed to NewRemoteKeySet is the one its fetches actually use.
+	// go-oidc runs the JWKS refresh in a goroutine against that stored
+	// context and selects on the caller's context only to return early - so
+	// a per-request deadline unblocks the request and leaves the fetch
+	// running. With http.DefaultClient, which has no timeout, a stalled
+	// JWKS endpoint hangs that goroutine indefinitely; and since the
+	// inflight request is only cleared when it finishes, every later
+	// verification joins the same dead fetch and times out too.
+	keySetCtx := oidc.ClientContext(context.Background(), &http.Client{Timeout: jwksFetchTimeout})
+	keySet := oidc.NewRemoteKeySet(keySetCtx, cfg.JWKSURI)
 	oidcCfg := &oidc.Config{
 		ClientID:             cfg.Audience,
 		SupportedSigningAlgs: algs,
