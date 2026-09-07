@@ -323,7 +323,7 @@ func (h *ZkHandler) VerifyAndExtract(ctx context.Context, vpToken string, pctx Z
 
 func (h *ZkHandler) verifyOneDocument(ctx context.Context, zkDoc *ZkDocumentMdoc, dd *ZkDocumentDataMdoc, pctx ZkPresentationContext) (*ZkDocumentResult, error) {
 	// 1. Match the declared ZK system against what this verifier requested.
-	_, matched := openid4vp.MatchZKSystemType(pctx.RequestedZkSystems, dd.ZkSystemID)
+	spec, matched := openid4vp.MatchZKSystemType(pctx.RequestedZkSystems, dd.ZkSystemID)
 	if !matched {
 		return nil, fmt.Errorf("zkSystemId %q was not offered in this request's zk_system_type", dd.ZkSystemID)
 	}
@@ -377,7 +377,7 @@ func (h *ZkHandler) verifyOneDocument(ctx context.Context, zkDoc *ZkDocumentMdoc
 	// concept in this v1 circuit - see verifyVegaDocument's own doc
 	// comment), so "which system" and "PPID or not" are kept as two
 	// independent axes rather than folded into one three-way if/else.
-	if strings.HasPrefix(dd.ZkSystemID, "vega-mc") {
+	if isVegaSystem(spec, dd.ZkSystemID) {
 		return h.verifyVegaDocument(ctx, zkDoc, dd, dsCert)
 	}
 
@@ -439,6 +439,31 @@ func (h *ZkHandler) verifyOneDocument(ctx context.Context, zkDoc *ZkDocumentMdoc
 		Claims:     issuerSigned,
 		Pseudonym:  pseudonym,
 	}, nil
+}
+
+// vegaSystemPrefix names the Vega proof-system family, as it appears in a
+// DCQL zk_system_type entry's "system" field (e.g. "vega-mc-p256-v1").
+const vegaSystemPrefix = "vega-mc"
+
+// isVegaSystem decides which verify path a presentation takes.
+//
+// The request's own matched zk_system_type entry is the authority: "system"
+// names the proof system, which is exactly this question, whereas "id"
+// names one circuit build and is free to be spelled however the catalog
+// spells it. Routing on the id's prefix meant a Vega circuit whose id did
+// not happen to start with "vega-mc" went down the Longfellow path and
+// failed there, for reasons that would have looked nothing like a naming
+// problem.
+//
+// The id is still consulted, but only when the matched entry carries no
+// system at all - ZKSystemTypeSpec.System is validate:"required", so that
+// is a request that did not come through validation rather than a shape
+// worth supporting.
+func isVegaSystem(spec *openid4vp.ZKSystemTypeSpec, zkSystemID string) bool {
+	if spec != nil && spec.System != "" {
+		return strings.HasPrefix(spec.System, vegaSystemPrefix)
+	}
+	return strings.HasPrefix(zkSystemID, vegaSystemPrefix)
 }
 
 // verifyVegaDocument verifies a Vega ("vega-mc*") presentation -

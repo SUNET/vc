@@ -170,23 +170,44 @@ func (dd *ZkDocumentDataMdoc) FlattenDeviceSigned() map[string]map[string]any {
 // Returns an error if any disclosed item has no DigestID at all (expected
 // only from a pre-digestId-extension wallet, or a non-Vega presentation
 // mistakenly routed through this path), or if the same DigestID appears
-// more than once (ambiguous - refuses to guess which one was intended,
-// mirroring findClaimInNamespaces' identical stance on a duplicate
-// elementIdentifier).
+// more than once.
+//
+// That second case includes a collision BETWEEN namespaces, which is not a
+// malformed credential: ISO 18013-5 scopes digestID to its namespace, and
+// this package's own MSOBuilder counts from zero per namespace, so two
+// namespaces sharing digestID 0 is entirely well-formed. The limitation is
+// the wire extension's, not the mdoc's - claimSlotDigestIds is a flat list
+// of digestIDs with no namespace beside them, so nothing downstream could
+// place a colliding pair in the right slots even if this map allowed them
+// through. Rejecting is therefore the honest outcome rather than a
+// conservative one, but the error says which namespaces collided so it
+// does not read as a wallet bug. Disclosing across namespaces in one Vega
+// presentation needs a wire change; see that document.
 func (dd *ZkDocumentDataMdoc) IssuerSignedItemsByDigestID() (map[uint32]ZkSignedItemMdoc, error) {
 	out := make(map[uint32]ZkSignedItemMdoc)
+	// Which namespace each digestID came from, so a cross-namespace
+	// collision can be reported as the wire-format constraint it is rather
+	// than as a duplicate the wallet got wrong.
+	seenNS := make(map[uint32]string)
 	for ns, items := range dd.IssuerSigned {
 		for _, item := range items {
 			if item.DigestID == nil {
 				return nil, fmt.Errorf("issuerSigned item %q (namespace %q) has no digestId - required for Vega claim matching", item.ElementIdentifier, ns)
 			}
 			if existing, ok := out[*item.DigestID]; ok {
+				if existingNS, sameNS := seenNS[*item.DigestID]; sameNS && existingNS != ns {
+					return nil, fmt.Errorf(
+						"digestId %d appears in both namespace %q (%q) and namespace %q (%q): digestIDs are namespace-scoped in ISO 18013-5, but claimSlotDigestIds carries no namespace, so a Vega presentation cannot disclose colliding digestIDs from two namespaces",
+						*item.DigestID, existingNS, existing.ElementIdentifier, ns, item.ElementIdentifier,
+					)
+				}
 				return nil, fmt.Errorf(
 					"digestId %d is disclosed more than once (%q and %q) - ambiguous, refusing to guess which one was intended",
 					*item.DigestID, existing.ElementIdentifier, item.ElementIdentifier,
 				)
 			}
 			out[*item.DigestID] = item
+			seenNS[*item.DigestID] = ns
 		}
 	}
 	return out, nil

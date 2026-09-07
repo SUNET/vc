@@ -144,6 +144,23 @@ item's `issuerSignedItemBytes`; if not found (the slot wasn't disclosed),
 `zk_cred_vega`'s `verify()` (Go C-ABI: `CDisclosedInput[MAX_CLAIMS_V1]`)
 requires.
 
+### Known limitation: one namespace per presentation
+
+`digestId` is namespace-scoped in ISO 18013-5, and `claimSlotDigestIds` is
+a flat list of digestIDs with no namespace beside them. A credential whose
+disclosed claims span two namespaces can therefore collide - two
+namespaces counting from zero both have digestID 0, which is perfectly
+well-formed mdoc - and nothing in this extension can say which slot each
+belongs to.
+
+A verifier rejects that case rather than guessing (see
+`IssuerSignedItemsByDigestID`), so it fails safely and says why. But it is
+a real constraint, not a defensive check: **a Vega presentation must
+disclose from a single namespace.** Lifting it means carrying the
+namespace alongside each entry - a wire change, and one to make together
+with whatever answer the question below settles on rather than
+unilaterally.
+
 Same additive/optional shape as the original `digestId` field - both are
 `omitempty`/absent for Longfellow presentations and for any pre-r12 Vega
 artifact, and a verifier that doesn't understand them simply never sees

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
 func digestIDPtr(v uint32) *uint32 { return &v }
@@ -353,5 +355,56 @@ func TestBuildVegaDisclosedBytesRejectsDuplicateSlots(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "both slot 1 and slot 2") {
 		t.Fatalf("error should name both slots, got: %v", err)
+	}
+}
+
+func TestIsVegaSystem(t *testing.T) {
+	// The point of the change: routing follows the request's "system", so a
+	// circuit id that does not look like a Vega id still routes correctly.
+	t.Run("system decides, not the id", func(t *testing.T) {
+		spec := &openid4vp.ZKSystemTypeSpec{ID: "custom-build-2026-09", System: "vega-mc-p256-v1"}
+		if !isVegaSystem(spec, spec.ID) {
+			t.Fatal("a vega-mc system must route to Vega regardless of how its id is spelled")
+		}
+	})
+
+	t.Run("a Longfellow system does not route to Vega", func(t *testing.T) {
+		spec := &openid4vp.ZKSystemTypeSpec{ID: "vega-mc-lookalike", System: "longfellow-libzk-v1"}
+		if isVegaSystem(spec, spec.ID) {
+			t.Fatal("system must win over an id that merely looks like a Vega id")
+		}
+	})
+
+	t.Run("falls back to the id when the spec carries no system", func(t *testing.T) {
+		if !isVegaSystem(&openid4vp.ZKSystemTypeSpec{ID: "vega-mc-p256-v1-r12"}, "vega-mc-p256-v1-r12") {
+			t.Fatal("expected the id fallback for a spec with no system")
+		}
+		if !isVegaSystem(nil, "vega-mc-p256-v1-r12") {
+			t.Fatal("expected the id fallback for a nil spec")
+		}
+		if isVegaSystem(nil, "longfellow-libzk-v1_8_1") {
+			t.Fatal("a Longfellow id must not route to Vega")
+		}
+	})
+}
+
+// TestIssuerSignedItemsByDigestIDNamespaceCollision: digestIDs are
+// namespace-scoped in ISO 18013-5 and this package's MSOBuilder counts from
+// zero per namespace, so a collision across namespaces is well-formed mdoc.
+// claimSlotDigestIds cannot express it, so it is refused - but the error has
+// to say that, or it reads as a wallet bug.
+func TestIssuerSignedItemsByDigestIDNamespaceCollision(t *testing.T) {
+	dd := &ZkDocumentDataMdoc{
+		IssuerSigned: map[string][]ZkSignedItemMdoc{
+			"org.iso.18013.5.1":    {{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: digestIDPtr(0)}},
+			"org.iso.18013.5.1.SE": {{ElementIdentifier: "personal_number", ElementValue: "1", DigestID: digestIDPtr(0)}},
+		},
+	}
+	_, err := dd.IssuerSignedItemsByDigestID()
+	if err == nil {
+		t.Fatal("a cross-namespace digestId collision must be rejected")
+	}
+	if !strings.Contains(err.Error(), "namespace-scoped") {
+		t.Fatalf("the error must explain the wire-format constraint, got: %v", err)
 	}
 }
