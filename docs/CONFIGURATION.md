@@ -1230,11 +1230,13 @@ as the human-readable label.
 
 > **Path:** `.verifier.presets.<preset label>.credentials.<key>`
 
-| Field            | Type    | Description                                                     | Example | Default | Required |
-| ---------------- | ------- | --------------------------------------------------------------- | ------- | ------- | -------- |
-| `claims`         | `array` | Specific claims to request. If empty, all VCTM claims are used. | -       | -       | No       |
-| `exclude_claims` | `array` | Claims to exclude from the DCQL query.                          | -       | -       | No       |
-| `validations`    | `array` | Optional rules applied server-side after claims extraction      | -       | -       | No       |
+| Field            | Type     | Description                                                                                                                                                                                                                                                                    | Example | Default | Required |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
+| `claims`         | `array`  | Specific claims to request. If empty, all VCTM claims are used.                                                                                                                                                                                                                | -       | -       | No       |
+| `exclude_claims` | `array`  | Claims to exclude from the DCQL query.                                                                                                                                                                                                                                         | -       | -       | No       |
+| `validations`    | `array`  | Optional rules applied server-side after claims extraction                                                                                                                                                                                                                     | -       | -       | No       |
+| `format`         | `string` | Format overrides the scope's own credential_metadata format (e.g. requesting "mso_mdoc_zk" - a zero-knowledge proof - over a scope whose credential_metadata format is the plain "mso_mdoc" it's actually issued as). Empty means use the scope's own format unchanged.        | -       | -       | No       |
+| `zk_system_type` | `array`  | ZKSystemType overrides meta.zk_system_type - required whenever Format is set to "mso_mdoc_zk" (openid4vp.FormatMsoMdocZk), since a ZK-mdoc DCQL query has no other way to say which proof system/circuit a verifier accepts. See openid4vp.ZKSystemTypeSpec's own doc comment. | -       | -       | No       |
 
 ### `claims` entry
 
@@ -1253,6 +1255,29 @@ as the human-readable label.
 | `rule`  | `string`   | Validation rule to apply, e.g., "age_over".     | `"age_over"`    | -       | Yes      |
 | `path`  | `[]string` | Claim path to validate, e.g., ["birthdate"].    | `["birthdate"]` | -       | Yes      |
 | `value` | `object`   | Threshold or expected value for the validation. | `18`            | -       | Yes      |
+
+### `zk_system_type` entry
+
+> **Path:** `.verifier.presets.<preset label>.<scope>.zk_system_type[]`
+
+array — a verifier's declaration of one ZK proof system + circuit variant
+it is willing to accept, mirroring multipaz's `ZkSystemSpec` wire shape
+(`{"id": ..., "system": ..., ...params}`, e.g.
+`{"id": "longfellow-libzk-v1_8_1_4259_2945", "system": "longfellow-libzk-v1",
+"num_attributes": 1, "circuit_hash": "...", "block_enc_hash": ...,
+"block_enc_sig": ...}`).
+
+Params is a flat string->string bag (all non-id/system JSON members of the
+wire object). Numeric wire values (e.g. num_attributes, block_enc_hash)
+are carried through as their JSON text representation - callers that need
+a specific field as an int/int64 should parse it themselves. This mirrors
+the DCQL CredentialQuery model overall: format-specific "meta" properties
+are intentionally loosely typed at this layer.
+
+| Field    | Type     | Description                                                                                                                                                                                                                                                                                                                                                           | Example | Default | Required |
+| -------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `id`     | `string` | ID identifies this specific system+circuit combination (e.g. "longfellow-libzk-v1_8_1_4259_2945"). A presented ZK document's own `zkSystemId` (pkg/mdoc.ZkDocumentDataMdoc.ZkSystemID) is expected to equal one of a request's ZKSystemType[].ID entries - this is how a verifier confirms the wallet actually used a circuit it offered, rather than some other one. | -       | -       | Yes      |
+| `system` | `string` | ZK proof system identifier (e.g. "longfellow-libzk-v1"). Params other than "id"/"system" are format-specific (circuit_hash, num_attributes, block_enc_hash, block_enc_sig for Longfellow).                                                                                                                                                                            | -       | -       | Yes      |
 
 ### `combined_presentation`
 
