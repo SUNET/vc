@@ -214,22 +214,24 @@ Example (`config.yaml`):
 
 ```yaml
 verifier:
-      oidc:
-            dynamic_registration_auth:
-                  mode: "static"
-                  static_bearer_token_file: "/run/secrets/verifier_dcr_initial_access_token"
+  outbound:
+    oidc_provider:
+      dynamic_registration_auth:
+        mode: "static"
+        static_bearer_token_file: "/run/secrets/verifier_dcr_initial_access_token"
 ```
 
 ```yaml
 verifier:
-      oidc:
-            dynamic_registration_auth:
-                  mode: "jwt"
-                  jwt:
-                        jwks_uri: "https://auth.example.com/.well-known/jwks.json"
-                        issuer: "https://auth.example.com"
-                        audience: "vc-verifier-register"
-                        allowed_signing_algs: ["RS256", "ES256"]
+  outbound:
+    oidc_provider:
+      dynamic_registration_auth:
+        mode: "jwt"
+        jwt:
+          jwks_uri: "https://auth.example.com/.well-known/jwks.json"
+          issuer: "https://auth.example.com"
+          audience: "vc-verifier-register"
+          allowed_signing_algs: ["RS256", "ES256"]
                         clock_skew_seconds: 60
 ```
 
