@@ -68,11 +68,19 @@ type DisclosedClaim struct {
 // verified, bound public output of a presentation. See that type's own doc
 // comment: this is everything the proof itself proved, NOT a pass/fail
 // against caller-supplied expected values.
+// Tagged explicitly, like every other type here: these names are a wire
+// protocol between two separately-built binaries, so leaving them to
+// default Go field names would let a rename in one silently stop matching
+// the other.
 type VerifyResult struct {
-	Qx, Qy                              []byte
-	Claims                              []DisclosedClaim
-	DeviceX, DeviceY                    []byte
-	SignedTs, ValidFromTs, ValidUntilTs []byte
+	Qx           []byte           `json:"qx"`
+	Qy           []byte           `json:"qy"`
+	Claims       []DisclosedClaim `json:"claims"`
+	DeviceX      []byte           `json:"device_x"`
+	DeviceY      []byte           `json:"device_y"`
+	SignedTs     []byte           `json:"signed_ts"`
+	ValidFromTs  []byte           `json:"valid_from_ts"`
+	ValidUntilTs []byte           `json:"valid_until_ts"`
 }
 
 // Response is the single JSON object the worker writes to stdout before

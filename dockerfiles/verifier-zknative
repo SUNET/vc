@@ -26,7 +26,7 @@
 # (musl libc) like dockerfiles/worker - the native .so files here are
 # built against glibc, and Alpine's musl libc cannot load them.
 
-ARG GOBUILD_IMAGE=golang:1.26.6
+ARG GOBUILD_IMAGE=golang:1.27.0
 FROM ${GOBUILD_IMAGE} AS gobuild
 WORKDIR /go/src/app
 COPY Makefile .
