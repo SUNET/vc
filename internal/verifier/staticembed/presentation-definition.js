@@ -230,7 +230,7 @@ Alpine.data("app", () => ({
     /** @type {boolean} Whether the server has opted in to native DC API attempts. */
     dcApiEnabled: false,
 
-    /** @type {boolean} Whether sendDcqlQuery() calls navigator.credentials.get() itself before falling back to the wallet link/QR - see DigitalCredentialsConfig.AutoAttempt's own doc comment for why this is separate from dcApiEnabled. */
+    /** @type {boolean} Whether sendDcqlQuery() calls navigator.credentials.get() before rendering the wallet link/QR screen; when false it goes straight to that screen. Separate from dcApiEnabled because an OS-level DC API matcher can reject a format with its own dialog before any JS runs, leaving no failure to catch - see DigitalCredentialsConfig.AutoAttempt. */
     dcApiAutoAttempt: true,
 
      /** @type {{ id: string; format: string; vct: string; vct_values?: string[]; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */

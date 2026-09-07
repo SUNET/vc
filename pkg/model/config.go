@@ -949,10 +949,11 @@ type DigitalCredentialsConfig struct {
 	AllowQRFallback *bool `yaml:"allow_qr_fallback" default:"true"`
 
 	// AutoAttempt controls whether the presentation-definition UI calls
-	// navigator.credentials.get() itself when a presentation request is
-	// started, rather than waiting for the operator to pick the native
-	// route (Enable alone only controls whether it is attempted at all, not
-	// whether it is attempted unprompted). Set to false
+	// navigator.credentials.get() as soon as a presentation request starts,
+	// before it renders the same-device wallet link and QR screen. With
+	// false the UI goes straight to that screen and never calls the native
+	// API. (Enable alone only controls whether the native API is available
+	// to attempt at all, not whether the UI attempts it first.) Set to false
 	// to skip straight to the same-device "open in wallet" link/QR fallback
 	// instead - confirmed via live testing that Android's OS-level DC API
 	// credential matcher can reject a non-standard format (e.g. the ZK-mdoc
