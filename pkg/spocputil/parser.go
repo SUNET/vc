@@ -16,6 +16,10 @@ import (
 	"github.com/sirosfoundation/go-spocp/pkg/starform"
 )
 
+// maxRuleLineBytes bounds one rule line. See LoadRulesFromFile's scanner
+// setup for why the default is not enough.
+const maxRuleLineBytes = 4 << 20
+
 // ParseAdvancedSExp parses a human-readable ("advanced form") S-expression into
 // a sexp.Element. This allows users to write rules as:
 //
@@ -64,6 +68,11 @@ func LoadRulesFromFile(engine *spocp.AdaptiveEngine, path string, validate func(
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
+	// bufio.Scanner's default cap is 64KiB, and a rule is one line: a long
+	// but perfectly valid rule would fail the whole file with
+	// bufio.ErrTooLong and stop the service from starting. Raised well past
+	// any plausible rule while still bounding a pathological file.
+	scanner.Buffer(make([]byte, 0, 64*1024), maxRuleLineBytes)
 	lineNum := 0
 	for scanner.Scan() {
 		lineNum++

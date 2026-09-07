@@ -2,6 +2,7 @@ package spocputil
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 
 	spocp "github.com/sirosfoundation/go-spocp"
@@ -40,7 +41,12 @@ func (e *Engine) RuleCount() int {
 func (e *Engine) ExportRules() []sexp.Element {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return e.engine.ExportRules()
+	// A copy, because the wrapped engine hands back its own backing slice.
+	// Returning that would put the rule set behind a read lock the caller
+	// does not hold once this returns - and let a caller reorder or
+	// overwrite entries in place, which is a corrupted policy rather than a
+	// visible error.
+	return slices.Clone(e.engine.ExportRules())
 }
 
 // BuildEngine parses inline rules and an optional rules file into a new

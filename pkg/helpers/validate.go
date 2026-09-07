@@ -378,6 +378,36 @@ func NewValidator() (*validator.Validate, error) {
 		}
 	}, model.VerificationPresetScope{})
 
+	// Register struct-level validation for IssuancePolicy: query_template
+	// must not restate the reserved "scope" dimension or repeat a name.
+	//
+	// policyRuleDimensions prepends "scope" unconditionally (it is
+	// auto-populated with the credential type), so an operator who also
+	// lists it gets two "scope" dimensions in every rule shape - and rules
+	// that can then never match, which reads as a blanket deny with nothing
+	// in the config looking wrong. A repeated name has the same effect.
+	// Validated here rather than in NewPolicyEngine because that runs per
+	// OIDC callback behind a cache, so a failure there is a broken request
+	// rather than a refused start.
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		policy := sl.Current().Interface().(model.IssuancePolicy)
+		seen := make(map[string]bool, len(policy.QueryTemplate))
+		for _, d := range policy.QueryTemplate {
+			switch {
+			case strings.TrimSpace(d.Dimension) == "":
+				sl.ReportError(policy.QueryTemplate, "QueryTemplate", "QueryTemplate", "query_template_dimension_required", d.Claim)
+			case d.Dimension == "scope":
+				sl.ReportError(policy.QueryTemplate, "QueryTemplate", "QueryTemplate", "query_template_scope_is_reserved", d.Dimension)
+			case seen[d.Dimension]:
+				sl.ReportError(policy.QueryTemplate, "QueryTemplate", "QueryTemplate", "query_template_duplicate_dimension", d.Dimension)
+			}
+			seen[d.Dimension] = true
+			if strings.TrimSpace(d.Claim) == "" {
+				sl.ReportError(policy.QueryTemplate, "QueryTemplate", "QueryTemplate", "query_template_claim_required", d.Dimension)
+			}
+		}
+	}, model.IssuancePolicy{})
+
 	// Register struct-level validation for DataSources: openid4vp auth_scopes must not self-reference
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		ds := sl.Current().Interface().(model.DataSources)
