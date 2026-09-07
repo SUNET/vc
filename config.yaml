@@ -99,11 +99,13 @@ verifier:
               path: ["birthdate"]
               value: 18
     "PID + EHIC":
-      pid:
-        exclude_claims:
-          - path: ["trust_anchor"]
-          - path: ["attestation_legal_category"]
-      ehic:
+      category: "Combined"
+      credentials:
+        pid:
+          exclude_claims:
+            - path: ["trust_anchor"]
+            - path: ["attestation_legal_category"]
+        ehic:
 
 registry:
   api_server:

@@ -6,6 +6,7 @@ import {
     getBestSupportedProtocol,
     requestCredentialFromAuthorizationRequestURI,
 } from "./dc-api-polyfill.js";
+import { groupPresets } from "./preset-helpers.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
 const credentialAttributesSchema = v.object({
@@ -299,46 +300,23 @@ Alpine.data("app", () => ({
         if (data.presets) {
             this.predefinedPresentationDefinitions = data.presets;
         }
-        this.presetCategoryOrder = data.preset_category_order;
+        // preset_category_order is omitempty, so it is absent whenever no
+        // preset is categorized - including the featured-but-uncategorized
+        // case, which still takes the grouping path below.
+        this.presetCategoryOrder = data.preset_category_order ?? [];
     },
 
     /**
-     * Groups predefinedPresentationDefinitions for progressive rendering:
-     * featured presets are always shown; everything else is grouped by
-     * category (an "Other presets" catch-all for uncategorized ones) and
-     * left collapsed behind showMorePresets, so an operator with a large
-     * preset catalog doesn't force every visitor to scan a long flat list
-     * before finding the common cases. Falls back to showing every preset
-     * as a single flat "featured" list when none carry category/featured
-     * metadata, preserving the old flat-grid behavior for a simple config.
+     * Groups predefinedPresentationDefinitions for progressive rendering.
+     * The logic lives in preset-helpers.js so it can be unit tested; see
+     * groupPresets there for the ordering and fallback rules.
      * @returns {{ featured: [string, any][], groups: { category: string, presets: [string, any][] }[] }}
      */
     groupedPresets() {
-        const entries = Object.entries(this.predefinedPresentationDefinitions);
-        const anyMetadata = entries.some(([, p]) => p.featured || p.category);
-        if (!anyMetadata) {
-            return { featured: entries, groups: [] };
-        }
-
-        const featured = entries.filter(([, p]) => p.featured);
-        const rest = entries.filter(([, p]) => !p.featured);
-
-        const byCategory = new Map();
-        const otherCategory = "Other presets";
-        for (const entry of rest) {
-            const category = entry[1].category || otherCategory;
-            if (!byCategory.has(category)) byCategory.set(category, []);
-            byCategory.get(category).push(entry);
-        }
-
-        const orderedCategories = [...this.presetCategoryOrder];
-        if (byCategory.has(otherCategory)) orderedCategories.push(otherCategory);
-
-        const groups = orderedCategories
-            .filter((category) => byCategory.has(category))
-            .map((category) => ({ category, presets: byCategory.get(category) }));
-
-        return { featured, groups };
+        return groupPresets(
+            Object.entries(this.predefinedPresentationDefinitions),
+            this.presetCategoryOrder,
+        );
     },
 
     /** @param {string} id */
