@@ -33,12 +33,13 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"github.com/SUNET/vc/pkg/mdoc/zkvegaworker"
-	"github.com/SUNET/vc/pkg/openid4vp"
-	"github.com/SUNET/vc/pkg/trust"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/SUNET/vc/pkg/mdoc/zkvegaworker"
+	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/trust"
 
 	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
