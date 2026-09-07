@@ -378,6 +378,15 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 						return nil, fmt.Errorf("failed to compute JWK thumbprint for scope %s: %w", scope, err)
 					}
 					readerPubKeyThumbprint = tp
+				} else {
+					// A miss means the key expired or was evicted between
+					// issuing the request and the wallet answering it. The
+					// wallet built ITS transcript with that key, so carrying
+					// on with a nil thumbprint guarantees a mismatch - and
+					// one that surfaces as an opaque proof failure rather
+					// than as the cache miss it actually is.
+					c.log.Error(nil, "ephemeral encryption key missing from cache for ZK session transcript", "scope", scope, "key_id", authCtx.EphemeralEncryptionKeyID)
+					return nil, fmt.Errorf("ephemeral encryption key %q is no longer cached, cannot rebuild the session transcript the wallet used for scope %s", authCtx.EphemeralEncryptionKeyID, scope)
 				}
 			}
 			sessionTranscript, err := mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)

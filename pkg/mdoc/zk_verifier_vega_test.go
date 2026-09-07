@@ -8,6 +8,7 @@ package mdoc
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 )
@@ -172,6 +173,162 @@ func TestCheckVegaValidityWindow(t *testing.T) {
 		now := time.Now()
 		if err := checkVegaValidityWindow([]byte("not-a-timestamp"), validUntil, now); err == nil {
 			t.Fatal("expected malformed valid_from_ts to be rejected")
+		}
+	})
+}
+
+// buildVegaItemBytes builds a real #6.24(bstr .cbor IssuerSignedItem), the
+// framing ISO 18013-5 specifies. Built through EncodedCBORBytes rather than
+// hand-assembled so the test actually exercises the tag-24 unwrap path -
+// a bare CBOR map here would silently take the fallback branch instead.
+func buildVegaItemBytes(t *testing.T, digestID uint32, identifier string, value any) []byte {
+	t.Helper()
+	enc, err := NewCBOREncoder()
+	if err != nil {
+		t.Fatalf("NewCBOREncoder: %v", err)
+	}
+	inner, err := enc.Marshal(vegaIssuerSignedItem{
+		DigestID:          digestID,
+		Random:            []byte("0123456789abcdef"),
+		ElementIdentifier: identifier,
+		ElementValue:      value,
+	})
+	if err != nil {
+		t.Fatalf("marshal inner item: %v", err)
+	}
+	wrapped, err := enc.Marshal(EncodedCBORBytes(inner))
+	if err != nil {
+		t.Fatalf("wrap in tag 24: %v", err)
+	}
+	if len(wrapped) < 2 || wrapped[0] != 0xd8 || wrapped[1] != 0x18 {
+		t.Fatalf("expected a tag-24 prefix, got % x", wrapped[:min(4, len(wrapped))])
+	}
+	return wrapped
+}
+
+func vegaWireDoc(items ...ZkSignedItemMdoc) *ZkDocumentDataMdoc {
+	return &ZkDocumentDataMdoc{
+		IssuerSigned: map[string][]ZkSignedItemMdoc{Namespace: items},
+	}
+}
+
+// TestCheckVegaWireMatchesProofBoundItems covers the property that a
+// successful verify() does NOT provide on its own: verify() authenticates
+// the issuerSignedItemBytes, while the claims handed downstream come from
+// the separate wire-declared elementIdentifier/elementValue fields.
+func TestCheckVegaWireMatchesProofBoundItems(t *testing.T) {
+	t.Run("agreeing wire and proof-bound item is accepted", func(t *testing.T) {
+		dd := vegaWireDoc(ZkSignedItemMdoc{
+			ElementIdentifier:     "given_name",
+			ElementValue:          "Jane",
+			DigestID:              digestIDPtr(300),
+			IssuerSignedItemBytes: buildVegaItemBytes(t, 300, "given_name", "Jane"),
+		})
+		if err := checkVegaWireMatchesProofBoundItems(dd); err != nil {
+			t.Fatalf("expected agreement to be accepted, got: %v", err)
+		}
+	})
+
+	// The attack: bind the genuine bytes so verify() passes, then declare
+	// something else on the wire.
+	t.Run("lying elementValue is rejected", func(t *testing.T) {
+		dd := vegaWireDoc(ZkSignedItemMdoc{
+			ElementIdentifier:     "given_name",
+			ElementValue:          "Mallory",
+			DigestID:              digestIDPtr(300),
+			IssuerSignedItemBytes: buildVegaItemBytes(t, 300, "given_name", "Jane"),
+		})
+		err := checkVegaWireMatchesProofBoundItems(dd)
+		if err == nil {
+			t.Fatal("a wire value that disagrees with the proof-bound value must be rejected")
+		}
+		if !strings.Contains(err.Error(), "elementValue") {
+			t.Fatalf("error should name the mismatching field, got: %v", err)
+		}
+	})
+
+	t.Run("lying elementIdentifier is rejected", func(t *testing.T) {
+		// Relabelling is as damaging as changing the value: the identifier
+		// becomes the claim key downstream, so age_over_21's bytes could be
+		// presented as age_over_18.
+		dd := vegaWireDoc(ZkSignedItemMdoc{
+			ElementIdentifier:     "age_over_18",
+			ElementValue:          true,
+			DigestID:              digestIDPtr(300),
+			IssuerSignedItemBytes: buildVegaItemBytes(t, 300, "age_over_21", true),
+		})
+		if err := checkVegaWireMatchesProofBoundItems(dd); err == nil {
+			t.Fatal("a wire identifier that disagrees with the proof-bound one must be rejected")
+		}
+	})
+
+	t.Run("lying digestId is rejected", func(t *testing.T) {
+		dd := vegaWireDoc(ZkSignedItemMdoc{
+			ElementIdentifier:     "given_name",
+			ElementValue:          "Jane",
+			DigestID:              digestIDPtr(301),
+			IssuerSignedItemBytes: buildVegaItemBytes(t, 300, "given_name", "Jane"),
+		})
+		if err := checkVegaWireMatchesProofBoundItems(dd); err == nil {
+			t.Fatal("a wire digestId that disagrees with the proof-bound one must be rejected")
+		}
+	})
+
+	t.Run("absent wire digestId is rejected", func(t *testing.T) {
+		dd := vegaWireDoc(ZkSignedItemMdoc{
+			ElementIdentifier:     "given_name",
+			ElementValue:          "Jane",
+			DigestID:              nil,
+			IssuerSignedItemBytes: buildVegaItemBytes(t, 300, "given_name", "Jane"),
+		})
+		if err := checkVegaWireMatchesProofBoundItems(dd); err == nil {
+			t.Fatal("a missing wire digestId must be rejected, not treated as agreement")
+		}
+	})
+
+	t.Run("undecodable issuerSignedItemBytes is rejected", func(t *testing.T) {
+		dd := vegaWireDoc(ZkSignedItemMdoc{
+			ElementIdentifier:     "given_name",
+			ElementValue:          "Jane",
+			DigestID:              digestIDPtr(300),
+			IssuerSignedItemBytes: []byte{0xff, 0xff, 0xff},
+		})
+		if err := checkVegaWireMatchesProofBoundItems(dd); err == nil {
+			t.Fatal("bytes that decode as neither framing must be rejected")
+		}
+	})
+
+	// The bare-map framing is accepted deliberately - see
+	// decodeVegaIssuerSignedItem's doc comment - and must compare identically.
+	t.Run("bare-map framing is compared the same way", func(t *testing.T) {
+		enc, err := NewCBOREncoder()
+		if err != nil {
+			t.Fatal(err)
+		}
+		bare, err := enc.Marshal(vegaIssuerSignedItem{
+			DigestID:          300,
+			Random:            []byte("0123456789abcdef"),
+			ElementIdentifier: "given_name",
+			ElementValue:      "Jane",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ok := vegaWireDoc(ZkSignedItemMdoc{
+			ElementIdentifier: "given_name", ElementValue: "Jane",
+			DigestID: digestIDPtr(300), IssuerSignedItemBytes: bare,
+		})
+		if err := checkVegaWireMatchesProofBoundItems(ok); err != nil {
+			t.Fatalf("bare map that agrees should be accepted, got: %v", err)
+		}
+
+		lying := vegaWireDoc(ZkSignedItemMdoc{
+			ElementIdentifier: "given_name", ElementValue: "Mallory",
+			DigestID: digestIDPtr(300), IssuerSignedItemBytes: bare,
+		})
+		if err := checkVegaWireMatchesProofBoundItems(lying); err == nil {
+			t.Fatal("bare map that disagrees must still be rejected")
 		}
 	})
 }

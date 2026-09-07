@@ -33,11 +33,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/trust"
 	"sort"
 	"strings"
 	"time"
-	"github.com/SUNET/vc/pkg/openid4vp"
-	"github.com/SUNET/vc/pkg/trust"
 
 	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
@@ -463,11 +463,14 @@ func (h *ZkHandler) verifyVegaDocument(ctx context.Context, zkDoc *ZkDocumentMdo
 		return nil, err
 	}
 
-	// checkVegaDisclosedClaimsMatchWire's job (pre-r12) is now done more
-	// strongly, and earlier, by BuildVegaDisclosedBytes + verify() itself:
-	// disclosedBytes above IS the wire's own issuerSignedItemBytes, so a
-	// successful verify() already proves the proof's binding matches the
-	// EXACT wire bytes, not just their decoded elementValue.
+	// verify() proves the proof commits to the EXACT bytes in
+	// disclosedBytes - but not that the elementIdentifier/elementValue the
+	// wire declares alongside them say the same thing. Those are separate
+	// fields, and the claims handed downstream come from them, so they have
+	// to be checked against the bytes the proof actually bound.
+	if err := checkVegaWireMatchesProofBoundItems(dd); err != nil {
+		return nil, err
+	}
 
 	if err := checkVegaValidityWindow(result.ValidFromTs, result.ValidUntilTs, h.clock()); err != nil {
 		return nil, err
@@ -531,6 +534,125 @@ func BuildVegaDisclosedBytes(dd *ZkDocumentDataMdoc) ([][]byte, error) {
 	}
 
 	return disclosedBytes, nil
+}
+
+// vegaIssuerSignedItem is the CBOR shape inside a disclosed slot's
+// issuerSignedItemBytes - the credential's original ISO 18013-5
+// IssuerSignedItem. random never otherwise crosses the wire, which is why
+// these bytes cannot be reconstructed from the wire-declared fields and
+// have to travel intact (see docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md's r12
+// addendum).
+type vegaIssuerSignedItem struct {
+	DigestID          uint32 `cbor:"digestID"`
+	Random            []byte `cbor:"random"`
+	ElementIdentifier string `cbor:"elementIdentifier"`
+	ElementValue      any    `cbor:"elementValue"`
+}
+
+// checkVegaWireMatchesProofBoundItems is the check that stops a wallet
+// proving one claim and declaring another.
+//
+// r12's verify() takes each disclosed slot's issuerSignedItemBytes as an
+// input and rejects the proof unless it committed to exactly those bytes.
+// That authenticates the BYTES. It says nothing about
+// ZkSignedItemMdoc.ElementIdentifier and .ElementValue, which are separate
+// wire fields - and those are what FlattenIssuerSigned hands downstream.
+// Without this, a wallet could send the genuine bytes for a claim it holds
+// (so the proof verifies) while declaring any identifier and value it
+// liked, and the verifier would surface the declared ones.
+//
+// Pre-r12 this was checkVegaDisclosedClaimsMatchWire, comparing the wire
+// against the plaintext verify() used to return. r12 stopped returning it,
+// and the check went with it; this is the same guarantee rebuilt against
+// the bytes instead.
+//
+// Must run only AFTER a successful verify(): it parses issuerSignedItemBytes,
+// and verify() having accepted them is what makes them trustworthy input
+// rather than attacker-chosen CBOR.
+func checkVegaWireMatchesProofBoundItems(dd *ZkDocumentDataMdoc) error {
+	enc, err := NewCBOREncoder()
+	if err != nil {
+		return fmt.Errorf("failed to create CBOR encoder: %w", err)
+	}
+
+	for ns, items := range dd.IssuerSigned {
+		for _, item := range items {
+			if len(item.IssuerSignedItemBytes) == 0 {
+				// BuildVegaDisclosedBytes already rejects this; a disclosed
+				// item with no bytes never reaches a successful verify().
+				return fmt.Errorf("claim %q (namespace %q) has no issuerSignedItemBytes to check the wire against", item.ElementIdentifier, ns)
+			}
+
+			bound, err := decodeVegaIssuerSignedItem(enc, item.IssuerSignedItemBytes)
+			if err != nil {
+				return fmt.Errorf("claim %q (namespace %q): %w", item.ElementIdentifier, ns, err)
+			}
+
+			if item.DigestID == nil || *item.DigestID != bound.DigestID {
+				wire := "absent"
+				if item.DigestID != nil {
+					wire = fmt.Sprintf("%d", *item.DigestID)
+				}
+				return fmt.Errorf(
+					"claim %q (namespace %q): wire-declared digestId %s does not match the proof-bound item's digestID %d",
+					item.ElementIdentifier, ns, wire, bound.DigestID,
+				)
+			}
+
+			if item.ElementIdentifier != bound.ElementIdentifier {
+				return fmt.Errorf(
+					"namespace %q, digestId %d: wire declares elementIdentifier %q but the proof-bound item says %q",
+					ns, bound.DigestID, item.ElementIdentifier, bound.ElementIdentifier,
+				)
+			}
+
+			// Canonical CBOR on both sides, so equality does not depend on Go
+			// value identity - see buildZkAttributes' own doc comment.
+			wireValue, err := enc.Marshal(item.ElementValue)
+			if err != nil {
+				return fmt.Errorf("claim %q (namespace %q): failed to encode wire-declared value: %w", item.ElementIdentifier, ns, err)
+			}
+			boundValue, err := enc.Marshal(bound.ElementValue)
+			if err != nil {
+				return fmt.Errorf("claim %q (namespace %q): failed to encode proof-bound value: %w", item.ElementIdentifier, ns, err)
+			}
+			if !bytes.Equal(wireValue, boundValue) {
+				return fmt.Errorf(
+					"claim %q (namespace %q, digestId %d): wire-declared elementValue does not match the value the proof bound",
+					item.ElementIdentifier, ns, bound.DigestID,
+				)
+			}
+		}
+	}
+	return nil
+}
+
+// decodeVegaIssuerSignedItem parses one disclosed slot's
+// issuerSignedItemBytes.
+//
+// ISO 18013-5 frames IssuerSignedItemBytes as #6.24(bstr .cbor
+// IssuerSignedItem), and that is what a producer sending "the exact
+// original item bytes" should emit. The bare map is accepted too: no
+// captured wallet artifact is checked in here to pin the framing, and
+// siros-sdk-swift has not implemented Vega at all yet, so refusing one
+// form would be guessing. Being lenient here costs nothing - verify() has
+// already accepted these bytes, so this is parsing authenticated data, and
+// the comparison the caller makes is identical either way.
+func decodeVegaIssuerSignedItem(enc *CBOREncoder, raw []byte) (*vegaIssuerSignedItem, error) {
+	var item vegaIssuerSignedItem
+
+	var inner EncodedCBORBytes
+	if err := enc.Unmarshal(raw, &inner); err == nil {
+		if err := enc.Unmarshal(inner, &item); err != nil {
+			return nil, fmt.Errorf("decoding tag-24-wrapped issuerSignedItemBytes: %w", err)
+		}
+		return &item, nil
+	}
+
+	if err := enc.Unmarshal(raw, &item); err != nil {
+		return nil, fmt.Errorf("issuerSignedItemBytes is neither #6.24(bstr) nor a bare IssuerSignedItem map: %w", err)
+	}
+	return &item, nil
 }
 
 // checkVegaIssuerKeyMatches rejects a proof whose recomputed issuer public
