@@ -64,6 +64,12 @@ ZK_CRED_VEGA_REF  ?= main
 ZK_CRED_VEGA_CHECKOUT := third_party/.zk-cred-vega-src
 ZK_CRED_VEGA_STAGE    := third_party/zk-cred-vega
 
+# Both libraries, always. The verifier binary links Longfellow, and it execs
+# zkvegaverifyworker, which links Vega and inherits this from it - so a path
+# carrying only one of them fails at load time for whichever half is missing,
+# and the Vega half fails in the subprocess where it is least obvious.
+ZKNATIVE_LD_PATH := $(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/lib:$(CURDIR)/$(ZK_CRED_VEGA_STAGE)/lib
+
 # bbsnative: blind BBS issuance (pkg/bbs), via cgo against zk-cred-bbs's
 # Go C-ABI build. Same opt-in shape and same reason as zknative above.
 # Unlike Longfellow, this one is needed on the ISSUER side: an issuer
@@ -346,7 +352,7 @@ zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native Z
 	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi/zk_cred_longfellow_go.h" "$(ZK_CRED_LONGFELLOW_STAGE)/include/"
 	cp "$(ZK_CRED_LONGFELLOW_CHECKOUT)/target/go-cabi"/libzk_cred_longfellow.* "$(ZK_CRED_LONGFELLOW_STAGE)/lib/"
 	@echo "Staged zk-cred-longfellow's Go C-ABI lib + header in $(ZK_CRED_LONGFELLOW_STAGE)"
-	@echo "Build/test with: CGO_ENABLED=1 LD_LIBRARY_PATH=\$$(pwd)/$(ZK_CRED_LONGFELLOW_STAGE)/lib go {build,test} -tags $(ZKNATIVE_TAG) ./..."
+	@echo "Build/test with: CGO_ENABLED=1 LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) go {build,test} -tags $(ZKNATIVE_TAG) ./..."
 
 bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not staged
 	@# Both halves, not just the archive: cgo needs the header to compile at
@@ -405,7 +411,7 @@ zk-native-lib-vega: ## Fetch/build zk-cred-vega's Go C-ABI library for native Ve
 
 test-zknative: ## Run pkg/mdoc's zknative-tagged tests (requires: make zk-native-lib zk-native-lib-vega)
 	$(info Testing with zknative build tag - requires 'make zk-native-lib zk-native-lib-vega' first)
-	CGO_ENABLED=1 LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/lib:$(CURDIR)/$(ZK_CRED_VEGA_STAGE)/lib \
+	CGO_ENABLED=1 LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) \
 		go test -tags $(ZKNATIVE_TAG) -v ./pkg/mdoc/...
 
 # DIDComm v2.1 Test targets
@@ -639,7 +645,7 @@ build-verifier-zknative: ## Build verifier with native ZK/PPID proof verificatio
 		CGO_LDFLAGS="-L$(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/lib -lzk_cred_longfellow" \
 		go build -tags $(ZKNATIVE_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_verifier-zknative \
 		$(LDFLAGS_DYNAMIC) ./cmd/verifier/
-	@echo "Run with: LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/lib ./bin/$(NAME)_verifier-zknative"
+	@echo "Run with: LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) ./bin/$(NAME)_verifier-zknative"
 
 build-zkvegaverifyworker: ## Build the isolated Vega ZK-verify subprocess worker (requires: make zk-native-lib-vega)
 	$(info Building zkvegaverifyworker - requires 'make zk-native-lib-vega' first)
@@ -648,7 +654,7 @@ build-zkvegaverifyworker: ## Build the isolated Vega ZK-verify subprocess worker
 		CGO_LDFLAGS="-L$(CURDIR)/$(ZK_CRED_VEGA_STAGE)/lib -lzk_cred_vega" \
 		go build -tags $(ZKNATIVE_TAG) $(BUILD_FLAGS) -o ./bin/zkvegaverifyworker \
 		$(LDFLAGS_DYNAMIC) ./cmd/zkvegaverifyworker/
-	@echo "Run the verifier with: PATH=$(CURDIR)/bin:\$$PATH LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_VEGA_STAGE)/lib ./bin/$(NAME)_verifier-zknative"
+	@echo "Run the verifier with: PATH=$(CURDIR)/bin:\$$PATH LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) ./bin/$(NAME)_verifier-zknative"
 	@echo "(zkvegaverifyworker resolves via PATH by default - see ZkVerifierConfig.VegaWorkerPath to override)"
 
 # ==============================================================================

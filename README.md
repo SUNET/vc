@@ -303,17 +303,18 @@ make zk-native-lib-vega   # Vega
 make build-verifier-zknative
 make build-zkvegaverifyworker
 
-# 3. Run the verifier - it needs Longfellow's shared library on the
-#    loader path, and zkvegaverifyworker's binary somewhere on PATH (or
-#    point ZkVerifierConfig.VegaWorkerPath at it directly).
-LD_LIBRARY_PATH=$(pwd)/third_party/zk-cred-longfellow/lib \
+# 3. Run the verifier. Both shared libraries need to be on the loader
+#    path - the verifier binary links Longfellow, and it execs
+#    zkvegaverifyworker, which links Vega and inherits this environment.
+#    The worker's binary also needs to be on PATH (or point
+#    ZkVerifierConfig.VegaWorkerPath at it directly).
+LD_LIBRARY_PATH=$(pwd)/third_party/zk-cred-longfellow/lib:$(pwd)/third_party/zk-cred-vega/lib \
   PATH=$(pwd)/bin:$PATH \
   ./bin/vc_verifier-zknative
 
 # ...or run pkg/mdoc's zknative-tagged tests directly (covers both
-# systems - the Vega package's own cgo tests need its library staged
-# too, via LD_LIBRARY_PATH, even though the verifier binary itself
-# doesn't link it):
+# systems; make test-zknative sets the loader path for both libraries
+# itself):
 make test-zknative
 ```
 
