@@ -69,11 +69,13 @@ export function groupPresets(entries, categoryOrder) {
     // Only the categories the server actually listed, in its order.
     const ordered = (categoryOrder ?? []).filter((category) => byCategory.has(category));
 
-    // Anything the server did not list still has to render. preset_category_order
-    // omits a category whose only presets are featured, and an operator or an
-    // older server can leave it incomplete - dropping the group silently would
-    // make presets disappear from the UI with nothing in the config looking
-    // wrong. Append the leftovers alphabetically instead.
+    // Anything the server did not list still has to render. The two lists do
+    // not have to agree: preset_category_order is derived from every
+    // categorized preset, featured or not, so it can name a category that
+    // forms no group here (all of its presets were featured), and an older or
+    // partial server can leave a category out of it entirely. Dropping an
+    // unlisted group silently would make presets disappear from the UI with
+    // nothing in the config looking wrong, so append the leftovers instead.
     const listed = new Set(ordered);
     const unlisted = [...byCategory.keys()]
         .filter((category) => category !== OTHER_CATEGORY && !listed.has(category))

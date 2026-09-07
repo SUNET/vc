@@ -50,7 +50,7 @@ services:
       - ./config.yaml:/config.yaml:ro
       - ./developer_tools/pki/:/pki:ro
       - ./metadata/:/metadata/:ro
-      - ./internal/verifier/static:/static:ro
+      - ./internal/verifier/staticembed:/static:ro
       - ./presentation_requests:/presentation_requests:ro
     depends_on:
       - mongo

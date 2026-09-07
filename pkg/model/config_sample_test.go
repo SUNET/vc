@@ -21,7 +21,7 @@ func TestSampleConfigPresetsMatchSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Lenient, matching how configuration.Parse loads it: the sample config
+	// Lenient, matching how configuration.New loads it: the sample config
 	// carries keys this package does not model, and pinning those is not this
 	// test's job.
 	var cfg Cfg
@@ -29,6 +29,9 @@ func TestSampleConfigPresetsMatchSchema(t *testing.T) {
 		t.Fatalf("config.yaml does not decode: %v", err)
 	}
 
+	if cfg.Verifier == nil {
+		t.Fatal("config.yaml parsed no verifier block")
+	}
 	if len(cfg.Verifier.Presets) == 0 {
 		t.Fatal("config.yaml parsed no verifier presets")
 	}

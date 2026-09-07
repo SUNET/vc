@@ -552,7 +552,7 @@ type PresetDefinition struct {
 	// Credentials maps credential_metadata scopes to optional overrides. At
 	// least one scope is required - see VerificationPreset's own doc comment
 	// for what a nil scope value means.
-	Credentials VerificationPreset `yaml:"credentials" validate:"required,dive"`
+	Credentials VerificationPreset `yaml:"credentials" validate:"required,min=1,dive"`
 	// Category groups this preset under a UI heading shared with every
 	// other preset carrying the same Category string. Presets with no
 	// Category fall into a generic catch-all group. Purely cosmetic - does
