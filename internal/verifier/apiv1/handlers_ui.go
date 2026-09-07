@@ -278,9 +278,6 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 						// doctype_value above and has no vct to offer.
 						uiCred.Meta.VCTValues = vs
 					}
-					if mddl := meta.GetMDDL(); mddl != nil {
-						uiCred.Meta.DoctypeValue = mddl.DocType
-					}
 				}
 
 				// A preset's Format/ZKSystemType override lets an otherwise

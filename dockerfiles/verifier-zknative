@@ -51,18 +51,24 @@ RUN make proto-verifier
 
 ARG TARGETARCH=amd64
 ENV CGO_ENABLED=1
-ENV CGO_CFLAGS="-I/go/src/app/third_party/zk-cred-longfellow/include -I/go/src/app/third_party/zk-cred-vega/include"
-ENV CGO_LDFLAGS="-L/go/src/app/third_party/zk-cred-longfellow/lib -L/go/src/app/third_party/zk-cred-vega/lib -lzk_cred_longfellow -lzk_cred_vega"
-
-# The verifier binary itself only ever links Longfellow's cgo binding -
-# see nativeVerifyZkProofVega's own doc comment for why Vega's is confined
-# to the separate zkvegaverifyworker binary below instead. Harmless that
-# CGO_LDFLAGS above names both libraries for this build: an unused
-# -l flag is not an error, and keeping one shared CGO_CFLAGS/LDFLAGS
-# environment for both `go build` invocations in this Dockerfile is
-# simpler than threading two different sets through.
+# Each binary is built against only the library it actually uses, rather
+# than one shared environment naming both.
+#
+# The verifier links Longfellow's cgo binding only - Vega's is confined to
+# the zkvegaverifyworker binary below, which is the whole point: a
+# memory-safety fault in the Vega library takes down one short-lived
+# subprocess instead of the process serving other requests (see
+# nativeVerifyZkProofVega's own doc comment). The Go side already
+# guarantees this - `go list -tags zknative -deps ./pkg/mdoc` names
+# pkg/mdoc/zknative and not zknative_vega - but passing -lzk_cred_vega to
+# the verifier's link step left that guarantee resting on the linker
+# dropping an unreferenced -l via --as-needed. Without it the verifier
+# would carry a DT_NEEDED on libzk_cred_vega.so and map it into its own
+# address space, which is exactly what the subprocess exists to avoid.
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
+    CGO_CFLAGS="-I/go/src/app/third_party/zk-cred-longfellow/include" \
+    CGO_LDFLAGS="-L/go/src/app/third_party/zk-cred-longfellow/lib -lzk_cred_longfellow" \
     go build -v -tags zknative -o bin/vc_verifier -ldflags \
     "-X vc/pkg/model.BuildVariableGitCommit=$(git rev-list -1 HEAD) \
     -X vc/pkg/model.BuildVariableGitBranch=$(git rev-parse --abbrev-ref HEAD) \
@@ -74,6 +80,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
+    CGO_CFLAGS="-I/go/src/app/third_party/zk-cred-vega/include" \
+    CGO_LDFLAGS="-L/go/src/app/third_party/zk-cred-vega/lib -lzk_cred_vega" \
     go build -v -tags zknative -o bin/zkvegaverifyworker -ldflags "-w -s" ./cmd/zkvegaverifyworker
 
 # Deploy — glibc base required for the native .so files (see top-of-file note).
