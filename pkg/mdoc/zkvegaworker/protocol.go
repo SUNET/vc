@@ -13,11 +13,17 @@
 // either way, exactly one request per process invocation - see this
 // package's own doc on why the worker isn't a long-lived pooled process
 // yet). The worker writes exactly one Response as a single JSON object to
-// stdout, then exits 0 (a struct Response.Result was produced, possibly
-// nil for a rejected-but-not-erroring... no: Result is always set on
-// success) or non-zero (Response.Error is set; process also exits
-// non-zero so a caller that fails to parse stdout at all still sees
-// something went wrong via the exit code).
+// stdout, then exits. Two invariants, and a caller may rely on both:
+//
+//   - exit 0 means Response.Result is set and Response.Error is empty.
+//   - a non-zero exit means Response.Error is set and Response.Result is
+//     nil. The exit code carries the failure as well as the body, so a
+//     caller that cannot parse stdout at all still learns something went
+//     wrong.
+//
+// There is no third case: the worker never exits 0 with a nil Result to
+// mean "rejected but not errored". A proof that fails verification is an
+// error.
 //
 // See docs/ZK_PPID_VERIFICATION_PLAN.md for the subprocess-isolation
 // rationale: the cgo call touching attacker-supplied

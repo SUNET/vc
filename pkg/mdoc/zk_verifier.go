@@ -65,6 +65,14 @@ var ErrNativeZkVerifyNotImplemented = errors.New(
 	"native Longfellow ZK proof verification is not available in this build/direction (see docs/ZK_PPID_VERIFICATION_PLAN.md)",
 )
 
+// ErrNativeVegaVerifyNotImplemented is the Vega counterpart. Separate from
+// the Longfellow error above because the two are built and staged
+// independently: naming the wrong system sends whoever reads the log
+// looking at the wrong library and the wrong build flag.
+var ErrNativeVegaVerifyNotImplemented = errors.New(
+	"native Vega ZK proof verification is not available in this build (rebuild with -tags zknative and zk-cred-vega staged - see docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md)",
+)
+
 // ZkAttribute mirrors zk-cred-longfellow's own `Attribute` FFI record
 // (see zk-cred-longfellow/src/mdoc_zk/verifier.rs): an element identifier
 // plus the CBOR encoding of its value - the shape the native

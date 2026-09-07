@@ -71,5 +71,5 @@ func nativeVerifyZkProofVega(
 	zkCircuitSources []string,
 	workerPath string,
 ) (zkvegaworker.VerifyResult, error) {
-	return zkvegaworker.VerifyResult{}, ErrNativeZkVerifyNotImplemented
+	return zkvegaworker.VerifyResult{}, ErrNativeVegaVerifyNotImplemented
 }
