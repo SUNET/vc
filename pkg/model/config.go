@@ -1024,8 +1024,9 @@ type DynamicRegistrationAuthConfig struct {
 	// Mode controls registration authorization behavior.
 	// Supported values: open, static, jwt.
 	//
-	// Future option (not implemented yet): introspection.
-	Mode string `yaml:"mode,omitempty" default:"open" validate:"omitempty,oneof=open static jwt introspection"`
+	// Future option (not implemented yet): introspection, which the
+	// validator rejects until it is.
+	Mode string `yaml:"mode,omitempty" default:"open" validate:"omitempty,oneof=open static jwt"`
 
 	// StaticBearerTokenFile points to a file containing the expected bearer token (single line).
 	// Required when Mode=static.

@@ -1188,11 +1188,11 @@ These clients are checked in addition to dynamically registered clients stored i
 
 > **Path:** `.verifier.outbound.oidc_provider.dynamic_registration_auth`
 
-| Field                      | Type     | Description                                                                                                                   | Example | Default | Required                  |
-| -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | ------------------------- |
-| `mode`                     | `string` | Registration authorization behavior. Supported values: open, static, jwt. Future option (not implemented yet): introspection. | -       | `open`  | No                        |
-| `static_bearer_token_file` | `string` | StaticBearerTokenFile points to a file containing the expected bearer token (single line). Required when Mode=static.         | -       | -       | Yes (if mode is "static") |
-| `jwt`                      | `object` | JWT config for Mode=jwt.                                                                                                      | -       | -       | Yes (if mode is "jwt")    |
+| Field                      | Type     | Description                                                                                                                                                            | Example | Default | Required                  |
+| -------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | ------------------------- |
+| `mode`                     | `string` | Registration authorization behavior. Supported values: open, static, jwt. Future option (not implemented yet): introspection, which the validator rejects until it is. | -       | `open`  | No                        |
+| `static_bearer_token_file` | `string` | StaticBearerTokenFile points to a file containing the expected bearer token (single line). Required when Mode=static.                                                  | -       | -       | Yes (if mode is "static") |
+| `jwt`                      | `object` | JWT config for Mode=jwt.                                                                                                                                               | -       | -       | Yes (if mode is "jwt")    |
 
 ### `jwt`
 
