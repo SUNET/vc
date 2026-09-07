@@ -36,6 +36,8 @@ import (
 	"runtime"
 	"sync"
 	"unsafe"
+
+	"github.com/SUNET/vc/pkg/mdoc/zkvegaworker"
 )
 
 // MaxClaims/MaxClaimBytes/TimestampLen mirror the crate's own
@@ -49,6 +51,18 @@ const (
 	MaxClaimBytes  = int(C.ZK_CRED_VEGA_MAX_CLAIM_BYTES)
 	TimestampLen   = int(C.ZK_CRED_VEGA_TIMESTAMP_LEN)
 	P256CoordBytes = 32
+)
+
+// The verifier-side builder cannot see the header - it must compile without
+// this tag - so it takes the slot count from zkvegaworker instead. These two
+// declarations fail to compile if that value and the crate's ever diverge:
+// a constant conversion to uint rejects a negative, so one of the pair
+// underflows unless they are equal. A circuit revision that changes
+// MAX_CLAIMS then breaks the tagged build here, rather than silently
+// producing a disclosedBytes slice the worker rejects at runtime.
+const (
+	_ = uint(MaxClaims - zkvegaworker.MaxClaims)
+	_ = uint(zkvegaworker.MaxClaims - MaxClaims)
 )
 
 // VerifierKey wraps an opaque, deserialized zk-cred-vega verifier-key

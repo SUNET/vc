@@ -33,6 +33,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/SUNET/vc/pkg/mdoc/zkvegaworker"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/trust"
 	"sort"
@@ -482,12 +483,11 @@ func (h *ZkHandler) verifyVegaDocument(ctx context.Context, zkDoc *ZkDocumentMdo
 	}, nil
 }
 
-// vegaMaxClaims mirrors zk-cred-vega's MAX_CLAIMS_V1 (also
-// VegaProofSystem.MAX_CLAIMS_V1 in siros-sdk-kotlin, ZK_CRED_VEGA_MAX_CLAIMS
-// in zk_cred_vega_go.h) - duplicated here (not imported from the
-// "zknative"-tagged zknative_vega package) since this file has no zknative
-// build tag and must compile in both configurations.
-const vegaMaxClaims = 4
+// vegaMaxClaims is the Vega circuit's fixed claim-slot count, from the
+// shared non-cgo package rather than restated here: zknative_vega holds the
+// authoritative value but only compiles under the zknative tag, and this
+// file has to build in both configurations. See zkvegaworker.MaxClaims.
+const vegaMaxClaims = zkvegaworker.MaxClaims
 
 // BuildVegaDisclosedBytes builds zk_cred_vega's r12 verify() input: exactly
 // vegaMaxClaims entries, in claim-slot order, each either a disclosed

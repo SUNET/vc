@@ -26,6 +26,18 @@
 // worker, not the process serving other in-flight requests.
 package zkvegaworker
 
+// MaxClaims is zk-cred-vega's MAX_CLAIMS_V1: the fixed number of claim
+// slots a v1 circuit has, and so the exact length of Request.DisclosedBytes.
+//
+// It lives here because this package is the one both sides can import - the
+// authoritative value is C.ZK_CRED_VEGA_MAX_CLAIMS in the crate's header,
+// but that is only reachable under the cgo build tag, and the verifier-side
+// builder has to know the slot count without it. zknative_vega asserts at
+// compile time that this matches the header, so a circuit revision that
+// changes the count fails the tagged build instead of producing wire data
+// the worker then rejects at runtime.
+const MaxClaims = 4
+
 // Request is the single JSON object the main process writes to the
 // worker's stdin.
 type Request struct {
