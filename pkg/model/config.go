@@ -545,9 +545,11 @@ type AdminGUI struct {
 // A nil value means "request all VCTM claims with no overrides".
 type VerificationPreset map[string]*VerificationPresetScope
 
-// PresetDefinition is a single named verification preset - what it requests,
-// plus how it should be organized in the UI. The parent Presets map's key
-// serves as the human-readable label.
+// PresetDefinition is a single named verification preset.
+//
+// It holds the credentials the preset requests, plus optional metadata for
+// how the UI should group and order it. The parent Presets map's key serves
+// as the human-readable label.
 type PresetDefinition struct {
 	// Credentials maps credential_metadata scopes to optional overrides. At
 	// least one scope is required - see VerificationPreset's own doc comment

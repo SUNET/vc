@@ -93,6 +93,21 @@ describe("groupPresets", () => {
         assert.deepEqual(got.groups.map((g) => g.category), ["Named", OTHER_CATEGORY]);
     });
 
+    // An operator may name a category "Other presets" explicitly. It can then
+    // appear in preset_category_order AND be appended as the catch-all, which
+    // rendered the same presets twice.
+    it("renders an explicitly-named Other presets category only once", () => {
+        const entries = [
+            preset("named", { category: OTHER_CATEGORY }),
+            preset("uncategorized", {}),
+            preset("feat", { featured: true }),
+        ];
+        const got = groupPresets(entries, [OTHER_CATEGORY]);
+        const headings = got.groups.map((g) => g.category);
+        assert.deepEqual(headings, [OTHER_CATEGORY], "the catch-all must appear exactly once");
+        assert.deepEqual(labels(got.groups[0].presets), ["named", "uncategorized"]);
+    });
+
     it("does not mutate its input", () => {
         const entries = [preset("B", { order: 2 }), preset("A", { order: 1 })];
         const snapshot = labels(entries);

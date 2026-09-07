@@ -66,8 +66,14 @@ export function groupPresets(entries, categoryOrder) {
         byCategory.get(category)?.push(entry);
     }
 
-    // Only the categories the server actually listed, in its order.
-    const ordered = (categoryOrder ?? []).filter((category) => byCategory.has(category));
+    // Only the categories the server actually listed, in its order. The
+    // catch-all heading is excluded even if the server named it: an operator
+    // is free to set category: "Other presets" explicitly, and it is
+    // appended once at the end below - taking it here as well would render
+    // the same presets twice.
+    const ordered = (categoryOrder ?? []).filter(
+        (category) => category !== OTHER_CATEGORY && byCategory.has(category),
+    );
 
     // Anything the server did not list still has to render. The two lists do
     // not have to agree: preset_category_order is derived from every

@@ -1170,8 +1170,9 @@ These clients are checked in addition to dynamically registered clients stored i
 
 > **Path:** `.verifier.presets.<preset label>`
 
-plus how it should be organized in the UI. The parent Presets map's key
-serves as the human-readable label.
+It holds the credentials the preset requests, plus optional metadata for
+how the UI should group and order it. The parent Presets map's key serves
+as the human-readable label.
 
 | Field         | Type     | Description                                                                                                                                                                                                                                                  | Example | Default | Required |
 | ------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
