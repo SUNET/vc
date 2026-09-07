@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -163,8 +164,15 @@ func extractBearerToken(authHeader string) (string, error) {
 	return token, nil
 }
 
+// staticBearerValidator holds the expected token as a SHA-256 digest.
+//
+// subtle.ConstantTimeCompare returns early when the two slices differ in
+// length, so comparing raw tokens is not constant-time in the length
+// dimension - a caller can learn how long the expected token is by timing.
+// Digests are always 32 bytes, so the comparison that matters runs over a
+// fixed width regardless of what was presented.
 type staticBearerValidator struct {
-	token string
+	tokenDigest [sha256.Size]byte
 }
 
 func newStaticBearerValidator(tokenFilePath string) (*staticBearerValidator, error) {
@@ -182,11 +190,12 @@ func newStaticBearerValidator(tokenFilePath string) (*staticBearerValidator, err
 		return nil, fmt.Errorf("static bearer token file is empty")
 	}
 
-	return &staticBearerValidator{token: token}, nil
+	return &staticBearerValidator{tokenDigest: sha256.Sum256([]byte(token))}, nil
 }
 
 func (v *staticBearerValidator) Validate(_ context.Context, token string) error {
-	if subtle.ConstantTimeCompare([]byte(token), []byte(v.token)) != 1 {
+	presented := sha256.Sum256([]byte(token))
+	if subtle.ConstantTimeCompare(presented[:], v.tokenDigest[:]) != 1 {
 		return unauthorizedRegistrationError(errDescInvalidRegistrationAuthorizationToken)
 	}
 

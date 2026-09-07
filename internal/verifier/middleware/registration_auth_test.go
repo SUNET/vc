@@ -3,6 +3,7 @@ package middleware
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/json"
 	"math/big"
 	"net/http"
@@ -213,12 +214,20 @@ func TestRegistrationAuthMiddlewareIntrospectionModeNotImplemented(t *testing.T)
 }
 
 func TestStaticBearerValidatorConstantTimeComparison(t *testing.T) {
-	validator := &staticBearerValidator{token: "expected-token"}
+	validator := &staticBearerValidator{tokenDigest: sha256.Sum256([]byte("expected-token"))}
 
 	err := validator.Validate(t.Context(), "expected-token")
 	require.NoError(t, err)
 
 	err = validator.Validate(t.Context(), "wrong-token")
+	require.Error(t, err)
+
+	// Different length, which is the case the digest comparison exists for:
+	// comparing raw tokens would have returned early on the length check.
+	err = validator.Validate(t.Context(), "x")
+	require.Error(t, err)
+
+	err = validator.Validate(t.Context(), "")
 	require.Error(t, err)
 	var authErr *registrationAuthError
 	require.ErrorAs(t, err, &authErr)
