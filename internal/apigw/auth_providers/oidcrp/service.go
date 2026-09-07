@@ -251,7 +251,12 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string, oidcP
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	// Store dynamic params in session for later retrieval during policy evaluation
+	// Stored so the callback can template the outgoing OIDC request
+	// parameters from them. NOT for policy evaluation: they are unverified
+	// caller input from the PAR body, and issuance policy is evaluated
+	// against OP-asserted claims only - see Session.DynamicParams and the
+	// note in apiv1.handlers_oidcrp for why letting them stand in for a
+	// claim the OP did not assert would let a caller forge any dimension.
 	if len(dynamicParams) > 0 {
 		session.DynamicParams = dynamicParams
 		s.sessionCache.Set(ctx, session.ID, session)
@@ -333,8 +338,8 @@ func (s *Service) InitiateAuthForVCI(ctx context.Context, credentialType, vciSes
 // reservedOIDCParams are authorization request parameters that CustomParams
 // must not be allowed to set, since oauth2.AuthCodeOption values are applied
 // by key (last write wins) - letting an operator-configured custom param
-// collide with one of these would silently override state/nonce/PKCE
-// guarantees set earlier in BuildAuthorizationURL.
+// collide with one of these would silently override the state/nonce/PKCE
+// guarantees InitiateAuth sets before calling AuthCodeURL.
 var reservedOIDCParams = map[string]bool{
 	"response_type":         true,
 	"client_id":             true,

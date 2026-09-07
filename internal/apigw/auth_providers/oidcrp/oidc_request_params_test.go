@@ -14,7 +14,7 @@ import (
 // parameter (e.g. "nonce", "state", "code_challenge") is rejected, since
 // oauth2.AuthCodeOption values are applied by key with last-write-wins
 // semantics and would otherwise silently override state/nonce/PKCE
-// guarantees set by BuildAuthorizationURL.
+// guarantees InitiateAuth sets before calling AuthCodeURL.
 func TestResolveOIDCRequestParams_CustomParamsCannotOverrideReserved(t *testing.T) {
 	for reserved := range reservedOIDCParams {
 		t.Run(reserved, func(t *testing.T) {
