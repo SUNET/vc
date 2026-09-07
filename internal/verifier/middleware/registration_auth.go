@@ -239,9 +239,10 @@ func newJWTBearerValidator(cfg *model.DynamicRegistrationJWTAuthConfig) (*jwtBea
 		SupportedSigningAlgs: algs,
 	}
 	// go-oidc has no leeway setting, so skew is applied by moving the clock
-	// the expiry check reads: a token that expired within the tolerance is
-	// still accepted. See ClockSkewSeconds' own doc comment for why this
-	// covers exp only.
+	// it reads. That one clock serves both time checks, in opposite
+	// directions: a token that expired within the tolerance is still
+	// accepted, and go-oidc's fixed five-minute nbf leeway shrinks by the
+	// same amount. See ClockSkewSeconds' own doc comment.
 	if cfg.ClockSkewSeconds > 0 {
 		skew := time.Duration(cfg.ClockSkewSeconds) * time.Second
 		oidcCfg.Now = func() time.Time { return time.Now().Add(-skew) }

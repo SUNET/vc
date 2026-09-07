@@ -1053,10 +1053,13 @@ type DynamicRegistrationJWTAuthConfig struct {
 	// ClockSkewSeconds is how far the token's exp may lie in the past and
 	// still be accepted, for a client whose clock runs behind ours.
 	//
-	// It covers exp only, which is narrower than it sounds and worth being
-	// exact about: the underlying verifier (coreos/go-oidc) applies its own
-	// fixed five-minute leeway to nbf and cannot be told otherwise, and it
-	// does not validate iat at all. Zero disables the tolerance.
+	// The underlying verifier (coreos/go-oidc) has no leeway setting, so
+	// this is applied by moving the clock it reads. That clock serves two
+	// checks, and the effect on each is opposite: exp is relaxed by this
+	// much, and go-oidc's own fixed five-minute nbf leeway is reduced by
+	// the same amount. Keep it well under five minutes, or a token whose
+	// nbf is legitimately a little in the future stops being accepted. iat
+	// is not validated at all. Zero disables both effects.
 	ClockSkewSeconds int `yaml:"clock_skew_seconds,omitempty" default:"60"`
 }
 
