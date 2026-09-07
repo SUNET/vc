@@ -251,12 +251,17 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string, oidcP
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	// Stored so the callback can template the outgoing OIDC request
-	// parameters from them. NOT for policy evaluation: they are unverified
-	// caller input from the PAR body, and issuance policy is evaluated
-	// against OP-asserted claims only - see Session.DynamicParams and the
-	// note in apiv1.handlers_oidcrp for why letting them stand in for a
-	// claim the OP did not assert would let a caller forge any dimension.
+	// Persisted on the session, but note that nothing reads it back today:
+	// the templating below uses the dynamicParams argument directly, in
+	// this same call, before the redirect. This is state kept for a
+	// consumer that does not exist yet.
+	//
+	// Whatever that consumer turns out to be, it must not be policy
+	// evaluation. These are unverified caller input from the PAR body, and
+	// issuance policy is evaluated against OP-asserted claims only - see
+	// Session.DynamicParams and the note in apiv1.handlers_oidcrp for why
+	// letting them stand in for a claim the OP did not assert would let a
+	// caller forge any dimension.
 	if len(dynamicParams) > 0 {
 		session.DynamicParams = dynamicParams
 		s.sessionCache.Set(ctx, session.ID, session)
