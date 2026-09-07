@@ -1059,8 +1059,12 @@ type DynamicRegistrationJWTAuthConfig struct {
 	// much, and go-oidc's own fixed five-minute nbf leeway is reduced by
 	// the same amount. Keep it well under five minutes, or a token whose
 	// nbf is legitimately a little in the future stops being accepted. iat
-	// is not validated at all. Zero disables both effects.
-	ClockSkewSeconds int `yaml:"clock_skew_seconds,omitempty" default:"60"`
+	// is not validated at all. Zero disables both effects, and the upper
+	// bound is one second short of go-oidc's nbf leeway - at or past it the
+	// leeway is gone and a token with a legitimately future nbf starts
+	// being rejected, which is the opposite of what raising a skew
+	// tolerance is meant to achieve.
+	ClockSkewSeconds int `yaml:"clock_skew_seconds,omitempty" default:"60" validate:"omitempty,min=0,max=299"`
 }
 
 // OpenID4VPConfig holds OpenID4VP-specific configuration

@@ -349,3 +349,39 @@ func TestRegistrationAuthHeaderErrorsAreInvalidRequest(t *testing.T) {
 		})
 	}
 }
+
+// TestStaticBearerTokenFileContents covers the file shapes that cannot
+// produce a working bearer token. Rejecting them at startup keeps the
+// message about the file; left to run, they present as every registration
+// attempt failing authentication.
+func TestStaticBearerTokenFileContents(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		contents  string
+		wantError string
+	}{
+		{name: "plain token", contents: "s3cret"},
+		{name: "trailing newline is trimmed", contents: "s3cret\n"},
+		{name: "surrounding whitespace is trimmed", contents: "  s3cret\t\n"},
+		{name: "empty", contents: "", wantError: "empty"},
+		{name: "whitespace only", contents: " \n\t ", wantError: "empty"},
+		{name: "token plus a comment line", contents: "s3cret\n# the registration token\n", wantError: "whitespace inside"},
+		{name: "two tokens", contents: "s3cret other\n", wantError: "whitespace inside"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "token")
+			if err := os.WriteFile(path, []byte(tc.contents), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			v, err := newStaticBearerValidator(path)
+			if tc.wantError == "" {
+				require.NoError(t, err)
+				require.NoError(t, v.Validate(t.Context(), "s3cret"))
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantError)
+		})
+	}
+}

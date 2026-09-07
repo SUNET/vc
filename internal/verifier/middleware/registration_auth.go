@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -201,6 +202,15 @@ func newStaticBearerValidator(tokenFilePath string) (*staticBearerValidator, err
 	token := strings.TrimSpace(string(content))
 	if token == "" {
 		return nil, fmt.Errorf("static bearer token file is empty")
+	}
+	// Surrounding whitespace is trimmed above, but whitespace *inside* the
+	// value cannot be sent in an Authorization header, so such a file can
+	// never match any request. Caught here, where the message can say the
+	// file is wrong - left to run, it surfaces later as every registration
+	// attempt being rejected, which reads as an auth failure rather than a
+	// configuration one.
+	if strings.ContainsFunc(token, unicode.IsSpace) {
+		return nil, fmt.Errorf("static bearer token file contains whitespace inside the token (expected a single line holding only the token)")
 	}
 
 	return &staticBearerValidator{tokenDigest: sha256.Sum256([]byte(token))}, nil

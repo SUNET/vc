@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/model"
@@ -76,6 +77,51 @@ func TestDynamicRegistrationAuthModeMatchesConfig(t *testing.T) {
 				}
 			}
 			t.Fatalf("expected a %q failure, got: %v", tc.wantTag, err)
+		})
+	}
+}
+
+// TestDynamicRegistrationJWTClockSkewBound pins the accepted range.
+//
+// The upper bound is one second short of go-oidc's fixed five-minute nbf
+// leeway: the same knob that relaxes exp shrinks that leeway by the same
+// amount, so at or past 300 a token with a legitimately future nbf starts
+// being rejected - the opposite of what raising a skew tolerance is for.
+// Negative values would otherwise be silently treated as disabled.
+func TestDynamicRegistrationJWTClockSkewBound(t *testing.T) {
+	v, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base := func(skew int) model.DynamicRegistrationJWTAuthConfig {
+		return model.DynamicRegistrationJWTAuthConfig{
+			JWKSURI:          "https://auth.example.com/jwks.json",
+			Issuer:           "https://auth.example.com",
+			Audience:         "vc-verifier-register",
+			ClockSkewSeconds: skew,
+		}
+	}
+
+	for _, tc := range []struct {
+		skew       int
+		wantReject bool
+	}{
+		{-1, true},
+		{0, false},
+		{60, false},
+		{299, false},
+		{300, true},
+		{3600, true},
+	} {
+		t.Run(fmt.Sprintf("skew_%d", tc.skew), func(t *testing.T) {
+			err := v.Struct(base(tc.skew))
+			if tc.wantReject && err == nil {
+				t.Fatalf("clock_skew_seconds=%d must be rejected", tc.skew)
+			}
+			if !tc.wantReject && err != nil {
+				t.Fatalf("clock_skew_seconds=%d must be accepted, got: %v", tc.skew, err)
+			}
 		})
 	}
 }
