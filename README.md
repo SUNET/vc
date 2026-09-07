@@ -232,7 +232,7 @@ verifier:
           issuer: "https://auth.example.com"
           audience: "vc-verifier-register"
           allowed_signing_algs: ["RS256", "ES256"]
-                        clock_skew_seconds: 60
+          clock_skew_seconds: 60
 ```
 
 Note: `introspection` is reserved for future implementation and is not enabled yet.

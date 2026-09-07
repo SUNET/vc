@@ -268,3 +268,64 @@ func TestRSAExponentEncodingSanity(t *testing.T) {
 	assert.True(t, privateKey.PublicKey.E > 0)
 	assert.True(t, privateKey.PublicKey.N.Cmp(big.NewInt(0)) > 0)
 }
+
+// TestRegistrationAuthHeaderErrorsAreInvalidRequest pins RFC 6750 section
+// 3.1's split: a missing or malformed Authorization header is
+// invalid_request, and only a credential that was actually judged and
+// rejected is invalid_token. Answering "your token is bad" to a client that
+// sent no token sends it looking in the wrong place.
+func TestRegistrationAuthHeaderErrorsAreInvalidRequest(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "token")
+	if err := os.WriteFile(tokenFile, []byte("s3cret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &model.Cfg{Verifier: &model.Verifier{
+		Outbound: model.VerifierOutbound{OIDCProvider: &model.OIDCOP{
+			DynamicRegistrationAuth: &model.DynamicRegistrationAuthConfig{
+				Mode:                  "static",
+				StaticBearerTokenFile: tokenFile,
+			},
+		}},
+	}}
+
+	mw, err := NewRegistrationAuthMiddleware(cfg, nil)
+	if err != nil {
+		t.Fatalf("middleware: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		header   string
+		wantCode string
+	}{
+		{"no header at all", "", "invalid_request"},
+		{"not a bearer scheme", "Basic dXNlcjpwYXNz", "invalid_request"},
+		{"bearer with no value", "Bearer", "invalid_request"},
+		{"well-formed but wrong token", "Bearer wrong", "invalid_token"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/register", nil)
+			if tc.header != "" {
+				c.Request.Header.Set("Authorization", tc.header)
+			}
+
+			mw(c)
+
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("want 401, got %d", rec.Code)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode body: %v (%s)", err, rec.Body.String())
+			}
+			if got := body["error"]; got != tc.wantCode {
+				t.Errorf("error code: want %q, got %v", tc.wantCode, got)
+			}
+		})
+	}
+}

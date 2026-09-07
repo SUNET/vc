@@ -1049,7 +1049,13 @@ type DynamicRegistrationJWTAuthConfig struct {
 	// AllowedSigningAlgs restricts accepted JWT signing algorithms.
 	AllowedSigningAlgs []string `yaml:"allowed_signing_algs,omitempty" default:"[\"RS256\",\"ES256\"]"`
 
-	// ClockSkewSeconds configures tolerated clock skew for exp/nbf/iat validation.
+	// ClockSkewSeconds is how far the token's exp may lie in the past and
+	// still be accepted, for a client whose clock runs behind ours.
+	//
+	// It covers exp only, which is narrower than it sounds and worth being
+	// exact about: the underlying verifier (coreos/go-oidc) applies its own
+	// fixed five-minute leeway to nbf and cannot be told otherwise, and it
+	// does not validate iat at all. Zero disables the tolerance.
 	ClockSkewSeconds int `yaml:"clock_skew_seconds,omitempty" default:"60"`
 }
 

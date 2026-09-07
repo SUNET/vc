@@ -19,6 +19,12 @@ import (
 )
 
 const (
+	// RFC 6750 section 3.1 separates these: invalid_request is for a
+	// malformed or missing Authorization header, invalid_token for a
+	// syntactically valid credential that was rejected. Collapsing them
+	// tells a client "your token is bad" when the real answer is "you did
+	// not send one".
+	errCodeInvalidRequest                        = "invalid_request"
 	errCodeInvalidToken                          = "invalid_token"
 	errDescInvalidRegistrationAuthorizationToken = "invalid registration authorization token"
 	errDescMissingOrInvalidBearerToken           = "missing or invalid bearer token"
@@ -43,6 +49,16 @@ func unauthorizedRegistrationError(description string) *registrationAuthError {
 	return &registrationAuthError{
 		status:      http.StatusUnauthorized,
 		errorCode:   errCodeInvalidToken,
+		description: description,
+	}
+}
+
+// malformedRequestError is the header-level failure: nothing was presented
+// that could be judged as a token.
+func malformedRequestError(description string) *registrationAuthError {
+	return &registrationAuthError{
+		status:      http.StatusUnauthorized,
+		errorCode:   errCodeInvalidRequest,
 		description: description,
 	}
 }
@@ -79,7 +95,7 @@ func NewRegistrationAuthMiddleware(cfg *model.Cfg, log *logger.Log) (gin.Handler
 	return func(c *gin.Context) {
 		token, err := extractBearerToken(c.GetHeader("Authorization"))
 		if err != nil {
-			writeRegistrationAuthError(c, unauthorizedRegistrationError(errDescMissingOrInvalidBearerToken))
+			writeRegistrationAuthError(c, malformedRequestError(errDescMissingOrInvalidBearerToken))
 			return
 		}
 
@@ -193,10 +209,19 @@ func newJWTBearerValidator(cfg *model.DynamicRegistrationJWTAuthConfig) (*jwtBea
 	// NOTE: Introspection mode is intentionally deferred.
 	// JWT mode validates token signature and claims locally against JWKS.
 	keySet := oidc.NewRemoteKeySet(context.Background(), cfg.JWKSURI)
-	verifier := oidc.NewVerifier(cfg.Issuer, keySet, &oidc.Config{
+	oidcCfg := &oidc.Config{
 		ClientID:             cfg.Audience,
 		SupportedSigningAlgs: algs,
-	})
+	}
+	// go-oidc has no leeway setting, so skew is applied by moving the clock
+	// the expiry check reads: a token that expired within the tolerance is
+	// still accepted. See ClockSkewSeconds' own doc comment for why this
+	// covers exp only.
+	if cfg.ClockSkewSeconds > 0 {
+		skew := time.Duration(cfg.ClockSkewSeconds) * time.Second
+		oidcCfg.Now = func() time.Time { return time.Now().Add(-skew) }
+	}
+	verifier := oidc.NewVerifier(cfg.Issuer, keySet, oidcCfg)
 
 	return &jwtBearerValidator{verifier: verifier}, nil
 }
