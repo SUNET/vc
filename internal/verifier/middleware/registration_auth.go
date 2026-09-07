@@ -61,9 +61,15 @@ func unauthorizedRegistrationError(description string) *registrationAuthError {
 
 // malformedRequestError is the header-level failure: nothing was presented
 // that could be judged as a token.
+//
+// 400, not 401, per RFC 6750 section 3.1. The distinction is not cosmetic:
+// clients commonly treat 401 as "the token was rejected, refresh and retry",
+// and answering that to a request whose Authorization header was missing or
+// unparseable sends them into a refresh loop over a request that will never
+// succeed until it is corrected.
 func malformedRequestError(description string) *registrationAuthError {
 	return &registrationAuthError{
-		status:      http.StatusUnauthorized,
+		status:      http.StatusBadRequest,
 		errorCode:   errCodeInvalidRequest,
 		description: description,
 	}

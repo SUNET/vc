@@ -93,7 +93,9 @@ func TestRegistrationAuthMiddlewareStaticMode(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, registerPath, nil)
 		resp := httptest.NewRecorder()
 		r.ServeHTTP(resp, req)
-		assert.Equal(t, http.StatusUnauthorized, resp.Code)
+		// 400, not 401: no Authorization header at all is invalid_request
+		// per RFC 6750 section 3.1, not a rejected token.
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
 	})
 
 	t.Run("invalid token", func(t *testing.T) {
@@ -304,15 +306,19 @@ func TestRegistrationAuthHeaderErrorsAreInvalidRequest(t *testing.T) {
 		t.Fatalf("middleware: %v", err)
 	}
 
+	// RFC 6750 section 3.1 pairs each code with a status: invalid_request is
+	// 400, invalid_token is 401. Asserting both together, since a client
+	// keying off the status alone is the case that matters.
 	for _, tc := range []struct {
-		name     string
-		header   string
-		wantCode string
+		name       string
+		header     string
+		wantCode   string
+		wantStatus int
 	}{
-		{"no header at all", "", "invalid_request"},
-		{"not a bearer scheme", "Basic dXNlcjpwYXNz", "invalid_request"},
-		{"bearer with no value", "Bearer", "invalid_request"},
-		{"well-formed but wrong token", "Bearer wrong", "invalid_token"},
+		{"no header at all", "", "invalid_request", http.StatusBadRequest},
+		{"not a bearer scheme", "Basic dXNlcjpwYXNz", "invalid_request", http.StatusBadRequest},
+		{"bearer with no value", "Bearer", "invalid_request", http.StatusBadRequest},
+		{"well-formed but wrong token", "Bearer wrong", "invalid_token", http.StatusUnauthorized},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
@@ -325,8 +331,8 @@ func TestRegistrationAuthHeaderErrorsAreInvalidRequest(t *testing.T) {
 
 			mw(c)
 
-			if rec.Code != http.StatusUnauthorized {
-				t.Fatalf("want 401, got %d", rec.Code)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("want status %d, got %d", tc.wantStatus, rec.Code)
 			}
 			var body map[string]any
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
