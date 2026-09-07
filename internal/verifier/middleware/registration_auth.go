@@ -149,6 +149,13 @@ func buildRegistrationAuthValidator(mode string, authCfg *model.DynamicRegistrat
 
 func writeRegistrationAuthError(c *gin.Context, authErr *registrationAuthError) {
 	c.Header("WWW-Authenticate", fmt.Sprintf("Bearer error=\"%s\"", authErr.errorCode))
+	// RFC 6749 section 5.2, and matching what the OIDC endpoints already do
+	// (see verifier/httpserver/endpoints_oidc.go): an authorization error is
+	// specific to one request's credential, so an intermediary holding on to
+	// it could answer a later, differently-credentialled request with a
+	// stale refusal.
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
 	c.JSON(authErr.status, gin.H{
 		"error":             authErr.errorCode,
 		"error_description": authErr.description,

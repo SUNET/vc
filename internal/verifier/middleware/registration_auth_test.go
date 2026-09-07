@@ -127,16 +127,21 @@ func TestRegistrationAuthMiddlewareJWTMode(t *testing.T) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
+	// Built here, not in the handler: httptest runs the handler on its own
+	// goroutine, and require's failure path calls t.FailNow, which the
+	// testing package documents as safe only from the goroutine running the
+	// test. Under -race that is a data race rather than a clean failure.
+	key, err := jwk.Import(privateKey.Public())
+	require.NoError(t, err)
+	require.NoError(t, key.Set(jwk.KeyIDKey, jwtKid))
+	set := jwk.NewSet()
+	require.NoError(t, set.AddKey(key))
+	jwksJSON, err := json.Marshal(set)
+	require.NoError(t, err)
+
 	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		key, err := jwk.Import(privateKey.Public())
-		require.NoError(t, err)
-		require.NoError(t, key.Set(jwk.KeyIDKey, jwtKid))
-
-		set := jwk.NewSet()
-		require.NoError(t, set.AddKey(key))
-
 		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(set))
+		_, _ = w.Write(jwksJSON)
 	}))
 	defer jwksServer.Close()
 
