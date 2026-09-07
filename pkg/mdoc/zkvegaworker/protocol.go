@@ -19,9 +19,8 @@
 // non-zero so a caller that fails to parse stdout at all still sees
 // something went wrong via the exit code).
 //
-// See docs/ZK_PPID_VERIFICATION_PLAN.md and
-// ~/.claude/plans/dreamy-frolicking-chipmunk.md's Phase 2/3 for the
-// subprocess-isolation rationale: the cgo call touching attacker-supplied
+// See docs/ZK_PPID_VERIFICATION_PLAN.md for the subprocess-isolation
+// rationale: the cgo call touching attacker-supplied
 // proof bytes runs in this isolated worker, not the main verifier process,
 // so a memory-safety fault in the native library only takes down one
 // worker, not the process serving other in-flight requests.

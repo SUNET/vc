@@ -47,8 +47,7 @@ both sides already agree on independently, so nothing extra needs to cross
 the wire.
 
 Vega (`zk-cred-vega`, a second, general-purpose ZK circuit backend this
-org is integrating alongside Longfellow - see
-`~/.claude/plans/dreamy-frolicking-chipmunk.md`) does not share that
+org is integrating alongside Longfellow) does not share that
 property. Its circuit has a fixed number of claim slots, but slot
 assignment is the **credential's own document order** (stable per
 credential, independent of which claims a given presentation discloses -

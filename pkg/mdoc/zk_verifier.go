@@ -440,10 +440,8 @@ func (h *ZkHandler) verifyOneDocument(ctx context.Context, zkDoc *ZkDocumentMdoc
 // credential's own validity window - is real, new comparison logic the
 // Longfellow path never needed (it hands its own expected values IN and
 // gets a bare pass/fail back). Vega presentations never carry a
-// pseudonym - this v1 circuit has no PPID concept at all (see
-// [[project_vega_broader_circuit_ambitions]] / the tracked plan's Phase 6
-// for the real research task pseudonym support needs before that
-// changes).
+// pseudonym - this v1 circuit has no PPID concept at all, and adding it
+// is a design task rather than a port of the Longfellow PPID scheme.
 func (h *ZkHandler) verifyVegaDocument(ctx context.Context, zkDoc *ZkDocumentMdoc, dd *ZkDocumentDataMdoc, dsCert *x509.Certificate) (*ZkDocumentResult, error) {
 	disclosedBytes, err := BuildVegaDisclosedBytes(dd)
 	if err != nil {
@@ -506,6 +504,19 @@ const vegaMaxClaims = 4
 func BuildVegaDisclosedBytes(dd *ZkDocumentDataMdoc) ([][]byte, error) {
 	if len(dd.ClaimSlotDigestIds) != vegaMaxClaims {
 		return nil, fmt.Errorf("expected exactly %d claimSlotDigestIds (one per Vega circuit slot), got %d", vegaMaxClaims, len(dd.ClaimSlotDigestIds))
+	}
+
+	// A digestId appearing in two slots would place one wire item's bytes
+	// in both, silently building a differently-shaped input than the
+	// credential the proof was made over - and the "every disclosed item is
+	// bound" check below would still pass, since it only asks whether each
+	// item was used at all.
+	seenSlots := make(map[uint32]int, len(dd.ClaimSlotDigestIds))
+	for i, digestID := range dd.ClaimSlotDigestIds {
+		if first, dup := seenSlots[digestID]; dup {
+			return nil, fmt.Errorf("claimSlotDigestIds lists digestId %d in both slot %d and slot %d - ambiguous, refusing to guess which slot it belongs to", digestID, first, i)
+		}
+		seenSlots[digestID] = i
 	}
 
 	byDigestID, err := dd.IssuerSignedItemsByDigestID()

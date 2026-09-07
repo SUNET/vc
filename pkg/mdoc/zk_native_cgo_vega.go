@@ -6,9 +6,9 @@ package mdoc
 // the Vega counterpart of zk_native_cgo.go's nativeVerifyZkProofWithPPID.
 //
 // Unlike the Longfellow path, this does NOT link zk-cred-vega's cgo
-// binding directly into this process. Per the agreed cgo-risk mitigation
-// (see ~/.claude/plans/dreamy-frolicking-chipmunk.md's "cgo risk decision"
-// and pkg/mdoc/zknative_vega's own package doc), the actual cgo call
+// binding directly into this process. The reason is the cgo risk this
+// package cannot mitigate any other way (see pkg/mdoc/zknative_vega's own
+// package doc, and docs/ZK_PPID_VERIFICATION_PLAN.md): the actual cgo call
 // touching attacker-controlled proof bytes runs in the isolated
 // cmd/zkvegaverifyworker subprocess instead: this file only resolves the
 // wallet-declared zkSystemId to a verifier-key artifact (caching the raw
@@ -110,6 +110,15 @@ func runZkVegaVerifyWorker(ctx context.Context, workerPath string, verifierKeyBy
 	}
 	if resp.Result == nil {
 		return zkvegaworker.VerifyResult{}, fmt.Errorf("worker reported neither a result nor an error")
+	}
+	// A parseable success response is not on its own proof the worker
+	// finished cleanly: it could have written a result and then died (a
+	// fault in the native library after the answer was serialized, or a
+	// context kill). The protocol says a successful worker exits zero, so a
+	// non-zero exit here contradicts the response and the response is not
+	// trustworthy.
+	if runErr != nil {
+		return zkvegaworker.VerifyResult{}, fmt.Errorf("worker returned a result but exited non-zero (%w); stderr: %s", runErr, strings.TrimSpace(stderr.String()))
 	}
 	return *resp.Result, nil
 }

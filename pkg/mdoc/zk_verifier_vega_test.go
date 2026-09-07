@@ -332,3 +332,26 @@ func TestCheckVegaWireMatchesProofBoundItems(t *testing.T) {
 		}
 	})
 }
+
+// TestBuildVegaDisclosedBytesRejectsDuplicateSlots: a digestId in two slots
+// would put one item's bytes in both, building a differently-shaped input
+// than the credential the proof was made over - and the existing
+// "every disclosed item is bound" check would not notice, since it only
+// asks whether each item was used at all.
+func TestBuildVegaDisclosedBytesRejectsDuplicateSlots(t *testing.T) {
+	dd := &ZkDocumentDataMdoc{
+		ClaimSlotDigestIds: []uint32{26, 300, 300, 55555},
+		IssuerSigned: map[string][]ZkSignedItemMdoc{
+			Namespace: {
+				{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: digestIDPtr(300), IssuerSignedItemBytes: []byte{0x01}},
+			},
+		},
+	}
+	_, err := BuildVegaDisclosedBytes(dd)
+	if err == nil {
+		t.Fatal("a duplicated digestId in claimSlotDigestIds must be rejected")
+	}
+	if !strings.Contains(err.Error(), "both slot 1 and slot 2") {
+		t.Fatalf("error should name both slots, got: %v", err)
+	}
+}
