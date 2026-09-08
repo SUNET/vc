@@ -82,18 +82,18 @@ type VerifierKey struct {
 // NewVerifierKey deserializes a published verifier-key artifact (the same
 // bytes go-zk-circuits serves for a vega-mc-p256-v1-*-verifier-key-* entry)
 // into a reusable VerifierKey.
-func NewVerifierKey(bytes []byte) (*VerifierKey, error) {
-	if len(bytes) == 0 {
+func NewVerifierKey(keyBytes []byte) (*VerifierKey, error) {
+	if len(keyBytes) == 0 {
 		return nil, errors.New("zknative_vega: verifier key bytes must not be empty")
 	}
 
-	ptr, length := bytesPtr(bytes)
+	ptr, length := bytesPtr(keyBytes)
 	var errOut *C.char
 	handle := C.zk_cred_vega_deserialize_verifier_key(ptr, length, &errOut)
-	// ptr points into bytes' backing array - KeepAlive guarantees bytes (and
+	// ptr points into keyBytes' backing array - KeepAlive guarantees it (and
 	// so its backing array) can't be GC'd before the (synchronous) C call
 	// above returns. See zknative.NewVerifier's identical rationale.
-	runtime.KeepAlive(bytes)
+	runtime.KeepAlive(keyBytes)
 	if handle == nil {
 		return nil, fmt.Errorf("zknative_vega: zk_cred_vega_deserialize_verifier_key: %s", takeErrorString(errOut))
 	}
