@@ -144,13 +144,18 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 			JWKS: &openid4vp.Keys{
 				Keys: []jwk.Key{ephemeralPublicJWK},
 			},
-			AuthorizationEncryptedResponseALG: "ECDH-ES",
-			AuthorizationEncryptedResponseENC: "A256GCM",
-			// See handlers_ui.go: OpenID4VP 1.0 renamed this field and made
-			// it an array. Both spellings are sent.
+			// OpenID4VP 1.0 replaced authorization_encrypted_response_enc
+			// with this array and closed client_metadata to a fixed set of
+			// members, so the old pair is opt-in only - see OpenID4VPCompat.
 			EncryptedResponseEncValuesSupported: []string{"A256GCM"},
 		},
 		IAT: time.Now().UTC().Unix(),
+	}
+
+	// Off unless a deployment opts in - see OpenID4VPCompat.
+	if c.cfg.SendLegacyJARMEncryptionParams() {
+		authorizationRequest.ClientMetadata.AuthorizationEncryptedResponseALG = "ECDH-ES"
+		authorizationRequest.ClientMetadata.AuthorizationEncryptedResponseENC = "A256GCM"
 	}
 
 	c.log.Debug("Authorization request", "request", authorizationRequest)

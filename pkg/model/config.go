@@ -162,6 +162,34 @@ type Log struct {
 }
 
 // Common holds the shared configuration used across all services
+// SendLegacyJARMEncryptionParams reports whether client_metadata should
+// carry the draft-era JARM encryption members. Nil-safe, because the three
+// places that build client_metadata should not each repeat the nil dance.
+func (cfg *Cfg) SendLegacyJARMEncryptionParams() bool {
+	if cfg == nil || cfg.Common == nil {
+		return false
+	}
+	return BoolVal(cfg.Common.OpenID4VPCompat.SendLegacyJARMEncryptionParams, false)
+}
+
+// OpenID4VPCompat holds interoperability switches for wallets that predate
+// OpenID4VP 1.0. Every field defaults to the conformant behaviour, so a
+// deployment that sets none of them is a 1.0 deployment.
+type OpenID4VPCompat struct {
+	// SendLegacyJARMEncryptionParams re-adds the draft-era
+	// authorization_encrypted_response_alg and authorization_encrypted_response_enc
+	// members to client_metadata, alongside the
+	// encrypted_response_enc_values_supported that replaced them.
+	//
+	// Off by default, and deliberately: OpenID4VP 1.0 defines client_metadata
+	// as a closed set of members, so a request carrying these two is
+	// non-conformant - the OIDF conformance suite reports them as unknown
+	// parameters and fails the test. Turn this on only for a deployment that
+	// still has to reach a draft-era wallet, and expect conformance to fail
+	// for as long as it is on.
+	SendLegacyJARMEncryptionParams *bool `yaml:"send_legacy_jarm_encryption_params" default:"false"`
+}
+
 type Common struct {
 	// Production enables production mode
 	Production *bool `yaml:"production" default:"true"`
@@ -192,6 +220,12 @@ type Common struct {
 	// unaffected until this is explicitly enabled and at least one scope
 	// sets vct or doctype instead of a file/URL.
 	CredentialRegistry CredentialRegistry `yaml:"credential_registry" validate:"omitempty"`
+
+	// OpenID4VPCompat holds opt-in switches for wallets that predate
+	// OpenID4VP 1.0. Shared rather than per-service because both the
+	// verifier and the apigw build client_metadata, and a wallet cannot
+	// meaningfully meet two different answers from one deployment.
+	OpenID4VPCompat OpenID4VPCompat `yaml:"openid4vp_compat" validate:"omitempty"`
 
 	// Branding holds custom branding configuration (logo and favicon paths)
 	Branding Branding `yaml:"branding"`

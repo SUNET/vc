@@ -23,7 +23,16 @@ func (s *Service) endpointVerificationRequestObject(ctx context.Context, c *gin.
 		return nil, err
 	}
 
-	return reply, nil
+	// Written raw, not returned through the generic renderer. reply is the
+	// compact JAR, and RFC 9101 section 10.2 gives it the media type
+	// application/oauth-authz-req+jwt; returning a plain string from here
+	// hands it to c.JSON instead, which labels it application/json and wraps
+	// it in quotes - so a wallet feeding the body straight to a compact-JWT
+	// parser chokes on the leading quote. The apigw's copy of this endpoint
+	// and the OIDC one next door both already do this; this was the one that
+	// did not.
+	c.Data(http.StatusOK, "application/oauth-authz-req+jwt", []byte(reply))
+	return nil, nil
 }
 
 func (s *Service) endpointVerificationDirectPost(ctx context.Context, c *gin.Context) (any, error) {

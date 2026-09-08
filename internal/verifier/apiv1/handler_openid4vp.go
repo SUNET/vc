@@ -69,11 +69,14 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		VerifierInfo:    c.registrationCertificate.VerifierInfo(),
 	}
 
-	// Add vp_formats_supported to client_metadata if Digital Credentials API is enabled
-	if c.cfg.Verifier.DigitalCredentials.Enable && c.cfg.Verifier.PreferredVPFormats != nil {
-		requestObject.ClientMetadata = &openid4vp.ClientMetadata{
-			VPFormatsSupported: c.cfg.Verifier.PreferredVPFormats,
-		}
+	// vp_formats_supported is REQUIRED in client_metadata when the wallet
+	// has no other way to learn it (OpenID4VP 1.0 section 11.1), so it is
+	// always sent - not, as before, only when the Digital Credentials API
+	// happened to be enabled, which is an unrelated switch. An operator who
+	// never configured preferred_vp_formats previously got a request object
+	// missing a required member, and nothing said so.
+	requestObject.ClientMetadata = &openid4vp.ClientMetadata{
+		VPFormatsSupported: vpFormatsOrDefault(c.cfg.Verifier.PreferredVPFormats),
 	}
 
 	// A response mode ending in .jwt asks the wallet to encrypt its response,
@@ -107,9 +110,12 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 			requestObject.ClientMetadata = &openid4vp.ClientMetadata{}
 		}
 		requestObject.ClientMetadata.JWKS = &openid4vp.Keys{Keys: []jwk.Key{ephemeralPublicJWK}}
-		requestObject.ClientMetadata.AuthorizationEncryptedResponseALG = "ECDH-ES"
-		requestObject.ClientMetadata.AuthorizationEncryptedResponseENC = "A256GCM"
 		requestObject.ClientMetadata.EncryptedResponseEncValuesSupported = []string{"A256GCM"}
+		// Off unless a deployment opts in - see OpenID4VPCompat.
+		if c.cfg.SendLegacyJARMEncryptionParams() {
+			requestObject.ClientMetadata.AuthorizationEncryptedResponseALG = "ECDH-ES"
+			requestObject.ClientMetadata.AuthorizationEncryptedResponseENC = "A256GCM"
+		}
 	}
 
 	// Sign the request object with X.509 certificate chain for x509_san_dns verification
