@@ -1,6 +1,9 @@
 package model
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestOIDCRelyingPartyResponseMode pins SUNET/vc#652: a request object served
 // behind a QR code or same-device link must never carry a dc_api mode,
@@ -71,7 +74,11 @@ func TestOIDCRelyingPartyResponseMode(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("want %q, got %q", tc.want, got)
 			}
-			if got == "dc_api" || len(got) > 6 && got[:7] == "dc_api." {
+			// Substring, not prefix: the resolver maps on strings.Contains,
+			// so a profiled spelling like w3c_dc_api.jwt has to be caught
+			// here too - a prefix check would have missed the one case in
+			// this table that carries that shape.
+			if strings.Contains(got, "dc_api") {
 				t.Fatalf("a dc_api mode must never reach this flow, got %q", got)
 			}
 		})
