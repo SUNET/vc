@@ -106,6 +106,12 @@ func runZkVegaVerifyWorker(ctx context.Context, workerPath string, verifierKeyBy
 		return zkvegaworker.VerifyResult{}, fmt.Errorf("failed to decode worker response: %w; stderr: %s", decodeErr, strings.TrimSpace(stderr.String()))
 	}
 	if resp.Error != "" {
+		// stderr comes along: a native fault can print a diagnostic there and
+		// still let the worker serialize an error, and dropping it leaves the
+		// most useful half of the failure on the floor.
+		if diag := strings.TrimSpace(stderr.String()); diag != "" {
+			return zkvegaworker.VerifyResult{}, fmt.Errorf("%s; stderr: %s", resp.Error, diag)
+		}
 		return zkvegaworker.VerifyResult{}, fmt.Errorf("%s", resp.Error)
 	}
 	if resp.Result == nil {
@@ -130,12 +136,16 @@ func runZkVegaVerifyWorker(ctx context.Context, workerPath string, verifierKeyBy
 // native handle happens once PER WORKER INVOCATION (see
 // zknative_vega.NewVerifierKey), not once per process, since the handle
 // only ever exists inside a short-lived worker subprocess.
+//
+// The blobs themselves live in a byte-bounded LRU - see vegaKeyCache, which
+// is in its own untagged file so its eviction rule can be tested without the
+// crate staged. The mutex here covers both that and the in-flight map.
 var vegaVerifierKeyCacheState = struct {
 	mu    sync.Mutex
-	byID  map[string][]byte
+	keys  *vegaKeyCache
 	inFly map[string]*inFlightLoad
 }{
-	byID:  make(map[string][]byte),
+	keys:  newVegaKeyCache(maxVegaVerifierKeyCacheBytes),
 	inFly: make(map[string]*inFlightLoad),
 }
 
@@ -158,7 +168,7 @@ var vegaVerifierKeyCacheState = struct {
 // unlike a plain string substitution would be.
 func getOrLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitSources []string) (verifierKeyBytes []byte, err error) {
 	vegaVerifierKeyCacheState.mu.Lock()
-	if cached, ok := vegaVerifierKeyCacheState.byID[zkSystemID]; ok {
+	if cached, ok := vegaVerifierKeyCacheState.keys.get(zkSystemID); ok {
 		vegaVerifierKeyCacheState.mu.Unlock()
 		return cached, nil
 	}
@@ -173,7 +183,7 @@ func getOrLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitS
 			return nil, fmt.Errorf("Vega verifier key %q failed to load on another goroutine: %w", zkSystemID, load.err)
 		}
 		vegaVerifierKeyCacheState.mu.Lock()
-		cached, ok := vegaVerifierKeyCacheState.byID[zkSystemID]
+		cached, ok := vegaVerifierKeyCacheState.keys.get(zkSystemID)
 		vegaVerifierKeyCacheState.mu.Unlock()
 		if !ok {
 			return nil, fmt.Errorf("Vega verifier key %q finished loading on another goroutine but is unexpectedly missing from the cache", zkSystemID)
@@ -197,7 +207,7 @@ func getOrLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitS
 
 		vegaVerifierKeyCacheState.mu.Lock()
 		if err == nil && len(verifierKeyBytes) > 0 {
-			vegaVerifierKeyCacheState.byID[zkSystemID] = verifierKeyBytes
+			vegaVerifierKeyCacheState.keys.put(zkSystemID, verifierKeyBytes)
 		}
 		load.err = err
 		delete(vegaVerifierKeyCacheState.inFly, zkSystemID)
