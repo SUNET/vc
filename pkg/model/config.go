@@ -948,6 +948,20 @@ type DigitalCredentialsConfig struct {
 	// Default: true
 	AllowQRFallback *bool `yaml:"allow_qr_fallback" default:"true"`
 
+	// AutoAttempt controls whether the presentation-definition UI calls
+	// navigator.credentials.get() as soon as a presentation request starts,
+	// before it renders the same-device wallet link and QR screen. With
+	// false the UI goes straight to that screen and never calls the native
+	// API. (Enable alone only controls whether the native API is available
+	// to attempt at all, not whether the UI attempts it first.) Set to false
+	// to skip straight to the same-device "open in wallet" link/QR fallback
+	// instead - confirmed via live testing that Android's OS-level DC API
+	// credential matcher can reject a non-standard format (e.g. the ZK-mdoc
+	// "mso_mdoc_zk" extension) with its own system dialog before any
+	// application code runs, with no JS-catchable failure to fall back
+	// from. Default: true (existing behavior, unaffected).
+	AutoAttempt *bool `yaml:"auto_attempt" default:"true"`
+
 	// DeepLinkScheme for mobile wallet integration
 	DeepLinkScheme string `yaml:"deep_link_scheme,omitempty" doc_example:"\"eudi-wallet://\""`
 }

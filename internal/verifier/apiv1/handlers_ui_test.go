@@ -1132,3 +1132,49 @@ func TestUIMetadataPresetMsoMdocUsesDoctypeValue(t *testing.T) {
 			"doctype_value is meaningless for sd-jwt and must not be sent")
 	})
 }
+
+// TestUIMetadata_DCAPIAutoAttempt pins the auto_attempt gate onto the wire.
+//
+// The field is a *bool defaulting to true, so an operator who never sets it
+// must still get the existing unprompted behaviour, and one who sets false
+// must actually see it reach the UI. Both directions matter: a default that
+// silently became false would disable the native DC API path for every
+// existing deployment, and a false that never propagated would leave the
+// knob doing nothing.
+func TestUIMetadata_DCAPIAutoAttempt(t *testing.T) {
+	ctx := t.Context()
+
+	tests := []struct {
+		name        string
+		autoAttempt *bool
+		want        bool
+	}{
+		{name: "unset defaults to true", autoAttempt: nil, want: true},
+		{name: "explicit true", autoAttempt: model.BoolPtr(true), want: true},
+		{name: "explicit false propagates", autoAttempt: model.BoolPtr(false), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &model.Cfg{
+				Common: &model.Common{},
+				Verifier: &model.Verifier{
+					DigitalCredentials: model.DigitalCredentialsConfig{
+						Enable:      true,
+						AutoAttempt: tt.autoAttempt,
+					},
+				},
+			}
+
+			client, _ := CreateTestClientWithMock(t, cfg)
+			client.cfg = cfg
+
+			reply, err := client.UIMetadata(ctx)
+			assert.NoError(t, err)
+			require.NotNil(t, reply)
+
+			assert.Equal(t, tt.want, reply.DCAPIAutoAttempt,
+				"DCAPIAutoAttempt should mirror verifier.digital_credentials.auto_attempt")
+		})
+	}
+}
