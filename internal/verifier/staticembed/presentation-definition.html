@@ -44,16 +44,16 @@
                 <div class="box container">
                     <h2 class="title is-size-6">Preconfigured presentation requests</h2>
                     <div class="buttons is-flex is-flex-direction-column">
-                        <template x-for="[key, prePD] in groupedPresets().featured" :key="key">
+                        <template x-for="[key, prePD] in groupedPresetData.featured" :key="key">
                         <button class="button is-light is-fullwidth" @click="handleSelectPredefinedPresentationDefinition(key)" x-text="prePD.label"></button>
                         </template>
                     </div>
-                    <template x-if="groupedPresets().groups.length > 0">
+                    <template x-if="groupedPresetData.groups.length > 0">
                         <div>
-                            <button class="button is-small is-text" @click="showMorePresets = !showMorePresets" x-text="showMorePresets ? 'Show fewer presets' : 'Show more presets'"></button>
+                            <button class="button is-small is-text" @click="showMorePresets = !showMorePresets" :aria-expanded="showMorePresets" x-text="showMorePresets ? 'Show fewer presets' : 'Show more presets'"></button>
                             <template x-if="showMorePresets">
                                 <div>
-                                    <template x-for="group in groupedPresets().groups" :key="group.category">
+                                    <template x-for="group in groupedPresetData.groups" :key="group.category">
                                         <div class="block">
                                             <p class="title is-size-7" x-text="group.category"></p>
                                             <div class="buttons is-flex is-flex-direction-column">

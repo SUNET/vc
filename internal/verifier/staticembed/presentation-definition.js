@@ -252,6 +252,18 @@ Alpine.data("app", () => ({
     /** @type {string[]} Category display order - see metadataResponseSchema's own doc comment. */
     presetCategoryOrder: [],
 
+    /**
+     * @type {{ featured: [string, any][], groups: { category: string, presets: [string, any][] }[] }}
+     * The grouped, sorted view the template renders. Derived from
+     * predefinedPresentationDefinitions and presetCategoryOrder, and
+     * computed once where those are set rather than on every read: the
+     * template reads it from three places and Alpine re-evaluates on each
+     * reactive update, so a method here re-entried and re-sorted the whole
+     * catalog every time. Both inputs are assigned in exactly one place
+     * (loadMetadata), which is why this needs no cache key or invalidation.
+     */
+    groupedPresetData: { featured: [], groups: [] },
+
     /** @type {boolean} Whether the non-featured/categorized preset groups are expanded. */
     showMorePresets: false,
 
@@ -304,16 +316,11 @@ Alpine.data("app", () => ({
         // preset is categorized - including the featured-but-uncategorized
         // case, which still takes the grouping path below.
         this.presetCategoryOrder = data.preset_category_order ?? [];
-    },
 
-    /**
-     * Groups predefinedPresentationDefinitions for progressive rendering.
-     * The logic lives in preset-helpers.js so it can be unit tested; see
-     * groupPresets there for the ordering and fallback rules.
-     * @returns {{ featured: [string, any][], groups: { category: string, presets: [string, any][] }[] }}
-     */
-    groupedPresets() {
-        return groupPresets(
+        // Grouped once, here, because this is the only place either input
+        // changes. The rules live in preset-helpers.js so they can be unit
+        // tested - see groupPresets there.
+        this.groupedPresetData = groupPresets(
             Object.entries(this.predefinedPresentationDefinitions),
             this.presetCategoryOrder,
         );
