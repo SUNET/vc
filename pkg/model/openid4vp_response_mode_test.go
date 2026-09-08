@@ -59,6 +59,19 @@ func TestOIDCRelyingPartyResponseMode(t *testing.T) {
 			want: ResponseModeDirectPost,
 		},
 		{
+			// The override wins, but it is still mapped: this method is
+			// exported and reachable with a config that never passed
+			// validation, and the invariant has to hold for those callers.
+			name: "a dc_api value in the override is still mapped",
+			v:    verifier(false, "", "dc_api.jwt"),
+			want: ResponseModeDirectPostJWT,
+		},
+		{
+			name: "an unencrypted dc_api override maps to direct_post",
+			v:    verifier(false, "", "w3c_dc_api"),
+			want: ResponseModeDirectPost,
+		},
+		{
 			name: "nil verifier does not panic",
 			v:    nil,
 			want: ResponseModeDirectPost,

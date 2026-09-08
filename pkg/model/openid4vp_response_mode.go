@@ -37,7 +37,13 @@ func (v *Verifier) OIDCRelyingPartyResponseMode() string {
 	}
 
 	if v.Inbound.OpenID4VP != nil && v.Inbound.OpenID4VP.ResponseMode != "" {
-		return v.Inbound.OpenID4VP.ResponseMode
+		// Mapped, not returned verbatim. Config validation restricts this
+		// field to the two direct_post modes, but this method is exported on
+		// an exported struct, so it can be reached with a config that never
+		// went through validation - a test, or anything constructing a
+		// Verifier directly. The invariant this method documents has to hold
+		// for those callers too, or it is not an invariant.
+		return linkDeliverableResponseMode(v.Inbound.OpenID4VP.ResponseMode)
 	}
 
 	if !v.DigitalCredentials.Enable {
@@ -45,19 +51,25 @@ func (v *Verifier) OIDCRelyingPartyResponseMode() string {
 	}
 
 	configured := v.DigitalCredentials.ResponseMode
-	switch {
-	case configured == "":
+	if configured == "" {
 		// The field defaults to dc_api.jwt, so an empty value means defaults
 		// were never applied. Treat it as that default would be treated.
 		return ResponseModeDirectPostJWT
-	case strings.Contains(configured, "dc_api"):
-		// Any DC API spelling, including a profiled one, maps to the
-		// direct_post shape carrying the same encryption choice.
-		if strings.HasSuffix(configured, ".jwt") {
-			return ResponseModeDirectPostJWT
-		}
-		return ResponseModeDirectPost
-	default:
-		return configured
 	}
+	return linkDeliverableResponseMode(configured)
+}
+
+// linkDeliverableResponseMode maps any response mode onto one a wallet
+// reached by link or QR code can actually answer in, preserving whether the
+// response is encrypted. A mode that is already deliverable passes through.
+func linkDeliverableResponseMode(mode string) string {
+	if !strings.Contains(mode, "dc_api") {
+		return mode
+	}
+	// Any DC API spelling, including a profiled one, maps to the direct_post
+	// shape carrying the same encryption choice.
+	if strings.HasSuffix(mode, ".jwt") {
+		return ResponseModeDirectPostJWT
+	}
+	return ResponseModeDirectPost
 }
