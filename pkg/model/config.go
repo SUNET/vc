@@ -161,20 +161,10 @@ type Log struct {
 	FolderPath string `yaml:"folder_path" doc_example:"\"/var/log/vc\""`
 }
 
-// Common holds the shared configuration used across all services
-// SendLegacyJARMEncryptionParams reports whether client_metadata should
-// carry the draft-era JARM encryption members. Nil-safe, because the three
-// places that build client_metadata should not each repeat the nil dance.
-func (cfg *Cfg) SendLegacyJARMEncryptionParams() bool {
-	if cfg == nil || cfg.Common == nil {
-		return false
-	}
-	return BoolVal(cfg.Common.OpenID4VPCompat.SendLegacyJARMEncryptionParams, false)
-}
-
-// OpenID4VPCompat holds interoperability switches for wallets that predate
-// OpenID4VP 1.0. Every field defaults to the conformant behaviour, so a
-// deployment that sets none of them is a 1.0 deployment.
+// OpenID4VPCompat holds interoperability switches for pre-1.0 wallets.
+//
+// Every field defaults to the conformant behaviour, so a deployment that
+// sets none of them is an OpenID4VP 1.0 deployment.
 type OpenID4VPCompat struct {
 	// SendLegacyJARMEncryptionParams re-adds the draft-era
 	// authorization_encrypted_response_alg and authorization_encrypted_response_enc
@@ -190,6 +180,17 @@ type OpenID4VPCompat struct {
 	SendLegacyJARMEncryptionParams *bool `yaml:"send_legacy_jarm_encryption_params" default:"false"`
 }
 
+// SendLegacyJARMEncryptionParams reports whether client_metadata should carry
+// the draft-era JARM encryption members. Nil-safe, because the three places
+// that build client_metadata should not each repeat the nil dance.
+func (cfg *Cfg) SendLegacyJARMEncryptionParams() bool {
+	if cfg == nil || cfg.Common == nil {
+		return false
+	}
+	return BoolVal(cfg.Common.OpenID4VPCompat.SendLegacyJARMEncryptionParams, false)
+}
+
+// Common holds the shared configuration used across all services
 type Common struct {
 	// Production enables production mode
 	Production *bool `yaml:"production" default:"true"`
