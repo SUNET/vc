@@ -134,7 +134,9 @@
             <template x-if="!loading && credentialsList && credentialAttributes && presentationDefinition && !dcApiVerified">
                 <div class="box container">
                     <div class="block is-flex is-justify-content-center">
-                        <img :src="`data:image/png;base64,${presentationDefinition.qr_code}`" alt="" />
+                        <a :href="presentationDefinition.authorization_request" target="_blank">
+                            <img :src="`data:image/png;base64,${presentationDefinition.qr_code}`" alt="" />
+                        </a>
                     </div>
                     <div class="block">
                         <pre class="has-border-radius" x-text="presentationDefinition.authorization_request"></pre>
