@@ -23,6 +23,11 @@ import (
 type mockRegistryClient struct {
 	section int64
 	index   int64
+	// updates records every TokenStatusListUpdateStatus call, so a test can
+	// assert an entry was handed back rather than left VALID.
+	updates []*apiv1_registry.TokenStatusListUpdateStatusRequest
+	// updateErr, when set, is returned by TokenStatusListUpdateStatus.
+	updateErr error
 }
 
 func (m *mockRegistryClient) TokenStatusListAddStatus(ctx context.Context, in *apiv1_registry.TokenStatusListAddStatusRequest, opts ...grpc.CallOption) (*apiv1_registry.TokenStatusListAddStatusReply, error) {
@@ -37,6 +42,10 @@ func (m *mockRegistryClient) TokenStatusListAddStatus(ctx context.Context, in *a
 }
 
 func (m *mockRegistryClient) TokenStatusListUpdateStatus(ctx context.Context, in *apiv1_registry.TokenStatusListUpdateStatusRequest, opts ...grpc.CallOption) (*apiv1_registry.TokenStatusListUpdateStatusReply, error) {
+	m.updates = append(m.updates, in)
+	if m.updateErr != nil {
+		return nil, m.updateErr
+	}
 	return &apiv1_registry.TokenStatusListUpdateStatusReply{}, nil
 }
 

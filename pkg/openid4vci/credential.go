@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/pkg/bbs"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -59,6 +60,71 @@ type CredentialRequest struct {
 	// Deprecated: Use Proofs instead. This field is kept for backward compatibility with older wallets.
 	Proof *Proof `json:"proof,omitempty" validate:"omitempty"`
 
+	// BBSCommitment OPTIONAL. Base64url-encoded `commitment_with_proof`
+	// for a blind BBS credential.
+	//
+	// Unlike the mdoc and SD-JWT paths, a BBS credential is signed over a
+	// commitment the WALLET produces: it commits to messages the issuer
+	// never sees, and to the public keys of its device-held key binding
+	// keys, together with proof it actually holds them. So the wallet
+	// participates at issuance and an issuer cannot add BBS afterwards.
+	//
+	// This needs no extra round-trip. The commitment challenge is computed
+	// wallet-locally by Fiat-Shamir with no issuer nonce, so the finished
+	// commitment simply rides alongside the key proof. Freshness still
+	// comes from the c_nonce-bound key proof; a commitment proof
+	// demonstrates knowledge, not recency, and must not be relied on for
+	// the latter.
+	BBSCommitment string `json:"bbs_commitment,omitempty" validate:"omitempty"`
+
+	// BBSCommittedClaims OPTIONAL. RFC 6901 pointers naming the claims the
+	// holder committed to, in message order.
+	//
+	// The issuer needs these and cannot derive them. It never sees the
+	// values — that is what blind issuance means — but it must still place
+	// those claims in the credential's claim map, and it cannot name what
+	// it cannot see. The count is checked against the commitment rather
+	// than taken on trust; a credential whose header described a different
+	// message vector than the one being signed would verify against
+	// nothing, with the failure pointing nowhere.
+	//
+	// Meaningful only alongside BBSCommitment, and rejected without it.
+	// Empty alongside one is legitimate rather than a mistake: a commitment
+	// can carry key binding keys and no holder claims at all, which is what
+	// a wallet binding a credential to a device key without hiding any of
+	// its own values sends.
+	BBSCommittedClaims []string `json:"bbs_committed_claims,omitempty" validate:"omitempty"`
+
+	// BBSKeyBinding OPTIONAL. Whether the commitment carries key binding
+	// keys. Absent means it does not.
+	//
+	// This selects the message layout the credential is signed under, and a
+	// verifier reads it back out of the header, so the two ends must agree.
+	// It is on the wire because the issuer cannot see inside the commitment
+	// without the wallet saying so - but it is not taken on trust: the
+	// native signer checks the claim against the commitment it was given
+	// and refuses to sign a mismatch. A wallet that lies here gets a failed
+	// issuance, not a credential bound to nothing.
+	BBSKeyBinding bool `json:"bbs_key_binding,omitempty" validate:"omitempty"`
+
+	// BBSSuite REQUIRED with BBSCommitment. Which cipher suite the
+	// commitment was built under: "plain" or "schnorr".
+	//
+	// The suite selects the domain separation everything is computed under
+	// - the api_id, and so generator derivation and every hash-to-scalar -
+	// so holder and issuer must agree or the commitment verifies against
+	// nothing. Carried explicitly, and required rather than defaulted,
+	// because a wrong guess is indistinguishable from a corrupt commitment,
+	// a wrong issuer key, or a tampered proof: the request fails either
+	// way, but only this way does the error say what to fix.
+	//
+	// A different axis from BBSKeyBinding despite the similar name. The
+	// suite picks the domain separation; key binding picks the message
+	// layout a verifier reads under. "schnorr" with no key binding keys is
+	// the ordinary unbound issuance, not a contradiction - which is why
+	// this cannot be derived from BBSKeyBinding.
+	BBSSuite string `json:"bbs_suite,omitempty" validate:"omitempty"`
+
 	// CredentialResponseEncryption OPTIONAL. Object containing information for encrypting the Credential Response.
 	// If this request element is not present, the corresponding credential response returned is not encrypted.
 	CredentialResponseEncryption *CredentialResponseEncryption `json:"credential_response_encryption,omitempty" validate:"omitempty"`
@@ -98,6 +164,14 @@ func (c *CredentialRequest) Validate(ctx context.Context, authorizationDetails [
 		if proofTypeCount != 1 {
 			return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "proofs must declare exactly one proof type"}
 		}
+	}
+
+	// A commitment that cannot be decoded is rejected here rather than
+	// deeper in, where the failure would surface as an opaque
+	// verification error with no indication that the transport encoding
+	// was the problem.
+	if err := c.validateBBS(); err != nil {
+		return err
 	}
 
 	// Neither identifier nor configuration ID provided
@@ -383,4 +457,66 @@ func (req *CredentialRequest) ResolveCredentialFormatWithAuthDetails(metadata *C
 	}
 
 	return "", &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "either credential_configuration_id or credential_identifier must be provided"}
+}
+
+// validateBBS checks the blind-BBS members of a credential request.
+//
+// Rejected here rather than deeper in, where the same problems surface as
+// opaque verification errors with nothing to say the request was the
+// problem. None of these are checks the native signer would skip; they are
+// checks whose failure is worth a useful message.
+func (c *CredentialRequest) validateBBS() error {
+	reject := func(description string) error {
+		return &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: description}
+	}
+
+	if c.BBSCommitment == "" {
+		// Pointers without a commitment name claims nothing committed to.
+		// Silently ignoring them would issue a credential whose claim map
+		// promises holder claims the signature does not cover.
+		if len(c.BBSCommittedClaims) > 0 {
+			return reject("bbs_committed_claims requires bbs_commitment")
+		}
+		if c.BBSKeyBinding {
+			return reject("bbs_key_binding requires bbs_commitment")
+		}
+		if c.BBSSuite != "" {
+			return reject("bbs_suite requires bbs_commitment")
+		}
+		return nil
+	}
+
+	// Named for the wire field and phrased once here, rather than passing
+	// bbs.DecodeCommitment's message through. That message is written for
+	// Go callers - it says "commitment", not "bbs_commitment" - so
+	// forwarding it points a client at a field it did not send, and ties
+	// this endpoint's response text to an internal package's wording.
+	if _, err := bbs.DecodeCommitment(c.BBSCommitment); err != nil {
+		return reject("bbs_commitment is not a valid base64url-encoded commitment")
+	}
+
+	if c.BBSSuite == "" {
+		return reject("bbs_commitment requires bbs_suite: the suite selects the domain " +
+			"separation the commitment was built under and cannot be guessed")
+	}
+	suite, err := bbs.ParseSuite(c.BBSSuite)
+	if err != nil {
+		return reject("bbs_suite must be \"plain\" or \"schnorr\"")
+	}
+	// "plain" is the suite with no device binding, so a commitment claiming
+	// both is describing two different things. The native side would refuse
+	// it too, but from deeper in and with a message about the commitment
+	// rather than about the two members that disagree.
+	if suite == bbs.SuitePlain && c.BBSKeyBinding {
+		return reject("bbs_key_binding is set but bbs_suite is \"plain\", which has no device binding")
+	}
+
+	if err := bbs.ValidateHolderPointers(c.BBSCommittedClaims); err != nil {
+		// One implementation of the rules, in pkg/bbs, prefixed with the
+		// name of the member this layer actually received - the OID4VCI
+		// client sent `bbs_committed_claims`, not `holder_pointers`.
+		return reject("bbs_committed_claims " + err.Error())
+	}
+
+	return nil
 }

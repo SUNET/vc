@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -15,6 +17,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/internal/issuer/auditlog"
+	"github.com/SUNET/vc/pkg/bbs"
 	"github.com/SUNET/vc/pkg/grpchelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
@@ -49,6 +52,24 @@ type Client struct {
 	registryClient apiv1_registry.RegistryServiceClient
 	mdocIssuer     *mdoc.Issuer // mDL issuer for ISO 18013-5 credentials
 	signMetadataRL *rate.Limiter
+	bbsKeys        *bbsKeyPair // nil unless Issuer.BBS is configured; gates the "jwp" format
+	// bbsIssuerOverride replaces the native signer in tests.
+	//
+	// A seam rather than a design choice: without it nothing could show
+	// that MakeJWP passes the caller's suite *through* to the signer, only
+	// that it rejects the ones it should. Those are different properties,
+	// and hardcoding the suite again passed every test until this existed.
+	bbsIssuerOverride bbs.Issuer
+}
+
+// bbsKeyPair is the issuer's BLS12-381 key pair, held as raw bytes.
+//
+// Raw bytes rather than a pki.Signer because it cannot be one: the secret is
+// a scalar consumed inside the BBS signing algebra, not a key that signs a
+// digest. See model.BBSConfig for why that rules out an HSM.
+type bbsKeyPair struct {
+	secret []byte
+	public []byte
 }
 
 // New creates a new instance of the public api
@@ -78,6 +99,15 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 	if err := c.initMDocIssuer(ctx); err != nil {
 		c.log.Info("mDL issuer not initialized", "error", err)
 		// Non-fatal: mDL issuance will be unavailable but SD-JWT will work
+	}
+
+	// Fatal, unlike the mDL case above: mDL is unconfigured by default and
+	// an absent certificate chain means "not offering that format". A
+	// present but unloadable BBS config means the operator asked for the
+	// format and it is broken, which should not start quietly and fail one
+	// request at a time.
+	if err := c.initBBSKeys(); err != nil {
+		return nil, err
 	}
 
 	c.log.Info("Started")
@@ -307,4 +337,134 @@ func (c *Client) Close() error {
 // RegistryClient returns the registry gRPC client, may be nil if not configured
 func (c *Client) RegistryClient() apiv1_registry.RegistryServiceClient {
 	return c.registryClient
+}
+
+// initBBSKeys loads the issuer's BBS key pair, if this issuer offers the
+// format at all.
+//
+// An absent Issuer.BBS section is not an error: it means this deployment
+// does not issue blind BBS credentials, and MakeJWP will say so rather than
+// signing with a zero key.
+func (c *Client) initBBSKeys() error {
+	if c.cfg.Issuer == nil || c.cfg.Issuer.BBS == nil {
+		c.log.Info("BBS issuance not configured")
+		return nil
+	}
+	cfg := c.cfg.Issuer.BBS
+
+	secret, err := bbsKeyMaterial("secret", cfg.SecretKeyPath, cfg.SecretKey)
+	if err != nil {
+		return err
+	}
+	public, err := bbsKeyMaterial("public", cfg.PublicKeyPath, cfg.PublicKey)
+	if err != nil {
+		return err
+	}
+
+	// Check the two halves actually form a pair. This was previously left
+	// undone because the crate exposed no way to derive a public key from a
+	// secret one, and a length check would have confirmed the widths and
+	// nothing about whether the pair is a pair; zk-cred-bbs v0.0.7 added
+	// SkToPk, so it can be checked properly.
+	//
+	// Worth the one derivation at startup: a mismatched pair signs
+	// perfectly well, and what fails is every verification afterwards,
+	// reporting only "does not verify" - a failure with nothing in it
+	// pointing at the configuration that caused it.
+	//
+	// Skipped when the native library is absent, because then there is no
+	// deriver and no issuance either: MakeJWP fails on its own with a
+	// clearer message than a startup error about an unavailable backend
+	// would give.
+	// Refused, not warned about. An operator who configured Issuer.BBS
+	// asked for the format; a binary built without `-tags bbsnative` cannot
+	// provide it, and every jwp issuance would fail at the signer with
+	// "not available" long after deploy. This is exactly the trap a
+	// deployment hits when it pins the stock issuer image, which is built
+	// CGO_ENABLED=0 with no tags.
+	//
+	// As in MakeJWP, the question is whether *this client* has a usable
+	// signer rather than how the process was built: the same thing in every
+	// deployment, and different only where one was supplied directly.
+	if c.bbsIssuerOverride == nil && !bbs.Available() {
+		return fmt.Errorf(
+			"issuer.bbs is configured but this binary has no native BBS support: " +
+				"rebuild with -tags bbsnative, or remove the issuer.bbs section")
+	}
+	if bbs.Available() {
+		if err := bbs.KeyPairMatches(bbs.Native(), secret, public); err != nil {
+			return err
+		}
+	}
+
+	c.bbsKeys = &bbsKeyPair{secret: secret, public: public}
+	c.log.Info("Initialized BBS issuance key")
+	return nil
+}
+
+// bbsKeyMaterial resolves one half of the key pair from whichever of the
+// two ways it was configured.
+//
+// Both set, or neither, is refused rather than resolved by precedence. A
+// deployment that sets both has two sources of truth for a signing key and
+// no way to tell which one is live; silently preferring one would mean an
+// operator can edit the wrong half and see no effect at all.
+func bbsKeyMaterial(which, path, inline string) ([]byte, error) {
+	switch {
+	case path != "" && inline != "":
+		return nil, fmt.Errorf("BBS %s key: set %s_key_path or %s_key, not both", which, which, which)
+	case path != "":
+		decoded, err := readBase64URLFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load BBS %s key: %w", which, err)
+		}
+		return decoded, nil
+	case inline != "":
+		decoded, err := decodeBase64URL(inline)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load BBS %s key: %w", which, err)
+		}
+		return decoded, nil
+	default:
+		return nil, fmt.Errorf("BBS %s key: set either %s_key_path or %s_key", which, which, which)
+	}
+}
+
+// decodeBase64URL decodes a single unpadded base64url value.
+func decodeBase64URL(value string) ([]byte, error) {
+	// Trailing whitespace is what every editor and heredoc leaves behind;
+	// padding is what a standard-base64 tool leaves behind. Neither is a
+	// broken key.
+	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(strings.TrimSpace(value), "="))
+	if err != nil {
+		return nil, fmt.Errorf("not valid base64url: %w", err)
+	}
+	if len(decoded) == 0 {
+		return nil, fmt.Errorf("is empty")
+	}
+	return decoded, nil
+}
+
+// readBase64URLFile reads a file holding a single base64url-encoded value.
+func readBase64URLFile(path string) ([]byte, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	// Trailing newlines are what every editor and every `echo -n`-less
+	// pipeline leaves behind; rejecting them would be a needless trap.
+	decoded, err := decodeBase64URL(string(raw))
+	if err != nil {
+		return nil, fmt.Errorf("%s %w", path, err)
+	}
+	return decoded, nil
+}
+
+// bbsIssuer is the signer MakeJWP blind-signs with — the native one unless
+// a test has replaced it.
+func (c *Client) bbsIssuer() bbs.Issuer {
+	if c.bbsIssuerOverride != nil {
+		return c.bbsIssuerOverride
+	}
+	return bbs.Native()
 }
