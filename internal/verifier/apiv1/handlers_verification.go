@@ -59,7 +59,18 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 }
 
 type VerificationDirectPostRequest struct {
-	Response  string `json:"response"  form:"response"`
+	Response string `json:"response"  form:"response"`
+	// DCAPI marks a response returned inside a navigator.credentials.get
+	// call and forwarded here by the verifier's own page, rather than POSTed
+	// by a wallet reached through request_uri. The two bind their mdoc
+	// session transcripts to different handovers, so this selects which one
+	// the verifier recomputes - see mdoc.BuildOID4VPDCAPISessionTranscript.
+	//
+	// Client-supplied and not trusted as an assertion: the origin bound into
+	// the transcript comes from configuration, never from the caller, so a
+	// caller that sets this wrongly only fails its own verification. It
+	// cannot choose what the presentation is checked against.
+	DCAPI     bool   `json:"dc_api" form:"dc_api"`
 	SessionID string `json:"-"` // Set by HTTP layer if same-device flow
 }
 
@@ -353,45 +364,29 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				c.log.Error(err, "failed to construct response URI for ZK session transcript", "scope", scope)
 				return nil, fmt.Errorf("failed to construct response URI for scope %s: %w", scope, err)
 			}
-			// BuildOID4VPSessionTranscript's own doc comment: the JWK
-			// thumbprint is nil "unless the request advertised an
-			// encryption key for the response" - this request always does
-			// (CreateRequestObject sets ClientMetadata.JWKS to the same
-			// ephemeral key cached under EphemeralEncryptionKeyID, and
-			// response_mode is "direct_post.jwt"/"dc_api.jwt" whenever
-			// AutoAttempt is off, per UIInteraction's own responseMode
-			// comment), so passing nil unconditionally contradicted the
-			// documented condition and silently left the ZK proof's
-			// Fiat-Shamir transcript unbound from the actual encryption
-			// key the wallet saw and included in its own transcript.
-			var readerPubKeyThumbprint []byte
-			if authCtx.EphemeralEncryptionKeyID != "" {
-				if privKey, found := c.openid4vp.EphemeralKeyCache.Get(authCtx.EphemeralEncryptionKeyID); found {
-					pubKeyIface, err := privKey.PublicKey()
-					if err != nil {
-						c.log.Error(err, "failed to derive public key for ZK session transcript", "scope", scope)
-						return nil, fmt.Errorf("failed to derive public key for scope %s: %w", scope, err)
-					}
-					tp, err := pubKeyIface.Thumbprint(crypto.SHA256)
-					if err != nil {
-						c.log.Error(err, "failed to compute JWK thumbprint for ZK session transcript", "scope", scope)
-						return nil, fmt.Errorf("failed to compute JWK thumbprint for scope %s: %w", scope, err)
-					}
-					readerPubKeyThumbprint = tp
-				} else {
-					// A miss means the key expired or was evicted between
-					// issuing the request and the wallet answering it. The
-					// wallet built ITS transcript with that key, so carrying
-					// on with a nil thumbprint guarantees a mismatch - and
-					// one that surfaces as an opaque proof failure rather
-					// than as the cache miss it actually is.
-					c.log.Error(nil, "ephemeral encryption key missing from cache for ZK session transcript", "scope", scope, "key_id", authCtx.EphemeralEncryptionKeyID)
-					return nil, fmt.Errorf("ephemeral encryption key %q is no longer cached, cannot rebuild the session transcript the wallet used for scope %s", authCtx.EphemeralEncryptionKeyID, scope)
+			// The handover follows how the response arrived, because the two
+			// hash different things and a wallet only ever produced one of
+			// them (SUNET/vc#652, SUNET/vc#655). A request_uri response binds
+			// to the response URI and client_id; a DC API response binds to
+			// the calling origin instead.
+			//
+			// Both carry the reader-key thumbprint, for the reason given
+			// above: a dc_api.jwt response is always encrypted, so leaving it
+			// out of that branch would reintroduce exactly the unbinding the
+			// block above fixes.
+			var sessionTranscript []byte
+			if req.DCAPI {
+				origin, originErr := c.dcAPIOrigin()
+				if originErr != nil {
+					c.log.Error(originErr, "cannot determine the DC API origin for the session transcript", "scope", scope)
+					return nil, originErr
 				}
+				sessionTranscript, err = mdoc.BuildOID4VPDCAPISessionTranscript(origin, authCtx.Nonce, readerPubKeyThumbprint)
+			} else {
+				sessionTranscript, err = mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)
 			}
-			sessionTranscript, err := mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)
 			if err != nil {
-				c.log.Error(err, "failed to build ZK session transcript", "scope", scope)
+				c.log.Error(err, "failed to build ZK session transcript", "scope", scope, "dc_api", req.DCAPI)
 				return nil, fmt.Errorf("failed to build ZK session transcript for scope %s: %w", scope, err)
 			}
 			zkResult, err := zkHandler.VerifyAndExtract(ctx, vpToken, mdoc.ZkPresentationContext{

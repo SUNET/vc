@@ -714,6 +714,12 @@ Alpine.data("app", () => ({
         }
         const body = new URLSearchParams();
         body.set("response", data.response);
+        // Tells the verifier this came back inside a
+        // navigator.credentials.get call, so it recomputes the mdoc session
+        // transcript with the DC API handover (origin-bound) rather than the
+        // request_uri one (response-URI-bound). The origin itself comes from
+        // the verifier's own configuration, not from here.
+        body.set("dc_api", "true");
 
         const res = await fetch(new URL("/verification/direct_post", baseUrl), {
             method: "POST",
