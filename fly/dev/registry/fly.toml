@@ -41,14 +41,9 @@ primary_region = "arn"
   timeout = "5s"
   path = "/health"
 
-# gRPC port for internal service communication
-[[services]]
-  internal_port = 8090
-  protocol = "tcp"
-  auto_stop_machines = "off"
-  [[services.ports]]
-    handlers = ["tls"]
-    port = 8090
+# gRPC listens on 8090; reachable via <app>.internal:8090 over 6PN (no
+# [[services]] block — that would either publish 8090 to the public IP or
+# fail fly config validation).
 
 [[vm]]
   size = "shared-cpu-1x"
