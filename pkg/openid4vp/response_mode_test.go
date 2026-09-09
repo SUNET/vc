@@ -2,6 +2,7 @@ package openid4vp
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -50,4 +51,38 @@ func TestWithDCAPIResponseModeDiffersOnlyInResponseMode(t *testing.T) {
 
 func TestWithDCAPIResponseModeNilIsNil(t *testing.T) {
 	assert.Nil(t, (*RequestObject)(nil).WithDCAPIResponseMode())
+}
+
+// TestResponseModeConstantsMatchOneofTag makes the constants' doc comment true.
+//
+// That comment claimed the constants sit beside the field's oneof validation
+// "so the two cannot drift". They could: the oneof list is a struct tag in
+// request_object.go, and a Go tag is an uninterpreted string literal - it
+// cannot reference a constant, so adding a mode in one place and not the
+// other compiles and passes everything. Review caught the claim; this test
+// is what makes it hold, by reading the tag back and comparing it to the
+// constants as sets.
+//
+// A mismatch in either direction is a bug with real consequences. A mode in
+// the tag but not the constants validates while no code can name it. A mode
+// in the constants but not the tag is worse: code sets it and validation
+// then rejects the request object it just built.
+func TestResponseModeConstantsMatchOneofTag(t *testing.T) {
+	field, ok := reflect.TypeOf(RequestObject{}).FieldByName("ResponseMode")
+	require.True(t, ok, "RequestObject has no ResponseMode field - this test must be updated with it")
+
+	var oneof string
+	for _, rule := range strings.Split(field.Tag.Get("validate"), ",") {
+		if after, found := strings.CutPrefix(rule, "oneof="); found {
+			oneof = after
+			break
+		}
+	}
+	require.NotEmpty(t, oneof, "ResponseMode's validate tag has no oneof= rule; the accepted set is no longer enforced there")
+
+	assert.ElementsMatch(t,
+		[]string{ResponseModeFormPost, ResponseModeDirectPost, ResponseModeDirectPostJWT, ResponseModeDCAPIJWT},
+		strings.Fields(oneof),
+		"the response-mode constants and the oneof validation tag have drifted; update both",
+	)
 }

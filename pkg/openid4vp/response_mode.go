@@ -1,7 +1,12 @@
 package openid4vp
 
-// The response modes RequestObject.ResponseMode accepts, kept beside the
-// field and its own oneof validation so the two cannot drift.
+// The response modes RequestObject.ResponseMode accepts.
+//
+// The authoritative list for validation is the oneof rule in that field's
+// struct tag, which a Go tag cannot build from these constants. The two are
+// therefore kept in step by TestResponseModeConstantsMatchOneofTag, which
+// reads the tag back and compares it to this set, rather than by the
+// declaration itself.
 //
 // Which of these is correct depends on how the request reaches the wallet,
 // not on configuration: a dc_api mode is defined only for a request handed
