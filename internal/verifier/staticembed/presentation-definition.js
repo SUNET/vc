@@ -6,6 +6,7 @@ import {
     getBestSupportedProtocol,
     requestCredentialFromAuthorizationRequestURI,
 } from "./dc-api-polyfill.js";
+import { groupPresets } from "./preset-helpers.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
 const credentialAttributesSchema = v.object({
@@ -95,8 +96,15 @@ const metadataResponseSchema = v.object({
     supported_wallets: v.nullish(v.record(v.string(), v.string()), {}),
     dc_api_enabled: v.optional(v.boolean(), false),
     dc_api_auto_attempt: v.optional(v.boolean(), true),
+    // preset_category_order lists every distinct category name in display
+    // order - see UIMetadataReply.PresetCategoryOrder's own doc comment for
+    // why this can't just be derived by sorting category names client-side.
+    preset_category_order: v.optional(v.array(v.string()), []),
     presets: v.optional(v.record(v.string(), v.object({
         label: v.string(),
+        category: v.optional(v.string(), ""),
+        order: v.optional(v.number(), 0),
+        featured: v.optional(v.boolean(), false),
         credentials: v.array(v.object({
             id: v.string(),
             format: v.string(),
@@ -236,10 +244,28 @@ Alpine.data("app", () => ({
      /** @type {{ id: string; format: string; vct: string; vct_values?: string[]; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
     credentialAttributes: null,
 
-    /** 
-     * @type {Record<string, object>} 
+    /**
+     * @type {Record<string, object>}
      */
     predefinedPresentationDefinitions: {},
+
+    /** @type {string[]} Category display order - see metadataResponseSchema's own doc comment. */
+    presetCategoryOrder: [],
+
+    /**
+     * @type {{ featured: [string, any][], groups: { category: string, presets: [string, any][] }[] }}
+     * The grouped, sorted view the template renders. Derived from
+     * predefinedPresentationDefinitions and presetCategoryOrder, and
+     * computed once where those are set rather than on every read: the
+     * template reads it from three places and Alpine re-evaluates on each
+     * reactive update, so a method here re-entried and re-sorted the whole
+     * catalog every time. Both inputs are assigned in exactly one place
+     * (loadMetadata), which is why this needs no cache key or invalidation.
+     */
+    groupedPresetData: { featured: [], groups: [] },
+
+    /** @type {boolean} Whether the non-featured/categorized preset groups are expanded. */
+    showMorePresets: false,
 
     /** @type {DCQLQuery | null} */
     dcqlQuery: null,
@@ -286,6 +312,18 @@ Alpine.data("app", () => ({
         if (data.presets) {
             this.predefinedPresentationDefinitions = data.presets;
         }
+        // preset_category_order is omitempty, so it is absent whenever no
+        // preset is categorized - including the featured-but-uncategorized
+        // case, which still takes the grouping path below.
+        this.presetCategoryOrder = data.preset_category_order ?? [];
+
+        // Grouped once, here, because this is the only place either input
+        // changes. The rules live in preset-helpers.js so they can be unit
+        // tested - see groupPresets there.
+        this.groupedPresetData = groupPresets(
+            Object.entries(this.predefinedPresentationDefinitions),
+            this.presetCategoryOrder,
+        );
     },
 
     /** @param {string} id */

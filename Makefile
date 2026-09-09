@@ -285,7 +285,7 @@ test-pkg: ## Test the shared packages under pkg/
 
 test-js: ## Run JS unit tests for staticembed helpers
 	$(info Running JS unit tests)
-	@node --test $(APIGW_STATIC)/tests/*.test.js
+	@node --test $(APIGW_STATIC)/tests/*.test.js $(VERIFIER_STATIC)/tests/*.test.js
 
 # Test targets with build tags
 test-pkcs11: ## Test with PKCS#11 build tag
@@ -885,7 +885,7 @@ VALIBOT_VERSION         := 1.1.0
 JSON_VIEWER_VERSION     := 2.2.0
 
 APIGW_STATIC            := internal/apigw/staticembed
-VERIFIER_STATIC         := internal/verifier/static
+VERIFIER_STATIC         := internal/verifier/staticembed
 
 vendor-js: ## Download vendored JS/CSS dependencies
 	$(info Downloading Alpine.js $(ALPINEJS_VERSION))
