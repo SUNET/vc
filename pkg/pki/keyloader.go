@@ -43,7 +43,7 @@ const (
 type KeyConfig struct {
 	// File-based configuration
 	PrivateKeyPath string `yaml:"private_key_path" validate:"required_without=PKCS11"` // Path to PEM key file
-	ChainPath      string `yaml:"chain_path"`                                          // Path to certificate chain (optional)
+	ChainPath      string `yaml:"chain_path"`                                          // Path to certificate chain (optional). Should contain the signing certificate followed by intermediates, and the root certificate if it is not in the system trust store
 
 	// HSM-based configuration
 	PKCS11 *PKCS11Config `yaml:"pkcs11" validate:"required_without=PrivateKeyPath"` // PKCS#11 HSM config (optional)
