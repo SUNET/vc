@@ -23,6 +23,7 @@ import (
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/status"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"google.golang.org/grpc"
@@ -52,7 +53,10 @@ type Client struct {
 	registryClient apiv1_registry.RegistryServiceClient
 	mdocIssuer     *mdoc.Issuer // mDL issuer for ISO 18013-5 credentials
 	signMetadataRL *rate.Limiter
-	bbsKeys        *bbsKeyPair // nil unless Issuer.BBS is configured; gates the "jwp" format
+
+	statusAggregator *status.Aggregator
+
+	bbsKeys *bbsKeyPair // nil unless Issuer.BBS is configured; gates the "jwp" format
 	// bbsIssuerOverride replaces the native signer in tests.
 	//
 	// A seam rather than a design choice: without it nothing could show
@@ -109,6 +113,8 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 	if err := c.initBBSKeys(); err != nil {
 		return nil, err
 	}
+
+	c.statusAggregator = c.buildStatusAggregator()
 
 	c.log.Info("Started")
 

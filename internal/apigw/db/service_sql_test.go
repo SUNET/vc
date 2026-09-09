@@ -35,7 +35,7 @@ func TestNewService(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "https://issuer.example.com", got.CredentialOfferParameters.CredentialIssuer)
 
-		probe := svc.Status(ctx)
-		require.True(t, probe.Healthy)
+		probe := svc.HealthProbe(ctx)
+		require.NoError(t, probe)
 	})
 }

@@ -6,6 +6,7 @@ import (
 	"net/url"
 
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
+	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	"github.com/SUNET/vc/internal/registry/apiv1"
 )
 
@@ -62,4 +63,10 @@ func (s *Service) SaveCredentialSubject(ctx context.Context, req *apiv1_registry
 	}
 
 	return &apiv1_registry.SaveCredentialSubjectReply{}, nil
+}
+
+// Status returns the readiness status of the registry service and its
+// dependencies.
+func (s *Service) Status(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {
+	return s.apiv1.Status(ctx, req)
 }

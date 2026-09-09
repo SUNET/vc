@@ -30,7 +30,7 @@ func TestNewService(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, got)
 
-		probe := svc.Status(ctx)
-		require.True(t, probe.Healthy)
+		probe := svc.HealthProbe(ctx)
+		require.NoError(t, probe)
 	})
 }

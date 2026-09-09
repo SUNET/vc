@@ -23,6 +23,7 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openidfederation"
 	"github.com/SUNET/vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/status"
 	"github.com/SUNET/vc/pkg/trace"
 	"github.com/SUNET/vc/pkg/trust"
 
@@ -80,6 +81,10 @@ type Client struct {
 	// issuerReachable tracks whether the issuer gRPC was reachable on the last refresh.
 	// Used to log state transitions (down→up, up→down) at Info level.
 	issuerReachable atomic.Bool
+
+	// status is the shared readiness aggregator: local probes + downstream
+	// Status RPCs, cached + single-flighted. Configured in New.
+	statusAggregator *status.Aggregator
 }
 
 // New creates a new instance of the public api
@@ -202,6 +207,8 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 			c.log.Info("Wallet attestation enabled (PDP trust, no scope restrictions)", "mode", modeLabel)
 		}
 	}
+
+	c.statusAggregator = c.buildStatusAggregator()
 
 	c.log.Info("Started")
 

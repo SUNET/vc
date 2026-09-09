@@ -2,9 +2,9 @@ package db
 
 import (
 	"context"
+	"errors"
 	"time"
 
-	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	"github.com/SUNET/vc/pkg/dbservice"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -22,7 +22,6 @@ type Service struct {
 	cfg         *model.Cfg
 	log         *logger.Log
 	tracer      *trace.Tracer
-	probeStore  *sqlstore.ProbeCache
 
 	// OIDC client collection, client registration
 	Clients ClientStore
@@ -43,7 +42,6 @@ func New(ctx context.Context, cfg *model.Cfg, tracer *trace.Tracer, log *logger.
 		log:         log.New("db"),
 		cfg:         cfg,
 		tracer:      tracer,
-		probeStore:  &sqlstore.ProbeCache{},
 		MongoClient: conn.MongoClient,
 		SQLDB:       conn.SQLDB,
 	}
@@ -96,18 +94,24 @@ func NewServiceWithMocks(clients ClientStore) *Service {
 	}
 }
 
-// Status returns the status of the database
-func (s *Service) Status(ctx context.Context) *apiv1_status.StatusProbe {
-	ctx, span := s.tracer.Start(ctx, "db:status")
+// HealthProbe implements the status.Prober contract: returns nil when the
+// active backend (SQL or MongoDB) is reachable, otherwise the underlying error.
+func (s *Service) HealthProbe(ctx context.Context) error {
+	ctx, span := s.tracer.Start(ctx, "verifier:db:healthprobe")
 	defer span.End()
 
-	ping := func(ctx context.Context) error {
-		if s.SQLDB != nil {
-			return s.SQLDB.PingContext(ctx)
-		}
-		return s.MongoClient.Ping(ctx, nil)
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
 	}
-	return sqlstore.ProbeStatus(ctx, s.probeStore, ping)
+	if s.SQLDB != nil {
+		return s.SQLDB.PingContext(ctx)
+	}
+	if s.MongoClient == nil {
+		return errors.New("mongo client not connected")
+	}
+	return s.MongoClient.Ping(ctx, nil)
 }
 
 // Close closes the database connection

@@ -60,6 +60,7 @@
         "Gruntfuggly",
         "GUNET",
         "HEALTHCHECK",
+        "healthprobe",
         "honnef",
         "httphelpers",
         "httpsurl",
@@ -170,6 +171,7 @@
         "socialsecurity",
         "softhsm",
         "SPOCP",
+        "SQLDB",
         "starform",
         "staticcheck",
         "staticembed",
@@ -207,5 +209,15 @@
         "zenor",
         "zoneinfo"
     ],
-    "makefile.configureOnOpen": false
+    "makefile.configureOnOpen": false,
+    "gopls": {
+        "analyses": {
+            "unusedparams": false,
+            "shadow": false,
+            "fieldalignment": false
+        },
+        "staticcheck": false,
+        "vulncheck": "Off",
+        "memoryMode": "DegradeClosed"
+    }
 }

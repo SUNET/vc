@@ -1,2 +1,4 @@
 docs/
 pki/
+gen_bootstrap
+bin/

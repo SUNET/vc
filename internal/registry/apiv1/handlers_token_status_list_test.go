@@ -82,6 +82,10 @@ func (m *mockTokenStatusListIssuer) SetError(err error) {
 	m.err = err
 }
 
+func (m *mockTokenStatusListIssuer) HealthProbe(ctx context.Context) error {
+	return m.err
+}
+
 // newTestClient creates a Client with mock dependencies for testing
 func newTestClient() (*Client, *mockTokenStatusListIssuer) {
 	mock := newMockTokenStatusListIssuer()

@@ -1,7 +1,8 @@
-package model
+package status
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
@@ -13,52 +14,58 @@ func TestProbes_Check(t *testing.T) {
 		name            string
 		probes          Probes
 		serviceName     string
-		expectStatus    string
 		expectNumProbes int
+		expectProbeSt   []string // per-probe status strings, in order
+		expectRollup    string   // Data.Status
 	}{
 		{
-			name:            "nil probes returns FAIL",
+			name:            "nil probes - rollup OK, no probes",
 			probes:          nil,
 			serviceName:     "test-service",
-			expectStatus:    fmt.Sprintf(StatusFail, "test-service"),
 			expectNumProbes: 0,
+			expectProbeSt:   nil,
+			expectRollup:    fmt.Sprintf(ServiceStatusOK, "test-service"),
 		},
 		{
-			name: "all healthy returns OK",
+			name: "all healthy - rollup OK",
 			probes: Probes{
 				{Name: "db", Healthy: true, Message: "connected"},
 				{Name: "cache", Healthy: true, Message: "ok"},
 			},
 			serviceName:     "my-svc",
-			expectStatus:    fmt.Sprintf(StatusOK, "my-svc"),
 			expectNumProbes: 2,
+			expectProbeSt:   []string{StatusOK, StatusOK},
+			expectRollup:    fmt.Sprintf(ServiceStatusOK, "my-svc"),
 		},
 		{
-			name: "one unhealthy returns FAIL",
+			name: "one unhealthy - rollup FAIL",
 			probes: Probes{
 				{Name: "db", Healthy: true, Message: "connected"},
 				{Name: "cache", Healthy: false, Message: "timeout"},
 			},
 			serviceName:     "svc",
-			expectStatus:    fmt.Sprintf(StatusFail, "svc"),
 			expectNumProbes: 2,
+			expectProbeSt:   []string{StatusOK, StatusFail},
+			expectRollup:    fmt.Sprintf(ServiceStatusFail, "svc"),
 		},
 		{
-			name: "all unhealthy returns FAIL",
+			name: "all unhealthy - rollup FAIL",
 			probes: Probes{
 				{Name: "db", Healthy: false, Message: "down"},
 				{Name: "cache", Healthy: false, Message: "down"},
 			},
 			serviceName:     "svc",
-			expectStatus:    fmt.Sprintf(StatusFail, "svc"),
 			expectNumProbes: 2,
+			expectProbeSt:   []string{StatusFail, StatusFail},
+			expectRollup:    fmt.Sprintf(ServiceStatusFail, "svc"),
 		},
 		{
-			name:            "empty slice returns OK",
+			name:            "empty slice - rollup OK, no probes",
 			probes:          Probes{},
 			serviceName:     "svc",
-			expectStatus:    fmt.Sprintf(StatusOK, "svc"),
 			expectNumProbes: 0,
+			expectProbeSt:   nil,
+			expectRollup:    fmt.Sprintf(ServiceStatusOK, "svc"),
 		},
 	}
 
@@ -67,10 +74,28 @@ func TestProbes_Check(t *testing.T) {
 			reply := tt.probes.Check(tt.serviceName)
 
 			assert.Equal(t, tt.serviceName, reply.Data.ServiceName)
-			assert.Equal(t, tt.expectStatus, reply.Data.Status)
+			assert.Equal(t, tt.expectRollup, reply.Data.Status)
 			assert.Len(t, reply.Data.Probes, tt.expectNumProbes)
+			for i, want := range tt.expectProbeSt {
+				p := reply.Data.Probes[i]
+				assert.Equal(t, want, p.Status, "probe %s", p.Name)
+				assert.True(t, strings.HasPrefix(p.Name, tt.serviceName+"."), "probe %s should be prefixed with %s.", p.Name, tt.serviceName)
+			}
 		})
 	}
+}
+
+func TestProbes_Check_DoesNotDoublePrefix(t *testing.T) {
+	// A downstream probe forwarded through an aggregator already carries
+	// its own "<svc>." prefix and must be left untouched.
+	probes := Probes{
+		{Name: "issuer.signer", Healthy: true},
+		{Name: "registry.mongo", Healthy: false, Message: "down"},
+	}
+	reply := probes.Check("apigw")
+
+	assert.Equal(t, "issuer.signer", reply.Data.Probes[0].Name)
+	assert.Equal(t, "registry.mongo", reply.Data.Probes[1].Name)
 }
 
 func TestProbes_Check_BuildVariablesPopulated(t *testing.T) {
@@ -96,9 +121,9 @@ func TestProbes_Check_ProbesPreserveOrder(t *testing.T) {
 	reply := probes.Check("svc")
 
 	assert.Len(t, reply.Data.Probes, 3)
-	assert.Equal(t, "first", reply.Data.Probes[0].Name)
-	assert.Equal(t, "second", reply.Data.Probes[1].Name)
-	assert.Equal(t, "third", reply.Data.Probes[2].Name)
+	assert.Equal(t, "svc.first", reply.Data.Probes[0].Name)
+	assert.Equal(t, "svc.second", reply.Data.Probes[1].Name)
+	assert.Equal(t, "svc.third", reply.Data.Probes[2].Name)
 }
 
 func TestProbes_Check_ProbeFieldsCopied(t *testing.T) {
@@ -110,7 +135,7 @@ func TestProbes_Check_ProbeFieldsCopied(t *testing.T) {
 	probes := Probes{probe}
 	reply := probes.Check("svc")
 
-	assert.Equal(t, probe.Name, reply.Data.Probes[0].Name)
+	assert.Equal(t, "svc.db", reply.Data.Probes[0].Name)
 	assert.Equal(t, probe.Healthy, reply.Data.Probes[0].Healthy)
 	assert.Equal(t, probe.Message, reply.Data.Probes[0].Message)
 }
