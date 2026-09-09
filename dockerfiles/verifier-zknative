@@ -69,12 +69,12 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     CGO_CFLAGS="-I/go/src/app/third_party/zk-cred-longfellow/include" \
     CGO_LDFLAGS="-L/go/src/app/third_party/zk-cred-longfellow/lib -lzk_cred_longfellow" \
     go build -v -tags zknative -o bin/vc_verifier -ldflags \
-    "-X vc/pkg/model.BuildVariableGitCommit=$(git rev-list -1 HEAD) \
-    -X vc/pkg/model.BuildVariableGitBranch=$(git rev-parse --abbrev-ref HEAD) \
-    -X vc/pkg/model.BuildVariableTimestamp=$(date -u +'%FT%TZ') \
-    -X vc/pkg/model.BuildVariableGoVersion=$(go version|awk '{print $3}') \
-    -X vc/pkg/model.BuildVariableGoArch=$(go version|awk '{print $4}') \
-    -X vc/pkg/model.BuildVersion=$(echo $BUILDTAG) \
+    "-X github.com/SUNET/vc/pkg/status.BuildVariableGitCommit=$(git rev-list -1 HEAD) \
+    -X github.com/SUNET/vc/pkg/status.BuildVariableGitBranch=$(git rev-parse --abbrev-ref HEAD) \
+    -X github.com/SUNET/vc/pkg/status.BuildVariableTimestamp=$(date -u +'%FT%TZ') \
+    -X github.com/SUNET/vc/pkg/status.BuildVariableGoVersion=$(go version|awk '{print $3}') \
+    -X github.com/SUNET/vc/pkg/status.BuildVariableGoArch=$(go version|awk '{print $4}') \
+    -X github.com/SUNET/vc/pkg/status.BuildVersion=$(echo $BUILDTAG) \
     -w -s" ./cmd/verifier
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
