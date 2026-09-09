@@ -5,6 +5,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/spocputil"
 
@@ -109,7 +110,7 @@ func BuildQuery(scope string, claims map[string]any, queryTemplate []model.Query
 		// Use explicit template: iterate in defined order to match rule positions
 		for _, dim := range queryTemplate {
 			dims = append(dims, dim.Dimension)
-			if value, ok := claims[dim.Claim]; ok {
+			if value, ok := lookupClaim(claims, dim.Claim); ok {
 				values[dim.Dimension] = toStringValue(value)
 			}
 			// Claim not present — leave values[dim.Dimension] unset;
@@ -129,6 +130,27 @@ func BuildQuery(scope string, claims map[string]any, queryTemplate []model.Query
 	}
 
 	return spocputil.BuildTaggedQuery("credential", dims, values)
+}
+
+// lookupClaim resolves a query template's claim path against the OIDC claims.
+//
+// The flat key is tried first, so a claim whose name itself contains a dot
+// keeps resolving exactly as it did. Only then is the path walked as
+// dot-notation, which is what the configuration documents and what the
+// callback actually produces: ProcessCallback fills the map via
+// idToken.Claims, so a nested claim arrives as a map under its parent and
+// "identity.given_name" is never a key.
+//
+// Worth its own function because the failure was silent. An unresolved
+// dimension is emitted empty, an empty dimension matches a wildcard rule
+// and fails a rule that requires a value - so a policy written against the
+// documented dot-notation would widen or hard-deny with nothing anywhere
+// saying why.
+func lookupClaim(claims map[string]any, path string) (any, bool) {
+	if value, ok := claims[path]; ok {
+		return value, true
+	}
+	return credential.GetNestedValue(claims, path)
 }
 
 func toStringValue(v any) string {

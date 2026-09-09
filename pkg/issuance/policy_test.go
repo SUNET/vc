@@ -310,3 +310,44 @@ func TestToStringValue(t *testing.T) {
 	assert.Equal(t, "42", toStringValue(42))
 	assert.Equal(t, "3.14", toStringValue(3.14))
 }
+
+// TestBuildQueryResolvesNestedClaimPaths covers the dot-notation the
+// configuration documents and the doc_example advertises
+// ("identity.given_name").
+//
+// BuildQuery used a flat map lookup, so such a path never resolved. The
+// dimension was then emitted empty, which matches a wildcard rule and fails
+// a rule requiring a value - a policy would widen or hard-deny with nothing
+// saying why. ProcessCallback fills the claims via idToken.Claims, so a
+// nested claim really does arrive as a map under its parent.
+func TestBuildQueryResolvesNestedClaimPaths(t *testing.T) {
+	claims := map[string]any{
+		"acr": "loa3",
+		"identity": map[string]any{
+			"given_name": "Ada",
+			"address":    map[string]any{"country": "SE"},
+		},
+		// A claim whose name itself contains a dot must keep winning over
+		// the traversal, so nested support cannot change existing configs.
+		"identity.given_name": "flat-wins",
+	}
+
+	for _, tc := range []struct {
+		name  string
+		claim string
+		want  string
+	}{
+		{name: "a nested path resolves", claim: "identity.address.country", want: "(10:credential(5:scope3:pid)(3:dim2:SE))"},
+		{name: "a flat key still resolves", claim: "acr", want: "(10:credential(5:scope3:pid)(3:dim4:loa3))"},
+		{name: "a literal dotted key beats the traversal", claim: "identity.given_name", want: "(10:credential(5:scope3:pid)(3:dim9:flat-wins))"},
+		{name: "an absent path leaves the dimension empty", claim: "identity.missing", want: "(10:credential(5:scope3:pid)(3:dim))"},
+		{name: "a path through a non-map leaves it empty", claim: "acr.nope", want: "(10:credential(5:scope3:pid)(3:dim))"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// String() renders the canonical length-prefixed SPOCP form,
+			// not the human-readable one the rules are written in.
+			q := BuildQuery("pid", claims, []model.QueryDimension{{Dimension: "dim", Claim: tc.claim}})
+			assert.Equal(t, tc.want, q.String())
+		})
+	}
+}
