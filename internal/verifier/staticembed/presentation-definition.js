@@ -116,6 +116,18 @@ const metadataResponseSchema = v.object({
             meta: v.object({
                 vct_values: v.optional(v.array(v.string())),
                 doctype_value: v.optional(v.string()),
+                // zk_system_type entries are a flat {id, system, ...params}
+                // string-keyed object on the wire (ZKSystemTypeSpec's own
+                // MarshalJSON flattens params to the top level, no nested
+                // "params" key) - v.record(string,string), not a fixed
+                // {id, system} shape, so an arbitrary param (e.g.
+                // num_attributes, circuit_hash) isn't silently dropped.
+                // Without this field declared at all, v.object() stripped
+                // it from every parsed preset - the verifier's own
+                // zk_system_type was present on the wire but never reached
+                // the DCQL query the wallet received, which is
+                // indistinguishable from "no ZK system offered" wallet-side.
+                zk_system_type: v.optional(v.array(v.record(v.string(), v.string()))),
             }),
             claims: v.optional(v.array(v.object({
                 path: v.array(v.nullable(v.string())),
@@ -140,8 +152,32 @@ const dcqlQueryCredentialSchema = v.object({
         v.object({
             vct_values: v.optional(v.array(v.string())),
             doctype_value: v.optional(v.string()),
+            // zk_system_type (mso_mdoc_zk only) is an array of flat
+            // {id, system, ...params} objects - declared explicitly since
+            // the catch-all record below only accepts string/string[]
+            // values, not array-of-object, and would otherwise reject
+            // (not silently drop) this entire query at the
+            // v.safeParse(dcqlQuerySchema, ...) gate right before it's
+            // sent - "Malformed predefined DCQL query" with no further
+            // detail. See the identical fix on metadataResponseSchema's
+            // preset meta - same root cause, different validation
+            // checkpoint (that one stripped the field silently; this one
+            // rejects the whole query instead).
+            zk_system_type: v.optional(v.array(v.record(v.string(), v.string()))),
         }),
-        v.record(v.string(), v.union([v.string(), v.array(v.string())])),
+        // v.intersect validates the object against EVERY member schema, not
+        // just "whichever keys aren't already declared above" - confirmed
+        // live (both via the deployed error and a local valibot repro):
+        // this catch-all record still runs against the ENTIRE meta object,
+        // zk_system_type included, so its value union has to independently
+        // accept zk_system_type's own array-of-objects shape too, or the
+        // intersection fails even though the object schema above already
+        // declared and accepted the field.
+        v.record(v.string(), v.union([
+            v.string(),
+            v.array(v.string()),
+            v.array(v.record(v.string(), v.string())),
+        ])),
     ]),
     claims: v.optional(v.array(v.object({
         path: v.array(v.nullable(v.string())),

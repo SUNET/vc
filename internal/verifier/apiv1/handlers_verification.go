@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"crypto"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -299,8 +300,25 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// rather than silently skipping either check.
 			var zkMeta openid4vp.MetaQuery
 			var requestedClaimIDs []string
-			if authCtx.DCQLQuery != nil {
-				for _, cq := range authCtx.DCQLQuery.Credentials {
+			// authCtx.DCQLQuery is the Mongo-persisted copy - confirmed live
+			// (via a temporary debug log, since removed) that it comes back
+			// nil here even for a session whose consent screen the wallet
+			// just correctly rendered from the SAME original DCQL query,
+			// meaning the query itself was never lost, only this particular
+			// round-trip through AuthContext's Mongo store. Fall back to
+			// RequestObjectCache (an in-memory, non-Mongo cache keyed by
+			// RequestObjectID) - it holds the exact RequestObject that was
+			// signed and served to the wallet at /verification/request-object
+			// (see VerificationRequestObject), which necessarily carries the
+			// same DCQLQuery the wallet just demonstrably parsed correctly.
+			dcqlQuery := authCtx.DCQLQuery
+			if dcqlQuery == nil {
+				if requestObject, found := c.openid4vp.RequestObjectCache.Get(authCtx.RequestObjectID); found {
+					dcqlQuery = requestObject.DCQLQuery
+				}
+			}
+			if dcqlQuery != nil {
+				for _, cq := range dcqlQuery.Credentials {
 					if cq.ID == scope && openid4vp.IsMdocZkFormat(cq.Format) {
 						zkMeta = cq.Meta
 						for _, claim := range cq.Claims {
@@ -314,28 +332,68 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				}
 			}
 
-			// SessionTranscript for the OpenID4VP redirect flow. Its wire
-			// format is cross-checked against an independent CBOR library
-			// (see pkg/mdoc.TestBuildOID4VPSessionTranscript_MatchesIndependentKotlinCBORLibraryCrossCheck),
-			// but is STILL NOT confirmed against a real wallet's own
-			// transcript bytes from a live session - no such fixture could
-			// be found (checked siros-sdk-kotlin, siros-sdk-swift,
-			// go-wallet-backend, multipaz). TRACKED GAP: if native ZK
-			// verification of a real presentation fails in a way that looks
-			// like a transcript/binding mismatch, treat
-			// BuildOID4VPSessionTranscript's exact byte layout as a prime
-			// suspect and get a real captured transcript to compare against.
-			responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "oidc-direct_post")
+			// SessionTranscript for the OpenID4VP redirect flow. CONFIRMED
+			// LIVE as the exact cause of a real "InvalidSumcheckProof"
+			// rejection of a genuinely valid proof: this endpoint path MUST
+			// match the responseURI actually sent to the wallet as
+			// requestObject.ResponseURI (see UIInteraction/CreateRequestObject,
+			// which use "direct_post", not "oidc-direct_post" - the latter
+			// belongs to a wholly separate OIDC RP flow with its own
+			// session/state cache namespace, see _submitDCAPIResponse's
+			// identical distinction in presentation-definition.js). Any
+			// difference here changes handoverInfo's encoded bytes, which
+			// changes its SHA-256 digest, which changes the whole
+			// SessionTranscript the ZK proof's Fiat-Shamir transcript was
+			// built against - a wallet-side proof built over the real
+			// "direct_post" responseURI can never verify against a
+			// recomputed transcript using a different one, regardless of
+			// whether the underlying disclosed claims are correct.
+			responseURI, err := url.JoinPath(c.cfg.Verifier.PublicURL, "verification", "direct_post")
 			if err != nil {
 				c.log.Error(err, "failed to construct response URI for ZK session transcript", "scope", scope)
 				return nil, fmt.Errorf("failed to construct response URI for scope %s: %w", scope, err)
 			}
-			sessionTranscript, err := mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, nil)
+			// BuildOID4VPSessionTranscript's own doc comment: the JWK
+			// thumbprint is nil "unless the request advertised an
+			// encryption key for the response" - this request always does
+			// (CreateRequestObject sets ClientMetadata.JWKS to the same
+			// ephemeral key cached under EphemeralEncryptionKeyID, and
+			// response_mode is "direct_post.jwt"/"dc_api.jwt" whenever
+			// AutoAttempt is off, per UIInteraction's own responseMode
+			// comment), so passing nil unconditionally contradicted the
+			// documented condition and silently left the ZK proof's
+			// Fiat-Shamir transcript unbound from the actual encryption
+			// key the wallet saw and included in its own transcript.
+			var readerPubKeyThumbprint []byte
+			if authCtx.EphemeralEncryptionKeyID != "" {
+				if privKey, found := c.openid4vp.EphemeralKeyCache.Get(authCtx.EphemeralEncryptionKeyID); found {
+					pubKeyIface, err := privKey.PublicKey()
+					if err != nil {
+						c.log.Error(err, "failed to derive public key for ZK session transcript", "scope", scope)
+						return nil, fmt.Errorf("failed to derive public key for scope %s: %w", scope, err)
+					}
+					tp, err := pubKeyIface.Thumbprint(crypto.SHA256)
+					if err != nil {
+						c.log.Error(err, "failed to compute JWK thumbprint for ZK session transcript", "scope", scope)
+						return nil, fmt.Errorf("failed to compute JWK thumbprint for scope %s: %w", scope, err)
+					}
+					readerPubKeyThumbprint = tp
+				} else {
+					// A miss means the key expired or was evicted between
+					// issuing the request and the wallet answering it. The
+					// wallet built ITS transcript with that key, so carrying
+					// on with a nil thumbprint guarantees a mismatch - and
+					// one that surfaces as an opaque proof failure rather
+					// than as the cache miss it actually is.
+					c.log.Error(nil, "ephemeral encryption key missing from cache for ZK session transcript", "scope", scope, "key_id", authCtx.EphemeralEncryptionKeyID)
+					return nil, fmt.Errorf("ephemeral encryption key %q is no longer cached, cannot rebuild the session transcript the wallet used for scope %s", authCtx.EphemeralEncryptionKeyID, scope)
+				}
+			}
+			sessionTranscript, err := mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)
 			if err != nil {
 				c.log.Error(err, "failed to build ZK session transcript", "scope", scope)
 				return nil, fmt.Errorf("failed to build ZK session transcript for scope %s: %w", scope, err)
 			}
-
 			zkResult, err := zkHandler.VerifyAndExtract(ctx, vpToken, mdoc.ZkPresentationContext{
 				SessionID:          authCtx.SessionID,
 				ClientID:           authCtx.ClientID,

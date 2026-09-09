@@ -109,6 +109,16 @@ type ZkDocumentDataMdoc struct {
 	// convention as a COSE x5chain header (see cose.go). May be absent.
 	// Use X5ChainCertificates to get parsed *x509.Certificate values.
 	MsoX5Chain any `cbor:"msoX5chain,omitempty"`
+
+	// ClaimSlotDigestIds is Vega-only (r12 circuit revision addendum to
+	// docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md): the credential's FULL,
+	// fixed-shape claim-slot list, in the credential's own document order
+	// (VegaProofSystem.MAX_CLAIMS_V1 entries in siros-sdk-kotlin), each
+	// entry being that slot's digestID regardless of whether this
+	// presentation discloses it. nil for a Longfellow presentation or a
+	// pre-r12 Vega artifact. See BuildVegaDisclosedBytes's doc comment for
+	// why the verifier needs this to call zk_cred_vega's r12 verify().
+	ClaimSlotDigestIds []uint32 `cbor:"claimSlotDigestIds,omitempty"`
 }
 
 // ZkSignedItemMdoc is one disclosed element inside a ZkDocumentDataMdoc's
@@ -116,6 +126,26 @@ type ZkDocumentDataMdoc struct {
 type ZkSignedItemMdoc struct {
 	ElementIdentifier string `cbor:"elementIdentifier"`
 	ElementValue      any    `cbor:"elementValue"`
+
+	// DigestID is the credential's own real ISO 18013-5 IssuerSignedItem
+	// digestID for this element - an ADDITIVE, optional extension to
+	// multipaz's own zkDocuments wire shape (see
+	// docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md for the full rationale and
+	// its "not yet proposed upstream" status). nil when absent - a
+	// Longfellow presentation never needs this (attributes are matched by
+	// request-order position, not digestID - see
+	// ZkPresentationContext.RequestedClaimIDs's doc comment), so only
+	// Vega-producing wallets (siros-sdk-kotlin as of this field's
+	// addition - siros-sdk-swift does not yet emit it) populate it.
+	DigestID *uint32 `cbor:"digestId,omitempty"`
+
+	// IssuerSignedItemBytes is Vega-only (r12 circuit revision addendum to
+	// docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md): this element's exact
+	// original IssuerSignedItem bytes. nil for a Longfellow presentation
+	// or a pre-r12 Vega artifact - see BuildVegaDisclosedBytes's doc
+	// comment for why r12 needs it (verify() takes disclosed bytes as an
+	// input rather than returning them from the proof).
+	IssuerSignedItemBytes []byte `cbor:"issuerSignedItemBytes,omitempty"`
 }
 
 // FlattenIssuerSigned converts IssuerSigned into the same
@@ -128,6 +158,59 @@ func (dd *ZkDocumentDataMdoc) FlattenIssuerSigned() map[string]map[string]any {
 // FlattenDeviceSigned is the DeviceSigned equivalent of FlattenIssuerSigned.
 func (dd *ZkDocumentDataMdoc) FlattenDeviceSigned() map[string]map[string]any {
 	return flattenZkSignedItems(dd.DeviceSigned)
+}
+
+// IssuerSignedItemsByDigestID indexes IssuerSigned by DigestID, across all
+// namespaces - the lookup a Vega presentation's verify path needs (see
+// docs/ZK_VEGA_DIGESTID_WIRE_EXTENSION.md): the returned proof's disclosed
+// claims are matched to a requested identifier via digestID, not position,
+// so the verifier needs the wire-declared elementValue for that same
+// digestID to compare against.
+//
+// Returns an error if any disclosed item has no DigestID at all (expected
+// only from a pre-digestId-extension wallet, or a non-Vega presentation
+// mistakenly routed through this path), or if the same DigestID appears
+// more than once.
+//
+// That second case includes a collision BETWEEN namespaces, which is not a
+// malformed credential: ISO 18013-5 scopes digestID to its namespace, and
+// this package's own MSOBuilder counts from zero per namespace, so two
+// namespaces sharing digestID 0 is entirely well-formed. The limitation is
+// the wire extension's, not the mdoc's - claimSlotDigestIds is a flat list
+// of digestIDs with no namespace beside them, so nothing downstream could
+// place a colliding pair in the right slots even if this map allowed them
+// through. Rejecting is therefore the honest outcome rather than a
+// conservative one, but the error says which namespaces collided so it
+// does not read as a wallet bug. Disclosing across namespaces in one Vega
+// presentation needs a wire change; see that document.
+func (dd *ZkDocumentDataMdoc) IssuerSignedItemsByDigestID() (map[uint32]ZkSignedItemMdoc, error) {
+	out := make(map[uint32]ZkSignedItemMdoc)
+	// Which namespace each digestID came from, so a cross-namespace
+	// collision can be reported as the wire-format constraint it is rather
+	// than as a duplicate the wallet got wrong.
+	seenNS := make(map[uint32]string)
+	for ns, items := range dd.IssuerSigned {
+		for _, item := range items {
+			if item.DigestID == nil {
+				return nil, fmt.Errorf("issuerSigned item %q (namespace %q) has no digestId - required for Vega claim matching", item.ElementIdentifier, ns)
+			}
+			if existing, ok := out[*item.DigestID]; ok {
+				if existingNS, sameNS := seenNS[*item.DigestID]; sameNS && existingNS != ns {
+					return nil, fmt.Errorf(
+						"digestId %d appears in both namespace %q (%q) and namespace %q (%q): digestIDs are namespace-scoped in ISO 18013-5, but claimSlotDigestIds carries no namespace, so a Vega presentation cannot disclose colliding digestIDs from two namespaces",
+						*item.DigestID, existingNS, existing.ElementIdentifier, ns, item.ElementIdentifier,
+					)
+				}
+				return nil, fmt.Errorf(
+					"digestId %d is disclosed more than once (%q and %q) - ambiguous, refusing to guess which one was intended",
+					*item.DigestID, existing.ElementIdentifier, item.ElementIdentifier,
+				)
+			}
+			out[*item.DigestID] = item
+			seenNS[*item.DigestID] = ns
+		}
+	}
+	return out, nil
 }
 
 func flattenZkSignedItems(m map[string][]ZkSignedItemMdoc) map[string]map[string]any {

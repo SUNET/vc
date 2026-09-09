@@ -52,7 +52,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=${TARGETARCH} go build -v ${GO_BUILD_TAGS:+-tags "$GO_BUILD_TAGS"} -o bin/vc_$SERVICE_NAME -ldflags \
     "-X github.com/SUNET/vc/pkg/status.BuildVariableGitCommit=$(git rev-list -1 HEAD) \
     -X github.com/SUNET/vc/pkg/status.BuildVariableGitBranch=$(git rev-parse --abbrev-ref HEAD) \
-    -X github.com/SUNET/vc/pkg/status.BuildVariableTimestamp=$(date +'%F:T%TZ') \
+    -X github.com/SUNET/vc/pkg/status.BuildVariableTimestamp=$(date -u +'%FT%TZ') \
     -X github.com/SUNET/vc/pkg/status.BuildVariableGoVersion=$(go version|awk '{print $3}') \
     -X github.com/SUNET/vc/pkg/status.BuildVariableGoArch=$(go version|awk '{print $4}') \
     -X github.com/SUNET/vc/pkg/status.BuildVersion=$(echo $BUILDTAG) \

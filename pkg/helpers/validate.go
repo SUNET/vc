@@ -16,6 +16,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sqlstore"
 	"github.com/SUNET/vc/pkg/trace"
 
@@ -356,6 +357,26 @@ func NewValidator() (*validator.Validate, error) {
 			sl.ReportError(cfg.JWKSURL, "JWKSURL", "JWKSURL", "jwks_source_required", "")
 		}
 	}, model.APIAuthJWKS{})
+
+	// Register struct-level validation for VerificationPresetScope: a
+	// "mso_mdoc_zk" format override has no meaning without a zk_system_type.
+	//
+	// The field's own doc comment already said it was required in that case;
+	// nothing enforced it, so the failure surfaced later as a DCQL query the
+	// wallet reads as "no ZK system offered" - which is indistinguishable
+	// from a wallet that cannot do ZK at all.
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		scope := sl.Current().Interface().(model.VerificationPresetScope)
+		if scope.Format == openid4vp.FormatMsoMdocZk && len(scope.ZKSystemType) == 0 {
+			sl.ReportError(scope.ZKSystemType, "ZKSystemType", "ZKSystemType", "zk_system_type_required_for_mso_mdoc_zk", "")
+		}
+		// The converse is a configuration that says nothing coherent: a
+		// zk_system_type only reaches the query through the ZK format, so on
+		// any other format it is silently inert rather than wrong-but-applied.
+		if len(scope.ZKSystemType) > 0 && scope.Format != openid4vp.FormatMsoMdocZk {
+			sl.ReportError(scope.Format, "Format", "Format", "zk_system_type_requires_mso_mdoc_zk_format", scope.Format)
+		}
+	}, model.VerificationPresetScope{})
 
 	// Register struct-level validation for DataSources: openid4vp auth_scopes must not self-reference
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {

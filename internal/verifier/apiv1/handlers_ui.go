@@ -85,8 +85,13 @@ type UIPresetCredential struct {
 // They are mutually exclusive, hence omitempty on both - sending an empty
 // vct_values alongside a doctype, or vice versa, is a malformed query.
 type UIPresetMeta struct {
-	VCTValues    []string `json:"vct_values,omitempty"`
-	DoctypeValue string   `json:"doctype_value,omitempty"`
+	VCTValues []string `json:"vct_values,omitempty"`
+	// DoctypeValue is set for mdoc/ZK-mdoc scopes (openid4vp.MetaQuery's
+	// mdoc-format field) - mirrors UICredentialInfo.VCT's mdoc branch.
+	DoctypeValue string `json:"doctype_value,omitempty"`
+	// ZKSystemType is set when the preset's VerificationPresetScope
+	// overrides it - see that type's own doc comment.
+	ZKSystemType []openid4vp.ZKSystemTypeSpec `json:"zk_system_type,omitempty"`
 }
 
 // UIPresetClaim is a claim path within a preset credential.
@@ -275,6 +280,15 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					}
 				}
 
+				// A preset's Format/ZKSystemType override lets an otherwise
+				// plain-format scope (e.g. mso_mdoc) be requested as a ZK
+				// proof (mso_mdoc_zk) instead - see
+				// model.VerificationPresetScope's own doc comment.
+				if scopeCfg != nil && scopeCfg.Format != "" {
+					uiCred.Format = scopeCfg.Format
+					uiCred.Meta.ZKSystemType = scopeCfg.ZKSystemType
+				}
+
 				// scopeCfg may be nil (scope with no overrides)
 				var claims []model.VerificationPresetClaim
 				var excludeSet map[string]bool
@@ -433,8 +447,21 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// encryption and produce a payload this page can't submit at all, so
 	// it's ignored here to keep request/response shapes consistent
 	// end-to-end for this specific flow.
+	// Also gated on AutoAttempt (default true): when it's false,
+	// _tryNativeDCAPI() never runs client-side at all (no manual retry
+	// button exists either - see presentation-definition.js's
+	// dcApiAutoAttempt check) and every request goes out through
+	// _setupFallbackFlow()'s QR/same-device-link path instead, which
+	// submits via /verification/direct_post through the ordinary
+	// WS-engine relay - NOT the DC API response channel. Serving
+	// "dc_api.jwt" there anyway produced a real, confirmed-live bug:
+	// go-wallet-backend's oid4vp.go correctly refuses to submit a
+	// dc_api.jwt-mode VP ("unsupported response_mode: dc_api.jwt"), since
+	// that response mode is JWE-encrypted specifically for
+	// navigator.credentials.get()'s own response construction, not a
+	// redirect/relay POST body.
 	responseMode := "direct_post.jwt"
-	if c.cfg.Verifier.DigitalCredentials.Enable {
+	if c.cfg.Verifier.DigitalCredentials.Enable && model.BoolVal(c.cfg.Verifier.DigitalCredentials.AutoAttempt, true) {
 		responseMode = "dc_api.jwt"
 	}
 
