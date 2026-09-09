@@ -1,12 +1,18 @@
 package model
 
-import "strings"
+import (
+	"strings"
 
-// ResponseModeDirectPost and ResponseModeDirectPostJWT are the two response
-// modes a wallet reached by QR code or same-device link can actually use.
+	"github.com/SUNET/vc/pkg/openid4vp"
+)
+
+// The two response modes a wallet reached by QR code or same-device link can
+// actually use. Aliases of openid4vp's, which owns RequestObject.ResponseMode
+// and its validation - defined there so the constants and the accepted set
+// cannot drift apart.
 const (
-	ResponseModeDirectPost    = "direct_post"
-	ResponseModeDirectPostJWT = "direct_post.jwt"
+	ResponseModeDirectPost    = openid4vp.ResponseModeDirectPost
+	ResponseModeDirectPostJWT = openid4vp.ResponseModeDirectPostJWT
 )
 
 // OIDCRelyingPartyResponseMode returns the response mode for request objects

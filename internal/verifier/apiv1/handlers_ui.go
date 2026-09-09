@@ -359,11 +359,6 @@ type UIInteractionRequest struct {
 	SessionID string `json:"-"`
 }
 
-// responseModeDCAPIJWT is the encrypted response mode for a request handed
-// to the browser's Digital Credentials API. It appears only on the object
-// served for that channel - see UIInteractionReply.DCAPIAuthorizationRequest.
-const responseModeDCAPIJWT = "dc_api.jwt"
-
 type UIInteractionReply struct {
 	// AuthorizationRequest is the request reached through request_uri: the QR
 	// code, the same-device link, and the polyfill's redirect fallback. Its
@@ -485,7 +480,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		ISS:          uiClientID,
 		ClientID:     authorizationContext.ClientID,
 		ResponseType: "vp_token",
-		ResponseMode: model.ResponseModeDirectPostJWT,
+		ResponseMode: openid4vp.ResponseModeDirectPostJWT,
 		State:        authorizationContext.State,
 		Nonce:        authorizationContext.Nonce,
 		ClientMetadata: &openid4vp.ClientMetadata{
@@ -536,7 +531,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// checks - client_id, nonce, response_uri, client_metadata, the DCQL
 	// query - has to be the same request seen through a different channel.
 	if c.cfg.Verifier.DigitalCredentials.Enable {
-		dcAPIRequestObject := dcAPIVariant(requestObject)
+		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
 
 		dcAPIRequestObjectID := uuid.NewString()
 		c.openid4vp.RequestObjectCache.Set(dcAPIRequestObjectID, dcAPIRequestObject)
