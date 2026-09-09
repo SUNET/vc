@@ -364,6 +364,41 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				c.log.Error(err, "failed to construct response URI for ZK session transcript", "scope", scope)
 				return nil, fmt.Errorf("failed to construct response URI for scope %s: %w", scope, err)
 			}
+			// BuildOID4VPSessionTranscript's own doc comment: the JWK
+			// thumbprint is nil "unless the request advertised an
+			// encryption key for the response" - this request always does
+			// (CreateRequestObject sets ClientMetadata.JWKS to the same
+			// ephemeral key cached under EphemeralEncryptionKeyID, and
+			// response_mode requires encryption on both delivery channels),
+			// so passing nil unconditionally contradicted the documented
+			// condition and silently left the ZK proof's Fiat-Shamir
+			// transcript unbound from the actual encryption key the wallet
+			// saw and included in its own transcript.
+			var readerPubKeyThumbprint []byte
+			if authCtx.EphemeralEncryptionKeyID != "" {
+				if privKey, found := c.openid4vp.EphemeralKeyCache.Get(authCtx.EphemeralEncryptionKeyID); found {
+					pubKeyIface, err := privKey.PublicKey()
+					if err != nil {
+						c.log.Error(err, "failed to derive public key for ZK session transcript", "scope", scope)
+						return nil, fmt.Errorf("failed to derive public key for scope %s: %w", scope, err)
+					}
+					tp, err := pubKeyIface.Thumbprint(crypto.SHA256)
+					if err != nil {
+						c.log.Error(err, "failed to compute JWK thumbprint for ZK session transcript", "scope", scope)
+						return nil, fmt.Errorf("failed to compute JWK thumbprint for scope %s: %w", scope, err)
+					}
+					readerPubKeyThumbprint = tp
+				} else {
+					// A miss means the key expired or was evicted between
+					// issuing the request and the wallet answering it. The
+					// wallet built ITS transcript with that key, so carrying
+					// on with a nil thumbprint guarantees a mismatch - and
+					// one that surfaces as an opaque proof failure rather
+					// than as the cache miss it actually is.
+					c.log.Error(nil, "ephemeral encryption key missing from cache for ZK session transcript", "scope", scope, "key_id", authCtx.EphemeralEncryptionKeyID)
+					return nil, fmt.Errorf("ephemeral encryption key %q is no longer cached, cannot rebuild the session transcript the wallet used for scope %s", authCtx.EphemeralEncryptionKeyID, scope)
+				}
+			}
 			// The handover follows how the response arrived, because the two
 			// hash different things and a wallet only ever produced one of
 			// them (SUNET/vc#652, SUNET/vc#655). A request_uri response binds
