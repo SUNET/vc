@@ -5,14 +5,24 @@ package mdoc
 // A decompressed Vega verifier key is ~100MB, and the cache is keyed by
 // zkSystemID, so an unbounded one grows the verifier's RSS permanently by
 // that much for every distinct circuit revision it is ever asked to verify
-// against, and never gives any of it back. 256MiB leaves room for two
-// revisions in flight - what a circuit rollover needs.
+// against, and never gives any of it back.
+//
+// 512MiB, which is room for about five keys. Two would cover a clean
+// rollover, and the extra headroom is deliberately cheap: this is a cap, not
+// a reservation, so RSS only reaches it if that many distinct revisions are
+// genuinely in use. The scenario it buys off is the one that fails quietly -
+// a working set one key larger than the cap makes every request evict the
+// key the next one needs, so the cache degrades to a full fetch per
+// verification with no error and nothing in the logs but latency. Paying
+// memory only in the case where the alternative is refetching 100MB per
+// request is the right side of that trade.
 //
 // The ceiling is PER PROCESS, not per deployment. Under Common.HA.Enable
 // there are several verifier instances, each with its own copy of this
-// cache, so the footprint to size for is 256MiB times the instance count -
-// and a rollover can have every instance holding two keys at once.
-const maxVegaVerifierKeyCacheBytes = 256 << 20
+// cache, so the footprint to size for is this times the instance count -
+// and each instance only reaches it if it has actually served that many
+// revisions.
+const maxVegaVerifierKeyCacheBytes = 512 << 20
 
 // vegaKeyCache is a byte-bounded LRU of decompressed verifier-key blobs.
 //

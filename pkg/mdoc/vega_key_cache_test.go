@@ -76,13 +76,23 @@ func TestVegaKeyCacheEviction(t *testing.T) {
 		}
 	})
 
-	t.Run("the real bound leaves room for two keys", func(t *testing.T) {
-		// ~100MB each; a circuit rollover needs two in flight.
+	t.Run("the real bound holds a plausible working set", func(t *testing.T) {
+		// ~100MB each. Two cover a clean rollover; the headroom is for a
+		// wallet population straddling more than two revisions, which is
+		// where a tight bound would thrash instead of cache.
 		c := newVegaKeyCache(maxVegaVerifierKeyCacheBytes)
-		c.put("r11", blob(100<<20))
-		c.put("r12", blob(100<<20))
-		if _, ok := c.byID["r11"]; !ok {
-			t.Fatal("two ~100MB keys must fit inside the bound")
+		for _, id := range []string{"r10", "r11", "r12", "r13", "r14"} {
+			c.put(id, blob(100<<20))
+		}
+		for _, id := range []string{"r10", "r11", "r12", "r13", "r14"} {
+			if _, ok := c.byID[id]; !ok {
+				t.Fatalf("%s should still be cached inside the bound", id)
+			}
+		}
+		// Still bounded, though: a sixth evicts the oldest.
+		c.put("r15", blob(100<<20))
+		if _, ok := c.byID["r10"]; ok {
+			t.Fatal("the bound must still evict - this is a cap, not unbounded growth")
 		}
 	})
 }
