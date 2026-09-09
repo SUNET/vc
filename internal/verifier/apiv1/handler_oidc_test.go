@@ -1576,7 +1576,7 @@ func TestAuthorize_NonASCIIWalletQRCodeBinding(t *testing.T) {
 	ctx := t.Context()
 	const walletName = "Möbius Wallet"
 
-	client, mockDB := CreateTestClientWithMock(nil)
+	client, mockDB := CreateTestClientWithMock(t, nil)
 	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
 	client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 	client.cfg.Verifier.SupportedWallets = map[string]string{
