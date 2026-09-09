@@ -139,7 +139,16 @@ func runZkVegaVerifyWorker(ctx context.Context, workerPath string, verifierKeyBy
 //
 // The blobs themselves live in a byte-bounded LRU - see vegaKeyCache, which
 // is in its own untagged file so its eviction rule can be tested without the
-// crate staged. The mutex here covers both that and the in-flight map.
+// crate staged, and whose doc comment explains why this cache sits outside
+// pkg/cache and Common.HA. The mutex here covers both that and the in-flight
+// map.
+//
+// inFly dedups concurrent loads within one process only. Under HA that means
+// each instance fetches a given artifact once rather than one fetching it for
+// the whole deployment - N cold-start fetches from the circuit catalog, not
+// one. Acceptable (they are cache misses on immutable public artifacts, and
+// the catalog is a CDN-shaped mirror list), but worth knowing before reading
+// a burst of identical fetches as a bug.
 var vegaVerifierKeyCacheState = struct {
 	mu    sync.Mutex
 	keys  *vegaKeyCache
