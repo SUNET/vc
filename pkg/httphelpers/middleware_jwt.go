@@ -356,8 +356,9 @@ func extractSPOCPSubject(token jwt.Token) string {
 	return ""
 }
 
-// BuildSPOCPQuery constructs a SPOCP query S-expression for the current HTTP
-// request, service name, and JWT subject:
+// BuildSPOCPQuery constructs a SPOCP query S-expression over all six
+// dimensions rules can match on: the service name, the HTTP method and path,
+// the JWT subject, and the requested authentic_source and scope:
 //
 //	(vc (service apigw)(method POST)(path /api/v1/upload)(subject alice@sunet.se)(authentic_source SUNET)(scope eduid))
 //

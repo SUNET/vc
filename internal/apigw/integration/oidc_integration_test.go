@@ -238,6 +238,11 @@ type mockOIDCProvider struct {
 
 	// tokenHandler can be overridden per-test to simulate error conditions
 	tokenHandler func(w http.ResponseWriter, r *http.Request)
+
+	// extraIDTokenClaims are merged into the default ID token, letting a test
+	// decide what the OP asserts about the user. Nil for every existing
+	// test, which leaves the default claim set exactly as it was.
+	extraIDTokenClaims map[string]any
 }
 
 func newMockOIDCProvider(t *testing.T) *mockOIDCProvider {
@@ -391,6 +396,7 @@ func (op *mockOIDCProvider) createIDToken(nonce string) string {
 	if nonce != "" {
 		claims["nonce"] = nonce
 	}
+	maps.Copy(claims, op.extraIDTokenClaims)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = op.keyID

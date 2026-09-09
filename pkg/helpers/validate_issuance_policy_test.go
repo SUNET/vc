@@ -37,12 +37,12 @@ func TestIssuancePolicyQueryTemplate(t *testing.T) {
 		{
 			name:    "an empty dimension name is rejected",
 			tmpl:    []model.QueryDimension{dim("", "acr")},
-			wantTag: "query_template_dimension_required",
+			wantTag: "required",
 		},
 		{
 			name:    "a dimension with no claim is rejected",
 			tmpl:    []model.QueryDimension{dim("acr", "")},
-			wantTag: "query_template_claim_required",
+			wantTag: "required",
 		},
 		{
 			name: "a well-formed template is accepted",

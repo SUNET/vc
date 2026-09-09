@@ -480,10 +480,10 @@ claims and evaluated against these rules. If no rule matches, issuance is denied
 
 Ordered slices of QueryDimension ensure deterministic query construction.
 
-| Field       | Type     | Description | Example | Default | Required |
-| ----------- | -------- | ----------- | ------- | ------- | -------- |
-| `dimension` | `string` | Dimension   | -       | -       | No       |
-| `claim`     | `string` | Claim       | -       | -       | No       |
+| Field       | Type     | Description                                                                                                                                                                                                                                                                                  | Example                 | Default | Required |
+| ----------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- | -------- |
+| `dimension` | `string` | SPOCP dimension name this entry populates. Required whenever the entry exists: an entry with no dimension has nothing to place the claim under, so it can only ever widen the rule shape into one no rule matches. "scope" is reserved - it is auto-populated with the credential type name. | `"acr"`                 | -       | Yes      |
+| `claim`     | `string` | OIDC claim whose value populates the dimension, in dot-notation for nested claims. Required for the same reason: a dimension with no claim renders empty in every query.                                                                                                                     | `"identity.given_name"` | -       | Yes      |
 
 ### `import`
 

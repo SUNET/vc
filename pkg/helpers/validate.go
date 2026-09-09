@@ -381,6 +381,11 @@ func NewValidator() (*validator.Validate, error) {
 	// Register struct-level validation for IssuancePolicy: query_template
 	// must not restate the reserved "scope" dimension or repeat a name.
 	//
+	// A missing dimension or claim is a per-field requirement instead, and
+	// lives as a `required` tag on QueryDimension - that way the generated
+	// configuration reference reports the field as required, which it did
+	// not while this function was the only thing enforcing it.
+	//
 	// policyRuleDimensions prepends "scope" unconditionally (it is
 	// auto-populated with the credential type), so an operator who also
 	// lists it gets two "scope" dimensions in every rule shape - and rules
@@ -393,18 +398,19 @@ func NewValidator() (*validator.Validate, error) {
 		policy := sl.Current().Interface().(model.IssuancePolicy)
 		seen := make(map[string]bool, len(policy.QueryTemplate))
 		for _, d := range policy.QueryTemplate {
+			// The dive tag already reports an entry with no dimension. An
+			// empty name cannot be reserved, and calling two of them
+			// duplicates of each other would only bury that report.
+			if strings.TrimSpace(d.Dimension) == "" {
+				continue
+			}
 			switch {
-			case strings.TrimSpace(d.Dimension) == "":
-				sl.ReportError(policy.QueryTemplate, "QueryTemplate", "QueryTemplate", "query_template_dimension_required", d.Claim)
 			case d.Dimension == "scope":
 				sl.ReportError(policy.QueryTemplate, "QueryTemplate", "QueryTemplate", "query_template_scope_is_reserved", d.Dimension)
 			case seen[d.Dimension]:
 				sl.ReportError(policy.QueryTemplate, "QueryTemplate", "QueryTemplate", "query_template_duplicate_dimension", d.Dimension)
 			}
 			seen[d.Dimension] = true
-			if strings.TrimSpace(d.Claim) == "" {
-				sl.ReportError(policy.QueryTemplate, "QueryTemplate", "QueryTemplate", "query_template_claim_required", d.Dimension)
-			}
 		}
 	}, model.IssuancePolicy{})
 

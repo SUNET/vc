@@ -325,14 +325,23 @@ type IssuancePolicy struct {
 	// match the order used in the rules.
 	// Special dimension "scope" is auto-populated with the credential type name.
 	// If empty, a default query is built with all claims as dimensions (sorted by key).
-	QueryTemplate []QueryDimension `yaml:"query_template,omitempty"`
+	QueryTemplate []QueryDimension `yaml:"query_template,omitempty" validate:"omitempty,dive"`
 }
 
 // QueryDimension maps a SPOCP dimension name to the OIDC claim whose value populates it.
 // Ordered slices of QueryDimension ensure deterministic query construction.
 type QueryDimension struct {
-	Dimension string `yaml:"dimension"`
-	Claim     string `yaml:"claim"`
+	// Dimension is the SPOCP dimension name this entry populates. Required
+	// whenever the entry exists: an entry with no dimension has nothing to
+	// place the claim under, so it can only ever widen the rule shape into
+	// one no rule matches. "scope" is reserved - it is auto-populated with
+	// the credential type name.
+	Dimension string `yaml:"dimension" validate:"required" doc_example:"\"acr\""`
+
+	// Claim is the OIDC claim whose value populates the dimension, in
+	// dot-notation for nested claims. Required for the same reason: a
+	// dimension with no claim renders empty in every query.
+	Claim string `yaml:"claim" validate:"required" doc_example:"\"identity.given_name\""`
 }
 
 // ScopePolicyConfig holds the per-scope issuance policy and OIDC request params.
