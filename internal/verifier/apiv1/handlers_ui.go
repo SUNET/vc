@@ -444,13 +444,16 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		return nil, fmt.Errorf("failed to construct response URI: %w", err)
 	}
 
-	// "direct_post.jwt" (encrypted, cross-device-network delivery) unless
-	// this page's native DC API attempt is enabled, in which case the
-	// wallet's own DC API response builder only encrypts for an EXACT
-	// response_mode match of "dc_api.jwt" (OpenID4VP 1.0 DC API integration
-	// profile's defined value - "direct_post.jwt" isn't a DC API response
-	// mode at all) - see CreateRequestObject's identical branch for the
-	// other (OIDC RP) verification flow.
+	// direct_post.jwt: encrypted, cross-device-network delivery. Nothing is
+	// conditional here any more - the mode follows the channel, and the DC
+	// API object is minted separately below.
+	//
+	// The two cannot share one object: a wallet's DC API response builder
+	// only encrypts for an EXACT response_mode match of "dc_api.jwt"
+	// (OpenID4VP 1.0's DC API value - "direct_post.jwt" is not a DC API
+	// response mode at all). The other (OIDC RP) flow resolves its mode in
+	// Verifier.OIDCRelyingPartyResponseMode, which never returns a dc_api
+	// mode, for the same reason seen from the other side.
 	//
 	// This object is the one reached through request_uri: the QR code, the
 	// same-device link, and the polyfill's redirect fallback. It therefore

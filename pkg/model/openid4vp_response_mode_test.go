@@ -111,10 +111,15 @@ func TestOIDCRelyingPartyResponseMode(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("want %q, got %q", tc.want, got)
 			}
-			// Substring, not prefix: the resolver maps on strings.Contains,
-			// so a profiled spelling like w3c_dc_api.jwt has to be caught
-			// here too - a prefix check would have missed the one case in
-			// this table that carries that shape.
+			// Substring, not prefix, so that a profiled spelling like
+			// w3c_dc_api.jwt is caught here too - a prefix check would have
+			// missed the one case in this table carrying that shape.
+			//
+			// This is the assertion's own reach, not a mirror of the
+			// resolver: linkDeliverableResponseMode decides on
+			// strings.HasSuffix(mode, ".jwt") and never inspects "dc_api" at
+			// all. Checking the substring keeps the test honest if it ever
+			// does.
 			if strings.Contains(got, "dc_api") {
 				t.Fatalf("a dc_api mode must never reach this flow, got %q", got)
 			}
