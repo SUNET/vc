@@ -910,12 +910,15 @@ vendor-js: ## Download vendored JS/CSS dependencies
 # Go Dependency Management
 # ==============================================================================
 
-update: ## Update all Go dependencies to their latest versions and re-vendor
+update: ## Update all Go dependencies and pinned GitHub Actions to their latest versions
 	$(info Updating all Go dependencies...)
 	GOFLAGS="" go get -u ./...
 	GOFLAGS="" go mod tidy
 	go mod vendor
-	$(info Done — all Go dependencies updated and vendor refreshed)
+	$(info Updating pinned GitHub Actions SHAs...)
+	@command -v pinact >/dev/null 2>&1 || { echo "pinact not installed; run 'make install-tools' or 'make vscode'"; exit 1; }
+	pinact run --update
+	$(info Done — Go dependencies and GitHub Actions pins updated)
 
 # ==============================================================================
 # Development Tools
@@ -948,7 +951,8 @@ install-tools: ## Install required development tools
 	$(info Installing from go)
 	go install github.com/swaggo/swag/cmd/swag@latest && \
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
-	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest && \
+	go install github.com/suzuki-shunsuke/pinact/v3/cmd/pinact@latest
 
 clean-apt-cache: ## Clean apt cache
 	$(info Cleaning apt cache)
@@ -977,7 +981,8 @@ vscode: test-env gh-install ## Set up VS Code development environment
 	go install github.com/securego/gosec/v2/cmd/gosec@latest && \
 	go install golang.org/x/vuln/cmd/govulncheck@latest && \
 	go install honnef.co/go/tools/cmd/staticcheck@latest && \
-	go install mvdan.cc/gofumpt@latest
+	go install mvdan.cc/gofumpt@latest && \
+	go install github.com/suzuki-shunsuke/pinact/v3/cmd/pinact@latest
 
 gh-install: ## Install GitHub CLI (gh)
 	$(info Install GitHub CLI)
