@@ -198,7 +198,13 @@ const dcqlQuerySchema = v.object({
 /** @typedef {v.InferOutput<typeof presentationDefinitionSchema>} PresentationDefinition */
 const presentationDefinitionSchema = v.object({
     qr_code: v.string(),
+    // The request_uri channel: QR code, same-device link, polyfill redirect.
+    // response_mode direct_post.jwt.
     authorization_request: v.string(),
+    // The browser DC API's own request, response_mode dc_api.jwt. Declared
+    // here or v.object() strips it before anything can read it - absent
+    // whenever the DC API is disabled server-side, hence optional.
+    dc_api_authorization_request: v.optional(v.string(), ""),
 });
 
 /**
@@ -620,9 +626,11 @@ Alpine.data("app", () => ({
     /**
      * Attempt credential request via native DC API.
      *
-     * The authorization_request URI is the same openid4vp://...?client_id=...
-     * &request_uri=... deep link used for QR/redirect - NOT itself a valid DC
-     * API `request` value for any protocol. requestCredentialFromAuthorizationRequestURI
+     * The URI used here is the DC API's own, distinct from the one behind
+     * the QR code and the link: they differ in response_mode, which has to
+     * follow the delivery channel. It is still an
+     * openid4vp://...?client_id=...&request_uri=... shape, and NOT itself a
+     * valid DC API `request` value for any protocol. requestCredentialFromAuthorizationRequestURI
      * (from @sirosfoundation/dc-api) resolves it into whatever shape the
      * detected protocol actually needs (fetching request_uri for the JWT when
      * required) before calling navigator.credentials.get().
@@ -638,8 +646,15 @@ Alpine.data("app", () => ({
             const abortController = new AbortController();
             this._dcAbort = abortController;
 
+            // The DC API request, not the link one: response_mode has to
+            // follow the delivery channel, and this call is the only channel
+            // a dc_api mode is defined for (SUNET/vc#652). Falls back to the
+            // link request if the server sent none, which is what an older
+            // verifier does - that request carries direct_post.jwt, which a
+            // wallet invoked this way can still answer.
             const result = await requestCredentialFromAuthorizationRequestURI(
-                this.presentationDefinition.authorization_request,
+                this.presentationDefinition.dc_api_authorization_request ||
+                    this.presentationDefinition.authorization_request,
                 { signal: abortController.signal },
             );
             if (!result) return false;

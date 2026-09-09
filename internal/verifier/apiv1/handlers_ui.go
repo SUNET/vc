@@ -359,9 +359,32 @@ type UIInteractionRequest struct {
 	SessionID string `json:"-"`
 }
 
+// responseModeDCAPIJWT is the encrypted response mode for a request handed
+// to the browser's Digital Credentials API. It appears only on the object
+// served for that channel - see UIInteractionReply.DCAPIAuthorizationRequest.
+const responseModeDCAPIJWT = "dc_api.jwt"
+
 type UIInteractionReply struct {
+	// AuthorizationRequest is the request reached through request_uri: the QR
+	// code, the same-device link, and the polyfill's redirect fallback. Its
+	// response_mode is direct_post.jwt, because a wallet arriving this way
+	// has no browser DC API call to answer inside.
 	AuthorizationRequest string `json:"authorization_request"`
 	QRCode               string `json:"qr_code"`
+
+	// DCAPIAuthorizationRequest is the request for navigator.credentials.get,
+	// carrying response_mode dc_api.jwt. Empty when the Digital Credentials
+	// API is disabled.
+	//
+	// Two requests rather than one, because response_mode has to follow the
+	// delivery channel: dc_api modes are defined only for a request handed to
+	// the browser DC API, where the response returns inside that call and the
+	// transcript binds to the calling origin. Serving one request object to
+	// both channels - which is what this flow did - meant every wallet that
+	// scanned the QR or followed the link got a mode it could not honour, and
+	// only found out after the user had selected credentials and signed
+	// (SUNET/vc#652).
+	DCAPIAuthorizationRequest string `json:"dc_api_authorization_request,omitempty"`
 }
 
 // UIInteraction handles front-end interactions, replying with an Authorization Request that contains a Request URI and DCQL query, the latter for UI to show.
@@ -432,46 +455,37 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// response_mode match of "dc_api.jwt" (OpenID4VP 1.0 DC API integration
 	// profile's defined value - "direct_post.jwt" isn't a DC API response
 	// mode at all) - see CreateRequestObject's identical branch for the
-	// other (OIDC RP) verification flow. VerificationDirectPost itself
-	// doesn't inspect response_mode, so this is purely about getting the
-	// wallet to encrypt; the wire handling at /verification/direct_post is
-	// unchanged either way.
+	// other (OIDC RP) verification flow.
 	//
-	// Unlike CreateRequestObject's OIDC RP flow (whose /verification/
-	// oidc-direct_post endpoint tolerates direct_post/direct_post.jwt's
-	// unencrypted vp_token+state shape too), DigitalCredentials.ResponseMode
-	// is NOT honored here even when set: this UI flow's own
-	// _submitDCAPIResponse only ever forwards the encrypted `response` JWE
-	// to /verification/direct_post, which has no unencrypted fallback. A
-	// config value other than "dc_api.jwt" would make the wallet skip
-	// encryption and produce a payload this page can't submit at all, so
-	// it's ignored here to keep request/response shapes consistent
-	// end-to-end for this specific flow.
-	// Also gated on AutoAttempt (default true): when it's false,
-	// _tryNativeDCAPI() never runs client-side at all (no manual retry
-	// button exists either - see presentation-definition.js's
-	// dcApiAutoAttempt check) and every request goes out through
-	// _setupFallbackFlow()'s QR/same-device-link path instead, which
-	// submits via /verification/direct_post through the ordinary
-	// WS-engine relay - NOT the DC API response channel. Serving
-	// "dc_api.jwt" there anyway produced a real, confirmed-live bug:
-	// go-wallet-backend's oid4vp.go correctly refuses to submit a
-	// dc_api.jwt-mode VP ("unsupported response_mode: dc_api.jwt"), since
-	// that response mode is JWE-encrypted specifically for
-	// navigator.credentials.get()'s own response construction, not a
-	// redirect/relay POST body.
-	responseMode := "direct_post.jwt"
-	if c.cfg.Verifier.DigitalCredentials.Enable && model.BoolVal(c.cfg.Verifier.DigitalCredentials.AutoAttempt, true) {
-		responseMode = "dc_api.jwt"
-	}
-
+	// This object is the one reached through request_uri: the QR code, the
+	// same-device link, and the polyfill's redirect fallback. It therefore
+	// carries direct_post.jwt and never a dc_api mode - a wallet arriving
+	// that way has no browser DC API call to answer inside. The DC API gets
+	// its own object below, so the mode follows the delivery channel rather
+	// than a config flag (SUNET/vc#652).
+	//
+	// That replaces a narrower fix: this used to serve one object whose mode
+	// was dc_api.jwt whenever the DC API was enabled AND AutoAttempt was on,
+	// which covered the AutoAttempt=false case and left the default one
+	// broken, because the QR code and the link render the very same
+	// request_uri the DC API call uses. The bug it was chasing is real and
+	// confirmed live: go-wallet-backend's oid4vp.go refuses to submit a
+	// dc_api.jwt-mode VP ("unsupported response_mode: dc_api.jwt"), correctly
+	// - that mode is JWE-encrypted for navigator.credentials.get()'s own
+	// response construction, not for a redirect or relay POST body.
+	// Splitting the objects fixes it for both settings.
+	//
+	// Encrypted either way: this page's _submitDCAPIResponse and the
+	// direct_post endpoint both handle the `response` JWE, and neither has
+	// an unencrypted fallback, so DigitalCredentials.ResponseMode is still
+	// not honoured here.
 	requestObject := &openid4vp.RequestObject{
 		ResponseURI:  responseURI,
 		AUD:          "https://self-issued.me/v2",
 		ISS:          uiClientID,
 		ClientID:     authorizationContext.ClientID,
 		ResponseType: "vp_token",
-		ResponseMode: responseMode,
+		ResponseMode: model.ResponseModeDirectPostJWT,
 		State:        authorizationContext.State,
 		Nonce:        authorizationContext.Nonce,
 		ClientMetadata: &openid4vp.ClientMetadata{
@@ -515,6 +529,22 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	reply.QRCode, err = openid4vp.GenerateQRV2(ctx, reply.AuthorizationRequest)
 	if err != nil {
 		return nil, err
+	}
+
+	// The DC API's own object, identical but for response_mode. A copy rather
+	// than a second literal so the two cannot drift: everything the wallet
+	// checks - client_id, nonce, response_uri, client_metadata, the DCQL
+	// query - has to be the same request seen through a different channel.
+	if c.cfg.Verifier.DigitalCredentials.Enable {
+		dcAPIRequestObject := dcAPIVariant(requestObject)
+
+		dcAPIRequestObjectID := uuid.NewString()
+		c.openid4vp.RequestObjectCache.Set(dcAPIRequestObjectID, dcAPIRequestObject)
+
+		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return reply, nil
