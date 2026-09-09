@@ -467,8 +467,8 @@ func TestValidateClaimValues_FloatBounds(t *testing.T) {
 	overflowFloat64 := math.Nextafter(float64(math.MaxInt64), math.MaxFloat64)
 	underflowFloat64 := math.Nextafter(float64(math.MinInt64), -math.MaxFloat64)
 	// Just outside the JSON-safe integer range.
-	aboveSafeInt := float64(1<<53) // 2^53 is representable but 2^53+1 is not; anything > 2^53-1 is unsafe.
-	belowSafeInt := -float64(1<<53)
+	aboveSafeInt := float64(1 << 53) // 2^53 is representable but 2^53+1 is not; anything > 2^53-1 is unsafe.
+	belowSafeInt := -float64(1 << 53)
 
 	tts := []struct {
 		name    string

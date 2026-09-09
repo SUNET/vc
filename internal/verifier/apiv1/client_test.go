@@ -13,7 +13,7 @@ import (
 )
 
 func TestClient_generateSubjectIdentifier_Public(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(t, nil)
 	client.cfg.Verifier.Outbound.OIDCProvider.SubjectType = "public"
 	client.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = "test-salt"
 
@@ -31,7 +31,7 @@ func TestClient_generateSubjectIdentifier_Public(t *testing.T) {
 }
 
 func TestClient_generateSubjectIdentifier_Pairwise(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(t, nil)
 	client.cfg.Verifier.Outbound.OIDCProvider.SubjectType = "pairwise"
 	client.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = "test-salt"
 
@@ -53,7 +53,7 @@ func TestClient_generateSubjectIdentifier_Pairwise(t *testing.T) {
 }
 
 func TestClient_generateSubjectIdentifier_DifferentWallets(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(t, nil)
 	client.cfg.Verifier.Outbound.OIDCProvider.SubjectType = "pairwise"
 	client.cfg.Verifier.Outbound.OIDCProvider.SubjectSalt = "test-salt"
 
@@ -68,7 +68,7 @@ func TestClient_generateSubjectIdentifier_DifferentWallets(t *testing.T) {
 }
 
 func TestClient_containsOIDC(t *testing.T) {
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(t, nil)
 
 	tests := []struct {
 		name     string
@@ -154,7 +154,7 @@ func TestClient_parseScopes(t *testing.T) {
 
 func TestClient_Health(t *testing.T) {
 	ctx := t.Context()
-	client, _ := CreateTestClientWithMock(nil)
+	client, _ := CreateTestClientWithMock(t, nil)
 
 	// Note: Health requires db to be set, which may fail in mock
 	// This test verifies the method exists and can be called
@@ -292,7 +292,7 @@ func TestClient_buildDCQLQueryFromConfig(t *testing.T) {
 					CredentialMetadata: tt.credMeta,
 				},
 			}
-			client, _ := CreateTestClientWithMock(cfg)
+			client, _ := CreateTestClientWithMock(t, cfg)
 
 			dcql, err := client.buildDCQLQueryFromConfig(tt.scopes)
 
@@ -352,7 +352,7 @@ func TestClient_createDCQLQuery(t *testing.T) {
 					CredentialMetadata: tt.credMeta,
 				},
 			}
-			client, _ := CreateTestClientWithMock(cfg)
+			client, _ := CreateTestClientWithMock(t, cfg)
 
 			dcql, err := client.createDCQLQuery(ctx, tt.scopes)
 

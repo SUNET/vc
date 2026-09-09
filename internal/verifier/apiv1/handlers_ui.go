@@ -92,6 +92,11 @@ type UIMetadataReply struct {
 	// attempts the native W3C Digital Credentials API when an operator has
 	// opted in, rather than always trying it regardless of server config.
 	DCAPIEnabled bool `json:"dc_api_enabled"`
+	// DCAPIAutoAttempt mirrors verifier.digital_credentials.auto_attempt -
+	// see that field's own doc comment for why this is separate from
+	// DCAPIEnabled (an OS-level DC API matcher rejection can pre-empt any
+	// application code, with no clean fallback to catch).
+	DCAPIAutoAttempt bool `json:"dc_api_auto_attempt"`
 }
 
 // vctIdentifiersFor returns every identifier a wallet might match this
@@ -127,6 +132,7 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		Credentials:      make(map[string]*UICredentialInfo),
 		SupportedWallets: c.cfg.Verifier.SupportedWallets,
 		DCAPIEnabled:     c.cfg.Verifier.DigitalCredentials.Enable,
+		DCAPIAutoAttempt: model.BoolVal(c.cfg.Verifier.DigitalCredentials.AutoAttempt, true),
 	}
 
 	for scope, constructor := range c.cfg.Common.CredentialMetadata {
@@ -399,6 +405,11 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 			AuthorizationSignedResponseALG:    "",
 			AuthorizationEncryptedResponseALG: "ECDH-ES",
 			AuthorizationEncryptedResponseENC: "A256GCM",
+			// OpenID4VP 1.0 renamed authorization_encrypted_response_enc to
+			// encrypted_response_enc_values_supported and made it an array.
+			// Both are sent: a 1.0 wallet rejects a request carrying only the
+			// old name, and a draft-era wallet ignores the new one.
+			EncryptedResponseEncValuesSupported: []string{"A256GCM"},
 		},
 		IAT:              time.Now().UTC().Unix(),
 		RedirectURI:      "",

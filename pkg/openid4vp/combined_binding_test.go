@@ -14,8 +14,8 @@ import (
 func TestCombinedBindingVerifier_SingleCredential(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:          true,
-			Enforcement:      BindingEnforcementEnforce,
+			Enabled:           true,
+			Enforcement:       BindingEnforcementEnforce,
 			KeyBindingEnabled: true,
 		},
 	}
@@ -31,8 +31,8 @@ func TestCombinedBindingVerifier_SingleCredential(t *testing.T) {
 func TestCombinedBindingVerifier_EmptyCredentials(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:          true,
-			Enforcement:      BindingEnforcementEnforce,
+			Enabled:           true,
+			Enforcement:       BindingEnforcementEnforce,
 			KeyBindingEnabled: true,
 		},
 	}
@@ -45,8 +45,8 @@ func TestCombinedBindingVerifier_EmptyCredentials(t *testing.T) {
 func TestCombinedBindingVerifier_KeyBinding_SameKey(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:          true,
-			Enforcement:      BindingEnforcementEnforce,
+			Enabled:           true,
+			Enforcement:       BindingEnforcementEnforce,
 			KeyBindingEnabled: true,
 		},
 	}
@@ -73,8 +73,8 @@ func TestCombinedBindingVerifier_KeyBinding_SameKey(t *testing.T) {
 func TestCombinedBindingVerifier_KeyBinding_DifferentKeys(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:          true,
-			Enforcement:      BindingEnforcementEnforce,
+			Enabled:           true,
+			Enforcement:       BindingEnforcementEnforce,
 			KeyBindingEnabled: true,
 		},
 	}
@@ -97,8 +97,8 @@ func TestCombinedBindingVerifier_KeyBinding_DifferentKeys(t *testing.T) {
 func TestCombinedBindingVerifier_KeyBinding_DifferentKeys_WarnMode(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:          true,
-			Enforcement:      BindingEnforcementWarn,
+			Enabled:           true,
+			Enforcement:       BindingEnforcementWarn,
 			KeyBindingEnabled: true,
 		},
 	}
@@ -253,8 +253,8 @@ func TestCombinedBindingVerifier_NestedAttributePath(t *testing.T) {
 func TestCombinedBindingVerifier_KeyAndAttributeBinding(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:          true,
-			Enforcement:      BindingEnforcementEnforce,
+			Enabled:           true,
+			Enforcement:       BindingEnforcementEnforce,
 			KeyBindingEnabled: true,
 			BindingAttributes: []BindingAttributeConfig{
 				{Paths: []string{"sub"}},
@@ -277,8 +277,8 @@ func TestCombinedBindingVerifier_KeyAndAttributeBinding(t *testing.T) {
 func TestCombinedBindingVerifier_InsufficientKeyMaterial(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:          true,
-			Enforcement:      BindingEnforcementEnforce,
+			Enabled:           true,
+			Enforcement:       BindingEnforcementEnforce,
 			KeyBindingEnabled: true,
 			BindingAttributes: []BindingAttributeConfig{
 				{Paths: []string{"sub"}},
@@ -304,8 +304,8 @@ func TestCombinedBindingVerifier_InsufficientKeyMaterial(t *testing.T) {
 func TestCombinedBindingVerifier_ThreeCredentials_SameKey(t *testing.T) {
 	v := &CombinedBindingVerifier{
 		Config: CombinedPresentationConfig{
-			Enabled:          true,
-			Enforcement:      BindingEnforcementEnforce,
+			Enabled:           true,
+			Enforcement:       BindingEnforcementEnforce,
 			KeyBindingEnabled: true,
 		},
 	}
@@ -331,8 +331,8 @@ func TestCombinedBindingVerifier_ThreeCredentials_MixedBinding(t *testing.T) {
 	t.Run("key_mismatch_attribute_match", func(t *testing.T) {
 		v := &CombinedBindingVerifier{
 			Config: CombinedPresentationConfig{
-				Enabled:          true,
-				Enforcement:      BindingEnforcementEnforce,
+				Enabled:           true,
+				Enforcement:       BindingEnforcementEnforce,
 				KeyBindingEnabled: true,
 				BindingAttributes: []BindingAttributeConfig{
 					{Paths: []string{"sub", "family_name"}},
@@ -359,8 +359,8 @@ func TestCombinedBindingVerifier_ThreeCredentials_MixedBinding(t *testing.T) {
 	t.Run("key_mismatch_attribute_match_warn_mode", func(t *testing.T) {
 		v := &CombinedBindingVerifier{
 			Config: CombinedPresentationConfig{
-				Enabled:          true,
-				Enforcement:      BindingEnforcementWarn,
+				Enabled:           true,
+				Enforcement:       BindingEnforcementWarn,
 				KeyBindingEnabled: true,
 				BindingAttributes: []BindingAttributeConfig{
 					{Paths: []string{"sub"}},
@@ -388,8 +388,8 @@ func TestCombinedBindingVerifier_ThreeCredentials_MixedBinding(t *testing.T) {
 		// Cred 1+2 share key, cred 3 has no key and different sub
 		v := &CombinedBindingVerifier{
 			Config: CombinedPresentationConfig{
-				Enabled:          true,
-				Enforcement:      BindingEnforcementEnforce,
+				Enabled:           true,
+				Enforcement:       BindingEnforcementEnforce,
 				KeyBindingEnabled: true,
 				BindingAttributes: []BindingAttributeConfig{
 					{Paths: []string{"sub"}},

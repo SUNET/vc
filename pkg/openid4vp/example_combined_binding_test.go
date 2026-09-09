@@ -26,8 +26,8 @@ func Example_combinedPresentation_universityAdmission() {
 	//   3. Enforce binding — reject if not established
 	verifier := &openid4vp.CombinedBindingVerifier{
 		Config: openid4vp.CombinedPresentationConfig{
-			Enabled:          true,
-			Enforcement:      openid4vp.BindingEnforcementEnforce,
+			Enabled:           true,
+			Enforcement:       openid4vp.BindingEnforcementEnforce,
 			KeyBindingEnabled: true,
 			BindingAttributes: []openid4vp.BindingAttributeConfig{
 				{Paths: []string{"family_name", "birth_date"}}, // compound: both must match
@@ -54,9 +54,9 @@ func Example_combinedPresentation_universityAdmission() {
 			Scope:               "pid",
 			HolderKeyThumbprint: thumbprint,
 			Claims: map[string]any{
-				"given_name": "Anna",
+				"given_name":  "Anna",
 				"family_name": "Lindqvist",
-				"birth_date": "1998-03-15",
+				"birth_date":  "1998-03-15",
 				"nationality": "SE",
 				"sub":         "urn:eudi:pid:se:199803150123",
 			},
@@ -65,10 +65,10 @@ func Example_combinedPresentation_universityAdmission() {
 			Scope:               "diploma",
 			HolderKeyThumbprint: thumbprint, // same key → same WSCD → high confidence
 			Claims: map[string]any{
-				"given_name":       "Anna",
-				"family_name":      "Lindqvist",
-				"birth_date":       "1998-03-15",
-				"degree":           "MSc Computer Science",
+				"given_name":        "Anna",
+				"family_name":       "Lindqvist",
+				"birth_date":        "1998-03-15",
+				"degree":            "MSc Computer Science",
 				"issuing_authority": "Uppsala University",
 			},
 		},
@@ -100,8 +100,8 @@ func Example_combinedPresentation_universityAdmission() {
 func Example_combinedPresentation_differentHolderKeys() {
 	verifier := &openid4vp.CombinedBindingVerifier{
 		Config: openid4vp.CombinedPresentationConfig{
-			Enabled:          true,
-			Enforcement:      openid4vp.BindingEnforcementEnforce,
+			Enabled:           true,
+			Enforcement:       openid4vp.BindingEnforcementEnforce,
 			KeyBindingEnabled: true,
 		},
 	}
@@ -140,8 +140,8 @@ func Example_combinedPresentation_differentHolderKeys() {
 func Example_combinedPresentation_warnMode() {
 	verifier := &openid4vp.CombinedBindingVerifier{
 		Config: openid4vp.CombinedPresentationConfig{
-			Enabled:          true,
-			Enforcement:      openid4vp.BindingEnforcementWarn,
+			Enabled:           true,
+			Enforcement:       openid4vp.BindingEnforcementWarn,
 			KeyBindingEnabled: true,
 			BindingAttributes: []openid4vp.BindingAttributeConfig{
 				{Paths: []string{"sub"}},

@@ -1,11 +1,17 @@
 package openid4vci
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/pkg/bbs"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -564,5 +570,259 @@ func TestResolveCredentialFormat(t *testing.T) {
 				assert.Equal(t, tt.wantFormat, format)
 			}
 		})
+	}
+}
+
+// A commitment that cannot be decoded must be rejected at the request
+// boundary, where the error can say the transport encoding was wrong,
+// rather than deeper in where it surfaces as an opaque verification
+// failure.
+func TestCredentialRequestValidatesBBSCommitment(t *testing.T) {
+	base := func() *CredentialRequest {
+		return &CredentialRequest{
+			Authorization:             "Bearer x",
+			CredentialConfigurationID: "cfg",
+		}
+	}
+
+	t.Run("absent is fine", func(t *testing.T) {
+		if err := base().Validate(context.Background(), nil); err != nil {
+			t.Fatalf("a request without a commitment must still validate: %v", err)
+		}
+	})
+
+	t.Run("valid base64url accepted", func(t *testing.T) {
+		r := base()
+		r.BBSCommitment = "AQIDBAU"
+		r.BBSSuite = bbs.SuiteNameSchnorr
+		if err := r.Validate(context.Background(), nil); err != nil {
+			t.Fatalf("valid commitment rejected: %v", err)
+		}
+	})
+
+	for _, tc := range []struct{ name, value string }{
+		{"not base64url", "!!!!"},
+		{"standard base64 alphabet", "a+/b=="},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := base()
+			r.BBSCommitment = tc.value
+			r.BBSSuite = bbs.SuiteNameSchnorr
+			err := r.Validate(context.Background(), nil)
+			if err == nil {
+				t.Fatalf("accepted %q", tc.value)
+			}
+			// The description is what a wallet developer reads, so it has
+			// to name the member they sent - `bbs_commitment` - rather than
+			// pass bbs.DecodeCommitment's wording through. That message is
+			// written for Go callers, says "commitment", and would tie this
+			// endpoint's response text to an internal package.
+			var e *Error
+			if !errors.As(err, &e) {
+				t.Fatalf("want *Error, got %T", err)
+			}
+			description, _ := e.ErrorDescription.(string)
+			if !strings.Contains(description, "bbs_commitment") {
+				t.Fatalf("error_description must name the wire member, got %q", description)
+			}
+			if strings.Contains(description, "bbs:") {
+				t.Fatalf("internal package wording reached the wire: %q", description)
+			}
+		})
+	}
+}
+
+// A commitment with no committed claims is legitimate rather than a mistake:
+// it is what a wallet sends when it binds a credential to a device key
+// without hiding any of its own values. BBSCommittedClaims' doc comment used
+// to call it "required with" the commitment, which said the opposite of what
+// this has always validated.
+func TestCredentialRequestAcceptsACommitmentWithNoCommittedClaims(t *testing.T) {
+	r := &CredentialRequest{
+		Authorization:             "Bearer x",
+		CredentialConfigurationID: "cfg",
+		BBSCommitment:             "AQIDBAU",
+		BBSSuite:                  bbs.SuiteNameSchnorr,
+		BBSKeyBinding:             true,
+	}
+	if err := r.Validate(context.Background(), nil); err != nil {
+		t.Fatalf("a commitment carrying only key binding keys must validate: %v", err)
+	}
+}
+
+// The blind-BBS request members carry things the issuer cannot derive and
+// cannot check later. A commitment names messages the issuer never sees; the
+// pointers say where they go; the key binding flag selects the message
+// layout. Each is rejected at the request boundary, where the error can name
+// the member, rather than deeper in where all three surface identically as
+// "does not verify".
+func TestCredentialRequestValidatesBBSMembers(t *testing.T) {
+	base := func() *CredentialRequest {
+		return &CredentialRequest{
+			Authorization:             "Bearer x",
+			CredentialConfigurationID: "cfg",
+		}
+	}
+	const validCommitment = "AQIDBAU"
+
+	t.Run("committed claims without a commitment", func(t *testing.T) {
+		// Pointers alone name claims nothing committed to. Ignoring them
+		// would issue a credential whose claim map promises holder claims
+		// the signature does not cover.
+		r := base()
+		r.BBSCommittedClaims = []string{"/device_pin_hash"}
+		if err := r.Validate(context.Background(), nil); err == nil {
+			t.Fatal("bbs_committed_claims without bbs_commitment must be rejected")
+		}
+	})
+
+	t.Run("key binding without a commitment", func(t *testing.T) {
+		// The flag selects a layout for a commitment that is not there.
+		r := base()
+		r.BBSKeyBinding = true
+		if err := r.Validate(context.Background(), nil); err == nil {
+			t.Fatal("bbs_key_binding without bbs_commitment must be rejected")
+		}
+	})
+
+	t.Run("commitment with pointers accepted", func(t *testing.T) {
+		r := base()
+		r.BBSCommitment = validCommitment
+		r.BBSSuite = bbs.SuiteNameSchnorr
+		r.BBSCommittedClaims = []string{"/device_pin_hash", "/recovery_secret"}
+		r.BBSKeyBinding = true
+		if err := r.Validate(context.Background(), nil); err != nil {
+			t.Fatalf("a well-formed blind BBS request was rejected: %v", err)
+		}
+	})
+
+	t.Run("commitment alone accepted", func(t *testing.T) {
+		// An issuance where the holder contributes no claims of its own is
+		// still blind issuance - the commitment can carry key binding keys
+		// and no messages.
+		r := base()
+		r.BBSCommitment = validCommitment
+		r.BBSSuite = bbs.SuiteNameSchnorr
+		if err := r.Validate(context.Background(), nil); err != nil {
+			t.Fatalf("a commitment with no holder claims was rejected: %v", err)
+		}
+	})
+
+	for _, tc := range []struct {
+		name    string
+		claims  []string
+		because string
+	}{
+		{"empty pointer", []string{""}, "names the whole document, not a claim"},
+		{"pointer without a leading slash", []string{"device_pin_hash"}, "is not an RFC 6901 pointer"},
+		{"duplicate pointer", []string{"/a", "/a"}, "would put two messages in one claim map position"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := base()
+			r.BBSCommitment = validCommitment
+			r.BBSSuite = bbs.SuiteNameSchnorr
+			r.BBSCommittedClaims = tc.claims
+			if err := r.Validate(context.Background(), nil); err == nil {
+				t.Fatalf("%v must be rejected: it %s", tc.claims, tc.because)
+			}
+		})
+	}
+
+	t.Run("more pointers than the message limit", func(t *testing.T) {
+		r := base()
+		r.BBSCommitment = validCommitment
+		r.BBSSuite = bbs.SuiteNameSchnorr
+		r.BBSCommittedClaims = make([]string, bbs.MaxMessages+1)
+		for i := range r.BBSCommittedClaims {
+			r.BBSCommittedClaims[i] = fmt.Sprintf("/claim_%d", i)
+		}
+		if err := r.Validate(context.Background(), nil); err == nil {
+			t.Fatalf("more than %d committed claims must be rejected", bbs.MaxMessages)
+		}
+	})
+}
+
+// The suite selects the domain separation the commitment was built under.
+// Holder and issuer must agree or nothing verifies, and a wrong guess is
+// indistinguishable from a corrupt commitment, a wrong issuer key, or a
+// tampered proof — so it is carried explicitly and required, not defaulted.
+func TestCredentialRequestValidatesBBSSuite(t *testing.T) {
+	base := func() *CredentialRequest {
+		return &CredentialRequest{
+			Authorization:             "Bearer x",
+			CredentialConfigurationID: "cfg",
+			BBSCommitment:             "AQIDBAU",
+		}
+	}
+
+	t.Run("both suites are accepted", func(t *testing.T) {
+		// Plain is a first-class choice, not a legacy value: an issuance
+		// with no device binding at all is a real configuration.
+		for _, name := range []string{bbs.SuiteNamePlain, bbs.SuiteNameSchnorr} {
+			r := base()
+			r.BBSSuite = name
+			if err := r.Validate(context.Background(), nil); err != nil {
+				t.Fatalf("suite %q was rejected: %v", name, err)
+			}
+		}
+	})
+
+	t.Run("a commitment without a suite is rejected", func(t *testing.T) {
+		if err := base().Validate(context.Background(), nil); err == nil {
+			t.Fatal("bbs_commitment without bbs_suite must be rejected rather than defaulted")
+		}
+	})
+
+	t.Run("a suite without a commitment is rejected", func(t *testing.T) {
+		r := base()
+		r.BBSCommitment = ""
+		r.BBSSuite = bbs.SuiteNameSchnorr
+		if err := r.Validate(context.Background(), nil); err == nil {
+			t.Fatal("bbs_suite alone names the domain separation of nothing")
+		}
+	})
+
+	for _, name := range []string{"", "SCHNORR", "Plain", "bbs", "1"} {
+		t.Run("unknown suite "+strconv.Quote(name), func(t *testing.T) {
+			r := base()
+			r.BBSSuite = name
+			if err := r.Validate(context.Background(), nil); err == nil {
+				t.Fatalf("%q is not a suite this issuer knows", name)
+			}
+		})
+	}
+
+	// "plain" is the suite with no device binding, so a request asking for
+	// both is describing two different things. The native side would refuse
+	// it anyway, but from deeper in and about the commitment rather than
+	// about the two members that disagree.
+	t.Run("plain with key binding is a contradiction", func(t *testing.T) {
+		r := base()
+		r.BBSSuite = bbs.SuiteNamePlain
+		r.BBSKeyBinding = true
+		if err := r.Validate(context.Background(), nil); err == nil {
+			t.Fatal("bbs_suite plain with bbs_key_binding must be rejected")
+		}
+	})
+
+	// The pairing that looks wrong and is not: an unbound issuance under
+	// the schnorr suite is what the wallet does today, and deriving the
+	// suite from key binding would break exactly this case.
+	t.Run("schnorr without key binding is the ordinary unbound issuance", func(t *testing.T) {
+		r := base()
+		r.BBSSuite = bbs.SuiteNameSchnorr
+		r.BBSKeyBinding = false
+		if err := r.Validate(context.Background(), nil); err != nil {
+			t.Fatalf("schnorr with no key binding keys must be allowed: %v", err)
+		}
+	})
+}
+
+func TestParseSuiteRoundTrips(t *testing.T) {
+	for _, s := range []bbs.Suite{bbs.SuitePlain, bbs.SuiteSchnorr} {
+		got, err := bbs.ParseSuite(s.String())
+		if err != nil || got != s {
+			t.Fatalf("%v did not round-trip through its wire name: %v %v", s, got, err)
+		}
 	}
 }

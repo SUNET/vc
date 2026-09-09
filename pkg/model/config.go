@@ -91,13 +91,26 @@ type MTLS struct {
 
 // Mongo holds the MongoDB configuration
 type Mongo struct {
-	// URI is the MongoDB connection URI. Required when Common.SQL.Backend is
-	// "mongo" (the default primary-store backend) or when Common.HA.Enable is
-	// true (pkg/cache has no relational backend yet, so HA caching always
-	// uses Mongo regardless of the primary store's backend). Enforced by a
-	// Common-level struct validation rather than a plain "required" tag here,
-	// since the requirement depends on sibling fields of Common, not of Mongo.
-	URI string `yaml:"uri" validate:"omitempty" doc_example:"\"mongodb://user:password@mongo:27017/vc\""`
+	// URI is the MongoDB connection URI. Required by registry
+	// unconditionally, which connects to MongoDB whatever
+	// Common.SQL.Backend says. Required by apigw and verifier when
+	// Common.SQL.Backend is "mongo" (the default primary-store backend) or
+	// when Common.HA.Enable is true (pkg/cache has no relational backend
+	// yet, so HA caching always uses Mongo regardless of the primary
+	// store's backend). Never required by the issuer, which opens no
+	// database at all.
+	//
+	// Enforced in configuration.New rather than by a validation tag here,
+	// because the requirement depends both on sibling fields of Common and on
+	// which service is starting - something a struct validation cannot see.
+	//
+	// Credentials may be embedded in the URI in the usual MongoDB way,
+	// though Common.SecretFilePath keeps them out of the main configuration.
+	// The example is deliberately credential-free: an inline userinfo
+	// component matches the secret-detection patterns some review and diff
+	// tools apply, and they redact it and then report the redaction as a
+	// malformed URI.
+	URI string `yaml:"uri" validate:"omitempty" doc_example:"\"mongodb://mongo:27017/vc\""`
 	// TLS enables TLS for the MongoDB connection.
 	// Can also be enabled via the connection URI parameter "tls=true".
 	TLS bool `yaml:"tls" default:"false"`
@@ -440,6 +453,59 @@ type Issuer struct {
 	PseudonymSeed *bool `yaml:"pseudonym_seed" validate:"omitempty"`
 	// AccessCertificate configures the EUDI access certificate (WRPAC) the issuer presents to wallets, optionally with its own key separate from KeyConfig. Off by default; deployments outside an ARF trust framework are unaffected.
 	AccessCertificate *IssuerAccessCertificate `yaml:"access_certificate,omitempty"`
+	// BBS holds blind BBS issuance configuration. Absent disables the
+	// "jwp" credential format entirely.
+	BBS *BBSConfig `yaml:"bbs" validate:"omitempty"`
+}
+
+// BBSConfig holds the issuer's blind BBS key pair.
+//
+// Separate from Issuer.KeyConfig, and unavoidably so. Every other key this
+// issuer signs with is an ECDSA key that signs a digest, which is what
+// pki.KeyConfig and PKCS#11 are built around. A BBS secret key is a
+// BLS12-381 scalar consumed inside the signing algebra itself, so it cannot
+// be handed to an HSM that only offers "sign these bytes" — mainstream HSMs
+// do not implement the curve at all. It is therefore a software key, which
+// is a known and accepted property of this format rather than an oversight.
+type BBSConfig struct {
+	// SecretKeyPath is a file holding the raw BLS12-381 secret scalar,
+	// base64url-encoded. Preferred where a file can be mounted, since it
+	// keeps the key out of the rendered config entirely.
+	SecretKeyPath string `yaml:"secret_key_path" validate:"omitempty" doc_example:"\"/etc/vc/bbs/issuer.sk\""`
+	// PublicKeyPath is a file holding the matching public key,
+	// base64url-encoded. Preferred over PublicKey for the same reason as
+	// SecretKeyPath, though the public half is not secret.
+	PublicKeyPath string `yaml:"public_key_path" validate:"omitempty" doc_example:"\"/etc/vc/bbs/issuer.pk\""`
+	// SecretKey is the same value inline, base64url-encoded.
+	//
+	// Exists because not every deployment can mount an arbitrary file. A
+	// Helm chart that models specific named secret volumes has no way to
+	// add one for a key it does not know about, so a path-only
+	// configuration cannot be deployed there at all without changing the
+	// chart. An inline value goes wherever the rest of the config goes, and
+	// the usual secret-injection machinery (env-var substitution into the
+	// rendered config) already handles it.
+	//
+	// Prefer SecretKeyPath where a file is possible: this puts the key in
+	// the config document, so it is only as protected as that document is.
+	//
+	// Exactly one of secret_key_path and secret_key must be set. Both, or
+	// neither, is refused at startup rather than resolved by precedence: a
+	// deployment with two sources of truth for a signing key has no way to
+	// tell which one is live, and an operator editing the half that is not
+	// would see no effect at all.
+	SecretKey string `yaml:"secret_key" validate:"omitempty"`
+	// PublicKey is the matching public key inline, base64url-encoded.
+	//
+	// The same exactly-one rule applies to this half independently:
+	// exactly one of public_key_path and public_key must be set. The two
+	// halves are resolved separately, so a path for one and an inline value
+	// for the other is fine - which is what a deployment that can mount the
+	// public key but must inject the secret one will want.
+	PublicKey string `yaml:"public_key" validate:"omitempty"`
+	// DefaultValidity is how long an issued credential is valid for
+	// (default: 365 days), used to derive the `exp` header member.
+	DefaultValidity time.Duration `yaml:"default_validity" default:"8760h"`
 }
 
 // SignMetadataRateLimitConfig configures the SignMetadata gRPC rate limiter.
@@ -936,6 +1002,20 @@ type DigitalCredentialsConfig struct {
 	// AllowQRFallback enables automatic fallback to QR code if DC API is unavailable
 	// Default: true
 	AllowQRFallback *bool `yaml:"allow_qr_fallback" default:"true"`
+
+	// AutoAttempt controls whether the presentation-definition UI calls
+	// navigator.credentials.get() as soon as a presentation request starts,
+	// before it renders the same-device wallet link and QR screen. With
+	// false the UI goes straight to that screen and never calls the native
+	// API. (Enable alone only controls whether the native API is available
+	// to attempt at all, not whether the UI attempts it first.) Set to false
+	// to skip straight to the same-device "open in wallet" link/QR fallback
+	// instead - confirmed via live testing that Android's OS-level DC API
+	// credential matcher can reject a non-standard format (e.g. the ZK-mdoc
+	// "mso_mdoc_zk" extension) with its own system dialog before any
+	// application code runs, with no JS-catchable failure to fall back
+	// from. Default: true (existing behavior, unaffected).
+	AutoAttempt *bool `yaml:"auto_attempt" default:"true"`
 
 	// DeepLinkScheme for mobile wallet integration
 	DeepLinkScheme string `yaml:"deep_link_scheme,omitempty" doc_example:"\"eudi-wallet://\""`

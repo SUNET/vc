@@ -973,7 +973,7 @@ func secretPlaceholder(yamlName string) string {
 	// Placeholders for secrets file documentation examples.
 	// These are NOT real credentials — they are shown as fill-in templates.
 	placeholders := map[string]string{ //#nosec G101 -- documentation placeholders, not real credentials
-		"uri":                               "\"mongodb://user:password@mongo:27017/vc\"",
+		"uri":                               "\"mongodb://mongo:27017/vc\"",
 		"client_secret":                     "\"your-oidc-client-secret\"",
 		"password":                          "\"change-me-in-production\"",
 		"session_secret":                    "\"random-32-byte-secret\"",

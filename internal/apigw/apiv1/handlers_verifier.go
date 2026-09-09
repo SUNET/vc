@@ -146,6 +146,9 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 			},
 			AuthorizationEncryptedResponseALG: "ECDH-ES",
 			AuthorizationEncryptedResponseENC: "A256GCM",
+			// See handlers_ui.go: OpenID4VP 1.0 renamed this field and made
+			// it an array. Both spellings are sent.
+			EncryptedResponseEncValuesSupported: []string{"A256GCM"},
 		},
 		IAT: time.Now().UTC().Unix(),
 	}

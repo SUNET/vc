@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/SUNET/vc/internal/verifier/cache"
@@ -112,7 +113,18 @@ func (m *MockDBService) ToDBService() *db.Service {
 }
 
 // CreateTestClientWithMock creates a test Client with a mock database for testing handlers
-func CreateTestClientWithMock(cfg *model.Cfg) (*Client, *MockDBService) {
+// CreateTestClientWithMock builds a Client wired to mock dependencies.
+//
+// t is taken so the openid4vp client's ephemeral key cache can be stopped
+// when the test finishes; it starts a background expiry goroutine that would
+// otherwise outlive every test in the suite.
+//
+// The cache.NewTestMemory* caches below start goroutines too. MemoryCache
+// has a Stop method, but cache.Service types those fields as the Cache
+// interface, which does not include it - so they are stopped through a type
+// assertion. AuthContext is backed by MemoryStore, which has no Stop at all,
+// and is the one goroutine left running.
+func CreateTestClientWithMock(t testing.TB, cfg *model.Cfg) (*Client, *MockDBService) {
 	ctx := context.TODO()
 
 	if cfg == nil {
@@ -155,6 +167,27 @@ func CreateTestClientWithMock(cfg *model.Cfg) (*Client, *MockDBService) {
 			Credential:             cache.NewTestMemoryCache[[]sdjwtvc.CredentialCache](5 * time.Minute),
 		},
 		jwksResolver: trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{}),
+		// Production wires this in New(); without it any path that needs an
+		// ephemeral encryption key - such as an encrypted response_mode -
+		// has nothing to generate one from.
+		openid4vp: &openid4vp.Client{
+			EphemeralKeyCache: openid4vp.NewEphemeralEncryptionKeyCache(10 * time.Minute),
+		},
+	}
+
+	t.Cleanup(client.openid4vp.Close)
+
+	// Stop the memory caches that can be stopped. The Cache interface omits
+	// Stop, so this asserts for it rather than widening the interface for a
+	// test-only need.
+	for _, c := range []any{
+		client.cacheService.Credential,
+		client.cacheService.EphemeralEncryptionKey,
+		client.cacheService.RequestObject,
+	} {
+		if stoppable, ok := c.(interface{ Stop() }); ok {
+			t.Cleanup(stoppable.Stop)
+		}
 	}
 
 	return client, mockDB

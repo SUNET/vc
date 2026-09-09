@@ -23,6 +23,7 @@ const (
 	IssuerService_MakeSDJWT_FullMethodName    = "/v1.issuer.IssuerService/MakeSDJWT"
 	IssuerService_MakeMDoc_FullMethodName     = "/v1.issuer.IssuerService/MakeMDoc"
 	IssuerService_MakeVC20_FullMethodName     = "/v1.issuer.IssuerService/MakeVC20"
+	IssuerService_MakeJWP_FullMethodName      = "/v1.issuer.IssuerService/MakeJWP"
 	IssuerService_JWKS_FullMethodName         = "/v1.issuer.IssuerService/JWKS"
 	IssuerService_SignMetadata_FullMethodName = "/v1.issuer.IssuerService/SignMetadata"
 	IssuerService_GetIACAs_FullMethodName     = "/v1.issuer.IssuerService/GetIACAs"
@@ -36,6 +37,7 @@ type IssuerServiceClient interface {
 	MakeSDJWT(ctx context.Context, in *MakeSDJWTRequest, opts ...grpc.CallOption) (*MakeSDJWTReply, error)
 	MakeMDoc(ctx context.Context, in *MakeMDocRequest, opts ...grpc.CallOption) (*MakeMDocReply, error)
 	MakeVC20(ctx context.Context, in *MakeVC20Request, opts ...grpc.CallOption) (*MakeVC20Reply, error)
+	MakeJWP(ctx context.Context, in *MakeJWPRequest, opts ...grpc.CallOption) (*MakeJWPReply, error)
 	JWKS(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*JwksReply, error)
 	SignMetadata(ctx context.Context, in *SignMetadataRequest, opts ...grpc.CallOption) (*SignMetadataReply, error)
 	GetIACAs(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*GetIACAsReply, error)
@@ -74,6 +76,16 @@ func (c *issuerServiceClient) MakeVC20(ctx context.Context, in *MakeVC20Request,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MakeVC20Reply)
 	err := c.cc.Invoke(ctx, IssuerService_MakeVC20_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *issuerServiceClient) MakeJWP(ctx context.Context, in *MakeJWPRequest, opts ...grpc.CallOption) (*MakeJWPReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MakeJWPReply)
+	err := c.cc.Invoke(ctx, IssuerService_MakeJWP_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +139,7 @@ type IssuerServiceServer interface {
 	MakeSDJWT(context.Context, *MakeSDJWTRequest) (*MakeSDJWTReply, error)
 	MakeMDoc(context.Context, *MakeMDocRequest) (*MakeMDocReply, error)
 	MakeVC20(context.Context, *MakeVC20Request) (*MakeVC20Reply, error)
+	MakeJWP(context.Context, *MakeJWPRequest) (*MakeJWPReply, error)
 	JWKS(context.Context, *Empty) (*JwksReply, error)
 	SignMetadata(context.Context, *SignMetadataRequest) (*SignMetadataReply, error)
 	GetIACAs(context.Context, *Empty) (*GetIACAsReply, error)
@@ -149,6 +162,9 @@ func (UnimplementedIssuerServiceServer) MakeMDoc(context.Context, *MakeMDocReque
 }
 func (UnimplementedIssuerServiceServer) MakeVC20(context.Context, *MakeVC20Request) (*MakeVC20Reply, error) {
 	return nil, status.Error(codes.Unimplemented, "method MakeVC20 not implemented")
+}
+func (UnimplementedIssuerServiceServer) MakeJWP(context.Context, *MakeJWPRequest) (*MakeJWPReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method MakeJWP not implemented")
 }
 func (UnimplementedIssuerServiceServer) JWKS(context.Context, *Empty) (*JwksReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method JWKS not implemented")
@@ -233,6 +249,24 @@ func _IssuerService_MakeVC20_Handler(srv interface{}, ctx context.Context, dec f
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IssuerServiceServer).MakeVC20(ctx, req.(*MakeVC20Request))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IssuerService_MakeJWP_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MakeJWPRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IssuerServiceServer).MakeJWP(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IssuerService_MakeJWP_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IssuerServiceServer).MakeJWP(ctx, req.(*MakeJWPRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -327,6 +361,10 @@ var IssuerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MakeVC20",
 			Handler:    _IssuerService_MakeVC20_Handler,
+		},
+		{
+			MethodName: "MakeJWP",
+			Handler:    _IssuerService_MakeJWP_Handler,
 		},
 		{
 			MethodName: "JWKS",
