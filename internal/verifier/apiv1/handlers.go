@@ -10,6 +10,9 @@ import (
 
 // Health returns the readiness of the verifier service.
 func (c *Client) Health(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {
+	if c.statusAggregator == nil {
+		return status.Probes{}.Check("verifier"), nil
+	}
 	return c.statusAggregator.Reply(ctx), nil
 }
 

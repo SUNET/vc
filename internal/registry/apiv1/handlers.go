@@ -13,6 +13,9 @@ import (
 
 // Status returns the readiness of the registry service.
 func (c *Client) Status(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {
+	if c.statusAggregator == nil {
+		return status.Probes{}.Check("registry"), nil
+	}
 	return c.statusAggregator.Reply(ctx), nil
 }
 

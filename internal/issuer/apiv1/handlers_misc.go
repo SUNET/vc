@@ -12,6 +12,9 @@ import (
 func (c *Client) Health(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {
 	_, span := c.tracer.Start(ctx, "apiv1:Health")
 	defer span.End()
+	if c.statusAggregator == nil {
+		return status.Probes{}.Check("issuer"), nil
+	}
 	return c.statusAggregator.Reply(ctx), nil
 }
 

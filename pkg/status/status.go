@@ -154,6 +154,9 @@ func (a *Aggregator) Reply(ctx context.Context) *apiv1_status.StatusReply {
 		a.mu.Lock()
 		r := a.cached
 		a.mu.Unlock()
+		if r == nil {
+			return Probes{}.Check(a.serviceName)
+		}
 		return r
 	}
 	a.refreshing = true
@@ -161,15 +164,18 @@ func (a *Aggregator) Reply(ctx context.Context) *apiv1_status.StatusReply {
 	ch := a.refreshedCh
 	a.mu.Unlock()
 
-	reply := a.build(ctx)
+	// defer so a panic in build cannot leave refreshing=true / ch unclosed
+	var reply *apiv1_status.StatusReply
+	defer func() {
+		a.mu.Lock()
+		a.cached = reply
+		a.staleAfter = time.Now().Add(a.cacheTTL)
+		a.refreshing = false
+		a.mu.Unlock()
+		close(ch)
+	}()
 
-	a.mu.Lock()
-	a.cached = reply
-	a.staleAfter = time.Now().Add(a.cacheTTL)
-	a.refreshing = false
-	a.mu.Unlock()
-	close(ch)
-
+	reply = a.build(ctx)
 	return reply
 }
 
