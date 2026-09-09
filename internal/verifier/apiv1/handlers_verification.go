@@ -422,17 +422,15 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// above: a dc_api.jwt response is always encrypted, so leaving it
 			// out of that branch would reintroduce exactly the unbinding the
 			// block above fixes.
-			var sessionTranscript []byte
+			var origin string
 			if req.DCAPI {
-				origin, originErr := c.dcAPIOrigin()
-				if originErr != nil {
-					c.log.Error(originErr, "cannot determine the DC API origin for the session transcript", "scope", scope)
-					return nil, originErr
+				origin, err = c.dcAPIOrigin()
+				if err != nil {
+					c.log.Error(err, "cannot determine the DC API origin for the session transcript", "scope", scope)
+					return nil, err
 				}
-				sessionTranscript, err = mdoc.BuildOID4VPDCAPISessionTranscript(origin, authCtx.Nonce, readerPubKeyThumbprint)
-			} else {
-				sessionTranscript, err = mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)
 			}
+			sessionTranscript, err := zkSessionTranscript(req.DCAPI, origin, authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)
 			if err != nil {
 				c.log.Error(err, "failed to build ZK session transcript", "scope", scope, "dc_api", req.DCAPI)
 				return nil, fmt.Errorf("failed to build ZK session transcript for scope %s: %w", scope, err)
