@@ -28,8 +28,17 @@ const (
 //
 // A copy of the whole struct rather than a rebuilt literal, so a field added
 // to RequestObject cannot be set on one channel and forgotten on the other.
-// Pointer fields are shared, deliberately: the wallet must see the same
-// client_metadata either way.
+//
+// The copy is SHALLOW, and that is a constraint on callers rather than an
+// incidental detail: every reference-typed field - pointers, slices, maps -
+// is shared with the original, not just the client_metadata pointer. Both
+// objects must therefore be treated as immutable once created. Mutating
+// either, including appending to one of its slices, either shows up in the
+// other or silently stops doing so when a backing array is reallocated, and
+// the two channels would then be asking for different things.
+//
+// That suits the only caller, which caches both and serves them read-only.
+// A caller that needs to mutate one wants a deep copy, not this.
 func (r *RequestObject) WithDCAPIResponseMode() *RequestObject {
 	if r == nil {
 		return nil

@@ -72,6 +72,30 @@ func TestOIDCRelyingPartyResponseMode(t *testing.T) {
 			want: ResponseModeDirectPost,
 		},
 		{
+			// form_post is a real OpenID4VP mode and a valid value on the
+			// DC API knob's sibling fields, but this endpoint cannot handle
+			// it - so it must not escape a function that promises a
+			// deliverable mode.
+			name: "form_post does not pass through",
+			v:    verifier(true, "form_post", ""),
+			want: ResponseModeDirectPost,
+		},
+		{
+			name: "an unrecognised mode is mapped, not passed through",
+			v:    verifier(true, "something_new", ""),
+			want: ResponseModeDirectPost,
+		},
+		{
+			name: "an unrecognised encrypted mode keeps its encryption",
+			v:    verifier(true, "something_new.jwt", ""),
+			want: ResponseModeDirectPostJWT,
+		},
+		{
+			name: "form_post in the flow's own setting is mapped too",
+			v:    verifier(false, "", "form_post"),
+			want: ResponseModeDirectPost,
+		},
+		{
 			name: "nil verifier does not panic",
 			v:    nil,
 			want: ResponseModeDirectPost,
@@ -93,6 +117,11 @@ func TestOIDCRelyingPartyResponseMode(t *testing.T) {
 			// this table that carries that shape.
 			if strings.Contains(got, "dc_api") {
 				t.Fatalf("a dc_api mode must never reach this flow, got %q", got)
+			}
+			// Stronger than the dc_api check alone: the documented invariant
+			// is that only these two can come out at all.
+			if got != ResponseModeDirectPost && got != ResponseModeDirectPostJWT {
+				t.Fatalf("only direct_post or direct_post.jwt may be returned, got %q", got)
 			}
 		})
 	}

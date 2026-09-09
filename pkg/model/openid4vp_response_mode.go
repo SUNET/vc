@@ -67,13 +67,25 @@ func (v *Verifier) OIDCRelyingPartyResponseMode() string {
 
 // linkDeliverableResponseMode maps any response mode onto one a wallet
 // reached by link or QR code can actually answer in, preserving whether the
-// response is encrypted. A mode that is already deliverable passes through.
+// response is encrypted.
+//
+// The return is always direct_post or direct_post.jwt - the only two modes
+// this flow's /verification/oidc-direct_post endpoint handles. Nothing
+// passes through unexamined: it previously returned any non-dc_api value
+// verbatim, which let form_post, or any unrecognised string, out of a
+// function whose whole purpose is to guarantee a deliverable mode. Config
+// validation would reject those, but this file exists precisely because the
+// exported method above can be reached with a config that never went
+// through it.
+//
+// Encryption is inferred from the .jwt suffix, so a profiled or future
+// spelling keeps whichever it asked for rather than silently dropping to an
+// unencrypted response.
 func linkDeliverableResponseMode(mode string) string {
-	if !strings.Contains(mode, "dc_api") {
+	switch mode {
+	case ResponseModeDirectPost, ResponseModeDirectPostJWT:
 		return mode
 	}
-	// Any DC API spelling, including a profiled one, maps to the direct_post
-	// shape carrying the same encryption choice.
 	if strings.HasSuffix(mode, ".jwt") {
 		return ResponseModeDirectPostJWT
 	}
