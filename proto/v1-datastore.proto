@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package v1.datastore;
 
-option go_package = "vc/internal/gen/v1/v1.datastore";
+option go_package = "github.com/SUNET/vc/internal/gen/datastore/apiv1_datastore";
 
 service DatastoreService {
     rpc List (ListRequest) returns (ListReply) {}
