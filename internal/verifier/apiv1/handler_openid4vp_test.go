@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
@@ -399,6 +400,33 @@ func createTestDBSession(sessionID string) *cache.AuthorizationContext {
 	return authCtx
 }
 
+// TestCreateRequestObject_LegacyJARMParamsAreOptIn covers the escape hatch:
+// a deployment that still has to reach a draft-era wallet can turn the old
+// members back on, and gets both spellings.
+func TestCreateRequestObject_LegacyJARMParamsAreOptIn(t *testing.T) {
+	ctx := t.Context()
+	client := newSigningTestClient(t)
+
+	client.cfg.Verifier.DigitalCredentials.Enable = true
+	if client.cfg.Common == nil {
+		client.cfg.Common = &model.Common{}
+	}
+	client.cfg.Common.OpenID4VPCompat.SendLegacyJARMEncryptionParams = model.BoolPtr(true)
+
+	_, err := client.CreateRequestObject(ctx, "session-legacy", createTestDCQLForVP(t), "nonce-legacy", nil)
+	require.NoError(t, err)
+
+	cached, err := client.GetRequestObject(ctx, "session-legacy")
+	require.NoError(t, err)
+	require.NotNil(t, cached.ClientMetadata)
+
+	md := cached.ClientMetadata
+	assert.Equal(t, "ECDH-ES", md.AuthorizationEncryptedResponseALG)
+	assert.Equal(t, "A256GCM", md.AuthorizationEncryptedResponseENC)
+	assert.Equal(t, []string{"A256GCM"}, md.EncryptedResponseEncValuesSupported,
+		"the 1.0 member stays regardless - the switch adds, it does not replace")
+}
+
 // TestCreateRequestObject_EncryptedModeCarriesAKey covers what an external
 // wallet actually validates. A response_mode ending in .jwt asks the wallet
 // to encrypt its response; this path previously sent client_metadata with
@@ -424,8 +452,18 @@ func TestCreateRequestObject_EncryptedModeCarriesAKey(t *testing.T) {
 
 	assert.Equal(t, []string{"A256GCM"}, md.EncryptedResponseEncValuesSupported,
 		"OpenID4VP 1.0 expects an array under this name")
-	assert.Equal(t, "ECDH-ES", md.AuthorizationEncryptedResponseALG)
-	assert.Equal(t, "A256GCM", md.AuthorizationEncryptedResponseENC)
+
+	// The draft-era pair is absent by default: OpenID4VP 1.0 closed
+	// client_metadata to a fixed set of members, and the OIDF conformance
+	// suite reports these two as unknown parameters (SUNET/vc#650).
+	assert.Empty(t, md.AuthorizationEncryptedResponseALG,
+		"the draft-era alg member must not be sent unless explicitly enabled")
+	assert.Empty(t, md.AuthorizationEncryptedResponseENC,
+		"the draft-era enc member must not be sent unless explicitly enabled")
+
+	// vp_formats_supported is REQUIRED and must be present even though this
+	// deployment never configured preferred_vp_formats.
+	require.NotNil(t, md.VPFormatsSupported, "vp_formats_supported is required")
 
 	// The private half must be findable by the advertised kid, or the wallet
 	// encrypts to a key we cannot decrypt with.

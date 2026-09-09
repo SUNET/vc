@@ -475,17 +475,14 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		State:        authorizationContext.State,
 		Nonce:        authorizationContext.Nonce,
 		ClientMetadata: &openid4vp.ClientMetadata{
-			VPFormatsSupported: c.cfg.Verifier.PreferredVPFormats,
+			VPFormatsSupported: vpFormatsOrDefault(c.cfg.Verifier.PreferredVPFormats),
 			JWKS: &openid4vp.Keys{
 				Keys: []jwk.Key{ephemeralPublicJWK},
 			},
-			AuthorizationSignedResponseALG:    "",
-			AuthorizationEncryptedResponseALG: "ECDH-ES",
-			AuthorizationEncryptedResponseENC: "A256GCM",
-			// OpenID4VP 1.0 renamed authorization_encrypted_response_enc to
-			// encrypted_response_enc_values_supported and made it an array.
-			// Both are sent: a 1.0 wallet rejects a request carrying only the
-			// old name, and a draft-era wallet ignores the new one.
+			AuthorizationSignedResponseALG: "",
+			// OpenID4VP 1.0 replaced authorization_encrypted_response_enc
+			// with this array and closed client_metadata to a fixed set of
+			// members, so the old pair is opt-in only - see OpenID4VPCompat.
 			EncryptedResponseEncValuesSupported: []string{"A256GCM"},
 		},
 		IAT:              time.Now().UTC().Unix(),
@@ -494,6 +491,12 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		DCQLQuery:        req.DCQLQuery,
 		RequestURIMethod: "",
 		VerifierInfo:     c.registrationCertificate.VerifierInfo(),
+	}
+
+	// Off unless a deployment opts in - see OpenID4VPCompat.
+	if c.cfg.SendLegacyJARMEncryptionParams() {
+		requestObject.ClientMetadata.AuthorizationEncryptedResponseALG = "ECDH-ES"
+		requestObject.ClientMetadata.AuthorizationEncryptedResponseENC = "A256GCM"
 	}
 
 	if err := c.cacheService.AuthContext.Save(ctx, authorizationContext); err != nil {

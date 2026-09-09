@@ -77,7 +77,9 @@ func TestClientMetadata_EncryptedResponseEncValuesSupportedIsAnArray(t *testing.
 	require.True(t, ok, "must serialise as an array of strings, not a string")
 	assert.Equal(t, []any{"A256GCM"}, values)
 
-	// The draft-era spellings stay so wallets that predate 1.0 keep working.
+	// The draft-era spellings still serialize when set - this is the shape a
+	// deployment gets with OpenID4VPCompat.SendLegacyJARMEncryptionParams on.
+	// They are not set by default; see that field for why.
 	assert.Equal(t, "A256GCM", got["authorization_encrypted_response_enc"])
 	assert.Equal(t, "ECDH-ES", got["authorization_encrypted_response_alg"])
 }
