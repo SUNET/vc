@@ -366,14 +366,27 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			}
 			// BuildOID4VPSessionTranscript's own doc comment: the JWK
 			// thumbprint is nil "unless the request advertised an
-			// encryption key for the response" - this request always does
-			// (CreateRequestObject sets ClientMetadata.JWKS to the same
-			// ephemeral key cached under EphemeralEncryptionKeyID, and
-			// response_mode requires encryption on both delivery channels),
-			// so passing nil unconditionally contradicted the documented
-			// condition and silently left the ZK proof's Fiat-Shamir
-			// transcript unbound from the actual encryption key the wallet
-			// saw and included in its own transcript.
+			// encryption key for the response". Every request that reaches
+			// this handler advertised one, so passing nil unconditionally
+			// contradicted the documented condition and silently left the ZK
+			// proof's Fiat-Shamir transcript unbound from the encryption key
+			// the wallet actually saw and included in its own transcript.
+			//
+			// The writer is UIInteraction: it sets EphemeralEncryptionKeyID
+			// for every session and caches the key under it, and both request
+			// objects it builds carry a ".jwt" response mode, so the key is
+			// advertised on both delivery channels.
+			//
+			// Not CreateRequestObject, which an earlier version of this
+			// comment cited as the proof - it attaches ClientMetadata.JWKS
+			// only when its response mode requires encryption, and
+			// OIDCRelyingPartyResponseMode can return plain direct_post. It
+			// also serves a different flow, which answers on
+			// oidc-direct_post and never arrives here, so it could not have
+			// established anything about this request either way. The guard
+			// below is still on the key ID rather than on the response mode,
+			// so a future caller that leaves it unset gets a nil thumbprint
+			// rather than a wrong one.
 			var readerPubKeyThumbprint []byte
 			if authCtx.EphemeralEncryptionKeyID != "" {
 				if privKey, found := c.openid4vp.EphemeralKeyCache.Get(authCtx.EphemeralEncryptionKeyID); found {
