@@ -17,7 +17,14 @@ func (c *Client) Status(ctx context.Context, req *apiv1_status.StatusRequest) (*
 }
 
 func (c *Client) buildStatusAggregator() *status.Aggregator {
-	a := status.New("registry").Register("mongo", c.dbService)
+	a := status.New("registry")
+	if c.dbService != nil {
+		a = a.Register("mongo", c.dbService)
+	} else {
+		a = a.RegisterFunc("mongo", func(context.Context) error {
+			return errors.New("db service not initialized")
+		})
+	}
 	if c.tokenStatusListIssuer != nil {
 		a = a.Register("tokenstatuslist", c.tokenStatusListIssuer)
 	} else {

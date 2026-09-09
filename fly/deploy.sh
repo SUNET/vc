@@ -272,9 +272,9 @@ push_wallet_frontend_branding_secrets() {
     done
 
     local light_b64 dark_b64 favicon_b64 theme_json
-    light_b64="$(base64 -w0 < "$light")"
-    dark_b64="$(base64 -w0 < "$dark")"
-    favicon_b64="$(base64 -w0 < "$favicon")"
+    light_b64="$(base64 < "$light" | tr -d '\n')"
+    dark_b64="$(base64 < "$dark" | tr -d '\n')"
+    favicon_b64="$(base64 < "$favicon" | tr -d '\n')"
     theme_json="$(cat "$theme")"
 
     echo "    Staging BRANDING_* secrets for $app"

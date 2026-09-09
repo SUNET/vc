@@ -107,7 +107,10 @@ func (s *Service) HealthProbe(ctx context.Context) error {
 	if s.MongoClient == nil {
 		return errors.New("mongo client not connected")
 	}
-	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	return s.MongoClient.Ping(pingCtx, nil)
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+	}
+	return s.MongoClient.Ping(ctx, nil)
 }

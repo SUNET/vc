@@ -68,6 +68,7 @@ BUILD_CONFIGS           := \
 	start stop restart clean_docker_images \
 	proto proto-% swagger swagger-% swagger-fmt \
 	check-protoc diagram install-tools clean-apt-cache vscode vendor-js update formatting \
+	gh-install gh-auth \
 	gosec staticcheck vulncheck \
 	test-pkcs11 \
 	test-wallet test-wallet-vci test-wallet-vp test-wallet-e2e test-wallet-stack \
@@ -855,7 +856,7 @@ clean-apt-cache: ## Clean apt cache
 	$(info Cleaning apt cache)
 	rm -rf /var/lib/apt/lists/*
 
-vscode: test-env ## Set up VS Code development environment
+vscode: test-env gh-install ## Set up VS Code development environment
 	$(info Installing APT packages)
 	sudo apt-get update && sudo apt-get install -y \
 		protobuf-compiler \
@@ -870,11 +871,6 @@ vscode: test-env ## Set up VS Code development environment
 	curl -sL https://fly.io/install.sh | sh
 	sudo ln -sf "$$HOME/.fly/bin/flyctl" /usr/local/bin/flyctl
 	sudo ln -sf "$$HOME/.fly/bin/flyctl" /usr/local/bin/fly
-	$(info Installing GitHub CLI (gh))
-	curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
-	sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
-	echo "deb [arch=$$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
-	sudo apt-get update && sudo apt-get install -y gh
 	$(info Installing go packages)
 	go install github.com/swaggo/swag/cmd/swag@latest && \
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
@@ -884,6 +880,27 @@ vscode: test-env ## Set up VS Code development environment
 	go install golang.org/x/vuln/cmd/govulncheck@latest && \
 	go install honnef.co/go/tools/cmd/staticcheck@latest && \
 	go install mvdan.cc/gofumpt@latest
+
+gh-install: ## Install GitHub CLI (gh)
+	$(info Install GitHub CLI)
+	@if ! command -v gh >/dev/null 2>&1; then \
+		sudo mkdir -p -m 755 /etc/apt/keyrings && \
+		curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
+		sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+		echo "deb [arch=$$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+		sudo apt-get update && \
+		sudo apt-get install -y gh; \
+	else \
+		echo "gh already installed: $$(gh --version | head -1)"; \
+	fi
+
+gh-auth: gh-install ## Authenticate GitHub CLI
+	$(info Authenticate GitHub CLI)
+	@if gh auth status >/dev/null 2>&1; then \
+		gh auth status; \
+	else \
+		gh auth login; \
+	fi
 
 # ==============================================================================
 # Formatting

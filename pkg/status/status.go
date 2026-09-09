@@ -1,7 +1,7 @@
 // Package status provides a small, reusable readiness aggregation layer.
 //
 // Microservice components implement the Prober interface — a single method
-// Status(ctx) error where nil means healthy and any non-nil error means
+// HealthProbe(ctx) error where nil means healthy and any non-nil error means
 // unhealthy (the error message is surfaced as the probe message).
 //
 // An Aggregator collects named local probes and downstream StatusReply

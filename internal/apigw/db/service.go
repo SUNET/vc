@@ -124,15 +124,18 @@ func (s *Service) HealthProbe(ctx context.Context) error {
 	ctx, span := s.tracer.Start(ctx, "apigw:db:healthprobe")
 	defer span.End()
 
-	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+	}
 	if s.SQLDB != nil {
-		return s.SQLDB.PingContext(pingCtx)
+		return s.SQLDB.PingContext(ctx)
 	}
 	if s.MongoClient == nil {
 		return errors.New("mongo client not connected")
 	}
-	return s.MongoClient.Ping(pingCtx, nil)
+	return s.MongoClient.Ping(ctx, nil)
 }
 
 // Close closes the database connection
