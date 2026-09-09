@@ -371,15 +371,15 @@ an authorization-code redirect flow so admins log in via the OIDC provider.
 
 Supports both file-based and HSM-based keys with explicit control.
 
-| Field              | Type     | Description                                                                                                               | Example           | Default | Required                          |
-| ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------- | ------- | --------------------------------- |
-| `private_key_path` | `string` | File-based configuration                                                                                                  | -                 | -       | Yes (if pkcs11 not set)           |
-| `chain_path`       | `string` | Path to certificate chain (optional)                                                                                      | -                 | -       | No                                |
-| `pkcs11`           | `object` | HSM-based configuration                                                                                                   | -                 | -       | Yes (if private_key_path not set) |
-| `source`           | `object` | Source selection (determines which config to use) If empty, tries in order: File (if FilePath set), then HSM (if HSM set) | -                 | -       | No                                |
-| `enable_file`      | `bool`   | File-based key loading (default: true if FilePath set)                                                                    | -                 | -       | No                                |
-| `enable_hsm`       | `bool`   | HSM-based key loading (default: true if HSM set)                                                                          | -                 | -       | No                                |
-| `priority`         | `array`  | Fallback order when both are enabled If nil, uses Source field or auto-detects based on what's configured                 | `["hsm", "file"]` | -       | No                                |
+| Field              | Type     | Description                                                                                                                                                             | Example           | Default | Required                          |
+| ------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | ------- | --------------------------------- |
+| `private_key_path` | `string` | File-based configuration                                                                                                                                                | -                 | -       | Yes (if pkcs11 not set)           |
+| `chain_path`       | `string` | Path to certificate chain (optional). Should contain the signing certificate followed by intermediates, and the root certificate if it is not in the system trust store | -                 | -       | No                                |
+| `pkcs11`           | `object` | HSM-based configuration                                                                                                                                                 | -                 | -       | Yes (if private_key_path not set) |
+| `source`           | `object` | Source selection (determines which config to use) If empty, tries in order: File (if FilePath set), then HSM (if HSM set)                                               | -                 | -       | No                                |
+| `enable_file`      | `bool`   | File-based key loading (default: true if FilePath set)                                                                                                                  | -                 | -       | No                                |
+| `enable_hsm`       | `bool`   | HSM-based key loading (default: true if HSM set)                                                                                                                        | -                 | -       | No                                |
+| `priority`         | `array`  | Fallback order when both are enabled If nil, uses Source field or auto-detects based on what's configured                                                               | `["hsm", "file"]` | -       | No                                |
 
 ### `pkcs11`
 
@@ -1258,7 +1258,7 @@ as the human-readable label.
 
 ### `zk_system_type` entry
 
-> **Path:** `.verifier.presets.<preset label>.<scope>.zk_system_type[]`
+> **Path:** `.verifier.presets.<preset label>.credentials.<key>.zk_system_type[]`
 
 array — a verifier's declaration of one ZK proof system + circuit variant
 it is willing to accept, mirroring multipaz's `ZkSystemSpec` wire shape
