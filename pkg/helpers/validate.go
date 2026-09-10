@@ -9,13 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sqlstore"
 	"github.com/SUNET/vc/pkg/trace"
@@ -253,14 +253,11 @@ func NewValidator() (*validator.Validate, error) {
 	// CredentialRequest.Validate() (pkg/openid4vci/credential.go), which
 	// reliably runs for this request instead.
 
-	// Register custom validation for safe_key - validates map keys used in MongoDB field paths.
-	// Only allows simple alphanumeric/underscore keys starting with a letter (max 64 chars).
-	// Prevents field-path injection via dots or MongoDB operator prefixes ($).
-	safeKeyRe := regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,63}$`)
-	err = validate.RegisterValidation("safe_key", func(fl validator.FieldLevel) bool {
-		return safeKeyRe.MatchString(fl.Field().String())
-	})
-	if err != nil {
+	// safe_key validates map keys that reach MongoDB field paths. Defined in
+	// pkg/openid4vci, which is below this package and where PARRequest is
+	// tagged with it, so the guard has one definition rather than a copy per
+	// validator.
+	if err := openid4vci.RegisterSafeKey(validate); err != nil {
 		return nil, err
 	}
 

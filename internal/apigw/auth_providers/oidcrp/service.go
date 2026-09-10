@@ -354,6 +354,13 @@ var reservedOIDCParams = map[string]bool{
 	"nonce":                 true,
 	"code_challenge":        true,
 	"code_challenge_method": true,
+
+	// These two have dedicated OIDCRequestParams fields, and CustomParams is
+	// applied after them, so a custom param of the same name would win
+	// silently - the operator would see acr_values configured and a
+	// different acr_values sent.
+	"acr_values": true,
+	"claims":     true,
 }
 
 // resolveOIDCRequestParams resolves template variables in OIDC request params

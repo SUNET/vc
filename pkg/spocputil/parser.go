@@ -197,7 +197,8 @@ func (p *advancedParser) parseStarForm() (sexp.Element, error) {
 		return &starform.Wildcard{}, nil
 	}
 
-	// Read the star form type: set, prefix, suffix, range...
+	// Read the star form type. Only prefix, suffix and set are implemented;
+	// anything else is rejected below as an unsupported star form.
 	formType, err := p.parseAtom()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse star form type: %w", err)

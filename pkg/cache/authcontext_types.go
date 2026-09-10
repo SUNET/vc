@@ -2,7 +2,6 @@ package cache
 
 import (
 	"reflect"
-	"regexp"
 	"strings"
 	"time"
 
@@ -12,13 +11,11 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// safeKeyRe mirrors pkg/helpers.NewValidator's "safe_key" registration.
-// Duplicated here (rather than shared) since AuthorizationContext.Validate
-// intentionally builds its own minimal *validator.Validate with a different
-// tag-name resolution than pkg/helpers.NewValidator (json tag vs.
-// yaml-preferring) -- reusing that constructor here would change error
-// messages/behavior for every other field on this struct, not just this one.
-var safeKeyRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,63}$`)
+// AuthorizationContext.Validate below builds its own minimal
+// *validator.Validate, because pkg/helpers.NewValidator resolves tag names
+// differently (json vs. yaml-preferring) and reusing it here would change
+// error messages for every other field on this struct. Only the constructor
+// is separate: the safe_key guard itself comes from openid4vci.
 
 // SessionStatus represents the status of an OIDC session
 type SessionStatus string
@@ -106,10 +103,10 @@ type AuthorizationContext struct {
 	DynamicParams map[string]string `json:"dynamic_params,omitempty" bson:"dynamic_params,omitempty" validate:"omitempty,dive,keys,safe_key,endkeys,max=1024,printascii"`
 
 	// Verifier-specific fields (presentation/RP flows)
-	RedirectURI            string         `json:"redirect_uri,omitempty" bson:"redirect_uri,omitempty" validate:"omitempty,max=2048,printascii"`
-	ResponseType           string         `json:"response_type,omitempty" bson:"response_type,omitempty" validate:"omitempty,max=32,printascii"`
-	ResponseMode           string         `json:"response_mode,omitempty" bson:"response_mode,omitempty" validate:"omitempty,max=32,printascii"`
-	ShowCredentialDetails  bool           `json:"show_credential_details,omitempty" bson:"show_credential_details,omitempty"`
+	RedirectURI           string `json:"redirect_uri,omitempty" bson:"redirect_uri,omitempty" validate:"omitempty,max=2048,printascii"`
+	ResponseType          string `json:"response_type,omitempty" bson:"response_type,omitempty" validate:"omitempty,max=32,printascii"`
+	ResponseMode          string `json:"response_mode,omitempty" bson:"response_mode,omitempty" validate:"omitempty,max=32,printascii"`
+	ShowCredentialDetails bool   `json:"show_credential_details,omitempty" bson:"show_credential_details,omitempty"`
 	// WalletFollowsRedirect is set when the user leaves /authorize for a
 	// same-device web wallet. ProcessDirectPost then returns redirect_uri so
 	// the wallet can send the browser back to the RP. Cross-device flows
@@ -143,9 +140,7 @@ func (a *AuthorizationContext) Validate() error {
 		}
 		return name
 	})
-	if err := v.RegisterValidation("safe_key", func(fl validator.FieldLevel) bool {
-		return safeKeyRe.MatchString(fl.Field().String())
-	}); err != nil {
+	if err := openid4vci.RegisterSafeKey(v); err != nil {
 		return err
 	}
 	return v.Struct(a)
