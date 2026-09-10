@@ -291,12 +291,10 @@ func NewCredentialOffer(issuerURL, credentialConfigID, grantType string) (*Crede
 	}
 
 	return &CredentialOfferResult{
-		CredentialOfferParameters: CredentialOfferParameters{
-			CredentialIssuer:           issuerURL,
-			CredentialConfigurationIDs: []string{credentialConfigID},
-			Grants: map[string]any{
-				grantType: grant,
-			},
+		CredentialIssuer:           issuerURL,
+		CredentialConfigurationIDs: []string{credentialConfigID},
+		Grants: map[string]any{
+			grantType: grant,
 		},
 		ID: token,
 	}, nil

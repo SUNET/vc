@@ -88,10 +88,10 @@ type AuthorizationContext struct {
 	RemoteName           string                                     `json:"remote_name,omitempty" bson:"remote_name,omitempty" validate:"omitempty,max=128,printascii"`
 
 	// Verifier-specific fields (presentation/RP flows)
-	RedirectURI            string         `json:"redirect_uri,omitempty" bson:"redirect_uri,omitempty" validate:"omitempty,max=2048,printascii"`
-	ResponseType           string         `json:"response_type,omitempty" bson:"response_type,omitempty" validate:"omitempty,max=32,printascii"`
-	ResponseMode           string         `json:"response_mode,omitempty" bson:"response_mode,omitempty" validate:"omitempty,max=32,printascii"`
-	ShowCredentialDetails  bool           `json:"show_credential_details,omitempty" bson:"show_credential_details,omitempty"`
+	RedirectURI           string `json:"redirect_uri,omitempty" bson:"redirect_uri,omitempty" validate:"omitempty,max=2048,printascii"`
+	ResponseType          string `json:"response_type,omitempty" bson:"response_type,omitempty" validate:"omitempty,max=32,printascii"`
+	ResponseMode          string `json:"response_mode,omitempty" bson:"response_mode,omitempty" validate:"omitempty,max=32,printascii"`
+	ShowCredentialDetails bool   `json:"show_credential_details,omitempty" bson:"show_credential_details,omitempty"`
 	// WalletFollowsRedirect is set when the user leaves /authorize for a
 	// same-device web wallet. ProcessDirectPost then returns redirect_uri so
 	// the wallet can send the browser back to the RP. Cross-device flows
@@ -119,7 +119,7 @@ type AuthorizationContext struct {
 func (a *AuthorizationContext) Validate() error {
 	v := validator.New(validator.WithRequiredStructEnabled())
 	v.RegisterTagNameFunc(func(fld reflect.StructField) string {
-		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
+		name, _, _ := strings.Cut(fld.Tag.Get("json"), ",")
 		if name == "-" {
 			return ""
 		}

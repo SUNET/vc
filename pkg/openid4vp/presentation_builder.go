@@ -3,6 +3,7 @@ package openid4vp
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 )
 
@@ -171,9 +172,7 @@ func copyDCQL(src *DCQL) *DCQL {
 			meta.ZKSystemType = make([]ZKSystemTypeSpec, len(cred.Meta.ZKSystemType))
 			for j, spec := range cred.Meta.ZKSystemType {
 				params := make(map[string]string, len(spec.Params))
-				for k, v := range spec.Params {
-					params[k] = v
-				}
+				maps.Copy(params, spec.Params)
 				meta.ZKSystemType[j] = ZKSystemTypeSpec{
 					ID:     spec.ID,
 					System: spec.System,

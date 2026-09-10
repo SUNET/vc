@@ -308,8 +308,7 @@ func (p ProofAttestation) Verify(opts *VerifyProofOptions) error {
 		return publicKey, nil
 	})
 	if err != nil {
-		var vciErr *Error
-		if errors.As(err, &vciErr) {
+		if vciErr, ok := errors.AsType[*Error](err); ok {
 			return vciErr
 		}
 		return &Error{Err: ErrInvalidProof, ErrorDescription: err.Error()}

@@ -28,17 +28,6 @@ func TestBoolVal(t *testing.T) {
 	}
 }
 
-func TestBoolPtr(t *testing.T) {
-	p := BoolPtr(true)
-	if p == nil || *p != true {
-		t.Error("BoolPtr(true) should return pointer to true")
-	}
-	p = BoolPtr(false)
-	if p == nil || *p != false {
-		t.Error("BoolPtr(false) should return pointer to false")
-	}
-}
-
 func TestExtractIdentityClaims(t *testing.T) {
 	required := []string{"sub", "email", "name"}
 

@@ -579,7 +579,7 @@ func parseDocConstraints(path string) ([]DocConstraint, error) {
 	re := regexp.MustCompile(`//\s*doc:constraint\s+(.+)`)
 	kvRe := regexp.MustCompile(`(\w+)="([^"]*)"`)
 	var constraints []DocConstraint
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		m := re.FindStringSubmatch(strings.TrimSpace(line))
 		if m == nil {
 			continue

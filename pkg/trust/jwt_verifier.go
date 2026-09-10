@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
 
 // JWTKeyMaterial holds key material extracted from a JWT header for signature verification and trust evaluation.
@@ -170,13 +169,11 @@ func (v *JWTTrustVerifier) EvaluateIssuerTrust(ctx context.Context, vpToken stri
 
 	// Evaluate trust via AuthZEN PDP
 	decision, err := v.trustEvaluator.Evaluate(ctx, &EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID:      issuerID,
-			KeyType:        keyInfo.KeyType,
-			Key:            keyInfo.KeyMaterial,
-			Role:           RoleCredentialIssuer,
-			CredentialType: credentialType,
-		},
+		SubjectID:      issuerID,
+		KeyType:        keyInfo.KeyType,
+		Key:            keyInfo.KeyMaterial,
+		Role:           RoleCredentialIssuer,
+		CredentialType: credentialType,
 	})
 	if err != nil {
 		return fmt.Errorf("trust evaluation error: %w", err)

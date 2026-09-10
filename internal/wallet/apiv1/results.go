@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"slices"
 	"sync"
 	"time"
 )
@@ -58,9 +59,9 @@ func (r *ResultStore) List() []*ScenarioResult {
 func (r *ResultStore) LastByName(name string) *ScenarioResult {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for i := len(r.results) - 1; i >= 0; i-- {
-		if r.results[i].ScenarioName == name {
-			return r.results[i]
+	for _, v := range slices.Backward(r.results) {
+		if v.ScenarioName == name {
+			return v
 		}
 	}
 	return nil

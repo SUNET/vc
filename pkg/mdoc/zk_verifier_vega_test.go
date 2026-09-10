@@ -15,8 +15,6 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vp"
 )
 
-func digestIDPtr(v uint32) *uint32 { return &v }
-
 func TestCheckVegaIssuerKeyMatches(t *testing.T) {
 	qx := make([]byte, 32)
 	qy := make([]byte, 32)
@@ -60,7 +58,7 @@ func TestBuildVegaDisclosedBytes(t *testing.T) {
 			ClaimSlotDigestIds: []uint32{26, 300, 4444, 55555},
 			IssuerSigned: map[string][]ZkSignedItemMdoc{
 				Namespace: {
-					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: digestIDPtr(300), IssuerSignedItemBytes: givenNameBytes},
+					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: new(uint32(300)), IssuerSignedItemBytes: givenNameBytes},
 				},
 			},
 		}
@@ -93,7 +91,7 @@ func TestBuildVegaDisclosedBytes(t *testing.T) {
 		dd := &ZkDocumentDataMdoc{
 			IssuerSigned: map[string][]ZkSignedItemMdoc{
 				Namespace: {
-					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: digestIDPtr(26)},
+					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: new(uint32(26))},
 				},
 			},
 		}
@@ -107,7 +105,7 @@ func TestBuildVegaDisclosedBytes(t *testing.T) {
 			ClaimSlotDigestIds: []uint32{26, 300, 4444, 55555},
 			IssuerSigned: map[string][]ZkSignedItemMdoc{
 				Namespace: {
-					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: digestIDPtr(300)},
+					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: new(uint32(300))},
 				},
 			},
 		}
@@ -122,7 +120,7 @@ func TestBuildVegaDisclosedBytes(t *testing.T) {
 			ClaimSlotDigestIds: []uint32{1, 2, 3, 4},
 			IssuerSigned: map[string][]ZkSignedItemMdoc{
 				Namespace: {
-					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: digestIDPtr(300), IssuerSignedItemBytes: []byte{0x01}},
+					{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: new(uint32(300)), IssuerSignedItemBytes: []byte{0x01}},
 				},
 			},
 		}
@@ -223,7 +221,7 @@ func TestCheckVegaWireMatchesProofBoundItems(t *testing.T) {
 		dd := vegaWireDoc(ZkSignedItemMdoc{
 			ElementIdentifier:     "given_name",
 			ElementValue:          "Jane",
-			DigestID:              digestIDPtr(300),
+			DigestID:              new(uint32(300)),
 			IssuerSignedItemBytes: buildVegaItemBytes(t, 300, "given_name", "Jane"),
 		})
 		if err := checkVegaWireMatchesProofBoundItems(dd); err != nil {
@@ -237,7 +235,7 @@ func TestCheckVegaWireMatchesProofBoundItems(t *testing.T) {
 		dd := vegaWireDoc(ZkSignedItemMdoc{
 			ElementIdentifier:     "given_name",
 			ElementValue:          "Mallory",
-			DigestID:              digestIDPtr(300),
+			DigestID:              new(uint32(300)),
 			IssuerSignedItemBytes: buildVegaItemBytes(t, 300, "given_name", "Jane"),
 		})
 		err := checkVegaWireMatchesProofBoundItems(dd)
@@ -256,7 +254,7 @@ func TestCheckVegaWireMatchesProofBoundItems(t *testing.T) {
 		dd := vegaWireDoc(ZkSignedItemMdoc{
 			ElementIdentifier:     "age_over_18",
 			ElementValue:          true,
-			DigestID:              digestIDPtr(300),
+			DigestID:              new(uint32(300)),
 			IssuerSignedItemBytes: buildVegaItemBytes(t, 300, "age_over_21", true),
 		})
 		if err := checkVegaWireMatchesProofBoundItems(dd); err == nil {
@@ -268,7 +266,7 @@ func TestCheckVegaWireMatchesProofBoundItems(t *testing.T) {
 		dd := vegaWireDoc(ZkSignedItemMdoc{
 			ElementIdentifier:     "given_name",
 			ElementValue:          "Jane",
-			DigestID:              digestIDPtr(301),
+			DigestID:              new(uint32(301)),
 			IssuerSignedItemBytes: buildVegaItemBytes(t, 300, "given_name", "Jane"),
 		})
 		if err := checkVegaWireMatchesProofBoundItems(dd); err == nil {
@@ -292,7 +290,7 @@ func TestCheckVegaWireMatchesProofBoundItems(t *testing.T) {
 		dd := vegaWireDoc(ZkSignedItemMdoc{
 			ElementIdentifier:     "given_name",
 			ElementValue:          "Jane",
-			DigestID:              digestIDPtr(300),
+			DigestID:              new(uint32(300)),
 			IssuerSignedItemBytes: []byte{0xff, 0xff, 0xff},
 		})
 		if err := checkVegaWireMatchesProofBoundItems(dd); err == nil {
@@ -319,7 +317,7 @@ func TestCheckVegaWireMatchesProofBoundItems(t *testing.T) {
 
 		ok := vegaWireDoc(ZkSignedItemMdoc{
 			ElementIdentifier: "given_name", ElementValue: "Jane",
-			DigestID: digestIDPtr(300), IssuerSignedItemBytes: bare,
+			DigestID: new(uint32(300)), IssuerSignedItemBytes: bare,
 		})
 		if err := checkVegaWireMatchesProofBoundItems(ok); err != nil {
 			t.Fatalf("bare map that agrees should be accepted, got: %v", err)
@@ -327,7 +325,7 @@ func TestCheckVegaWireMatchesProofBoundItems(t *testing.T) {
 
 		lying := vegaWireDoc(ZkSignedItemMdoc{
 			ElementIdentifier: "given_name", ElementValue: "Mallory",
-			DigestID: digestIDPtr(300), IssuerSignedItemBytes: bare,
+			DigestID: new(uint32(300)), IssuerSignedItemBytes: bare,
 		})
 		if err := checkVegaWireMatchesProofBoundItems(lying); err == nil {
 			t.Fatal("bare map that disagrees must still be rejected")
@@ -345,7 +343,7 @@ func TestBuildVegaDisclosedBytesRejectsDuplicateSlots(t *testing.T) {
 		ClaimSlotDigestIds: []uint32{26, 300, 300, 55555},
 		IssuerSigned: map[string][]ZkSignedItemMdoc{
 			Namespace: {
-				{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: digestIDPtr(300), IssuerSignedItemBytes: []byte{0x01}},
+				{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: new(uint32(300)), IssuerSignedItemBytes: []byte{0x01}},
 			},
 		},
 	}
@@ -396,8 +394,8 @@ func TestIsVegaSystem(t *testing.T) {
 func TestIssuerSignedItemsByDigestIDNamespaceCollision(t *testing.T) {
 	dd := &ZkDocumentDataMdoc{
 		IssuerSigned: map[string][]ZkSignedItemMdoc{
-			"org.iso.18013.5.1":    {{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: digestIDPtr(0)}},
-			"org.iso.18013.5.1.SE": {{ElementIdentifier: "personal_number", ElementValue: "1", DigestID: digestIDPtr(0)}},
+			"org.iso.18013.5.1":    {{ElementIdentifier: "given_name", ElementValue: "Jane", DigestID: new(uint32(0))}},
+			"org.iso.18013.5.1.SE": {{ElementIdentifier: "personal_number", ElementValue: "1", DigestID: new(uint32(0))}},
 		},
 	}
 	_, err := dd.IssuerSignedItemsByDigestID()

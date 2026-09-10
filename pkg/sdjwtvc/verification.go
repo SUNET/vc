@@ -19,7 +19,6 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirosfoundation/go-cryptoutil"
-	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
 
 // VerificationResult contains the result of SD-JWT verification
@@ -163,13 +162,11 @@ func (c *Client) ParseAndVerify(sdJWT string, publicKey any, opts *VerificationO
 			}
 
 			trustDecision, err := opts.TrustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
-				EvaluationRequest: trustapi.EvaluationRequest{
-					SubjectID:      issuerID,
-					KeyType:        trust.KeyTypeX5C,
-					Key:            chain,
-					Role:           trust.RoleCredentialIssuer,
-					CredentialType: credentialType,
-				},
+				SubjectID:      issuerID,
+				KeyType:        trust.KeyTypeX5C,
+				Key:            chain,
+				Role:           trust.RoleCredentialIssuer,
+				CredentialType: credentialType,
 			})
 			if err != nil {
 				result.Errors = append(result.Errors, fmt.Errorf("trust evaluation failed: %w", err))

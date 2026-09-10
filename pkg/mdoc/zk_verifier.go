@@ -40,8 +40,6 @@ import (
 	"github.com/SUNET/vc/pkg/mdoc/zkvegaworker"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/trust"
-
-	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
 
 // PseudonymClaimIdentifier is the element identifier a Longfellow V8 PPID
@@ -354,13 +352,11 @@ func (h *ZkHandler) verifyOneDocument(ctx context.Context, zkDoc *ZkDocumentMdoc
 		issuerID = extractMDocIssuerID(dsCert)
 	}
 	decision, err := h.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: issuerID,
-			KeyType:   trust.KeyTypeX5C,
-			Key:       certs,
-			Role:      trust.RoleCredentialIssuer,
-			DocType:   dd.DocType,
-		},
+		SubjectID: issuerID,
+		KeyType:   trust.KeyTypeX5C,
+		Key:       certs,
+		Role:      trust.RoleCredentialIssuer,
+		DocType:   dd.DocType,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("trust evaluation failed: %w", err)

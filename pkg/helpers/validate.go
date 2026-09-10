@@ -30,7 +30,7 @@ func NewValidator() (*validator.Validate, error) {
 
 	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		// Prefer yaml tag (used by config structs), fall back to json tag
-		name := strings.SplitN(fld.Tag.Get("yaml"), ",", 2)[0]
+		name, _, _ := strings.Cut(fld.Tag.Get("yaml"), ",")
 		if name == "" || name == "-" {
 			name = strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
 		}
