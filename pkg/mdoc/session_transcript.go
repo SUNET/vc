@@ -59,3 +59,68 @@ func BuildOID4VPSessionTranscript(clientID, nonce, responseURI string, readerPub
 	}
 	return transcript, nil
 }
+
+// BuildOID4VPDCAPISessionTranscript builds the SessionTranscript for a
+// presentation delivered through the browser's Digital Credentials API
+// (OpenID4VP 1.0 §B.2.6.2 "Invocation via the Digital Credentials API").
+//
+//	SessionTranscript = [
+//	  null,                                  // DeviceEngagementBytes
+//	  null,                                  // EReaderKeyBytes
+//	  ["OpenID4VPDCAPIHandover", SHA256(handoverInfo)],
+//	]
+//	handoverInfo = [origin, nonce, readerPublicKeyJWKThumbprint]
+//
+// Three differences from the redirect flow's handover, each of which makes
+// the two transcripts incompatible - so the caller has to pick by how the
+// response actually arrived, not by which is convenient:
+//
+//   - the calling web origin replaces the response URI, and comes first;
+//   - there is no clientID member at all;
+//   - the label is OpenID4VPDCAPIHandover.
+//
+// nonce is the request's nonce exactly as it appeared on the wire. multipaz
+// models it as raw bytes and base64url-encodes it here, and an OpenID4VP
+// request's nonce parameter is that same base64url text, so passing the
+// string through is the same value - see VerificationUtil.kt's own doc
+// ("For OpenID4VP, this will be base64url-encoded without padding").
+//
+// readerPublicKeyJWKThumbprint is nil when the request advertised no
+// encryption key, and encodes as CBOR null in that case rather than being
+// omitted: the array is three elements either way.
+//
+// Layout taken from multipaz's VerificationUtil.kt, which is the upstream
+// reference implementation, rather than from reading the specification -
+// see BuildOID4VPSessionTranscript above for what happens otherwise. It is
+// still not confirmed against bytes captured from a live wallet session;
+// SUNET/vc#655 tracks getting that capture.
+func BuildOID4VPDCAPISessionTranscript(origin, nonce string, readerPublicKeyJWKThumbprint []byte) ([]byte, error) {
+	if origin == "" {
+		// The origin is the whole point of this handover: it is what binds
+		// the presentation to the page that asked for it. An empty one would
+		// produce a transcript that hashes cleanly and means nothing.
+		return nil, fmt.Errorf("mdoc: DC API session transcript requires the calling origin")
+	}
+
+	encoder, err := NewCBOREncoder()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CBOR encoder: %w", err)
+	}
+
+	var jwkThumbprint any
+	if readerPublicKeyJWKThumbprint != nil {
+		jwkThumbprint = readerPublicKeyJWKThumbprint
+	}
+
+	handoverInfo, err := encoder.Marshal([]any{origin, nonce, jwkThumbprint})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode DC API handoverInfo: %w", err)
+	}
+	handoverInfoDigest := sha256.Sum256(handoverInfo)
+
+	transcript, err := encoder.Marshal([]any{nil, nil, []any{"OpenID4VPDCAPIHandover", handoverInfoDigest[:]}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode DC API SessionTranscript: %w", err)
+	}
+	return transcript, nil
+}

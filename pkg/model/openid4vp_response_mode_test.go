@@ -1,0 +1,133 @@
+package model
+
+import (
+	"strings"
+	"testing"
+)
+
+// TestOIDCRelyingPartyResponseMode pins SUNET/vc#652: a request object served
+// behind a QR code or same-device link must never carry a dc_api mode,
+// whatever the Digital Credentials API is configured to do.
+func TestOIDCRelyingPartyResponseMode(t *testing.T) {
+	verifier := func(dcEnable bool, dcMode, ownMode string) *Verifier {
+		v := &Verifier{
+			DigitalCredentials: DigitalCredentialsConfig{Enable: dcEnable, ResponseMode: dcMode},
+			Inbound:            VerifierInbound{OpenID4VP: &OpenID4VPConfig{ResponseMode: ownMode}},
+		}
+		return v
+	}
+
+	for _, tc := range []struct {
+		name string
+		v    *Verifier
+		want string
+	}{
+		{
+			// The reported case: DC API on, response_mode at its dc_api.jwt
+			// default, wallet gets a mode it cannot answer in.
+			name: "dc_api.jwt default becomes direct_post.jwt",
+			v:    verifier(true, "dc_api.jwt", ""),
+			want: ResponseModeDirectPostJWT,
+		},
+		{
+			// Encryption must survive the mapping - dropping to direct_post
+			// here would silently unencrypt the response.
+			name: "a profiled dc_api spelling keeps its encryption",
+			v:    verifier(true, "w3c_dc_api.jwt", ""),
+			want: ResponseModeDirectPostJWT,
+		},
+		{
+			name: "an unencrypted dc_api mode maps to direct_post",
+			v:    verifier(true, "dc_api", ""),
+			want: ResponseModeDirectPost,
+		},
+		{
+			// The documented workaround keeps working unchanged.
+			name: "an explicit direct_post.jwt is left alone",
+			v:    verifier(true, "direct_post.jwt", ""),
+			want: ResponseModeDirectPostJWT,
+		},
+		{
+			name: "DC API disabled is direct_post",
+			v:    verifier(false, "dc_api.jwt", ""),
+			want: ResponseModeDirectPost,
+		},
+		{
+			// The decoupled setting wins over the legacy derivation.
+			name: "the flow's own setting takes precedence",
+			v:    verifier(true, "dc_api.jwt", ResponseModeDirectPost),
+			want: ResponseModeDirectPost,
+		},
+		{
+			// The override wins, but it is still mapped: this method is
+			// exported and reachable with a config that never passed
+			// validation, and the invariant has to hold for those callers.
+			name: "a dc_api value in the override is still mapped",
+			v:    verifier(false, "", "dc_api.jwt"),
+			want: ResponseModeDirectPostJWT,
+		},
+		{
+			name: "an unencrypted dc_api override maps to direct_post",
+			v:    verifier(false, "", "w3c_dc_api"),
+			want: ResponseModeDirectPost,
+		},
+		{
+			// form_post is a real OpenID4VP mode and a valid value on the
+			// DC API knob's sibling fields, but this endpoint cannot handle
+			// it - so it must not escape a function that promises a
+			// deliverable mode.
+			name: "form_post does not pass through",
+			v:    verifier(true, "form_post", ""),
+			want: ResponseModeDirectPost,
+		},
+		{
+			name: "an unrecognised mode is mapped, not passed through",
+			v:    verifier(true, "something_new", ""),
+			want: ResponseModeDirectPost,
+		},
+		{
+			name: "an unrecognised encrypted mode keeps its encryption",
+			v:    verifier(true, "something_new.jwt", ""),
+			want: ResponseModeDirectPostJWT,
+		},
+		{
+			name: "form_post in the flow's own setting is mapped too",
+			v:    verifier(false, "", "form_post"),
+			want: ResponseModeDirectPost,
+		},
+		{
+			name: "nil verifier does not panic",
+			v:    nil,
+			want: ResponseModeDirectPost,
+		},
+		{
+			name: "nil inbound config falls back",
+			v:    &Verifier{DigitalCredentials: DigitalCredentialsConfig{Enable: true, ResponseMode: "dc_api.jwt"}},
+			want: ResponseModeDirectPostJWT,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.v.OIDCRelyingPartyResponseMode()
+			if got != tc.want {
+				t.Fatalf("want %q, got %q", tc.want, got)
+			}
+			// Substring, not prefix, so that a profiled spelling like
+			// w3c_dc_api.jwt is caught here too - a prefix check would have
+			// missed the one case in this table carrying that shape.
+			//
+			// This is the assertion's own reach, not a mirror of the
+			// resolver: linkDeliverableResponseMode decides on
+			// strings.HasSuffix(mode, ".jwt") and never inspects "dc_api" at
+			// all. Checking the substring keeps the test honest if it ever
+			// does.
+			if strings.Contains(got, "dc_api") {
+				t.Fatalf("a dc_api mode must never reach this flow, got %q", got)
+			}
+			// Stronger than the dc_api check alone: the documented invariant
+			// is that only these two can come out at all.
+			if got != ResponseModeDirectPost && got != ResponseModeDirectPostJWT {
+				t.Fatalf("only direct_post or direct_post.jwt may be returned, got %q", got)
+			}
+		})
+	}
+}

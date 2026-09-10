@@ -1022,6 +1022,22 @@ type OpenID4VPConfig struct {
 	TokenEndpoint string `yaml:"token_endpoint" validate:"required" doc_example:"\"https://verifier.sunet.se/token\""`
 	// Clients holds the OAuth2 client configurations for RP interactions
 	Clients oauth2.Clients `yaml:"clients" validate:"required" doc_key:"client id"`
+
+	// ResponseMode is the OpenID4VP response mode for request objects served
+	// behind the QR code and the same-device link - the flow whose response
+	// comes back to /verification/oidc-direct_post.
+	//
+	// Only direct_post and direct_post.jwt are meaningful here. A dc_api mode
+	// is not: those are defined solely for a request delivered through the
+	// browser's Digital Credentials API, where the response returns inside
+	// the browser call and the transcript binds to the calling origin. A
+	// request that arrives as a link has neither, so a wallet is right to
+	// refuse it.
+	//
+	// Leave unset to keep deriving it from digital_credentials.response_mode,
+	// which is what this flow used to read - see
+	// Verifier.OIDCRelyingPartyResponseMode.
+	ResponseMode string `yaml:"response_mode,omitempty" validate:"omitempty,oneof=direct_post direct_post.jwt" doc_example:"\"direct_post.jwt\""`
 }
 
 // GetSupportedCredentials returns the supported credentials, or nil if the config is nil.

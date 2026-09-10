@@ -41,24 +41,28 @@ func TestCreateRequestObject(t *testing.T) {
 			expectedResponseMode: "direct_post",
 		},
 		{
-			name:                 "request object with Digital Credentials API enabled",
-			sessionID:            "test-session-dc-1",
-			dcqlQuery:            createTestDCQLForVP(t),
-			nonce:                "test-nonce-dc",
-			dcEnabled:            true,
-			dcResponseMode:       "",
-			expectError:          false,
-			expectedResponseMode: "dc_api.jwt", // Default when DC enabled
+			name:           "request object with Digital Credentials API enabled",
+			sessionID:      "test-session-dc-1",
+			dcqlQuery:      createTestDCQLForVP(t),
+			nonce:          "test-nonce-dc",
+			dcEnabled:      true,
+			dcResponseMode: "",
+			expectError:    false,
+			// Not dc_api.jwt: this request object is served behind the QR
+			// code and the same-device link, where that mode cannot be
+			// answered (SUNET/vc#652). Encryption is preserved.
+			expectedResponseMode: "direct_post.jwt",
 		},
 		{
-			name:                 "request object with custom DC response mode",
-			sessionID:            "test-session-dc-2",
-			dcqlQuery:            createTestDCQLForVP(t),
-			nonce:                "test-nonce-dc2",
-			dcEnabled:            true,
-			dcResponseMode:       "w3c_dc_api.jwt",
-			expectError:          false,
-			expectedResponseMode: "w3c_dc_api.jwt",
+			name:           "request object with custom DC response mode",
+			sessionID:      "test-session-dc-2",
+			dcqlQuery:      createTestDCQLForVP(t),
+			nonce:          "test-nonce-dc2",
+			dcEnabled:      true,
+			dcResponseMode: "w3c_dc_api.jwt",
+			expectError:    false,
+			// A profiled DC API spelling maps the same way, keeping .jwt.
+			expectedResponseMode: "direct_post.jwt",
 		},
 		{
 			name:                 "request object with DC preferred formats",
@@ -68,7 +72,7 @@ func TestCreateRequestObject(t *testing.T) {
 			dcEnabled:            true,
 			dcPreferredFormats:   []string{"vc+sd-jwt", "mso_mdoc"},
 			expectError:          false,
-			expectedResponseMode: "dc_api.jwt", // Default when DC enabled
+			expectedResponseMode: "direct_post.jwt",
 		},
 	}
 

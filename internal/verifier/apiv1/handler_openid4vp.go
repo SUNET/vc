@@ -20,15 +20,11 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	ctx, span := c.tracer.Start(ctx, "apiv1:create_request_object")
 	defer span.End()
 
-	// Determine response mode based on Digital Credentials API configuration
-	responseMode := "direct_post"
-	if c.cfg.Verifier.DigitalCredentials.Enable {
-		if c.cfg.Verifier.DigitalCredentials.ResponseMode != "" {
-			responseMode = c.cfg.Verifier.DigitalCredentials.ResponseMode
-		} else {
-			responseMode = "dc_api.jwt" // Default for DC API
-		}
-	}
+	// This request object is served behind the QR code and the same-device
+	// link, so it must never carry a dc_api mode - see
+	// OIDCRelyingPartyResponseMode for why, and for the precedence between
+	// the setting that belongs to this flow and the legacy derivation.
+	responseMode := c.cfg.Verifier.OIDCRelyingPartyResponseMode()
 
 	// Create request object
 	// Use the OIDC direct_post endpoint which does not require a browser session,

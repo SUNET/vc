@@ -59,7 +59,18 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 }
 
 type VerificationDirectPostRequest struct {
-	Response  string `json:"response"  form:"response"`
+	Response string `json:"response"  form:"response"`
+	// DCAPI marks a response returned inside a navigator.credentials.get
+	// call and forwarded here by the verifier's own page, rather than POSTed
+	// by a wallet reached through request_uri. The two bind their mdoc
+	// session transcripts to different handovers, so this selects which one
+	// the verifier recomputes - see mdoc.BuildOID4VPDCAPISessionTranscript.
+	//
+	// Client-supplied and not trusted as an assertion: the origin bound into
+	// the transcript comes from configuration, never from the caller, so a
+	// caller that sets this wrongly only fails its own verification. It
+	// cannot choose what the presentation is checked against.
+	DCAPI     bool   `json:"dc_api" form:"dc_api"`
 	SessionID string `json:"-"` // Set by HTTP layer if same-device flow
 }
 
@@ -355,15 +366,27 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			}
 			// BuildOID4VPSessionTranscript's own doc comment: the JWK
 			// thumbprint is nil "unless the request advertised an
-			// encryption key for the response" - this request always does
-			// (CreateRequestObject sets ClientMetadata.JWKS to the same
-			// ephemeral key cached under EphemeralEncryptionKeyID, and
-			// response_mode is "direct_post.jwt"/"dc_api.jwt" whenever
-			// AutoAttempt is off, per UIInteraction's own responseMode
-			// comment), so passing nil unconditionally contradicted the
-			// documented condition and silently left the ZK proof's
-			// Fiat-Shamir transcript unbound from the actual encryption
-			// key the wallet saw and included in its own transcript.
+			// encryption key for the response". Every request that reaches
+			// this handler advertised one, so passing nil unconditionally
+			// contradicted the documented condition and silently left the ZK
+			// proof's Fiat-Shamir transcript unbound from the encryption key
+			// the wallet actually saw and included in its own transcript.
+			//
+			// The writer is UIInteraction: it sets EphemeralEncryptionKeyID
+			// for every session and caches the key under it, and both request
+			// objects it builds carry a ".jwt" response mode, so the key is
+			// advertised on both delivery channels.
+			//
+			// Not CreateRequestObject, which an earlier version of this
+			// comment cited as the proof - it attaches ClientMetadata.JWKS
+			// only when its response mode requires encryption, and
+			// OIDCRelyingPartyResponseMode can return plain direct_post. It
+			// also serves a different flow, which answers on
+			// oidc-direct_post and never arrives here, so it could not have
+			// established anything about this request either way. The guard
+			// below is still on the key ID rather than on the response mode,
+			// so a future caller that leaves it unset gets a nil thumbprint
+			// rather than a wrong one.
 			var readerPubKeyThumbprint []byte
 			if authCtx.EphemeralEncryptionKeyID != "" {
 				if privKey, found := c.openid4vp.EphemeralKeyCache.Get(authCtx.EphemeralEncryptionKeyID); found {
@@ -389,9 +412,27 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 					return nil, fmt.Errorf("ephemeral encryption key %q is no longer cached, cannot rebuild the session transcript the wallet used for scope %s", authCtx.EphemeralEncryptionKeyID, scope)
 				}
 			}
-			sessionTranscript, err := mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)
+			// The handover follows how the response arrived, because the two
+			// hash different things and a wallet only ever produced one of
+			// them (SUNET/vc#652, SUNET/vc#655). A request_uri response binds
+			// to the response URI and client_id; a DC API response binds to
+			// the calling origin instead.
+			//
+			// Both carry the reader-key thumbprint, for the reason given
+			// above: a dc_api.jwt response is always encrypted, so leaving it
+			// out of that branch would reintroduce exactly the unbinding the
+			// block above fixes.
+			var origin string
+			if req.DCAPI {
+				origin, err = c.dcAPIOrigin()
+				if err != nil {
+					c.log.Error(err, "cannot determine the DC API origin for the session transcript", "scope", scope)
+					return nil, err
+				}
+			}
+			sessionTranscript, err := zkSessionTranscript(req.DCAPI, origin, authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)
 			if err != nil {
-				c.log.Error(err, "failed to build ZK session transcript", "scope", scope)
+				c.log.Error(err, "failed to build ZK session transcript", "scope", scope, "dc_api", req.DCAPI)
 				return nil, fmt.Errorf("failed to build ZK session transcript for scope %s: %w", scope, err)
 			}
 			zkResult, err := zkHandler.VerifyAndExtract(ctx, vpToken, mdoc.ZkPresentationContext{
