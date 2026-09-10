@@ -1150,8 +1150,8 @@ func TestUIMetadata_DCAPIAutoAttempt(t *testing.T) {
 		want        bool
 	}{
 		{name: "unset defaults to true", autoAttempt: nil, want: true},
-		{name: "explicit true", autoAttempt: model.BoolPtr(true), want: true},
-		{name: "explicit false propagates", autoAttempt: model.BoolPtr(false), want: false},
+		{name: "explicit true", autoAttempt: new(true), want: true},
+		{name: "explicit false propagates", autoAttempt: new(false), want: false},
 	}
 
 	for _, tt := range tests {
@@ -1203,7 +1203,7 @@ func TestUIMetadataPresetCategoryOrder(t *testing.T) {
 				// alphabetical category-name sorting would get this backwards.
 				"Zebra preset":    {Category: "Z category", Order: 0, Credentials: model.VerificationPreset{"pid": nil}},
 				"Apple preset":    {Category: "A category", Order: 5, Credentials: model.VerificationPreset{"ehic": nil}},
-				"Featured preset": {Featured: model.BoolPtr(true), Credentials: model.VerificationPreset{"mdl": nil}},
+				"Featured preset": {Featured: new(true), Credentials: model.VerificationPreset{"mdl": nil}},
 				"Uncategorized":   {Credentials: model.VerificationPreset{"pid": nil}},
 			},
 		},

@@ -652,7 +652,7 @@ func detectCredentialFormat(vpToken string) CredentialFormat {
 	// Plain JWT without SD (still vc+sd-jwt format per spec, but no disclosures)
 	if strings.Count(vpToken, ".") == 2 && !strings.Contains(vpToken, "~") {
 		// Could be a plain JWT - check if it's valid base64url
-		headerPart := strings.Split(vpToken, ".")[0]
+		headerPart, _, _ := strings.Cut(vpToken, ".")
 		if _, err := base64.RawURLEncoding.DecodeString(headerPart); err == nil {
 			return FormatSDJWT
 		}

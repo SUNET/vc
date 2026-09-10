@@ -37,7 +37,7 @@ type Client struct {
 // It unmarshals from either a single string or an array of strings.
 type RedirectURIs []string
 
-func (r *RedirectURIs) UnmarshalYAML(unmarshal func(interface{}) error) error {
+func (r *RedirectURIs) UnmarshalYAML(unmarshal func(any) error) error {
 	var single string
 	if err := unmarshal(&single); err == nil {
 		*r = RedirectURIs{single}

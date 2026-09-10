@@ -767,14 +767,12 @@ func signMockOIDCToken(t *testing.T, m *mockoidc.MockOIDC, eppn string) string {
 		EPPN string `json:"eppn"`
 	}
 	claims := &oidcClaims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    m.Issuer(),
-			Subject:   "opaque-id",
-			Audience:  jwt.ClaimStrings{m.ClientID},
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
-		},
-		EPPN: eppn,
+		Issuer:    m.Issuer(),
+		Subject:   "opaque-id",
+		Audience:  jwt.ClaimStrings{m.ClientID},
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
+		EPPN:      eppn,
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = m.Keypair.Kid
@@ -955,15 +953,13 @@ func TestOIDC_RealisticOpaqueSubject(t *testing.T) {
 		EPPN  string `json:"eppn"`
 	}
 	claims := &oidcClaims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    m.Issuer(),
-			Subject:   "a3f8b2c1-9d4e-4f6a-b7c8-1234567890ab", // opaque sub
-			Audience:  jwt.ClaimStrings{m.ClientID},
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
-		},
-		Email: "alice@sunet.se",
-		EPPN:  "alice@sunet.se",
+		Issuer:    m.Issuer(),
+		Subject:   "a3f8b2c1-9d4e-4f6a-b7c8-1234567890ab", // opaque sub
+		Audience:  jwt.ClaimStrings{m.ClientID},
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
+		Email:     "alice@sunet.se",
+		EPPN:      "alice@sunet.se",
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = m.Keypair.Kid
@@ -992,14 +988,12 @@ func TestOIDC_EmailFallback(t *testing.T) {
 		Email string `json:"email"`
 	}
 	claims := &emailOnlyClaims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    m.Issuer(),
-			Subject:   "a3f8b2c1-9d4e-4f6a-b7c8-1234567890ab",
-			Audience:  jwt.ClaimStrings{m.ClientID},
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
-		},
-		Email: "alice@sunet.se",
+		Issuer:    m.Issuer(),
+		Subject:   "a3f8b2c1-9d4e-4f6a-b7c8-1234567890ab",
+		Audience:  jwt.ClaimStrings{m.ClientID},
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
+		Email:     "alice@sunet.se",
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = m.Keypair.Kid

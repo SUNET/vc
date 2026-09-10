@@ -415,7 +415,7 @@ func TestCreateRequestObject_LegacyJARMParamsAreOptIn(t *testing.T) {
 	if client.cfg.Common == nil {
 		client.cfg.Common = &model.Common{}
 	}
-	client.cfg.Common.OpenID4VPCompat.SendLegacyJARMEncryptionParams = model.BoolPtr(true)
+	client.cfg.Common.OpenID4VPCompat.SendLegacyJARMEncryptionParams = new(true)
 
 	_, err := client.CreateRequestObject(ctx, "session-legacy", createTestDCQLForVP(t), "nonce-legacy", nil)
 	require.NoError(t, err)

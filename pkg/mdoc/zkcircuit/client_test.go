@@ -196,8 +196,7 @@ func TestDownloadArtifact_HashMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a hash-mismatch error")
 	}
-	var artifactErr *ArtifactError
-	if !errors.As(err, &artifactErr) {
+	if _, ok := errors.AsType[*ArtifactError](err); !ok {
 		t.Fatalf("expected *ArtifactError, got %T: %v", err, err)
 	}
 }
@@ -399,8 +398,7 @@ func TestDownloadAndDecompress_UncompressedHashMismatch(t *testing.T) {
 func TestDownloadArtifact_NoArtifact(t *testing.T) {
 	client := NewClient("https://example.invalid")
 	_, err := client.DownloadArtifact(context.Background(), &CircuitDescriptor{ID: "no-artifact"})
-	var artifactErr *ArtifactError
-	if !errors.As(err, &artifactErr) {
+	if _, ok := errors.AsType[*ArtifactError](err); !ok {
 		t.Fatalf("expected *ArtifactError, got %T: %v", err, err)
 	}
 }
@@ -657,8 +655,7 @@ func TestDownloadArtifact_OversizedResponseRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for a response exceeding the declared size cap")
 	}
-	var artifactErr *ArtifactError
-	if !errors.As(err, &artifactErr) {
+	if _, ok := errors.AsType[*ArtifactError](err); !ok {
 		t.Fatalf("expected *ArtifactError, got %T: %v", err, err)
 	}
 }
@@ -708,8 +705,7 @@ func TestDownloadAndDecompress_BombRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for a decompressed payload exceeding the declared size cap")
 	}
-	var artifactErr *ArtifactError
-	if !errors.As(err, &artifactErr) {
+	if _, ok := errors.AsType[*ArtifactError](err); !ok {
 		t.Fatalf("expected *ArtifactError, got %T: %v", err, err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -259,10 +260,8 @@ func (c *MemoryStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThu
 	}
 
 	// Check if this specific client (DPoP thumbprint) already redeemed the code
-	for _, tp := range doc.RedeemedBy {
-		if tp == dpopThumbprint {
-			return nil, errors.New("pre-authorized code already redeemed by this client")
-		}
+	if slices.Contains(doc.RedeemedBy, dpopThumbprint) {
+		return nil, errors.New("pre-authorized code already redeemed by this client")
 	}
 
 	// Enforce maximum number of distinct redeemers to prevent unbounded growth

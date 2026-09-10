@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func claimPath(s string) *string { return &s }
 
 func filterTestClient(t *testing.T, scope string, metadata *model.CredentialMetadata) *Client {
 	t.Helper()
@@ -45,8 +44,8 @@ func idTokenClaims() map[string]any {
 // present them every time.
 func TestFilterClaims_DropsUndeclared(t *testing.T) {
 	c := filterTestClient(t, "pid", &model.CredentialMetadata{VCTM: &sdjwtvc.VCTM{Claims: []sdjwtvc.Claim{
-		{Path: []*string{claimPath("given_name")}},
-		{Path: []*string{claimPath("family_name")}},
+		{Path: []*string{new("given_name")}},
+		{Path: []*string{new("family_name")}},
 	}}})
 
 	got := c.filterClaimsByCredentialType("pid", idTokenClaims())

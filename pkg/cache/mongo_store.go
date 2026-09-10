@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -359,10 +360,8 @@ func (s *MongoStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThum
 			if existing.Forfeited {
 				return nil, errors.New("pre-authorized code has been forfeited")
 			}
-			for _, tp := range existing.RedeemedBy {
-				if tp == dpopThumbprint {
-					return nil, errors.New("pre-authorized code already redeemed by this client")
-				}
+			if slices.Contains(existing.RedeemedBy, dpopThumbprint) {
+				return nil, errors.New("pre-authorized code already redeemed by this client")
 			}
 			if len(existing.RedeemedBy) >= MaxPreAuthRedeemers {
 				return nil, errors.New("pre-authorized code has reached the maximum number of redemptions")

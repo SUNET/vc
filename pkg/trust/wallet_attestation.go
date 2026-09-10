@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -225,7 +226,7 @@ func validateAttestationPoP(attestation, popJWT, expectedAudience string) error 
 
 	// Parse and validate the PoP JWT
 	claims := &jwt.RegisteredClaims{}
-	token, err := jwt.ParseWithClaims(popJWT, claims, func(t *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(popJWT, claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodECDSA); !ok {
 			return nil, fmt.Errorf("unexpected PoP signing method: %v", t.Header["alg"])
 		}
@@ -245,13 +246,7 @@ func validateAttestationPoP(attestation, popJWT, expectedAudience string) error 
 
 	// Validate aud contains our AS issuer URL
 	if expectedAudience != "" {
-		audValid := false
-		for _, aud := range claims.Audience {
-			if aud == expectedAudience {
-				audValid = true
-				break
-			}
-		}
+		audValid := slices.Contains(claims.Audience, expectedAudience)
 		if !audValid {
 			return fmt.Errorf("PoP aud %v does not contain expected audience %q", claims.Audience, expectedAudience)
 		}
@@ -283,7 +278,7 @@ func extractCNFKeyFromWIA(attestation string) (*ecdsa.PublicKey, error) {
 	if !ok {
 		return nil, errors.New("WIA missing cnf claim")
 	}
-	cnf, ok := cnfRaw.(map[string]interface{})
+	cnf, ok := cnfRaw.(map[string]any)
 	if !ok {
 		return nil, errors.New("WIA cnf claim is not an object")
 	}
@@ -292,7 +287,7 @@ func extractCNFKeyFromWIA(attestation string) (*ecdsa.PublicKey, error) {
 	if !ok {
 		return nil, errors.New("WIA cnf missing jwk")
 	}
-	jwk, ok := jwkRaw.(map[string]interface{})
+	jwk, ok := jwkRaw.(map[string]any)
 	if !ok {
 		return nil, errors.New("WIA cnf.jwk is not an object")
 	}
@@ -301,7 +296,7 @@ func extractCNFKeyFromWIA(attestation string) (*ecdsa.PublicKey, error) {
 }
 
 // parseECPublicKeyFromCNF parses an EC public key from a JWK map (P-256, P-384, P-521).
-func parseECPublicKeyFromCNF(jwk map[string]interface{}) (*ecdsa.PublicKey, error) {
+func parseECPublicKeyFromCNF(jwk map[string]any) (*ecdsa.PublicKey, error) {
 	kty, _ := jwk["kty"].(string)
 	if kty != "EC" {
 		return nil, fmt.Errorf("unsupported cnf key type %q, expected EC", kty)
@@ -390,7 +385,7 @@ func parseAttestationIdentity(attestation string) (*attestationIdentity, error) 
 		// Treating it as "no x5c" here would let it silently masquerade as an
 		// IETF/iss-only WIA, slipping past WIAModeIETF's "reject any x5c
 		// header" enforcement in Evaluate.
-		x5cArr, isArr := x5cRaw.([]interface{})
+		x5cArr, isArr := x5cRaw.([]any)
 		if !isArr || len(x5cArr) == 0 {
 			return nil, errors.New("x5c header present but malformed (not a non-empty array)")
 		}

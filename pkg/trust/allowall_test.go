@@ -3,8 +3,6 @@ package trust
 import (
 	"context"
 	"testing"
-
-	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
 
 func TestAllowAllEvaluator_Evaluate(t *testing.T) {
@@ -19,11 +17,9 @@ func TestAllowAllEvaluator_Evaluate(t *testing.T) {
 		{
 			name: "accepts JWK",
 			req: &EvaluationRequest{
-				EvaluationRequest: trustapi.EvaluationRequest{
-					SubjectID: "https://issuer.example.com",
-					KeyType:   KeyTypeJWK,
-					Key:       map[string]any{"kty": "EC"},
-				},
+				SubjectID: "https://issuer.example.com",
+				KeyType:   KeyTypeJWK,
+				Key:       map[string]any{"kty": "EC"},
 			},
 			wantErr:     false,
 			wantTrusted: true,
@@ -31,11 +27,9 @@ func TestAllowAllEvaluator_Evaluate(t *testing.T) {
 		{
 			name: "accepts X5C",
 			req: &EvaluationRequest{
-				EvaluationRequest: trustapi.EvaluationRequest{
-					SubjectID: "https://issuer.example.com",
-					KeyType:   KeyTypeX5C,
-					Key:       []string{"base64cert"},
-				},
+				SubjectID: "https://issuer.example.com",
+				KeyType:   KeyTypeX5C,
+				Key:       []string{"base64cert"},
 			},
 			wantErr:     false,
 			wantTrusted: true,
@@ -48,11 +42,9 @@ func TestAllowAllEvaluator_Evaluate(t *testing.T) {
 		{
 			name: "rejects unsupported key type",
 			req: &EvaluationRequest{
-				EvaluationRequest: trustapi.EvaluationRequest{
-					SubjectID: "https://issuer.example.com",
-					KeyType:   "unknown",
-					Key:       map[string]any{},
-				},
+				SubjectID: "https://issuer.example.com",
+				KeyType:   "unknown",
+				Key:       map[string]any{},
 			},
 			wantErr:     false,
 			wantTrusted: false,

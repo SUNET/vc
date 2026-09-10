@@ -532,13 +532,6 @@ func TestRecursiveDisclosureDeepNesting(t *testing.T) {
 	}
 }
 
-// Helper function to create string pointers
-//
-//go:fix inline
-func stringPtr(s string) *string {
-	return new(s)
-}
-
 func TestGetHashAlgorithmName(t *testing.T) {
 	tests := []struct {
 		name         string
