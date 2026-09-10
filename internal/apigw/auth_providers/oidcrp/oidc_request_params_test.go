@@ -1,6 +1,7 @@
 package oidcrp
 
 import (
+	"encoding/json"
 	"net/url"
 	"testing"
 
@@ -99,4 +100,96 @@ func TestResolveOIDCRequestParams_CustomParamsCannotShadowDedicatedFields(t *tes
 			}
 		})
 	}
+}
+
+// TestResolveOIDCRequestParams_ClaimsCannotBeStructurallyInjected covers the
+// claims parameter against its own dynamic values.
+//
+// They arrive in the PAR request body, so they are caller-supplied, and
+// text/template escapes nothing. The documented way to write this parameter
+// puts the variable inside a JSON string, so a value carrying a quote used
+// to close that string and let the caller append JSON of their own.
+func TestResolveOIDCRequestParams_ClaimsCannotBeStructurallyInjected(t *testing.T) {
+	const tmpl = `{"id_token":{"org_id":{"value":"{{.org_id}}"}}}`
+
+	t.Run("a quote stays inside the value", func(t *testing.T) {
+		// Reads as: close the string, add an essential claim of the
+		// caller's choosing, and balance the braces.
+		injection := `x","email":{"essential":true}},"ignored":{"y":"z`
+		opts, err := resolveOIDCRequestParams(
+			&model.OIDCRequestParams{Claims: tmpl},
+			map[string]string{"org_id": injection},
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		claims := authURLParam(t, opts, "claims")
+
+		// The structure must be exactly what the operator wrote, with the
+		// whole injection sitting in the value as text.
+		var got struct {
+			IDToken map[string]struct {
+				Value string `json:"value"`
+			} `json:"id_token"`
+			Email any `json:"email"`
+		}
+		if err := json.Unmarshal([]byte(claims), &got); err != nil {
+			t.Fatalf("resolved claims is not valid JSON: %v\n%s", err, claims)
+		}
+		if got.Email != nil {
+			t.Fatalf("the injected email claim reached the request: %s", claims)
+		}
+		if got.IDToken["org_id"].Value != injection {
+			t.Fatalf("value was altered\n got: %q\nwant: %q", got.IDToken["org_id"].Value, injection)
+		}
+	})
+
+	t.Run("a backslash cannot escape the escaping", func(t *testing.T) {
+		opts, err := resolveOIDCRequestParams(
+			&model.OIDCRequestParams{Claims: tmpl},
+			map[string]string{"org_id": `back\slash"and quote`},
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if claims := authURLParam(t, opts, "claims"); !json.Valid([]byte(claims)) {
+			t.Fatalf("resolved claims is not valid JSON: %s", claims)
+		}
+	})
+
+	t.Run("an operator template that is not JSON is refused", func(t *testing.T) {
+		_, err := resolveOIDCRequestParams(
+			&model.OIDCRequestParams{Claims: `{"id_token": oops}`},
+			nil,
+		)
+		if err == nil {
+			t.Fatal("expected a malformed claims parameter to be rejected")
+		}
+	})
+
+	t.Run("a plain value is unchanged", func(t *testing.T) {
+		opts, err := resolveOIDCRequestParams(
+			&model.OIDCRequestParams{Claims: tmpl},
+			map[string]string{"org_id": "SUNET"},
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got, want := authURLParam(t, opts, "claims"), `{"id_token":{"org_id":{"value":"SUNET"}}}`; got != want {
+			t.Fatalf("got %q, want %q", got, want)
+		}
+	})
+}
+
+// authURLParam reads one parameter back out of the AuthCodeOption list by
+// rendering an authorization URL, since the options are opaque otherwise.
+func authURLParam(t *testing.T, opts []oauth2.AuthCodeOption, key string) string {
+	t.Helper()
+	cfg := &oauth2.Config{ClientID: "test-client", Endpoint: oauth2.Endpoint{AuthURL: "https://op.example.com/authorize"}}
+	u, err := url.Parse(cfg.AuthCodeURL("state", opts...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Query().Get(key)
 }

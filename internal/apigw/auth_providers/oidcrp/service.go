@@ -3,6 +3,7 @@ package oidcrp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -377,7 +378,7 @@ func resolveOIDCRequestParams(params *model.OIDCRequestParams, dynamicParams map
 	}
 
 	if params.Claims != "" {
-		resolved, err := resolveTemplate(params.Claims, dynamicParams)
+		resolved, err := resolveJSONTemplate(params.Claims, dynamicParams)
 		if err != nil {
 			return nil, fmt.Errorf("claims template: %w", err)
 		}
@@ -396,6 +397,47 @@ func resolveOIDCRequestParams(params *model.OIDCRequestParams, dynamicParams map
 	}
 
 	return opts, nil
+}
+
+// resolveJSONTemplate resolves a template whose output must be JSON - the
+// OIDC "claims" request parameter (OIDC Core 5.5).
+//
+// The dynamic values are caller-supplied, arriving in the PAR request body,
+// and text/template escapes nothing. The documented way to write this
+// parameter puts the variable inside a JSON string:
+//
+//	{"id_token":{"org_id":{"value":"{{.org_id}}"}}}
+//
+// so a value containing a quote or a backslash used to end that string and
+// let the caller append JSON of their own - asking the OP for claims the
+// operator never configured, or simply breaking the request. Each value is
+// therefore escaped as JSON string content before templating, which leaves
+// it able to affect only the value it sits in and never the structure
+// around it.
+//
+// The result is then checked to be valid JSON. That catches an operator
+// template that was malformed to begin with, and means anything this
+// function cannot vouch for fails here rather than at the OP.
+func resolveJSONTemplate(tmplStr string, data map[string]string) (string, error) {
+	escaped := make(map[string]string, len(data))
+	for key, value := range data {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return "", fmt.Errorf("escaping dynamic param %q: %w", key, err)
+		}
+		// json.Marshal of a string is quoted; the template inserts into a
+		// string that already has its own quotes.
+		escaped[key] = string(encoded[1 : len(encoded)-1])
+	}
+
+	resolved, err := resolveTemplate(tmplStr, escaped)
+	if err != nil {
+		return "", err
+	}
+	if !json.Valid([]byte(resolved)) {
+		return "", fmt.Errorf("resolved claims parameter is not valid JSON: %q", resolved)
+	}
+	return resolved, nil
 }
 
 // resolveTemplate resolves Go template syntax in a string using dynamic params as data.

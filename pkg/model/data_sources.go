@@ -290,6 +290,11 @@ type OIDCRequestParams struct {
 
 	// Claims is a JSON string conforming to OIDC Core §5.5 claims request parameter.
 	// Supports Go template syntax for dynamic values: "{{.variable_name}}"
+	//
+	// Dynamic values are escaped as JSON string content, so a value can only
+	// affect the string it is written into and never the surrounding
+	// structure. The rendered result must be valid JSON or flow initiation
+	// fails, which also catches a template that was malformed as written.
 	Claims string `yaml:"claims,omitempty" doc_example:"\"{\\\"id_token\\\":{\\\"org_id\\\":{\\\"value\\\":\\\"{{.org_id}}\\\"}}}\""`
 
 	// ExtraScopes are additional OAuth2 scopes to request beyond the default OIDC RP scopes.
