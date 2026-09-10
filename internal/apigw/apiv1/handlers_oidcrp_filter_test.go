@@ -9,8 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-//go:fix inline
-func claimPath(s string) *string { return new(s) }
 
 func filterTestClient(t *testing.T, scope string, metadata *model.CredentialMetadata) *Client {
 	t.Helper()
