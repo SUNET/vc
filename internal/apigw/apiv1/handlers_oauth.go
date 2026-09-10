@@ -131,6 +131,7 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		WalletClientID:       req.ClientID,
 		WalletURI:            req.RedirectURI,
 		ExpiresAt:            time.Now().Add(60 * time.Second).Unix(),
+		DynamicParams:        req.DynamicParams,
 	}
 
 	azt.Nonce, err = crypto.GenerateSecureToken(0, 32)

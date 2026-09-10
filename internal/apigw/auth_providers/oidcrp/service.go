@@ -1,10 +1,13 @@
 package oidcrp
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/SUNET/vc/internal/apigw/db"
@@ -232,8 +235,10 @@ type AuthRequest struct {
 	State            string
 }
 
-// InitiateAuth initiates an OIDC authentication flow
-func (s *Service) InitiateAuth(ctx context.Context, credentialType string) (*AuthRequest, error) {
+// InitiateAuth initiates an OIDC authentication flow.
+// oidcParams and dynamicParams are optional: when non-nil, they customize the
+// authorization request (e.g., acr_values, claims parameter, extra scopes).
+func (s *Service) InitiateAuth(ctx context.Context, credentialType string, oidcParams *model.OIDCRequestParams, dynamicParams map[string]string) (*AuthRequest, error) {
 	if err := s.ensureReady(ctx); err != nil {
 		return nil, fmt.Errorf("OIDC RP not ready: %w", err)
 	}
@@ -247,16 +252,57 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string) (*Aut
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
+	// Persisted on the session, but note that nothing reads it back today:
+	// the templating below uses the dynamicParams argument directly, in
+	// this same call, before the redirect. This is state kept for a
+	// consumer that does not exist yet.
+	//
+	// Whatever that consumer turns out to be, it must not be policy
+	// evaluation. These are unverified caller input from the PAR body, and
+	// issuance policy is evaluated against OP-asserted claims only - see
+	// Session.DynamicParams and the note in apiv1.handlers_oidcrp for why
+	// letting them stand in for a claim the OP did not assert would let a
+	// caller forge any dimension.
+	if len(dynamicParams) > 0 {
+		session.DynamicParams = dynamicParams
+		s.sessionCache.Set(ctx, session.ID, session)
+	}
+
 	// Generate PKCE code_challenge from code_verifier
 	codeChallenge := pkgoauth2.CreateCodeChallenge(pkgoauth2.CodeChallengeMethodS256, session.CodeVerifier)
 
 	// Build authorization URL with PKCE
-	authURL := s.oauth2Config.AuthCodeURL(
-		session.State,
+	authOpts := []oauth2.AuthCodeOption{
 		oauth2.SetAuthURLParam("nonce", session.Nonce),
 		oauth2.SetAuthURLParam("code_challenge", codeChallenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
-	)
+	}
+
+	// Apply per-scope OIDC request parameters
+	if oidcParams != nil {
+		extraOpts, err := resolveOIDCRequestParams(oidcParams, dynamicParams)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve OIDC request params: %w", err)
+		}
+		authOpts = append(authOpts, extraOpts...)
+	}
+
+	// If extra scopes are configured, create a temporary config with merged scopes
+	oauthCfg := s.oauth2Config
+	if oidcParams != nil && len(oidcParams.ExtraScopes) > 0 {
+		mergedScopes := make([]string, len(s.oauth2Config.Scopes))
+		copy(mergedScopes, s.oauth2Config.Scopes)
+		mergedScopes = append(mergedScopes, oidcParams.ExtraScopes...)
+		oauthCfg = &oauth2.Config{
+			ClientID:     s.oauth2Config.ClientID,
+			ClientSecret: s.oauth2Config.ClientSecret,
+			RedirectURL:  s.oauth2Config.RedirectURL,
+			Endpoint:     s.oauth2Config.Endpoint,
+			Scopes:       mergedScopes,
+		}
+	}
+
+	authURL := oauthCfg.AuthCodeURL(session.State, authOpts...)
 
 	s.log.Debug("OIDC authorization URL generated",
 		"credential_type", credentialType,
@@ -272,8 +318,8 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string) (*Aut
 // an OpenID4VCI credential issuance session. The VCI session ID is stored in
 // the OIDC session so that the callback handler can route the result back into
 // the VCI pipeline.
-func (s *Service) InitiateAuthForVCI(ctx context.Context, credentialType, vciSessionID string) (*AuthRequest, error) {
-	authReq, err := s.InitiateAuth(ctx, credentialType)
+func (s *Service) InitiateAuthForVCI(ctx context.Context, credentialType, vciSessionID string, oidcParams *model.OIDCRequestParams, dynamicParams map[string]string) (*AuthRequest, error) {
+	authReq, err := s.InitiateAuth(ctx, credentialType, oidcParams, dynamicParams)
 	if err != nil {
 		return nil, err
 	}
@@ -293,6 +339,123 @@ func (s *Service) InitiateAuthForVCI(ctx context.Context, credentialType, vciSes
 		"credential_type", credentialType)
 
 	return authReq, nil
+}
+
+// reservedOIDCParams are authorization request parameters that CustomParams
+// must not be allowed to set, since oauth2.AuthCodeOption values are applied
+// by key (last write wins) - letting an operator-configured custom param
+// collide with one of these would silently override the state/nonce/PKCE
+// guarantees InitiateAuth sets before calling AuthCodeURL.
+var reservedOIDCParams = map[string]bool{
+	"response_type":         true,
+	"client_id":             true,
+	"redirect_uri":          true,
+	"scope":                 true,
+	"state":                 true,
+	"nonce":                 true,
+	"code_challenge":        true,
+	"code_challenge_method": true,
+
+	// These two have dedicated OIDCRequestParams fields, and CustomParams is
+	// applied after them, so a custom param of the same name would win
+	// silently - the operator would see acr_values configured and a
+	// different acr_values sent.
+	"acr_values": true,
+	"claims":     true,
+}
+
+// resolveOIDCRequestParams resolves template variables in OIDC request params
+// and returns oauth2.AuthCodeOption values to append to the authorization URL.
+func resolveOIDCRequestParams(params *model.OIDCRequestParams, dynamicParams map[string]string) ([]oauth2.AuthCodeOption, error) {
+	var opts []oauth2.AuthCodeOption
+
+	if params.ACRValues != "" {
+		resolved, err := resolveTemplate(params.ACRValues, dynamicParams)
+		if err != nil {
+			return nil, fmt.Errorf("acr_values template: %w", err)
+		}
+		opts = append(opts, oauth2.SetAuthURLParam("acr_values", resolved))
+	}
+
+	if params.Claims != "" {
+		resolved, err := resolveJSONTemplate(params.Claims, dynamicParams)
+		if err != nil {
+			return nil, fmt.Errorf("claims template: %w", err)
+		}
+		opts = append(opts, oauth2.SetAuthURLParam("claims", resolved))
+	}
+
+	for key, value := range params.CustomParams {
+		if reservedOIDCParams[key] {
+			return nil, fmt.Errorf("custom_params key %q is reserved and cannot override a core authorization request parameter", key)
+		}
+		resolvedValue, err := resolveTemplate(value, dynamicParams)
+		if err != nil {
+			return nil, fmt.Errorf("custom param %q template: %w", key, err)
+		}
+		opts = append(opts, oauth2.SetAuthURLParam(key, resolvedValue))
+	}
+
+	return opts, nil
+}
+
+// resolveJSONTemplate resolves a template whose output must be JSON - the
+// OIDC "claims" request parameter (OIDC Core 5.5).
+//
+// The dynamic values are caller-supplied, arriving in the PAR request body,
+// and text/template escapes nothing. The documented way to write this
+// parameter puts the variable inside a JSON string:
+//
+//	{"id_token":{"org_id":{"value":"{{.org_id}}"}}}
+//
+// so a value containing a quote or a backslash used to end that string and
+// let the caller append JSON of their own - asking the OP for claims the
+// operator never configured, or simply breaking the request. Each value is
+// therefore escaped as JSON string content before templating, which leaves
+// it able to affect only the value it sits in and never the structure
+// around it.
+//
+// The result is then checked to be valid JSON. That catches an operator
+// template that was malformed to begin with, and means anything this
+// function cannot vouch for fails here rather than at the OP.
+func resolveJSONTemplate(tmplStr string, data map[string]string) (string, error) {
+	escaped := make(map[string]string, len(data))
+	for key, value := range data {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return "", fmt.Errorf("escaping dynamic param %q: %w", key, err)
+		}
+		// json.Marshal of a string is quoted; the template inserts into a
+		// string that already has its own quotes.
+		escaped[key] = string(encoded[1 : len(encoded)-1])
+	}
+
+	resolved, err := resolveTemplate(tmplStr, escaped)
+	if err != nil {
+		return "", err
+	}
+	if !json.Valid([]byte(resolved)) {
+		return "", fmt.Errorf("resolved claims parameter is not valid JSON: %q", resolved)
+	}
+	return resolved, nil
+}
+
+// resolveTemplate resolves Go template syntax in a string using dynamic params as data.
+func resolveTemplate(tmplStr string, data map[string]string) (string, error) {
+	if len(data) == 0 {
+		return tmplStr, nil
+	}
+
+	tmpl, err := template.New("param").Option("missingkey=error").Parse(tmplStr)
+	if err != nil {
+		return "", fmt.Errorf("invalid template %q: %w", tmplStr, err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("template execution failed for %q: %w", tmplStr, err)
+	}
+	return buf.String(), nil
 }
 
 // AuthResponse represents the result of OIDC authentication

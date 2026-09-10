@@ -9,13 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sqlstore"
 	"github.com/SUNET/vc/pkg/trace"
@@ -253,14 +253,11 @@ func NewValidator() (*validator.Validate, error) {
 	// CredentialRequest.Validate() (pkg/openid4vci/credential.go), which
 	// reliably runs for this request instead.
 
-	// Register custom validation for safe_key - validates map keys used in MongoDB field paths.
-	// Only allows simple alphanumeric/underscore keys starting with a letter (max 64 chars).
-	// Prevents field-path injection via dots or MongoDB operator prefixes ($).
-	safeKeyRe := regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,63}$`)
-	err = validate.RegisterValidation("safe_key", func(fl validator.FieldLevel) bool {
-		return safeKeyRe.MatchString(fl.Field().String())
-	})
-	if err != nil {
+	// safe_key validates map keys that reach MongoDB field paths. Defined in
+	// pkg/openid4vci, which is below this package and where PARRequest is
+	// tagged with it, so the guard has one definition rather than a copy per
+	// validator.
+	if err := openid4vci.RegisterSafeKey(validate); err != nil {
 		return nil, err
 	}
 
@@ -377,6 +374,42 @@ func NewValidator() (*validator.Validate, error) {
 			sl.ReportError(scope.Format, "Format", "Format", "zk_system_type_requires_mso_mdoc_zk_format", scope.Format)
 		}
 	}, model.VerificationPresetScope{})
+
+	// Register struct-level validation for IssuancePolicy: query_template
+	// must not restate the reserved "scope" dimension or repeat a name.
+	//
+	// A missing dimension or claim is a per-field requirement instead, and
+	// lives as a `required` tag on QueryDimension - that way the generated
+	// configuration reference reports the field as required, which it did
+	// not while this function was the only thing enforcing it.
+	//
+	// policyRuleDimensions prepends "scope" unconditionally (it is
+	// auto-populated with the credential type), so an operator who also
+	// lists it gets two "scope" dimensions in every rule shape - and rules
+	// that can then never match, which reads as a blanket deny with nothing
+	// in the config looking wrong. A repeated name has the same effect.
+	// Validated here rather than in NewPolicyEngine because that runs per
+	// OIDC callback behind a cache, so a failure there is a broken request
+	// rather than a refused start.
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		policy := sl.Current().Interface().(model.IssuancePolicy)
+		seen := make(map[string]bool, len(policy.QueryTemplate))
+		for _, d := range policy.QueryTemplate {
+			// The dive tag already reports an entry with no dimension. An
+			// empty name cannot be reserved, and calling two of them
+			// duplicates of each other would only bury that report.
+			if strings.TrimSpace(d.Dimension) == "" {
+				continue
+			}
+			switch {
+			case d.Dimension == "scope":
+				sl.ReportError(policy.QueryTemplate, "QueryTemplate", "QueryTemplate", "query_template_scope_is_reserved", d.Dimension)
+			case seen[d.Dimension]:
+				sl.ReportError(policy.QueryTemplate, "QueryTemplate", "QueryTemplate", "query_template_duplicate_dimension", d.Dimension)
+			}
+			seen[d.Dimension] = true
+		}
+	}, model.IssuancePolicy{})
 
 	// Register struct-level validation for DataSources: openid4vp auth_scopes must not self-reference
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {

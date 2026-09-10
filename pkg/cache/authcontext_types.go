@@ -11,6 +11,12 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
+// AuthorizationContext.Validate below builds its own minimal
+// *validator.Validate, because pkg/helpers.NewValidator resolves tag names
+// differently (json vs. yaml-preferring) and reusing it here would change
+// error messages for every other field on this struct. Only the constructor
+// is separate: the safe_key guard itself comes from openid4vci.
+
 // SessionStatus represents the status of an OIDC session
 type SessionStatus string
 
@@ -87,6 +93,15 @@ type AuthorizationContext struct {
 	DataSource           string                                     `json:"data_source,omitempty" bson:"data_source,omitempty" validate:"omitempty,max=32,printascii"`
 	RemoteName           string                                     `json:"remote_name,omitempty" bson:"remote_name,omitempty" validate:"omitempty,max=128,printascii"`
 
+	// DynamicParams holds key-value parameters bound directly from the PAR
+	// caller's request body at flow initiation time (see PARRequest.DynamicParams
+	// for why the name is misleading: nothing here verifies these actually
+	// came from an authentic source business system). Used only for template
+	// substitution in outgoing OIDC request parameters (e.g., acr_values,
+	// claims) -- deliberately NOT used for issuance policy evaluation, which
+	// is gated on OP-asserted claims instead.
+	DynamicParams map[string]string `json:"dynamic_params,omitempty" bson:"dynamic_params,omitempty" validate:"omitempty,dive,keys,safe_key,endkeys,max=1024,printascii"`
+
 	// Verifier-specific fields (presentation/RP flows)
 	RedirectURI           string `json:"redirect_uri,omitempty" bson:"redirect_uri,omitempty" validate:"omitempty,max=2048,printascii"`
 	ResponseType          string `json:"response_type,omitempty" bson:"response_type,omitempty" validate:"omitempty,max=32,printascii"`
@@ -125,5 +140,8 @@ func (a *AuthorizationContext) Validate() error {
 		}
 		return name
 	})
+	if err := openid4vci.RegisterSafeKey(v); err != nil {
+		return err
+	}
 	return v.Struct(a)
 }
