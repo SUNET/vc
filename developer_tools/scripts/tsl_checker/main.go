@@ -221,32 +221,52 @@ func extractFromJWT(s string) (string, int64, error) {
 }
 
 func extractFromMdoc(raw []byte) (string, int64, error) {
-	candidates := mdocDecodeCandidates(raw)
 	var lastErr error
-	for _, data := range candidates {
-		var doc mdoc.DocumentMdoc
-		if err := cbor.Unmarshal(data, &doc); err == nil {
-			if ref, err := mdoc.ExtractStatusReference(&doc); err == nil {
-				return ref.URI, ref.Index, nil
-			} else {
-				lastErr = err
-			}
+	for _, data := range mdocDecodeCandidates(raw) {
+		if uri, idx, ok, err := tryExtractMdocDoc(data); ok {
+			return uri, idx, nil
+		} else if err != nil {
+			lastErr = err
 		}
-		var resp mdoc.DeviceResponseMdoc
-		if err := cbor.Unmarshal(data, &resp); err == nil {
-			for i := range resp.Documents {
-				if ref, err := mdoc.ExtractStatusReference(&resp.Documents[i]); err == nil {
-					return ref.URI, ref.Index, nil
-				} else {
-					lastErr = err
-				}
-			}
+		if uri, idx, ok, err := tryExtractMdocResponse(data); ok {
+			return uri, idx, nil
+		} else if err != nil {
+			lastErr = err
 		}
 	}
 	if lastErr != nil {
 		return "", 0, lastErr
 	}
 	return "", 0, errors.New("input is neither JWT/SD-JWT nor recognizable mdoc CBOR")
+}
+
+func tryExtractMdocDoc(data []byte) (string, int64, bool, error) {
+	var doc mdoc.DocumentMdoc
+	if err := cbor.Unmarshal(data, &doc); err != nil {
+		return "", 0, false, nil
+	}
+	ref, err := mdoc.ExtractStatusReference(&doc)
+	if err != nil {
+		return "", 0, false, err
+	}
+	return ref.URI, ref.Index, true, nil
+}
+
+func tryExtractMdocResponse(data []byte) (string, int64, bool, error) {
+	var resp mdoc.DeviceResponseMdoc
+	if err := cbor.Unmarshal(data, &resp); err != nil {
+		return "", 0, false, nil
+	}
+	var lastErr error
+	for i := range resp.Documents {
+		ref, err := mdoc.ExtractStatusReference(&resp.Documents[i])
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return ref.URI, ref.Index, true, nil
+	}
+	return "", 0, false, lastErr
 }
 
 // mdocDecodeCandidates returns possible raw CBOR forms of an mdoc credential.
@@ -339,8 +359,12 @@ func checkJWT(body []byte, idx int64, res *result) error {
 		return fmt.Errorf("parse JWT: %w", err)
 	}
 
-	if jwkHdr, ok := unverified.Header["jwk"].(map[string]any); ok {
+	if hdr, present := unverified.Header["jwk"]; present {
 		// An embedded jwk asserts a signer; treat any failure as fatal so callers cannot consume an unauthenticated status.
+		jwkHdr, ok := hdr.(map[string]any)
+		if !ok {
+			return fmt.Errorf("embedded jwk header has invalid type %T", hdr)
+		}
 		pub, err := jose.ParseJWKToPublicKey(jwkHdr)
 		if err != nil {
 			return fmt.Errorf("embedded jwk unusable: %w", err)
@@ -355,7 +379,7 @@ func checkJWT(body []byte, idx int64, res *result) error {
 			return fmt.Errorf("signature verification failed: %w", err)
 		}
 		res.Verified = true
-		b, err := tokenstatuslist.GetStatusFromJWT(claims, int(idx))
+		b, err := statusFromJWTClaims(claims, idx)
 		if err != nil {
 			return fmt.Errorf("extract status from JWT: %w", err)
 		}
@@ -368,12 +392,42 @@ func checkJWT(body []byte, idx int64, res *result) error {
 	if err != nil {
 		return fmt.Errorf("parse JWT claims: %w", err)
 	}
-	b, err := tokenstatuslist.GetStatusFromJWT(claims, int(idx))
+	b, err := statusFromJWTClaims(claims, idx)
 	if err != nil {
 		return fmt.Errorf("extract status from JWT: %w", err)
 	}
 	res.StatusByte = b
 	return nil
+}
+
+// statusFromJWTClaims decodes the compressed lst and returns the status at idx,
+// honoring StatusList.Bits (1, 2, 4, or 8) per draft-ietf-oauth-status-list.
+func statusFromJWTClaims(claims *tokenstatuslist.JWTClaims, idx int64) (uint8, error) {
+	statuses, err := tokenstatuslist.DecodeAndDecompress(claims.StatusList.Lst)
+	if err != nil {
+		return 0, fmt.Errorf("decode status list: %w", err)
+	}
+	return statusAt(statuses, claims.StatusList.Bits, idx)
+}
+
+// statusAt unpacks a single status entry from the decompressed lst.
+func statusAt(lst []byte, bits int, idx int64) (uint8, error) {
+	switch bits {
+	case 1, 2, 4, 8:
+	default:
+		return 0, fmt.Errorf("unsupported status list bits value: %d", bits)
+	}
+	if idx < 0 {
+		return 0, fmt.Errorf("index out of range: %d", idx)
+	}
+	entriesPerByte := int64(8 / bits)
+	byteIdx := idx / entriesPerByte
+	if byteIdx >= int64(len(lst)) {
+		return 0, fmt.Errorf("index %d out of range for status list of %d entries", idx, int64(len(lst))*entriesPerByte)
+	}
+	shift := uint((idx % entriesPerByte) * int64(bits))
+	mask := uint8((1 << bits) - 1)
+	return (lst[byteIdx] >> shift) & mask, nil
 }
 
 func parseJWTClaimsUnverified(tokenStr string) (*tokenstatuslist.JWTClaims, error) {
@@ -393,14 +447,30 @@ func parseJWTClaimsUnverified(tokenStr string) (*tokenstatuslist.JWTClaims, erro
 }
 
 // ensureStrongAlg rejects "none", HMAC ("HS*"), and any algorithm that does
-// not match the resolved public key type. Prevents JWT algorithm-confusion.
+// not match the resolved public key type. For ECDSA it also enforces the JWA
+// alg↔curve pairing (ES256/P-256, ES384/P-384, ES512/P-521). Prevents JWT
+// algorithm-confusion.
 func ensureStrongAlg(alg string, pub any) error {
-	switch pub.(type) {
+	switch key := pub.(type) {
 	case *ecdsa.PublicKey:
+		curve := key.Curve.Params().Name
 		switch alg {
-		case "ES256", "ES384", "ES512":
-			return nil
+		case "ES256":
+			if curve == "P-256" {
+				return nil
+			}
+		case "ES384":
+			if curve == "P-384" {
+				return nil
+			}
+		case "ES512":
+			if curve == "P-521" {
+				return nil
+			}
+		default:
+			return fmt.Errorf("disallowed JWT alg %q for key type %T", alg, pub)
 		}
+		return fmt.Errorf("JWT alg %q incompatible with EC curve %q", alg, curve)
 	case *rsa.PublicKey:
 		switch alg {
 		case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":
@@ -420,12 +490,82 @@ func checkCWT(body []byte, idx int64, res *result) error {
 	if err != nil {
 		return fmt.Errorf("parse CWT: %w", err)
 	}
-	b, err := tokenstatuslist.GetStatusFromCWT(claims, int(idx))
+	lst, bits, err := extractCWTStatusList(claims)
+	if err != nil {
+		return fmt.Errorf("extract status_list from CWT: %w", err)
+	}
+	statuses, err := tokenstatuslist.DecompressStatuses(lst)
+	if err != nil {
+		return fmt.Errorf("decompress CWT status list: %w", err)
+	}
+	b, err := statusAt(statuses, bits, idx)
 	if err != nil {
 		return fmt.Errorf("extract status from CWT: %w", err)
 	}
 	res.StatusByte = b
 	return nil
+}
+
+// extractCWTStatusList reads lst and bits from a parsed CWT claim map,
+// tolerating the map key shapes produced by different CBOR decoders.
+func extractCWTStatusList(claims map[int]any) ([]byte, int, error) {
+	raw, ok := claims[65534]
+	if !ok {
+		return nil, 0, errors.New("status_list claim not found")
+	}
+	var lst []byte
+	bits := 0
+	switch sl := raw.(type) {
+	case map[int]any:
+		lst, _ = sl[2].([]byte)
+		bits = cwtIntField(sl[1])
+	case map[any]any:
+		for k, v := range sl {
+			switch cwtNormalizeKey(k) {
+			case 1:
+				bits = cwtIntField(v)
+			case 2:
+				if b, ok := v.([]byte); ok {
+					lst = b
+				}
+			}
+		}
+	default:
+		return nil, 0, fmt.Errorf("invalid status_list claim format: %T", raw)
+	}
+	if lst == nil {
+		return nil, 0, errors.New("lst not found in status_list")
+	}
+	if bits == 0 {
+		return nil, 0, errors.New("bits not found in status_list")
+	}
+	return lst, bits, nil
+}
+
+func cwtNormalizeKey(k any) int {
+	switch v := k.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case uint64:
+		return int(v)
+	default:
+		return -1
+	}
+}
+
+func cwtIntField(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case uint64:
+		return int(n)
+	default:
+		return 0
+	}
 }
 
 func statusName(b uint8) string {
