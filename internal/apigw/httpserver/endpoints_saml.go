@@ -213,6 +213,11 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 			}
 		} else {
 			// Assertion: store the transformed claims directly as a document
+			for k, v := range s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].Defaults {
+				if _, present := claims[k]; !present {
+					claims[k] = v
+				}
+			}
 			doc := &model.CompleteDocument{
 				Meta: &model.MetaData{
 					AuthenticSource: session.IDPEntityID,
@@ -311,6 +316,11 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 
 	// Store document data so the credential endpoint can issue the credential
 	// when the wallet redeems the offer.
+	for k, v := range s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].Defaults {
+		if _, present := claims[k]; !present {
+			claims[k] = v
+		}
+	}
 	doc := &model.CompleteDocument{
 		Meta:         &model.MetaData{AuthenticSource: session.IDPEntityID},
 		DocumentData: claims,

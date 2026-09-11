@@ -216,6 +216,11 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 			}
 		} else {
 			// Assertion: store the transformed claims directly as a document
+			for k, v := range c.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].Defaults {
+				if _, present := claims[k]; !present {
+					claims[k] = v
+				}
+			}
 			doc := &model.CompleteDocument{
 				Meta: &model.MetaData{
 					AuthenticSource: session.IssuerURL,
@@ -349,6 +354,13 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 
 	// Store document data so the credential endpoint can issue the credential
 	// when the wallet redeems the offer.
+	if credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion {
+		for k, v := range c.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].Defaults {
+			if _, present := claims[k]; !present {
+				claims[k] = v
+			}
+		}
+	}
 	doc := &model.CompleteDocument{
 		Meta:         &model.MetaData{AuthenticSource: session.IssuerURL},
 		DocumentData: claims,

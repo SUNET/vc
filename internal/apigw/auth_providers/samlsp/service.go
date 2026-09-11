@@ -154,6 +154,10 @@ func (s *Service) GetSPMetadata(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal SP metadata: %w", err)
 	}
+	xmlBytes, err = augmentSPMetadata(xmlBytes, s.cfg.Metadata)
+	if err != nil {
+		return "", fmt.Errorf("failed to augment SP metadata: %w", err)
+	}
 	return string(xmlBytes), nil
 }
 
@@ -282,6 +286,12 @@ func (s *Service) ProcessAssertion(ctx context.Context, samlResponseEncoded stri
 	sp := *s.sp
 	sp.IDPMetadata = idpMetadata
 
+	// Rewrite mislabelled-as-PrintableString UTF-8 attributes in any
+	// certificate embedded in <ds:KeyInfo>. Only the tag byte inside the
+	// Subject/Issuer RDN changes; SignedInfo is unaffected, so signature
+	// validation still succeeds.
+	samlResponseEncoded = sanitizeBase64SAMLResponse(samlResponseEncoded)
+
 	// Parse and validate SAML response
 	acsURL := sp.AcsURL
 	samlResp, err := sp.ParseResponse(&http.Request{
@@ -292,6 +302,13 @@ func (s *Service) ProcessAssertion(ctx context.Context, samlResponseEncoded stri
 		},
 	}, []string{session.ID})
 	if err != nil {
+		// crewjam's ParseResponse hides the real reason behind a public
+		// "authentication failed" message; the underlying cause lives in
+		// InvalidResponseError.PrivateErr. Surface it verbatim.
+		if ive, ok := err.(*saml.InvalidResponseError); ok && ive.PrivateErr != nil {
+			s.log.Debug("SAML response rejected", "error", ive.PrivateErr.Error(), "response", ive.Response)
+			return nil, fmt.Errorf("failed to parse SAML response: %w", ive.PrivateErr)
+		}
 		return nil, fmt.Errorf("failed to parse SAML response: %w", err)
 	}
 

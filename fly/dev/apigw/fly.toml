@@ -24,12 +24,16 @@ primary_region = "arn"
   secret_name = "SIGNING_EC_CHAIN"
 
 [[files]]
-  guest_path = "/bootstrapping/diploma.json"
-  local_path = "fly/dev/bootstrapping/diploma.json"
+  guest_path = "/pki/saml_sp.crt"
+  secret_name = "SAML_SP_CERT"
 
 [[files]]
-  guest_path = "/bootstrapping/eduid.json"
-  local_path = "fly/dev/bootstrapping/eduid.json"
+  guest_path = "/pki/saml_sp.key"
+  secret_name = "SAML_SP_KEY"
+
+[[files]]
+  guest_path = "/bootstrapping/diploma.json"
+  local_path = "fly/dev/bootstrapping/diploma.json"
 
 [[files]]
   guest_path = "/bootstrapping/ehic.json"
