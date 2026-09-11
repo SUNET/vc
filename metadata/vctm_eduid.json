@@ -75,7 +75,7 @@
       "path": [
         "birthdate"
       ],
-      "mandatory": true,
+      "mandatory": false,
       "sd": "always",
       "svg_id": "birth_date",
       "display": [
