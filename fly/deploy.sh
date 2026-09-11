@@ -287,6 +287,63 @@ push_wallet_frontend_branding_secrets() {
         || echo "    (failed to stage branding secrets; continuing)"
 }
 
+# Registers the profile's apigw URL as an issuer on the wallet-backend's
+# default tenant. wallet-backend has no config-driven issuer bootstrap; without
+# this, a fresh deploy shows an empty credentials list in the wallet UI.
+# The admin token is rotated each run so we never depend on a value we can't
+# read back from Fly. Idempotent: PUT-if-exists so the client_id
+# ("fly-wallet") stays in sync with what apigw's static clients map advertises.
+register_apigw_issuer_on_wallet_backend() {
+    local wb_app apigw_url admin_token proxy_pid body_file
+    wb_app="$(app_name wallet-backend)"
+    apigw_url="https://$(app_name apigw).fly.dev"
+
+    echo "    Registering ${apigw_url} as issuer on ${wb_app} (default tenant)"
+
+    admin_token="$(openssl rand -hex 32)"
+    if ! fly secrets set --app "$wb_app" WALLET_SERVER_ADMIN_TOKEN="$admin_token" >/dev/null 2>&1; then
+        echo "    (failed to rotate admin token; skipping issuer registration)"
+        return 0
+    fi
+
+    fly proxy 18081:8081 --app "$wb_app" >/dev/null 2>&1 &
+    proxy_pid=$!
+    sleep 3
+
+    body_file="/tmp/issuer_reg_body.$$"
+    local payload='{"credential_issuer_identifier":"'"$apigw_url"'","client_id":"fly-wallet","visible":true}'
+
+    local list existing_id method path code
+    list="$(curl -sS -H "Authorization: Bearer $admin_token" \
+        http://127.0.0.1:18081/admin/tenants/default/issuers 2>/dev/null || echo '{}')"
+    existing_id="$(printf '%s' "$list" | jq -r --arg url "$apigw_url" \
+        '.issuers[]? | select(.credential_issuer_identifier == $url) | .id' 2>/dev/null | head -n 1)"
+
+    if [[ -n "$existing_id" ]]; then
+        method="PUT"
+        path="/admin/tenants/default/issuers/$existing_id"
+    else
+        method="POST"
+        path="/admin/tenants/default/issuers"
+    fi
+
+    code="$(curl -sS -o "$body_file" -w '%{http_code}' \
+        -X "$method" \
+        -H "Authorization: Bearer $admin_token" \
+        -H 'Content-Type: application/json' \
+        -d "$payload" \
+        "http://127.0.0.1:18081$path" 2>/dev/null || echo 000)"
+
+    case "$code" in
+        200|201) echo "    Issuer ${method,,}ed with client_id=fly-wallet" ;;
+        *)       echo "    Unexpected status $code from admin API (body: $(head -c 200 "$body_file" 2>/dev/null))" ;;
+    esac
+
+    kill "$proxy_pid" 2>/dev/null
+    wait "$proxy_pid" 2>/dev/null || true
+    rm -f "$body_file"
+}
+
 cmd_deploy() {
     require_flyctl
     require_profile_vars
@@ -317,6 +374,11 @@ cmd_deploy() {
                 --app "$app" \
                 --config "${profile_root}/${service}/fly.toml"
         )
+
+        if [[ "$service" == "wallet-backend" ]]; then
+            register_apigw_issuer_on_wallet_backend
+        fi
+
         echo ""
     done
     echo "==> Deployment complete"
