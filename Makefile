@@ -149,6 +149,7 @@ BUILD_CONFIGS           := \
 	release release-prod release-demo check_current_branch \
 	release-check-issuer-jwks \
 	release-jwt-issuer build-jwt-issuer \
+	release-tsl-checker build-tsl-checker \
 	fly-launch-dev fly-launch-demo \
 	fly-deploy fly-deploy-dev fly-deploy-demo fly-deploy-dev-% fly-deploy-demo-% \
 	fly-status-dev fly-status-demo fly-status-dev-% fly-status-demo-% \
@@ -556,6 +557,14 @@ build-jwt-issuer: ## Build jwt_issuer developer tool
 		-ldflags "-w -s --extldflags '-static' -X main.version=$(JWT_ISSUER_VERSION)" \
 		./developer_tools/scripts/jwt_issuer/
 
+build-tsl-checker: ## Build tsl_checker developer tool
+	$(info Building tsl_checker)
+	$(eval TSL_CHECKER_VERSION := $(or $(shell git tag -l "tsl-checker-v*" --sort=-v:refname | head -n1 | sed 's/^tsl-checker-//'),dev))
+	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
+		$(BUILD_FLAGS) -o ./bin/tsl_checker \
+		-ldflags "-w -s --extldflags '-static' -X main.version=$(TSL_CHECKER_VERSION)" \
+		./developer_tools/scripts/tsl_checker/
+
 release-check-issuer-jwks: check_current_branch ## Tag and push a release for check_issuer_jwks (BUMP=major|minor|patch)
 	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
 		{ echo "Error: BUMP must be major, minor, or patch (got: $(BUMP))"; exit 1; }
@@ -620,6 +629,39 @@ release-jwt-issuer: check_current_branch ## Tag and push a release for jwt_issue
 	git push origin "$$NEW_TAG"; \
 	echo ""; \
 	echo "==> $$NEW_TAG pushed."; \
+	echo ""
+
+release-tsl-checker: check_current_branch ## Tag and push a release for tsl_checker (BUMP=major|minor|patch)
+	@echo "$(BUMP)" | grep -qE '^(major|minor|patch)$$' || \
+		{ echo "Error: BUMP must be major, minor, or patch (got: $(BUMP))"; exit 1; }
+	@if [ "$(FORCE)" != "true" ] && ! git diff --quiet HEAD 2>/dev/null; then \
+		echo "Error: working tree is dirty — commit or stash changes first (use FORCE=true to override)"; exit 1; \
+	fi
+	@LATEST=$$(git tag -l "tsl-checker-v*" --sort=-v:refname | grep -E '^tsl-checker-v[0-9]+\.[0-9]+\.[0-9]+$$' | head -n1); \
+	if [ -z "$$LATEST" ]; then \
+		echo "No existing tsl-checker tags found, starting at tsl-checker-v0.0.0"; \
+		LATEST="tsl-checker-v0.0.0"; \
+	fi; \
+	CURRENT=$$(echo "$$LATEST" | sed 's/^tsl-checker-v//'); \
+	MAJOR=$$(echo "$$CURRENT" | cut -d. -f1); \
+	MINOR=$$(echo "$$CURRENT" | cut -d. -f2); \
+	PATCH=$$(echo "$$CURRENT" | cut -d. -f3); \
+	case "$(BUMP)" in \
+		major) MAJOR=$$((MAJOR + 1)); MINOR=0; PATCH=0 ;; \
+		minor) MINOR=$$((MINOR + 1)); PATCH=0 ;; \
+		patch) PATCH=$$((PATCH + 1)) ;; \
+	esac; \
+	NEW_TAG="tsl-checker-v$$MAJOR.$$MINOR.$$PATCH"; \
+	echo ""; \
+	echo "$$LATEST -> $$NEW_TAG"; \
+	echo ""; \
+	if git rev-parse "$$NEW_TAG" >/dev/null 2>&1; then \
+		echo "Error: tag $$NEW_TAG already exists"; exit 1; \
+	fi; \
+	git tag -a "$$NEW_TAG" -m "Release $$NEW_TAG"; \
+	git push origin "$$NEW_TAG"; \
+	echo ""; \
+	echo "==> $$NEW_TAG pushed. GitHub Actions will build tsl_checker binaries."; \
 	echo ""
 
 docker-build-wallet: _check-reserved-tag ## Build Docker image for wallet test tool
