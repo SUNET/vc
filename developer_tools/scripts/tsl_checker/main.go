@@ -340,33 +340,30 @@ func checkJWT(body []byte, idx int64, res *result) error {
 	}
 
 	if jwkHdr, ok := unverified.Header["jwk"].(map[string]any); ok {
+		// An embedded jwk asserts a signer; treat any failure as fatal so callers cannot consume an unauthenticated status.
 		pub, err := jose.ParseJWKToPublicKey(jwkHdr)
 		if err != nil {
-			res.VerifyReason = fmt.Sprintf("embedded jwk unusable: %v", err)
-		} else {
-			claims, err := tokenstatuslist.ParseJWT(tokenStr, func(t *jwt.Token) (any, error) {
-				if err := ensureStrongAlg(t.Method.Alg(), pub); err != nil {
-					return nil, err
-				}
-				return pub, nil
-			})
-			if err != nil {
-				res.VerifyReason = fmt.Sprintf("signature verification failed: %v", err)
-			} else {
-				res.Verified = true
-				b, err := tokenstatuslist.GetStatusFromJWT(claims, int(idx))
-				if err != nil {
-					return fmt.Errorf("extract status from JWT: %w", err)
-				}
-				res.StatusByte = b
-				return nil
-			}
+			return fmt.Errorf("embedded jwk unusable: %w", err)
 		}
-	} else {
-		res.VerifyReason = "no jwk header embedded; signature not verified"
+		claims, err := tokenstatuslist.ParseJWT(tokenStr, func(t *jwt.Token) (any, error) {
+			if err := ensureStrongAlg(t.Method.Alg(), pub); err != nil {
+				return nil, err
+			}
+			return pub, nil
+		})
+		if err != nil {
+			return fmt.Errorf("signature verification failed: %w", err)
+		}
+		res.Verified = true
+		b, err := tokenstatuslist.GetStatusFromJWT(claims, int(idx))
+		if err != nil {
+			return fmt.Errorf("extract status from JWT: %w", err)
+		}
+		res.StatusByte = b
+		return nil
 	}
+	res.VerifyReason = "no jwk header embedded; signature not verified"
 
-	// Fallback: parse without verification and read the status byte.
 	claims, err := parseJWTClaimsUnverified(tokenStr)
 	if err != nil {
 		return fmt.Errorf("parse JWT claims: %w", err)
