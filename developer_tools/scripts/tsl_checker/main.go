@@ -5,6 +5,9 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -86,7 +90,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
-	flag.Parse()
+	// ContinueOnError so bad flags map to exitUsage instead of the default exit 2.
+	flag.CommandLine.Init("tsl_checker", flag.ContinueOnError)
+	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil {
+		os.Exit(exitUsage)
+	}
 
 	if *showVersion {
 		fmt.Printf("tsl_checker %s\n", version)
@@ -139,9 +147,17 @@ func resolveInput(uri string, idx int64, credFile string) (string, int64, string
 		}
 		return uri, idx, "uri", nil
 	case haveCred:
-		data, err := os.ReadFile(credFile)
+		f, err := os.Open(filepath.Clean(credFile))
 		if err != nil {
 			return "", 0, "", fmt.Errorf("read credential file: %w", err)
+		}
+		defer func() { _ = f.Close() }()
+		data, err := io.ReadAll(io.LimitReader(f, maxCredentialSize+1))
+		if err != nil {
+			return "", 0, "", fmt.Errorf("read credential file: %w", err)
+		}
+		if int64(len(data)) > maxCredentialSize {
+			return "", 0, "", fmt.Errorf("credential file exceeds maximum size (%d bytes)", maxCredentialSize)
 		}
 		return extractFromCredential(data, "credential_file")
 	case stdinPiped:
@@ -154,7 +170,7 @@ func resolveInput(uri string, idx int64, credFile string) (string, int64, string
 		}
 		return extractFromCredential(data, "stdin")
 	default:
-		return "", 0, "", errors.New("no input: provide -uri+-idx, -credential_file, or pipe credential to stdin")
+		return "", 0, "", errors.New("no input: provide -uri and -idx, -credential_file, or pipe credential to stdin")
 	}
 }
 
@@ -172,7 +188,7 @@ func extractFromCredential(raw []byte, source string) (string, int64, string, er
 		return uri, idx, source, nil
 	}
 
-	uri, idx, err := extractFromMdoc([]byte(trimmed))
+	uri, idx, err := extractFromMdoc(raw)
 	if err != nil {
 		return "", 0, "", fmt.Errorf("extract from mdoc: %w", err)
 	}
@@ -217,11 +233,13 @@ func extractFromMdoc(raw []byte) (string, int64, error) {
 			}
 		}
 		var resp mdoc.DeviceResponseMdoc
-		if err := cbor.Unmarshal(data, &resp); err == nil && len(resp.Documents) > 0 {
-			if ref, err := mdoc.ExtractStatusReference(&resp.Documents[0]); err == nil {
-				return ref.URI, ref.Index, nil
-			} else {
-				lastErr = err
+		if err := cbor.Unmarshal(data, &resp); err == nil {
+			for i := range resp.Documents {
+				if ref, err := mdoc.ExtractStatusReference(&resp.Documents[i]); err == nil {
+					return ref.URI, ref.Index, nil
+				} else {
+					lastErr = err
+				}
 			}
 		}
 	}
@@ -327,6 +345,9 @@ func checkJWT(body []byte, idx int64, res *result) error {
 			res.VerifyReason = fmt.Sprintf("embedded jwk unusable: %v", err)
 		} else {
 			claims, err := tokenstatuslist.ParseJWT(tokenStr, func(t *jwt.Token) (any, error) {
+				if err := ensureStrongAlg(t.Method.Alg(), pub); err != nil {
+					return nil, err
+				}
 				return pub, nil
 			})
 			if err != nil {
@@ -372,6 +393,28 @@ func parseJWTClaimsUnverified(tokenStr string) (*tokenstatuslist.JWTClaims, erro
 		return nil, fmt.Errorf("parse payload: %w", err)
 	}
 	return &claims, nil
+}
+
+// ensureStrongAlg rejects "none", HMAC ("HS*"), and any algorithm that does
+// not match the resolved public key type. Prevents JWT algorithm-confusion.
+func ensureStrongAlg(alg string, pub any) error {
+	switch pub.(type) {
+	case *ecdsa.PublicKey:
+		switch alg {
+		case "ES256", "ES384", "ES512":
+			return nil
+		}
+	case *rsa.PublicKey:
+		switch alg {
+		case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":
+			return nil
+		}
+	case ed25519.PublicKey:
+		if alg == "EdDSA" {
+			return nil
+		}
+	}
+	return fmt.Errorf("disallowed JWT alg %q for key type %T", alg, pub)
 }
 
 func checkCWT(body []byte, idx int64, res *result) error {
