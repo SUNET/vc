@@ -248,6 +248,12 @@ func (m *MDQClient) GetIDPMetadata(ctx context.Context, entityID string) (*saml.
 	// Otherwise use MDQ
 	m.log.Debug("fetching IdP metadata", "entity_id", entityID)
 
+	if entityID == "" {
+		// A blank entityID in MDQ mode would query the federation base URL and
+		// pull the entire aggregate (tens of MB, wrong shape). Refuse instead.
+		return nil, fmt.Errorf("MDQ mode requires a non-empty IdP entity ID")
+	}
+
 	if cached, found := m.cache.Get(entityID); found {
 		m.log.Debug("IdP metadata found in cache", "entity_id", entityID)
 		return cached.(*saml.EntityDescriptor), nil
@@ -336,12 +342,33 @@ func (m *MDQClient) parseAndVerifyMetadata(metadataXML []byte) (*saml.EntityDesc
 		m.log.Debug("metadata signature verified successfully")
 	}
 
+	// Rewrite mislabelled-as-PrintableString UTF-8 attributes in embedded
+	// certs so Go's crypto/x509 can parse them at signature-verify time.
+	metadataXML = sanitizeMetadataCerts(metadataXML)
+
 	var metadata saml.EntityDescriptor
-	if err := xml.Unmarshal(metadataXML, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse IdP metadata XML: %w", err)
+	err := xml.Unmarshal(metadataXML, &metadata)
+	if err == nil {
+		return &metadata, nil
 	}
 
-	return &metadata, nil
+	// SWAMID's MDQ and some IdP endpoints wrap a single entity in an
+	// EntitiesDescriptor. Fall back to that shape and pick the first entry
+	// that has an IdP role, mirroring crewjam's samlsp.ParseMetadata.
+	if err.Error() == "expected element type <EntityDescriptor> but have <EntitiesDescriptor>" {
+		var entities saml.EntitiesDescriptor
+		if err2 := xml.Unmarshal(metadataXML, &entities); err2 != nil {
+			return nil, fmt.Errorf("failed to parse IdP metadata XML (as EntitiesDescriptor): %w", err2)
+		}
+		for i, e := range entities.EntityDescriptors {
+			if len(e.IDPSSODescriptors) > 0 {
+				return &entities.EntityDescriptors[i], nil
+			}
+		}
+		return nil, fmt.Errorf("EntitiesDescriptor contains no IdP entity")
+	}
+
+	return nil, fmt.Errorf("failed to parse IdP metadata XML: %w", err)
 }
 
 // verifyMetadataSignature validates the XML signature on a metadata document

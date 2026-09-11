@@ -333,6 +333,63 @@ type SAMLSP struct {
 
 	// MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ
 	MetadataCacheTTL int `yaml:"metadata_cache_ttl"`
+
+	// Metadata carries the federation-facing description of this SP that goes
+	// into the published SAML metadata (mdui:UIInfo, md:Organization,
+	// md:ContactPerson). Required for SWAMID acceptance; harmless when empty.
+	Metadata *SAMLSPMetadata `yaml:"metadata,omitempty"`
+}
+
+// SAMLSPMetadata carries federation-facing SP descriptors that crewjam/saml
+// does not populate by default. Serialized into the published SP metadata
+// XML by the samlsp service.
+type SAMLSPMetadata struct {
+	// Organization becomes md:Organization on the EntityDescriptor.
+	Organization *SAMLOrganization `yaml:"organization,omitempty"`
+
+	// ContactPersons becomes one or more md:ContactPerson on the EntityDescriptor.
+	// SWAMID requires at least types "technical" and "administrative".
+	ContactPersons []SAMLContactPerson `yaml:"contact_persons,omitempty" validate:"omitempty,dive"`
+
+	// UIInfo becomes mdui:UIInfo inside md:Extensions on the SPSSODescriptor.
+	UIInfo *SAMLUIInfo `yaml:"ui_info,omitempty"`
+}
+
+// SAMLOrganization maps to md:Organization. A single language tag is used
+// for all three localized fields; SWAMID Tech 6.1.4 mandates at least "en".
+type SAMLOrganization struct {
+	Name        string `yaml:"name" validate:"required"`
+	DisplayName string `yaml:"display_name" validate:"required"`
+	URL         string `yaml:"url" validate:"required,url"`
+	Lang        string `yaml:"lang,omitempty" default:"en"`
+}
+
+// SAMLContactPerson maps to md:ContactPerson.
+type SAMLContactPerson struct {
+	Type      string `yaml:"type" validate:"required,oneof=technical support administrative billing other"`
+	Company   string `yaml:"company,omitempty"`
+	GivenName string `yaml:"given_name,omitempty"`
+	SurName   string `yaml:"sur_name,omitempty"`
+	Email     string `yaml:"email,omitempty" validate:"omitempty,email"`
+	Phone     string `yaml:"phone,omitempty"`
+}
+
+// SAMLUIInfo maps to mdui:UIInfo (namespace urn:oasis:names:tc:SAML:metadata:ui).
+// A single language tag applies to all localized child elements.
+type SAMLUIInfo struct {
+	DisplayName         string      `yaml:"display_name" validate:"required"`
+	Description         string      `yaml:"description" validate:"required"`
+	InformationURL      string      `yaml:"information_url" validate:"required,url"`
+	PrivacyStatementURL string      `yaml:"privacy_statement_url" validate:"required,url"`
+	Logo                *SAMLUILogo `yaml:"logo,omitempty"`
+	Lang                string      `yaml:"lang,omitempty" default:"en"`
+}
+
+// SAMLUILogo maps to mdui:Logo. Width and height are required by the spec.
+type SAMLUILogo struct {
+	URL    string `yaml:"url" validate:"required,url"`
+	Height int    `yaml:"height" validate:"required,gt=0"`
+	Width  int    `yaml:"width" validate:"required,gt=0"`
 }
 
 // StaticIDPConfig holds configuration for a single static IdP connection
@@ -443,8 +500,8 @@ type AttributeConfig struct {
 	Required bool `yaml:"required" default:"false"`
 
 	// Transform is an optional transformation to apply
-	// Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3"
-	Transform string `yaml:"transform,omitempty" validate:"omitempty,oneof=lowercase uppercase trim country_alpha2 country_alpha3"`
+	// Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3", "yyyymmdd_to_iso"
+	Transform string `yaml:"transform,omitempty" validate:"omitempty,oneof=lowercase uppercase trim country_alpha2 country_alpha3 yyyymmdd_to_iso"`
 
 	// Default is an optional default value if attribute is missing
 	Default string `yaml:"default,omitempty"`

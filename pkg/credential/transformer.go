@@ -86,6 +86,17 @@ func ApplyTransform(value any, transform string) any {
 			return value
 		}
 		return cc.Alpha3()
+	case "yyyymmdd_to_iso":
+		// SCHAC schacDateOfBirth is "YYYYMMDD"; SD-JWT VC birthdate is ISO "YYYY-MM-DD".
+		if len(str) != 8 {
+			return value
+		}
+		for _, r := range str {
+			if r < '0' || r > '9' {
+				return value
+			}
+		}
+		return str[0:4] + "-" + str[4:6] + "-" + str[6:8]
 	default:
 		return value
 	}

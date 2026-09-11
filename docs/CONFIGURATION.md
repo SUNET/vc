@@ -469,9 +469,10 @@ Each entry represents one acceptable credential type the wallet can present.
 
 The data comes directly from the SAML attributes or OIDC claims.
 
-| Field           | Type     | Description                                           | Example | Default | Required |
-| --------------- | -------- | ----------------------------------------------------- | ------- | ------- | -------- |
-| `auth_provider` | `string` | Auth provider for this credential type (saml or oidc) | -       | -       | Yes      |
+| Field           | Type     | Description                                                                                                                                                                                                                                        | Example | Default | Required |
+| --------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `auth_provider` | `string` | Auth provider for this credential type (saml or oidc)                                                                                                                                                                                              | -       | -       | Yes      |
+| `defaults`      | `object` | Claim values injected into the assertion document for credential-level fields the authentication assertion cannot supply (e.g. issuing_authority, issuing_country, date_of_expiry). Merged after attribute_mapping — real attributes always win.   | -       | -       | No       |
 
 ### `external_api`
 
@@ -501,7 +502,7 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 | ----------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- | -------- |
 | `claim`     | `string` | Target claim name (supports dot-notation for nesting)                                                                                                    | `"identity.given_name"` | -       | Yes      |
 | `required`  | `bool`   | Required indicates if this attribute must be present in the assertion/response                                                                           | -                       | `false` | No       |
-| `transform` | `string` | Optional transformation to apply Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3"                                         | -                       | -       | No       |
+| `transform` | `string` | Optional transformation to apply Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3", "yyyymmdd_to_iso"                      | -                       | -       | No       |
 | `default`   | `string` | Optional default value if attribute is missing                                                                                                           | -                       | -       | No       |
 | `as_array`  | `bool`   | AsArray wraps a scalar value in a single-element array before setting the claim. No-op when the value is already a slice (e.g. multi-valued OIDC claim). | -                       | -       | No       |
 
@@ -535,6 +536,7 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 | `metadata_signing_cert_path` | `string` | Path to the X.509 certificate used to verify metadata signatures. When set, all fetched metadata (MDQ and static) must carry a valid XML signature from this certificate.                                                                                                                                                                                 | -                                         | -       | No                                               |
 | `allow_unsigned_metadata`    | `bool`   | AllowUnsignedMetadata permits MDQ/URL metadata without signature verification. This is INSECURE (MITM → fake IdP) and should only be used in development. When false (default), MDQ and URL metadata sources require MetadataSigningCertPath. Local metadata files are allowed unsigned regardless (with a startup warning).                              | -                                         | `false` | No                                               |
 | `metadata_cache_ttl`         | `int`    | MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ                                                                                                                                                                                                                                                                     | -                                         | -       | No                                               |
+| `metadata`                   | `object` | Metadata carries the federation-facing description of this SP that goes into the published SAML metadata (mdui:UIInfo, md:Organization, md:ContactPerson). Required for SWAMID acceptance; harmless when empty.                                                                                                                                           | -                                         | -       | No                                               |
 
 ### `static_idp_metadata`
 
@@ -545,6 +547,70 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 | `entity_id`     | `string` | IdP entity identifier                                                         | -       | -       | Yes                                               |
 | `metadata_path` | `string` | File path to IdP metadata XML                                                 | -       | -       | Yes (if metadata_url not set; mutually exclusive) |
 | `metadata_url`  | `string` | HTTP(S) URL to fetch IdP metadata from (mutually exclusive with MetadataPath) | -       | -       | No                                                |
+
+### `metadata`
+
+> **Path:** `.apigw.auth_providers.saml.metadata`
+
+does not populate by default. Serialized into the published SP metadata
+XML by the samlsp service.
+
+| Field             | Type     | Description                                                                                                                                   | Example | Default | Required |
+| ----------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `organization`    | `object` | Organization becomes md:Organization on the EntityDescriptor.                                                                                 | -       | -       | No       |
+| `contact_persons` | `array`  | ContactPersons becomes one or more md:ContactPerson on the EntityDescriptor. SWAMID requires at least types "technical" and "administrative". | -       | -       | No       |
+| `ui_info`         | `object` | UIInfo becomes mdui:UIInfo inside md:Extensions on the SPSSODescriptor.                                                                       | -       | -       | No       |
+
+### `organization`
+
+> **Path:** `.apigw.auth_providers.saml.metadata.organization`
+
+for all three localized fields; SWAMID Tech 6.1.4 mandates at least "en".
+
+| Field          | Type     | Description  | Example | Default | Required |
+| -------------- | -------- | ------------ | ------- | ------- | -------- |
+| `name`         | `string` | Name         | -       | -       | Yes      |
+| `display_name` | `string` | Display Name | -       | -       | Yes      |
+| `url`          | `string` | URL          | -       | -       | Yes      |
+| `lang`         | `string` | Lang         | -       | `en`    | No       |
+
+### `contact_persons` entry
+
+> **Path:** `.apigw.auth_providers.saml.metadata.contact_persons[]`
+
+| Field        | Type     | Description | Example | Default | Required |
+| ------------ | -------- | ----------- | ------- | ------- | -------- |
+| `type`       | `string` | Type        | -       | -       | Yes      |
+| `company`    | `string` | Company     | -       | -       | No       |
+| `given_name` | `string` | Given Name  | -       | -       | No       |
+| `sur_name`   | `string` | Sur Name    | -       | -       | No       |
+| `email`      | `string` | Email       | -       | -       | No       |
+| `phone`      | `string` | Phone       | -       | -       | No       |
+
+### `ui_info`
+
+> **Path:** `.apigw.auth_providers.saml.metadata.ui_info`
+
+A single language tag applies to all localized child elements.
+
+| Field                   | Type     | Description           | Example | Default | Required |
+| ----------------------- | -------- | --------------------- | ------- | ------- | -------- |
+| `display_name`          | `string` | Display Name          | -       | -       | Yes      |
+| `description`           | `string` | Description           | -       | -       | Yes      |
+| `information_url`       | `string` | Information URL       | -       | -       | Yes      |
+| `privacy_statement_url` | `string` | Privacy Statement URL | -       | -       | Yes      |
+| `logo`                  | `object` | Logo                  | -       | -       | No       |
+| `lang`                  | `string` | Lang                  | -       | `en`    | No       |
+
+### `logo`
+
+> **Path:** `.apigw.auth_providers.saml.metadata.ui_info.logo`
+
+| Field    | Type     | Description | Example | Default | Required |
+| -------- | -------- | ----------- | ------- | ------- | -------- |
+| `url`    | `string` | URL         | -       | -       | Yes      |
+| `height` | `int`    | Height      | -       | -       | Yes      |
+| `width`  | `int`    | Width       | -       | -       | Yes      |
 
 ### `oidc`
 
