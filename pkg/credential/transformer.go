@@ -112,6 +112,22 @@ func wrapAsArray(value any) any {
 	}
 }
 
+// MergeDefaults injects default claim values into doc for any claim path
+// whose key is not already present, treating each defaults key as a
+// dot-notation claim path (matching the AttributeMapping Claim field).
+// Existing values — including nested ones — always win.
+func MergeDefaults(doc, defaults map[string]any) error {
+	for path, value := range defaults {
+		if _, present := GetNestedValue(doc, path); present {
+			continue
+		}
+		if err := SetNestedValue(doc, path, value); err != nil {
+			return fmt.Errorf("failed to set default %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
 // SetNestedValue sets a value in a map using dot-notation path.
 // Example: "identity.family_name" creates map[identity][family_name] = value
 func SetNestedValue(doc map[string]any, path string, value any) error {

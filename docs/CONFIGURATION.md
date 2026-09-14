@@ -552,8 +552,10 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 
 > **Path:** `.apigw.auth_providers.saml.metadata`
 
-does not populate by default. Serialized into the published SP metadata
-XML by the samlsp service.
+> **Constraint** (`contact_persons`): When contact_persons is set, SWAMID Tech 6.1.4 requires at least one 'technical' and one 'administrative' contact. Other types (support, billing, other) may appear alongside them.
+
+These descriptors are not populated by crewjam/saml by default; the samlsp
+service serializes them into the published SP metadata XML.
 
 | Field             | Type     | Description                                                                                                                                   | Example | Default | Required |
 | ----------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -565,7 +567,8 @@ XML by the samlsp service.
 
 > **Path:** `.apigw.auth_providers.saml.metadata.organization`
 
-for all three localized fields; SWAMID Tech 6.1.4 mandates at least "en".
+A single language tag applies to all three localized fields; SWAMID Tech
+6.1.4 mandates at least "en".
 
 | Field          | Type     | Description  | Example | Default | Required |
 | -------------- | -------- | ------------ | ------- | ------- | -------- |

@@ -340,9 +340,10 @@ type SAMLSP struct {
 	Metadata *SAMLSPMetadata `yaml:"metadata,omitempty"`
 }
 
-// SAMLSPMetadata carries federation-facing SP descriptors that crewjam/saml
-// does not populate by default. Serialized into the published SP metadata
-// XML by the samlsp service.
+// SAMLSPMetadata carries federation-facing SP descriptors.
+//
+// These descriptors are not populated by crewjam/saml by default; the samlsp
+// service serializes them into the published SP metadata XML.
 type SAMLSPMetadata struct {
 	// Organization becomes md:Organization on the EntityDescriptor.
 	Organization *SAMLOrganization `yaml:"organization,omitempty"`
@@ -355,8 +356,10 @@ type SAMLSPMetadata struct {
 	UIInfo *SAMLUIInfo `yaml:"ui_info,omitempty"`
 }
 
-// SAMLOrganization maps to md:Organization. A single language tag is used
-// for all three localized fields; SWAMID Tech 6.1.4 mandates at least "en".
+// SAMLOrganization maps to md:Organization.
+//
+// A single language tag applies to all three localized fields; SWAMID Tech
+// 6.1.4 mandates at least "en".
 type SAMLOrganization struct {
 	Name        string `yaml:"name" validate:"required"`
 	DisplayName string `yaml:"display_name" validate:"required"`

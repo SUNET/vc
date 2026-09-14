@@ -57,6 +57,10 @@ require_flyctl() {
     command -v fly >/dev/null 2>&1 || die "flyctl not found. Install: https://fly.io/docs/flyctl/install/"
 }
 
+require_jq() {
+    command -v jq >/dev/null 2>&1 || die "jq not found. Install: https://jqlang.github.io/jq/download/ (needed for idempotent wallet-backend issuer registration)."
+}
+
 apply_profile() {
     case "$PROFILE" in
         dev)
@@ -250,40 +254,46 @@ cmd_launch() {
     fi
 
     # apigw's SAML SP keypair, mounted via [[files]] in fly/<profile>/apigw/fly.toml.
-    # Only apigw needs it, and only profiles that enable SAML mount it. The
-    # cert/key aren't checked into developer_tools/pki, so we self-provision
-    # a throwaway keypair on first launch to make a fresh 'fly deploy' actually
-    # boot instead of crashing in tls.LoadX509KeyPair.
+    # See provision_apigw_saml_sp_keypair for the rationale.
+    provision_apigw_saml_sp_keypair
+
+    echo ""
+    echo "==> Apps created. Next: ./fly/deploy.sh deploy --profile ${PROFILE:-dev}"
+}
+
+# apigw's SAML SP keypair, mounted via [[files]] in fly/<profile>/apigw/fly.toml.
+# Only apigw needs it, and only profiles that enable SAML mount it. The
+# cert/key aren't checked into developer_tools/pki, so we self-provision
+# a throwaway keypair on first launch (or first auto-create deploy) to make
+# a fresh 'fly deploy' actually boot instead of crashing in tls.LoadX509KeyPair.
+provision_apigw_saml_sp_keypair() {
     local apigw_app saml_cert_b64 saml_key_b64 saml_tmp
     apigw_app="$(app_name "apigw")"
     if fly secrets list --app "$apigw_app" --json 2>/dev/null | grep -q '"SAML_SP_CERT"'; then
         echo "==> SAML SP secrets already set for $apigw_app (skipping)"
-    else
-        echo "==> Provisioning SAML SP keypair for $apigw_app"
-        saml_tmp="$(mktemp -d)"
-        # Self-signed cert; SP metadata publishes the pubkey, IdPs pin it out-of-band.
-        # 10 years is well beyond dev/demo rotation cadence.
-        if openssl req -x509 -newkey rsa:2048 -nodes \
-                -keyout "${saml_tmp}/saml_sp.key" \
-                -out "${saml_tmp}/saml_sp.crt" \
-                -days 3650 \
-                -subj "/CN=${apigw_app}.fly.dev/O=SUNET VC" \
-                >/dev/null 2>&1; then
-            saml_cert_b64="$(base64 < "${saml_tmp}/saml_sp.crt" | tr -d '\n')"
-            saml_key_b64="$(base64 < "${saml_tmp}/saml_sp.key" | tr -d '\n')"
-            fly secrets set --app "$apigw_app" \
-                SAML_SP_CERT="$saml_cert_b64" \
-                SAML_SP_KEY="$saml_key_b64" \
-                2>/dev/null && echo "    SAML SP keypair set" \
-                || echo "    (failed to set SAML SP keypair; app missing?)"
-        else
-            echo "    (openssl failed to generate SAML SP keypair; set SAML_SP_CERT/KEY manually)"
-        fi
-        rm -rf "$saml_tmp"
+        return 0
     fi
-
-    echo ""
-    echo "==> Apps created. Next: ./fly/deploy.sh deploy --profile ${PROFILE:-dev}"
+    echo "==> Provisioning SAML SP keypair for $apigw_app"
+    saml_tmp="$(mktemp -d)"
+    # Self-signed cert; SP metadata publishes the pubkey, IdPs pin it out-of-band.
+    # 10 years is well beyond dev/demo rotation cadence.
+    if openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "${saml_tmp}/saml_sp.key" \
+            -out "${saml_tmp}/saml_sp.crt" \
+            -days 3650 \
+            -subj "/CN=${apigw_app}.fly.dev/O=SUNET VC" \
+            >/dev/null 2>&1; then
+        saml_cert_b64="$(base64 < "${saml_tmp}/saml_sp.crt" | tr -d '\n')"
+        saml_key_b64="$(base64 < "${saml_tmp}/saml_sp.key" | tr -d '\n')"
+        fly secrets set --app "$apigw_app" \
+            SAML_SP_CERT="$saml_cert_b64" \
+            SAML_SP_KEY="$saml_key_b64" \
+            2>/dev/null && echo "    SAML SP keypair set" \
+            || echo "    (failed to set SAML SP keypair; app missing?)"
+    else
+        echo "    (openssl failed to generate SAML SP keypair; set SAML_SP_CERT/KEY manually)"
+    fi
+    rm -rf "$saml_tmp"
 }
 
 # Stage branding data URLs as Fly secrets consumed by the upstream image's
@@ -362,7 +372,6 @@ register_apigw_issuer_on_wallet_backend() {
         wait "$proxy_pid" 2>/dev/null || true
         return 0
     fi
-
     body_file="/tmp/issuer_reg_body.$$"
     local payload='{"credential_issuer_identifier":"'"$apigw_url"'","client_id":"fly-wallet","visible":true}'
 
@@ -398,8 +407,9 @@ register_apigw_issuer_on_wallet_backend() {
     done
 
     case "$code" in
-        200|201) echo "    Issuer ${method,,}ed with client_id=fly-wallet" ;;
-        *)       echo "    Unexpected status $code from admin API (body: $(head -c 200 "$body_file" 2>/dev/null))" ;;
+        200) echo "    Issuer updated with client_id=fly-wallet" ;;
+        201) echo "    Issuer created with client_id=fly-wallet" ;;
+        *)   echo "    Unexpected status $code from admin API (body: $(head -c 200 "$body_file" 2>/dev/null))" ;;
     esac
 
     kill "$proxy_pid" 2>/dev/null
@@ -409,6 +419,7 @@ register_apigw_issuer_on_wallet_backend() {
 
 cmd_deploy() {
     require_flyctl
+    require_jq
     require_profile_vars
     local profile_root
     profile_root="$(profile_dir)"
@@ -422,6 +433,12 @@ cmd_deploy() {
         if ! fly status --app "$app" >/dev/null 2>&1; then
             echo "  [create] $app (auto-creating)"
             fly apps create "$app" --org "$FLY_ORG" || die "Failed to create app: $app"
+            # cmd_launch runs SAML SP keypair provisioning after app creation,
+            # but a first-time deploy that bypasses launch needs the same
+            # bootstrap or apigw crashes in tls.LoadX509KeyPair on boot.
+            if [[ "$service" == "apigw" ]]; then
+                provision_apigw_saml_sp_keypair
+            fi
         fi
 
         if [[ "$service" == "wallet-frontend" ]]; then

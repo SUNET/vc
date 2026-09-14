@@ -312,6 +312,29 @@ func NewValidator() (*validator.Validate, error) {
 		}
 	}, model.SAMLSP{})
 
+	// doc:constraint name="saml_metadata_contact_types" struct="SAMLSPMetadata" applies="ContactPersons" description="When contact_persons is set, SWAMID Tech 6.1.4 requires at least one 'technical' and one 'administrative' contact. Other types (support, billing, other) may appear alongside them."
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(model.SAMLSPMetadata)
+		if len(cfg.ContactPersons) == 0 {
+			return
+		}
+		var hasTechnical, hasAdministrative bool
+		for _, cp := range cfg.ContactPersons {
+			switch cp.Type {
+			case "technical":
+				hasTechnical = true
+			case "administrative":
+				hasAdministrative = true
+			}
+		}
+		if !hasTechnical {
+			sl.ReportError(cfg.ContactPersons, "ContactPersons", "ContactPersons", "saml_metadata_technical_contact_required", "")
+		}
+		if !hasAdministrative {
+			sl.ReportError(cfg.ContactPersons, "ContactPersons", "ContactPersons", "saml_metadata_administrative_contact_required", "")
+		}
+	}, model.SAMLSPMetadata{})
+
 	// doc:constraint name="oidc_openid_scope" struct="OIDCRP" applies="Scopes" description="The 'openid' scope is mandatory when OIDC RP is enabled."
 	// Register struct-level validation for OIDCRPConfig
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {

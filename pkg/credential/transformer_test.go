@@ -273,6 +273,66 @@ func TestTransformClaims(t *testing.T) {
 				"nationalities": "NotACountry",
 			},
 		},
+		{
+			name: "transform yyyymmdd_to_iso valid date",
+			mapping: model.AttributeMapping{
+				"dob": {Claim: "birthdate", Required: true, Transform: "yyyymmdd_to_iso"},
+			},
+			attributes: map[string]any{
+				"dob": "19850317",
+			},
+			want: map[string]any{
+				"birthdate": "1985-03-17",
+			},
+		},
+		{
+			name: "transform yyyymmdd_to_iso leap day",
+			mapping: model.AttributeMapping{
+				"dob": {Claim: "birthdate", Required: true, Transform: "yyyymmdd_to_iso"},
+			},
+			attributes: map[string]any{
+				"dob": "20240229",
+			},
+			want: map[string]any{
+				"birthdate": "2024-02-29",
+			},
+		},
+		{
+			name: "transform yyyymmdd_to_iso invalid calendar date is unchanged",
+			mapping: model.AttributeMapping{
+				"dob": {Claim: "birthdate", Required: true, Transform: "yyyymmdd_to_iso"},
+			},
+			attributes: map[string]any{
+				"dob": "20240230",
+			},
+			want: map[string]any{
+				"birthdate": "20240230",
+			},
+		},
+		{
+			name: "transform yyyymmdd_to_iso wrong shape is unchanged",
+			mapping: model.AttributeMapping{
+				"dob": {Claim: "birthdate", Required: true, Transform: "yyyymmdd_to_iso"},
+			},
+			attributes: map[string]any{
+				"dob": "1985-03-17",
+			},
+			want: map[string]any{
+				"birthdate": "1985-03-17",
+			},
+		},
+		{
+			name: "transform yyyymmdd_to_iso empty string is unchanged",
+			mapping: model.AttributeMapping{
+				"dob": {Claim: "birthdate", Required: false, Default: "", Transform: "yyyymmdd_to_iso"},
+			},
+			attributes: map[string]any{
+				"dob": "",
+			},
+			want: map[string]any{
+				"birthdate": "",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -413,4 +473,71 @@ func FuzzSetNestedValue(f *testing.F) {
 		assert.True(t, ok, "value should be retrievable after set")
 		assert.Equal(t, value, got)
 	})
+}
+
+func TestMergeDefaults(t *testing.T) {
+	tests := []struct {
+		name     string
+		claims   map[string]any
+		defaults map[string]any
+		want     map[string]any
+	}{
+		{
+			name:     "flat default injected when missing",
+			claims:   map[string]any{},
+			defaults: map[string]any{"issuing_country": "SE"},
+			want:     map[string]any{"issuing_country": "SE"},
+		},
+		{
+			name:     "flat default does not overwrite existing flat claim",
+			claims:   map[string]any{"issuing_country": "NO"},
+			defaults: map[string]any{"issuing_country": "SE"},
+			want:     map[string]any{"issuing_country": "NO"},
+		},
+		{
+			name:     "nested default becomes nested claim",
+			claims:   map[string]any{},
+			defaults: map[string]any{"identity.country": "SE"},
+			want: map[string]any{
+				"identity": map[string]any{"country": "SE"},
+			},
+		},
+		{
+			name: "nested default does not overwrite existing nested claim",
+			claims: map[string]any{
+				"identity": map[string]any{"country": "NO"},
+			},
+			defaults: map[string]any{"identity.country": "SE"},
+			want: map[string]any{
+				"identity": map[string]any{"country": "NO"},
+			},
+		},
+		{
+			name: "nested default merges into existing sibling",
+			claims: map[string]any{
+				"identity": map[string]any{"given_name": "Alice"},
+			},
+			defaults: map[string]any{"identity.country": "SE"},
+			want: map[string]any{
+				"identity": map[string]any{
+					"given_name": "Alice",
+					"country":    "SE",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := MergeDefaults(tt.claims, tt.defaults)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, tt.claims)
+		})
+	}
+}
+
+func TestMergeDefaults_PathConflict(t *testing.T) {
+	claims := map[string]any{"identity": "not-a-map"}
+	err := MergeDefaults(claims, map[string]any{"identity.country": "SE"})
+	require.Error(t, err)
 }
