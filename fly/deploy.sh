@@ -194,10 +194,16 @@ cmd_launch() {
         demo_user_password="$(LC_ALL=C awk 'BEGIN{srand();s="";for(i=0;i<3;i++)s=s substr("abcdefghjkmnpqrstuvwxyz",int(rand()*23)+1,1);print s int(rand()*10)}')"
 
         echo "==> Setting OIDC secrets for $oidc_app"
-        fly secrets set --app "$oidc_app" \
+        # Abort on failure: if fly rejects the secrets, we must NOT write the
+        # generated client_secret into the local secrets file. Otherwise apigw
+        # ships with a secret Keycloak never received and every OIDC login
+        # fails.
+        if ! fly secrets set --app "$oidc_app" \
             APIGW_OIDC_CLIENT_SECRET="$apigw_client_secret" \
-            DEMO_USER_PASSWORD="$demo_user_password" \
-            2>/dev/null && echo "    OIDC secrets set" || echo "    (failed to set OIDC secrets)"
+            DEMO_USER_PASSWORD="$demo_user_password"; then
+            die "Failed to set OIDC secrets for $oidc_app; refusing to write local client_secret"
+        fi
+        echo "    OIDC secrets set"
 
         yq -i ".apigw.auth_providers.oidc.registration.preconfigured.client_secret = \"$apigw_client_secret\"" "$secrets_file"
         echo "    Updated $secrets_file with apigw OIDC client_secret (auth_providers)"
