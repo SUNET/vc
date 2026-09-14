@@ -127,6 +127,12 @@ type AssertionConfig struct {
 type AssertionScope struct {
 	// AuthProvider is the auth provider for this credential type (saml or oidc)
 	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=saml oidc"`
+
+	// Defaults holds claim values injected into the assertion document for
+	// credential-level fields the authentication assertion cannot supply
+	// (e.g. issuing_authority, issuing_country, date_of_expiry). Merged
+	// after attribute_mapping — real attributes always win.
+	Defaults map[string]any `yaml:"defaults,omitempty" doc_key:"claim path"`
 }
 
 // ExternalAPIConfig groups external API credential scopes.

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -213,6 +214,11 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 			}
 		} else {
 			// Assertion: store the transformed claims directly as a document
+			defaults := s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].Defaults
+			if err := credential.MergeDefaults(claims, defaults); err != nil {
+				span.SetStatus(codes.Error, "assertion defaults merge failed")
+				return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
+			}
 			doc := &model.CompleteDocument{
 				Meta: &model.MetaData{
 					AuthenticSource: session.IDPEntityID,
@@ -287,6 +293,29 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		s.log.Debug("standalone SAML: could not resolve identifier", "error", resolveErr)
 	}
 
+	// Resolve the data source for this credential type so that the credential
+	// endpoint knows whether the identity is assertion-based, and so that we
+	// don't merge assertion-only defaults into a document belonging to a
+	// datastore or external-API source. Mirrors the OIDC standalone path.
+	credSource, credSourceErr := s.cfg.APIGW.DataSources.ResolveDataSource(session.CredentialType, string(model.AuthProviderSAML))
+	if credSourceErr != nil {
+		s.log.Debug("standalone SAML: could not resolve data source", "error", credSourceErr)
+	}
+
+	// Fail fast if we have neither an identifier nor a resolved data source —
+	// a credential offer created without either cannot be redeemed. Mirrors
+	// the OIDC standalone path.
+	if identifier == "" && credSourceErr != nil {
+		span.SetStatus(codes.Error, "cannot create credential offer without identifier or data source")
+		return nil, fmt.Errorf("failed to resolve data source for credential type %q: %w (identifier error: %v)", session.CredentialType, credSourceErr, resolveErr)
+	}
+
+	// Fail fast if the data source requires an identifier but none was resolved.
+	if identifier == "" && credSourceErr == nil && credSource.DataSource != model.DataSourceAssertion {
+		span.SetStatus(codes.Error, "data source requires identifier but none was resolved")
+		return nil, fmt.Errorf("data source %q for credential type %q requires an identifier", credSource.DataSource, session.CredentialType)
+	}
+
 	authCtx := &cache.AuthorizationContext{
 		SessionID:    preAuthCode,
 		Code:         preAuthCode,
@@ -304,13 +333,26 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 			},
 		},
 	}
+	if credSourceErr == nil {
+		authCtx.DataSource = string(credSource.DataSource)
+	}
 	if err = s.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		span.SetStatus(codes.Error, "pre-auth code persistence failed")
 		return nil, fmt.Errorf("failed to store pre-auth code: %w", err)
 	}
 
 	// Store document data so the credential endpoint can issue the credential
-	// when the wallet redeems the offer.
+	// when the wallet redeems the offer. Only merge assertion defaults when
+	// the resolved source is Assertion; other sources (datastore, external
+	// API) own their document data and must not be polluted with SAML
+	// assertion defaults.
+	if credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion {
+		defaults := s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].Defaults
+		if err := credential.MergeDefaults(claims, defaults); err != nil {
+			span.SetStatus(codes.Error, "assertion defaults merge failed")
+			return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
+		}
+	}
 	doc := &model.CompleteDocument{
 		Meta:         &model.MetaData{AuthenticSource: session.IDPEntityID},
 		DocumentData: claims,

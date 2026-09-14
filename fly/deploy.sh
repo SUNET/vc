@@ -57,6 +57,10 @@ require_flyctl() {
     command -v fly >/dev/null 2>&1 || die "flyctl not found. Install: https://fly.io/docs/flyctl/install/"
 }
 
+require_jq() {
+    command -v jq >/dev/null 2>&1 || die "jq not found. Install: https://jqlang.github.io/jq/download/ (needed for idempotent wallet-backend issuer registration)."
+}
+
 apply_profile() {
     case "$PROFILE" in
         dev)
@@ -249,8 +253,47 @@ cmd_launch() {
         echo "         apigw/issuer/verifier/registry, or run make dev-pki first."
     fi
 
+    # apigw's SAML SP keypair, mounted via [[files]] in fly/<profile>/apigw/fly.toml.
+    # See provision_apigw_saml_sp_keypair for the rationale.
+    provision_apigw_saml_sp_keypair
+
     echo ""
     echo "==> Apps created. Next: ./fly/deploy.sh deploy --profile ${PROFILE:-dev}"
+}
+
+# apigw's SAML SP keypair, mounted via [[files]] in fly/<profile>/apigw/fly.toml.
+# Only apigw needs it, and only profiles that enable SAML mount it. The
+# cert/key aren't checked into developer_tools/pki, so we self-provision
+# a throwaway keypair on first launch (or first auto-create deploy) to make
+# a fresh 'fly deploy' actually boot instead of crashing in tls.LoadX509KeyPair.
+provision_apigw_saml_sp_keypair() {
+    local apigw_app saml_cert_b64 saml_key_b64 saml_tmp
+    apigw_app="$(app_name "apigw")"
+    if fly secrets list --app "$apigw_app" --json 2>/dev/null | grep -q '"SAML_SP_CERT"'; then
+        echo "==> SAML SP secrets already set for $apigw_app (skipping)"
+        return 0
+    fi
+    echo "==> Provisioning SAML SP keypair for $apigw_app"
+    saml_tmp="$(mktemp -d)"
+    # Self-signed cert; SP metadata publishes the pubkey, IdPs pin it out-of-band.
+    # 10 years is well beyond dev/demo rotation cadence.
+    if openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "${saml_tmp}/saml_sp.key" \
+            -out "${saml_tmp}/saml_sp.crt" \
+            -days 3650 \
+            -subj "/CN=${apigw_app}.fly.dev/O=SUNET VC" \
+            >/dev/null 2>&1; then
+        saml_cert_b64="$(base64 < "${saml_tmp}/saml_sp.crt" | tr -d '\n')"
+        saml_key_b64="$(base64 < "${saml_tmp}/saml_sp.key" | tr -d '\n')"
+        fly secrets set --app "$apigw_app" \
+            SAML_SP_CERT="$saml_cert_b64" \
+            SAML_SP_KEY="$saml_key_b64" \
+            2>/dev/null && echo "    SAML SP keypair set" \
+            || echo "    (failed to set SAML SP keypair; app missing?)"
+    else
+        echo "    (openssl failed to generate SAML SP keypair; set SAML_SP_CERT/KEY manually)"
+    fi
+    rm -rf "$saml_tmp"
 }
 
 # Stage branding data URLs as Fly secrets consumed by the upstream image's
@@ -287,8 +330,96 @@ push_wallet_frontend_branding_secrets() {
         || echo "    (failed to stage branding secrets; continuing)"
 }
 
+# Registers the profile's apigw URL as an issuer on the wallet-backend's
+# default tenant. wallet-backend has no config-driven issuer bootstrap; without
+# this, a fresh deploy shows an empty credentials list in the wallet UI.
+# The admin token is rotated each run so we never depend on a value we can't
+# read back from Fly. Idempotent: PUT-if-exists so the client_id
+# ("fly-wallet") stays in sync with what apigw's static clients map advertises.
+register_apigw_issuer_on_wallet_backend() {
+    local wb_app apigw_url admin_token proxy_pid body_file
+    wb_app="$(app_name wallet-backend)"
+    apigw_url="https://$(app_name apigw).fly.dev"
+
+    echo "    Registering ${apigw_url} as issuer on ${wb_app} (default tenant)"
+
+    admin_token="$(openssl rand -hex 32)"
+    if ! fly secrets set --app "$wb_app" WALLET_SERVER_ADMIN_TOKEN="$admin_token" >/dev/null 2>&1; then
+        echo "    (failed to rotate admin token; skipping issuer registration)"
+        return 0
+    fi
+
+    fly proxy 18081:8081 --app "$wb_app" >/dev/null 2>&1 &
+    proxy_pid=$!
+
+    # Rotating the admin-token secret restarts the backend, and fly's health
+    # check has a 10s grace period. Poll until the admin API answers with a
+    # 2xx/4xx (i.e. the process is up and TLS-terminating), so a cold start
+    # can't silently skip registration by racing an unhealthy backend.
+    local ready="" attempt code_probe
+    for attempt in $(seq 1 30); do
+        code_probe="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 \
+            -H "Authorization: Bearer $admin_token" \
+            http://127.0.0.1:18081/admin/tenants/default/issuers 2>/dev/null || echo 000)"
+        case "$code_probe" in
+            2*|4*) ready=1; break ;;
+        esac
+        sleep 1
+    done
+    if [[ -z "$ready" ]]; then
+        echo "    (wallet-backend admin API did not become ready; skipping issuer registration)"
+        kill "$proxy_pid" 2>/dev/null
+        wait "$proxy_pid" 2>/dev/null || true
+        return 0
+    fi
+    body_file="/tmp/issuer_reg_body.$$"
+    local payload='{"credential_issuer_identifier":"'"$apigw_url"'","client_id":"fly-wallet","visible":true}'
+
+    local list existing_id method path code
+    list="$(curl -sS -H "Authorization: Bearer $admin_token" \
+        http://127.0.0.1:18081/admin/tenants/default/issuers 2>/dev/null || echo '{}')"
+    existing_id="$(printf '%s' "$list" | jq -r --arg url "$apigw_url" \
+        '.issuers[]? | select(.credential_issuer_identifier == $url) | .id' 2>/dev/null | head -n 1)"
+
+    if [[ -n "$existing_id" ]]; then
+        method="PUT"
+        path="/admin/tenants/default/issuers/$existing_id"
+    else
+        method="POST"
+        path="/admin/tenants/default/issuers"
+    fi
+
+    # Retry the admin request itself: the readiness probe above uses the same
+    # code path, but the process can briefly go 502 during machine promotion.
+    local attempt2
+    code="000"
+    for attempt2 in 1 2 3; do
+        code="$(curl -sS -o "$body_file" -w '%{http_code}' \
+            -X "$method" \
+            -H "Authorization: Bearer $admin_token" \
+            -H 'Content-Type: application/json' \
+            -d "$payload" \
+            "http://127.0.0.1:18081$path" 2>/dev/null || echo 000)"
+        case "$code" in
+            200|201) break ;;
+        esac
+        sleep 2
+    done
+
+    case "$code" in
+        200) echo "    Issuer updated with client_id=fly-wallet" ;;
+        201) echo "    Issuer created with client_id=fly-wallet" ;;
+        *)   echo "    Unexpected status $code from admin API (body: $(head -c 200 "$body_file" 2>/dev/null))" ;;
+    esac
+
+    kill "$proxy_pid" 2>/dev/null
+    wait "$proxy_pid" 2>/dev/null || true
+    rm -f "$body_file"
+}
+
 cmd_deploy() {
     require_flyctl
+    require_jq
     require_profile_vars
     local profile_root
     profile_root="$(profile_dir)"
@@ -302,6 +433,12 @@ cmd_deploy() {
         if ! fly status --app "$app" >/dev/null 2>&1; then
             echo "  [create] $app (auto-creating)"
             fly apps create "$app" --org "$FLY_ORG" || die "Failed to create app: $app"
+            # cmd_launch runs SAML SP keypair provisioning after app creation,
+            # but a first-time deploy that bypasses launch needs the same
+            # bootstrap or apigw crashes in tls.LoadX509KeyPair on boot.
+            if [[ "$service" == "apigw" ]]; then
+                provision_apigw_saml_sp_keypair
+            fi
         fi
 
         if [[ "$service" == "wallet-frontend" ]]; then
@@ -317,6 +454,11 @@ cmd_deploy() {
                 --app "$app" \
                 --config "${profile_root}/${service}/fly.toml"
         )
+
+        if [[ "$service" == "wallet-backend" ]]; then
+            register_apigw_issuer_on_wallet_backend
+        fi
+
         echo ""
     done
     echo "==> Deployment complete"

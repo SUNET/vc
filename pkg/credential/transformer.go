@@ -3,6 +3,7 @@ package credential
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/biter777/countries"
@@ -86,6 +87,15 @@ func ApplyTransform(value any, transform string) any {
 			return value
 		}
 		return cc.Alpha3()
+	case "yyyymmdd_to_iso":
+		// SCHAC schacDateOfBirth is "YYYYMMDD"; SD-JWT VC birthdate is ISO "YYYY-MM-DD".
+		// Reject impossible calendar dates (e.g. 20240230) rather than
+		// reformatting them into plausible-looking ISO strings.
+		t, err := time.Parse("20060102", str)
+		if err != nil {
+			return value
+		}
+		return t.Format("2006-01-02")
 	default:
 		return value
 	}
@@ -100,6 +110,22 @@ func wrapAsArray(value any) any {
 	default:
 		return v
 	}
+}
+
+// MergeDefaults injects default claim values into doc for any claim path
+// whose key is not already present, treating each defaults key as a
+// dot-notation claim path (matching the AttributeMapping Claim field).
+// Existing values — including nested ones — always win.
+func MergeDefaults(doc, defaults map[string]any) error {
+	for path, value := range defaults {
+		if _, present := GetNestedValue(doc, path); present {
+			continue
+		}
+		if err := SetNestedValue(doc, path, value); err != nil {
+			return fmt.Errorf("failed to set default %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 // SetNestedValue sets a value in a map using dot-notation path.
