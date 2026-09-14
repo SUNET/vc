@@ -533,9 +533,11 @@ func (m *middlewareHandler) SecurityHeaders(tlsEnabled bool) gin.HandlerFunc {
 }
 
 // AdminCSP returns middleware that sets a restrictive Content-Security-Policy for admin UI pages.
+// 'unsafe-eval' is required by the Alpine.js runtime (new AsyncFunction) used to compile
+// x-* directives; the alternative is the @alpinejs/csp precompiled build.
 func (m *middlewareHandler) AdminCSP() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'")
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'")
 		c.Next()
 	}
 }

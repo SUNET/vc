@@ -57,6 +57,10 @@ require_flyctl() {
     command -v fly >/dev/null 2>&1 || die "flyctl not found. Install: https://fly.io/docs/flyctl/install/"
 }
 
+require_yq() {
+    command -v yq >/dev/null 2>&1 || die "yq not found. Install: https://github.com/mikefarah/yq"
+}
+
 apply_profile() {
     case "$PROFILE" in
         dev)
@@ -98,6 +102,7 @@ profile_dir() {
 
 cmd_launch() {
     require_flyctl
+    require_yq
     require_profile_vars
     echo "==> Launching Fly apps (prefix=${ENV_PREFIX}, tag=${VC_IMAGE_TAG}, region=${REGION})"
     echo ""
@@ -169,8 +174,9 @@ cmd_launch() {
         echo "    Updated $secrets_file with MongoDB URI"
     fi
 
-    local oidc_app apigw_client_secret demo_user_password
+    local oidc_app apigw_client_secret demo_user_password oidc_first_launch
     oidc_app="$(app_name "oidc")"
+    oidc_first_launch=0
 
     # Idempotent: Keycloak's realm import runs once on first boot and stores
     # the client_secret + user password hashes in its H2 DB. Rotating these
@@ -179,23 +185,55 @@ cmd_launch() {
     if fly secrets list --app "$oidc_app" --json 2>/dev/null | grep -q '"APIGW_OIDC_CLIENT_SECRET"'; then
         echo "==> OIDC secrets already set for $oidc_app (skipping)"
     else
+        oidc_first_launch=1
         apigw_client_secret="$(openssl rand -hex 24)"
         # 4 chars for live demos: 3 lowercase letters + 1 trailing digit.
+        # Shared by every realm user (including admin@sunet.se) — an accepted
+        # demo tradeoff: these environments are throwaway and rebuilt often,
+        # not production authorisation surfaces.
         demo_user_password="$(LC_ALL=C awk 'BEGIN{srand();s="";for(i=0;i<3;i++)s=s substr("abcdefghjkmnpqrstuvwxyz",int(rand()*23)+1,1);print s int(rand()*10)}')"
 
         echo "==> Setting OIDC secrets for $oidc_app"
-        fly secrets set --app "$oidc_app" \
+        # Abort on failure: if fly rejects the secrets, we must NOT write the
+        # generated client_secret into the local secrets file. Otherwise apigw
+        # ships with a secret Keycloak never received and every OIDC login
+        # fails.
+        if ! fly secrets set --app "$oidc_app" \
             APIGW_OIDC_CLIENT_SECRET="$apigw_client_secret" \
-            DEMO_USER_PASSWORD="$demo_user_password" \
-            2>/dev/null && echo "    OIDC secrets set" || echo "    (failed to set OIDC secrets)"
-
-        if command -v yq >/dev/null 2>&1; then
-            yq -i ".apigw.auth_providers.oidc.registration.preconfigured.client_secret = \"$apigw_client_secret\"" "$secrets_file"
-            echo "    Updated $secrets_file with apigw OIDC client_secret"
-        else
-            echo "    WARNING: yq not found; set apigw.auth_providers.oidc.registration.preconfigured.client_secret in $secrets_file manually to: $apigw_client_secret"
+            DEMO_USER_PASSWORD="$demo_user_password"; then
+            die "Failed to set OIDC secrets for $oidc_app; refusing to write local client_secret"
         fi
+        echo "    OIDC secrets set"
+
+        yq -i ".apigw.auth_providers.oidc.registration.preconfigured.client_secret = \"$apigw_client_secret\"" "$secrets_file"
+        echo "    Updated $secrets_file with apigw OIDC client_secret (auth_providers)"
         echo "    Demo user password (Keycloak realm users): $demo_user_password"
+    fi
+
+    # api_auth.oidc.client_secret mirrors the preconfigured client_secret.
+    # Reconcile on every deploy so upgrades of existing environments (where
+    # the first-launch branch above is skipped) still get the field populated
+    # without rotating the Keycloak secret. yq is a hard prerequisite (see
+    # require_yq at the top of cmd_launch), so no fallback branch is needed.
+    if [[ -f "$secrets_file" ]]; then
+        local existing_client_secret
+        existing_client_secret="$(yq -r '.apigw.auth_providers.oidc.registration.preconfigured.client_secret // ""' "$secrets_file")"
+        if [[ -n "$existing_client_secret" && "$existing_client_secret" != "null" ]]; then
+            yq -i ".apigw.api_server.api_auth.oidc.client_secret = \"$existing_client_secret\"" "$secrets_file"
+            echo "    Reconciled apigw.api_server.api_auth.oidc.client_secret in $secrets_file"
+        fi
+    fi
+
+    # Keycloak's realm import is one-shot: on an existing environment the
+    # newly added admin@sunet.se user and email protocol mapper won't appear
+    # in the running realm. Warn the operator so they either re-import
+    # manually (Keycloak admin UI → Realm → Partial import) or destroy and
+    # re-launch the oidc app to get a fresh realm from realm-vc.json.
+    if [[ "$oidc_first_launch" -eq 0 ]]; then
+        echo "    NOTE: realm-vc.json changes (admin@sunet.se user, email mapper)"
+        echo "          only apply on first launch. To pick them up on an existing"
+        echo "          environment: fly ssh console --app $oidc_app and re-import"
+        echo "          the realm, or 'fly apps destroy $oidc_app' and re-launch."
     fi
 
     local wallet_backend_app as_key_pem as_key_b64

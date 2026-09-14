@@ -6,6 +6,7 @@ import (
 
 	"github.com/SUNET/vc/internal/registry/apiv1"
 	"github.com/SUNET/vc/internal/registry/cache"
+	"github.com/SUNET/vc/internal/registry/httpserver/staticembed"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -82,6 +83,12 @@ func New(ctx context.Context, cfg *model.Cfg, api *apiv1.Client, tracer *trace.T
 
 		// Redirect root to admin login
 		s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "", http.StatusFound, s.endpointRootRedirect)
+
+		// Static admin assets (SUNET logo, favicon) served from an embedded FS.
+		s.gin.StaticFS("/admin/static", http.FS(staticembed.FS))
+		s.gin.GET("/favicon.ico", func(c *gin.Context) {
+			c.FileFromFS("favicon.png", http.FS(staticembed.FS))
+		})
 
 		rgAdmin := rgRoot.Group("/admin")
 		// Public routes (no auth required)
