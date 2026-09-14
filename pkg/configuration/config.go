@@ -152,6 +152,9 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 
 	// Nil out service sections this service doesn't own so that a shared
 	// config file won't fail validation on incomplete sibling stanzas.
+	if serviceName == "apigw" {
+		cfg.SeedDashboardDefaults()
+	}
 	switch serviceName {
 	case "issuer":
 		cfg.APIGW, cfg.Verifier, cfg.Registry = nil, nil, nil

@@ -415,6 +415,10 @@ func (u unimplementedApiv1) Health(context.Context, *apiv1_status.StatusRequest)
 	panic("not implemented")
 }
 
+func (u unimplementedApiv1) Dashboard(context.Context) (*apiv1.DashboardReply, error) {
+	panic("not implemented")
+}
+
 // mockApiv1 embeds unimplementedApiv1 and overrides only the methods under test
 type mockApiv1 struct {
 	unimplementedApiv1

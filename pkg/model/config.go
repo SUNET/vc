@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -1347,6 +1348,8 @@ type APIGW struct {
 	OpenIDFederation *openidfederation.Config `yaml:"federation,omitempty"`
 	// RateLimit configures per-endpoint rate limiting for the APIGW.
 	RateLimit *APIGWRateLimit `yaml:"rate_limit,omitempty"`
+	// Dashboard configures the /dashboard demo landing page.
+	Dashboard APIGWDashboard `yaml:"dashboard,omitempty"`
 }
 
 // APIGWRateLimit holds per-endpoint rate limit settings for the APIGW.
@@ -1357,6 +1360,38 @@ type APIGWRateLimit struct {
 	CredentialRequestsPerMinute int `yaml:"credential_requests_per_minute" default:"30"`
 	// DatastoreRequestsPerMinute is the maximum datastore endpoint requests per minute per IP. Default: 60
 	DatastoreRequestsPerMinute int `yaml:"datastore_requests_per_minute" default:"60"`
+}
+
+// APIGWDashboard configures the /dashboard demo landing page that lists every
+// service in the deployment. Intended for dev/demo environments; disable in
+// production by setting enable: false.
+type APIGWDashboard struct {
+	// Enable serves GET /dashboard. Default: true.
+	Enable *bool `yaml:"enable" default:"true"`
+	// Title overrides the page heading. Default: "VC System Dashboard".
+	Title string `yaml:"title,omitempty" default:"VC System Dashboard"`
+	// Services optionally augments or overrides the auto-discovered service list.
+	// Entries with a Name that matches an auto-discovered service replace it;
+	// other entries are appended.
+	Services []DashboardService `yaml:"services,omitempty"`
+}
+
+// DashboardService is a single entry on the /dashboard page.
+type DashboardService struct {
+	// Name is the display name and match key (e.g. "apigw", "issuer").
+	Name string `yaml:"name" validate:"required"`
+	// URL is the primary public URL for the service.
+	URL string `yaml:"url" validate:"required,httpurl"`
+	// Description is optional free-form text shown under the service name.
+	Description string `yaml:"description,omitempty"`
+	// Links is an ordered list of extra labelled URLs (health, metadata, UIs, ...).
+	Links []DashboardLink `yaml:"links,omitempty"`
+}
+
+// DashboardLink is a labelled URL shown under a service entry.
+type DashboardLink struct {
+	Label string `yaml:"label" validate:"required"`
+	URL   string `yaml:"url" validate:"required,httpurl"`
 }
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list
@@ -1425,6 +1460,99 @@ type Cfg struct {
 	Issuer   *Issuer   `yaml:"issuer" validate:"omitempty"`
 	Verifier *Verifier `yaml:"verifier" validate:"omitempty"`
 	Registry *Registry `yaml:"registry" validate:"omitempty"`
+}
+
+// SeedDashboardDefaults appends auto-discovered service entries (apigw,
+// issuer, verifier, registry) to cfg.APIGW.Dashboard.Services from the
+// currently populated sibling sections. Operator-supplied entries win:
+// a Name match in Services skips the corresponding default.
+//
+// Intended to be called by the config loader before it nils sibling
+// service sections, so the /dashboard handler has data to render even
+// when it can no longer read cfg.Issuer / cfg.Verifier / cfg.Registry
+// directly.
+func (cfg *Cfg) SeedDashboardDefaults() {
+	if cfg == nil || cfg.APIGW == nil {
+		return
+	}
+
+	have := map[string]bool{}
+	for _, s := range cfg.APIGW.Dashboard.Services {
+		have[s.Name] = true
+	}
+	add := func(s DashboardService) {
+		if s.URL == "" || have[s.Name] {
+			return
+		}
+		cfg.APIGW.Dashboard.Services = append(cfg.APIGW.Dashboard.Services, s)
+	}
+
+	if u := strings.TrimRight(cfg.APIGW.PublicURL, "/"); u != "" {
+		links := []DashboardLink{
+			{Label: "Health", URL: u + "/health"},
+			{Label: "Credential offers", URL: u + "/offers"},
+			{Label: "OpenID4VCI metadata", URL: u + "/.well-known/openid-credential-issuer"},
+			{Label: "OAuth2 metadata", URL: u + "/.well-known/oauth-authorization-server"},
+			{Label: "JWKS", URL: u + "/jwks"},
+		}
+		if cfg.APIGW.AdminUIEnable {
+			links = append(links, DashboardLink{Label: "Admin UI", URL: u + "/ui"})
+		}
+		if cfg.APIGW.OpenIDFederation != nil {
+			links = append(links, DashboardLink{Label: "OpenID federation", URL: u + "/.well-known/openid-federation"})
+		}
+		add(DashboardService{
+			Name:        "apigw",
+			URL:         u,
+			Description: "API gateway – credential issuance, OAuth2/OIDC, wallet-facing endpoints.",
+			Links:       links,
+		})
+	}
+
+	if cfg.Issuer != nil {
+		if u := strings.TrimRight(cfg.Issuer.IssuerURL, "/"); u != "" {
+			add(DashboardService{
+				Name:        "issuer",
+				URL:         u,
+				Description: "Credential issuer – signs verifiable credentials.",
+				Links: []DashboardLink{
+					{Label: "Health", URL: u + "/health"},
+					{Label: "JWKS", URL: u + "/jwks"},
+				},
+			})
+		}
+	}
+
+	if cfg.Verifier != nil {
+		if u := strings.TrimRight(cfg.Verifier.PublicURL, "/"); u != "" {
+			add(DashboardService{
+				Name:        "verifier",
+				URL:         u,
+				Description: "Credential verifier – OpenID4VP relying party.",
+				Links: []DashboardLink{
+					{Label: "Health", URL: u + "/health"},
+				},
+			})
+		}
+	}
+
+	if cfg.Registry != nil {
+		if u := strings.TrimRight(cfg.Registry.PublicURL, "/"); u != "" {
+			links := []DashboardLink{
+				{Label: "Health", URL: u + "/health"},
+				{Label: "Status lists", URL: u + "/statuslists"},
+			}
+			if BoolVal(cfg.Registry.AdminGUI.Enable, false) {
+				links = append(links, DashboardLink{Label: "Admin GUI", URL: u + "/admin"})
+			}
+			add(DashboardService{
+				Name:        "registry",
+				URL:         u,
+				Description: "Credential status registry – token status lists.",
+				Links:       links,
+			})
+		}
+	}
 }
 
 // LookupCredentialSources returns full data source information for a credential type

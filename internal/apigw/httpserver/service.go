@@ -241,6 +241,10 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "health", 200, s.endpointHealth)
 
+	if model.BoolVal(s.cfg.APIGW.Dashboard.Enable, true) {
+		s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "dashboard", http.StatusOK, s.endpointDashboard)
+	}
+
 	// Prometheus metrics scrape endpoint
 	if s.metricsHandler != nil {
 		rgRoot.GET("metrics", gin.WrapH(s.metricsHandler))
