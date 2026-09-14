@@ -280,6 +280,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 | `trust`                   | `object` | Trust evaluation configuration for OpenID4VP credential validation. When configured, credentials presented via VP are validated against a PDP.                                                                      | -                           | -       | No       |
 | `federation`              | `object` | OpenID Federation entity configuration. When enabled, serves /.well-known/openid-federation as a self-signed JWT.                                                                                                   | -                           | -       | No       |
 | `rate_limit`              | `object` | Per-endpoint rate limiting for the APIGW.                                                                                                                                                                           | -                           | -       | No       |
+| `dashboard`               | `object` | The /dashboard demo landing page.                                                                                                                                                                                   | -                           | -       | No       |
 
 ### `api_server`
 
@@ -876,6 +877,42 @@ Example rules:
 | `token_requests_per_minute`      | `int` | Maximum token endpoint requests per minute per IP. Default: 20      | -       | `20`    | No       |
 | `credential_requests_per_minute` | `int` | Maximum credential endpoint requests per minute per IP. Default: 30 | -       | `30`    | No       |
 | `datastore_requests_per_minute`  | `int` | Maximum datastore endpoint requests per minute per IP. Default: 60  | -       | `60`    | No       |
+
+### `dashboard`
+
+> **Path:** `.apigw.dashboard`
+
+service in the deployment. Intended for dev/demo environments; opt in by
+setting enable: true. Off by default so no shared-config deployment starts
+exposing its service inventory to anonymous callers without an explicit
+action from the operator.
+
+| Field      | Type     | Description                                                                                                                                                                     | Example | Default                        | Required |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------ | -------- |
+| `enable`   | `bool`   | Enable serves GET /dashboard. Default: false (opt-in).                                                                                                                          | -       | `false`                        | No       |
+| `title`    | `string` | Title overrides the page heading. Default: "SUNET Verifiable Credentials".                                                                                                      | -       | `SUNET Verifiable Credentials` | No       |
+| `services` | `array`  | Services optionally augments or overrides the auto-discovered service list. Entries with a Name that matches an auto-discovered service replace it; other entries are appended. | -       | -                              | No       |
+
+### `services` entry
+
+> **Path:** `.apigw.dashboard.services[]`
+
+| Field         | Type     | Description                                                       | Example | Default | Required |
+| ------------- | -------- | ----------------------------------------------------------------- | ------- | ------- | -------- |
+| `name`        | `string` | Display name and match key (e.g. "apigw", "issuer").              | -       | -       | Yes      |
+| `url`         | `string` | Primary public URL for the service.                               | -       | -       | Yes      |
+| `description` | `string` | Optional free-form text shown under the service name.             | -       | -       | No       |
+| `links`       | `array`  | Ordered list of extra labelled URLs (health, metadata, UIs, ...). | -       | -       | No       |
+
+### `links` entry
+
+> **Path:** `.apigw.dashboard.services[].links[]`
+
+| Field   | Type     | Description                                                                                                                                               | Example | Default | Required |
+| ------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `label` | `string` | Label                                                                                                                                                     | -       | -       | Yes      |
+| `url`   | `string` | URL                                                                                                                                                       | -       | -       | Yes      |
+| `type`  | `string` | How the dashboard follows this link. "json" opens the response in an in-page viewer (pretty-printed, no navigation). "page" (default) opens in a new tab. | -       | `page`  | No       |
 
 ## `issuer` (Top-level)
 
