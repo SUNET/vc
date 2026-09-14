@@ -1546,7 +1546,7 @@ func (cfg *Cfg) SeedDashboardDefaults() {
 		if u := strings.TrimRight(cfg.Registry.PublicURL, "/"); u != "" {
 			links := []DashboardLink{
 				{Label: "Health", URL: u + "/health", Type: "json"},
-				{Label: "Status lists", URL: u + "/statuslists", Type: "page"},
+				{Label: "Status lists", URL: u + "/statuslists", Type: "json"},
 			}
 			if BoolVal(cfg.Registry.AdminGUI.Enable, false) {
 				links = append(links, DashboardLink{Label: "Admin GUI", URL: u + "/admin", Type: "page"})
@@ -1554,7 +1554,7 @@ func (cfg *Cfg) SeedDashboardDefaults() {
 			add(DashboardService{
 				Name:        "registry",
 				URL:         u,
-				Description: "Credential status registry – token status lists.",
+				Description: "Credential status registry - token status lists.",
 				Links:       links,
 			})
 		}

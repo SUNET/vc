@@ -191,9 +191,10 @@ cmd_launch() {
 
         if command -v yq >/dev/null 2>&1; then
             yq -i ".apigw.auth_providers.oidc.registration.preconfigured.client_secret = \"$apigw_client_secret\"" "$secrets_file"
-            echo "    Updated $secrets_file with apigw OIDC client_secret"
+            yq -i ".apigw.api_server.api_auth.oidc.client_secret = \"$apigw_client_secret\"" "$secrets_file"
+            echo "    Updated $secrets_file with apigw OIDC client_secret (auth_providers + api_auth)"
         else
-            echo "    WARNING: yq not found; set apigw.auth_providers.oidc.registration.preconfigured.client_secret in $secrets_file manually to: $apigw_client_secret"
+            echo "    WARNING: yq not found; set apigw.auth_providers.oidc.registration.preconfigured.client_secret AND apigw.api_server.api_auth.oidc.client_secret in $secrets_file manually to: $apigw_client_secret"
         fi
         echo "    Demo user password (Keycloak realm users): $demo_user_password"
     fi

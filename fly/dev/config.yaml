@@ -148,7 +148,14 @@ apigw:
         - "https://sunet-vc-wallet.fly.dev"
     api_auth:
       oidc:
-        enable: false
+        enable: true
+        issuer_url: "https://sunet-vc-oidc.fly.dev/realms/vc"
+        audience: "apigw-oidc-client"
+        client_id: "apigw-oidc-client"
+        redirect_uri: "https://sunet-vc-apigw.fly.dev/ui/callback"
+        scopes: ["openid", "email"]
+      rules:
+        - "(vc (service apigw)(method *)(path /api/v1/*)(subject admin@sunet.se)(authentic_source *)(scope *))"
   public_url: "https://sunet-vc-apigw.fly.dev"
   registry_public_url: "https://sunet-vc-registry.fly.dev"
   issuer_client:

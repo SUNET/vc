@@ -66,6 +66,20 @@
             "claim.name": "family_name",
             "jsonType.label": "String"
           }
+        },
+        {
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "email",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "email",
+            "jsonType.label": "String"
+          }
         }
       ]
     }
@@ -123,6 +137,17 @@
       "attributes": {
         "birthdate": ["1988-09-09"]
       },
+      "credentials": [
+        { "type": "password", "value": "${env.DEMO_USER_PASSWORD}", "temporary": false }
+      ]
+    },
+    {
+      "username": "admin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "VC",
+      "lastName": "Admin",
+      "email": "admin@sunet.se",
       "credentials": [
         { "type": "password", "value": "${env.DEMO_USER_PASSWORD}", "temporary": false }
       ]

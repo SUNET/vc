@@ -137,6 +137,7 @@ func TestDashboardURLAllowed(t *testing.T) {
 			URL:  "https://issuer.example.com",
 			Links: []model.DashboardLink{
 				{Label: "Health", URL: "https://issuer.example.com/health", Type: "json"},
+				{Label: "Admin UI", URL: "https://issuer.example.com/ui", Type: "page"},
 				{Label: "Other host", URL: "https://other.example.com/foo", Type: "json"},
 			},
 		},
@@ -147,11 +148,15 @@ func TestDashboardURLAllowed(t *testing.T) {
 		url     string
 		allowed bool
 	}{
-		{"https://issuer.example.com/health", true},
-		{"https://issuer.example.com/anything", true},
-		{"https://other.example.com/anything", true},
-		{"https://evil.example.com/foo", false},
-		{"http://issuer.example.com/health", false}, // scheme mismatch
+		{"https://issuer.example.com/health", true},                // exact JSON link
+		{"https://issuer.example.com/health?ts=1", true},           // query ignored
+		{"https://other.example.com/foo", true},                    // exact JSON link on other host
+		{"https://issuer.example.com/anything", false},             // path not advertised
+		{"https://issuer.example.com/ui", false},                   // page link, not json
+		{"https://issuer.example.com/metrics", false},              // unadvertised path on allowed host
+		{"https://other.example.com/anything", false},              // unadvertised path on allowed host
+		{"https://evil.example.com/foo", false},                    // unknown host
+		{"http://issuer.example.com/health", false},                // scheme mismatch
 	}
 	for _, tc := range cases {
 		t.Run(tc.url, func(t *testing.T) {

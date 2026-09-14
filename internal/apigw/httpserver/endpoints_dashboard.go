@@ -35,6 +35,10 @@ func (s *Service) endpointDashboardProxy(ctx context.Context, c *gin.Context) (a
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
-	c.Data(http.StatusOK, reply.ContentType, reply.Body)
+	status := reply.StatusCode
+	if status < 100 || status > 599 {
+		status = http.StatusBadGateway
+	}
+	c.Data(status, reply.ContentType, reply.Body)
 	return nil, nil
 }

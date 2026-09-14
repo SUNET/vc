@@ -135,6 +135,7 @@ apigw:
   key_config:
     private_key_path: "/pki/signing_ec_private.pem"
     chain_path: "/pki/signing_ec_chain.pem"
+  admin_ui_enable: true
   dashboard:
     enable: true
   api_server:
@@ -147,7 +148,14 @@ apigw:
         - "https://sunet-vc-demo-wallet.fly.dev"
     api_auth:
       oidc:
-        enable: false
+        enable: true
+        issuer_url: "https://sunet-vc-demo-oidc.fly.dev/realms/vc"
+        audience: "apigw-oidc-client"
+        client_id: "apigw-oidc-client"
+        redirect_uri: "https://sunet-vc-demo-apigw.fly.dev/ui/callback"
+        scopes: ["openid", "email"]
+      rules:
+        - "(vc (service apigw)(method *)(path /api/v1/*)(subject admin@sunet.se)(authentic_source *)(scope *))"
   public_url: "https://sunet-vc-demo-apigw.fly.dev"
   registry_public_url: "https://sunet-vc-demo-registry.fly.dev"
   issuer_client:
