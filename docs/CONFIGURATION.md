@@ -882,10 +882,9 @@ Example rules:
 
 > **Path:** `.apigw.dashboard`
 
-service in the deployment. Intended for dev/demo environments; opt in by
-setting enable: true. Off by default so no shared-config deployment starts
-exposing its service inventory to anonymous callers without an explicit
-action from the operator.
+Intended for dev/demo environments; opt in by setting enable: true. Off by
+default so no shared-config deployment starts exposing its service inventory
+to anonymous callers without an explicit action from the operator.
 
 | Field      | Type     | Description                                                                                                                                                                     | Example | Default                        | Required |
 | ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------ | -------- |

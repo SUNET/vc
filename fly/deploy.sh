@@ -181,6 +181,9 @@ cmd_launch() {
     else
         apigw_client_secret="$(openssl rand -hex 24)"
         # 4 chars for live demos: 3 lowercase letters + 1 trailing digit.
+        # Shared by every realm user (including admin@sunet.se) — an accepted
+        # demo tradeoff: these environments are throwaway and rebuilt often,
+        # not production authorisation surfaces.
         demo_user_password="$(LC_ALL=C awk 'BEGIN{srand();s="";for(i=0;i<3;i++)s=s substr("abcdefghjkmnpqrstuvwxyz",int(rand()*23)+1,1);print s int(rand()*10)}')"
 
         echo "==> Setting OIDC secrets for $oidc_app"
@@ -191,12 +194,24 @@ cmd_launch() {
 
         if command -v yq >/dev/null 2>&1; then
             yq -i ".apigw.auth_providers.oidc.registration.preconfigured.client_secret = \"$apigw_client_secret\"" "$secrets_file"
-            yq -i ".apigw.api_server.api_auth.oidc.client_secret = \"$apigw_client_secret\"" "$secrets_file"
-            echo "    Updated $secrets_file with apigw OIDC client_secret (auth_providers + api_auth)"
+            echo "    Updated $secrets_file with apigw OIDC client_secret (auth_providers)"
         else
-            echo "    WARNING: yq not found; set apigw.auth_providers.oidc.registration.preconfigured.client_secret AND apigw.api_server.api_auth.oidc.client_secret in $secrets_file manually to: $apigw_client_secret"
+            echo "    WARNING: yq not found; set apigw.auth_providers.oidc.registration.preconfigured.client_secret in $secrets_file manually to: $apigw_client_secret"
         fi
         echo "    Demo user password (Keycloak realm users): $demo_user_password"
+    fi
+
+    # api_auth.oidc.client_secret is a newer field that mirrors the
+    # preconfigured client_secret. Reconcile on every deploy so upgrades of
+    # existing environments (where the first-launch branch above is skipped)
+    # still get the field populated without rotating the Keycloak secret.
+    if command -v yq >/dev/null 2>&1 && [[ -f "$secrets_file" ]]; then
+        local existing_client_secret
+        existing_client_secret="$(yq -r '.apigw.auth_providers.oidc.registration.preconfigured.client_secret // ""' "$secrets_file")"
+        if [[ -n "$existing_client_secret" && "$existing_client_secret" != "null" ]]; then
+            yq -i ".apigw.api_server.api_auth.oidc.client_secret = \"$existing_client_secret\"" "$secrets_file"
+            echo "    Reconciled apigw.api_server.api_auth.oidc.client_secret in $secrets_file"
+        fi
     fi
 
     local wallet_backend_app as_key_pem as_key_b64

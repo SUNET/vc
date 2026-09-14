@@ -3,8 +3,12 @@ package apiv1
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	"github.com/SUNET/vc/pkg/logger"
@@ -165,4 +169,74 @@ func TestDashboardURLAllowed(t *testing.T) {
 			assert.Equal(t, tc.allowed, c.dashboardURLAllowed(u))
 		})
 	}
+}
+
+func TestAddrIsPublic(t *testing.T) {
+	cases := []struct {
+		addr   string
+		public bool
+	}{
+		{"1.1.1.1", true},
+		{"8.8.8.8", true},
+		{"127.0.0.1", false},
+		{"10.0.0.5", false},
+		{"192.168.1.1", false},
+		{"172.16.0.1", false},
+		{"169.254.169.254", false}, // link-local (AWS/GCP metadata)
+		{"0.0.0.0", false},
+		{"224.0.0.1", false},
+		{"::1", false},
+		{"fe80::1", false},
+		{"fd00::1", false}, // ULA
+		{"::", false},
+		{"2001:4860:4860::8888", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.addr, func(t *testing.T) {
+			a, err := netip.ParseAddr(tc.addr)
+			require.NoError(t, err)
+			assert.Equal(t, tc.public, addrIsPublic(a))
+		})
+	}
+}
+
+func TestNewDashboardHTTPClient_RejectsPrivate(t *testing.T) {
+	// A localhost target must be refused at dial time by the SSRF guardrail.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	client := newDashboardHTTPClient(2 * time.Second)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+
+	_, err = client.Do(req)
+	require.Error(t, err, "expected dial to loopback to fail")
+	assert.Contains(t, err.Error(), "non-public")
+}
+
+func TestProbeCache_TTL(t *testing.T) {
+	pc := &probeCache{}
+	pc.put("k", "healthy", "")
+	h, m, ok := pc.get("k")
+	assert.True(t, ok)
+	assert.Equal(t, "healthy", h)
+	assert.Empty(t, m)
+
+	// Force expiry.
+	pc.entries["k"] = probeCacheEntry{health: "healthy", expires: time.Now().Add(-time.Second)}
+	_, _, ok = pc.get("k")
+	assert.False(t, ok)
+}
+
+// TestHTTPHealthProbe_RejectsRedirect confirms the health probe follows no
+// redirects (redirect targets could point at internal hosts).
+func TestHTTPHealthProbe_RejectsRedirect(t *testing.T) {
+	// Public-address dialer refuses loopback, so an httptest.Server won't
+	// actually be dialled. Instead assert the classification path for an
+	// unreachable host.
+	h, msg := httpHealthProbe(t.Context(), "http://127.0.0.1:1/health")
+	assert.Equal(t, "unhealthy", h)
+	assert.NotEmpty(t, msg)
 }

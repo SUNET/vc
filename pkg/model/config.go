@@ -1362,11 +1362,11 @@ type APIGWRateLimit struct {
 	DatastoreRequestsPerMinute int `yaml:"datastore_requests_per_minute" default:"60"`
 }
 
-// APIGWDashboard configures the /dashboard demo landing page that lists every
-// service in the deployment. Intended for dev/demo environments; opt in by
-// setting enable: true. Off by default so no shared-config deployment starts
-// exposing its service inventory to anonymous callers without an explicit
-// action from the operator.
+// APIGWDashboard configures the /dashboard demo landing page that lists every service in the deployment.
+//
+// Intended for dev/demo environments; opt in by setting enable: true. Off by
+// default so no shared-config deployment starts exposing its service inventory
+// to anonymous callers without an explicit action from the operator.
 type APIGWDashboard struct {
 	// Enable serves GET /dashboard. Default: false (opt-in).
 	Enable bool `yaml:"enable" default:"false"`

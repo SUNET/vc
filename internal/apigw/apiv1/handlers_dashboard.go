@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -117,7 +119,8 @@ func (c *Client) applyHealth(ctx context.Context, services []DashboardServiceVie
 // issuance chain apigw's own /health tracks) gets a live probe here, without
 // coupling those services back into apigw's readiness signal. Probes run in
 // parallel with a short per-request timeout so a single unreachable service
-// can't slow the whole dashboard down.
+// can't slow the whole dashboard down. Results are cached (dashboardProbeTTL)
+// so repeated dashboard hits don't fan out to unbounded upstream traffic.
 func (c *Client) probeUnknownServices(ctx context.Context, services []DashboardServiceView) {
 	const perProbeTimeout = 2 * time.Second
 
@@ -130,12 +133,18 @@ func (c *Client) probeUnknownServices(ctx context.Context, services []DashboardS
 		if healthURL == "" {
 			continue
 		}
+		if health, msg, ok := dashboardProbeCache.get(healthURL); ok {
+			services[i].Health = health
+			services[i].Message = msg
+			continue
+		}
 		wg.Add(1)
 		go func(idx int, url string) {
 			defer wg.Done()
 			probeCtx, cancel := context.WithTimeout(ctx, perProbeTimeout)
 			defer cancel()
 			health, msg := httpHealthProbe(probeCtx, url)
+			dashboardProbeCache.put(url, health, msg)
 			services[idx].Health = health
 			services[idx].Message = msg
 		}(i, healthURL)
@@ -152,15 +161,24 @@ func healthLinkURL(links []model.DashboardLink) string {
 	return ""
 }
 
-// httpHealthProbe issues a GET against url and returns ("healthy", "") on a
-// 2xx response, ("unhealthy", message) otherwise. Any transport error, non-2xx
-// status, or timeout maps to "unhealthy".
+// httpHealthProbe issues a GET against url with an SSRF-safe transport (no
+// redirects, private/loopback/link-local IPs rejected at dial time) and
+// returns ("healthy", "") on a 2xx response, ("unhealthy", message) otherwise.
+// Any transport error, non-2xx status, or timeout maps to "unhealthy".
 func httpHealthProbe(ctx context.Context, target string) (string, string) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	u, err := url.Parse(target)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return "unhealthy", "invalid url"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return "unhealthy", err.Error()
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := newDashboardHTTPClient(0)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "unhealthy", err.Error()
 	}
@@ -169,6 +187,108 @@ func httpHealthProbe(ctx context.Context, target string) (string, string) {
 		return "unhealthy", fmt.Sprintf("HTTP %d", resp.StatusCode)
 	}
 	return "healthy", ""
+}
+
+// dashboardProbeTTL bounds how often /dashboard fans out to health links for
+// services the aggregator doesn't cover. Short enough to stay useful, long
+// enough that anonymous page hits can't drive unbounded upstream traffic.
+const dashboardProbeTTL = 10 * time.Second
+
+type probeCacheEntry struct {
+	health, message string
+	expires         time.Time
+}
+
+type probeCache struct {
+	mu      sync.Mutex
+	entries map[string]probeCacheEntry
+}
+
+func (p *probeCache) get(key string) (string, string, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e, ok := p.entries[key]
+	if !ok || time.Now().After(e.expires) {
+		return "", "", false
+	}
+	return e.health, e.message, true
+}
+
+func (p *probeCache) put(key, health, message string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.entries == nil {
+		p.entries = map[string]probeCacheEntry{}
+	}
+	p.entries[key] = probeCacheEntry{health: health, message: message, expires: time.Now().Add(dashboardProbeTTL)}
+}
+
+var dashboardProbeCache = &probeCache{}
+
+// newDashboardHTTPClient returns an HTTP client whose dialer resolves the
+// target host and rejects any resolved IP that is loopback, private,
+// link-local, multicast, or unspecified. This is the SSRF guardrail for every
+// outbound request made on behalf of the anonymous /dashboard endpoints: an
+// operator-advertised URL is only followed if its host resolves entirely to
+// public addresses.
+func newDashboardHTTPClient(timeout time.Duration) *http.Client {
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(address)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := dialer.Resolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, err
+			}
+			var lastErr error
+			for _, ip := range ips {
+				a, ok := netip.AddrFromSlice(ip.IP)
+				if !ok {
+					continue
+				}
+				if !addrIsPublic(a) {
+					lastErr = fmt.Errorf("dashboard: refusing to dial non-public address %s", a)
+					continue
+				}
+				conn, derr := dialer.DialContext(ctx, network, net.JoinHostPort(a.String(), port))
+				if derr == nil {
+					return conn, nil
+				}
+				lastErr = derr
+			}
+			if lastErr == nil {
+				lastErr = fmt.Errorf("dashboard: no resolvable public address for %s", host)
+			}
+			return nil, lastErr
+		},
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 5 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConns:          10,
+		IdleConnTimeout:       30 * time.Second,
+	}
+	return &http.Client{Timeout: timeout, Transport: transport}
+}
+
+func addrIsPublic(a netip.Addr) bool {
+	if !a.IsValid() {
+		return false
+	}
+	if a.Is4In6() {
+		a = a.Unmap()
+	}
+	if a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() ||
+		a.IsMulticast() || a.IsUnspecified() || a.IsInterfaceLocalMulticast() {
+		return false
+	}
+	return true
 }
 
 // DashboardProxyReply carries a URL fetched by the dashboard proxy.
@@ -212,21 +332,20 @@ func (c *Client) DashboardProxy(ctx context.Context, target string) (*DashboardP
 	}
 	req.Header.Set("Accept", "application/json, */*")
 
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		// Re-check every redirect target against the same allowlist. Without
-		// this, a server on an allowed host could redirect the APIGW into
-		// 127.0.0.1, cloud metadata, or another internal host on behalf of
-		// an anonymous caller.
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return errors.New("too many redirects")
-			}
-			if !c.dashboardURLAllowed(req.URL) {
-				return errDashboardProxyDenied
-			}
-			return nil
-		},
+	client := newDashboardHTTPClient(5 * time.Second)
+	// Re-check every redirect target against the same allowlist. Without
+	// this, a server on an allowed host could redirect the APIGW into
+	// 127.0.0.1, cloud metadata, or another internal host on behalf of
+	// an anonymous caller. The SSRF-safe dialer is a second line of defence
+	// for hostnames that resolve to private IPs (DNS rebinding).
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return errors.New("too many redirects")
+		}
+		if !c.dashboardURLAllowed(req.URL) {
+			return errDashboardProxyDenied
+		}
+		return nil
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -238,11 +357,11 @@ func (c *Client) DashboardProxy(ctx context.Context, target string) (*DashboardP
 	if err != nil {
 		return nil, err
 	}
-	ct := resp.Header.Get("Content-Type")
-	if ct == "" {
-		ct = "text/plain; charset=utf-8"
-	}
-	return &DashboardProxyReply{Body: body, ContentType: ct, StatusCode: resp.StatusCode}, nil
+	// Force a non-executable Content-Type: /dashboard/proxy is anonymous and
+	// same-origin, so a direct navigation to it must never render an
+	// allowlisted response as text/html or another active type. The dashboard
+	// allowlist is JSON-only.
+	return &DashboardProxyReply{Body: body, ContentType: "application/json; charset=utf-8", StatusCode: resp.StatusCode}, nil
 }
 
 // dashboardURLAllowed returns true iff u exactly matches (scheme+host+path) a
