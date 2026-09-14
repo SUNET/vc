@@ -170,6 +170,18 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		}
 	}
 
+	// Log the raw attribute Names the IdP released (keys only, no values, no PII)
+	// so operators can tell whether an empty claim set is caused by a release-policy
+	// issue at the IdP or by an OID mismatch in our attribute_mapping.
+	rawAttrNames := make([]string, 0, len(assertion.Attributes))
+	for k := range assertion.Attributes {
+		rawAttrNames = append(rawAttrNames, k)
+	}
+	s.log.Info("SAML ACS: raw assertion attributes",
+		"count", len(rawAttrNames),
+		"names", rawAttrNames,
+		"has_nameid", assertion.NameID != "")
+
 	// Transform SAML attributes to credential claims using the generic transformer
 	claims, err := transformer.TransformClaims(samlAttrs)
 	if err != nil {
