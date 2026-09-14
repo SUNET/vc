@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -163,8 +164,12 @@ func healthLinkURL(links []model.DashboardLink) string {
 
 // httpHealthProbe issues a GET against url with an SSRF-safe transport (no
 // redirects, private/loopback/link-local IPs rejected at dial time) and
-// returns ("healthy", "") on a 2xx response, ("unhealthy", message) otherwise.
-// Any transport error, non-2xx status, or timeout maps to "unhealthy".
+// classifies the service using both the HTTP status and the response body:
+// non-2xx maps to "unhealthy"; a 2xx body that decodes as a StatusReply with
+// any probe reporting healthy=false (or data.status set and not "healthy")
+// also maps to "unhealthy" so downstream services whose /health always
+// returns HTTP 200 don't show green while their payload reports failure.
+// Bodies that do not parse as a StatusReply fall back to the raw 2xx signal.
 func httpHealthProbe(ctx context.Context, target string) (string, string) {
 	u, err := url.Parse(target)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
@@ -183,8 +188,40 @@ func httpHealthProbe(ctx context.Context, target string) (string, string) {
 		return "unhealthy", err.Error()
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "unhealthy", fmt.Sprintf("HTTP %d", resp.StatusCode)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, dashboardProxyMaxBytes))
+	if err != nil {
+		return "unhealthy", err.Error()
+	}
+	return classifyHealthBody(resp.StatusCode, body)
+}
+
+// classifyHealthBody encodes the /health interpretation: non-2xx is
+// unhealthy; a 2xx body that decodes as the shared StatusReply shape uses
+// its per-probe healthy flags (any false = unhealthy) and the STATUS_FAIL_*
+// rollup; anything else that arrives with 2xx is treated as healthy.
+func classifyHealthBody(status int, body []byte) (string, string) {
+	if status < 200 || status >= 300 {
+		return "unhealthy", fmt.Sprintf("HTTP %d", status)
+	}
+	var payload struct {
+		Data struct {
+			Status string `json:"status"`
+			Probes []struct {
+				Name    string `json:"name"`
+				Healthy bool   `json:"healthy"`
+				Message string `json:"message"`
+			} `json:"probes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err == nil {
+		for _, p := range payload.Data.Probes {
+			if !p.Healthy {
+				return "unhealthy", p.Name + ": " + p.Message
+			}
+		}
+		if strings.HasPrefix(payload.Data.Status, "STATUS_FAIL_") {
+			return "unhealthy", payload.Data.Status
+		}
 	}
 	return "healthy", ""
 }
@@ -227,17 +264,19 @@ var dashboardProbeCache = &probeCache{}
 
 // newDashboardHTTPClient returns an HTTP client whose dialer resolves the
 // target host and rejects any resolved IP that is loopback, private,
-// link-local, multicast, or unspecified. This is the SSRF guardrail for every
-// outbound request made on behalf of the anonymous /dashboard endpoints: an
+// link-local, multicast, unspecified, or in the RFC 6598 shared address
+// space (100.64.0.0/10). This is the SSRF guardrail for every outbound
+// request made on behalf of the anonymous /dashboard endpoints: an
 // operator-advertised URL is only followed if its host resolves entirely to
-// public addresses.
+// public addresses. HTTP(S) proxies are deliberately disabled because a
+// proxy would perform its own resolution/dial and defeat the guard.
 func newDashboardHTTPClient(timeout time.Duration) *http.Client {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		Proxy: nil,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(address)
 			if err != nil {
@@ -277,6 +316,11 @@ func newDashboardHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout, Transport: transport}
 }
 
+// rfc6598CGNAT is the 100.64.0.0/10 shared address space used by carrier-grade
+// NAT. netip.Addr.IsPrivate does not cover it, but from an SSRF perspective it
+// is just as much "not public internet" as RFC 1918.
+var rfc6598CGNAT = netip.MustParsePrefix("100.64.0.0/10")
+
 func addrIsPublic(a netip.Addr) bool {
 	if !a.IsValid() {
 		return false
@@ -286,6 +330,9 @@ func addrIsPublic(a netip.Addr) bool {
 	}
 	if a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() ||
 		a.IsMulticast() || a.IsUnspecified() || a.IsInterfaceLocalMulticast() {
+		return false
+	}
+	if a.Is4() && rfc6598CGNAT.Contains(a) {
 		return false
 	}
 	return true

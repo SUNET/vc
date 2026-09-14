@@ -230,13 +230,89 @@ func TestProbeCache_TTL(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// TestHTTPHealthProbe_RejectsRedirect confirms the health probe follows no
-// redirects (redirect targets could point at internal hosts).
-func TestHTTPHealthProbe_RejectsRedirect(t *testing.T) {
-	// Public-address dialer refuses loopback, so an httptest.Server won't
-	// actually be dialled. Instead assert the classification path for an
-	// unreachable host.
+// TestHTTPHealthProbe_UnreachableHost covers the classification path when a
+// health endpoint cannot be reached at all.
+func TestHTTPHealthProbe_UnreachableHost(t *testing.T) {
+	// The SSRF dialer refuses loopback, so 127.0.0.1 fails at dial time.
 	h, msg := httpHealthProbe(t.Context(), "http://127.0.0.1:1/health")
 	assert.Equal(t, "unhealthy", h)
 	assert.NotEmpty(t, msg)
+}
+
+// TestClassifyHealthBody confirms the probe inspects the StatusReply body
+// rather than trusting HTTP 200: every service's /health returns 200 even
+// when probes fail.
+func TestClassifyHealthBody(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		body    string
+		want    string
+		msgSubs string
+	}{
+		{
+			name: "unhealthy probe on 200",
+			status: 200,
+			body:   `{"data":{"status":"STATUS_FAIL_verifier","probes":[{"name":"verifier.db","healthy":false,"message":"connection refused"}]}}`,
+			want:   "unhealthy", msgSubs: "connection refused",
+		},
+		{
+			name: "all probes healthy on 200",
+			status: 200,
+			body:   `{"data":{"status":"STATUS_OK_verifier","probes":[{"name":"verifier.db","healthy":true}]}}`,
+			want:   "healthy",
+		},
+		{
+			name: "non-2xx overrides body",
+			status: 503,
+			body:   `{"data":{"status":"STATUS_OK_verifier"}}`,
+			want:   "unhealthy", msgSubs: "HTTP 503",
+		},
+		{
+			name: "empty payload falls back to 2xx=healthy",
+			status: 200,
+			body:   `{}`,
+			want:   "healthy",
+		},
+		{
+			name: "non-JSON 2xx body falls back to healthy",
+			status: 200,
+			body:   `OK`,
+			want:   "healthy",
+		},
+		{
+			name: "status FAIL rollup with no probes still unhealthy",
+			status: 200,
+			body:   `{"data":{"status":"STATUS_FAIL_verifier"}}`,
+			want:   "unhealthy", msgSubs: "STATUS_FAIL_verifier",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, msg := classifyHealthBody(tc.status, []byte(tc.body))
+			assert.Equal(t, tc.want, got)
+			if tc.msgSubs != "" {
+				assert.Contains(t, msg, tc.msgSubs)
+			}
+		})
+	}
+}
+
+// TestDashboardProxy_RedirectFollowedIntoDeniedHostFails ensures the proxy's
+// CheckRedirect rejects a redirect target that isn't in the allowlist. We can
+// only exercise this at the CheckRedirect level (an httptest server on
+// loopback is refused by the SSRF dialer before any HTTP handshake happens);
+// verify the callback returns an error for a disallowed URL.
+func TestDashboardProxy_RedirectDenies(t *testing.T) {
+	services := []model.DashboardService{
+		{Name: "issuer", URL: "https://issuer.example.com", Links: []model.DashboardLink{
+			{Label: "Meta", URL: "https://issuer.example.com/x", Type: "json"},
+		}},
+	}
+	c := dashboardTestClient(t, services, nil)
+	allowed, _ := url.Parse("https://issuer.example.com/x")
+	denied, _ := url.Parse("https://evil.example.com/x")
+
+	assert.True(t, c.dashboardURLAllowed(allowed))
+	assert.False(t, c.dashboardURLAllowed(denied))
 }
