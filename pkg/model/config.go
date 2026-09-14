@@ -1363,17 +1363,19 @@ type APIGWRateLimit struct {
 }
 
 // APIGWDashboard configures the /dashboard demo landing page that lists every
-// service in the deployment. Intended for dev/demo environments; disable in
-// production by setting enable: false.
+// service in the deployment. Intended for dev/demo environments; opt in by
+// setting enable: true. Off by default so no shared-config deployment starts
+// exposing its service inventory to anonymous callers without an explicit
+// action from the operator.
 type APIGWDashboard struct {
-	// Enable serves GET /dashboard. Default: true.
-	Enable *bool `yaml:"enable" default:"true"`
-	// Title overrides the page heading. Default: "VC System Dashboard".
-	Title string `yaml:"title,omitempty" default:"VC System Dashboard"`
+	// Enable serves GET /dashboard. Default: false (opt-in).
+	Enable bool `yaml:"enable" default:"false"`
+	// Title overrides the page heading. Default: "SUNET Verifiable Credentials".
+	Title string `yaml:"title,omitempty" default:"SUNET Verifiable Credentials"`
 	// Services optionally augments or overrides the auto-discovered service list.
 	// Entries with a Name that matches an auto-discovered service replace it;
 	// other entries are appended.
-	Services []DashboardService `yaml:"services,omitempty"`
+	Services []DashboardService `yaml:"services,omitempty" validate:"omitempty,dive"`
 }
 
 // DashboardService is a single entry on the /dashboard page.
@@ -1385,13 +1387,17 @@ type DashboardService struct {
 	// Description is optional free-form text shown under the service name.
 	Description string `yaml:"description,omitempty"`
 	// Links is an ordered list of extra labelled URLs (health, metadata, UIs, ...).
-	Links []DashboardLink `yaml:"links,omitempty"`
+	Links []DashboardLink `yaml:"links,omitempty" validate:"omitempty,dive"`
 }
 
 // DashboardLink is a labelled URL shown under a service entry.
 type DashboardLink struct {
 	Label string `yaml:"label" validate:"required"`
 	URL   string `yaml:"url" validate:"required,httpurl"`
+	// Type controls how the dashboard follows this link. "json" opens the
+	// response in an in-page viewer (pretty-printed, no navigation).
+	// "page" (default) opens in a new tab.
+	Type string `yaml:"type,omitempty" default:"page" validate:"oneof=json page"`
 }
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list
@@ -1489,17 +1495,17 @@ func (cfg *Cfg) SeedDashboardDefaults() {
 
 	if u := strings.TrimRight(cfg.APIGW.PublicURL, "/"); u != "" {
 		links := []DashboardLink{
-			{Label: "Health", URL: u + "/health"},
-			{Label: "Credential offers", URL: u + "/offers"},
-			{Label: "OpenID4VCI metadata", URL: u + "/.well-known/openid-credential-issuer"},
-			{Label: "OAuth2 metadata", URL: u + "/.well-known/oauth-authorization-server"},
-			{Label: "JWKS", URL: u + "/jwks"},
+			{Label: "Health", URL: u + "/health", Type: "json"},
+			{Label: "Credential offers", URL: u + "/offers", Type: "page"},
+			{Label: "OpenID4VCI metadata", URL: u + "/.well-known/openid-credential-issuer", Type: "json"},
+			{Label: "OAuth2 metadata", URL: u + "/.well-known/oauth-authorization-server", Type: "json"},
+			{Label: "JWKS", URL: u + "/jwks", Type: "json"},
 		}
 		if cfg.APIGW.AdminUIEnable {
-			links = append(links, DashboardLink{Label: "Admin UI", URL: u + "/ui"})
+			links = append(links, DashboardLink{Label: "Admin UI", URL: u + "/ui", Type: "page"})
 		}
 		if cfg.APIGW.OpenIDFederation != nil {
-			links = append(links, DashboardLink{Label: "OpenID federation", URL: u + "/.well-known/openid-federation"})
+			links = append(links, DashboardLink{Label: "OpenID federation", URL: u + "/.well-known/openid-federation", Type: "page"})
 		}
 		add(DashboardService{
 			Name:        "apigw",
@@ -1516,8 +1522,8 @@ func (cfg *Cfg) SeedDashboardDefaults() {
 				URL:         u,
 				Description: "Credential issuer – signs verifiable credentials.",
 				Links: []DashboardLink{
-					{Label: "Health", URL: u + "/health"},
-					{Label: "JWKS", URL: u + "/jwks"},
+					{Label: "Health", URL: u + "/health", Type: "json"},
+					{Label: "JWKS", URL: u + "/jwks", Type: "json"},
 				},
 			})
 		}
@@ -1530,7 +1536,7 @@ func (cfg *Cfg) SeedDashboardDefaults() {
 				URL:         u,
 				Description: "Credential verifier – OpenID4VP relying party.",
 				Links: []DashboardLink{
-					{Label: "Health", URL: u + "/health"},
+					{Label: "Health", URL: u + "/health", Type: "json"},
 				},
 			})
 		}
@@ -1539,11 +1545,11 @@ func (cfg *Cfg) SeedDashboardDefaults() {
 	if cfg.Registry != nil {
 		if u := strings.TrimRight(cfg.Registry.PublicURL, "/"); u != "" {
 			links := []DashboardLink{
-				{Label: "Health", URL: u + "/health"},
-				{Label: "Status lists", URL: u + "/statuslists"},
+				{Label: "Health", URL: u + "/health", Type: "json"},
+				{Label: "Status lists", URL: u + "/statuslists", Type: "page"},
 			}
 			if BoolVal(cfg.Registry.AdminGUI.Enable, false) {
-				links = append(links, DashboardLink{Label: "Admin GUI", URL: u + "/admin"})
+				links = append(links, DashboardLink{Label: "Admin GUI", URL: u + "/admin", Type: "page"})
 			}
 			add(DashboardService{
 				Name:        "registry",

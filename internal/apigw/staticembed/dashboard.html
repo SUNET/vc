@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ .Title }}</title>
+<link rel="icon" href="/static/favicon.png" type="image/png">
+<title>SUNET · {{ .Title }}</title>
 <style>
   :root {
     --bg: #f5f6f8;
@@ -11,18 +12,34 @@
     --text: #1f2937;
     --muted: #6b7280;
     --border: #e5e7eb;
+    --brand: #e9772a;
+    --brand-dark: #c65e1f;
     --ok-bg: #d1fae5; --ok-fg: #065f46;
     --bad-bg: #fee2e2; --bad-fg: #7f1d1d;
     --unk-bg: #e5e7eb; --unk-fg: #374151;
-    --link: #1d4ed8;
+    --link: #c65e1f;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 32px 16px;
+    margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: var(--bg); color: var(--text);
   }
-  .container { max-width: 960px; margin: 0 auto; }
+  .brand-bar {
+    background: var(--brand);
+    color: #fff;
+    padding: 16px 24px;
+    display: flex; align-items: center; gap: 16px;
+    border-bottom: 3px solid var(--brand-dark);
+  }
+  .brand-bar img { height: 32px; width: auto; display: block; }
+  .brand-bar .wordmark {
+    font-weight: 700; font-size: 18px; letter-spacing: 0.08em;
+  }
+  .brand-bar .brand-tag {
+    margin-left: auto; font-size: 12px; opacity: 0.85; letter-spacing: 0.04em;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 16px; }
   h1 { margin: 0 0 8px; font-size: 24px; }
   .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 14px; }
   .grid {
@@ -32,6 +49,7 @@
   .card {
     background: var(--card); border: 1px solid var(--border); border-radius: 8px;
     padding: 16px; display: flex; flex-direction: column; gap: 8px;
+    border-top: 3px solid var(--brand);
   }
   .card-head {
     display: flex; justify-content: space-between; align-items: center; gap: 8px;
@@ -46,30 +64,62 @@
   .badge.healthy   { background: var(--ok-bg);  color: var(--ok-fg); }
   .badge.unhealthy { background: var(--bad-bg); color: var(--bad-fg); }
   .badge.unknown   { background: var(--unk-bg); color: var(--unk-fg); }
-  .primary-url {
-    font-size: 13px; word-break: break-all;
-  }
+  .primary-url { font-size: 13px; word-break: break-all; }
   .primary-url a { color: var(--link); text-decoration: none; }
   .primary-url a:hover { text-decoration: underline; }
   .description { color: var(--muted); font-size: 13px; }
   .message {
     background: var(--bad-bg); color: var(--bad-fg);
-    padding: 6px 10px; border-radius: 4px; font-size: 12px;
-    word-break: break-word;
+    padding: 6px 10px; border-radius: 4px; font-size: 12px; word-break: break-word;
   }
   .links {
     list-style: none; padding: 0; margin: 0;
-    display: flex; flex-wrap: wrap; gap: 6px 12px;
-    font-size: 13px;
+    display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13px;
   }
   .links a { color: var(--link); text-decoration: none; }
   .links a:hover { text-decoration: underline; }
   footer {
-    margin-top: 32px; color: var(--muted); font-size: 12px; text-align: center;
+    margin: 24px 0 8px; color: var(--muted); font-size: 12px; text-align: center;
+  }
+  footer a { color: var(--brand); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+
+  .viewer[hidden] { display: none; }
+  .viewer {
+    position: fixed; inset: 0; background: #fff; z-index: 10;
+    display: flex; flex-direction: column;
+  }
+  .viewer-head {
+    background: var(--brand); color: #fff;
+    padding: 12px 16px; display: flex; align-items: center; gap: 16px;
+    border-bottom: 3px solid var(--brand-dark);
+  }
+  .viewer-head .back {
+    background: transparent; color: #fff;
+    border: 1px solid rgba(255,255,255,.5);
+    padding: 6px 12px; border-radius: 4px; cursor: pointer;
+    font: inherit; font-size: 13px;
+  }
+  .viewer-head .back:hover { background: rgba(255,255,255,.15); }
+  .viewer-head .src {
+    color: #fff; text-decoration: underline; font-size: 13px;
+    word-break: break-all; opacity: .95;
+  }
+  .viewer pre {
+    margin: 0; padding: 20px; overflow: auto; flex: 1;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px; line-height: 1.5;
+    background: #f8f9fa; color: var(--text);
+    white-space: pre-wrap; word-break: break-word;
   }
 </style>
 </head>
 <body>
+  <div class="brand-bar">
+    <img src="/static/logo.png" alt="SUNET">
+    <span class="wordmark">SUNET</span>
+    <span class="brand-tag">Verifiable Credentials</span>
+  </div>
   <div class="container">
     <h1>{{ .Title }}</h1>
     <div class="subtitle">Every service in this deployment, one click away.</div>
@@ -85,13 +135,86 @@
         {{ if .Message }}<div class="message">{{ .Message }}</div>{{ end }}
         {{ if .Links }}
         <ul class="links">
-          {{ range .Links }}<li><a href="{{ .URL }}" target="_blank" rel="noopener">{{ .Label }}</a></li>{{ end }}
+          {{ range .Links }}<li><a href="{{ .URL }}" data-type="{{ .Type }}" target="_blank" rel="noopener">{{ .Label }}</a></li>{{ end }}
         </ul>
         {{ end }}
       </div>
       {{ end }}
     </div>
-    <footer>apigw &middot; /dashboard</footer>
+    <footer>
+      <a href="https://www.sunet.se" target="_blank" rel="noopener">SUNET</a> &middot; apigw /dashboard
+    </footer>
   </div>
+
+  <div id="viewer" class="viewer" hidden aria-hidden="true">
+    <div class="viewer-head">
+      <button type="button" class="back" onclick="closeViewer()">&larr; Back</button>
+      <a class="src" id="viewer-src" href="#" target="_blank" rel="noopener"></a>
+    </div>
+    <pre id="viewer-body">Loading&hellip;</pre>
+  </div>
+
+  <script>
+  (function () {
+    const viewer = document.getElementById('viewer');
+    const srcLink = document.getElementById('viewer-src');
+    const bodyEl = document.getElementById('viewer-body');
+
+    function openViewer(url) {
+      srcLink.href = url;
+      srcLink.textContent = url;
+      bodyEl.textContent = 'Loading\u2026';
+      viewer.hidden = false;
+      viewer.setAttribute('aria-hidden', 'false');
+      if (location.hash !== '#viewer') {
+        history.pushState({viewer: true}, '', '#viewer');
+      }
+      fetch('/dashboard/proxy?url=' + encodeURIComponent(url))
+        .then(r => r.text().then(t => ({text: t, ct: r.headers.get('content-type') || '', ok: r.ok, status: r.status})))
+        .then(({text, ct, ok, status}) => {
+          if (!ok) {
+            bodyEl.textContent = 'HTTP ' + status + '\n\n' + text;
+            return;
+          }
+          if (ct.indexOf('json') !== -1) {
+            try {
+              bodyEl.textContent = JSON.stringify(JSON.parse(text), null, 2);
+              return;
+            } catch (_) { /* fall through to raw */ }
+          }
+          bodyEl.textContent = text;
+        })
+        .catch(err => { bodyEl.textContent = 'Error: ' + err; });
+    }
+
+    function closeViewer() {
+      if (viewer.hidden) return;
+      viewer.hidden = true;
+      viewer.setAttribute('aria-hidden', 'true');
+      if (location.hash === '#viewer') {
+        history.back();
+      }
+    }
+    window.closeViewer = closeViewer;
+
+    window.addEventListener('popstate', () => {
+      if (!viewer.hidden) {
+        viewer.hidden = true;
+        viewer.setAttribute('aria-hidden', 'true');
+      }
+    });
+
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && !viewer.hidden) closeViewer();
+    });
+
+    document.addEventListener('click', (ev) => {
+      const a = ev.target.closest('a[data-type="json"]');
+      if (!a) return;
+      ev.preventDefault();
+      openViewer(a.href);
+    });
+  })();
+  </script>
 </body>
 </html>

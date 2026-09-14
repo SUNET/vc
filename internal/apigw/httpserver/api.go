@@ -100,4 +100,5 @@ type Apiv1 interface {
 
 	// dashboard
 	Dashboard(ctx context.Context) (*apiv1.DashboardReply, error)
+	DashboardProxy(ctx context.Context, target string) (*apiv1.DashboardProxyReply, error)
 }

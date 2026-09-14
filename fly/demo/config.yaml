@@ -90,26 +90,30 @@ verifier:
             - "ehic"
   presets:
     "PID":
-      pid:
-        exclude_claims:
-          - path: ["trust_anchor"]
-          - path: ["attestation_legal_category"]
+      credentials:
+        pid:
+          exclude_claims:
+            - path: ["trust_anchor"]
+            - path: ["attestation_legal_category"]
     "EHIC":
-      ehic:
+      credentials:
+        ehic:
     "PID Age Over 18":
-      pid:
-        claims:
-          - path: ["birthdate"]
-        validations:
-          - rule: "age_over"
-            path: ["birthdate"]
-            value: 18
+      credentials:
+        pid:
+          claims:
+            - path: ["birthdate"]
+          validations:
+            - rule: "age_over"
+              path: ["birthdate"]
+              value: 18
     "PID + EHIC":
-      pid:
-        exclude_claims:
-          - path: ["trust_anchor"]
-          - path: ["attestation_legal_category"]
-      ehic:
+      credentials:
+        pid:
+          exclude_claims:
+            - path: ["trust_anchor"]
+            - path: ["attestation_legal_category"]
+        ehic:
 
 registry:
   api_server:
@@ -131,6 +135,8 @@ apigw:
   key_config:
     private_key_path: "/pki/signing_ec_private.pem"
     chain_path: "/pki/signing_ec_chain.pem"
+  dashboard:
+    enable: true
   api_server:
     addr: :8080
     trust_proxy_tls: true
