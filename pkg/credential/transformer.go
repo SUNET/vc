@@ -3,6 +3,7 @@ package credential
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/biter777/countries"
@@ -88,15 +89,13 @@ func ApplyTransform(value any, transform string) any {
 		return cc.Alpha3()
 	case "yyyymmdd_to_iso":
 		// SCHAC schacDateOfBirth is "YYYYMMDD"; SD-JWT VC birthdate is ISO "YYYY-MM-DD".
-		if len(str) != 8 {
+		// Reject impossible calendar dates (e.g. 20240230) rather than
+		// reformatting them into plausible-looking ISO strings.
+		t, err := time.Parse("20060102", str)
+		if err != nil {
 			return value
 		}
-		for _, r := range str {
-			if r < '0' || r > '9' {
-				return value
-			}
-		}
-		return str[0:4] + "-" + str[4:6] + "-" + str[6:8]
+		return t.Format("2006-01-02")
 	default:
 		return value
 	}

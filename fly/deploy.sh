@@ -249,6 +249,39 @@ cmd_launch() {
         echo "         apigw/issuer/verifier/registry, or run make dev-pki first."
     fi
 
+    # apigw's SAML SP keypair, mounted via [[files]] in fly/<profile>/apigw/fly.toml.
+    # Only apigw needs it, and only profiles that enable SAML mount it. The
+    # cert/key aren't checked into developer_tools/pki, so we self-provision
+    # a throwaway keypair on first launch to make a fresh 'fly deploy' actually
+    # boot instead of crashing in tls.LoadX509KeyPair.
+    local apigw_app saml_cert_b64 saml_key_b64 saml_tmp
+    apigw_app="$(app_name "apigw")"
+    if fly secrets list --app "$apigw_app" --json 2>/dev/null | grep -q '"SAML_SP_CERT"'; then
+        echo "==> SAML SP secrets already set for $apigw_app (skipping)"
+    else
+        echo "==> Provisioning SAML SP keypair for $apigw_app"
+        saml_tmp="$(mktemp -d)"
+        # Self-signed cert; SP metadata publishes the pubkey, IdPs pin it out-of-band.
+        # 10 years is well beyond dev/demo rotation cadence.
+        if openssl req -x509 -newkey rsa:2048 -nodes \
+                -keyout "${saml_tmp}/saml_sp.key" \
+                -out "${saml_tmp}/saml_sp.crt" \
+                -days 3650 \
+                -subj "/CN=${apigw_app}.fly.dev/O=SUNET VC" \
+                >/dev/null 2>&1; then
+            saml_cert_b64="$(base64 < "${saml_tmp}/saml_sp.crt" | tr -d '\n')"
+            saml_key_b64="$(base64 < "${saml_tmp}/saml_sp.key" | tr -d '\n')"
+            fly secrets set --app "$apigw_app" \
+                SAML_SP_CERT="$saml_cert_b64" \
+                SAML_SP_KEY="$saml_key_b64" \
+                2>/dev/null && echo "    SAML SP keypair set" \
+                || echo "    (failed to set SAML SP keypair; app missing?)"
+        else
+            echo "    (openssl failed to generate SAML SP keypair; set SAML_SP_CERT/KEY manually)"
+        fi
+        rm -rf "$saml_tmp"
+    fi
+
     echo ""
     echo "==> Apps created. Next: ./fly/deploy.sh deploy --profile ${PROFILE:-dev}"
 }
@@ -308,7 +341,27 @@ register_apigw_issuer_on_wallet_backend() {
 
     fly proxy 18081:8081 --app "$wb_app" >/dev/null 2>&1 &
     proxy_pid=$!
-    sleep 3
+
+    # Rotating the admin-token secret restarts the backend, and fly's health
+    # check has a 10s grace period. Poll until the admin API answers with a
+    # 2xx/4xx (i.e. the process is up and TLS-terminating), so a cold start
+    # can't silently skip registration by racing an unhealthy backend.
+    local ready="" attempt code_probe
+    for attempt in $(seq 1 30); do
+        code_probe="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 \
+            -H "Authorization: Bearer $admin_token" \
+            http://127.0.0.1:18081/admin/tenants/default/issuers 2>/dev/null || echo 000)"
+        case "$code_probe" in
+            2*|4*) ready=1; break ;;
+        esac
+        sleep 1
+    done
+    if [[ -z "$ready" ]]; then
+        echo "    (wallet-backend admin API did not become ready; skipping issuer registration)"
+        kill "$proxy_pid" 2>/dev/null
+        wait "$proxy_pid" 2>/dev/null || true
+        return 0
+    fi
 
     body_file="/tmp/issuer_reg_body.$$"
     local payload='{"credential_issuer_identifier":"'"$apigw_url"'","client_id":"fly-wallet","visible":true}'
@@ -327,12 +380,22 @@ register_apigw_issuer_on_wallet_backend() {
         path="/admin/tenants/default/issuers"
     fi
 
-    code="$(curl -sS -o "$body_file" -w '%{http_code}' \
-        -X "$method" \
-        -H "Authorization: Bearer $admin_token" \
-        -H 'Content-Type: application/json' \
-        -d "$payload" \
-        "http://127.0.0.1:18081$path" 2>/dev/null || echo 000)"
+    # Retry the admin request itself: the readiness probe above uses the same
+    # code path, but the process can briefly go 502 during machine promotion.
+    local attempt2
+    code="000"
+    for attempt2 in 1 2 3; do
+        code="$(curl -sS -o "$body_file" -w '%{http_code}' \
+            -X "$method" \
+            -H "Authorization: Bearer $admin_token" \
+            -H 'Content-Type: application/json' \
+            -d "$payload" \
+            "http://127.0.0.1:18081$path" 2>/dev/null || echo 000)"
+        case "$code" in
+            200|201) break ;;
+        esac
+        sleep 2
+    done
 
     case "$code" in
         200|201) echo "    Issuer ${method,,}ed with client_id=fly-wallet" ;;

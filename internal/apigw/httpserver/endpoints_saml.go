@@ -292,6 +292,15 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		s.log.Debug("standalone SAML: could not resolve identifier", "error", resolveErr)
 	}
 
+	// Resolve the data source for this credential type so that the credential
+	// endpoint knows whether the identity is assertion-based, and so that we
+	// don't merge assertion-only defaults into a document belonging to a
+	// datastore or external-API source. Mirrors the OIDC standalone path.
+	credSource, credSourceErr := s.cfg.APIGW.DataSources.ResolveDataSource(session.CredentialType, string(model.AuthProviderSAML))
+	if credSourceErr != nil {
+		s.log.Debug("standalone SAML: could not resolve data source", "error", credSourceErr)
+	}
+
 	authCtx := &cache.AuthorizationContext{
 		SessionID:    preAuthCode,
 		Code:         preAuthCode,
@@ -309,16 +318,24 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 			},
 		},
 	}
+	if credSourceErr == nil {
+		authCtx.DataSource = string(credSource.DataSource)
+	}
 	if err = s.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		span.SetStatus(codes.Error, "pre-auth code persistence failed")
 		return nil, fmt.Errorf("failed to store pre-auth code: %w", err)
 	}
 
 	// Store document data so the credential endpoint can issue the credential
-	// when the wallet redeems the offer.
-	for k, v := range s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].Defaults {
-		if _, present := claims[k]; !present {
-			claims[k] = v
+	// when the wallet redeems the offer. Only merge assertion defaults when
+	// the resolved source is Assertion; other sources (datastore, external
+	// API) own their document data and must not be polluted with SAML
+	// assertion defaults.
+	if credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion {
+		for k, v := range s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].Defaults {
+			if _, present := claims[k]; !present {
+				claims[k] = v
+			}
 		}
 	}
 	doc := &model.CompleteDocument{

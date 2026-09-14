@@ -304,12 +304,14 @@ func (s *Service) ProcessAssertion(ctx context.Context, samlResponseEncoded stri
 	if err != nil {
 		// crewjam's ParseResponse hides the real reason behind a public
 		// "authentication failed" message; the underlying cause lives in
-		// InvalidResponseError.PrivateErr. Surface it verbatim.
+		// InvalidResponseError.PrivateErr. Log it for operators but return a
+		// generic error so the raw SAML response (which contains user PII)
+		// and parser internals never reach the ACS caller.
 		if ive, ok := err.(*saml.InvalidResponseError); ok && ive.PrivateErr != nil {
-			s.log.Debug("SAML response rejected", "error", ive.PrivateErr.Error(), "response", ive.Response)
-			return nil, fmt.Errorf("failed to parse SAML response: %w", ive.PrivateErr)
+			s.log.Debug("SAML response rejected", "error", ive.PrivateErr.Error())
+			return nil, fmt.Errorf("failed to parse SAML response")
 		}
-		return nil, fmt.Errorf("failed to parse SAML response: %w", err)
+		return nil, fmt.Errorf("failed to parse SAML response")
 	}
 
 	// Extract attributes

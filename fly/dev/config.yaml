@@ -220,9 +220,10 @@ apigw:
           claim: "given_name"
         "urn:oid:2.16.840.1.113730.3.1.241":
           claim: "name"
-        "urn:oid:1.3.6.1.5.5.7.9.1":
-          claim: "birthdate"
-        # schacDateOfBirth (YYYYMMDD) — eduID's actual DoB attribute.
+        # schacDateOfBirth (YYYYMMDD) — eduID's actual DoB attribute. The
+        # older urn:oid:1.3.6.1.5.5.7.9.1 dateOfBirth is intentionally not
+        # mapped: eduID emits both, and having two mappings to `birthdate`
+        # would make the winning value depend on map iteration order.
         "urn:oid:1.3.6.1.4.1.25178.1.2.3":
           claim: "birthdate"
           transform: "yyyymmdd_to_iso"

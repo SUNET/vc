@@ -335,16 +335,20 @@ func (m *MDQClient) IsStaticMode() bool {
 // parseAndVerifyMetadata parses metadata XML and, when a signing certificate is
 // configured, validates the enveloped XML signature. Returns the parsed descriptor.
 func (m *MDQClient) parseAndVerifyMetadata(metadataXML []byte) (*saml.EntityDescriptor, error) {
+	// Rewrite mislabelled-as-PrintableString UTF-8 attributes in embedded
+	// certs first. goxmldsig parses KeyInfo certificates during signature
+	// verification, so an un-sanitized document with a bad PrintableString
+	// fails inside crypto/x509 before we reach the XML parser. The rewrite
+	// only touches the tag byte inside Subject/Issuer RDNs; SignedInfo is
+	// unaffected, so signature validation over the sanitized bytes succeeds.
+	metadataXML = sanitizeMetadataCerts(metadataXML)
+
 	if m.signingCert != nil {
 		if err := m.verifyMetadataSignature(metadataXML); err != nil {
 			return nil, fmt.Errorf("metadata signature verification failed: %w", err)
 		}
 		m.log.Debug("metadata signature verified successfully")
 	}
-
-	// Rewrite mislabelled-as-PrintableString UTF-8 attributes in embedded
-	// certs so Go's crypto/x509 can parse them at signature-verify time.
-	metadataXML = sanitizeMetadataCerts(metadataXML)
 
 	var metadata saml.EntityDescriptor
 	err := xml.Unmarshal(metadataXML, &metadata)
