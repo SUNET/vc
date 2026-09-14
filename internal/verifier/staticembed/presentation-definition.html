@@ -153,8 +153,8 @@
             <template x-if="!loading && credentialsList && credentialAttributes && presentationDefinition && !dcApiVerified">
                 <div class="box container">
                     <div class="block is-flex is-justify-content-center">
-                        <a :href="presentationDefinition.authorization_request" target="_blank">
-                            <img :src="`data:image/png;base64,${presentationDefinition.qr_code}`" alt="QR code for authorization request (click to open)" rel="noopener noreferrer" />
+                        <a :href="presentationDefinition.authorization_request" target="_blank" rel="noopener noreferrer" >
+                            <img :src="`data:image/png;base64,${presentationDefinition.qr_code}`" alt="QR code for authorization request (click to open)" />
                         </a>
                     </div>
                     <div class="block">
