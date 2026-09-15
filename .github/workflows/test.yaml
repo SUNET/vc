@@ -188,8 +188,8 @@ jobs:
       # ships. The issuer is the binary that links this library, and its
       # link step - cgo objects into a statically linked executable - is
       # reached by nothing else here.
-      - name: Build the issuer
-        run: make build-issuer
+      - name: Build the issuer with bbsnative
+        run: make build-issuer BBSNATIVE=true
 
       # pkg/bbs must still compile and pass without the tag. Every other
       # service is CGO_ENABLED=0 and fully static, and the package is
