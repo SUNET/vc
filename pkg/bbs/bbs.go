@@ -27,15 +27,19 @@
 // Without the `bbsnative` tag, [Native] returns an implementation whose
 // every method fails with [ErrUnavailable].
 //
-// The issuer builds with the tag by default, because blind BBS has no
-// pure-Go path and an issuer built without it resolves a `format: jwp`
-// credential configuration, passes every check, and then fails at the
-// signer — wired but dead. It stays statically linked while doing it:
-// `cgo-static` in the Makefile's BUILD_CONFIGS, with `netgo` and
-// `osusergo` restoring the pure-Go DNS and user lookups that turning CGO
-// on would otherwise hand to glibc's NSS.
+// The stock issuer image is built *without* the tag: the standard
+// `make release` path is pure-Go and CGO_ENABLED=0 so that a bare
+// checkout can release without a Rust toolchain. Deployments that
+// actually issue blind BBS opt in with `make release BBSNATIVE=true`,
+// which flips the issuer to `cgo-static` in the Makefile's BUILD_CONFIGS
+// with `netgo` and `osusergo` restoring the pure-Go DNS and user lookups
+// that turning CGO on would otherwise hand to glibc's NSS. The issuer
+// refuses to start when `issuer.bbs` is configured against a binary
+// built without the tag (see internal/issuer/apiv1/client.go): a `format:
+// jwp` credential otherwise resolves, passes every check, and then fails
+// at the signer - wired but dead.
 //
-// Every other service stays CGO_ENABLED=0 and fully static, and must —
+// Every other service stays CGO_ENABLED=0 and fully static, and must -
 // this tag buys a native dependency, and nothing that does not need blind
 // BBS should pay for it. See the repository Makefile's `bbs-native-lib`
 // target and the equivalent reasoning for `zknative`.

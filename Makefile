@@ -285,14 +285,19 @@ define get-ldflags
 $(if $(filter static cgo-static,$(call get-mode,$1)),$(LDFLAGS),$(LDFLAGS_DYNAMIC))
 endef
 
-# Native-library staged prereqs implied by a service's compiled tag set:
-# split the comma list back into words and translate feature tags to
-# their corresponding "<...>-native-lib-staged" fail-fast targets. Keeps
-# the docker-build template declarative and lets `PKCS11=true` (no staged
-# lib) coexist with `BBSNATIVE=true` (staged lib) on the same service.
+# Native-library staged prereqs implied by a service's *effective* Docker
+# tag set - i.e. what actually ends up in the -tags flag, not just what
+# BUILD_CONFIGS declares. Callers can inject feature tags via
+# GO_BUILD_TAGS (Jenkins does this for the HSM image), and the prereq
+# fires on those too so the build stops at the guard rather than deep in
+# cgo with a missing header.
+define get-cgo-features
+$(filter bbsnative pkcs11 zknative,$(subst $(comma), ,$(call docker-tags,$1)))
+endef
+
 define get-stage-prereqs
-$(if $(filter bbsnative,$(subst $(comma), ,$(call get-tags,$1))),bbs-native-lib-staged) \
-$(if $(filter zknative,$(subst $(comma), ,$(call get-tags,$1))),zk-native-lib-staged)
+$(if $(filter bbsnative,$(call get-cgo-features,$1)),bbs-native-lib-staged) \
+$(if $(filter zknative,$(call get-cgo-features,$1)),zk-native-lib-staged)
 endef
 
 # Docker image tag: $(call docker-tag,service,version)
@@ -766,13 +771,18 @@ build-zkvegaverifyworker: ## Build the isolated Vega ZK-verify subprocess worker
 docker-build: $(addprefix docker-build-,$(SERVICES)) ## Build all Docker images
 
 # Generate docker-build targets for workers
+#
+# CGO_ENABLED is driven off the *effective* feature tags (via
+# get-cgo-features) rather than just BUILD_CONFIGS's link mode, so an
+# out-of-band `GO_BUILD_TAGS=pkcs11 make docker-build` (Jenkins does
+# this for the HSM variant) still turns cgo on even without PKCS11=true.
 define DOCKER_BUILD_WORKER_TEMPLATE
 docker-build-$(1): _check-reserved-tag $$(call get-stage-prereqs,$(1)) ## Build Docker image for $(1)
 	$$(info Docker Building $(1) with tag: $$(VERSION))
 	docker build --build-arg SERVICE_NAME=$(1) \
 		$$(if $$(filter apigw,$(1)),--build-arg BUILDTAG=$$(VERSION)) \
 		$$(if $$(call docker-tags,$(1)),--build-arg GO_BUILD_TAGS="$$(call docker-tags,$(1))") \
-		$$(if $$(filter-out static,$$(call get-mode,$(1))),--build-arg CGO_ENABLED=1) \
+		$$(if $$(call get-cgo-features,$(1)),--build-arg CGO_ENABLED=1) \
 		$$(if $$(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$$(GOBUILD_IMAGE)) \
 		--tag $$(call docker-tag,$(1),$$(VERSION)) \
 		--file dockerfiles/worker .
