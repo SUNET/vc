@@ -214,12 +214,12 @@ help: ## Show this help message
 	$(info   PKCS11=true                    - Opt-in: link issuer against a PKCS#11 provider (HSM signing))
 	$(info   Example: make release BUMP=patch BBSNATIVE=true PKCS11=true)
 	$(info )
-	$(info Native library staging (only when a flag above is set):)
-	$(info   make bbs-native-lib           - Fetch/build zk-cred-bbs's Go C-ABI lib (needs Rust))
-	$(info   make zk-native-lib            - Fetch/build zk-cred-longfellow's Go C-ABI lib (needed by build-verifier-zknative))
-	$(info   make zk-native-lib-vega       - Fetch/build zk-cred-vega's Go C-ABI lib (only for zkvegaverifyworker))
-	$(info   make test-bbsnative           - Run pkg/bbs's bbsnative-tagged tests (requires bbs-native-lib))
-	$(info   make test-zknative            - Run pkg/mdoc's zknative-tagged tests (requires zk-native-lib zk-native-lib-vega))
+	$(info Native library staging (prereqs for the optional native-feature targets below):)
+	$(info   make bbs-native-lib           - Fetch/build zk-cred-bbs's Go C-ABI lib          (needs Rust; required by BBSNATIVE=true and test-bbsnative))
+	$(info   make zk-native-lib            - Fetch/build zk-cred-longfellow's Go C-ABI lib   (required by build-verifier-zknative and test-zknative))
+	$(info   make zk-native-lib-vega       - Fetch/build zk-cred-vega's Go C-ABI lib         (required by build-zkvegaverifyworker and test-zknative))
+	$(info   make test-bbsnative           - Run pkg/bbs's bbsnative-tagged tests            (requires bbs-native-lib))
+	$(info   make test-zknative            - Run pkg/mdoc's zknative-tagged tests            (requires zk-native-lib zk-native-lib-vega))
 	$(info )
 	$(info Legacy dedicated-binary variants (produce differently named binaries/images):)
 	$(info   make build-issuer-hsm         - Build issuer with PKCS#11 HSM support - dynamic-libc variant)
@@ -448,11 +448,13 @@ zk-native-lib-staged: ## Fail with a useful message if zk-cred-longfellow is not
 	@# Longfellow's cgo binding links dynamically (see build-verifier-zknative
 	@# and dockerfiles/verifier-zknative), so the artifact consumers actually
 	@# need is the shared object - checking for the archive would reject a
-	@# valid `.so`-only stage.
+	@# valid `.so`-only stage. Guard is shared between build-verifier-zknative
+	@# and test-zknative; the message names both so the operator re-runs the
+	@# right one.
 	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" || ( \
 		echo "The 'zknative' build tag was requested but zk-cred-longfellow is not staged." >&2; \
 		echo "Both $(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so and $(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h are required." >&2; \
-		echo "Run 'make zk-native-lib' first (needs network and a C++ toolchain), then re-run 'make build-verifier-zknative'." >&2; \
+		echo "Run 'make zk-native-lib' first (needs network and a C++ toolchain), then re-run the requesting target ('make build-verifier-zknative' or 'make test-zknative')." >&2; \
 		exit 1)
 
 bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not staged

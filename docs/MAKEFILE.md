@@ -84,9 +84,12 @@ Each service has a specific build configuration:
 
 ```makefile
 verifier:static:           # Static linking, no CGO, no build tags
-registry:dynamic:          # Dynamic linking, CGO enabled
+registry:static:           # Static linking, no CGO, no build tags
 apigw:static:              # Static linking, supports saml/oidcrp tags
-issuer:static:             # Static linking, supports pkcs11 tag
+issuer:static:             # Default: pure-Go static, no cgo, no build tags.
+                           # Flipped to cgo-static with `bbsnative` and/or
+                           # `pkcs11` (plus `netgo,osusergo`) when the caller
+                           # sets BBSNATIVE=true and/or PKCS11=true.
 ```
 
 ### Template System
@@ -160,7 +163,9 @@ $(call docker-tag,verifier,1.2.3)  # Returns docker.sunet.se/iam_vc/verifier:1.2
 ### Available Tags
 - **saml** - SAML authentication support
 - **oidcrp** - OpenID Connect Relying Party support
-- **pkcs11** - Hardware Security Module (HSM) support
+- **bbsnative** - Blind BBS issuance (requires `make bbs-native-lib`; enabled via `BBSNATIVE=true`)
+- **pkcs11** - Hardware Security Module (HSM) support (enabled via `PKCS11=true`, or the dedicated `build-issuer-hsm` variant)
+- **zknative** - Native ZK/PPID proof verification (Longfellow + Vega; requires `make zk-native-lib` / `make zk-native-lib-vega`; used only by `build-verifier-zknative` and `build-zkvegaverifyworker`)
 - **vc20** - W3C Verifiable Credentials 2.0 support
 
 ### Usage Examples

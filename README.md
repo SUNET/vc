@@ -226,16 +226,17 @@ All standard builds produce static binaries (`CGO_ENABLED=0`) for `linux/amd64`.
 
 Optional features are enabled via Go build tags. The following tags are available:
 
-| Tag           | Description                    | Affected service(s) | CGO         | Make target                   |
-| ------------- | ------------------------------ | ------------------- | ----------- | ----------------------------- |
-| `saml`        | SAML IdP support               | apigw               | static      | `make build-apigw-saml`       |
-| `oidcrp`      | OpenID Connect Relying Party   | apigw               | static      | `make build-apigw-oidcrp`     |
-| `saml,oidcrp` | All optional apigw features    | apigw               | static      | `make build-apigw-all`        |
-| `pkcs11`      | PKCS#11 HSM signing            | issuer              | **dynamic** | `make build-issuer-hsm`       |
-| `vc20`        | W3C Verifiable Credentials 2.0 | vc20-test-server    | static      | `make build-vc20-test-server` |
-| `zknative`    | Native ZK/PPID proof verification (mso_mdoc_zk) - Longfellow + Vega | verifier | **dynamic** | `make build-verifier-zknative` (+ `make build-zkvegaverifyworker` for Vega) |
+| Tag           | Description                    | Affected service(s) | CGO            | Make target                   |
+| ------------- | ------------------------------ | ------------------- | -------------- | ----------------------------- |
+| `saml`        | SAML IdP support               | apigw               | static         | `make build-apigw-saml`       |
+| `oidcrp`      | OpenID Connect Relying Party   | apigw               | static         | `make build-apigw-oidcrp`     |
+| `saml,oidcrp` | All optional apigw features    | apigw               | static         | `make build-apigw-all`        |
+| `bbsnative`   | Blind BBS issuance (zk-cred-bbs) — requires `make bbs-native-lib` first | issuer | **cgo-static** | `make build-issuer BBSNATIVE=true` (or `make release BBSNATIVE=true`) |
+| `pkcs11`      | PKCS#11 HSM signing            | issuer              | **cgo-static** | `make build-issuer PKCS11=true` (or `make build-issuer-hsm` for the dedicated dynamic-libc variant) |
+| `vc20`        | W3C Verifiable Credentials 2.0 | vc20-test-server    | static         | `make build-vc20-test-server` |
+| `zknative`    | Native ZK/PPID proof verification (mso_mdoc_zk) - Longfellow + Vega — requires `make zk-native-lib` (+ `make zk-native-lib-vega` for Vega) first | verifier | **dynamic** | `make build-verifier-zknative` (+ `make build-zkvegaverifyworker` for Vega) |
 
-> **Note:** The `pkcs11` and `zknative` tags require CGO (`CGO_ENABLED=1`) and produce dynamically linked binaries. See "Native ZK/PPID proof verification" below for `zknative` setup.
+> **Note:** The `bbsnative`, `pkcs11`, and `zknative` tags require CGO (`CGO_ENABLED=1`). `bbsnative` and `pkcs11` are opt-in via the `BBSNATIVE=true` / `PKCS11=true` flags and stay statically linked (`netgo,osusergo` are added automatically); `zknative` produces a dynamically linked binary via the dedicated `build-verifier-zknative` target. See "Native ZK/PPID proof verification" below for `zknative` setup and `pkg/bbs` for `bbsnative`.
 
 ### Docker
 
