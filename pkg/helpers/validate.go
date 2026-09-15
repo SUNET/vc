@@ -378,6 +378,30 @@ func NewValidator() (*validator.Validate, error) {
 		}
 	}, model.VerificationPresetScope{})
 
+	// Register struct-level validation for DynamicRegistrationAuthConfig:
+	// auth settings must not be paired with an open mode.
+	//
+	// required_if already covers the other direction - mode static needs a
+	// token file, mode jwt needs a jwt block. This is the direction that
+	// fails open: mode defaults to "open", and the middleware returns a
+	// pass-through for "open" or empty without ever consulting the rest of
+	// the config. So an operator who writes a jwt: block and forgets
+	// mode: "jwt" gets dynamic client registration wide open, with their
+	// auth configuration present, ignored, and silent about it.
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(model.DynamicRegistrationAuthConfig)
+		mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
+		if mode != "" && mode != "open" {
+			return
+		}
+		if cfg.JWT != nil {
+			sl.ReportError(cfg.JWT, "JWT", "JWT", "auth_config_requires_non_open_mode", mode)
+		}
+		if strings.TrimSpace(cfg.StaticBearerTokenFile) != "" {
+			sl.ReportError(cfg.StaticBearerTokenFile, "StaticBearerTokenFile", "StaticBearerTokenFile", "auth_config_requires_non_open_mode", mode)
+		}
+	}, model.DynamicRegistrationAuthConfig{})
+
 	// Register struct-level validation for DataSources: openid4vp auth_scopes must not self-reference
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		ds := sl.Current().Interface().(model.DataSources)

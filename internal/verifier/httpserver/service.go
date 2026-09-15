@@ -47,6 +47,7 @@ type Service struct {
 	tokenLimiter     *middleware.RateLimiter
 	authorizeLimiter *middleware.RateLimiter
 	registerLimiter  *middleware.RateLimiter
+	registerAuth     gin.HandlerFunc
 
 	// openidFederationService is nil when OpenID Federation is not enabled.
 	// Built once here rather than per-request, since constructing a signer
@@ -72,6 +73,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		tokenLimiter:     middleware.NewRateLimiter(rateLimitConfig.TokenRequestsPerMinute, rateLimitConfig.TokenBurst),
 		authorizeLimiter: middleware.NewRateLimiter(rateLimitConfig.AuthorizeRequestsPerMinute, rateLimitConfig.AuthorizeBurst),
 		registerLimiter:  middleware.NewRateLimiter(rateLimitConfig.RegisterRequestsPerMinute, rateLimitConfig.RegisterBurst),
+		registerAuth:     func(c *gin.Context) { c.Next() },
 		sessionsOptions: sessions.Options{
 			Path:     "/",
 			Domain:   "",
@@ -109,6 +111,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 			MaxAge:           12 * time.Hour,
 		}
 		s.gin.Use(cors.New(corsConfig))
+	}
+
+	s.registerAuth, err = middleware.NewRegistrationAuthMiddleware(s.cfg, s.log.New("registration_auth"))
+	if err != nil {
+		return nil, err
 	}
 
 	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.Verifier.APIServer)
@@ -187,7 +194,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	})
 
 	// Dynamic Client Registration (RFC 7591/7592) with rate limiting
-	rgRoot.POST("register", s.registerLimiter.Middleware(), func(c *gin.Context) {
+	rgRoot.POST("register", s.registerLimiter.Middleware(), s.registerAuth, func(c *gin.Context) {
 		response, err := s.endpointRegisterClient(ctx, c)
 		if err != nil {
 			s.handleOAuthError(c, err)
