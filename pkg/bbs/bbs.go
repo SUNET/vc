@@ -39,10 +39,11 @@
 // jwp` credential otherwise resolves, passes every check, and then fails
 // at the signer - wired but dead.
 //
-// Every other service stays CGO_ENABLED=0 and fully static, and must -
-// this tag buys a native dependency, and nothing that does not need blind
-// BBS should pay for it. See the repository Makefile's `bbs-native-lib`
-// target and the equivalent reasoning for `zknative`.
+// Every other service stays CGO_ENABLED=0 and fully static, and must
+// stay that way: this tag buys a native dependency, and nothing that
+// does not need blind BBS should pay for it. See the repository
+// Makefile's `bbs-native-lib` target and the equivalent reasoning for
+// `zknative`.
 package bbs
 
 import (

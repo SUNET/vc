@@ -34,20 +34,25 @@ GOBUILD_IMAGE           ?=
 _RELEASE_MODE           ?=
 RESERVED_TAGS           := latest testing demo dev
 
-# Opt-in native (cgo + C/Rust) features. All three are off by default so
+# Opt-in native (cgo + C/Rust) features. Both are off by default so
 # that a bare `make build` / `make docker-build` / `make release` needs
 # neither a Rust toolchain, a PKCS#11 header, nor any staged third_party/
-# artefact. Enable one or more on the command line; each independently
-# flips the affected service into a cgo-static build with the matching
-# Go build tag and (where applicable) a staged-native-library prereq.
-# See the BUILD_CONFIGS block below for the full mode/tags derivation.
+# artefact. Enable one or both on the command line; each independently
+# flips the issuer into a cgo-static build with the matching Go build
+# tag and (where applicable) a staged-native-library prereq. See the
+# BUILD_CONFIGS block below for the full mode/tags derivation.
 #
 #   BBSNATIVE=true   link the issuer against zk-cred-bbs        (blind BBS issuance;    needs `make bbs-native-lib`)
 #   PKCS11=true      link the issuer against a PKCS#11 provider (HSM-backed signing)
-#   ZKNATIVE=true    link the verifier against zk-cred-longfellow (native ZK verification; needs `make zk-native-lib`)
+#
+# Native ZK/PPID verification (zk-cred-longfellow + zk-cred-vega) is NOT
+# in this list: its cgo binding requires dynamic linking against a
+# glibc-built .so, which the standard `dockerfiles/worker` (Alpine,
+# `--extldflags '-static'`) cannot produce. Use the dedicated
+# `build-verifier-zknative` local target and `dockerfiles/verifier-zknative`
+# Docker image instead.
 BBSNATIVE               ?=
 PKCS11                  ?=
-ZKNATIVE                ?=
 
 # Build Tags for Optional Features
 # PKCS#11 requires CGO for hardware security module support.
@@ -112,13 +117,12 @@ ZK_CRED_BBS_STAGE    := third_party/zk-cred-bbs
 # third_party/ dependencies. `make release` on a bare checkout must not
 # require Rust, a PKCS#11 header, or a network fetch of an unrelated crate.
 #
-# Any opt-in flag (BBSNATIVE=true, PKCS11=true, ZKNATIVE=true - see the
-# opt-in variable block above) flips the affected service into cgo-static
-# with the matching feature tag(s) plus netgo,osusergo. netgo and osusergo
-# ride along because CGO is now on: without them Go resolves DNS and user
-# lookups through glibc's NSS, which a statically linked binary cannot do
-# reliably. Multiple flags on the same service (issuer + BBSNATIVE +
-# PKCS11) combine cleanly - both tags are added.
+# Any opt-in flag (BBSNATIVE=true, PKCS11=true - see the opt-in variable
+# block above) flips the issuer into cgo-static with the matching feature
+# tag(s) plus netgo,osusergo. netgo and osusergo ride along because CGO
+# is now on: without them Go resolves DNS and user lookups through
+# glibc's NSS, which a statically linked binary cannot do reliably. Both
+# flags on the same build combine cleanly - both tags are added.
 #
 # Without a feature tag the corresponding subsystem builds against its
 # stub. For BBS that stub returns ErrUnavailable, and the issuer refuses
@@ -126,11 +130,13 @@ ZK_CRED_BBS_STAGE    := third_party/zk-cred-bbs
 # to ship a small default image and let deployments that actually need
 # BBS opt in than to make every release depend on a Rust toolchain.
 #
-# Known limitation of the *NATIVE flags: the staged library is built for
-# the host architecture, and cgo cross-compilation needs a cross C
-# toolchain, so `docker-build-issuer BBSNATIVE=true` (and equivalents) only
-# produce an image for the machine they run on. Services with no feature
-# tag are unaffected and still cross-compile freely.
+# Known limitation of BBSNATIVE: the staged library is built for the
+# host architecture, and cgo cross-compilation needs a cross C
+# toolchain, so `docker-build-issuer BBSNATIVE=true` only produces an
+# image for the machine it runs on. Services with no feature tag are
+# unaffected and still cross-compile freely. Native ZK/PPID verification
+# lives entirely outside this template - see `build-verifier-zknative`
+# and `dockerfiles/verifier-zknative`.
 comma := ,
 empty :=
 space := $(empty) $(empty)
@@ -138,17 +144,13 @@ space := $(empty) $(empty)
 _issuer_features   := $(strip \
 	$(if $(filter true,$(BBSNATIVE)),bbsnative) \
 	$(if $(filter true,$(PKCS11)),pkcs11))
-_verifier_features := $(strip \
-	$(if $(filter true,$(ZKNATIVE)),zknative))
 
 _issuer_mode   := $(if $(_issuer_features),cgo-static,static)
-_verifier_mode := $(if $(_verifier_features),cgo-static,static)
 
 _issuer_tags   := $(subst $(space),$(comma),$(strip $(if $(_issuer_features),$(_issuer_features) netgo osusergo)))
-_verifier_tags := $(subst $(space),$(comma),$(strip $(if $(_verifier_features),$(_verifier_features) netgo osusergo)))
 
 BUILD_CONFIGS           := \
-	verifier:$(_verifier_mode):$(_verifier_tags) \
+	verifier:static: \
 	registry:static: \
 	apigw:static: \
 	issuer:$(_issuer_mode):$(_issuer_tags) \
@@ -210,12 +212,11 @@ help: ## Show this help message
 	$(info Optional Build Features (all off by default - pure-Go static build needs none):)
 	$(info   BBSNATIVE=true                 - Opt-in: link issuer against zk-cred-bbs         (needs make bbs-native-lib))
 	$(info   PKCS11=true                    - Opt-in: link issuer against a PKCS#11 provider (HSM signing))
-	$(info   ZKNATIVE=true                  - Opt-in: link verifier against zk-cred-longfellow (needs make zk-native-lib))
 	$(info   Example: make release BUMP=patch BBSNATIVE=true PKCS11=true)
 	$(info )
 	$(info Native library staging (only when a flag above is set):)
 	$(info   make bbs-native-lib           - Fetch/build zk-cred-bbs's Go C-ABI lib (needs Rust))
-	$(info   make zk-native-lib            - Fetch/build zk-cred-longfellow's Go C-ABI lib)
+	$(info   make zk-native-lib            - Fetch/build zk-cred-longfellow's Go C-ABI lib (needed by build-verifier-zknative))
 	$(info   make zk-native-lib-vega       - Fetch/build zk-cred-vega's Go C-ABI lib (only for zkvegaverifyworker))
 	$(info   make test-bbsnative           - Run pkg/bbs's bbsnative-tagged tests (requires bbs-native-lib))
 	$(info   make test-zknative            - Run pkg/mdoc's zknative-tagged tests (requires zk-native-lib zk-native-lib-vega))
@@ -583,7 +584,7 @@ build: proto $(addprefix build-,$(SERVICES)) build-vc20-test-server ## Build all
 
 # Generate standard build targets dynamically
 define BUILD_TEMPLATE
-build-$(1): ## Build $(1) service
+build-$(1): $$(call get-stage-prereqs,$(1)) ## Build $(1) service
 	$$(info Building $(1))
 	$$(call get-cgo,$(1)) GOOS=$$(BUILD_OS) GOARCH=$$(BUILD_ARCH) go build \
 		$$(if $$(call get-tags,$(1)),-tags "$$(call get-tags,$(1))") \
@@ -799,10 +800,19 @@ $(foreach service,$(WORKER_SERVICES),$(eval $(call DOCKER_BUILD_WORKER_TEMPLATE,
 # stock image. Combine with BBSNATIVE=true when the same deployment needs
 # both an HSM-backed ECDSA key AND blind BBS issuance - those are not
 # alternatives; a BBS secret cannot live in a PKCS#11 slot regardless.
+#
+# The tag set is derived directly here rather than through docker-tags:
+# this image forces CGO_ENABLED=1 and dockerfiles/worker still links
+# statically, so netgo/osusergo must be present or DNS/user lookups fall
+# through to glibc's NSS at runtime (which a static binary in Alpine
+# cannot resolve).
+_issuer_hsm_tags := $(subst $(space),$(comma),$(strip \
+	$(if $(filter true,$(BBSNATIVE)),bbsnative) $(PKCS11_TAG) netgo osusergo))
+
 docker-build-issuer-hsm: _check-reserved-tag $(call get-stage-prereqs,issuer) ## Build issuer Docker image with PKCS#11 HSM support
 	$(info Docker building issuer with PKCS#11 HSM support, tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=issuer --build-arg BUILDTAG=$(VERSION) \
-		--build-arg GO_BUILD_TAGS="$(if $(call docker-tags,issuer),$(call docker-tags,issuer)$(comma))$(PKCS11_TAG)" \
+		--build-arg GO_BUILD_TAGS="$(_issuer_hsm_tags)" \
 		--build-arg CGO_ENABLED=1 \
 		$(if $(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$(GOBUILD_IMAGE)) \
 		--tag $(call docker-tag,issuer-hsm,$(VERSION)) \

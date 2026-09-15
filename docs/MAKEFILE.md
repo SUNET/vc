@@ -269,8 +269,9 @@ This performs:
 1. Verifies you're on the `main` branch (unless `FORCE=true`)
 2. Verifies the working tree is clean (unless `FORCE=true`)
 3. Bumps the latest `vX.Y.Z` tag according to `BUMP`
-4. Creates and pushes the new git tag
-5. Builds all Docker images tagged `:vX.Y.Z`
+4. Builds all Docker images tagged `:vX.Y.Z` (fail-fast: no git tag is
+   created if the build fails)
+5. Creates and pushes the new git tag
 6. Pushes images tagged `:vX.Y.Z`
 7. Retags and pushes all images as `:dev`
 
