@@ -34,16 +34,22 @@ GOBUILD_IMAGE           ?=
 _RELEASE_MODE           ?=
 RESERVED_TAGS           := latest testing demo dev
 
-# Opt-in native (cgo + C/Rust) features. Both are off by default so
-# that a bare `make build` / `make docker-build` / `make release` needs
-# neither a Rust toolchain, a PKCS#11 header, nor any staged third_party/
-# artefact. Enable one or both on the command line; each independently
-# flips the issuer into a cgo-static build with the matching Go build
+# Opt-in native (cgo + C/Rust) features. All off by default so that a
+# bare `make build` / `make docker-build` / `make release` needs neither
+# a Rust toolchain, a PKCS#11 provider, nor any staged third_party/
+# artefact. Enable on the command line; each flag independently flips
+# the affected service(s) into cgo-static with the matching Go build
 # tag and (where applicable) a staged-native-library prereq. See the
 # BUILD_CONFIGS block below for the full mode/tags derivation.
 #
-#   BBSNATIVE=true   link the issuer against zk-cred-bbs        (blind BBS issuance;    needs `make bbs-native-lib`)
-#   PKCS11=true      link the issuer against a PKCS#11 provider (HSM-backed signing)
+#   BBSNATIVE=true                     link the issuer against zk-cred-bbs (blind BBS issuance; needs `make bbs-native-lib`)
+#   PKCS11_SERVICES="svc1 svc2 ..."    per-service list; any subset of $(SERVICES) that should link against a PKCS#11 provider
+#
+# PKCS11 is not intrinsically issuer-only: pkg/pki's HSM signer is used
+# by any service that loads a signing key. Today that's the issuer
+# (credential signing) and the registry (Token Status List signing), and
+# apigw/verifier can be wired in the same way for metadata / OIDC-OP
+# response signing. Name each service to opt it in.
 #
 # Native ZK/PPID verification (zk-cred-longfellow + zk-cred-vega) is NOT
 # in this list: its cgo binding requires dynamic linking against a
@@ -52,7 +58,7 @@ RESERVED_TAGS           := latest testing demo dev
 # `build-verifier-zknative` local target and `dockerfiles/verifier-zknative`
 # Docker image instead.
 BBSNATIVE               ?=
-PKCS11                  ?=
+PKCS11_SERVICES         ?=
 
 # Build Tags for Optional Features
 # PKCS#11 requires CGO for hardware security module support.
@@ -115,14 +121,23 @@ ZK_CRED_BBS_STAGE    := third_party/zk-cred-bbs
 #
 # Default: every service is a pure-Go static build with no cgo and no
 # third_party/ dependencies. `make release` on a bare checkout must not
-# require Rust, a PKCS#11 header, or a network fetch of an unrelated crate.
+# require Rust, a PKCS#11 provider, or a network fetch of an unrelated
+# crate.
 #
-# Any opt-in flag (BBSNATIVE=true, PKCS11=true - see the opt-in variable
-# block above) flips the issuer into cgo-static with the matching feature
-# tag(s) plus netgo,osusergo. netgo and osusergo ride along because CGO
-# is now on: without them Go resolves DNS and user lookups through
-# glibc's NSS, which a statically linked binary cannot do reliably. Both
-# flags on the same build combine cleanly - both tags are added.
+# BBSNATIVE=true flips the issuer into cgo-static with the `bbsnative`
+# tag (plus netgo,osusergo). BBS code lives only in pkg/bbs and is
+# imported only by the issuer, so this flag is issuer-scoped.
+#
+# PKCS11_SERVICES="..." flips whichever service(s) it names into
+# cgo-static with the `pkcs11` tag (plus netgo,osusergo). Multiple
+# services can be flipped independently; each affected binary still
+# cross-compiles under CGO only if a matching C cross toolchain is
+# available (see the known limitation below).
+#
+# netgo and osusergo ride along whenever CGO is on: without them Go
+# resolves DNS and user lookups through glibc's NSS, which a statically
+# linked binary cannot do reliably. Flags on the same service combine
+# cleanly - all requested tags are added.
 #
 # Without a feature tag the corresponding subsystem builds against its
 # stub. For BBS that stub returns ErrUnavailable, and the issuer refuses
@@ -130,30 +145,53 @@ ZK_CRED_BBS_STAGE    := third_party/zk-cred-bbs
 # to ship a small default image and let deployments that actually need
 # BBS opt in than to make every release depend on a Rust toolchain.
 #
-# Known limitation of BBSNATIVE: the staged library is built for the
-# host architecture, and cgo cross-compilation needs a cross C
-# toolchain, so `docker-build-issuer BBSNATIVE=true` only produces an
-# image for the machine it runs on. Services with no feature tag are
-# unaffected and still cross-compile freely. Native ZK/PPID verification
-# lives entirely outside this template - see `build-verifier-zknative`
-# and `dockerfiles/verifier-zknative`.
+# Known limitation: cgo cross-compilation needs a cross C toolchain, so
+# a service built with BBSNATIVE=true or a non-empty PKCS11_SERVICES
+# only produces an image for the host architecture. Services with no
+# feature tag are unaffected and still cross-compile freely. Native
+# ZK/PPID verification lives entirely outside this template - see
+# `build-verifier-zknative` and `dockerfiles/verifier-zknative`.
 comma := ,
 empty :=
 space := $(empty) $(empty)
 
-_issuer_features   := $(strip \
-	$(if $(filter true,$(BBSNATIVE)),bbsnative) \
-	$(if $(filter true,$(PKCS11)),pkcs11))
+# Effective PKCS11 per-service opt-in list.
+_pkcs11_services := $(strip $(PKCS11_SERVICES))
 
-_issuer_mode   := $(if $(_issuer_features),cgo-static,static)
+# BBS remains issuer-only for now: cmd/issuer is the only importer.
+_bbsnative_services := $(if $(filter true,$(BBSNATIVE)),issuer)
 
-_issuer_tags   := $(subst $(space),$(comma),$(strip $(if $(_issuer_features),$(_issuer_features) netgo osusergo)))
+# get-features,<svc> -> space-separated feature-tag list this service
+# opts into (subset of {bbsnative, pkcs11}). Empty means pure-Go static.
+define get-features
+$(strip \
+	$(if $(filter $1,$(_bbsnative_services)),bbsnative) \
+	$(if $(filter $1,$(_pkcs11_services)),pkcs11))
+endef
+
+# get-service-mode,<svc> -> link mode for BUILD_CONFIGS.
+define get-service-mode
+$(if $(call get-features,$1),cgo-static,static)
+endef
+
+# get-service-tags,<svc> -> comma-joined tag list for BUILD_CONFIGS,
+# with netgo,osusergo appended whenever CGO ends up on.
+define get-service-tags
+$(if $(call get-features,$1),$(subst $(space),$(comma),$(strip $(call get-features,$1) netgo osusergo)))
+endef
+
+# One line per worker service, derived from the helpers above so that
+# the flag surface stays in one place. vc20-test-server is not a worker
+# and never opts into cgo features.
+define _config_line
+$1:$(call get-service-mode,$1):$(call get-service-tags,$1)
+endef
 
 BUILD_CONFIGS           := \
-	verifier:static: \
-	registry:static: \
-	apigw:static: \
-	issuer:$(_issuer_mode):$(_issuer_tags) \
+	$(call _config_line,verifier) \
+	$(call _config_line,registry) \
+	$(call _config_line,apigw) \
+	$(call _config_line,issuer) \
 	vc20-test-server:static:
 
 # ==============================================================================
@@ -162,7 +200,7 @@ BUILD_CONFIGS           := \
 
 .PHONY: help pki pki-clean test test-env test-js test-pkg \
 	build build-% \
-	docker-build docker-build-% docker-push docker-push-% docker-push-issuer-hsm docker-tag docker-tag-% docker-pull docker-archive \
+	docker-build docker-build-% docker-push docker-push-% docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
 	proto proto-% swagger swagger-% swagger-fmt \
 	bbs-native-lib bbs-native-lib-staged \
@@ -210,9 +248,9 @@ help: ## Show this help message
 	$(info Services: $(SERVICES))
 	$(info )
 	$(info Optional Build Features (all off by default - pure-Go static build needs none):)
-	$(info   BBSNATIVE=true                 - Opt-in: link issuer against zk-cred-bbs         (needs make bbs-native-lib))
-	$(info   PKCS11=true                    - Opt-in: link issuer against a PKCS#11 provider (HSM signing))
-	$(info   Example: make release BUMP=patch BBSNATIVE=true PKCS11=true)
+	$(info   BBSNATIVE=true                 - Opt-in: link issuer against zk-cred-bbs (needs make bbs-native-lib))
+	$(info   PKCS11_SERVICES="svc1 svc2"    - Opt-in: link named services against a PKCS#11 provider. Any of: $(SERVICES))
+	$(info   Example: make release BUMP=patch BBSNATIVE=true PKCS11_SERVICES="issuer registry")
 	$(info )
 	$(info Native library staging (prereqs for the optional native-feature targets below):)
 	$(info   make bbs-native-lib           - Fetch/build zk-cred-bbs's Go C-ABI lib          (needs Rust; required by BBSNATIVE=true and test-bbsnative))
@@ -222,7 +260,6 @@ help: ## Show this help message
 	$(info   make test-zknative            - Run pkg/mdoc's zknative-tagged tests            (requires zk-native-lib zk-native-lib-vega))
 	$(info )
 	$(info Legacy dedicated-binary variants (produce differently named binaries/images):)
-	$(info   make build-issuer-hsm         - Build issuer with PKCS#11 HSM support - dynamic-libc variant)
 	$(info   make build-verifier-zknative  - Build verifier with native ZK/PPID verification - dynamic-libc variant)
 	$(info   make build-zkvegaverifyworker - Build the isolated Vega ZK-verify subprocess worker)
 	$(info )
@@ -289,9 +326,8 @@ endef
 # Native-library staged prereqs implied by a service's *effective* Docker
 # tag set - i.e. what actually ends up in the -tags flag, not just what
 # BUILD_CONFIGS declares. Callers can inject feature tags via
-# GO_BUILD_TAGS (Jenkins does this for the HSM image), and the prereq
-# fires on those too so the build stops at the guard rather than deep in
-# cgo with a missing header.
+# GO_BUILD_TAGS, and the prereq fires on those too so the build stops at
+# the guard rather than deep in cgo with a missing header.
 #
 # zknative is deliberately NOT in this filter: dockerfiles/worker is a
 # static Alpine image that cannot link Longfellow's .so, so a standard
@@ -324,13 +360,41 @@ endef
 # the set - dockerfiles/worker still passes --extldflags '-static', so a
 # cgo build without the pure-Go DNS/user lookups would fall through to
 # glibc NSS in an Alpine image. This also neutralises a global
-# GO_BUILD_TAGS=pkcs11 (Jenkins) on non-issuer services: CGO ends up on,
-# but the effective tag set still contains the pure-Go tags a static
-# binary needs. `sort` doubles as a dedupe so BUILD_CONFIGS entries that
-# already carry netgo,osusergo (issuer with BBSNATIVE=true) do not end up
-# with them twice.
+# GO_BUILD_TAGS=pkcs11 on services that did not opt in via
+# PKCS11_SERVICES: CGO ends up on, but the effective tag set still
+# contains the pure-Go tags a static binary needs. `sort` doubles as a
+# dedupe so BUILD_CONFIGS entries that already carry netgo,osusergo
+# (issuer with BBSNATIVE=true) do not end up with them twice.
 define effective-docker-tags
 $(if $(call get-cgo-features,$1),$(subst $(space),$(comma),$(sort $(subst $(comma), ,$(call docker-tags,$1)) netgo osusergo)),$(call docker-tags,$1))
+endef
+
+# Feature-aware image tag suffix.
+#
+# Maps the effective feature-tag set for a service (a subset of
+# {bbsnative, pkcs11}) to a short, sorted, hyphen-joined suffix
+# consumers can pull by:
+#
+#   bbsnative -> bbs   (blind BBS issuance)
+#   pkcs11    -> hsm   (HSM-backed signing)
+#
+# Alphabetical sort keeps `bbs-hsm` canonical (never `hsm-bbs`), so a
+# consumer that wants "issuer with BBS and HSM" always writes
+# `issuer:v1.2.3-bbs-hsm`. Stock builds get no suffix.
+#
+# Each service carries its own suffix - `make docker-build
+# PKCS11_SERVICES=issuer VERSION=v1.2.3` publishes `issuer:v1.2.3-hsm`
+# alongside stock `apigw:v1.2.3`, `verifier:v1.2.3`, etc.
+define feature-suffix
+$(if $(call get-cgo-features,$1),-$(subst $(space),-,$(sort $(subst pkcs11,hsm,$(subst bbsnative,bbs,$(call get-cgo-features,$1))))))
+endef
+
+# Feature-aware image tag: $(call image-tag,<svc>,<version>).
+# Every docker-* recipe routes through this so the tag matches what was
+# actually compiled in - never publishes an HSM-enabled issuer under the
+# stock `issuer:v1.2.3` tag.
+define image-tag
+$(call docker-tag,$1,$2$(call feature-suffix,$1))
 endef
 
 # Docker image tag: $(call docker-tag,service,version)
@@ -403,7 +467,7 @@ test-js: ## Run JS unit tests for staticembed helpers
 # Test targets with build tags
 test-pkcs11: ## Test with PKCS#11 build tag
 	$(info Testing with PKCS#11 build tag)
-	go test -tags $(PKCS11_TAG) -v ./pkg/signing/...
+	go test -tags $(PKCS11_TAG) -v ./pkg/pki/... ./pkg/jose/...
 
 # ==============================================================================
 # Native ZK/PPID Proof Verification (zk-cred-longfellow, cgo, opt-in)
@@ -788,12 +852,6 @@ docker-build-wallet: _check-reserved-tag ## Build Docker image for wallet test t
 # Optional Feature Builds (with build tags)
 # ==============================================================================
 
-build-issuer-hsm: ## Build issuer with PKCS#11 HSM support
-	$(info Building issuer with PKCS#11 HSM support)
-	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
-		-tags $(PKCS11_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_issuer-hsm \
-		$(LDFLAGS_DYNAMIC) ./cmd/issuer/
-
 build-verifier-zknative: zk-native-lib-staged ## Build verifier with native ZK/PPID proof verification (requires: make zk-native-lib)
 	$(info Building verifier with native ZK/PPID proof verification - requires 'make zk-native-lib' first)
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) \
@@ -823,55 +881,22 @@ docker-build: $(addprefix docker-build-,$(SERVICES)) ## Build all Docker images
 #
 # CGO_ENABLED is driven off the *effective* feature tags (via
 # get-cgo-features) rather than just BUILD_CONFIGS's link mode, so an
-# out-of-band `GO_BUILD_TAGS=pkcs11 make docker-build` (Jenkins does
-# this for the HSM variant) still turns cgo on even without PKCS11=true.
+# out-of-band `GO_BUILD_TAGS=pkcs11 make docker-build` still turns cgo
+# on even without a matching PKCS11_SERVICES entry.
 define DOCKER_BUILD_WORKER_TEMPLATE
 docker-build-$(1): _check-reserved-tag $$(call get-stage-prereqs,$(1)) ## Build Docker image for $(1)
-	$$(info Docker Building $(1) with tag: $$(VERSION))
+	$$(info Docker Building $(1) with tag: $$(VERSION)$$(call feature-suffix,$(1)))
 	docker build --build-arg SERVICE_NAME=$(1) \
 		$$(if $$(filter apigw,$(1)),--build-arg BUILDTAG=$$(VERSION)) \
 		$$(if $$(call effective-docker-tags,$(1)),--build-arg GO_BUILD_TAGS="$$(call effective-docker-tags,$(1))") \
 		$$(if $$(call get-cgo-features,$(1)),--build-arg CGO_ENABLED=1) \
 		$$(if $$(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$$(GOBUILD_IMAGE)) \
-		--tag $$(call docker-tag,$(1),$$(VERSION)) \
+		--tag $$(call image-tag,$(1),$$(VERSION)) \
 		--file dockerfiles/worker .
 
 endef
 
 $(foreach service,$(WORKER_SERVICES),$(eval $(call DOCKER_BUILD_WORKER_TEMPLATE,$(service))))
-
-# Docker build with PKCS#11 feature
-# Produces a distinctly tagged `issuer-hsm:<version>` image alongside the
-# default `issuer:<version>` one. Equivalent to `docker-build-issuer
-# PKCS11=true` for the build itself; the separate tag exists so a
-# deployment can pull the HSM variant explicitly without stomping the
-# stock image. Combine with BBSNATIVE=true when the same deployment needs
-# both an HSM-backed ECDSA key AND blind BBS issuance - those are not
-# alternatives; a BBS secret cannot live in a PKCS#11 slot regardless.
-#
-# The tag set is derived directly here rather than through docker-tags:
-# this image forces CGO_ENABLED=1 and dockerfiles/worker still links
-# statically, so netgo/osusergo must be present or DNS/user lookups fall
-# through to glibc's NSS at runtime (which a static binary in Alpine
-# cannot resolve).
-_issuer_hsm_tags := $(subst $(space),$(comma),$(strip \
-	$(if $(filter true,$(BBSNATIVE)),bbsnative) $(PKCS11_TAG) netgo osusergo))
-
-# Prereq derived from the same list the recipe actually forwards, not
-# from get-stage-prereqs (which reads GO_BUILD_TAGS): the HSM recipe adds
-# `bbsnative` independently when BBSNATIVE=true, so the guard must too or
-# `make docker-build-issuer-hsm BBSNATIVE=true GO_BUILD_TAGS=pkcs11` skips
-# bbs-native-lib-staged and fails deep in cgo.
-_issuer_hsm_stage_prereqs := $(if $(filter true,$(BBSNATIVE)),bbs-native-lib-staged)
-
-docker-build-issuer-hsm: _check-reserved-tag $(_issuer_hsm_stage_prereqs) ## Build issuer Docker image with PKCS#11 HSM support
-	$(info Docker building issuer with PKCS#11 HSM support, tag: $(VERSION))
-	docker build --build-arg SERVICE_NAME=issuer --build-arg BUILDTAG=$(VERSION) \
-		--build-arg GO_BUILD_TAGS="$(_issuer_hsm_tags)" \
-		--build-arg CGO_ENABLED=1 \
-		$(if $(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$(GOBUILD_IMAGE)) \
-		--tag $(call docker-tag,issuer-hsm,$(VERSION)) \
-		--file dockerfiles/worker .
 
 docker-build-gobuild: _check-reserved-tag ## Build gobuild Docker image
 	$(info Docker Building gobuild with tag: $(VERSION))
@@ -891,17 +916,12 @@ docker-push: $(addprefix docker-push-,$(SERVICES)) ## Push all Docker images
 # Generate docker-push targets dynamically
 define DOCKER_PUSH_TEMPLATE
 docker-push-$(1): _check-reserved-tag ## Push Docker image for $(1)
-	$$(info Pushing docker image $(1))
-	docker push $$(call docker-tag,$(1),$$(VERSION))
+	$$(info Pushing docker image $(1)$$(call feature-suffix,$(1)))
+	docker push $$(call image-tag,$(1),$$(VERSION))
 
 endef
 
 $(foreach service,$(SERVICES),$(eval $(call DOCKER_PUSH_TEMPLATE,$(service))))
-
-# Push target for PKCS#11 feature build
-docker-push-issuer-hsm: _check-reserved-tag ## Push issuer Docker image with PKCS#11 HSM support
-	$(info Pushing docker image issuer-hsm)
-	docker push $(call docker-tag,issuer-hsm,$(VERSION))
 
 docker-push-gobuild: _check-reserved-tag ## Push gobuild Docker image
 	$(info Pushing docker image gobuild)
@@ -920,8 +940,8 @@ docker-tag: $(addprefix docker-tag-,$(SERVICES)) ## Tag all Docker images
 # Generate docker-tag targets dynamically
 define DOCKER_TAG_TEMPLATE
 docker-tag-$(1): _check-reserved-tag ## Tag Docker image for $(1)
-	$$(info Tagging docker image $(1))
-	docker tag $$(call docker-tag,$(1),$$(VERSION)) $$(call docker-tag,$(1),$$(NEWTAG))
+	$$(info Tagging docker image $(1)$$(call feature-suffix,$(1)))
+	docker tag $$(call image-tag,$(1),$$(VERSION)) $$(call image-tag,$(1),$$(NEWTAG))
 
 endef
 
@@ -933,16 +953,16 @@ $(foreach service,$(SERVICES),$(eval $(call DOCKER_TAG_TEMPLATE,$(service))))
 
 docker-pull: _check-reserved-tag ## Pull all Docker images
 	$(info Pulling docker images)
-	$(foreach service,$(SERVICES),docker pull $(call docker-tag,$(service),$(VERSION));)
+	$(foreach service,$(SERVICES),docker pull $(call image-tag,$(service),$(VERSION));)
 
 docker-archive: _check-reserved-tag ## Create Docker archive
 	docker save --output docker_archives/vc_$(VERSION).tar \
-		$(call docker-tag,verifier,$(VERSION)) \
-		$(call docker-tag,registry,$(VERSION))
+		$(call image-tag,verifier,$(VERSION)) \
+		$(call image-tag,registry,$(VERSION))
 
 clean_docker_images: ## Clean Docker images
 	$(info Cleaning docker images)
-	$(foreach service,$(SERVICES),docker rmi $(call docker-tag,$(service),$(VERSION)) -f;)
+	$(foreach service,$(SERVICES),docker rmi $(call image-tag,$(service),$(VERSION)) -f;)
 
 # ==============================================================================
 # Protocol Buffers
