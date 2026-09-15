@@ -414,21 +414,26 @@ zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native Z
 
 zk-native-lib-staged: ## Fail with a useful message if zk-cred-longfellow is not staged
 	@# Symmetric with bbs-native-lib-staged - see that target for why both
-	@# halves matter.
+	@# halves matter. There is no ZKNATIVE=true flag: this guard fires when
+	@# the effective build-tag set contains 'zknative' (via GO_BUILD_TAGS=zknative
+	@# on a standard target, or by using `make build-verifier-zknative`).
 	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.a" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" || ( \
-		echo "ZKNATIVE=true was requested but zk-cred-longfellow is not staged." >&2; \
+		echo "The 'zknative' build tag was requested but zk-cred-longfellow is not staged." >&2; \
 		echo "Both $(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.a and $(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h are required." >&2; \
-		echo "Run 'make zk-native-lib' first (needs network and a C++ toolchain), or drop ZKNATIVE=true." >&2; \
+		echo "Run 'make zk-native-lib' first (needs network and a C++ toolchain), then re-run 'make build-verifier-zknative' (or drop the zknative tag from GO_BUILD_TAGS)." >&2; \
 		exit 1)
 
 bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not staged
 	@# Both halves, not just the archive: cgo needs the header to compile at
 	@# all, and a stage with one and not the other passed this check and then
 	@# failed deep in the build with "zk_cred_bbs_go.h: No such file".
+	@# The guard fires whenever the effective build-tag set contains
+	@# 'bbsnative' - either via BBSNATIVE=true or an explicit
+	@# GO_BUILD_TAGS=bbsnative override.
 	@test -f "$(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a" -a -f "$(ZK_CRED_BBS_STAGE)/include/zk_cred_bbs_go.h" || ( \
-		echo "BBSNATIVE=true was requested but zk-cred-bbs is not staged." >&2; \
+		echo "The 'bbsnative' build tag was requested but zk-cred-bbs is not staged." >&2; \
 		echo "Both $(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a and $(ZK_CRED_BBS_STAGE)/include/zk_cred_bbs_go.h are required." >&2; \
-		echo "Run 'make bbs-native-lib' first (needs network and a Rust toolchain), or drop BBSNATIVE=true." >&2; \
+		echo "Run 'make bbs-native-lib' first (needs network and a Rust toolchain), or drop BBSNATIVE=true / the bbsnative tag from GO_BUILD_TAGS." >&2; \
 		exit 1)
 
 bbs-native-lib: ## Fetch/build zk-cred-bbs's Go C-ABI library for blind BBS issuance
