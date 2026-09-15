@@ -226,16 +226,15 @@ All standard builds produce static binaries (`CGO_ENABLED=0`) for `linux/amd64`.
 
 Optional features are enabled via Go build tags. The following tags are available:
 
-| Tag           | Description                    | Affected service(s) | CGO         | Make target                   |
-| ------------- | ------------------------------ | ------------------- | ----------- | ----------------------------- |
-| `saml`        | SAML IdP support               | apigw               | static      | `make build-apigw-saml`       |
-| `oidcrp`      | OpenID Connect Relying Party   | apigw               | static      | `make build-apigw-oidcrp`     |
-| `saml,oidcrp` | All optional apigw features    | apigw               | static      | `make build-apigw-all`        |
-| `pkcs11`      | PKCS#11 HSM signing            | issuer              | **dynamic** | `make build-issuer-hsm`       |
-| `vc20`        | W3C Verifiable Credentials 2.0 | vc20-test-server    | static      | `make build-vc20-test-server` |
-| `zknative`    | Native ZK/PPID proof verification (mso_mdoc_zk) - Longfellow + Vega | verifier | **dynamic** | `make build-verifier-zknative` (+ `make build-zkvegaverifyworker` for Vega) |
+| Tag         | Description                    | Affected service(s) | CGO            | Make target                   |
+| ----------- | ------------------------------ | ------------------- | -------------- | ----------------------------- |
+| `bbsnative` | Blind BBS issuance (zk-cred-bbs) — requires `make bbs-native-lib` first | issuer | **cgo-static** | `make build-issuer BBSNATIVE=true` |
+| `pkcs11`    | PKCS#11 HSM signing            | any that loads a signing key (issuer, registry, apigw, verifier) | **cgo-static** | `make build-<svc> PKCS11_SERVICES=<svc>` |
+| `zknative`  | Native ZK/PPID proof verification (mso_mdoc_zk) - Longfellow + Vega — requires `make zk-native-lib` (+ `make zk-native-lib-vega` for Vega) first | verifier | **dynamic** | `make build-verifier-zknative` (+ `make build-zkvegaverifyworker` for Vega) |
 
-> **Note:** The `pkcs11` and `zknative` tags require CGO (`CGO_ENABLED=1`) and produce dynamically linked binaries. See "Native ZK/PPID proof verification" below for `zknative` setup.
+> **Note:** All three tags require CGO (`CGO_ENABLED=1`). `bbsnative` and `pkcs11` are opt-in via the `BBSNATIVE=true` / `PKCS11_SERVICES="..."` flags and stay statically linked (`netgo,osusergo` are added automatically); `zknative` produces a dynamically linked binary via the dedicated `build-verifier-zknative` target. See "Native ZK/PPID proof verification" below for `zknative` setup and `pkg/bbs` for `bbsnative`.
+
+> **Release caveat:** `BBSNATIVE=true` / `PKCS11_SERVICES="..."` are honored only by the `make release` path that publishes to `docker.sunet.se/iam_vc`. Pushing a `v*.*.*` tag also triggers [`.github/workflows/docker-build-push.yml`](.github/workflows/docker-build-push.yml), which builds every service (including the issuer) from `dockerfiles/worker` with no build tags and publishes plain images to GHCR. If you need a feature-enabled release on GHCR, build and push that image manually.
 
 ### Docker
 
@@ -245,15 +244,7 @@ For convenience all services can be built inside a Docker container.
 | -------------------------------- | ------------------------------------------- |
 | `make docker-build`              | Build all Docker images                     |
 | `make docker-build-<service>`    | Build a specific service image              |
-| `make docker-build-apigw-saml`   | apigw image with SAML support               |
-| `make docker-build-apigw-oidcrp` | apigw image with OIDC RP support            |
-| `make docker-build-apigw-all`    | apigw image with all features               |
-| `make docker-build-issuer-hsm`   | issuer image with PKCS#11 HSM support       |
 | `make docker-push`               | Push all standard images to registry        |
-| `make docker-push-apigw-saml`    | Push apigw SAML image                       |
-| `make docker-push-apigw-oidcrp`  | Push apigw OIDC RP image                    |
-| `make docker-push-apigw-all`     | Push apigw all-features image               |
-| `make docker-push-issuer-hsm`    | Push issuer HSM image                       |
 | `make docker-tag`                | Tag all images                              |
 
 Set the image version with `VERSION=x.x.x` (default: `latest`).
@@ -348,12 +339,9 @@ pseudonym concept of its own yet either).
 | Command              | Description                                                   |
 | -------------------- | ------------------------------------------------------------- |
 | `make test`          | Run all service tests                                         |
-| `make test-saml`     | Test with `saml` build tag                                    |
-| `make test-oidcrp`   | Test with `oidcrp` build tag                                  |
-| `make test-vc20`     | Test with `vc20` build tag                                    |
+| `make test-bbsnative`| Test with `bbsnative` build tag (requires `make bbs-native-lib`) |
 | `make test-pkcs11`   | Test with `pkcs11` build tag (requires `make test-env`)       |
 | `make test-zknative` | Test with `zknative` build tag (requires `make zk-native-lib zk-native-lib-vega`) |
-| `make test-all-tags` | Test with all build tags                                      |
 | `make test-env`      | Install test dependencies (softhsm2, opensc)                  |
 
 ## Development Tools

@@ -11,17 +11,15 @@ make help
 # Build
 make build                    # Build all services
 make build-SERVICE            # Build specific service (e.g., build-apigw)
-make build-apigw-saml        # Build apigw with SAML support
-make build-apigw-oidcrp      # Build apigw with OIDC RP support
-make build-apigw-all         # Build apigw with all features
-make build-issuer-hsm        # Build issuer with HSM/PKCS#11 support
+make build-verifier-zknative  # Build verifier with native ZK/PPID verification
+make build-zkvegaverifyworker # Build the isolated Vega ZK-verify subprocess worker
 
 # Test
 make test                    # Run all tests
 make test-SERVICE            # Test specific service
-make test-saml              # Test with SAML build tag
-make test-oidcrp            # Test with OIDC RP build tag
-make test-all-tags          # Test with all build tags
+make test-bbsnative          # Test with bbsnative build tag (requires bbs-native-lib)
+make test-pkcs11             # Test with pkcs11 build tag (requires test-env)
+make test-zknative           # Test with zknative build tag (requires zk-native-lib zk-native-lib-vega)
 
 # Docker
 make docker-build                          # Build all images (VERSION=local)
@@ -75,8 +73,8 @@ W3C_TEST_PORT=8888   # W3C test server port (default: 8888)
 The build system manages 4 microservices:
 - **verifier** - Credential verification service (web worker)
 - **registry** - Central registry service (worker)
-- **apigw** - API gateway (worker, supports SAML/OIDCRP tags)
-- **issuer** - Credential issuing service (worker)
+- **apigw** - API gateway (worker)
+- **issuer** - Credential issuing service (worker; opt-in `bbsnative`/`pkcs11` cgo tags)
 
 ### Build Configuration
 
@@ -84,9 +82,12 @@ Each service has a specific build configuration:
 
 ```makefile
 verifier:static:           # Static linking, no CGO, no build tags
-registry:dynamic:          # Dynamic linking, CGO enabled
-apigw:static:              # Static linking, supports saml/oidcrp tags
-issuer:static:             # Static linking, supports pkcs11 tag
+registry:static:           # Static linking, no CGO, no build tags
+apigw:static:              # Static linking, no CGO, no build tags
+issuer:static:             # Default: pure-Go static, no cgo, no build tags.
+                           # Flipped to cgo-static with `bbsnative` and/or
+                           # `pkcs11` (plus `netgo,osusergo`) when the caller
+                           # sets BBSNATIVE=true and/or PKCS11_SERVICES="...".
 ```
 
 ### Template System
@@ -140,7 +141,7 @@ $(call get-cgo,apigw)  # Returns CGO_ENABLED=0 or CGO_ENABLED=1
 ### get-tags
 Returns build tags for a service:
 ```makefile
-$(call get-tags,apigw)  # Returns build tags like "saml" or empty
+$(call get-tags,issuer)  # Returns "bbsnative,netgo,osusergo" (with BBSNATIVE=true) or empty
 ```
 
 ### get-ldflags
@@ -158,26 +159,31 @@ $(call docker-tag,verifier,1.2.3)  # Returns docker.sunet.se/iam_vc/verifier:1.2
 ## Build Tags
 
 ### Available Tags
-- **saml** - SAML authentication support
-- **oidcrp** - OpenID Connect Relying Party support
-- **pkcs11** - Hardware Security Module (HSM) support
-- **vc20** - W3C Verifiable Credentials 2.0 support
+- **bbsnative** - Blind BBS issuance (requires `make bbs-native-lib`; enabled via `BBSNATIVE=true`)
+- **pkcs11** - Hardware Security Module (HSM) support (enabled per-service via `PKCS11_SERVICES="svc1 svc2"`)
+- **zknative** - Native ZK/PPID proof verification (Longfellow + Vega; requires `make zk-native-lib` / `make zk-native-lib-vega`; used only by `build-verifier-zknative` and `build-zkvegaverifyworker`)
 
 ### Usage Examples
 ```bash
-# Build with specific tag
-make build-apigw-saml
+# Build the issuer with an opt-in native feature
+make build-issuer BBSNATIVE=true
+make build-issuer PKCS11_SERVICES=issuer
+make build-issuer BBSNATIVE=true PKCS11_SERVICES=issuer     # both
 
-# Test with specific tag
-make test-saml
-make test-oidcrp
+# Test with a specific tag
+make test-bbsnative
+make test-pkcs11
+make test-zknative
 
-# Test all tags
-make test-all-tags
-
-# Docker build with tags
-make docker-build-apigw-saml VERSION=myfeature
-make docker-build-issuer-hsm VERSION=myfeature
+# Docker build with feature tags — the resulting image tag gets a short,
+# sorted suffix so a feature build never overwrites the stock tag:
+#   BBSNATIVE=true            -> issuer:<ver>-bbs
+#   PKCS11_SERVICES=issuer    -> issuer:<ver>-hsm
+#   BBSNATIVE=true + PKCS11_SERVICES=issuer
+#                             -> issuer:<ver>-bbs-hsm
+make docker-build BBSNATIVE=true VERSION=myfeature
+make docker-build PKCS11_SERVICES="issuer registry" VERSION=myfeature
+make docker-build BBSNATIVE=true PKCS11_SERVICES=issuer VERSION=myfeature
 ```
 
 ## Docker Workflows
@@ -214,11 +220,10 @@ make docker-push VERSION=staging
 # Build only the API gateway
 make docker-build-apigw VERSION=myfeature
 
-# Build with SAML support
-make docker-build-apigw-saml VERSION=myfeature
-
-# Build with all features
-make docker-build-apigw-all VERSION=myfeature
+# Build the issuer with an opt-in feature (tag suffixed automatically)
+make docker-build-issuer BBSNATIVE=true VERSION=myfeature                       # -> issuer:myfeature-bbs
+make docker-build-issuer PKCS11_SERVICES=issuer VERSION=myfeature               # -> issuer:myfeature-hsm
+make docker-build-issuer BBSNATIVE=true PKCS11_SERVICES=issuer VERSION=myfeature # -> issuer:myfeature-bbs-hsm
 ```
 
 ## Reserved Tag Guard
@@ -269,8 +274,9 @@ This performs:
 1. Verifies you're on the `main` branch (unless `FORCE=true`)
 2. Verifies the working tree is clean (unless `FORCE=true`)
 3. Bumps the latest `vX.Y.Z` tag according to `BUMP`
-4. Creates and pushes the new git tag
-5. Builds all Docker images tagged `:vX.Y.Z`
+4. Builds all Docker images tagged `:vX.Y.Z` (fail-fast: no git tag is
+   created if the build fails)
+5. Creates and pushes the new git tag
 6. Pushes images tagged `:vX.Y.Z`
 7. Retags and pushes all images as `:dev`
 
