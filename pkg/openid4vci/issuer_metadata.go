@@ -149,9 +149,9 @@ type CredentialConfigurationsSupported struct {
 	// Cryptosuite: OPTIONAL. For ldp_vc and vc+ld+json formats, identifies the cryptographic suite used for Data Integrity Proofs.
 	Cryptosuite string `json:"cryptosuite,omitempty" yaml:"cryptosuite,omitempty"`
 
-	// DisclosurePolicy: OPTIONAL. Embedded disclosure policy per CIR 2024/2979 Annex III and ETSI TS 119 472-3.
+	// DisclosurePolicy: OPTIONAL. Embedded disclosure policy per CIR 2024/2979 Annex III and ETSI TS 119 472-3 §4.2.5.
 	// Specifies conditions a Relying Party must meet to receive this attestation.
-	// Distributed via Credential Issuer metadata (ARF 3.0 §6.6.2.8, Discussion Paper Topic D §3.1 Option A).
+	// No stable normative key layout exists in OpenID4VCI yet (see openid/OpenID4VCI issue #384); omitted unless explicitly configured.
 	DisclosurePolicy *EmbeddedDisclosurePolicy `json:"disclosure_policy,omitempty" yaml:"disclosure_policy,omitempty"`
 }
 

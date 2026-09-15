@@ -580,10 +580,9 @@ func TestIssuerMetadata_Generate_DisclosurePolicy(t *testing.T) {
 		expectRoots  []string
 	}{
 		{
-			name:         "no policy configured defaults to none",
+			name:         "no policy configured omits field",
 			policy:       nil,
-			expectPolicy: true,
-			expectType:   "none",
+			expectPolicy: false,
 		},
 		{
 			name: "none policy",

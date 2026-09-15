@@ -1744,8 +1744,8 @@ type CredentialMetadata struct {
 	// Format is the credential format to issue
 	Format string `yaml:"format" json:"format" validate:"required" default:"dc+sd-jwt" doc_example:"\"dc+sd-jwt\""`
 	// DisclosurePolicy configures the embedded disclosure policy for this credential type.
-	// Per ARF 3.0 §6.6.2.8 and CIR 2024/2979 Annex III. Only applicable to QEAAs and PuB-EAAs (not PIDs).
-	// When omitted, the metadata publishes policy_type "none" (no restrictions).
+	// Per CIR 2024/2979 Annex III and ETSI TS 119 472-3 §4.2.5. Only applicable to QEAAs and PuB-EAAs (not PIDs).
+	// Optional and off by default: when omitted, no `disclosure_policy` field is emitted in the credential issuer metadata.
 	DisclosurePolicy *openid4vci.EmbeddedDisclosurePolicy `yaml:"disclosure_policy,omitempty" json:"-" validate:"omitempty"`
 	// Attributes maps claim names to their source fields and transformation rules for credential issuance
 	Attributes map[string]map[string][]*string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
@@ -2249,9 +2249,6 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 			}
 
 			credConfig.DisclosurePolicy = constructor.DisclosurePolicy
-			if credConfig.DisclosurePolicy == nil {
-				credConfig.DisclosurePolicy = &openid4vci.EmbeddedDisclosurePolicy{PolicyType: "none"}
-			}
 			cfg.applyCommonCredentialConfig(&credConfig)
 			credentialConfigs[scope] = credConfig
 			continue
@@ -2372,9 +2369,6 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		}
 
 		credConfig.DisclosurePolicy = constructor.DisclosurePolicy
-		if credConfig.DisclosurePolicy == nil {
-			credConfig.DisclosurePolicy = &openid4vci.EmbeddedDisclosurePolicy{PolicyType: "none"}
-		}
 		cfg.applyCommonCredentialConfig(&credConfig)
 		credentialConfigs[scope] = credConfig
 	}

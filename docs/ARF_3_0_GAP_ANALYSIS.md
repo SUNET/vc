@@ -61,14 +61,13 @@ Implemented:
 
 #### 3. ~~Embedded Disclosure Policies (ETSI TS 119 472-3)~~ ✅ Done
 
-**ARF ref**: §6.6.2.8  
+**Spec ref**: CIR 2024/2979 Annex III; ETSI TS 119 472-3 §4.2.5 (ARF 3.x has no stable normative section for this yet — the earlier `§6.6.2.8` anchor was incorrect, that section is about batch issuance). See also OpenID4VCI issue [#384](https://github.com/openid/OpenID4VCI/issues/384) for the ongoing key-layout discussion.  
 **Status**: ✅ Implemented — per-credential `disclosure_policy` in Credential Issuer metadata.  
 **Role**: Issuer  
 
 Implemented:
 - `EmbeddedDisclosurePolicy` struct with three policy types: `none`, `authorized_relying_parties`, `specific_root_of_trust`
-- Published in `credential_configurations_supported` via `disclosure_policy` field
-- Always explicitly declarative (defaults to `{"policy_type":"none"}` when not configured)
+- Published in `credential_configurations_supported` via `disclosure_policy` field only when explicitly configured (off by default, since no normative key layout is finalized and unknown-field-strict wallets — e.g. Procivis One — otherwise fail metadata parsing)
 - Validation: RP list required for `authorized_relying_parties`, SHA-256 hex fingerprints required for `specific_root_of_trust`
 - Configurable per-scope via `disclosure_policy:` in YAML under `credential_metadata`
 
