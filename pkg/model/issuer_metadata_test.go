@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/mdoc"
@@ -614,36 +615,72 @@ func TestIssuerMetadata_Generate_DisclosurePolicy(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			credMeta := map[string]*CredentialMetadata{
-				"test_cred": {
+	// Both the VCTM/SD-JWT and mso_mdoc/MDDL branches of Generate must honor
+	// the opt-in contract: an unset policy is omitted, and a set policy is
+	// propagated verbatim.
+	formats := []struct {
+		name  string
+		build func(policy *openid4vci.EmbeddedDisclosurePolicy) *CredentialMetadata
+	}{
+		{
+			name: "dc+sd-jwt",
+			build: func(policy *openid4vci.EmbeddedDisclosurePolicy) *CredentialMetadata {
+				return &CredentialMetadata{
 					VCTM:             &sdjwtvc.VCTM{VCT: baseURL + "/type-metadata/test_cred"},
 					VCTURL:           baseURL + "/type-metadata/test_cred",
 					Format:           "dc+sd-jwt",
-					DisclosurePolicy: tt.policy,
-				},
-			}
+					DisclosurePolicy: policy,
+				}
+			},
+		},
+		{
+			name: "mso_mdoc",
+			build: func(policy *openid4vci.EmbeddedDisclosurePolicy) *CredentialMetadata {
+				return &CredentialMetadata{
+					Format: "mso_mdoc",
+					MDDL: &mdoc.MDDLSchema{
+						Format:  "mso_mdoc",
+						DocType: "org.iso.18013.5.1.mDL",
+					},
+					DisclosurePolicy: policy,
+				}
+			},
+		},
+	}
 
-			ctx := context.Background()
-			metadata, err := cfg.Generate(ctx, baseURL, credMeta)
-			require.NoError(t, err)
+	for _, f := range formats {
+		t.Run(f.name, func(t *testing.T) {
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					credMeta := map[string]*CredentialMetadata{
+						"test_cred": f.build(tt.policy),
+					}
 
-			credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
+					ctx := context.Background()
+					metadata, err := cfg.Generate(ctx, baseURL, credMeta)
+					require.NoError(t, err)
 
-			if !tt.expectPolicy {
-				assert.Nil(t, credConfig.DisclosurePolicy)
-				return
-			}
+					credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
 
-			require.NotNil(t, credConfig.DisclosurePolicy)
-			assert.Equal(t, tt.expectType, credConfig.DisclosurePolicy.PolicyType)
+					if !tt.expectPolicy {
+						assert.Nil(t, credConfig.DisclosurePolicy)
+						// omitempty must keep the field out of the marshalled metadata too
+						js, err := json.Marshal(credConfig)
+						require.NoError(t, err)
+						assert.NotContains(t, string(js), "disclosure_policy")
+						return
+					}
 
-			if tt.expectRPs != nil {
-				assert.Equal(t, tt.expectRPs, credConfig.DisclosurePolicy.AuthorizedRelyingParties)
-			}
-			if tt.expectRoots != nil {
-				assert.Equal(t, tt.expectRoots, credConfig.DisclosurePolicy.TrustedRoots)
+					require.NotNil(t, credConfig.DisclosurePolicy)
+					assert.Equal(t, tt.expectType, credConfig.DisclosurePolicy.PolicyType)
+
+					if tt.expectRPs != nil {
+						assert.Equal(t, tt.expectRPs, credConfig.DisclosurePolicy.AuthorizedRelyingParties)
+					}
+					if tt.expectRoots != nil {
+						assert.Equal(t, tt.expectRoots, credConfig.DisclosurePolicy.TrustedRoots)
+					}
+				})
 			}
 		})
 	}
