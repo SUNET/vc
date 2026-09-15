@@ -292,13 +292,45 @@ endef
 # GO_BUILD_TAGS (Jenkins does this for the HSM image), and the prereq
 # fires on those too so the build stops at the guard rather than deep in
 # cgo with a missing header.
+#
+# zknative is deliberately NOT in this filter: dockerfiles/worker is a
+# static Alpine image that cannot link Longfellow's .so, so a standard
+# `docker-build-*` build with the zknative tag is never valid. Native ZK
+# verification lives in build-verifier-zknative + dockerfiles/verifier-zknative
+# (dynamic, glibc); routing it through the standard worker would silently
+# select an impossible link mode.
 define get-cgo-features
-$(filter bbsnative pkcs11 zknative,$(subst $(comma), ,$(call docker-tags,$1)))
+$(filter bbsnative pkcs11,$(subst $(comma), ,$(call docker-tags,$1)))
+endef
+
+# Local-recipe counterparts: the `build-$(1)` recipe compiles with
+# `get-tags` (BUILD_CONFIGS only), not `docker-tags`, so its prereq must
+# see the same tag set - otherwise `GO_BUILD_TAGS=bbsnative make build-issuer`
+# fails the guard while the recipe below still builds without the tag.
+define get-local-cgo-features
+$(filter bbsnative pkcs11,$(subst $(comma), ,$(call get-tags,$1)))
 endef
 
 define get-stage-prereqs
-$(if $(filter bbsnative,$(call get-cgo-features,$1)),bbs-native-lib-staged) \
-$(if $(filter zknative,$(call get-cgo-features,$1)),zk-native-lib-staged)
+$(if $(filter bbsnative,$(call get-cgo-features,$1)),bbs-native-lib-staged)
+endef
+
+define get-local-stage-prereqs
+$(if $(filter bbsnative,$(call get-local-cgo-features,$1)),bbs-native-lib-staged)
+endef
+
+# Docker tags actually forwarded to the worker Dockerfile. Whenever CGO
+# is inferred (get-cgo-features non-empty), ensure netgo,osusergo are in
+# the set - dockerfiles/worker still passes --extldflags '-static', so a
+# cgo build without the pure-Go DNS/user lookups would fall through to
+# glibc NSS in an Alpine image. This also neutralises a global
+# GO_BUILD_TAGS=pkcs11 (Jenkins) on non-issuer services: CGO ends up on,
+# but the effective tag set still contains the pure-Go tags a static
+# binary needs. `sort` doubles as a dedupe so BUILD_CONFIGS entries that
+# already carry netgo,osusergo (issuer with BBSNATIVE=true) do not end up
+# with them twice.
+define effective-docker-tags
+$(if $(call get-cgo-features,$1),$(subst $(space),$(comma),$(sort $(subst $(comma), ,$(call docker-tags,$1)) netgo osusergo)),$(call docker-tags,$1))
 endef
 
 # Docker image tag: $(call docker-tag,service,version)
@@ -413,14 +445,14 @@ zk-native-lib: ## Fetch/build zk-cred-longfellow's Go C-ABI library for native Z
 	@echo "Build/test with: CGO_ENABLED=1 LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) go {build,test} -tags $(ZKNATIVE_TAG) ./..."
 
 zk-native-lib-staged: ## Fail with a useful message if zk-cred-longfellow is not staged
-	@# Symmetric with bbs-native-lib-staged - see that target for why both
-	@# halves matter. There is no ZKNATIVE=true flag: this guard fires when
-	@# the effective build-tag set contains 'zknative' (via GO_BUILD_TAGS=zknative
-	@# on a standard target, or by using `make build-verifier-zknative`).
-	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.a" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" || ( \
+	@# Longfellow's cgo binding links dynamically (see build-verifier-zknative
+	@# and dockerfiles/verifier-zknative), so the artifact consumers actually
+	@# need is the shared object - checking for the archive would reject a
+	@# valid `.so`-only stage.
+	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" || ( \
 		echo "The 'zknative' build tag was requested but zk-cred-longfellow is not staged." >&2; \
-		echo "Both $(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.a and $(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h are required." >&2; \
-		echo "Run 'make zk-native-lib' first (needs network and a C++ toolchain), then re-run 'make build-verifier-zknative' (or drop the zknative tag from GO_BUILD_TAGS)." >&2; \
+		echo "Both $(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so and $(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h are required." >&2; \
+		echo "Run 'make zk-native-lib' first (needs network and a C++ toolchain), then re-run 'make build-verifier-zknative'." >&2; \
 		exit 1)
 
 bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not staged
@@ -482,12 +514,11 @@ zk-native-lib-vega: ## Fetch/build zk-cred-vega's Go C-ABI library for native Ve
 	@echo "Staged zk-cred-vega's Go C-ABI lib + header in $(ZK_CRED_VEGA_STAGE)"
 
 zk-native-lib-vega-staged: ## Fail with a useful message if zk-cred-vega is not staged
-	@# Symmetric with bbs-native-lib-staged / zk-native-lib-staged - both
-	@# halves matter for the same reason (cgo needs the header to compile,
-	@# the archive to link).
-	@test -f "$(ZK_CRED_VEGA_STAGE)/lib/libzk_cred_vega.a" -a -f "$(ZK_CRED_VEGA_STAGE)/include/zk_cred_vega_go.h" || ( \
+	@# build-zkvegaverifyworker and dockerfiles/verifier-zknative both link
+	@# libzk_cred_vega.so - check the shared library, not the archive.
+	@test -f "$(ZK_CRED_VEGA_STAGE)/lib/libzk_cred_vega.so" -a -f "$(ZK_CRED_VEGA_STAGE)/include/zk_cred_vega_go.h" || ( \
 		echo "zk-cred-vega is not staged - needed for build-zkvegaverifyworker and test-zknative." >&2; \
-		echo "Both $(ZK_CRED_VEGA_STAGE)/lib/libzk_cred_vega.a and $(ZK_CRED_VEGA_STAGE)/include/zk_cred_vega_go.h are required." >&2; \
+		echo "Both $(ZK_CRED_VEGA_STAGE)/lib/libzk_cred_vega.so and $(ZK_CRED_VEGA_STAGE)/include/zk_cred_vega_go.h are required." >&2; \
 		echo "Run 'make zk-native-lib-vega' first (needs network and a C++ toolchain)." >&2; \
 		exit 1)
 
@@ -599,7 +630,7 @@ build: proto $(addprefix build-,$(SERVICES)) build-vc20-test-server ## Build all
 
 # Generate standard build targets dynamically
 define BUILD_TEMPLATE
-build-$(1): $$(call get-stage-prereqs,$(1)) ## Build $(1) service
+build-$(1): $$(call get-local-stage-prereqs,$(1)) ## Build $(1) service
 	$$(info Building $(1))
 	$$(call get-cgo,$(1)) GOOS=$$(BUILD_OS) GOARCH=$$(BUILD_ARCH) go build \
 		$$(if $$(call get-tags,$(1)),-tags "$$(call get-tags,$(1))") \
@@ -797,7 +828,7 @@ docker-build-$(1): _check-reserved-tag $$(call get-stage-prereqs,$(1)) ## Build 
 	$$(info Docker Building $(1) with tag: $$(VERSION))
 	docker build --build-arg SERVICE_NAME=$(1) \
 		$$(if $$(filter apigw,$(1)),--build-arg BUILDTAG=$$(VERSION)) \
-		$$(if $$(call docker-tags,$(1)),--build-arg GO_BUILD_TAGS="$$(call docker-tags,$(1))") \
+		$$(if $$(call effective-docker-tags,$(1)),--build-arg GO_BUILD_TAGS="$$(call effective-docker-tags,$(1))") \
 		$$(if $$(call get-cgo-features,$(1)),--build-arg CGO_ENABLED=1) \
 		$$(if $$(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$$(GOBUILD_IMAGE)) \
 		--tag $$(call docker-tag,$(1),$$(VERSION)) \
@@ -824,7 +855,14 @@ $(foreach service,$(WORKER_SERVICES),$(eval $(call DOCKER_BUILD_WORKER_TEMPLATE,
 _issuer_hsm_tags := $(subst $(space),$(comma),$(strip \
 	$(if $(filter true,$(BBSNATIVE)),bbsnative) $(PKCS11_TAG) netgo osusergo))
 
-docker-build-issuer-hsm: _check-reserved-tag $(call get-stage-prereqs,issuer) ## Build issuer Docker image with PKCS#11 HSM support
+# Prereq derived from the same list the recipe actually forwards, not
+# from get-stage-prereqs (which reads GO_BUILD_TAGS): the HSM recipe adds
+# `bbsnative` independently when BBSNATIVE=true, so the guard must too or
+# `make docker-build-issuer-hsm BBSNATIVE=true GO_BUILD_TAGS=pkcs11` skips
+# bbs-native-lib-staged and fails deep in cgo.
+_issuer_hsm_stage_prereqs := $(if $(filter true,$(BBSNATIVE)),bbs-native-lib-staged)
+
+docker-build-issuer-hsm: _check-reserved-tag $(_issuer_hsm_stage_prereqs) ## Build issuer Docker image with PKCS#11 HSM support
 	$(info Docker building issuer with PKCS#11 HSM support, tag: $(VERSION))
 	docker build --build-arg SERVICE_NAME=issuer --build-arg BUILDTAG=$(VERSION) \
 		--build-arg GO_BUILD_TAGS="$(_issuer_hsm_tags)" \
