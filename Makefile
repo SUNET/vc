@@ -166,7 +166,7 @@ BUILD_CONFIGS           := \
 	start stop restart clean_docker_images \
 	proto proto-% swagger swagger-% swagger-fmt \
 	bbs-native-lib bbs-native-lib-staged \
-	zk-native-lib zk-native-lib-staged zk-native-lib-vega \
+	zk-native-lib zk-native-lib-staged zk-native-lib-vega zk-native-lib-vega-staged \
 	check-protoc diagram install-tools clean-apt-cache vscode vendor-js update formatting \
 	gh-install gh-auth \
 	gosec staticcheck vulncheck \
@@ -481,7 +481,17 @@ zk-native-lib-vega: ## Fetch/build zk-cred-vega's Go C-ABI library for native Ve
 	cp "$(ZK_CRED_VEGA_CHECKOUT)/target/go-cabi"/libzk_cred_vega.* "$(ZK_CRED_VEGA_STAGE)/lib/"
 	@echo "Staged zk-cred-vega's Go C-ABI lib + header in $(ZK_CRED_VEGA_STAGE)"
 
-test-zknative: ## Run pkg/mdoc's zknative-tagged tests (requires: make zk-native-lib zk-native-lib-vega)
+zk-native-lib-vega-staged: ## Fail with a useful message if zk-cred-vega is not staged
+	@# Symmetric with bbs-native-lib-staged / zk-native-lib-staged - both
+	@# halves matter for the same reason (cgo needs the header to compile,
+	@# the archive to link).
+	@test -f "$(ZK_CRED_VEGA_STAGE)/lib/libzk_cred_vega.a" -a -f "$(ZK_CRED_VEGA_STAGE)/include/zk_cred_vega_go.h" || ( \
+		echo "zk-cred-vega is not staged - needed for build-zkvegaverifyworker and test-zknative." >&2; \
+		echo "Both $(ZK_CRED_VEGA_STAGE)/lib/libzk_cred_vega.a and $(ZK_CRED_VEGA_STAGE)/include/zk_cred_vega_go.h are required." >&2; \
+		echo "Run 'make zk-native-lib-vega' first (needs network and a C++ toolchain)." >&2; \
+		exit 1)
+
+test-zknative: zk-native-lib-staged zk-native-lib-vega-staged ## Run pkg/mdoc's zknative-tagged tests (requires: make zk-native-lib zk-native-lib-vega)
 	$(info Testing with zknative build tag - requires 'make zk-native-lib zk-native-lib-vega' first)
 	CGO_ENABLED=1 LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) \
 		go test -tags $(ZKNATIVE_TAG) -v ./pkg/mdoc/...
@@ -751,7 +761,7 @@ build-issuer-hsm: ## Build issuer with PKCS#11 HSM support
 		-tags $(PKCS11_TAG) $(BUILD_FLAGS) -o ./bin/$(NAME)_issuer-hsm \
 		$(LDFLAGS_DYNAMIC) ./cmd/issuer/
 
-build-verifier-zknative: ## Build verifier with native ZK/PPID proof verification (requires: make zk-native-lib)
+build-verifier-zknative: zk-native-lib-staged ## Build verifier with native ZK/PPID proof verification (requires: make zk-native-lib)
 	$(info Building verifier with native ZK/PPID proof verification - requires 'make zk-native-lib' first)
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) \
 		CGO_CFLAGS="-I$(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/include" \
@@ -760,7 +770,7 @@ build-verifier-zknative: ## Build verifier with native ZK/PPID proof verificatio
 		$(LDFLAGS_DYNAMIC) ./cmd/verifier/
 	@echo "Run with: LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) ./bin/$(NAME)_verifier-zknative"
 
-build-zkvegaverifyworker: ## Build the isolated Vega ZK-verify subprocess worker (requires: make zk-native-lib-vega)
+build-zkvegaverifyworker: zk-native-lib-vega-staged ## Build the isolated Vega ZK-verify subprocess worker (requires: make zk-native-lib-vega)
 	$(info Building zkvegaverifyworker - requires 'make zk-native-lib-vega' first)
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) \
 		CGO_CFLAGS="-I$(CURDIR)/$(ZK_CRED_VEGA_STAGE)/include" \
