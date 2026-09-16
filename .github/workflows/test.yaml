@@ -145,11 +145,24 @@ jobs:
             third_party/.zk-cred-vega-src/target
           key: zk-cred-vega-${{ runner.os }}-${{ steps.crate.outputs.vega_sha }}
 
+      # pkg/mdoc/zkvegaworker transitively imports pkg/bbs/bbsnative
+      # (via pkg/openid4vci → pkg/bbs), which is compiled unconditionally
+      # and links libzk_cred_bbs — so `go test ./pkg/mdoc/...` fails to
+      # build without it staged.
+      - name: Cache the built zk-cred-bbs C ABI library
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/zk-cred-bbs
+            third_party/.zk-cred-bbs-src/target
+          key: zk-cred-bbs-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
       - name: Build the native libraries
-        # Both, not just Longfellow: pkg/mdoc/zknative_vega includes
-        # zk_cred_vega_go.h, so the zknative tag does not compile at all
-        # without the Vega library staged as well.
+        # pkg/mdoc/zknative_vega includes zk_cred_vega_go.h and
+        # pkg/mdoc/zkvegaworker transitively pulls in pkg/bbs/bbsnative,
+        # so the zknative tag does not compile without all three staged.
         run: |
+          make bbs-native-lib
           make zk-native-lib
           make zk-native-lib-vega
 

@@ -363,8 +363,8 @@ zk-native-lib-vega-staged: ## Fail with a useful message if zk-cred-vega is not 
 		echo "Run 'make zk-native-lib-vega' first (needs network and a C++ toolchain)." >&2; \
 		exit 1)
 
-test-zknative: zk-native-lib-staged zk-native-lib-vega-staged ## Run pkg/mdoc's zknative-tagged tests (requires: make zk-native-lib zk-native-lib-vega)
-	$(info Testing with zknative build tag - requires 'make zk-native-lib zk-native-lib-vega' first)
+test-zknative: bbs-native-lib-staged zk-native-lib-staged zk-native-lib-vega-staged ## Run pkg/mdoc's zknative-tagged tests (requires: make bbs-native-lib zk-native-lib zk-native-lib-vega)
+	$(info Testing with zknative build tag - requires 'make bbs-native-lib zk-native-lib zk-native-lib-vega' first)
 	CGO_ENABLED=1 LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) \
 		go test -tags $(ZKNATIVE_TAG) -v ./pkg/mdoc/...
 
