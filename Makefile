@@ -286,9 +286,12 @@ test-js: ## Run JS unit tests for staticembed helpers
 	@node --test $(APIGW_STATIC)/tests/*.test.js $(VERIFIER_STATIC)/tests/*.test.js
 
 # Test targets with build tags
+# The SoftHSM integration tests in pkg/pki and pkg/jose shell out to
+# softhsm2-util/pkcs11-tool; keep them behind the `pkcs11` build tag so
+# `test-pkg` on a clean checkout does not require `test-env`.
 test-pkcs11: ## Test pkg/pki and pkg/jose (cgo, PKCS#11 code paths)
 	$(info Testing pkg/pki and pkg/jose)
-	CGO_ENABLED=1 go test -v ./pkg/pki/... ./pkg/jose/...
+	CGO_ENABLED=1 go test -v -tags pkcs11 ./pkg/pki/... ./pkg/jose/...
 
 # ==============================================================================
 # Native ZK/PPID Proof Verification (zk-cred-longfellow, cgo, opt-in)
@@ -540,7 +543,7 @@ endef
 
 $(foreach service,$(SERVICES),$(eval $(call BUILD_TEMPLATE,$(service))))
 
-build-vc20-test-server: ## Build VC 2.0 test server
+build-vc20-test-server: bbs-native-lib-ensure ## Build VC 2.0 test server
 	$(info Building vc20-test-server)
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
 		-tags "$(WORKER_BUILD_TAGS)" \

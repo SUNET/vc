@@ -1,3 +1,5 @@
+//go:build pkcs11
+
 package pki_test
 
 import (
