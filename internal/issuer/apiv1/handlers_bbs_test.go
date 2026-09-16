@@ -100,35 +100,6 @@ func TestMakeJWPRequiresARegistry(t *testing.T) {
 	}
 }
 
-// A status list entry is consumed before anything is signed, and it is never
-// handed back. An issuer configured with BBS keys but built without
-// `-tags bbsnative` would therefore burn one registry entry per request while
-// never issuing a credential - a slow leak in the revocation list rather than
-// a visible failure. The availability check has to come first.
-func TestMakeJWPDoesNotConsumeAStatusEntryWithoutNativeSupport(t *testing.T) {
-	if bbs.Available() {
-		t.Skip("this is the untagged build's failure mode; native support is compiled in")
-	}
-	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
-	registry := &mockRegistryClient{}
-	c.registryClient = registry
-
-	_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
-		Commitment:   []byte{1, 2, 3},
-		VCT:          "urn:example:pid",
-		DocumentData: validDocumentData,
-	})
-	if err == nil {
-		t.Fatal("an issuer with no native support must refuse to issue")
-	}
-	if got := grpcstatus.Code(err); got != codes.Unimplemented {
-		t.Fatalf("want codes.Unimplemented, got %v (%v)", got, err)
-	}
-	if registry.index != 0 {
-		t.Fatalf("a refused issuance must consume no status entry, %d consumed", registry.index)
-	}
-}
-
 // Same argument as the availability check, one layer up: `holder_pointers` is
 // entirely caller-controlled, and a list that cannot possibly be signed must
 // not cost a revocation entry to discover.
@@ -304,23 +275,16 @@ func TestBBSIssuerHeaderCarriesWhatMustNotBeHidden(t *testing.T) {
 
 // bbsTestKeyPair returns a key pair the startup check will accept.
 //
-// Toy byte strings will not do any more: under `-tags bbsnative` the pair
-// is verified by deriving the public key from the secret, so the two halves
-// have to actually belong together. The secret is a small in-range scalar
-// and the public half is derived from it - which also means these tests
-// exercise the real derivation whenever the native library is present, and
-// fall back to arbitrary bytes only where there is nothing to derive with.
+// Toy byte strings will not do any more: the startup check verifies the
+// pair by deriving the public key from the secret, so the two halves have
+// to actually belong together.
 func bbsTestKeyPair(t *testing.T) (secretB64, publicB64 string) {
 	t.Helper()
 	secret := make([]byte, 32)
 	secret[31] = 7
-	public := make([]byte, 96)
-	if bbs.Available() {
-		derived, err := bbs.Native().SkToPk(secret)
-		if err != nil {
-			t.Fatalf("deriving a test public key: %v", err)
-		}
-		public = derived
+	public, err := bbs.Native().SkToPk(secret)
+	if err != nil {
+		t.Fatalf("deriving a test public key: %v", err)
 	}
 	enc := base64.RawURLEncoding
 	return enc.EncodeToString(secret), enc.EncodeToString(public)
@@ -567,32 +531,6 @@ func TestMakeJWPSignsUnderTheSuiteItWasGiven(t *testing.T) {
 				t.Fatalf("key binding = %v, want %v", signer.got.KeyBinding, wantBinding)
 			}
 		})
-	}
-}
-
-// Configuring BBS on a binary that cannot do it must fail the boot.
-//
-// This is the trap a deployment falls into by pinning the stock issuer
-// image, which is built CGO_ENABLED=0 with no tags: the config loads, the
-// service starts, `format: jwp` resolves, and every issuance dies at the
-// signer long after anyone was watching the deploy.
-func TestInitBBSKeysRefusesABuildWithoutNativeSupport(t *testing.T) {
-	if bbs.Available() {
-		t.Skip("this binary has native BBS support; the refusal cannot be reached")
-	}
-	dir := t.TempDir()
-	skB64, pkB64 := bbsTestKeyPair(t)
-	c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Issuer: &model.Issuer{BBS: &model.BBSConfig{
-		SecretKeyPath: writeKeyFile(t, dir, "n.sk", skB64),
-		PublicKeyPath: writeKeyFile(t, dir, "n.pk", pkB64),
-	}}}}
-
-	err := c.initBBSKeys()
-	if err == nil {
-		t.Fatal("a BBS-configured issuer without native support must not start")
-	}
-	if !strings.Contains(err.Error(), "bbsnative") {
-		t.Fatalf("the error should say how to fix it, got: %v", err)
 	}
 }
 

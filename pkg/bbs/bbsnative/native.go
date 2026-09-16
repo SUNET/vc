@@ -1,10 +1,7 @@
-//go:build bbsnative
-
 // Package bbsnative is a cgo wrapper around zk-cred-bbs's plain C-ABI Go
-// binding (src/go_ffi.rs / include/zk_cred_bbs_go.h in that crate). It is
-// built only when the "bbsnative" build tag is set — see pkg/bbs for why,
-// and the repository Makefile's `bbs-native-lib` target for how the
-// library gets staged.
+// binding (src/go_ffi.rs / include/zk_cred_bbs_go.h in that crate). The
+// static library is staged by the repository Makefile's `bbs-native-lib`
+// target.
 //
 // Unlike zk-cred-longfellow's verifier binding, this exposes the ISSUER
 // side too: an issuer offering BBS credentials must verify the holder's
