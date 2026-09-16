@@ -74,53 +74,47 @@ The build system manages 4 microservices:
 - **verifier** - Credential verification service (web worker)
 - **registry** - Central registry service (worker)
 - **apigw** - API gateway (worker)
-- **issuer** - Credential issuing service (worker; opt-in `bbsnative`/`pkcs11` cgo tags)
+- **issuer** - Credential issuing service (worker; links `zk-cred-bbs` for blind BBS issuance, PKCS#11 for HSM signing)
 
 ### Build Configuration
 
-Each service has a specific build configuration:
+Every service is compiled with cgo enabled (`CGO_ENABLED=1`) and the
+`netgo,osusergo` build tags, then statically linked via `--extldflags
+'-static'`. The verifier additionally links `zk-cred-longfellow` (via the
+`zknative` build tag) and is dynamically linked because Longfellow's C++
+pulls in libm/libstdc++. The Docker builder stage in `dockerfiles/worker`
+fetches and builds every native library it needs from source — no
+host-side staging is required for `docker build`.
 
-```makefile
-verifier:static:           # Static linking, no CGO, no build tags
-registry:static:           # Static linking, no CGO, no build tags
-apigw:static:              # Static linking, no CGO, no build tags
-issuer:static:             # Default: pure-Go static, no cgo, no build tags.
-                           # Flipped to cgo-static with `bbsnative` and/or
-                           # `pkcs11` (plus `netgo,osusergo`) when the caller
-                           # sets BBSNATIVE=true and/or PKCS11_SERVICES="...".
-```
+| Service    | Extra native libs linked into the main binary | Extra binaries shipped alongside | Docker stage       |
+| ---------- | --------------------------------------------- | -------------------------------- | ------------------ |
+| `verifier` | `zk-cred-bbs`, `zk-cred-longfellow`           | `zkvegaverifyworker`             | `runtime-verifier` |
+| `issuer`   | `zk-cred-bbs`                                 | —                                | `runtime`          |
+| `apigw`    | `zk-cred-bbs`                                 | —                                | `runtime`          |
+| `registry` | `zk-cred-bbs`                                 | —                                | `runtime`          |
+
+Every worker links `zk-cred-bbs` because `pkg/openid4vci` imports
+`pkg/bbs` transitively. That import is what forces cgo on for every
+worker; nothing else in the standard build actually calls into BBS.
 
 ### Template System
 
 The Makefile uses templates to generate targets dynamically:
 
-- **TEST_TEMPLATE** - Generates `test-SERVICE` targets
-- **BUILD_TEMPLATE** - Generates `build-SERVICE` targets
-- **DOCKER_BUILD_WEB_TEMPLATE** - Docker builds for web workers (verifier)
-- **DOCKER_BUILD_WORKER_TEMPLATE** - Docker builds for workers (registry, apigw, issuer)
+- **TEST_TEMPLATE** - Generates `test-SERVICE` targets (with `bbs-native-lib-staged` prereq)
+- **BUILD_TEMPLATE** - Generates `build-SERVICE` targets (with `bbs-native-lib-staged` prereq)
+- **DOCKER_BUILD_WORKER_TEMPLATE** - Generates `docker-build-SERVICE` targets
 - **DOCKER_PUSH_TEMPLATE** - Generates `docker-push-SERVICE` targets
 - **DOCKER_TAG_TEMPLATE** - Generates `docker-tag-SERVICE` targets
 
 ## How to Add a New Service
 
-Adding a new service requires only 3 edits:
+Adding a new service requires only 2 edits:
 
-1. **Add to SERVICES list** (line ~22):
+1. **Add to SERVICES list** (Configuration Variables block):
 ```makefile
-SERVICES := verifier registry apigw issuer newservice
-```
-
-2. **Add to WEB_SERVICES or WORKER_SERVICES** (lines ~23-24):
-```makefile
-WEB_SERVICES    := verifier newservice        # if web worker
-WORKER_SERVICES := registry apigw issuer  # OR worker
-```
-
-3. **Add build configuration** (lines ~38-45):
-```makefile
-BUILD_CONFIGS := \
-    newservice:static: \
-    # ... existing configs
+SERVICES        := verifier registry apigw issuer newservice
+WORKER_SERVICES := verifier registry apigw issuer newservice
 ```
 
 The templates will automatically generate all targets:
@@ -132,58 +126,57 @@ The templates will automatically generate all targets:
 
 ## Helper Functions
 
-### get-cgo
-Returns CGO configuration for a service based on BUILD_CONFIGS:
-```makefile
-$(call get-cgo,apigw)  # Returns CGO_ENABLED=0 or CGO_ENABLED=1
-```
-
-### get-tags
-Returns build tags for a service:
-```makefile
-$(call get-tags,issuer)  # Returns "bbsnative,netgo,osusergo" (with BBSNATIVE=true) or empty
-```
-
-### get-ldflags
-Returns appropriate LDFLAGS (static vs dynamic):
-```makefile
-$(call get-ldflags,issuer)  # Returns static or dynamic LDFLAGS
-```
-
 ### docker-tag
 Generates consistent Docker image tags:
 ```makefile
 $(call docker-tag,verifier,1.2.3)  # Returns docker.sunet.se/iam_vc/verifier:1.2.3
 ```
 
-## Build Tags
+## Native library staging
 
-### Available Tags
-- **bbsnative** - Blind BBS issuance (requires `make bbs-native-lib`; enabled via `BBSNATIVE=true`)
-- **pkcs11** - Hardware Security Module (HSM) support (enabled per-service via `PKCS11_SERVICES="svc1 svc2"`)
-- **zknative** - Native ZK/PPID proof verification (Longfellow + Vega; requires `make zk-native-lib` / `make zk-native-lib-vega`; used only by `build-verifier-zknative` and `build-zkvegaverifyworker`)
+The build never picks up a native library from GOPATH or the system
+package manager: each of `zk-cred-bbs`, `zk-cred-longfellow`, and
+`zk-cred-vega` is fetched from source (`ZK_CRED_*_REPO` / `ZK_CRED_*_REF`
+in the Makefile) and built into `third_party/`.
+
+- **bbsnative** (`pkg/bbs` + `pkg/bbs/bbsnative`) — Blind BBS issuance.
+  Staged by `make bbs-native-lib`, and is a prereq for every `make
+  build-SERVICE` and every `make test-SERVICE` because `pkg/openid4vci`
+  imports `pkg/bbs`. Runtime activation is configured in the
+  `issuer.bbs` block; the code path only fires on the issuer.
+- **pkcs11** (`pkg/pki`, `pkg/jose`) — HSM signing via `miekg/pkcs11`
+  (vendored, cgo). No separate staging step: the C headers ship with
+  the package. `make test-pkcs11` runs the SoftHSM2-backed tests
+  (requires `softhsm2-util` and `pkcs11-tool` locally, installed by
+  `make test-env`).
+- **zknative** (`pkg/mdoc/zknative`, `pkg/mdoc/zknative_vega`, and
+  `cmd/zkvegaverifyworker`) — Native ZK/PPID verification. Longfellow
+  is linked into the main verifier binary via `make
+  build-verifier-zknative` (prereq: `make zk-native-lib`); Vega is
+  compiled into a separate subprocess binary via `make
+  build-zkvegaverifyworker` (prereq: `make zk-native-lib-vega`). The
+  Docker `runtime-verifier` stage in `dockerfiles/worker` builds both
+  libraries inside the builder — no host staging is needed.
 
 ### Usage Examples
-```bash
-# Build the issuer with an opt-in native feature
-make build-issuer BBSNATIVE=true
-make build-issuer PKCS11_SERVICES=issuer
-make build-issuer BBSNATIVE=true PKCS11_SERVICES=issuer     # both
 
-# Test with a specific tag
+```bash
+# Default build: every worker links pkg/bbs's cgo backend.
+make build-issuer
+make build-verifier
+
+# Verifier with native ZK/PPID (Longfellow linked into the binary).
+make zk-native-lib
+make build-verifier-zknative
+
+# Vega subprocess worker (execed by the zknative verifier at runtime).
+make zk-native-lib-vega
+make build-zkvegaverifyworker
+
+# Run the tagged tests directly.
 make test-bbsnative
 make test-pkcs11
 make test-zknative
-
-# Docker build with feature tags — the resulting image tag gets a short,
-# sorted suffix so a feature build never overwrites the stock tag:
-#   BBSNATIVE=true            -> issuer:<ver>-bbs
-#   PKCS11_SERVICES=issuer    -> issuer:<ver>-hsm
-#   BBSNATIVE=true + PKCS11_SERVICES=issuer
-#                             -> issuer:<ver>-bbs-hsm
-make docker-build BBSNATIVE=true VERSION=myfeature
-make docker-build PKCS11_SERVICES="issuer registry" VERSION=myfeature
-make docker-build BBSNATIVE=true PKCS11_SERVICES=issuer VERSION=myfeature
 ```
 
 ## Docker Workflows
@@ -217,13 +210,12 @@ make docker-push VERSION=staging
 
 ### Building Specific Services
 ```bash
-# Build only the API gateway
+# Build only the API gateway.
 make docker-build-apigw VERSION=myfeature
 
-# Build the issuer with an opt-in feature (tag suffixed automatically)
-make docker-build-issuer BBSNATIVE=true VERSION=myfeature                       # -> issuer:myfeature-bbs
-make docker-build-issuer PKCS11_SERVICES=issuer VERSION=myfeature               # -> issuer:myfeature-hsm
-make docker-build-issuer BBSNATIVE=true PKCS11_SERVICES=issuer VERSION=myfeature # -> issuer:myfeature-bbs-hsm
+# Build only the verifier (gets the runtime-verifier stage automatically,
+# including the two native ZK shared objects and zkvegaverifyworker).
+make docker-build-verifier VERSION=myfeature
 ```
 
 ## Reserved Tag Guard
@@ -340,7 +332,7 @@ make --version
 ```bash
 # View service lists
 grep "^SERVICES" Makefile
-grep "^BUILD_CONFIGS" Makefile
+grep "^WORKER_SERVICES" Makefile
 
 # Check what targets exist for a service
 make -n build-apigw

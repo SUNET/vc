@@ -220,21 +220,36 @@ determined by `auth_method` in the credential configuration.
 | registry         | `make build-registry`         | Registry                    |
 | vc20-test-server | `make build-vc20-test-server` | W3C VC 2.0 test server      |
 
-All standard builds produce static binaries (`CGO_ENABLED=0`) for `linux/amd64`. Output goes to `./bin/`.
+All standard builds link cgo native dependencies (`CGO_ENABLED=1`,
+`netgo,osusergo`) for `linux/amd64`. Output goes to `./bin/`. The
+Docker builds under `dockerfiles/worker` produce dynamically linked
+images (distroless/cc-debian12 supplies glibc + libstdc++6).
 
-### Build tags
+### Native features
 
-Optional features are enabled via Go build tags. The following tags are available:
+Every service is compiled with the following native code paths **always
+present**. Which of them actually fires is decided by the deployment's
+runtime configuration; there is no compile-time opt-in flag.
 
-| Tag         | Description                    | Affected service(s) | CGO            | Make target                   |
-| ----------- | ------------------------------ | ------------------- | -------------- | ----------------------------- |
-| `bbsnative` | Blind BBS issuance (zk-cred-bbs) — requires `make bbs-native-lib` first | issuer | **cgo-static** | `make build-issuer BBSNATIVE=true` |
-| `pkcs11`    | PKCS#11 HSM signing            | any that loads a signing key (issuer, registry, apigw, verifier) | **cgo-static** | `make build-<svc> PKCS11_SERVICES=<svc>` |
-| `zknative`  | Native ZK/PPID proof verification (mso_mdoc_zk) - Longfellow + Vega — requires `make zk-native-lib` (+ `make zk-native-lib-vega` for Vega) first | verifier | **dynamic** | `make build-verifier-zknative` (+ `make build-zkvegaverifyworker` for Vega) |
+| Feature                          | Native lib (staged under `third_party/`)              | Activated by (config)                                     | Services that can activate it                             |
+| -------------------------------- | ----------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------- |
+| Blind BBS issuance (`bbsnative`) | `zk-cred-bbs` — `make bbs-native-lib`                 | `issuer.bbs` block                                        | issuer                                                    |
+| PKCS#11 HSM signing (`pkcs11`)   | `pkg/pki` cgo bindings — `libp11-kit`/vendor's module | a `pkcs11:` URL in a signer key config                    | any worker that loads a signing key                       |
+| Native ZK/PPID (`zknative`)      | `zk-cred-longfellow` + `zk-cred-vega`                 | `zk_verifier` block                                       | verifier (Longfellow linked in; Vega runs in a subprocess) |
 
-> **Note:** All three tags require CGO (`CGO_ENABLED=1`). `bbsnative` and `pkcs11` are opt-in via the `BBSNATIVE=true` / `PKCS11_SERVICES="..."` flags and stay statically linked (`netgo,osusergo` are added automatically); `zknative` produces a dynamically linked binary via the dedicated `build-verifier-zknative` target. See "Native ZK/PPID proof verification" below for `zknative` setup and `pkg/bbs` for `bbsnative`.
+> **Build prerequisites.** Every worker's build fetches and stages
+> `zk-cred-bbs` because `pkg/openid4vci` links `pkg/bbs` transitively.
+> The verifier additionally fetches and stages `zk-cred-longfellow` and
+> `zk-cred-vega`. The Dockerfile does this inside the builder stage
+> (Rust + cmake preinstalled), so a bare `docker build` needs nothing
+> from the host. Local `make build` calls `make bbs-native-lib` for you
+> as a prereq; run `make zk-native-lib zk-native-lib-vega` before
+> `make build-verifier-zknative` / `make build-zkvegaverifyworker`.
 
-> **Release caveat:** `BBSNATIVE=true` / `PKCS11_SERVICES="..."` are honored only by the `make release` path that publishes to `docker.sunet.se/iam_vc`. Pushing a `v*.*.*` tag also triggers [`.github/workflows/docker-build-push.yml`](.github/workflows/docker-build-push.yml), which builds every service (including the issuer) from `dockerfiles/worker` with no build tags and publishes plain images to GHCR. If you need a feature-enabled release on GHCR, build and push that image manually.
+> **Multi-arch releases.** `.github/workflows/docker-build-push.yml`
+> builds each arch on its own native runner (`ubuntu-latest` for amd64,
+> `ubuntu-24.04-arm` for arm64) and then joins the two into a manifest
+> list. No cross toolchain, no QEMU for the Rust/C++ compilations.
 
 ### Docker
 
@@ -252,9 +267,10 @@ Set the image version with `VERSION=x.x.x` (default: `latest`).
 ### Native ZK/PPID proof verification
 
 vc-verifier can verify "mso_mdoc_zk" presentations natively for **two**
-independent ZK systems, both **opt-in** via the `zknative` build tag (the
-default `make build-verifier`/Docker build stays `CGO_ENABLED=0` and
-fully static, exactly like the `pkcs11` tag above):
+independent ZK systems, both always compiled in via the `zknative` build
+tag. The Docker `runtime-verifier` stage ships them; the plain `runtime`
+stage (used by every other worker) does not. Activation at runtime is
+gated by the `zk_verifier` config block.
 
 - **Longfellow** - zero-knowledge proof-of-possession with an optional
   pairwise pseudonym, via a cgo binding to

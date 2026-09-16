@@ -1,21 +1,30 @@
-# Build stage — installs protoc + swagger + gRPC codegen once, then
-# compiles vc_$SERVICE_NAME and (for verifier only) zkvegaverifyworker.
-# Use GOBUILD_IMAGE to swap in a pre-built builder that already has the
-# tools installed; the install-tools step is then a no-op.
+# Builder base. `install-tools` installs protoc + swag + gRPC codegen; the
+# apt/rustup block adds the C++ and Rust toolchains the third_party/ native
+# libraries build under. Use GOBUILD_IMAGE to reuse a pre-built image that
+# already has these.
 ARG GOBUILD_IMAGE=golang:1.27.1
 FROM ${GOBUILD_IMAGE} AS gobuild
 WORKDIR /go/src/app
 COPY Makefile .
 RUN make install-tools
+# cmake+build-essential build zk-cred-longfellow (C++); cargo builds
+# zk-cred-bbs and zk-cred-vega (Rust). All three are fetched and built
+# below by `make bbs-native-lib` / `zk-native-lib` / `zk-native-lib-vega`
+# on the target architecture — no cross toolchain, so this Dockerfile
+# expects a builder platform equal to the target platform (the GHCR
+# workflow enforces that by running each arch on its own native runner).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        cmake pkg-config git ca-certificates curl build-essential && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --default-toolchain stable --profile minimal && \
+    rm -rf /var/lib/apt/lists/*
+ENV PATH=/root/.cargo/bin:$PATH
 RUN make clean-apt-cache
 
-ARG BUILDPLATFORM
-FROM --platform=$BUILDPLATFORM gobuild AS builder
+FROM gobuild AS builder
 
 ARG SERVICE_NAME
 ARG BUILDTAG
-# Verifier needs the zknative tag to link Longfellow. The other three
-# workers get no zknative tag and do not link libzk_cred_longfellow at all.
 ARG BUILD_TAGS="netgo,osusergo"
 
 ENV GOTOOLCHAIN=local
@@ -29,17 +38,31 @@ COPY . .
 RUN make swagger-${SERVICE_NAME} swagger-fmt
 RUN make proto-${SERVICE_NAME}
 
-# Every worker links pkg/pki (miekg/pkcs11) via cgo; the issuer additionally
-# links pkg/bbs (zk-cred-bbs); the verifier additionally links
-# zk-cred-longfellow when BUILD_TAGS contains "zknative". Dynamic linking:
-# distroless/cc-debian12 ships glibc + libgcc_s + libstdc++6 at runtime.
+# Every worker links libzk_cred_bbs.so via pkg/openid4vci → pkg/bbs.
+RUN make bbs-native-lib
+
+# Only the verifier links libzk_cred_longfellow.so (native ZK/PPID via the
+# zknative build tag) and only the verifier's separate zkvegaverifyworker
+# links libzk_cred_vega.so.
+RUN if [ "$SERVICE_NAME" = "verifier" ]; then \
+        make zk-native-lib && make zk-native-lib-vega ; \
+    fi
+
+# distroless/cc-debian12 ships glibc + libgcc_s + libstdc++6, so dynamic
+# linking here matches what the runtime image can resolve. Longfellow's
+# C++ pulls libm/libstdc++, so a static link is not attempted.
 ARG TARGETARCH=amd64
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
+    if [ "$SERVICE_NAME" = "verifier" ]; then \
+        TAGS="$BUILD_TAGS,zknative"; \
+        export CGO_CFLAGS="-I/go/src/app/third_party/zk-cred-longfellow/include"; \
+        export CGO_LDFLAGS="-L/go/src/app/third_party/zk-cred-longfellow/lib -lzk_cred_longfellow"; \
+    else \
+        TAGS="$BUILD_TAGS"; \
+    fi && \
     CGO_ENABLED=1 GOOS=linux GOARCH=${TARGETARCH} \
-    CGO_CFLAGS="-I/go/src/app/third_party/zk-cred-longfellow/include" \
-    CGO_LDFLAGS="-L/go/src/app/third_party/zk-cred-longfellow/lib -lzk_cred_longfellow" \
-    go build -v -tags "${BUILD_TAGS}" -o bin/vc_$SERVICE_NAME -ldflags \
+    go build -v -tags "$TAGS" -o bin/vc_$SERVICE_NAME -ldflags \
     "-X github.com/SUNET/vc/pkg/status.BuildVariableGitCommit=$(git rev-list -1 HEAD) \
     -X github.com/SUNET/vc/pkg/status.BuildVariableGitBranch=$(git rev-parse --abbrev-ref HEAD) \
     -X github.com/SUNET/vc/pkg/status.BuildVariableTimestamp=$(date -u +'%FT%TZ') \
@@ -48,7 +71,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     -X github.com/SUNET/vc/pkg/status.BuildVersion=$(echo $BUILDTAG) \
     -w -s" ./cmd/$SERVICE_NAME
 
-# Only the verifier ships zkvegaverifyworker (isolated Vega ZK-verify subprocess).
+# Only the verifier ships the isolated Vega ZK-verify subprocess worker.
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     if [ "$SERVICE_NAME" = "verifier" ]; then \
@@ -58,29 +81,37 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
         go build -v -tags "zknative" -o bin/zkvegaverifyworker -ldflags "-w -s" ./cmd/zkvegaverifyworker; \
     fi
 
-# Runtime base — used by verifier, registry, apigw, issuer. Distroless
-# glibc keeps the CVE surface small (~15 packages vs debian:slim's ~90).
-# Fly.io / Kubernetes probe /health directly; there is no HEALTHCHECK line
-# because distroless has no shell.
-FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
-
+# Verifier variant defined FIRST so `runtime` below is the LAST (default)
+# stage. A bare `docker build --file dockerfiles/worker .` for a non-
+# verifier service must not accidentally select runtime-verifier — that
+# target expects bin/zkvegaverifyworker and the two ZK shared objects,
+# which only the verifier build produces.
+FROM gcr.io/distroless/cc-debian12:nonroot AS runtime-verifier
 ARG SERVICE_NAME
 WORKDIR /
 COPY --from=builder /go/src/app/bin/vc_${SERVICE_NAME} /vc_service
 COPY --from=builder /go/src/app/docs /docs
 COPY --from=builder /go/src/app/standards /standards
 COPY --from=builder /go/src/app/metadata /metadata
-# libzk_cred_bbs is a DT_NEEDED for every worker because pkg/openid4vci
-# imports pkg/bbs. The BBS code path itself only fires on the issuer,
-# but the loader still needs the shared object present at startup.
 COPY --from=builder /go/src/app/third_party/zk-cred-bbs/lib/libzk_cred_bbs.so /usr/lib/
-EXPOSE 8080
-CMD ["/vc_service"]
-
-# Verifier variant — same base plus the two native ZK shared objects and
-# the isolated Vega verify worker. Selected via `docker build --target
-# runtime-verifier` (see the Makefile's docker-build-verifier recipe).
-FROM runtime AS runtime-verifier
 COPY --from=builder /go/src/app/third_party/zk-cred-longfellow/lib/libzk_cred_longfellow.so /usr/lib/
 COPY --from=builder /go/src/app/third_party/zk-cred-vega/lib/libzk_cred_vega.so /usr/lib/
 COPY --from=builder /go/src/app/bin/zkvegaverifyworker /usr/local/bin/zkvegaverifyworker
+EXPOSE 8080
+CMD ["/vc_service"]
+
+# Plain runtime — used by registry, apigw, issuer, and by verifier when it
+# is built without the native ZK payload. libzk_cred_bbs is DT_NEEDED for
+# every worker because pkg/openid4vci imports pkg/bbs; the BBS code path
+# itself only fires on the issuer, but the loader still needs the shared
+# object present at startup.
+FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
+ARG SERVICE_NAME
+WORKDIR /
+COPY --from=builder /go/src/app/bin/vc_${SERVICE_NAME} /vc_service
+COPY --from=builder /go/src/app/docs /docs
+COPY --from=builder /go/src/app/standards /standards
+COPY --from=builder /go/src/app/metadata /metadata
+COPY --from=builder /go/src/app/third_party/zk-cred-bbs/lib/libzk_cred_bbs.so /usr/lib/
+EXPOSE 8080
+CMD ["/vc_service"]

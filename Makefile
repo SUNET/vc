@@ -218,11 +218,14 @@ pki-clean: ## Clean PKI material
 
 test: $(addprefix test-,$(SERVICES)) test-pkg test-js ## Run all Go tests (services and pkg/) plus the JS unit tests
 
-# Generate test-SERVICE targets dynamically
+# Generate test-SERVICE targets dynamically. bbs-native-lib-staged
+# is a prereq for every service because pkg/openid4vci links pkg/bbs
+# transitively, so every service's tests import cgo code.
 define TEST_TEMPLATE
-test-$(1): ## Test $(1) service
+test-$(1): bbs-native-lib-staged ## Test $(1) service
 	$$(info Testing $(1))
-	go test -v ./cmd/$(1)/... ./internal/$(1)/...
+	LD_LIBRARY_PATH=$$(CURDIR)/$$(ZK_CRED_BBS_STAGE)/lib \
+		go test -v ./cmd/$(1)/... ./internal/$(1)/...
 
 endef
 
@@ -232,9 +235,10 @@ test-env: ## Set up test environment
 	$(info Setting up test environment)
 	sudo apt-get update && sudo apt-get install -y softhsm2 opensc nodejs npm
 
-test-pkg: ## Test the shared packages under pkg/
+test-pkg: bbs-native-lib-staged ## Test the shared packages under pkg/
 	$(info Testing pkg)
-	go test ./pkg/...
+	LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_BBS_STAGE)/lib \
+		go test ./pkg/...
 
 test-js: ## Run JS unit tests for staticembed helpers
 	$(info Running JS unit tests)
@@ -466,17 +470,16 @@ restart: stop start ## Restart services
 build: proto $(addprefix build-,$(SERVICES)) build-vc20-test-server ## Build all services
 
 # Every worker links pkg/bbs via pkg/openid4vci, so bbs staging is a
-# universal prereq. Only the verifier additionally needs the ZK libs —
-# and drops --extldflags '-static' because Longfellow (C++) pulls in
-# libm, which the static link cannot resolve locally.
+# universal prereq. The verifier's native ZK/PPID path lives entirely
+# behind the dedicated build-verifier-zknative target below - the
+# default build stays symmetric with the other workers.
 define BUILD_TEMPLATE
-build-$(1): bbs-native-lib-staged \
-		$$(if $$(filter verifier,$(1)),zk-native-lib-staged zk-native-lib-vega-staged) ## Build $(1) service
+build-$(1): bbs-native-lib-staged ## Build $(1) service
 	$$(info Building $(1))
 	$$(CGO_ENABLED_DYNAMIC) GOOS=$$(BUILD_OS) GOARCH=$$(BUILD_ARCH) go build \
-		-tags "$$(WORKER_BUILD_TAGS)$$(if $$(filter verifier,$(1)),$$(comma)zknative)" \
+		-tags "$$(WORKER_BUILD_TAGS)" \
 		$$(BUILD_FLAGS) -o ./bin/$$(NAME)_$(1) \
-		$$(if $$(filter verifier,$(1)),$$(LDFLAGS_DYNAMIC),$$(LDFLAGS)) ./cmd/$(1)/
+		$$(LDFLAGS) ./cmd/$(1)/
 
 endef
 
@@ -630,7 +633,7 @@ docker-build-wallet: _check-reserved-tag ## Build Docker image for wallet test t
 # Optional Feature Builds (with build tags)
 # ==============================================================================
 
-build-verifier-zknative: zk-native-lib-staged ## Build verifier with native ZK/PPID proof verification (requires: make zk-native-lib)
+build-verifier-zknative: bbs-native-lib-staged zk-native-lib-staged ## Build verifier with native ZK/PPID proof verification (requires: make zk-native-lib)
 	$(info Building verifier with native ZK/PPID proof verification - requires 'make zk-native-lib' first)
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) \
 		CGO_CFLAGS="-I$(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/include" \
@@ -639,7 +642,7 @@ build-verifier-zknative: zk-native-lib-staged ## Build verifier with native ZK/P
 		$(LDFLAGS_DYNAMIC) ./cmd/verifier/
 	@echo "Run with: LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) ./bin/$(NAME)_verifier-zknative"
 
-build-zkvegaverifyworker: zk-native-lib-vega-staged ## Build the isolated Vega ZK-verify subprocess worker (requires: make zk-native-lib-vega)
+build-zkvegaverifyworker: bbs-native-lib-staged zk-native-lib-vega-staged ## Build the isolated Vega ZK-verify subprocess worker (requires: make zk-native-lib-vega)
 	$(info Building zkvegaverifyworker - requires 'make zk-native-lib-vega' first)
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) \
 		CGO_CFLAGS="-I$(CURDIR)/$(ZK_CRED_VEGA_STAGE)/include" \
@@ -655,28 +658,19 @@ build-zkvegaverifyworker: zk-native-lib-vega-staged ## Build the isolated Vega Z
 
 docker-build: $(addprefix docker-build-,$(SERVICES)) ## Build all Docker images
 
-# Verifier links Longfellow and ships zkvegaverifyworker + libzk_cred_vega.so
-# via the `runtime-verifier` target in dockerfiles/worker. Other workers use
-# the default `runtime` target and stay clean of the ZK payload.
+# The Dockerfile itself fetches and builds the native libraries inside the
+# builder stage (see dockerfiles/worker), so no host-side staging prereq
+# fires here. Verifier picks up Longfellow + Vega via the runtime-verifier
+# stage; other workers use the plain runtime stage.
 define DOCKER_BUILD_WORKER_TEMPLATE
-docker-build-$(1): _check-reserved-tag bbs-native-lib-staged \
-		$$(if $$(filter verifier,$(1)),zk-native-lib-staged zk-native-lib-vega-staged) ## Build Docker image for $(1)
+docker-build-$(1): _check-reserved-tag ## Build Docker image for $(1)
 	$$(info Docker Building $(1) with tag: $$(VERSION))
-	@if [ "$(1)" = "verifier" ]; then \
-		docker build --build-arg SERVICE_NAME=$(1) \
-			--build-arg BUILD_TAGS=netgo,osusergo,zknative \
-			--target runtime-verifier \
-			$$(if $$(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$$(GOBUILD_IMAGE)) \
-			--tag $$(call docker-tag,$(1),$$(VERSION)) \
-			--file dockerfiles/worker .; \
-	else \
-		docker build --build-arg SERVICE_NAME=$(1) \
-			--target runtime \
-			$$(if $$(filter apigw,$(1)),--build-arg BUILDTAG=$$(VERSION)) \
-			$$(if $$(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$$(GOBUILD_IMAGE)) \
-			--tag $$(call docker-tag,$(1),$$(VERSION)) \
-			--file dockerfiles/worker .; \
-	fi
+	docker build --build-arg SERVICE_NAME=$(1) \
+		--target $$(if $$(filter verifier,$(1)),runtime-verifier,runtime) \
+		$$(if $$(filter apigw,$(1)),--build-arg BUILDTAG=$$(VERSION)) \
+		$$(if $$(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$$(GOBUILD_IMAGE)) \
+		--tag $$(call docker-tag,$(1),$$(VERSION)) \
+		--file dockerfiles/worker .
 
 endef
 
