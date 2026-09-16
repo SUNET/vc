@@ -17,9 +17,21 @@ CGO_ENABLED_DYNAMIC     := CGO_ENABLED=1
 BUILD_OS                ?= linux
 # Follow the host arch so `make build-*` on arm64 dev machines produces
 # arm64 binaries whose staged cgo libs (built by bbs-native-lib et al.
-# on the same host) actually link. CI / cross builds can override.
+# on the same host) actually link. Overriding BUILD_OS/BUILD_ARCH is only
+# meaningful for the pure-Go builds (check_issuer_jwks, jwt_issuer);
+# cgo builds refuse a host/target mismatch — see _check-native-host below.
 BUILD_ARCH              ?= $(shell go env GOARCH 2>/dev/null || echo amd64)
 BUILD_FLAGS             := -v
+
+# Host OS/arch the local zk-cred-* / bbs-native-lib staging actually
+# targets. Those recipes invoke the host cargo/cc toolchain with no
+# cross target, so a request to build cgo binaries for a different
+# GOOS/GOARCH would silently link host-format objects into the target's
+# link line. _check-native-host rejects that combination at the earliest
+# entry point (the -ensure prereqs); real cross builds go through
+# docker-build-* which stages libraries inside the target-arch stage.
+_HOST_OS                := $(shell go env GOHOSTOS 2>/dev/null)
+_HOST_ARCH              := $(shell go env GOHOSTARCH 2>/dev/null)
 
 # Services Configuration
 SERVICES                := verifier registry apigw issuer
@@ -85,6 +97,7 @@ comma                   := ,
 	bbs-native-lib bbs-native-lib-staged bbs-native-lib-ensure \
 	zk-native-lib zk-native-lib-staged zk-native-lib-ensure \
 	zk-native-lib-vega zk-native-lib-vega-staged zk-native-lib-vega-ensure \
+	_check-native-host \
 	check-protoc diagram install-tools clean-apt-cache vscode vendor-js update formatting \
 	gh-install gh-auth \
 	gosec staticcheck vulncheck \
@@ -204,6 +217,30 @@ ifneq ($(_RELEASE_MODE),1)
 endif
 
 # ==============================================================================
+# Native-Library Host/Target Guard
+# ==============================================================================
+# bbs-native-lib, zk-native-lib, and zk-native-lib-vega all invoke the
+# host cargo/cc toolchain with no cross target. A local cgo build for a
+# different GOOS/GOARCH would silently link host-format objects into the
+# target's link line, so refuse the combination at the -ensure entry
+# point. Cross builds go through docker-build-*, which stages the
+# libraries inside the target-arch builder stage.
+
+_check-native-host:
+	@if [ -n "$(_HOST_OS)" ] && [ "$(BUILD_OS)" != "$(_HOST_OS)" ]; then \
+		echo "Error: BUILD_OS=$(BUILD_OS) does not match host OS $(_HOST_OS)." >&2; \
+		echo "Local native-library staging (bbs-native-lib, zk-native-lib, zk-native-lib-vega) builds artifacts for the host toolchain only." >&2; \
+		echo "Use 'make docker-build-<service>' for cross-OS builds; it stages libraries inside the target-OS builder stage." >&2; \
+		exit 1; \
+	fi
+	@if [ -n "$(_HOST_ARCH)" ] && [ "$(BUILD_ARCH)" != "$(_HOST_ARCH)" ]; then \
+		echo "Error: BUILD_ARCH=$(BUILD_ARCH) does not match host arch $(_HOST_ARCH)." >&2; \
+		echo "Local native-library staging (bbs-native-lib, zk-native-lib, zk-native-lib-vega) builds artifacts for the host toolchain only." >&2; \
+		echo "Use 'make docker-build-<service>' for cross-arch builds; it stages libraries inside the target-arch builder stage." >&2; \
+		exit 1; \
+	fi
+
+# ==============================================================================
 # PKI Management
 # ==============================================================================
 
@@ -305,7 +342,7 @@ zk-native-lib-staged: ## Fail with a useful message if zk-cred-longfellow is not
 		echo "Run 'make zk-native-lib' first (needs network and a C++ toolchain), then re-run the requesting target ('make build-verifier-zknative' or 'make test-zknative')." >&2; \
 		exit 1)
 
-zk-native-lib-ensure: ## Stage zk-cred-longfellow only when it's missing (for local build-*)
+zk-native-lib-ensure: _check-native-host ## Stage zk-cred-longfellow only when it's missing (for local build-*)
 	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" || $(MAKE) --no-print-directory zk-native-lib
 
 bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not staged
@@ -316,7 +353,7 @@ bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not stage
 		echo "Run 'make bbs-native-lib' first (needs network and a Rust toolchain)." >&2; \
 		exit 1)
 
-bbs-native-lib-ensure: ## Stage zk-cred-bbs only when it's missing (for local build-*)
+bbs-native-lib-ensure: _check-native-host ## Stage zk-cred-bbs only when it's missing (for local build-*)
 	@# Same presence test as -staged but fetches on miss instead of erroring
 	@# so a fresh checkout can run `make build-*` without a separate step.
 	@# CI keeps the strict -staged guard on test-* targets.
@@ -376,7 +413,7 @@ zk-native-lib-vega-staged: ## Fail with a useful message if zk-cred-vega is not 
 		echo "Run 'make zk-native-lib-vega' first (needs network and a C++ toolchain)." >&2; \
 		exit 1)
 
-zk-native-lib-vega-ensure: ## Stage zk-cred-vega only when it's missing (for local build-*)
+zk-native-lib-vega-ensure: _check-native-host ## Stage zk-cred-vega only when it's missing (for local build-*)
 	@test -f "$(ZK_CRED_VEGA_STAGE)/lib/libzk_cred_vega.so" -a -f "$(ZK_CRED_VEGA_STAGE)/include/zk_cred_vega_go.h" || $(MAKE) --no-print-directory zk-native-lib-vega
 
 test-zknative: bbs-native-lib-staged zk-native-lib-staged zk-native-lib-vega-staged ## Run pkg/mdoc's zknative-tagged tests (requires: make bbs-native-lib zk-native-lib zk-native-lib-vega)
