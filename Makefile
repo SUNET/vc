@@ -309,7 +309,7 @@ zk-native-lib-ensure: ## Stage zk-cred-longfellow only when it's missing (for lo
 	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" || $(MAKE) --no-print-directory zk-native-lib
 
 bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not staged
-	@# Check both halves: cgo needs the header to compile and the archive to link.
+	@# Header for cgo compile, archive for the static link (pkg/bbs uses -l:libzk_cred_bbs.a).
 	@test -f "$(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a" -a -f "$(ZK_CRED_BBS_STAGE)/include/zk_cred_bbs_go.h" || ( \
 		echo "zk-cred-bbs is not staged, but the issuer build requires it." >&2; \
 		echo "Both $(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a and $(ZK_CRED_BBS_STAGE)/include/zk_cred_bbs_go.h are required." >&2; \

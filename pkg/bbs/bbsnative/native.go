@@ -18,7 +18,7 @@ package bbsnative
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../../third_party/zk-cred-bbs/include
-#cgo LDFLAGS: -L${SRCDIR}/../../../third_party/zk-cred-bbs/lib -lzk_cred_bbs
+#cgo LDFLAGS: -L${SRCDIR}/../../../third_party/zk-cred-bbs/lib -l:libzk_cred_bbs.a
 #include <stdlib.h>
 #include "zk_cred_bbs_go.h"
 */

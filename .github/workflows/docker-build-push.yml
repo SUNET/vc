@@ -136,6 +136,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
       - name: Compute custom tag
         id: custom-tag
