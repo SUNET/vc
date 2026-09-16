@@ -14,8 +14,11 @@ LDFLAGS                 := -ldflags "-w -s --extldflags '-static'"
 LDFLAGS_DYNAMIC         := -ldflags "-w -s"
 CGO_ENABLED_STATIC      := CGO_ENABLED=0
 CGO_ENABLED_DYNAMIC     := CGO_ENABLED=1
-BUILD_OS                := linux
-BUILD_ARCH              := amd64
+BUILD_OS                ?= linux
+# Follow the host arch so `make build-*` on arm64 dev machines produces
+# arm64 binaries whose staged cgo libs (built by bbs-native-lib et al.
+# on the same host) actually link. CI / cross builds can override.
+BUILD_ARCH              ?= $(shell go env GOARCH 2>/dev/null || echo amd64)
 BUILD_FLAGS             := -v
 
 # Services Configuration
@@ -79,8 +82,9 @@ comma                   := ,
 	docker-build docker-build-% docker-push docker-push-% docker-tag docker-tag-% docker-pull docker-archive \
 	start stop restart clean_docker_images \
 	proto proto-% swagger swagger-% swagger-fmt \
-	bbs-native-lib bbs-native-lib-staged \
-	zk-native-lib zk-native-lib-staged zk-native-lib-vega zk-native-lib-vega-staged \
+	bbs-native-lib bbs-native-lib-staged bbs-native-lib-ensure \
+	zk-native-lib zk-native-lib-staged zk-native-lib-ensure \
+	zk-native-lib-vega zk-native-lib-vega-staged zk-native-lib-vega-ensure \
 	check-protoc diagram install-tools clean-apt-cache vscode vendor-js update formatting \
 	gh-install gh-auth \
 	gosec staticcheck vulncheck \
@@ -301,6 +305,9 @@ zk-native-lib-staged: ## Fail with a useful message if zk-cred-longfellow is not
 		echo "Run 'make zk-native-lib' first (needs network and a C++ toolchain), then re-run the requesting target ('make build-verifier-zknative' or 'make test-zknative')." >&2; \
 		exit 1)
 
+zk-native-lib-ensure: ## Stage zk-cred-longfellow only when it's missing (for local build-*)
+	@test -f "$(ZK_CRED_LONGFELLOW_STAGE)/lib/libzk_cred_longfellow.so" -a -f "$(ZK_CRED_LONGFELLOW_STAGE)/include/zk_cred_longfellow_go.h" || $(MAKE) --no-print-directory zk-native-lib
+
 bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not staged
 	@# Check both halves: cgo needs the header to compile and the archive to link.
 	@test -f "$(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a" -a -f "$(ZK_CRED_BBS_STAGE)/include/zk_cred_bbs_go.h" || ( \
@@ -308,6 +315,12 @@ bbs-native-lib-staged: ## Fail with a useful message if zk-cred-bbs is not stage
 		echo "Both $(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a and $(ZK_CRED_BBS_STAGE)/include/zk_cred_bbs_go.h are required." >&2; \
 		echo "Run 'make bbs-native-lib' first (needs network and a Rust toolchain)." >&2; \
 		exit 1)
+
+bbs-native-lib-ensure: ## Stage zk-cred-bbs only when it's missing (for local build-*)
+	@# Same presence test as -staged but fetches on miss instead of erroring
+	@# so a fresh checkout can run `make build-*` without a separate step.
+	@# CI keeps the strict -staged guard on test-* targets.
+	@test -f "$(ZK_CRED_BBS_STAGE)/lib/libzk_cred_bbs.a" -a -f "$(ZK_CRED_BBS_STAGE)/include/zk_cred_bbs_go.h" || $(MAKE) --no-print-directory bbs-native-lib
 
 bbs-native-lib: ## Fetch/build zk-cred-bbs's Go C-ABI library for blind BBS issuance
 	$(info Fetching/building zk-cred-bbs's go-cabi target from $(ZK_CRED_BBS_REPO)@$(ZK_CRED_BBS_REF))
@@ -362,6 +375,9 @@ zk-native-lib-vega-staged: ## Fail with a useful message if zk-cred-vega is not 
 		echo "Both $(ZK_CRED_VEGA_STAGE)/lib/libzk_cred_vega.so and $(ZK_CRED_VEGA_STAGE)/include/zk_cred_vega_go.h are required." >&2; \
 		echo "Run 'make zk-native-lib-vega' first (needs network and a C++ toolchain)." >&2; \
 		exit 1)
+
+zk-native-lib-vega-ensure: ## Stage zk-cred-vega only when it's missing (for local build-*)
+	@test -f "$(ZK_CRED_VEGA_STAGE)/lib/libzk_cred_vega.so" -a -f "$(ZK_CRED_VEGA_STAGE)/include/zk_cred_vega_go.h" || $(MAKE) --no-print-directory zk-native-lib-vega
 
 test-zknative: bbs-native-lib-staged zk-native-lib-staged zk-native-lib-vega-staged ## Run pkg/mdoc's zknative-tagged tests (requires: make bbs-native-lib zk-native-lib zk-native-lib-vega)
 	$(info Testing with zknative build tag - requires 'make bbs-native-lib zk-native-lib zk-native-lib-vega' first)
@@ -473,8 +489,10 @@ build: proto $(addprefix build-,$(SERVICES)) build-vc20-test-server ## Build all
 # universal prereq. The verifier's native ZK/PPID path lives entirely
 # behind the dedicated build-verifier-zknative target below - the
 # default build stays symmetric with the other workers.
+# -ensure (not -staged) so a fresh checkout can `make build-*` without
+# a separate staging step; CI keeps the strict -staged guard on test-*.
 define BUILD_TEMPLATE
-build-$(1): bbs-native-lib-staged ## Build $(1) service
+build-$(1): bbs-native-lib-ensure ## Build $(1) service
 	$$(info Building $(1))
 	$$(CGO_ENABLED_DYNAMIC) GOOS=$$(BUILD_OS) GOARCH=$$(BUILD_ARCH) go build \
 		-tags "$$(WORKER_BUILD_TAGS)" \
@@ -492,7 +510,7 @@ build-vc20-test-server: ## Build VC 2.0 test server
 		$(BUILD_FLAGS) -o ./bin/$(NAME)_vc20-test-server \
 		$(LDFLAGS) ./cmd/vc20-test-server/
 
-build-wallet: bbs-native-lib-staged ## Build wallet test tool
+build-wallet: bbs-native-lib-ensure ## Build wallet test tool
 	$(info Building wallet)
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
 		-tags "$(WORKER_BUILD_TAGS)" \
@@ -515,7 +533,7 @@ build-jwt-issuer: ## Build jwt_issuer developer tool
 		-ldflags "-w -s --extldflags '-static' -X main.version=$(JWT_ISSUER_VERSION)" \
 		./developer_tools/scripts/jwt_issuer/
 
-build-tsl-checker: bbs-native-lib-staged ## Build tsl_checker developer tool
+build-tsl-checker: bbs-native-lib-ensure ## Build tsl_checker developer tool
 	$(info Building tsl_checker)
 	$(eval TSL_CHECKER_VERSION := $(or $(shell git tag -l "tsl-checker-v*" --sort=-v:refname | head -n1 | sed 's/^tsl-checker-//'),dev))
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
@@ -633,8 +651,8 @@ docker-build-wallet: _check-reserved-tag ## Build Docker image for wallet test t
 # Optional Feature Builds (with build tags)
 # ==============================================================================
 
-build-verifier-zknative: bbs-native-lib-staged zk-native-lib-staged ## Build verifier with native ZK/PPID proof verification (requires: make zk-native-lib)
-	$(info Building verifier with native ZK/PPID proof verification - requires 'make zk-native-lib' first)
+build-verifier-zknative: bbs-native-lib-ensure zk-native-lib-ensure ## Build verifier with native ZK/PPID proof verification
+	$(info Building verifier with native ZK/PPID proof verification)
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) \
 		CGO_CFLAGS="-I$(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/include" \
 		CGO_LDFLAGS="-L$(CURDIR)/$(ZK_CRED_LONGFELLOW_STAGE)/lib -lzk_cred_longfellow" \
@@ -642,8 +660,8 @@ build-verifier-zknative: bbs-native-lib-staged zk-native-lib-staged ## Build ver
 		$(LDFLAGS_DYNAMIC) ./cmd/verifier/
 	@echo "Run with: LD_LIBRARY_PATH=$(ZKNATIVE_LD_PATH) ./bin/$(NAME)_verifier-zknative"
 
-build-zkvegaverifyworker: bbs-native-lib-staged zk-native-lib-vega-staged ## Build the isolated Vega ZK-verify subprocess worker (requires: make zk-native-lib-vega)
-	$(info Building zkvegaverifyworker - requires 'make zk-native-lib-vega' first)
+build-zkvegaverifyworker: bbs-native-lib-ensure zk-native-lib-vega-ensure ## Build the isolated Vega ZK-verify subprocess worker
+	$(info Building zkvegaverifyworker)
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) \
 		CGO_CFLAGS="-I$(CURDIR)/$(ZK_CRED_VEGA_STAGE)/include" \
 		CGO_LDFLAGS="-L$(CURDIR)/$(ZK_CRED_VEGA_STAGE)/lib -lzk_cred_vega" \
@@ -965,7 +983,7 @@ gen-config-docs: build-gen-config-docs ## Generate configuration reference docum
 	$(info Generating docs/CONFIGURATION.md)
 	./bin/gen_config_docs
 
-build-gen-bootstrap: bbs-native-lib-staged ## Build gen_bootstrap tool
+build-gen-bootstrap: bbs-native-lib-ensure ## Build gen_bootstrap tool
 	$(info Building gen_bootstrap)
 	$(CGO_ENABLED_DYNAMIC) go build $(BUILD_FLAGS) -tags "$(WORKER_BUILD_TAGS)" -o ./bin/gen_bootstrap ./developer_tools/scripts/gen_bootstrap/
 

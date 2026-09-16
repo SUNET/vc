@@ -234,7 +234,7 @@ runtime configuration; there is no compile-time opt-in flag.
 | Feature                          | Native lib (staged under `third_party/`)              | Activated by (config)                                     | Services that can activate it                             |
 | -------------------------------- | ----------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------- |
 | Blind BBS issuance (`bbsnative`) | `zk-cred-bbs` — `make bbs-native-lib`                 | `issuer.bbs` block                                        | issuer                                                    |
-| PKCS#11 HSM signing (`pkcs11`)   | `pkg/pki` cgo bindings — `libp11-kit`/vendor's module | a `pkcs11:` URL in a signer key config                    | any worker that loads a signing key                       |
+| PKCS#11 HSM signing (`pkcs11`)   | `pkg/pki` cgo bindings (`github.com/miekg/pkcs11`, vendored) — dynamically loads the configured HSM module at runtime | a `pkcs11` object in a signer key config                  | any worker that loads a signing key                       |
 | Native ZK/PPID (`zknative`)      | `zk-cred-longfellow` + `zk-cred-vega`                 | `zk_verifier` block                                       | verifier (Longfellow linked in; Vega runs in a subprocess) |
 
 > **Build prerequisites.** Every worker's build fetches and stages
@@ -242,9 +242,11 @@ runtime configuration; there is no compile-time opt-in flag.
 > The verifier additionally fetches and stages `zk-cred-longfellow` and
 > `zk-cred-vega`. The Dockerfile does this inside the builder stage
 > (Rust + cmake preinstalled), so a bare `docker build` needs nothing
-> from the host. Local `make build` calls `make bbs-native-lib` for you
-> as a prereq; run `make zk-native-lib zk-native-lib-vega` before
-> `make build-verifier-zknative` / `make build-zkvegaverifyworker`.
+> from the host. Local `make build-*` (and `make build-verifier-zknative`
+> / `make build-zkvegaverifyworker`) auto-stage on first run — call
+> `make bbs-native-lib` / `make zk-native-lib` / `make zk-native-lib-vega`
+> explicitly only to force a re-fetch after bumping the ref in the
+> Makefile.
 
 > **Multi-arch releases.** `.github/workflows/docker-build-push.yml`
 > builds each arch on its own native runner (`ubuntu-latest` for amd64,
@@ -355,7 +357,7 @@ pseudonym concept of its own yet either).
 | Command              | Description                                                   |
 | -------------------- | ------------------------------------------------------------- |
 | `make test`          | Run all service tests                                         |
-| `make test-bbsnative`| Test with `bbsnative` build tag (requires `make bbs-native-lib`) |
+| `make test-bbsnative`| Test the `pkg/bbs` native cgo path (requires `make bbs-native-lib`) |
 | `make test-pkcs11`   | Test with `pkcs11` build tag (requires `make test-env`)       |
 | `make test-zknative` | Test with `zknative` build tag (requires `make zk-native-lib zk-native-lib-vega`) |
 | `make test-env`      | Install test dependencies (softhsm2, opensc)                  |

@@ -29,7 +29,59 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  # Resolve every mutable third_party ref (main / a tag) to a commit SHA
+  # ONCE, so every arch of every service in the release manifest links the
+  # same zk-cred-* commits. Without this, each matrix job resolves `main`
+  # independently and a rebuild of the same git tag can produce different
+  # native-library bytes on amd64 vs arm64.
+  resolve-refs:
+    runs-on: ubuntu-latest
+    outputs:
+      bbs_sha: ${{ steps.resolve.outputs.bbs_sha }}
+      longfellow_sha: ${{ steps.resolve.outputs.longfellow_sha }}
+      vega_sha: ${{ steps.resolve.outputs.vega_sha }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.git_ref || github.ref }}
+
+      - name: Resolve native library refs to commit SHAs
+        id: resolve
+        # Same resolver as .github/workflows/test.yaml's zknative job so
+        # both pipelines agree on how ref -> SHA is derived.
+        run: |
+          set -euo pipefail
+          read_ref() {
+            sed -n "s/^$1[[:space:]]*?=[[:space:]]*//p" Makefile | head -n1
+          }
+          resolve() {
+            local name="$1" repo="$2" ref="$3" sha refs
+            if printf '%s' "$ref" | grep -Eiq '^[0-9a-f]{40}$'; then
+              sha="$ref"
+            else
+              refs=$(git ls-remote "$repo" "$ref")
+              sha=$(printf '%s\n' "$refs" | awk '$2 ~ /\^\{\}$/ { print $1; exit }')
+              [ -n "$sha" ] || sha=$(printf '%s\n' "$refs" | awk 'NR==1 { print $1 }')
+            fi
+            if ! printf '%s' "$sha" | grep -Eiq '^[0-9a-f]{40}$'; then
+              echo "::error::could not resolve $name ref '$ref'"
+              exit 1
+            fi
+            echo "$sha"
+          }
+          BBS_REF=$(read_ref ZK_CRED_BBS_REF)
+          LONGFELLOW_REF=$(read_ref ZK_CRED_LONGFELLOW_REF)
+          VEGA_REF=$(read_ref ZK_CRED_VEGA_REF)
+          for pair in "ZK_CRED_BBS_REF=$BBS_REF" "ZK_CRED_LONGFELLOW_REF=$LONGFELLOW_REF" "ZK_CRED_VEGA_REF=$VEGA_REF"; do
+            case "$pair" in *=) echo "::error::could not read ${pair%=} default from Makefile"; exit 1 ;; esac
+          done
+          echo "bbs_sha=$(resolve zk-cred-bbs https://github.com/sirosfoundation/zk-cred-bbs.git "$BBS_REF")" >> "$GITHUB_OUTPUT"
+          echo "longfellow_sha=$(resolve zk-cred-longfellow https://github.com/sirosfoundation/zk-cred-longfellow.git "$LONGFELLOW_REF")" >> "$GITHUB_OUTPUT"
+          echo "vega_sha=$(resolve zk-cred-vega https://github.com/sirosfoundation/zk-cred-vega.git "$VEGA_REF")" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: resolve-refs
     permissions:
       contents: read
       packages: write
@@ -121,6 +173,9 @@ jobs:
           build-args: |
             SERVICE_NAME=${{ matrix.service }}
             BUILDTAG=${{ steps.custom-tag.outputs.version || steps.meta.outputs.version }}
+            ZK_CRED_BBS_REF=${{ needs.resolve-refs.outputs.bbs_sha }}
+            ZK_CRED_LONGFELLOW_REF=${{ needs.resolve-refs.outputs.longfellow_sha }}
+            ZK_CRED_VEGA_REF=${{ needs.resolve-refs.outputs.vega_sha }}
           cache-from: type=gha,scope=${{ matrix.service }}-${{ matrix.arch }}
           cache-to: type=gha,scope=${{ matrix.service }}-${{ matrix.arch }},mode=max
 

@@ -27,6 +27,15 @@ ARG SERVICE_NAME
 ARG BUILDTAG
 ARG BUILD_TAGS="netgo,osusergo"
 
+# Pinned commit SHAs for the third_party native libraries. Docker-build-
+# push.yml resolves each mutable ref (main / a tag) to a SHA once and
+# passes it in here, so every arch of every service in a release manifest
+# links the same bytes. Empty (bare `docker build` locally) → Makefile
+# defaults apply.
+ARG ZK_CRED_BBS_REF=
+ARG ZK_CRED_LONGFELLOW_REF=
+ARG ZK_CRED_VEGA_REF=
+
 ENV GOTOOLCHAIN=local
 ENV GOFLAGS=-mod=vendor
 ENV GOPROXY=off
@@ -39,13 +48,14 @@ RUN make swagger-${SERVICE_NAME} swagger-fmt
 RUN make proto-${SERVICE_NAME}
 
 # Every worker links libzk_cred_bbs.so via pkg/openid4vci → pkg/bbs.
-RUN make bbs-native-lib
+RUN make bbs-native-lib ${ZK_CRED_BBS_REF:+ZK_CRED_BBS_REF="$ZK_CRED_BBS_REF"}
 
 # Only the verifier links libzk_cred_longfellow.so (native ZK/PPID via the
 # zknative build tag) and only the verifier's separate zkvegaverifyworker
 # links libzk_cred_vega.so.
 RUN if [ "$SERVICE_NAME" = "verifier" ]; then \
-        make zk-native-lib && make zk-native-lib-vega ; \
+        make zk-native-lib ${ZK_CRED_LONGFELLOW_REF:+ZK_CRED_LONGFELLOW_REF="$ZK_CRED_LONGFELLOW_REF"} && \
+        make zk-native-lib-vega ${ZK_CRED_VEGA_REF:+ZK_CRED_VEGA_REF="$ZK_CRED_VEGA_REF"} ; \
     fi
 
 # distroless/cc-debian12 ships glibc + libgcc_s + libstdc++6, so dynamic

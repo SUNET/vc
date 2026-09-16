@@ -17,7 +17,7 @@ make build-zkvegaverifyworker # Build the isolated Vega ZK-verify subprocess wor
 # Test
 make test                    # Run all tests
 make test-SERVICE            # Test specific service
-make test-bbsnative          # Test with bbsnative build tag (requires bbs-native-lib)
+make test-bbsnative          # Test pkg/bbs native cgo path (requires bbs-native-lib)
 make test-pkcs11             # Test with pkcs11 build tag (requires test-env)
 make test-zknative           # Test with zknative build tag (requires zk-native-lib zk-native-lib-vega)
 
@@ -102,7 +102,7 @@ worker; nothing else in the standard build actually calls into BBS.
 The Makefile uses templates to generate targets dynamically:
 
 - **TEST_TEMPLATE** - Generates `test-SERVICE` targets (with `bbs-native-lib-staged` prereq)
-- **BUILD_TEMPLATE** - Generates `build-SERVICE` targets (with `bbs-native-lib-staged` prereq)
+- **BUILD_TEMPLATE** - Generates `build-SERVICE` targets (with `bbs-native-lib-ensure` prereq — auto-stages on first run)
 - **DOCKER_BUILD_WORKER_TEMPLATE** - Generates `docker-build-SERVICE` targets
 - **DOCKER_PUSH_TEMPLATE** - Generates `docker-push-SERVICE` targets
 - **DOCKER_TAG_TEMPLATE** - Generates `docker-tag-SERVICE` targets
@@ -161,16 +161,19 @@ in the Makefile) and built into `third_party/`.
 ### Usage Examples
 
 ```bash
-# Default build: every worker links pkg/bbs's cgo backend.
+# Default build: every worker links pkg/bbs's cgo backend. The first
+# invocation stages zk-cred-bbs automatically (bbs-native-lib-ensure);
+# later invocations skip the presence check when the artifacts exist.
 make build-issuer
 make build-verifier
 
 # Verifier with native ZK/PPID (Longfellow linked into the binary).
-make zk-native-lib
+# build-verifier-zknative also auto-stages zk-cred-longfellow on first
+# run; `make zk-native-lib` explicitly is only needed to force a refetch.
 make build-verifier-zknative
 
 # Vega subprocess worker (execed by the zknative verifier at runtime).
-make zk-native-lib-vega
+# Same auto-staging as above; `make zk-native-lib-vega` forces a refetch.
 make build-zkvegaverifyworker
 
 # Run the tagged tests directly.
