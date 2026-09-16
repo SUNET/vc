@@ -221,9 +221,12 @@ determined by `auth_method` in the credential configuration.
 | vc20-test-server | `make build-vc20-test-server` | W3C VC 2.0 test server      |
 
 All standard builds link cgo native dependencies (`CGO_ENABLED=1`,
-`netgo,osusergo`) for `linux/amd64`. Output goes to `./bin/`. The
-Docker builds under `dockerfiles/worker` produce dynamically linked
-images (distroless/cc-debian12 supplies glibc + libstdc++6).
+`netgo,osusergo`) for the host `GOOS`/`GOARCH` (Linux is assumed;
+override `BUILD_OS`/`BUILD_ARCH` only for the pure-Go developer tools,
+since local cgo builds refuse a host/target mismatch). Output goes to
+`./bin/`. The Docker builds under `dockerfiles/worker` produce
+dynamically linked `linux/amd64` and `linux/arm64` images
+(distroless/cc-debian12 supplies glibc + libstdc++6).
 
 ### Native features
 
