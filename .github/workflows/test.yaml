@@ -46,6 +46,14 @@ jobs:
           LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/zk-cred-bbs/lib
         run: make test
 
+      # test-pkcs11 covers the pkg/pki and pkg/jose SoftHSM integration
+      # tests gated by //go:build pkcs11. Without this step the PKCS#11
+      # code paths would only be compile-checked in CI.
+      - name: Run PKCS#11 integration tests
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/zk-cred-bbs/lib
+        run: make test-pkcs11
+
   config-docs:
     runs-on: ubuntu-latest
     steps:

@@ -261,12 +261,14 @@ test: $(addprefix test-,$(SERVICES)) test-pkg test-js ## Run all Go tests (servi
 
 # Generate test-SERVICE targets dynamically. bbs-native-lib-staged
 # is a prereq for every service because pkg/openid4vci links pkg/bbs
-# transitively, so every service's tests import cgo code.
+# transitively, so every service's tests import cgo code — force
+# CGO_ENABLED=1 so `CGO_ENABLED=0 make test` from the environment does
+# not defeat the build.
 define TEST_TEMPLATE
 test-$(1): bbs-native-lib-staged ## Test $(1) service
 	$$(info Testing $(1))
 	LD_LIBRARY_PATH=$$(CURDIR)/$$(ZK_CRED_BBS_STAGE)/lib \
-		go test -v ./cmd/$(1)/... ./internal/$(1)/...
+		$$(CGO_ENABLED_DYNAMIC) go test -v ./cmd/$(1)/... ./internal/$(1)/...
 
 endef
 
@@ -279,7 +281,7 @@ test-env: ## Set up test environment
 test-pkg: bbs-native-lib-staged ## Test the shared packages under pkg/
 	$(info Testing pkg)
 	LD_LIBRARY_PATH=$(CURDIR)/$(ZK_CRED_BBS_STAGE)/lib \
-		go test ./pkg/...
+		$(CGO_ENABLED_DYNAMIC) go test ./pkg/...
 
 test-js: ## Run JS unit tests for staticembed helpers
 	$(info Running JS unit tests)
@@ -543,7 +545,10 @@ endef
 
 $(foreach service,$(SERVICES),$(eval $(call BUILD_TEMPLATE,$(service))))
 
-build-vc20-test-server: bbs-native-lib-ensure ## Build VC 2.0 test server
+# cmd/vc20-test-server transitively imports pkg/pki (miekg/pkcs11, cgo)
+# but does not import pkg/bbs, so it needs the host/target guard but
+# not zk-cred-bbs staging.
+build-vc20-test-server: _check-native-host ## Build VC 2.0 test server
 	$(info Building vc20-test-server)
 	$(CGO_ENABLED_DYNAMIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
 		-tags "$(WORKER_BUILD_TAGS)" \
@@ -1023,9 +1028,13 @@ gen-config-docs: build-gen-config-docs ## Generate configuration reference docum
 	$(info Generating docs/CONFIGURATION.md)
 	./bin/gen_config_docs
 
+# dockerfiles/developer-tools runs this binary on Alpine (musl); keep
+# the external link fully static so the builder's glibc does not leak
+# into the runtime image.
 build-gen-bootstrap: bbs-native-lib-ensure ## Build gen_bootstrap tool
 	$(info Building gen_bootstrap)
-	$(CGO_ENABLED_DYNAMIC) go build $(BUILD_FLAGS) -tags "$(WORKER_BUILD_TAGS)" -o ./bin/gen_bootstrap ./developer_tools/scripts/gen_bootstrap/
+	$(CGO_ENABLED_DYNAMIC) go build $(BUILD_FLAGS) -tags "$(WORKER_BUILD_TAGS)" \
+		$(LDFLAGS) -o ./bin/gen_bootstrap ./developer_tools/scripts/gen_bootstrap/
 
 gen-bootstrap: build-gen-bootstrap ## Generate bootstrapping JSON files from YAML source
 	$(info Generating bootstrapping/*.json from developer_tools/scripts/gen_bootstrap/users_paris.yaml)
