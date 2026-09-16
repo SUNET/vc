@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -1407,6 +1408,8 @@ type APIGW struct {
 	OpenIDFederation *openidfederation.Config `yaml:"federation,omitempty"`
 	// RateLimit configures per-endpoint rate limiting for the APIGW.
 	RateLimit *APIGWRateLimit `yaml:"rate_limit,omitempty"`
+	// Dashboard configures the /dashboard demo landing page.
+	Dashboard APIGWDashboard `yaml:"dashboard,omitempty"`
 }
 
 // APIGWRateLimit holds per-endpoint rate limit settings for the APIGW.
@@ -1417,6 +1420,44 @@ type APIGWRateLimit struct {
 	CredentialRequestsPerMinute int `yaml:"credential_requests_per_minute" default:"30"`
 	// DatastoreRequestsPerMinute is the maximum datastore endpoint requests per minute per IP. Default: 60
 	DatastoreRequestsPerMinute int `yaml:"datastore_requests_per_minute" default:"60"`
+}
+
+// APIGWDashboard configures the /dashboard demo landing page that lists every service in the deployment.
+//
+// Intended for dev/demo environments; opt in by setting enable: true. Off by
+// default so no shared-config deployment starts exposing its service inventory
+// to anonymous callers without an explicit action from the operator.
+type APIGWDashboard struct {
+	// Enable serves GET /dashboard. Default: false (opt-in).
+	Enable bool `yaml:"enable" default:"false"`
+	// Title overrides the page heading. Default: "SUNET Verifiable Credentials".
+	Title string `yaml:"title,omitempty" default:"SUNET Verifiable Credentials"`
+	// Services optionally augments or overrides the auto-discovered service list.
+	// Entries with a Name that matches an auto-discovered service replace it;
+	// other entries are appended.
+	Services []DashboardService `yaml:"services,omitempty" validate:"omitempty,dive"`
+}
+
+// DashboardService is a single entry on the /dashboard page.
+type DashboardService struct {
+	// Name is the display name and match key (e.g. "apigw", "issuer").
+	Name string `yaml:"name" validate:"required"`
+	// URL is the primary public URL for the service.
+	URL string `yaml:"url" validate:"required,httpurl"`
+	// Description is optional free-form text shown under the service name.
+	Description string `yaml:"description,omitempty"`
+	// Links is an ordered list of extra labelled URLs (health, metadata, UIs, ...).
+	Links []DashboardLink `yaml:"links,omitempty" validate:"omitempty,dive"`
+}
+
+// DashboardLink is a labelled URL shown under a service entry.
+type DashboardLink struct {
+	Label string `yaml:"label" validate:"required"`
+	URL   string `yaml:"url" validate:"required,httpurl"`
+	// Type controls how the dashboard follows this link. "json" opens the
+	// response in an in-page viewer (pretty-printed, no navigation).
+	// "page" (default) opens in a new tab.
+	Type string `yaml:"type,omitempty" default:"page" validate:"oneof=json page"`
 }
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list
@@ -1485,6 +1526,99 @@ type Cfg struct {
 	Issuer   *Issuer   `yaml:"issuer" validate:"omitempty"`
 	Verifier *Verifier `yaml:"verifier" validate:"omitempty"`
 	Registry *Registry `yaml:"registry" validate:"omitempty"`
+}
+
+// SeedDashboardDefaults appends auto-discovered service entries (apigw,
+// issuer, verifier, registry) to cfg.APIGW.Dashboard.Services from the
+// currently populated sibling sections. Operator-supplied entries win:
+// a Name match in Services skips the corresponding default.
+//
+// Intended to be called by the config loader before it nils sibling
+// service sections, so the /dashboard handler has data to render even
+// when it can no longer read cfg.Issuer / cfg.Verifier / cfg.Registry
+// directly.
+func (cfg *Cfg) SeedDashboardDefaults() {
+	if cfg == nil || cfg.APIGW == nil {
+		return
+	}
+
+	have := map[string]bool{}
+	for _, s := range cfg.APIGW.Dashboard.Services {
+		have[s.Name] = true
+	}
+	add := func(s DashboardService) {
+		if s.URL == "" || have[s.Name] {
+			return
+		}
+		cfg.APIGW.Dashboard.Services = append(cfg.APIGW.Dashboard.Services, s)
+	}
+
+	if u := strings.TrimRight(cfg.APIGW.PublicURL, "/"); u != "" {
+		links := []DashboardLink{
+			{Label: "Health", URL: u + "/health", Type: "json"},
+			{Label: "Credential offers", URL: u + "/offers", Type: "page"},
+			{Label: "OpenID4VCI metadata", URL: u + "/.well-known/openid-credential-issuer", Type: "json"},
+			{Label: "OAuth2 metadata", URL: u + "/.well-known/oauth-authorization-server", Type: "json"},
+			{Label: "JWKS", URL: u + "/jwks", Type: "json"},
+		}
+		if cfg.APIGW.AdminUIEnable {
+			links = append(links, DashboardLink{Label: "Admin UI", URL: u + "/ui", Type: "page"})
+		}
+		if cfg.APIGW.OpenIDFederation != nil {
+			links = append(links, DashboardLink{Label: "OpenID federation", URL: u + "/.well-known/openid-federation", Type: "page"})
+		}
+		add(DashboardService{
+			Name:        "apigw",
+			URL:         u,
+			Description: "API gateway – credential issuance, OAuth2/OIDC, wallet-facing endpoints.",
+			Links:       links,
+		})
+	}
+
+	if cfg.Issuer != nil {
+		if u := strings.TrimRight(cfg.Issuer.IssuerURL, "/"); u != "" {
+			add(DashboardService{
+				Name:        "issuer",
+				URL:         u,
+				Description: "Credential issuer – signs verifiable credentials.",
+				Links: []DashboardLink{
+					{Label: "Health", URL: u + "/health", Type: "json"},
+					{Label: "JWKS", URL: u + "/jwks", Type: "json"},
+				},
+			})
+		}
+	}
+
+	if cfg.Verifier != nil {
+		if u := strings.TrimRight(cfg.Verifier.PublicURL, "/"); u != "" {
+			add(DashboardService{
+				Name:        "verifier",
+				URL:         u,
+				Description: "Credential verifier – OpenID4VP relying party.",
+				Links: []DashboardLink{
+					{Label: "Health", URL: u + "/health", Type: "json"},
+				},
+			})
+		}
+	}
+
+	if cfg.Registry != nil {
+		if u := strings.TrimRight(cfg.Registry.PublicURL, "/"); u != "" {
+			links := []DashboardLink{
+				{Label: "Health", URL: u + "/health", Type: "json"},
+				{Label: "Status lists", URL: u + "/statuslists", Type: "json"},
+			}
+			if BoolVal(cfg.Registry.AdminGUI.Enable, false) {
+				links = append(links, DashboardLink{Label: "Admin GUI", URL: u + "/admin", Type: "page"})
+			}
+			add(DashboardService{
+				Name:        "registry",
+				URL:         u,
+				Description: "Credential status registry - token status lists.",
+				Links:       links,
+			})
+		}
+	}
 }
 
 // LookupCredentialSources returns full data source information for a credential type
@@ -1670,8 +1804,8 @@ type CredentialMetadata struct {
 	// Format is the credential format to issue
 	Format string `yaml:"format" json:"format" validate:"required" default:"dc+sd-jwt" doc_example:"\"dc+sd-jwt\""`
 	// DisclosurePolicy configures the embedded disclosure policy for this credential type.
-	// Per ARF 3.0 §6.6.2.8 and CIR 2024/2979 Annex III. Only applicable to QEAAs and PuB-EAAs (not PIDs).
-	// When omitted, the metadata publishes policy_type "none" (no restrictions).
+	// Per CIR 2024/2979 Annex III and ETSI TS 119 472-3 §4.2.5. Only applicable to QEAAs and PuB-EAAs (not PIDs).
+	// Optional and off by default: when omitted, no `disclosure_policy` field is emitted in the credential issuer metadata.
 	DisclosurePolicy *openid4vci.EmbeddedDisclosurePolicy `yaml:"disclosure_policy,omitempty" json:"-" validate:"omitempty"`
 	// Attributes maps claim names to their source fields and transformation rules for credential issuance
 	Attributes map[string]map[string][]*string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
@@ -2175,9 +2309,6 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 			}
 
 			credConfig.DisclosurePolicy = constructor.DisclosurePolicy
-			if credConfig.DisclosurePolicy == nil {
-				credConfig.DisclosurePolicy = &openid4vci.EmbeddedDisclosurePolicy{PolicyType: "none"}
-			}
 			cfg.applyCommonCredentialConfig(&credConfig)
 			credentialConfigs[scope] = credConfig
 			continue
@@ -2298,9 +2429,6 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		}
 
 		credConfig.DisclosurePolicy = constructor.DisclosurePolicy
-		if credConfig.DisclosurePolicy == nil {
-			credConfig.DisclosurePolicy = &openid4vci.EmbeddedDisclosurePolicy{PolicyType: "none"}
-		}
 		cfg.applyCommonCredentialConfig(&credConfig)
 		credentialConfigs[scope] = credConfig
 	}

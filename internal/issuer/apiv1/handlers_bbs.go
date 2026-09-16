@@ -113,20 +113,6 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	if c.registryClient == nil {
 		return nil, grpcstatus.Error(codes.FailedPrecondition, "registry client not configured")
 	}
-	// Checked here rather than left to bbs.Issue's ErrUnavailable, because
-	// the status list entry below is allocated before that call and is not
-	// handed back when it fails. An issuer configured with BBS keys but
-	// built without `-tags bbsnative` would burn one registry entry per
-	// request while never issuing anything - a slow leak in the revocation
-	// list rather than a visible failure.
-	//
-	// The question is whether *this client* has a usable signer, not
-	// whether the process was built with the native backend: those are the
-	// same thing in every deployment and differ only where a signer has
-	// been supplied directly.
-	if c.bbsIssuerOverride == nil && !bbs.Available() {
-		return nil, grpcstatus.Error(codes.Unimplemented, "bbs issuance is not available on this issuer")
-	}
 	statusEntry, err := c.registryClient.TokenStatusListAddStatus(ctx, &apiv1_registry.TokenStatusListAddStatusRequest{
 		Status: 0, // VALID status for new credential
 	})
@@ -190,8 +176,6 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 		switch {
 		case errors.Is(err, bbs.ErrVerification):
 			return nil, grpcstatus.Error(codes.InvalidArgument, "commitment did not verify")
-		case errors.Is(err, bbs.ErrUnavailable):
-			return nil, grpcstatus.Error(codes.Unimplemented, "bbs issuance is not available on this issuer")
 		default:
 			return nil, grpcstatus.Error(codes.Internal, "failed to issue bbs credential")
 		}

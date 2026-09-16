@@ -1,5 +1,3 @@
-//go:build pkcs11
-
 package pki
 
 import (

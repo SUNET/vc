@@ -1,27 +1,40 @@
-# Build tools stage — installs protobuf compiler, swagger, and gRPC codegen.
-# Inlined from dockerfiles/gobuild so the Dockerfile is self-contained.
-# Use GOBUILD_IMAGE to override with a pre-built image that already has tools:
-#   docker build --build-arg GOBUILD_IMAGE=docker.sunet.se/iam_vc/gobuild:local ...
-# When overriding, the install-tools/clean-apt-cache steps are redundant but
-# harmless (make targets are idempotent). For a faster local build, use the
-# pre-built image directly as the builder stage via multi-stage FROM.
+# Builder base. `install-tools` installs protoc + swag + gRPC codegen; the
+# apt/rustup block adds the C++ and Rust toolchains the third_party/ native
+# libraries build under. Use GOBUILD_IMAGE to reuse a pre-built image that
+# already has these.
 ARG GOBUILD_IMAGE=golang:1.27.1
 FROM ${GOBUILD_IMAGE} AS gobuild
 WORKDIR /go/src/app
 COPY Makefile .
 RUN make install-tools
+# cmake+build-essential build zk-cred-longfellow (C++); cargo builds
+# zk-cred-bbs and zk-cred-vega (Rust). All three are fetched and built
+# below by `make bbs-native-lib` / `zk-native-lib` / `zk-native-lib-vega`
+# on the target architecture — no cross toolchain, so this Dockerfile
+# expects a builder platform equal to the target platform (the GHCR
+# workflow enforces that by running each arch on its own native runner).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        cmake pkg-config git ca-certificates curl build-essential && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --default-toolchain stable --profile minimal && \
+    rm -rf /var/lib/apt/lists/*
+ENV PATH=/root/.cargo/bin:$PATH
 RUN make clean-apt-cache
 
-# Compile
-# Pin builder to the build host's native platform so Go can cross-compile
-# for TARGETARCH. The gobuild base image must have a manifest for BUILDPLATFORM
-# (golang and pre-built gobuild images are typically amd64/arm64 multi-arch).
-ARG BUILDPLATFORM
-FROM --platform=$BUILDPLATFORM gobuild AS builder
+FROM gobuild AS builder
 
 ARG SERVICE_NAME
 ARG BUILDTAG
-ARG GO_BUILD_TAGS
+ARG BUILD_TAGS="netgo,osusergo"
+
+# Pinned commit SHAs for the third_party native libraries. Docker-build-
+# push.yml resolves each mutable ref (main / a tag) to a SHA once and
+# passes it in here, so every arch of every service in a release manifest
+# links the same bytes. Empty (bare `docker build` locally) → Makefile
+# defaults apply.
+ARG ZK_CRED_BBS_REF=
+ARG ZK_CRED_LONGFELLOW_REF=
+ARG ZK_CRED_VEGA_REF=
 
 ENV GOTOOLCHAIN=local
 ENV GOFLAGS=-mod=vendor
@@ -29,57 +42,83 @@ ENV GOPROXY=off
 ENV GONOSUMDB=*
 ENV GONOSUMCHECK=*
 
-# Copy source code (includes vendor/)
 COPY . .
 
-# Run make commands
 RUN make swagger-${SERVICE_NAME} swagger-fmt
 RUN make proto-${SERVICE_NAME}
 
-# Build with caching for both build cache and module cache
-# GO_BUILD_TAGS is optional - if set, adds -tags flag
-# CGO defaults to disabled for static builds. Pass --build-arg CGO_ENABLED=1
-# for features that require CGO (e.g. pkcs11 HSM support). Note: CGO with
-# cross-compilation requires a cross C toolchain in the builder image.
-# TARGETARCH is set automatically by BuildKit to the target platform.
-# With BuildKit (required by RUN --mount), even plain docker build sets
-# TARGETARCH to the host architecture, so this default is only a
-# documentation hint and does not affect BuildKit-based builds.
-ARG CGO_ENABLED=0
+# Every worker links libzk_cred_bbs.so via pkg/openid4vci → pkg/bbs.
+RUN make bbs-native-lib ${ZK_CRED_BBS_REF:+ZK_CRED_BBS_REF="$ZK_CRED_BBS_REF"}
+
+# Only the verifier links libzk_cred_longfellow.so (native ZK/PPID via the
+# zknative build tag) and only the verifier's separate zkvegaverifyworker
+# links libzk_cred_vega.so.
+RUN if [ "$SERVICE_NAME" = "verifier" ]; then \
+        make zk-native-lib ${ZK_CRED_LONGFELLOW_REF:+ZK_CRED_LONGFELLOW_REF="$ZK_CRED_LONGFELLOW_REF"} && \
+        make zk-native-lib-vega ${ZK_CRED_VEGA_REF:+ZK_CRED_VEGA_REF="$ZK_CRED_VEGA_REF"} ; \
+    fi
+
+# distroless/cc-debian12 ships glibc + libgcc_s + libstdc++6, so dynamic
+# linking here matches what the runtime image can resolve. Longfellow's
+# C++ pulls libm/libstdc++, so a static link is not attempted.
 ARG TARGETARCH=amd64
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=${TARGETARCH} go build -v ${GO_BUILD_TAGS:+-tags "$GO_BUILD_TAGS"} -o bin/vc_$SERVICE_NAME -ldflags \
+    if [ "$SERVICE_NAME" = "verifier" ]; then \
+        TAGS="$BUILD_TAGS,zknative"; \
+        export CGO_CFLAGS="-I/go/src/app/third_party/zk-cred-longfellow/include"; \
+        export CGO_LDFLAGS="-L/go/src/app/third_party/zk-cred-longfellow/lib -lzk_cred_longfellow"; \
+    else \
+        TAGS="$BUILD_TAGS"; \
+    fi && \
+    CGO_ENABLED=1 GOOS=linux GOARCH=${TARGETARCH} \
+    go build -v -tags "$TAGS" -o bin/vc_$SERVICE_NAME -ldflags \
     "-X github.com/SUNET/vc/pkg/status.BuildVariableGitCommit=$(git rev-list -1 HEAD) \
     -X github.com/SUNET/vc/pkg/status.BuildVariableGitBranch=$(git rev-parse --abbrev-ref HEAD) \
     -X github.com/SUNET/vc/pkg/status.BuildVariableTimestamp=$(date -u +'%FT%TZ') \
     -X github.com/SUNET/vc/pkg/status.BuildVariableGoVersion=$(go version|awk '{print $3}') \
     -X github.com/SUNET/vc/pkg/status.BuildVariableGoArch=$(go version|awk '{print $4}') \
     -X github.com/SUNET/vc/pkg/status.BuildVersion=$(echo $BUILDTAG) \
-    -w -s --extldflags '-static'" ./cmd/$SERVICE_NAME
+    -w -s" ./cmd/$SERVICE_NAME
 
-# Deploy — Alpine for minimal CVE surface (binary is statically linked)
-FROM alpine:3.23
+# Only the verifier ships the isolated Vega ZK-verify subprocess worker.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    if [ "$SERVICE_NAME" = "verifier" ]; then \
+        CGO_ENABLED=1 GOOS=linux GOARCH=${TARGETARCH} \
+        CGO_CFLAGS="-I/go/src/app/third_party/zk-cred-vega/include" \
+        CGO_LDFLAGS="-L/go/src/app/third_party/zk-cred-vega/lib -lzk_cred_vega" \
+        go build -v -tags "zknative" -o bin/zkvegaverifyworker -ldflags "-w -s" ./cmd/zkvegaverifyworker; \
+    fi
 
+# Verifier variant defined FIRST so `runtime` below is the LAST (default)
+# stage. A bare `docker build --file dockerfiles/worker .` for a non-
+# verifier service must not accidentally select runtime-verifier — that
+# target expects bin/zkvegaverifyworker and the two ZK shared objects,
+# which only the verifier build produces.
+FROM gcr.io/distroless/cc-debian12:nonroot AS runtime-verifier
 ARG SERVICE_NAME
-
 WORKDIR /
-
-RUN apk add --no-cache ca-certificates curl
-
-# Run as non-root user for security hardening
-RUN addgroup -S vcservice && adduser -S vcservice -G vcservice
-
 COPY --from=builder /go/src/app/bin/vc_${SERVICE_NAME} /vc_service
 COPY --from=builder /go/src/app/docs /docs
 COPY --from=builder /go/src/app/standards /standards
 COPY --from=builder /go/src/app/metadata /metadata
-
+COPY --from=builder /go/src/app/third_party/zk-cred-longfellow/lib/libzk_cred_longfellow.so /usr/lib/
+COPY --from=builder /go/src/app/third_party/zk-cred-vega/lib/libzk_cred_vega.so /usr/lib/
+COPY --from=builder /go/src/app/bin/zkvegaverifyworker /usr/local/bin/zkvegaverifyworker
 EXPOSE 8080
+CMD ["/vc_service"]
 
-USER vcservice
-
-HEALTHCHECK --interval=20s --timeout=10s CMD curl -k --connect-timeout 5 http://localhost:8080/health | grep -q STATUS_OK || curl -k --connect-timeout 5 https://localhost:8080/health | grep -q STATUS_OK
-
-# vars in CMD and ENTRYPOINT are evaluated at runtime, that's why we use a static name on the binary.
-CMD [ "./vc_service" ]
+# Plain runtime — used by registry, apigw, issuer, and by verifier when it
+# is built without the native ZK payload. pkg/bbs links libzk_cred_bbs
+# statically (see the cgo directive in pkg/bbs/bbsnative/native.go), so no
+# BBS shared object is needed at runtime.
+FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
+ARG SERVICE_NAME
+WORKDIR /
+COPY --from=builder /go/src/app/bin/vc_${SERVICE_NAME} /vc_service
+COPY --from=builder /go/src/app/docs /docs
+COPY --from=builder /go/src/app/standards /standards
+COPY --from=builder /go/src/app/metadata /metadata
+EXPOSE 8080
+CMD ["/vc_service"]

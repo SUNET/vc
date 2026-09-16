@@ -240,7 +240,7 @@ sets none of them is an OpenID4VP 1.0 deployment.
 | `mddl_url`          | `string` | URL where the MDDL schema is already published externally. The mso_mdoc analogue of vctm_url.                                                                                                                                                                                                                        | -             | -           | Yes (if none of vctm_file_path, vctm_url, mddl_file_path, vct, doctype set)      |
 | `doctype`           | `string` | Mdoc doctype value to resolve via Common.CredentialRegistry, used only when neither MDDLFilePath nor MDDLUrl is set. Requires Common.CredentialRegistry.Enable, same as VCT. Used only for mso_mdoc.                                                                                                                 | -             | -           | Yes (if none of vctm_file_path, vctm_url, mddl_file_path, mddl_url, vct set)     |
 | `format`            | `string` | Credential format to issue                                                                                                                                                                                                                                                                                           | `"dc+sd-jwt"` | `dc+sd-jwt` | No                                                                               |
-| `disclosure_policy` | `object` | The embedded disclosure policy for this credential type. Per ARF 3.0 §6.6.2.8 and CIR 2024/2979 Annex III. Only applicable to QEAAs and PuB-EAAs (not PIDs). When omitted, the metadata publishes policy_type "none" (no restrictions).                                                                              | -             | -           | No                                                                               |
+| `disclosure_policy` | `object` | The embedded disclosure policy for this credential type. Per CIR 2024/2979 Annex III and ETSI TS 119 472-3 §4.2.5. Only applicable to QEAAs and PuB-EAAs (not PIDs). Optional and off by default: when omitted, no `disclosure_policy` field is emitted in the credential issuer metadata.                           | -             | -           | No                                                                               |
 | `attributes`        | `object` | Claim names to their source fields and transformation rules for credential issuance                                                                                                                                                                                                                                  | -             | -           | No                                                                               |
 
 ### `disclosure_policy`
@@ -280,6 +280,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 | `trust`                   | `object` | Trust evaluation configuration for OpenID4VP credential validation. When configured, credentials presented via VP are validated against a PDP.                                                                      | -                           | -       | No       |
 | `federation`              | `object` | OpenID Federation entity configuration. When enabled, serves /.well-known/openid-federation as a self-signed JWT.                                                                                                   | -                           | -       | No       |
 | `rate_limit`              | `object` | Per-endpoint rate limiting for the APIGW.                                                                                                                                                                           | -                           | -       | No       |
+| `dashboard`               | `object` | The /dashboard demo landing page.                                                                                                                                                                                   | -                           | -       | No       |
 
 ### `api_server`
 
@@ -945,6 +946,41 @@ Example rules:
 | `token_requests_per_minute`      | `int` | Maximum token endpoint requests per minute per IP. Default: 20      | -       | `20`    | No       |
 | `credential_requests_per_minute` | `int` | Maximum credential endpoint requests per minute per IP. Default: 30 | -       | `30`    | No       |
 | `datastore_requests_per_minute`  | `int` | Maximum datastore endpoint requests per minute per IP. Default: 60  | -       | `60`    | No       |
+
+### `dashboard`
+
+> **Path:** `.apigw.dashboard`
+
+Intended for dev/demo environments; opt in by setting enable: true. Off by
+default so no shared-config deployment starts exposing its service inventory
+to anonymous callers without an explicit action from the operator.
+
+| Field      | Type     | Description                                                                                                                                                                     | Example | Default                        | Required |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------ | -------- |
+| `enable`   | `bool`   | Enable serves GET /dashboard. Default: false (opt-in).                                                                                                                          | -       | `false`                        | No       |
+| `title`    | `string` | Title overrides the page heading. Default: "SUNET Verifiable Credentials".                                                                                                      | -       | `SUNET Verifiable Credentials` | No       |
+| `services` | `array`  | Services optionally augments or overrides the auto-discovered service list. Entries with a Name that matches an auto-discovered service replace it; other entries are appended. | -       | -                              | No       |
+
+### `services` entry
+
+> **Path:** `.apigw.dashboard.services[]`
+
+| Field         | Type     | Description                                                       | Example | Default | Required |
+| ------------- | -------- | ----------------------------------------------------------------- | ------- | ------- | -------- |
+| `name`        | `string` | Display name and match key (e.g. "apigw", "issuer").              | -       | -       | Yes      |
+| `url`         | `string` | Primary public URL for the service.                               | -       | -       | Yes      |
+| `description` | `string` | Optional free-form text shown under the service name.             | -       | -       | No       |
+| `links`       | `array`  | Ordered list of extra labelled URLs (health, metadata, UIs, ...). | -       | -       | No       |
+
+### `links` entry
+
+> **Path:** `.apigw.dashboard.services[].links[]`
+
+| Field   | Type     | Description                                                                                                                                               | Example | Default | Required |
+| ------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `label` | `string` | Label                                                                                                                                                     | -       | -       | Yes      |
+| `url`   | `string` | URL                                                                                                                                                       | -       | -       | Yes      |
+| `type`  | `string` | How the dashboard follows this link. "json" opens the response in an in-page viewer (pretty-printed, no navigation). "page" (default) opens in a new tab. | -       | `page`  | No       |
 
 ## `issuer` (Top-level)
 

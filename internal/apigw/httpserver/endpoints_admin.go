@@ -38,6 +38,10 @@ func (s *Service) endpointAdminLogin(ctx context.Context, c *gin.Context) (any, 
 		session := sessions.Default(c)
 		session.Set(adminSessionKey, true)
 		session.Set("admin_subject", "anonymous")
+		// CSRFProtection rejects any state-changing request from a session
+		// that has no csrf_token; without this the anonymous admin UI can
+		// GET but never POST/PUT/DELETE.
+		session.Set("csrf_token", uuid.NewString())
 		if err := session.Save(); err != nil {
 			span.SetStatus(codes.Error, err.Error())
 			return nil, err

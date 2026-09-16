@@ -1,5 +1,5 @@
 // @ts-nocheck
-import Alpine from 'alpinejs';
+import Alpine from '/static/alpinejs.esm.min.js';
 
 window.adminApp = function () {
     /** Flatten a nested object into dot-notation key-value pairs */

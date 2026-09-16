@@ -97,4 +97,8 @@ type Apiv1 interface {
 
 	// health
 	Health(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error)
+
+	// dashboard
+	Dashboard(ctx context.Context) (*apiv1.DashboardReply, error)
+	DashboardProxy(ctx context.Context, target string) (*apiv1.DashboardProxyReply, error)
 }

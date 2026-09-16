@@ -1,5 +1,3 @@
-//go:build bbsnative
-
 package bbs
 
 import (
@@ -114,9 +112,6 @@ func Native() interface {
 } {
 	return native{}
 }
-
-// Available reports whether native BBS support was compiled in.
-func Available() bool { return true }
 
 func (n native) SkToPk(secretKey []byte) ([]byte, error) {
 	pk, status, msg := n.backend.SkToPk(secretKey)
