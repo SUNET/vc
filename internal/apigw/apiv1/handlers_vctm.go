@@ -182,10 +182,16 @@ func (c *Client) TypeMetadata(ctx context.Context, req *TypeMetadataRequest) (js
 		return json.RawMessage(raw), nil
 	}
 
-	if !constructor.IsLocalVCTM() {
-		return nil, errors.New("VCTM for scope " + req.Scope + " is not published by this service")
-	}
-
+	// Serve whatever document this scope was built from, wherever it came
+	// from. For a registry- or URL-resolved type these are the exact bytes
+	// vct#integrity in every issued credential is computed over, so a wallet
+	// that resolves the type here can verify that pin; refusing to serve them
+	// left wallets checking the credential against some other copy of the
+	// document, or against none.
+	//
+	// This does not republish the type under this issuer's own identifier:
+	// ResolveVCTUrls still rewrites the vct only for local VCTMs, so an
+	// externally-resolved document keeps the vct it arrived with.
 	raw := constructor.GetVCTMRaw()
 	if raw == nil {
 		return nil, errors.New("VCTM not loaded for scope: " + req.Scope)
