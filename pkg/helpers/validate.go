@@ -430,6 +430,23 @@ func NewValidator() (*validator.Validate, error) {
 				}
 			}
 		}
+		// Validate AssertionScope.ExpiryDuration at config load. `omitempty`
+		// on the field only lets an empty string through; a malformed or
+		// non-positive value would otherwise only surface on the first
+		// issuance, or (worse) produce a pre-expired `date_of_expiry`.
+		for scope, cred := range ds.Assertion.Scopes {
+			if cred.ExpiryDuration == "" {
+				continue
+			}
+			d, err := time.ParseDuration(cred.ExpiryDuration)
+			if err != nil {
+				sl.ReportError(cred.ExpiryDuration, "ExpiryDuration", "ExpiryDuration", "expiry_duration_invalid", scope)
+				continue
+			}
+			if d <= 0 {
+				sl.ReportError(cred.ExpiryDuration, "ExpiryDuration", "ExpiryDuration", "expiry_duration_not_positive", scope)
+			}
+		}
 	}, model.DataSources{})
 
 	// Register struct-level validation for OpenID4VPConfig: supported_credentials scopes must cover all client scopes

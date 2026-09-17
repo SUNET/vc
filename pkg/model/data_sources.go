@@ -143,9 +143,10 @@ type AssertionScope struct {
 }
 
 // ResolveDefaults returns Defaults with date_of_expiry populated from
-// ExpiryDuration when set. Injecting now keeps the callers testable.
+// ExpiryDuration when set, and date_of_issuance populated from now.
+// Injecting now keeps the callers testable.
 func (a AssertionScope) ResolveDefaults(now time.Time) (map[string]any, error) {
-	out := make(map[string]any, len(a.Defaults)+1)
+	out := make(map[string]any, len(a.Defaults)+2)
 	for k, v := range a.Defaults {
 		out[k] = v
 	}
@@ -154,8 +155,12 @@ func (a AssertionScope) ResolveDefaults(now time.Time) (map[string]any, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid expiry_duration %q: %w", a.ExpiryDuration, err)
 		}
+		if d <= 0 {
+			return nil, fmt.Errorf("expiry_duration %q must be positive", a.ExpiryDuration)
+		}
 		out["date_of_expiry"] = now.Add(d).Format("2006-01-02")
 	}
+	out["date_of_issuance"] = now.Format("2006-01-02")
 	return out, nil
 }
 

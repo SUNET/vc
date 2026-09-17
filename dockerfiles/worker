@@ -1,25 +1,13 @@
-# Builder base. `install-tools` installs protoc + swag + gRPC codegen; the
-# apt/rustup block adds the C++ and Rust toolchains the third_party/ native
-# libraries build under. Use GOBUILD_IMAGE to reuse a pre-built image that
-# already has these.
-ARG GOBUILD_IMAGE=golang:1.27.1
+# Builder base. GOBUILD_IMAGE is the pre-built dockerfiles/gobuild image
+# which ships protoc + swag + gRPC codegen and the C++/Rust toolchains
+# (cmake, build-essential, rustup/cargo). This Dockerfile assumes those
+# tools are present — it does not install them. Build gobuild first via
+# `make docker-build-gobuild` or override GOBUILD_IMAGE to a registry tag.
+# The default matches Makefile's GOBUILD_LOCAL_TAG for VERSION=local.
+ARG GOBUILD_IMAGE=docker.sunet.se/iam_vc/gobuild:local
 FROM ${GOBUILD_IMAGE} AS gobuild
 WORKDIR /go/src/app
 COPY Makefile .
-RUN make install-tools
-# cmake+build-essential build zk-cred-longfellow (C++); cargo builds
-# zk-cred-bbs and zk-cred-vega (Rust). All three are fetched and built
-# below by `make bbs-native-lib` / `zk-native-lib` / `zk-native-lib-vega`
-# on the target architecture — no cross toolchain, so this Dockerfile
-# expects a builder platform equal to the target platform (the GHCR
-# workflow enforces that by running each arch on its own native runner).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        cmake pkg-config git ca-certificates curl build-essential && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-        | sh -s -- -y --default-toolchain stable --profile minimal && \
-    rm -rf /var/lib/apt/lists/*
-ENV PATH=/root/.cargo/bin:$PATH
-RUN make clean-apt-cache
 
 FROM gobuild AS builder
 

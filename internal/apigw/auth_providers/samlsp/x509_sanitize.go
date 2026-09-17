@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"regexp"
 	"strings"
+
+	"github.com/crewjam/saml"
 )
 
 // sanitizePrintableStrings walks a DER-encoded ASN.1 value in-place and
@@ -179,4 +181,28 @@ func isPrintableStringError(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "PrintableString")
+}
+
+// sanitizeIDPKeyDescriptorCerts rewrites base64 X509Certificate payloads
+// inside each IdP KeyDescriptor in a parsed EntityDescriptor. This runs
+// after successful outer signature verification (or on unsigned metadata):
+// verifying the metadata signature does not exercise the embedded KeyInfo
+// certs the IdP publishes for signing/encryption, so a mislabelled
+// PrintableString in one of those still trips up crewjam's later
+// getIDPSigningCerts() -> x509.ParseCertificate call during every ACS
+// request. Only the in-memory struct is mutated; the signed XML bytes are
+// left untouched.
+func sanitizeIDPKeyDescriptorCerts(metadata *saml.EntityDescriptor) {
+	if metadata == nil {
+		return
+	}
+	for i := range metadata.IDPSSODescriptors {
+		kds := metadata.IDPSSODescriptors[i].KeyDescriptors
+		for j := range kds {
+			certs := kds[j].KeyInfo.X509Data.X509Certificates
+			for k := range certs {
+				certs[k].Data = rewriteBase64Cert(certs[k].Data)
+			}
+		}
+	}
 }

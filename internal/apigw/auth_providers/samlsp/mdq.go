@@ -293,6 +293,17 @@ func (m *MDQClient) GetIDPMetadata(ctx context.Context, entityID string) (*saml.
 		return nil, err
 	}
 
+	// MDQ mode: a valid entity for the wrong federation member would
+	// otherwise be cached under the requested key and used for SSO with the
+	// wrong signing keys. Aggregate responses are already matched inside
+	// parseAndVerifyMetadata; the direct EntityDescriptor path is not, so
+	// enforce the match here. Static-metadata callers (which log-only on
+	// mismatch) go through NewStaticMDQClient / validateAndSetMetadata and
+	// don't run this code path.
+	if metadata.EntityID != "" && metadata.EntityID != entityID {
+		return nil, fmt.Errorf("MDQ returned entity %q, expected %q", metadata.EntityID, entityID)
+	}
+
 	if len(metadata.IDPSSODescriptors) == 0 {
 		return nil, fmt.Errorf("metadata does not contain IdP SSO descriptor")
 	}
@@ -373,6 +384,7 @@ func (m *MDQClient) parseAndVerifyMetadata(metadataXML []byte, expectedEntityID 
 	var metadata saml.EntityDescriptor
 	err := xml.Unmarshal(metadataXML, &metadata)
 	if err == nil {
+		sanitizeIDPKeyDescriptorCerts(&metadata)
 		return &metadata, nil
 	}
 
@@ -385,6 +397,7 @@ func (m *MDQClient) parseAndVerifyMetadata(metadataXML []byte, expectedEntityID 
 		return nil, fmt.Errorf("failed to parse IdP metadata XML (as EntitiesDescriptor): %w", err2)
 	}
 	if match := findIDPEntity(&entities, expectedEntityID); match != nil {
+		sanitizeIDPKeyDescriptorCerts(match)
 		return match, nil
 	}
 	if expectedEntityID != "" {
