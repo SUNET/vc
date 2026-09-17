@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -156,18 +157,34 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		return nil, fmt.Errorf("failed to create transformer: %w", err)
 	}
 
-	// Convert SAML attributes (map[string][]string) to map[string]any
-	// Take the first value from each attribute array
+	// Convert SAML attributes (map[string][]string) to map[string]any.
+	// Preserve the full slice when the assertion released more than one value
+	// for the same attribute so mappings with `as_array: true` (or per-element
+	// transforms like country_alpha2) don't lose values. The transformer
+	// collapses to first-value with a warning for non-array claims.
 	samlAttrs := make(map[string]any)
 	for key, values := range assertion.Attributes {
-		if len(values) > 1 {
-			s.log.Warn("SAML attribute has multiple values, using first",
-				"attribute", key, "count", len(values))
-		}
-		if len(values) > 0 {
-			samlAttrs[key] = values[0] // Use first value
+		switch len(values) {
+		case 0:
+			continue
+		case 1:
+			samlAttrs[key] = values[0]
+		default:
+			samlAttrs[key] = append([]string(nil), values...)
 		}
 	}
+
+	// Log the raw attribute Names the IdP released (keys only, no values, no PII)
+	// so operators can tell whether an empty claim set is caused by a release-policy
+	// issue at the IdP or by an OID mismatch in our attribute_mapping.
+	rawAttrNames := make([]string, 0, len(assertion.Attributes))
+	for k := range assertion.Attributes {
+		rawAttrNames = append(rawAttrNames, k)
+	}
+	s.log.Info("SAML ACS: raw assertion attributes",
+		"count", len(rawAttrNames),
+		"names", rawAttrNames,
+		"has_nameid", assertion.NameID != "")
 
 	// Transform SAML attributes to credential claims using the generic transformer
 	claims, err := transformer.TransformClaims(samlAttrs)
@@ -213,6 +230,15 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 			}
 		} else {
 			// Assertion: store the transformed claims directly as a document
+			defaults, derr := s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].ResolveDefaults(time.Now())
+			if derr != nil {
+				span.SetStatus(codes.Error, "assertion defaults resolve failed")
+				return nil, fmt.Errorf("failed to resolve assertion defaults: %w", derr)
+			}
+			if err := credential.MergeDefaults(claims, defaults); err != nil {
+				span.SetStatus(codes.Error, "assertion defaults merge failed")
+				return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
+			}
 			doc := &model.CompleteDocument{
 				Meta: &model.MetaData{
 					AuthenticSource: session.IDPEntityID,
@@ -287,6 +313,37 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		s.log.Debug("standalone SAML: could not resolve identifier", "error", resolveErr)
 	}
 
+	// Resolve the data source for this credential type so that the credential
+	// endpoint knows whether the identity is assertion-based, and so that we
+	// don't merge assertion-only defaults into a document belonging to a
+	// datastore or external-API source. Mirrors the OIDC standalone path.
+	credSource, credSourceErr := s.cfg.APIGW.DataSources.ResolveDataSource(session.CredentialType, string(model.AuthProviderSAML))
+	if credSourceErr != nil {
+		s.log.Debug("standalone SAML: could not resolve data source", "error", credSourceErr)
+	}
+
+	// Fail fast if we have neither an identifier nor a resolved data source —
+	// a credential offer created without either cannot be redeemed. Mirrors
+	// the OIDC standalone path.
+	if identifier == "" && credSourceErr != nil {
+		span.SetStatus(codes.Error, "cannot create credential offer without identifier or data source")
+		return nil, fmt.Errorf("failed to resolve data source for credential type %q: %w (identifier error: %v)", session.CredentialType, credSourceErr, resolveErr)
+	}
+
+	// Fail fast if the data source requires an identifier but none was resolved.
+	if identifier == "" && credSourceErr == nil && credSource.DataSource != model.DataSourceAssertion {
+		span.SetStatus(codes.Error, "data source requires identifier but none was resolved")
+		return nil, fmt.Errorf("data source %q for credential type %q requires an identifier", credSource.DataSource, session.CredentialType)
+	}
+
+	// AuthorizationDetails is intentionally left empty here, mirroring the
+	// OIDC standalone pre-auth path in handlers_oidcrp.go: if set, the token
+	// endpoint reflects it back with credential_identifiers added, which per
+	// OID4VCI then requires the wallet to use credential_identifier in the
+	// credential request. The EUDI reference wallet does not build
+	// identifier-scoped requests and aborts; leaving this empty lets the
+	// wallet fall back to credential_configuration_id, which the token
+	// endpoint and CredentialRequest.Validate already handle.
 	authCtx := &cache.AuthorizationContext{
 		SessionID:    preAuthCode,
 		Code:         preAuthCode,
@@ -297,12 +354,9 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		Nonce:        nonce,
 		AuthProvider: model.AuthProviderSAML,
 		Identifier:   identifier,
-		AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{
-			{
-				Type:                      "openid_credential",
-				CredentialConfigurationID: session.CredentialType,
-			},
-		},
+	}
+	if credSourceErr == nil {
+		authCtx.DataSource = string(credSource.DataSource)
 	}
 	if err = s.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		span.SetStatus(codes.Error, "pre-auth code persistence failed")
@@ -310,7 +364,21 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	}
 
 	// Store document data so the credential endpoint can issue the credential
-	// when the wallet redeems the offer.
+	// when the wallet redeems the offer. Only merge assertion defaults when
+	// the resolved source is Assertion; other sources (datastore, external
+	// API) own their document data and must not be polluted with SAML
+	// assertion defaults.
+	if credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion {
+		defaults, derr := s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].ResolveDefaults(time.Now())
+		if derr != nil {
+			span.SetStatus(codes.Error, "assertion defaults resolve failed")
+			return nil, fmt.Errorf("failed to resolve assertion defaults: %w", derr)
+		}
+		if err := credential.MergeDefaults(claims, defaults); err != nil {
+			span.SetStatus(codes.Error, "assertion defaults merge failed")
+			return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
+		}
+	}
 	doc := &model.CompleteDocument{
 		Meta:         &model.MetaData{AuthenticSource: session.IDPEntityID},
 		DocumentData: claims,

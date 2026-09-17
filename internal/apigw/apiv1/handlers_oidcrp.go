@@ -10,6 +10,7 @@ import (
 	"github.com/SUNET/vc/internal/apigw/auth_providers/oidcrp"
 	"github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
+	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/grpchelpers"
 	"github.com/SUNET/vc/pkg/model"
@@ -216,6 +217,15 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 			}
 		} else {
 			// Assertion: store the transformed claims directly as a document
+			defaults, derr := c.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].ResolveDefaults(time.Now())
+			if derr != nil {
+				span.SetStatus(codes.Error, "assertion defaults resolve failed")
+				return nil, fmt.Errorf("failed to resolve assertion defaults: %w", derr)
+			}
+			if err := credential.MergeDefaults(claims, defaults); err != nil {
+				span.SetStatus(codes.Error, "assertion defaults merge failed")
+				return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
+			}
 			doc := &model.CompleteDocument{
 				Meta: &model.MetaData{
 					AuthenticSource: session.IssuerURL,
@@ -349,6 +359,17 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 
 	// Store document data so the credential endpoint can issue the credential
 	// when the wallet redeems the offer.
+	if credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion {
+		defaults, derr := c.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].ResolveDefaults(time.Now())
+		if derr != nil {
+			span.SetStatus(codes.Error, "assertion defaults resolve failed")
+			return nil, fmt.Errorf("failed to resolve assertion defaults: %w", derr)
+		}
+		if err := credential.MergeDefaults(claims, defaults); err != nil {
+			span.SetStatus(codes.Error, "assertion defaults merge failed")
+			return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
+		}
+	}
 	doc := &model.CompleteDocument{
 		Meta:         &model.MetaData{AuthenticSource: session.IssuerURL},
 		DocumentData: claims,

@@ -220,3 +220,85 @@ func TestMDQClient_MultipleConcurrentRequests(t *testing.T) {
 	// This is a race condition test, so be lenient
 	assert.LessOrEqual(t, requestCount.Load(), int32(5), "Concurrent requests should use cache once populated")
 }
+
+// aggregate with two IdPs; requested one is second. First-IdP behavior would
+// route the login through the wrong IdP with the wrong signing keys.
+const testAggregateTwoIDPs = `<?xml version="1.0"?>
+<EntitiesDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata">
+  <EntityDescriptor entityID="https://other-idp.example.com/idp">
+    <IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+      <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://other-idp.example.com/sso"/>
+    </IDPSSODescriptor>
+  </EntityDescriptor>
+  <EntityDescriptor entityID="https://idp.example.com/idp">
+    <IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+      <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example.com/sso"/>
+    </IDPSSODescriptor>
+  </EntityDescriptor>
+</EntitiesDescriptor>`
+
+const testNestedAggregate = `<?xml version="1.0"?>
+<EntitiesDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata">
+  <EntitiesDescriptor>
+    <EntityDescriptor entityID="https://nested.example.com/idp">
+      <IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+        <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://nested.example.com/sso"/>
+      </IDPSSODescriptor>
+    </EntityDescriptor>
+  </EntitiesDescriptor>
+</EntitiesDescriptor>`
+
+func TestMDQClient_GetIDPMetadata_AggregateSelectsRequestedEntityID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/samlmetadata+xml")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(testAggregateTwoIDPs)) // #nosec G104
+	}))
+	defer server.Close()
+
+	log, err := logger.New("test", "", false)
+	require.NoError(t, err)
+
+	client := NewMDQClient(server.URL, 3600, nil, log)
+
+	metadata, err := client.GetIDPMetadata(t.Context(), "https://idp.example.com/idp")
+	require.NoError(t, err)
+	assert.Equal(t, "https://idp.example.com/idp", metadata.EntityID)
+	assert.Equal(t, "https://idp.example.com/sso", metadata.IDPSSODescriptors[0].SingleSignOnServices[0].Location)
+}
+
+func TestMDQClient_GetIDPMetadata_AggregateRejectsUnknownEntityID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/samlmetadata+xml")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(testAggregateTwoIDPs)) // #nosec G104
+	}))
+	defer server.Close()
+
+	log, err := logger.New("test", "", false)
+	require.NoError(t, err)
+
+	client := NewMDQClient(server.URL, 3600, nil, log)
+
+	_, err = client.GetIDPMetadata(t.Context(), "https://not-in-aggregate.example.com/idp")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "https://not-in-aggregate.example.com/idp")
+}
+
+func TestMDQClient_GetIDPMetadata_NestedAggregateRecurses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/samlmetadata+xml")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(testNestedAggregate)) // #nosec G104
+	}))
+	defer server.Close()
+
+	log, err := logger.New("test", "", false)
+	require.NoError(t, err)
+
+	client := NewMDQClient(server.URL, 3600, nil, log)
+
+	metadata, err := client.GetIDPMetadata(t.Context(), "https://nested.example.com/idp")
+	require.NoError(t, err)
+	assert.Equal(t, "https://nested.example.com/idp", metadata.EntityID)
+}

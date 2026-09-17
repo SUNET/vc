@@ -1,25 +1,26 @@
-# Builder base. `install-tools` installs protoc + swag + gRPC codegen; the
-# apt/rustup block adds the C++ and Rust toolchains the third_party/ native
-# libraries build under. Use GOBUILD_IMAGE to reuse a pre-built image that
-# already has these.
-ARG GOBUILD_IMAGE=golang:1.27.1
+# Builder base. Default is plain `golang:*-bookworm` so this Dockerfile is
+# self-contained: CI (which cannot push to docker.sunet.se) and any bare
+# `docker build` work without a pre-built base. Local dev overrides
+# GOBUILD_IMAGE via Makefile to the pre-built dockerfiles/gobuild image,
+# which already ships protoc + swag + gRPC codegen and the C++/Rust
+# toolchains — the tool-install steps below no-op when they detect the
+# tools are already present.
+# Keep the golang tag aligned with dockerfiles/gobuild's FROM.
+ARG GOBUILD_IMAGE=golang:1.27.1-bookworm
 FROM ${GOBUILD_IMAGE} AS gobuild
 WORKDIR /go/src/app
 COPY Makefile .
-RUN make install-tools
-# cmake+build-essential build zk-cred-longfellow (C++); cargo builds
-# zk-cred-bbs and zk-cred-vega (Rust). All three are fetched and built
-# below by `make bbs-native-lib` / `zk-native-lib` / `zk-native-lib-vega`
-# on the target architecture — no cross toolchain, so this Dockerfile
-# expects a builder platform equal to the target platform (the GHCR
-# workflow enforces that by running each arch on its own native runner).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        cmake pkg-config git ca-certificates curl build-essential && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-        | sh -s -- -y --default-toolchain stable --profile minimal && \
-    rm -rf /var/lib/apt/lists/*
+
+RUN command -v protoc >/dev/null 2>&1 && command -v swag >/dev/null 2>&1 \
+    || make install-tools
+RUN command -v cmake >/dev/null 2>&1 \
+    || ( apt-get update && apt-get install -y --no-install-recommends \
+             cmake pkg-config git ca-certificates curl build-essential \
+         && rm -rf /var/lib/apt/lists/* )
+RUN command -v cargo >/dev/null 2>&1 \
+    || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+       | sh -s -- -y --default-toolchain stable --profile minimal
 ENV PATH=/root/.cargo/bin:$PATH
-RUN make clean-apt-cache
 
 FROM gobuild AS builder
 

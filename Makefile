@@ -41,9 +41,22 @@ WORKER_SERVICES         := verifier registry apigw issuer
 DOCKER_REGISTRY         := docker.sunet.se/iam_vc
 DOCKER_BUILD_FLAGS      := 
 GO_BUILD_TAGS           ?=
-# Override to use a pre-built gobuild image instead of the inline stage.
-# Example: make docker-build-gobuild VERSION=local && make docker-build GOBUILD_IMAGE=docker.sunet.se/iam_vc/gobuild:local
-GOBUILD_IMAGE           ?=
+# Pre-built builder image (dockerfiles/gobuild) that ships protoc, swag,
+# gRPC codegen, cmake + build-essential, and rustup. The worker Dockerfile
+# is self-contained and installs these itself when missing (so CI, which
+# cannot push to docker.sunet.se, builds from a plain golang base), but
+# skips the installs when GOBUILD_IMAGE already provides them — that's
+# the local-dev speedup this variable exists for.
+GOBUILD_LOCAL_TAG       := $(DOCKER_REGISTRY)/gobuild:$(VERSION)
+GOBUILD_IMAGE           ?= $(GOBUILD_LOCAL_TAG)
+# Only auto-build gobuild when the caller is using the local default tag.
+# When GOBUILD_IMAGE points at a registry image (CI), skip the prereq so
+# each worker job doesn't try to rebuild the base.
+ifeq ($(GOBUILD_IMAGE),$(GOBUILD_LOCAL_TAG))
+GOBUILD_PREREQ          := docker-build-gobuild
+else
+GOBUILD_PREREQ          :=
+endif
 
 # Release Guard Configuration
 _RELEASE_MODE           ?=
@@ -726,12 +739,12 @@ docker-build: $(addprefix docker-build-,$(SERVICES)) ## Build all Docker images
 # fires here. Verifier picks up Longfellow + Vega via the runtime-verifier
 # stage; other workers use the plain runtime stage.
 define DOCKER_BUILD_WORKER_TEMPLATE
-docker-build-$(1): _check-reserved-tag ## Build Docker image for $(1)
+docker-build-$(1): _check-reserved-tag $$(GOBUILD_PREREQ) ## Build Docker image for $(1)
 	$$(info Docker Building $(1) with tag: $$(VERSION))
 	docker build --build-arg SERVICE_NAME=$(1) \
 		--target $$(if $$(filter verifier,$(1)),runtime-verifier,runtime) \
 		$$(if $$(filter apigw,$(1)),--build-arg BUILDTAG=$$(VERSION)) \
-		$$(if $$(GOBUILD_IMAGE),--build-arg GOBUILD_IMAGE=$$(GOBUILD_IMAGE)) \
+		--build-arg GOBUILD_IMAGE=$$(GOBUILD_IMAGE) \
 		--tag $$(call docker-tag,$(1),$$(VERSION)) \
 		--file dockerfiles/worker .
 
