@@ -168,3 +168,15 @@ func sanitizeBase64SAMLResponse(b64 string) string {
 	}
 	return base64.StdEncoding.EncodeToString(fixed)
 }
+
+// isPrintableStringError reports whether err (or any wrapped cause) comes from
+// crypto/x509 refusing a PrintableString-labelled attribute that actually
+// contains UTF-8 bytes. Used as the trigger for falling back to the wide-net
+// cert rewrite — which mutates bytes covered by XML-DSig reference digests
+// and must only run when the strict path has already failed for this reason.
+func isPrintableStringError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "PrintableString")
+}

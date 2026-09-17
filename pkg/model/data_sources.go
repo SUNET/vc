@@ -133,6 +133,30 @@ type AssertionScope struct {
 	// (e.g. issuing_authority, issuing_country, date_of_expiry). Merged
 	// after attribute_mapping — real attributes always win.
 	Defaults map[string]any `yaml:"defaults,omitempty" doc_key:"claim path"`
+
+	// ExpiryDuration, if set, computes date_of_expiry at issuance time as
+	// now+duration (formatted as ISO YYYY-MM-DD) and overrides any static
+	// date_of_expiry in Defaults. Prevents freshly issued credentials from
+	// shipping pre-expired when a static date is left un-rotated. Uses Go
+	// duration syntax; example: "8760h" for one year.
+	ExpiryDuration string `yaml:"expiry_duration,omitempty" validate:"omitempty" doc_example:"\"8760h\""`
+}
+
+// ResolveDefaults returns Defaults with date_of_expiry populated from
+// ExpiryDuration when set. Injecting now keeps the callers testable.
+func (a AssertionScope) ResolveDefaults(now time.Time) (map[string]any, error) {
+	out := make(map[string]any, len(a.Defaults)+1)
+	for k, v := range a.Defaults {
+		out[k] = v
+	}
+	if a.ExpiryDuration != "" {
+		d, err := time.ParseDuration(a.ExpiryDuration)
+		if err != nil {
+			return nil, fmt.Errorf("invalid expiry_duration %q: %w", a.ExpiryDuration, err)
+		}
+		out["date_of_expiry"] = now.Add(d).Format("2006-01-02")
+	}
+	return out, nil
 }
 
 // ExternalAPIConfig groups external API credential scopes.

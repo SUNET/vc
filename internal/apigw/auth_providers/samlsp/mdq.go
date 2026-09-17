@@ -1,6 +1,7 @@
 package samlsp
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/pem"
@@ -103,7 +104,7 @@ func NewStaticMDQClient(metadataSource, entityID string, isURL bool, signingCert
 		}
 	}
 
-	metadata, err := client.parseAndVerifyMetadata(metadataXML)
+	metadata, err := client.parseAndVerifyMetadata(metadataXML, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +170,7 @@ func (m *MDQClient) retryStaticMetadataFetch() error {
 		return fmt.Errorf("fetch failed: %w", err)
 	}
 
-	metadata, err := m.parseAndVerifyMetadata(metadataXML)
+	metadata, err := m.parseAndVerifyMetadata(metadataXML, m.staticEntityID)
 	if err != nil {
 		m.retryBackoff = min(m.retryBackoff*2, mdqRetryMax)
 		m.retryAfter = time.Now().Add(m.retryBackoff)
@@ -287,7 +288,7 @@ func (m *MDQClient) GetIDPMetadata(ctx context.Context, entityID string) (*saml.
 		return nil, fmt.Errorf("failed to read MDQ response: %w", err)
 	}
 
-	metadata, err := m.parseAndVerifyMetadata(body)
+	metadata, err := m.parseAndVerifyMetadata(body, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -333,21 +334,40 @@ func (m *MDQClient) IsStaticMode() bool {
 }
 
 // parseAndVerifyMetadata parses metadata XML and, when a signing certificate is
-// configured, validates the enveloped XML signature. Returns the parsed descriptor.
-func (m *MDQClient) parseAndVerifyMetadata(metadataXML []byte) (*saml.EntityDescriptor, error) {
-	// Rewrite mislabelled-as-PrintableString UTF-8 attributes in embedded
-	// certs first. goxmldsig parses KeyInfo certificates during signature
-	// verification, so an un-sanitized document with a bad PrintableString
-	// fails inside crypto/x509 before we reach the XML parser. The rewrite
-	// only touches the tag byte inside Subject/Issuer RDNs; SignedInfo is
-	// unaffected, so signature validation over the sanitized bytes succeeds.
-	metadataXML = sanitizeMetadataCerts(metadataXML)
-
+// configured, validates the enveloped XML signature. When the XML wraps entities
+// in an EntitiesDescriptor aggregate (SWAMID MDQ, federation feeds), expectedEntityID
+// selects the exact IdP entry — returning the first IdP would let an aggregate
+// hijack a login through the wrong IdP with the wrong signing keys.
+func (m *MDQClient) parseAndVerifyMetadata(metadataXML []byte, expectedEntityID string) (*saml.EntityDescriptor, error) {
 	if m.signingCert != nil {
-		if err := m.verifyMetadataSignature(metadataXML); err != nil {
-			return nil, fmt.Errorf("metadata signature verification failed: %w", err)
+		// Verify on the original bytes first. Rewriting embedded certificates
+		// pre-emptively (as we do in unsigned mode) mutates bytes covered by
+		// XML-DSig reference digests and rejects otherwise valid signed
+		// metadata. Only fall back to a full rewrite when verification fails
+		// specifically because crypto/x509 refused a PrintableString-labelled
+		// UTF-8 attribute in the KeyInfo certificate.
+		verr := m.verifyMetadataSignature(metadataXML)
+		if verr != nil {
+			if !isPrintableStringError(verr) {
+				return nil, fmt.Errorf("metadata signature verification failed: %w", verr)
+			}
+			rewritten := sanitizeMetadataCerts(metadataXML)
+			if bytes.Equal(rewritten, metadataXML) {
+				return nil, fmt.Errorf("metadata signature verification failed: %w", verr)
+			}
+			if verr2 := m.verifyMetadataSignature(rewritten); verr2 != nil {
+				return nil, fmt.Errorf("metadata signature verification failed after PrintableString sanitize: %w", verr2)
+			}
+			m.log.Warn("metadata verified after PrintableString sanitize; upstream should fix cert encoding")
+			metadataXML = rewritten
 		}
 		m.log.Debug("metadata signature verified successfully")
+	} else {
+		// Unsigned mode has no reference digest to preserve, so it is safe
+		// to rewrite embedded certs upfront and unblock downstream cert
+		// parsing (KeyDescriptor certs) that crypto/x509 would otherwise
+		// reject on bad PrintableString.
+		metadataXML = sanitizeMetadataCerts(metadataXML)
 	}
 
 	var metadata saml.EntityDescriptor
@@ -356,23 +376,44 @@ func (m *MDQClient) parseAndVerifyMetadata(metadataXML []byte) (*saml.EntityDesc
 		return &metadata, nil
 	}
 
-	// SWAMID's MDQ and some IdP endpoints wrap a single entity in an
-	// EntitiesDescriptor. Fall back to that shape and pick the first entry
-	// that has an IdP role, mirroring crewjam's samlsp.ParseMetadata.
-	if err.Error() == "expected element type <EntityDescriptor> but have <EntitiesDescriptor>" {
-		var entities saml.EntitiesDescriptor
-		if err2 := xml.Unmarshal(metadataXML, &entities); err2 != nil {
-			return nil, fmt.Errorf("failed to parse IdP metadata XML (as EntitiesDescriptor): %w", err2)
-		}
-		for i, e := range entities.EntityDescriptors {
-			if len(e.IDPSSODescriptors) > 0 {
-				return &entities.EntityDescriptors[i], nil
-			}
-		}
-		return nil, fmt.Errorf("EntitiesDescriptor contains no IdP entity")
+	if err.Error() != "expected element type <EntityDescriptor> but have <EntitiesDescriptor>" {
+		return nil, fmt.Errorf("failed to parse IdP metadata XML: %w", err)
 	}
 
-	return nil, fmt.Errorf("failed to parse IdP metadata XML: %w", err)
+	var entities saml.EntitiesDescriptor
+	if err2 := xml.Unmarshal(metadataXML, &entities); err2 != nil {
+		return nil, fmt.Errorf("failed to parse IdP metadata XML (as EntitiesDescriptor): %w", err2)
+	}
+	if match := findIDPEntity(&entities, expectedEntityID); match != nil {
+		return match, nil
+	}
+	if expectedEntityID != "" {
+		return nil, fmt.Errorf("EntitiesDescriptor contains no IdP entity with entityID %q", expectedEntityID)
+	}
+	return nil, fmt.Errorf("EntitiesDescriptor contains no IdP entity")
+}
+
+// findIDPEntity walks an EntitiesDescriptor aggregate (including nested ones)
+// and returns the IdP whose EntityID equals expectedEntityID. When expectedEntityID
+// is empty (edge case: static-metadata bootstrap without a configured entity_id),
+// the first IdP found is returned, matching crewjam's samlsp.ParseMetadata legacy
+// behavior.
+func findIDPEntity(agg *saml.EntitiesDescriptor, expectedEntityID string) *saml.EntityDescriptor {
+	for i := range agg.EntityDescriptors {
+		e := &agg.EntityDescriptors[i]
+		if len(e.IDPSSODescriptors) == 0 {
+			continue
+		}
+		if expectedEntityID == "" || e.EntityID == expectedEntityID {
+			return e
+		}
+	}
+	for i := range agg.EntitiesDescriptors {
+		if match := findIDPEntity(&agg.EntitiesDescriptors[i], expectedEntityID); match != nil {
+			return match
+		}
+	}
+	return nil
 }
 
 // verifyMetadataSignature validates the XML signature on a metadata document
@@ -411,7 +452,14 @@ func LoadMetadataSigningCert(certPath string) (*x509.Certificate, error) {
 		return nil, fmt.Errorf("failed to decode PEM block from %s", certPath)
 	}
 
-	cert, err := x509.ParseCertificate(block.Bytes)
+	// Normalize the DER before parsing so the trust root's Raw bytes match
+	// any embedded KeyInfo certificate that had to be rewritten to survive
+	// crypto/x509 PrintableString validation. Without this, goxmldsig's
+	// x509.Certificate.Equal(trust, keyInfo) fails on Raw-byte inequality.
+	der := append([]byte(nil), block.Bytes...)
+	sanitizePrintableStrings(der)
+
+	cert, err := x509.ParseCertificate(der)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse metadata signing certificate: %w", err)
 	}

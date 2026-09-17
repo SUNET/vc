@@ -2,7 +2,11 @@
 common:
   secret_file_path: "/secrets.yaml"
   skip_secrets_perm_check: true
-  production: true
+  # Dev profile. false is deliberate: paired with allow_unsigned_metadata
+  # below, it flags this as a local-only environment where MITM'd SWAMID QA
+  # metadata is an accepted risk. Do not flip on without mounting a
+  # federation signing cert and setting metadata_signing_cert_path.
+  production: false
   mongo:
     uri: ""
 
@@ -284,10 +288,12 @@ apigw:
       scopes:
         eduid:
           auth_provider: saml
+          # ISO date for date_of_expiry is derived at issuance time from this
+          # duration so freshly issued credentials never ship pre-expired.
+          expiry_duration: "8760h"
           defaults:
             issuing_authority: "SUNET"
             issuing_country: "SE"
-            date_of_expiry: "2027-05-28"
             date_of_issuance: "2026-04-28"
   delivery:
     openid4vci:

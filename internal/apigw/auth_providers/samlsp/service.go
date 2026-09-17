@@ -286,21 +286,14 @@ func (s *Service) ProcessAssertion(ctx context.Context, samlResponseEncoded stri
 	sp := *s.sp
 	sp.IDPMetadata = idpMetadata
 
-	// Rewrite mislabelled-as-PrintableString UTF-8 attributes in any
-	// certificate embedded in <ds:KeyInfo>. Only the tag byte inside the
-	// Subject/Issuer RDN changes; SignedInfo is unaffected, so signature
-	// validation still succeeds.
-	samlResponseEncoded = sanitizeBase64SAMLResponse(samlResponseEncoded)
-
-	// Parse and validate SAML response
+	// Parse and validate SAML response on the ORIGINAL bytes first. Rewriting
+	// certificates pre-emptively mutates bytes covered by outer-Response and
+	// nested-Assertion XML-DSig reference digests and rejects otherwise valid
+	// signed responses. Only fall back to the wide-net sanitize when the
+	// failure is specifically crypto/x509 refusing a PrintableString-labelled
+	// UTF-8 attribute inside the signer's KeyInfo cert.
 	acsURL := sp.AcsURL
-	samlResp, err := sp.ParseResponse(&http.Request{
-		URL: &acsURL,
-		PostForm: url.Values{
-			"SAMLResponse": {samlResponseEncoded},
-			"RelayState":   {session.ID},
-		},
-	}, []string{session.ID})
+	samlResp, err := parseSAMLResponseWithFallback(&sp, samlResponseEncoded, session.ID, acsURL)
 	if err != nil {
 		// crewjam's ParseResponse hides the real reason behind a public
 		// "authentication failed" message; the underlying cause lives in
@@ -343,6 +336,41 @@ func (s *Service) ProcessAssertion(ctx context.Context, samlResponseEncoded stri
 		NotBefore:  samlResp.Conditions.NotBefore,
 		NotAfter:   samlResp.Conditions.NotOnOrAfter,
 	}, nil
+}
+
+// parseSAMLResponseWithFallback calls sp.ParseResponse on the original
+// base64-encoded response bytes and, only if that fails specifically because
+// crypto/x509 refused a PrintableString-labelled UTF-8 attribute in the
+// signer's KeyInfo certificate, retries with sanitizeBase64SAMLResponse. The
+// wide-net rewrite mutates bytes covered by XML-DSig reference digests, so it
+// stays behind the strict path to avoid rejecting otherwise valid signed
+// responses (see ADR: DSig-safe cert sanitizing).
+func parseSAMLResponseWithFallback(sp *saml.ServiceProvider, samlResponseEncoded, sessionID string, acsURL url.URL) (*saml.Assertion, error) {
+	req := func(payload string) *http.Request {
+		return &http.Request{
+			URL: &acsURL,
+			PostForm: url.Values{
+				"SAMLResponse": {payload},
+				"RelayState":   {sessionID},
+			},
+		}
+	}
+	resp, err := sp.ParseResponse(req(samlResponseEncoded), []string{sessionID})
+	if err == nil {
+		return resp, nil
+	}
+	cause := err
+	if ive, ok := err.(*saml.InvalidResponseError); ok && ive.PrivateErr != nil {
+		cause = ive.PrivateErr
+	}
+	if !isPrintableStringError(cause) {
+		return nil, err
+	}
+	sanitized := sanitizeBase64SAMLResponse(samlResponseEncoded)
+	if sanitized == samlResponseEncoded {
+		return nil, err
+	}
+	return sp.ParseResponse(req(sanitized), []string{sessionID})
 }
 
 // GetSession retrieves a session by ID

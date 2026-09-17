@@ -217,7 +217,11 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 			}
 		} else {
 			// Assertion: store the transformed claims directly as a document
-			defaults := c.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].Defaults
+			defaults, derr := c.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].ResolveDefaults(time.Now())
+			if derr != nil {
+				span.SetStatus(codes.Error, "assertion defaults resolve failed")
+				return nil, fmt.Errorf("failed to resolve assertion defaults: %w", derr)
+			}
 			if err := credential.MergeDefaults(claims, defaults); err != nil {
 				span.SetStatus(codes.Error, "assertion defaults merge failed")
 				return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
@@ -356,7 +360,11 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	// Store document data so the credential endpoint can issue the credential
 	// when the wallet redeems the offer.
 	if credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion {
-		defaults := c.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].Defaults
+		defaults, derr := c.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].ResolveDefaults(time.Now())
+		if derr != nil {
+			span.SetStatus(codes.Error, "assertion defaults resolve failed")
+			return nil, fmt.Errorf("failed to resolve assertion defaults: %w", derr)
+		}
 		if err := credential.MergeDefaults(claims, defaults); err != nil {
 			span.SetStatus(codes.Error, "assertion defaults merge failed")
 			return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)

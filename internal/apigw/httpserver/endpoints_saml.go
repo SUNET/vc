@@ -157,16 +157,20 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		return nil, fmt.Errorf("failed to create transformer: %w", err)
 	}
 
-	// Convert SAML attributes (map[string][]string) to map[string]any
-	// Take the first value from each attribute array
+	// Convert SAML attributes (map[string][]string) to map[string]any.
+	// Preserve the full slice when the assertion released more than one value
+	// for the same attribute so mappings with `as_array: true` (or per-element
+	// transforms like country_alpha2) don't lose values. The transformer
+	// collapses to first-value with a warning for non-array claims.
 	samlAttrs := make(map[string]any)
 	for key, values := range assertion.Attributes {
-		if len(values) > 1 {
-			s.log.Warn("SAML attribute has multiple values, using first",
-				"attribute", key, "count", len(values))
-		}
-		if len(values) > 0 {
-			samlAttrs[key] = values[0] // Use first value
+		switch len(values) {
+		case 0:
+			continue
+		case 1:
+			samlAttrs[key] = values[0]
+		default:
+			samlAttrs[key] = append([]string(nil), values...)
 		}
 	}
 
@@ -226,7 +230,11 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 			}
 		} else {
 			// Assertion: store the transformed claims directly as a document
-			defaults := s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].Defaults
+			defaults, derr := s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].ResolveDefaults(time.Now())
+			if derr != nil {
+				span.SetStatus(codes.Error, "assertion defaults resolve failed")
+				return nil, fmt.Errorf("failed to resolve assertion defaults: %w", derr)
+			}
 			if err := credential.MergeDefaults(claims, defaults); err != nil {
 				span.SetStatus(codes.Error, "assertion defaults merge failed")
 				return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
@@ -328,6 +336,14 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		return nil, fmt.Errorf("data source %q for credential type %q requires an identifier", credSource.DataSource, session.CredentialType)
 	}
 
+	// AuthorizationDetails is intentionally left empty here, mirroring the
+	// OIDC standalone pre-auth path in handlers_oidcrp.go: if set, the token
+	// endpoint reflects it back with credential_identifiers added, which per
+	// OID4VCI then requires the wallet to use credential_identifier in the
+	// credential request. The EUDI reference wallet does not build
+	// identifier-scoped requests and aborts; leaving this empty lets the
+	// wallet fall back to credential_configuration_id, which the token
+	// endpoint and CredentialRequest.Validate already handle.
 	authCtx := &cache.AuthorizationContext{
 		SessionID:    preAuthCode,
 		Code:         preAuthCode,
@@ -338,12 +354,6 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		Nonce:        nonce,
 		AuthProvider: model.AuthProviderSAML,
 		Identifier:   identifier,
-		AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{
-			{
-				Type:                      "openid_credential",
-				CredentialConfigurationID: session.CredentialType,
-			},
-		},
 	}
 	if credSourceErr == nil {
 		authCtx.DataSource = string(credSource.DataSource)
@@ -359,7 +369,11 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	// API) own their document data and must not be polluted with SAML
 	// assertion defaults.
 	if credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion {
-		defaults := s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].Defaults
+		defaults, derr := s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].ResolveDefaults(time.Now())
+		if derr != nil {
+			span.SetStatus(codes.Error, "assertion defaults resolve failed")
+			return nil, fmt.Errorf("failed to resolve assertion defaults: %w", derr)
+		}
 		if err := credential.MergeDefaults(claims, defaults); err != nil {
 			span.SetStatus(codes.Error, "assertion defaults merge failed")
 			return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)

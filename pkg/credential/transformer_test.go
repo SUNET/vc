@@ -298,39 +298,91 @@ func TestTransformClaims(t *testing.T) {
 			},
 		},
 		{
-			name: "transform yyyymmdd_to_iso invalid calendar date is unchanged",
+			name: "transform yyyymmdd_to_iso invalid calendar date errors when required",
 			mapping: model.AttributeMapping{
 				"dob": {Claim: "birthdate", Required: true, Transform: "yyyymmdd_to_iso"},
 			},
 			attributes: map[string]any{
 				"dob": "20240230",
 			},
-			want: map[string]any{
-				"birthdate": "20240230",
-			},
+			wantErr: "invalid YYYYMMDD date",
 		},
 		{
-			name: "transform yyyymmdd_to_iso wrong shape is unchanged",
+			name: "transform yyyymmdd_to_iso invalid calendar date is skipped when optional",
+			mapping: model.AttributeMapping{
+				"dob": {Claim: "birthdate", Required: false, Transform: "yyyymmdd_to_iso"},
+			},
+			attributes: map[string]any{
+				"dob": "20240230",
+			},
+			want: map[string]any{},
+		},
+		{
+			name: "transform yyyymmdd_to_iso wrong shape errors when required",
 			mapping: model.AttributeMapping{
 				"dob": {Claim: "birthdate", Required: true, Transform: "yyyymmdd_to_iso"},
 			},
 			attributes: map[string]any{
 				"dob": "1985-03-17",
 			},
-			want: map[string]any{
-				"birthdate": "1985-03-17",
-			},
+			wantErr: "invalid YYYYMMDD date",
 		},
 		{
-			name: "transform yyyymmdd_to_iso empty string is unchanged",
+			name: "transform yyyymmdd_to_iso empty string is skipped when optional",
 			mapping: model.AttributeMapping{
 				"dob": {Claim: "birthdate", Required: false, Default: "", Transform: "yyyymmdd_to_iso"},
 			},
 			attributes: map[string]any{
 				"dob": "",
 			},
+			want: map[string]any{},
+		},
+		{
+			name: "multi-value slice with as_array and per-element transform preserves both",
+			mapping: model.AttributeMapping{
+				"nats": {Claim: "nationalities", Transform: "country_alpha2", AsArray: true},
+			},
+			attributes: map[string]any{
+				"nats": []string{"Sweden", "Norway"},
+			},
 			want: map[string]any{
-				"birthdate": "",
+				"nationalities": []string{"SE", "NO"},
+			},
+		},
+		{
+			name: "multi-value slice with as_array no transform preserves both",
+			mapping: model.AttributeMapping{
+				"nats": {Claim: "nationalities", AsArray: true},
+			},
+			attributes: map[string]any{
+				"nats": []string{"SE", "NO"},
+			},
+			want: map[string]any{
+				"nationalities": []string{"SE", "NO"},
+			},
+		},
+		{
+			name: "multi-value slice mapped to non-array claim collapses to first",
+			mapping: model.AttributeMapping{
+				"nats": {Claim: "nationality", Transform: "country_alpha2"},
+			},
+			attributes: map[string]any{
+				"nats": []string{"Sweden", "Norway"},
+			},
+			want: map[string]any{
+				"nationality": "SE",
+			},
+		},
+		{
+			name: "single-value slice with as_array stays as single-element array",
+			mapping: model.AttributeMapping{
+				"nats": {Claim: "nationalities", Transform: "country_alpha2", AsArray: true},
+			},
+			attributes: map[string]any{
+				"nats": []string{"Sweden"},
+			},
+			want: map[string]any{
+				"nationalities": []string{"SE"},
 			},
 		},
 	}
@@ -540,4 +592,30 @@ func TestMergeDefaults_PathConflict(t *testing.T) {
 	claims := map[string]any{"identity": "not-a-map"}
 	err := MergeDefaults(claims, map[string]any{"identity.country": "SE"})
 	require.Error(t, err)
+}
+
+func TestMergeDefaults_OverlappingPathsRejected(t *testing.T) {
+	err := MergeDefaults(map[string]any{}, map[string]any{
+		"identity":         map[string]any{"country": "NO"},
+		"identity.country": "SE",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "overlapping default paths")
+}
+
+func TestMergeDefaults_DeterministicOrder(t *testing.T) {
+	// Repeated runs must produce the same result regardless of map iteration.
+	for i := 0; i < 50; i++ {
+		claims := map[string]any{}
+		err := MergeDefaults(claims, map[string]any{
+			"a.b": "1",
+			"a.c": "2",
+			"x.y": "3",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"a": map[string]any{"b": "1", "c": "2"},
+			"x": map[string]any{"y": "3"},
+		}, claims)
+	}
 }

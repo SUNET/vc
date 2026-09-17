@@ -305,9 +305,14 @@ cmd_launch() {
 # a throwaway keypair on first launch (or first auto-create deploy) to make
 # a fresh 'fly deploy' actually boot instead of crashing in tls.LoadX509KeyPair.
 provision_apigw_saml_sp_keypair() {
-    local apigw_app saml_cert_b64 saml_key_b64 saml_tmp
+    local apigw_app saml_cert_b64 saml_key_b64 saml_tmp secrets_json
     apigw_app="$(app_name "apigw")"
-    if fly secrets list --app "$apigw_app" --json 2>/dev/null | grep -q '"SAML_SP_CERT"'; then
+    # Skip only when BOTH secrets exist. A partial rotation that leaves only
+    # the cert would otherwise pass this guard and apigw would fail to load
+    # the mounted keypair on startup.
+    secrets_json="$(fly secrets list --app "$apigw_app" --json 2>/dev/null || echo '[]')"
+    if printf '%s' "$secrets_json" | grep -q '"SAML_SP_CERT"' \
+        && printf '%s' "$secrets_json" | grep -q '"SAML_SP_KEY"'; then
         echo "==> SAML SP secrets already set for $apigw_app (skipping)"
         return 0
     fi
@@ -471,12 +476,14 @@ cmd_deploy() {
         if ! fly status --app "$app" >/dev/null 2>&1; then
             echo "  [create] $app (auto-creating)"
             fly apps create "$app" --org "$FLY_ORG" || die "Failed to create app: $app"
-            # cmd_launch runs SAML SP keypair provisioning after app creation,
-            # but a first-time deploy that bypasses launch needs the same
-            # bootstrap or apigw crashes in tls.LoadX509KeyPair on boot.
-            if [[ "$service" == "apigw" ]]; then
-                provision_apigw_saml_sp_keypair
-            fi
+        fi
+
+        # apigw's SAML SP keypair is provisioned on every deploy, not just on
+        # app creation: an upgrade that first introduces the [[files]] mount
+        # would otherwise boot without the secrets and crash in
+        # tls.LoadX509KeyPair. provision_apigw_saml_sp_keypair is idempotent.
+        if [[ "$service" == "apigw" ]]; then
+            provision_apigw_saml_sp_keypair
         fi
 
         if [[ "$service" == "wallet-frontend" ]]; then
