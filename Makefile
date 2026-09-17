@@ -43,10 +43,10 @@ DOCKER_BUILD_FLAGS      :=
 GO_BUILD_TAGS           ?=
 # Pre-built builder image (dockerfiles/gobuild) that ships protoc, swag,
 # gRPC codegen, cmake + build-essential, and rustup. The worker Dockerfile
-# skips its own install steps when these tools are already present, so
-# using this image is a real speedup — not just a cosmetic override.
-# CI overrides this to a registry-pushed tag (e.g. gobuild:<sha>) so each
-# worker job pulls the pre-built image instead of rebuilding it locally.
+# is self-contained and installs these itself when missing (so CI, which
+# cannot push to docker.sunet.se, builds from a plain golang base), but
+# skips the installs when GOBUILD_IMAGE already provides them — that's
+# the local-dev speedup this variable exists for.
 GOBUILD_LOCAL_TAG       := $(DOCKER_REGISTRY)/gobuild:$(VERSION)
 GOBUILD_IMAGE           ?= $(GOBUILD_LOCAL_TAG)
 # Only auto-build gobuild when the caller is using the local default tag.

@@ -1,13 +1,26 @@
-# Builder base. GOBUILD_IMAGE is the pre-built dockerfiles/gobuild image
-# which ships protoc + swag + gRPC codegen and the C++/Rust toolchains
-# (cmake, build-essential, rustup/cargo). This Dockerfile assumes those
-# tools are present — it does not install them. Build gobuild first via
-# `make docker-build-gobuild` or override GOBUILD_IMAGE to a registry tag.
-# The default matches Makefile's GOBUILD_LOCAL_TAG for VERSION=local.
-ARG GOBUILD_IMAGE=docker.sunet.se/iam_vc/gobuild:local
+# Builder base. Default is plain `golang:*-bookworm` so this Dockerfile is
+# self-contained: CI (which cannot push to docker.sunet.se) and any bare
+# `docker build` work without a pre-built base. Local dev overrides
+# GOBUILD_IMAGE via Makefile to the pre-built dockerfiles/gobuild image,
+# which already ships protoc + swag + gRPC codegen and the C++/Rust
+# toolchains — the tool-install steps below no-op when they detect the
+# tools are already present.
+# Keep the golang tag aligned with dockerfiles/gobuild's FROM.
+ARG GOBUILD_IMAGE=golang:1.27.1-bookworm
 FROM ${GOBUILD_IMAGE} AS gobuild
 WORKDIR /go/src/app
 COPY Makefile .
+
+RUN command -v protoc >/dev/null 2>&1 && command -v swag >/dev/null 2>&1 \
+    || make install-tools
+RUN command -v cmake >/dev/null 2>&1 \
+    || ( apt-get update && apt-get install -y --no-install-recommends \
+             cmake pkg-config git ca-certificates curl build-essential \
+         && rm -rf /var/lib/apt/lists/* )
+RUN command -v cargo >/dev/null 2>&1 \
+    || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+       | sh -s -- -y --default-toolchain stable --profile minimal
+ENV PATH=/root/.cargo/bin:$PATH
 
 FROM gobuild AS builder
 

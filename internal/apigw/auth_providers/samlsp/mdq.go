@@ -299,8 +299,9 @@ func (m *MDQClient) GetIDPMetadata(ctx context.Context, entityID string) (*saml.
 	// parseAndVerifyMetadata; the direct EntityDescriptor path is not, so
 	// enforce the match here. Static-metadata callers (which log-only on
 	// mismatch) go through NewStaticMDQClient / validateAndSetMetadata and
-	// don't run this code path.
-	if metadata.EntityID != "" && metadata.EntityID != entityID {
+	// don't run this code path. entityID is guaranteed non-empty above, so
+	// an empty metadata.EntityID must also be rejected.
+	if metadata.EntityID != entityID {
 		return nil, fmt.Errorf("MDQ returned entity %q, expected %q", metadata.EntityID, entityID)
 	}
 
