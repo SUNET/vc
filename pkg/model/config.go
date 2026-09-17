@@ -1844,10 +1844,17 @@ func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string, registr
 	}
 	c.Attributes = vctm.Attributes()
 
-	// Only keep raw bytes for locally-served VCTMs.
-	if c.IsLocalVCTM() {
-		c.VCTMRaw = rawBytes
-	}
+	// Keep the raw bytes whatever the source. Serving /type-metadata/:scope
+	// is not the only thing that needs them: APIGW sends the VCTM inline in
+	// every MakeSDJWTRequest and the issuer validates it as required, so a
+	// scope configured by vct or vctm_url could not issue at all when these
+	// were dropped - it failed with "validation_error field:vctm" at
+	// POST /credential, after a successful /token. This mirrors MDDLRaw
+	// below, which is kept unconditionally for exactly the same reason.
+	// Publishing stays gated on IsLocalVCTM (see APIGW's TypeMetadata and
+	// ResolveVCTUrls): an externally-resolved document is used for issuance
+	// but still not re-published under this issuer's own URL.
+	c.VCTMRaw = rawBytes
 
 	return nil
 }
