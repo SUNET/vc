@@ -20,11 +20,6 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 )
 
-// NewServerOptions returns gRPC server options with optional TLS/mTLS support.
-// If TLS is disabled, returns nil (for insecure server).
-// If TLS is enabled without client CA, uses server-only TLS.
-// If TLS is enabled with client CA, uses mutual TLS (mTLS) requiring client certificates.
-// If AllowedClientFingerprints or AllowedClientDNs is set, adds an interceptor to verify client certs.
 // MaxMessageBytes is the gRPC message-size limit these services use in place
 // of grpc-go's 4 MiB default, on both ends of every connection.
 //
@@ -40,6 +35,11 @@ import (
 // transport failure - see the issuer's maxMetadataJSONBytes.
 const MaxMessageBytes = 16 * 1024 * 1024
 
+// NewServerOptions returns gRPC server options with optional TLS/mTLS support.
+// The message-size options (MaxMessageBytes) are always included, TLS or not.
+// If TLS is enabled without client CA, uses server-only TLS.
+// If TLS is enabled with client CA, uses mutual TLS (mTLS) requiring client certificates.
+// If AllowedClientFingerprints or AllowedClientDNs is set, adds an interceptor to verify client certs.
 func NewServerOptions(cfg model.GRPCServer) ([]grpc.ServerOption, error) {
 	sizeOpts := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(MaxMessageBytes),
