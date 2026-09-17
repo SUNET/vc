@@ -25,7 +25,12 @@ import (
 // list entries. Callers that need retries for specific idempotent RPCs
 // should implement them at the application level.
 func NewClientConn(cfg model.GRPCClientTLS) (*grpc.ClientConn, error) {
-	opts := []grpc.DialOption{}
+	// Matches the server's limit: a call is bounded by the smaller of the two,
+	// so raising only one end would leave the default in force.
+	opts := []grpc.DialOption{grpc.WithDefaultCallOptions(
+		grpc.MaxCallRecvMsgSize(MaxMessageBytes),
+		grpc.MaxCallSendMsgSize(MaxMessageBytes),
+	)}
 
 	if !cfg.TLS {
 		// Insecure connection

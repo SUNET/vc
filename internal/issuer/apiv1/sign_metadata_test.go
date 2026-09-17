@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/SUNET/vc/pkg/grpchelpers"
 	"strings"
 	"testing"
 
@@ -441,4 +442,22 @@ func TestSignMetadata_RateLimitExhausted(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, codes.ResourceExhausted, st.Code())
 	assert.Contains(t, st.Message(), "rate limit exceeded")
+}
+
+// TestMaxMetadataJSONBytes_Invariants pins the two properties the limit's
+// value depends on, so neither can be lost silently.
+func TestMaxMetadataJSONBytes_Invariants(t *testing.T) {
+	// It must stay below the transport limit, or an oversized payload fails as
+	// a generic gRPC transport error instead of the specific InvalidArgument
+	// this guard exists to produce.
+	assert.Less(t, maxMetadataJSONBytes, grpchelpers.MaxMessageBytes,
+		"the application guard must fire before the transport limit")
+
+	// And it must clear the size that was actually observed in the field: an
+	// issuer with nine configured types, three carrying registry-sourced
+	// artwork, published 2.19 MiB of Credential Issuer Metadata and silently
+	// fell back to serving it unsigned.
+	const observedMetadataBytes = 2_188_352
+	assert.Greater(t, maxMetadataJSONBytes, observedMetadataBytes,
+		"a real deployment's metadata must be signable")
 }

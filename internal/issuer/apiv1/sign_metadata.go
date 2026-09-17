@@ -25,20 +25,26 @@ const (
 	MetadataTypeOAuth2 = "oauth2-authorization-server"
 
 	// maxMetadataJSONBytes bounds the size of the metadata_json payload accepted
-	// by SignMetadata. This is an application-level guard, separate from gRPC's
-	// own transport-level message-size limit (grpc-go defaults to 4 MiB and
-	// neither the issuer's gRPC server nor the apigw client override it), so
-	// that an oversized payload gets a clear, specific InvalidArgument error
-	// here instead of a generic gRPC transport failure.
+	// by SignMetadata. This is an application-level guard, separate from the
+	// transport-level message-size limit both ends set to
+	// grpchelpers.MaxMessageBytes, so that an oversized payload gets a clear,
+	// specific InvalidArgument error here instead of a generic gRPC transport
+	// failure.
 	//
 	// A real deployment's Credential Issuer Metadata grows with the number of
 	// configured VCTM/MDDL scopes (each contributing a CredentialConfigurationsSupported
 	// entry with multi-language Display/ClaimDescription/ClaimDisplayProperties
-	// per claim, see pkg/openid4vci/issuer_metadata.go), so a handful of
-	// configured scopes can comfortably exceed a few hundred KB. 2 MiB leaves
-	// generous headroom for that while staying well under gRPC's 4 MiB default,
-	// so this check - not gRPC's - is the one that actually fires.
-	maxMetadataJSONBytes = 2 * 1024 * 1024
+	// per claim, see pkg/openid4vci/issuer_metadata.go), and each entry now
+	// also inlines that type's display metadata, logos included. 2 MiB was not
+	// enough for that: an issuer offering nine types, three of them with
+	// registry-sourced artwork, published 2.19 MiB and could no longer sign its
+	// own metadata - it served it unsigned instead, which is a silent
+	// downgrade for every wallet that would have verified the signature.
+	//
+	// 8 MiB leaves room for that growth while staying under
+	// grpchelpers.MaxMessageBytes, so this check - not the transport's - is
+	// still the one that fires, with a specific error.
+	maxMetadataJSONBytes = 8 * 1024 * 1024
 )
 
 // signableMetadata is implemented by metadata structs that can be
