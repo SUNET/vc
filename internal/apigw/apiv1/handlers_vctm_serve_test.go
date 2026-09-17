@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/SUNET/vc/pkg/model"
+	ts11client "github.com/sirosfoundation/go-ts11client"
 )
 
 // pidVCTM is a minimal type metadata document. Its exact bytes are what
@@ -19,23 +21,41 @@ import (
 // them, so TypeMetadata must hand back these bytes and not a re-serialisation.
 const pidVCTM = `{"vct":"urn:eudi:pid:arf-1.8:1","name":"PID","claims":[{"path":["given_name"]}]}`
 
-// loadedMetadata builds a CredentialMetadata the way LoadCredentialSchema
-// would for the given source, without reaching for a registry or the network.
-func loadedMetadata(t *testing.T, source func(*model.CredentialMetadata), raw string) *model.CredentialMetadata {
-	t.Helper()
-	c := &model.CredentialMetadata{Format: "dc+sd-jwt"}
-	source(c)
+// stubRegistry is a ts11client.Client double, so the registry-resolved case
+// actually goes through loadVCTM's registry branch rather than the URL one.
+type stubRegistry struct{ vctm map[string][]byte }
 
+func (s *stubRegistry) ResolveVCT(_ context.Context, vct string) (*ts11client.Resolved, error) {
+	data, ok := s.vctm[vct]
+	if !ok {
+		return nil, fmt.Errorf("%w: vct=%s", ts11client.ErrNotFound, vct)
+	}
+	return &ts11client.Resolved{Data: data, Source: "stub"}, nil
+}
+
+func (s *stubRegistry) ResolveDoctype(_ context.Context, doctype string) (*ts11client.Resolved, error) {
+	return nil, fmt.Errorf("%w: doctype=%s", ts11client.ErrNotFound, doctype)
+}
+
+// loadedFromRegistry loads a scope the way a vct-configured deployment does.
+func loadedFromRegistry(t *testing.T, vct, raw string) *model.CredentialMetadata {
+	t.Helper()
+	c := &model.CredentialMetadata{Format: "dc+sd-jwt", VCT: vct}
+	registry := &stubRegistry{vctm: map[string][]byte{vct: []byte(raw)}}
+	require.NoError(t, c.LoadCredentialSchema(context.Background(), "pid_1_8", registry))
+	return c
+}
+
+// loadedFromURL loads a scope the way a vctm_url-configured deployment does.
+func loadedFromURL(t *testing.T, raw string) *model.CredentialMetadata {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(raw))
 	}))
 	t.Cleanup(srv.Close)
-	// Route every source through the URL loader: it is the one path that
-	// exercises loadVCTM without a registry client, and what it stores in
-	// VCTMRaw is the same for all of them.
-	c.VCTMUrl = srv.URL
+
+	c := &model.CredentialMetadata{Format: "dc+sd-jwt", VCTMUrl: srv.URL}
 	require.NoError(t, c.LoadCredentialSchema(context.Background(), "pid_1_8", nil))
-	source(c) // restore the source under test, now that the document is loaded
 	return c
 }
 
@@ -50,22 +70,24 @@ func typeMetadataClient(scope string, c *model.CredentialMetadata) *Client {
 // the issuer computed vct#integrity over, or a wallet cannot verify the pin.
 func TestTypeMetadata_ServesExactBytes(t *testing.T) {
 	tts := []struct {
-		name   string
-		source func(*model.CredentialMetadata)
+		name string
+		load func(*testing.T) *model.CredentialMetadata
 	}{
 		{
-			name:   "registry-resolved (vct)",
-			source: func(c *model.CredentialMetadata) { c.VCTMFilePath = ""; c.VCT = "urn:eudi:pid:arf-1.8:1" },
+			name: "registry-resolved (vct)",
+			load: func(t *testing.T) *model.CredentialMetadata {
+				return loadedFromRegistry(t, "urn:eudi:pid:arf-1.8:1", pidVCTM)
+			},
 		},
 		{
-			name:   "URL-resolved (vctm_url)",
-			source: func(c *model.CredentialMetadata) { c.VCTMFilePath = "" },
+			name: "URL-resolved (vctm_url)",
+			load: func(t *testing.T) *model.CredentialMetadata { return loadedFromURL(t, pidVCTM) },
 		},
 	}
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			meta := loadedMetadata(t, tt.source, pidVCTM)
+			meta := tt.load(t)
 			require.False(t, meta.IsLocalVCTM(), "the point of this case is a non-local source")
 
 			client := typeMetadataClient("pid_1_8", meta)
