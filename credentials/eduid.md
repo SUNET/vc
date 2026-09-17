@@ -4,7 +4,7 @@ background_color: "#0d4f8b"
 text_color: "#ffffff"
 ---
 
-# eduID Credential
+# EduID Credential
 
 A verifiable credential for educational identity, based on PID ARF 1.8. Provides identity attributes for students and staff within the education and research sector.
 

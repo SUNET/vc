@@ -13,6 +13,9 @@ common:
     ehic:
       vctm_file_path: "/metadata/vctm_ehic.json"
       format: "dc+sd-jwt"
+    eduid:
+      vctm_file_path: "/metadata/vctm_eduid.json"
+      format: "dc+sd-jwt"
     #pid_mdoc:
     #  mddl_file_path: "/metadata/pid_mdoc.mdoc.json"
     #  format: "mso_mdoc"
@@ -192,12 +195,72 @@ apigw:
         preconfigured:
           enable: true
           client_id: "apigw-oidc-client"
+    saml:
+      enable: true
+      entity_id: "https://sunet-vc-demo-apigw.fly.dev/samlsp/metadata"
+      static_idp_metadata:
+        entity_id: "https://idp.dev.eduid.se/idp.xml"
+        metadata_url: "https://mds.swamid.se/qa/entities/https%3A%2F%2Fidp.dev.eduid.se%2Fidp.xml"
+      certificate_path: "/pki/saml_sp.crt"
+      private_key_path: "/pki/saml_sp.key"
+      acs_endpoint: "https://sunet-vc-demo-apigw.fly.dev/samlsp/acs"
+      session_duration: 300
+      metadata_cache_ttl: 86400
+      allow_unsigned_metadata: true
+      metadata:
+        organization:
+          name: "SUNET"
+          display_name: "SUNET"
+          url: "https://sunet.se/"
+        contact_persons:
+          - type: technical
+            given_name: "SUNET"
+            sur_name: "Support"
+            email: "masv@sunet.se"
+          - type: administrative
+            given_name: "SUNET"
+            sur_name: "Operations"
+            email: "masv@sunet.se"
+        ui_info:
+          display_name: "SUNET VC Issuer (demo)"
+          description: "SUNET verifiable credentials issuer — demonstration environment. Issues EduID-based digital credentials for research and education."
+          information_url: "https://sunet.se/"
+          privacy_statement_url: "https://sunet.se/om-sunet/information-om-behandling-av-personuppgifter/"
+      attribute_mapping:
+        # https://www.oidc.se/specifications/claim-mappings-to-other-specs.html
+        "urn:oid:2.5.4.4":
+          claim: "family_name"
+        "urn:oid:2.5.4.42":
+          claim: "given_name"
+        "urn:oid:2.5.4.3":
+          claim: "common_name"
+        "urn:oid:2.16.840.1.113730.3.1.241":
+          claim: "name"
+        # schacDateOfBirth (YYYYMMDD) — eduID's actual DoB attribute. The
+        # older urn:oid:1.3.6.1.5.5.7.9.1 dateOfBirth is intentionally not
+        # mapped: eduID emits both, and having two mappings to `birthdate`
+        # would make the winning value depend on map iteration order.
+        "urn:oid:1.3.6.1.4.1.25178.1.2.3":
+          claim: "birthdate"
+          transform: "yyyymmdd_to_iso"
+        "urn:oid:2.5.4.6":
+          claim: "nationalities"
+          transform: "country_alpha2"
+          as_array: true
+        "urn:oid:1.2.752.29.4.13":
+          claim: "personal_administrative_number"
+        "urn:oid:1.3.6.1.4.1.5923.1.1.1.6":
+          claim: "preferred_username"
+        "urn:oid:1.3.6.1.4.1.5923.1.1.1.11":
+          claim: "assurance"
+          as_array: true
+        "urn:oasis:names:tc:SAML:attribute:subject-id":
+          claim: "subject_id"
   data_sources:
     datastore:
       import:
         file_paths:
           - "/bootstrapping/diploma.json"
-          - "/bootstrapping/eduid.json"
           - "/bootstrapping/ehic.json"
           - "/bootstrapping/pda1.json"
           - "/bootstrapping/pid.json"
@@ -221,6 +284,18 @@ apigw:
         mdl:
           auth_provider: oidc
           auth_claims: ["given_name", "family_name", "birthdate"]
+    assertion:
+      scopes:
+        eduid:
+          auth_provider: saml
+          # ISO date for date_of_expiry is derived at issuance time from this
+          # duration so freshly issued credentials never ship pre-expired.
+          # date_of_issuance is populated at issuance time from now(); do not
+          # set it as a static default.
+          expiry_duration: "8760h"
+          defaults:
+            issuing_authority: "SUNET"
+            issuing_country: "SE"
   delivery:
     openid4vci:
       token_endpoint: "https://sunet-vc-demo-apigw.fly.dev/token"
@@ -233,6 +308,7 @@ apigw:
             - "ehic"
             #- "pid_mdoc"
             - "mdl"
+            - "eduid"
     credential_offers:
       issuer_url: "https://sunet-vc-demo-apigw.fly.dev"
       wallets:
