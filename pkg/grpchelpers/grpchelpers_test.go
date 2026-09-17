@@ -238,6 +238,10 @@ func TestNewClientConn_TLS_InvalidCAPEM(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to parse CA certificate")
 }
 
+// sizeOptionCount is how many options NewServerOptions always adds for the
+// gRPC message-size limit, regardless of TLS - see MaxMessageBytes.
+const sizeOptionCount = 2
+
 // TestNewServerOptions_Disabled tests server options when TLS is disabled
 func TestNewServerOptions_Disabled(t *testing.T) {
 	cfg := model.GRPCServer{
@@ -249,7 +253,10 @@ func TestNewServerOptions_Disabled(t *testing.T) {
 
 	opts, err := NewServerOptions(cfg)
 	require.NoError(t, err)
-	assert.Nil(t, opts)
+	// Plaintext still gets the message-size options: the limit is about
+	// payload size, not transport security, and SignMetadata's payload
+	// exceeds grpc-go's default either way.
+	assert.Len(t, opts, sizeOptionCount)
 }
 
 // TestNewServerOptions_InvalidCert tests server options with invalid certificate
@@ -345,7 +352,7 @@ func TestNewServerOptions_ValidTLS(t *testing.T) {
 	opts, err := NewServerOptions(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, opts)
-	assert.Len(t, opts, 1) // Just TLS credentials, no interceptors
+	assert.Len(t, opts, sizeOptionCount+1) // message sizes + TLS credentials, no interceptors
 }
 
 // TestNewServerOptions_ValidMTLS tests server options with valid mTLS config
@@ -374,7 +381,7 @@ func TestNewServerOptions_ValidMTLS(t *testing.T) {
 	opts, err := NewServerOptions(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, opts)
-	assert.Len(t, opts, 1) // Just TLS credentials, no interceptors (no fingerprints)
+	assert.Len(t, opts, sizeOptionCount+1) // message sizes + TLS credentials, no interceptors (no fingerprints)
 }
 
 // TestNewServerOptions_WithFingerprints tests server options with fingerprint allowlist
@@ -406,8 +413,8 @@ func TestNewServerOptions_WithFingerprints(t *testing.T) {
 	opts, err := NewServerOptions(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, opts)
-	// TLS credentials + unary interceptor + stream interceptor
-	assert.Len(t, opts, 3)
+	// message sizes + TLS credentials + unary interceptor + stream interceptor
+	assert.Len(t, opts, sizeOptionCount+3)
 }
 
 // TestVerifyClientFingerprint_NoPeer tests verification with no peer info
@@ -936,7 +943,7 @@ func TestNewServerOptions_WithAllowlists(t *testing.T) {
 		opts, err := NewServerOptions(cfg)
 		require.NoError(t, err)
 		require.NotNil(t, opts)
-		assert.Len(t, opts, 3)
+		assert.Len(t, opts, sizeOptionCount+3)
 	})
 
 	t.Run("both fingerprints and DNs", func(t *testing.T) {
@@ -947,7 +954,7 @@ func TestNewServerOptions_WithAllowlists(t *testing.T) {
 		opts, err := NewServerOptions(cfg)
 		require.NoError(t, err)
 		require.NotNil(t, opts)
-		assert.Len(t, opts, 3)
+		assert.Len(t, opts, sizeOptionCount+3)
 	})
 }
 
