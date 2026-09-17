@@ -272,10 +272,29 @@ func TestCredentialMetadata_VCT_ResolvesViaRegistry(t *testing.T) {
 	assert.NotNil(t, c.VCTM)
 	assert.Equal(t, "urn:eudi:pid:1", c.VCTM.VCT)
 	assert.Contains(t, c.Integrity, "sha256-")
-	// Registry-resolved VCTMs aren't served by apigw (same as vctm_url),
-	// so raw bytes aren't kept for re-publishing.
+	// Not served by apigw under this issuer's own URL (same as vctm_url)...
 	assert.False(t, c.IsLocalVCTM())
-	assert.Empty(t, c.GetVCTMRaw())
+	// ...but the bytes are still kept, because APIGW sends them inline in
+	// every MakeSDJWTRequest and the issuer requires the field. Dropping
+	// them here made every registry-resolved scope unissuable.
+	assert.Equal(t, vctmBytes, c.GetVCTMRaw())
+}
+
+func TestCredentialMetadata_VCTMUrl_KeepsRawBytesForIssuance(t *testing.T) {
+	vctmBytes, err := os.ReadFile("./testdata/vctm_pid.json")
+	require.NoError(t, err)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(vctmBytes)
+	}))
+	defer srv.Close()
+
+	c := &CredentialMetadata{Format: "dc+sd-jwt", VCTMUrl: srv.URL + "/vctm_pid.json"}
+	require.NoError(t, c.LoadCredentialSchema(context.Background(), "pid", nil))
+
+	assert.NotNil(t, c.VCTM)
+	assert.False(t, c.IsLocalVCTM())
+	assert.Equal(t, vctmBytes, c.GetVCTMRaw(), "vctm_url scopes must be issuable too")
 }
 
 func TestCredentialMetadata_VCT_NotFoundInRegistry(t *testing.T) {
@@ -305,7 +324,8 @@ func TestCredentialMetadata_Doctype_ResolvesViaRegistry(t *testing.T) {
 	assert.NotNil(t, c.MDDL)
 	assert.Equal(t, "eu.europa.ec.eudi.pid.1", c.MDDL.DocType)
 	assert.Contains(t, c.Integrity, "sha256-")
-	// Unlike VCTMRaw, MDDLRaw is always required regardless of source.
+	// Like VCTMRaw, MDDLRaw is required regardless of source: APIGW sends
+	// it inline in every MakeMDocRequest.
 	assert.NotEmpty(t, c.GetMDDLRaw())
 }
 

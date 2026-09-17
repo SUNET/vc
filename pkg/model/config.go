@@ -1750,8 +1750,11 @@ type CredentialMetadata struct {
 	// Attributes maps claim names to their source fields and transformation rules for credential issuance
 	Attributes map[string]map[string][]*string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 
-	// VCTMRaw holds the raw JSON bytes of the VCTM document for serving
-	// via /type-metadata/:scope. Only populated for local VCTMs (VCTMFilePath).
+	// VCTMRaw holds the raw JSON bytes of the VCTM document, passed inline
+	// to the issuer at issuance time and served via /type-metadata/:scope
+	// for local VCTMs. Populated for every source (mirrors MDDLRaw): the
+	// issuer requires the bytes whatever the document came from, while
+	// publishing stays gated on IsLocalVCTM.
 	VCTMRaw []byte `yaml:"-" json:"-"`
 
 	// Integrity is the SRI hash of the VCTM or MDDL document (e.g. "sha256-...").
@@ -1844,10 +1847,17 @@ func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string, registr
 	}
 	c.Attributes = vctm.Attributes()
 
-	// Only keep raw bytes for locally-served VCTMs.
-	if c.IsLocalVCTM() {
-		c.VCTMRaw = rawBytes
-	}
+	// Keep the raw bytes whatever the source. Serving /type-metadata/:scope
+	// is not the only thing that needs them: APIGW sends the VCTM inline in
+	// every MakeSDJWTRequest and the issuer validates it as required, so a
+	// scope configured by vct or vctm_url could not issue at all when these
+	// were dropped - it failed with "validation_error field:vctm" at
+	// POST /credential, after a successful /token. This mirrors MDDLRaw
+	// below, which is kept unconditionally for exactly the same reason.
+	// Publishing stays gated on IsLocalVCTM (see APIGW's TypeMetadata and
+	// ResolveVCTUrls): an externally-resolved document is used for issuance
+	// but still not re-published under this issuer's own URL.
+	c.VCTMRaw = rawBytes
 
 	return nil
 }
@@ -1910,11 +1920,11 @@ func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string, r
 	c.Integrity = "sha256-" + base64.StdEncoding.EncodeToString(h[:])
 	c.Attributes = schema.Attributes()
 
-	// Unlike VCTMRaw (only needed to serve /type-metadata/:scope for local
-	// VCTMs), MDDLRaw is always required: APIGW sends it inline in every
-	// MakeMDocRequest and the issuer validates it as required, regardless of
-	// whether the schema came from a local file or mddl_url. Keep it
-	// unconditionally so mddl_url-configured scopes can actually issue.
+	// As with VCTMRaw above, MDDLRaw is required whatever the source: APIGW
+	// sends it inline in every MakeMDocRequest and the issuer validates it
+	// as required, regardless of whether the schema came from a local file
+	// or mddl_url. Keep it unconditionally so mddl_url-configured scopes can
+	// actually issue.
 	c.MDDLRaw = rawBytes
 
 	return nil
