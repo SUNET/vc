@@ -1779,6 +1779,14 @@ func (c *CredentialMetadata) VCTQueryValues() []string {
 	if c == nil {
 		return nil
 	}
+	// Honour the contract above rather than trusting that an mdoc entry simply
+	// has no VCTM: nothing stops a credential_metadata entry carrying VCTM or
+	// VCTURL alongside Format "mso_mdoc", and reading them here would let a
+	// caller emit vct_values for a credential DCQL constrains by doctype_value.
+	switch c.Format {
+	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
+		return nil
+	}
 	var out []string
 	seen := make(map[string]bool, 2)
 	add := func(v string) {
@@ -1809,12 +1817,11 @@ func (c *CredentialMetadata) VCTQueryValues() []string {
 //
 //   - mso_mdoc: doctype_value, from the MDDL's doctype or the configured
 //     doctype used to resolve it from a registry.
-//   - dc+sd-jwt / vc+sd-jwt (and an empty format, which the Format field
-//     declares as defaulting to dc+sd-jwt): vct_values, carrying BOTH
-//     identifiers - see VCTQueryValues for why choosing one breaks half the
-//     deployed wallets.
-//   - anything else (ldp_vc, vc+ld+json, jwt_vc_json, jwp, mso_mdoc_zk): ok
-//     is false.
+//   - dc+sd-jwt (and an empty format, which the Format field declares as
+//     defaulting to it): vct_values, carrying BOTH identifiers - see
+//     VCTQueryValues for why choosing one breaks half the deployed wallets.
+//   - anything else (ldp_vc, vc+ld+json, jwt_vc_json, jwp, mso_mdoc_zk and
+//     the legacy vc+sd-jwt spelling): ok is false.
 //
 // ok=false covers four cases a caller must not paper over: a nil receiver
 // (an auth scope or requested scope with no credential_metadata entry - config
@@ -1853,7 +1860,15 @@ func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
 			return openid4vp.MetaQuery{}, false
 		}
 		return openid4vp.MetaQuery{DoctypeValue: doctype}, true
-	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
+	case openid4vp.FormatSDJWTVC, "":
+		// Only the canonical "dc+sd-jwt". The legacy "vc+sd-jwt" spelling is
+		// still an issuable format (see handlers_issuer.go), but
+		// ValidateCredentialQuery validates vct_values for the canonical
+		// identifier alone, and both builders pass Format through to the query
+		// unchanged - so accepting it here would emit a query carrying a
+		// format identifier OpenID4VP does not define. Such a scope reports
+		// !ok and its caller says so, instead of silently shipping one.
+		//
 		// "" honours the Format field's own `default:"dc+sd-jwt"`: config
 		// validation marks Format required, so an empty one only reaches here
 		// from a hand-built Cfg, and treating it as anything but the declared

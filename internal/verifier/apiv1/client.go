@@ -404,19 +404,26 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 		// ValidateCredentialQuery rejects.
 		meta, ok := credInfo.DCQLMetaQuery()
 		if !ok {
-			// A scope whose format has no expressible DCQL constraint (a W3C
-			// VC one, say - see DCQLMetaQuery) is dropped rather than sent as
-			// an invalid query. If that leaves nothing, the caller below
-			// fails loudly with "no valid credentials found for requested
-			// scopes" instead of returning a query that matches nothing.
+			// A CONFIGURED scope that cannot be expressed is an error, not a
+			// skip. Dropping it from the query would still leave it in the
+			// OIDC request's scope list, which handler_oidc.go stores as
+			// authCtx.Scopes; VerificationDirectPost iterates that list and
+			// requires a VP token per entry, so the flow would fail with
+			// "VP token not found for scope" only after the user had gone all
+			// the way through a presentation. Failing here names what is
+			// actually wrong, before anything reaches a wallet.
+			//
+			// Deliberately narrower than the lookup miss above, which stays a
+			// silent skip: an unconfigured scope is an ordinary OIDC scope
+			// like "profile", not a credential the caller asked for.
+			//
 			// GetFormatForScope, not credInfo.Format: the map can hold a nil
 			// value for a present key (a credential_metadata entry written
 			// with no fields), which is distinct from the key being absent and
 			// survives the lookup above. DCQLMetaQuery is nil-safe and lands
 			// here; a direct field read would panic while reporting the very
 			// config error it is reporting.
-			c.log.Info("Skipping scope with no usable DCQL meta constraint", "scope", scope, "format", c.cfg.GetFormatForScope(scope))
-			continue
+			return nil, fmt.Errorf("scope %q is configured with format %q, for which no DCQL meta constraint can be built", scope, c.cfg.GetFormatForScope(scope))
 		}
 		// Past this point credInfo is non-nil: a nil one cannot produce ok.
 		c.log.Info("Matched scope to credential", "scope", scope, "vct_values", meta.VCTValues, "doctype_value", meta.DoctypeValue, "format", credInfo.Format)

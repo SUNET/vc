@@ -451,16 +451,26 @@ func TestBuildDCQLQueryFromConfigSkipsW3CScope(t *testing.T) {
 	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
 	client, _ := CreateTestClientWithMock(t, cfg)
 
-	// Mixed request: the usable scope survives, the W3C one is dropped.
-	dcql, err := client.buildDCQLQueryFromConfig([]string{"pid", "diploma_ldp"})
+	// Mixed with a usable scope is still an error, not a partial query. A
+	// dropped scope would stay in the OIDC request's scope list
+	// (handler_oidc.go -> authCtx.Scopes), and VerificationDirectPost requires
+	// a VP token for every entry there - so a partial query fails with
+	// "VP token not found for scope" only after the user has completed a
+	// presentation. Better to say what is wrong before anything reaches a
+	// wallet.
+	_, err := client.buildDCQLQueryFromConfig([]string{"pid", "diploma_ldp"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "diploma_ldp")
+
+	_, err = client.buildDCQLQueryFromConfig([]string{"diploma_ldp"})
+	assert.Error(t, err)
+
+	// An UNCONFIGURED scope stays a silent skip: that is an ordinary OIDC
+	// scope like "profile", not a credential anyone asked for.
+	dcql, err := client.buildDCQLQueryFromConfig([]string{"pid", "profile"})
 	require.NoError(t, err)
 	require.Len(t, dcql.Credentials, 1)
 	assert.Equal(t, "pid", dcql.Credentials[0].ID)
-
-	// W3C scope alone: nothing usable is left, so this is an error rather than
-	// an empty or invalid query.
-	_, err = client.buildDCQLQueryFromConfig([]string{"diploma_ldp"})
-	assert.Error(t, err)
 }
 
 // TestBuildDCQLQueryFromConfigNilMetadataValue covers a Copilot review finding:
@@ -485,13 +495,13 @@ func TestBuildDCQLQueryFromConfigNilMetadataValue(t *testing.T) {
 	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
 	client, _ := CreateTestClientWithMock(t, cfg)
 
-	// Must not panic; the nil entry is skipped and the usable scope survives.
-	dcql, err := client.buildDCQLQueryFromConfig([]string{"pid", "broken"})
-	require.NoError(t, err)
-	require.Len(t, dcql.Credentials, 1)
-	assert.Equal(t, "pid", dcql.Credentials[0].ID)
+	// Must not panic. A nil entry is a CONFIGURED scope that cannot be
+	// expressed, so it is reported rather than dropped - the key is present,
+	// which is what distinguishes it from an ordinary unknown OIDC scope.
+	_, err := client.buildDCQLQueryFromConfig([]string{"pid", "broken"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "broken")
 
-	// The nil entry alone leaves nothing to ask for.
 	_, err = client.buildDCQLQueryFromConfig([]string{"broken"})
 	assert.Error(t, err)
 }

@@ -343,6 +343,28 @@ func TestVCTQueryValues(t *testing.T) {
 			want: nil,
 		},
 		{
+			// Nothing stops an entry carrying VCTM/VCTURL alongside an mdoc
+			// format, so the format - not the absence of a VCTM - has to be
+			// what makes this nil. Otherwise a caller emits vct_values for a
+			// credential DCQL constrains by doctype_value.
+			name: "mdoc scope with a VCTM still contributes nothing",
+			cm: &CredentialMetadata{
+				Format: "mso_mdoc",
+				VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				VCTURL: "https://apigw.example/type-metadata/pid",
+			},
+			want: nil,
+		},
+		{
+			name: "zk mdoc scope with a VCTM contributes nothing",
+			cm: &CredentialMetadata{
+				Format: "mso_mdoc_zk",
+				VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				VCTURL: "https://apigw.example/type-metadata/pid",
+			},
+			want: nil,
+		},
+		{
 			// Callers hand this the result of a map lookup that may have missed.
 			name: "nil receiver",
 			cm:   nil,
@@ -450,6 +472,14 @@ func TestDCQLMetaQueryFollowsFormat(t *testing.T) {
 			// this branch.
 			name:   "zk mdoc cannot be completed from credential_metadata",
 			cm:     &CredentialMetadata{Format: "mso_mdoc_zk", MDDL: &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"}},
+			wantOK: false,
+		},
+		{
+			// The legacy spelling is issuable but is not an OpenID4VP format
+			// identifier, and both builders pass Format straight into the
+			// query, so it cannot be requested as-is.
+			name:   "legacy vc+sd-jwt is not a queryable format",
+			cm:     &CredentialMetadata{Format: "vc+sd-jwt", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}, VCTURL: "https://apigw.example/type-metadata/pid"},
 			wantOK: false,
 		},
 		{
