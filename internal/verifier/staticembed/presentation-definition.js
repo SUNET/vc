@@ -16,6 +16,10 @@ const credentialAttributesSchema = v.object({
     // and null for one that emits the field without omitempty. The query
     // builder falls back to [vct] in both cases.
     vct_values: v.nullish(v.array(v.string())),
+    // type_values is the W3C VC constraint: an array of ALTERNATIVES, each an
+    // array of types a credential must carry all of. nullish for the same
+    // reason as vct_values - an older server sends neither.
+    type_values: v.nullish(v.array(v.array(v.string()))),
     attributes: v.record(
         v.string(),
         v.record(
@@ -116,6 +120,7 @@ const metadataResponseSchema = v.object({
             meta: v.object({
                 vct_values: v.optional(v.array(v.string())),
                 doctype_value: v.optional(v.string()),
+                type_values: v.optional(v.array(v.array(v.string()))),
                 // zk_system_type entries are a flat {id, system, ...params}
                 // string-keyed object on the wire (ZKSystemTypeSpec's own
                 // MarshalJSON flattens params to the top level, no nested
@@ -152,6 +157,7 @@ const dcqlQueryCredentialSchema = v.object({
         v.object({
             vct_values: v.optional(v.array(v.string())),
             doctype_value: v.optional(v.string()),
+            type_values: v.optional(v.array(v.array(v.string()))),
             // zk_system_type (mso_mdoc_zk only) is an array of flat
             // {id, system, ...params} objects - declared explicitly since
             // the catch-all record below only accepts string/string[]
@@ -283,7 +289,7 @@ Alpine.data("app", () => ({
     /** @type {boolean} Whether sendDcqlQuery() calls navigator.credentials.get() before rendering the wallet link/QR screen; when false it goes straight to that screen. Separate from dcApiEnabled because an OS-level DC API matcher can reject a format with its own dialog before any JS runs, leaving no failure to catch - see DigitalCredentialsConfig.AutoAttempt. */
     dcApiAutoAttempt: true,
 
-     /** @type {{ id: string; format: string; vct: string; vct_values?: string[]; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
+     /** @type {{ id: string; format: string; vct: string; vct_values?: string[]; type_values?: string[][]; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
     credentialAttributes: null,
 
     /**
@@ -464,6 +470,10 @@ Alpine.data("app", () => ({
             // page) to the absent form this object's type declares, keeping
             // the strict checkJs contract consistent.
             vct_values: chosenCredential.vct_values ?? undefined,
+            // Same reason as vct_values: without carrying this, a W3C
+            // credential picked here would fall back to vct_values and go out
+            // with a constraint its format does not use.
+            type_values: chosenCredential.type_values ?? undefined,
             claims,
             claimTree: buildClaimTree(claims),
         }
@@ -550,9 +560,22 @@ Alpine.data("app", () => ({
         const vctValues = this.credentialAttributes.vct_values?.length
             ? this.credentialAttributes.vct_values
             : [this.credentialAttributes.vct];
-        const meta = this.credentialAttributes.format === "mso_mdoc"
-            ? { doctype_value: this.credentialAttributes.vct }
-            : { vct_values: vctValues };
+        // Three formats, three constraints (OpenID4VP 1.0 6.4.1). W3C VC uses
+        // type_values - an array of type alternatives - and sending vct_values
+        // for one is the same class of mistake as sending it for an mdoc: a
+        // constraint the wallet does not match that format by. The server only
+        // publishes type_values for a scope whose credential_types narrows it
+        // beyond the base type, so an unconstrainable W3C scope never reaches
+        // here at all.
+        const isW3C = ["ldp_vc", "vc+ld+json", "jwt_vc_json"].includes(this.credentialAttributes.format);
+        let meta;
+        if (this.credentialAttributes.format === "mso_mdoc") {
+            meta = { doctype_value: this.credentialAttributes.vct };
+        } else if (isW3C) {
+            meta = { type_values: this.credentialAttributes.type_values ?? [] };
+        } else {
+            meta = { vct_values: vctValues };
+        }
 
         /** @satisfies {DCQLQueryCredential} */
         const credential = {

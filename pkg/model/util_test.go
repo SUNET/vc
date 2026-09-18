@@ -393,6 +393,7 @@ func TestDCQLMetaQueryFollowsFormat(t *testing.T) {
 		wantOK      bool
 		wantVCTs    []string
 		wantDoctype string
+		wantTypes   [][]string
 	}{
 		{
 			name: "sd-jwt gets both vct identifiers",
@@ -477,6 +478,35 @@ func TestDCQLMetaQueryFollowsFormat(t *testing.T) {
 			wantVCTs: []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
 		},
 		{
+			// Configured types make the W3C formats requestable (SUNET/vc#680).
+			name: "ldp_vc with configured types gets type_values",
+			cm: &CredentialMetadata{
+				Format:          "ldp_vc",
+				CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"},
+			},
+			wantOK:    true,
+			wantTypes: [][]string{{"VerifiableCredential", "DiplomaCredential"}},
+		},
+		{
+			name: "jwt_vc_json with configured types gets type_values",
+			cm: &CredentialMetadata{
+				Format:          "jwt_vc_json",
+				CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"},
+			},
+			wantOK:    true,
+			wantTypes: [][]string{{"VerifiableCredential", "DiplomaCredential"}},
+		},
+		{
+			// The base type alone constrains nothing - it matches every W3C
+			// credential in the wallet - so it is refused rather than sent.
+			name: "ldp_vc with only the base type is still unusable",
+			cm: &CredentialMetadata{
+				Format:          "ldp_vc",
+				CredentialTypes: []string{"VerifiableCredential"},
+			},
+			wantOK: false,
+		},
+		{
 			// The Copilot finding: these used to fall into the sd-jwt branch.
 			name:   "ldp_vc reports no expressible constraint",
 			cm:     &CredentialMetadata{Format: "ldp_vc", VCTM: &sdjwtvc.VCTM{VCT: "urn:credential:diploma:1"}, VCTURL: "https://apigw.example/type-metadata/diploma"},
@@ -517,6 +547,7 @@ func TestDCQLMetaQueryFollowsFormat(t *testing.T) {
 			}
 			assert.Equal(t, tt.wantDoctype, got.DoctypeValue)
 			assert.Equal(t, tt.wantVCTs, got.VCTValues)
+			assert.Equal(t, tt.wantTypes, got.TypeValues)
 		})
 	}
 }
@@ -577,4 +608,48 @@ func TestShippedVCTMsDeclareTheirVCT(t *testing.T) {
 			assert.Equal(t, []string{expected, "https://apigw.example/type-metadata/s"}, cm.VCTQueryValues())
 		})
 	}
+}
+
+// TestW3CTypes covers the single source the issuer metadata, issuance and the
+// DCQL constraint all read (SUNET/vc#680).
+//
+// Note the deliberate asymmetry with DCQLMetaQuery: issuing a credential typed
+// only "VerifiableCredential" is merely unspecific, while REQUESTING one is a
+// query matching every W3C credential in the wallet. So this defaults and that
+// refuses.
+func TestW3CTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		cm   *CredentialMetadata
+		want []string
+	}{
+		{
+			name: "configured types are used as written",
+			cm:   &CredentialMetadata{CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"}},
+			want: []string{"VerifiableCredential", "DiplomaCredential"},
+		},
+		{
+			// What the issuer metadata always advertised.
+			name: "unset falls back to the base type",
+			cm:   &CredentialMetadata{},
+			want: []string{"VerifiableCredential"},
+		},
+		{
+			name: "nil receiver",
+			cm:   nil,
+			want: []string{"VerifiableCredential"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.cm.W3CTypes())
+		})
+	}
+
+	// A clone, so a caller cannot edit the configuration every later request
+	// is built from.
+	cm := &CredentialMetadata{CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"}}
+	got := cm.W3CTypes()
+	got[1] = "mutated"
+	assert.Equal(t, []string{"VerifiableCredential", "DiplomaCredential"}, cm.CredentialTypes)
 }

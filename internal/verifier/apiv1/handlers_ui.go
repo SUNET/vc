@@ -39,7 +39,13 @@ type UICredentialInfo struct {
 	// either form - it declares vct_values as nullish and falls back to
 	// [vct] for both absent and null - so this is about not sending noise
 	// for mdoc credentials, not about satisfying a parsing constraint.
-	VCTValues  []string                        `json:"vct_values,omitempty"`
+	VCTValues []string `json:"vct_values,omitempty"`
+	// TypeValues is the W3C VC equivalent: the type alternatives a wallet
+	// matches an ldp_vc or jwt_vc_json credential by. Empty for every other
+	// format, and for a W3C scope whose credential_types is unset - see
+	// model.CredentialMetadata.DCQLMetaQuery for why the bare base type is
+	// refused rather than sent.
+	TypeValues [][]string                      `json:"type_values,omitempty"`
 	Attributes map[string]map[string][]*string `json:"attributes"`
 }
 
@@ -79,6 +85,11 @@ type UIPresetMeta struct {
 	// DoctypeValue is set for mdoc/ZK-mdoc scopes (openid4vp.MetaQuery's
 	// mdoc-format field) - mirrors UICredentialInfo.VCT's mdoc branch.
 	DoctypeValue string `json:"doctype_value,omitempty"`
+	// TypeValues is set for the W3C VC formats, whose DCQL constraint is
+	// neither vct_values nor doctype_value but a list of type alternatives
+	// (OpenID4VP 1.0 6.4.1). Comes from credential_types - see
+	// model.CredentialMetadata.W3CTypes.
+	TypeValues [][]string `json:"type_values,omitempty"`
 	// ZKSystemType is set when the preset's VerificationPresetScope
 	// overrides it - see that type's own doc comment.
 	ZKSystemType []openid4vp.ZKSystemTypeSpec `json:"zk_system_type,omitempty"`
@@ -176,6 +187,7 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		// Empty for mdoc, which is constrained by its doctype instead;
 		// omitempty then drops the field.
 		info.VCTValues = mq.VCTValues
+		info.TypeValues = mq.TypeValues
 
 		// For an mdoc scope the doctype IS the identifier, and
 		// presentation-definition.js sends info.VCT as meta.doctype_value - so
@@ -280,6 +292,7 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				}
 				uiCred.Meta.DoctypeValue = mq.DoctypeValue
 				uiCred.Meta.VCTValues = mq.VCTValues
+				uiCred.Meta.TypeValues = mq.TypeValues
 
 				// A preset's Format/ZKSystemType override lets an otherwise
 				// plain-format scope (e.g. mso_mdoc) be requested as a ZK

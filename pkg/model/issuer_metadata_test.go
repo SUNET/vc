@@ -696,3 +696,37 @@ func TestIssuerMetadata_Generate_DisclosurePolicy(t *testing.T) {
 		})
 	}
 }
+
+// TestIssuerMetadata_W3CCredentialTypes covers the issuance half of
+// SUNET/vc#680: credential_definition.type comes from credential_types, so the
+// types advertised, the types issueVC20 mints (it reads them back from this
+// metadata) and the DCQL type_values a verifier asks by are one list.
+func TestIssuerMetadata_W3CCredentialTypes(t *testing.T) {
+	cfg := &IssuerMetadata{}
+	baseURL := "https://issuer.sunet.se"
+
+	metadata, err := cfg.Generate(context.Background(), baseURL, map[string]*CredentialMetadata{
+		"diploma": {
+			Format:          "ldp_vc",
+			VCTM:            &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+			VCTURL:          baseURL + "/type-metadata/diploma",
+			CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"},
+		},
+		// Unconfigured: keeps the bare base type this always advertised.
+		"generic": {
+			Format: "ldp_vc",
+			VCTM:   &sdjwtvc.VCTM{VCT: "urn:example:generic:1"},
+			VCTURL: baseURL + "/type-metadata/generic",
+		},
+	})
+	require.NoError(t, err)
+
+	diploma := metadata.CredentialConfigurationsSupported["diploma"]
+	require.NotNil(t, diploma.CredentialDefinition)
+	assert.Equal(t, []string{"VerifiableCredential", "DiplomaCredential"}, diploma.CredentialDefinition.Type)
+
+	generic := metadata.CredentialConfigurationsSupported["generic"]
+	require.NotNil(t, generic.CredentialDefinition)
+	assert.Equal(t, []string{"VerifiableCredential"}, generic.CredentialDefinition.Type,
+		"an unconfigured W3C scope keeps the previous behaviour")
+}
