@@ -380,7 +380,7 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 			// still asked for a single identifier and still missed the wallets
 			// matching the other one.
 			c.augmentVCTValuesFromConfig(dcql, scopes)
-			if uncovered := c.uncoveredScopes(dcql, scopes); len(uncovered) > 0 {
+			if uncovered := c.uncoveredScopes(ctx, dcql, scopes); len(uncovered) > 0 {
 				return nil, fmt.Errorf("the presentation template selected for this request does not cover requested scope(s) %v; a wallet would never be asked for them", uncovered)
 			}
 			c.log.Info("DCQL query built from presentation template", "credential_count", len(dcql.Credentials))
@@ -559,39 +559,54 @@ func queryIDForConstraint(dcql *openid4vp.DCQL, meta openid4vp.MetaQuery) (strin
 	return found, found != ""
 }
 
-// uncoveredScopes returns the requested scopes that are configured, have a
-// constraint this repo can express, and are nonetheless absent from the built
-// query.
+// uncoveredScopes returns the requested scopes the built query cannot actually
+// answer: configured, with a constraint this repo can express, and yet with no
+// query of their own to be resolved through.
 //
-// Such a scope is a request the verifier cannot fulfil: it stays in
+// Such a scope is a request the verifier cannot fulfil. It stays in
 // authCtx.Scopes, VerificationDirectPost requires a VP token for every entry
 // there, and the wallet was never asked for this one - so the flow fails only
 // after the user has completed a presentation, naming a credential they were
 // never prompted for. A template covering some of a request's scopes and not
-// others is exactly how that happens.
+// others is how that happens.
+//
+// Coverage is decided by ScopeQueryIDs, deliberately, so this and the mapping
+// that direct-post later resolves through cannot disagree. That matters for
+// ambiguity in particular: two configured aliases sharing a vct, against a
+// template with one query, are refused a mapping by ScopeQueryIDs - and were
+// nonetheless reported as covered here while it made its own weaker check, so
+// the request went out and failed after the fact. A scope keyed by its own id,
+// which is how buildDCQLQueryFromConfig builds them, needs no mapping.
 //
 // Scopes whose constraint cannot be expressed are not reported: a template may
 // legitimately cover a W3C scope with meta.type_values, and there is no way to
 // tell yet (SUNET/vc#680). Rejecting them here would break a working
 // deployment, which is why an earlier, blunter version of this check was
 // reverted.
-func (c *Client) uncoveredScopes(dcql *openid4vp.DCQL, scopes []string) []string {
+func (c *Client) uncoveredScopes(ctx context.Context, dcql *openid4vp.DCQL, scopes []string) []string {
 	if dcql == nil || c.cfg.Common == nil {
 		return nil
 	}
+	pairs := c.ScopeQueryIDs(ctx, dcql, scopes)
+
 	var uncovered []string
 	for _, scope := range scopes {
 		constructor, configured := c.cfg.Common.CredentialMetadata[scope]
 		if !configured {
 			continue
 		}
-		meta, ok := constructor.DCQLMetaQuery()
-		if !ok {
+		if _, ok := constructor.DCQLMetaQuery(); !ok {
 			continue
 		}
-		if _, found := queryIDForConstraint(dcql, meta); !found {
-			uncovered = append(uncovered, scope)
+		if _, mapped := pairs[scope]; mapped {
+			continue
 		}
+		if slices.ContainsFunc(dcql.Credentials, func(cred openid4vp.CredentialQuery) bool {
+			return cred.ID == scope
+		}) {
+			continue
+		}
+		uncovered = append(uncovered, scope)
 	}
 	return uncovered
 }

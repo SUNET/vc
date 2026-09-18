@@ -82,13 +82,13 @@ func TestUncoveredScopesRejectsUnaskedCredential(t *testing.T) {
 	}}
 
 	assert.Equal(t, []string{"ehic"},
-		client.uncoveredScopes(pidOnly, []string{"pid", "ehic", "profile"}),
+		client.uncoveredScopes(t.Context(), pidOnly, []string{"pid", "ehic", "profile"}),
 		"a configured, expressible scope the query never mentions is unfulfillable")
 
-	assert.Empty(t, client.uncoveredScopes(pidOnly, []string{"pid", "diploma_ldp"}),
+	assert.Empty(t, client.uncoveredScopes(t.Context(), pidOnly, []string{"pid", "diploma_ldp"}),
 		"a scope with no expressible constraint must not be reported: a template may cover it")
 
-	assert.Empty(t, client.uncoveredScopes(pidOnly, []string{"pid", "profile", "openid"}),
+	assert.Empty(t, client.uncoveredScopes(t.Context(), pidOnly, []string{"pid", "profile", "openid"}),
 		"unconfigured scopes are ordinary OIDC scopes")
 }
 
@@ -451,4 +451,30 @@ func TestScopeQueryIDsRebuildForLegacySession(t *testing.T) {
 		openid4vp.VPResponse{VPToken: map[string][]string{"eudi_pid": {"token"}}}, "pid")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"token"}, tokens)
+}
+
+// TestUncoveredScopesRejectsAmbiguousCoverage covers a review finding: the
+// coverage check and the mapping have to agree, or an ambiguous request is sent
+// and fails only after the user completes a presentation.
+//
+// Two configured aliases sharing a vct, against a template with one query:
+// ScopeQueryIDs refuses to map either, since nothing says which scope the query
+// answers. The coverage check made its own weaker check and reported both as
+// covered, so the request went out and direct-post failed afterwards.
+func TestUncoveredScopesRejectsAmbiguousCoverage(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid":       sdJWTScope("urn:eudi:pid:1"),
+		"pid_alias": sdJWTScope("urn:eudi:pid:1"),
+	}, nil)
+
+	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+		{ID: "eudi_pid", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}}},
+	}}
+
+	assert.ElementsMatch(t, []string{"pid", "pid_alias"},
+		client.uncoveredScopes(t.Context(), dcql, []string{"pid", "pid_alias"}),
+		"an ambiguous pairing must be caught before the request is sent")
+
+	// One alias alone is unambiguous and covered.
+	assert.Empty(t, client.uncoveredScopes(t.Context(), dcql, []string{"pid"}))
 }
