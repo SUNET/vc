@@ -425,16 +425,41 @@ func (c *Client) ScopeQueryIDs(ctx context.Context, dcql *openid4vp.DCQL, scopes
 		_, templateScopes, _ = c.presentationBuilder.TemplateDCQLQuery(ctx, scopes)
 	}
 
-	var pairs map[string]string
+	pairs := make(map[string]string, len(scopes))
+	claimants := make(map[string][]string, len(scopes))
 	for _, scope := range scopes {
 		queryID, found := c.queryIDForScope(dcql, scope, templateScopes)
 		if !found || queryID == scope {
 			continue
 		}
-		if pairs == nil {
-			pairs = make(map[string]string, len(scopes))
-		}
 		pairs[scope] = queryID
+		claimants[queryID] = append(claimants[queryID], scope)
+	}
+
+	// One query answers one scope. Uniqueness has to hold in both directions:
+	// queryIDForConstraint already refuses a scope matching several queries,
+	// but two scopes can still land on the SAME query - aliases sharing a
+	// credential's vct, against a template with one query. Keeping both pairs
+	// would have VerificationDirectPost resolve that single VP token twice and
+	// process it under each scope, duplicating it in the cache and applying
+	// each scope's validations to the other's credential.
+	//
+	// Nothing here can say which scope the query was meant for, so both pairs
+	// go. Those scopes then fall back to their own key, find nothing, and fail
+	// loudly - the same treatment every other ambiguity in this path gets.
+	for queryID, scopesClaiming := range claimants {
+		if len(scopesClaiming) < 2 {
+			continue
+		}
+		c.log.Error(nil, "not mapping scopes to a shared DCQL query: cannot tell which one it answers",
+			"query_id", queryID, "scopes", scopesClaiming)
+		for _, scope := range scopesClaiming {
+			delete(pairs, scope)
+		}
+	}
+
+	if len(pairs) == 0 {
+		return nil
 	}
 	return pairs
 }

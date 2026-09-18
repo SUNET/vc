@@ -362,3 +362,57 @@ func TestCredentialScopes(t *testing.T) {
 		assert.Empty(t, got)
 	})
 }
+
+// TestScopeQueryIDsSharedQueryIsAmbiguous covers a review finding: uniqueness
+// has to hold in both directions.
+//
+// queryIDForConstraint already refuses a scope that matches several queries,
+// but two scopes can still land on the SAME query - aliases sharing a
+// credential's vct, against a template with one query. Keeping both pairs would
+// have VerificationDirectPost resolve that single VP token twice and process it
+// under each scope, duplicating it in the cache and applying each scope's
+// validations to the other's credential.
+func TestScopeQueryIDsSharedQueryIsAmbiguous(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid":       sdJWTScope("urn:eudi:pid:1"),
+		"pid_alias": sdJWTScope("urn:eudi:pid:1"),
+	}, nil)
+
+	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+		{ID: "eudi_pid", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}}},
+	}}
+
+	assert.Empty(t, client.ScopeQueryIDs(t.Context(), dcql, []string{"pid", "pid_alias"}),
+		"two scopes claiming one query must not both be mapped to it")
+
+	// On its own each is unambiguous and still maps.
+	assert.Equal(t, map[string]string{"pid": "eudi_pid"},
+		client.ScopeQueryIDs(t.Context(), dcql, []string{"pid"}))
+}
+
+// TestCredentialScopesLegacySession covers a review finding about sessions
+// created before ScopeQueryIDs existed: DCQLQuery is persisted (that field
+// predates this change) while the mapping is nil.
+//
+// Such a session must not resolve to nothing. It fails - the wallet keyed its
+// answer by a query id the session cannot resolve, which is the bug this branch
+// fixes and cannot retroactively fix for a request already in flight - but it
+// fails loudly at token resolution rather than completing with nothing checked.
+func TestCredentialScopesLegacySession(t *testing.T) {
+	client, _ := CreateTestClientWithMock(t, nil)
+
+	authCtx := &cache.AuthorizationContext{
+		Scopes:        []string{"openid", "pid", "profile"},
+		ScopeQueryIDs: nil,
+		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+			{ID: "eudi_pid"},
+		}},
+	}
+
+	scopes := client.credentialScopes(authCtx)
+	require.Equal(t, []string{"pid"}, scopes, "the credential scope must survive an absent mapping")
+
+	_, err := client.vpTokensForScope(authCtx, scopes,
+		openid4vp.VPResponse{VPToken: map[string][]string{"eudi_pid": {"token"}}}, "pid")
+	assert.Error(t, err, "an unresolvable legacy session must fail, not silently succeed")
+}
