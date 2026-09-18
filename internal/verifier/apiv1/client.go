@@ -390,45 +390,18 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 	return c.buildDCQLQueryFromConfig(scopes)
 }
 
-// augmentVCTValuesFromConfig adds the credential type identifiers a wallet
-// might match on to a template-built query, without discarding what the
-// operator wrote.
+// augmentVCTValuesFromConfig completes a template-built query with the other
+// identifiers a wallet might match the same credential type by, without
+// discarding what the template author wrote.
 //
-// A template states one vct per credential (see presentation_requests/*.yaml),
+// A template names one vct per credential (see presentation_requests/*.yaml),
 // but deployed wallets disagree about which identifier names a credential type
 // - see model.CredentialMetadata.VCTQueryValues. meta.vct_values is an
-// acceptable-value list, so the operator's value is kept, in first position,
-// and the scope's other identifier is appended.
+// acceptable-value list, so the operator's value keeps first position and the
+// rest are appended.
 //
-// Matching is by value, not by credential-query id: a template's id is a query
-// name ("eudi_pid") and need not be a configured scope ("pid"). A query is
-// therefore paired with the scope whose identifiers it already mentions, which
-// is exactly the relationship that makes appending the rest correct.
-//
-// Which credential configuration a query belongs to is settled in two steps,
-// because the safe answer and the useful answer are not always the same one.
-//
-// A requested scope that owns one of the query's identifiers wins: the caller
-// named it, so completing from it cannot exceed what was asked for. That covers
-// templates whose oidc_scopes are credential scopes, like eudi_pid_basic ("pid").
-//
-// Otherwise the identifier's sole owner among all configured scopes is used.
-// Half the shipped templates need this: eudi_pid_full triggers on the OIDC
-// scope "pid_full" while the credential is configured as "pid", and the eduID
-// full/age templates do the same, so a requested-scope-only rule silently left
-// them un-augmented - the bug this fix exists to remove, still in place for
-// those templates.
-//
-// Sole owner is the condition that makes it safe. ResolveVCTUrls derives VCTURL
-// per scope, so aliases backed by one VCTM resolve to different type-metadata
-// URLs; if several configured scopes carry the identifier there is no way to
-// tell which one the template meant, and guessing would widen the query to
-// accept a credential configuration nobody asked for. Ambiguity therefore
-// augments nothing and says so.
-//
-// Queries with no vct_values are left alone: mdoc queries are constrained by
-// doctype_value, and a query with no type constraint at all is not something to
-// guess at.
+// Queries with no vct_values are left alone: an mdoc query is constrained by
+// doctype_value, and a query with no type constraint is not one to guess at.
 func (c *Client) augmentVCTValuesFromConfig(dcql *openid4vp.DCQL, scopes []string) {
 	if dcql == nil {
 		return
@@ -448,14 +421,33 @@ func (c *Client) augmentVCTValuesFromConfig(dcql *openid4vp.DCQL, scopes []strin
 	}
 }
 
-// identifiersForQuery resolves the credential configuration a template query
-// refers to, and returns the scopes it matched with the union of their
-// identifiers. See augmentVCTValuesFromConfig for why it prefers a requested
-// scope and falls back to a sole owner.
+// identifiersForQuery works out which credential configuration a template query
+// refers to, since a template's credential id is a query name ("eudi_pid") and
+// need not be a configured scope ("pid"). The query is paired with the scope
+// whose identifiers it already names - the relationship that makes completing
+// it from that scope correct - and matched returns those scopes, identifiers
+// their union.
 //
-// An empty result is the normal case for a template naming a credential type
-// this verifier configures no scope for, and for an ambiguous one.
-func (c *Client) identifiersForQuery(values []string, scopes []string) ([]string, []string) {
+// Two steps, because the safe answer and the useful answer are not always the
+// same one:
+//
+//   - A REQUESTED scope owning one of the identifiers wins. The caller named
+//     it, so completing from it cannot exceed what was asked for.
+//   - Otherwise the identifier's SOLE owner among all configured scopes is
+//     used. Half the shipped templates need this: eudi_pid_full triggers on
+//     OIDC scope "pid_full" while the credential is configured as "pid", and
+//     the eduID full/age templates do the same, so a requested-scope-only rule
+//     left exactly the templates this fix exists for un-augmented.
+//
+// Sole ownership is what makes that fallback safe. ResolveVCTUrls derives
+// VCTURL per scope, so aliases backed by one VCTM resolve to different
+// type-metadata URLs; with several owners there is nothing to tell which the
+// template meant, and guessing would widen the query to accept a credential
+// configuration nobody asked for. Ambiguity therefore augments nothing.
+//
+// Empty results are normal: a template may name a credential type this verifier
+// configures no scope for.
+func (c *Client) identifiersForQuery(values, scopes []string) (matched, identifiers []string) {
 	if c.cfg.Common == nil {
 		return nil, nil
 	}
@@ -464,6 +456,7 @@ func (c *Client) identifiersForQuery(values []string, scopes []string) ([]string
 	switch {
 	case len(owners) == 0:
 		return nil, nil
+
 	case len(owners) == 1:
 		// Sole owner: unambiguous whether or not it was requested.
 	default:
@@ -483,7 +476,6 @@ func (c *Client) identifiersForQuery(values []string, scopes []string) ([]string
 		owners = requested
 	}
 
-	var identifiers []string
 	for _, scope := range owners {
 		identifiers = appendMissing(identifiers, c.cfg.Common.CredentialMetadata[scope].VCTQueryValues())
 	}
