@@ -423,3 +423,42 @@ func TestBuildDCQLQueryFromConfigMetaConstraints(t *testing.T) {
 	assert.Empty(t, mdocCred.Meta.VCTValues, "mdoc query must not carry vct_values")
 	assert.NoError(t, openid4vp.ValidateCredentialQuery(mdocCred))
 }
+
+// TestBuildDCQLQueryFromConfigSkipsW3CScope is the verifier-side half of the
+// Copilot finding covered by TestBuildAuthDCQLW3CScopeIsSkipped: a configured
+// ldp_vc scope used to fall through to the SD-JWT branch and go out with
+// vct_values, which ValidateCredentialQuery rejects for W3C formats.
+//
+// With the only requested scope skipped, the builder fails loudly rather than
+// returning a query that matches nothing.
+func TestBuildDCQLQueryFromConfigSkipsW3CScope(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"diploma_ldp": {
+					Format:       "ldp_vc",
+					VCTMFilePath: "/path/to/vctm_diploma",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:credential:diploma:1"},
+				},
+				"pid": {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/path/to/vctm_pid",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+			},
+		},
+	}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+	client, _ := CreateTestClientWithMock(t, cfg)
+
+	// Mixed request: the usable scope survives, the W3C one is dropped.
+	dcql, err := client.buildDCQLQueryFromConfig([]string{"pid", "diploma_ldp"})
+	require.NoError(t, err)
+	require.Len(t, dcql.Credentials, 1)
+	assert.Equal(t, "pid", dcql.Credentials[0].ID)
+
+	// W3C scope alone: nothing usable is left, so this is an error rather than
+	// an empty or invalid query.
+	_, err = client.buildDCQLQueryFromConfig([]string{"diploma_ldp"})
+	assert.Error(t, err)
+}

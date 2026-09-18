@@ -1795,6 +1795,67 @@ func (c *CredentialMetadata) VCTQueryValues() []string {
 	return out
 }
 
+// DCQLMetaQuery returns the DCQL meta constraint for this credential type,
+// together with whether one could be expressed at all.
+//
+// The constraint is chosen by FORMAT (OpenID4VP 1.0 6.4.1), not by which
+// metadata document happens to have loaded. That distinction matters: an
+// earlier version of both DCQL builders keyed off "is an MDDL present", which
+// silently routed every non-mdoc format - including the ldp_vc and
+// jwt_vc_json credentials this stack can actually issue - into the SD-JWT
+// branch and emitted vct_values for them. ValidateCredentialQuery requires
+// type_values for those formats, so the query was invalid by this repo's own
+// validator.
+//
+//   - mso_mdoc / mso_mdoc_zk: doctype_value, from the MDDL's doctype or the
+//     configured doctype used to resolve it from a registry.
+//   - dc+sd-jwt / vc+sd-jwt (and an empty format, which the Format field
+//     declares as defaulting to dc+sd-jwt): vct_values, carrying BOTH
+//     identifiers - see VCTQueryValues for why choosing one breaks half the
+//     deployed wallets.
+//   - anything else (ldp_vc, vc+ld+json, jwt_vc_json, jwp): ok is false.
+//
+// ok=false covers three cases a caller must not paper over: a nil receiver
+// (an auth scope or requested scope with no credential_metadata entry - config
+// validation does not currently check that auth_scopes keys resolve, so this
+// is reachable from a valid config), a format whose DCQL constraint this repo
+// cannot yet build, and a format whose own identifier is missing. W3C VC
+// formats need meta.type_values, and nothing in credential_metadata configures
+// the credential's type list - the issuer metadata hardcodes the base
+// "VerifiableCredential" type, which as a DCQL constraint would match every
+// W3C credential in the wallet rather than the intended one. Emitting that
+// would trade an invalid query for an over-broad one, so callers should skip
+// the scope and say so instead. Giving W3C scopes a real constraint needs a
+// configurable type list first.
+func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
+	if c == nil {
+		return openid4vp.MetaQuery{}, false
+	}
+	switch c.Format {
+	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
+		doctype := c.Doctype
+		if mddl := c.GetMDDL(); mddl != nil && mddl.DocType != "" {
+			doctype = mddl.DocType
+		}
+		if doctype == "" {
+			return openid4vp.MetaQuery{}, false
+		}
+		return openid4vp.MetaQuery{DoctypeValue: doctype}, true
+	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
+		// "" honours the Format field's own `default:"dc+sd-jwt"`: config
+		// validation marks Format required, so an empty one only reaches here
+		// from a hand-built Cfg, and treating it as anything but the declared
+		// default would contradict the struct tag.
+		vctValues := c.VCTQueryValues()
+		if len(vctValues) == 0 {
+			return openid4vp.MetaQuery{}, false
+		}
+		return openid4vp.MetaQuery{VCTValues: vctValues}, true
+	default:
+		return openid4vp.MetaQuery{}, false
+	}
+}
+
 // CredentialRegistry configures an optional TS11 credential metadata registry client (github.com/sirosfoundation/go-ts11client), disabled by default. When enabled, Registries is an ordered list of logical registries: a later entry overrides an earlier one for the same vct/doctype, so distinct registries are tried in that order rather than raced - only the mirrors within a single logical registry are queried concurrently, first hit wins, since only mirrors are expected to hold identical content.
 type CredentialRegistry struct {
 	// Enable turns on registry-backed resolution for any scope that sets

@@ -10,7 +10,17 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/SUNET/vc/pkg/logger"
 )
+
+// testLogger builds the logger buildAuthDCQL writes its skip messages to.
+func testLogger(t *testing.T) *logger.Log {
+	t.Helper()
+	log, err := logger.New("test", "", false)
+	require.NoError(t, err)
+	return log
+}
 
 // TestBuildAuthDCQLOffersBothVCTIdentifiers pins the fix for SUNET/vc#673 on
 // the path that actually regressed.
@@ -45,7 +55,7 @@ func TestBuildAuthDCQLOffersBothVCTIdentifiers(t *testing.T) {
 	}
 	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
 
-	c := &Client{cfg: cfg}
+	c := &Client{cfg: cfg, log: testLogger(t)}
 	dcql := c.buildAuthDCQL(&model.OpenID4VPCredentialAuth{
 		AuthScopes: map[string]model.AuthScopeEntry{
 			"pid":   {AuthClaims: []string{"given_name", "family_name"}},
@@ -94,7 +104,7 @@ func TestBuildAuthDCQLMdocScopeUsesDoctype(t *testing.T) {
 		},
 	}
 
-	c := &Client{cfg: cfg}
+	c := &Client{cfg: cfg, log: testLogger(t)}
 	dcql := c.buildAuthDCQL(&model.OpenID4VPCredentialAuth{
 		AuthScopes: map[string]model.AuthScopeEntry{
 			"pid_mdoc": {AuthClaims: []string{"given_name"}},
@@ -106,4 +116,78 @@ func TestBuildAuthDCQLMdocScopeUsesDoctype(t *testing.T) {
 	assert.Equal(t, "eu.europa.ec.eudi.pid.1", cred.Meta.DoctypeValue)
 	assert.Empty(t, cred.Meta.VCTValues, "mdoc query must not carry vct_values")
 	assert.NoError(t, openid4vp.ValidateCredentialQuery(cred))
+}
+
+// TestBuildAuthDCQLUnknownScopeDoesNotPanic covers a Copilot review finding on
+// this PR: config validation checks that auth_scopes is non-empty and does not
+// self-reference, but never that its keys resolve to a configured credential
+// (pkg/helpers/validate.go). GetCredentialMetadata then returns nil, and every
+// CredentialMetadata accessor takes c.mu.RLock() without a nil-receiver guard -
+// so reading the scope's metadata here panicked on a config that passes
+// validation. DCQLMetaQuery's nil check plus the skip keeps it a logged
+// configuration error.
+func TestBuildAuthDCQLUnknownScopeDoesNotPanic(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"pid": {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/path/to/vctm_pid",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+			},
+		},
+	}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+
+	c := &Client{cfg: cfg, log: testLogger(t)}
+	dcql := c.buildAuthDCQL(&model.OpenID4VPCredentialAuth{
+		AuthScopes: map[string]model.AuthScopeEntry{
+			"pid":              {AuthClaims: []string{"given_name"}},
+			"nosuchcredential": {AuthClaims: []string{"given_name"}},
+		},
+	})
+
+	// The unknown scope is dropped from both the queries and the options,
+	// rather than emitted as a query no wallet can match.
+	require.Len(t, dcql.Credentials, 1)
+	assert.Equal(t, "pid", dcql.Credentials[0].ID)
+	require.Len(t, dcql.CredentialSets, 1)
+	assert.Equal(t, [][]string{{"pid"}}, dcql.CredentialSets[0].Options)
+}
+
+// TestBuildAuthDCQLW3CScopeIsSkipped covers the second Copilot finding: the
+// branch used to key off "is an MDDL loaded", so a configured ldp_vc or
+// jwt_vc_json scope - both of which this stack can issue, see issueVC20 -
+// fell through to the SD-JWT branch and got vct_values. ValidateCredentialQuery
+// requires type_values for those formats, so the query was invalid by this
+// repo's own validator.
+//
+// Nothing in credential_metadata configures a W3C type list, so the scope is
+// skipped rather than given a constraint that would be either invalid or (with
+// the issuer metadata's bare "VerifiableCredential") broad enough to match
+// every W3C credential in the wallet.
+func TestBuildAuthDCQLW3CScopeIsSkipped(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"diploma_ldp": {
+					Format:       "ldp_vc",
+					VCTMFilePath: "/path/to/vctm_diploma",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:credential:diploma:1"},
+				},
+			},
+		},
+	}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+
+	c := &Client{cfg: cfg, log: testLogger(t)}
+	dcql := c.buildAuthDCQL(&model.OpenID4VPCredentialAuth{
+		AuthScopes: map[string]model.AuthScopeEntry{
+			"diploma_ldp": {AuthClaims: []string{"given_name"}},
+		},
+	})
+
+	assert.Empty(t, dcql.Credentials, "an ldp_vc scope must not be sent with vct_values")
+	assert.Empty(t, dcql.CredentialSets[0].Options)
 }

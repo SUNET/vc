@@ -395,25 +395,22 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 			continue
 		}
 
-		// Which meta field applies is decided by format, not by what happens
-		// to be loaded: vct_values for sd-jwt, doctype_value for mso_mdoc
-		// (OpenID4VP 1.0 6.4.1). This used to emit vct_values unconditionally,
-		// so an mso_mdoc scope - which has an MDDL and no VCTM at all - went
-		// out as {"vct_values": [""]} with no doctype_value: a query no wallet
-		// can match, and one ValidateCredentialQuery rejects. handlers_ui.go
-		// already branched correctly; this builder never got the same fix.
-		meta := openid4vp.MetaQuery{}
-		if mddl := credInfo.GetMDDL(); mddl != nil && mddl.DocType != "" {
-			meta.DoctypeValue = mddl.DocType
-		} else {
-			// Both identifiers, for the reason documented on
-			// model.CredentialMetadata.VCTQueryValues: deployed wallets
-			// disagree about which one names a credential type, and
-			// vct_values is an acceptable-value list precisely so a verifier
-			// need not pick a winner. This path previously sent only the
-			// VCTM's own vct, which no multipaz-derived wallet matches
-			// (SUNET/vc#673).
-			meta.VCTValues = credInfo.VCTQueryValues()
+		// The meta constraint follows the credential's FORMAT (OpenID4VP 1.0
+		// 6.4.1): doctype_value for mdoc, vct_values - carrying BOTH
+		// identifiers, the SUNET/vc#673 fix - for sd-jwt. This used to emit
+		// vct_values unconditionally, so an mso_mdoc scope, which has an MDDL
+		// and no VCTM at all, went out as {"vct_values": [""]} with no
+		// doctype_value: a query no wallet can match and one
+		// ValidateCredentialQuery rejects.
+		meta, ok := credInfo.DCQLMetaQuery()
+		if !ok {
+			// A scope whose format has no expressible DCQL constraint (a W3C
+			// VC one, say - see DCQLMetaQuery) is dropped rather than sent as
+			// an invalid query. If that leaves nothing, the caller below
+			// fails loudly with "no valid credentials found for requested
+			// scopes" instead of returning a query that matches nothing.
+			c.log.Info("Skipping scope with no usable DCQL meta constraint", "scope", scope, "format", credInfo.Format)
+			continue
 		}
 		c.log.Info("Matched scope to credential", "scope", scope, "vct_values", meta.VCTValues, "doctype_value", meta.DoctypeValue, "format", credInfo.Format)
 

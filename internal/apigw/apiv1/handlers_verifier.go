@@ -49,6 +49,14 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	}
 
 	dcql := c.buildAuthDCQL(vpAuth)
+	if len(dcql.Credentials) == 0 {
+		// Every configured auth scope was unusable (unknown scope, or a format
+		// with no expressible DCQL constraint - see buildAuthDCQL). Sending an
+		// empty query would let the wallet "authenticate" by presenting
+		// nothing, so fail the request instead; the skipped scopes are already
+		// logged individually.
+		return "", fmt.Errorf("scope %q: no auth scope yields a usable DCQL credential query", scope)
+	}
 
 	// Persist the DCQL query in the auth context so VerificationDirectPost
 	// can use it for VP Token validation later.
@@ -144,29 +152,27 @@ func (c *Client) buildAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth) *openid4vp
 			})
 		}
 
-		// Which meta field applies follows the format, not what happens to be
-		// loaded: vct_values for sd-jwt, doctype_value for mso_mdoc
-		// (OpenID4VP 1.0 6.4.1).
-		meta := openid4vp.MetaQuery{}
-		credMeta := c.cfg.GetCredentialMetadata(authScope)
-		if mddl := credMeta.GetMDDL(); mddl != nil && mddl.DocType != "" {
-			meta.DoctypeValue = mddl.DocType
-		} else {
-			// Both identifiers, not one. Finding 16 set this to the VCTM's own
-			// vct (what wwWallet matches); finding 18 then reverted it to the
-			// type-metadata URL (what the EUDI reference wallet / multipaz
-			// matches, since DcqlRequestProcessor filters on the
-			// issuer-metadata-derived format tag before ever parsing the
-			// credential body). Both findings are right about their own wallet
-			// and wrong to exclude the other, so this call site oscillated and
-			// broke half the deployed wallets in each position.
-			//
-			// meta.vct_values is an acceptable-value list (OpenID4VP 1.0
-			// 6.4.1), so there was never a need to choose. The verifier UI was
-			// fixed to send both in 5aa1c50e but this path was missed, which is
-			// what SUNET/vc#673 reports. The shared rule and the evidence for
-			// it live on model.CredentialMetadata.VCTQueryValues.
-			meta.VCTValues = credMeta.VCTQueryValues()
+		// The meta constraint follows the credential's FORMAT (OpenID4VP 1.0
+		// 6.4.1): doctype_value for mdoc, vct_values - carrying BOTH
+		// identifiers, which is the SUNET/vc#673 fix - for sd-jwt. See
+		// model.CredentialMetadata.DCQLMetaQuery for why the choice is made on
+		// format rather than on which metadata document happened to load, and
+		// why a W3C VC scope reports !ok rather than being given a constraint
+		// this repo cannot yet build correctly.
+		//
+		// A nil credential_metadata entry lands here too: config validation
+		// checks that auth_scopes is non-empty and non-self-referential, but
+		// never that its keys resolve to a configured credential, so an
+		// unknown auth scope survives into a running server.
+		meta, ok := c.cfg.GetCredentialMetadata(authScope).DCQLMetaQuery()
+		if !ok {
+			// Skipping is deliberate: a CredentialQuery with no usable meta
+			// constraint is rejected by ValidateCredentialQuery and matches
+			// nothing in a wallet, so emitting one would only turn a
+			// configuration error into a silent no-match at presentation time.
+			c.log.Error(nil, "skipping auth scope with no usable DCQL meta constraint",
+				"scope", authScope, "format", c.cfg.GetFormatForScope(authScope))
+			continue
 		}
 
 		credentialQueries = append(credentialQueries, openid4vp.CredentialQuery{

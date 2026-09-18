@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
@@ -400,5 +401,115 @@ func TestVCTQueryValuesForScopes(t *testing.T) {
 
 	if vals := cfg.VCTQueryValuesForScopes(nil); len(vals) != 0 {
 		t.Errorf("expected empty for no scopes, got %v", vals)
+	}
+}
+
+// TestDCQLMetaQueryFollowsFormat pins the constraint to the credential's
+// FORMAT rather than to which metadata document happens to be loaded. Keying
+// off "is an MDDL present" routed every non-mdoc format - including the ldp_vc
+// and jwt_vc_json credentials this stack can issue - into the SD-JWT branch and
+// emitted vct_values, which ValidateCredentialQuery rejects for those formats.
+func TestDCQLMetaQueryFollowsFormat(t *testing.T) {
+	tests := []struct {
+		name        string
+		cm          *CredentialMetadata
+		wantOK      bool
+		wantVCTs    []string
+		wantDoctype string
+	}{
+		{
+			name: "sd-jwt gets both vct identifiers",
+			cm: &CredentialMetadata{
+				Format: "dc+sd-jwt",
+				VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				VCTURL: "https://apigw.example/type-metadata/pid",
+			},
+			wantOK:   true,
+			wantVCTs: []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
+		},
+		{
+			// Format is declared `default:"dc+sd-jwt"`, so an unset one means
+			// sd-jwt rather than "unsupported".
+			name: "empty format honours the dc+sd-jwt default",
+			cm: &CredentialMetadata{
+				VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				VCTURL: "https://apigw.example/type-metadata/pid",
+			},
+			wantOK:   true,
+			wantVCTs: []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
+		},
+		{
+			name:        "mdoc gets doctype_value",
+			cm:          &CredentialMetadata{Format: "mso_mdoc", MDDL: &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"}},
+			wantOK:      true,
+			wantDoctype: "eu.europa.ec.eudi.pid.1",
+		},
+		{
+			// A registry-resolved mdoc scope configures the doctype directly
+			// and may have no MDDL document in hand.
+			name:        "mdoc falls back to the configured doctype",
+			cm:          &CredentialMetadata{Format: "mso_mdoc", Doctype: "eu.europa.ec.eudi.pid.1"},
+			wantOK:      true,
+			wantDoctype: "eu.europa.ec.eudi.pid.1",
+		},
+		{
+			name:        "zk mdoc is still constrained by doctype",
+			cm:          &CredentialMetadata{Format: "mso_mdoc_zk", MDDL: &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"}},
+			wantOK:      true,
+			wantDoctype: "eu.europa.ec.eudi.pid.1",
+		},
+		{
+			// The Copilot finding: these used to fall into the sd-jwt branch.
+			name:   "ldp_vc reports no expressible constraint",
+			cm:     &CredentialMetadata{Format: "ldp_vc", VCTM: &sdjwtvc.VCTM{VCT: "urn:credential:diploma:1"}, VCTURL: "https://apigw.example/type-metadata/diploma"},
+			wantOK: false,
+		},
+		{
+			name:   "jwt_vc_json reports no expressible constraint",
+			cm:     &CredentialMetadata{Format: "jwt_vc_json", VCTM: &sdjwtvc.VCTM{VCT: "urn:credential:diploma:1"}, VCTURL: "https://apigw.example/type-metadata/diploma"},
+			wantOK: false,
+		},
+		{
+			name:   "mdoc with no doctype anywhere",
+			cm:     &CredentialMetadata{Format: "mso_mdoc"},
+			wantOK: false,
+		},
+		{
+			name:   "sd-jwt with no identifier at all",
+			cm:     &CredentialMetadata{Format: "dc+sd-jwt"},
+			wantOK: false,
+		},
+		{
+			// An auth scope or requested scope with no credential_metadata
+			// entry: config validation never checks that auth_scopes keys
+			// resolve, and every accessor takes a lock on the receiver, so an
+			// unguarded call here panicked.
+			name:   "nil metadata",
+			cm:     nil,
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := tt.cm.DCQLMetaQuery()
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if got.DoctypeValue != tt.wantDoctype {
+				t.Errorf("doctype_value = %q, want %q", got.DoctypeValue, tt.wantDoctype)
+			}
+			if len(got.VCTValues) != len(tt.wantVCTs) {
+				t.Fatalf("vct_values = %v, want %v", got.VCTValues, tt.wantVCTs)
+			}
+			for i := range got.VCTValues {
+				if got.VCTValues[i] != tt.wantVCTs[i] {
+					t.Fatalf("vct_values = %v, want %v", got.VCTValues, tt.wantVCTs)
+				}
+			}
+		})
 	}
 }

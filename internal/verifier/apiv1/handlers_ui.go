@@ -237,15 +237,15 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				// which matches nothing in any wallet.
 				if meta != nil {
 					uiCred.Format = meta.Format
-					if mddl := meta.GetMDDL(); mddl != nil && mddl.DocType != "" {
-						uiCred.Meta.DoctypeValue = mddl.DocType
-					} else if vs := vctIdentifiersFor(meta); len(vs) > 0 {
-						// Both identifiers, for the reason documented on
-						// UICredentialInfo.VCTValues: wallets disagree about
-						// which one names a credential type. Only reached for
-						// non-mdoc credentials - an mdoc is constrained by
-						// doctype_value above and has no vct to offer.
-						uiCred.Meta.VCTValues = vs
+					// Same format-driven resolution the apigw and OIDC-RP
+					// DCQL builders use - see
+					// model.CredentialMetadata.DCQLMetaQuery. !ok leaves the
+					// preset's meta empty, which the UI's own schema already
+					// tolerates; the alternative is advertising a constraint
+					// the wallet cannot match.
+					if mq, ok := meta.DCQLMetaQuery(); ok {
+						uiCred.Meta.DoctypeValue = mq.DoctypeValue
+						uiCred.Meta.VCTValues = mq.VCTValues
 					}
 				}
 
