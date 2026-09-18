@@ -1807,19 +1807,22 @@ func (c *CredentialMetadata) VCTQueryValues() []string {
 // type_values for those formats, so the query was invalid by this repo's own
 // validator.
 //
-//   - mso_mdoc / mso_mdoc_zk: doctype_value, from the MDDL's doctype or the
-//     configured doctype used to resolve it from a registry.
+//   - mso_mdoc: doctype_value, from the MDDL's doctype or the configured
+//     doctype used to resolve it from a registry.
 //   - dc+sd-jwt / vc+sd-jwt (and an empty format, which the Format field
 //     declares as defaulting to dc+sd-jwt): vct_values, carrying BOTH
 //     identifiers - see VCTQueryValues for why choosing one breaks half the
 //     deployed wallets.
-//   - anything else (ldp_vc, vc+ld+json, jwt_vc_json, jwp): ok is false.
+//   - anything else (ldp_vc, vc+ld+json, jwt_vc_json, jwp, mso_mdoc_zk): ok
+//     is false.
 //
-// ok=false covers three cases a caller must not paper over: a nil receiver
+// ok=false covers four cases a caller must not paper over: a nil receiver
 // (an auth scope or requested scope with no credential_metadata entry - config
 // validation does not currently check that auth_scopes keys resolve, so this
 // is reachable from a valid config), a format whose DCQL constraint this repo
-// cannot yet build, and a format whose own identifier is missing. W3C VC
+// cannot yet build, a format whose constraint cannot be completed from
+// credential_metadata alone (mso_mdoc_zk, above), and a format whose own
+// identifier is missing. W3C VC
 // formats need meta.type_values, and nothing in credential_metadata configures
 // the credential's type list - the issuer metadata hardcodes the base
 // "VerifiableCredential" type, which as a DCQL constraint would match every
@@ -1832,7 +1835,16 @@ func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
 		return openid4vp.MetaQuery{}, false
 	}
 	switch c.Format {
-	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
+	// Deliberately not FormatMsoMdocZk: validateMsoMdocZkQuery requires a
+	// non-empty meta.zk_system_type alongside the doctype, and the ZK system
+	// specs live on VerificationPresetScope, not here - nothing in
+	// credential_metadata can supply them. Returning ok=true with the doctype
+	// alone would hand callers a query their own validator rejects. A ZK-mdoc
+	// request is produced the other way round: the scope's credential_metadata
+	// declares plain mso_mdoc, and a preset overrides Format to mso_mdoc_zk
+	// while supplying ZKSystemType (see VerificationPresetScope), so that path
+	// never asks this helper for the zk format.
+	case openid4vp.FormatMsoMdoc:
 		doctype := c.Doctype
 		if mddl := c.GetMDDL(); mddl != nil && mddl.DocType != "" {
 			doctype = mddl.DocType

@@ -230,24 +230,30 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				}
 
 				// Resolve format and the type constraint from
-				// credential_metadata. An mso_mdoc credential has no vct at
-				// all - DCQL constrains it by doctype_value instead
-				// (OpenID4VP 1.0 6.4.1) - so a preset over an mdoc scope was
-				// previously emitted with an empty vct_values and no doctype,
-				// which matches nothing in any wallet.
-				if meta != nil {
-					uiCred.Format = meta.Format
-					// Same format-driven resolution the apigw and OIDC-RP
-					// DCQL builders use - see
-					// model.CredentialMetadata.DCQLMetaQuery. !ok leaves the
-					// preset's meta empty, which the UI's own schema already
-					// tolerates; the alternative is advertising a constraint
-					// the wallet cannot match.
-					if mq, ok := meta.DCQLMetaQuery(); ok {
-						uiCred.Meta.DoctypeValue = mq.DoctypeValue
-						uiCred.Meta.VCTValues = mq.VCTValues
-					}
+				// credential_metadata, by format - the same resolution the
+				// apigw and OIDC-RP DCQL builders use. See
+				// model.CredentialMetadata.DCQLMetaQuery. An mso_mdoc
+				// credential has no vct at all and is constrained by
+				// doctype_value instead (OpenID4VP 1.0 6.4.1), so a preset
+				// over an mdoc scope was once emitted with an empty vct_values
+				// and no doctype, which matches nothing in any wallet.
+				uiCred.Format = meta.Format
+				mq, ok := meta.DCQLMetaQuery()
+				if !ok {
+					// Emitting the credential anyway would put a query with an
+					// EMPTY meta on the wire: the UI's schema accepts it and
+					// handleSelectPredefinedPresentationDefinition sends it, so
+					// a wallet would see a credential query with no type
+					// constraint at all and could match any credential of that
+					// format. An unconstrained query is worse than a missing
+					// one - it over-discloses silently - so the credential is
+					// dropped and the operator told which preset lost it.
+					c.log.Error(nil, "preset credential dropped: no usable DCQL meta constraint for scope",
+						"preset", label, "scope", scope, "format", meta.Format)
+					continue
 				}
+				uiCred.Meta.DoctypeValue = mq.DoctypeValue
+				uiCred.Meta.VCTValues = mq.VCTValues
 
 				// A preset's Format/ZKSystemType override lets an otherwise
 				// plain-format scope (e.g. mso_mdoc) be requested as a ZK
@@ -312,6 +318,14 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					}
 				}
 				uiPreset.Credentials = append(uiPreset.Credentials, uiCred)
+			}
+			if len(uiPreset.Credentials) == 0 {
+				// Every scope in the preset was dropped above. A preset button
+				// that requests nothing would produce an empty DCQL query,
+				// which a wallet can satisfy by presenting nothing at all, so
+				// the preset is not advertised.
+				c.log.Error(nil, "preset dropped: no credential in it has a usable DCQL meta constraint", "preset", label)
+				continue
 			}
 			reply.Presets[label] = uiPreset
 		}

@@ -1,6 +1,9 @@
 package model
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -437,10 +440,17 @@ func TestDCQLMetaQueryFollowsFormat(t *testing.T) {
 			wantDoctype: "eu.europa.ec.eudi.pid.1",
 		},
 		{
-			name:        "zk mdoc is still constrained by doctype",
-			cm:          &CredentialMetadata{Format: "mso_mdoc_zk", MDDL: &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"}},
-			wantOK:      true,
-			wantDoctype: "eu.europa.ec.eudi.pid.1",
+			// validateMsoMdocZkQuery wants a non-empty meta.zk_system_type
+			// alongside the doctype, and the ZK specs live on
+			// VerificationPresetScope - nothing in credential_metadata can
+			// supply them. Returning the doctype alone would hand the caller a
+			// query ValidateCredentialQuery rejects, so this reports !ok and
+			// the caller skips the scope. A real ZK request comes from a preset
+			// overriding Format on a plain mso_mdoc scope, which never reaches
+			// this branch.
+			name:   "zk mdoc cannot be completed from credential_metadata",
+			cm:     &CredentialMetadata{Format: "mso_mdoc_zk", MDDL: &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"}},
+			wantOK: false,
 		},
 		{
 			// The Copilot finding: these used to fall into the sd-jwt branch.
@@ -483,6 +493,64 @@ func TestDCQLMetaQueryFollowsFormat(t *testing.T) {
 			}
 			assert.Equal(t, tt.wantDoctype, got.DoctypeValue)
 			assert.Equal(t, tt.wantVCTs, got.VCTValues)
+		})
+	}
+}
+
+// TestShippedVCTMsDeclareTheirVCT keeps the vendored type metadata and the
+// canonical identifiers in this package from drifting apart.
+//
+// Every document in metadata/ used to omit "vct". ResolveVCTUrls back-fills an
+// empty one from the derived type-metadata URL, so VCTM.VCT and VCTURL became
+// the same string: a stock deployment issued credentials whose embedded vct was
+// the URL, advertised exactly one value in meta.vct_values no matter which code
+// path built the query, and could never match the URNs that
+// presentation_requests/*.yaml asks for. The "offer both identifiers" fix was
+// structurally present but degenerate.
+//
+// The identifiers here are the ones credential_types.go already declares and
+// the copies in testdata already carry, so this asserts the shipped files agree
+// with both rather than inventing anything.
+func TestShippedVCTMsDeclareTheirVCT(t *testing.T) {
+	want := map[string]string{
+		"vctm_pid.json":             CredentialTypeUrnEudiPid1,
+		"vctm_ehic.json":            CredentialTypeUrnEudiEhic1,
+		"vctm_pda1.json":            CredentialTypeUrnEudiPda11,
+		"vctm_diploma.json":         CredentialTypeUrnEudiDiploma1,
+		"vctm_elm.json":             CredentialTypeUrnEudiElm1,
+		"vctm_microcredential.json": CredentialTypeUrnEudiMicroCredential1,
+		"vctm_eduid.json":           CredentialTypeUrnEduID1,
+	}
+
+	paths, err := filepath.Glob(filepath.Join("..", "..", "metadata", "vctm_*.json"))
+	require.NoError(t, err)
+	require.Len(t, paths, len(want), "a new shipped VCTM needs an entry here and a vct of its own")
+
+	for _, path := range paths {
+		name := filepath.Base(path)
+		t.Run(name, func(t *testing.T) {
+			expected, known := want[name]
+			require.True(t, known, "unexpected shipped VCTM")
+
+			raw, err := os.ReadFile(path)
+			require.NoError(t, err)
+			var doc struct {
+				VCT string `json:"vct"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &doc))
+			assert.Equal(t, expected, doc.VCT)
+
+			// The whole point of declaring it: after resolution the credential's
+			// own vct and the URL its metadata is served from are two distinct
+			// identifiers, so vct_values carries both.
+			cm := &CredentialMetadata{
+				Format:       "dc+sd-jwt",
+				VCTMFilePath: path,
+				VCTM:         &sdjwtvc.VCTM{VCT: doc.VCT},
+			}
+			cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{"s": cm}}}
+			require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+			assert.Equal(t, []string{expected, "https://apigw.example/type-metadata/s"}, cm.VCTQueryValues())
 		})
 	}
 }

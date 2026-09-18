@@ -409,9 +409,16 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 			// an invalid query. If that leaves nothing, the caller below
 			// fails loudly with "no valid credentials found for requested
 			// scopes" instead of returning a query that matches nothing.
-			c.log.Info("Skipping scope with no usable DCQL meta constraint", "scope", scope, "format", credInfo.Format)
+			// GetFormatForScope, not credInfo.Format: the map can hold a nil
+			// value for a present key (a credential_metadata entry written
+			// with no fields), which is distinct from the key being absent and
+			// survives the lookup above. DCQLMetaQuery is nil-safe and lands
+			// here; a direct field read would panic while reporting the very
+			// config error it is reporting.
+			c.log.Info("Skipping scope with no usable DCQL meta constraint", "scope", scope, "format", c.cfg.GetFormatForScope(scope))
 			continue
 		}
+		// Past this point credInfo is non-nil: a nil one cannot produce ok.
 		c.log.Info("Matched scope to credential", "scope", scope, "vct_values", meta.VCTValues, "doctype_value", meta.DoctypeValue, "format", credInfo.Format)
 
 		credentials = append(credentials, openid4vp.CredentialQuery{

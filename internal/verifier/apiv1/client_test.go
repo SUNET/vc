@@ -462,3 +462,84 @@ func TestBuildDCQLQueryFromConfigSkipsW3CScope(t *testing.T) {
 	_, err = client.buildDCQLQueryFromConfig([]string{"diploma_ldp"})
 	assert.Error(t, err)
 }
+
+// TestBuildDCQLQueryFromConfigNilMetadataValue covers a Copilot review finding:
+// credential_metadata can hold a nil VALUE for a present key (an entry written
+// with no fields), which is distinct from the key being absent and survives the
+// map lookup. DCQLMetaQuery is nil-safe and reports !ok, but the skip log then
+// read credInfo.Format directly and panicked while reporting the very config
+// error it was reporting.
+func TestBuildDCQLQueryFromConfigNilMetadataValue(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"broken": nil,
+				"pid": {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/path/to/vctm_pid",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+			},
+		},
+	}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+	client, _ := CreateTestClientWithMock(t, cfg)
+
+	// Must not panic; the nil entry is skipped and the usable scope survives.
+	dcql, err := client.buildDCQLQueryFromConfig([]string{"pid", "broken"})
+	require.NoError(t, err)
+	require.Len(t, dcql.Credentials, 1)
+	assert.Equal(t, "pid", dcql.Credentials[0].ID)
+
+	// The nil entry alone leaves nothing to ask for.
+	_, err = client.buildDCQLQueryFromConfig([]string{"broken"})
+	assert.Error(t, err)
+}
+
+// TestUIMetadataDropsPresetWithUnconstrainableScope covers a Copilot review
+// finding on the preset path: when DCQLMetaQuery reports !ok the credential was
+// still emitted, with an EMPTY meta. The UI schema accepts that and sends it, so
+// the wallet saw a query with no type constraint and could match any credential
+// of that format. An unconstrained query over-discloses silently, which is worse
+// than a missing one.
+func TestUIMetadataDropsPresetWithUnconstrainableScope(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"pid": {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/path/to/vctm_pid",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+				// No DCQL constraint is expressible for a W3C VC scope.
+				"diploma_ldp": {
+					Format:       "ldp_vc",
+					VCTMFilePath: "/path/to/vctm_diploma",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+				},
+			},
+		},
+		Verifier: &model.Verifier{
+			Presets: map[string]model.PresetDefinition{
+				// Mixed: keeps the usable scope, drops the other.
+				"MIXED": {Credentials: model.VerificationPreset{"pid": nil, "diploma_ldp": nil}},
+				// Nothing usable at all: the whole preset goes.
+				"LDP_ONLY": {Credentials: model.VerificationPreset{"diploma_ldp": nil}},
+			},
+		},
+	}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+	client, _ := CreateTestClientWithMock(t, cfg)
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+
+	mixed, present := reply.Presets["MIXED"]
+	require.True(t, present, "a preset with one usable scope is still offered")
+	require.Len(t, mixed.Credentials, 1)
+	assert.Equal(t, "pid", mixed.Credentials[0].ID)
+	assert.NotEmpty(t, mixed.Credentials[0].Meta.VCTValues)
+
+	_, present = reply.Presets["LDP_ONLY"]
+	assert.False(t, present, "a preset whose every scope is unconstrainable must not be advertised")
+}
