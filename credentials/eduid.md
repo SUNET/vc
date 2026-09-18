@@ -29,8 +29,6 @@ A verifiable credential for educational identity, based on PID ARF 1.8. Provides
 - `birth_family_name` "Birth Last Name" (string): Last name(s) or surname(s) at birth [sd=always]
 - `birth_given_name` "Birth First Name" (string): First name(s), including middle name(s), at birth [sd=always]
 - `sex` "Sex" (string): Recorded sex or gender, using standard codes [sd=always]
-- `email` "Email" (string): Person's email address [sd=always]
-  - sv: "E-post" - Personens e-postadress
 - `phone_number` "Mobile" (string): Person's mobile phone number [sd=always]
   - sv: "Mobilnummer" - Personens mobilnummer
 - `address` "Address" (object): Person's residential address [sd=always]

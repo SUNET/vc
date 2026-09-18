@@ -2,7 +2,7 @@
 common:
   secret_file_path: "/secrets.yaml"
   skip_secrets_perm_check: true
-  production: true
+  production: false
   mongo:
     uri: ""
 
