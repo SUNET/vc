@@ -948,11 +948,12 @@ func applyPerScopeValidations(scopes []string, validations map[string][]openid4v
 // TestUIMetadataAdvertisesCanonicalVCT pins the UI to advertising the
 // single canonical vct per VCTM in reply.Credentials[].VCTValues and every
 // preset's Meta.VCTValues. ResolveVCTUrls yields exactly one vct per VCTM
-// (rewritten to the hosting URL for a local file, preserved verbatim for an
-// external vctm_url), so the DCQL vct_values list carries at most one value
-// and reply.Credentials[].VCT names that same identifier -- the value the
-// credential body carries, the metadata advertises, and a wallet stores as
-// the credential's type tag.
+// (preserved verbatim from the file for external scopes and for local
+// scopes whose file declares one, back-filled from the hosting URL only
+// when a local file left it empty), so the DCQL vct_values list carries at
+// most one value and reply.Credentials[].VCT names that same identifier --
+// the value the credential body carries, the metadata advertises, and a
+// wallet stores as the credential's type tag.
 func TestUIMetadataAdvertisesCanonicalVCT(t *testing.T) {
 	ctx := t.Context()
 
@@ -967,8 +968,15 @@ func TestUIMetadataAdvertisesCanonicalVCT(t *testing.T) {
 					VCTMUrl: "https://registry.example/pid.vctm.json",
 					VCTM:    &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 				},
-				// Local file with no vct: ResolveVCTUrls rewrites VCTM.VCT
-				// to the hosting URL, so vct and vct_values match.
+				// Local file with an explicit URN: ResolveVCTUrls keeps the
+				// URN as vct even though the file is hosted by apigw.
+				"eudi_pid": {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/path/to/eudi_pid",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:de:1"},
+				},
+				// Local file with no vct: ResolveVCTUrls back-fills VCTM.VCT
+				// from the hosting URL, so vct and vct_values match.
 				"novct": {
 					Format:       "dc+sd-jwt",
 					VCTMFilePath: "/path/to/novct",
@@ -978,8 +986,9 @@ func TestUIMetadataAdvertisesCanonicalVCT(t *testing.T) {
 		},
 		Verifier: &model.Verifier{
 			Presets: map[string]model.PresetDefinition{
-				"PID":   {Credentials: model.VerificationPreset{"pid": nil}},
-				"NOVCT": {Credentials: model.VerificationPreset{"novct": nil}},
+				"PID":     {Credentials: model.VerificationPreset{"pid": nil}},
+				"EUDIPID": {Credentials: model.VerificationPreset{"eudi_pid": nil}},
+				"NOVCT":   {Credentials: model.VerificationPreset{"novct": nil}},
 			},
 		},
 	}
@@ -987,7 +996,10 @@ func TestUIMetadataAdvertisesCanonicalVCT(t *testing.T) {
 	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
 	require.Equal(t, "https://apigw.example/type-metadata/novct",
 		cfg.Common.CredentialMetadata["novct"].GetVCTM().VCT,
-		"precondition: ResolveVCTUrls rewrites a local file's empty vct to the hosting URL")
+		"precondition: ResolveVCTUrls back-fills a local file's empty vct from the hosting URL")
+	require.Equal(t, "urn:eudi:pid:de:1",
+		cfg.Common.CredentialMetadata["eudi_pid"].GetVCTM().VCT,
+		"precondition: ResolveVCTUrls preserves a local file's explicit URN vct")
 	require.Equal(t, "urn:eudi:pid:1",
 		cfg.Common.CredentialMetadata["pid"].GetVCTM().VCT,
 		"precondition: ResolveVCTUrls preserves an external VCTM's vct verbatim")
@@ -1004,7 +1016,12 @@ func TestUIMetadataAdvertisesCanonicalVCT(t *testing.T) {
 		assert.Equal(t, []string{"urn:eudi:pid:1"}, reply.Credentials["pid"].VCTValues)
 	})
 
-	t.Run("local scope advertises the hosting URL", func(t *testing.T) {
+	t.Run("local scope with an explicit URN keeps the URN", func(t *testing.T) {
+		assert.Equal(t, "urn:eudi:pid:de:1", reply.Credentials["eudi_pid"].VCT)
+		assert.Equal(t, []string{"urn:eudi:pid:de:1"}, reply.Credentials["eudi_pid"].VCTValues)
+	})
+
+	t.Run("local scope without a file vct advertises the hosting URL", func(t *testing.T) {
 		assert.Equal(t, "https://apigw.example/type-metadata/novct", reply.Credentials["novct"].VCT)
 		assert.Equal(t, []string{"https://apigw.example/type-metadata/novct"}, reply.Credentials["novct"].VCTValues)
 	})
@@ -1016,7 +1033,14 @@ func TestUIMetadataAdvertisesCanonicalVCT(t *testing.T) {
 		assert.Equal(t, []string{"urn:eudi:pid:1"}, preset.Credentials[0].Meta.VCTValues)
 	})
 
-	t.Run("preset vct_values for a local scope carry the hosting URL", func(t *testing.T) {
+	t.Run("preset vct_values for a local URN scope carry the URN", func(t *testing.T) {
+		preset := reply.Presets["EUDIPID"]
+		require.NotNil(t, preset)
+		require.Len(t, preset.Credentials, 1)
+		assert.Equal(t, []string{"urn:eudi:pid:de:1"}, preset.Credentials[0].Meta.VCTValues)
+	})
+
+	t.Run("preset vct_values for a back-filled local scope carry the hosting URL", func(t *testing.T) {
 		preset := reply.Presets["NOVCT"]
 		require.NotNil(t, preset)
 		require.Len(t, preset.Credentials, 1)

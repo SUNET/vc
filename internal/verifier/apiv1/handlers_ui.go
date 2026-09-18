@@ -25,9 +25,9 @@ type UICredentialInfo struct {
 	VCT string `json:"vct"`
 	// VCTValues is the credential's canonical vct as a single-element list,
 	// for DCQL meta.vct_values. ResolveVCTUrls yields exactly one identifier
-	// per VCTM (rewritten to the hosting URL for a local file, preserved
-	// verbatim for an external vctm_url), so the list carries at most one
-	// value.
+	// per VCTM -- the file's own vct when present (URN or foreign URL), or
+	// the apigw hosting URL when a local file left vct empty -- so the list
+	// carries at most one value.
 	// omitempty: mso_mdoc scopes get no list (they're identified by doctype,
 	// not vct), so this drops the field entirely for them rather than
 	// emitting a meaningless "vct_values": null.
@@ -108,9 +108,10 @@ type UIMetadataReply struct {
 
 // vctIdentifiersFor returns the credential's canonical vct as a single-item
 // list (or nil for mso_mdoc scopes, which have no vct and are constrained by
-// doctype_value in DCQL). After ResolveVCTUrls the VCTM's vct is the same
-// value the credential body carries and the metadata advertises, so exactly
-// one identifier is offered.
+// doctype_value in DCQL). After ResolveVCTUrls the VCTM's vct is what the
+// credential body carries and the metadata advertises: the file's own value
+// for external and local-with-vct scopes, or the hosting URL back-filled for
+// a local file whose vct was empty.
 func vctIdentifiersFor(constructor *model.CredentialMetadata) []string {
 	if constructor == nil {
 		return nil
@@ -135,12 +136,12 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 			Attributes: constructor.GetAttributes(),
 		}
 		// VCTM.VCT is the credential's canonical identifier: ResolveVCTUrls
-		// has rewritten it to the hosting URL for local scopes and preserved
-		// the file's own value for external ones, so it matches both the
-		// credential body's vct claim and the issuer metadata's advertised
-		// vct. VCTURL is only a defensive fallback for a scope without a
-		// loaded VCTM; mso_mdoc scopes have no vct and use their doctype as
-		// the closest equivalent identifier.
+		// preserves the file's own value (URN, foreign URL, or otherwise) and
+		// only back-fills to the hosting URL when a local file left vct empty,
+		// so it matches both the credential body's vct claim and the issuer
+		// metadata's advertised vct. VCTURL is a defensive fallback for a
+		// scope without a loaded VCTM; mso_mdoc scopes have no vct and use
+		// their doctype as the closest equivalent identifier.
 		if vctm := constructor.GetVCTM(); vctm != nil && vctm.VCT != "" {
 			info.VCT = vctm.VCT
 		} else if v := constructor.GetVCTURL(); v != "" {

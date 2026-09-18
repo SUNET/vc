@@ -1673,10 +1673,11 @@ func (c *Cfg) GetFormatForScope(scope string) string {
 // scope -- VCTM.VCT -- which after ResolveVCTUrls is the single value shared
 // by the credential body (BuildCredentialWithSigner stamps body["vct"] =
 // vctm.VCT), the served VCTM document, the issuer metadata's
-// credential_configurations_supported[].vct, and DCQL vct_values. Local
-// scopes have this rewritten to the /type-metadata/<scope> hosting URL by
-// ResolveVCTUrls; external scopes keep the file's own value. Scopes without
-// a loaded VCTM are silently skipped.
+// credential_configurations_supported[].vct, and DCQL vct_values. External
+// scopes keep the file's own value; local scopes keep the file's own value
+// too when the file declares one, and fall back to the /type-metadata/<scope>
+// hosting URL only when the local file left vct empty. Scopes without a
+// loaded VCTM are silently skipped.
 func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 	ids := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
@@ -2036,20 +2037,22 @@ func (c *CredentialMetadata) IsLocalMDDL() bool {
 	return c.MDDLFilePath != ""
 }
 
-// ResolveVCTUrls fills in VCTURL for every scope and enforces the two-way
-// contract on vct identifiers:
+// ResolveVCTUrls fills in VCTURL for every scope and enforces the vct
+// identifier contract:
 //
-//   - Local VCTM (vctm_file_path): apigw itself is the registry. VCTURL is
-//     apigwPublicURL + /type-metadata/{scope}, and both VCTM.VCT and the
-//     served VCTMRaw's "vct" are rewritten to that URL, regardless of what
-//     the file carried. This makes the issuer metadata, the served VCTM,
-//     the credential body's vct claim, and DCQL vct_values all reference
-//     the same dereferenceable identifier.
+//   - Local VCTM (vctm_file_path): apigw hosts the type metadata under
+//     apigwPublicURL + /type-metadata/{scope} and sets VCTURL to that
+//     hosting URL. If the file already carried a vct (URN or any other
+//     Collision-Resistant Name per SD-JWT VC §3.2.2.1), it is preserved
+//     verbatim in both VCTM.VCT and the served VCTMRaw. Only when the
+//     file has no vct does ResolveVCTUrls back-fill VCTM.VCT and
+//     VCTMRaw's "vct" from the hosting URL so the credential body,
+//     served VCTM, and DCQL vct_values still agree on a single value.
 //   - External VCTM (vctm_url or vct via registry): the source is
-//     authoritative. VCTM.VCT and VCTMRaw are left untouched. VCTURL is set
-//     to the source URL (vctm_url or the resolved vct), but that only
-//     drives helpers -- it never overwrites the identifier the wallet
-//     stores.
+//     authoritative. VCTM.VCT and VCTMRaw are left untouched. VCTURL is
+//     set to the source URL (vctm_url or the resolved vct), but that
+//     only drives helpers -- it never overwrites the identifier the
+//     wallet stores.
 func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 	if cfg.Common == nil {
 		return nil
@@ -2076,7 +2079,8 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 		constructor.mu.Lock()
 		constructor.VCTURL = vctURL
 
-		if constructor.IsLocalVCTM() {
+		// Only back-fill a locally-hosted VCTM's vct when the file did not carry one.
+		if constructor.IsLocalVCTM() && constructor.VCTM.VCT == "" {
 			constructor.VCTM.VCT = vctURL
 			if constructor.VCTMRaw != nil {
 				var doc map[string]json.RawMessage
@@ -2099,6 +2103,10 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 		}
 		if constructor.GetVCTURL() == "" {
 			return fmt.Errorf("VCTURL is empty for scope %q after resolution (check vctm_file_path, vctm_url, or vct)", scope)
+		}
+		// Local scopes get VCTM.VCT rewritten above; external ones must carry it themselves.
+		if !constructor.IsLocalVCTM() && constructor.VCTM.VCT == "" {
+			return fmt.Errorf("external VCTM for scope %q has empty vct (check vctm_url source or the resolved vct); BuildCredentialWithSigner and DCQL vct_values require it", scope)
 		}
 	}
 
