@@ -151,6 +151,14 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// request naming more than one scope failed here, since no wallet returns a
 	// credential for "profile".
 	credentialScopes := c.credentialScopes(authCtx)
+	if len(credentialScopes) == 0 && authCtx.DCQLQuery != nil && len(authCtx.DCQLQuery.Credentials) > 0 {
+		// The query asked for credentials but nothing is left to check them
+		// against - a template selected by an ordinary scope alone would do
+		// this. Falling through would cache a successful presentation having
+		// validated no VP token whatsoever.
+		c.log.Error(nil, "no requested scope corresponds to a requested credential", "scopes", authCtx.Scopes)
+		return nil, fmt.Errorf("no requested scope corresponds to a requested credential")
+	}
 	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(credentialScopes))
 
 	for _, scope := range credentialScopes {
@@ -601,34 +609,34 @@ type VerificationCallbackResponse struct {
 	CredentialData []sdjwtvc.CredentialCache `json:"credential_data"`
 }
 
-// credentialScopes returns the requested scopes that a credential query in the
-// authorization context actually stands for, in request order.
+// credentialScopes returns the requested scopes that are part of the
+// presentation, in request order.
 //
-// authCtx.Scopes is the raw OIDC scope list: it always carries "openid" (OIDC
-// Core requires it) and whatever else the RP asked for, and the shipped
-// eudi_pid_basic template is selected by "pid profile". None of those name a
-// credential, and no wallet returns a token for them.
+// Only the scopes OIDC Core defines are dropped. authCtx.Scopes always carries
+// "openid", and the shipped eudi_pid_basic template is selected by
+// "pid profile" - no wallet returns a credential for those, so requiring a VP
+// token for them failed every request naming more than one scope.
 //
-// A scope counts when the query has a credential of that id - which is how
-// buildDCQLQueryFromConfig keys them - or when ScopeQueryIDs paired it with
-// one. Anything else is an ordinary OIDC scope and is not part of the
-// presentation.
+// Everything else is kept, including a scope no credential query obviously
+// stands for. Dropping those would be the dangerous direction: an unmapped
+// scope would simply vanish from the loop, and a request whose scopes all
+// vanished would cache a successful presentation having validated no VP token
+// at all. Keeping them means such a scope reaches vpTokensForScope and fails
+// there, loudly, which is what it did before any of this.
 //
-// With no DCQL query cached at all, every scope is returned, which is the
-// behaviour that predates this. Sessions created before this field existed
-// therefore keep working across a rolling deploy.
+// With no DCQL query cached, every scope is returned - the behaviour that
+// predates this, so sessions created before the field existed survive a
+// rolling deploy.
 func (c *Client) credentialScopes(authCtx *cache.AuthorizationContext) []string {
 	if authCtx.DCQLQuery == nil {
 		return authCtx.Scopes
 	}
 	scopes := make([]string, 0, len(authCtx.Scopes))
 	for _, scope := range authCtx.Scopes {
-		_, mapped := authCtx.ScopeQueryIDs[scope]
-		if mapped || slices.ContainsFunc(authCtx.DCQLQuery.Credentials, func(cred openid4vp.CredentialQuery) bool {
-			return cred.ID == scope
-		}) {
-			scopes = append(scopes, scope)
+		if openid4vp.StandardOIDCScopes[scope] {
+			continue
 		}
+		scopes = append(scopes, scope)
 	}
 	return scopes
 }

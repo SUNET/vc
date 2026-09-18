@@ -303,8 +303,7 @@ func TestScopeQueryIDsAliasScopeAmbiguous(t *testing.T) {
 // authCtx.Scopes is the raw OIDC scope list: "openid" is always there (OIDC
 // Core requires it) and the shipped eudi_pid_basic template is selected by
 // "pid profile". Requiring a VP token for those meant any request naming more
-// than one scope failed - no wallet returns a credential for "profile" - which
-// left the template flow broken even once its query id resolved.
+// than one scope failed - no wallet returns a credential for "profile".
 func TestCredentialScopes(t *testing.T) {
 	client, _ := CreateTestClientWithMock(t, nil)
 
@@ -313,17 +312,6 @@ func TestCredentialScopes(t *testing.T) {
 			Scopes: []string{"openid", "profile", "pid"},
 			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
 				{ID: "pid"},
-			}},
-		})
-		assert.Equal(t, []string{"pid"}, got)
-	})
-
-	t.Run("a scope paired with a template's query id counts", func(t *testing.T) {
-		got := client.credentialScopes(&cache.AuthorizationContext{
-			Scopes:        []string{"openid", "profile", "pid"},
-			ScopeQueryIDs: map[string]string{"pid": "eudi_pid"},
-			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
-				{ID: "eudi_pid"},
 			}},
 		})
 		assert.Equal(t, []string{"pid"}, got)
@@ -339,6 +327,20 @@ func TestCredentialScopes(t *testing.T) {
 		assert.Equal(t, []string{"ehic", "pid"}, got)
 	})
 
+	t.Run("an unmapped scope is kept, not dropped", func(t *testing.T) {
+		// Covers a review finding. Dropping a scope no query obviously stands
+		// for is the dangerous direction: it vanishes from the loop instead of
+		// failing there, and if every scope vanished the presentation would be
+		// cached having validated no VP token at all.
+		got := client.credentialScopes(&cache.AuthorizationContext{
+			Scopes: []string{"openid", "pid", "custom_claim"},
+			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+				{ID: "pid"},
+			}},
+		})
+		assert.Equal(t, []string{"pid", "custom_claim"}, got)
+	})
+
 	t.Run("no cached query falls back to every scope", func(t *testing.T) {
 		// A session created before this existed, mid rolling deploy.
 		got := client.credentialScopes(&cache.AuthorizationContext{
@@ -346,36 +348,17 @@ func TestCredentialScopes(t *testing.T) {
 		})
 		assert.Equal(t, []string{"openid", "pid"}, got)
 	})
-}
 
-// TestScopeQueryIDsSkipsStandardOIDCScopes covers a review finding on the
-// alias-scope fallback, where two fixes in this branch interacted badly.
-//
-// eudi_pid_basic is selected by "pid profile". The fallback maps an
-// unconfigured scope to the sole query, which would have caught "profile" - and
-// because a mapped scope counts as a credential scope, the one credential would
-// then be resolved and processed TWICE: duplicated in scopeCredentials and the
-// cache, with validations, revocation and combined-binding applied over it
-// again.
-func TestScopeQueryIDsSkipsStandardOIDCScopes(t *testing.T) {
-	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
-		"pid": sdJWTScope("urn:eudi:pid:1"),
-	}, nil)
-
-	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
-		{ID: "eudi_pid", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}}},
-	}}
-
-	// The scope list eudi_pid_basic is actually selected by, plus "openid".
-	got := client.ScopeQueryIDs(t.Context(), dcql, []string{"openid", "pid", "profile"})
-	assert.Equal(t, map[string]string{"pid": "eudi_pid"}, got)
-	assert.NotContains(t, got, "profile")
-	assert.NotContains(t, got, "openid")
-
-	// So the credential is resolved once, not once per ordinary scope.
-	assert.Equal(t, []string{"pid"}, client.credentialScopes(&cache.AuthorizationContext{
-		Scopes:        []string{"openid", "pid", "profile"},
-		ScopeQueryIDs: got,
-		DCQLQuery:     dcql,
-	}))
+	t.Run("a query with only ordinary scopes leaves nothing to check", func(t *testing.T) {
+		// eudi_pid_basic declares "pid profile", so "profile" alone selects it.
+		// The guard in VerificationDirectPost turns this into an error rather
+		// than a presentation accepted with nothing verified.
+		got := client.credentialScopes(&cache.AuthorizationContext{
+			Scopes: []string{"openid", "profile"},
+			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+				{ID: "eudi_pid"},
+			}},
+		})
+		assert.Empty(t, got)
+	})
 }
