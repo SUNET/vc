@@ -615,3 +615,25 @@ func TestCredentialQueryRequireCryptographicHolderBindingTriState(t *testing.T) 
 		})
 	}
 }
+
+// TestValidateCredentialQuery_VCLDJSON covers a review finding: vc+ld+json is
+// issued by this repo (handlers_issuer.go routes it to issueVC20 alongside
+// ldp_vc) and DCQLMetaQuery treats it as W3C, but the shared format checks did
+// not - so a query in that format skipped the type_values requirement the other
+// two W3C formats are held to, and an unconstrained one passed validation.
+func TestValidateCredentialQuery_VCLDJSON(t *testing.T) {
+	assert.True(t, IsW3CVCFormatIdentifier(FormatVCLDJSON))
+
+	err := ValidateCredentialQuery(CredentialQuery{
+		ID:     "diploma",
+		Format: FormatVCLDJSON,
+	})
+	require.Error(t, err, "a W3C query with no type_values must be rejected")
+	assert.Contains(t, err.Error(), "type_values")
+
+	assert.NoError(t, ValidateCredentialQuery(CredentialQuery{
+		ID:     "diploma",
+		Format: FormatVCLDJSON,
+		Meta:   MetaQuery{TypeValues: [][]string{{"VerifiableCredential", "DiplomaCredential"}}},
+	}))
+}

@@ -1926,7 +1926,7 @@ func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
 			return openid4vp.MetaQuery{}, false
 		}
 		return openid4vp.MetaQuery{VCTValues: vctValues}, true
-	case openid4vp.FormatLdpVCDCQL, "vc+ld+json", openid4vp.FormatJwtVCJson:
+	case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON, openid4vp.FormatJwtVCJson:
 		// type_values is an array of ALTERNATIVES, each an array of types a
 		// credential must carry all of (OpenID4VP 1.0 6.4.1). One alternative
 		// here: the types this scope issues.
@@ -2626,7 +2626,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		// jwt_vc_json-ld stays advertised but is deliberately not requestable:
 		// nothing issues it (see handlers_issuer.go's format switch), so
 		// DCQLMetaQuery does not accept it either.
-		case "jwt_vc_json", "ldp_vc", "vc+ld+json", "jwt_vc_json-ld":
+		case "jwt_vc_json", "ldp_vc", openid4vp.FormatVCLDJSON, "jwt_vc_json-ld":
 			// Appendix A.1: credential_definition with type array is format-specific for W3C VC formats.
 			//
 			// credential_types when configured, so the advertised types, the
