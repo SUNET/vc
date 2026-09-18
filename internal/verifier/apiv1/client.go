@@ -7,9 +7,9 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -403,41 +403,51 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 // doctype_value, and a query with no type constraint at all is not something to
 // guess at.
 func (c *Client) augmentVCTValuesFromConfig(dcql *openid4vp.DCQL) {
-	if dcql == nil || c.cfg.Common == nil {
+	if dcql == nil {
 		return
 	}
-	scopeKeys := make([]string, 0, len(c.cfg.Common.CredentialMetadata))
-	for scope := range c.cfg.Common.CredentialMetadata {
-		scopeKeys = append(scopeKeys, scope)
-	}
-	sort.Strings(scopeKeys)
-
 	for i := range dcql.Credentials {
 		cred := &dcql.Credentials[i]
 		if len(cred.Meta.VCTValues) == 0 {
 			continue
 		}
-		present := make(map[string]bool, len(cred.Meta.VCTValues))
-		for _, v := range cred.Meta.VCTValues {
-			present[v] = true
+		scope, identifiers := c.scopeMatchingVCTValues(cred.Meta.VCTValues)
+		if scope == "" {
+			continue
 		}
+		cred.Meta.VCTValues = appendMissing(cred.Meta.VCTValues, identifiers)
+		c.log.Debug("Augmented template vct_values from credential config",
+			"credential_id", cred.ID, "scope", scope, "vct_values", cred.Meta.VCTValues)
+	}
+}
 
-		for _, scope := range scopeKeys {
-			identifiers := c.cfg.Common.CredentialMetadata[scope].VCTQueryValues()
-			if !slices.ContainsFunc(identifiers, func(id string) bool { return present[id] }) {
-				continue
-			}
-			for _, id := range identifiers {
-				if !present[id] {
-					present[id] = true
-					cred.Meta.VCTValues = append(cred.Meta.VCTValues, id)
-				}
-			}
-			c.log.Debug("Augmented template vct_values from credential config",
-				"credential_id", cred.ID, "scope", scope, "vct_values", cred.Meta.VCTValues)
-			break
+// scopeMatchingVCTValues finds the configured scope that values already names,
+// and returns it with its full identifier set. Scopes are visited in sorted
+// order so an ambiguous config resolves the same way twice. Returns "" when no
+// scope matches, which is the normal case for a credential type this verifier
+// has no credential_metadata for.
+func (c *Client) scopeMatchingVCTValues(values []string) (string, []string) {
+	if c.cfg.Common == nil {
+		return "", nil
+	}
+	for _, scope := range slices.Sorted(maps.Keys(c.cfg.Common.CredentialMetadata)) {
+		identifiers := c.cfg.Common.CredentialMetadata[scope].VCTQueryValues()
+		if slices.ContainsFunc(identifiers, func(id string) bool { return slices.Contains(values, id) }) {
+			return scope, identifiers
 		}
 	}
+	return "", nil
+}
+
+// appendMissing appends each of extra not already in base, preserving base's
+// order - the operator's own value keeps first position.
+func appendMissing(base, extra []string) []string {
+	for _, v := range extra {
+		if !slices.Contains(base, v) {
+			base = append(base, v)
+		}
+	}
+	return base
 }
 
 // buildDCQLQueryFromConfig builds a DCQL query using credential constructor config.

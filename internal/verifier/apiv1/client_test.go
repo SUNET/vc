@@ -369,6 +369,41 @@ func TestClient_createDCQLQuery(t *testing.T) {
 	}
 }
 
+// sdJWTScope is a dc+sd-jwt credential_metadata entry whose VCTM declares its
+// own vct. VCTURL is deliberately left unset: dcqlClientFor runs ResolveVCTUrls,
+// which derives it exactly as the server does at startup, so these fixtures
+// exercise the real resolution rather than a hand-built approximation of it.
+func sdJWTScope(vct string) *model.CredentialMetadata {
+	return &model.CredentialMetadata{
+		Format:       "dc+sd-jwt",
+		VCTMFilePath: "/path/to/vctm",
+		VCTM:         &sdjwtvc.VCTM{VCT: vct},
+	}
+}
+
+// w3cScope is the same thing in a format DCQL has no expressible constraint for.
+func w3cScope(vct string) *model.CredentialMetadata {
+	cm := sdJWTScope(vct)
+	cm.Format = "ldp_vc"
+	return cm
+}
+
+// dcqlClientFor builds a verifier client over the given credential_metadata and
+// presets, with VCT URLs resolved as the server resolves them at startup.
+func dcqlClientFor(t *testing.T, credMeta map[string]*model.CredentialMetadata, presets map[string]model.PresetDefinition) *Client {
+	t.Helper()
+
+	cfg := &model.Cfg{
+		Common:   &model.Common{CredentialMetadata: credMeta},
+		Verifier: &model.Verifier{Presets: presets},
+	}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+	return client
+}
+
 // TestBuildDCQLQueryFromConfigMetaConstraints pins the two things this builder
 // got wrong before SUNET/vc#673: it sent only one of the two vct identifiers a
 // wallet might match on, and it sent vct_values for mso_mdoc scopes, which are
@@ -378,26 +413,11 @@ func TestClient_createDCQLQuery(t *testing.T) {
 // TestUIMetadataOffersBothVCTIdentifiers; this is the OIDC-RP fallback path,
 // which the original "offer both" fix never reached.
 func TestBuildDCQLQueryFromConfigMetaConstraints(t *testing.T) {
-	cfg := &model.Cfg{
-		Common: &model.Common{
-			CredentialMetadata: map[string]*model.CredentialMetadata{
-				// VCTURL is not hand-set: ResolveVCTUrls below derives it
-				// exactly as production does, so this exercises the real path.
-				"pid": {
-					Format:       "dc+sd-jwt",
-					VCTMFilePath: "/path/to/vctm",
-					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-				},
-				"pid_mdoc": {
-					Format: "mso_mdoc",
-					MDDL:   &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"},
-				},
-			},
-		},
-	}
-	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid":      sdJWTScope("urn:eudi:pid:1"),
+		"pid_mdoc": {Format: "mso_mdoc", MDDL: &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"}},
+	}, nil)
 
-	client, _ := CreateTestClientWithMock(t, cfg)
 	dcql, err := client.buildDCQLQueryFromConfig([]string{"pid", "pid_mdoc"})
 	require.NoError(t, err)
 	require.Len(t, dcql.Credentials, 2)
@@ -432,24 +452,10 @@ func TestBuildDCQLQueryFromConfigMetaConstraints(t *testing.T) {
 // With the only requested scope skipped, the builder fails loudly rather than
 // returning a query that matches nothing.
 func TestBuildDCQLQueryFromConfigSkipsW3CScope(t *testing.T) {
-	cfg := &model.Cfg{
-		Common: &model.Common{
-			CredentialMetadata: map[string]*model.CredentialMetadata{
-				"diploma_ldp": {
-					Format:       "ldp_vc",
-					VCTMFilePath: "/path/to/vctm_diploma",
-					VCTM:         &sdjwtvc.VCTM{VCT: "urn:credential:diploma:1"},
-				},
-				"pid": {
-					Format:       "dc+sd-jwt",
-					VCTMFilePath: "/path/to/vctm_pid",
-					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-				},
-			},
-		},
-	}
-	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
-	client, _ := CreateTestClientWithMock(t, cfg)
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"diploma_ldp": w3cScope("urn:credential:diploma:1"),
+		"pid":         sdJWTScope("urn:eudi:pid:1"),
+	}, nil)
 
 	// Mixed with a usable scope is still an error, not a partial query. A
 	// dropped scope would stay in the OIDC request's scope list
@@ -480,20 +486,10 @@ func TestBuildDCQLQueryFromConfigSkipsW3CScope(t *testing.T) {
 // read credInfo.Format directly and panicked while reporting the very config
 // error it was reporting.
 func TestBuildDCQLQueryFromConfigNilMetadataValue(t *testing.T) {
-	cfg := &model.Cfg{
-		Common: &model.Common{
-			CredentialMetadata: map[string]*model.CredentialMetadata{
-				"broken": nil,
-				"pid": {
-					Format:       "dc+sd-jwt",
-					VCTMFilePath: "/path/to/vctm_pid",
-					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-				},
-			},
-		},
-	}
-	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
-	client, _ := CreateTestClientWithMock(t, cfg)
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"broken": nil,
+		"pid":    sdJWTScope("urn:eudi:pid:1"),
+	}, nil)
 
 	// Must not panic. A nil entry is a CONFIGURED scope that cannot be
 	// expressed, so it is reported rather than dropped - the key is present,
@@ -513,33 +509,16 @@ func TestBuildDCQLQueryFromConfigNilMetadataValue(t *testing.T) {
 // of that format. An unconstrained query over-discloses silently, which is worse
 // than a missing one.
 func TestUIMetadataDropsPresetWithUnconstrainableScope(t *testing.T) {
-	cfg := &model.Cfg{
-		Common: &model.Common{
-			CredentialMetadata: map[string]*model.CredentialMetadata{
-				"pid": {
-					Format:       "dc+sd-jwt",
-					VCTMFilePath: "/path/to/vctm_pid",
-					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-				},
-				// No DCQL constraint is expressible for a W3C VC scope.
-				"diploma_ldp": {
-					Format:       "ldp_vc",
-					VCTMFilePath: "/path/to/vctm_diploma",
-					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
-				},
-			},
-		},
-		Verifier: &model.Verifier{
-			Presets: map[string]model.PresetDefinition{
-				// Mixed: keeps the usable scope, drops the other.
-				"MIXED": {Credentials: model.VerificationPreset{"pid": nil, "diploma_ldp": nil}},
-				// Nothing usable at all: the whole preset goes.
-				"LDP_ONLY": {Credentials: model.VerificationPreset{"diploma_ldp": nil}},
-			},
-		},
-	}
-	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
-	client, _ := CreateTestClientWithMock(t, cfg)
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid": sdJWTScope("urn:eudi:pid:1"),
+		// No DCQL constraint is expressible for a W3C VC scope.
+		"diploma_ldp": w3cScope("urn:eudi:diploma:1"),
+	}, map[string]model.PresetDefinition{
+		// Mixed: keeps the usable scope, drops the other.
+		"MIXED": {Credentials: model.VerificationPreset{"pid": nil, "diploma_ldp": nil}},
+		// Nothing usable at all: the whole preset goes.
+		"LDP_ONLY": {Credentials: model.VerificationPreset{"diploma_ldp": nil}},
+	})
 
 	reply, err := client.UIMetadata(t.Context())
 	require.NoError(t, err)
@@ -566,23 +545,10 @@ func TestUIMetadataDropsPresetWithUnconstrainableScope(t *testing.T) {
 // The operator's own value stays first; the scope's remaining identifiers are
 // appended, since meta.vct_values is an acceptable-value list.
 func TestAugmentVCTValuesFromConfig(t *testing.T) {
-	cfg := &model.Cfg{
-		Common: &model.Common{
-			CredentialMetadata: map[string]*model.CredentialMetadata{
-				"pid": {
-					Format:       "dc+sd-jwt",
-					VCTMFilePath: "/path/to/vctm_pid",
-					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-				},
-				"pid_mdoc": {
-					Format: "mso_mdoc",
-					MDDL:   &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"},
-				},
-			},
-		},
-	}
-	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
-	client, _ := CreateTestClientWithMock(t, cfg)
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid":      sdJWTScope("urn:eudi:pid:1"),
+		"pid_mdoc": {Format: "mso_mdoc", MDDL: &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"}},
+	}, nil)
 
 	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
 		// Shaped like presentation_requests/eudi_pid.yaml: the query id is a

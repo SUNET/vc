@@ -133,6 +133,16 @@ type VerificationDirectPostResponse struct {
 	RedirectURI                       string `json:"redirect_uri"`
 }
 
+// claimQueriesFor turns one auth scope's configured auth_claims into DCQL claim
+// queries.
+func claimQueriesFor(entry model.AuthScopeEntry) []openid4vp.ClaimQuery {
+	queries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims))
+	for _, claim := range entry.AuthClaims {
+		queries = append(queries, openid4vp.ClaimQuery{Path: openid4vp.StringPath(claim)})
+	}
+	return queries
+}
+
 // buildAuthDCQL builds the DCQL query a wallet answers to authenticate before
 // issuance: one CredentialQuery per configured auth scope, so the wallet can
 // present any of the acceptable credential types (e.g. pid OR eduid), each
@@ -145,12 +155,6 @@ func (c *Client) buildAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth) *openid4vp
 	options := make([][]string, 0, len(vpAuth.AuthScopes))
 	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
 		entry := vpAuth.AuthScopes[authScope]
-		scopeClaimQueries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims))
-		for _, claim := range entry.AuthClaims {
-			scopeClaimQueries = append(scopeClaimQueries, openid4vp.ClaimQuery{
-				Path: openid4vp.StringPath(claim),
-			})
-		}
 
 		// The meta constraint follows the credential's FORMAT (OpenID4VP 1.0
 		// 6.4.1): doctype_value for mdoc, vct_values - carrying BOTH
@@ -181,7 +185,7 @@ func (c *Client) buildAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth) *openid4vp
 			Multiple:                          false,
 			Meta:                              meta,
 			RequireCryptographicHolderBinding: new(false),
-			Claims:                            scopeClaimQueries,
+			Claims:                            claimQueriesFor(entry),
 		})
 		options = append(options, []string{authScope})
 	}
