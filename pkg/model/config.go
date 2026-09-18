@@ -1767,13 +1767,16 @@ func (c *Cfg) VCTQueryValuesForScopes(scopes []string) []string {
 //
 // Duplicates are collapsed, which is what happens for a VCTM file with no
 // "vct" field: ResolveVCTUrls back-fills VCTM.VCT from the derived URL, so both
-// are the same string and a one-element list is the correct answer. Note that
-// this is the case for every VCTM shipped in metadata/, so a stock deployment
-// legitimately advertises a single value - that is a property of the metadata,
-// not of this function.
+// are the same string and a one-element list is the correct answer. That is a
+// property of the metadata, not of this function - every VCTM shipped in
+// metadata/ used to omit "vct" and so collapse to one value, which made the
+// two-identifier fix above a no-op for a stock deployment; each now declares
+// the identifier credential_types.go defines for it, so the list really is two
+// distinct values. A VCTM file that still omits "vct" collapses as described.
 //
-// Returns nil for mso_mdoc scopes: they have no vct at all, and DCQL constrains
-// them with doctype_value instead. Nil receiver returns nil, so callers can
+// Returns nil for mso_mdoc scopes: DCQL constrains them with doctype_value
+// instead, and the Format switch below enforces that rather than relying on
+// such an entry having no VCTM. Nil receiver returns nil, so callers can
 // hand this the result of a map lookup that missed.
 func (c *CredentialMetadata) VCTQueryValues() []string {
 	if c == nil {
