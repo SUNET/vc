@@ -564,9 +564,11 @@ Alpine.data("app", () => ({
         // type_values - an array of type alternatives - and sending vct_values
         // for one is the same class of mistake as sending it for an mdoc: a
         // constraint the wallet does not match that format by. The server only
-        // publishes type_values for a scope whose credential_types narrows it
-        // beyond the base type, so an unconstrainable W3C scope never reaches
-        // here at all.
+        // publishes type_values for a scope that configures credential_type_values
+        // - fully expanded IRIs, and narrowing past the base type every W3C
+        // credential carries - so an unconstrainable W3C scope never reaches
+        // here at all. (credential_types is the separate compact-term list the
+        // issuer metadata advertises; it cannot be expanded into these.)
         const isW3C = ["ldp_vc", "vc+ld+json", "jwt_vc_json"].includes(this.credentialAttributes.format);
         let meta;
         if (this.credentialAttributes.format === "mso_mdoc") {

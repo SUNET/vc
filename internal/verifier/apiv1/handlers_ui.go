@@ -41,10 +41,15 @@ type UICredentialInfo struct {
 	// for mdoc credentials, not about satisfying a parsing constraint.
 	VCTValues []string `json:"vct_values,omitempty"`
 	// TypeValues is the W3C VC equivalent: the type alternatives a wallet
-	// matches an ldp_vc or jwt_vc_json credential by. Empty for every other
-	// format, and for a W3C scope whose credential_types is unset - see
-	// model.CredentialMetadata.DCQLMetaQuery for why the bare base type is
-	// refused rather than sent.
+	// matches an ldp_vc, vc+ld+json or jwt_vc_json credential by, as fully
+	// expanded IRIs.
+	//
+	// From credential_type_values - NOT credential_types, which is the
+	// compact-term list the issuer metadata advertises and cannot be expanded
+	// into these. Empty for every other format, and for a W3C scope that
+	// configures no credential_type_values, or only the base type every W3C
+	// credential carries: see model.CredentialMetadata.DCQLMetaQuery for why
+	// that is refused rather than sent.
 	TypeValues [][]string                      `json:"type_values,omitempty"`
 	Attributes map[string]map[string][]*string `json:"attributes"`
 }
@@ -87,8 +92,9 @@ type UIPresetMeta struct {
 	DoctypeValue string `json:"doctype_value,omitempty"`
 	// TypeValues is set for the W3C VC formats, whose DCQL constraint is
 	// neither vct_values nor doctype_value but a list of type alternatives
-	// (OpenID4VP 1.0 6.4.1). Comes from credential_types - see
-	// model.CredentialMetadata.W3CTypes.
+	// (OpenID4VP 1.0 6.4.1). Comes from credential_type_values - fully
+	// expanded IRIs - see model.CredentialMetadata.CredentialTypeValues, and
+	// note it is not the credential_types list the issuer metadata uses.
 	TypeValues [][]string `json:"type_values,omitempty"`
 	// ZKSystemType is set when the preset's VerificationPresetScope
 	// overrides it - see that type's own doc comment.
