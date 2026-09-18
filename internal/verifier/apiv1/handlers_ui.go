@@ -173,9 +173,25 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				"scope", scope, "format", constructor.Format)
 			continue
 		}
-		// Empty for mdoc, whose constraint is the doctype the UI already reads
-		// from VCT above; omitempty then drops the field.
+		// Empty for mdoc, which is constrained by its doctype instead;
+		// omitempty then drops the field.
 		info.VCTValues = mq.VCTValues
+
+		// For an mdoc scope the doctype IS the identifier, and
+		// presentation-definition.js sends info.VCT as meta.doctype_value - so
+		// it has to be the same string the server-side builders would use, not
+		// whatever the chain above happened to find first.
+		//
+		// The two disagreed. That chain reads VCTM.VCT, then VCTURL, then the
+		// MDDL's doctype, and never the configured Doctype at all, so a
+		// registry-backed mdoc scope - doctype configured, no MDDL document in
+		// hand - left info.VCT empty and the UI sent an empty doctype_value,
+		// matching nothing. A scope carrying both a VCTM and an MDDL picked the
+		// VCTM's vct while DCQLMetaQuery picked the MDDL's doctype, so the UI
+		// asked for one thing and every other path asked for another.
+		if mq.DoctypeValue != "" {
+			info.VCT = mq.DoctypeValue
+		}
 		reply.Credentials[scope] = info
 	}
 
