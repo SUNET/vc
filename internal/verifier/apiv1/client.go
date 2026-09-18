@@ -364,15 +364,15 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 
 	// If we have a presentation builder with templates, use it
 	if c.presentationBuilder != nil {
-		dcql, err := c.presentationBuilder.BuildDCQLQuery(ctx, scopes)
-		// IsGenericDCQL, not just a nil check: BuildDCQLQuery answers "no
-		// template matched" with a non-nil placeholder that constrains nothing
-		// and hardcodes one format, so a plain nil check made the fallback
-		// below unreachable for every deployment with presentation_requests
-		// configured. A configured mso_mdoc scope with no template of its own
-		// then got an unconstrained vc+sd-jwt query instead of the
-		// format-aware one buildDCQLQueryFromConfig builds.
-		if err == nil && dcql != nil && !openid4vp.IsGenericDCQL(dcql) {
+		// TemplateDCQLQuery, not BuildDCQLQuery: the latter answers "no
+		// template matched" with a generic placeholder that constrains nothing
+		// and hardcodes one format, which reads exactly like success. This
+		// branch used to accept it, so the fallback below was unreachable for
+		// every deployment with presentation_requests configured - a
+		// configured mso_mdoc scope with no template of its own got an
+		// unconstrained vc+sd-jwt query instead of its doctype.
+		dcql, matched := c.presentationBuilder.TemplateDCQLQuery(ctx, scopes)
+		if matched {
 			// Templates take priority over buildDCQLQueryFromConfig, so
 			// without this every SUNET/vc#673 fix below would be unreachable
 			// for the deployment shape that actually ships: each template in

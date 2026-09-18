@@ -708,15 +708,18 @@ func TestCreateDCQLQueryFallsBackWhenNoTemplateMatches(t *testing.T) {
 		"pid_mdoc": {Format: "mso_mdoc", MDDL: &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"}},
 	}, nil)
 
-	// A builder with no templates at all: every lookup yields the placeholder.
+	// A builder with no templates at all: nothing can match.
 	builder := openid4vp.NewPresentationBuilder([]openid4vp.PresentationRequestTemplate(nil))
 	client.presentationBuilder = builder
 
-	// Sanity: this is the shape the branch has to recognise.
+	// The two builder entry points disagree on purpose, and that disagreement
+	// is the bug: BuildDCQLQuery hands back a non-nil placeholder that reads
+	// like success, while TemplateDCQLQuery says plainly that nothing matched.
 	generic, err := builder.BuildDCQLQuery(t.Context(), []string{"pid_mdoc"})
 	require.NoError(t, err)
 	require.NotNil(t, generic, "the placeholder is non-nil, which is what made a nil check insufficient")
-	require.True(t, openid4vp.IsGenericDCQL(generic))
+	_, matched := builder.TemplateDCQLQuery(t.Context(), []string{"pid_mdoc"})
+	require.False(t, matched)
 
 	dcql, err := client.createDCQLQuery(t.Context(), []string{"pid_mdoc"})
 	require.NoError(t, err)
