@@ -183,6 +183,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkAuthScopes(cfg); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 
@@ -206,6 +210,45 @@ func checkCredentialMetadataEntries(cfg *model.Cfg) error {
 	}
 	if len(empty) > 0 {
 		return fmt.Errorf("common.credential_metadata: no configuration under %s", strings.Join(empty, ", "))
+	}
+	return nil
+}
+
+// checkAuthScopes verifies that every openid4vp auth_scopes key names a scope
+// that common.credential_metadata actually configures.
+//
+// The struct-level validation in pkg/helpers checks that auth_scopes is
+// non-empty, does not name the scope it authenticates, and gives every entry
+// auth_claims - but it sees only the DataSources stanza, so it cannot tell
+// whether a key resolves to a credential. A typo'd or stale auth scope
+// therefore started the server, and Cfg.GetCredentialMetadata returned nil for
+// it at request time: the apigw's pre-issuance verifier then built a DCQL query
+// for a credential that does not exist, and before the accessors were made
+// nil-safe it panicked outright (SUNET/vc#681).
+//
+// This runs here rather than as a struct-level rule because it needs the whole
+// Cfg - credential_metadata lives under common, auth_scopes under apigw - and
+// after the service-scoping switch above, so a verifier or issuer process with
+// no APIGW stanza simply has nothing to check.
+func checkAuthScopes(cfg *model.Cfg) error {
+	if cfg.APIGW == nil {
+		return nil
+	}
+
+	var problems []string
+	for _, scope := range slices.Sorted(maps.Keys(cfg.APIGW.DataSources.Datastore.Scopes)) {
+		credential := cfg.APIGW.DataSources.Datastore.Scopes[scope]
+		if credential.AuthProvider != model.AuthProviderOpenID4VP {
+			continue
+		}
+		for _, authScope := range slices.Sorted(maps.Keys(credential.AuthScopes)) {
+			if cfg.GetCredentialMetadata(authScope) == nil {
+				problems = append(problems, fmt.Sprintf("%s.auth_scopes.%s", scope, authScope))
+			}
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("apigw.data_sources.datastore.scopes: %s name no scope in common.credential_metadata, so no credential can be requested for them", strings.Join(problems, ", "))
 	}
 	return nil
 }
