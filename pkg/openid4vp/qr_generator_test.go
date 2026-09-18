@@ -136,12 +136,16 @@ func TestGenerateQR(t *testing.T) {
 // a different URI. Wallets that match the scheme plus "//" - which is what
 // the spec's examples show - then failed to recognise the offer at all.
 func TestGenerateQR_KeepsEmptyAuthority(t *testing.T) {
-	for _, uri := range []string{
-		"openid-credential-offer://?credential_offer=%7B%22credential_issuer%22%3A%22https%3A%2F%2Fissuer.example.com%22%7D",
-		"openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer.example.com%2Foffer%2F1",
-		"openid4vp://?client_id=x",
+	for _, tt := range []struct {
+		name string
+		uri  string
+	}{
+		{"offer by value", "openid-credential-offer://?credential_offer=%7B%22credential_issuer%22%3A%22https%3A%2F%2Fissuer.example.com%22%7D"},
+		{"offer by reference", "openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer.example.com%2Foffer%2F1"},
+		{"presentation request", "openid4vp://?client_id=x"},
 	} {
-		t.Run(uri[:34], func(t *testing.T) {
+		uri := tt.uri
+		t.Run(tt.name, func(t *testing.T) {
 			got, err := GenerateQR(uri, qrcode.Medium, 256)
 			assert.NoError(t, err)
 			assert.Equal(t, uri, got.URI, "the authority marker must survive")
