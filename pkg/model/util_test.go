@@ -6,6 +6,9 @@ import (
 
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBoolVal(t *testing.T) {
@@ -346,15 +349,7 @@ func TestVCTQueryValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.cm.VCTQueryValues()
-			if len(got) != len(tt.want) {
-				t.Fatalf("got %v, want %v", got, tt.want)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Fatalf("got %v, want %v", got, tt.want)
-				}
-			}
+			assert.Equal(t, tt.want, tt.cm.VCTQueryValues())
 		})
 	}
 }
@@ -383,25 +378,14 @@ func TestVCTQueryValuesForScopes(t *testing.T) {
 		"pid_mdoc": {Format: "mso_mdoc"},
 	}}}
 
-	got := cfg.VCTQueryValuesForScopes([]string{"pid", "pid_alias", "ehic", "pid_mdoc", "nosuchscope"})
 	want := []string{
 		"urn:eudi:pid:1",
 		"https://apigw.example/type-metadata/pid",
 		"urn:eudi:ehic:1",
 		"https://apigw.example/type-metadata/ehic",
 	}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			t.Fatalf("got %v, want %v", got, want)
-		}
-	}
-
-	if vals := cfg.VCTQueryValuesForScopes(nil); len(vals) != 0 {
-		t.Errorf("expected empty for no scopes, got %v", vals)
-	}
+	assert.Equal(t, want, cfg.VCTQueryValuesForScopes([]string{"pid", "pid_alias", "ehic", "pid_mdoc", "nosuchscope"}))
+	assert.Empty(t, cfg.VCTQueryValuesForScopes(nil))
 }
 
 // TestDCQLMetaQueryFollowsFormat pins the constraint to the credential's
@@ -493,23 +477,12 @@ func TestDCQLMetaQueryFollowsFormat(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, ok := tt.cm.DCQLMetaQuery()
-			if ok != tt.wantOK {
-				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
-			}
+			require.Equal(t, tt.wantOK, ok)
 			if !ok {
 				return
 			}
-			if got.DoctypeValue != tt.wantDoctype {
-				t.Errorf("doctype_value = %q, want %q", got.DoctypeValue, tt.wantDoctype)
-			}
-			if len(got.VCTValues) != len(tt.wantVCTs) {
-				t.Fatalf("vct_values = %v, want %v", got.VCTValues, tt.wantVCTs)
-			}
-			for i := range got.VCTValues {
-				if got.VCTValues[i] != tt.wantVCTs[i] {
-					t.Fatalf("vct_values = %v, want %v", got.VCTValues, tt.wantVCTs)
-				}
-			}
+			assert.Equal(t, tt.wantDoctype, got.DoctypeValue)
+			assert.Equal(t, tt.wantVCTs, got.VCTValues)
 		})
 	}
 }
