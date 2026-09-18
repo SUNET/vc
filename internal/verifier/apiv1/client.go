@@ -455,6 +455,22 @@ func (c *Client) queryIDForScope(dcql *openid4vp.DCQL, scope string) (string, bo
 		return queryIDForConstraint(dcql, meta)
 	}
 
+	// Never an ordinary OIDC scope. eudi_pid_basic is selected by "pid
+	// profile", so without this "profile" would map to the same sole query as
+	// "pid" - and since a mapped scope counts as a credential scope
+	// (credentialScopes), the one credential would be resolved and processed
+	// twice: duplicated in scopeCredentials and the cache, with validations,
+	// revocation and combined-binding applied over it again.
+	//
+	// This only excludes the scopes OIDC Core defines. A deployment could still
+	// name some other non-credential scope in a template's oidc_scopes and have
+	// it map here; templates name credential-ish scopes in practice, and the
+	// alternative - requiring every template scope to be configured - is the
+	// restriction that left the alias templates broken to begin with.
+	if openid4vp.StandardOIDCScopes[scope] {
+		return "", false
+	}
+
 	if len(dcql.Credentials) == 1 {
 		return dcql.Credentials[0].ID, true
 	}

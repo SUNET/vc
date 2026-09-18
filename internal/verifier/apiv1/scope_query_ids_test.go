@@ -311,3 +311,35 @@ func TestCredentialScopes(t *testing.T) {
 		assert.Equal(t, []string{"openid", "pid"}, got)
 	})
 }
+
+// TestScopeQueryIDsSkipsStandardOIDCScopes covers a review finding on the
+// alias-scope fallback, where two fixes in this branch interacted badly.
+//
+// eudi_pid_basic is selected by "pid profile". The fallback maps an
+// unconfigured scope to the sole query, which would have caught "profile" - and
+// because a mapped scope counts as a credential scope, the one credential would
+// then be resolved and processed TWICE: duplicated in scopeCredentials and the
+// cache, with validations, revocation and combined-binding applied over it
+// again.
+func TestScopeQueryIDsSkipsStandardOIDCScopes(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid": sdJWTScope("urn:eudi:pid:1"),
+	}, nil)
+
+	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+		{ID: "eudi_pid", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}}},
+	}}
+
+	// The scope list eudi_pid_basic is actually selected by, plus "openid".
+	got := client.ScopeQueryIDs(dcql, []string{"openid", "pid", "profile"})
+	assert.Equal(t, map[string]string{"pid": "eudi_pid"}, got)
+	assert.NotContains(t, got, "profile")
+	assert.NotContains(t, got, "openid")
+
+	// So the credential is resolved once, not once per ordinary scope.
+	assert.Equal(t, []string{"pid"}, client.credentialScopes(&cache.AuthorizationContext{
+		Scopes:        []string{"openid", "pid", "profile"},
+		ScopeQueryIDs: got,
+		DCQLQuery:     dcql,
+	}))
+}
