@@ -643,6 +643,61 @@ func TestAugmentVCTValuesOnlyUsesRequestedScopes(t *testing.T) {
 	assert.Equal(t, []string{"urn:eudi:pid:1"}, ambiguous.Credentials[0].Meta.VCTValues)
 }
 
+// TestAugmentVCTValuesIgnoresNonVCTFormats covers a review finding: ownership
+// has to be judged by the constraint a scope can actually contribute to.
+//
+// VCTQueryValues only withholds identifiers for mdoc, so a W3C scope carrying a
+// VCTM - which credential_metadata permits - looked like an owner of the type it
+// names. As the SOLE owner it was then used to complete an SD-JWT template query
+// naming that type, appending a type-metadata URL belonging to a format this
+// package says has no vct constraint at all.
+//
+// The sole-owner case is the one that exposes it: with a second, SD-JWT owner
+// present the ambiguity rule would prefer the requested scope and hide the
+// defect.
+func TestAugmentVCTValuesIgnoresNonVCTFormats(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"diploma_ldp": w3cScope("urn:eudi:diploma:1"),
+	}, nil)
+
+	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+		ID: "eudi_diploma", Format: "dc+sd-jwt",
+		Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:diploma:1"}},
+	}}}
+
+	client.augmentVCTValuesFromConfig(dcql, []string{"diploma_ldp"})
+
+	assert.Equal(t, []string{"urn:eudi:diploma:1"}, dcql.Credentials[0].Meta.VCTValues,
+		"a W3C scope must not contribute a vct_values entry")
+	assert.NotContains(t, dcql.Credentials[0].Meta.VCTValues, "https://apigw.example/type-metadata/diploma_ldp")
+}
+
+// TestAugmentVCTValuesPrefersTheVCTFormatOwner is the mixed version: the same
+// credential type configured in both an SD-JWT and a W3C format. Only the
+// SD-JWT scope may contribute, and the W3C entry must not make the match look
+// ambiguous either - an ambiguous match augments nothing, which would silently
+// reintroduce the bug this augmentation exists to fix.
+func TestAugmentVCTValuesPrefersTheVCTFormatOwner(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"diploma":     sdJWTScope("urn:eudi:diploma:1"),
+		"diploma_ldp": w3cScope("urn:eudi:diploma:1"),
+	}, nil)
+
+	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+		ID: "eudi_diploma", Format: "dc+sd-jwt",
+		Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:diploma:1"}},
+	}}}
+
+	// Requesting neither by name: the SD-JWT scope must still be the sole owner.
+	client.augmentVCTValuesFromConfig(dcql, []string{"diploma_full"})
+
+	assert.Equal(t,
+		[]string{"urn:eudi:diploma:1", "https://apigw.example/type-metadata/diploma"},
+		dcql.Credentials[0].Meta.VCTValues,
+	)
+	assert.NotContains(t, dcql.Credentials[0].Meta.VCTValues, "https://apigw.example/type-metadata/diploma_ldp")
+}
+
 // TestAugmentVCTValuesTemplateAliasScope covers the shape half the shipped
 // templates actually have, and which a requested-scope-only rule silently left
 // un-augmented - the bug this augmentation exists to remove.

@@ -430,6 +430,28 @@ func TestDCQLMetaQueryFollowsFormat(t *testing.T) {
 			wantDoctype: "eu.europa.ec.eudi.pid.1",
 		},
 		{
+			// An mdoc scope configured with a VCTM rather than an MDDL keeps
+			// its identifier there, and that string is then what the operator
+			// is using as the doctype - the verifier UI already reads it the
+			// same way. Dropping such a scope would take a working
+			// configuration away.
+			name:        "mdoc falls back to the VCTM's vct as a last resort",
+			cm:          &CredentialMetadata{Format: "mso_mdoc", VCTM: &sdjwtvc.VCTM{VCT: "org.iso.18013.5.1.mDL"}},
+			wantOK:      true,
+			wantDoctype: "org.iso.18013.5.1.mDL",
+		},
+		{
+			// The configured doctype wins over both documents.
+			name: "configured doctype takes precedence",
+			cm: &CredentialMetadata{
+				Format:  "mso_mdoc",
+				Doctype: "eu.europa.ec.eudi.pid.1",
+				MDDL:    &mdoc.MDDLSchema{DocType: "org.iso.18013.5.1.mDL"},
+			},
+			wantOK:      true,
+			wantDoctype: "eu.europa.ec.eudi.pid.1",
+		},
+		{
 			// validateMsoMdocZkQuery wants a non-empty meta.zk_system_type
 			// alongside the doctype, and the ZK specs live on
 			// VerificationPresetScope - nothing in credential_metadata can

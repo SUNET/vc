@@ -477,22 +477,40 @@ func (c *Client) identifiersForQuery(values, scopes []string) (matched, identifi
 	}
 
 	for _, scope := range owners {
-		identifiers = appendMissing(identifiers, c.cfg.Common.CredentialMetadata[scope].VCTQueryValues())
+		identifiers = appendMissing(identifiers, c.vctValuesFor(scope))
 	}
 	return owners, identifiers
 }
 
 // scopesOwningAny returns, in sorted order, every configured scope whose own
 // identifiers include one of values.
+//
+// Ownership is judged by DCQLMetaQuery's vct_values, not by VCTQueryValues:
+// the latter only withholds identifiers for mdoc, so a W3C scope carrying a
+// VCTM - which credential_metadata permits, and this repo's own fixtures do -
+// would be counted as an owner and have its type-metadata URL appended to an
+// SD-JWT query naming the same type. That would widen the query with an
+// identifier belonging to a format this package says has no vct constraint at
+// all. Only scopes whose own DCQL constraint IS a vct_values list can
+// contribute to one.
 func (c *Client) scopesOwningAny(values []string) []string {
 	var owners []string
 	for _, scope := range slices.Sorted(maps.Keys(c.cfg.Common.CredentialMetadata)) {
-		identifiers := c.cfg.Common.CredentialMetadata[scope].VCTQueryValues()
-		if slices.ContainsFunc(identifiers, func(id string) bool { return slices.Contains(values, id) }) {
+		if slices.ContainsFunc(c.vctValuesFor(scope), func(id string) bool { return slices.Contains(values, id) }) {
 			owners = append(owners, scope)
 		}
 	}
 	return owners
+}
+
+// vctValuesFor returns the scope's identifiers when its DCQL constraint is a
+// vct_values list, and nothing otherwise.
+func (c *Client) vctValuesFor(scope string) []string {
+	meta, ok := c.cfg.Common.CredentialMetadata[scope].DCQLMetaQuery()
+	if !ok {
+		return nil
+	}
+	return meta.VCTValues
 }
 
 // appendMissing appends each of extra not already in base, preserving base's
