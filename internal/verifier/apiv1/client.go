@@ -462,7 +462,13 @@ func (c *Client) queryIDForScope(dcql *openid4vp.DCQL, scope string) (string, bo
 }
 
 // queryIDForConstraint finds the credential query in dcql that carries meta's
-// constraint - the same doctype, or one of the same vct identifiers.
+// constraint - the same doctype, one of the same vct identifiers, or the same
+// W3C type alternative.
+//
+// The type_values arm matches nothing today, because DCQLMetaQuery has no W3C
+// constraint to return yet. It is here so this pairs correctly the moment
+// SUNET/vc#680 gives those scopes a type list rather than silently leaving W3C
+// requests unmapped - the same half-covered state this change exists to end.
 func queryIDForConstraint(dcql *openid4vp.DCQL, meta openid4vp.MetaQuery) (string, bool) {
 	for _, cred := range dcql.Credentials {
 		switch {
@@ -470,6 +476,12 @@ func queryIDForConstraint(dcql *openid4vp.DCQL, meta openid4vp.MetaQuery) (strin
 			return cred.ID, true
 		case len(meta.VCTValues) > 0 && slices.ContainsFunc(cred.Meta.VCTValues, func(v string) bool {
 			return slices.Contains(meta.VCTValues, v)
+		}):
+			return cred.ID, true
+		case len(meta.TypeValues) > 0 && slices.ContainsFunc(cred.Meta.TypeValues, func(t []string) bool {
+			return slices.ContainsFunc(meta.TypeValues, func(want []string) bool {
+				return slices.Equal(t, want)
+			})
 		}):
 			return cred.ID, true
 		}
