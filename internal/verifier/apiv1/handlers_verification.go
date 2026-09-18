@@ -147,21 +147,9 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(authCtx.Scopes))
 
 	for _, scope := range authCtx.Scopes {
-		vpTokens, ok := vpResponse.VPToken[scope]
-		if !ok || len(vpTokens) == 0 {
-			// Fallback: wallet sent vp_token as a plain string (single credential).
-			// Only allow this when exactly one scope was requested; otherwise
-			// the same credential would be reused for every scope with potentially
-			// wrong validations.
-			if len(authCtx.Scopes) != 1 {
-				c.log.Error(nil, "VP token not found for scope and multiple scopes requested", "scope", scope)
-				return nil, fmt.Errorf("VP token not found for scope %s: _default fallback is only allowed when a single scope is requested", scope)
-			}
-			vpTokens, ok = vpResponse.VPToken["_default"]
-			if !ok || len(vpTokens) == 0 {
-				c.log.Error(nil, "VP token not found for scope", "scope", scope)
-				return nil, fmt.Errorf("VP token not found for scope: %s", scope)
-			}
+		vpTokens, err := c.vpTokensForScope(authCtx, vpResponse, scope)
+		if err != nil {
+			return nil, err
 		}
 		if len(vpTokens) > 1 {
 			c.log.Info("multiple VP tokens received for scope, using first", "scope", scope, "count", len(vpTokens))
@@ -604,6 +592,49 @@ type VerificationCallbackRequest struct {
 
 type VerificationCallbackResponse struct {
 	CredentialData []sdjwtvc.CredentialCache `json:"credential_data"`
+}
+
+// vpTokensForScope finds the VP tokens a wallet returned for one requested
+// scope, in the three ways a response can name them.
+//
+// The scope's own key comes first, which is what a query built from
+// credential_metadata produces - buildDCQLQueryFromConfig keys each query by
+// the scope itself.
+//
+// Then the scope's DCQL credential query id. A wallet keys vp_token by QUERY
+// ID (OpenID4VP 1.0), and a presentation template names its queries whatever
+// its author chose: the shipped PID template asks for "eudi_pid" while the
+// request is made with scope "pid". Without this the verifier reads a key the
+// wallet never sent and the presentation fails after the user completed it -
+// the whole of SUNET/vc#682. ScopeQueryIDs carries only the differing pairs,
+// so an absent entry simply means the first lookup was the right one.
+//
+// Then "_default", for a wallet that sent vp_token as a plain string rather
+// than a map. That is only safe for a single-scope request: with several
+// scopes the same credential would be reused for each, carrying whichever
+// validations belong to the others.
+func (c *Client) vpTokensForScope(authCtx *cache.AuthorizationContext, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
+	if tokens, ok := vpResponse.VPToken[scope]; ok && len(tokens) > 0 {
+		return tokens, nil
+	}
+
+	if queryID, mapped := authCtx.ScopeQueryIDs[scope]; mapped {
+		if tokens, ok := vpResponse.VPToken[queryID]; ok && len(tokens) > 0 {
+			c.log.Debug("resolved VP token through the scope's DCQL query id", "scope", scope, "query_id", queryID)
+			return tokens, nil
+		}
+	}
+
+	if len(authCtx.Scopes) != 1 {
+		c.log.Error(nil, "VP token not found for scope and multiple scopes requested", "scope", scope)
+		return nil, fmt.Errorf("VP token not found for scope %s: _default fallback is only allowed when a single scope is requested", scope)
+	}
+	if tokens, ok := vpResponse.VPToken["_default"]; ok && len(tokens) > 0 {
+		return tokens, nil
+	}
+
+	c.log.Error(nil, "VP token not found for scope", "scope", scope)
+	return nil, fmt.Errorf("VP token not found for scope: %s", scope)
 }
 
 func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCallbackRequest) (*VerificationCallbackResponse, error) {

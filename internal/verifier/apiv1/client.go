@@ -380,6 +380,9 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 			// still asked for a single identifier and still missed the wallets
 			// matching the other one.
 			c.augmentVCTValuesFromConfig(dcql, scopes)
+			if uncovered := c.uncoveredScopes(dcql, scopes); len(uncovered) > 0 {
+				return nil, fmt.Errorf("the presentation template selected for this request does not cover requested scope(s) %v; a wallet would never be asked for them", uncovered)
+			}
 			c.log.Info("DCQL query built from presentation template", "credential_count", len(dcql.Credentials))
 			return dcql, nil
 		}
@@ -388,6 +391,101 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 
 	// Fallback to building DCQL query from credential config
 	return c.buildDCQLQueryFromConfig(scopes)
+}
+
+// ScopeQueryIDs pairs each requested scope with the id of the DCQL credential
+// query that stands for it, for the pairs where the two differ. The result is
+// what cache.AuthorizationContext.ScopeQueryIDs carries; see that field for why
+// it is needed at all.
+//
+// Pairing is by CONSTRAINT, since a template names its queries whatever its
+// author chose ("eudi_pid" for scope "pid"): a query stands for a scope when it
+// carries that scope's doctype, or one of its vct identifiers. Queries built
+// from credential_metadata are keyed by the scope already and produce no entry.
+//
+// A scope whose constraint this repo cannot express - a W3C VC one, see
+// model.CredentialMetadata.DCQLMetaQuery - is skipped rather than guessed at:
+// a template may well cover it with meta.type_values, but nothing in
+// credential_metadata says which types are its, so there is no honest way to
+// recognise the query. Those scopes keep today's scope-keyed lookup until
+// SUNET/vc#680 gives them a constraint to match on.
+func (c *Client) ScopeQueryIDs(dcql *openid4vp.DCQL, scopes []string) map[string]string {
+	if dcql == nil || c.cfg.Common == nil {
+		return nil
+	}
+	var pairs map[string]string
+	for _, scope := range scopes {
+		constructor, configured := c.cfg.Common.CredentialMetadata[scope]
+		if !configured {
+			continue
+		}
+		meta, ok := constructor.DCQLMetaQuery()
+		if !ok {
+			continue
+		}
+		queryID, found := queryIDForConstraint(dcql, meta)
+		if !found || queryID == scope {
+			continue
+		}
+		if pairs == nil {
+			pairs = make(map[string]string, len(scopes))
+		}
+		pairs[scope] = queryID
+	}
+	return pairs
+}
+
+// queryIDForConstraint finds the credential query in dcql that carries meta's
+// constraint - the same doctype, or one of the same vct identifiers.
+func queryIDForConstraint(dcql *openid4vp.DCQL, meta openid4vp.MetaQuery) (string, bool) {
+	for _, cred := range dcql.Credentials {
+		switch {
+		case meta.DoctypeValue != "" && cred.Meta.DoctypeValue == meta.DoctypeValue:
+			return cred.ID, true
+		case len(meta.VCTValues) > 0 && slices.ContainsFunc(cred.Meta.VCTValues, func(v string) bool {
+			return slices.Contains(meta.VCTValues, v)
+		}):
+			return cred.ID, true
+		}
+	}
+	return "", false
+}
+
+// uncoveredScopes returns the requested scopes that are configured, have a
+// constraint this repo can express, and are nonetheless absent from the built
+// query.
+//
+// Such a scope is a request the verifier cannot fulfil: it stays in
+// authCtx.Scopes, VerificationDirectPost requires a VP token for every entry
+// there, and the wallet was never asked for this one - so the flow fails only
+// after the user has completed a presentation, naming a credential they were
+// never prompted for. A template covering some of a request's scopes and not
+// others is exactly how that happens.
+//
+// Scopes whose constraint cannot be expressed are not reported: a template may
+// legitimately cover a W3C scope with meta.type_values, and there is no way to
+// tell yet (SUNET/vc#680). Rejecting them here would break a working
+// deployment, which is why an earlier, blunter version of this check was
+// reverted.
+func (c *Client) uncoveredScopes(dcql *openid4vp.DCQL, scopes []string) []string {
+	if dcql == nil || c.cfg.Common == nil {
+		return nil
+	}
+	var uncovered []string
+	for _, scope := range scopes {
+		constructor, configured := c.cfg.Common.CredentialMetadata[scope]
+		if !configured {
+			continue
+		}
+		meta, ok := constructor.DCQLMetaQuery()
+		if !ok {
+			continue
+		}
+		if _, found := queryIDForConstraint(dcql, meta); !found {
+			uncovered = append(uncovered, scope)
+		}
+	}
+	return uncovered
 }
 
 // augmentVCTValuesFromConfig completes a template-built query with the other
