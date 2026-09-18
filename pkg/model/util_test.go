@@ -479,30 +479,52 @@ func TestDCQLMetaQueryFollowsFormat(t *testing.T) {
 		},
 		{
 			// Configured types make the W3C formats requestable (SUNET/vc#680).
-			name: "ldp_vc with configured types gets type_values",
+			name: "ldp_vc with configured type values gets type_values",
 			cm: &CredentialMetadata{
-				Format:          "ldp_vc",
-				CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"},
+				Format: "ldp_vc",
+				CredentialTypeValues: [][]string{{
+					"https://www.w3.org/2018/credentials#VerifiableCredential",
+					"https://example.org/diploma#DiplomaCredential",
+				}},
 			},
-			wantOK:    true,
-			wantTypes: [][]string{{"VerifiableCredential", "DiplomaCredential"}},
+			wantOK: true,
+			wantTypes: [][]string{{
+				"https://www.w3.org/2018/credentials#VerifiableCredential",
+				"https://example.org/diploma#DiplomaCredential",
+			}},
 		},
 		{
-			name: "jwt_vc_json with configured types gets type_values",
+			name: "jwt_vc_json with configured type values gets type_values",
 			cm: &CredentialMetadata{
-				Format:          "jwt_vc_json",
-				CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"},
+				Format: "jwt_vc_json",
+				CredentialTypeValues: [][]string{{
+					"https://www.w3.org/2018/credentials#VerifiableCredential",
+					"https://example.org/diploma#DiplomaCredential",
+				}},
 			},
-			wantOK:    true,
-			wantTypes: [][]string{{"VerifiableCredential", "DiplomaCredential"}},
+			wantOK: true,
+			wantTypes: [][]string{{
+				"https://www.w3.org/2018/credentials#VerifiableCredential",
+				"https://example.org/diploma#DiplomaCredential",
+			}},
 		},
 		{
 			// The base type alone constrains nothing - it matches every W3C
 			// credential in the wallet - so it is refused rather than sent.
-			name: "ldp_vc with only the base type is still unusable",
+			name: "ldp_vc with only the base type IRI is still unusable",
+			cm: &CredentialMetadata{
+				Format:               "ldp_vc",
+				CredentialTypeValues: [][]string{{"https://www.w3.org/2018/credentials#VerifiableCredential"}},
+			},
+			wantOK: false,
+		},
+		{
+			// Compact terms feed the issuer metadata, not DCQL, and cannot be
+			// expanded here - so they make the scope requestable on their own.
+			name: "credential_types alone does not make a W3C scope requestable",
 			cm: &CredentialMetadata{
 				Format:          "ldp_vc",
-				CredentialTypes: []string{"VerifiableCredential"},
+				CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"},
 			},
 			wantOK: false,
 		},
@@ -610,13 +632,15 @@ func TestShippedVCTMsDeclareTheirVCT(t *testing.T) {
 	}
 }
 
-// TestW3CTypes covers the single source the issuer metadata, issuance and the
-// DCQL constraint all read (SUNET/vc#680).
+// TestW3CTypes covers the issuance side: the compact-term list the issuer
+// metadata advertises and issueVC20 mints from (SUNET/vc#680).
 //
-// Note the deliberate asymmetry with DCQLMetaQuery: issuing a credential typed
-// only "VerifiableCredential" is merely unspecific, while REQUESTING one is a
-// query matching every W3C credential in the wallet. So this defaults and that
-// refuses.
+// A verifier reads CredentialTypeValues instead, and the asymmetry with
+// DCQLMetaQuery is deliberate twice: the representations differ (compact terms
+// against fully expanded IRIs, which cannot be derived from one another without
+// a JSON-LD expansion), and so does the treatment of the bare base type -
+// issuing a credential typed only "VerifiableCredential" is unspecific, while
+// requesting one matches every W3C credential in the wallet.
 func TestW3CTypes(t *testing.T) {
 	tests := []struct {
 		name string
@@ -624,6 +648,8 @@ func TestW3CTypes(t *testing.T) {
 		want []string
 	}{
 		{
+			// Compact terms, as OID4VCI Appendix A.1 and the W3C VC data model
+			// use them - not the expanded IRIs DCQL matches on.
 			name: "configured types are used as written",
 			cm:   &CredentialMetadata{CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"}},
 			want: []string{"VerifiableCredential", "DiplomaCredential"},

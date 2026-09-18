@@ -11,14 +11,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// w3cScopeWithTypes is a W3C VC scope that declares the types it issues, which
-// is what makes it requestable at all (SUNET/vc#680).
-func w3cScopeWithTypes(types ...string) *model.CredentialMetadata {
+// diplomaTypeIRIs is the DCQL constraint for the fixture credential: fully
+// expanded IRIs, which is what meta.type_values requires.
+var diplomaTypeIRIs = [][]string{{
+	"https://www.w3.org/2018/credentials#VerifiableCredential",
+	"https://example.org/diploma#DiplomaCredential",
+}}
+
+// w3cScopeWithTypes is a W3C VC scope that declares the DCQL type values it is
+// requested by, which is what makes it requestable at all (SUNET/vc#680).
+func w3cScopeWithTypes(typeValues ...[]string) *model.CredentialMetadata {
 	return &model.CredentialMetadata{
-		Format:          "ldp_vc",
-		VCTMFilePath:    "/path/to/vctm",
-		VCTM:            &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
-		CredentialTypes: types,
+		Format:               "ldp_vc",
+		VCTMFilePath:         "/path/to/vctm",
+		VCTM:                 &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+		CredentialTypes:      []string{"VerifiableCredential", "DiplomaCredential"},
+		CredentialTypeValues: typeValues,
 	}
 }
 
@@ -28,7 +36,7 @@ func w3cScopeWithTypes(types ...string) *model.CredentialMetadata {
 // omitted it. With credential_types configured it is a first-class scope.
 func TestW3CScopeIsRequestable(t *testing.T) {
 	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
-		"diploma_ldp": w3cScopeWithTypes("VerifiableCredential", "DiplomaCredential"),
+		"diploma_ldp": w3cScopeWithTypes(diplomaTypeIRIs...),
 		"pid":         sdJWTScope("urn:eudi:pid:1"),
 	}, map[string]model.PresetDefinition{
 		"DIPLOMA": {Credentials: model.VerificationPreset{"diploma_ldp": nil}},
@@ -40,7 +48,7 @@ func TestW3CScopeIsRequestable(t *testing.T) {
 		require.Len(t, dcql.Credentials, 1)
 
 		cred := dcql.Credentials[0]
-		assert.Equal(t, [][]string{{"VerifiableCredential", "DiplomaCredential"}}, cred.Meta.TypeValues)
+		assert.Equal(t, diplomaTypeIRIs, cred.Meta.TypeValues)
 		assert.Empty(t, cred.Meta.VCTValues, "a W3C query must not carry vct_values")
 		assert.Empty(t, cred.Meta.DoctypeValue)
 		// The shape this repo's own validator demands for the format.
@@ -59,13 +67,12 @@ func TestW3CScopeIsRequestable(t *testing.T) {
 
 		require.Contains(t, reply.Credentials, "diploma_ldp")
 		info := reply.Credentials["diploma_ldp"]
-		assert.Equal(t, [][]string{{"VerifiableCredential", "DiplomaCredential"}}, info.TypeValues)
+		assert.Equal(t, diplomaTypeIRIs, info.TypeValues)
 		assert.Empty(t, info.VCTValues, "a W3C credential is not matched by vct_values")
 
 		require.Contains(t, reply.Presets, "DIPLOMA")
 		require.Len(t, reply.Presets["DIPLOMA"].Credentials, 1)
-		assert.Equal(t, [][]string{{"VerifiableCredential", "DiplomaCredential"}},
-			reply.Presets["DIPLOMA"].Credentials[0].Meta.TypeValues)
+		assert.Equal(t, diplomaTypeIRIs, reply.Presets["DIPLOMA"].Credentials[0].Meta.TypeValues)
 	})
 }
 
@@ -76,10 +83,10 @@ func TestW3CScopeIsRequestable(t *testing.T) {
 func TestW3CScopeWithoutTypesStaysUnusable(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		types []string
+		types [][]string
 	}{
-		{"no credential_types at all", nil},
-		{"only the base type", []string{"VerifiableCredential"}},
+		{"no credential_type_values at all", nil},
+		{"only the base type IRI", [][]string{{"https://www.w3.org/2018/credentials#VerifiableCredential"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client := dcqlClientFor(t, map[string]*model.CredentialMetadata{

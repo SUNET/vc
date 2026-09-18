@@ -1818,13 +1818,16 @@ func (c *CredentialMetadata) doctype() string {
 	return ""
 }
 
-// W3CTypes returns the W3C Verifiable Credential types this scope issues,
-// defaulting to the bare base type when credential_types is not configured -
-// which is what the issuer metadata always advertised.
+// W3CTypes returns the compact-term types this scope issues, defaulting to the
+// bare base type when credential_types is not configured - which is what the
+// issuer metadata always advertised.
 //
-// Note the asymmetry with DCQLMetaQuery, which refuses the default: issuing a
-// credential typed only "VerifiableCredential" is merely unspecific, while
-// REQUESTING one is a query that matches every W3C credential in the wallet.
+// This is the ISSUANCE side. A verifier constrains requests by
+// CredentialTypeValues instead, and the asymmetry is deliberate twice over:
+// the representations differ (compact terms against expanded IRIs), and so
+// does the treatment of the bare base type. Issuing a credential typed only
+// "VerifiableCredential" is merely unspecific; REQUESTING one is a query that
+// matches every W3C credential in the wallet.
 func (c *CredentialMetadata) W3CTypes() []string {
 	if c == nil || len(c.CredentialTypes) == 0 {
 		return []string{"VerifiableCredential"}
@@ -1832,15 +1835,28 @@ func (c *CredentialMetadata) W3CTypes() []string {
 	return slices.Clone(c.CredentialTypes)
 }
 
-// hasSpecificW3CTypes reports whether credential_types narrows the credential
-// beyond the base type every W3C VC carries.
-func (c *CredentialMetadata) hasSpecificW3CTypes() bool {
-	for _, t := range c.CredentialTypes {
-		if t != "" && t != "VerifiableCredential" {
-			return true
+// baseVCTypeIRI is the expanded form of the type every W3C Verifiable
+// Credential carries. A query constrained by it alone matches all of them.
+const baseVCTypeIRI = "https://www.w3.org/2018/credentials#VerifiableCredential"
+
+// w3cTypeValues returns the configured DCQL type_values, dropping any
+// alternative that would not actually narrow the request.
+//
+// An alternative naming only the base type matches every W3C credential in the
+// wallet, so accepting it would turn "this request cannot be built" into "this
+// request asks for anything" - the over-broad query this package declines to
+// emit everywhere else.
+func (c *CredentialMetadata) w3cTypeValues() [][]string {
+	var out [][]string
+	for _, alternative := range c.CredentialTypeValues {
+		narrowing := slices.ContainsFunc(alternative, func(t string) bool {
+			return t != "" && t != baseVCTypeIRI
+		})
+		if narrowing {
+			out = append(out, slices.Clone(alternative))
 		}
 	}
-	return false
+	return out
 }
 
 // DCQLMetaQuery returns the DCQL meta constraint for this credential type,
@@ -1861,9 +1877,12 @@ func (c *CredentialMetadata) hasSpecificW3CTypes() bool {
 //     Format field declares as defaulting to dc+sd-jwt): vct_values, carrying
 //     BOTH identifiers - see VCTQueryValues for why choosing one breaks half
 //     the deployed wallets.
-//   - ldp_vc / vc+ld+json / jwt_vc_json: type_values, from credential_types -
-//     but only when that list narrows the credential beyond the base
-//     "VerifiableCredential" every W3C VC carries. See below.
+//   - ldp_vc / vc+ld+json / jwt_vc_json: type_values, from
+//     credential_type_values - fully expanded IRIs, and only alternatives that
+//     narrow the credential beyond the base type every W3C VC carries. Note
+//     this is NOT credential_types, which is the compact-term list the issuer
+//     metadata advertises; see both fields for why they cannot be derived from
+//     each other.
 //   - anything else (jwp, mso_mdoc_zk): ok is false.
 //
 // ok=false covers four cases a caller must not paper over:
@@ -1937,10 +1956,11 @@ func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
 		// - it would turn "this request cannot be built" into "this request
 		// asks for anything", which over-discloses silently instead of
 		// failing. The caller reports the scope as unusable instead.
-		if !c.hasSpecificW3CTypes() {
+		typeValues := c.w3cTypeValues()
+		if len(typeValues) == 0 {
 			return openid4vp.MetaQuery{}, false
 		}
-		return openid4vp.MetaQuery{TypeValues: [][]string{c.W3CTypes()}}, true
+		return openid4vp.MetaQuery{TypeValues: typeValues}, true
 	default:
 		return openid4vp.MetaQuery{}, false
 	}
@@ -2034,24 +2054,41 @@ type CredentialMetadata struct {
 	Doctype string `yaml:"doctype,omitempty" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath MDDLUrl VCT"`
 
 	// CredentialTypes lists the W3C Verifiable Credential types this scope
-	// issues, most general first - conventionally starting with the base
-	// "VerifiableCredential" and narrowing from there, e.g.
+	// issues, most general first - conventionally the base
+	// "VerifiableCredential" and then narrowing, e.g.
 	// ["VerifiableCredential", "DiplomaCredential"].
 	//
-	// Used only for the W3C formats (ldp_vc, vc+ld+json, jwt_vc_json). It is
-	// the single source for a type list that has to agree in three places:
-	// the issuer metadata's credential_definition.type, the types issueVC20
-	// mints into the credential (which it reads back from that metadata), and
-	// the DCQL meta.type_values a verifier constrains a request by.
+	// Compact terms, as the W3C VC data model and OID4VCI Appendix A.1 use
+	// them. Advertised as credential_definition.type in the issuer metadata,
+	// which is also where issueVC20 reads the types it mints - so this one
+	// field keeps issuance and what is advertised in step.
 	//
-	// Without it there is no way to ask for such a credential: DCQL requires
-	// type_values for these formats, and the only value available was the
-	// hardcoded base type, which as a constraint matches EVERY W3C credential
-	// in a wallet rather than the intended one (SUNET/vc#680). Leaving it
-	// unset keeps exactly that behaviour for issuance, and a verifier reports
-	// the scope as having no expressible constraint rather than emitting an
-	// over-broad query - see DCQLMetaQuery.
+	// NOT what a verifier constrains a DCQL request by: see
+	// CredentialTypeValues, which is a different representation of the same
+	// credential and cannot be derived from this one.
+	//
+	// Used only for the W3C formats (ldp_vc, vc+ld+json, jwt_vc_json).
+	// Defaults to the bare base type, which is what was hardcoded before.
 	CredentialTypes []string `yaml:"credential_types,omitempty" json:"-" validate:"omitempty,dive,required"`
+
+	// CredentialTypeValues is the DCQL meta.type_values a verifier constrains
+	// a request for this credential by: an array of alternatives, each an
+	// array of types a credential must carry all of (OpenID4VP 1.0 6.4.1).
+	//
+	// FULLY EXPANDED IRIs, after the credential's @context has been applied -
+	// "https://www.w3.org/2018/credentials#VerifiableCredential", not
+	// "VerifiableCredential". That is what the format requires, and what
+	// openid4vp.MetaQuery.TypeValues and MatchTypeValues both document.
+	//
+	// Separate from CredentialTypes because the two genuinely differ: OID4VCI
+	// advertises compact terms and DCQL matches expanded IRIs, and going from
+	// one to the other needs the credential's @context and a JSON-LD
+	// expansion this repo does not do. Deriving one from the other would mean
+	// emitting a query wallets cannot match.
+	//
+	// Unset leaves the scope unrequestable - DCQLMetaQuery reports no
+	// expressible constraint - rather than guessing an expansion.
+	CredentialTypeValues [][]string `yaml:"credential_type_values,omitempty" json:"-" validate:"omitempty,dive,required,dive,required"`
 
 	MDDL *mdoc.MDDLSchema `yaml:"-" json:"-"`
 
