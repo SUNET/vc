@@ -1671,6 +1671,11 @@ func (c *Cfg) GetFormatForScope(scope string) string {
 
 // VCTUrlsForScopes resolves a list of scope keys to their resolved VCT URLs.
 // Scopes without a loaded VCTM are silently skipped.
+//
+// Not for DCQL meta.vct_values: this is only one of the two identifiers a
+// wallet might match a credential type by. Use VCTQueryValuesForScopes there -
+// see CredentialMetadata.VCTQueryValues for why choosing one breaks half the
+// deployed wallets.
 func (c *Cfg) VCTUrlsForScopes(scopes []string) []string {
 	urls := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
@@ -1694,6 +1699,11 @@ func (c *Cfg) VCTUrlsForScopes(scopes []string) []string {
 // embedded in a credential). DCQL queries built from VCTUrlsForScopes instead
 // of this never matched any real issued credential — confirmed live via a
 // fresh test issuance (lpidproto PLAN.md workstream 7 task 7.5, finding 16).
+//
+// Not for DCQL meta.vct_values either, for the mirror-image reason given on
+// VCTUrlsForScopes: finding 16 and finding 18 are both half-right, and a query
+// built from just one of them breaks the wallets that use the other. Use
+// VCTQueryValuesForScopes at DCQL call sites.
 func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 	ids := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
@@ -1706,6 +1716,83 @@ func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 		}
 	}
 	return ids
+}
+
+// VCTQueryValuesForScopes returns the DCQL meta.vct_values list covering every
+// given scope: the union of each scope's VCTQueryValues, in scope order,
+// deduplicated. Scopes with no credential metadata, and mso_mdoc scopes (which
+// DCQL constrains by doctype_value instead), contribute nothing.
+//
+// This is the function DCQL call sites want. See CredentialMetadata.VCTQueryValues
+// for why it returns both identifiers rather than picking one.
+func (c *Cfg) VCTQueryValuesForScopes(scopes []string) []string {
+	out := make([]string, 0, 2*len(scopes))
+	seen := make(map[string]bool, 2*len(scopes))
+	for _, scope := range scopes {
+		for _, v := range c.GetCredentialMetadata(scope).VCTQueryValues() {
+			if seen[v] {
+				continue
+			}
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// VCTQueryValues returns every identifier a wallet might legitimately match
+// this credential type by, most-specific first: the credential's own embedded
+// vct (VCTM.VCT), then the published type-metadata URL (VCTURL).
+//
+// Both forms have to be offered, because deployed wallets disagree about which
+// one identifies a credential, and each behaviour is live-verified in this
+// repo:
+//
+//   - The EUDI reference wallet (multipaz) matches the ISSUER METADATA's
+//     declared vct - our published type-metadata URL. Offer.kt sets
+//     SdJwtVcFormat(vct = configuration.type) and DcqlRequestProcessor filters
+//     candidates on that tag before ever parsing the credential body. See the
+//     finding-18 note in internal/apigw/apiv1/handlers_verifier.go.
+//
+//   - Other wallets (e.g. wwWallet/wallet-frontend) match the credential's own
+//     embedded "vct" claim, i.e. VCTM.VCT - the value BuildCredentialWithSigner
+//     (pkg/sdjwtvc/methods.go) writes as body["vct"]. See the finding-16 note
+//     on VCTIdentifiersForScopes above.
+//
+// DCQL's meta.vct_values is an acceptable-value list by design (OpenID4VP 1.0
+// 6.4.1), so emitting both satisfies either wallet instead of picking a winner
+// and silently breaking the other. Picking one is exactly what the finding-16
+// -> finding-18 flip-flop did, in both directions; offering both is what ends
+// it (SUNET/vc#673).
+//
+// Duplicates are collapsed, which is what happens for a VCTM file with no
+// "vct" field: ResolveVCTUrls back-fills VCTM.VCT from the derived URL, so both
+// are the same string and a one-element list is the correct answer. Note that
+// this is the case for every VCTM shipped in metadata/, so a stock deployment
+// legitimately advertises a single value - that is a property of the metadata,
+// not of this function.
+//
+// Returns nil for mso_mdoc scopes: they have no vct at all, and DCQL constrains
+// them with doctype_value instead. Nil receiver returns nil, so callers can
+// hand this the result of a map lookup that missed.
+func (c *CredentialMetadata) VCTQueryValues() []string {
+	if c == nil {
+		return nil
+	}
+	var out []string
+	seen := make(map[string]bool, 2)
+	add := func(v string) {
+		if v == "" || seen[v] {
+			return
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	if vctm := c.GetVCTM(); vctm != nil {
+		add(vctm.VCT)
+	}
+	add(c.GetVCTURL())
+	return out
 }
 
 // CredentialRegistry configures an optional TS11 credential metadata registry client (github.com/sirosfoundation/go-ts11client), disabled by default. When enabled, Registries is an ordered list of logical registries: a later entry overrides an earlier one for the same vct/doctype, so distinct registries are tried in that order rather than raced - only the mirrors within a single logical registry are queried concurrently, first hit wins, since only mirrors are expected to hold identical content.

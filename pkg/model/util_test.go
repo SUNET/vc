@@ -3,6 +3,8 @@ package model
 import (
 	"testing"
 	"time"
+
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
 func TestBoolVal(t *testing.T) {
@@ -282,5 +284,121 @@ func TestOpenID4VPConfig_GetPresentationRequestsDir(t *testing.T) {
 	c = &OpenID4VPConfig{PresentationRequestsDir: "/tmp/requests"}
 	if c.GetPresentationRequestsDir() != "/tmp/requests" {
 		t.Errorf("unexpected dir: %s", c.GetPresentationRequestsDir())
+	}
+}
+
+// TestVCTQueryValues pins the rule that ends the finding-16/finding-18
+// flip-flop (SUNET/vc#673): a DCQL meta.vct_values list carries BOTH
+// identifiers a wallet might match a credential type by, never one.
+func TestVCTQueryValues(t *testing.T) {
+	tests := []struct {
+		name string
+		cm   *CredentialMetadata
+		want []string
+	}{
+		{
+			// The case the bug was about: a VCTM whose own vct is a URN while
+			// the type-metadata URL is something else entirely. Picking either
+			// one alone is what broke half the deployed wallets.
+			name: "distinct vct and url yields both, credential's own vct first",
+			cm: &CredentialMetadata{
+				VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				VCTURL: "https://apigw.example/type-metadata/pid",
+				Format: "dc+sd-jwt",
+			},
+			want: []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
+		},
+		{
+			// Every VCTM shipped in metadata/ has no "vct" field, so
+			// ResolveVCTUrls back-fills it from the URL and the two collapse.
+			// A one-element list is the correct answer here - it is a property
+			// of the metadata, not a regression of this function.
+			name: "back-filled vct equal to url collapses to one value",
+			cm: &CredentialMetadata{
+				VCTM:   &sdjwtvc.VCTM{VCT: "https://apigw.example/type-metadata/pid"},
+				VCTURL: "https://apigw.example/type-metadata/pid",
+				Format: "dc+sd-jwt",
+			},
+			want: []string{"https://apigw.example/type-metadata/pid"},
+		},
+		{
+			name: "no VCTM falls back to the url alone",
+			cm: &CredentialMetadata{
+				VCTURL: "https://apigw.example/type-metadata/pid",
+				Format: "dc+sd-jwt",
+			},
+			want: []string{"https://apigw.example/type-metadata/pid"},
+		},
+		{
+			// mso_mdoc is constrained by doctype_value, not vct_values.
+			name: "mdoc scope contributes nothing",
+			cm:   &CredentialMetadata{Format: "mso_mdoc"},
+			want: nil,
+		},
+		{
+			// Callers hand this the result of a map lookup that may have missed.
+			name: "nil receiver",
+			cm:   nil,
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.cm.VCTQueryValues()
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("got %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// TestVCTQueryValuesForScopes covers the Cfg-level union: scope order is
+// preserved, values shared between scopes appear once, and unknown or mdoc
+// scopes contribute nothing rather than an empty string.
+func TestVCTQueryValuesForScopes(t *testing.T) {
+	cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{
+		"pid": {
+			VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+			VCTURL: "https://apigw.example/type-metadata/pid",
+			Format: "dc+sd-jwt",
+		},
+		"ehic": {
+			VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
+			VCTURL: "https://apigw.example/type-metadata/ehic",
+			Format: "dc+sd-jwt",
+		},
+		// Shares pid's URN, to prove the union deduplicates across scopes.
+		"pid_alias": {
+			VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+			VCTURL: "https://apigw.example/type-metadata/pid",
+			Format: "dc+sd-jwt",
+		},
+		"pid_mdoc": {Format: "mso_mdoc"},
+	}}}
+
+	got := cfg.VCTQueryValuesForScopes([]string{"pid", "pid_alias", "ehic", "pid_mdoc", "nosuchscope"})
+	want := []string{
+		"urn:eudi:pid:1",
+		"https://apigw.example/type-metadata/pid",
+		"urn:eudi:ehic:1",
+		"https://apigw.example/type-metadata/ehic",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+
+	if vals := cfg.VCTQueryValuesForScopes(nil); len(vals) != 0 {
+		t.Errorf("expected empty for no scopes, got %v", vals)
 	}
 }

@@ -395,21 +395,33 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 			continue
 		}
 
-		vctID := ""
-		if vctm := credInfo.GetVCTM(); vctm != nil {
-			vctID = vctm.VCT
+		// Which meta field applies is decided by format, not by what happens
+		// to be loaded: vct_values for sd-jwt, doctype_value for mso_mdoc
+		// (OpenID4VP 1.0 6.4.1). This used to emit vct_values unconditionally,
+		// so an mso_mdoc scope - which has an MDDL and no VCTM at all - went
+		// out as {"vct_values": [""]} with no doctype_value: a query no wallet
+		// can match, and one ValidateCredentialQuery rejects. handlers_ui.go
+		// already branched correctly; this builder never got the same fix.
+		meta := openid4vp.MetaQuery{}
+		if mddl := credInfo.GetMDDL(); mddl != nil && mddl.DocType != "" {
+			meta.DoctypeValue = mddl.DocType
+		} else {
+			// Both identifiers, for the reason documented on
+			// model.CredentialMetadata.VCTQueryValues: deployed wallets
+			// disagree about which one names a credential type, and
+			// vct_values is an acceptable-value list precisely so a verifier
+			// need not pick a winner. This path previously sent only the
+			// VCTM's own vct, which no multipaz-derived wallet matches
+			// (SUNET/vc#673).
+			meta.VCTValues = credInfo.VCTQueryValues()
 		}
-		c.log.Info("Matched scope to credential", "scope", scope, "vct", vctID, "format", credInfo.Format)
+		c.log.Info("Matched scope to credential", "scope", scope, "vct_values", meta.VCTValues, "doctype_value", meta.DoctypeValue, "format", credInfo.Format)
 
-		cred := openid4vp.CredentialQuery{
+		credentials = append(credentials, openid4vp.CredentialQuery{
 			ID:     scope,
 			Format: credInfo.Format,
-			Meta: openid4vp.MetaQuery{
-				VCTValues: []string{vctID},
-			},
-		}
-
-		credentials = append(credentials, cred)
+			Meta:   meta,
+		})
 	}
 
 	if len(credentials) == 0 {

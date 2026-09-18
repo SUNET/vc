@@ -26,23 +26,13 @@ type UICredentialInfo struct {
 	// VCTValues is every identifier a wallet might legitimately match this
 	// credential type by, for use as DCQL meta.vct_values.
 	//
-	// Both forms have to be offered, because deployed wallets disagree about
-	// which one identifies a credential, and each behaviour is live-verified
-	// in this repo:
+	// The rule - and why both forms have to be offered rather than one being
+	// chosen - lives on model.CredentialMetadata.VCTQueryValues, which every
+	// DCQL call site in this repo now shares. Keeping it in one place is the
+	// point: this field used to carry the only copy of that reasoning while
+	// two other call sites quietly each picked a different single value
+	// (SUNET/vc#673).
 	//
-	//   - The EUDI reference wallet (multipaz) matches the ISSUER METADATA's
-	//     declared vct - our published type-metadata URL. Offer.kt sets
-	//     SdJwtVcFormat(vct = configuration.type) and DcqlRequestProcessor
-	//     filters on that tag before ever parsing the credential body. See
-	//     the finding-18 note in internal/apigw/apiv1/handlers_verifier.go.
-	//
-	//   - Other wallets (e.g. wwWallet/wallet-frontend) match the credential's
-	//     own embedded "vct" claim, i.e. VCTM.VCT. See the finding-16 note on
-	//     VCTIdentifiersForScopes in pkg/model/config.go.
-	//
-	// vct_values is an acceptable-value list by design (OpenID4VP DCQL), so
-	// emitting both satisfies either wallet instead of picking a winner and
-	// silently breaking the other.
 	// omitempty: mso_mdoc scopes get no list (they're identified by doctype,
 	// not vct), so this drops the field entirely for them rather than
 	// emitting a meaningless "vct_values": null. The UI's schema tolerates
@@ -124,32 +114,11 @@ type UIMetadataReply struct {
 	DCAPIAutoAttempt bool `json:"dc_api_auto_attempt"`
 }
 
-// vctIdentifiersFor returns every identifier a wallet might match this
-// credential type by, most-specific first: the credential's own embedded vct
-// (VCTM.VCT), then the published type-metadata URL. Duplicates are collapsed,
-// which is what happens for a VCTM file with no "vct" field - ResolveVCTUrls
-// back-fills VCTM.VCT from the URL, so both are the same string.
-//
-// Returns nil for mso_mdoc scopes: they have no vct at all, and DCQL
-// constrains them with doctype_value instead.
+// vctIdentifiersFor is a thin alias for model.CredentialMetadata.VCTQueryValues,
+// kept so the UI-side call sites below read as they did before the resolution
+// moved into pkg/model to be shared with the apigw and OIDC-RP DCQL builders.
 func vctIdentifiersFor(constructor *model.CredentialMetadata) []string {
-	if constructor == nil {
-		return nil
-	}
-	var out []string
-	seen := make(map[string]bool, 2)
-	add := func(v string) {
-		if v == "" || seen[v] {
-			return
-		}
-		seen[v] = true
-		out = append(out, v)
-	}
-	if vctm := constructor.GetVCTM(); vctm != nil {
-		add(vctm.VCT)
-	}
-	add(constructor.GetVCTURL())
-	return out
+	return constructor.VCTQueryValues()
 }
 
 func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {

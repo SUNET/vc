@@ -5,7 +5,9 @@ import (
 	"encoding/base64"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/stretchr/testify/assert"
@@ -365,4 +367,59 @@ func TestClient_createDCQLQuery(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestBuildDCQLQueryFromConfigMetaConstraints pins the two things this builder
+// got wrong before SUNET/vc#673: it sent only one of the two vct identifiers a
+// wallet might match on, and it sent vct_values for mso_mdoc scopes, which are
+// constrained by doctype_value instead (OpenID4VP 1.0 6.4.1).
+//
+// The sibling assertion lives in handlers_ui_test.go's
+// TestUIMetadataOffersBothVCTIdentifiers; this is the OIDC-RP fallback path,
+// which the original "offer both" fix never reached.
+func TestBuildDCQLQueryFromConfigMetaConstraints(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				// VCTURL is not hand-set: ResolveVCTUrls below derives it
+				// exactly as production does, so this exercises the real path.
+				"pid": {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/path/to/vctm",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+				"pid_mdoc": {
+					Format: "mso_mdoc",
+					MDDL:   &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"},
+				},
+			},
+		},
+	}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	dcql, err := client.buildDCQLQueryFromConfig([]string{"pid", "pid_mdoc"})
+	require.NoError(t, err)
+	require.Len(t, dcql.Credentials, 2)
+
+	byID := map[string]openid4vp.CredentialQuery{}
+	for _, cred := range dcql.Credentials {
+		byID[cred.ID] = cred
+	}
+
+	// Both identifiers, credential's own vct first. Sending only
+	// "urn:eudi:pid:1" is what no multipaz-derived wallet can match; sending
+	// only the URL is what wwWallet can't match.
+	pid := byID["pid"]
+	assert.Equal(t, []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"}, pid.Meta.VCTValues)
+	assert.Empty(t, pid.Meta.DoctypeValue, "sd-jwt query must not carry a doctype_value")
+	assert.NoError(t, openid4vp.ValidateCredentialQuery(pid))
+
+	// The mdoc scope has no VCTM at all, so the old code emitted
+	// {"vct_values": [""]} with no doctype_value: unmatched by every wallet
+	// and rejected by ValidateCredentialQuery.
+	mdocCred := byID["pid_mdoc"]
+	assert.Equal(t, "eu.europa.ec.eudi.pid.1", mdocCred.Meta.DoctypeValue)
+	assert.Empty(t, mdocCred.Meta.VCTValues, "mdoc query must not carry vct_values")
+	assert.NoError(t, openid4vp.ValidateCredentialQuery(mdocCred))
 }
