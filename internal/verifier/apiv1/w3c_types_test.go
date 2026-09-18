@@ -3,6 +3,7 @@ package apiv1
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -104,4 +105,38 @@ func TestW3CScopeWithoutTypesStaysUnusable(t *testing.T) {
 			assert.NotContains(t, reply.Presets, "DIPLOMA")
 		})
 	}
+}
+
+// TestZKPresetOverrideSurvivesTheUsabilityCheck pins the documented ZK preset
+// shape against the check that drops unconstrainable preset credentials.
+//
+// DCQLMetaQuery deliberately refuses mso_mdoc_zk, since meta.zk_system_type
+// lives on VerificationPresetScope and nothing in credential_metadata can
+// supply it. The documented way to request a ZK proof is the other way round:
+// the scope declares plain mso_mdoc and the PRESET overrides Format while
+// supplying ZKSystemType - so the usability check sees the metadata's own
+// mso_mdoc, resolves a doctype, and the override is applied afterwards.
+//
+// Raised in review as a case where the check would drop such a preset. It does
+// not, for the documented shape, and this keeps it that way.
+func TestZKPresetOverrideSurvivesTheUsabilityCheck(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid_mdoc": {Format: "mso_mdoc", MDDL: &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"}},
+	}, map[string]model.PresetDefinition{
+		"ZK": {Credentials: model.VerificationPreset{"pid_mdoc": &model.VerificationPresetScope{
+			Format:       "mso_mdoc_zk",
+			ZKSystemType: []openid4vp.ZKSystemTypeSpec{{ID: "circuit-1", System: "longfellow"}},
+		}}},
+	})
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+
+	require.Contains(t, reply.Presets, "ZK")
+	require.Len(t, reply.Presets["ZK"].Credentials, 1)
+	cred := reply.Presets["ZK"].Credentials[0]
+
+	assert.Equal(t, "mso_mdoc_zk", cred.Format, "the preset's format override applies")
+	assert.Equal(t, "eu.europa.ec.eudi.pid.1", cred.Meta.DoctypeValue, "from the scope's own mso_mdoc metadata")
+	assert.Len(t, cred.Meta.ZKSystemType, 1, "the preset supplies the ZK system types")
 }

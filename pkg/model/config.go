@@ -2069,6 +2069,10 @@ type CredentialMetadata struct {
 	//
 	// Used only for the W3C formats (ldp_vc, vc+ld+json, jwt_vc_json).
 	// Defaults to the bare base type, which is what was hardcoded before.
+	//
+	// Configuring this ALONE does not make a W3C scope requestable: a verifier
+	// needs CredentialTypeValues, and one cannot be derived from the other. A
+	// scope meant to be both issued and requested configures both.
 	CredentialTypes []string `yaml:"credential_types,omitempty" json:"-" validate:"omitempty,dive,required"`
 
 	// CredentialTypeValues is the DCQL meta.type_values a verifier constrains
