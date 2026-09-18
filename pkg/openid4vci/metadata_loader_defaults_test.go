@@ -35,9 +35,65 @@ func TestIssuerLevelDefaultsReachEveryConfiguration(t *testing.T) {
 	for id, config := range metadata.CredentialConfigurationsSupported {
 		assert.Equal(t, []string{"jwk"}, config.CryptographicBindingMethodsSupported,
 			"configuration %s should have inherited the issuer-level binding methods", id)
-		assert.Equal(t, []any{"ES256"}, config.CredentialSigningAlgValuesSupported,
-			"configuration %s should have inherited the issuer-level signing algorithms", id)
 	}
+	assert.Equal(t, []any{"ES256"},
+		metadata.CredentialConfigurationsSupported["pid"].CredentialSigningAlgValuesSupported)
+}
+
+func TestAnMdocGetsNoStringTypedSigningAlgDefault(t *testing.T) {
+	// mso_mdoc identifies signing algorithms by COSE integer (-7 for ES256),
+	// not by JOSE name, and the issuer-level default is []string - so it
+	// cannot say what such a configuration needs. Publishing "ES256" where -7
+	// is meant would be worse than publishing nothing, and the field is
+	// OPTIONAL.
+	cfg := &MetadataConfig{
+		CredentialIssuer:                    "https://issuer.example",
+		CredentialEndpoint:                  "https://issuer.example/credential",
+		CredentialSigningAlgValuesSupported: []string{"ES256"},
+		CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
+			"mdl": {Format: "mso_mdoc"},
+			"mdl-cose": {
+				Format:                              "mso_mdoc",
+				CredentialSigningAlgValuesSupported: []any{-7},
+			},
+		},
+	}
+
+	metadata := cfg.GenerateIssuerMetadata(context.Background())
+
+	assert.Empty(t, metadata.CredentialConfigurationsSupported["mdl"].CredentialSigningAlgValuesSupported)
+	// And a configuration that states its own COSE identifiers keeps them.
+	assert.Equal(t, []any{-7},
+		metadata.CredentialConfigurationsSupported["mdl-cose"].CredentialSigningAlgValuesSupported)
+}
+
+func TestGeneratingMetadataDoesNotMutateTheCallersConfiguration(t *testing.T) {
+	// A "generate" helper that writes back into what it was handed leaks the
+	// defaults into a caller that reuses cfg - and then a later change to the
+	// issuer-level default silently does nothing, because the configuration
+	// now "states its own".
+	cfg := &MetadataConfig{
+		CredentialIssuer:                     "https://issuer.example",
+		CredentialEndpoint:                   "https://issuer.example/credential",
+		CryptographicBindingMethodsSupported: []string{"jwk"},
+		CredentialSigningAlgValuesSupported:  []string{"ES256"},
+		CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
+			"pid": {Format: "dc+sd-jwt"},
+		},
+	}
+
+	metadata := cfg.GenerateIssuerMetadata(context.Background())
+	require.Equal(t, []string{"jwk"},
+		metadata.CredentialConfigurationsSupported["pid"].CryptographicBindingMethodsSupported)
+
+	assert.Empty(t, cfg.CredentialConfigurationsSupported["pid"].CryptographicBindingMethodsSupported,
+		"the caller's configuration must be untouched")
+	assert.Empty(t, cfg.CredentialConfigurationsSupported["pid"].CredentialSigningAlgValuesSupported,
+		"the caller's configuration must be untouched")
+
+	// The returned metadata must not alias the issuer-level slice either.
+	metadata.CredentialConfigurationsSupported["pid"].CryptographicBindingMethodsSupported[0] = "did:jwk"
+	assert.Equal(t, []string{"jwk"}, cfg.CryptographicBindingMethodsSupported)
 }
 
 func TestAConfigurationKeepsItsOwnValues(t *testing.T) {
