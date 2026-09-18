@@ -104,19 +104,53 @@ func TestGenerateQR(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			uri, err := url.ParseRequestURI(tt.args.uri)
-			if err != nil {
-				assert.Equal(t, tt.want.err, err)
-			} else {
-				got, err := GenerateQR(uri, tt.args.recoveryLevel, tt.args.size)
-				assert.Equal(t, tt.want.err, err)
-				assert.Equal(t, tt.want.qrReply.URI, got.URI)
-				if tt.want.qrReply.Base64Image == "" {
-					assert.Empty(t, got.Base64Image)
-				} else {
-					assertSameQRImage(t, tt.want.qrReply.Base64Image, got.Base64Image)
-				}
+			got, err := GenerateQR(tt.args.uri, tt.args.recoveryLevel, tt.args.size)
+			assert.Equal(t, tt.want.err, err)
+			if tt.want.err != nil {
+				assert.Nil(t, got)
+				return
 			}
+			assert.Equal(t, tt.want.qrReply.URI, got.URI)
+			if tt.want.qrReply.Base64Image == "" {
+				assert.Empty(t, got.Base64Image)
+			} else {
+				assertSameQRImage(t, tt.want.qrReply.Base64Image, got.Base64Image)
+			}
+		})
+	}
+}
+
+// TestGenerateQR_KeepsEmptyAuthority pins the reason GenerateQR takes a string.
+//
+// A credential offer's wallet redirect URI has an empty authority, and
+// OpenID4VCI 1.0 section 4.1.2 writes it with the "//" left in:
+//
+//	openid-credential-offer://?credential_offer=...
+//
+// url.URL cannot represent that. Parsing it leaves Host and Path both empty,
+// and URL.String() writes "//" back only when one of Host, Path or User is
+// non-empty, so the value that came out was
+//
+//	openid-credential-offer:?credential_offer=...
+//
+// a different URI. Wallets that match the scheme plus "//" - which is what
+// the spec's examples show - then failed to recognise the offer at all.
+func TestGenerateQR_KeepsEmptyAuthority(t *testing.T) {
+	for _, uri := range []string{
+		"openid-credential-offer://?credential_offer=%7B%22credential_issuer%22%3A%22https%3A%2F%2Fissuer.example.com%22%7D",
+		"openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer.example.com%2Foffer%2F1",
+		"openid4vp://?client_id=x",
+	} {
+		t.Run(uri[:34], func(t *testing.T) {
+			got, err := GenerateQR(uri, qrcode.Medium, 256)
+			assert.NoError(t, err)
+			assert.Equal(t, uri, got.URI, "the authority marker must survive")
+
+			// And what url.URL would have done to it, for the record.
+			parsed, err := url.Parse(uri)
+			assert.NoError(t, err)
+			assert.NotEqual(t, uri, parsed.String(),
+				"if url.URL ever round-trips this faithfully, GenerateQR may take a *url.URL again")
 		})
 	}
 }

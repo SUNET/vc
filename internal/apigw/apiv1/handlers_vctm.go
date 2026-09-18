@@ -92,13 +92,10 @@ func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialO
 	credentialOfferURL := fmt.Sprintf("%s?%s", wallet.RedirectURI, credentialOffer)
 	c.log.Debug("UICreateCredentialOffer: offer created", "scope", req.Scope, "wallet_redirect_uri", wallet.RedirectURI, "issuer_url", c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL)
 
-	u, err := url.Parse(credentialOfferURL)
-	if err != nil {
-		c.log.Error(err, "failed to parse credential offer URL")
-		return nil, err
-	}
-
-	qr, err := openid4vp.GenerateQR(u, qrcode.Medium, 256)
+	// Encoded as built, not round-tripped through url.Parse: the wallet
+	// redirect URI may have an empty authority ("openid-credential-offer://"),
+	// which url.URL cannot represent - see GenerateQR's doc comment.
+	qr, err := openid4vp.GenerateQR(credentialOfferURL, qrcode.Medium, 256)
 	if err != nil {
 		return nil, err
 	}
