@@ -403,6 +403,9 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 // carries that scope's doctype, or one of its vct identifiers. Queries built
 // from credential_metadata are keyed by the scope already and produce no entry.
 //
+// A requested scope that configures no credential is handled too - see
+// queryIDForScope, since half the shipped templates are selected by one.
+//
 // A scope whose constraint this repo cannot express - a W3C VC one, see
 // model.CredentialMetadata.DCQLMetaQuery - is skipped rather than guessed at:
 // a template may well cover it with meta.type_values, but nothing in
@@ -415,15 +418,7 @@ func (c *Client) ScopeQueryIDs(dcql *openid4vp.DCQL, scopes []string) map[string
 	}
 	var pairs map[string]string
 	for _, scope := range scopes {
-		constructor, configured := c.cfg.Common.CredentialMetadata[scope]
-		if !configured {
-			continue
-		}
-		meta, ok := constructor.DCQLMetaQuery()
-		if !ok {
-			continue
-		}
-		queryID, found := queryIDForConstraint(dcql, meta)
+		queryID, found := c.queryIDForScope(dcql, scope)
 		if !found || queryID == scope {
 			continue
 		}
@@ -433,6 +428,37 @@ func (c *Client) ScopeQueryIDs(dcql *openid4vp.DCQL, scopes []string) map[string
 		pairs[scope] = queryID
 	}
 	return pairs
+}
+
+// queryIDForScope finds the credential query that answers one requested scope.
+//
+// A configured scope is matched by its own constraint, which is exact.
+//
+// An UNCONFIGURED scope is matched to the query only when the request produced
+// exactly one. That case is not an oddity: half the shipped templates are
+// selected by a scope that is not a credential_metadata key at all -
+// eudi_pid_full triggers on "pid_full" while the credential is configured as
+// "pid", and the eduID full/age templates do the same. Such a scope has no
+// constraint of its own to match on, yet it is what lands in authCtx.Scopes and
+// what the response is looked up by, so skipping it left exactly those
+// templates as broken as before.
+//
+// With more than one query there is nothing to choose on - a template's queries
+// carry no record of which of its oidc_scopes each answers - so the scope is
+// left unmapped rather than guessed at, and the direct lookup applies.
+func (c *Client) queryIDForScope(dcql *openid4vp.DCQL, scope string) (string, bool) {
+	if constructor, configured := c.cfg.Common.CredentialMetadata[scope]; configured {
+		meta, ok := constructor.DCQLMetaQuery()
+		if !ok {
+			return "", false
+		}
+		return queryIDForConstraint(dcql, meta)
+	}
+
+	if len(dcql.Credentials) == 1 {
+		return dcql.Credentials[0].ID, true
+	}
+	return "", false
 }
 
 // queryIDForConstraint finds the credential query in dcql that carries meta's

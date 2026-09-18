@@ -190,3 +190,62 @@ func TestVPTokensForScope(t *testing.T) {
 		})
 	}
 }
+
+// TestScopeQueryIDsAliasTemplateScope covers a review finding, and the shape
+// half the shipped templates actually have.
+//
+// eudi_pid_full is selected by the OIDC scope "pid_full" while the credential
+// is configured as "pid"; the eduID full and age templates do the same. Such a
+// scope is not a credential_metadata key, so it has no constraint of its own -
+// but it is what lands in authCtx.Scopes and what the response is looked up by.
+// Skipping unconfigured scopes left precisely these templates as broken as
+// before the fix.
+func TestScopeQueryIDsAliasTemplateScope(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid": sdJWTScope("urn:eudi:pid:1"),
+	}, nil)
+
+	// What eudi_pid_full produces: one query, named for the template.
+	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+		{ID: "eudi_pid", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}}},
+	}}
+
+	assert.Equal(t, map[string]string{"pid_full": "eudi_pid"},
+		client.ScopeQueryIDs(dcql, []string{"pid_full"}),
+		"an alias scope must still resolve to the query the wallet answers under")
+
+	// And the response then resolves, which is the whole point.
+	tokens, err := client.vpTokensForScope(
+		&cache.AuthorizationContext{
+			Scopes:        []string{"pid_full"},
+			ScopeQueryIDs: client.ScopeQueryIDs(dcql, []string{"pid_full"}),
+		},
+		openid4vp.VPResponse{VPToken: map[string][]string{"eudi_pid": {"token-pid"}}},
+		"pid_full",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"token-pid"}, tokens)
+}
+
+// TestScopeQueryIDsAliasScopeAmbiguous pins the limit of that fallback: with
+// several queries in the request there is nothing to choose on, since a
+// template's queries carry no record of which of its oidc_scopes each answers.
+// The scope is left unmapped rather than guessed at.
+func TestScopeQueryIDsAliasScopeAmbiguous(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid":  sdJWTScope("urn:eudi:pid:1"),
+		"ehic": sdJWTScope("urn:eudi:ehic:1"),
+	}, nil)
+
+	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+		{ID: "eudi_pid", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}}},
+		{ID: "eudi_ehic", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:ehic:1"}}},
+	}}
+
+	got := client.ScopeQueryIDs(dcql, []string{"combined_full"})
+	assert.Empty(t, got, "an unconfigured scope with several candidate queries must not be guessed")
+
+	// Configured scopes in the same request still pair exactly, by constraint.
+	assert.Equal(t, map[string]string{"pid": "eudi_pid", "ehic": "eudi_ehic"},
+		client.ScopeQueryIDs(dcql, []string{"pid", "ehic"}))
+}
