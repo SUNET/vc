@@ -631,9 +631,16 @@ func TestValidateCredentialQuery_VCLDJSON(t *testing.T) {
 	require.Error(t, err, "a W3C query with no type_values must be rejected")
 	assert.Contains(t, err.Error(), "type_values")
 
+	// Fully expanded IRIs, as MetaQuery.TypeValues documents and
+	// MatchTypeValues compares against - not the compact terms OID4VCI's
+	// credential_definition.type uses. A positive case written with compact
+	// terms would bless the representation a wallet cannot match.
 	assert.NoError(t, ValidateCredentialQuery(CredentialQuery{
 		ID:     "diploma",
 		Format: FormatVCLDJSON,
-		Meta:   MetaQuery{TypeValues: [][]string{{"VerifiableCredential", "DiplomaCredential"}}},
+		Meta: MetaQuery{TypeValues: [][]string{{
+			"https://www.w3.org/2018/credentials#VerifiableCredential",
+			"https://example.org/diploma#DiplomaCredential",
+		}}},
 	}))
 }
