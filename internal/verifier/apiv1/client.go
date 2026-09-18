@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
-	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -372,7 +371,7 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 			// presentation_requests/ names ONE vct, so a template-built query
 			// still asked for a single identifier and still missed the wallets
 			// matching the other one.
-			c.augmentVCTValuesFromConfig(dcql)
+			c.augmentVCTValuesFromConfig(dcql, scopes)
 			c.log.Info("DCQL query built from presentation template", "credential_count", len(dcql.Credentials))
 			return dcql, nil
 		}
@@ -396,13 +395,18 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 // Matching is by value, not by credential-query id: a template's id is a query
 // name ("eudi_pid") and need not be a configured scope ("pid"). A query is
 // therefore paired with the scope whose identifiers it already mentions, which
-// is exactly the relationship that makes appending the rest correct. Scopes are
-// visited in sorted order so an ambiguous config resolves the same way twice.
+// is exactly the relationship that makes appending the rest correct.
+//
+// Only the REQUESTED scopes are considered. ResolveVCTUrls derives VCTURL per
+// scope, so two scopes backed by the same VCTM - aliases sharing a vct - get
+// different type-metadata URLs. Scanning every configured scope would let a
+// query for one of them be augmented with the other's URL, widening it to
+// accept a credential configuration the caller never asked for.
 //
 // Queries with no vct_values are left alone: mdoc queries are constrained by
 // doctype_value, and a query with no type constraint at all is not something to
 // guess at.
-func (c *Client) augmentVCTValuesFromConfig(dcql *openid4vp.DCQL) {
+func (c *Client) augmentVCTValuesFromConfig(dcql *openid4vp.DCQL, scopes []string) {
 	if dcql == nil {
 		return
 	}
@@ -411,7 +415,7 @@ func (c *Client) augmentVCTValuesFromConfig(dcql *openid4vp.DCQL) {
 		if len(cred.Meta.VCTValues) == 0 {
 			continue
 		}
-		scope, identifiers := c.scopeMatchingVCTValues(cred.Meta.VCTValues)
+		scope, identifiers := c.scopeMatchingVCTValues(cred.Meta.VCTValues, scopes)
 		if scope == "" {
 			continue
 		}
@@ -421,17 +425,24 @@ func (c *Client) augmentVCTValuesFromConfig(dcql *openid4vp.DCQL) {
 	}
 }
 
-// scopeMatchingVCTValues finds the configured scope that values already names,
-// and returns it with its full identifier set. Scopes are visited in sorted
-// order so an ambiguous config resolves the same way twice. Returns "" when no
-// scope matches, which is the normal case for a credential type this verifier
-// has no credential_metadata for.
-func (c *Client) scopeMatchingVCTValues(values []string) (string, []string) {
+// scopeMatchingVCTValues finds, among the REQUESTED scopes, the one that values
+// already names, and returns it with its full identifier set. Requested scopes
+// with no credential_metadata entry are skipped - those are ordinary OIDC
+// scopes like "profile". Candidates are visited in sorted order so an ambiguous
+// config resolves the same way twice.
+//
+// Returns "" when nothing matches, which is the normal case for a template
+// naming a credential type this verifier has no credential_metadata for.
+func (c *Client) scopeMatchingVCTValues(values []string, scopes []string) (string, []string) {
 	if c.cfg.Common == nil {
 		return "", nil
 	}
-	for _, scope := range slices.Sorted(maps.Keys(c.cfg.Common.CredentialMetadata)) {
-		identifiers := c.cfg.Common.CredentialMetadata[scope].VCTQueryValues()
+	for _, scope := range slices.Sorted(slices.Values(scopes)) {
+		constructor, ok := c.cfg.Common.CredentialMetadata[scope]
+		if !ok {
+			continue
+		}
+		identifiers := constructor.VCTQueryValues()
 		if slices.ContainsFunc(identifiers, func(id string) bool { return slices.Contains(values, id) }) {
 			return scope, identifiers
 		}

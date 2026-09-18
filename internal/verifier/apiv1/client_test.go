@@ -565,7 +565,7 @@ func TestAugmentVCTValuesFromConfig(t *testing.T) {
 		{ID: "foreign", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:example:unknown:1"}}},
 	}}
 
-	client.augmentVCTValuesFromConfig(dcql)
+	client.augmentVCTValuesFromConfig(dcql, []string{"pid", "pid_mdoc", "profile"})
 
 	assert.Equal(t, []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"}, dcql.Credentials[0].Meta.VCTValues)
 	assert.Equal(t, []string{"https://apigw.example/type-metadata/pid", "urn:eudi:pid:1"}, dcql.Credentials[1].Meta.VCTValues)
@@ -574,8 +574,54 @@ func TestAugmentVCTValuesFromConfig(t *testing.T) {
 	assert.Equal(t, []string{"urn:example:unknown:1"}, dcql.Credentials[3].Meta.VCTValues)
 
 	// Idempotent: running twice must not duplicate anything.
-	client.augmentVCTValuesFromConfig(dcql)
+	client.augmentVCTValuesFromConfig(dcql, []string{"pid", "pid_mdoc", "profile"})
 	assert.Equal(t, []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"}, dcql.Credentials[0].Meta.VCTValues)
 
-	assert.NotPanics(t, func() { client.augmentVCTValuesFromConfig(nil) })
+	assert.NotPanics(t, func() { client.augmentVCTValuesFromConfig(nil, []string{"pid"}) })
+}
+
+// TestAugmentVCTValuesOnlyUsesRequestedScopes covers a review finding: scanning
+// every configured scope, rather than the requested ones, widens the query.
+//
+// ResolveVCTUrls derives VCTURL per SCOPE, so two scopes backed by the same
+// VCTM - aliases sharing a vct - get different type-metadata URLs. Matching
+// against all of credential_metadata would augment a query for one of them with
+// the other's URL, so the verifier would accept a credential configuration it
+// never asked for.
+func TestAugmentVCTValuesOnlyUsesRequestedScopes(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid":       sdJWTScope("urn:eudi:pid:1"),
+		"pid_alias": sdJWTScope("urn:eudi:pid:1"),
+	}, nil)
+
+	// Sanity: the two scopes really do resolve to distinct URLs.
+	pidURL := "https://apigw.example/type-metadata/pid"
+	aliasURL := "https://apigw.example/type-metadata/pid_alias"
+	require.Equal(t, []string{"urn:eudi:pid:1", aliasURL},
+		client.cfg.Common.CredentialMetadata["pid_alias"].VCTQueryValues())
+
+	query := func() *openid4vp.DCQL {
+		return &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+			ID: "eudi_pid", Format: "dc+sd-jwt",
+			Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}},
+		}}}
+	}
+
+	// Requesting "pid_alias" must not pull in "pid"'s URL, even though "pid"
+	// sorts first and shares the vct.
+	alias := query()
+	client.augmentVCTValuesFromConfig(alias, []string{"pid_alias"})
+	assert.Equal(t, []string{"urn:eudi:pid:1", aliasURL}, alias.Credentials[0].Meta.VCTValues)
+	assert.NotContains(t, alias.Credentials[0].Meta.VCTValues, pidURL)
+
+	// And the converse.
+	pid := query()
+	client.augmentVCTValuesFromConfig(pid, []string{"pid"})
+	assert.Equal(t, []string{"urn:eudi:pid:1", pidURL}, pid.Credentials[0].Meta.VCTValues)
+	assert.NotContains(t, pid.Credentials[0].Meta.VCTValues, aliasURL)
+
+	// A request naming no configured credential scope augments nothing.
+	none := query()
+	client.augmentVCTValuesFromConfig(none, []string{"profile", "openid"})
+	assert.Equal(t, []string{"urn:eudi:pid:1"}, none.Credentials[0].Meta.VCTValues)
 }
