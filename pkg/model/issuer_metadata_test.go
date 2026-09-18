@@ -526,6 +526,278 @@ func TestIssuerMetadata_Generate_DefaultValues(t *testing.T) {
 	assert.Nil(t, credConfig.CredentialDefinition, "vc+sd-jwt should not have credential_definition")
 }
 
+// TestIssuerMetadata_Generate_PreservesEmbeddedVCT pins the Generate stage's
+// contract: credConfig.VCT is always VCTM.VCT verbatim, with a defensive
+// fallback to VCTURL only when VCTM.VCT is empty. The upstream ResolveVCTUrls
+// stage is what enforces the vct policy per source type (rewrite for local,
+// preserve for external) -- covered by
+// TestIssuerMetadata_Generate_PreservesEmbeddedVCT_LocalFile and
+// _ExternalURL below.
+func TestIssuerMetadata_Generate_PreservesEmbeddedVCT(t *testing.T) {
+	const baseURL = "https://issuer.sunet.se"
+	const vctURL = baseURL + "/type-metadata/test_cred"
+
+	tests := []struct {
+		name    string
+		vctmVCT string
+		format  string
+		wantVCT string
+	}{
+		{name: "dc+sd-jwt with URN VCT", vctmVCT: "urn:eudi:pid:1", format: "dc+sd-jwt", wantVCT: "urn:eudi:pid:1"},
+		{name: "vc+sd-jwt with URN VCT", vctmVCT: "urn:eudi:ehic:1", format: "vc+sd-jwt", wantVCT: "urn:eudi:ehic:1"},
+		{name: "dc+sd-jwt with foreign URL VCT", vctmVCT: "https://registry.siros.org/sirosfoundation/demo_pid_rb_1_5.vctm.json", format: "dc+sd-jwt", wantVCT: "https://registry.siros.org/sirosfoundation/demo_pid_rb_1_5.vctm.json"},
+		{name: "jwt_vc_json with URN VCT", vctmVCT: "urn:example:diploma:1", format: "jwt_vc_json", wantVCT: "urn:example:diploma:1"},
+		{name: "dc+sd-jwt with empty VCT falls back to VCTURL", vctmVCT: "", format: "dc+sd-jwt", wantVCT: vctURL},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &IssuerMetadata{}
+			credMeta := map[string]*CredentialMetadata{
+				"test_cred": {
+					VCTM:   &sdjwtvc.VCTM{VCT: tt.vctmVCT},
+					VCTURL: vctURL,
+					Format: tt.format,
+				},
+			}
+			metadata, err := cfg.Generate(context.Background(), baseURL, credMeta)
+			require.NoError(t, err)
+			credConfig, exists := metadata.CredentialConfigurationsSupported["test_cred"]
+			require.True(t, exists)
+			assert.Equal(t, tt.wantVCT, credConfig.VCT)
+		})
+	}
+}
+
+// TestIssuerMetadata_Generate_PreservesEmbeddedVCT_LocalFile pins the
+// end-to-end contract for a scope configured with vctm_file_path -- apigw
+// itself hosts the VCTM under /type-metadata/<scope> and is therefore the
+// registry. Whatever vct the file carried (URN, foreign registry URL, or
+// nothing at all), ResolveVCTUrls rewrites VCTM.VCT AND the served
+// VCTMRaw's vct AND (via Generate) credConfig.VCT to the hosting URL. All
+// four values -- VCTURL, VCTM.VCT, served VCTMRaw.vct, and the issuer
+// metadata's advertised vct -- must agree, so that the credential body
+// (BuildCredentialWithSigner stamps body["vct"] = vctm.VCT), DCQL
+// vct_values, and the wallet's stored tag all reference the same
+// dereferenceable identifier.
+func TestIssuerMetadata_Generate_PreservesEmbeddedVCT_LocalFile(t *testing.T) {
+	const baseURL = "https://demo-1.issuer.id.siros.org"
+	const scope = "demo_pid_rb_1_5"
+	hostingURL := baseURL + "/type-metadata/" + scope
+
+	tests := []struct {
+		name    string
+		fileVCT string
+	}{
+		{name: "file's foreign registry URL vct is rewritten", fileVCT: "https://registry.siros.org/sirosfoundation/demo_pid_rb_1_5.vctm.json"},
+		{name: "file's URN vct is rewritten", fileVCT: "urn:eudi:pid:1"},
+		{name: "file with no vct is filled in", fileVCT: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(map[string]any{
+				"vct":  tt.fileVCT,
+				"name": "Demo PID",
+			})
+			require.NoError(t, err)
+
+			cfg := &Cfg{
+				Common: &Common{
+					CredentialMetadata: map[string]*CredentialMetadata{
+						scope: {
+							Format:       "dc+sd-jwt",
+							VCTMFilePath: "/vctms/" + scope + ".json",
+							VCTM:         &sdjwtvc.VCTM{VCT: tt.fileVCT, Name: "Demo PID"},
+							VCTMRaw:      raw,
+						},
+					},
+				},
+			}
+
+			require.NoError(t, cfg.ResolveVCTUrls(baseURL))
+
+			constructor := cfg.Common.CredentialMetadata[scope]
+			assert.Equal(t, hostingURL, constructor.VCTURL)
+			assert.Equal(t, hostingURL, constructor.VCTM.VCT, "apigw is the registry: the file's vct is rewritten to the hosting URL")
+
+			var doc map[string]any
+			require.NoError(t, json.Unmarshal(constructor.VCTMRaw, &doc))
+			assert.Equal(t, hostingURL, doc["vct"], "served VCTM document must advertise the hosting URL as vct")
+
+			metadata, err := (&IssuerMetadata{}).Generate(context.Background(), baseURL, cfg.Common.CredentialMetadata)
+			require.NoError(t, err)
+			credConfig, exists := metadata.CredentialConfigurationsSupported[scope]
+			require.True(t, exists)
+			assert.Equal(t, hostingURL, credConfig.VCT)
+		})
+	}
+}
+
+// TestIssuerMetadata_Generate_PreservesEmbeddedVCT_ExternalURL pins the
+// external-source contract: when the VCTM is loaded via vctm_url, apigw is
+// NOT the registry -- the external source is authoritative. ResolveVCTUrls
+// must leave VCTM.VCT and VCTMRaw untouched, VCTURL is set to the external
+// URL, and credConfig.VCT advertises the file's own vct verbatim (URN or
+// foreign URL). This must stay stable regardless of what the local case
+// rewrites.
+func TestIssuerMetadata_Generate_PreservesEmbeddedVCT_ExternalURL(t *testing.T) {
+	const baseURL = "https://demo-1.issuer.id.siros.org"
+	const scope = "demo_pid_rb_1_5"
+	const vctmURL = "https://registry.siros.org/sirosfoundation/demo_pid_rb_1_5.vctm.json"
+
+	tests := []struct {
+		name    string
+		fileVCT string
+	}{
+		{name: "external URL vct is preserved verbatim", fileVCT: vctmURL},
+		{name: "external URN vct is preserved verbatim", fileVCT: "urn:eudi:pid:1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(map[string]any{
+				"vct":  tt.fileVCT,
+				"name": "Demo PID",
+			})
+			require.NoError(t, err)
+
+			cfg := &Cfg{
+				Common: &Common{
+					CredentialMetadata: map[string]*CredentialMetadata{
+						scope: {
+							Format:  "dc+sd-jwt",
+							VCTMUrl: vctmURL,
+							VCTM:    &sdjwtvc.VCTM{VCT: tt.fileVCT, Name: "Demo PID"},
+							VCTMRaw: raw,
+						},
+					},
+				},
+			}
+
+			require.NoError(t, cfg.ResolveVCTUrls(baseURL))
+
+			constructor := cfg.Common.CredentialMetadata[scope]
+			assert.Equal(t, vctmURL, constructor.VCTURL, "VCTURL for an external VCTM is the vctm_url")
+			assert.Equal(t, tt.fileVCT, constructor.VCTM.VCT, "external VCTM.VCT must be preserved verbatim")
+
+			var doc map[string]any
+			require.NoError(t, json.Unmarshal(constructor.VCTMRaw, &doc))
+			assert.Equal(t, tt.fileVCT, doc["vct"], "external VCTMRaw must not be rewritten")
+
+			metadata, err := (&IssuerMetadata{}).Generate(context.Background(), baseURL, cfg.Common.CredentialMetadata)
+			require.NoError(t, err)
+			credConfig, exists := metadata.CredentialConfigurationsSupported[scope]
+			require.True(t, exists)
+			assert.Equal(t, tt.fileVCT, credConfig.VCT)
+		})
+	}
+}
+
+// TestIssuerMetadata_Generate_ServedMetadata_MixedSources exercises the exact
+// startup wiring apigw's Client.New runs -- ResolveVCTUrls then
+// IssuerMetadata.Generate against cfg.Common.CredentialMetadata -- with BOTH
+// a locally-published (vctm_file_path) scope AND an external (vctm_url)
+// scope side by side, then marshals the result to JSON (what
+// /.well-known/openid-credential-issuer serves). Each scope must carry its
+// own vct with zero cross-contamination:
+//
+//   - local_pid: apigw is the registry; credential_configurations_supported.
+//     local_pid.vct is the /type-metadata/local_pid hosting URL, and the
+//     file's original vct never leaks into the response.
+//   - external_pid: source is authoritative; credential_configurations_supported.
+//     external_pid.vct is the URN the file declared, and the apigw's
+//     /type-metadata/external_pid URL never appears in it.
+func TestIssuerMetadata_Generate_ServedMetadata_MixedSources(t *testing.T) {
+	const baseURL = "https://demo-1.issuer.id.siros.org"
+	const localScope = "local_pid"
+	const externalScope = "external_pid"
+	const externalVCT = "urn:eudi:pid:1"
+	const externalVCTMUrl = "https://registry.siros.org/sirosfoundation/external_pid.vctm.json"
+
+	localHostingURL := baseURL + "/type-metadata/" + localScope
+	externalHostingURL := baseURL + "/type-metadata/" + externalScope
+
+	localRaw, err := json.Marshal(map[string]any{
+		"vct":  "urn:local:should-be-rewritten:1",
+		"name": "Local PID",
+	})
+	require.NoError(t, err)
+	externalRaw, err := json.Marshal(map[string]any{
+		"vct":  externalVCT,
+		"name": "External PID",
+	})
+	require.NoError(t, err)
+
+	cfg := &Cfg{
+		Common: &Common{
+			CredentialMetadata: map[string]*CredentialMetadata{
+				localScope: {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/vctms/" + localScope + ".json",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:local:should-be-rewritten:1", Name: "Local PID"},
+					VCTMRaw:      localRaw,
+				},
+				externalScope: {
+					Format:  "dc+sd-jwt",
+					VCTMUrl: externalVCTMUrl,
+					VCTM:    &sdjwtvc.VCTM{VCT: externalVCT, Name: "External PID"},
+					VCTMRaw: externalRaw,
+				},
+			},
+		},
+	}
+
+	require.NoError(t, cfg.ResolveVCTUrls(baseURL))
+
+	metadata, err := (&IssuerMetadata{}).Generate(context.Background(), baseURL, cfg.Common.CredentialMetadata)
+	require.NoError(t, err)
+
+	served, err := json.Marshal(metadata)
+	require.NoError(t, err)
+
+	var doc struct {
+		CredentialConfigurationsSupported map[string]struct {
+			VCT string `json:"vct"`
+		} `json:"credential_configurations_supported"`
+	}
+	require.NoError(t, json.Unmarshal(served, &doc))
+
+	assert.Equal(t, localHostingURL, doc.CredentialConfigurationsSupported[localScope].VCT,
+		"local scope: served vct must be the apigw hosting URL")
+	assert.Equal(t, externalVCT, doc.CredentialConfigurationsSupported[externalScope].VCT,
+		"external scope: served vct must be the file's own vct")
+
+	// Cross-contamination guards: neither scope's payload may carry the
+	// other's identifier anywhere in the served JSON.
+	assert.NotContains(t, string(served), "urn:local:should-be-rewritten:1",
+		"the local file's original vct must not leak into the served metadata")
+	assert.NotContains(t, string(served), externalHostingURL,
+		"the external scope must not advertise the apigw hosting URL as its vct")
+}
+
+// TestIssuerMetadata_Generate_MDDLDoctype_Preserved locks in the mso_mdoc
+// branch's already-correct behavior: MDDL.DocType is copied verbatim into
+// credConfig.Doctype, no hosting URL rewrites (regression guard alongside
+// TestIssuerMetadata_Generate_PreservesEmbeddedVCT).
+func TestIssuerMetadata_Generate_MDDLDoctype_Preserved(t *testing.T) {
+	cfg := &IssuerMetadata{}
+	credMeta := map[string]*CredentialMetadata{
+		"test_mdl": {
+			Format: "mso_mdoc",
+			MDDL: &mdoc.MDDLSchema{
+				Format:  "mso_mdoc",
+				DocType: "org.iso.18013.5.1.mDL",
+			},
+		},
+	}
+	metadata, err := cfg.Generate(context.Background(), "https://issuer.sunet.se", credMeta)
+	require.NoError(t, err)
+	credConfig, exists := metadata.CredentialConfigurationsSupported["test_mdl"]
+	require.True(t, exists)
+	assert.Equal(t, "org.iso.18013.5.1.mDL", credConfig.Doctype)
+	assert.Empty(t, credConfig.VCT, "mso_mdoc scopes must not set VCT")
+}
+
 func TestIssuerMetadata_Generate_MultipleCredentials(t *testing.T) {
 	cfg := &IssuerMetadata{}
 
@@ -561,11 +833,11 @@ func TestIssuerMetadata_Generate_MultipleCredentials(t *testing.T) {
 
 	ehicConfig := metadata.CredentialConfigurationsSupported["ehic"]
 	assert.Equal(t, "vc+sd-jwt", ehicConfig.Format)
-	assert.Equal(t, baseURL+"/type-metadata/ehic", ehicConfig.VCT)
+	assert.Equal(t, "urn:eudi:ehic:1", ehicConfig.VCT)
 
 	diplomaConfig := metadata.CredentialConfigurationsSupported["diploma"]
 	assert.Equal(t, "vc+sd-jwt", diplomaConfig.Format) // default
-	assert.Equal(t, baseURL+"/type-metadata/diploma", diplomaConfig.VCT)
+	assert.Equal(t, "urn:eudi:diploma:1", diplomaConfig.VCT)
 }
 
 func TestIssuerMetadata_Generate_DisclosurePolicy(t *testing.T) {

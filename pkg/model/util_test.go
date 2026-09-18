@@ -243,14 +243,6 @@ func TestGetFormatForScope(t *testing.T) {
 	}
 }
 
-func TestVCTUrlsForScopes(t *testing.T) {
-	cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{}}}
-	urls := cfg.VCTUrlsForScopes([]string{"a", "b"})
-	if len(urls) != 0 {
-		t.Errorf("expected empty, got %v", urls)
-	}
-}
-
 func TestVCTIdentifiersForScopes(t *testing.T) {
 	cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{}}}
 	ids := cfg.VCTIdentifiersForScopes([]string{"a", "b"})
