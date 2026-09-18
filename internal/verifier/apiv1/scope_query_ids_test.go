@@ -478,3 +478,55 @@ func TestUncoveredScopesRejectsAmbiguousCoverage(t *testing.T) {
 	// One alias alone is unambiguous and covered.
 	assert.Empty(t, client.uncoveredScopes(t.Context(), dcql, []string{"pid"}))
 }
+
+// TestScopeQueryIDsDirectKeyedCollision covers a review finding: a template
+// query is free to be NAMED after a configured scope.
+//
+// With a query called "pid" and an alias sharing its constraint, "pid" looked
+// like a direct hit needing no mapping while the alias mapped onto it - so the
+// collision went unnoticed, the request passed coverage, and
+// VerificationDirectPost processed the one VP token twice, under each scope's
+// validations. Identity pairings are tracked for collisions now even though
+// they are not persisted.
+func TestScopeQueryIDsDirectKeyedCollision(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid":       sdJWTScope("urn:eudi:pid:1"),
+		"pid_alias": sdJWTScope("urn:eudi:pid:1"),
+	}, nil)
+
+	// The query is named for one of the scopes.
+	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+		{ID: "pid", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}}},
+	}}
+
+	assert.Empty(t, client.ScopeQueryIDs(t.Context(), dcql, []string{"pid", "pid_alias"}))
+	assert.ElementsMatch(t, []string{"pid", "pid_alias"},
+		client.uncoveredScopes(t.Context(), dcql, []string{"pid", "pid_alias"}),
+		"a contested query must leave both scopes unanswered, so the request is refused up front")
+}
+
+// TestUncoveredScopesIgnoresNameOnlyMatches covers the other half of the same
+// finding: a query named after a configured scope but constrained for a
+// different credential must not pass as covering it.
+//
+// Template query ids are arbitrary, so a name match says nothing. Accepting one
+// would send the request and then resolve that scope's VP token under the wrong
+// scope's validations.
+func TestUncoveredScopesIgnoresNameOnlyMatches(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid":  sdJWTScope("urn:eudi:pid:1"),
+		"ehic": sdJWTScope("urn:eudi:ehic:1"),
+	}, nil)
+
+	// Named "pid", constrained for the EHIC type.
+	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+		{ID: "pid", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:ehic:1"}}},
+	}}
+
+	assert.Equal(t, []string{"pid"}, client.uncoveredScopes(t.Context(), dcql, []string{"pid"}),
+		"a name-only match must not count as coverage")
+
+	// The scope the query is actually constrained for is answered by it.
+	assert.Empty(t, client.uncoveredScopes(t.Context(), dcql, []string{"ehic"}))
+	assert.Equal(t, map[string]string{"ehic": "pid"}, client.ScopeQueryIDs(t.Context(), dcql, []string{"ehic"}))
+}

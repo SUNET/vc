@@ -413,6 +413,45 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 // recognise the query. Those scopes keep today's scope-keyed lookup until
 // SUNET/vc#680 gives them a constraint to match on.
 func (c *Client) ScopeQueryIDs(ctx context.Context, dcql *openid4vp.DCQL, scopes []string) map[string]string {
+	resolved := c.resolveScopeQueries(ctx, dcql, scopes)
+
+	// Only the differing pairs are persisted: a scope answered by a query of
+	// its own name needs no mapping, and an absent entry means the direct
+	// lookup was already right.
+	pairs := make(map[string]string, len(resolved))
+	for scope, queryID := range resolved {
+		if queryID != scope {
+			pairs[scope] = queryID
+		}
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	return pairs
+}
+
+// resolveScopeQueries works out which credential query answers each requested
+// scope, including the scopes answered by a query of their own name, and drops
+// any pairing that turns out to be contested.
+//
+// One query answers one scope, and uniqueness has to hold in both directions.
+// queryIDForConstraint already refuses a scope matching several queries. Here
+// the inverse: several scopes can land on one query - aliases sharing a
+// credential's vct - and keeping those would have VerificationDirectPost
+// resolve that single VP token once per scope, caching it twice and applying
+// each scope's validations to the other's credential.
+//
+// Identity pairings are tracked for that purpose even though they are not
+// persisted, because a template query is free to be NAMED after a configured
+// scope: with a query called "pid" and an alias sharing its constraint, "pid"
+// would look direct while the alias mapped onto it, and the collision would go
+// unnoticed.
+//
+// Nothing here can say which scope a contested query was meant for, so both
+// pairings go and those scopes fall back to their own key - where they fail
+// loudly, and where uncoveredScopes sees them as unanswered and rejects the
+// request before a wallet is ever involved.
+func (c *Client) resolveScopeQueries(ctx context.Context, dcql *openid4vp.DCQL, scopes []string) map[string]string {
 	if dcql == nil || c.cfg.Common == nil {
 		return nil
 	}
@@ -425,43 +464,28 @@ func (c *Client) ScopeQueryIDs(ctx context.Context, dcql *openid4vp.DCQL, scopes
 		_, templateScopes, _ = c.presentationBuilder.TemplateDCQLQuery(ctx, scopes)
 	}
 
-	pairs := make(map[string]string, len(scopes))
+	resolved := make(map[string]string, len(scopes))
 	claimants := make(map[string][]string, len(scopes))
 	for _, scope := range scopes {
 		queryID, found := c.queryIDForScope(dcql, scope, templateScopes)
-		if !found || queryID == scope {
+		if !found {
 			continue
 		}
-		pairs[scope] = queryID
+		resolved[scope] = queryID
 		claimants[queryID] = append(claimants[queryID], scope)
 	}
 
-	// One query answers one scope. Uniqueness has to hold in both directions:
-	// queryIDForConstraint already refuses a scope matching several queries,
-	// but two scopes can still land on the SAME query - aliases sharing a
-	// credential's vct, against a template with one query. Keeping both pairs
-	// would have VerificationDirectPost resolve that single VP token twice and
-	// process it under each scope, duplicating it in the cache and applying
-	// each scope's validations to the other's credential.
-	//
-	// Nothing here can say which scope the query was meant for, so both pairs
-	// go. Those scopes then fall back to their own key, find nothing, and fail
-	// loudly - the same treatment every other ambiguity in this path gets.
 	for queryID, scopesClaiming := range claimants {
 		if len(scopesClaiming) < 2 {
 			continue
 		}
-		c.log.Error(nil, "not mapping scopes to a shared DCQL query: cannot tell which one it answers",
+		c.log.Error(nil, "not pairing scopes with a shared DCQL query: cannot tell which one it answers",
 			"query_id", queryID, "scopes", scopesClaiming)
 		for _, scope := range scopesClaiming {
-			delete(pairs, scope)
+			delete(resolved, scope)
 		}
 	}
-
-	if len(pairs) == 0 {
-		return nil
-	}
-	return pairs
+	return resolved
 }
 
 // queryIDForScope finds the credential query that answers one requested scope.
@@ -570,13 +594,15 @@ func queryIDForConstraint(dcql *openid4vp.DCQL, meta openid4vp.MetaQuery) (strin
 // never prompted for. A template covering some of a request's scopes and not
 // others is how that happens.
 //
-// Coverage is decided by ScopeQueryIDs, deliberately, so this and the mapping
-// that direct-post later resolves through cannot disagree. That matters for
-// ambiguity in particular: two configured aliases sharing a vct, against a
-// template with one query, are refused a mapping by ScopeQueryIDs - and were
-// nonetheless reported as covered here while it made its own weaker check, so
-// the request went out and failed after the fact. A scope keyed by its own id,
-// which is how buildDCQLQueryFromConfig builds them, needs no mapping.
+// Coverage is decided by resolveScopeQueries, deliberately, so this and the
+// mapping direct-post later resolves through cannot disagree. Two things follow
+// from sharing it. A contested query - two aliases sharing a vct against a
+// template with one credential - leaves both scopes unanswered here, so the
+// request is refused before a wallet is involved rather than failing after the
+// presentation. And a scope is answered only when a query's CONSTRAINT matches
+// it: a template query merely NAMED after a configured scope, while
+// constrained for some other type, no longer passes as covering it and then
+// resolves that scope's token under the wrong validations.
 //
 // Scopes whose constraint cannot be expressed are not reported: a template may
 // legitimately cover a W3C scope with meta.type_values, and there is no way to
@@ -587,7 +613,7 @@ func (c *Client) uncoveredScopes(ctx context.Context, dcql *openid4vp.DCQL, scop
 	if dcql == nil || c.cfg.Common == nil {
 		return nil
 	}
-	pairs := c.ScopeQueryIDs(ctx, dcql, scopes)
+	resolved := c.resolveScopeQueries(ctx, dcql, scopes)
 
 	var uncovered []string
 	for _, scope := range scopes {
@@ -598,15 +624,9 @@ func (c *Client) uncoveredScopes(ctx context.Context, dcql *openid4vp.DCQL, scop
 		if _, ok := constructor.DCQLMetaQuery(); !ok {
 			continue
 		}
-		if _, mapped := pairs[scope]; mapped {
-			continue
+		if _, answered := resolved[scope]; !answered {
+			uncovered = append(uncovered, scope)
 		}
-		if slices.ContainsFunc(dcql.Credentials, func(cred openid4vp.CredentialQuery) bool {
-			return cred.ID == scope
-		}) {
-			continue
-		}
-		uncovered = append(uncovered, scope)
 	}
 	return uncovered
 }
