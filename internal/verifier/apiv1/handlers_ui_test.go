@@ -1230,3 +1230,47 @@ func TestUIMetadataPresetCategoryOrder(t *testing.T) {
 	assert.Empty(t, reply.Presets["Uncategorized"].Category,
 		"an uncategorized preset carries no Category, distinct from any named group")
 }
+
+// TestUIMetadataOmitsUnconstrainableCredential covers a review finding on the
+// non-preset UI path: presentation-definition.js turns UICredentialInfo.VCTValues
+// straight into meta.vct_values for every format but mso_mdoc, so publishing that
+// list for a scope whose format cannot carry vct_values put an invalid query on
+// the wire - an ldp_vc credential is constrained by type_values, which nothing in
+// credential_metadata can supply yet.
+//
+// The preset path already dropped such credentials; this is the picker doing the
+// same, so the two halves of the UI agree.
+func TestUIMetadataOmitsUnconstrainableCredential(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"pid": {
+					Format:       openid4vp.FormatSDJWTVC,
+					VCTMFilePath: "/path/to/vctm_pid",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+				"diploma_ldp": {
+					Format:       "ldp_vc",
+					VCTMFilePath: "/path/to/vctm_diploma",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+				},
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+
+	require.Contains(t, reply.Credentials, "pid")
+	assert.Equal(t,
+		[]string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
+		reply.Credentials["pid"].VCTValues,
+	)
+	assert.NotContains(t, reply.Credentials, "diploma_ldp",
+		"a scope the UI cannot build a usable query for must not be offered in the picker")
+}

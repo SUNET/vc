@@ -114,13 +114,6 @@ type UIMetadataReply struct {
 	DCAPIAutoAttempt bool `json:"dc_api_auto_attempt"`
 }
 
-// vctIdentifiersFor is a thin alias for model.CredentialMetadata.VCTQueryValues,
-// kept so the UI-side call sites below read as they did before the resolution
-// moved into pkg/model to be shared with the apigw and OIDC-RP DCQL builders.
-func vctIdentifiersFor(constructor *model.CredentialMetadata) []string {
-	return constructor.VCTQueryValues()
-}
-
 func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 	reply := &UIMetadataReply{
 		Credentials:      make(map[string]*UICredentialInfo),
@@ -165,7 +158,24 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 			// list empty and let the UI fall back to the single value.
 			info.VCT = mddl.DocType
 		}
-		info.VCTValues = vctIdentifiersFor(constructor)
+		// Format-aware, like every other DCQL call site. presentation-definition.js
+		// turns this list straight into meta.vct_values for any format other
+		// than mso_mdoc, so publishing it for a scope whose format cannot carry
+		// vct_values puts an invalid query on the wire: an ldp_vc or
+		// jwt_vc_json credential is constrained by type_values, which nothing
+		// in credential_metadata can supply yet (SUNET/vc#680). Such a scope is
+		// left out of the picker entirely rather than offered as something the
+		// UI cannot build a usable request for - the same choice the preset
+		// path below makes.
+		mq, ok := constructor.DCQLMetaQuery()
+		if !ok {
+			c.log.Error(nil, "credential omitted from the verifier UI: no usable DCQL meta constraint for scope",
+				"scope", scope, "format", constructor.Format)
+			continue
+		}
+		// Empty for mdoc, whose constraint is the doctype the UI already reads
+		// from VCT above; omitempty then drops the field.
+		info.VCTValues = mq.VCTValues
 		reply.Credentials[scope] = info
 	}
 

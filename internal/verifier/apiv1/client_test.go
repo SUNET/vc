@@ -635,4 +635,60 @@ func TestAugmentVCTValuesOnlyUsesRequestedScopes(t *testing.T) {
 	reversed := query()
 	client.augmentVCTValuesFromConfig(reversed, []string{"pid_alias", "pid"})
 	assert.Equal(t, both.Credentials[0].Meta.VCTValues, reversed.Credentials[0].Meta.VCTValues)
+
+	// Neither alias requested: the identifier has two owners and nothing
+	// distinguishes them, so guessing would widen the query. Left untouched.
+	ambiguous := query()
+	client.augmentVCTValuesFromConfig(ambiguous, []string{"pid_full"})
+	assert.Equal(t, []string{"urn:eudi:pid:1"}, ambiguous.Credentials[0].Meta.VCTValues)
+}
+
+// TestAugmentVCTValuesTemplateAliasScope covers the shape half the shipped
+// templates actually have, and which a requested-scope-only rule silently left
+// un-augmented - the bug this augmentation exists to remove.
+//
+// eudi_pid_full triggers on the OIDC scope "pid_full" while the credential is
+// configured as "pid"; the eduID full/age templates do the same. The requested
+// scope is therefore not a credential_metadata key at all, so the query has to
+// be paired with the sole configured owner of the identifier it names.
+func TestAugmentVCTValuesTemplateAliasScope(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid": sdJWTScope("urn:eudi:pid:1"),
+	}, nil)
+
+	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+		ID: "eudi_pid", Format: "dc+sd-jwt",
+		Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}},
+	}}}
+
+	// "pid_full" is an OIDC scope, not a configured credential scope.
+	client.augmentVCTValuesFromConfig(dcql, []string{"pid_full"})
+	assert.Equal(t,
+		[]string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
+		dcql.Credentials[0].Meta.VCTValues,
+	)
+}
+
+// TestCreateDCQLQueryRejectsUnusableConfiguredScope covers the guard that runs
+// before either builder.
+//
+// The template path used to return successfully whenever a template matched one
+// requested scope, without looking at the others: a request for "pid" plus a
+// configured ldp_vc scope produced a PID-only query while authCtx.Scopes kept
+// both, so VerificationDirectPost waited for a VP token nobody had been asked
+// for and failed only after the user completed a presentation.
+func TestCreateDCQLQueryRejectsUnusableConfiguredScope(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid":         sdJWTScope("urn:eudi:pid:1"),
+		"diploma_ldp": w3cScope("urn:eudi:diploma:1"),
+	}, nil)
+
+	_, err := client.createDCQLQuery(t.Context(), []string{"pid", "diploma_ldp"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "diploma_ldp")
+
+	// Unconfigured scopes are not this check's business.
+	dcql, err := client.createDCQLQuery(t.Context(), []string{"pid", "profile", "openid"})
+	require.NoError(t, err)
+	require.Len(t, dcql.Credentials, 1)
 }

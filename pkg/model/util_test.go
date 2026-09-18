@@ -381,40 +381,6 @@ func TestVCTQueryValues(t *testing.T) {
 	}
 }
 
-// TestVCTQueryValuesForScopes covers the Cfg-level union: scope order is
-// preserved, values shared between scopes appear once, and unknown or mdoc
-// scopes contribute nothing rather than an empty string.
-func TestVCTQueryValuesForScopes(t *testing.T) {
-	cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{
-		"pid": {
-			VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-			VCTURL: "https://apigw.example/type-metadata/pid",
-			Format: "dc+sd-jwt",
-		},
-		"ehic": {
-			VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:ehic:1"},
-			VCTURL: "https://apigw.example/type-metadata/ehic",
-			Format: "dc+sd-jwt",
-		},
-		// Shares pid's URN, to prove the union deduplicates across scopes.
-		"pid_alias": {
-			VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-			VCTURL: "https://apigw.example/type-metadata/pid",
-			Format: "dc+sd-jwt",
-		},
-		"pid_mdoc": {Format: "mso_mdoc"},
-	}}}
-
-	want := []string{
-		"urn:eudi:pid:1",
-		"https://apigw.example/type-metadata/pid",
-		"urn:eudi:ehic:1",
-		"https://apigw.example/type-metadata/ehic",
-	}
-	assert.Equal(t, want, cfg.VCTQueryValuesForScopes([]string{"pid", "pid_alias", "ehic", "pid_mdoc", "nosuchscope"}))
-	assert.Empty(t, cfg.VCTQueryValuesForScopes(nil))
-}
-
 // TestDCQLMetaQueryFollowsFormat pins the constraint to the credential's
 // FORMAT rather than to which metadata document happens to be loaded. Keying
 // off "is an MDDL present" routed every non-mdoc format - including the ldp_vc

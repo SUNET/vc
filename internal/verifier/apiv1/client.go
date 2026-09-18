@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -361,6 +362,21 @@ func getOrDefaultString(s, defaultVal string) string {
 func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4vp.DCQL, error) {
 	c.log.Info("Creating DCQL query", "scopes", scopes)
 
+	// Before either builder: refuse a request naming a configured credential
+	// this verifier cannot ask for. Whichever path builds the query, the
+	// request's full scope list is what handler_oidc.go persists as
+	// authCtx.Scopes, and VerificationDirectPost requires a VP token for every
+	// entry - so a query that quietly covers only some of them fails with
+	// "VP token not found for scope" after the user has completed a
+	// presentation, naming a scope they were never asked for.
+	//
+	// The template path needs this as much as the fallback does, and used to
+	// lack it: a template selected for "pid" returns a PID-only query while a
+	// second configured scope in the same request goes unmentioned.
+	if err := c.validateRequestedScopes(scopes); err != nil {
+		return nil, err
+	}
+
 	// If we have a presentation builder with templates, use it
 	if c.presentationBuilder != nil {
 		dcql, err := c.presentationBuilder.BuildDCQLQuery(ctx, scopes)
@@ -382,6 +398,28 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 	return c.buildDCQLQueryFromConfig(scopes)
 }
 
+// validateRequestedScopes rejects a request naming a configured credential
+// whose DCQL constraint cannot be built.
+//
+// Only CONFIGURED scopes are checked: a requested scope with no
+// credential_metadata entry is an ordinary OIDC scope like "profile", which no
+// query should mention and whose absence from one is not an error.
+func (c *Client) validateRequestedScopes(scopes []string) error {
+	if c.cfg.Common == nil {
+		return nil
+	}
+	for _, scope := range scopes {
+		constructor, ok := c.cfg.Common.CredentialMetadata[scope]
+		if !ok {
+			continue
+		}
+		if _, usable := constructor.DCQLMetaQuery(); !usable {
+			return fmt.Errorf("scope %q is configured with format %q, for which no DCQL meta constraint can be built", scope, c.cfg.GetFormatForScope(scope))
+		}
+	}
+	return nil
+}
+
 // augmentVCTValuesFromConfig adds the credential type identifiers a wallet
 // might match on to a template-built query, without discarding what the
 // operator wrote.
@@ -397,11 +435,26 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 // therefore paired with the scope whose identifiers it already mentions, which
 // is exactly the relationship that makes appending the rest correct.
 //
-// Only the REQUESTED scopes are considered. ResolveVCTUrls derives VCTURL per
-// scope, so two scopes backed by the same VCTM - aliases sharing a vct - get
-// different type-metadata URLs. Scanning every configured scope would let a
-// query for one of them be augmented with the other's URL, widening it to
-// accept a credential configuration the caller never asked for.
+// Which credential configuration a query belongs to is settled in two steps,
+// because the safe answer and the useful answer are not always the same one.
+//
+// A requested scope that owns one of the query's identifiers wins: the caller
+// named it, so completing from it cannot exceed what was asked for. That covers
+// templates whose oidc_scopes are credential scopes, like eudi_pid_basic ("pid").
+//
+// Otherwise the identifier's sole owner among all configured scopes is used.
+// Half the shipped templates need this: eudi_pid_full triggers on the OIDC
+// scope "pid_full" while the credential is configured as "pid", and the eduID
+// full/age templates do the same, so a requested-scope-only rule silently left
+// them un-augmented - the bug this fix exists to remove, still in place for
+// those templates.
+//
+// Sole owner is the condition that makes it safe. ResolveVCTUrls derives VCTURL
+// per scope, so aliases backed by one VCTM resolve to different type-metadata
+// URLs; if several configured scopes carry the identifier there is no way to
+// tell which one the template meant, and guessing would widen the query to
+// accept a credential configuration nobody asked for. Ambiguity therefore
+// augments nothing and says so.
 //
 // Queries with no vct_values are left alone: mdoc queries are constrained by
 // doctype_value, and a query with no type constraint at all is not something to
@@ -415,7 +468,7 @@ func (c *Client) augmentVCTValuesFromConfig(dcql *openid4vp.DCQL, scopes []strin
 		if len(cred.Meta.VCTValues) == 0 {
 			continue
 		}
-		matched, identifiers := c.identifiersForRequestedScopes(cred.Meta.VCTValues, scopes)
+		matched, identifiers := c.identifiersForQuery(cred.Meta.VCTValues, scopes)
 		if len(matched) == 0 {
 			continue
 		}
@@ -425,42 +478,59 @@ func (c *Client) augmentVCTValuesFromConfig(dcql *openid4vp.DCQL, scopes []strin
 	}
 }
 
-// identifiersForRequestedScopes returns every REQUESTED scope whose identifiers
-// values already names, together with the union of those scopes' identifiers.
-// Requested scopes with no credential_metadata entry are skipped - those are
-// ordinary OIDC scopes like "profile".
-//
-// Every matching scope contributes, rather than just the first. Two scopes can
-// share a vct while resolving to different type-metadata URLs (ResolveVCTUrls
-// derives VCTURL per scope, so aliases backed by one VCTM differ there), and
-// picking one of them by sort order would drop an alias the caller explicitly
-// requested while keeping the other. Taking all of them cannot widen the query
-// past the request, since only requested scopes are ever consulted, and it
-// leaves no tie to break.
-//
-// Scopes come back in sorted order, so a given request augments a query the
-// same way every time.
+// identifiersForQuery resolves the credential configuration a template query
+// refers to, and returns the scopes it matched with the union of their
+// identifiers. See augmentVCTValuesFromConfig for why it prefers a requested
+// scope and falls back to a sole owner.
 //
 // An empty result is the normal case for a template naming a credential type
-// none of the requested scopes configures.
-func (c *Client) identifiersForRequestedScopes(values []string, scopes []string) ([]string, []string) {
+// this verifier configures no scope for, and for an ambiguous one.
+func (c *Client) identifiersForQuery(values []string, scopes []string) ([]string, []string) {
 	if c.cfg.Common == nil {
 		return nil, nil
 	}
-	var matched, identifiers []string
-	for _, scope := range slices.Sorted(slices.Values(scopes)) {
-		constructor, ok := c.cfg.Common.CredentialMetadata[scope]
-		if !ok {
-			continue
+
+	owners := c.scopesOwningAny(values)
+	switch {
+	case len(owners) == 0:
+		return nil, nil
+	case len(owners) == 1:
+		// Sole owner: unambiguous whether or not it was requested.
+	default:
+		// Several configured scopes carry the identifier. Prefer the ones the
+		// caller actually asked for; without that there is nothing to pick on.
+		requested := make([]string, 0, len(owners))
+		for _, scope := range owners {
+			if slices.Contains(scopes, scope) {
+				requested = append(requested, scope)
+			}
 		}
-		scopeIdentifiers := constructor.VCTQueryValues()
-		if !slices.ContainsFunc(scopeIdentifiers, func(id string) bool { return slices.Contains(values, id) }) {
-			continue
+		if len(requested) == 0 {
+			c.log.Info("Not augmenting template vct_values: identifier is shared by several configured scopes and none was requested",
+				"scopes", owners, "vct_values", values)
+			return nil, nil
 		}
-		matched = append(matched, scope)
-		identifiers = appendMissing(identifiers, scopeIdentifiers)
+		owners = requested
 	}
-	return matched, identifiers
+
+	var identifiers []string
+	for _, scope := range owners {
+		identifiers = appendMissing(identifiers, c.cfg.Common.CredentialMetadata[scope].VCTQueryValues())
+	}
+	return owners, identifiers
+}
+
+// scopesOwningAny returns, in sorted order, every configured scope whose own
+// identifiers include one of values.
+func (c *Client) scopesOwningAny(values []string) []string {
+	var owners []string
+	for _, scope := range slices.Sorted(maps.Keys(c.cfg.Common.CredentialMetadata)) {
+		identifiers := c.cfg.Common.CredentialMetadata[scope].VCTQueryValues()
+		if slices.ContainsFunc(identifiers, func(id string) bool { return slices.Contains(values, id) }) {
+			owners = append(owners, scope)
+		}
+	}
+	return owners
 }
 
 // appendMissing appends each of extra not already in base, preserving base's
