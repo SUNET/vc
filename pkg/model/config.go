@@ -2524,8 +2524,31 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 			return nil, fmt.Errorf("credential constructor for scope %q has no VCTM metadata loaded (check vctm_file_path)", scope)
 		}
 
+		// The VCTM's OWN declared vct, not the URL the document is served
+		// from. A wallet that stores a credential by the type advertised in
+		// credential_configurations_supported - the Android German Wallet and
+		// multipaz both do - otherwise files it under
+		// "https://<apigw>/type-metadata/<scope>" while the credential it
+		// receives carries "urn:eudi:pid:1", and a registry lookup by that
+		// advertised type finds nothing (SUNET/vc#676).
+		//
+		// This branch used to be harmless for a stock deployment only because
+		// every VCTM shipped in metadata/ omitted "vct": ResolveVCTUrls
+		// back-filled it from this same URL, so the two agreed by accident.
+		// Now that those documents declare their identifiers, the two would
+		// disagree, which is exactly the divergence #676 reports.
+		//
+		// The fallback still covers a VCTM with no "vct" of its own, where
+		// ResolveVCTUrls has back-filled the URL and both are the same string.
+		//
+		// The mso_mdoc branch above already does the equivalent: it advertises
+		// the MDDL's own doctype and never rewrites it.
+		//
 		// Set format-specific parameters per OID4VCI 1.0 Appendix A
-		resolvedVCT := constructor.GetVCTURL()
+		resolvedVCT := vctm.VCT
+		if resolvedVCT == "" {
+			resolvedVCT = constructor.GetVCTURL()
+		}
 		switch constructor.Format {
 		case "dc+sd-jwt":
 			// Appendix A.3: only vct is format-specific for dc+sd-jwt

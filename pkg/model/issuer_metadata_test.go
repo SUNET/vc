@@ -553,19 +553,30 @@ func TestIssuerMetadata_Generate_MultipleCredentials(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, metadata.CredentialConfigurationsSupported, 3)
 
-	// Verify each credential - keys are scope names
+	// Verify each credential - keys are scope names.
+	//
+	// The advertised vct is the VCTM's own, never the URL the document is
+	// served from (SUNET/vc#676): a wallet that stores a credential by the
+	// type in credential_configurations_supported would otherwise file it
+	// under an identifier the credential itself never carries. These
+	// assertions used to expect the URL for all three, which is the behaviour
+	// that issue reports.
+	//
+	// pid is the case where the two coincide: its VCTM declares the URL as its
+	// own vct, exactly as ResolveVCTUrls back-fills a VCTM that omits one.
 	pidConfig := metadata.CredentialConfigurationsSupported["pid"]
 	assert.Equal(t, "dc+sd-jwt", pidConfig.Format)
 	assert.Equal(t, baseURL+"/type-metadata/pid", pidConfig.VCT)
 	assert.Equal(t, "pid", pidConfig.Scope)
 
+	// ehic and diploma declare URNs of their own, so those are advertised.
 	ehicConfig := metadata.CredentialConfigurationsSupported["ehic"]
 	assert.Equal(t, "vc+sd-jwt", ehicConfig.Format)
-	assert.Equal(t, baseURL+"/type-metadata/ehic", ehicConfig.VCT)
+	assert.Equal(t, "urn:eudi:ehic:1", ehicConfig.VCT)
 
 	diplomaConfig := metadata.CredentialConfigurationsSupported["diploma"]
 	assert.Equal(t, "vc+sd-jwt", diplomaConfig.Format) // default
-	assert.Equal(t, baseURL+"/type-metadata/diploma", diplomaConfig.VCT)
+	assert.Equal(t, "urn:eudi:diploma:1", diplomaConfig.VCT)
 }
 
 func TestIssuerMetadata_Generate_DisclosurePolicy(t *testing.T) {
