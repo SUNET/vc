@@ -2187,7 +2187,18 @@ func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string, r
 
 // GetVCTM returns the cached VCTM under a read lock so it is safe to call
 // concurrently with the background refresh loop.
+//
+// Nil receiver returns the zero value, as every accessor on this type does.
+// A nil *CredentialMetadata is reachable without a programming error:
+// Cfg.GetCredentialMetadata is a map lookup, credential_metadata can hold a
+// nil value for a present key (an entry written with no fields), and an
+// auth_scopes key naming no configured scope resolved to nil until
+// SUNET/vc#681. Taking the lock first turned each of those into a panic in
+// whatever request touched it.
 func (c *CredentialMetadata) GetVCTM() *sdjwtvc.VCTM {
+	if c == nil {
+		return nil
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.VCTM
@@ -2195,6 +2206,9 @@ func (c *CredentialMetadata) GetVCTM() *sdjwtvc.VCTM {
 
 // GetVCTURL returns the published URL where the VCTM is served.
 func (c *CredentialMetadata) GetVCTURL() string {
+	if c == nil {
+		return ""
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.VCTURL
@@ -2202,6 +2216,9 @@ func (c *CredentialMetadata) GetVCTURL() string {
 
 // GetVCTMRaw returns the raw VCTM JSON bytes under a read lock.
 func (c *CredentialMetadata) GetVCTMRaw() []byte {
+	if c == nil {
+		return nil
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.VCTMRaw
@@ -2209,6 +2226,9 @@ func (c *CredentialMetadata) GetVCTMRaw() []byte {
 
 // GetAttributes returns the derived attributes under a read lock.
 func (c *CredentialMetadata) GetAttributes() map[string]map[string][]*string {
+	if c == nil {
+		return nil
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.Attributes
@@ -2217,6 +2237,9 @@ func (c *CredentialMetadata) GetAttributes() map[string]map[string][]*string {
 // GetIntegrity returns the SRI integrity hash of the VCTM or MDDL document
 // under a read lock.
 func (c *CredentialMetadata) GetIntegrity() string {
+	if c == nil {
+		return ""
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.Integrity
@@ -2225,6 +2248,9 @@ func (c *CredentialMetadata) GetIntegrity() string {
 // GetMDDL returns the cached MDDL schema under a read lock so it is safe to
 // call concurrently with the background refresh loop.
 func (c *CredentialMetadata) GetMDDL() *mdoc.MDDLSchema {
+	if c == nil {
+		return nil
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.MDDL
@@ -2232,6 +2258,9 @@ func (c *CredentialMetadata) GetMDDL() *mdoc.MDDLSchema {
 
 // GetMDDLRaw returns the raw MDDL JSON bytes under a read lock.
 func (c *CredentialMetadata) GetMDDLRaw() []byte {
+	if c == nil {
+		return nil
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.MDDLRaw
@@ -2240,7 +2269,7 @@ func (c *CredentialMetadata) GetMDDLRaw() []byte {
 // IsLocalVCTM returns true when the VCTM is loaded from a local file
 // (i.e. apigw should publish it at /type-metadata/:scope).
 func (c *CredentialMetadata) IsLocalVCTM() bool {
-	return c.VCTMFilePath != ""
+	return c != nil && c.VCTMFilePath != ""
 }
 
 // IsLocalMDDL returns true when the MDDL schema is loaded from a local file.

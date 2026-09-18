@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/mdoc"
+	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/stretchr/testify/assert"
@@ -577,4 +578,45 @@ func TestShippedVCTMsDeclareTheirVCT(t *testing.T) {
 			assert.Equal(t, []string{expected, "https://apigw.example/type-metadata/s"}, cm.VCTQueryValues())
 		})
 	}
+}
+
+// TestCredentialMetadataAccessorsAreNilSafe pins every accessor against a nil
+// receiver.
+//
+// A nil *CredentialMetadata is reachable without a programming error:
+// Cfg.GetCredentialMetadata is a map lookup that returns nil for an absent key,
+// credential_metadata can hold a nil value for a PRESENT key (an entry written
+// with no fields), and an auth_scopes key naming no configured scope resolved
+// to nil until SUNET/vc#681 made config load reject that. Each accessor took
+// c.mu.RLock() before reading anything, so any of those turned into a panic in
+// whatever request touched it - which is how one reached a released code path.
+//
+// The config-load check is the real fix for the auth_scopes case; this is the
+// floor under it, so a future caller cannot reintroduce the same panic.
+func TestCredentialMetadataAccessorsAreNilSafe(t *testing.T) {
+	var cm *CredentialMetadata
+
+	assert.NotPanics(t, func() {
+		assert.Nil(t, cm.GetVCTM())
+		assert.Empty(t, cm.GetVCTURL())
+		assert.Nil(t, cm.GetVCTMRaw())
+		assert.Nil(t, cm.GetAttributes())
+		assert.Empty(t, cm.GetIntegrity())
+		assert.Nil(t, cm.GetMDDL())
+		assert.Nil(t, cm.GetMDDLRaw())
+		assert.False(t, cm.IsLocalVCTM())
+		assert.Nil(t, cm.VCTQueryValues())
+
+		meta, ok := cm.DCQLMetaQuery()
+		assert.False(t, ok)
+		assert.Equal(t, openid4vp.MetaQuery{}, meta)
+	})
+
+	// The shape that reaches these accessors in practice: a present key whose
+	// value is nil, which a plain "was it found" check does not catch.
+	cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{"broken": nil}}}
+	assert.NotPanics(t, func() {
+		assert.Nil(t, cfg.GetCredentialMetadata("broken").GetVCTM())
+		assert.Empty(t, cfg.GetCredentialMetadata("nosuchscope").GetVCTURL())
+	})
 }
