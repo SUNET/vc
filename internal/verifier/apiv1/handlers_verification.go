@@ -150,6 +150,17 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// is selected by "pid profile". Requiring a VP token for those meant any
 	// request naming more than one scope failed here, since no wallet returns a
 	// credential for "profile".
+	// A session created before ScopeQueryIDs existed has a cached DCQLQuery and
+	// no mapping, so a template-built query's response would not resolve. The
+	// mapping is a pure function of the request, so rebuild it rather than fail
+	// a presentation the user has already completed mid rolling deploy.
+	if authCtx.ScopeQueryIDs == nil && authCtx.DCQLQuery != nil {
+		if rebuilt := c.ScopeQueryIDs(ctx, authCtx.DCQLQuery, authCtx.Scopes); len(rebuilt) > 0 {
+			c.log.Info("rebuilt the scope-to-query mapping for a session that predates it", "scopes", authCtx.Scopes)
+			authCtx.ScopeQueryIDs = rebuilt
+		}
+	}
+
 	credentialScopes := c.credentialScopes(authCtx)
 	if len(credentialScopes) == 0 && authCtx.DCQLQuery != nil && len(authCtx.DCQLQuery.Credentials) > 0 {
 		// The query asked for credentials but nothing is left to check them
@@ -612,33 +623,54 @@ type VerificationCallbackResponse struct {
 // credentialScopes returns the requested scopes that are part of the
 // presentation, in request order.
 //
-// Only the scopes OIDC Core defines are dropped. authCtx.Scopes always carries
-// "openid", and the shipped eudi_pid_basic template is selected by
-// "pid profile" - no wallet returns a credential for those, so requiring a VP
-// token for them failed every request naming more than one scope.
+// A non-standard scope is always kept, even when nothing obviously represents
+// it. Dropping on uncertainty is the dangerous direction on a validation path:
+// the scope would vanish from the loop instead of failing in it, and a request
+// whose scopes all vanished would cache a successful presentation having
+// validated no VP token at all.
 //
-// Everything else is kept, including a scope no credential query obviously
-// stands for. Dropping those would be the dangerous direction: an unmapped
-// scope would simply vanish from the loop, and a request whose scopes all
-// vanished would cache a successful presentation having validated no VP token
-// at all. Keeping them means such a scope reaches vpTokensForScope and fails
-// there, loudly, which is what it did before any of this.
+// A scope OIDC Core defines is kept only when it really is a credential - named
+// by a query, paired with one, or configured in credential_metadata. Otherwise
+// it is dropped, which is the reason this function exists: authCtx.Scopes
+// always carries "openid", the shipped eudi_pid_basic template is selected by
+// "pid profile", and no wallet returns a credential for those, so requiring a
+// VP token for them failed every request naming more than one scope.
+//
+// The check is that narrow because a standard scope CAN be a credential here:
+// PresentationBuilder deliberately lets one select a template, and nothing
+// stops credential_metadata configuring "profile". Excluding those by name
+// would skip validating a credential the request actually asked for.
 //
 // With no DCQL query cached, every scope is returned - the behaviour that
-// predates this, so sessions created before the field existed survive a
-// rolling deploy.
+// predates this.
 func (c *Client) credentialScopes(authCtx *cache.AuthorizationContext) []string {
 	if authCtx.DCQLQuery == nil {
 		return authCtx.Scopes
 	}
 	scopes := make([]string, 0, len(authCtx.Scopes))
 	for _, scope := range authCtx.Scopes {
-		if openid4vp.StandardOIDCScopes[scope] {
+		if openid4vp.StandardOIDCScopes[scope] && !c.isCredentialScope(authCtx, scope) {
 			continue
 		}
 		scopes = append(scopes, scope)
 	}
 	return scopes
+}
+
+// isCredentialScope reports whether a scope names a credential this request
+// actually asked for.
+func (c *Client) isCredentialScope(authCtx *cache.AuthorizationContext, scope string) bool {
+	if _, mapped := authCtx.ScopeQueryIDs[scope]; mapped {
+		return true
+	}
+	if c.cfg.Common != nil {
+		if _, configured := c.cfg.Common.CredentialMetadata[scope]; configured {
+			return true
+		}
+	}
+	return slices.ContainsFunc(authCtx.DCQLQuery.Credentials, func(cred openid4vp.CredentialQuery) bool {
+		return cred.ID == scope
+	})
 }
 
 // vpTokensForScope finds the VP tokens a wallet returned for one requested

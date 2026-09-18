@@ -349,6 +349,36 @@ func TestCredentialScopes(t *testing.T) {
 		assert.Equal(t, []string{"openid", "pid"}, got)
 	})
 
+	t.Run("a standard scope configured as a credential is kept", func(t *testing.T) {
+		// Covers a review finding. PresentationBuilder deliberately lets a
+		// standard scope select a template, and nothing stops
+		// credential_metadata configuring "profile" - so excluding those by
+		// name would skip validating a credential the request asked for.
+		configured, _ := CreateTestClientWithMock(t, &model.Cfg{
+			Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+				"profile": sdJWTScope("urn:example:profile:1"),
+			}},
+			Verifier: &model.Verifier{},
+		})
+		got := configured.credentialScopes(&cache.AuthorizationContext{
+			Scopes: []string{"openid", "profile"},
+			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+				{ID: "profile"},
+			}},
+		})
+		assert.Equal(t, []string{"profile"}, got)
+	})
+
+	t.Run("a standard scope named by a query is kept", func(t *testing.T) {
+		got := client.credentialScopes(&cache.AuthorizationContext{
+			Scopes: []string{"openid", "email"},
+			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+				{ID: "email"},
+			}},
+		})
+		assert.Equal(t, []string{"email"}, got)
+	})
+
 	t.Run("a query with only ordinary scopes leaves nothing to check", func(t *testing.T) {
 		// eudi_pid_basic declares "pid profile", so "profile" alone selects it.
 		// The guard in VerificationDirectPost turns this into an error rather
@@ -390,29 +420,35 @@ func TestScopeQueryIDsSharedQueryIsAmbiguous(t *testing.T) {
 		client.ScopeQueryIDs(t.Context(), dcql, []string{"pid"}))
 }
 
-// TestCredentialScopesLegacySession covers a review finding about sessions
-// created before ScopeQueryIDs existed: DCQLQuery is persisted (that field
-// predates this change) while the mapping is nil.
+// TestScopeQueryIDsRebuildForLegacySession covers a review finding about
+// sessions created before ScopeQueryIDs existed: DCQLQuery is persisted (that
+// field predates this change) while the mapping is nil, so a template-built
+// query's response would not resolve and a presentation the user had already
+// completed would fail mid rolling deploy.
 //
-// Such a session must not resolve to nothing. It fails - the wallet keyed its
-// answer by a query id the session cannot resolve, which is the bug this branch
-// fixes and cannot retroactively fix for a request already in flight - but it
-// fails loudly at token resolution rather than completing with nothing checked.
-func TestCredentialScopesLegacySession(t *testing.T) {
-	client, _ := CreateTestClientWithMock(t, nil)
+// The mapping is a pure function of the request, so it can simply be rebuilt.
+func TestScopeQueryIDsRebuildForLegacySession(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid": sdJWTScope("urn:eudi:pid:1"),
+	}, nil)
 
-	authCtx := &cache.AuthorizationContext{
-		Scopes:        []string{"openid", "pid", "profile"},
+	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+		{ID: "eudi_pid", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}}},
+	}}
+
+	// What the cache holds for such a session: a query, no mapping.
+	legacy := &cache.AuthorizationContext{
+		Scopes:        []string{"openid", "pid"},
 		ScopeQueryIDs: nil,
-		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
-			{ID: "eudi_pid"},
-		}},
+		DCQLQuery:     dcql,
 	}
 
-	scopes := client.credentialScopes(authCtx)
-	require.Equal(t, []string{"pid"}, scopes, "the credential scope must survive an absent mapping")
+	rebuilt := client.ScopeQueryIDs(t.Context(), legacy.DCQLQuery, legacy.Scopes)
+	require.Equal(t, map[string]string{"pid": "eudi_pid"}, rebuilt)
 
-	_, err := client.vpTokensForScope(authCtx, scopes,
+	legacy.ScopeQueryIDs = rebuilt
+	tokens, err := client.vpTokensForScope(legacy, client.credentialScopes(legacy),
 		openid4vp.VPResponse{VPToken: map[string][]string{"eudi_pid": {"token"}}}, "pid")
-	assert.Error(t, err, "an unresolvable legacy session must fail, not silently succeed")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"token"}, tokens)
 }
