@@ -371,7 +371,7 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 		// every deployment with presentation_requests configured - a
 		// configured mso_mdoc scope with no template of its own got an
 		// unconstrained vc+sd-jwt query instead of its doctype.
-		dcql, matched := c.presentationBuilder.TemplateDCQLQuery(ctx, scopes)
+		dcql, _, matched := c.presentationBuilder.TemplateDCQLQuery(ctx, scopes)
 		if matched {
 			// Templates take priority over buildDCQLQueryFromConfig, so
 			// without this every SUNET/vc#673 fix below would be unreachable
@@ -412,13 +412,22 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 // credential_metadata says which types are its, so there is no honest way to
 // recognise the query. Those scopes keep today's scope-keyed lookup until
 // SUNET/vc#680 gives them a constraint to match on.
-func (c *Client) ScopeQueryIDs(dcql *openid4vp.DCQL, scopes []string) map[string]string {
+func (c *Client) ScopeQueryIDs(ctx context.Context, dcql *openid4vp.DCQL, scopes []string) map[string]string {
 	if dcql == nil || c.cfg.Common == nil {
 		return nil
 	}
+
+	// Which template answered, recomputed rather than carried: selection is a
+	// pure function of the requested scopes, and stashing it on the Client
+	// would be per-request state on an object every request shares.
+	var templateScopes []string
+	if c.presentationBuilder != nil {
+		_, templateScopes, _ = c.presentationBuilder.TemplateDCQLQuery(ctx, scopes)
+	}
+
 	var pairs map[string]string
 	for _, scope := range scopes {
-		queryID, found := c.queryIDForScope(dcql, scope)
+		queryID, found := c.queryIDForScope(dcql, scope, templateScopes)
 		if !found || queryID == scope {
 			continue
 		}
@@ -443,10 +452,11 @@ func (c *Client) ScopeQueryIDs(dcql *openid4vp.DCQL, scopes []string) map[string
 // what the response is looked up by, so skipping it left exactly those
 // templates as broken as before.
 //
-// With more than one query there is nothing to choose on - a template's queries
-// carry no record of which of its oidc_scopes each answers - so the scope is
-// left unmapped rather than guessed at, and the direct lookup applies.
-func (c *Client) queryIDForScope(dcql *openid4vp.DCQL, scope string) (string, bool) {
+// Even then, only a scope the selected template declares, and only when the
+// request produced one query: a template's queries carry no record of which of
+// its oidc_scopes each answers, so with several there is nothing to choose on
+// and the scope is left unmapped rather than guessed at.
+func (c *Client) queryIDForScope(dcql *openid4vp.DCQL, scope string, templateScopes []string) (string, bool) {
 	if constructor, configured := c.cfg.Common.CredentialMetadata[scope]; configured {
 		meta, ok := constructor.DCQLMetaQuery()
 		if !ok {
@@ -455,19 +465,21 @@ func (c *Client) queryIDForScope(dcql *openid4vp.DCQL, scope string) (string, bo
 		return queryIDForConstraint(dcql, meta)
 	}
 
-	// Never an ordinary OIDC scope. eudi_pid_basic is selected by "pid
-	// profile", so without this "profile" would map to the same sole query as
-	// "pid" - and since a mapped scope counts as a credential scope
-	// (credentialScopes), the one credential would be resolved and processed
-	// twice: duplicated in scopeCredentials and the cache, with validations,
+	// Never an ordinary OIDC scope: eudi_pid_basic is selected by "pid profile",
+	// and a mapped scope counts as a credential scope (credentialScopes), so
+	// mapping "profile" would resolve and process the one credential twice -
+	// duplicated in scopeCredentials and the cache, with validations,
 	// revocation and combined-binding applied over it again.
-	//
-	// This only excludes the scopes OIDC Core defines. A deployment could still
-	// name some other non-credential scope in a template's oidc_scopes and have
-	// it map here; templates name credential-ish scopes in practice, and the
-	// alternative - requiring every template scope to be configured - is the
-	// restriction that left the alias templates broken to begin with.
 	if openid4vp.StandardOIDCScopes[scope] {
+		return "", false
+	}
+
+	// And only a scope the selected template actually declares. A request can
+	// name scopes the template says nothing about - "pid something_else" still
+	// selects the PID template - and mapping those would key the same
+	// credential under a scope the template never claimed. The template's
+	// oidc_scopes are the only record of which scopes its queries answer.
+	if !slices.Contains(templateScopes, scope) {
 		return "", false
 	}
 
@@ -481,28 +493,45 @@ func (c *Client) queryIDForScope(dcql *openid4vp.DCQL, scope string) (string, bo
 // constraint - the same doctype, one of the same vct identifiers, or the same
 // W3C type alternative.
 //
+// Exactly one match, or none. Two configured scopes can share a credential's
+// embedded vct while resolving to different type-metadata URLs - aliases for
+// one type - so with several queries in the request an overlap on the shared
+// URN does not say which query answers this scope. Taking the first would key
+// the response lookup to the wrong query and lose the wallet's answer, which is
+// the failure this whole change exists to remove. An ambiguous scope is left
+// unmapped and falls back to its own key.
+//
 // The type_values arm matches nothing today, because DCQLMetaQuery has no W3C
 // constraint to return yet. It is here so this pairs correctly the moment
 // SUNET/vc#680 gives those scopes a type list rather than silently leaving W3C
-// requests unmapped - the same half-covered state this change exists to end.
+// requests unmapped.
 func queryIDForConstraint(dcql *openid4vp.DCQL, meta openid4vp.MetaQuery) (string, bool) {
+	var found string
 	for _, cred := range dcql.Credentials {
+		var matches bool
 		switch {
-		case meta.DoctypeValue != "" && cred.Meta.DoctypeValue == meta.DoctypeValue:
-			return cred.ID, true
-		case len(meta.VCTValues) > 0 && slices.ContainsFunc(cred.Meta.VCTValues, func(v string) bool {
-			return slices.Contains(meta.VCTValues, v)
-		}):
-			return cred.ID, true
-		case len(meta.TypeValues) > 0 && slices.ContainsFunc(cred.Meta.TypeValues, func(t []string) bool {
-			return slices.ContainsFunc(meta.TypeValues, func(want []string) bool {
-				return slices.Equal(t, want)
+		case meta.DoctypeValue != "":
+			matches = cred.Meta.DoctypeValue == meta.DoctypeValue
+		case len(meta.VCTValues) > 0:
+			matches = slices.ContainsFunc(cred.Meta.VCTValues, func(v string) bool {
+				return slices.Contains(meta.VCTValues, v)
 			})
-		}):
-			return cred.ID, true
+		case len(meta.TypeValues) > 0:
+			matches = slices.ContainsFunc(cred.Meta.TypeValues, func(t []string) bool {
+				return slices.ContainsFunc(meta.TypeValues, func(want []string) bool {
+					return slices.Equal(t, want)
+				})
+			})
 		}
+		if !matches {
+			continue
+		}
+		if found != "" {
+			return "", false
+		}
+		found = cred.ID
 	}
-	return "", false
+	return found, found != ""
 }
 
 // uncoveredScopes returns the requested scopes that are configured, have a

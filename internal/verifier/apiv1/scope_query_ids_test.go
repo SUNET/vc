@@ -37,7 +37,7 @@ func TestScopeQueryIDs(t *testing.T) {
 		{ID: "ehic", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:ehic:1"}}},
 	}}
 
-	got := client.ScopeQueryIDs(dcql, []string{"pid", "ehic", "pid_mdoc", "diploma_ldp", "profile"})
+	got := client.ScopeQueryIDs(t.Context(), dcql, []string{"pid", "ehic", "pid_mdoc", "diploma_ldp", "profile"})
 
 	// Only the pairs that actually differ, so the common case costs nothing.
 	assert.Equal(t, map[string]string{
@@ -57,7 +57,7 @@ func TestScopeQueryIDsNoTemplateNames(t *testing.T) {
 	dcql, err := client.buildDCQLQueryFromConfig([]string{"pid"})
 	require.NoError(t, err)
 
-	assert.Empty(t, client.ScopeQueryIDs(dcql, []string{"pid"}))
+	assert.Empty(t, client.ScopeQueryIDs(t.Context(), dcql, []string{"pid"}))
 }
 
 // TestUncoveredScopesRejectsUnaskedCredential covers the request side of the
@@ -201,6 +201,19 @@ func TestVPTokensForScope(t *testing.T) {
 	}
 }
 
+// stubTemplate is a presentation template with the shape the shipped ones have:
+// a query named for the template, selected by scopes that need not be
+// credential_metadata keys.
+type stubTemplate struct {
+	id     string
+	scopes []string
+	dcql   *openid4vp.DCQL
+}
+
+func (t stubTemplate) GetID() string                 { return t.id }
+func (t stubTemplate) GetOIDCScopes() []string       { return t.scopes }
+func (t stubTemplate) GetDCQLQuery() *openid4vp.DCQL { return t.dcql }
+
 // TestScopeQueryIDsAliasTemplateScope covers a review finding, and the shape
 // half the shipped templates actually have.
 //
@@ -215,27 +228,50 @@ func TestScopeQueryIDsAliasTemplateScope(t *testing.T) {
 		"pid": sdJWTScope("urn:eudi:pid:1"),
 	}, nil)
 
-	// What eudi_pid_full produces: one query, named for the template.
+	// What eudi_pid_full is: one query named for the template, selected by a
+	// scope that configures no credential.
 	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
 		{ID: "eudi_pid", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}}},
 	}}
+	client.presentationBuilder = openid4vp.NewPresentationBuilder([]openid4vp.PresentationRequestTemplate{
+		stubTemplate{id: "eudi_pid_full", scopes: []string{"pid_full"}, dcql: dcql},
+	})
 
-	assert.Equal(t, map[string]string{"pid_full": "eudi_pid"},
-		client.ScopeQueryIDs(dcql, []string{"pid_full"}),
+	pairs := client.ScopeQueryIDs(t.Context(), dcql, []string{"pid_full"})
+	assert.Equal(t, map[string]string{"pid_full": "eudi_pid"}, pairs,
 		"an alias scope must still resolve to the query the wallet answers under")
 
 	// And the response then resolves, which is the whole point.
 	tokens, err := client.vpTokensForScope(
-		&cache.AuthorizationContext{
-			Scopes:        []string{"pid_full"},
-			ScopeQueryIDs: client.ScopeQueryIDs(dcql, []string{"pid_full"}),
-		},
+		&cache.AuthorizationContext{Scopes: []string{"pid_full"}, ScopeQueryIDs: pairs},
 		[]string{"pid_full"},
 		openid4vp.VPResponse{VPToken: map[string][]string{"eudi_pid": {"token-pid"}}},
 		"pid_full",
 	)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"token-pid"}, tokens)
+}
+
+// TestScopeQueryIDsIgnoresScopesTheTemplateDoesNotClaim covers a review
+// finding: a request can name scopes the selected template says nothing about -
+// "pid_full something_else" still selects the PID template - and mapping those
+// would key the same credential under a scope the template never claimed, so
+// VerificationDirectPost would process and cache the one credential twice.
+func TestScopeQueryIDsIgnoresScopesTheTemplateDoesNotClaim(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid": sdJWTScope("urn:eudi:pid:1"),
+	}, nil)
+
+	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+		{ID: "eudi_pid", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}}},
+	}}
+	client.presentationBuilder = openid4vp.NewPresentationBuilder([]openid4vp.PresentationRequestTemplate{
+		stubTemplate{id: "eudi_pid_full", scopes: []string{"pid_full"}, dcql: dcql},
+	})
+
+	pairs := client.ScopeQueryIDs(t.Context(), dcql, []string{"pid_full", "something_else"})
+	assert.Equal(t, map[string]string{"pid_full": "eudi_pid"}, pairs)
+	assert.NotContains(t, pairs, "something_else")
 }
 
 // TestScopeQueryIDsAliasScopeAmbiguous pins the limit of that fallback: with
@@ -253,12 +289,12 @@ func TestScopeQueryIDsAliasScopeAmbiguous(t *testing.T) {
 		{ID: "eudi_ehic", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:ehic:1"}}},
 	}}
 
-	got := client.ScopeQueryIDs(dcql, []string{"combined_full"})
+	got := client.ScopeQueryIDs(t.Context(), dcql, []string{"combined_full"})
 	assert.Empty(t, got, "an unconfigured scope with several candidate queries must not be guessed")
 
 	// Configured scopes in the same request still pair exactly, by constraint.
 	assert.Equal(t, map[string]string{"pid": "eudi_pid", "ehic": "eudi_ehic"},
-		client.ScopeQueryIDs(dcql, []string{"pid", "ehic"}))
+		client.ScopeQueryIDs(t.Context(), dcql, []string{"pid", "ehic"}))
 }
 
 // TestCredentialScopes covers which requested scopes the response is actually
@@ -331,7 +367,7 @@ func TestScopeQueryIDsSkipsStandardOIDCScopes(t *testing.T) {
 	}}
 
 	// The scope list eudi_pid_basic is actually selected by, plus "openid".
-	got := client.ScopeQueryIDs(dcql, []string{"openid", "pid", "profile"})
+	got := client.ScopeQueryIDs(t.Context(), dcql, []string{"openid", "pid", "profile"})
 	assert.Equal(t, map[string]string{"pid": "eudi_pid"}, got)
 	assert.NotContains(t, got, "profile")
 	assert.NotContains(t, got, "openid")

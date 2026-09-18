@@ -773,7 +773,7 @@ func TestCreateDCQLQueryFallsBackWhenNoTemplateMatches(t *testing.T) {
 	generic, err := builder.BuildDCQLQuery(t.Context(), []string{"pid_mdoc"})
 	require.NoError(t, err)
 	require.NotNil(t, generic, "the placeholder is non-nil, which is what made a nil check insufficient")
-	_, matched := builder.TemplateDCQLQuery(t.Context(), []string{"pid_mdoc"})
+	_, _, matched := builder.TemplateDCQLQuery(t.Context(), []string{"pid_mdoc"})
 	require.False(t, matched)
 
 	dcql, err := client.createDCQLQuery(t.Context(), []string{"pid_mdoc"})

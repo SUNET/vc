@@ -94,7 +94,7 @@ func (pb *PresentationBuilder) BuildFromTemplate(ctx context.Context, templateID
 // credential_metadata, say - wants TemplateDCQLQuery instead, which reports the
 // no-match case instead of standing in for it.
 func (pb *PresentationBuilder) BuildDCQLQuery(ctx context.Context, scopes []string) (*DCQL, error) {
-	if dcql, matched := pb.TemplateDCQLQuery(ctx, scopes); matched {
+	if dcql, _, matched := pb.TemplateDCQLQuery(ctx, scopes); matched {
 		return dcql, nil
 	}
 	return pb.createGenericDCQL(), nil
@@ -106,15 +106,17 @@ func (pb *PresentationBuilder) BuildDCQLQuery(ctx context.Context, scopes []stri
 // credential when configured; non-standard scopes are tried first so "openid"
 // does not win merely by appearing first in the request.
 //
+// The template's declared oidc_scopes come back alongside the query.
+//
 // matched is the part BuildDCQLQuery cannot express: it answers "no template"
 // with the generic placeholder, which constrains nothing and reads to a caller
 // exactly like success. Inferring that case back out of the returned query is
 // not possible either - a DCQL credential id is arbitrary, nothing reserves the
 // placeholder's, and a template using the same id would be discarded. So the
 // builder says so directly.
-func (pb *PresentationBuilder) TemplateDCQLQuery(_ context.Context, scopes []string) (*DCQL, bool) {
+func (pb *PresentationBuilder) TemplateDCQLQuery(_ context.Context, scopes []string) (*DCQL, []string, bool) {
 	if len(scopes) == 0 {
-		return nil, false
+		return nil, nil, false
 	}
 
 	// Prioritize non-standard scopes over standard OIDC scopes.
@@ -128,16 +130,22 @@ func (pb *PresentationBuilder) TemplateDCQLQuery(_ context.Context, scopes []str
 			if !ok {
 				continue
 			}
-			if dcql := pb.templates[templateID].GetDCQLQuery(); dcql != nil {
+			template := pb.templates[templateID]
+			if dcql := template.GetDCQLQuery(); dcql != nil {
 				// A copy, so a caller completing the query in place (see the
 				// verifier's augmentVCTValuesFromConfig) cannot edit the
 				// template every later request is built from.
-				return copyDCQL(dcql), true
+				//
+				// The template's own oidc_scopes come back with it: they are
+				// the only record of which requested scopes this query is meant
+				// to answer, and a caller pairing scopes to queries has nothing
+				// else to go on for a scope that configures no credential.
+				return copyDCQL(dcql), slices.Clone(template.GetOIDCScopes()), true
 			}
 		}
 	}
 
-	return nil, false
+	return nil, nil, false
 }
 
 // copyDCQL creates a deep copy of a DCQL query

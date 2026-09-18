@@ -152,7 +152,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		// names its queries whatever its author chose, so VerificationDirectPost
 		// needs this to find the response for a scope (SUNET/vc#682). Empty for
 		// a query built from credential_metadata, where the two already agree.
-		ScopeQueryIDs: c.ScopeQueryIDs(dcqlQuery, requestedScopes),
+		ScopeQueryIDs: c.ScopeQueryIDs(ctx, dcqlQuery, requestedScopes),
 	}
 
 	// Save session
