@@ -3,6 +3,7 @@ package apiv1
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -10,16 +11,38 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/SUNET/vc/pkg/logger"
 )
 
-// testLogger builds the logger buildAuthDCQL writes its skip messages to.
-func testLogger(t *testing.T) *logger.Log {
+// sdJWTScope is a dc+sd-jwt credential_metadata entry whose VCTM declares its
+// own vct. VCTURL is deliberately left unset: authDCQLFor runs ResolveVCTUrls,
+// which derives it exactly as the server does at startup, so these fixtures
+// exercise the real resolution rather than a hand-built approximation of it.
+func sdJWTScope(vct string) *model.CredentialMetadata {
+	return &model.CredentialMetadata{
+		Format:       "dc+sd-jwt",
+		VCTMFilePath: "/path/to/vctm",
+		VCTM:         &sdjwtvc.VCTM{VCT: vct},
+	}
+}
+
+// authDCQLFor builds the pre-issuance authentication query for the given
+// credential_metadata, requesting every configured scope as an auth scope.
+func authDCQLFor(t *testing.T, credMeta map[string]*model.CredentialMetadata) *openid4vp.DCQL {
 	t.Helper()
+
+	cfg := &model.Cfg{Common: &model.Common{CredentialMetadata: credMeta}}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+
+	authScopes := make(map[string]model.AuthScopeEntry, len(credMeta))
+	for scope := range credMeta {
+		authScopes[scope] = model.AuthScopeEntry{AuthClaims: []string{"given_name"}}
+	}
+
 	log, err := logger.New("test", "", false)
 	require.NoError(t, err)
-	return log
+
+	c := &Client{cfg: cfg, log: log}
+	return c.buildAuthDCQL(&model.OpenID4VPCredentialAuth{AuthScopes: authScopes})
 }
 
 // TestBuildAuthDCQLOffersBothVCTIdentifiers pins the fix for SUNET/vc#673 on
@@ -35,32 +58,9 @@ func testLogger(t *testing.T) *logger.Log {
 // meta.vct_values is an acceptable-value list (OpenID4VP 1.0 6.4.1), so the
 // query carries both and this test fails if anyone picks a winner again.
 func TestBuildAuthDCQLOffersBothVCTIdentifiers(t *testing.T) {
-	cfg := &model.Cfg{
-		Common: &model.Common{
-			CredentialMetadata: map[string]*model.CredentialMetadata{
-				// VCTURL is not hand-set: ResolveVCTUrls derives it below
-				// exactly as the server does at startup.
-				"pid": {
-					Format:       "dc+sd-jwt",
-					VCTMFilePath: "/path/to/vctm_pid",
-					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-				},
-				"eduid": {
-					Format:       "dc+sd-jwt",
-					VCTMFilePath: "/path/to/vctm_eduid",
-					VCTM:         &sdjwtvc.VCTM{VCT: "urn:credential:eduid:1"},
-				},
-			},
-		},
-	}
-	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
-
-	c := &Client{cfg: cfg, log: testLogger(t)}
-	dcql := c.buildAuthDCQL(&model.OpenID4VPCredentialAuth{
-		AuthScopes: map[string]model.AuthScopeEntry{
-			"pid":   {AuthClaims: []string{"given_name", "family_name"}},
-			"eduid": {AuthClaims: []string{"given_name"}},
-		},
+	dcql := authDCQLFor(t, map[string]*model.CredentialMetadata{
+		"pid":   sdJWTScope("urn:eudi:pid:1"),
+		"eduid": sdJWTScope("urn:credential:eduid:1"),
 	})
 
 	require.Len(t, dcql.Credentials, 2)
@@ -93,21 +93,10 @@ func TestBuildAuthDCQLOffersBothVCTIdentifiers(t *testing.T) {
 // empty vct_values and no doctype - a query no wallet can match, and one
 // ValidateCredentialQuery rejects.
 func TestBuildAuthDCQLMdocScopeUsesDoctype(t *testing.T) {
-	cfg := &model.Cfg{
-		Common: &model.Common{
-			CredentialMetadata: map[string]*model.CredentialMetadata{
-				"pid_mdoc": {
-					Format: "mso_mdoc",
-					MDDL:   &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"},
-				},
-			},
-		},
-	}
-
-	c := &Client{cfg: cfg, log: testLogger(t)}
-	dcql := c.buildAuthDCQL(&model.OpenID4VPCredentialAuth{
-		AuthScopes: map[string]model.AuthScopeEntry{
-			"pid_mdoc": {AuthClaims: []string{"given_name"}},
+	dcql := authDCQLFor(t, map[string]*model.CredentialMetadata{
+		"pid_mdoc": {
+			Format: "mso_mdoc",
+			MDDL:   &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"},
 		},
 	})
 
@@ -127,20 +116,17 @@ func TestBuildAuthDCQLMdocScopeUsesDoctype(t *testing.T) {
 // validation. DCQLMetaQuery's nil check plus the skip keeps it a logged
 // configuration error.
 func TestBuildAuthDCQLUnknownScopeDoesNotPanic(t *testing.T) {
-	cfg := &model.Cfg{
-		Common: &model.Common{
-			CredentialMetadata: map[string]*model.CredentialMetadata{
-				"pid": {
-					Format:       "dc+sd-jwt",
-					VCTMFilePath: "/path/to/vctm_pid",
-					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-				},
-			},
-		},
-	}
+	cfg := &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+		"pid": sdJWTScope("urn:eudi:pid:1"),
+	}}}
 	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
 
-	c := &Client{cfg: cfg, log: testLogger(t)}
+	log, err := logger.New("test", "", false)
+	require.NoError(t, err)
+
+	// The auth scopes deliberately name a credential the config never defines,
+	// which authDCQLFor cannot express (it derives them from credMeta).
+	c := &Client{cfg: cfg, log: log}
 	dcql := c.buildAuthDCQL(&model.OpenID4VPCredentialAuth{
 		AuthScopes: map[string]model.AuthScopeEntry{
 			"pid":              {AuthClaims: []string{"given_name"}},
@@ -168,25 +154,10 @@ func TestBuildAuthDCQLUnknownScopeDoesNotPanic(t *testing.T) {
 // the issuer metadata's bare "VerifiableCredential") broad enough to match
 // every W3C credential in the wallet.
 func TestBuildAuthDCQLW3CScopeIsSkipped(t *testing.T) {
-	cfg := &model.Cfg{
-		Common: &model.Common{
-			CredentialMetadata: map[string]*model.CredentialMetadata{
-				"diploma_ldp": {
-					Format:       "ldp_vc",
-					VCTMFilePath: "/path/to/vctm_diploma",
-					VCTM:         &sdjwtvc.VCTM{VCT: "urn:credential:diploma:1"},
-				},
-			},
-		},
-	}
-	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+	ldp := sdJWTScope("urn:credential:diploma:1")
+	ldp.Format = "ldp_vc"
 
-	c := &Client{cfg: cfg, log: testLogger(t)}
-	dcql := c.buildAuthDCQL(&model.OpenID4VPCredentialAuth{
-		AuthScopes: map[string]model.AuthScopeEntry{
-			"diploma_ldp": {AuthClaims: []string{"given_name"}},
-		},
-	})
+	dcql := authDCQLFor(t, map[string]*model.CredentialMetadata{"diploma_ldp": ldp})
 
 	assert.Empty(t, dcql.Credentials, "an ldp_vc scope must not be sent with vct_values")
 	assert.Empty(t, dcql.CredentialSets[0].Options)
