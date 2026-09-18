@@ -316,10 +316,12 @@ func TestVCTQueryValues(t *testing.T) {
 			want: []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
 		},
 		{
-			// Every VCTM shipped in metadata/ has no "vct" field, so
-			// ResolveVCTUrls back-fills it from the URL and the two collapse.
-			// A one-element list is the correct answer here - it is a property
-			// of the metadata, not a regression of this function.
+			// A VCTM whose source file omits "vct": ResolveVCTUrls back-fills
+			// it from the derived URL and the two collapse. A one-element list
+			// is the correct answer here - a property of that VCTM, not a
+			// regression of this function. (The files under metadata/ all
+			// declare a vct now, so they take the two-value path above; see
+			// TestShippedVCTMsDeclareTheirVCT.)
 			name: "back-filled vct equal to url collapses to one value",
 			cm: &CredentialMetadata{
 				VCTM:   &sdjwtvc.VCTM{VCT: "https://apigw.example/type-metadata/pid"},
@@ -475,12 +477,16 @@ func TestDCQLMetaQueryFollowsFormat(t *testing.T) {
 			wantOK: false,
 		},
 		{
-			// The legacy spelling is issuable but is not an OpenID4VP format
-			// identifier, and both builders pass Format straight into the
-			// query, so it cannot be requested as-is.
-			name:   "legacy vc+sd-jwt is not a queryable format",
-			cm:     &CredentialMetadata{Format: "vc+sd-jwt", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}, VCTURL: "https://apigw.example/type-metadata/pid"},
-			wantOK: false,
+			// The legacy spelling stays on the SD-JWT branch. This repo still
+			// issues it and treats it as SD-JWT elsewhere, so rejecting it here
+			// would take a working deployment's scope away at runtime rather
+			// than fix the real wart (the query then carries a format
+			// identifier OpenID4VP does not define), which belongs in config
+			// validation.
+			name:     "legacy vc+sd-jwt is treated as SD-JWT",
+			cm:       &CredentialMetadata{Format: "vc+sd-jwt", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}, VCTURL: "https://apigw.example/type-metadata/pid"},
+			wantOK:   true,
+			wantVCTs: []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
 		},
 		{
 			// The Copilot finding: these used to fall into the sd-jwt branch.

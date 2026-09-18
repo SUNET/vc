@@ -1765,14 +1765,15 @@ func (c *Cfg) VCTQueryValuesForScopes(scopes []string) []string {
 // -> finding-18 flip-flop did, in both directions; offering both is what ends
 // it (SUNET/vc#673).
 //
-// Duplicates are collapsed, which is what happens for a VCTM file with no
-// "vct" field: ResolveVCTUrls back-fills VCTM.VCT from the derived URL, so both
-// are the same string and a one-element list is the correct answer. That is a
-// property of the metadata, not of this function - every VCTM shipped in
-// metadata/ used to omit "vct" and so collapse to one value, which made the
-// two-identifier fix above a no-op for a stock deployment; each now declares
-// the identifier credential_types.go defines for it, so the list really is two
-// distinct values. A VCTM file that still omits "vct" collapses as described.
+// Duplicates are collapsed, so the list is one element long exactly when the
+// source VCTM omits "vct": ResolveVCTUrls then back-fills VCTM.VCT from the
+// derived URL and both are the same string. That is a property of an
+// individual VCTM, not of this function.
+//
+// Every VCTM shipped in metadata/ used to omit it, which is what made the
+// two-identifier behaviour above a no-op for a stock deployment; each now
+// declares the identifier credential_types.go defines for it, so those return
+// two distinct values. A VCTM that omits "vct" still collapses as described.
 //
 // Returns nil for mso_mdoc scopes: DCQL constrains them with doctype_value
 // instead, and the Format switch below enforces that rather than relying on
@@ -1820,11 +1821,12 @@ func (c *CredentialMetadata) VCTQueryValues() []string {
 //
 //   - mso_mdoc: doctype_value, from the MDDL's doctype or the configured
 //     doctype used to resolve it from a registry.
-//   - dc+sd-jwt (and an empty format, which the Format field declares as
-//     defaulting to it): vct_values, carrying BOTH identifiers - see
-//     VCTQueryValues for why choosing one breaks half the deployed wallets.
-//   - anything else (ldp_vc, vc+ld+json, jwt_vc_json, jwp, mso_mdoc_zk and
-//     the legacy vc+sd-jwt spelling): ok is false.
+//   - dc+sd-jwt, its legacy vc+sd-jwt spelling, and an empty format (which the
+//     Format field declares as defaulting to dc+sd-jwt): vct_values, carrying
+//     BOTH identifiers - see VCTQueryValues for why choosing one breaks half
+//     the deployed wallets.
+//   - anything else (ldp_vc, vc+ld+json, jwt_vc_json, jwp, mso_mdoc_zk): ok
+//     is false.
 //
 // ok=false covers four cases a caller must not paper over: a nil receiver
 // (an auth scope or requested scope with no credential_metadata entry - config
@@ -1863,14 +1865,22 @@ func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
 			return openid4vp.MetaQuery{}, false
 		}
 		return openid4vp.MetaQuery{DoctypeValue: doctype}, true
-	case openid4vp.FormatSDJWTVC, "":
-		// Only the canonical "dc+sd-jwt". The legacy "vc+sd-jwt" spelling is
-		// still an issuable format (see handlers_issuer.go), but
-		// ValidateCredentialQuery validates vct_values for the canonical
-		// identifier alone, and both builders pass Format through to the query
-		// unchanged - so accepting it here would emit a query carrying a
-		// format identifier OpenID4VP does not define. Such a scope reports
-		// !ok and its caller says so, instead of silently shipping one.
+	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
+		// "vc+sd-jwt" is the legacy spelling of the same thing. This repo still
+		// accepts and issues it (handlers_issuer.go) and treats it as an
+		// SD-JWT format elsewhere (internal/apigw/apiv1/helpers.go), so
+		// rejecting it here would take a working deployment's auth scope or UI
+		// preset away at runtime rather than fix anything - a regression, not a
+		// tightening. It is kept on the SD-JWT branch for that reason.
+		//
+		// The related wart is real but is not this function's to fix:
+		// ValidateCredentialQuery only validates vct_values for the canonical
+		// identifier, and both builders pass Format into the query unchanged,
+		// so such a scope emits a format identifier OpenID4VP does not define.
+		// That predates this helper. Normalising the legacy spelling, or
+		// rejecting it outright, belongs in configuration validation where it
+		// can be reported once at startup instead of silently at request time
+		// (see SUNET/vc#681 for the neighbouring validation gap).
 		//
 		// "" honours the Format field's own `default:"dc+sd-jwt"`: config
 		// validation marks Format required, so an empty one only reaches here

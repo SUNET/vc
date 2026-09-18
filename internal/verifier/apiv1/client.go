@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -365,6 +366,13 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 	if c.presentationBuilder != nil {
 		dcql, err := c.presentationBuilder.BuildDCQLQuery(ctx, scopes)
 		if err == nil && dcql != nil {
+			// Templates take priority over buildDCQLQueryFromConfig, so
+			// without this every SUNET/vc#673 fix below would be unreachable
+			// for the deployment shape that actually ships: each template in
+			// presentation_requests/ names ONE vct, so a template-built query
+			// still asked for a single identifier and still missed the wallets
+			// matching the other one.
+			c.augmentVCTValuesFromConfig(dcql)
 			c.log.Info("DCQL query built from presentation template", "credential_count", len(dcql.Credentials))
 			return dcql, nil
 		}
@@ -373,6 +381,63 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 
 	// Fallback to building DCQL query from credential config
 	return c.buildDCQLQueryFromConfig(scopes)
+}
+
+// augmentVCTValuesFromConfig adds the credential type identifiers a wallet
+// might match on to a template-built query, without discarding what the
+// operator wrote.
+//
+// A template states one vct per credential (see presentation_requests/*.yaml),
+// but deployed wallets disagree about which identifier names a credential type
+// - see model.CredentialMetadata.VCTQueryValues. meta.vct_values is an
+// acceptable-value list, so the operator's value is kept, in first position,
+// and the scope's other identifier is appended.
+//
+// Matching is by value, not by credential-query id: a template's id is a query
+// name ("eudi_pid") and need not be a configured scope ("pid"). A query is
+// therefore paired with the scope whose identifiers it already mentions, which
+// is exactly the relationship that makes appending the rest correct. Scopes are
+// visited in sorted order so an ambiguous config resolves the same way twice.
+//
+// Queries with no vct_values are left alone: mdoc queries are constrained by
+// doctype_value, and a query with no type constraint at all is not something to
+// guess at.
+func (c *Client) augmentVCTValuesFromConfig(dcql *openid4vp.DCQL) {
+	if dcql == nil || c.cfg.Common == nil {
+		return
+	}
+	scopeKeys := make([]string, 0, len(c.cfg.Common.CredentialMetadata))
+	for scope := range c.cfg.Common.CredentialMetadata {
+		scopeKeys = append(scopeKeys, scope)
+	}
+	sort.Strings(scopeKeys)
+
+	for i := range dcql.Credentials {
+		cred := &dcql.Credentials[i]
+		if len(cred.Meta.VCTValues) == 0 {
+			continue
+		}
+		present := make(map[string]bool, len(cred.Meta.VCTValues))
+		for _, v := range cred.Meta.VCTValues {
+			present[v] = true
+		}
+
+		for _, scope := range scopeKeys {
+			identifiers := c.cfg.Common.CredentialMetadata[scope].VCTQueryValues()
+			if !slices.ContainsFunc(identifiers, func(id string) bool { return present[id] }) {
+				continue
+			}
+			for _, id := range identifiers {
+				if !present[id] {
+					present[id] = true
+					cred.Meta.VCTValues = append(cred.Meta.VCTValues, id)
+				}
+			}
+			c.log.Debug("Augmented template vct_values from credential config",
+				"credential_id", cred.ID, "scope", scope, "vct_values", cred.Meta.VCTValues)
+			break
+		}
+	}
 }
 
 // buildDCQLQueryFromConfig builds a DCQL query using credential constructor config.

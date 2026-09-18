@@ -553,3 +553,63 @@ func TestUIMetadataDropsPresetWithUnconstrainableScope(t *testing.T) {
 	_, present = reply.Presets["LDP_ONLY"]
 	assert.False(t, present, "a preset whose every scope is unconstrainable must not be advertised")
 }
+
+// TestAugmentVCTValuesFromConfig covers the path that actually ships.
+//
+// createDCQLQuery tries the presentation templates FIRST and returns their
+// query as-is when one matches, so buildDCQLQueryFromConfig - where the
+// SUNET/vc#673 fix lives - is never reached by a deployment that configures
+// presentation_requests/. Each shipped template names exactly one vct, so those
+// requests kept asking for a single identifier and kept missing the wallets
+// that match the other one.
+//
+// The operator's own value stays first; the scope's remaining identifiers are
+// appended, since meta.vct_values is an acceptable-value list.
+func TestAugmentVCTValuesFromConfig(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"pid": {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/path/to/vctm_pid",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+				"pid_mdoc": {
+					Format: "mso_mdoc",
+					MDDL:   &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"},
+				},
+			},
+		},
+	}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+	client, _ := CreateTestClientWithMock(t, cfg)
+
+	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+		// Shaped like presentation_requests/eudi_pid.yaml: the query id is a
+		// template name, not a configured scope, so the pairing has to be made
+		// on the vct value itself.
+		{ID: "eudi_pid", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}}},
+		// A template written the other way round - naming the served URL -
+		// should gain the credential's own vct instead.
+		{ID: "pid_by_url", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"https://apigw.example/type-metadata/pid"}}},
+		// Constrained by doctype: nothing to add, and nothing to guess at.
+		{ID: "mdl", Format: "mso_mdoc", Meta: openid4vp.MetaQuery{DoctypeValue: "eu.europa.ec.eudi.pid.1"}},
+		// Names a type this verifier has no credential_metadata for: left as
+		// the operator wrote it.
+		{ID: "foreign", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:example:unknown:1"}}},
+	}}
+
+	client.augmentVCTValuesFromConfig(dcql)
+
+	assert.Equal(t, []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"}, dcql.Credentials[0].Meta.VCTValues)
+	assert.Equal(t, []string{"https://apigw.example/type-metadata/pid", "urn:eudi:pid:1"}, dcql.Credentials[1].Meta.VCTValues)
+	assert.Empty(t, dcql.Credentials[2].Meta.VCTValues)
+	assert.Equal(t, "eu.europa.ec.eudi.pid.1", dcql.Credentials[2].Meta.DoctypeValue)
+	assert.Equal(t, []string{"urn:example:unknown:1"}, dcql.Credentials[3].Meta.VCTValues)
+
+	// Idempotent: running twice must not duplicate anything.
+	client.augmentVCTValuesFromConfig(dcql)
+	assert.Equal(t, []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"}, dcql.Credentials[0].Meta.VCTValues)
+
+	assert.NotPanics(t, func() { client.augmentVCTValuesFromConfig(nil) })
+}
