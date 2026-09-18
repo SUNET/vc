@@ -144,24 +144,38 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	redirectURI := u.String()
 
 	// Process all VP tokens for the requested scopes
-	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(authCtx.Scopes))
+	// Only the scopes a credential query actually stands for. authCtx.Scopes is
+	// the raw OIDC scope list, which carries "openid" (always, per OIDC Core)
+	// and whatever else the RP asked for - the shipped eudi_pid_basic template
+	// is selected by "pid profile". Requiring a VP token for those meant any
+	// request naming more than one scope failed here, since no wallet returns a
+	// credential for "profile".
+	// A session created before ScopeQueryIDs existed has a cached DCQLQuery and
+	// no mapping, so a template-built query's response would not resolve. The
+	// mapping is a pure function of the request, so rebuild it rather than fail
+	// a presentation the user has already completed mid rolling deploy.
+	if authCtx.ScopeQueryIDs == nil && authCtx.DCQLQuery != nil {
+		if rebuilt := c.ScopeQueryIDs(ctx, authCtx.DCQLQuery, authCtx.Scopes); len(rebuilt) > 0 {
+			c.log.Info("rebuilt the scope-to-query mapping for a session that predates it", "scopes", authCtx.Scopes)
+			authCtx.ScopeQueryIDs = rebuilt
+		}
+	}
 
-	for _, scope := range authCtx.Scopes {
-		vpTokens, ok := vpResponse.VPToken[scope]
-		if !ok || len(vpTokens) == 0 {
-			// Fallback: wallet sent vp_token as a plain string (single credential).
-			// Only allow this when exactly one scope was requested; otherwise
-			// the same credential would be reused for every scope with potentially
-			// wrong validations.
-			if len(authCtx.Scopes) != 1 {
-				c.log.Error(nil, "VP token not found for scope and multiple scopes requested", "scope", scope)
-				return nil, fmt.Errorf("VP token not found for scope %s: _default fallback is only allowed when a single scope is requested", scope)
-			}
-			vpTokens, ok = vpResponse.VPToken["_default"]
-			if !ok || len(vpTokens) == 0 {
-				c.log.Error(nil, "VP token not found for scope", "scope", scope)
-				return nil, fmt.Errorf("VP token not found for scope: %s", scope)
-			}
+	credentialScopes := c.credentialScopes(authCtx)
+	if len(credentialScopes) == 0 && authCtx.DCQLQuery != nil && len(authCtx.DCQLQuery.Credentials) > 0 {
+		// The query asked for credentials but nothing is left to check them
+		// against - a template selected by an ordinary scope alone would do
+		// this. Falling through would cache a successful presentation having
+		// validated no VP token whatsoever.
+		c.log.Error(nil, "no requested scope corresponds to a requested credential", "scopes", authCtx.Scopes)
+		return nil, fmt.Errorf("no requested scope corresponds to a requested credential")
+	}
+	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(credentialScopes))
+
+	for _, scope := range credentialScopes {
+		vpTokens, err := c.vpTokensForScope(authCtx, credentialScopes, vpResponse, scope)
+		if err != nil {
+			return nil, err
 		}
 		if len(vpTokens) > 1 {
 			c.log.Info("multiple VP tokens received for scope, using first", "scope", scope, "count", len(vpTokens))
@@ -604,6 +618,106 @@ type VerificationCallbackRequest struct {
 
 type VerificationCallbackResponse struct {
 	CredentialData []sdjwtvc.CredentialCache `json:"credential_data"`
+}
+
+// credentialScopes returns the requested scopes that are part of the
+// presentation, in request order.
+//
+// A non-standard scope is always kept, even when nothing obviously represents
+// it. Dropping on uncertainty is the dangerous direction on a validation path:
+// the scope would vanish from the loop instead of failing in it, and a request
+// whose scopes all vanished would cache a successful presentation having
+// validated no VP token at all.
+//
+// A scope OIDC Core defines is kept only when it really is a credential - named
+// by a query, paired with one, or configured in credential_metadata. Otherwise
+// it is dropped, which is the reason this function exists: authCtx.Scopes
+// always carries "openid", the shipped eudi_pid_basic template is selected by
+// "pid profile", and no wallet returns a credential for those, so requiring a
+// VP token for them failed every request naming more than one scope.
+//
+// The check is that narrow because a standard scope CAN be a credential here:
+// PresentationBuilder deliberately lets one select a template, and nothing
+// stops credential_metadata configuring "profile". Excluding those by name
+// would skip validating a credential the request actually asked for.
+//
+// With no DCQL query cached, every scope is returned - the behaviour that
+// predates this.
+func (c *Client) credentialScopes(authCtx *cache.AuthorizationContext) []string {
+	if authCtx.DCQLQuery == nil {
+		return authCtx.Scopes
+	}
+	scopes := make([]string, 0, len(authCtx.Scopes))
+	for _, scope := range authCtx.Scopes {
+		if openid4vp.StandardOIDCScopes[scope] && !c.isCredentialScope(authCtx, scope) {
+			continue
+		}
+		scopes = append(scopes, scope)
+	}
+	return scopes
+}
+
+// isCredentialScope reports whether a scope names a credential this request
+// actually asked for.
+func (c *Client) isCredentialScope(authCtx *cache.AuthorizationContext, scope string) bool {
+	if _, mapped := authCtx.ScopeQueryIDs[scope]; mapped {
+		return true
+	}
+	if c.cfg.Common != nil {
+		if _, configured := c.cfg.Common.CredentialMetadata[scope]; configured {
+			return true
+		}
+	}
+	return slices.ContainsFunc(authCtx.DCQLQuery.Credentials, func(cred openid4vp.CredentialQuery) bool {
+		return cred.ID == scope
+	})
+}
+
+// vpTokensForScope finds the VP tokens a wallet returned for one requested
+// scope, in the three ways a response can name them.
+//
+// The scope's own key comes first, which is what a query built from
+// credential_metadata produces - buildDCQLQueryFromConfig keys each query by
+// the scope itself.
+//
+// Then the scope's DCQL credential query id. A wallet keys vp_token by QUERY
+// ID (OpenID4VP 1.0), and a presentation template names its queries whatever
+// its author chose: the shipped PID template asks for "eudi_pid" while the
+// request is made with scope "pid". Without this the verifier reads a key the
+// wallet never sent and the presentation fails after the user completed it -
+// the whole of SUNET/vc#682. ScopeQueryIDs carries only the differing pairs,
+// so an absent entry simply means the first lookup was the right one.
+//
+// Then "_default", for a wallet that sent vp_token as a plain string rather
+// than a map. That is only safe for a single-scope request: with several
+// scopes the same credential would be reused for each, carrying whichever
+// validations belong to the others.
+func (c *Client) vpTokensForScope(authCtx *cache.AuthorizationContext, credentialScopes []string, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
+	if tokens, ok := vpResponse.VPToken[scope]; ok && len(tokens) > 0 {
+		return tokens, nil
+	}
+
+	if queryID, mapped := authCtx.ScopeQueryIDs[scope]; mapped {
+		if tokens, ok := vpResponse.VPToken[queryID]; ok && len(tokens) > 0 {
+			c.log.Debug("resolved VP token through the scope's DCQL query id", "scope", scope, "query_id", queryID)
+			return tokens, nil
+		}
+	}
+
+	// credentialScopes, not authCtx.Scopes: what makes _default ambiguous is
+	// more than one CREDENTIAL being asked for, not more than one OIDC scope.
+	// Counting the raw list refused the plain-string vp_token for an ordinary
+	// "openid pid" request, which asks for exactly one credential.
+	if len(credentialScopes) != 1 {
+		c.log.Error(nil, "VP token not found for scope and multiple credentials requested", "scope", scope)
+		return nil, fmt.Errorf("VP token not found for scope %s: _default fallback is only allowed when a single credential is requested", scope)
+	}
+	if tokens, ok := vpResponse.VPToken["_default"]; ok && len(tokens) > 0 {
+		return tokens, nil
+	}
+
+	c.log.Error(nil, "VP token not found for scope", "scope", scope)
+	return nil, fmt.Errorf("VP token not found for scope: %s", scope)
 }
 
 func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCallbackRequest) (*VerificationCallbackResponse, error) {

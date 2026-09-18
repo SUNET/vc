@@ -89,50 +89,63 @@ func (pb *PresentationBuilder) BuildFromTemplate(ctx context.Context, templateID
 
 // BuildDCQLQuery creates a DCQL query from OIDC scopes.
 // This attempts to find matching templates, and falls back to a generic DCQL query if none are found.
-// All scopes are considered for matching, including standard OIDC scopes like "openid".
-// This allows standard OIDC scopes to optionally map to credentials if configured.
-// Non-standard scopes are prioritized over standard scopes to prevent "openid" from
-// always being selected when it appears first in the request.
+//
+// A caller with a better fallback than the generic query - building from
+// credential_metadata, say - wants TemplateDCQLQuery instead, which reports the
+// no-match case instead of standing in for it.
 func (pb *PresentationBuilder) BuildDCQLQuery(ctx context.Context, scopes []string) (*DCQL, error) {
+	if dcql, _, matched := pb.TemplateDCQLQuery(ctx, scopes); matched {
+		return dcql, nil
+	}
+	return pb.createGenericDCQL(), nil
+}
+
+// TemplateDCQLQuery returns a copy of the DCQL query of the template matching
+// scopes, and whether one matched at all. All scopes are considered, including
+// standard OIDC scopes like "openid", so a standard scope can map to a
+// credential when configured; non-standard scopes are tried first so "openid"
+// does not win merely by appearing first in the request.
+//
+// The template's declared oidc_scopes come back alongside the query.
+//
+// matched is the part BuildDCQLQuery cannot express: it answers "no template"
+// with the generic placeholder, which constrains nothing and reads to a caller
+// exactly like success. Inferring that case back out of the returned query is
+// not possible either - a DCQL credential id is arbitrary, nothing reserves the
+// placeholder's, and a template using the same id would be discarded. So the
+// builder says so directly.
+func (pb *PresentationBuilder) TemplateDCQLQuery(_ context.Context, scopes []string) (*DCQL, []string, bool) {
 	if len(scopes) == 0 {
-		// Return a generic DCQL query when no scopes provided
-		return pb.createGenericDCQL(), nil
+		return nil, nil, false
 	}
 
 	// Prioritize non-standard scopes over standard OIDC scopes.
 	// This prevents "openid" (which typically appears first) from always being selected.
-	// First, try non-standard scopes
-	for _, scope := range scopes {
-		if StandardOIDCScopes[scope] {
-			continue // Skip standard scopes in first pass
-		}
-		if templateID, ok := pb.scopeIndex[scope]; ok {
+	for _, standard := range []bool{false, true} {
+		for _, scope := range scopes {
+			if StandardOIDCScopes[scope] != standard {
+				continue
+			}
+			templateID, ok := pb.scopeIndex[scope]
+			if !ok {
+				continue
+			}
 			template := pb.templates[templateID]
-			dcql := template.GetDCQLQuery()
-			if dcql != nil {
-				// Return a copy to avoid modifications to the template
-				return copyDCQL(dcql), nil
+			if dcql := template.GetDCQLQuery(); dcql != nil {
+				// A copy, so a caller completing the query in place (see the
+				// verifier's augmentVCTValuesFromConfig) cannot edit the
+				// template every later request is built from.
+				//
+				// The template's own oidc_scopes come back with it: they are
+				// the only record of which requested scopes this query is meant
+				// to answer, and a caller pairing scopes to queries has nothing
+				// else to go on for a scope that configures no credential.
+				return copyDCQL(dcql), slices.Clone(template.GetOIDCScopes()), true
 			}
 		}
 	}
 
-	// Then, try standard OIDC scopes (if configured with a template)
-	for _, scope := range scopes {
-		if !StandardOIDCScopes[scope] {
-			continue // Already tried non-standard scopes
-		}
-		if templateID, ok := pb.scopeIndex[scope]; ok {
-			template := pb.templates[templateID]
-			dcql := template.GetDCQLQuery()
-			if dcql != nil {
-				// Return a copy to avoid modifications to the template
-				return copyDCQL(dcql), nil
-			}
-		}
-	}
-
-	// No template found, return generic DCQL
-	return pb.createGenericDCQL(), nil
+	return nil, nil, false
 }
 
 // copyDCQL creates a deep copy of a DCQL query

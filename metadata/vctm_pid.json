@@ -1,4 +1,5 @@
 {
+  "vct": "urn:eudi:pid:1",
   "name": "PID SD-JWT VC Type Metadata",
   "description": "Person Identification Data per EUDI ARF PID Rulebook v1.0 (urn:eudi:pid:1).",
   "$comment": "Implementation of this type metadata may require Member State–specific clarifications to align with national policies governing the display of included claims.",
