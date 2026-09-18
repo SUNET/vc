@@ -733,28 +733,85 @@ func TestResolveVCTUrls_AutoPopulatesVCT(t *testing.T) {
 }
 
 func TestResolveVCTUrls_PreservesExplicitVCT(t *testing.T) {
-	// When a VCTM file already has a "vct" field, ResolveVCTUrls should
-	// not overwrite it.
+	// The source's origin decides who owns the vct:
+	//   - Local file: VCTURL is always the hosting URL, but any vct the file
+	//     carried is preserved verbatim in VCTM.VCT and VCTMRaw. Only an
+	//     empty file vct is back-filled from the hosting URL (that path is
+	//     pinned by TestResolveVCTUrls_AutoPopulatesVCT above).
+	//   - External vctm_url: the source is authoritative -- VCTM.VCT and
+	//     VCTMRaw stay untouched regardless of format (URN or foreign URL).
+	t.Run("local file with explicit vct is preserved verbatim", func(t *testing.T) {
+		cfg := &Cfg{
+			Common: &Common{
+				CredentialMetadata: map[string]*CredentialMetadata{
+					"pid": {
+						VCTMFilePath: "/dummy/vctm_pid.json",
+						Format:       "dc+sd-jwt",
+						VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+						VCTMRaw:      []byte(`{"vct":"urn:eudi:pid:1","name":"PID"}`),
+					},
+				},
+			},
+		}
+
+		require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example.com"))
+
+		meta := cfg.Common.CredentialMetadata["pid"]
+		assert.Equal(t, "https://apigw.example.com/type-metadata/pid", meta.VCTURL,
+			"VCTURL for a local file is always the hosting URL")
+		assert.Equal(t, "urn:eudi:pid:1", meta.VCTM.VCT,
+			"an explicit URN in a local file must be preserved")
+		assert.Equal(t, `{"vct":"urn:eudi:pid:1","name":"PID"}`, string(meta.VCTMRaw),
+			"served VCTM document must keep the file's own vct")
+	})
+
+	t.Run("external vctm_url preserves the file's vct verbatim", func(t *testing.T) {
+		const vctmURL = "https://registry.siros.org/sirosfoundation/demo_pid_rb_1_5.vctm.json"
+		cfg := &Cfg{
+			Common: &Common{
+				CredentialMetadata: map[string]*CredentialMetadata{
+					"pid": {
+						VCTMUrl: vctmURL,
+						Format:  "dc+sd-jwt",
+						VCTM:    &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+						VCTMRaw: []byte(`{"vct":"urn:eudi:pid:1","name":"PID"}`),
+					},
+				},
+			},
+		}
+
+		require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example.com"))
+
+		meta := cfg.Common.CredentialMetadata["pid"]
+		assert.Equal(t, vctmURL, meta.VCTURL, "VCTURL for an external VCTM is the vctm_url")
+		assert.Equal(t, "urn:eudi:pid:1", meta.VCTM.VCT, "external VCTM.VCT must stay untouched")
+		assert.Equal(t, `{"vct":"urn:eudi:pid:1","name":"PID"}`, string(meta.VCTMRaw),
+			"external VCTMRaw must stay untouched -- apigw does not re-publish it")
+	})
+}
+
+func TestResolveVCTUrls_ExternalVCTMRejectsEmptyVCT(t *testing.T) {
+	// External VCTM (vctm_url) with empty VCTM.VCT: nothing rewrites the
+	// identifier, so issuance (BuildCredentialWithSigner rejects empty vct)
+	// and DCQL (VCTIdentifiersForScopes emits nothing) would silently
+	// break downstream. ResolveVCTUrls must fail fast instead.
 	cfg := &Cfg{
 		Common: &Common{
 			CredentialMetadata: map[string]*CredentialMetadata{
 				"pid": {
-					VCTMFilePath: "/dummy/vctm_pid.json",
-					Format:       "dc+sd-jwt",
-					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
-					VCTMRaw:      []byte(`{"vct":"urn:eudi:pid:1","name":"PID"}`),
+					VCTMUrl: "https://registry.example/pid.vctm.json",
+					Format:  "dc+sd-jwt",
+					VCTM:    &sdjwtvc.VCTM{VCT: ""},
+					VCTMRaw: []byte(`{"name":"PID"}`),
 				},
 			},
 		},
 	}
 
 	err := cfg.ResolveVCTUrls("https://apigw.example.com")
-	require.NoError(t, err)
-
-	meta := cfg.Common.CredentialMetadata["pid"]
-	assert.Equal(t, "urn:eudi:pid:1", meta.VCTM.VCT,
-		"Explicit VCT from file should be preserved")
-	assert.Equal(t, "https://apigw.example.com/type-metadata/pid", meta.VCTURL)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"pid"`)
+	assert.Contains(t, err.Error(), "empty vct")
 }
 
 func TestIssuerMetadataLoadAndSign(t *testing.T) {

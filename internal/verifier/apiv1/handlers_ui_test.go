@@ -945,45 +945,38 @@ func applyPerScopeValidations(scopes []string, validations map[string][]openid4v
 	return nil
 }
 
-// TestUIMetadataOffersBothVCTIdentifiers pins the UI to advertising BOTH
-// identifiers a wallet might match a credential type by: the VCTM's own vct
-// first, then the URL the VCTM is served from.
-//
-// Both are needed, because deployed wallets disagree about which one names a
-// credential type, and each behaviour is live-verified in this repo. The EUDI
-// reference wallet (multipaz) matches the issuer metadata's declared vct - the
-// type-metadata URL - per the finding-18 note in
-// internal/apigw/apiv1/handlers_verifier.go. Other wallets match the
-// credential's own vct claim, built from the VCTM (BuildCredentialWithSigner
-// sets body["vct"] = vctm.VCT), per the finding-16 note on
-// VCTIdentifiersForScopes in pkg/model/config.go. DCQL's meta.vct_values is an
-// acceptable-value list, so emitting both satisfies either wallet.
-//
-// The existing TestUIMetadata already asserts "VCT should be populated from
-// VCTM", but could not catch the original regression: it builds
-// CredentialMetadata directly and never sets VCTURL, so the empty-URL path was
-// the only one exercised. In production ResolveVCTUrls guarantees VCTURL is
-// non-empty for every VCTM-backed scope, which is exactly the case that
-// regressed - the UI advertised only https://apigw.example/type-metadata/pid
-// for a credential whose vct is urn:eudi:pid:1, so presentations started from
-// the UI matched nothing in wallets of the second kind.
-func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
+// TestUIMetadataAdvertisesCanonicalVCT pins the UI to advertising the
+// single canonical vct per VCTM in reply.Credentials[].VCTValues and every
+// preset's Meta.VCTValues. ResolveVCTUrls yields exactly one vct per VCTM
+// (preserved verbatim from the file for external scopes and for local
+// scopes whose file declares one, back-filled from the hosting URL only
+// when a local file left it empty), so the DCQL vct_values list carries at
+// most one value and reply.Credentials[].VCT names that same identifier --
+// the value the credential body carries, the metadata advertises, and a
+// wallet stores as the credential's type tag.
+func TestUIMetadataAdvertisesCanonicalVCT(t *testing.T) {
 	ctx := t.Context()
 
 	cfg := &model.Cfg{
 		Common: &model.Common{
 			CredentialMetadata: map[string]*model.CredentialMetadata{
-				// VCTURL is deliberately NOT hand-set: ResolveVCTUrls below
-				// derives it exactly as production does, so this fixture
-				// exercises the real code path rather than a hand-built
-				// approximation of it.
+				// External vctm_url: ResolveVCTUrls preserves VCTM.VCT
+				// verbatim (the URN); VCTURL is set to vctm_url but does
+				// not leak into vct_values.
 				"pid": {
-					Format:       "dc+sd-jwt",
-					VCTMFilePath: "/path/to/vctm",
-					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+					Format:  "dc+sd-jwt",
+					VCTMUrl: "https://registry.example/pid.vctm.json",
+					VCTM:    &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 				},
-				// A VCTM file with no vct: ResolveVCTUrls back-fills VCTM.VCT
-				// from the derived URL, so the two collapse to one value.
+				// Local file with an explicit URN: ResolveVCTUrls keeps the
+				// URN as vct even though the file is hosted by apigw.
+				"eudi_pid": {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/path/to/eudi_pid",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:de:1"},
+				},
+				// Local file with no vct: ResolveVCTUrls back-fills VCTM.VCT
+				// from the hosting URL, so vct and vct_values match.
 				"novct": {
 					Format:       "dc+sd-jwt",
 					VCTMFilePath: "/path/to/novct",
@@ -993,24 +986,23 @@ func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
 		},
 		Verifier: &model.Verifier{
 			Presets: map[string]model.PresetDefinition{
-				"PID": {Credentials: model.VerificationPreset{"pid": nil}},
-				// Its own preset, not folded into "PID": the preset path
-				// resolves vct_values independently of reply.Credentials, so
-				// without a preset covering this scope Meta.VCTValues could
-				// regress for a back-filled VCTM while the credential-info
-				// assertions still passed.
-				"NOVCT": {Credentials: model.VerificationPreset{"novct": nil}},
+				"PID":     {Credentials: model.VerificationPreset{"pid": nil}},
+				"EUDIPID": {Credentials: model.VerificationPreset{"eudi_pid": nil}},
+				"NOVCT":   {Credentials: model.VerificationPreset{"novct": nil}},
 			},
 		},
 	}
 
-	// Resolve as the server does at startup: this is what populates VCTURL and
-	// back-fills an empty VCTM.VCT from it. Without this the "novct" case would
-	// only prove the URL fallback and never reach the de-duplication branch.
 	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
 	require.Equal(t, "https://apigw.example/type-metadata/novct",
 		cfg.Common.CredentialMetadata["novct"].GetVCTM().VCT,
-		"precondition: ResolveVCTUrls should have back-filled the empty vct from the URL")
+		"precondition: ResolveVCTUrls back-fills a local file's empty vct from the hosting URL")
+	require.Equal(t, "urn:eudi:pid:de:1",
+		cfg.Common.CredentialMetadata["eudi_pid"].GetVCTM().VCT,
+		"precondition: ResolveVCTUrls preserves a local file's explicit URN vct")
+	require.Equal(t, "urn:eudi:pid:1",
+		cfg.Common.CredentialMetadata["pid"].GetVCTM().VCT,
+		"precondition: ResolveVCTUrls preserves an external VCTM's vct verbatim")
 
 	client, _ := CreateTestClientWithMock(t, cfg)
 	client.cfg = cfg
@@ -1019,47 +1011,40 @@ func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, reply)
 
-	t.Run("credential info uses the VCTM vct", func(t *testing.T) {
-		assert.Equal(t, "urn:eudi:pid:1", reply.Credentials["pid"].VCT,
-			"the identifier a wallet matches against is the VCTM's vct, not where the VCTM is served")
+	t.Run("external scope advertises the file's own vct", func(t *testing.T) {
+		assert.Equal(t, "urn:eudi:pid:1", reply.Credentials["pid"].VCT)
+		assert.Equal(t, []string{"urn:eudi:pid:1"}, reply.Credentials["pid"].VCTValues)
 	})
 
-	t.Run("credential info offers both identifiers, VCTM vct first", func(t *testing.T) {
-		assert.Equal(t,
-			[]string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
-			reply.Credentials["pid"].VCTValues,
-			"wallets disagree on which identifier names a credential type: multipaz "+
-				"matches the metadata URL, wwWallet the credential's own vct - so offer both")
+	t.Run("local scope with an explicit URN keeps the URN", func(t *testing.T) {
+		assert.Equal(t, "urn:eudi:pid:de:1", reply.Credentials["eudi_pid"].VCT)
+		assert.Equal(t, []string{"urn:eudi:pid:de:1"}, reply.Credentials["eudi_pid"].VCTValues)
 	})
 
-	t.Run("preset vct_values offer both identifiers", func(t *testing.T) {
+	t.Run("local scope without a file vct advertises the hosting URL", func(t *testing.T) {
+		assert.Equal(t, "https://apigw.example/type-metadata/novct", reply.Credentials["novct"].VCT)
+		assert.Equal(t, []string{"https://apigw.example/type-metadata/novct"}, reply.Credentials["novct"].VCTValues)
+	})
+
+	t.Run("preset vct_values for an external scope carry the file's vct", func(t *testing.T) {
 		preset := reply.Presets["PID"]
 		require.NotNil(t, preset)
 		require.Len(t, preset.Credentials, 1)
-		assert.Equal(t,
-			[]string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
-			preset.Credentials[0].Meta.VCTValues,
-			"DCQL meta.vct_values is an acceptable-value list, so both forms belong in it")
+		assert.Equal(t, []string{"urn:eudi:pid:1"}, preset.Credentials[0].Meta.VCTValues)
 	})
 
-	t.Run("preset vct_values also collapse for a back-filled VCTM", func(t *testing.T) {
+	t.Run("preset vct_values for a local URN scope carry the URN", func(t *testing.T) {
+		preset := reply.Presets["EUDIPID"]
+		require.NotNil(t, preset)
+		require.Len(t, preset.Credentials, 1)
+		assert.Equal(t, []string{"urn:eudi:pid:de:1"}, preset.Credentials[0].Meta.VCTValues)
+	})
+
+	t.Run("preset vct_values for a back-filled local scope carry the hosting URL", func(t *testing.T) {
 		preset := reply.Presets["NOVCT"]
 		require.NotNil(t, preset)
 		require.Len(t, preset.Credentials, 1)
-		assert.Equal(t,
-			[]string{"https://apigw.example/type-metadata/novct"},
-			preset.Credentials[0].Meta.VCTValues,
-			"the preset path resolves vct_values separately from reply.Credentials, "+
-				"so it needs its own coverage of the de-duplicated case")
-	})
-
-	t.Run("collapses to one value when the VCTM had no vct", func(t *testing.T) {
-		assert.Equal(t, "https://apigw.example/type-metadata/novct", reply.Credentials["novct"].VCT,
-			"a VCTM with no vct still needs a usable identifier")
-		assert.Equal(t, []string{"https://apigw.example/type-metadata/novct"},
-			reply.Credentials["novct"].VCTValues,
-			"ResolveVCTUrls back-filled VCTM.VCT from the URL, so the two are the same "+
-				"string and must be de-duplicated rather than listed twice")
+		assert.Equal(t, []string{"https://apigw.example/type-metadata/novct"}, preset.Credentials[0].Meta.VCTValues)
 	})
 }
 
