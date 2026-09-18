@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1671,6 +1672,11 @@ func (c *Cfg) GetFormatForScope(scope string) string {
 
 // VCTUrlsForScopes resolves a list of scope keys to their resolved VCT URLs.
 // Scopes without a loaded VCTM are silently skipped.
+//
+// Not for DCQL meta.vct_values: this is only one of the two identifiers a
+// wallet might match a credential type by. Use CredentialMetadata.DCQLMetaQuery
+// at DCQL call sites - see VCTQueryValues for why choosing one of the two
+// breaks half the deployed wallets.
 func (c *Cfg) VCTUrlsForScopes(scopes []string) []string {
 	urls := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
@@ -1694,6 +1700,11 @@ func (c *Cfg) VCTUrlsForScopes(scopes []string) []string {
 // embedded in a credential). DCQL queries built from VCTUrlsForScopes instead
 // of this never matched any real issued credential — confirmed live via a
 // fresh test issuance (lpidproto PLAN.md workstream 7 task 7.5, finding 16).
+//
+// Not for DCQL meta.vct_values either, for the mirror-image reason given on
+// VCTUrlsForScopes: finding 16 and finding 18 are both half-right, and a query
+// built from just one of them breaks the wallets that use the other. Use
+// CredentialMetadata.DCQLMetaQuery at DCQL call sites.
 func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 	ids := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
@@ -1706,6 +1717,253 @@ func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 		}
 	}
 	return ids
+}
+
+// VCTQueryValues returns every identifier a wallet might legitimately match
+// this credential type by, most-specific first: the credential's own embedded
+// vct (VCTM.VCT), then the published type-metadata URL (VCTURL).
+//
+// Both forms have to be offered, because deployed wallets disagree about which
+// one identifies a credential, and each behaviour is live-verified in this
+// repo:
+//
+//   - The EUDI reference wallet (multipaz) matches the ISSUER METADATA's
+//     declared vct - our published type-metadata URL. Confirmed against the
+//     wallet-core sources: adding a document from an openid4vci offer makes
+//     Offer.kt set SdJwtVcFormat(vct = configuration.type) from the issuer
+//     metadata's credential_configurations_supported, never by parsing the
+//     issued credential; SdJwtVcCredentialFactory stamps that same value onto
+//     the stored credential (CredentialFactory.kt); and
+//     DcqlRequestProcessor.candidateDocumentsForQuery filters candidates by
+//     comparing vct_values against exactly that metadata-derived tag, BEFORE
+//     it ever reads the credential's JWT body. Querying with the VCTM-internal
+//     value alone therefore cannot match a real document, whatever the
+//     credential itself carries. (This paragraph was the finding-18 note in
+//     internal/apigw/apiv1/handlers_verifier.go, which now builds its query
+//     through this helper.)
+//
+//   - Other wallets (e.g. wwWallet/wallet-frontend) match the credential's own
+//     embedded "vct" claim, i.e. VCTM.VCT - the value BuildCredentialWithSigner
+//     (pkg/sdjwtvc/methods.go) writes as body["vct"]. See the finding-16 note
+//     on VCTIdentifiersForScopes above.
+//
+// DCQL's meta.vct_values is an acceptable-value list by design (OpenID4VP 1.0
+// 6.4.1), so emitting both satisfies either wallet instead of picking a winner
+// and silently breaking the other. Picking one is exactly what the finding-16
+// -> finding-18 flip-flop did, in both directions; offering both is what ends
+// it (SUNET/vc#673).
+//
+// Duplicates are collapsed, so the list is one element long exactly when the
+// source VCTM omits "vct": ResolveVCTUrls then back-fills VCTM.VCT from the
+// derived URL and both are the same string. That is a property of an
+// individual VCTM, not of this function.
+//
+// Every VCTM shipped in metadata/ used to omit it, which is what made the
+// two-identifier behaviour above a no-op for a stock deployment; each now
+// declares the identifier credential_types.go defines for it, so those return
+// two distinct values. A VCTM that omits "vct" still collapses as described.
+//
+// Returns nil for mso_mdoc scopes: DCQL constrains them with doctype_value
+// instead, and the Format switch below enforces that rather than relying on
+// such an entry having no VCTM. Nil receiver returns nil, so callers can
+// hand this the result of a map lookup that missed.
+func (c *CredentialMetadata) VCTQueryValues() []string {
+	if c == nil {
+		return nil
+	}
+	// Honour the contract above rather than trusting that an mdoc entry simply
+	// has no VCTM: nothing stops a credential_metadata entry carrying VCTM or
+	// VCTURL alongside Format "mso_mdoc", and reading them here would let a
+	// caller emit vct_values for a credential DCQL constrains by doctype_value.
+	switch c.Format {
+	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
+		return nil
+	}
+	var out []string
+	seen := make(map[string]bool, 2)
+	add := func(v string) {
+		if v == "" || seen[v] {
+			return
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	if vctm := c.GetVCTM(); vctm != nil {
+		add(vctm.VCT)
+	}
+	add(c.GetVCTURL())
+	return out
+}
+
+// doctype resolves the mdoc doctype this entry is identified by, preferring the
+// most explicit source: the configured doctype (which is also how a
+// registry-resolved scope names itself, with no MDDL document in hand), then
+// the loaded MDDL's own, and finally the VCTM's vct.
+//
+// The last is a fallback rather than a conflation. An mso_mdoc scope configured
+// with a VCTM instead of an MDDL keeps its identifier there - the verifier UI
+// already reads it the same way for its display identifier - and that string is
+// then what the operator is using as the doctype. Dropping such a scope would
+// take a working configuration away for tidiness.
+func (c *CredentialMetadata) doctype() string {
+	if c.Doctype != "" {
+		return c.Doctype
+	}
+	if mddl := c.GetMDDL(); mddl != nil && mddl.DocType != "" {
+		return mddl.DocType
+	}
+	if vctm := c.GetVCTM(); vctm != nil {
+		return vctm.VCT
+	}
+	return ""
+}
+
+// W3CTypes returns the compact-term types this scope issues, defaulting to the
+// bare base type when credential_types is not configured - which is what the
+// issuer metadata always advertised.
+//
+// This is the ISSUANCE side. A verifier constrains requests by
+// CredentialTypeValues instead, and the asymmetry is deliberate twice over:
+// the representations differ (compact terms against expanded IRIs), and so
+// does the treatment of the bare base type. Issuing a credential typed only
+// "VerifiableCredential" is merely unspecific; REQUESTING one is a query that
+// matches every W3C credential in the wallet.
+func (c *CredentialMetadata) W3CTypes() []string {
+	if c == nil || len(c.CredentialTypes) == 0 {
+		return []string{"VerifiableCredential"}
+	}
+	return slices.Clone(c.CredentialTypes)
+}
+
+// baseVCTypeIRI is the expanded form of the type every W3C Verifiable
+// Credential carries. A query constrained by it alone matches all of them.
+const baseVCTypeIRI = "https://www.w3.org/2018/credentials#VerifiableCredential"
+
+// w3cTypeValues returns the configured DCQL type_values, dropping any
+// alternative that would not actually narrow the request.
+//
+// An alternative naming only the base type matches every W3C credential in the
+// wallet, so accepting it would turn "this request cannot be built" into "this
+// request asks for anything" - the over-broad query this package declines to
+// emit everywhere else.
+func (c *CredentialMetadata) w3cTypeValues() [][]string {
+	var out [][]string
+	for _, alternative := range c.CredentialTypeValues {
+		narrowing := slices.ContainsFunc(alternative, func(t string) bool {
+			return t != "" && t != baseVCTypeIRI
+		})
+		if narrowing {
+			out = append(out, slices.Clone(alternative))
+		}
+	}
+	return out
+}
+
+// DCQLMetaQuery returns the DCQL meta constraint for this credential type,
+// together with whether one could be expressed at all.
+//
+// The constraint is chosen by FORMAT (OpenID4VP 1.0 6.4.1), not by which
+// metadata document happens to have loaded. That distinction matters: an
+// earlier version of both DCQL builders keyed off "is an MDDL present", which
+// silently routed every non-mdoc format - including the ldp_vc and
+// jwt_vc_json credentials this stack can actually issue - into the SD-JWT
+// branch and emitted vct_values for them. ValidateCredentialQuery requires
+// type_values for those formats, so the query was invalid by this repo's own
+// validator.
+//
+//   - mso_mdoc: doctype_value, from the MDDL's doctype or the configured
+//     doctype used to resolve it from a registry.
+//   - dc+sd-jwt, its legacy vc+sd-jwt spelling, and an empty format (which the
+//     Format field declares as defaulting to dc+sd-jwt): vct_values, carrying
+//     BOTH identifiers - see VCTQueryValues for why choosing one breaks half
+//     the deployed wallets.
+//   - ldp_vc / vc+ld+json / jwt_vc_json: type_values, from
+//     credential_type_values - fully expanded IRIs, and only alternatives that
+//     narrow the credential beyond the base type every W3C VC carries. Note
+//     this is NOT credential_types, which is the compact-term list the issuer
+//     metadata advertises; see both fields for why they cannot be derived from
+//     each other.
+//   - anything else (jwp, mso_mdoc_zk): ok is false.
+//
+// ok=false covers four cases a caller must not paper over:
+//
+//   - a nil receiver - an auth scope or requested scope with no
+//     credential_metadata entry. Config validation does not check that
+//     auth_scopes keys resolve, so this is reachable from a valid config.
+//   - a format whose DCQL constraint this repo cannot yet build (the W3C VC
+//     formats, below).
+//   - a format whose constraint cannot be completed from credential_metadata
+//     alone (mso_mdoc_zk, above).
+//   - a format whose own identifier is missing.
+//
+// W3C VC formats need meta.type_values, and nothing in credential_metadata
+// configures the credential's type list - the issuer metadata hardcodes the
+// base "VerifiableCredential" type, which as a DCQL constraint would match
+// every W3C credential in the wallet rather than the intended one. Emitting
+// that would trade an invalid query for an over-broad one, so a caller should
+// say the scope is unusable instead. Giving W3C scopes a real constraint needs
+// a configurable type list first (SUNET/vc#680).
+func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
+	if c == nil {
+		return openid4vp.MetaQuery{}, false
+	}
+	switch c.Format {
+	// Deliberately not FormatMsoMdocZk: validateMsoMdocZkQuery requires a
+	// non-empty meta.zk_system_type alongside the doctype, and the ZK system
+	// specs live on VerificationPresetScope, not here - nothing in
+	// credential_metadata can supply them. Returning ok=true with the doctype
+	// alone would hand callers a query their own validator rejects. A ZK-mdoc
+	// request is produced the other way round: the scope's credential_metadata
+	// declares plain mso_mdoc, and a preset overrides Format to mso_mdoc_zk
+	// while supplying ZKSystemType (see VerificationPresetScope), so that path
+	// never asks this helper for the zk format.
+	case openid4vp.FormatMsoMdoc:
+		return openid4vp.MetaQuery{DoctypeValue: c.doctype()}, c.doctype() != ""
+	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
+		// "vc+sd-jwt" is the legacy spelling of the same thing. This repo still
+		// accepts and issues it (handlers_issuer.go) and treats it as an
+		// SD-JWT format elsewhere (internal/apigw/apiv1/helpers.go), so
+		// rejecting it here would take a working deployment's auth scope or UI
+		// preset away at runtime rather than fix anything - a regression, not a
+		// tightening. It is kept on the SD-JWT branch for that reason.
+		//
+		// The related wart is real but is not this function's to fix:
+		// ValidateCredentialQuery only validates vct_values for the canonical
+		// identifier, and both builders pass Format into the query unchanged,
+		// so such a scope emits a format identifier OpenID4VP does not define.
+		// That predates this helper. Normalising the legacy spelling, or
+		// rejecting it outright, belongs in configuration validation where it
+		// can be reported once at startup instead of silently at request time
+		// (see SUNET/vc#681 for the neighbouring validation gap).
+		//
+		// "" honours the Format field's own `default:"dc+sd-jwt"`: config
+		// validation marks Format required, so an empty one only reaches here
+		// from a hand-built Cfg, and treating it as anything but the declared
+		// default would contradict the struct tag.
+		vctValues := c.VCTQueryValues()
+		if len(vctValues) == 0 {
+			return openid4vp.MetaQuery{}, false
+		}
+		return openid4vp.MetaQuery{VCTValues: vctValues}, true
+	case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON, openid4vp.FormatJwtVCJson:
+		// type_values is an array of ALTERNATIVES, each an array of types a
+		// credential must carry all of (OpenID4VP 1.0 6.4.1). One alternative
+		// here: the types this scope issues.
+		//
+		// Refused when credential_types is unset or names only the base type.
+		// W3CTypes would happily default to ["VerifiableCredential"], and a
+		// query constrained by that matches every W3C credential in the wallet
+		// - it would turn "this request cannot be built" into "this request
+		// asks for anything", which over-discloses silently instead of
+		// failing. The caller reports the scope as unusable instead.
+		typeValues := c.w3cTypeValues()
+		if len(typeValues) == 0 {
+			return openid4vp.MetaQuery{}, false
+		}
+		return openid4vp.MetaQuery{TypeValues: typeValues}, true
+	default:
+		return openid4vp.MetaQuery{}, false
+	}
 }
 
 // CredentialRegistry configures an optional TS11 credential metadata registry client (github.com/sirosfoundation/go-ts11client), disabled by default. When enabled, Registries is an ordered list of logical registries: a later entry overrides an earlier one for the same vct/doctype, so distinct registries are tried in that order rather than raced - only the mirrors within a single logical registry are queried concurrently, first hit wins, since only mirrors are expected to hold identical content.
@@ -1794,6 +2052,47 @@ type CredentialMetadata struct {
 	// MDDLUrl is set. Requires Common.CredentialRegistry.Enable, same as
 	// VCT. Used only for mso_mdoc.
 	Doctype string `yaml:"doctype,omitempty" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath MDDLUrl VCT"`
+
+	// CredentialTypes lists the W3C Verifiable Credential types this scope
+	// issues, most general first - conventionally the base
+	// "VerifiableCredential" and then narrowing, e.g.
+	// ["VerifiableCredential", "DiplomaCredential"].
+	//
+	// Compact terms, as the W3C VC data model and OID4VCI Appendix A.1 use
+	// them. Advertised as credential_definition.type in the issuer metadata,
+	// which is also where issueVC20 reads the types it mints - so this one
+	// field keeps issuance and what is advertised in step.
+	//
+	// NOT what a verifier constrains a DCQL request by: see
+	// CredentialTypeValues, which is a different representation of the same
+	// credential and cannot be derived from this one.
+	//
+	// Used only for the W3C formats (ldp_vc, vc+ld+json, jwt_vc_json).
+	// Defaults to the bare base type, which is what was hardcoded before.
+	//
+	// Configuring this ALONE does not make a W3C scope requestable: a verifier
+	// needs CredentialTypeValues, and one cannot be derived from the other. A
+	// scope meant to be both issued and requested configures both.
+	CredentialTypes []string `yaml:"credential_types,omitempty" json:"-" validate:"omitempty,dive,required"`
+
+	// CredentialTypeValues is the DCQL meta.type_values a verifier constrains
+	// a request for this credential by: an array of alternatives, each an
+	// array of types a credential must carry all of (OpenID4VP 1.0 6.4.1).
+	//
+	// FULLY EXPANDED IRIs, after the credential's @context has been applied -
+	// "https://www.w3.org/2018/credentials#VerifiableCredential", not
+	// "VerifiableCredential". That is what the format requires, and what
+	// openid4vp.MetaQuery.TypeValues and MatchTypeValues both document.
+	//
+	// Separate from CredentialTypes because the two genuinely differ: OID4VCI
+	// advertises compact terms and DCQL matches expanded IRIs, and going from
+	// one to the other needs the credential's @context and a JSON-LD
+	// expansion this repo does not do. Deriving one from the other would mean
+	// emitting a query wallets cannot match.
+	//
+	// Unset leaves the scope unrequestable - DCQLMetaQuery reports no
+	// expressible constraint - rather than guessing an expansion.
+	CredentialTypeValues [][]string `yaml:"credential_type_values,omitempty" json:"-" validate:"omitempty,dive,required,dive,required"`
 
 	MDDL *mdoc.MDDLSchema `yaml:"-" json:"-"`
 
@@ -2329,16 +2628,55 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 			return nil, fmt.Errorf("credential constructor for scope %q has no VCTM metadata loaded (check vctm_file_path)", scope)
 		}
 
+		// The VCTM's OWN declared vct, not the URL the document is served
+		// from. A wallet that stores a credential by the type advertised in
+		// credential_configurations_supported - the Android German Wallet and
+		// multipaz both do - otherwise files it under
+		// "https://<apigw>/type-metadata/<scope>" while the credential it
+		// receives carries "urn:eudi:pid:1", and a registry lookup by that
+		// advertised type finds nothing (SUNET/vc#676).
+		//
+		// This branch used to be harmless for a stock deployment only because
+		// every VCTM shipped in metadata/ omitted "vct": ResolveVCTUrls
+		// back-filled it from this same URL, so the two agreed by accident.
+		// Now that those documents declare their identifiers, the two would
+		// disagree, which is exactly the divergence #676 reports.
+		//
+		// The fallback still covers a VCTM with no "vct" of its own, where
+		// ResolveVCTUrls has back-filled the URL and both are the same string.
+		//
+		// The mso_mdoc branch above already does the equivalent: it advertises
+		// the MDDL's own doctype and never rewrites it.
+		//
 		// Set format-specific parameters per OID4VCI 1.0 Appendix A
-		resolvedVCT := constructor.GetVCTURL()
+		resolvedVCT := vctm.VCT
+		if resolvedVCT == "" {
+			resolvedVCT = constructor.GetVCTURL()
+		}
 		switch constructor.Format {
 		case "dc+sd-jwt":
 			// Appendix A.3: only vct is format-specific for dc+sd-jwt
 			credConfig.VCT = resolvedVCT
-		case "jwt_vc_json", "ldp_vc", "jwt_vc_json-ld":
-			// Appendix A.1: credential_definition with type array is format-specific for W3C VC formats
+		// vc+ld+json belongs here: handlers_issuer.go issues it alongside
+		// ldp_vc, and DCQLMetaQuery treats it as a W3C format, so leaving it
+		// out sent it down the default branch with no credential_definition at
+		// all - its credential_types went unadvertised while a verifier
+		// constrained requests by them, which is the disagreement this field
+		// exists to remove.
+		//
+		// jwt_vc_json-ld stays advertised but is deliberately not requestable:
+		// nothing issues it (see handlers_issuer.go's format switch), so
+		// DCQLMetaQuery does not accept it either.
+		case "jwt_vc_json", "ldp_vc", openid4vp.FormatVCLDJSON, "jwt_vc_json-ld":
+			// Appendix A.1: credential_definition with type array is format-specific for W3C VC formats.
+			//
+			// credential_types when configured, so the advertised types, the
+			// types issueVC20 mints (it reads them back from here) and the DCQL
+			// type_values a verifier asks by all come from one place. The bare
+			// base type remains the default, which is what this always
+			// advertised.
 			credConfig.CredentialDefinition = &openid4vci.CredentialDefinition{
-				Type: []string{"VerifiableCredential"},
+				Type: constructor.W3CTypes(),
 			}
 			credConfig.VCT = resolvedVCT
 		default:

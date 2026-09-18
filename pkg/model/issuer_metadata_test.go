@@ -553,19 +553,30 @@ func TestIssuerMetadata_Generate_MultipleCredentials(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, metadata.CredentialConfigurationsSupported, 3)
 
-	// Verify each credential - keys are scope names
+	// Verify each credential - keys are scope names.
+	//
+	// The advertised vct is the VCTM's own, never the URL the document is
+	// served from (SUNET/vc#676): a wallet that stores a credential by the
+	// type in credential_configurations_supported would otherwise file it
+	// under an identifier the credential itself never carries. These
+	// assertions used to expect the URL for all three, which is the behaviour
+	// that issue reports.
+	//
+	// pid is the case where the two coincide: its VCTM declares the URL as its
+	// own vct, exactly as ResolveVCTUrls back-fills a VCTM that omits one.
 	pidConfig := metadata.CredentialConfigurationsSupported["pid"]
 	assert.Equal(t, "dc+sd-jwt", pidConfig.Format)
 	assert.Equal(t, baseURL+"/type-metadata/pid", pidConfig.VCT)
 	assert.Equal(t, "pid", pidConfig.Scope)
 
+	// ehic and diploma declare URNs of their own, so those are advertised.
 	ehicConfig := metadata.CredentialConfigurationsSupported["ehic"]
 	assert.Equal(t, "vc+sd-jwt", ehicConfig.Format)
-	assert.Equal(t, baseURL+"/type-metadata/ehic", ehicConfig.VCT)
+	assert.Equal(t, "urn:eudi:ehic:1", ehicConfig.VCT)
 
 	diplomaConfig := metadata.CredentialConfigurationsSupported["diploma"]
 	assert.Equal(t, "vc+sd-jwt", diplomaConfig.Format) // default
-	assert.Equal(t, baseURL+"/type-metadata/diploma", diplomaConfig.VCT)
+	assert.Equal(t, "urn:eudi:diploma:1", diplomaConfig.VCT)
 }
 
 func TestIssuerMetadata_Generate_DisclosurePolicy(t *testing.T) {
@@ -684,4 +695,63 @@ func TestIssuerMetadata_Generate_DisclosurePolicy(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestIssuerMetadata_W3CCredentialTypes covers the issuance half of
+// SUNET/vc#680: credential_definition.type comes from credential_types, so the
+// types advertised, the types issueVC20 mints (it reads them back from this
+// metadata) and the DCQL type_values a verifier asks by are one list.
+func TestIssuerMetadata_W3CCredentialTypes(t *testing.T) {
+	cfg := &IssuerMetadata{}
+	baseURL := "https://issuer.sunet.se"
+
+	metadata, err := cfg.Generate(context.Background(), baseURL, map[string]*CredentialMetadata{
+		"diploma": {
+			Format:          "ldp_vc",
+			VCTM:            &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+			VCTURL:          baseURL + "/type-metadata/diploma",
+			CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"},
+		},
+		// Unconfigured: keeps the bare base type this always advertised.
+		"generic": {
+			Format: "ldp_vc",
+			VCTM:   &sdjwtvc.VCTM{VCT: "urn:example:generic:1"},
+			VCTURL: baseURL + "/type-metadata/generic",
+		},
+	})
+	require.NoError(t, err)
+
+	diploma := metadata.CredentialConfigurationsSupported["diploma"]
+	require.NotNil(t, diploma.CredentialDefinition)
+	assert.Equal(t, []string{"VerifiableCredential", "DiplomaCredential"}, diploma.CredentialDefinition.Type)
+
+	generic := metadata.CredentialConfigurationsSupported["generic"]
+	require.NotNil(t, generic.CredentialDefinition)
+	assert.Equal(t, []string{"VerifiableCredential"}, generic.CredentialDefinition.Type,
+		"an unconfigured W3C scope keeps the previous behaviour")
+}
+
+// TestIssuerMetadata_VCLDJSONGetsCredentialDefinition covers a review finding:
+// vc+ld+json is issued alongside ldp_vc (handlers_issuer.go) and treated as a
+// W3C format by DCQLMetaQuery, but the metadata switch omitted it - so it fell
+// to the default branch with no credential_definition, its credential_types
+// went unadvertised, and issuance and the DCQL constraint disagreed about the
+// credential's types.
+func TestIssuerMetadata_VCLDJSONGetsCredentialDefinition(t *testing.T) {
+	cfg := &IssuerMetadata{}
+	baseURL := "https://issuer.sunet.se"
+
+	metadata, err := cfg.Generate(context.Background(), baseURL, map[string]*CredentialMetadata{
+		"diploma": {
+			Format:          "vc+ld+json",
+			VCTM:            &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+			VCTURL:          baseURL + "/type-metadata/diploma",
+			CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"},
+		},
+	})
+	require.NoError(t, err)
+
+	diploma := metadata.CredentialConfigurationsSupported["diploma"]
+	require.NotNil(t, diploma.CredentialDefinition, "vc+ld+json is a W3C format and needs credential_definition")
+	assert.Equal(t, []string{"VerifiableCredential", "DiplomaCredential"}, diploma.CredentialDefinition.Type)
 }

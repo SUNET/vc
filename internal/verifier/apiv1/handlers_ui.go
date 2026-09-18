@@ -26,30 +26,31 @@ type UICredentialInfo struct {
 	// VCTValues is every identifier a wallet might legitimately match this
 	// credential type by, for use as DCQL meta.vct_values.
 	//
-	// Both forms have to be offered, because deployed wallets disagree about
-	// which one identifies a credential, and each behaviour is live-verified
-	// in this repo:
+	// The rule - and why both forms have to be offered rather than one being
+	// chosen - lives on model.CredentialMetadata.VCTQueryValues, which every
+	// DCQL call site in this repo now shares. Keeping it in one place is the
+	// point: this field used to carry the only copy of that reasoning while
+	// two other call sites quietly each picked a different single value
+	// (SUNET/vc#673).
 	//
-	//   - The EUDI reference wallet (multipaz) matches the ISSUER METADATA's
-	//     declared vct - our published type-metadata URL. Offer.kt sets
-	//     SdJwtVcFormat(vct = configuration.type) and DcqlRequestProcessor
-	//     filters on that tag before ever parsing the credential body. See
-	//     the finding-18 note in internal/apigw/apiv1/handlers_verifier.go.
-	//
-	//   - Other wallets (e.g. wwWallet/wallet-frontend) match the credential's
-	//     own embedded "vct" claim, i.e. VCTM.VCT. See the finding-16 note on
-	//     VCTIdentifiersForScopes in pkg/model/config.go.
-	//
-	// vct_values is an acceptable-value list by design (OpenID4VP DCQL), so
-	// emitting both satisfies either wallet instead of picking a winner and
-	// silently breaking the other.
 	// omitempty: mso_mdoc scopes get no list (they're identified by doctype,
 	// not vct), so this drops the field entirely for them rather than
 	// emitting a meaningless "vct_values": null. The UI's schema tolerates
 	// either form - it declares vct_values as nullish and falls back to
 	// [vct] for both absent and null - so this is about not sending noise
 	// for mdoc credentials, not about satisfying a parsing constraint.
-	VCTValues  []string                        `json:"vct_values,omitempty"`
+	VCTValues []string `json:"vct_values,omitempty"`
+	// TypeValues is the W3C VC equivalent: the type alternatives a wallet
+	// matches an ldp_vc, vc+ld+json or jwt_vc_json credential by, as fully
+	// expanded IRIs.
+	//
+	// From credential_type_values - NOT credential_types, which is the
+	// compact-term list the issuer metadata advertises and cannot be expanded
+	// into these. Empty for every other format, and for a W3C scope that
+	// configures no credential_type_values, or only the base type every W3C
+	// credential carries: see model.CredentialMetadata.DCQLMetaQuery for why
+	// that is refused rather than sent.
+	TypeValues [][]string                      `json:"type_values,omitempty"`
 	Attributes map[string]map[string][]*string `json:"attributes"`
 }
 
@@ -89,6 +90,12 @@ type UIPresetMeta struct {
 	// DoctypeValue is set for mdoc/ZK-mdoc scopes (openid4vp.MetaQuery's
 	// mdoc-format field) - mirrors UICredentialInfo.VCT's mdoc branch.
 	DoctypeValue string `json:"doctype_value,omitempty"`
+	// TypeValues is set for the W3C VC formats, whose DCQL constraint is
+	// neither vct_values nor doctype_value but a list of type alternatives
+	// (OpenID4VP 1.0 6.4.1). Comes from credential_type_values - fully
+	// expanded IRIs - see model.CredentialMetadata.CredentialTypeValues, and
+	// note it is not the credential_types list the issuer metadata uses.
+	TypeValues [][]string `json:"type_values,omitempty"`
 	// ZKSystemType is set when the preset's VerificationPresetScope
 	// overrides it - see that type's own doc comment.
 	ZKSystemType []openid4vp.ZKSystemTypeSpec `json:"zk_system_type,omitempty"`
@@ -122,34 +129,6 @@ type UIMetadataReply struct {
 	// DCAPIEnabled (an OS-level DC API matcher rejection can pre-empt any
 	// application code, with no clean fallback to catch).
 	DCAPIAutoAttempt bool `json:"dc_api_auto_attempt"`
-}
-
-// vctIdentifiersFor returns every identifier a wallet might match this
-// credential type by, most-specific first: the credential's own embedded vct
-// (VCTM.VCT), then the published type-metadata URL. Duplicates are collapsed,
-// which is what happens for a VCTM file with no "vct" field - ResolveVCTUrls
-// back-fills VCTM.VCT from the URL, so both are the same string.
-//
-// Returns nil for mso_mdoc scopes: they have no vct at all, and DCQL
-// constrains them with doctype_value instead.
-func vctIdentifiersFor(constructor *model.CredentialMetadata) []string {
-	if constructor == nil {
-		return nil
-	}
-	var out []string
-	seen := make(map[string]bool, 2)
-	add := func(v string) {
-		if v == "" || seen[v] {
-			return
-		}
-		seen[v] = true
-		out = append(out, v)
-	}
-	if vctm := constructor.GetVCTM(); vctm != nil {
-		add(vctm.VCT)
-	}
-	add(constructor.GetVCTURL())
-	return out
 }
 
 func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
@@ -196,7 +175,41 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 			// list empty and let the UI fall back to the single value.
 			info.VCT = mddl.DocType
 		}
-		info.VCTValues = vctIdentifiersFor(constructor)
+		// Format-aware, like every other DCQL call site. presentation-definition.js
+		// turns this list straight into meta.vct_values for any format other
+		// than mso_mdoc, so publishing it for a scope whose format cannot carry
+		// vct_values puts an invalid query on the wire: an ldp_vc or
+		// jwt_vc_json credential is constrained by type_values, which nothing
+		// in credential_metadata can supply yet (SUNET/vc#680). Such a scope is
+		// left out of the picker entirely rather than offered as something the
+		// UI cannot build a usable request for - the same choice the preset
+		// path below makes.
+		mq, ok := constructor.DCQLMetaQuery()
+		if !ok {
+			c.log.Error(nil, "credential omitted from the verifier UI: no usable DCQL meta constraint for scope",
+				"scope", scope, "format", constructor.Format)
+			continue
+		}
+		// Empty for mdoc, which is constrained by its doctype instead;
+		// omitempty then drops the field.
+		info.VCTValues = mq.VCTValues
+		info.TypeValues = mq.TypeValues
+
+		// For an mdoc scope the doctype IS the identifier, and
+		// presentation-definition.js sends info.VCT as meta.doctype_value - so
+		// it has to be the same string the server-side builders would use, not
+		// whatever the chain above happened to find first.
+		//
+		// The two disagreed. That chain reads VCTM.VCT, then VCTURL, then the
+		// MDDL's doctype, and never the configured Doctype at all, so a
+		// registry-backed mdoc scope - doctype configured, no MDDL document in
+		// hand - left info.VCT empty and the UI sent an empty doctype_value,
+		// matching nothing. A scope carrying both a VCTM and an MDDL picked the
+		// VCTM's vct while DCQLMetaQuery picked the MDDL's doctype, so the UI
+		// asked for one thing and every other path asked for another.
+		if mq.DoctypeValue != "" {
+			info.VCT = mq.DoctypeValue
+		}
 		reply.Credentials[scope] = info
 	}
 
@@ -261,24 +274,31 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				}
 
 				// Resolve format and the type constraint from
-				// credential_metadata. An mso_mdoc credential has no vct at
-				// all - DCQL constrains it by doctype_value instead
-				// (OpenID4VP 1.0 6.4.1) - so a preset over an mdoc scope was
-				// previously emitted with an empty vct_values and no doctype,
-				// which matches nothing in any wallet.
-				if meta != nil {
-					uiCred.Format = meta.Format
-					if mddl := meta.GetMDDL(); mddl != nil && mddl.DocType != "" {
-						uiCred.Meta.DoctypeValue = mddl.DocType
-					} else if vs := vctIdentifiersFor(meta); len(vs) > 0 {
-						// Both identifiers, for the reason documented on
-						// UICredentialInfo.VCTValues: wallets disagree about
-						// which one names a credential type. Only reached for
-						// non-mdoc credentials - an mdoc is constrained by
-						// doctype_value above and has no vct to offer.
-						uiCred.Meta.VCTValues = vs
-					}
+				// credential_metadata, by format - the same resolution the
+				// apigw and OIDC-RP DCQL builders use. See
+				// model.CredentialMetadata.DCQLMetaQuery. An mso_mdoc
+				// credential has no vct at all and is constrained by
+				// doctype_value instead (OpenID4VP 1.0 6.4.1), so a preset
+				// over an mdoc scope was once emitted with an empty vct_values
+				// and no doctype, which matches nothing in any wallet.
+				uiCred.Format = meta.Format
+				mq, ok := meta.DCQLMetaQuery()
+				if !ok {
+					// Emitting the credential anyway would put a query with an
+					// EMPTY meta on the wire: the UI's schema accepts it and
+					// handleSelectPredefinedPresentationDefinition sends it, so
+					// a wallet would see a credential query with no type
+					// constraint at all and could match any credential of that
+					// format. An unconstrained query is worse than a missing
+					// one - it over-discloses silently - so the credential is
+					// dropped and the operator told which preset lost it.
+					c.log.Error(nil, "preset credential dropped: no usable DCQL meta constraint for scope",
+						"preset", label, "scope", scope, "format", meta.Format)
+					continue
 				}
+				uiCred.Meta.DoctypeValue = mq.DoctypeValue
+				uiCred.Meta.VCTValues = mq.VCTValues
+				uiCred.Meta.TypeValues = mq.TypeValues
 
 				// A preset's Format/ZKSystemType override lets an otherwise
 				// plain-format scope (e.g. mso_mdoc) be requested as a ZK
@@ -343,6 +363,14 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					}
 				}
 				uiPreset.Credentials = append(uiPreset.Credentials, uiCred)
+			}
+			if len(uiPreset.Credentials) == 0 {
+				// Every scope in the preset was dropped above. A preset button
+				// that requests nothing would produce an empty DCQL query,
+				// which a wallet can satisfy by presenting nothing at all, so
+				// the preset is not advertised.
+				c.log.Error(nil, "preset dropped: no credential in it has a usable DCQL meta constraint", "preset", label)
+				continue
 			}
 			reply.Presets[label] = uiPreset
 		}

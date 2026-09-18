@@ -1,8 +1,17 @@
 package model
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/SUNET/vc/pkg/mdoc"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBoolVal(t *testing.T) {
@@ -283,4 +292,390 @@ func TestOpenID4VPConfig_GetPresentationRequestsDir(t *testing.T) {
 	if c.GetPresentationRequestsDir() != "/tmp/requests" {
 		t.Errorf("unexpected dir: %s", c.GetPresentationRequestsDir())
 	}
+}
+
+// TestVCTQueryValues pins the rule that ends the finding-16/finding-18
+// flip-flop (SUNET/vc#673): a DCQL meta.vct_values list carries BOTH
+// identifiers a wallet might match a credential type by, never one.
+func TestVCTQueryValues(t *testing.T) {
+	tests := []struct {
+		name string
+		cm   *CredentialMetadata
+		want []string
+	}{
+		{
+			// The case the bug was about: a VCTM whose own vct is a URN while
+			// the type-metadata URL is something else entirely. Picking either
+			// one alone is what broke half the deployed wallets.
+			name: "distinct vct and url yields both, credential's own vct first",
+			cm: &CredentialMetadata{
+				VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				VCTURL: "https://apigw.example/type-metadata/pid",
+				Format: "dc+sd-jwt",
+			},
+			want: []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
+		},
+		{
+			// A VCTM whose source file omits "vct": ResolveVCTUrls back-fills
+			// it from the derived URL and the two collapse. A one-element list
+			// is the correct answer here - a property of that VCTM, not a
+			// regression of this function. (The files under metadata/ all
+			// declare a vct now, so they take the two-value path above; see
+			// TestShippedVCTMsDeclareTheirVCT.)
+			name: "back-filled vct equal to url collapses to one value",
+			cm: &CredentialMetadata{
+				VCTM:   &sdjwtvc.VCTM{VCT: "https://apigw.example/type-metadata/pid"},
+				VCTURL: "https://apigw.example/type-metadata/pid",
+				Format: "dc+sd-jwt",
+			},
+			want: []string{"https://apigw.example/type-metadata/pid"},
+		},
+		{
+			name: "no VCTM falls back to the url alone",
+			cm: &CredentialMetadata{
+				VCTURL: "https://apigw.example/type-metadata/pid",
+				Format: "dc+sd-jwt",
+			},
+			want: []string{"https://apigw.example/type-metadata/pid"},
+		},
+		{
+			// mso_mdoc is constrained by doctype_value, not vct_values.
+			name: "mdoc scope contributes nothing",
+			cm:   &CredentialMetadata{Format: "mso_mdoc"},
+			want: nil,
+		},
+		{
+			// Nothing stops an entry carrying VCTM/VCTURL alongside an mdoc
+			// format, so the format - not the absence of a VCTM - has to be
+			// what makes this nil. Otherwise a caller emits vct_values for a
+			// credential DCQL constrains by doctype_value.
+			name: "mdoc scope with a VCTM still contributes nothing",
+			cm: &CredentialMetadata{
+				Format: "mso_mdoc",
+				VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				VCTURL: "https://apigw.example/type-metadata/pid",
+			},
+			want: nil,
+		},
+		{
+			name: "zk mdoc scope with a VCTM contributes nothing",
+			cm: &CredentialMetadata{
+				Format: "mso_mdoc_zk",
+				VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				VCTURL: "https://apigw.example/type-metadata/pid",
+			},
+			want: nil,
+		},
+		{
+			// Callers hand this the result of a map lookup that may have missed.
+			name: "nil receiver",
+			cm:   nil,
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.cm.VCTQueryValues())
+		})
+	}
+}
+
+// TestDCQLMetaQueryFollowsFormat pins the constraint to the credential's
+// FORMAT rather than to which metadata document happens to be loaded. Keying
+// off "is an MDDL present" routed every non-mdoc format - including the ldp_vc
+// and jwt_vc_json credentials this stack can issue - into the SD-JWT branch and
+// emitted vct_values, which ValidateCredentialQuery rejects for those formats.
+func TestDCQLMetaQueryFollowsFormat(t *testing.T) {
+	tests := []struct {
+		name        string
+		cm          *CredentialMetadata
+		wantOK      bool
+		wantVCTs    []string
+		wantDoctype string
+		wantTypes   [][]string
+	}{
+		{
+			name: "sd-jwt gets both vct identifiers",
+			cm: &CredentialMetadata{
+				Format: "dc+sd-jwt",
+				VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				VCTURL: "https://apigw.example/type-metadata/pid",
+			},
+			wantOK:   true,
+			wantVCTs: []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
+		},
+		{
+			// Format is declared `default:"dc+sd-jwt"`, so an unset one means
+			// sd-jwt rather than "unsupported".
+			name: "empty format honours the dc+sd-jwt default",
+			cm: &CredentialMetadata{
+				VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				VCTURL: "https://apigw.example/type-metadata/pid",
+			},
+			wantOK:   true,
+			wantVCTs: []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
+		},
+		{
+			name:        "mdoc gets doctype_value",
+			cm:          &CredentialMetadata{Format: "mso_mdoc", MDDL: &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"}},
+			wantOK:      true,
+			wantDoctype: "eu.europa.ec.eudi.pid.1",
+		},
+		{
+			// A registry-resolved mdoc scope configures the doctype directly
+			// and may have no MDDL document in hand.
+			name:        "mdoc falls back to the configured doctype",
+			cm:          &CredentialMetadata{Format: "mso_mdoc", Doctype: "eu.europa.ec.eudi.pid.1"},
+			wantOK:      true,
+			wantDoctype: "eu.europa.ec.eudi.pid.1",
+		},
+		{
+			// An mdoc scope configured with a VCTM rather than an MDDL keeps
+			// its identifier there, and that string is then what the operator
+			// is using as the doctype - the verifier UI already reads it the
+			// same way. Dropping such a scope would take a working
+			// configuration away.
+			name:        "mdoc falls back to the VCTM's vct as a last resort",
+			cm:          &CredentialMetadata{Format: "mso_mdoc", VCTM: &sdjwtvc.VCTM{VCT: "org.iso.18013.5.1.mDL"}},
+			wantOK:      true,
+			wantDoctype: "org.iso.18013.5.1.mDL",
+		},
+		{
+			// The configured doctype wins over both documents.
+			name: "configured doctype takes precedence",
+			cm: &CredentialMetadata{
+				Format:  "mso_mdoc",
+				Doctype: "eu.europa.ec.eudi.pid.1",
+				MDDL:    &mdoc.MDDLSchema{DocType: "org.iso.18013.5.1.mDL"},
+			},
+			wantOK:      true,
+			wantDoctype: "eu.europa.ec.eudi.pid.1",
+		},
+		{
+			// validateMsoMdocZkQuery wants a non-empty meta.zk_system_type
+			// alongside the doctype, and the ZK specs live on
+			// VerificationPresetScope - nothing in credential_metadata can
+			// supply them. Returning the doctype alone would hand the caller a
+			// query ValidateCredentialQuery rejects, so this reports !ok and
+			// the caller skips the scope. A real ZK request comes from a preset
+			// overriding Format on a plain mso_mdoc scope, which never reaches
+			// this branch.
+			name:   "zk mdoc cannot be completed from credential_metadata",
+			cm:     &CredentialMetadata{Format: "mso_mdoc_zk", MDDL: &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"}},
+			wantOK: false,
+		},
+		{
+			// The legacy spelling stays on the SD-JWT branch. This repo still
+			// issues it and treats it as SD-JWT elsewhere, so rejecting it here
+			// would take a working deployment's scope away at runtime rather
+			// than fix the real wart (the query then carries a format
+			// identifier OpenID4VP does not define), which belongs in config
+			// validation.
+			name:     "legacy vc+sd-jwt is treated as SD-JWT",
+			cm:       &CredentialMetadata{Format: "vc+sd-jwt", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}, VCTURL: "https://apigw.example/type-metadata/pid"},
+			wantOK:   true,
+			wantVCTs: []string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
+		},
+		{
+			// Configured types make the W3C formats requestable (SUNET/vc#680).
+			name: "ldp_vc with configured type values gets type_values",
+			cm: &CredentialMetadata{
+				Format: "ldp_vc",
+				CredentialTypeValues: [][]string{{
+					"https://www.w3.org/2018/credentials#VerifiableCredential",
+					"https://example.org/diploma#DiplomaCredential",
+				}},
+			},
+			wantOK: true,
+			wantTypes: [][]string{{
+				"https://www.w3.org/2018/credentials#VerifiableCredential",
+				"https://example.org/diploma#DiplomaCredential",
+			}},
+		},
+		{
+			name: "jwt_vc_json with configured type values gets type_values",
+			cm: &CredentialMetadata{
+				Format: "jwt_vc_json",
+				CredentialTypeValues: [][]string{{
+					"https://www.w3.org/2018/credentials#VerifiableCredential",
+					"https://example.org/diploma#DiplomaCredential",
+				}},
+			},
+			wantOK: true,
+			wantTypes: [][]string{{
+				"https://www.w3.org/2018/credentials#VerifiableCredential",
+				"https://example.org/diploma#DiplomaCredential",
+			}},
+		},
+		{
+			// The base type alone constrains nothing - it matches every W3C
+			// credential in the wallet - so it is refused rather than sent.
+			name: "ldp_vc with only the base type IRI is still unusable",
+			cm: &CredentialMetadata{
+				Format:               "ldp_vc",
+				CredentialTypeValues: [][]string{{"https://www.w3.org/2018/credentials#VerifiableCredential"}},
+			},
+			wantOK: false,
+		},
+		{
+			// Compact terms feed the issuer metadata, not DCQL, and cannot be
+			// expanded here - so they make the scope requestable on their own.
+			name: "credential_types alone does not make a W3C scope requestable",
+			cm: &CredentialMetadata{
+				Format:          "ldp_vc",
+				CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"},
+			},
+			wantOK: false,
+		},
+		{
+			// The Copilot finding: these used to fall into the sd-jwt branch.
+			name:   "ldp_vc reports no expressible constraint",
+			cm:     &CredentialMetadata{Format: "ldp_vc", VCTM: &sdjwtvc.VCTM{VCT: "urn:credential:diploma:1"}, VCTURL: "https://apigw.example/type-metadata/diploma"},
+			wantOK: false,
+		},
+		{
+			name:   "jwt_vc_json reports no expressible constraint",
+			cm:     &CredentialMetadata{Format: "jwt_vc_json", VCTM: &sdjwtvc.VCTM{VCT: "urn:credential:diploma:1"}, VCTURL: "https://apigw.example/type-metadata/diploma"},
+			wantOK: false,
+		},
+		{
+			name:   "mdoc with no doctype anywhere",
+			cm:     &CredentialMetadata{Format: "mso_mdoc"},
+			wantOK: false,
+		},
+		{
+			name:   "sd-jwt with no identifier at all",
+			cm:     &CredentialMetadata{Format: "dc+sd-jwt"},
+			wantOK: false,
+		},
+		{
+			// An auth scope or requested scope with no credential_metadata
+			// entry: config validation never checks that auth_scopes keys
+			// resolve, and every accessor takes a lock on the receiver, so an
+			// unguarded call here panicked.
+			name:   "nil metadata",
+			cm:     nil,
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := tt.cm.DCQLMetaQuery()
+			require.Equal(t, tt.wantOK, ok)
+			if !ok {
+				return
+			}
+			assert.Equal(t, tt.wantDoctype, got.DoctypeValue)
+			assert.Equal(t, tt.wantVCTs, got.VCTValues)
+			assert.Equal(t, tt.wantTypes, got.TypeValues)
+		})
+	}
+}
+
+// TestShippedVCTMsDeclareTheirVCT keeps the vendored type metadata and the
+// canonical identifiers in this package from drifting apart.
+//
+// Every document in metadata/ used to omit "vct". ResolveVCTUrls back-fills an
+// empty one from the derived type-metadata URL, so VCTM.VCT and VCTURL became
+// the same string: a stock deployment issued credentials whose embedded vct was
+// the URL, advertised exactly one value in meta.vct_values no matter which code
+// path built the query, and could never match the URNs that
+// presentation_requests/*.yaml asks for. The "offer both identifiers" fix was
+// structurally present but degenerate.
+//
+// The identifiers here are the ones credential_types.go already declares and
+// the copies in testdata already carry, so this asserts the shipped files agree
+// with both rather than inventing anything.
+func TestShippedVCTMsDeclareTheirVCT(t *testing.T) {
+	want := map[string]string{
+		"vctm_pid.json":             CredentialTypeUrnEudiPid1,
+		"vctm_ehic.json":            CredentialTypeUrnEudiEhic1,
+		"vctm_pda1.json":            CredentialTypeUrnEudiPda11,
+		"vctm_diploma.json":         CredentialTypeUrnEudiDiploma1,
+		"vctm_elm.json":             CredentialTypeUrnEudiElm1,
+		"vctm_microcredential.json": CredentialTypeUrnEudiMicroCredential1,
+		"vctm_eduid.json":           CredentialTypeUrnEduID1,
+	}
+
+	paths, err := filepath.Glob(filepath.Join("..", "..", "metadata", "vctm_*.json"))
+	require.NoError(t, err)
+	require.Len(t, paths, len(want), "a new shipped VCTM needs an entry here and a vct of its own")
+
+	for _, path := range paths {
+		name := filepath.Base(path)
+		t.Run(name, func(t *testing.T) {
+			expected, known := want[name]
+			require.True(t, known, "unexpected shipped VCTM")
+
+			raw, err := os.ReadFile(path)
+			require.NoError(t, err)
+			var doc struct {
+				VCT string `json:"vct"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &doc))
+			assert.Equal(t, expected, doc.VCT)
+
+			// The whole point of declaring it: after resolution the credential's
+			// own vct and the URL its metadata is served from are two distinct
+			// identifiers, so vct_values carries both.
+			cm := &CredentialMetadata{
+				Format:       "dc+sd-jwt",
+				VCTMFilePath: path,
+				VCTM:         &sdjwtvc.VCTM{VCT: doc.VCT},
+			}
+			cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{"s": cm}}}
+			require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+			assert.Equal(t, []string{expected, "https://apigw.example/type-metadata/s"}, cm.VCTQueryValues())
+		})
+	}
+}
+
+// TestW3CTypes covers the issuance side: the compact-term list the issuer
+// metadata advertises and issueVC20 mints from (SUNET/vc#680).
+//
+// A verifier reads CredentialTypeValues instead, and the asymmetry with
+// DCQLMetaQuery is deliberate twice: the representations differ (compact terms
+// against fully expanded IRIs, which cannot be derived from one another without
+// a JSON-LD expansion), and so does the treatment of the bare base type -
+// issuing a credential typed only "VerifiableCredential" is unspecific, while
+// requesting one matches every W3C credential in the wallet.
+func TestW3CTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		cm   *CredentialMetadata
+		want []string
+	}{
+		{
+			// Compact terms, as OID4VCI Appendix A.1 and the W3C VC data model
+			// use them - not the expanded IRIs DCQL matches on.
+			name: "configured types are used as written",
+			cm:   &CredentialMetadata{CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"}},
+			want: []string{"VerifiableCredential", "DiplomaCredential"},
+		},
+		{
+			// What the issuer metadata always advertised.
+			name: "unset falls back to the base type",
+			cm:   &CredentialMetadata{},
+			want: []string{"VerifiableCredential"},
+		},
+		{
+			name: "nil receiver",
+			cm:   nil,
+			want: []string{"VerifiableCredential"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.cm.W3CTypes())
+		})
+	}
+
+	// A clone, so a caller cannot edit the configuration every later request
+	// is built from.
+	cm := &CredentialMetadata{CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"}}
+	got := cm.W3CTypes()
+	got[1] = "mutated"
+	assert.Equal(t, []string{"VerifiableCredential", "DiplomaCredential"}, cm.CredentialTypes)
 }
