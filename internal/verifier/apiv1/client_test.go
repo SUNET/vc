@@ -624,4 +624,15 @@ func TestAugmentVCTValuesOnlyUsesRequestedScopes(t *testing.T) {
 	none := query()
 	client.augmentVCTValuesFromConfig(none, []string{"profile", "openid"})
 	assert.Equal(t, []string{"urn:eudi:pid:1"}, none.Credentials[0].Meta.VCTValues)
+
+	// Both aliases requested: both contribute, rather than sort order silently
+	// dropping one the caller asked for. Nothing here was not requested.
+	both := query()
+	client.augmentVCTValuesFromConfig(both, []string{"pid", "pid_alias"})
+	assert.Equal(t, []string{"urn:eudi:pid:1", pidURL, aliasURL}, both.Credentials[0].Meta.VCTValues)
+
+	// Order of the requested scopes must not change the result.
+	reversed := query()
+	client.augmentVCTValuesFromConfig(reversed, []string{"pid_alias", "pid"})
+	assert.Equal(t, both.Credentials[0].Meta.VCTValues, reversed.Credentials[0].Meta.VCTValues)
 }

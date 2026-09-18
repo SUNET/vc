@@ -415,39 +415,52 @@ func (c *Client) augmentVCTValuesFromConfig(dcql *openid4vp.DCQL, scopes []strin
 		if len(cred.Meta.VCTValues) == 0 {
 			continue
 		}
-		scope, identifiers := c.scopeMatchingVCTValues(cred.Meta.VCTValues, scopes)
-		if scope == "" {
+		matched, identifiers := c.identifiersForRequestedScopes(cred.Meta.VCTValues, scopes)
+		if len(matched) == 0 {
 			continue
 		}
 		cred.Meta.VCTValues = appendMissing(cred.Meta.VCTValues, identifiers)
 		c.log.Debug("Augmented template vct_values from credential config",
-			"credential_id", cred.ID, "scope", scope, "vct_values", cred.Meta.VCTValues)
+			"credential_id", cred.ID, "scopes", matched, "vct_values", cred.Meta.VCTValues)
 	}
 }
 
-// scopeMatchingVCTValues finds, among the REQUESTED scopes, the one that values
-// already names, and returns it with its full identifier set. Requested scopes
-// with no credential_metadata entry are skipped - those are ordinary OIDC
-// scopes like "profile". Candidates are visited in sorted order so an ambiguous
-// config resolves the same way twice.
+// identifiersForRequestedScopes returns every REQUESTED scope whose identifiers
+// values already names, together with the union of those scopes' identifiers.
+// Requested scopes with no credential_metadata entry are skipped - those are
+// ordinary OIDC scopes like "profile".
 //
-// Returns "" when nothing matches, which is the normal case for a template
-// naming a credential type this verifier has no credential_metadata for.
-func (c *Client) scopeMatchingVCTValues(values []string, scopes []string) (string, []string) {
+// Every matching scope contributes, rather than just the first. Two scopes can
+// share a vct while resolving to different type-metadata URLs (ResolveVCTUrls
+// derives VCTURL per scope, so aliases backed by one VCTM differ there), and
+// picking one of them by sort order would drop an alias the caller explicitly
+// requested while keeping the other. Taking all of them cannot widen the query
+// past the request, since only requested scopes are ever consulted, and it
+// leaves no tie to break.
+//
+// Scopes come back in sorted order, so a given request augments a query the
+// same way every time.
+//
+// An empty result is the normal case for a template naming a credential type
+// none of the requested scopes configures.
+func (c *Client) identifiersForRequestedScopes(values []string, scopes []string) ([]string, []string) {
 	if c.cfg.Common == nil {
-		return "", nil
+		return nil, nil
 	}
+	var matched, identifiers []string
 	for _, scope := range slices.Sorted(slices.Values(scopes)) {
 		constructor, ok := c.cfg.Common.CredentialMetadata[scope]
 		if !ok {
 			continue
 		}
-		identifiers := constructor.VCTQueryValues()
-		if slices.ContainsFunc(identifiers, func(id string) bool { return slices.Contains(values, id) }) {
-			return scope, identifiers
+		scopeIdentifiers := constructor.VCTQueryValues()
+		if !slices.ContainsFunc(scopeIdentifiers, func(id string) bool { return slices.Contains(values, id) }) {
+			continue
 		}
+		matched = append(matched, scope)
+		identifiers = appendMissing(identifiers, scopeIdentifiers)
 	}
-	return "", nil
+	return matched, identifiers
 }
 
 // appendMissing appends each of extra not already in base, preserving base's
