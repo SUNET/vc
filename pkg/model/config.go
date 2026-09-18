@@ -2616,7 +2616,17 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		case "dc+sd-jwt":
 			// Appendix A.3: only vct is format-specific for dc+sd-jwt
 			credConfig.VCT = resolvedVCT
-		case "jwt_vc_json", "ldp_vc", "jwt_vc_json-ld":
+		// vc+ld+json belongs here: handlers_issuer.go issues it alongside
+		// ldp_vc, and DCQLMetaQuery treats it as a W3C format, so leaving it
+		// out sent it down the default branch with no credential_definition at
+		// all - its credential_types went unadvertised while a verifier
+		// constrained requests by them, which is the disagreement this field
+		// exists to remove.
+		//
+		// jwt_vc_json-ld stays advertised but is deliberately not requestable:
+		// nothing issues it (see handlers_issuer.go's format switch), so
+		// DCQLMetaQuery does not accept it either.
+		case "jwt_vc_json", "ldp_vc", "vc+ld+json", "jwt_vc_json-ld":
 			// Appendix A.1: credential_definition with type array is format-specific for W3C VC formats.
 			//
 			// credential_types when configured, so the advertised types, the

@@ -730,3 +730,28 @@ func TestIssuerMetadata_W3CCredentialTypes(t *testing.T) {
 	assert.Equal(t, []string{"VerifiableCredential"}, generic.CredentialDefinition.Type,
 		"an unconfigured W3C scope keeps the previous behaviour")
 }
+
+// TestIssuerMetadata_VCLDJSONGetsCredentialDefinition covers a review finding:
+// vc+ld+json is issued alongside ldp_vc (handlers_issuer.go) and treated as a
+// W3C format by DCQLMetaQuery, but the metadata switch omitted it - so it fell
+// to the default branch with no credential_definition, its credential_types
+// went unadvertised, and issuance and the DCQL constraint disagreed about the
+// credential's types.
+func TestIssuerMetadata_VCLDJSONGetsCredentialDefinition(t *testing.T) {
+	cfg := &IssuerMetadata{}
+	baseURL := "https://issuer.sunet.se"
+
+	metadata, err := cfg.Generate(context.Background(), baseURL, map[string]*CredentialMetadata{
+		"diploma": {
+			Format:          "vc+ld+json",
+			VCTM:            &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+			VCTURL:          baseURL + "/type-metadata/diploma",
+			CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"},
+		},
+	})
+	require.NoError(t, err)
+
+	diploma := metadata.CredentialConfigurationsSupported["diploma"]
+	require.NotNil(t, diploma.CredentialDefinition, "vc+ld+json is a W3C format and needs credential_definition")
+	assert.Equal(t, []string{"VerifiableCredential", "DiplomaCredential"}, diploma.CredentialDefinition.Type)
+}
