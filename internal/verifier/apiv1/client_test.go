@@ -692,3 +692,37 @@ func TestCreateDCQLQueryRejectsUnusableConfiguredScope(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, dcql.Credentials, 1)
 }
+
+// TestCreateDCQLQueryFallsBackWhenNoTemplateMatches covers a review finding
+// about the presentation-builder branch.
+//
+// BuildDCQLQuery cannot say "no template matched" through its signature: it
+// returns a non-nil generic placeholder that constrains nothing (empty
+// vct_values) and hardcodes format vc+sd-jwt. A plain nil check therefore
+// accepted it, which made the config fallback unreachable for every deployment
+// with presentation_requests configured - so a configured mso_mdoc scope with
+// no template of its own was asked for with an unconstrained vc+sd-jwt query
+// instead of its doctype.
+func TestCreateDCQLQueryFallsBackWhenNoTemplateMatches(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid_mdoc": {Format: "mso_mdoc", MDDL: &mdoc.MDDLSchema{DocType: "eu.europa.ec.eudi.pid.1"}},
+	}, nil)
+
+	// A builder with no templates at all: every lookup yields the placeholder.
+	builder := openid4vp.NewPresentationBuilder([]openid4vp.PresentationRequestTemplate(nil))
+	client.presentationBuilder = builder
+
+	// Sanity: this is the shape the branch has to recognise.
+	generic, err := builder.BuildDCQLQuery(t.Context(), []string{"pid_mdoc"})
+	require.NoError(t, err)
+	require.NotNil(t, generic, "the placeholder is non-nil, which is what made a nil check insufficient")
+	require.True(t, openid4vp.IsGenericDCQL(generic))
+
+	dcql, err := client.createDCQLQuery(t.Context(), []string{"pid_mdoc"})
+	require.NoError(t, err)
+	require.Len(t, dcql.Credentials, 1)
+	assert.Equal(t, "pid_mdoc", dcql.Credentials[0].ID)
+	assert.Equal(t, "eu.europa.ec.eudi.pid.1", dcql.Credentials[0].Meta.DoctypeValue)
+	assert.Empty(t, dcql.Credentials[0].Meta.VCTValues)
+	assert.NoError(t, openid4vp.ValidateCredentialQuery(dcql.Credentials[0]))
+}

@@ -362,25 +362,17 @@ func getOrDefaultString(s, defaultVal string) string {
 func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4vp.DCQL, error) {
 	c.log.Info("Creating DCQL query", "scopes", scopes)
 
-	// Before either builder: refuse a request naming a configured credential
-	// this verifier cannot ask for. Whichever path builds the query, the
-	// request's full scope list is what handler_oidc.go persists as
-	// authCtx.Scopes, and VerificationDirectPost requires a VP token for every
-	// entry - so a query that quietly covers only some of them fails with
-	// "VP token not found for scope" after the user has completed a
-	// presentation, naming a scope they were never asked for.
-	//
-	// The template path needs this as much as the fallback does, and used to
-	// lack it: a template selected for "pid" returns a PID-only query while a
-	// second configured scope in the same request goes unmentioned.
-	if err := c.validateRequestedScopes(scopes); err != nil {
-		return nil, err
-	}
-
 	// If we have a presentation builder with templates, use it
 	if c.presentationBuilder != nil {
 		dcql, err := c.presentationBuilder.BuildDCQLQuery(ctx, scopes)
-		if err == nil && dcql != nil {
+		// IsGenericDCQL, not just a nil check: BuildDCQLQuery answers "no
+		// template matched" with a non-nil placeholder that constrains nothing
+		// and hardcodes one format, so a plain nil check made the fallback
+		// below unreachable for every deployment with presentation_requests
+		// configured. A configured mso_mdoc scope with no template of its own
+		// then got an unconstrained vc+sd-jwt query instead of the
+		// format-aware one buildDCQLQueryFromConfig builds.
+		if err == nil && dcql != nil && !openid4vp.IsGenericDCQL(dcql) {
 			// Templates take priority over buildDCQLQueryFromConfig, so
 			// without this every SUNET/vc#673 fix below would be unreachable
 			// for the deployment shape that actually ships: each template in
@@ -391,33 +383,11 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 			c.log.Info("DCQL query built from presentation template", "credential_count", len(dcql.Credentials))
 			return dcql, nil
 		}
-		c.log.Info("No presentation template matched, falling back to credential config")
+		c.log.Info("No presentation template matched, falling back to credential config", "scopes", scopes)
 	}
 
 	// Fallback to building DCQL query from credential config
 	return c.buildDCQLQueryFromConfig(scopes)
-}
-
-// validateRequestedScopes rejects a request naming a configured credential
-// whose DCQL constraint cannot be built.
-//
-// Only CONFIGURED scopes are checked: a requested scope with no
-// credential_metadata entry is an ordinary OIDC scope like "profile", which no
-// query should mention and whose absence from one is not an error.
-func (c *Client) validateRequestedScopes(scopes []string) error {
-	if c.cfg.Common == nil {
-		return nil
-	}
-	for _, scope := range scopes {
-		constructor, ok := c.cfg.Common.CredentialMetadata[scope]
-		if !ok {
-			continue
-		}
-		if _, usable := constructor.DCQLMetaQuery(); !usable {
-			return fmt.Errorf("scope %q is configured with format %q, for which no DCQL meta constraint can be built", scope, c.cfg.GetFormatForScope(scope))
-		}
-	}
-	return nil
 }
 
 // augmentVCTValuesFromConfig adds the credential type identifiers a wallet

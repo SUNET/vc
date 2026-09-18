@@ -251,12 +251,33 @@ func copyDCQL(src *DCQL) *DCQL {
 	return dst
 }
 
+// GenericCredentialQueryID is the credential-query id createGenericDCQL uses.
+// It is exported so a caller can tell the placeholder apart from a real
+// template match - see IsGenericDCQL.
+const GenericCredentialQueryID = "credential_generic"
+
+// IsGenericDCQL reports whether dcql is the placeholder BuildDCQLQuery returns
+// when no template matched, rather than a query built from one.
+//
+// BuildDCQLQuery cannot say "no match" through its own signature: it returns a
+// non-nil generic query in that case, which reads to a caller exactly like
+// success. A caller that has a better fallback - building from
+// credential_metadata, say - needs to tell the two apart, because the generic
+// query constrains nothing (empty vct_values) and names a single hardcoded
+// format, so accepting it in place of a real query asks a wallet for anything
+// at all.
+func IsGenericDCQL(dcql *DCQL) bool {
+	return dcql != nil &&
+		len(dcql.Credentials) == 1 &&
+		dcql.Credentials[0].ID == GenericCredentialQueryID
+}
+
 // createGenericDCQL creates a generic DCQL query when no specific templates match
 func (pb *PresentationBuilder) createGenericDCQL() *DCQL {
 	return &DCQL{
 		Credentials: []CredentialQuery{
 			{
-				ID:     "credential_generic",
+				ID:     GenericCredentialQueryID,
 				Format: "vc+sd-jwt",
 				Meta: MetaQuery{
 					VCTValues: []string{}, // Empty - accept any VCT
