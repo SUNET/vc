@@ -103,19 +103,21 @@ func TestVPTokensForScope(t *testing.T) {
 	client, _ := CreateTestClientWithMock(t, nil)
 
 	tests := []struct {
-		name      string
-		authCtx   *cache.AuthorizationContext
-		vpToken   map[string][]string
-		scope     string
-		want      []string
-		wantError string
+		name             string
+		authCtx          *cache.AuthorizationContext
+		credentialScopes []string
+		vpToken          map[string][]string
+		scope            string
+		want             []string
+		wantError        string
 	}{
 		{
-			name:    "keyed by the scope, as a config-built query is",
-			authCtx: &cache.AuthorizationContext{Scopes: []string{"pid", "ehic"}},
-			vpToken: map[string][]string{"pid": {"token-pid"}},
-			scope:   "pid",
-			want:    []string{"token-pid"},
+			name:             "keyed by the scope, as a config-built query is",
+			authCtx:          &cache.AuthorizationContext{Scopes: []string{"pid", "ehic"}},
+			credentialScopes: []string{"pid", "ehic"},
+			vpToken:          map[string][]string{"pid": {"token-pid"}},
+			scope:            "pid",
+			want:             []string{"token-pid"},
 		},
 		{
 			// The bug: without the mapping this is "VP token not found".
@@ -124,9 +126,10 @@ func TestVPTokensForScope(t *testing.T) {
 				Scopes:        []string{"pid", "ehic"},
 				ScopeQueryIDs: map[string]string{"pid": "eudi_pid"},
 			},
-			vpToken: map[string][]string{"eudi_pid": {"token-pid"}},
-			scope:   "pid",
-			want:    []string{"token-pid"},
+			credentialScopes: []string{"pid", "ehic"},
+			vpToken:          map[string][]string{"eudi_pid": {"token-pid"}},
+			scope:            "pid",
+			want:             []string{"token-pid"},
 		},
 		{
 			// The scope's own key wins, so a wallet that answers correctly is
@@ -136,32 +139,38 @@ func TestVPTokensForScope(t *testing.T) {
 				Scopes:        []string{"pid", "ehic"},
 				ScopeQueryIDs: map[string]string{"pid": "eudi_pid"},
 			},
-			vpToken: map[string][]string{"pid": {"right"}, "eudi_pid": {"wrong"}},
-			scope:   "pid",
-			want:    []string{"right"},
+			credentialScopes: []string{"pid", "ehic"},
+			vpToken:          map[string][]string{"pid": {"right"}, "eudi_pid": {"wrong"}},
+			scope:            "pid",
+			want:             []string{"right"},
 		},
 		{
-			name:    "plain-string vp_token with a single requested scope",
-			authCtx: &cache.AuthorizationContext{Scopes: []string{"pid"}},
-			vpToken: map[string][]string{"_default": {"token-pid"}},
-			scope:   "pid",
-			want:    []string{"token-pid"},
+			// The shape an ordinary OIDC request has: several scopes asked for,
+			// one credential among them.
+			name:             "plain-string vp_token with a single requested credential",
+			authCtx:          &cache.AuthorizationContext{Scopes: []string{"openid", "profile", "pid"}},
+			credentialScopes: []string{"pid"},
+			vpToken:          map[string][]string{"_default": {"token-pid"}},
+			scope:            "pid",
+			want:             []string{"token-pid"},
 		},
 		{
 			// _default with several scopes would reuse one credential for each,
 			// carrying whichever validations belong to the others.
-			name:      "plain-string vp_token refused for a multi-scope request",
-			authCtx:   &cache.AuthorizationContext{Scopes: []string{"pid", "ehic"}},
-			vpToken:   map[string][]string{"_default": {"token"}},
-			scope:     "pid",
-			wantError: "_default fallback is only allowed when a single scope is requested",
+			name:             "plain-string vp_token refused for a multi-scope request",
+			authCtx:          &cache.AuthorizationContext{Scopes: []string{"pid", "ehic"}},
+			credentialScopes: []string{"pid", "ehic"},
+			vpToken:          map[string][]string{"_default": {"token"}},
+			scope:            "pid",
+			wantError:        "_default fallback is only allowed when a single credential is requested",
 		},
 		{
-			name:      "nothing usable",
-			authCtx:   &cache.AuthorizationContext{Scopes: []string{"pid"}},
-			vpToken:   map[string][]string{"something_else": {"token"}},
-			scope:     "pid",
-			wantError: "VP token not found for scope: pid",
+			name:             "nothing usable",
+			authCtx:          &cache.AuthorizationContext{Scopes: []string{"pid"}},
+			credentialScopes: []string{"pid"},
+			vpToken:          map[string][]string{"something_else": {"token"}},
+			scope:            "pid",
+			wantError:        "VP token not found for scope: pid",
 		},
 		{
 			// A mapping that points at a key the wallet did not send must not
@@ -171,15 +180,16 @@ func TestVPTokensForScope(t *testing.T) {
 				Scopes:        []string{"pid", "ehic"},
 				ScopeQueryIDs: map[string]string{"pid": "eudi_pid"},
 			},
-			vpToken:   map[string][]string{"ehic": {"token-ehic"}},
-			scope:     "pid",
-			wantError: "_default fallback is only allowed when a single scope is requested",
+			credentialScopes: []string{"pid", "ehic"},
+			vpToken:          map[string][]string{"ehic": {"token-ehic"}},
+			scope:            "pid",
+			wantError:        "_default fallback is only allowed when a single credential is requested",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := client.vpTokensForScope(tt.authCtx, openid4vp.VPResponse{VPToken: tt.vpToken}, tt.scope)
+			got, err := client.vpTokensForScope(tt.authCtx, tt.credentialScopes, openid4vp.VPResponse{VPToken: tt.vpToken}, tt.scope)
 			if tt.wantError != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantError)
@@ -220,6 +230,7 @@ func TestScopeQueryIDsAliasTemplateScope(t *testing.T) {
 			Scopes:        []string{"pid_full"},
 			ScopeQueryIDs: client.ScopeQueryIDs(dcql, []string{"pid_full"}),
 		},
+		[]string{"pid_full"},
 		openid4vp.VPResponse{VPToken: map[string][]string{"eudi_pid": {"token-pid"}}},
 		"pid_full",
 	)
@@ -248,4 +259,55 @@ func TestScopeQueryIDsAliasScopeAmbiguous(t *testing.T) {
 	// Configured scopes in the same request still pair exactly, by constraint.
 	assert.Equal(t, map[string]string{"pid": "eudi_pid", "ehic": "eudi_ehic"},
 		client.ScopeQueryIDs(dcql, []string{"pid", "ehic"}))
+}
+
+// TestCredentialScopes covers which requested scopes the response is actually
+// resolved for.
+//
+// authCtx.Scopes is the raw OIDC scope list: "openid" is always there (OIDC
+// Core requires it) and the shipped eudi_pid_basic template is selected by
+// "pid profile". Requiring a VP token for those meant any request naming more
+// than one scope failed - no wallet returns a credential for "profile" - which
+// left the template flow broken even once its query id resolved.
+func TestCredentialScopes(t *testing.T) {
+	client, _ := CreateTestClientWithMock(t, nil)
+
+	t.Run("ordinary OIDC scopes are not part of the presentation", func(t *testing.T) {
+		got := client.credentialScopes(&cache.AuthorizationContext{
+			Scopes: []string{"openid", "profile", "pid"},
+			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+				{ID: "pid"},
+			}},
+		})
+		assert.Equal(t, []string{"pid"}, got)
+	})
+
+	t.Run("a scope paired with a template's query id counts", func(t *testing.T) {
+		got := client.credentialScopes(&cache.AuthorizationContext{
+			Scopes:        []string{"openid", "profile", "pid"},
+			ScopeQueryIDs: map[string]string{"pid": "eudi_pid"},
+			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+				{ID: "eudi_pid"},
+			}},
+		})
+		assert.Equal(t, []string{"pid"}, got)
+	})
+
+	t.Run("request order is preserved", func(t *testing.T) {
+		got := client.credentialScopes(&cache.AuthorizationContext{
+			Scopes: []string{"ehic", "openid", "pid"},
+			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+				{ID: "pid"}, {ID: "ehic"},
+			}},
+		})
+		assert.Equal(t, []string{"ehic", "pid"}, got)
+	})
+
+	t.Run("no cached query falls back to every scope", func(t *testing.T) {
+		// A session created before this existed, mid rolling deploy.
+		got := client.credentialScopes(&cache.AuthorizationContext{
+			Scopes: []string{"openid", "pid"},
+		})
+		assert.Equal(t, []string{"openid", "pid"}, got)
+	})
 }

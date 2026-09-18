@@ -144,10 +144,17 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	redirectURI := u.String()
 
 	// Process all VP tokens for the requested scopes
-	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(authCtx.Scopes))
+	// Only the scopes a credential query actually stands for. authCtx.Scopes is
+	// the raw OIDC scope list, which carries "openid" (always, per OIDC Core)
+	// and whatever else the RP asked for - the shipped eudi_pid_basic template
+	// is selected by "pid profile". Requiring a VP token for those meant any
+	// request naming more than one scope failed here, since no wallet returns a
+	// credential for "profile".
+	credentialScopes := c.credentialScopes(authCtx)
+	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(credentialScopes))
 
-	for _, scope := range authCtx.Scopes {
-		vpTokens, err := c.vpTokensForScope(authCtx, vpResponse, scope)
+	for _, scope := range credentialScopes {
+		vpTokens, err := c.vpTokensForScope(authCtx, credentialScopes, vpResponse, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -594,6 +601,38 @@ type VerificationCallbackResponse struct {
 	CredentialData []sdjwtvc.CredentialCache `json:"credential_data"`
 }
 
+// credentialScopes returns the requested scopes that a credential query in the
+// authorization context actually stands for, in request order.
+//
+// authCtx.Scopes is the raw OIDC scope list: it always carries "openid" (OIDC
+// Core requires it) and whatever else the RP asked for, and the shipped
+// eudi_pid_basic template is selected by "pid profile". None of those name a
+// credential, and no wallet returns a token for them.
+//
+// A scope counts when the query has a credential of that id - which is how
+// buildDCQLQueryFromConfig keys them - or when ScopeQueryIDs paired it with
+// one. Anything else is an ordinary OIDC scope and is not part of the
+// presentation.
+//
+// With no DCQL query cached at all, every scope is returned, which is the
+// behaviour that predates this. Sessions created before this field existed
+// therefore keep working across a rolling deploy.
+func (c *Client) credentialScopes(authCtx *cache.AuthorizationContext) []string {
+	if authCtx.DCQLQuery == nil {
+		return authCtx.Scopes
+	}
+	scopes := make([]string, 0, len(authCtx.Scopes))
+	for _, scope := range authCtx.Scopes {
+		_, mapped := authCtx.ScopeQueryIDs[scope]
+		if mapped || slices.ContainsFunc(authCtx.DCQLQuery.Credentials, func(cred openid4vp.CredentialQuery) bool {
+			return cred.ID == scope
+		}) {
+			scopes = append(scopes, scope)
+		}
+	}
+	return scopes
+}
+
 // vpTokensForScope finds the VP tokens a wallet returned for one requested
 // scope, in the three ways a response can name them.
 //
@@ -613,7 +652,7 @@ type VerificationCallbackResponse struct {
 // than a map. That is only safe for a single-scope request: with several
 // scopes the same credential would be reused for each, carrying whichever
 // validations belong to the others.
-func (c *Client) vpTokensForScope(authCtx *cache.AuthorizationContext, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
+func (c *Client) vpTokensForScope(authCtx *cache.AuthorizationContext, credentialScopes []string, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
 	if tokens, ok := vpResponse.VPToken[scope]; ok && len(tokens) > 0 {
 		return tokens, nil
 	}
@@ -625,9 +664,13 @@ func (c *Client) vpTokensForScope(authCtx *cache.AuthorizationContext, vpRespons
 		}
 	}
 
-	if len(authCtx.Scopes) != 1 {
-		c.log.Error(nil, "VP token not found for scope and multiple scopes requested", "scope", scope)
-		return nil, fmt.Errorf("VP token not found for scope %s: _default fallback is only allowed when a single scope is requested", scope)
+	// credentialScopes, not authCtx.Scopes: what makes _default ambiguous is
+	// more than one CREDENTIAL being asked for, not more than one OIDC scope.
+	// Counting the raw list refused the plain-string vp_token for an ordinary
+	// "openid pid" request, which asks for exactly one credential.
+	if len(credentialScopes) != 1 {
+		c.log.Error(nil, "VP token not found for scope and multiple credentials requested", "scope", scope)
+		return nil, fmt.Errorf("VP token not found for scope %s: _default fallback is only allowed when a single credential is requested", scope)
 	}
 	if tokens, ok := vpResponse.VPToken["_default"]; ok && len(tokens) > 0 {
 		return tokens, nil
