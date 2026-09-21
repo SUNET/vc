@@ -500,15 +500,10 @@ func TestReplaceVCT(t *testing.T) {
 // receiver.
 //
 // A nil *CredentialMetadata is reachable without a programming error:
-// Cfg.GetCredentialMetadata is a map lookup that returns nil for an absent key,
-// credential_metadata can hold a nil value for a PRESENT key (an entry written
-// with no fields), and an auth_scopes key naming no configured scope resolved
-// to nil until SUNET/vc#681 made config load reject that. Each accessor took
-// c.mu.RLock() before reading anything, so any of those turned into a panic in
-// whatever request touched it - which is how one reached a released code path.
-//
-// The config-load check is the real fix for the auth_scopes case; this is the
-// floor under it, so a future caller cannot reintroduce the same panic.
+// GetCredentialMetadata returns nil for an absent key, and credential_metadata
+// can hold a nil value for a present key. Each accessor took c.mu.RLock()
+// before reading anything, so either turned into a panic in whatever request
+// touched it.
 func TestCredentialMetadataAccessorsAreNilSafe(t *testing.T) {
 	var cm *CredentialMetadata
 

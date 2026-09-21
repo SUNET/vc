@@ -2014,11 +2014,9 @@ func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string, r
 //
 // Nil receiver returns the zero value, as every accessor on this type does.
 // A nil *CredentialMetadata is reachable without a programming error:
-// Cfg.GetCredentialMetadata is a map lookup, credential_metadata can hold a
-// nil value for a present key (an entry written with no fields), and an
-// auth_scopes key naming no configured scope resolved to nil until
-// SUNET/vc#681. Taking the lock first turned each of those into a panic in
-// whatever request touched it.
+// GetCredentialMetadata is a map lookup, and credential_metadata can hold a
+// nil value for a present key. Taking the lock first turned those into a
+// panic in whatever request touched it.
 func (c *CredentialMetadata) GetVCTM() *sdjwtvc.VCTM {
 	if c == nil {
 		return nil

@@ -217,14 +217,11 @@ func checkCredentialMetadataEntries(cfg *model.Cfg) error {
 // checkAuthScopes verifies that every openid4vp auth_scopes key names a scope
 // that common.credential_metadata actually configures.
 //
-// The struct-level validation in pkg/helpers checks that auth_scopes is
-// non-empty, does not name the scope it authenticates, and gives every entry
-// auth_claims - but it sees only the DataSources stanza, so it cannot tell
-// whether a key resolves to a credential. A typo'd or stale auth scope
-// therefore started the server, and Cfg.GetCredentialMetadata returned nil for
-// it at request time: the apigw's pre-issuance verifier then built a DCQL query
-// for a credential that does not exist, and before the accessors were made
-// nil-safe it panicked outright (SUNET/vc#681).
+// The struct-level validation in pkg/helpers sees only the DataSources
+// stanza, so it cannot tell whether a key resolves to a credential. A typo'd
+// or stale auth scope therefore started the server and failed at request time,
+// where GetCredentialMetadata returned nil and the pre-issuance verifier built
+// a DCQL query for a credential that does not exist.
 //
 // This runs here rather than as a struct-level rule because it needs the whole
 // Cfg - credential_metadata lives under common, auth_scopes under apigw - and

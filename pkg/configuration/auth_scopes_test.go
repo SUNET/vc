@@ -10,10 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestCheckAuthScopes covers SUNET/vc#681: an auth_scopes key that names no
+// TestCheckAuthScopes pins the config-load check: an auth_scopes key naming no
 // configured credential used to start the server and fail at request time,
-// because the struct-level validation sees only the DataSources stanza and
-// cannot tell whether a key resolves to a credential.
+// because the struct-level validation sees only the DataSources stanza.
 func TestCheckAuthScopes(t *testing.T) {
 	credentialMetadata := map[string]*model.CredentialMetadata{
 		"pid":   {Format: "dc+sd-jwt", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}},
