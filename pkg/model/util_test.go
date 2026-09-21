@@ -295,11 +295,12 @@ func TestOpenID4VPConfig_GetPresentationRequestsDir(t *testing.T) {
 // leaves unconstrained).
 func TestDCQLMetaQueryByFormat(t *testing.T) {
 	tests := []struct {
-		name        string
-		cm          *CredentialMetadata
-		wantOK      bool
-		wantVCTs    []string
-		wantDoctype string
+		name         string
+		cm           *CredentialMetadata
+		wantOK       bool
+		wantVCTs     []string
+		wantDoctype  string
+		wantTypeVals [][]string
 	}{
 		{
 			name:     "sd-jwt is constrained by its canonical vct",
@@ -368,9 +369,28 @@ func TestDCQLMetaQueryByFormat(t *testing.T) {
 			wantOK: false,
 		},
 		{
-			// meta.type_values, which credential_metadata cannot supply yet.
-			name:   "W3C has no expressible constraint",
+			// No credential_type_values: nothing to constrain by, and the bare
+			// base type would match every W3C credential in the wallet.
+			name:   "W3C with no configured type values is unusable",
 			cm:     &CredentialMetadata{Format: "ldp_vc", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"}},
+			wantOK: false,
+		},
+		{
+			name: "W3C is constrained by its configured type values",
+			cm: &CredentialMetadata{
+				Format:               "ldp_vc",
+				CredentialTypeValues: [][]string{{baseVCTypeIRI, "https://example.org/diploma#DiplomaCredential"}},
+			},
+			wantOK:       true,
+			wantTypeVals: [][]string{{baseVCTypeIRI, "https://example.org/diploma#DiplomaCredential"}},
+		},
+		{
+			// Base-only narrows nothing, so it is dropped and nothing remains.
+			name: "a base-only alternative is not a constraint",
+			cm: &CredentialMetadata{
+				Format:               "ldp_vc",
+				CredentialTypeValues: [][]string{{baseVCTypeIRI}},
+			},
 			wantOK: false,
 		},
 		{
@@ -393,7 +413,7 @@ func TestDCQLMetaQueryByFormat(t *testing.T) {
 			}
 			assert.Equal(t, tt.wantVCTs, meta.VCTValues)
 			assert.Equal(t, tt.wantDoctype, meta.DoctypeValue)
-			assert.Nil(t, meta.TypeValues)
+			assert.Equal(t, tt.wantTypeVals, meta.TypeValues)
 		})
 	}
 }
@@ -495,4 +515,50 @@ func TestReplaceVCT(t *testing.T) {
 			assert.Equal(t, "PID", served["name"], "and keep the rest of the file")
 		})
 	}
+
+// TestW3CTypes covers the issuance side: the compact-term list the issuer
+// metadata advertises and issueVC20 mints from.
+//
+// A verifier reads CredentialTypeValues instead. The asymmetry is deliberate:
+// the representations differ (compact terms against fully expanded IRIs, not
+// derivable from one another without JSON-LD expansion), and so does the bare
+// base type - issuing a credential typed only "VerifiableCredential" is
+// unspecific, while requesting one matches every W3C credential in the wallet.
+func TestW3CTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		cm   *CredentialMetadata
+		want []string
+	}{
+		{
+			// Compact terms, as OID4VCI Appendix A.1 and the W3C VC data model
+			// use them - not the expanded IRIs DCQL matches on.
+			name: "configured types are used as written",
+			cm:   &CredentialMetadata{CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"}},
+			want: []string{"VerifiableCredential", "DiplomaCredential"},
+		},
+		{
+			// What the issuer metadata always advertised.
+			name: "unset falls back to the base type",
+			cm:   &CredentialMetadata{},
+			want: []string{"VerifiableCredential"},
+		},
+		{
+			name: "nil receiver",
+			cm:   nil,
+			want: []string{"VerifiableCredential"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.cm.W3CTypes())
+		})
+	}
+
+	// A clone, so a caller cannot edit the configuration every later request
+	// is built from.
+	cm := &CredentialMetadata{CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"}}
+	got := cm.W3CTypes()
+	got[1] = "mutated"
+	assert.Equal(t, []string{"VerifiableCredential", "DiplomaCredential"}, cm.CredentialTypes)
 }

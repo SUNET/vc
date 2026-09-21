@@ -407,11 +407,21 @@ const (
 	// FormatLdpVCDCQL is the format identifier for W3C VC Data Integrity (used in DCQL).
 	// Note: This duplicates FormatLdpVC from vc20_handler.go but is needed for non-vc20 builds.
 	FormatLdpVCDCQL = "ldp_vc"
+	// FormatVCLDJSON is the other spelling this repo issues W3C VC Data
+	// Integrity under - see handlers_issuer.go, which routes it to issueVC20
+	// alongside ldp_vc.
+	FormatVCLDJSON = "vc+ld+json"
 )
 
-// IsW3CVCFormatIdentifier returns true if the format identifier is a W3C Verifiable Credential format (ldp_vc or jwt_vc_json).
+// IsW3CVCFormatIdentifier returns true if the format identifier is a W3C
+// Verifiable Credential format (ldp_vc, vc+ld+json or jwt_vc_json).
+//
+// vc+ld+json belongs here because this repo issues it as one: handlers_issuer.go
+// routes it to issueVC20 alongside ldp_vc. Leaving it out meant a query in that
+// format skipped the type_values requirement in ValidateCredentialQuery that
+// the other two are held to, so an unconstrained W3C query passed validation.
 func IsW3CVCFormatIdentifier(format string) bool {
-	return format == "ldp_vc" || format == FormatJwtVCJson
+	return format == FormatLdpVCDCQL || format == FormatVCLDJSON || format == FormatJwtVCJson
 }
 
 // IsSDJWTFormatIdentifier returns true if the format identifier is SD-JWT VC format.
@@ -578,7 +588,7 @@ func NewTrustedAuthorityOpenIDFederation(trustAnchors ...string) TrustedAuthorit
 // for the specified format.
 func ValidateCredentialQuery(query CredentialQuery) error {
 	switch query.Format {
-	case "ldp_vc", FormatJwtVCJson:
+	case "ldp_vc", FormatVCLDJSON, FormatJwtVCJson:
 		// W3C VC format requires type_values
 		if len(query.Meta.TypeValues) == 0 {
 			return &DCQLValidationError{

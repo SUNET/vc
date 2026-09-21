@@ -8,6 +8,7 @@ import {
 } from "./dc-api-polyfill.js";
 import { groupPresets } from "./preset-helpers.js";
 import { claimsForLocale } from "./locale-helpers.js";
+import { dcqlMetaFor } from "./dcql-meta.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
 const credentialAttributesSchema = v.object({
@@ -17,6 +18,10 @@ const credentialAttributesSchema = v.object({
     // and null for one that emits the field without omitempty. The query
     // builder falls back to [vct] in both cases.
     vct_values: v.nullish(v.array(v.string())),
+    // type_values is the W3C VC constraint: an array of ALTERNATIVES, each an
+    // array of types a credential must carry all of. nullish for the same
+    // reason as vct_values - an older server sends neither.
+    type_values: v.nullish(v.array(v.array(v.string()))),
     attributes: v.record(
         v.string(),
         v.record(
@@ -117,6 +122,7 @@ const metadataResponseSchema = v.object({
             meta: v.object({
                 vct_values: v.optional(v.array(v.string())),
                 doctype_value: v.optional(v.string()),
+                type_values: v.optional(v.array(v.array(v.string()))),
                 // zk_system_type entries are a flat {id, system, ...params}
                 // string-keyed object on the wire (ZKSystemTypeSpec's own
                 // MarshalJSON flattens params to the top level, no nested
@@ -153,6 +159,7 @@ const dcqlQueryCredentialSchema = v.object({
         v.object({
             vct_values: v.optional(v.array(v.string())),
             doctype_value: v.optional(v.string()),
+            type_values: v.optional(v.array(v.array(v.string()))),
             // zk_system_type (mso_mdoc_zk only) is an array of flat
             // {id, system, ...params} objects - declared explicitly since
             // the catch-all record below only accepts string/string[]
@@ -284,7 +291,7 @@ Alpine.data("app", () => ({
     /** @type {boolean} Whether sendDcqlQuery() calls navigator.credentials.get() before rendering the wallet link/QR screen; when false it goes straight to that screen. Separate from dcApiEnabled because an OS-level DC API matcher can reject a format with its own dialog before any JS runs, leaving no failure to catch - see DigitalCredentialsConfig.AutoAttempt. */
     dcApiAutoAttempt: true,
 
-     /** @type {{ id: string; format: string; vct: string; vct_values?: string[]; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
+     /** @type {{ id: string; format: string; vct: string; vct_values?: string[]; type_values?: string[][]; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
     credentialAttributes: null,
 
     /**
@@ -467,6 +474,10 @@ Alpine.data("app", () => ({
             // page) to the absent form this object's type declares, keeping
             // the strict checkJs contract consistent.
             vct_values: chosenCredential.vct_values ?? undefined,
+            // Same reason as vct_values: without carrying this, a W3C
+            // credential picked here would fall back to vct_values and go out
+            // with a constraint its format does not use.
+            type_values: chosenCredential.type_values ?? undefined,
             claims,
             claimTree: buildClaimTree(claims),
         }
@@ -537,21 +548,13 @@ Alpine.data("app", () => ({
             claims.push({ path });
         }
 
-        // mso_mdoc credentials have no vct - the DCQL equivalent constraint
-        // is doctype_value (OpenID4VP 1.0 6.4.1), not vct_values. Sending
-        // vct_values for an mdoc credential matches nothing on the wallet
-        // side (no mdoc credential has a vct), so the request always comes
-        // back empty.
-        // vct_values carries the credential's canonical vct - the one value
-        // ResolveVCTUrls settles on, which the credential body carries and the
-        // issuer metadata advertises, so a wallet matching either finds it.
-        // Falls back to the single vct for an older server that sends no list.
-        const vctValues = this.credentialAttributes.vct_values?.length
-            ? this.credentialAttributes.vct_values
-            : [this.credentialAttributes.vct];
-        const meta = this.credentialAttributes.format === "mso_mdoc"
-            ? { doctype_value: this.credentialAttributes.vct }
-            : { vct_values: vctValues };
+        // The meta constraint follows the credential's format; the rules and
+        // the reasons live in dcql-meta.js so they can be unit tested.
+        const { meta, error: metaError } = dcqlMetaFor(this.credentialAttributes);
+        if (metaError) {
+            this.error = metaError;
+            return;
+        }
 
         /** @satisfies {DCQLQueryCredential} */
         const credential = {

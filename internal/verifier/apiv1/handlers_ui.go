@@ -31,7 +31,18 @@ type UICredentialInfo struct {
 	// omitempty: mso_mdoc scopes get no list (they're identified by doctype,
 	// not vct), so this drops the field entirely for them rather than
 	// emitting a meaningless "vct_values": null.
-	VCTValues  []string                        `json:"vct_values,omitempty"`
+	VCTValues []string `json:"vct_values,omitempty"`
+	// TypeValues is the W3C VC equivalent: the type alternatives a wallet
+	// matches an ldp_vc, vc+ld+json or jwt_vc_json credential by, as fully
+	// expanded IRIs.
+	//
+	// From credential_type_values - NOT credential_types, which is the
+	// compact-term list the issuer metadata advertises and cannot be expanded
+	// into these. Empty for every other format, and for a W3C scope that
+	// configures no credential_type_values, or only the base type every W3C
+	// credential carries: see model.CredentialMetadata.DCQLMetaQuery for why
+	// that is refused rather than sent.
+	TypeValues [][]string                      `json:"type_values,omitempty"`
 	Attributes map[string]map[string][]*string `json:"attributes"`
 }
 
@@ -71,6 +82,12 @@ type UIPresetMeta struct {
 	// DoctypeValue is set for mdoc/ZK-mdoc scopes (openid4vp.MetaQuery's
 	// mdoc-format field) - mirrors UICredentialInfo.VCT's mdoc branch.
 	DoctypeValue string `json:"doctype_value,omitempty"`
+	// TypeValues is set for the W3C VC formats, whose DCQL constraint is
+	// neither vct_values nor doctype_value but a list of type alternatives
+	// (OpenID4VP 1.0 6.4.1). Comes from credential_type_values - fully
+	// expanded IRIs - see model.CredentialMetadata.CredentialTypeValues, and
+	// note it is not the credential_types list the issuer metadata uses.
+	TypeValues [][]string `json:"type_values,omitempty"`
 	// ZKSystemType is set when the preset's VerificationPresetScope
 	// overrides it - see that type's own doc comment.
 	ZKSystemType []openid4vp.ZKSystemTypeSpec `json:"zk_system_type,omitempty"`
@@ -198,10 +215,10 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		} else if mddl := constructor.GetMDDL(); mddl != nil {
 			info.VCT = mddl.DocType
 		}
-		// Format-aware, like the DCQL builders: the JS turns VCTValues straight
-		// into meta.vct_values, so publishing one for a credential constrained
-		// another way puts an unmatchable query on the wire. An unconstrainable
-		// scope is left out of the picker.
+		// Format-aware, like the DCQL builders: vct_values for SD-JWT,
+		// doctype_value for mdoc, type_values for a W3C scope that configures
+		// credential_type_values. An unconstrainable scope is left out of the
+		// picker rather than offered and then refused.
 		mq, ok := constructor.DCQLMetaQuery()
 		if !ok {
 			c.log.Error(nil, "credential omitted from the verifier UI: no usable DCQL meta constraint for scope",
@@ -211,6 +228,7 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		// Empty for mdoc, which is constrained by its doctype instead;
 		// omitempty then drops the field.
 		info.VCTValues = mq.VCTValues
+		info.TypeValues = mq.TypeValues
 		// The JS sends info.VCT as meta.doctype_value, so it must match what
 		// the server-side builders use. The chain above never reads the
 		// configured Doctype, leaving a registry-backed scope empty.
@@ -298,6 +316,7 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					}
 					uiCred.Meta.DoctypeValue = mq.DoctypeValue
 					uiCred.Meta.VCTValues = mq.VCTValues
+					uiCred.Meta.TypeValues = mq.TypeValues
 				}
 
 				// A preset's Format/ZKSystemType override lets a plain
