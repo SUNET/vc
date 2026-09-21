@@ -2122,7 +2122,7 @@ func (c *CredentialMetadata) IsLocalVCTM() bool {
 
 // IsLocalMDDL returns true when the MDDL schema is loaded from a local file.
 func (c *CredentialMetadata) IsLocalMDDL() bool {
-	return c.MDDLFilePath != ""
+	return c != nil && c.MDDLFilePath != ""
 }
 
 // vctIdentifier returns the credential's canonical vct - the value the body
