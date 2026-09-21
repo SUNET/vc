@@ -213,6 +213,14 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 	// from data attributes embedded in the rendered HTML.
 	var redirectURL string
 
+	if authProvider == model.AuthProviderPreAuth {
+		c.HTML(http.StatusOK, "consent.html", gin.H{
+			"AuthMethod":  authProvider,
+			"RedirectURL": "",
+		})
+		return nil, nil
+	}
+
 	sessionID, ok := session.Get("session_id").(string)
 	if !ok {
 		err := errors.New("session_id not found in session")

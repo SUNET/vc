@@ -101,6 +101,11 @@
                     </div>
                 </div>
             </template>
+            <template x-if="!loading && authMethod === 'preauth'">
+                <div class="space-y-4 md:space-y-6">
+                    <p class="text-center">This credential is only issued via a pre-authorized credential offer sent by the issuer. It cannot be requested directly from your wallet.</p>
+                </div>
+            </template>
             <template x-if="!loading && loggedIn">
                 <div class="space-y-4 md:space-y-6">
                     <p>Select the credential you wish to retrieve by clicking on it:</p>

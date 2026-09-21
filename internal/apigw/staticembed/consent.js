@@ -108,7 +108,7 @@ Alpine.data("app", () => ({
     /** @type {boolean} */
     loggedIn: false,
 
-    /** @type {"saml" | "oidc" | "openid4vp" | null} */
+    /** @type {"saml" | "oidc" | "openid4vp" | "preauth" | null} */
     authMethod: null,
 
     /** @type {number | null} */

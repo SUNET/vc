@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
@@ -104,6 +106,17 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 	// Public clients MUST use PKCE (RFC 6749 Section 2.1)
 	if oauthClient.Type == oauth2.ClientTypePublic && req.CodeChallenge == "" {
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest, "code_challenge is required for public clients", 400)
+	}
+
+	// Reject scopes that are configured for pre-authorized issuance only,
+	// so a wallet cannot initiate the flow itself.
+	if sources, lookupErr := c.cfg.APIGW.DataSources.LookupCredentialSources(req.Scope); lookupErr == nil {
+		for _, src := range sources {
+			if src.AuthProvider == model.AuthProviderPreAuth {
+				return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidScope,
+					"scope is issuable only via pre-authorized credential offer", 400)
+			}
+		}
 	}
 
 	c.log.Debug("par")
@@ -487,6 +500,28 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		if preCheck.WalletURI != "" && req.RedirectURI != preCheck.WalletURI {
 			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
 				"redirect_uri does not match the authorization request", 400)
+		}
+	}
+
+	// Validate transaction code (PIN) BEFORE consuming the pre-authorized code
+	// so wrong-PIN attempts do not burn the code (OID4VCI §6.3).
+	if isPreAuthFlow {
+		preCheck, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code})
+		if err != nil {
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
+				"Authorization code is invalid or has already been used", 400, err)
+		}
+		switch {
+		case preCheck.TXCode == "" && req.TXCode != "":
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+				"tx_code is not expected for this credential offer", 400)
+		case preCheck.TXCode != "" && req.TXCode == "":
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+				"tx_code is required for this credential offer", 400)
+		case preCheck.TXCode != "" &&
+			subtle.ConstantTimeCompare([]byte(preCheck.TXCode), []byte(req.TXCode)) != 1:
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+				"invalid tx_code", 400)
 		}
 	}
 

@@ -70,6 +70,11 @@ type AuthorizationContext struct {
 	// the same code twice.
 	RedeemedBy []string `json:"redeemed_by,omitempty" bson:"redeemed_by,omitempty"`
 
+	// TXCode is the transaction code (PIN) the wallet must present at the
+	// token endpoint for a pre-authorized credential offer. Empty when the
+	// offer does not require a PIN.
+	TXCode string `json:"tx_code,omitempty" bson:"tx_code,omitempty" validate:"omitempty,max=32,printascii"`
+
 	// Token fields
 	Token       *Token `json:"token,omitempty" bson:"token,omitempty"`
 	AccessToken string `json:"access_token,omitempty" bson:"access_token,omitempty" validate:"omitempty,max=16384,printascii"`

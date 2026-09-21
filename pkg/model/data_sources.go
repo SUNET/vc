@@ -55,11 +55,15 @@ type IdentityMappingImport struct {
 
 // DatastoreScope configures a credential type backed by the datastore.
 type DatastoreScope struct {
-	// AuthProvider is the auth provider for this credential type (openid4vp, saml, or oidc)
-	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=openid4vp saml oidc"`
+	// AuthProvider is the auth provider for this credential type
+	// (openid4vp, saml, oidc, or preauth). Use preauth to restrict issuance
+	// to pre-authorized credential offers only; wallet-initiated PAR/authorize
+	// requests for such a scope are rejected.
+	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=openid4vp saml oidc preauth"`
 
 	// AuthClaims lists the normalized claim names used for datastore identity lookup
 	// when auth_provider is saml or oidc. Not used for openid4vp (use AuthScopes instead).
+	// Must be empty when auth_provider is preauth.
 	// These names must match the BSON field names under "identities." in the datastore.
 	// Use attribute_mappings (in auth_providers) to normalize provider-specific attribute
 	// names (e.g. SAML urn:oid:2.5.4.42, eIDAS date_of_birth) to these canonical names.
@@ -175,8 +179,10 @@ type ExternalAPIScope struct {
 	// Remote is the name of a remote defined in Remotes
 	Remote string `yaml:"remote" validate:"required"`
 
-	// AuthProvider is the auth provider to identify the user (saml or oidc)
-	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=saml oidc"`
+	// AuthProvider is the auth provider to identify the user (saml, oidc, or
+	// preauth). Use preauth to restrict issuance to pre-authorized credential
+	// offers only.
+	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=saml oidc preauth"`
 
 	// AttributeMapping defines how to map API response data to credential claims
 	AttributeMapping AttributeMapping `yaml:"attribute_mapping,omitempty" doc_key:"attribute"`

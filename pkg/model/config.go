@@ -1369,6 +1369,17 @@ type APIGWAuthProviders struct {
 	SAML SAMLSP `yaml:"saml,omitempty" validate:"omitempty"`
 	// OIDC configures the OIDC RP auth provider
 	OIDC OIDCRP `yaml:"oidc,omitempty" validate:"omitempty"`
+	// PreAuth configures the pre-authorized credential offer flow
+	// (data_sources scopes with auth_provider: preauth).
+	PreAuth PreAuth `yaml:"preauth,omitempty" validate:"omitempty"`
+}
+
+// PreAuth configures the pre-authorized credential offer flow.
+type PreAuth struct {
+	// EnablePIN, when true, generates a numeric transaction code (PIN) for
+	// each pre-authorized credential offer created via /api/v1/datastore/preauth_offer.
+	// The wallet must include the PIN in the token request. Default: false.
+	EnablePIN bool `yaml:"enable_pin" default:"false"`
 }
 
 // APIGW holds the configuration for the API Gateway service that handles credential issuance requests
