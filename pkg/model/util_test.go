@@ -515,6 +515,7 @@ func TestReplaceVCT(t *testing.T) {
 			assert.Equal(t, "PID", served["name"], "and keep the rest of the file")
 		})
 	}
+}
 
 // TestW3CTypes covers the issuance side: the compact-term list the issuer
 // metadata advertises and issueVC20 mints from.
