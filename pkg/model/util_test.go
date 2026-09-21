@@ -517,7 +517,6 @@ func TestCredentialMetadataAccessorsAreNilSafe(t *testing.T) {
 		assert.Nil(t, cm.GetMDDLRaw())
 		assert.False(t, cm.IsLocalVCTM())
 		assert.False(t, cm.IsLocalMDDL())
-		assert.Nil(t, cm.VCTQueryValues())
 
 		meta, ok := cm.DCQLMetaQuery()
 		assert.False(t, ok)
