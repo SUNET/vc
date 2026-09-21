@@ -324,11 +324,12 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 // authenticate the user during OpenID4VP-based issuance. One CredentialQuery
 // per auth scope so the wallet may present any acceptable credential type
 // (e.g. pid OR eduid); each carries its per-scope auth_claims and the
-// scope's canonical vct (VCTM.VCT after ResolveVCTUrls -- for a local scope
-// the hosting URL, for an external scope the file's own vct). That single
-// value is what the credential body carries, what the issuer metadata
-// advertises, and what wallets store as the credential's type tag -- see
-// (*model.Cfg).VCTIdentifiersForScopes.
+// scope's canonical vct (VCTM.VCT after ResolveVCTUrls -- preserved from the
+// VCTM file when present (both local and external), and back-filled from the
+// /type-metadata/<scope> hosting URL only when a local file left vct empty).
+// That single value is what the credential body carries, what the issuer
+// metadata advertises, and what wallets store as the credential's type tag
+// -- see (*model.Cfg).VCTIdentifiersForScopes.
 func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg) *openid4vp.DCQL {
 	credentialQueries := make([]openid4vp.CredentialQuery, 0, len(vpAuth.AuthScopes))
 	options := make([][]string, 0, len(vpAuth.AuthScopes))

@@ -2098,14 +2098,18 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 
 	// Validate that every constructor got a non-empty VCTURL.
 	for scope, constructor := range cfg.Common.CredentialMetadata {
-		if constructor == nil || constructor.GetVCTM() == nil {
+		if constructor == nil {
+			continue
+		}
+		vctm := constructor.GetVCTM()
+		if vctm == nil {
 			continue
 		}
 		if constructor.GetVCTURL() == "" {
 			return fmt.Errorf("VCTURL is empty for scope %q after resolution (check vctm_file_path, vctm_url, or vct)", scope)
 		}
 		// Local scopes get VCTM.VCT rewritten above; external ones must carry it themselves.
-		if !constructor.IsLocalVCTM() && constructor.VCTM.VCT == "" {
+		if !constructor.IsLocalVCTM() && vctm.VCT == "" {
 			return fmt.Errorf("external VCTM for scope %q has empty vct (check vctm_url source or the resolved vct); BuildCredentialWithSigner and DCQL vct_values require it", scope)
 		}
 	}
