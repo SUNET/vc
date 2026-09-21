@@ -2090,6 +2090,12 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 					doc["vct"] = vctJSON
 					if updated, err := json.Marshal(doc); err == nil {
 						constructor.VCTMRaw = updated
+						// Rebuild Integrity to match the rewritten bytes so
+						// vct#integrity in issued credentials still verifies
+						// against the served /type-metadata document.
+						if sri, sriErr := constructor.VCTM.SRIIntegrity(updated); sriErr == nil {
+							constructor.Integrity = sri
+						}
 					}
 				}
 			}
