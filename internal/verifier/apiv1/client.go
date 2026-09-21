@@ -363,8 +363,14 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 
 	// If we have a presentation builder with templates, use it
 	if c.presentationBuilder != nil {
-		dcql, err := c.presentationBuilder.BuildDCQLQuery(ctx, scopes)
-		if err == nil && dcql != nil {
+		// TemplateDCQLQuery, not BuildDCQLQuery: the latter answers "no match"
+		// with a generic placeholder that reads like success, which made this
+		// fallback unreachable for any deployment with templates configured.
+		dcql, _, matched := c.presentationBuilder.TemplateDCQLQuery(ctx, scopes)
+		if matched {
+			if uncovered := c.uncoveredScopes(ctx, dcql, scopes); len(uncovered) > 0 {
+				return nil, fmt.Errorf("the presentation template selected for this request does not cover requested scope(s) %v; a wallet would never be asked for them", uncovered)
+			}
 			c.log.Info("DCQL query built from presentation template", "credential_count", len(dcql.Credentials))
 			return dcql, nil
 		}
@@ -373,6 +379,228 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 
 	// Fallback to building DCQL query from credential config
 	return c.buildDCQLQueryFromConfig(scopes)
+}
+
+// ScopeQueryIDs pairs each requested scope with the id of the DCQL credential
+// query that stands for it, for the pairs where the two differ. It fills
+// cache.AuthorizationContext.ScopeQueryIDs.
+//
+// Pairing is by constraint, not by name: a template names its queries whatever
+// its author chose ("eudi_pid" for scope "pid"), so a query stands for a scope
+// when it carries that scope's doctype or its vct. Queries
+// built from credential_metadata are keyed by the scope already.
+//
+// W3C scopes are skipped: credential_metadata carries no type list for them
+// yet, so a template query cannot be recognised as theirs. They keep the
+// scope-keyed lookup.
+func (c *Client) ScopeQueryIDs(ctx context.Context, dcql *openid4vp.DCQL, scopes []string) map[string]string {
+	resolved := c.resolveScopeQueries(ctx, dcql, scopes)
+
+	// Only the differing pairs are persisted: a scope answered by a query of
+	// its own name needs no mapping, and an absent entry means the direct
+	// lookup was already right.
+	pairs := make(map[string]string, len(resolved))
+	for scope, queryID := range resolved {
+		if queryID != scope {
+			pairs[scope] = queryID
+		}
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	return pairs
+}
+
+// resolveScopeQueries works out which credential query answers each requested
+// scope, including the scopes answered by a query of their own name, and drops
+// any pairing that turns out to be contested.
+//
+// One query answers one scope, and uniqueness has to hold in both directions.
+// queryIDForConstraint already refuses a scope matching several queries. Here
+// the inverse: several scopes can land on one query - aliases sharing a
+// credential's vct - and keeping those would have VerificationDirectPost
+// resolve that single VP token once per scope, caching it twice and applying
+// each scope's validations to the other's credential.
+//
+// Identity pairings are tracked for that purpose even though they are not
+// persisted, because a template query is free to be NAMED after a configured
+// scope: with a query called "pid" and an alias sharing its constraint, "pid"
+// would look direct while the alias mapped onto it, and the collision would go
+// unnoticed.
+//
+// Nothing here can say which scope a contested query was meant for, so both
+// pairings go and those scopes fall back to their own key - where they fail
+// loudly, and where uncoveredScopes sees them as unanswered and rejects the
+// request before a wallet is ever involved.
+func (c *Client) resolveScopeQueries(ctx context.Context, dcql *openid4vp.DCQL, scopes []string) map[string]string {
+	if dcql == nil || c.cfg.Common == nil {
+		return nil
+	}
+
+	// Which template answered, recomputed rather than carried: selection is a
+	// pure function of the requested scopes, and stashing it on the Client
+	// would be per-request state on an object every request shares.
+	var templateScopes []string
+	if c.presentationBuilder != nil {
+		_, templateScopes, _ = c.presentationBuilder.TemplateDCQLQuery(ctx, scopes)
+	}
+
+	resolved := make(map[string]string, len(scopes))
+	claimants := make(map[string][]string, len(scopes))
+	for _, scope := range scopes {
+		queryID, found := c.queryIDForScope(dcql, scope, templateScopes)
+		if !found {
+			continue
+		}
+		resolved[scope] = queryID
+		claimants[queryID] = append(claimants[queryID], scope)
+	}
+
+	for queryID, scopesClaiming := range claimants {
+		if len(scopesClaiming) < 2 {
+			continue
+		}
+		c.log.Error(nil, "not pairing scopes with a shared DCQL query: cannot tell which one it answers",
+			"query_id", queryID, "scopes", scopesClaiming)
+		for _, scope := range scopesClaiming {
+			delete(resolved, scope)
+		}
+	}
+	return resolved
+}
+
+// queryIDForScope finds the credential query that answers one requested scope.
+//
+// A configured scope is matched by its own constraint, which is exact.
+//
+// An UNCONFIGURED scope is matched to the query only when the request produced
+// exactly one. That case is not an oddity: half the shipped templates are
+// selected by a scope that is not a credential_metadata key at all -
+// eudi_pid_full triggers on "pid_full" while the credential is configured as
+// "pid", and the eduID full/age templates do the same. Such a scope has no
+// constraint of its own to match on, yet it is what lands in authCtx.Scopes and
+// what the response is looked up by, so skipping it left exactly those
+// templates as broken as before.
+//
+// Even then, only a scope the selected template declares, and only when the
+// request produced one query: a template's queries carry no record of which of
+// its oidc_scopes each answers, so with several there is nothing to choose on
+// and the scope is left unmapped rather than guessed at.
+func (c *Client) queryIDForScope(dcql *openid4vp.DCQL, scope string, templateScopes []string) (string, bool) {
+	if constructor, configured := c.cfg.Common.CredentialMetadata[scope]; configured {
+		meta, ok := constructor.DCQLMetaQuery()
+		if !ok {
+			return "", false
+		}
+		return queryIDForConstraint(dcql, meta)
+	}
+
+	// Never an ordinary OIDC scope: eudi_pid_basic is selected by "pid profile",
+	// and a mapped scope counts as a credential scope (credentialScopes), so
+	// mapping "profile" would resolve and process the one credential twice -
+	// duplicated in scopeCredentials and the cache, with validations,
+	// revocation and combined-binding applied over it again.
+	if openid4vp.StandardOIDCScopes[scope] {
+		return "", false
+	}
+
+	// And only a scope the selected template actually declares. A request can
+	// name scopes the template says nothing about - "pid something_else" still
+	// selects the PID template - and mapping those would key the same
+	// credential under a scope the template never claimed. The template's
+	// oidc_scopes are the only record of which scopes its queries answer.
+	if !slices.Contains(templateScopes, scope) {
+		return "", false
+	}
+
+	if len(dcql.Credentials) == 1 {
+		return dcql.Credentials[0].ID, true
+	}
+	return "", false
+}
+
+// queryIDForConstraint finds the credential query in dcql that carries meta's
+// constraint - the same doctype, the same vct, or the same W3C type
+// alternative.
+//
+// Exactly one match, or none. Two scopes can be aliases for one credential
+// type, backed by the same VCTM and so carrying the same vct, in which case an
+// overlap does not say which query answers this scope. Taking the first would
+// key the lookup to the wrong query; an ambiguous scope is left unmapped and
+// falls back to its own key.
+//
+// The type_values arm matches nothing until credential_metadata carries a W3C
+// type list.
+func queryIDForConstraint(dcql *openid4vp.DCQL, meta openid4vp.MetaQuery) (string, bool) {
+	var found string
+	for _, cred := range dcql.Credentials {
+		var matches bool
+		switch {
+		case meta.DoctypeValue != "":
+			matches = cred.Meta.DoctypeValue == meta.DoctypeValue
+		case len(meta.VCTValues) > 0:
+			matches = slices.ContainsFunc(cred.Meta.VCTValues, func(v string) bool {
+				return slices.Contains(meta.VCTValues, v)
+			})
+		case len(meta.TypeValues) > 0:
+			matches = slices.ContainsFunc(cred.Meta.TypeValues, func(t []string) bool {
+				return slices.ContainsFunc(meta.TypeValues, func(want []string) bool {
+					return slices.Equal(t, want)
+				})
+			})
+		}
+		if !matches {
+			continue
+		}
+		if found != "" {
+			return "", false
+		}
+		found = cred.ID
+	}
+	return found, found != ""
+}
+
+// uncoveredScopes returns the requested scopes the built query cannot actually
+// answer: configured, with a constraint this repo can express, and yet with no
+// query of their own to be resolved through.
+//
+// Such a scope is a request the verifier cannot fulfil. It stays in
+// authCtx.Scopes, VerificationDirectPost requires a VP token for every entry
+// there, and the wallet was never asked for this one - so the flow fails only
+// after the user has completed a presentation, naming a credential they were
+// never prompted for. A template covering some of a request's scopes and not
+// others is how that happens.
+//
+// Coverage comes from resolveScopeQueries so this and the mapping direct-post
+// resolves through cannot disagree. A contested query - two aliases sharing a
+// vct against a template with one credential - leaves both scopes unanswered,
+// refusing the request before a wallet is involved. And a query merely named
+// after a scope, while constrained for another type, no longer counts as
+// covering it.
+//
+// W3C scopes are not reported: a template may legitimately cover one with
+// meta.type_values and there is no way to tell yet, so rejecting them would
+// break working deployments.
+func (c *Client) uncoveredScopes(ctx context.Context, dcql *openid4vp.DCQL, scopes []string) []string {
+	if dcql == nil || c.cfg.Common == nil {
+		return nil
+	}
+	resolved := c.resolveScopeQueries(ctx, dcql, scopes)
+
+	var uncovered []string
+	for _, scope := range scopes {
+		constructor, configured := c.cfg.Common.CredentialMetadata[scope]
+		if !configured {
+			continue
+		}
+		if _, ok := constructor.DCQLMetaQuery(); !ok {
+			continue
+		}
+		if _, answered := resolved[scope]; !answered {
+			uncovered = append(uncovered, scope)
+		}
+	}
+	return uncovered
 }
 
 // buildDCQLQueryFromConfig builds a DCQL query using credential constructor config.

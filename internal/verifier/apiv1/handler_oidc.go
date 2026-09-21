@@ -148,6 +148,11 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 		ResponseType:        req.ResponseType,
 		ResponseMode:        req.ResponseMode,
 		DCQLQuery:           dcqlQuery,
+		// A wallet keys its vp_token by credential query id, and a template
+		// names its queries whatever its author chose, so
+		// VerificationDirectPost needs this to find a scope's response. Empty
+		// for a query built from credential_metadata, where the two agree.
+		ScopeQueryIDs: c.ScopeQueryIDs(ctx, dcqlQuery, requestedScopes),
 	}
 
 	// Save session
