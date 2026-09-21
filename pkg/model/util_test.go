@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
@@ -320,10 +321,25 @@ func TestDCQLMetaQueryByFormat(t *testing.T) {
 			wantVCTs: []string{"urn:eudi:pid:1"},
 		},
 		{
-			name:        "registry-backed mdoc uses its configured doctype",
+			// Fallback for a scope whose MDDL never loaded.
+			name:        "configured doctype is used when no MDDL is loaded",
 			cm:          &CredentialMetadata{Format: openid4vp.FormatMsoMdoc, Doctype: "eu.europa.ec.eudi.pid.1"},
 			wantOK:      true,
 			wantDoctype: "eu.europa.ec.eudi.pid.1",
+		},
+		{
+			// The MDDL wins: loadMDDLSchema fills it from the registry lookup
+			// too, and IssuerMetadata advertises mddl.DocType in every case,
+			// so the configured value is a source selector and not necessarily
+			// the doctype the issued credential carries.
+			name: "the loaded MDDL wins over a differing configured doctype",
+			cm: &CredentialMetadata{
+				Format:  openid4vp.FormatMsoMdoc,
+				Doctype: "eu.europa.ec.eudi.pid.1",
+				MDDL:    &mdoc.MDDLSchema{DocType: "org.iso.18013.5.1.mDL"},
+			},
+			wantOK:      true,
+			wantDoctype: "org.iso.18013.5.1.mDL",
 		},
 		{
 			name:        "an mdoc carrying a VCTM is still an mdoc",

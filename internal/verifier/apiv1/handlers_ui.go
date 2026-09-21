@@ -230,7 +230,13 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					uiCred.Format = meta.Format
 					mq, ok := meta.DCQLMetaQuery()
 					if !ok {
-						return nil, fmt.Errorf("preset %q references scope %q, for which no DCQL meta constraint can be built (format %q)", label, scope, c.cfg.GetFormatForScope(scope))
+						// Drop the credential, like the picker loop above,
+						// rather than fail the whole /ui/metadata response:
+						// one unconstrainable scope would otherwise hide every
+						// usable credential and preset the verifier has.
+						c.log.Error(nil, "credential omitted from a verifier UI preset: no usable DCQL meta constraint for scope",
+							"preset", label, "scope", scope, "format", c.cfg.GetFormatForScope(scope))
+						continue
 					}
 					uiCred.Meta.DoctypeValue = mq.DoctypeValue
 					uiCred.Meta.VCTValues = mq.VCTValues
@@ -299,6 +305,12 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					}
 				}
 				uiPreset.Credentials = append(uiPreset.Credentials, uiCred)
+			}
+			// A preset whose credentials were all dropped would render as an
+			// empty selection that asks the wallet for nothing.
+			if len(uiPreset.Credentials) == 0 {
+				c.log.Error(nil, "preset omitted from the verifier UI: none of its credentials can be requested", "preset", label)
+				continue
 			}
 			reply.Presets[label] = uiPreset
 		}

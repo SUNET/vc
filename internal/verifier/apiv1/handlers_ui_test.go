@@ -1298,3 +1298,38 @@ func TestUIMetadataOmitsUnconstrainableCredential(t *testing.T) {
 	assert.NotContains(t, reply.Credentials, "diploma_ldp",
 		"a scope the UI cannot build a usable query for must not be offered in the picker")
 }
+
+// TestUIMetadataPresetDropsUnconstrainableCredential covers a review finding:
+// the preset path used to return an error, which took the whole /ui/metadata
+// response down - hiding every usable credential and preset - over one scope
+// the picker loop merely skips.
+//
+// A scope with no expressible constraint is not a malformed config; it is a
+// credential this verifier cannot ask for. It is dropped, and a preset left
+// with nothing to request is dropped with it.
+func TestUIMetadataPresetDropsUnconstrainableCredential(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid":         sdJWTScope("urn:eudi:pid:1"),
+		"diploma_ldp": w3cScope("urn:eudi:diploma:1"),
+	}, map[string]model.PresetDefinition{
+		"Mixed":   {Credentials: map[string]*model.VerificationPresetScope{"pid": nil, "diploma_ldp": nil}},
+		"OnlyW3C": {Credentials: map[string]*model.VerificationPresetScope{"diploma_ldp": nil}},
+		"OnlyPID": {Credentials: map[string]*model.VerificationPresetScope{"pid": nil}},
+	})
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err, "one unconstrainable scope must not fail the whole response")
+
+	require.Contains(t, reply.Presets, "Mixed")
+	require.Len(t, reply.Presets["Mixed"].Credentials, 1,
+		"the unconstrainable credential is dropped, the usable one stays")
+	assert.Equal(t, "pid", reply.Presets["Mixed"].Credentials[0].ID)
+
+	assert.NotContains(t, reply.Presets, "OnlyW3C",
+		"a preset with nothing left to request would ask the wallet for nothing")
+	assert.Contains(t, reply.Presets, "OnlyPID")
+
+	// The picker itself is unaffected and still lists the usable credential.
+	assert.Contains(t, reply.Credentials, "pid")
+	assert.NotContains(t, reply.Credentials, "diploma_ldp")
+}

@@ -2063,18 +2063,24 @@ func (c *CredentialMetadata) vctIdentifier() string {
 	return c.GetVCTURL()
 }
 
-// doctype resolves the mdoc doctype, most explicit source first: the configured
-// doctype (how a registry-resolved scope names itself, with no MDDL in hand),
-// then the MDDL's, then the VCTM's vct.
+// doctype resolves the mdoc doctype the ISSUED credential actually carries.
 //
-// The last is a fallback, not a conflation: an mso_mdoc scope configured with a
-// VCTM keeps its identifier there.
+// The loaded MDDL wins. loadMDDLSchema fills it from mddl_file_path, mddl_url
+// or a registry lookup keyed by the configured doctype, and IssuerMetadata
+// advertises mddl.DocType in every one of those cases - so a config setting
+// both an MDDL source and a differing doctype issues the MDDL's. Preferring
+// the configured value would have every DCQL caller request a doctype no
+// issued credential carries.
+//
+// The configured doctype is the fallback for a scope whose MDDL never loaded,
+// and the VCTM's vct the last resort for an mso_mdoc scope configured with one
+// - a fallback, not a conflation.
 func (c *CredentialMetadata) doctype() string {
-	if c.Doctype != "" {
-		return c.Doctype
-	}
 	if mddl := c.GetMDDL(); mddl != nil && mddl.DocType != "" {
 		return mddl.DocType
+	}
+	if c.Doctype != "" {
+		return c.Doctype
 	}
 	if vctm := c.GetVCTM(); vctm != nil {
 		return vctm.VCT
