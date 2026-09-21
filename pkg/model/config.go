@@ -2037,8 +2037,9 @@ func (c *CredentialMetadata) IsLocalMDDL() bool {
 	return c.MDDLFilePath != ""
 }
 
-// ResolveVCTUrls fills in VCTURL for every scope and enforces the vct
-// identifier contract:
+// ResolveVCTUrls fills in VCTURL for every VCTM-backed scope (scopes
+// without a loaded VCTM, such as mso_mdoc doctypes, are skipped) and
+// enforces the vct identifier contract:
 //
 //   - Local VCTM (vctm_file_path): apigw hosts the type metadata under
 //     apigwPublicURL + /type-metadata/{scope} and sets VCTURL to that
