@@ -1,4 +1,5 @@
 {
+  "vct": "urn:credential:eduid:1",
   "name": "EduID Credential",
   "description": "A verifiable credential for educational identity, based on PID Rulebook (ARF Annex 3.01). Provides identity attributes sourced from the EduID SAML2 IdP for students and staff within the education and research sector.",
   "display": [
