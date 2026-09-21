@@ -2048,6 +2048,88 @@ func (c *CredentialMetadata) IsLocalMDDL() bool {
 	return c.MDDLFilePath != ""
 }
 
+// vctIdentifier returns the credential's canonical vct - the single value
+// ResolveVCTUrls settles on, which the credential body carries, the issuer
+// metadata advertises, and a wallet stores as the credential's type tag.
+//
+// VCTURL is the fallback, not a second identifier: ResolveVCTUrls back-fills
+// VCTM.VCT from the hosting URL for a local file that declared none, so the
+// two agree by construction and this only covers a caller running before
+// resolution.
+func (c *CredentialMetadata) vctIdentifier() string {
+	if vctm := c.GetVCTM(); vctm != nil && vctm.VCT != "" {
+		return vctm.VCT
+	}
+	return c.GetVCTURL()
+}
+
+// doctype resolves the mdoc doctype, most explicit source first: the configured
+// doctype (how a registry-resolved scope names itself, with no MDDL in hand),
+// then the MDDL's, then the VCTM's vct.
+//
+// The last is a fallback, not a conflation: an mso_mdoc scope configured with a
+// VCTM keeps its identifier there.
+func (c *CredentialMetadata) doctype() string {
+	if c.Doctype != "" {
+		return c.Doctype
+	}
+	if mddl := c.GetMDDL(); mddl != nil && mddl.DocType != "" {
+		return mddl.DocType
+	}
+	if vctm := c.GetVCTM(); vctm != nil {
+		return vctm.VCT
+	}
+	return ""
+}
+
+// DCQLMetaQuery returns the DCQL meta constraint for this credential type, and
+// whether one could be expressed at all.
+//
+// Chosen by FORMAT (OpenID4VP 1.0 6.4.1), not by which metadata document
+// happens to be loaded. Keying off "is an MDDL present" routes every non-mdoc
+// format - including the ldp_vc and jwt_vc_json credentials this stack issues -
+// into the SD-JWT branch, emitting vct_values where ValidateCredentialQuery
+// requires type_values. Keying off "has a VCTM" mislabels an mso_mdoc scope
+// that happens to carry one.
+//
+//   - mso_mdoc: doctype_value, see doctype.
+//   - dc+sd-jwt, the legacy vc+sd-jwt spelling, and an empty format (which
+//     Format declares as defaulting to dc+sd-jwt): vct_values, carrying the
+//     canonical identifier - see vctIdentifier.
+//   - anything else: ok is false.
+//
+// ok=false covers four cases a caller must not paper over: a nil receiver (a
+// scope with no credential_metadata entry, reachable from a valid config), a
+// format whose constraint this repo cannot build (the W3C VC formats, which
+// need a configured type list), a format credential_metadata cannot complete
+// (mso_mdoc_zk, below), and a format whose own identifier is missing.
+func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
+	if c == nil {
+		return openid4vp.MetaQuery{}, false
+	}
+	switch c.Format {
+	// Not mso_mdoc_zk: validateMsoMdocZkQuery also wants a non-empty
+	// meta.zk_system_type, and those specs live on VerificationPresetScope.
+	// A ZK request comes the other way round - a plain mso_mdoc scope with a
+	// preset overriding Format and supplying ZKSystemType - so that path never
+	// asks for the zk format here.
+	case openid4vp.FormatMsoMdoc:
+		doctype := c.doctype()
+		return openid4vp.MetaQuery{DoctypeValue: doctype}, doctype != ""
+	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
+		// vc+sd-jwt is the legacy spelling this repo still issues and treats
+		// as SD-JWT elsewhere; rejecting it here would take a working
+		// deployment's scope away. "" honours Format's own default.
+		vct := c.vctIdentifier()
+		if vct == "" {
+			return openid4vp.MetaQuery{}, false
+		}
+		return openid4vp.MetaQuery{VCTValues: []string{vct}}, true
+	default:
+		return openid4vp.MetaQuery{}, false
+	}
+}
+
 // ResolveVCTUrls fills in VCTURL for every VCTM-backed scope (scopes
 // without a loaded VCTM, such as mso_mdoc doctypes, are skipped) and
 // enforces the vct identifier contract:

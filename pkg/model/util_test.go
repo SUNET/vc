@@ -3,6 +3,12 @@ package model
 import (
 	"testing"
 	"time"
+
+	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBoolVal(t *testing.T) {
@@ -274,5 +280,89 @@ func TestOpenID4VPConfig_GetPresentationRequestsDir(t *testing.T) {
 	c = &OpenID4VPConfig{PresentationRequestsDir: "/tmp/requests"}
 	if c.GetPresentationRequestsDir() != "/tmp/requests" {
 		t.Errorf("unexpected dir: %s", c.GetPresentationRequestsDir())
+	}
+}
+
+// TestDCQLMetaQueryByFormat pins the meta constraint to the credential's
+// FORMAT (OpenID4VP 1.0 6.4.1) rather than to whichever metadata document
+// happens to be loaded.
+//
+// Both misreadings are represented below: an mso_mdoc scope that carries a
+// VCTM (which a "has a VCTM?" test calls SD-JWT) and a registry-backed mdoc
+// scope with a configured doctype and no MDDL (which a "has an MDDL?" test
+// leaves unconstrained).
+func TestDCQLMetaQueryByFormat(t *testing.T) {
+	tests := []struct {
+		name        string
+		cm          *CredentialMetadata
+		wantOK      bool
+		wantVCTs    []string
+		wantDoctype string
+	}{
+		{
+			name:     "sd-jwt is constrained by its canonical vct",
+			cm:       &CredentialMetadata{Format: openid4vp.FormatSDJWTVC, VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}},
+			wantOK:   true,
+			wantVCTs: []string{"urn:eudi:pid:1"},
+		},
+		{
+			// Still issued by this repo and treated as SD-JWT elsewhere.
+			name:     "legacy vc+sd-jwt is treated as SD-JWT",
+			cm:       &CredentialMetadata{Format: "vc+sd-jwt", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}},
+			wantOK:   true,
+			wantVCTs: []string{"urn:eudi:pid:1"},
+		},
+		{
+			// Format's own `default:"dc+sd-jwt"`.
+			name:     "empty format follows the declared default",
+			cm:       &CredentialMetadata{VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}},
+			wantOK:   true,
+			wantVCTs: []string{"urn:eudi:pid:1"},
+		},
+		{
+			name:        "registry-backed mdoc uses its configured doctype",
+			cm:          &CredentialMetadata{Format: openid4vp.FormatMsoMdoc, Doctype: "eu.europa.ec.eudi.pid.1"},
+			wantOK:      true,
+			wantDoctype: "eu.europa.ec.eudi.pid.1",
+		},
+		{
+			name:        "an mdoc carrying a VCTM is still an mdoc",
+			cm:          &CredentialMetadata{Format: openid4vp.FormatMsoMdoc, VCTM: &sdjwtvc.VCTM{VCT: "org.iso.18013.5.1.mDL"}},
+			wantOK:      true,
+			wantDoctype: "org.iso.18013.5.1.mDL",
+		},
+		{
+			name:   "an mdoc with no identifier at all is unusable",
+			cm:     &CredentialMetadata{Format: openid4vp.FormatMsoMdoc},
+			wantOK: false,
+		},
+		{
+			// meta.type_values, which credential_metadata cannot supply yet.
+			name:   "W3C has no expressible constraint",
+			cm:     &CredentialMetadata{Format: "ldp_vc", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"}},
+			wantOK: false,
+		},
+		{
+			// Reachable from a valid config: a map lookup that missed.
+			name:   "nil receiver reports rather than panics",
+			cm:     nil,
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var meta openid4vp.MetaQuery
+			var ok bool
+			require.NotPanics(t, func() { meta, ok = tt.cm.DCQLMetaQuery() })
+			assert.Equal(t, tt.wantOK, ok)
+			if !tt.wantOK {
+				assert.Equal(t, openid4vp.MetaQuery{}, meta, "an unusable constraint must be empty, not partially filled")
+				return
+			}
+			assert.Equal(t, tt.wantVCTs, meta.VCTValues)
+			assert.Equal(t, tt.wantDoctype, meta.DoctypeValue)
+			assert.Nil(t, meta.TypeValues)
+		})
 	}
 }

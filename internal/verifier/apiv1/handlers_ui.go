@@ -106,22 +106,6 @@ type UIMetadataReply struct {
 	DCAPIAutoAttempt bool `json:"dc_api_auto_attempt"`
 }
 
-// vctIdentifiersFor returns the credential's canonical vct as a single-item
-// list (or nil for mso_mdoc scopes, which have no vct and are constrained by
-// doctype_value in DCQL). After ResolveVCTUrls the VCTM's vct is what the
-// credential body carries and the metadata advertises: the file's own value
-// for external and local-with-vct scopes, or the hosting URL back-filled for
-// a local file whose vct was empty.
-func vctIdentifiersFor(constructor *model.CredentialMetadata) []string {
-	if constructor == nil {
-		return nil
-	}
-	if vctm := constructor.GetVCTM(); vctm != nil && vctm.VCT != "" {
-		return []string{vctm.VCT}
-	}
-	return nil
-}
-
 func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 	reply := &UIMetadataReply{
 		Credentials:      make(map[string]*UICredentialInfo),
@@ -149,7 +133,30 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		} else if mddl := constructor.GetMDDL(); mddl != nil {
 			info.VCT = mddl.DocType
 		}
-		info.VCTValues = vctIdentifiersFor(constructor)
+		// Format-aware, like the DCQL builders: presentation-definition.js
+		// turns VCTValues straight into meta.vct_values, so publishing one for
+		// a credential DCQL constrains some other way puts an unmatchable
+		// query on the wire. A scope with no expressible constraint is left
+		// out of the picker rather than offered and then refused.
+		mq, ok := constructor.DCQLMetaQuery()
+		if !ok {
+			c.log.Error(nil, "credential omitted from the verifier UI: no usable DCQL meta constraint for scope",
+				"scope", scope, "format", c.cfg.GetFormatForScope(scope))
+			continue
+		}
+		// Empty for mdoc, which is constrained by its doctype instead;
+		// omitempty then drops the field.
+		info.VCTValues = mq.VCTValues
+		// For an mdoc scope the doctype IS the identifier, and
+		// presentation-definition.js sends info.VCT as meta.doctype_value, so
+		// it must be the string the server-side builders use. The chain above
+		// reads VCTM.VCT, then VCTURL, then the MDDL's doctype, and never the
+		// configured Doctype - leaving a registry-backed scope's identifier
+		// empty, and picking the VCTM's vct over the MDDL's doctype when both
+		// are present.
+		if mq.DoctypeValue != "" {
+			info.VCT = mq.DoctypeValue
+		}
 		reply.Credentials[scope] = info
 	}
 
@@ -214,23 +221,19 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				}
 
 				// Resolve format and the type constraint from
-				// credential_metadata. An mso_mdoc credential has no vct at
-				// all - DCQL constrains it by doctype_value instead
-				// (OpenID4VP 1.0 6.4.1) - so a preset over an mdoc scope was
-				// previously emitted with an empty vct_values and no doctype,
-				// which matches nothing in any wallet.
+				// credential_metadata, by FORMAT rather than by which
+				// metadata document is loaded: keying off "has an MDDL" gave
+				// a registry-backed mdoc scope (doctype configured, no MDDL)
+				// an empty vct_values and no doctype, which matches nothing
+				// in any wallet.
 				if meta != nil {
 					uiCred.Format = meta.Format
-					if mddl := meta.GetMDDL(); mddl != nil && mddl.DocType != "" {
-						uiCred.Meta.DoctypeValue = mddl.DocType
-					} else if vs := vctIdentifiersFor(meta); len(vs) > 0 {
-						// Both identifiers, for the reason documented on
-						// UICredentialInfo.VCTValues: wallets disagree about
-						// which one names a credential type. Only reached for
-						// non-mdoc credentials - an mdoc is constrained by
-						// doctype_value above and has no vct to offer.
-						uiCred.Meta.VCTValues = vs
+					mq, ok := meta.DCQLMetaQuery()
+					if !ok {
+						return nil, fmt.Errorf("preset %q references scope %q, for which no DCQL meta constraint can be built (format %q)", label, scope, c.cfg.GetFormatForScope(scope))
 					}
+					uiCred.Meta.DoctypeValue = mq.DoctypeValue
+					uiCred.Meta.VCTValues = mq.VCTValues
 				}
 
 				// A preset's Format/ZKSystemType override lets an otherwise
