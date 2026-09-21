@@ -48,66 +48,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", fmt.Errorf("scope %q is not configured for openid4vp authentication", scope)
 	}
 
-	// Build one CredentialQuery per auth scope so the wallet can authenticate
-	// with any of the acceptable credential types (e.g. pid OR eduid).
-	// Each scope has its own claim queries derived from its per-scope auth_claims.
-	credentialQueries := make([]openid4vp.CredentialQuery, 0, len(vpAuth.AuthScopes))
-	options := make([][]string, 0, len(vpAuth.AuthScopes))
-	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
-		entry := vpAuth.AuthScopes[authScope]
-		scopeClaimQueries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims))
-		for _, claim := range entry.AuthClaims {
-			scopeClaimQueries = append(scopeClaimQueries, openid4vp.ClaimQuery{
-				Path: openid4vp.StringPath(claim),
-			})
-		}
-		credentialQueries = append(credentialQueries, openid4vp.CredentialQuery{
-			ID:       authScope,
-			Format:   c.cfg.GetFormatForScope(authScope),
-			Multiple: false,
-			Meta: openid4vp.MetaQuery{
-				// VCTUrlsForScopes, not VCTIdentifiersForScopes (finding 18,
-				// reversing finding 16). The credential's own embedded "vct"
-				// JWT claim (set by BuildCredentialWithSigner from vctm.VCT,
-				// e.g. "urn:eudi:pid:1") is NOT what the EUDI reference wallet
-				// matches a DCQL query against. Confirmed live against the real
-				// wallet-core/multipaz sources: when a document is added from an
-				// openid4vci offer, Offer.kt's OfferedDocument.documentFormat
-				// sets SdJwtVcFormat(vct = configuration.type) from the ISSUER
-				// METADATA's declared vct in credential_configurations_supported
-				// (our published type-metadata URL) -- never by parsing the
-				// issued credential's JWT body. SdJwtVcCredentialFactory then
-				// stamps that same format.vct onto the stored Credential's own
-				// `vct` property (CredentialFactory.kt). DcqlRequestProcessor's
-				// candidateDocumentsForQuery filters candidates by comparing the
-				// query's vct_values against exactly this metadata-derived tag
-				// (SdJwtVcFormat equality) -- BEFORE it ever parses the
-				// credential's actual JWT body -- so querying with the vctm-
-				// internal value here can never match any real issued document,
-				// independent of what's embedded in the credential body.
-				// Finding 16's reversal was based on inspecting the credential
-				// BODY's own vct claim, which the wallet never consults for this
-				// match. Reverted back to VCTUrlsForScopes; verified the
-				// server's own DCQL validation (pkg/openid4vp/validator.go
-				// validateAgainstDCQL) is a no-op stub, so this does not
-				// introduce a new server-side vct mismatch.
-				VCTValues: c.cfg.VCTUrlsForScopes([]string{authScope}),
-			},
-			RequireCryptographicHolderBinding: new(false),
-			Claims:                            scopeClaimQueries,
-		})
-		options = append(options, []string{authScope})
-	}
-
-	dcql := &openid4vp.DCQL{
-		Credentials: credentialQueries,
-		CredentialSets: []openid4vp.CredentialSetQuery{
-			{
-				Options:  options,
-				Required: new(false),
-			},
-		},
-	}
+	dcql := buildIssuanceAuthDCQL(vpAuth, c.cfg)
 
 	// Persist the DCQL query in the auth context so VerificationDirectPost
 	// can use it for VP Token validation later.
@@ -377,4 +318,48 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		RedirectURI: u.String(),
 	}
 	return reply, nil
+}
+
+// buildIssuanceAuthDCQL builds the DCQL query the wallet must satisfy to
+// authenticate the user during OpenID4VP-based issuance. One CredentialQuery
+// per auth scope so the wallet may present any acceptable credential type
+// (e.g. pid OR eduid); each carries its per-scope auth_claims and the
+// scope's canonical vct (VCTM.VCT after ResolveVCTUrls -- preserved from the
+// VCTM file when present (both local and external), and back-filled from the
+// /type-metadata/<scope> hosting URL only when a local file left vct empty).
+// That single value is what the credential body carries, what the issuer
+// metadata advertises, and what wallets store as the credential's type tag
+// -- see (*model.Cfg).VCTIdentifiersForScopes.
+func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg) *openid4vp.DCQL {
+	credentialQueries := make([]openid4vp.CredentialQuery, 0, len(vpAuth.AuthScopes))
+	options := make([][]string, 0, len(vpAuth.AuthScopes))
+	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
+		entry := vpAuth.AuthScopes[authScope]
+		scopeClaimQueries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims))
+		for _, claim := range entry.AuthClaims {
+			scopeClaimQueries = append(scopeClaimQueries, openid4vp.ClaimQuery{
+				Path: openid4vp.StringPath(claim),
+			})
+		}
+		credentialQueries = append(credentialQueries, openid4vp.CredentialQuery{
+			ID:       authScope,
+			Format:   cfg.GetFormatForScope(authScope),
+			Multiple: false,
+			Meta: openid4vp.MetaQuery{
+				VCTValues: cfg.VCTIdentifiersForScopes([]string{authScope}),
+			},
+			RequireCryptographicHolderBinding: new(false),
+			Claims:                            scopeClaimQueries,
+		})
+		options = append(options, []string{authScope})
+	}
+	return &openid4vp.DCQL{
+		Credentials: credentialQueries,
+		CredentialSets: []openid4vp.CredentialSetQuery{
+			{
+				Options:  options,
+				Required: new(false),
+			},
+		},
+	}
 }

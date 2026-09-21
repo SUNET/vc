@@ -1669,31 +1669,15 @@ func (c *Cfg) GetFormatForScope(scope string) string {
 	return constructor.Format
 }
 
-// VCTUrlsForScopes resolves a list of scope keys to their resolved VCT URLs.
-// Scopes without a loaded VCTM are silently skipped.
-func (c *Cfg) VCTUrlsForScopes(scopes []string) []string {
-	urls := make([]string, 0, len(scopes))
-	for _, scope := range scopes {
-		constructor := c.GetCredentialMetadata(scope)
-		if constructor == nil {
-			continue
-		}
-		if v := constructor.GetVCTURL(); v != "" {
-			urls = append(urls, v)
-		}
-	}
-	return urls
-}
-
-// VCTIdentifiersForScopes resolves a list of scope keys to the vct value
-// actually embedded in issued credentials for that scope -- BuildCredentialWithSigner
-// (pkg/sdjwtvc/methods.go) sets body["vct"] = vctm.VCT, the VCTM's own
-// declared "vct" field, not the published type-metadata URL VCTUrlsForScopes
-// returns (that URL only appears in credential_configurations_supported's
-// issuer-metadata "vct", a different, cosmetic value from what's actually
-// embedded in a credential). DCQL queries built from VCTUrlsForScopes instead
-// of this never matched any real issued credential — confirmed live via a
-// fresh test issuance (lpidproto PLAN.md workstream 7 task 7.5, finding 16).
+// VCTIdentifiersForScopes returns the canonical vct identifier for each
+// scope -- VCTM.VCT -- which after ResolveVCTUrls is the single value shared
+// by the credential body (BuildCredentialWithSigner stamps body["vct"] =
+// vctm.VCT), the served VCTM document, the issuer metadata's
+// credential_configurations_supported[].vct, and DCQL vct_values. External
+// scopes keep the file's own value; local scopes keep the file's own value
+// too when the file declares one, and fall back to the /type-metadata/<scope>
+// hosting URL only when the local file left vct empty. Scopes without a
+// loaded VCTM are silently skipped.
 func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 	ids := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
@@ -2053,12 +2037,23 @@ func (c *CredentialMetadata) IsLocalMDDL() bool {
 	return c.MDDLFilePath != ""
 }
 
-// ResolveVCTUrls computes the URL-based VCT for each credential metadata entry
-// and stores it in VCTURL.  VCTM.VCT, VCTMRaw, and Integrity are left
-// unchanged — the served VCTM document preserves the original VCT
-// identifier from the VCTM file (e.g. a URN).
-// For local VCTMs the URL is built from apigwPublicURL + /type-metadata/{scope}.
-// For external VCTMs the VCTMUrl is used.
+// ResolveVCTUrls fills in VCTURL for every VCTM-backed scope (scopes
+// without a loaded VCTM, such as mso_mdoc doctypes, are skipped) and
+// enforces the vct identifier contract:
+//
+//   - Local VCTM (vctm_file_path): apigw hosts the type metadata under
+//     apigwPublicURL + /type-metadata/{scope} and sets VCTURL to that
+//     hosting URL. If the file already carried a vct (URN or any other
+//     Collision-Resistant Name per SD-JWT VC §3.2.2.1), it is preserved
+//     verbatim in both VCTM.VCT and the served VCTMRaw. Only when the
+//     file has no vct does ResolveVCTUrls back-fill VCTM.VCT and
+//     VCTMRaw's "vct" from the hosting URL so the credential body,
+//     served VCTM, and DCQL vct_values still agree on a single value.
+//   - External VCTM (vctm_url or vct via registry): the source is
+//     authoritative. VCTM.VCT and VCTMRaw are left untouched. VCTURL is
+//     set to the source URL (vctm_url or the resolved vct), but that
+//     only drives helpers -- it never overwrites the identifier the
+//     wallet stores.
 func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 	if cfg.Common == nil {
 		return nil
@@ -2085,21 +2080,23 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 		constructor.mu.Lock()
 		constructor.VCTURL = vctURL
 
-		// Auto-populate VCTM.VCT from the resolved URL if the source file
-		// did not include a vct field. This ensures the served VCTM document
-		// and issued credentials reference the canonical dereferenceable URL.
-		if constructor.VCTM.VCT == "" {
+		// Only back-fill a locally-hosted VCTM's vct when the file did not carry one.
+		if constructor.IsLocalVCTM() && constructor.VCTM.VCT == "" {
 			constructor.VCTM.VCT = vctURL
-		}
-
-		// Re-serialize VCTMRaw so the served document includes the vct field.
-		if constructor.IsLocalVCTM() && constructor.VCTMRaw != nil {
-			var doc map[string]json.RawMessage
-			if err := json.Unmarshal(constructor.VCTMRaw, &doc); err == nil {
-				vctJSON, _ := json.Marshal(constructor.VCTM.VCT)
-				doc["vct"] = vctJSON
-				if updated, err := json.Marshal(doc); err == nil {
-					constructor.VCTMRaw = updated
+			if constructor.VCTMRaw != nil {
+				var doc map[string]json.RawMessage
+				if err := json.Unmarshal(constructor.VCTMRaw, &doc); err == nil {
+					vctJSON, _ := json.Marshal(vctURL)
+					doc["vct"] = vctJSON
+					if updated, err := json.Marshal(doc); err == nil {
+						constructor.VCTMRaw = updated
+						// Rebuild Integrity to match the rewritten bytes so
+						// vct#integrity in issued credentials still verifies
+						// against the served /type-metadata document.
+						if sri, sriErr := constructor.VCTM.SRIIntegrity(updated); sriErr == nil {
+							constructor.Integrity = sri
+						}
+					}
 				}
 			}
 		}
@@ -2108,11 +2105,19 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 
 	// Validate that every constructor got a non-empty VCTURL.
 	for scope, constructor := range cfg.Common.CredentialMetadata {
-		if constructor == nil || constructor.GetVCTM() == nil {
+		if constructor == nil {
+			continue
+		}
+		vctm := constructor.GetVCTM()
+		if vctm == nil {
 			continue
 		}
 		if constructor.GetVCTURL() == "" {
 			return fmt.Errorf("VCTURL is empty for scope %q after resolution (check vctm_file_path, vctm_url, or vct)", scope)
+		}
+		// Local scopes get VCTM.VCT rewritten above; external ones must carry it themselves.
+		if !constructor.IsLocalVCTM() && vctm.VCT == "" {
+			return fmt.Errorf("external VCTM for scope %q has empty vct (check vctm_url source or the resolved vct); BuildCredentialWithSigner and DCQL vct_values require it", scope)
 		}
 	}
 
@@ -2329,8 +2334,15 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 			return nil, fmt.Errorf("credential constructor for scope %q has no VCTM metadata loaded (check vctm_file_path)", scope)
 		}
 
-		// Set format-specific parameters per OID4VCI 1.0 Appendix A
-		resolvedVCT := constructor.GetVCTURL()
+		// Advertise the VCTM's own vct (URN or foreign URL) so it matches the
+		// credential body's vct claim (which BuildCredentialWithSigner sets
+		// from vctm.VCT). Fall back to VCTURL only when the VCTM has none --
+		// ResolveVCTUrls back-fills that case for local scopes, so the
+		// fallback value equals the hosting URL by construction.
+		resolvedVCT := vctm.VCT
+		if resolvedVCT == "" {
+			resolvedVCT = constructor.GetVCTURL()
+		}
 		switch constructor.Format {
 		case "dc+sd-jwt":
 			// Appendix A.3: only vct is format-specific for dc+sd-jwt
