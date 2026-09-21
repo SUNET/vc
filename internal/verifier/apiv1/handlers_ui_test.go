@@ -1215,3 +1215,86 @@ func TestUIMetadataPresetCategoryOrder(t *testing.T) {
 	assert.Empty(t, reply.Presets["Uncategorized"].Category,
 		"an uncategorized preset carries no Category, distinct from any named group")
 }
+
+// TestUIMetadataMdocDoctypeIdentifier covers the picker's identifier for mdoc
+// scopes.
+//
+// presentation-definition.js sends UICredentialInfo.VCT as meta.doctype_value
+// for an mso_mdoc credential, but the chain that filled it read VCTM.VCT, then
+// VCTURL, then the MDDL's doctype - never the configured Doctype. A
+// registry-backed scope therefore advertised an empty identifier and the UI
+// sent an empty doctype_value, which matches nothing; and a scope carrying
+// both documents advertised the VCTM's vct while the server-side builders used
+// the MDDL's doctype.
+func TestUIMetadataMdocDoctypeIdentifier(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				// Registry-backed: doctype configured, no MDDL document.
+				"pid_mdoc": {
+					Format:  openid4vp.FormatMsoMdoc,
+					Doctype: "eu.europa.ec.eudi.pid.1",
+				},
+				// Both documents present, disagreeing.
+				"mdl": {
+					Format: openid4vp.FormatMsoMdoc,
+					VCTM:   &sdjwtvc.VCTM{VCT: "urn:something:else:1"},
+					MDDL:   &mdoc.MDDLSchema{DocType: "org.iso.18013.5.1.mDL"},
+				},
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+
+	require.Contains(t, reply.Credentials, "pid_mdoc")
+	assert.Equal(t, "eu.europa.ec.eudi.pid.1", reply.Credentials["pid_mdoc"].VCT,
+		"a registry-backed mdoc scope names itself by its configured doctype")
+	assert.Empty(t, reply.Credentials["pid_mdoc"].VCTValues,
+		"an mdoc credential has no vct for a wallet to match")
+
+	require.Contains(t, reply.Credentials, "mdl")
+	assert.Equal(t, "org.iso.18013.5.1.mDL", reply.Credentials["mdl"].VCT,
+		"the MDDL's doctype wins over a VCTM's vct, as the server-side builders do")
+}
+
+// TestUIMetadataOmitsUnconstrainableCredential covers a scope the UI cannot
+// build a usable DCQL query for. Offering it in the picker would send a
+// credential query with an empty meta, which DCQL reads as unconstrained.
+func TestUIMetadataOmitsUnconstrainableCredential(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"pid": {
+					Format:       openid4vp.FormatSDJWTVC,
+					VCTMFilePath: "/path/to/vctm_pid",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+				"diploma_ldp": {
+					Format:       "ldp_vc",
+					VCTMFilePath: "/path/to/vctm_diploma",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+				},
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+
+	require.Contains(t, reply.Credentials, "pid")
+	assert.Equal(t, []string{"urn:eudi:pid:1"}, reply.Credentials["pid"].VCTValues,
+		"the VCTM file's own vct is preserved, not replaced by the hosting URL")
+	assert.NotContains(t, reply.Credentials, "diploma_ldp",
+		"a scope the UI cannot build a usable query for must not be offered in the picker")
+}

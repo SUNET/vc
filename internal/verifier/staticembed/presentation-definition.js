@@ -539,14 +539,10 @@ Alpine.data("app", () => ({
         // vct_values for an mdoc credential matches nothing on the wallet
         // side (no mdoc credential has a vct), so the request always comes
         // back empty.
-        // vct_values carries EVERY identifier a wallet might match this
-        // credential type by, not just one: the EUDI reference wallet
-        // (multipaz) matches the issuer metadata's declared vct (our
-        // type-metadata URL), while others (wwWallet) match the credential's
-        // own embedded vct claim. DCQL treats vct_values as an
-        // acceptable-value list, so sending both satisfies either wallet.
-        // Falls back to the single vct for an older server that doesn't
-        // send the list.
+        // vct_values carries the credential's canonical vct - the one value
+        // ResolveVCTUrls settles on, which the credential body carries and the
+        // issuer metadata advertises, so a wallet matching either finds it.
+        // Falls back to the single vct for an older server that sends no list.
         const vctValues = this.credentialAttributes.vct_values?.length
             ? this.credentialAttributes.vct_values
             : [this.credentialAttributes.vct];
