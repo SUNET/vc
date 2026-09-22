@@ -250,7 +250,22 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 	saveSession(t, nil)
 	_, err = client.VerificationDirectPost(ctx, &VerificationDirectPostRequest{Response: string(encrypted)})
 	require.Error(t, err, "an unconstrained W3C query must not accept whatever arrives")
-	assert.Contains(t, err.Error(), "constrains no types")
+	assert.Contains(t, err.Error(), "cannot constrain a credential")
+
+	// The alternatives that have length but still match everything. A length
+	// check would let all of these through; the query validator is what knows
+	// they do not narrow, which is why the recovered query goes through it.
+	for _, unconstraining := range [][][]string{
+		{{}},                        // an empty alternative
+		{{openid4vp.BaseVCTypeIRI}}, // every W3C credential carries this
+		{{openid4vp.BaseVCTypeIRI, "https://example.org/degree#UniversityDegreeCredential"}, {openid4vp.BaseVCTypeIRI}},
+	} {
+		requestedTypes = unconstraining
+		saveSession(t, nil)
+		_, err = client.VerificationDirectPost(ctx, &VerificationDirectPostRequest{Response: string(encrypted)})
+		require.Error(t, err, "%v does not narrow and must be refused", unconstraining)
+		assert.Contains(t, err.Error(), "cannot constrain a credential")
+	}
 }
 
 // metaFor builds the request's meta: the type constraint when there is one,

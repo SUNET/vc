@@ -554,14 +554,16 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				c.log.Error(nil, "cannot recover the query this scope was requested under", "scope", scope)
 				return nil, fmt.Errorf("cannot verify the constraint for scope %s: the request it was made under is no longer available", scope)
 			}
-			// A W3C query without type_values constrains nothing, and a
-			// template-built one never passed through ValidateCredentialQuery
-			// - only UIInteraction validates its input - so it can arrive
-			// here empty. Skipping the match in that case would accept any
-			// W3C credential the wallet chose to send, so refuse instead.
-			if len(requested.Meta.TypeValues) == 0 {
-				c.log.Error(nil, "W3C query carries no type_values", "scope", scope)
-				return nil, fmt.Errorf("the query for scope %s constrains no types, so no credential can be attributed to it", scope)
+			// Validate the query before trusting it as a constraint. Only
+			// UIInteraction validates the DCQL it is handed; a template-built
+			// query reaches here unchecked, and a length test is not enough -
+			// [[]] and [[VerifiableCredential]] both have length but match
+			// every W3C credential. ValidateCredentialQuery already encodes
+			// what counts as narrowing, so use it rather than restate it, and
+			// pick up anything added to it later for free.
+			if err := openid4vp.ValidateCredentialQuery(requested); err != nil {
+				c.log.Error(err, "the query this scope was requested under does not constrain it", "scope", scope)
+				return nil, fmt.Errorf("the query for scope %s cannot constrain a credential: %w", scope, err)
 			}
 			if !openid4vp.MatchTypeValues(vc20Result.TypeIRIs, requested.Meta.TypeValues) {
 				c.log.Error(nil, "returned W3C credential does not carry the requested types",
