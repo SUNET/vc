@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -409,9 +410,17 @@ func TestVCTMRawWithVCTMalformed(t *testing.T) {
 		})
 	}
 
-	// The same document reaching issuance must not panic either.
-	cm := &CredentialMetadata{VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}, VCTMRaw: []byte("null")}
-	assert.Equal(t, "null", string(cm.GetVCTMIssuanceRaw()))
+	// And resolution survives one: the scope keeps its in-memory identifier
+	// rather than panicking on the unrewritable bytes. loadVCTM refuses such
+	// a document earlier, so this is the second line of defence.
+	cm := &CredentialMetadata{
+		Format: openid4vp.FormatSDJWTVC, VCTMFilePath: "/path/to/vctm.json",
+		VCTM: &sdjwtvc.VCTM{}, VCTMRaw: []byte("null"),
+	}
+	cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{"pid": cm}}}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+	assert.Equal(t, "https://apigw.example/type-metadata/pid", cm.GetVCTM().VCT)
+	assert.Equal(t, "null", string(cm.GetVCTMRaw()), "unrewritable bytes are left alone")
 }
 
 // TestResolveVCTUrlsRejectsNilEntry pins the malformed-entry rule at the one
@@ -427,75 +436,63 @@ func TestResolveVCTUrlsRejectsNilEntry(t *testing.T) {
 	assert.Contains(t, err.Error(), "broken")
 }
 
-// TestPublishNewVCT covers what the option does and, as importantly, what it
-// deliberately does not touch.
+// TestReplaceVCT states what the option means, and what it deliberately does
+// not touch.
 //
-// The IDENTIFIER is resolved either way: a local VCTM declaring no vct takes
-// the hosting URL, so the credential body, the DCQL query and the issuer
-// metadata agree on one value. Only the SERVED bytes differ - false publishes
-// the file exactly as written, integrity included, for a document whose SRI is
-// pinned outside this deployment.
-func TestPublishNewVCT(t *testing.T) {
+// The served document ALWAYS declares a vct - one without it is not Type
+// Metadata (SD-JWT VC 6.3), so there is no "publish it bare" case. What the
+// option decides is whose identifier that is when the file brought its own:
+// the file's by default, so a URN survives publication, or the hosting URL
+// when this deployment owns the type.
+func TestReplaceVCT(t *testing.T) {
 	const hosted = "https://apigw.example/type-metadata/pid"
 
-	localVCTM := func(vct string, publishNew *bool) *CredentialMetadata {
+	localVCTM := func(vct string, replace *bool) *CredentialMetadata {
 		raw := []byte(`{"name":"PID"}`)
 		if vct != "" {
 			raw = []byte(`{"vct":"` + vct + `","name":"PID"}`)
 		}
 		return &CredentialMetadata{
-			Format:        openid4vp.FormatSDJWTVC,
-			VCTMFilePath:  "/path/to/vctm_pid.json",
-			VCTM:          &sdjwtvc.VCTM{VCT: vct},
-			VCTMRaw:       raw,
-			PublishNewVCT: publishNew,
+			Format:       openid4vp.FormatSDJWTVC,
+			VCTMFilePath: "/path/to/vctm_pid.json",
+			VCTM:         &sdjwtvc.VCTM{VCT: vct},
+			VCTMRaw:      raw,
+			ReplaceVCT:   replace,
 		}
 	}
 
 	tests := []struct {
-		name          string
-		cm            *CredentialMetadata
-		wantVCT       string
-		wantRawHasVCT bool
+		name    string
+		cm      *CredentialMetadata
+		wantVCT string
 	}{
-		{"unset writes the vct into the served bytes", localVCTM("", nil), hosted, true},
-		{"explicit true does the same", localVCTM("", new(true)), hosted, true},
-		{"false resolves the identifier but serves the file verbatim", localVCTM("", new(false)), hosted, false},
-		{"a declared urn is kept and served as written", localVCTM("urn:eudi:pid:1", nil), "urn:eudi:pid:1", true},
-		{"and with the option off too", localVCTM("urn:eudi:pid:1", new(false)), "urn:eudi:pid:1", true},
+		{"no vct in the file takes the hosting URL", localVCTM("", nil), hosted},
+		{"and replace_vct changes nothing there", localVCTM("", new(true)), hosted},
+		{"a declared urn is kept by default", localVCTM("urn:eudi:pid:1", nil), "urn:eudi:pid:1"},
+		{"explicit false keeps it too", localVCTM("urn:eudi:pid:1", new(false)), "urn:eudi:pid:1"},
+		{"replace_vct overwrites a declared urn", localVCTM("urn:eudi:pid:1", new(true)), hosted},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			before := string(tt.cm.VCTMRaw)
-			integrityBefore := tt.cm.Integrity
-
 			cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{"pid": tt.cm}}}
 			require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"),
 				"the option must never make a scope unloadable")
 
-			// One identifier, three readers: the body, the query, the metadata.
+			// One identifier, four readers: the body, the query, the issuer
+			// metadata, and the document served at the hosting URL.
 			assert.Equal(t, tt.wantVCT, tt.cm.GetVCTM().VCT)
 			assert.Equal(t, tt.wantVCT, tt.cm.vctIdentifier())
+
 			meta, ok := tt.cm.DCQLMetaQuery()
 			require.True(t, ok, "the scope stays requestable whatever the option says")
 			assert.Equal(t, []string{tt.wantVCT}, meta.VCTValues)
 
-			if tt.wantRawHasVCT {
-				assert.Contains(t, string(tt.cm.GetVCTMRaw()), tt.wantVCT)
-			} else {
-				assert.Equal(t, before, string(tt.cm.GetVCTMRaw()),
-					"false must publish the file byte-for-byte")
-				assert.Equal(t, integrityBefore, tt.cm.Integrity,
-					"and must not recompute an SRI pinned elsewhere")
-			}
-
-			// Whatever the option says about the SERVED document, the bytes
-			// sent to the issuer always declare the vct: BuildCredentialWithSigner
-			// rejects an empty one, so publishing a file verbatim must not
-			// leave the scope loadable but unissuable.
-			assert.Contains(t, string(tt.cm.GetVCTMIssuanceRaw()), tt.wantVCT,
-				"issuance bytes must carry the resolved identifier")
+			var served map[string]any
+			require.NoError(t, json.Unmarshal(tt.cm.GetVCTMRaw(), &served))
+			assert.Equal(t, tt.wantVCT, served["vct"],
+				"the served document must declare the same identifier the credential names")
+			assert.Equal(t, "PID", served["name"], "and keep the rest of the file")
 		})
 	}
 }

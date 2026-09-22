@@ -507,7 +507,7 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 			DocumentData: documentData,
 			Jwk:          jwk,
 			Integrity:    credMeta.GetIntegrity(),
-			Vctm:         credMeta.GetVCTMIssuanceRaw(),
+			Vctm:         credMeta.GetVCTMRaw(),
 		})
 		if err != nil {
 			c.log.Error(err, "failed to call MakeSDJWT")

@@ -1784,23 +1784,21 @@ type CredentialMetadata struct {
 	// externally. The mso_mdoc analogue of vctm_url.
 	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath VCT Doctype,omitempty,url"`
 
-	// PublishNewVCT controls apigw's back-fill: when a file-loaded VCTM
-	// declares no vct, apigw writes the /type-metadata/{scope} URL it
-	// publishes the document at into both VCTM.VCT and the served bytes.
+	// ReplaceVCT decides what happens to a local VCTM that ALREADY declares
+	// a vct: false (the default) publishes the file's own identifier, true
+	// overwrites it with the /type-metadata/{scope} URL apigw serves the
+	// document at.
 	//
-	// Defaults to true, the existing behaviour. Set false to publish the file
-	// exactly as written - bytes and integrity untouched - for a document
-	// whose SRI is pinned somewhere this deployment does not control.
+	// A file that declares NO vct always takes the hosting URL, whatever this
+	// says - there is nothing to preserve, and a Type Metadata document
+	// without a vct is not one (SD-JWT VC 6.3). So the served bytes always
+	// carry an identifier, and it is always the one the credential names.
 	//
-	// The identifier is resolved either way: a file declaring no vct still
-	// takes the hosting URL in memory, so the credential body, the DCQL query
-	// and the issuer metadata agree on one value. Only the SERVED document
-	// differs.
-	//
-	// A file that declares its own vct is never rewritten whatever this says;
-	// that is what lets a URN survive publication. Only meaningful for a local
-	// VCTM (vctm_file_path): an external source is authoritative already.
-	PublishNewVCT *bool `yaml:"publish_new_vct,omitempty" json:"-" default:"true" doc_example:"true"`
+	// The default keeps a URN working: an identifier chosen outside this
+	// deployment survives publication. Set true when this deployment owns the
+	// type and the hosting URL is meant to be canonical. Only meaningful for
+	// a local VCTM (vctm_file_path): an external source is authoritative.
+	ReplaceVCT *bool `yaml:"replace_vct,omitempty" json:"-" default:"false" doc_example:"false"`
 
 	// Doctype is the mdoc doctype value to resolve via
 	// Common.CredentialRegistry, used only when neither MDDLFilePath nor
@@ -2033,23 +2031,6 @@ func (c *CredentialMetadata) GetVCTMRaw() []byte {
 	return c.VCTMRaw
 }
 
-// GetVCTMIssuanceRaw returns the VCTM bytes to send to the issuer inline.
-//
-// These are not always the bytes /type-metadata serves. Under
-// publish_new_vct: false the served document is published exactly as written -
-// its SRI may be pinned somewhere this deployment does not control - but the
-// issuer's parser requires a vct, so the resolved identifier is injected into
-// the issuance copy only. Otherwise the two are byte-identical.
-func (c *CredentialMetadata) GetVCTMIssuanceRaw() []byte {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if c.VCTM == nil {
-		return c.VCTMRaw
-	}
-	raw, _ := vctmRawWithVCT(c.VCTMRaw, c.VCTM.VCT)
-	return raw
-}
-
 // vctmRawWithVCT returns raw with "vct" set to vct, and reports whether it had
 // to change anything. Bytes that already declare a non-empty vct are returned
 // untouched, as are bytes that do not parse - a caller must never lose the
@@ -2063,12 +2044,6 @@ func vctmRawWithVCT(raw []byte, vct string) ([]byte, bool) {
 	// into a nil map panics - on every issuance, since this runs there too.
 	if err := json.Unmarshal(raw, &doc); err != nil || doc == nil {
 		return raw, false
-	}
-	if existing, ok := doc["vct"]; ok {
-		var declared string
-		if json.Unmarshal(existing, &declared) == nil && declared != "" {
-			return raw, false
-		}
 	}
 	vctJSON, err := json.Marshal(vct)
 	if err != nil {
@@ -2205,11 +2180,10 @@ func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
 //     hosting URL. If the file already carried a vct (URN or any other
 //     Collision-Resistant Name per SD-JWT VC §3.2.2.1), it is preserved
 //     verbatim in both VCTM.VCT and the served VCTMRaw. Only when the
-//     file has no vct does ResolveVCTUrls back-fill VCTM.VCT from the
-//     hosting URL so the credential body, served VCTM, and DCQL
-//     vct_values still agree on a single value. It rewrites the served
-//     VCTMRaw to match unless publish_new_vct is false; issuance takes
-//     its copy from GetVCTMIssuanceRaw either way.
+//     file has no vct - or replace_vct is set - does ResolveVCTUrls
+//     write the hosting URL into both VCTM.VCT and the served VCTMRaw,
+//     so the credential body, served VCTM, and DCQL vct_values always
+//     agree on a single value that the served document declares.
 //   - External VCTM (vctm_url or vct via registry): the source is
 //     authoritative. VCTM.VCT and VCTMRaw are left untouched. VCTURL is
 //     set to the source URL (vctm_url or the resolved vct), but that
@@ -2241,26 +2215,20 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 		constructor.mu.Lock()
 		constructor.VCTURL = vctURL
 
-		// A locally-hosted VCTM that declares no vct takes the hosting URL as
-		// its identifier, so the credential body, the DCQL query and the
-		// issuer metadata still agree on one value. A file that declares a vct
-		// is never touched, which is what keeps a URN working.
-		if constructor.IsLocalVCTM() && constructor.VCTM.VCT == "" {
+		// One identifier, always present in the served document. A file that
+		// declares no vct takes the hosting URL - a Type Metadata document
+		// without a vct is not one, so there is no "serve it bare" case. A
+		// file that declares one keeps it unless replace_vct says otherwise,
+		// which is what lets a URN survive publication.
+		if constructor.IsLocalVCTM() && (constructor.VCTM.VCT == "" || BoolVal(constructor.ReplaceVCT, false)) {
 			constructor.VCTM.VCT = vctURL
-			// The SERVED bytes are a separate decision: publish_new_vct: false
-			// publishes the file exactly as written, integrity included, for a
-			// document whose SRI is pinned somewhere this deployment does not
-			// control. Rewriting them would change the hash under whoever
-			// published it.
-			if BoolVal(constructor.PublishNewVCT, true) {
-				if updated, changed := vctmRawWithVCT(constructor.VCTMRaw, vctURL); changed {
-					constructor.VCTMRaw = updated
-					// Rebuild Integrity to match the rewritten bytes so
-					// vct#integrity in issued credentials still verifies
-					// against the served /type-metadata document.
-					if sri, sriErr := constructor.VCTM.SRIIntegrity(updated); sriErr == nil {
-						constructor.Integrity = sri
-					}
+			if updated, changed := vctmRawWithVCT(constructor.VCTMRaw, vctURL); changed {
+				constructor.VCTMRaw = updated
+				// Rebuild Integrity to match the rewritten bytes so
+				// vct#integrity in issued credentials still verifies
+				// against the served /type-metadata document.
+				if sri, sriErr := constructor.VCTM.SRIIntegrity(updated); sriErr == nil {
+					constructor.Integrity = sri
 				}
 			}
 		}
@@ -2506,11 +2474,10 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		// credential body's vct claim (which BuildCredentialWithSigner sets
 		// from vctm.VCT).
 		//
-		// vctIdentifier, not an inline VCTURL fallback: the two must agree, and
-		// they stopped agreeing the moment publish_new_vct could leave a local
-		// VCTM's vct deliberately empty. The old fallback assumed
-		// ResolveVCTUrls always back-fills, so it advertised the hosting URL
-		// for a scope whose credential body would carry nothing.
+		// vctIdentifier, not an inline VCTURL fallback: the two must agree.
+		// The old fallback advertised the hosting URL regardless, which is
+		// wrong for a file declaring its own vct - the credential body carries
+		// vctm.VCT, so the metadata has to name the same value.
 		resolvedVCT := constructor.vctIdentifier()
 		switch constructor.Format {
 		case "dc+sd-jwt":
