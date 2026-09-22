@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"slices"
 	"time"
 
@@ -64,6 +65,10 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 	// Validate cryptosuite
 	if !isValidCryptosuite(cryptosuite) {
 		return nil, fmt.Errorf("unsupported cryptosuite: %s", cryptosuite)
+	}
+
+	if err := validateAdditionalContexts(req.AdditionalContexts); err != nil {
+		return nil, err
 	}
 
 	// Use credential types from request (required field)
@@ -154,6 +159,36 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 	}
 
 	return reply, nil
+}
+
+// validateAdditionalContexts restricts the JSON-LD contexts a caller may ask
+// the issuer to sign with.
+//
+// Signing canonicalizes the credential to RDF, which DEREFERENCES every
+// context in it. So this field decides URLs the issuer will fetch, and the
+// caller supplies it: a scheme like file:// would read local files into the
+// resolution, and a non-absolute reference resolves against whatever base the
+// loader picks.
+//
+// http(s) and absolute only. This does not make the field safe against a
+// caller who can reach the issuer's gRPC API - such a caller can already ask
+// for arbitrary credentials to be signed, which is worse - but it keeps the
+// reachable set to ordinary web requests, which a deployment can police with
+// egress rules.
+func validateAdditionalContexts(contexts []string) error {
+	for _, raw := range contexts {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return fmt.Errorf("additional context %q is not a URL: %w", raw, err)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return fmt.Errorf("additional context %q must be an http(s) URL, got scheme %q", raw, u.Scheme)
+		}
+		if u.Host == "" {
+			return fmt.Errorf("additional context %q must be absolute", raw)
+		}
+	}
+	return nil
 }
 
 // buildVC20CredentialJSON builds the JSON-LD credential structure

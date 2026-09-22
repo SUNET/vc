@@ -2263,10 +2263,12 @@ func (c *CredentialMetadata) w3cTypeValues() [][]string {
 //   - mso_mdoc: doctype_value, see doctype.
 //   - dc+sd-jwt, the legacy vc+sd-jwt spelling, and an empty format (Format
 //     defaults to dc+sd-jwt): vct_values, see vctIdentifier.
-//   - ldp_vc / vc+ld+json / jwt_vc_json: type_values from
-//     credential_type_values - expanded IRIs, only alternatives that narrow
-//     past the base type. Not credential_types, which cannot be expanded.
-//   - anything else: ok is false.
+//   - ldp_vc / vc+ld+json: type_values from credential_type_values - expanded
+//     IRIs, only alternatives that narrow past the base type. Not
+//     credential_types, which cannot be expanded.
+//   - anything else: ok is false, jwt_vc_json included. Nothing issues it and
+//     the verifier reads a compact JWT-VC as SD-JWT, so it is advertised in
+//     issuer metadata but never requestable.
 //
 // ok=false means no constraint can be built - a nil receiver, a W3C format
 // with no configured type list, mso_mdoc_zk (below), or a missing identifier -

@@ -246,3 +246,34 @@ func TestMakeVC20_NoAdditionalContexts(t *testing.T) {
 	require.NoError(t, json.Unmarshal(reply.Credential, &cred))
 	assert.Equal(t, []any{"https://www.w3.org/ns/credentials/v2"}, cred["@context"])
 }
+
+// TestMakeVC20_RejectsUnsafeAdditionalContexts pins what the issuer will
+// dereference.
+//
+// Signing canonicalizes to RDF, which fetches every context in the credential,
+// and this field comes from the caller - so it decides URLs the issuer issues
+// requests for. Restricted to absolute http(s).
+func TestMakeVC20_RejectsUnsafeAdditionalContexts(t *testing.T) {
+	ctx := t.Context()
+	client := mockNewClient(ctx, t, "ecdsa", logger.NewSimple("test"))
+
+	for _, bad := range []string{
+		"file:///etc/passwd",
+		"ftp://example.org/ctx",
+		"/relative/context",
+		"example.org/no-scheme",
+		"https://",
+	} {
+		t.Run(bad, func(t *testing.T) {
+			_, err := client.MakeVC20(ctx, &CreateVC20Request{
+				Scope:              "diploma",
+				DocumentData:       mockCredentialSubject,
+				CredentialTypes:    []string{"VerifiableCredential"},
+				SubjectDID:         "did:example:subject",
+				Cryptosuite:        openid4vp.CryptosuiteECDSA2019,
+				AdditionalContexts: []string{bad},
+			})
+			require.Error(t, err, "%q must not reach the JSON-LD loader", bad)
+		})
+	}
+}
