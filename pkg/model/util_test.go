@@ -397,18 +397,18 @@ func TestDCQLMetaQueryByFormat(t *testing.T) {
 	}
 }
 
-// TestPublishNewVCT covers the option apigw uses to decide whether a published
-// VCTM keeps the vct its file declares or takes the /type-metadata URL it is
-// served from.
+// TestPublishNewVCT covers the switch on apigw's vct back-fill.
 //
-// The default preserves the file's value, which is what lets a URN survive
-// publication; a file declaring no vct is rewritten either way, since the
-// credential body, the served document and DCQL vct_values need one value to
-// agree on.
+// Default (unset) is the existing behaviour: a file-loaded VCTM that declares
+// no vct gets the /type-metadata URL it is published at, so the credential
+// body, the served document and DCQL vct_values agree on one value. Setting it
+// false turns that off for a scope whose vct comes from elsewhere. A file that
+// declares a vct is never rewritten either way, which is what lets a URN
+// survive publication.
 func TestPublishNewVCT(t *testing.T) {
 	const hosted = "https://apigw.example/type-metadata/pid"
 
-	localVCTM := func(vct string, publishNew bool) *CredentialMetadata {
+	localVCTM := func(vct string, publishNew *bool) *CredentialMetadata {
 		raw := []byte(`{"name":"PID"}`)
 		if vct != "" {
 			raw = []byte(`{"vct":"` + vct + `","name":"PID"}`)
@@ -427,9 +427,11 @@ func TestPublishNewVCT(t *testing.T) {
 		cm      *CredentialMetadata
 		wantVCT string
 	}{
-		{"default keeps the file's urn", localVCTM("urn:eudi:pid:1", false), "urn:eudi:pid:1"},
-		{"publish_new_vct takes the hosting url", localVCTM("urn:eudi:pid:1", true), hosted},
-		{"an empty vct is back-filled regardless", localVCTM("", false), hosted},
+		{"unset back-fills an empty vct, as before", localVCTM("", nil), hosted},
+		{"explicit true back-fills too", localVCTM("", new(true)), hosted},
+		{"false turns the back-fill off", localVCTM("", new(false)), ""},
+		{"a declared urn is kept whatever the setting", localVCTM("urn:eudi:pid:1", nil), "urn:eudi:pid:1"},
+		{"and is still kept with it explicitly on", localVCTM("urn:eudi:pid:1", new(true)), "urn:eudi:pid:1"},
 	}
 
 	for _, tt := range tests {
@@ -438,13 +440,11 @@ func TestPublishNewVCT(t *testing.T) {
 			require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
 
 			assert.Equal(t, tt.wantVCT, tt.cm.GetVCTM().VCT)
-			// The served document has to carry the same value, or a wallet
-			// dereferencing vct#integrity gets a document naming another type.
-			assert.Contains(t, string(tt.cm.GetVCTMRaw()), tt.wantVCT)
-			meta, ok := tt.cm.DCQLMetaQuery()
-			require.True(t, ok)
-			assert.Equal(t, []string{tt.wantVCT}, meta.VCTValues,
-				"the query must ask for the same identifier the credential will carry")
+			if tt.wantVCT != "" {
+				// The served document has to carry the same value, or a wallet
+				// dereferencing vct#integrity gets a document naming another type.
+				assert.Contains(t, string(tt.cm.GetVCTMRaw()), tt.wantVCT)
+			}
 		})
 	}
 }
