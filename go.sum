@@ -386,8 +386,8 @@ github.com/sirosfoundation/go-cryptoutil v0.6.0 h1:NmmHCZ/3ETuHlC1X4+0ce5QB6XI+I
 github.com/sirosfoundation/go-cryptoutil v0.6.0/go.mod h1:6JWcg/wLtALH2x6Hofa6VYX4b6XKiMNfXAVjp4yv9CA=
 github.com/sirosfoundation/go-spocp v0.1.0 h1:fH/jrSHS8vc+KfAzJmq3fE9OH69ShRgL7G1ihb9FCPs=
 github.com/sirosfoundation/go-spocp v0.1.0/go.mod h1:a6WtxG5hnsUzcqUt5iHmSMvyX4PLUPMDFK7FLoDMSMs=
-github.com/sirosfoundation/go-trust v0.20.6 h1:gO/0tDZsMMTQ/iB1AEalhaLl9MCo1rr96g+n3diigUs=
-github.com/sirosfoundation/go-trust v0.20.6/go.mod h1:Qcp+rIoXhMs1NGa6IMITrwGOn+8H24DXJfTL1aBB3v0=
+github.com/sirosfoundation/go-trust v0.20.7 h1:yamJhPSXz8LL+NTdNC7KWRUAsWODo5h9xZj4LX0DopA=
+github.com/sirosfoundation/go-trust v0.20.7/go.mod h1:KvLowBgeO851IIyEdjZR0//VhmcJ9gRLnQmcQyhKe2w=
 github.com/sirosfoundation/go-ts11client v0.0.0-20260821071625-a8d5997107d0 h1:UyoIfTiFimESFkS/nQ1g8qIWpB8Dropwl2XLzGFDxPk=
 github.com/sirosfoundation/go-ts11client v0.0.0-20260821071625-a8d5997107d0/go.mod h1:PEH6L1hSgFvbUjIjcLlp5XK7y0fg02B4WQk8tIsw2us=
 github.com/sirosfoundation/goxmldsig v1.6.1-siros1 h1:iQadRZy/iwj0E/hXlfKrEDqA94Ey1ozIdLtATKGpGH8=
