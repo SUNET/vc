@@ -2073,9 +2073,19 @@ func (c *CredentialMetadata) IsLocalMDDL() bool {
 //
 // VCTURL is a fallback, not a second identifier: ResolveVCTUrls back-fills
 // VCTM.VCT from it, so the two agree after resolution.
+//
+// Except when publish_new_vct turned that back-fill off, where an empty vct is
+// the operator's choice. Substituting VCTURL there would have DCQL query by
+// the very hosting URL they opted out of, making the option a no-op for every
+// query. Empty instead, so DCQLMetaQuery reports the scope as unconstrainable
+// and the caller refuses it rather than asking by an identifier the credential
+// will not carry.
 func (c *CredentialMetadata) vctIdentifier() string {
 	if vctm := c.GetVCTM(); vctm != nil && vctm.VCT != "" {
 		return vctm.VCT
+	}
+	if !BoolVal(c.PublishNewVCT, true) {
+		return ""
 	}
 	return c.GetVCTURL()
 }

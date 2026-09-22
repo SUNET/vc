@@ -440,6 +440,18 @@ func TestPublishNewVCT(t *testing.T) {
 			require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
 
 			assert.Equal(t, tt.wantVCT, tt.cm.GetVCTM().VCT)
+
+			// The DCQL query has to follow the same decision. VCTURL is set
+			// whatever the option says, so falling back to it here would have
+			// queried by the hosting URL the operator opted out of.
+			meta, ok := tt.cm.DCQLMetaQuery()
+			if tt.wantVCT == "" {
+				assert.False(t, ok, "an unconstrainable scope must be reported, not queried by VCTURL")
+			} else {
+				require.True(t, ok)
+				assert.Equal(t, []string{tt.wantVCT}, meta.VCTValues)
+			}
+
 			if tt.wantVCT != "" {
 				// The served document has to carry the same value, or a wallet
 				// dereferencing vct#integrity gets a document naming another type.
