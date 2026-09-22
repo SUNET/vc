@@ -2154,7 +2154,7 @@ func (c *CredentialMetadata) doctype() string {
 }
 
 // baseVCType is the compact term every W3C VC must carry, the counterpart of
-// baseVCTypeIRI on the DCQL side.
+// openid4vp.BaseVCTypeIRI on the DCQL side.
 const baseVCType = "VerifiableCredential"
 
 // W3CTypes returns the compact-term types this scope issues, always including
@@ -2179,10 +2179,6 @@ func (c *CredentialMetadata) W3CTypes() []string {
 	return append([]string{baseVCType}, c.CredentialTypes...)
 }
 
-// baseVCTypeIRI is the expanded form of the type every W3C VC carries; a query
-// constrained by it alone matches all of them.
-const baseVCTypeIRI = "https://www.w3.org/2018/credentials#VerifiableCredential"
-
 // w3cTypeValues returns the configured DCQL type_values, dropping alternatives
 // that would not narrow the request - one naming only the base type would turn
 // "cannot be built" into "asks for anything".
@@ -2190,7 +2186,7 @@ func (c *CredentialMetadata) w3cTypeValues() [][]string {
 	var out [][]string
 	for _, alternative := range c.CredentialTypeValues {
 		narrowing := slices.ContainsFunc(alternative, func(t string) bool {
-			return t != "" && t != baseVCTypeIRI
+			return t != "" && t != openid4vp.BaseVCTypeIRI
 		})
 		if narrowing {
 			out = append(out, slices.Clone(alternative))

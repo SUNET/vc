@@ -407,6 +407,10 @@ const (
 	// FormatLdpVCDCQL is the format identifier for W3C VC Data Integrity (used in DCQL).
 	// Note: This duplicates FormatLdpVC from vc20_handler.go but is needed for non-vc20 builds.
 	FormatLdpVCDCQL = "ldp_vc"
+
+	// BaseVCTypeIRI is the expanded form of the type every W3C VC carries.
+	// A type_values alternative naming only this constrains nothing.
+	BaseVCTypeIRI = "https://www.w3.org/2018/credentials#VerifiableCredential"
 	// FormatVCLDJSON is the other spelling this repo issues W3C VC Data
 	// Integrity under - see handlers_issuer.go, which routes it to issueVC20
 	// alongside ldp_vc.
@@ -595,10 +599,19 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 		// the whole constraint - so [[]] is an unconstrained request wearing
 		// a constraint's shape.
 		for i, alternative := range query.Meta.TypeValues {
-			if len(alternative) == 0 {
+			// Base-only is the same defect as empty, one step along: every
+			// W3C credential carries VerifiableCredential, so an alternative
+			// naming only it is satisfied by all of them. The config path
+			// (CredentialMetadata.w3cTypeValues) already refuses that; an
+			// API-supplied query has to be held to the same rule, or the
+			// request over-discloses without ever looking unconstrained.
+			narrowing := slices.ContainsFunc(alternative, func(t string) bool {
+				return t != "" && t != BaseVCTypeIRI
+			})
+			if !narrowing {
 				return &DCQLValidationError{
 					Field:   fmt.Sprintf("meta.type_values[%d]", i),
-					Message: "each type_values alternative must name at least one type",
+					Message: "each type_values alternative must name at least one type beyond " + BaseVCTypeIRI + ", or it matches every W3C credential",
 				}
 			}
 		}

@@ -645,36 +645,44 @@ func TestValidateCredentialQuery_VCLDJSON(t *testing.T) {
 	}))
 }
 
-// TestValidateCredentialQueryRejectsEmptyTypeAlternative pins a review finding:
-// requiring type_values to be non-empty is not enough. MatchTypeValues reads an
-// empty alternative as satisfied by any credential, and one satisfied
-// alternative answers the whole constraint - so [[]] is an unconstrained
-// request wearing a constraint's shape, and it reached this validator from
-// templates and API-supplied queries that never pass through config validation.
-func TestValidateCredentialQueryRejectsEmptyTypeAlternative(t *testing.T) {
-	base := []string{"https://www.w3.org/2018/credentials#VerifiableCredential"}
+// TestValidateCredentialQueryRejectsUnconstrainedTypes covers the alternatives
+// that look like a constraint and are not.
+//
+// MatchTypeValues reads an empty alternative as satisfied by any credential,
+// and one satisfied alternative answers the whole constraint - so [[]] is an
+// unconstrained request wearing a constraint's shape. An alternative naming
+// only VerifiableCredential is the same defect one step along: every W3C
+// credential carries it.
+//
+// CredentialMetadata.w3cTypeValues already refuses both on the config path.
+// This validator is where templates and API-supplied queries arrive, and they
+// never pass through config validation.
+func TestValidateCredentialQueryRejectsUnconstrainedTypes(t *testing.T) {
+	base := []string{BaseVCTypeIRI}
+	narrowing := []string{BaseVCTypeIRI, "https://example.org/diploma#DiplomaCredential"}
 
 	for _, format := range []string{"ldp_vc", FormatVCLDJSON, FormatJwtVCJson} {
 		t.Run(format, func(t *testing.T) {
-			err := ValidateCredentialQuery(CredentialQuery{
-				ID: "diploma", Format: format,
-				Meta: MetaQuery{TypeValues: [][]string{{}}},
-			})
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "type_values")
-
-			// A real alternative beside an empty one is still refused: one
-			// satisfied alternative answers the whole constraint.
-			err = ValidateCredentialQuery(CredentialQuery{
-				ID: "diploma", Format: format,
-				Meta: MetaQuery{TypeValues: [][]string{base, {}}},
-			})
-			require.Error(t, err)
+			refused := [][][]string{
+				{{}},              // empty alternative
+				{base},            // base type only
+				{narrowing, {}},   // one real alternative beside an empty one
+				{narrowing, base}, // one real alternative beside a base-only one
+				{{""}},            // an empty string is not a type
+			}
+			for _, typeValues := range refused {
+				err := ValidateCredentialQuery(CredentialQuery{
+					ID: "diploma", Format: format,
+					Meta: MetaQuery{TypeValues: typeValues},
+				})
+				require.Error(t, err, "%v must be refused", typeValues)
+				assert.Contains(t, err.Error(), "type_values")
+			}
 
 			assert.NoError(t, ValidateCredentialQuery(CredentialQuery{
 				ID: "diploma", Format: format,
-				Meta: MetaQuery{TypeValues: [][]string{base}},
-			}))
+				Meta: MetaQuery{TypeValues: [][]string{narrowing}},
+			}), "an alternative that actually narrows is fine")
 		})
 	}
 }

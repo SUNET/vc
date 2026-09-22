@@ -379,17 +379,17 @@ func TestDCQLMetaQueryByFormat(t *testing.T) {
 			name: "W3C is constrained by its configured type values",
 			cm: &CredentialMetadata{
 				Format:               "ldp_vc",
-				CredentialTypeValues: [][]string{{baseVCTypeIRI, "https://example.org/diploma#DiplomaCredential"}},
+				CredentialTypeValues: [][]string{{openid4vp.BaseVCTypeIRI, "https://example.org/diploma#DiplomaCredential"}},
 			},
 			wantOK:       true,
-			wantTypeVals: [][]string{{baseVCTypeIRI, "https://example.org/diploma#DiplomaCredential"}},
+			wantTypeVals: [][]string{{openid4vp.BaseVCTypeIRI, "https://example.org/diploma#DiplomaCredential"}},
 		},
 		{
 			// Base-only narrows nothing, so it is dropped and nothing remains.
 			name: "a base-only alternative is not a constraint",
 			cm: &CredentialMetadata{
 				Format:               "ldp_vc",
-				CredentialTypeValues: [][]string{{baseVCTypeIRI}},
+				CredentialTypeValues: [][]string{{openid4vp.BaseVCTypeIRI}},
 			},
 			wantOK: false,
 		},
