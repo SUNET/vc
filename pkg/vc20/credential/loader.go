@@ -2,7 +2,9 @@ package credential
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -35,25 +37,51 @@ type CachingDocumentLoader struct {
 	log      *logger.Log
 }
 
-// contextHTTPClient fetches remote JSON-LD contexts without following
-// redirects, and without waiting indefinitely.
+// contextHTTPClient fetches remote JSON-LD contexts, refusing redirects that
+// leave the public internet, and without waiting indefinitely.
 //
-// A redirect would defeat any decision made about the URL before the fetch.
-// The issuer allowlists which context URLs it may dereference
-// (issuer.jsonld_context_allowlist), and passing http.DefaultClient would let
-// an allowlisted endpoint answer 302 and send the fetch somewhere that was
-// never allowed - the classic way an allowlist on the first hop is bypassed.
+// Redirects cannot simply be refused: w3id.org exists to redirect, and the
+// Data Integrity contexts resolve through it to w3.org. But a redirect also
+// defeats any decision made about the URL before the fetch - the issuer
+// allowlists which context URLs it may dereference
+// (issuer.jsonld_context_allowlist), and an allowlisted endpoint answering 302
+// would otherwise send that fetch anywhere the issuer can reach.
 //
-// A context that redirects therefore fails to load rather than being followed.
-// The W3C base contexts are preloaded below and never fetched, so this only
-// affects contexts a deployment publishes itself, which it can serve directly.
+// So redirects are followed, but never to a private, loopback or link-local
+// address, which is where an allowlist bypass would be aiming.
 func contextHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: 10 * time.Second,
-		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
-			return fmt.Errorf("refusing to follow a redirect while loading a JSON-LD context (to %s)", req.URL)
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("too many redirects while loading a JSON-LD context")
+			}
+			if internal, addr := resolvesToInternalAddress(req.URL.Hostname()); internal {
+				return fmt.Errorf("refusing to follow a JSON-LD context redirect to an internal address (%s -> %s)", req.URL, addr)
+			}
+			return nil
 		},
 	}
+}
+
+// resolvesToInternalAddress reports whether a host resolves to any address the
+// public internet cannot reach, and which one.
+func resolvesToInternalAddress(host string) (bool, string) {
+	if host == "" {
+		return true, "empty host"
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		// Unresolvable is not reachable; let the request fail on its own terms.
+		return false, ""
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return true, ip.String()
+		}
+	}
+	return false, ""
 }
 
 // NewCachingDocumentLoader creates a new caching document loader
