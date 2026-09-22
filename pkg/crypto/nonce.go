@@ -55,9 +55,10 @@ func GenerateSecureToken(byteSize int, stringLength int) (string, error) {
 	return encoded, nil
 }
 
-// GenerateNumericCode returns a cryptographically random string of exactly
-// `digits` base-10 digits (leading zeros preserved). Intended for short
-// human-entered codes such as OpenID4VCI transaction codes (PINs).
+// GenerateNumericCode returns a cryptographically random decimal string
+// whose length equals the digits argument, with leading zeros preserved.
+// Intended for short human-entered codes such as OpenID4VCI transaction
+// codes (PINs).
 func GenerateNumericCode(digits int) (string, error) {
 	if digits <= 0 || digits > 32 {
 		return "", fmt.Errorf("digits %d must be between 1 and 32", digits)
