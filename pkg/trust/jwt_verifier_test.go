@@ -68,12 +68,7 @@ func signTestJWTWithJWK(t *testing.T, issuer, credentialType string) string {
 		"vct": credentialType,
 	})
 	pubKey := privateKey.PublicKey
-	token.Header["jwk"] = map[string]any{
-		"kty": "EC",
-		"crv": "P-256",
-		"x":   jwktest.Coord(pubKey.X, pubKey.Curve),
-		"y":   jwktest.Coord(pubKey.Y, pubKey.Curve),
-	}
+	token.Header["jwk"] = jwktest.PublicKeyJWK(&pubKey)
 
 	signedJWT, err := token.SignedString(privateKey)
 	require.NoError(t, err)

@@ -377,12 +377,7 @@ func createMockSDJWT(t *testing.T) string {
 		"iat": time.Now().Unix(),
 		"vct": "urn:credential:test",
 		"cnf": map[string]any{
-			"jwk": map[string]any{
-				"kty": "EC",
-				"crv": "P-256",
-				"x":   jwktest.Coord(key.PublicKey.X, key.PublicKey.Curve),
-				"y":   jwktest.Coord(key.PublicKey.Y, key.PublicKey.Curve),
-			},
+			"jwk": jwktest.PublicKeyJWK(&key.PublicKey),
 		},
 	})
 	signed, err := token.SignedString(key)

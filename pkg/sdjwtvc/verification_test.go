@@ -23,12 +23,7 @@ func TestParseAndVerify_ValidCredential(t *testing.T) {
 	holderPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	holderJWK := map[string]any{
-		"kty": "EC",
-		"crv": "P-256",
-		"x":   jwktest.Coord(holderPrivateKey.PublicKey.X, holderPrivateKey.PublicKey.Curve),
-		"y":   jwktest.Coord(holderPrivateKey.PublicKey.Y, holderPrivateKey.PublicKey.Curve),
-	}
+	holderJWK := jwktest.PublicKeyJWK(&holderPrivateKey.PublicKey)
 
 	testClaim := "test_claim"
 	vctm := &VCTM{
@@ -174,12 +169,7 @@ func TestParseAndVerify_WithKeyBinding(t *testing.T) {
 	holderPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	holderJWK := map[string]any{
-		"kty": "EC",
-		"crv": "P-256",
-		"x":   jwktest.Coord(holderPrivateKey.PublicKey.X, holderPrivateKey.PublicKey.Curve),
-		"y":   jwktest.Coord(holderPrivateKey.PublicKey.Y, holderPrivateKey.PublicKey.Curve),
-	}
+	holderJWK := jwktest.PublicKeyJWK(&holderPrivateKey.PublicKey)
 
 	testClaim := "test_claim"
 	vctm := &VCTM{
@@ -259,12 +249,7 @@ func TestParseAndVerify_InvalidNonce(t *testing.T) {
 	holderPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	holderJWK := map[string]any{
-		"kty": "EC",
-		"crv": "P-256",
-		"x":   jwktest.Coord(holderPrivateKey.PublicKey.X, holderPrivateKey.PublicKey.Curve),
-		"y":   jwktest.Coord(holderPrivateKey.PublicKey.Y, holderPrivateKey.PublicKey.Curve),
-	}
+	holderJWK := jwktest.PublicKeyJWK(&holderPrivateKey.PublicKey)
 
 	testClaim := "test_claim"
 	vctm := &VCTM{
@@ -629,12 +614,7 @@ func TestJWKToPublicKey_ECDSA(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create JWK map
-	jwkMap := map[string]any{
-		"kty": "EC",
-		"crv": "P-256",
-		"x":   jwktest.Coord(privateKey.PublicKey.X, privateKey.PublicKey.Curve),
-		"y":   jwktest.Coord(privateKey.PublicKey.Y, privateKey.PublicKey.Curve),
-	}
+	jwkMap := jwktest.PublicKeyJWK(&privateKey.PublicKey)
 
 	// Convert to public key
 	pubKey, err := jwkToPublicKey(jwkMap)
