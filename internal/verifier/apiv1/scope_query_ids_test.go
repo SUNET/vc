@@ -639,3 +639,40 @@ func TestDefaultTokenAllowed(t *testing.T) {
 		})
 	}
 }
+
+// TestDefaultTokenAllowedRejectsMerelyConfiguredScope covers the case the
+// table above cannot: it needs a client whose config actually carries the
+// scope, because that is the clause being tested.
+//
+// A template selected by "profile" builds one SD-JWT PID query. diploma_ldp is
+// configured in credential_metadata but the query never names it - the W3C
+// skip left it unqueried - and it survives credentialScopes as the only entry.
+// isCredentialScope says yes, because configured, and "_default" would then
+// cache the PID credential under diploma_ldp.
+//
+// Being configured decides whether a scope is VALIDATED. It is not attribution.
+func TestDefaultTokenAllowedRejectsMerelyConfiguredScope(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"diploma_ldp": {Format: openid4vp.FormatLdpVCDCQL},
+			},
+		},
+		Verifier: &model.Verifier{
+			Outbound: model.VerifierOutbound{OIDCProvider: &model.OIDCOP{Issuer: "https://verifier.example.com"}},
+		},
+	}
+	client, _ := CreateTestClientWithMock(t, cfg)
+
+	authCtx := &cache.AuthorizationContext{
+		Scopes:    []string{"openid", "profile", "diploma_ldp"},
+		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{ID: "pid"}}},
+	}
+
+	// The precondition: the old test really would have said yes here.
+	assert.True(t, client.isCredentialScope(authCtx, nil, "diploma_ldp"),
+		"the scope is configured, which is what made this attributable before")
+
+	assert.False(t, client.defaultTokenAllowed(authCtx, nil, []string{"diploma_ldp"}),
+		"a scope the query never names cannot be attributed an unlabelled credential")
+}

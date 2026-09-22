@@ -719,6 +719,19 @@ func queryIDForScopeIn(scopeQueryIDs map[string]string, scope string) string {
 	return scope
 }
 
+// scopeNamedByQuery reports whether the request's DCQL actually asks for this
+// scope: a credential query carries its id, either directly or through the
+// scope-to-query mapping.
+func scopeNamedByQuery(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string, scope string) bool {
+	if authCtx == nil || authCtx.DCQLQuery == nil {
+		return false
+	}
+	queryID := queryIDForScopeIn(scopeQueryIDs, scope)
+	return slices.ContainsFunc(authCtx.DCQLQuery.Credentials, func(cred openid4vp.CredentialQuery) bool {
+		return cred.ID == queryID
+	})
+}
+
 // defaultTokenAllowed reports whether a plain-string vp_token, which the
 // wallet keys as "_default", can be attributed to a scope at all.
 //
@@ -742,8 +755,15 @@ func (c *Client) defaultTokenAllowed(authCtx *cache.AuthorizationContext, scopeQ
 	if authCtx.DCQLQuery == nil {
 		return true
 	}
+	// Named by the query, not merely configured. isCredentialScope accepts a
+	// scope that credential_metadata configures, which is the right test for
+	// deciding whether to VALIDATE a scope - but not for attributing an
+	// unlabelled credential to it. A template selected by an unrelated scope
+	// can leave a configured-but-unrequested scope as the only entry in
+	// credentialScopes, and "_default" would then cache that template's
+	// credential under a scope the request never asked for.
 	return len(authCtx.DCQLQuery.Credentials) <= 1 &&
-		c.isCredentialScope(authCtx, scopeQueryIDs, credentialScopes[0])
+		scopeNamedByQuery(authCtx, scopeQueryIDs, credentialScopes[0])
 }
 
 func (c *Client) vpTokensForScope(scopeQueryIDs map[string]string, defaultAllowed bool, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
