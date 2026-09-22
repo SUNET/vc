@@ -2051,7 +2051,9 @@ func vctmRawWithVCT(raw []byte, vct string) ([]byte, bool) {
 		return raw, false
 	}
 	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &doc); err != nil {
+	// A JSON "null" unmarshals without error and leaves doc nil, and assigning
+	// into a nil map panics - on every issuance, since this runs there too.
+	if err := json.Unmarshal(raw, &doc); err != nil || doc == nil {
 		return raw, false
 	}
 	if existing, ok := doc["vct"]; ok {

@@ -397,6 +397,23 @@ func TestDCQLMetaQueryByFormat(t *testing.T) {
 	}
 }
 
+// TestVCTMRawWithVCTMalformed pins the refusal path. A JSON "null" unmarshals
+// without error into a nil map, and assigning into one panics - which would
+// take down issuance, not just config load, since the same helper runs there.
+func TestVCTMRawWithVCTMalformed(t *testing.T) {
+	for _, raw := range []string{"null", "[]", `"a string"`, "not json at all", ""} {
+		t.Run(raw, func(t *testing.T) {
+			got, changed := vctmRawWithVCT([]byte(raw), "https://apigw.example/type-metadata/pid")
+			assert.False(t, changed, "an unrewritable document must be refused, not rewritten")
+			assert.Equal(t, raw, string(got), "and handed back untouched")
+		})
+	}
+
+	// The same document reaching issuance must not panic either.
+	cm := &CredentialMetadata{VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}, VCTMRaw: []byte("null")}
+	assert.Equal(t, "null", string(cm.GetVCTMIssuanceRaw()))
+}
+
 // TestPublishNewVCT covers what the option does and, as importantly, what it
 // deliberately does not touch.
 //
