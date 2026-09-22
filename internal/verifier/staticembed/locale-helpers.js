@@ -20,7 +20,7 @@ export function claimsForLocale(attributes) {
     if (!attributes) return {};
     if (attributes[DEFAULT_LOCALE]) return attributes[DEFAULT_LOCALE];
 
-    const locales = Object.keys(attributes).sort();
+    const locales = Object.keys(attributes).sort((a, b) => a.localeCompare(b));
     const english = locales.find((l) => l.startsWith("en"));
     return attributes[english ?? locales[0]] ?? {};
 }
