@@ -2279,8 +2279,9 @@ const docTemplate = `{
                     "maxLength": 256
                 },
                 "tx_code": {
-                    "description": "TXCode OPTIONAL. String value containing a Transaction Code.",
-                    "type": "string"
+                    "description": "TXCode OPTIONAL. String value containing a Transaction Code as\ndefined in OpenID4VCI §6.1. Bounded here to a defensive upper limit;\nthe actual accepted length is set by the offer's tx_code metadata.",
+                    "type": "string",
+                    "maxLength": 64
                 }
             }
         },

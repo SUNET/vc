@@ -518,10 +518,23 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		case preCheck.TXCode != "" && req.TXCode == "":
 			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
 				"tx_code is required for this credential offer", 400)
-		case preCheck.TXCode != "" &&
-			subtle.ConstantTimeCompare([]byte(preCheck.TXCode), []byte(req.TXCode)) != 1:
-			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-				"invalid tx_code", 400)
+		case preCheck.TXCode != "":
+			// Atomically debit the per-code PIN attempt budget before the
+			// constant-time compare so distributed guesses cannot exceed
+			// MaxTXCodeAttempts even when spread across many client IPs.
+			updated, attemptErr := c.cacheService.AuthContext.ConsumeTXCodeAttempt(ctx, code)
+			if attemptErr != nil {
+				if errors.Is(attemptErr, cache.ErrTXCodeAttemptsExceeded) {
+					return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+						"invalid tx_code", 400)
+				}
+				return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
+					"Authorization code is invalid or has already been used", 400, attemptErr)
+			}
+			if subtle.ConstantTimeCompare([]byte(updated.TXCode), []byte(req.TXCode)) != 1 {
+				return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+					"invalid tx_code", 400)
+			}
 		}
 	}
 

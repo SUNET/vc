@@ -1179,7 +1179,11 @@ definitions:
         maxLength: 256
         type: string
       tx_code:
-        description: TXCode OPTIONAL. String value containing a Transaction Code.
+        description: |-
+          TXCode OPTIONAL. String value containing a Transaction Code as
+          defined in OpenID4VCI §6.1. Bounded here to a defensive upper limit;
+          the actual accepted length is set by the offer's tx_code metadata.
+        maxLength: 64
         type: string
     required:
     - grant_type

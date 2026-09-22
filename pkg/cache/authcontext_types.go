@@ -27,6 +27,12 @@ const (
 	// redeem a single pre-authorized code. This prevents unbounded growth of
 	// the RedeemedBy array and child sessions if a code leaks.
 	MaxPreAuthRedeemers = 10
+
+	// MaxTXCodeAttempts caps the number of transaction-code (PIN) attempts
+	// per pre-authorized code. Once reached, the code is forfeited so an
+	// attacker who obtains the code cannot brute-force the PIN by
+	// distributing guesses across IPs (OID4VCI §6.3).
+	MaxTXCodeAttempts = 5
 )
 
 // Token represents an access token with expiration
@@ -74,6 +80,10 @@ type AuthorizationContext struct {
 	// token endpoint for a pre-authorized credential offer. Empty when the
 	// offer does not require a PIN.
 	TXCode string `json:"tx_code,omitempty" bson:"tx_code,omitempty" validate:"omitempty,max=32,printascii"`
+
+	// TXCodeAttempts counts the number of tx_code (PIN) attempts consumed
+	// for this pre-authorized code. Bounded by MaxTXCodeAttempts.
+	TXCodeAttempts int `json:"tx_code_attempts,omitempty" bson:"tx_code_attempts,omitempty"`
 
 	// Token fields
 	Token       *Token `json:"token,omitempty" bson:"token,omitempty"`

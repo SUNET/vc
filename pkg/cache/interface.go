@@ -43,6 +43,13 @@ type AuthContextStore interface {
 	// the same client attempts to redeem the code twice.
 	RedeemPreAuthorizedCode(ctx context.Context, code, dpopThumbprint string) (*AuthorizationContext, error)
 
+	// ConsumeTXCodeAttempt atomically records a tx_code (PIN) attempt against
+	// a pre-authorized code and returns the updated context. If the code has
+	// already reached MaxTXCodeAttempts, the code is forfeited and
+	// ErrTXCodeAttemptsExceeded is returned so callers can reject further
+	// guesses without leaking whether the PIN was correct.
+	ConsumeTXCodeAttempt(ctx context.Context, code string) (*AuthorizationContext, error)
+
 	// MarkCodeAsForfeited marks an authorization code as forfeited by session ID.
 	MarkCodeAsForfeited(ctx context.Context, id string) error
 

@@ -156,3 +156,39 @@ func TestOAuthToken_PreAuth_TXCodeUnexpectedRejected(t *testing.T) {
 	require.ErrorAs(t, err, &oauthErr)
 	assert.Equal(t, oauth2.ErrCodeInvalidRequest, oauthErr.ErrorCode)
 }
+
+func TestOAuthToken_PreAuth_TXCodeAttemptsLockout(t *testing.T) {
+	client, code := newTokenTestClient(t, "123456")
+
+	for range apigwcache.MaxTXCodeAttempts {
+		reply, err := client.OAuthToken(t.Context(), &openid4vci.TokenRequest{
+			GrantType:         openid4vci.GrantTypePreAuthorizedCode,
+			PreAuthorizedCode: code,
+			TXCode:            "999999",
+		})
+		require.Error(t, err)
+		assert.Nil(t, reply)
+	}
+
+	stored, getErr := client.cacheService.AuthContext.Get(t.Context(), &apigwcache.AuthorizationContext{Code: code})
+	require.NoError(t, getErr)
+	assert.Equal(t, apigwcache.MaxTXCodeAttempts, stored.TXCodeAttempts)
+	assert.False(t, stored.Forfeited, "code must not be forfeited until the next attempt trips the cap")
+
+	// The next attempt — even with the correct PIN — is rejected and forfeits the code.
+	reply, err := client.OAuthToken(t.Context(), &openid4vci.TokenRequest{
+		GrantType:         openid4vci.GrantTypePreAuthorizedCode,
+		PreAuthorizedCode: code,
+		TXCode:            "123456",
+	})
+	require.Error(t, err)
+	assert.Nil(t, reply)
+
+	var oauthErr *oauth2.OAuthError
+	require.ErrorAs(t, err, &oauthErr)
+	assert.Equal(t, oauth2.ErrCodeInvalidGrant, oauthErr.ErrorCode)
+
+	stored, getErr = client.cacheService.AuthContext.Get(t.Context(), &apigwcache.AuthorizationContext{Code: code})
+	require.NoError(t, getErr)
+	assert.True(t, stored.Forfeited, "code must be forfeited once the attempt budget is exhausted")
+}
