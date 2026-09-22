@@ -113,6 +113,7 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 	// the verifier refuses to pretend an unbound credential satisfies a request
 	// that asked for binding.
 	requestedTypes := [][]string{{openid4vp.BaseVCTypeIRI, "https://example.org/degree#UniversityDegreeCredential"}}
+	var requestedMeta openid4vp.MetaQuery
 	saveSession := func(t *testing.T, holderBinding *bool) {
 		t.Helper()
 		require.NoError(t, client.cacheService.AuthContext.Save(ctx, &cache.AuthorizationContext{
@@ -125,7 +126,7 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
 				ID:                                scope,
 				Format:                            openid4vp.FormatLdpVCDCQL,
-				Meta:                              openid4vp.MetaQuery{TypeValues: requestedTypes},
+				Meta:                              metaFor(requestedTypes, requestedMeta),
 				RequireCryptographicHolderBinding: holderBinding,
 			}}},
 		}))
@@ -239,4 +240,24 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 	_, err = client.VerificationDirectPost(ctx, &VerificationDirectPostRequest{Response: string(encrypted)})
 	require.Error(t, err, "a credential of the wrong type must not answer the scope")
 	assert.Contains(t, err.Error(), "requested types")
+
+	// A W3C query carrying no type_values constrains no types. Template-built
+	// queries never pass through ValidateCredentialQuery, so one can arrive
+	// like this - here with a vct_values meta that is meaningless for a W3C
+	// format - and accepting it would let the wallet pick any W3C credential.
+	requestedTypes = nil
+	requestedMeta = openid4vp.MetaQuery{VCTValues: []string{"urn:not:a:w3c:constraint"}}
+	saveSession(t, nil)
+	_, err = client.VerificationDirectPost(ctx, &VerificationDirectPostRequest{Response: string(encrypted)})
+	require.Error(t, err, "an unconstrained W3C query must not accept whatever arrives")
+	assert.Contains(t, err.Error(), "constrains no types")
+}
+
+// metaFor builds the request's meta: the type constraint when there is one,
+// otherwise whatever the caller wants to stand in for a mis-built query.
+func metaFor(typeValues [][]string, fallback openid4vp.MetaQuery) openid4vp.MetaQuery {
+	if len(typeValues) > 0 {
+		return openid4vp.MetaQuery{TypeValues: typeValues}
+	}
+	return fallback
 }
