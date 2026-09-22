@@ -500,3 +500,25 @@ func TestUncoveredScopesIgnoresNameOnlyMatches(t *testing.T) {
 	assert.Empty(t, client.uncoveredScopes(t.Context(), dcql, []string{"ehic"}))
 	assert.Equal(t, map[string]string{"ehic": "pid"}, client.ScopeQueryIDs(t.Context(), dcql, []string{"ehic"}))
 }
+
+// TestQueryIDForScopeIn pins the resolution the ZK path and the collision
+// guard share: the scope's query id when the two differ, the scope otherwise.
+//
+// The ZK mdoc path used to match credential queries by SCOPE, so a
+// template-built request (query "eudi_pid", scope "pid") found none and
+// verified against an empty zkMeta - failing for want of a zk_system_type
+// that was in the query all along.
+func TestQueryIDForScopeIn(t *testing.T) {
+	authCtx := &cache.AuthorizationContext{
+		Scopes:        []string{"pid", "ehic"},
+		ScopeQueryIDs: map[string]string{"pid": "eudi_pid"},
+	}
+
+	assert.Equal(t, "eudi_pid", queryIDForScopeIn(authCtx, "pid"),
+		"a mapped scope resolves to its query id")
+	assert.Equal(t, "ehic", queryIDForScopeIn(authCtx, "ehic"),
+		"an unmapped scope is its own key - only differing pairs are persisted")
+
+	assert.Equal(t, "nosuch", queryIDForScopeIn(&cache.AuthorizationContext{}, "nosuch"),
+		"a session with no mapping at all still resolves")
+}

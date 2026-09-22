@@ -175,6 +175,22 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		c.log.Error(nil, "no requested scope corresponds to a requested credential", "scopes", authCtx.Scopes)
 		return nil, fmt.Errorf("no requested scope corresponds to a requested credential")
 	}
+	// Two scopes must not resolve to one vp_token key. resolveScopeQueries
+	// refuses to build such a mapping, but a session cached before it existed
+	// reaches here with only its persisted pairs - and a scope that IS a query
+	// id resolves to itself, so it can collide with another scope mapped onto
+	// it. Both would then read the same credential and validate it twice,
+	// under each scope's rules.
+	claimedBy := make(map[string]string, len(credentialScopes))
+	for _, scope := range credentialScopes {
+		key := queryIDForScopeIn(authCtx, scope)
+		if owner, taken := claimedBy[key]; taken {
+			c.log.Error(nil, "two scopes resolve to the same DCQL query id", "query_id", key, "scopes", []string{owner, scope})
+			return nil, fmt.Errorf("scopes %q and %q both resolve to DCQL query id %q; the response cannot be attributed", owner, scope, key)
+		}
+		claimedBy[key] = scope
+	}
+
 	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(credentialScopes))
 
 	for _, scope := range credentialScopes {
@@ -348,8 +364,14 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				}
 			}
 			if dcqlQuery != nil {
+				// By the scope's QUERY ID, not the scope: a template names its
+				// queries whatever its author chose, so matching on the scope
+				// found nothing for a template-built request and left zkMeta
+				// empty - the ZK verification then failed for want of a
+				// zk_system_type that was in the query all along.
+				queryID := queryIDForScopeIn(authCtx, scope)
 				for _, cq := range dcqlQuery.Credentials {
-					if cq.ID == scope && openid4vp.IsMdocZkFormat(cq.Format) {
+					if cq.ID == queryID && openid4vp.IsMdocZkFormat(cq.Format) {
 						zkMeta = cq.Meta
 						for _, claim := range cq.Claims {
 							if len(claim.Path) == 0 || claim.Path[len(claim.Path)-1] == nil {
@@ -678,6 +700,18 @@ func (c *Client) isCredentialScope(authCtx *cache.AuthorizationContext, scope st
 //   - "_default", for a wallet that sent a plain string. Single-scope requests
 //     only: otherwise one credential would answer every scope, carrying the
 //     others' validations.
+//
+// queryIDForScopeIn returns the DCQL credential query id that stands for scope
+// in this session, which is the scope itself unless ScopeQueryIDs says
+// otherwise. Only differing pairs are persisted, so an absent entry means the
+// two already agree.
+func queryIDForScopeIn(authCtx *cache.AuthorizationContext, scope string) string {
+	if queryID, mapped := authCtx.ScopeQueryIDs[scope]; mapped {
+		return queryID
+	}
+	return scope
+}
+
 func (c *Client) vpTokensForScope(authCtx *cache.AuthorizationContext, credentialScopes []string, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
 	if tokens, ok := vpResponse.VPToken[scope]; ok && len(tokens) > 0 {
 		return tokens, nil
