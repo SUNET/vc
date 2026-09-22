@@ -30,3 +30,23 @@ func TestCOSEKeyCoordinatesAreFixedWidth(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, full.X, 32)
 }
+
+// TestECDHSharedSecretIsFixedWidth pins the ECDH Z conversion. Per SEC1 2.3.5
+// and RFC 5903 the shared secret is the fixed-length x-coordinate, and ISO
+// 18013-5 9.1.1.5 derives SKReader/SKDevice from it with HKDF.
+//
+// big.Int.Bytes() drops leading zeros, so for roughly 1 session in 125 this
+// side fed HKDF 31 bytes where a conformant peer fed it 32 - different session
+// keys, and a session that fails to decrypt with nothing obviously wrong.
+func TestECDHSharedSecretIsFixedWidth(t *testing.T) {
+	// A tiny x is the same shape as an unlucky real one.
+	assert.Len(t, ecdhSharedSecret(elliptic.P256(), big.NewInt(1)), 32)
+	assert.Len(t, ecdhSharedSecret(elliptic.P384(), big.NewInt(1)), 48)
+
+	// A full-width coordinate is unchanged.
+	full := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(1))
+	assert.Len(t, ecdhSharedSecret(elliptic.P256(), full), 32)
+
+	// The padding is on the left: the value must survive a round trip.
+	assert.Equal(t, big.NewInt(1), new(big.Int).SetBytes(ecdhSharedSecret(elliptic.P256(), big.NewInt(1))))
+}
