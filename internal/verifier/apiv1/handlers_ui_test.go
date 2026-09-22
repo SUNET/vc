@@ -1333,3 +1333,33 @@ func TestUIMetadataPresetDropsUnconstrainableCredential(t *testing.T) {
 	assert.Contains(t, reply.Credentials, "pid")
 	assert.NotContains(t, reply.Credentials, "diploma_ldp")
 }
+
+// TestUIMetadataRejectsEmptyCredentialEntry pins the nil guard on the picker
+// loop. credential_metadata can hold a nil value for a present key, and Format
+// is a direct field read rather than one of the nil-safe accessors, so the
+// whole UI panicked on a config that merely parses.
+//
+// An error, not a skip: the preset path refuses a dangling scope the same way,
+// and a malformed entry is not the same as a credential that legitimately has
+// no expressible constraint - see
+// TestUIMetadataPresetDropsUnconstrainableCredential.
+func TestUIMetadataRejectsEmptyCredentialEntry(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"broken": nil,
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	var reply *UIMetadataReply
+	var err error
+	require.NotPanics(t, func() { reply, err = client.UIMetadata(t.Context()) })
+	require.Error(t, err)
+	assert.Nil(t, reply)
+	assert.Contains(t, err.Error(), "broken")
+}

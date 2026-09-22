@@ -115,6 +115,18 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 	}
 
 	for scope, constructor := range c.cfg.Common.CredentialMetadata {
+		// credential_metadata can hold a nil value for a present key - an
+		// entry written with no fields - and Format is a direct field read,
+		// not one of the nil-safe accessors, so this panicked on a config
+		// that merely parses.
+		//
+		// An error rather than a skip, unlike the unconstrainable case below:
+		// the preset path refuses a dangling scope the same way, and a
+		// malformed entry is a config the operator has to fix, not a
+		// credential this verifier happens to be unable to ask for.
+		if constructor == nil {
+			return nil, fmt.Errorf("credential_metadata entry %q is empty", scope)
+		}
 		info := &UICredentialInfo{
 			Format:     constructor.Format,
 			Attributes: constructor.GetAttributes(),
