@@ -73,3 +73,23 @@ describe("dcqlMetaFor", () => {
         });
     }
 });
+
+describe("dcqlMetaFor refuses an empty constraint in every format", () => {
+    // DCQL reads an empty doctype_value or vct_values the same way it reads an
+    // empty type_values: as no constraint, matching every credential.
+    it("refuses an mdoc with no doctype", () => {
+        for (const attrs of [{ format: "mso_mdoc" }, { format: "mso_mdoc", vct: "" }]) {
+            const { meta, error } = dcqlMetaFor(attrs);
+            assert.equal(meta, undefined);
+            assert.match(error, /no doctype/);
+        }
+    });
+
+    it("refuses an SD-JWT with no vct", () => {
+        for (const attrs of [{ format: "dc+sd-jwt" }, { format: "dc+sd-jwt", vct: "", vct_values: [] }]) {
+            const { meta, error } = dcqlMetaFor(attrs);
+            assert.equal(meta, undefined);
+            assert.match(error, /no vct/);
+        }
+    });
+});

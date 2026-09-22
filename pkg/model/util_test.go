@@ -518,7 +518,8 @@ func TestReplaceVCT(t *testing.T) {
 }
 
 // TestW3CTypes covers the issuance side: the compact-term list the issuer
-// metadata advertises and issueVC20 mints from.
+// metadata advertises and issueVC20 mints from, whether it reads them back
+// from that metadata or falls back to this directly.
 //
 // A verifier reads CredentialTypeValues instead. The asymmetry is deliberate:
 // the representations differ (compact terms against fully expanded IRIs, not

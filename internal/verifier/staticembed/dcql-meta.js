@@ -52,7 +52,13 @@ function narrowingAlternatives(typeValues) {
  * @returns {{ meta: object, error?: undefined } | { meta?: undefined, error: string }}
  */
 export function dcqlMetaFor(attrs) {
+    // Every branch refuses an empty constraint rather than sending one: DCQL
+    // reads an empty doctype_value, vct_values or type_values as no constraint
+    // at all, so the request would match every credential of that format.
     if (attrs.format === "mso_mdoc") {
+        if (!attrs.vct) {
+            return { error: "Selected credential has no doctype to request by" };
+        }
         return { meta: { doctype_value: attrs.vct } };
     }
 
@@ -64,6 +70,10 @@ export function dcqlMetaFor(attrs) {
         return { meta: { type_values: typeValues } };
     }
 
-    const vctValues = attrs.vct_values?.length ? attrs.vct_values : [attrs.vct];
+    const vctValues = (attrs.vct_values?.length ? attrs.vct_values : [attrs.vct])
+        .filter((v) => v);
+    if (!vctValues.length) {
+        return { error: "Selected credential has no vct to request by" };
+    }
     return { meta: { vct_values: vctValues } };
 }
