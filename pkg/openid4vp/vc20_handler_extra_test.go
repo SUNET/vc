@@ -70,17 +70,26 @@ func TestExpandedTypesDropsRelativeIRIs(t *testing.T) {
 // discards the presentation wrapper and its proof, so the binding cannot be
 // checked afterwards. Refuse plainly rather than report a presentation as a
 // bare credential.
-func TestExpandedPresentationRefusedWhenBindingRequired(t *testing.T) {
-	h, err := NewVC20Handler(
-		WithVC20StaticKey(nil),
-		WithVC20PresentationBinding("nonce", "verifier"),
-	)
+func TestExpandedPresentationRefused(t *testing.T) {
+	// Both postures: the credential bytes cannot be isolated from the wrapper
+	// either way, so binding is not what decides this.
+	for name, h := range map[string]*VC20Handler{
+		"holder binding required":  mustHandler(t, WithVC20StaticKey(nil), WithVC20PresentationBinding("nonce", "verifier")),
+		"holder binding opted out": mustHandler(t, WithVC20StaticKey(nil)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			expandedVP := `[{"@type":["https://www.w3.org/2018/credentials#VerifiablePresentation"],
+			  "https://www.w3.org/2018/credentials#verifiableCredential":[{"@type":["https://www.w3.org/2018/credentials#VerifiableCredential"]}]}]`
+			_, err := h.VerifyAndExtract(t.Context(), expandedVP)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "expanded-form presentations")
+		})
+	}
+}
+
+func mustHandler(t *testing.T, opts ...VC20HandlerOption) *VC20Handler {
+	t.Helper()
+	h, err := NewVC20Handler(opts...)
 	require.NoError(t, err)
-
-	expandedVP := `[{"@type":["https://www.w3.org/2018/credentials#VerifiablePresentation"],
-	  "https://www.w3.org/2018/credentials#verifiableCredential":[{"@type":["https://www.w3.org/2018/credentials#VerifiableCredential"]}]}]`
-
-	_, err = h.VerifyAndExtract(t.Context(), expandedVP)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "expanded-form presentations")
+	return h
 }

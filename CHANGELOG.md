@@ -4,6 +4,12 @@
 
 ### Breaking Changes
 
+- **The Docker image no longer ships `/metadata`**: credential schemas (VCTM and MDDL files) are not copied into either runtime stage. A deployment whose `credential_metadata` points at `/metadata/...` and relies on the baked-in copy will fail at startup with `failed to read VCTM file /metadata/...`.
+
+  **Migration:** supply the documents instead of depending on the image — mount them (`docker-compose.yaml` already bind-mounts `./metadata/:/metadata/:ro`, so the compose stack is unaffected), or resolve them from a credential registry with `common.credential_registry` and per-scope `vct` / `doctype` rather than `vctm_file_path` / `mddl_file_path`.
+
+  The files remain in the repository as fixtures; they are simply no longer part of the image.
+
 - **Configuration Refactoring**: Migrated to centralized `key_config` using `pki.KeyConfig` across all services. All signing key configurations now use the unified PKI package structure. Existing configurations will fail validation without these updates.
   
   **Migration:** Update your configuration files with the new `key_config` structure:

@@ -218,16 +218,21 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		if err2 := json.Unmarshal(credBytes, &expanded); err2 != nil {
 			return nil, fmt.Errorf("failed to parse credential JSON: %w (also tried array: %v)", err, err2)
 		}
-		// Find the credential node in the expanded format for result extraction
-		// Keep original bytes for vc20 library verification
+		// An expanded presentation cannot be verified in this form, whatever
+		// the holder-binding setting.
 		//
-		// This DISCARDS any presentation wrapper and its proof, so a holder
-		// binding cannot be checked afterwards - the credential node alone
-		// looks identical to a bare credential. Refuse rather than report it
-		// as "not a presentation", which would be misleading for a response
-		// that really is one.
-		if h.requireHolderBinding && expandedContainsPresentation(expanded) {
-			return nil, errors.New("expanded-form presentations are not supported when holder binding is required; send the compacted form")
+		// extractCredentialFromExpanded narrows credMap to the credential
+		// node, but credBytes stays the WHOLE document - deliberately, since
+		// the vc20 suites verify the bytes they were given. For a presentation
+		// that means the issuer's proof would be checked against the VP
+		// wrapper rather than the credential, and the holder's proof is
+		// discarded along with the wrapper.
+		//
+		// Unconditional, because the isolation problem is not about binding:
+		// gating it on requireHolderBinding let an expanded VP through as a
+		// bare credential whenever a query opted out.
+		if expandedContainsPresentation(expanded) {
+			return nil, errors.New("expanded-form presentations are not supported; send the compacted form")
 		}
 		credMap, err = h.extractCredentialFromExpanded(expanded)
 		if err != nil {
