@@ -508,6 +508,21 @@ func TestAuthScopesSelfReference(t *testing.T) {
 	}
 }
 
+func TestExternalAPIScope_PreAuthRejected(t *testing.T) {
+	validate, err := NewValidator()
+	require.NoError(t, err)
+
+	scope := model.ExternalAPIScope{
+		Remote:       "ladok",
+		AuthProvider: model.AuthProviderPreAuth,
+	}
+
+	err = validate.Struct(scope)
+	require.Error(t, err, "external_api scopes must not accept preauth (no external preauth issuance path)")
+	assert.Contains(t, err.Error(), "auth_provider")
+	assert.Contains(t, err.Error(), "oneof")
+}
+
 func TestImagePNGValidator(t *testing.T) {
 	validate, err := NewValidator()
 	require.NoError(t, err)

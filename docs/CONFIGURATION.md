@@ -488,11 +488,11 @@ The data comes directly from the SAML attributes or OIDC claims.
 
 > **Path:** `.apigw.data_sources.external_api.scopes.<credential scope>`
 
-| Field               | Type     | Description                                                                                                                             | Example | Default | Required |
-| ------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `remote`            | `string` | Name of a remote defined in Remotes                                                                                                     | -       | -       | Yes      |
-| `auth_provider`     | `string` | Auth provider to identify the user (saml, oidc, or preauth). Use preauth to restrict issuance to pre-authorized credential offers only. | -       | -       | Yes      |
-| `attribute_mapping` | `object` | How to map API response data to credential claims                                                                                       | -       | -       | No       |
+| Field               | Type     | Description                                       | Example | Default | Required |
+| ------------------- | -------- | ------------------------------------------------- | ------- | ------- | -------- |
+| `remote`            | `string` | Name of a remote defined in Remotes               | -       | -       | Yes      |
+| `auth_provider`     | `string` | Auth provider to identify the user (saml or oidc) | -       | -       | Yes      |
+| `attribute_mapping` | `object` | How to map API response data to credential claims | -       | -       | No       |
 
 ### `attribute_mapping` entry
 

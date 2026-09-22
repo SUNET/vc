@@ -1162,6 +1162,10 @@
                 },
                 "credential_offer_url": {
                     "type": "string"
+                },
+                "tx_code": {
+                    "description": "TXCode is the transaction code (PIN) the wallet must present at the\ntoken endpoint. Only set when apigw.auth_providers.preauth.enable_pin\nis true; must be delivered to the end user out-of-band.",
+                    "type": "string"
                 }
             }
         },
@@ -1861,6 +1865,25 @@
                 "authorization": {
                     "type": "string"
                 },
+                "bbs_commitment": {
+                    "description": "BBSCommitment OPTIONAL. Base64url-encoded `commitment_with_proof`\nfor a blind BBS credential.\n\nUnlike the mdoc and SD-JWT paths, a BBS credential is signed over a\ncommitment the WALLET produces: it commits to messages the issuer\nnever sees, and to the public keys of its device-held key binding\nkeys, together with proof it actually holds them. So the wallet\nparticipates at issuance and an issuer cannot add BBS afterwards.\n\nThis needs no extra round-trip. The commitment challenge is computed\nwallet-locally by Fiat-Shamir with no issuer nonce, so the finished\ncommitment simply rides alongside the key proof. Freshness still\ncomes from the c_nonce-bound key proof; a commitment proof\ndemonstrates knowledge, not recency, and must not be relied on for\nthe latter.",
+                    "type": "string"
+                },
+                "bbs_committed_claims": {
+                    "description": "BBSCommittedClaims OPTIONAL. RFC 6901 pointers naming the claims the\nholder committed to, in message order.\n\nThe issuer needs these and cannot derive them. It never sees the\nvalues — that is what blind issuance means — but it must still place\nthose claims in the credential's claim map, and it cannot name what\nit cannot see. The count is checked against the commitment rather\nthan taken on trust; a credential whose header described a different\nmessage vector than the one being signed would verify against\nnothing, with the failure pointing nowhere.\n\nMeaningful only alongside BBSCommitment, and rejected without it.\nEmpty alongside one is legitimate rather than a mistake: a commitment\ncan carry key binding keys and no holder claims at all, which is what\na wallet binding a credential to a device key without hiding any of\nits own values sends.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "bbs_key_binding": {
+                    "description": "BBSKeyBinding OPTIONAL. Whether the commitment carries key binding\nkeys. Absent means it does not.\n\nThis selects the message layout the credential is signed under, and a\nverifier reads it back out of the header, so the two ends must agree.\nIt is on the wire because the issuer cannot see inside the commitment\nwithout the wallet saying so - but it is not taken on trust: the\nnative signer checks the claim against the commitment it was given\nand refuses to sign a mismatch. A wallet that lies here gets a failed\nissuance, not a credential bound to nothing.",
+                    "type": "boolean"
+                },
+                "bbs_suite": {
+                    "description": "BBSSuite REQUIRED with BBSCommitment. Which cipher suite the\ncommitment was built under: \"plain\" or \"schnorr\".\n\nThe suite selects the domain separation everything is computed under\n- the api_id, and so generator derivation and every hash-to-scalar -\nso holder and issuer must agree or the commitment verifies against\nnothing. Carried explicitly, and required rather than defaulted,\nbecause a wrong guess is indistinguishable from a corrupt commitment,\na wrong issuer key, or a tampered proof: the request fails either\nway, but only this way does the error say what to fix.\n\nA different axis from BBSKeyBinding despite the similar name. The\nsuite picks the domain separation; key binding picks the message\nlayout a verifier reads under. \"schnorr\" with no key binding keys is\nthe ordinary unbound issuance, not a contradiction - which is why\nthis cannot be derived from BBSKeyBinding.",
+                    "type": "string"
+                },
                 "credential_configuration_id": {
                     "description": "CredentialConfigurationID REQUIRED if a credential_identifiers parameter was not returned from\nthe Token Response as part of the authorization_details parameter. It MUST NOT be used otherwise.\nString that uniquely identifies one of the keys in the name/value pairs stored in the\ncredential_configurations_supported Credential Issuer metadata. When this parameter is used,\nthe credential_identifier MUST NOT be present.",
                     "type": "string"
@@ -1890,7 +1913,7 @@
                     ]
                 },
                 "proofs": {
-                    "description": "Proofs OPTIONAL. Object providing one or more proof of possessions of the cryptographic key material\nto which the issued Credential instances will be bound to. The proofs parameter contains exactly one\nparameter named as the proof type in Appendix F, the value set for this parameter is a non-empty array\ncontaining parameters as defined by the corresponding proof type.",
+                    "description": "Proofs OPTIONAL. Object providing one or more proof of possessions of the cryptographic key material\nto which the issued Credential instances will be bound to. The proofs parameter contains exactly one\nparameter named as the proof type in Appendix F, the value set for this parameter is a non-empty array\ncontaining parameters as defined by the corresponding proof type.\n\"Exactly one proof type\" is enforced in Validate() below, not via a\nstruct tag: the go-playground/validator custom validation function\nregistered for this used to be named \"single_proof_type\", but it was\nnever actually being invoked here (confirmed live with a canary panic\nthat never fired) for reasons not tracked down within the time spent\ninvestigating -- moving the check to Validate(), which already runs\nreliably for this request, sidesteps whatever is wrong with the\nstruct-tag path rather than leaving proof-type-count unchecked.",
                     "allOf": [
                         {
                             "$ref": "#/definitions/openid4vci.Proofs"
@@ -2018,6 +2041,14 @@
                     "items": {
                         "$ref": "#/definitions/openid4vci.AuthorizationDetailsParameter"
                     }
+                },
+                "client_assertion": {
+                    "type": "string",
+                    "maxLength": 8192
+                },
+                "client_assertion_type": {
+                    "type": "string",
+                    "maxLength": 256
                 },
                 "client_id": {
                     "type": "string"
@@ -2160,8 +2191,11 @@
             "type": "object",
             "properties": {
                 "attestation": {
-                    "description": "Attestation contains a single JWT representing a key attestation\nas defined in Appendix D.1",
-                    "type": "string"
+                    "description": "Attestation contains an array of JWTs representing key attestations\nas defined in Appendix D.1. Confirmed as an array (not a bare string)\nagainst the EUDI reference wallet's pinned eudi-lib-jvm-openid4vci-kt\n(lpidproto PLAN.md workstream 7): it sends \"attestation\" with the same\narray shape as \"jwt\", which this field previously rejected with a JSON\nunmarshal error.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "di_vp": {
                     "description": "DIVP contains an array of W3C Verifiable Presentations\nsigned using Data Integrity Proof as defined in Appendix F.2",
@@ -2214,11 +2248,12 @@
                     "type": "string"
                 },
                 "grant_type": {
-                    "description": "GrantType REQUIRED. \"authorization_code\" or \"urn:ietf:params:oauth:grant-type:pre-authorized_code\".",
+                    "description": "GrantType REQUIRED. \"authorization_code\", \"urn:ietf:params:oauth:grant-type:pre-authorized_code\", or \"refresh_token\".",
                     "type": "string",
                     "enum": [
                         "authorization_code",
-                        "urn:ietf:params:oauth:grant-type:pre-authorized_code"
+                        "urn:ietf:params:oauth:grant-type:pre-authorized_code",
+                        "refresh_token"
                     ]
                 },
                 "pre-authorized_code": {
@@ -2229,6 +2264,11 @@
                 "redirect_uri": {
                     "description": "RedirectURI REQUIRED for authorization_code grant, if the \"redirect_uri\" parameter was included in the authorization request.",
                     "type": "string"
+                },
+                "refresh_token": {
+                    "description": "RefreshToken REQUIRED for refresh_token grant. The refresh token previously issued to the client.",
+                    "type": "string",
+                    "maxLength": 256
                 },
                 "tx_code": {
                     "description": "TXCode OPTIONAL. String value containing a Transaction Code.",
@@ -2265,6 +2305,14 @@
                 },
                 "expires_in": {
                     "description": "ExpiresIn RECOMMENDED.  The lifetime in seconds of the access token.  For example, the value \"3600\" denotes that the access token will expire in one hour from the time the response was generated. If omitted, the authorization server SHOULD provide the expiration time via other means or document the default value.",
+                    "type": "integer"
+                },
+                "refresh_token": {
+                    "description": "RefreshToken OPTIONAL. A refresh token bound to the DPoP key, allowing the client to obtain\nfresh access tokens for credential re-issuance without full re-authentication.",
+                    "type": "string"
+                },
+                "refresh_token_expires_in": {
+                    "description": "RefreshTokenExpiresIn OPTIONAL. Lifetime in seconds of the refresh token.",
                     "type": "integer"
                 },
                 "scope": {

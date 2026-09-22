@@ -179,10 +179,8 @@ type ExternalAPIScope struct {
 	// Remote is the name of a remote defined in Remotes
 	Remote string `yaml:"remote" validate:"required"`
 
-	// AuthProvider is the auth provider to identify the user (saml, oidc, or
-	// preauth). Use preauth to restrict issuance to pre-authorized credential
-	// offers only.
-	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=saml oidc preauth"`
+	// AuthProvider is the auth provider to identify the user (saml or oidc)
+	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=saml oidc"`
 
 	// AttributeMapping defines how to map API response data to credential claims
 	AttributeMapping AttributeMapping `yaml:"attribute_mapping,omitempty" doc_key:"attribute"`
