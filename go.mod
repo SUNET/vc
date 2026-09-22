@@ -11,7 +11,7 @@ require (
 	github.com/chromedp/cdproto v0.0.0-20260719223732-95f6af754cfe
 	github.com/chromedp/chromedp v0.16.0
 	github.com/coreos/go-oidc/v3 v3.21.0
-	github.com/creasty/defaults v1.8.0
+	github.com/creasty/defaults v1.11.0
 	github.com/crewjam/saml v0.5.1
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/dustin/go-broadcast v0.0.0-20211018055107-71439988bd91
