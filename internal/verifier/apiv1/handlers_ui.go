@@ -106,6 +106,20 @@ type UIMetadataReply struct {
 	DCAPIAutoAttempt bool `json:"dc_api_auto_attempt"`
 }
 
+// validZKSystemTypes reports whether specs satisfy what
+// openid4vp.validateMsoMdocZkQuery requires of a ZK-mdoc request.
+func validZKSystemTypes(specs []openid4vp.ZKSystemTypeSpec) bool {
+	if len(specs) == 0 {
+		return false
+	}
+	for _, spec := range specs {
+		if spec.ID == "" || spec.System == "" {
+			return false
+		}
+	}
+	return true
+}
+
 // constraintFamily names the DCQL meta field a format is matched by, or "" for
 // a format this repo cannot build a constraint for.
 //
@@ -295,9 +309,19 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				// Crossing families pairs a format with a constraint it does
 				// not use, which no wallet can match.
 				if scopeCfg != nil && scopeCfg.Format != "" {
-					if meta != nil && !sameConstraintFamily(meta.Format, scopeCfg.Format) {
+					if !sameConstraintFamily(meta.Format, scopeCfg.Format) {
 						c.log.Error(nil, "credential omitted from a verifier UI preset: format override changes the DCQL constraint",
 							"preset", label, "scope", scope, "configured", meta.Format, "override", scopeCfg.Format)
+						continue
+					}
+					// The ZK format needs more than the doctype its family
+					// shares: validateMsoMdocZkQuery requires a non-empty
+					// zk_system_type whose entries each carry id and system.
+					// Copying the override blind published a preset the
+					// server's own validator rejects at request time.
+					if scopeCfg.Format == openid4vp.FormatMsoMdocZk && !validZKSystemTypes(scopeCfg.ZKSystemType) {
+						c.log.Error(nil, "credential omitted from a verifier UI preset: zk format override without usable zk_system_type",
+							"preset", label, "scope", scope)
 						continue
 					}
 					uiCred.Format = scopeCfg.Format

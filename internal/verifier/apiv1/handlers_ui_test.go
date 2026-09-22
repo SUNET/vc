@@ -1433,3 +1433,20 @@ func TestSameConstraintFamily(t *testing.T) {
 		})
 	}
 }
+
+// TestValidZKSystemTypes mirrors what openid4vp.validateMsoMdocZkQuery
+// requires, so a preset overriding a scope to mso_mdoc_zk cannot publish a
+// query the server's own validator rejects at request time.
+func TestValidZKSystemTypes(t *testing.T) {
+	ok := []openid4vp.ZKSystemTypeSpec{{ID: "longfellow-libzk-v1_8_1", System: "longfellow-libzk-v1"}}
+	assert.True(t, validZKSystemTypes(ok))
+
+	assert.False(t, validZKSystemTypes(nil), "the ZK format requires a system list")
+	assert.False(t, validZKSystemTypes([]openid4vp.ZKSystemTypeSpec{}))
+	assert.False(t, validZKSystemTypes([]openid4vp.ZKSystemTypeSpec{{System: "longfellow-libzk-v1"}}),
+		"id is required for circuit resolution")
+	assert.False(t, validZKSystemTypes([]openid4vp.ZKSystemTypeSpec{{ID: "x"}}),
+		"system is required")
+	assert.False(t, validZKSystemTypes(append(ok, openid4vp.ZKSystemTypeSpec{ID: "y"})),
+		"one unusable entry invalidates the request")
+}
