@@ -31,6 +31,18 @@ describe("claimsForLocale", () => {
         assert.deepEqual(claimsForLocale(attrs), claimsForLocale({ ...attrs }));
     });
 
+    it("skips an empty default bucket for a populated one", () => {
+        // {} is truthy, so a presence check returned the empty en-US bucket
+        // and the request went out with no claim paths.
+        const got = claimsForLocale({ [DEFAULT_LOCALE]: {}, "sv-SE": claims("Förnamn") });
+        assert.deepEqual(got, claims("Förnamn"));
+    });
+
+    it("skips empty non-default buckets too", () => {
+        const got = claimsForLocale({ "de-DE": {}, "sv-SE": claims("Förnamn") });
+        assert.deepEqual(got, claims("Förnamn"));
+    });
+
     it("returns an empty map for absent or empty attributes", () => {
         assert.deepEqual(claimsForLocale(undefined), {});
         assert.deepEqual(claimsForLocale({}), {});

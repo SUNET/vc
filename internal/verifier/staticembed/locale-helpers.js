@@ -18,9 +18,16 @@ export const DEFAULT_LOCALE = "en-US";
  */
 export function claimsForLocale(attributes) {
     if (!attributes) return {};
-    if (attributes[DEFAULT_LOCALE]) return attributes[DEFAULT_LOCALE];
 
-    const locales = Object.keys(attributes).sort((a, b) => a.localeCompare(b));
+    // Non-empty, not merely present: {} is truthy, so a metadata document
+    // carrying an empty DEFAULT_LOCALE bucket alongside a populated one would
+    // otherwise return the empty one and send no claim paths at all.
+    const populated = (locale) => Object.keys(attributes[locale] ?? {}).length > 0;
+    if (populated(DEFAULT_LOCALE)) return attributes[DEFAULT_LOCALE];
+
+    const locales = Object.keys(attributes)
+        .filter(populated)
+        .sort((a, b) => a.localeCompare(b));
     const english = locales.find((l) => l.startsWith("en"));
     return attributes[english ?? locales[0]] ?? {};
 }
