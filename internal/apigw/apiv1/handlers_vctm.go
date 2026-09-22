@@ -26,6 +26,12 @@ func (c *Client) UICredentialOffers(ctx context.Context) (*CredentialOfferLookup
 	return c.CredentialOfferLookupMetadata, nil
 }
 
+// OpaqueWalletID is a reserved wallet_id value that triggers an opaque
+// credential-offer URI (openid-credential-offer://?...) instead of a
+// configured wallet's custom scheme. Configuring a wallet with this id is
+// rejected at config load.
+const OpaqueWalletID = "opaque"
+
 type UICredentialOfferRequest struct {
 	Scope    string `json:"scope" uri:"scope" binding:"required"`
 	WalletID string `json:"wallet_id" uri:"wallet_id" binding:"required"`
@@ -83,14 +89,19 @@ func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialO
 		return nil, err
 	}
 
-	wallet, ok := c.cfg.APIGW.Delivery.CredentialOffers.Wallets[req.WalletID]
-	if !ok {
-		err := errors.New("invalid wallet id")
-		return nil, err
+	var credentialOfferURL string
+	if req.WalletID == OpaqueWalletID {
+		credentialOfferURL = fmt.Sprintf("openid-credential-offer://?%s", credentialOffer)
+		c.log.Debug("UICreateCredentialOffer: opaque offer created", "scope", req.Scope, "issuer_url", c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL)
+	} else {
+		wallet, ok := c.cfg.APIGW.Delivery.CredentialOffers.Wallets[req.WalletID]
+		if !ok {
+			err := errors.New("invalid wallet id")
+			return nil, err
+		}
+		credentialOfferURL = fmt.Sprintf("%s?%s", wallet.RedirectURI, credentialOffer)
+		c.log.Debug("UICreateCredentialOffer: offer created", "scope", req.Scope, "wallet_redirect_uri", wallet.RedirectURI, "issuer_url", c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL)
 	}
-
-	credentialOfferURL := fmt.Sprintf("%s?%s", wallet.RedirectURI, credentialOffer)
-	c.log.Debug("UICreateCredentialOffer: offer created", "scope", req.Scope, "wallet_redirect_uri", wallet.RedirectURI, "issuer_url", c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL)
 
 	// Encoded as built, not round-tripped through url.Parse: the wallet
 	// redirect URI may have an empty authority ("openid-credential-offer://"),

@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/stretchr/testify/require"
@@ -168,6 +170,62 @@ func TestUICreateCredentialOffer_InvalidWalletID(t *testing.T) {
 	_, err := client.UICreateCredentialOffer(t.Context(), &UICredentialOfferRequest{
 		Scope:    "siros_id",
 		WalletID: "does-not-exist",
+	})
+	require.Error(t, err)
+}
+
+// The "opaque" wallet_id sentinel triggers an authority-less
+// openid-credential-offer:// URI so that /offers can produce a wallet-agnostic
+// deep link. Inner credential_offer payload must be identical to the
+// wallet-scoped path.
+func TestUICreateCredentialOffer_OpaqueSentinel_VCTMScope(t *testing.T) {
+	credMeta := map[string]*model.CredentialMetadata{
+		"siros_id": {VCTM: &sdjwtvc.VCTM{Name: "SIROS ID", VCT: "urn:siros:id"}},
+	}
+	client := newOfferTestClient(t, credMeta)
+
+	reply, err := client.UICreateCredentialOffer(t.Context(), &UICredentialOfferRequest{
+		Scope:    "siros_id",
+		WalletID: OpaqueWalletID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "SIROS ID", reply.Name)
+	require.Equal(t, "urn:siros:id", reply.ID)
+	require.True(t, strings.HasPrefix(reply.QR.URI, "openid-credential-offer://?"), "URI must be authority-less opaque form, got %q", reply.QR.URI)
+
+	params, err := openid4vci.ParseCredentialOfferURI(reply.QR.URI)
+	require.NoError(t, err)
+	require.Equal(t, "https://issuer.example.com", params.CredentialIssuer)
+	require.Equal(t, []string{"siros_id"}, params.CredentialConfigurationIDs)
+}
+
+func TestUICreateCredentialOffer_OpaqueSentinel_MDocScope(t *testing.T) {
+	credMeta := map[string]*model.CredentialMetadata{
+		"mdl": {MDDL: &mdoc.MDDLSchema{
+			DocType: "org.iso.18013.5.1.mDL",
+			Display: []mdoc.DisplayProperties{
+				{Locale: "en-US", Name: "Mobile Driving Licence"},
+			},
+		}},
+	}
+	client := newOfferTestClient(t, credMeta)
+
+	reply, err := client.UICreateCredentialOffer(t.Context(), &UICredentialOfferRequest{
+		Scope:    "mdl",
+		WalletID: OpaqueWalletID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "Mobile Driving Licence", reply.Name)
+	require.Equal(t, "org.iso.18013.5.1.mDL", reply.ID)
+	require.True(t, strings.HasPrefix(reply.QR.URI, "openid-credential-offer://?"), "URI must be authority-less opaque form, got %q", reply.QR.URI)
+}
+
+func TestUICreateCredentialOffer_OpaqueSentinel_UnknownScope(t *testing.T) {
+	client := newOfferTestClient(t, map[string]*model.CredentialMetadata{})
+
+	_, err := client.UICreateCredentialOffer(t.Context(), &UICredentialOfferRequest{
+		Scope:    "nonexistent",
+		WalletID: OpaqueWalletID,
 	})
 	require.Error(t, err)
 }

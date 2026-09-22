@@ -174,6 +174,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkOpaqueWalletSentinel(cfg, serviceName); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 
@@ -217,6 +221,19 @@ func checkMongoRequirement(cfg *model.Cfg, serviceName string) error {
 		return fmt.Errorf("common.mongo.uri is required for the %s service because common.ha.enable is set and HA caching has no relational backend", serviceName)
 	}
 
+	return nil
+}
+
+// checkOpaqueWalletSentinel rejects an apigw config that declares a
+// credential-offer wallet with the reserved id "opaque", which the
+// /offers UI uses to request an opaque credential-offer URI.
+func checkOpaqueWalletSentinel(cfg *model.Cfg, serviceName string) error {
+	if serviceName != "apigw" || cfg.APIGW == nil {
+		return nil
+	}
+	if _, ok := cfg.APIGW.Delivery.CredentialOffers.Wallets["opaque"]; ok {
+		return fmt.Errorf(`apigw.delivery.credential_offers.wallets: "opaque" is reserved and cannot be used as a wallet id`)
+	}
 	return nil
 }
 

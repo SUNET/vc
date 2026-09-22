@@ -57,11 +57,17 @@
                                 <div class="radios">
                                     <template x-for="(label, id) in wallets">
                                         <label class="radio">
-                                            <input type="radio" name="wallet" :value="id" required />
+                                            <input type="radio" name="wallet" :value="id" :required="!opaque" :disabled="opaque" />
                                             <span x-text="label"></span>
                                         </label>
                                     </template>
                                 </div>
+                            </div>
+                            <div class="field">
+                                <label class="checkbox">
+                                    <input type="checkbox" name="opaque" x-model="opaque" />
+                                    Generate opaque credential offer (no specific wallet)
+                                </label>
                             </div>
                             <input type="submit" value="Submit" class="button is-primary">
                         </div>
