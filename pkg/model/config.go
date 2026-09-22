@@ -1909,6 +1909,14 @@ func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string, registr
 		return fmt.Errorf("failed to unmarshal VCTM for scope %s: %w", scope, err)
 	}
 
+	// A literal "null" is valid JSON and unmarshals into a zero VCTM without
+	// error, so the scope would load and advertise and then fail every
+	// issuance at parseVCTM - after a successful /token. Refuse it here.
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(rawBytes, &doc); err != nil || doc == nil {
+		return fmt.Errorf("VCTM for scope %s is not a JSON object", scope)
+	}
+
 	// Swap cached data under write lock so concurrent readers see a
 	// consistent snapshot.
 	c.mu.Lock()
@@ -2261,8 +2269,12 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 
 	// Validate that every constructor got a non-empty VCTURL.
 	for scope, constructor := range cfg.Common.CredentialMetadata {
+		// A present key holding nil is a malformed config entry, not an
+		// absent scope, and every consumer would have to guard it separately
+		// - Client.New dereferences it during verifier startup. Refuse it
+		// here so one check covers them all.
 		if constructor == nil {
-			continue
+			return fmt.Errorf("credential_metadata entry for scope %q is empty", scope)
 		}
 		vctm := constructor.GetVCTM()
 		if vctm == nil {

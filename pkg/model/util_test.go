@@ -414,6 +414,19 @@ func TestVCTMRawWithVCTMalformed(t *testing.T) {
 	assert.Equal(t, "null", string(cm.GetVCTMIssuanceRaw()))
 }
 
+// TestResolveVCTUrlsRejectsNilEntry pins the malformed-entry rule at the one
+// place every consumer goes through.
+//
+// A present key holding nil is a config typo, not an absent scope. Left to
+// each caller it is a panic waiting to happen - Client.New dereferences it
+// during verifier startup, before any handler-level guard can run.
+func TestResolveVCTUrlsRejectsNilEntry(t *testing.T) {
+	cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{"broken": nil}}}
+	err := cfg.ResolveVCTUrls("https://apigw.example")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "broken")
+}
+
 // TestPublishNewVCT covers what the option does and, as importantly, what it
 // deliberately does not touch.
 //
