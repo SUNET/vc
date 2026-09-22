@@ -397,14 +397,14 @@ func TestDCQLMetaQueryByFormat(t *testing.T) {
 	}
 }
 
-// TestPublishNewVCT covers the switch on apigw's vct back-fill.
+// TestPublishNewVCT covers what the option does and, as importantly, what it
+// deliberately does not touch.
 //
-// Default (unset) is the existing behaviour: a file-loaded VCTM that declares
-// no vct gets the /type-metadata URL it is published at, so the credential
-// body, the served document and DCQL vct_values agree on one value. Setting it
-// false turns that off for a scope whose vct comes from elsewhere. A file that
-// declares a vct is never rewritten either way, which is what lets a URN
-// survive publication.
+// The IDENTIFIER is resolved either way: a local VCTM declaring no vct takes
+// the hosting URL, so the credential body, the DCQL query and the issuer
+// metadata agree on one value. Only the SERVED bytes differ - false publishes
+// the file exactly as written, integrity included, for a document whose SRI is
+// pinned outside this deployment.
 func TestPublishNewVCT(t *testing.T) {
 	const hosted = "https://apigw.example/type-metadata/pid"
 
@@ -423,59 +423,42 @@ func TestPublishNewVCT(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		cm      *CredentialMetadata
-		wantVCT string
+		name          string
+		cm            *CredentialMetadata
+		wantVCT       string
+		wantRawHasVCT bool
 	}{
-		{"unset back-fills an empty vct, as before", localVCTM("", nil), hosted},
-		{"explicit true back-fills too", localVCTM("", new(true)), hosted},
-		{"a declared urn is kept whatever the setting", localVCTM("urn:eudi:pid:1", nil), "urn:eudi:pid:1"},
-		{"and is still kept with it explicitly on", localVCTM("urn:eudi:pid:1", new(true)), "urn:eudi:pid:1"},
+		{"unset writes the vct into the served bytes", localVCTM("", nil), hosted, true},
+		{"explicit true does the same", localVCTM("", new(true)), hosted, true},
+		{"false resolves the identifier but serves the file verbatim", localVCTM("", new(false)), hosted, false},
+		{"a declared urn is kept and served as written", localVCTM("urn:eudi:pid:1", nil), "urn:eudi:pid:1", true},
+		{"and with the option off too", localVCTM("urn:eudi:pid:1", new(false)), "urn:eudi:pid:1", true},
 	}
-
-	// Disabling the back-fill for a file that declares no vct leaves a scope
-	// that can be neither issued (parseVCTM rejects an empty vct at mint time)
-	// nor requested, and a local VCTM has no other source for one - so it is
-	// refused at load rather than at the first credential request.
-	t.Run("false without a vct in the file is refused", func(t *testing.T) {
-		cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{
-			"pid": localVCTM("", new(false)),
-		}}}
-		err := cfg.ResolveVCTUrls("https://apigw.example")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "publish_new_vct")
-	})
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			before := string(tt.cm.VCTMRaw)
+			integrityBefore := tt.cm.Integrity
+
 			cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{"pid": tt.cm}}}
-			require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+			require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"),
+				"the option must never make a scope unloadable")
 
+			// One identifier, three readers: the body, the query, the metadata.
 			assert.Equal(t, tt.wantVCT, tt.cm.GetVCTM().VCT)
-
-			// The DCQL query has to follow the same decision. VCTURL is set
-			// whatever the option says, so falling back to it here would have
-			// queried by the hosting URL the operator opted out of.
+			assert.Equal(t, tt.wantVCT, tt.cm.vctIdentifier())
 			meta, ok := tt.cm.DCQLMetaQuery()
-			if tt.wantVCT == "" {
-				assert.False(t, ok, "an unconstrainable scope must be reported, not queried by VCTURL")
-			} else {
-				require.True(t, ok)
-				assert.Equal(t, []string{tt.wantVCT}, meta.VCTValues)
-			}
+			require.True(t, ok, "the scope stays requestable whatever the option says")
+			assert.Equal(t, []string{tt.wantVCT}, meta.VCTValues)
 
-			if tt.wantVCT != "" {
-				// The served document has to carry the same value, or a wallet
-				// dereferencing vct#integrity gets a document naming another type.
+			if tt.wantRawHasVCT {
 				assert.Contains(t, string(tt.cm.GetVCTMRaw()), tt.wantVCT)
+			} else {
+				assert.Equal(t, before, string(tt.cm.GetVCTMRaw()),
+					"false must publish the file byte-for-byte")
+				assert.Equal(t, integrityBefore, tt.cm.Integrity,
+					"and must not recompute an SRI pinned elsewhere")
 			}
-
-			// And so does what the issuer metadata advertises: three readers
-			// of one decision - the published document, the DCQL query, and
-			// credential_configurations_supported - which is where this option
-			// kept leaking, one reader at a time.
-			assert.Equal(t, tt.wantVCT, tt.cm.vctIdentifier(),
-				"issuer metadata resolves its advertised vct through this")
 		})
 	}
 }

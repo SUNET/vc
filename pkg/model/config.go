@@ -1788,19 +1788,18 @@ type CredentialMetadata struct {
 	// declares no vct, apigw writes the /type-metadata/{scope} URL it
 	// publishes the document at into both VCTM.VCT and the served bytes.
 	//
-	// Defaults to true, which is the existing behaviour. Set false to turn it
-	// off for a scope whose vct is meant to come from somewhere else - the
-	// document is then published exactly as the file wrote it.
+	// Defaults to true, the existing behaviour. Set false to publish the file
+	// exactly as written - bytes and integrity untouched - for a document
+	// whose SRI is pinned somewhere this deployment does not control.
 	//
-	// A file that DOES declare a vct is never rewritten either way; that is
-	// what lets a URN survive publication.
+	// The identifier is resolved either way: a file declaring no vct still
+	// takes the hosting URL in memory, so the credential body, the DCQL query
+	// and the issuer metadata agree on one value. Only the SERVED document
+	// differs.
 	//
-	// Only meaningful for a local VCTM (vctm_file_path): an external source is
-	// authoritative and is never rewritten.
-	//
-	// Only meaningful for a file that declares its own vct: a local VCTM has
-	// no other source for one, so turning the back-fill off for a file without
-	// it is refused at config load rather than failing at the first issuance.
+	// A file that declares its own vct is never rewritten whatever this says;
+	// that is what lets a URN survive publication. Only meaningful for a local
+	// VCTM (vctm_file_path): an external source is authoritative already.
 	PublishNewVCT *bool `yaml:"publish_new_vct,omitempty" json:"-" default:"true" doc_example:"true"`
 
 	// Doctype is the mdoc doctype value to resolve via
@@ -2072,19 +2071,9 @@ func (c *CredentialMetadata) IsLocalMDDL() bool {
 //
 // VCTURL is a fallback, not a second identifier: ResolveVCTUrls back-fills
 // VCTM.VCT from it, so the two agree after resolution.
-//
-// Except when publish_new_vct turned that back-fill off, where an empty vct is
-// the operator's choice. Substituting VCTURL there would have DCQL query by
-// the very hosting URL they opted out of, making the option a no-op for every
-// query. Empty instead, so DCQLMetaQuery reports the scope as unconstrainable
-// and the caller refuses it rather than asking by an identifier the credential
-// will not carry.
 func (c *CredentialMetadata) vctIdentifier() string {
 	if vctm := c.GetVCTM(); vctm != nil && vctm.VCT != "" {
 		return vctm.VCT
-	}
-	if !BoolVal(c.PublishNewVCT, true) {
-		return ""
 	}
 	return c.GetVCTURL()
 }
@@ -2193,13 +2182,18 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 		constructor.mu.Lock()
 		constructor.VCTURL = vctURL
 
-		// Back-fill a locally-hosted VCTM's vct from the hosting URL when the
-		// file declares none, unless publish_new_vct turns that off. A file
-		// that declares a vct is never rewritten, which is what keeps a URN
-		// working.
-		if constructor.IsLocalVCTM() && constructor.VCTM.VCT == "" && BoolVal(constructor.PublishNewVCT, true) {
+		// A locally-hosted VCTM that declares no vct takes the hosting URL as
+		// its identifier, so the credential body, the DCQL query and the
+		// issuer metadata still agree on one value. A file that declares a vct
+		// is never touched, which is what keeps a URN working.
+		if constructor.IsLocalVCTM() && constructor.VCTM.VCT == "" {
 			constructor.VCTM.VCT = vctURL
-			if constructor.VCTMRaw != nil {
+			// The SERVED bytes are a separate decision: publish_new_vct: false
+			// publishes the file exactly as written, integrity included, for a
+			// document whose SRI is pinned somewhere this deployment does not
+			// control. Rewriting them would change the hash under whoever
+			// published it.
+			if BoolVal(constructor.PublishNewVCT, true) && constructor.VCTMRaw != nil {
 				var doc map[string]json.RawMessage
 				if err := json.Unmarshal(constructor.VCTMRaw, &doc); err == nil {
 					vctJSON, _ := json.Marshal(vctURL)
@@ -2230,15 +2224,6 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 		}
 		if constructor.GetVCTURL() == "" {
 			return fmt.Errorf("VCTURL is empty for scope %q after resolution (check vctm_file_path, vctm_url, or vct)", scope)
-		}
-		// A local VCTM's vct comes from the file or from the back-fill; there
-		// is no third source, so turning the back-fill off for a file that
-		// declares none leaves a scope that cannot be issued (parseVCTM
-		// rejects an empty vct at mint time, after a successful /token) and
-		// cannot be requested (DCQLMetaQuery reports it unconstrainable).
-		// Refuse it here rather than at the first credential request.
-		if constructor.IsLocalVCTM() && vctm.VCT == "" {
-			return fmt.Errorf("scope %q sets publish_new_vct: false but its VCTM file declares no vct; a local VCTM has no other source for one, so the scope could be neither issued nor requested", scope)
 		}
 		// External scopes must carry it themselves.
 		if !constructor.IsLocalVCTM() && vctm.VCT == "" {
