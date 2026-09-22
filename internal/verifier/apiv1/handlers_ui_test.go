@@ -1365,3 +1365,36 @@ func TestUIMetadataRejectsEmptyCredentialEntry(t *testing.T) {
 	assert.Nil(t, reply)
 	assert.Contains(t, err.Error(), "broken")
 }
+
+// TestUIMetadataNeverSerializesNullAttributes covers a review finding on
+// registry-backed mdoc scopes. Attributes is a required, non-nullable record in
+// presentation-definition.js's metadataResponseSchema, and a nil Go map
+// marshals to null - so a scope whose metadata document never loaded made the
+// whole response fail to parse, taking down every other credential and preset
+// with it.
+func TestUIMetadataNeverSerializesNullAttributes(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				// Registry-backed, no MDDL loaded: doctype resolves, so it is
+				// offered, but nothing ever set Attributes.
+				"pid_mdoc": {Format: openid4vp.FormatMsoMdoc, Doctype: "eu.europa.ec.eudi.pid.1"},
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+	require.Contains(t, reply.Credentials, "pid_mdoc")
+	assert.NotNil(t, reply.Credentials["pid_mdoc"].Attributes)
+
+	encoded, err := json.Marshal(reply.Credentials["pid_mdoc"])
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"attributes":{}`,
+		"the UI schema rejects null here, which would fail the whole response")
+	assert.NotContains(t, string(encoded), `"attributes":null`)
+}

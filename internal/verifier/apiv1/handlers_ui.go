@@ -122,9 +122,18 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		if constructor == nil {
 			return nil, fmt.Errorf("credential_metadata entry %q is empty", scope)
 		}
+		// Attributes is a required, non-nullable record in the UI's schema and
+		// a nil Go map marshals to null, which fails metadataResponseSchema
+		// and takes the whole picker down rather than just this credential.
+		// A scope whose metadata document never loaded - a registry-backed
+		// mdoc with the registry disabled, say - has no attributes at all.
+		attributes := constructor.GetAttributes()
+		if attributes == nil {
+			attributes = map[string]map[string][]*string{}
+		}
 		info := &UICredentialInfo{
 			Format:     constructor.Format,
-			Attributes: constructor.GetAttributes(),
+			Attributes: attributes,
 		}
 		// VCTM.VCT is the credential's canonical identifier: ResolveVCTUrls
 		// preserves the file's own value (URN, foreign URL, or otherwise) and
