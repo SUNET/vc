@@ -588,7 +588,7 @@ func NewTrustedAuthorityOpenIDFederation(trustAnchors ...string) TrustedAuthorit
 // for the specified format.
 func ValidateCredentialQuery(query CredentialQuery) error {
 	switch query.Format {
-	case "ldp_vc", FormatVCLDJSON, FormatJwtVCJson:
+	case FormatLdpVCDCQL, FormatVCLDJSON, FormatJwtVCJson:
 		// W3C VC format requires type_values, and every alternative must
 		// actually constrain: MatchTypeValues reads an empty alternative as
 		// satisfied by any credential, and one satisfied alternative answers
@@ -692,7 +692,7 @@ func (e *DCQLValidationError) Error() string {
 func NewVC20CredentialQuery(id string, typeValues [][]string, claims []ClaimQuery) CredentialQuery {
 	return CredentialQuery{
 		ID:     id,
-		Format: "ldp_vc", // W3C VC Data Integrity format
+		Format: FormatLdpVCDCQL,
 		Meta: MetaQuery{
 			TypeValues: typeValues,
 		},

@@ -2581,7 +2581,7 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		// jwt_vc_json-ld stays advertised but is deliberately not requestable:
 		// nothing issues it (see handlers_issuer.go's format switch), so
 		// DCQLMetaQuery does not accept it either.
-		case "jwt_vc_json", "ldp_vc", openid4vp.FormatVCLDJSON, "jwt_vc_json-ld":
+		case openid4vp.FormatJwtVCJson, openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON, "jwt_vc_json-ld":
 			// Appendix A.1: credential_definition with type array is format-specific for W3C VC formats.
 			//
 			// credential_types when configured, so the advertised types, the
