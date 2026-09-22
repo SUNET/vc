@@ -2,9 +2,19 @@ package apiv1
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/httphelpers"
+	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/trace"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
@@ -88,5 +98,49 @@ func TestResolveDirectPostEncrypted(t *testing.T) {
 		})})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "exactly one")
+	})
+}
+
+// TestDirectPostRequestBindsWithoutState covers the half of the reported bug
+// that resolveDirectPost cannot: the failure Lam saw happened at BINDING, before
+// any handler code ran, because State carried binding:"required".
+//
+// Constructing a DirectPostRequest in Go skips that entirely, so this drives the
+// real form-encoded bind and would fail if the tag came back.
+func TestDirectPostRequestBindsWithoutState(t *testing.T) {
+	ctx := t.Context()
+	log := logger.NewSimple("directpost-binding")
+	tracer, err := trace.NewForTesting(ctx, "directpost-binding", log)
+	require.NoError(t, err)
+	helpers, err := httphelpers.New(ctx, tracer, &model.Cfg{}, log)
+	require.NoError(t, err)
+
+	gin.SetMode(gin.TestMode)
+
+	bind := func(t *testing.T, form url.Values) (*DirectPostRequest, error) {
+		t.Helper()
+		body := form.Encode()
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		httpReq := httptest.NewRequest(http.MethodPost, "/verification/oidc-direct_post", strings.NewReader(body))
+		httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		c.Request = httpReq
+
+		req := &DirectPostRequest{}
+		return req, helpers.Binding.Request(ctx, c, req)
+	}
+
+	t.Run("response alone binds", func(t *testing.T) {
+		// Exactly what a direct_post.jwt wallet posts: no state field at all.
+		req, err := bind(t, url.Values{"response": {"eyJhbGciOiJFQ0RILUVTIn0..a.b.c"}})
+		require.NoError(t, err, "state lives inside the JWE; requiring it here rejected a conformant wallet")
+		assert.Empty(t, req.State)
+		assert.NotEmpty(t, req.Response)
+	})
+
+	t.Run("plain direct_post still binds", func(t *testing.T) {
+		req, err := bind(t, url.Values{"state": {"s-1"}, "vp_token": {"tok~"}})
+		require.NoError(t, err)
+		assert.Equal(t, "s-1", req.State)
+		assert.Equal(t, "tok~", req.VPToken)
 	})
 }
