@@ -32,16 +32,12 @@ type UICredentialInfo struct {
 	// not vct), so this drops the field entirely for them rather than
 	// emitting a meaningless "vct_values": null.
 	VCTValues []string `json:"vct_values,omitempty"`
-	// TypeValues is the W3C VC equivalent: the type alternatives a wallet
-	// matches an ldp_vc, vc+ld+json or jwt_vc_json credential by, as fully
-	// expanded IRIs.
+	// TypeValues is the W3C equivalent: the type alternatives a wallet matches
+	// an ldp_vc, vc+ld+json or jwt_vc_json credential by, as expanded IRIs.
 	//
-	// From credential_type_values - NOT credential_types, which is the
-	// compact-term list the issuer metadata advertises and cannot be expanded
-	// into these. Empty for every other format, and for a W3C scope that
-	// configures no credential_type_values, or only the base type every W3C
-	// credential carries: see model.CredentialMetadata.DCQLMetaQuery for why
-	// that is refused rather than sent.
+	// From credential_type_values, not credential_types. Empty for other
+	// formats and for a W3C scope whose configured alternatives narrow
+	// nothing - see DCQLMetaQuery for why those are refused, not sent.
 	TypeValues [][]string                      `json:"type_values,omitempty"`
 	Attributes map[string]map[string][]*string `json:"attributes"`
 }
@@ -82,11 +78,8 @@ type UIPresetMeta struct {
 	// DoctypeValue is set for mdoc/ZK-mdoc scopes (openid4vp.MetaQuery's
 	// mdoc-format field) - mirrors UICredentialInfo.VCT's mdoc branch.
 	DoctypeValue string `json:"doctype_value,omitempty"`
-	// TypeValues is set for the W3C VC formats, whose DCQL constraint is
-	// neither vct_values nor doctype_value but a list of type alternatives
-	// (OpenID4VP 1.0 6.4.1). Comes from credential_type_values - fully
-	// expanded IRIs - see model.CredentialMetadata.CredentialTypeValues, and
-	// note it is not the credential_types list the issuer metadata uses.
+	// TypeValues is the W3C formats' constraint, from credential_type_values
+	// (expanded IRIs) - not the credential_types the issuer metadata uses.
 	TypeValues [][]string `json:"type_values,omitempty"`
 	// ZKSystemType is set when the preset's VerificationPresetScope
 	// overrides it - see that type's own doc comment.
@@ -167,6 +160,23 @@ func sameConstraintFamily(configured, override string) bool {
 // uiDefaultLocale is the locale bucket presentation-definition.js reads
 // attributes from, and the one every shipped VCTM and MDDL populates.
 const uiDefaultLocale = "en-US"
+
+// sameConstraintFamily reports whether two formats are matched by the same
+// DCQL meta field, so a preset's format override cannot pair a format with a
+// constraint it does not use.
+func sameConstraintFamily(configured, override string) bool {
+	family := func(f string) string {
+		switch f {
+		case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
+			return "doctype"
+		case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON, openid4vp.FormatJwtVCJson:
+			return "types"
+		default:
+			return "vct"
+		}
+	}
+	return family(configured) == family(override)
+}
 
 func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 	reply := &UIMetadataReply{
@@ -298,12 +308,9 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					ID: scope,
 				}
 
-				// Resolve format and the type constraint from
-				// credential_metadata, by FORMAT rather than by which
-				// metadata document is loaded: keying off "has an MDDL" gave
-				// a registry-backed mdoc scope (doctype configured, no MDDL)
-				// an empty vct_values and no doctype, which matches nothing
-				// in any wallet.
+				// By FORMAT, not by which document is loaded: keying off "has
+				// an MDDL" gave a registry-backed mdoc scope an empty
+				// vct_values and no doctype, matching nothing.
 				if meta != nil {
 					uiCred.Format = meta.Format
 					mq, ok := meta.DCQLMetaQuery()
@@ -323,10 +330,10 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				// mso_mdoc scope be requested as mso_mdoc_zk instead.
 				//
 				// The override must keep the credential's constraint family -
-				// mdoc matches on doctype_value, SD-JWT on vct_values - since
-				// the meta above was derived from the CONFIGURED format.
-				// Crossing families pairs a format with a constraint it does
-				// not use, which no wallet can match.
+				// mdoc matches on doctype_value, SD-JWT on vct_values, W3C on
+				// type_values - since the meta above was resolved from the
+				// configured format. Crossing families pairs a format with a
+				// constraint it does not use, which no wallet can match.
 				if scopeCfg != nil && scopeCfg.Format != "" {
 					if !sameConstraintFamily(meta.Format, scopeCfg.Format) {
 						c.log.Error(nil, "credential omitted from a verifier UI preset: format override changes the DCQL constraint",

@@ -528,11 +528,13 @@ Alpine.data("app", () => ({
 
         if (!this.credentialAttributes) {
             this.error = "Selected attributes list is null";
+            this.loading = false;
             return;
         }
 
         if (!(this.$refs.attributesSelectionForm instanceof HTMLFormElement)) {
             this.error = "Attributes selection form not of type 'HtmlFormElement'";
+            this.loading = false;
             return;
         }
 
@@ -553,6 +555,7 @@ Alpine.data("app", () => ({
         const { meta, error: metaError } = dcqlMetaFor(this.credentialAttributes);
         if (metaError) {
             this.error = metaError;
+            this.loading = false;
             return;
         }
 
@@ -572,6 +575,7 @@ Alpine.data("app", () => ({
         const { output: dcql_query, success } = v.safeParse(dcqlQuerySchema, dcqlQuery);
         if (!success) {
             this.error = "Invalid DCQL query";
+            this.loading = false;
             return;
         }
 
