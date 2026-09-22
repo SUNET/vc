@@ -67,7 +67,7 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 		return nil, fmt.Errorf("unsupported cryptosuite: %s", cryptosuite)
 	}
 
-	if err := validateAdditionalContexts(req.AdditionalContexts); err != nil {
+	if err := c.validateAdditionalContexts(req.AdditionalContexts); err != nil {
 		return nil, err
 	}
 
@@ -170,12 +170,16 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 // resolution, and a non-absolute reference resolves against whatever base the
 // loader picks.
 //
-// http(s) and absolute only. This does not make the field safe against a
-// caller who can reach the issuer's gRPC API - such a caller can already ask
-// for arbitrary credentials to be signed, which is worse - but it keeps the
-// reachable set to ordinary web requests, which a deployment can police with
-// egress rules.
-func validateAdditionalContexts(contexts []string) error {
+// Two checks, because the first cannot do the second's job: http(s) and
+// absolute rules out local file reads, and issuer.jsonld_context_allowlist
+// decides which hosts may be reached at all. Empty allowlist means no
+// additional context is accepted.
+func (c *Client) validateAdditionalContexts(contexts []string) error {
+	var allowed []string
+	if c.cfg != nil && c.cfg.Issuer != nil {
+		allowed = c.cfg.Issuer.JSONLDContextAllowlist
+	}
+
 	for _, raw := range contexts {
 		u, err := url.Parse(raw)
 		if err != nil {
@@ -186,6 +190,11 @@ func validateAdditionalContexts(contexts []string) error {
 		}
 		if u.Host == "" {
 			return fmt.Errorf("additional context %q must be absolute", raw)
+		}
+		// The scheme check above rules out local file reads; it cannot rule
+		// out a host. Only contexts the deployment has named may be fetched.
+		if !slices.Contains(allowed, raw) {
+			return fmt.Errorf("additional context %q is not in issuer.jsonld_context_allowlist; the issuer will not dereference it", raw)
 		}
 	}
 	return nil

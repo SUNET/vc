@@ -207,6 +207,10 @@ func TestMakeVC20_AdditionalContexts(t *testing.T) {
 	credential.GetGlobalLoader().AddContext("https://example.org/degree",
 		`{"@context":{"UniversityDegreeCredential":"https://example.org/degree#UniversityDegreeCredential"}}`)
 
+	// The deployment step: the issuer only dereferences contexts it has been
+	// told about, so a custom one has to be named in config.
+	client.cfg.Issuer.JSONLDContextAllowlist = []string{"https://example.org/degree"}
+
 	reply, err := client.MakeVC20(ctx, &CreateVC20Request{
 		Scope:              "diploma",
 		DocumentData:       mockCredentialSubject,
@@ -276,4 +280,37 @@ func TestMakeVC20_RejectsUnsafeAdditionalContexts(t *testing.T) {
 			require.Error(t, err, "%q must not reach the JSON-LD loader", bad)
 		})
 	}
+}
+
+// TestMakeVC20_AdditionalContextsNeedAllowlisting pins the default.
+//
+// additional_contexts arrives from the caller and signing DEREFERENCES it, so
+// an unlisted context is a caller-directed outbound request from the issuer.
+// A scheme check cannot address that - any host is an http(s) host - so the
+// allowlist decides, and an empty one accepts none.
+func TestMakeVC20_AdditionalContextsNeedAllowlisting(t *testing.T) {
+	ctx := t.Context()
+	client := mockNewClient(ctx, t, "ecdsa", logger.NewSimple("test"))
+
+	req := func() *CreateVC20Request {
+		return &CreateVC20Request{
+			Scope:              "diploma",
+			DocumentData:       mockCredentialSubject,
+			CredentialTypes:    []string{"VerifiableCredential"},
+			SubjectDID:         "did:example:subject",
+			Cryptosuite:        openid4vp.CryptosuiteECDSA2019,
+			AdditionalContexts: []string{"https://internal.example/ctx"},
+		}
+	}
+
+	// Default: nothing allowed.
+	_, err := client.MakeVC20(ctx, req())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "jsonld_context_allowlist")
+
+	// An allowlist naming a DIFFERENT context does not help.
+	client.cfg.Issuer.JSONLDContextAllowlist = []string{"https://example.org/degree"}
+	_, err = client.MakeVC20(ctx, req())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "jsonld_context_allowlist")
 }

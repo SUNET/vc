@@ -534,6 +534,21 @@ type Issuer struct {
 	MDoc *MDocConfig `yaml:"mdoc" validate:"omitempty"`
 	// AuditLog holds audit log configuration
 	AuditLog *AuditLog `yaml:"audit_log" validate:"omitempty"`
+	// JSONLDContextAllowlist names the JSON-LD context URLs this issuer may
+	// dereference when signing a W3C credential.
+	//
+	// additional_contexts arrives over gRPC from the caller, and signing
+	// canonicalizes the credential to RDF, which FETCHES every context in it.
+	// Without an allowlist that is a caller-directed outbound request from
+	// the issuer - reachable hosts include anything the issuer's network can
+	// reach, which is the part a scheme check cannot address.
+	//
+	// Empty means no additional context may be used: a request carrying one
+	// is refused. Nothing is lost by that default, since a deployment using
+	// custom W3C types has to publish its context anyway and can name it
+	// here. Matching is exact.
+	JSONLDContextAllowlist []string `yaml:"jsonld_context_allowlist" validate:"omitempty,dive,required,url" doc_example:"\"https://example.org/diploma\""`
+
 	// SignMetadataRateLimit configures the rate limiter for the SignMetadata gRPC endpoint.
 	// In HA setups each APIGW node refreshes two documents (VCI+OAuth2), so the defaults
 	// should accommodate the expected cluster size. Default: 2 req/s, burst 20.
@@ -1859,6 +1874,9 @@ type CredentialMetadata struct {
 	// the sharper one: signing canonicalizes the credential to RDF, so an
 	// unreachable context fails issuance outright rather than degrading
 	// verification. Publish it before configuring it.
+	//
+	// The issuer also refuses to fetch a context it has not been told about -
+	// name it in issuer.jsonld_context_allowlist as well, or issuance fails.
 	CredentialContexts []string `yaml:"credential_contexts,omitempty" json:"-" validate:"omitempty,dive,required,url"`
 
 	MDDL *mdoc.MDDLSchema `yaml:"-" json:"-"`
