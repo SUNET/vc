@@ -26,14 +26,7 @@ import (
 // would strand a wallet still holding the earlier one.
 func (c *Client) ephemeralEncryptionKey(ctx context.Context, kid string) (privateKey jwk.Key, publicKey jwk.Key, err error) {
 	if existing, ok := c.cacheService.EphemeralEncryptionKey.Get(ctx, kid); ok {
-		publicJWK, err := existing.PublicKey()
-		if err != nil {
-			return nil, nil, fmt.Errorf("deriving public key for kid %q: %w", kid, err)
-		}
-		if err := openid4vp.DecorateEncryptionKey(publicJWK, kid); err != nil {
-			return nil, nil, err
-		}
-		return existing, publicJWK, nil
+		return withPublicHalf(existing, kid)
 	}
 
 	privKey, err := ecdh.P256().GenerateKey(rand.Reader)
@@ -49,15 +42,36 @@ func (c *Client) ephemeralEncryptionKey(ctx context.Context, kid string) (privat
 		return nil, nil, err
 	}
 
-	c.cacheService.EphemeralEncryptionKey.Set(ctx, kid, privateJWK)
-
-	publicJWK, err := jwk.Import(privKey.Public())
+	// SetNX, not Set: the lookup above and this store are not one operation,
+	// so two concurrent builds for the same kid both reach here. The loser
+	// must not overwrite the private half its rival may already have
+	// advertised to a wallet - it adopts the stored key instead.
+	stored, err := c.cacheService.EphemeralEncryptionKey.SetNX(ctx, kid, privateJWK)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("storing ephemeral key for kid %q: %w", kid, err)
+	}
+	if !stored {
+		winner, ok := c.cacheService.EphemeralEncryptionKey.Get(ctx, kid)
+		if !ok {
+			return nil, nil, fmt.Errorf("ephemeral key for kid %q was stored by a concurrent request and has already expired", kid)
+		}
+		return withPublicHalf(winner, kid)
+	}
+
+	return withPublicHalf(privateJWK, kid)
+}
+
+// withPublicHalf returns the private key alongside the public JWK the request
+// object advertises for it.
+func withPublicHalf(privateJWK jwk.Key, kid string) (jwk.Key, jwk.Key, error) {
+	// PublicKey copies the key material but not every parameter, so the
+	// advertised key is decorated the same way a freshly generated one is.
+	publicJWK, err := privateJWK.PublicKey()
+	if err != nil {
+		return nil, nil, fmt.Errorf("deriving public key for kid %q: %w", kid, err)
 	}
 	if err := openid4vp.DecorateEncryptionKey(publicJWK, kid); err != nil {
 		return nil, nil, err
 	}
-
 	return privateJWK, publicJWK, nil
 }
