@@ -180,7 +180,7 @@ func TestVPTokensForScope(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := client.vpTokensForScope(tt.authCtx, tt.credentialScopes, openid4vp.VPResponse{VPToken: tt.vpToken}, tt.scope)
+			got, err := client.vpTokensForScope(tt.authCtx.ScopeQueryIDs, tt.credentialScopes, openid4vp.VPResponse{VPToken: tt.vpToken}, tt.scope)
 			if tt.wantError != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantError)
@@ -230,7 +230,7 @@ func TestScopeQueryIDsAliasTemplateScope(t *testing.T) {
 
 	// And the response then resolves, which is the whole point.
 	tokens, err := client.vpTokensForScope(
-		&cache.AuthorizationContext{Scopes: []string{"pid_full"}, ScopeQueryIDs: pairs},
+		pairs,
 		[]string{"pid_full"},
 		openid4vp.VPResponse{VPToken: map[string][]string{"eudi_pid": {"token-pid"}}},
 		"pid_full",
@@ -295,7 +295,7 @@ func TestCredentialScopes(t *testing.T) {
 	client, _ := CreateTestClientWithMock(t, nil)
 
 	t.Run("ordinary OIDC scopes are not part of the presentation", func(t *testing.T) {
-		got := client.credentialScopes(&cache.AuthorizationContext{
+		got := client.credentialScopesLit(&cache.AuthorizationContext{
 			Scopes: []string{"openid", "profile", "pid"},
 			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
 				{ID: "pid"},
@@ -305,7 +305,7 @@ func TestCredentialScopes(t *testing.T) {
 	})
 
 	t.Run("request order is preserved", func(t *testing.T) {
-		got := client.credentialScopes(&cache.AuthorizationContext{
+		got := client.credentialScopesLit(&cache.AuthorizationContext{
 			Scopes: []string{"ehic", "openid", "pid"},
 			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
 				{ID: "pid"}, {ID: "ehic"},
@@ -319,7 +319,7 @@ func TestCredentialScopes(t *testing.T) {
 		// for is the dangerous direction: it vanishes from the loop instead of
 		// failing there, and if every scope vanished the presentation would be
 		// cached having validated no VP token at all.
-		got := client.credentialScopes(&cache.AuthorizationContext{
+		got := client.credentialScopesLit(&cache.AuthorizationContext{
 			Scopes: []string{"openid", "pid", "custom_claim"},
 			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
 				{ID: "pid"},
@@ -330,7 +330,7 @@ func TestCredentialScopes(t *testing.T) {
 
 	t.Run("no cached query falls back to every scope", func(t *testing.T) {
 		// A session created before this existed, mid rolling deploy.
-		got := client.credentialScopes(&cache.AuthorizationContext{
+		got := client.credentialScopesLit(&cache.AuthorizationContext{
 			Scopes: []string{"openid", "pid"},
 		})
 		assert.Equal(t, []string{"openid", "pid"}, got)
@@ -347,7 +347,7 @@ func TestCredentialScopes(t *testing.T) {
 			}},
 			Verifier: &model.Verifier{},
 		})
-		got := configured.credentialScopes(&cache.AuthorizationContext{
+		got := configured.credentialScopesLit(&cache.AuthorizationContext{
 			Scopes: []string{"openid", "profile"},
 			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
 				{ID: "profile"},
@@ -357,7 +357,7 @@ func TestCredentialScopes(t *testing.T) {
 	})
 
 	t.Run("a standard scope named by a query is kept", func(t *testing.T) {
-		got := client.credentialScopes(&cache.AuthorizationContext{
+		got := client.credentialScopesLit(&cache.AuthorizationContext{
 			Scopes: []string{"openid", "email"},
 			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
 				{ID: "email"},
@@ -370,7 +370,7 @@ func TestCredentialScopes(t *testing.T) {
 		// eudi_pid_basic declares "pid profile", so "profile" alone selects it.
 		// The guard in VerificationDirectPost turns this into an error rather
 		// than a presentation accepted with nothing verified.
-		got := client.credentialScopes(&cache.AuthorizationContext{
+		got := client.credentialScopesLit(&cache.AuthorizationContext{
 			Scopes: []string{"openid", "profile"},
 			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
 				{ID: "eudi_pid"},
@@ -429,7 +429,7 @@ func TestScopeQueryIDsRebuildForLegacySession(t *testing.T) {
 	require.Equal(t, map[string]string{"pid": "eudi_pid"}, rebuilt)
 
 	legacy.ScopeQueryIDs = rebuilt
-	tokens, err := client.vpTokensForScope(legacy, client.credentialScopes(legacy),
+	tokens, err := client.vpTokensForScope(legacy.ScopeQueryIDs, client.credentialScopes(legacy, legacy.ScopeQueryIDs),
 		openid4vp.VPResponse{VPToken: map[string][]string{"eudi_pid": {"token"}}}, "pid")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"token"}, tokens)
@@ -514,11 +514,17 @@ func TestQueryIDForScopeIn(t *testing.T) {
 		ScopeQueryIDs: map[string]string{"pid": "eudi_pid"},
 	}
 
-	assert.Equal(t, "eudi_pid", queryIDForScopeIn(authCtx, "pid"),
+	assert.Equal(t, "eudi_pid", queryIDForScopeIn(authCtx.ScopeQueryIDs, "pid"),
 		"a mapped scope resolves to its query id")
-	assert.Equal(t, "ehic", queryIDForScopeIn(authCtx, "ehic"),
+	assert.Equal(t, "ehic", queryIDForScopeIn(authCtx.ScopeQueryIDs, "ehic"),
 		"an unmapped scope is its own key - only differing pairs are persisted")
 
-	assert.Equal(t, "nosuch", queryIDForScopeIn(&cache.AuthorizationContext{}, "nosuch"),
+	assert.Equal(t, "nosuch", queryIDForScopeIn(nil, "nosuch"),
 		"a session with no mapping at all still resolves")
+}
+
+// credentialScopesLit is a test shim for the common case of an inline auth
+// context: the request-local mapping is just the one the context carries.
+func (c *Client) credentialScopesLit(authCtx *cache.AuthorizationContext) []string {
+	return c.credentialScopes(authCtx, authCtx.ScopeQueryIDs)
 }

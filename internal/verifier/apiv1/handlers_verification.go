@@ -154,10 +154,15 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// no mapping, so a template-built query's response would not resolve. The
 	// mapping is a pure function of the request, so rebuild it rather than fail
 	// a presentation the user has already completed mid rolling deploy.
-	if authCtx.ScopeQueryIDs == nil && authCtx.DCQLQuery != nil {
+	//
+	// Held locally, never written back: MemoryStore.Get returns the cached
+	// *AuthorizationContext itself, so assigning here would mutate an object
+	// concurrent direct-post requests are reading.
+	scopeQueryIDs := authCtx.ScopeQueryIDs
+	if scopeQueryIDs == nil && authCtx.DCQLQuery != nil {
 		if rebuilt := c.ScopeQueryIDs(ctx, authCtx.DCQLQuery, authCtx.Scopes); len(rebuilt) > 0 {
 			c.log.Info("rebuilt the scope-to-query mapping for a session that predates it", "scopes", authCtx.Scopes)
-			authCtx.ScopeQueryIDs = rebuilt
+			scopeQueryIDs = rebuilt
 		}
 	}
 
@@ -170,7 +175,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// and caches a successful presentation having validated no VP token. The
 	// check used to fire only when the query had credentials, so a query with
 	// none skipped it.
-	credentialScopes := c.credentialScopes(authCtx)
+	credentialScopes := c.credentialScopes(authCtx, scopeQueryIDs)
 	if len(credentialScopes) == 0 {
 		c.log.Error(nil, "no requested scope corresponds to a requested credential", "scopes", authCtx.Scopes)
 		return nil, fmt.Errorf("no requested scope corresponds to a requested credential")
@@ -183,7 +188,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// under each scope's rules.
 	claimedBy := make(map[string]string, len(credentialScopes))
 	for _, scope := range credentialScopes {
-		key := queryIDForScopeIn(authCtx, scope)
+		key := queryIDForScopeIn(scopeQueryIDs, scope)
 		if owner, taken := claimedBy[key]; taken {
 			c.log.Error(nil, "two scopes resolve to the same DCQL query id", "query_id", key, "scopes", []string{owner, scope})
 			return nil, fmt.Errorf("scopes %q and %q both resolve to DCQL query id %q; the response cannot be attributed", owner, scope, key)
@@ -194,7 +199,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(credentialScopes))
 
 	for _, scope := range credentialScopes {
-		vpTokens, err := c.vpTokensForScope(authCtx, credentialScopes, vpResponse, scope)
+		vpTokens, err := c.vpTokensForScope(scopeQueryIDs, credentialScopes, vpResponse, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -369,7 +374,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				// found nothing for a template-built request and left zkMeta
 				// empty - the ZK verification then failed for want of a
 				// zk_system_type that was in the query all along.
-				queryID := queryIDForScopeIn(authCtx, scope)
+				queryID := queryIDForScopeIn(scopeQueryIDs, scope)
 				for _, cq := range dcqlQuery.Credentials {
 					if cq.ID == queryID && openid4vp.IsMdocZkFormat(cq.Format) {
 						zkMeta = cq.Meta
@@ -661,13 +666,13 @@ type VerificationCallbackResponse struct {
 // selected by one, and nothing stops credential_metadata configuring one.
 //
 // No cached query means every scope is returned, as before.
-func (c *Client) credentialScopes(authCtx *cache.AuthorizationContext) []string {
+func (c *Client) credentialScopes(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string) []string {
 	if authCtx.DCQLQuery == nil {
 		return authCtx.Scopes
 	}
 	scopes := make([]string, 0, len(authCtx.Scopes))
 	for _, scope := range authCtx.Scopes {
-		if openid4vp.StandardOIDCScopes[scope] && !c.isCredentialScope(authCtx, scope) {
+		if openid4vp.StandardOIDCScopes[scope] && !c.isCredentialScope(authCtx, scopeQueryIDs, scope) {
 			continue
 		}
 		scopes = append(scopes, scope)
@@ -677,8 +682,8 @@ func (c *Client) credentialScopes(authCtx *cache.AuthorizationContext) []string 
 
 // isCredentialScope reports whether a scope names a credential this request
 // actually asked for.
-func (c *Client) isCredentialScope(authCtx *cache.AuthorizationContext, scope string) bool {
-	if _, mapped := authCtx.ScopeQueryIDs[scope]; mapped {
+func (c *Client) isCredentialScope(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string, scope string) bool {
+	if _, mapped := scopeQueryIDs[scope]; mapped {
 		return true
 	}
 	if c.cfg.Common != nil {
@@ -705,19 +710,19 @@ func (c *Client) isCredentialScope(authCtx *cache.AuthorizationContext, scope st
 // in this session, which is the scope itself unless ScopeQueryIDs says
 // otherwise. Only differing pairs are persisted, so an absent entry means the
 // two already agree.
-func queryIDForScopeIn(authCtx *cache.AuthorizationContext, scope string) string {
-	if queryID, mapped := authCtx.ScopeQueryIDs[scope]; mapped {
+func queryIDForScopeIn(scopeQueryIDs map[string]string, scope string) string {
+	if queryID, mapped := scopeQueryIDs[scope]; mapped {
 		return queryID
 	}
 	return scope
 }
 
-func (c *Client) vpTokensForScope(authCtx *cache.AuthorizationContext, credentialScopes []string, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
+func (c *Client) vpTokensForScope(scopeQueryIDs map[string]string, credentialScopes []string, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
 	if tokens, ok := vpResponse.VPToken[scope]; ok && len(tokens) > 0 {
 		return tokens, nil
 	}
 
-	if queryID, mapped := authCtx.ScopeQueryIDs[scope]; mapped {
+	if queryID, mapped := scopeQueryIDs[scope]; mapped {
 		if tokens, ok := vpResponse.VPToken[queryID]; ok && len(tokens) > 0 {
 			c.log.Debug("resolved VP token through the scope's DCQL query id", "scope", scope, "query_id", queryID)
 			return tokens, nil
