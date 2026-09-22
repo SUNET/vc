@@ -139,9 +139,7 @@ func constraintFamily(format string) string {
 	switch format {
 	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
 		return "doctype"
-	// "vc+ld+json" as a literal: this repo issues it but has no constant for
-	// it on this branch.
-	case openid4vp.FormatLdpVCDCQL, "vc+ld+json", openid4vp.FormatJwtVCJson:
+	case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON, openid4vp.FormatJwtVCJson:
 		return "types"
 	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
 		return "vct"
