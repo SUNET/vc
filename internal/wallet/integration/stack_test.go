@@ -1371,8 +1371,8 @@ func publicKeyJWK(t *testing.T, key *ecdsa.PrivateKey) map[string]any {
 	return map[string]any{
 		"kty": "EC",
 		"crv": key.Curve.Params().Name,
-		"x":   base64.RawURLEncoding.EncodeToString(key.PublicKey.X.FillBytes(make([]byte, 32))),
-		"y":   base64.RawURLEncoding.EncodeToString(key.PublicKey.Y.FillBytes(make([]byte, 32))),
+		"x":   base64.RawURLEncoding.EncodeToString(key.PublicKey.X.FillBytes(make([]byte, (key.PublicKey.Curve.Params().BitSize+7)/8))),
+		"y":   base64.RawURLEncoding.EncodeToString(key.PublicKey.Y.FillBytes(make([]byte, (key.PublicKey.Curve.Params().BitSize+7)/8))),
 	}
 }
 

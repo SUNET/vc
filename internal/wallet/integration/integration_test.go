@@ -379,8 +379,8 @@ func createMockSDJWT(t *testing.T) string {
 			"jwk": map[string]any{
 				"kty": "EC",
 				"crv": "P-256",
-				"x":   base64.RawURLEncoding.EncodeToString(key.PublicKey.X.FillBytes(make([]byte, 32))),
-				"y":   base64.RawURLEncoding.EncodeToString(key.PublicKey.Y.FillBytes(make([]byte, 32))),
+				"x":   base64.RawURLEncoding.EncodeToString(key.PublicKey.X.FillBytes(make([]byte, (key.PublicKey.Curve.Params().BitSize+7)/8))),
+				"y":   base64.RawURLEncoding.EncodeToString(key.PublicKey.Y.FillBytes(make([]byte, (key.PublicKey.Curve.Params().BitSize+7)/8))),
 			},
 		},
 	})
