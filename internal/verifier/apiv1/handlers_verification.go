@@ -834,6 +834,22 @@ func (c *Client) requestedQuery(authCtx *cache.AuthorizationContext, scope strin
 			return q, true
 		}
 	}
+
+	// A template names its queries whatever its author chose, and the shipped
+	// ones nearly all differ from the scope that selects them - "pid" selects
+	// a query with id "eudi_pid", "ehic" one with id "eudi_ehic". So an id
+	// lookup alone finds nothing for a template-built request.
+	//
+	// With exactly one credential query there is no ambiguity about which one
+	// the scope was requested under. With more than one there is, and this
+	// returns nothing so the caller refuses - guessing would attribute a
+	// constraint to the wrong credential.
+	//
+	// SUNET/vc#683 persists the real scope-to-query mapping; once that is in,
+	// this should consult it instead of inferring.
+	if len(dcqlQuery.Credentials) == 1 {
+		return dcqlQuery.Credentials[0], true
+	}
 	return openid4vp.CredentialQuery{}, false
 }
 

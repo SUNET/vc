@@ -276,3 +276,48 @@ func metaFor(typeValues [][]string, fallback openid4vp.MetaQuery) openid4vp.Meta
 	}
 	return fallback
 }
+
+// TestRequestedQueryResolvesTemplateNamedQueries covers the lookup itself.
+//
+// A template names its queries whatever its author chose, and the shipped ones
+// nearly all differ from the scope that selects them - "pid" selects a query
+// with id "eudi_pid". An id-equals-scope lookup finds nothing for those, and
+// every check that compares a response against the request then has nothing to
+// compare with.
+func TestRequestedQueryResolvesTemplateNamedQueries(t *testing.T) {
+	client, _ := CreateTestClientWithMock(t, nil)
+
+	single := &cache.AuthorizationContext{
+		Scopes: []string{"pid"},
+		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+			{ID: "eudi_pid", Format: openid4vp.FormatSDJWTVC},
+		}},
+	}
+	got, ok := client.requestedQuery(single, "pid")
+	require.True(t, ok, "a template's sole query answers the scope that selected it")
+	assert.Equal(t, "eudi_pid", got.ID)
+
+	// The scope's own id still wins when it is present.
+	named := &cache.AuthorizationContext{
+		Scopes: []string{"pid", "ehic"},
+		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+			{ID: "ehic", Format: openid4vp.FormatSDJWTVC},
+			{ID: "pid", Format: openid4vp.FormatSDJWTVC},
+		}},
+	}
+	got, ok = client.requestedQuery(named, "pid")
+	require.True(t, ok)
+	assert.Equal(t, "pid", got.ID)
+
+	// Several queries and no id match: which one the scope meant is genuinely
+	// unknown, so return nothing and let the caller refuse rather than guess.
+	ambiguous := &cache.AuthorizationContext{
+		Scopes: []string{"pid"},
+		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+			{ID: "eudi_pid", Format: openid4vp.FormatSDJWTVC},
+			{ID: "eudi_ehic", Format: openid4vp.FormatSDJWTVC},
+		}},
+	}
+	_, ok = client.requestedQuery(ambiguous, "pid")
+	assert.False(t, ok, "guessing between queries would attribute a constraint to the wrong credential")
+}
