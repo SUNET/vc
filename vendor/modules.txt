@@ -521,8 +521,8 @@ github.com/json-iterator/go
 # github.com/kaptinlin/jsonpointer v0.4.28
 ## explicit; go 1.26.5
 github.com/kaptinlin/jsonpointer
-# github.com/kaptinlin/jsonschema v0.9.9
-## explicit; go 1.27
+# github.com/kaptinlin/jsonschema v0.9.10
+## explicit; go 1.27.0
 github.com/kaptinlin/jsonschema
 github.com/kaptinlin/jsonschema/pkg/tagparser
 # github.com/kelseyhightower/envconfig v1.4.0
@@ -962,6 +962,9 @@ github.com/xdg-go/scram
 # github.com/xdg-go/stringprep v1.0.4
 ## explicit; go 1.11
 github.com/xdg-go/stringprep
+# github.com/yosida95/uritemplate/v3 v3.0.2
+## explicit; go 1.14
+github.com/yosida95/uritemplate/v3
 # github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78
 ## explicit; go 1.17
 github.com/youmark/pkcs8
