@@ -369,8 +369,10 @@ func TestUIMetadataCredentialFormatFromMetadata(t *testing.T) {
 					VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 				},
 				"mdl": {
-					Format: openid4vp.FormatMsoMdoc,
-					VCTM:   &sdjwtvc.VCTM{VCT: "org.iso.18013.5.1.mDL"},
+					// An mdoc names itself by doctype; a VCTM-only mdoc scope
+					// has no constraint the UI can offer.
+					Format:  openid4vp.FormatMsoMdoc,
+					Doctype: "org.iso.18013.5.1.mDL",
 				},
 			},
 		},

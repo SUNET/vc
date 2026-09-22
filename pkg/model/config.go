@@ -2048,14 +2048,11 @@ func (c *CredentialMetadata) IsLocalMDDL() bool {
 	return c.MDDLFilePath != ""
 }
 
-// vctIdentifier returns the credential's canonical vct - the single value
-// ResolveVCTUrls settles on, which the credential body carries, the issuer
-// metadata advertises, and a wallet stores as the credential's type tag.
+// vctIdentifier returns the credential's canonical vct - the value the body
+// carries, the issuer metadata advertises, and a wallet tags it by.
 //
-// VCTURL is the fallback, not a second identifier: ResolveVCTUrls back-fills
-// VCTM.VCT from the hosting URL for a local file that declared none, so the
-// two agree by construction and this only covers a caller running before
-// resolution.
+// VCTURL is a fallback, not a second identifier: ResolveVCTUrls back-fills
+// VCTM.VCT from it, so the two agree after resolution.
 func (c *CredentialMetadata) vctIdentifier() string {
 	if vctm := c.GetVCTM(); vctm != nil && vctm.VCT != "" {
 		return vctm.VCT
@@ -2065,50 +2062,38 @@ func (c *CredentialMetadata) vctIdentifier() string {
 
 // doctype resolves the mdoc doctype the ISSUED credential actually carries.
 //
-// The loaded MDDL wins. loadMDDLSchema fills it from mddl_file_path, mddl_url
-// or a registry lookup keyed by the configured doctype, and IssuerMetadata
-// advertises mddl.DocType in every one of those cases - so a config setting
-// both an MDDL source and a differing doctype issues the MDDL's. Preferring
-// the configured value would have every DCQL caller request a doctype no
-// issued credential carries.
+// The loaded MDDL wins: loadMDDLSchema fills it in all three cases, including
+// the registry lookup keyed by the configured doctype, and IssuerMetadata
+// always advertises mddl.DocType - so the configured value is a source
+// selector, not necessarily the doctype the issued credential carries.
 //
-// The configured doctype is the fallback for a scope whose MDDL never loaded,
-// and the VCTM's vct the last resort for an mso_mdoc scope configured with one
-// - a fallback, not a conflation.
+// It is the fallback for a scope whose MDDL never loaded. There is deliberately
+// no fall back to the VCTM's vct: an mdoc carries a doctype and never a vct,
+// and that vct may be a back-filled hosting URL, so it would ask for something
+// no issued mdoc has. Empty makes DCQLMetaQuery report the scope instead.
 func (c *CredentialMetadata) doctype() string {
 	if mddl := c.GetMDDL(); mddl != nil && mddl.DocType != "" {
 		return mddl.DocType
 	}
-	if c.Doctype != "" {
-		return c.Doctype
-	}
-	if vctm := c.GetVCTM(); vctm != nil {
-		return vctm.VCT
-	}
-	return ""
+	return c.Doctype
 }
 
 // DCQLMetaQuery returns the DCQL meta constraint for this credential type, and
 // whether one could be expressed at all.
 //
-// Chosen by FORMAT (OpenID4VP 1.0 6.4.1), not by which metadata document
-// happens to be loaded. Keying off "is an MDDL present" routes every non-mdoc
-// format - including the ldp_vc and jwt_vc_json credentials this stack issues -
-// into the SD-JWT branch, emitting vct_values where ValidateCredentialQuery
-// requires type_values. Keying off "has a VCTM" mislabels an mso_mdoc scope
-// that happens to carry one.
+// Chosen by FORMAT (OpenID4VP 1.0 6.4.1), not by which metadata document is
+// loaded: keying off "has an MDDL" routes W3C credentials into the SD-JWT
+// branch, and keying off "has a VCTM" mislabels an mdoc that carries one.
 //
 //   - mso_mdoc: doctype_value, see doctype.
-//   - dc+sd-jwt, the legacy vc+sd-jwt spelling, and an empty format (which
-//     Format declares as defaulting to dc+sd-jwt): vct_values, carrying the
-//     canonical identifier - see vctIdentifier.
+//   - dc+sd-jwt, the legacy vc+sd-jwt spelling, and an empty format (Format
+//     defaults to dc+sd-jwt): vct_values, see vctIdentifier.
 //   - anything else: ok is false.
 //
-// ok=false covers four cases a caller must not paper over: a nil receiver (a
-// scope with no credential_metadata entry, reachable from a valid config), a
-// format whose constraint this repo cannot build (the W3C VC formats, which
-// need a configured type list), a format credential_metadata cannot complete
-// (mso_mdoc_zk, below), and a format whose own identifier is missing.
+// ok=false means no constraint can be built - a nil receiver, a W3C format
+// with no configured type list, mso_mdoc_zk (below), or a missing identifier -
+// and callers must refuse the scope rather than send an empty meta, which DCQL
+// reads as matching everything.
 func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
 	if c == nil {
 		return openid4vp.MetaQuery{}, false

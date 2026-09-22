@@ -342,10 +342,24 @@ func TestDCQLMetaQueryByFormat(t *testing.T) {
 			wantDoctype: "org.iso.18013.5.1.mDL",
 		},
 		{
-			name:        "an mdoc carrying a VCTM is still an mdoc",
-			cm:          &CredentialMetadata{Format: openid4vp.FormatMsoMdoc, VCTM: &sdjwtvc.VCTM{VCT: "org.iso.18013.5.1.mDL"}},
+			// Routed by format, not by which document is loaded: a VCTM does
+			// not make this an SD-JWT scope.
+			name: "an mdoc carrying a VCTM is still an mdoc",
+			cm: &CredentialMetadata{
+				Format:  openid4vp.FormatMsoMdoc,
+				Doctype: "org.iso.18013.5.1.mDL",
+				VCTM:    &sdjwtvc.VCTM{VCT: "urn:something:else:1"},
+			},
 			wantOK:      true,
 			wantDoctype: "org.iso.18013.5.1.mDL",
+		},
+		{
+			// An mdoc carries a doctype and never a vct, and ResolveVCTUrls
+			// may back-fill that vct from the hosting URL - so using it as a
+			// doctype_value would ask for something no issued mdoc has.
+			name:   "an mdoc with only a VCTM is unusable, not a vct query",
+			cm:     &CredentialMetadata{Format: openid4vp.FormatMsoMdoc, VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}},
+			wantOK: false,
 		},
 		{
 			name:   "an mdoc with no identifier at all is unusable",

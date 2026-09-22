@@ -115,15 +115,10 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 	}
 
 	for scope, constructor := range c.cfg.Common.CredentialMetadata {
-		// credential_metadata can hold a nil value for a present key - an
-		// entry written with no fields - and Format is a direct field read,
-		// not one of the nil-safe accessors, so this panicked on a config
-		// that merely parses.
-		//
-		// An error rather than a skip, unlike the unconstrainable case below:
-		// the preset path refuses a dangling scope the same way, and a
-		// malformed entry is a config the operator has to fix, not a
-		// credential this verifier happens to be unable to ask for.
+		// A present key can hold a nil value, and Format is a direct field
+		// read, so this panicked on a config that merely parses. An error, not
+		// a skip like the unconstrainable case below: a malformed entry is a
+		// config to fix, not a credential we cannot ask for.
 		if constructor == nil {
 			return nil, fmt.Errorf("credential_metadata entry %q is empty", scope)
 		}
@@ -145,11 +140,10 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		} else if mddl := constructor.GetMDDL(); mddl != nil {
 			info.VCT = mddl.DocType
 		}
-		// Format-aware, like the DCQL builders: presentation-definition.js
-		// turns VCTValues straight into meta.vct_values, so publishing one for
-		// a credential DCQL constrains some other way puts an unmatchable
-		// query on the wire. A scope with no expressible constraint is left
-		// out of the picker rather than offered and then refused.
+		// Format-aware, like the DCQL builders: the JS turns VCTValues straight
+		// into meta.vct_values, so publishing one for a credential constrained
+		// another way puts an unmatchable query on the wire. An unconstrainable
+		// scope is left out of the picker.
 		mq, ok := constructor.DCQLMetaQuery()
 		if !ok {
 			c.log.Error(nil, "credential omitted from the verifier UI: no usable DCQL meta constraint for scope",
@@ -159,13 +153,9 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		// Empty for mdoc, which is constrained by its doctype instead;
 		// omitempty then drops the field.
 		info.VCTValues = mq.VCTValues
-		// For an mdoc scope the doctype IS the identifier, and
-		// presentation-definition.js sends info.VCT as meta.doctype_value, so
-		// it must be the string the server-side builders use. The chain above
-		// reads VCTM.VCT, then VCTURL, then the MDDL's doctype, and never the
-		// configured Doctype - leaving a registry-backed scope's identifier
-		// empty, and picking the VCTM's vct over the MDDL's doctype when both
-		// are present.
+		// The JS sends info.VCT as meta.doctype_value, so it must match what
+		// the server-side builders use. The chain above never reads the
+		// configured Doctype, leaving a registry-backed scope empty.
 		if mq.DoctypeValue != "" {
 			info.VCT = mq.DoctypeValue
 		}
@@ -242,10 +232,8 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					uiCred.Format = meta.Format
 					mq, ok := meta.DCQLMetaQuery()
 					if !ok {
-						// Drop the credential, like the picker loop above,
-						// rather than fail the whole /ui/metadata response:
-						// one unconstrainable scope would otherwise hide every
-						// usable credential and preset the verifier has.
+						// Drop it, like the picker loop: failing here would
+						// hide every usable credential and preset.
 						c.log.Error(nil, "credential omitted from a verifier UI preset: no usable DCQL meta constraint for scope",
 							"preset", label, "scope", scope, "format", c.cfg.GetFormatForScope(scope))
 						continue
@@ -318,8 +306,7 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 				}
 				uiPreset.Credentials = append(uiPreset.Credentials, uiCred)
 			}
-			// A preset whose credentials were all dropped would render as an
-			// empty selection that asks the wallet for nothing.
+			// An all-dropped preset would ask the wallet for nothing.
 			if len(uiPreset.Credentials) == 0 {
 				c.log.Error(nil, "preset omitted from the verifier UI: none of its credentials can be requested", "preset", label)
 				continue

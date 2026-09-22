@@ -395,19 +395,15 @@ func (c *Client) buildDCQLQueryFromConfig(scopes []string) (*openid4vp.DCQL, err
 			continue
 		}
 
-		// The meta constraint follows the credential's FORMAT (OpenID4VP 1.0
-		// 6.4.1). Emitting vct_values unconditionally sent an mso_mdoc scope
-		// out as {"vct_values": [""]} with no doctype_value - a query no
-		// wallet can match, since no mdoc credential carries a vct.
+		// By FORMAT (OpenID4VP 1.0 6.4.1). Emitting vct_values unconditionally
+		// sent an mso_mdoc scope out as {"vct_values": [""]}, which no wallet
+		// can match since no mdoc carries a vct.
 		meta, ok := credInfo.DCQLMetaQuery()
 		if !ok {
-			// A configured scope whose constraint cannot be expressed is an
-			// error, not a skip: dropping it here would leave it in the
-			// requested scopes, where the direct-post handler requires a VP
-			// token for every entry, so the flow would fail only after the
-			// user completed a presentation for a credential they were never
-			// asked for. GetFormatForScope, not credInfo.Format: the map can
-			// hold a nil value for a present key.
+			// An error, not a skip: dropping the scope leaves it in the
+			// request, where direct-post requires a VP token for it, so the
+			// flow fails only after the user has presented. GetFormatForScope,
+			// not credInfo.Format - the map can hold a nil value.
 			return nil, fmt.Errorf("scope %q is configured with format %q, for which no DCQL meta constraint can be built", scope, c.cfg.GetFormatForScope(scope))
 		}
 		c.log.Info("Matched scope to credential", "scope", scope, "vct_values", meta.VCTValues, "doctype_value", meta.DoctypeValue, "format", credInfo.Format)
