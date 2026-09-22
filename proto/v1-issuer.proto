@@ -154,6 +154,11 @@ message MakeVC20Request {
     string subject_did = 4;               // Optional subject DID for holder binding
     string cryptosuite = 5;               // Cryptosuite: "ecdsa-rdfc-2019", "ecdsa-sd-2023", or "eddsa-rdfc-2022"
     repeated string mandatory_pointers = 6; // JSON pointers for mandatory claims (SD-2023 only)
+    // Extra JSON-LD contexts appended after the VC 2.0 base context. A custom
+    // type carries no meaning without one: it survives JSON-LD expansion as a
+    // relative IRI, so a verifier constraining by meta.type_values can never
+    // match it. Must be dereferenceable by the verifier.
+    repeated string additional_contexts = 7;
 }
 
 // MakeVC20Reply contains the issued W3C VC 2.0 credential

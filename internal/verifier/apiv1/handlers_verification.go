@@ -489,27 +489,24 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// evaluator the other formats use - trust.KeyResolver and
 			// openid4vp.VC20KeyResolver declare the same method, and both
 			// configured evaluators implement it.
-			// A W3C presentation proves holder binding with a proof over the
-			// VP carrying the verifier's challenge and domain. VC20Handler
-			// verifies the ISSUER's proof on the credential and unwraps a VP
-			// without checking its proof, so nothing here binds the response
-			// to this session - a captured credential would replay.
-			//
-			// Refuse rather than accept that silently. A query may opt out
-			// with require_cryptographic_holder_binding: false, and then
-			// issuer-proof-only verification is exactly what was asked for.
-			if requested, ok := requestedQuery(authCtx, scope); !ok || requested.RequiresCryptographicHolderBinding() {
-				c.log.Error(nil, "W3C holder binding is required but cannot be verified yet", "scope", scope)
-				return nil, fmt.Errorf("scope %s requires cryptographic holder binding, which W3C VC verification cannot check yet; set require_cryptographic_holder_binding: false only if an unbound credential is acceptable for this scope", scope)
-			}
-
 			resolver, ok := c.trustEvaluator.(trust.KeyResolver)
 			if !ok {
 				c.log.Error(nil, "trust evaluator cannot resolve verification methods", "scope", scope)
 				return nil, fmt.Errorf("W3C VC verification for scope %s needs a key-resolving trust evaluator", scope)
 			}
 
-			vc20Handler, err := openid4vp.NewVC20Handler(openid4vp.WithVC20KeyResolver(resolver))
+			vc20Opts := []openid4vp.VC20HandlerOption{openid4vp.WithVC20KeyResolver(resolver)}
+
+			// Holder binding, when the request asked for it (the OpenID4VP
+			// default). The credential's issuer proof says it was issued; only
+			// a proof over the PRESENTATION, carrying this session's nonce and
+			// naming this verifier, says the holder is presenting it now.
+			requested, haveQuery := requestedQuery(authCtx, scope)
+			if !haveQuery || requested.RequiresCryptographicHolderBinding() {
+				vc20Opts = append(vc20Opts, openid4vp.WithVC20PresentationBinding(authCtx.Nonce, authCtx.ClientID))
+			}
+
+			vc20Handler, err := openid4vp.NewVC20Handler(vc20Opts...)
 			if err != nil {
 				c.log.Error(err, "failed to create W3C VC handler", "scope", scope)
 				return nil, fmt.Errorf("failed to create W3C VC handler for scope %s: %w", scope, err)
@@ -545,6 +542,17 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				c.log.Warn("W3C issuer not trusted", "scope", scope,
 					"issuer", vc20Result.Issuer, "reason", decision.Reason)
 				return nil, fmt.Errorf("W3C issuer not trusted for scope %s: %s", scope, decision.Reason)
+			}
+
+			// The type constraint the request carried, enforced on what came
+			// back. Without this the wallet chooses which credential answers
+			// the scope and meta.type_values is decoration.
+			if haveQuery && len(requested.Meta.TypeValues) > 0 {
+				if !openid4vp.MatchTypeValues(vc20Result.TypeIRIs, requested.Meta.TypeValues) {
+					c.log.Error(nil, "returned W3C credential does not carry the requested types",
+						"scope", scope, "got", vc20Result.TypeIRIs, "want", requested.Meta.TypeValues)
+					return nil, fmt.Errorf("the credential returned for scope %s does not carry the requested types", scope)
+				}
 			}
 
 			c.log.Debug("W3C VC verified successfully", "scope", scope,

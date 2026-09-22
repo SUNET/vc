@@ -7,6 +7,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/trust"
+	"github.com/SUNET/vc/pkg/vc20/credential"
 
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
@@ -26,15 +28,19 @@ import (
 // verification method, which is what W3C Data Integrity needs and what
 // AllowAllEvaluator deliberately cannot do without a PDP.
 type staticKeyEvaluator struct {
-	key crypto.PublicKey
+	keys map[string]crypto.PublicKey
 }
 
 func (e *staticKeyEvaluator) Evaluate(context.Context, *trust.EvaluationRequest) (*trust.TrustDecision, error) {
 	return &trust.TrustDecision{Trusted: true}, nil
 }
 func (e *staticKeyEvaluator) SupportsKeyType(trust.KeyType) bool { return true }
-func (e *staticKeyEvaluator) ResolveKey(context.Context, string) (crypto.PublicKey, error) {
-	return e.key, nil
+func (e *staticKeyEvaluator) ResolveKey(_ context.Context, verificationMethod string) (crypto.PublicKey, error) {
+	key, ok := e.keys[verificationMethod]
+	if !ok {
+		return nil, fmt.Errorf("no key for %q", verificationMethod)
+	}
+	return key, nil
 }
 
 // TestVerificationDirectPostW3C drives a real signed W3C VC 2.0 credential
@@ -51,6 +57,13 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
+	// A context defining the custom term, registered locally so expansion is
+	// offline and deterministic. In a deployment this is a published URL,
+	// configured as credential_contexts and fetched by the verifier.
+	const degreeContext = "https://example.org/degree"
+	credential.GetGlobalLoader().AddContext(degreeContext,
+		`{"@context":{"UniversityDegreeCredential":"https://example.org/degree#UniversityDegreeCredential"}}`)
+
 	issuerHandler, err := openid4vp.NewVC20Handler(
 		openid4vp.WithVC20SignerConfig(&openid4vp.VC20SignerConfig{
 			PrivateKey:         issuerKey,
@@ -62,13 +75,22 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 	require.NoError(t, err)
 
 	created, err := issuerHandler.CreateCredential(ctx, &openid4vp.VC20CreateRequest{
-		Types:   []string{"UniversityDegreeCredential"},
-		Subject: map[string]any{"id": "did:example:subject", "degree": "Master of Science"},
+		Types:              []string{"UniversityDegreeCredential"},
+		AdditionalContexts: []string{degreeContext},
+		Subject:            map[string]any{"id": "did:example:subject", "degree": "Master of Science"},
 	})
 	require.NoError(t, err)
 
+	// The holder signs the presentation; the issuer signed the credential.
+	// Two distinct keys, which is the whole point of holder binding.
+	holderKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
 	client, _ := CreateTestClientWithMock(t, nil)
-	client.trustEvaluator = &staticKeyEvaluator{key: &issuerKey.PublicKey}
+	client.trustEvaluator = &staticKeyEvaluator{keys: map[string]crypto.PublicKey{
+		"did:example:issuer#key-1": &issuerKey.PublicKey,
+		"did:example:holder#key-1": &holderKey.PublicKey,
+	}}
 
 	openid4vpClient, err := openid4vp.New(ctx, &openid4vp.Config{})
 	require.NoError(t, err)
@@ -90,6 +112,7 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 	// is explicitly false: this credential carries only the issuer's proof, and
 	// the verifier refuses to pretend an unbound credential satisfies a request
 	// that asked for binding.
+	requestedTypes := [][]string{{openid4vp.BaseVCTypeIRI, "https://example.org/degree#UniversityDegreeCredential"}}
 	saveSession := func(t *testing.T, holderBinding *bool) {
 		t.Helper()
 		require.NoError(t, client.cacheService.AuthContext.Save(ctx, &cache.AuthorizationContext{
@@ -102,16 +125,32 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
 				ID:                                scope,
 				Format:                            openid4vp.FormatLdpVCDCQL,
-				Meta:                              openid4vp.MetaQuery{TypeValues: [][]string{{openid4vp.BaseVCTypeIRI, "https://example.org/degree#UniversityDegreeCredential"}}},
+				Meta:                              openid4vp.MetaQuery{TypeValues: requestedTypes},
 				RequireCryptographicHolderBinding: holderBinding,
 			}}},
 		}))
 	}
-	saveSession(t, new(false))
+	saveSession(t, nil) // nil is the spec default: holder binding required
+
+	// A real presentation: the holder signs the VP with proofPurpose
+	// "authentication", carrying this session's nonce as the challenge and
+	// naming this verifier as the domain.
+	vp, err := openid4vp.NewVPBuilder().BuildVC20Presentation(
+		[][]byte{created.CredentialJSON},
+		holderKey,
+		&openid4vp.VPBuildOptions{
+			HolderDID:          "did:example:holder",
+			VerificationMethod: "did:example:holder#key-1",
+			Nonce:              "w3c-nonce",
+			Domain:             "x509_san_dns:verifier.example.com",
+			Cryptosuite:        openid4vp.CryptosuiteECDSA2019,
+		},
+	)
+	require.NoError(t, err)
 
 	body, err := json.Marshal(openid4vp.VPResponse{
 		State:   state,
-		VPToken: map[string][]string{scope: {string(created.CredentialJSON)}},
+		VPToken: map[string][]string{scope: {string(vp)}},
 	})
 	require.NoError(t, err)
 	encrypted, err := jwe.Encrypt(body,
@@ -142,17 +181,62 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 	require.True(t, ok, "the whole credential map is cached, so validations can address credentialSubject.*")
 	assert.Equal(t, "Master of Science", subject["degree"])
 
-	// The same credential against a request that DID ask for holder binding
-	// must be refused, not accepted. VC20Handler verifies the issuer's proof
-	// and unwraps a VP without checking its proof, so nothing binds this
-	// response to this session - accepting it would let a captured credential
-	// replay. nil is the spec default, which is true.
-	for _, binding := range []*bool{nil, new(true)} {
-		saveSession(t, binding)
-		_, err = client.VerificationDirectPost(ctx, &VerificationDirectPostRequest{
-			Response: string(encrypted),
-		})
-		require.Error(t, err, "an unbound credential must not satisfy a request requiring holder binding")
-		assert.Contains(t, err.Error(), "holder binding")
-	}
+	// A BARE credential - issuer-signed, no presentation proof - proves it was
+	// issued, not that this holder is presenting it now. Accepting one where
+	// binding was required is exactly the replay this guards against.
+	bareBody, err := json.Marshal(openid4vp.VPResponse{
+		State:   state,
+		VPToken: map[string][]string{scope: {string(created.CredentialJSON)}},
+	})
+	require.NoError(t, err)
+	bare, err := jwe.Encrypt(bareBody,
+		jwe.WithKey(jwa.ECDH_ES(), ephemeralPubJWK),
+		jwe.WithContentEncryption(jwa.A256GCM()),
+	)
+	require.NoError(t, err)
+
+	saveSession(t, nil)
+	_, err = client.VerificationDirectPost(ctx, &VerificationDirectPostRequest{Response: string(bare)})
+	require.Error(t, err, "a bare credential must not satisfy a request requiring holder binding")
+	assert.Contains(t, err.Error(), "presentation")
+
+	// A presentation bound to a DIFFERENT session. It verifies cryptographically
+	// - the holder really signed it - and must still be refused, because the
+	// challenge names someone else's exchange. This is replay.
+	replayed, err := openid4vp.NewVPBuilder().BuildVC20Presentation(
+		[][]byte{created.CredentialJSON},
+		holderKey,
+		&openid4vp.VPBuildOptions{
+			HolderDID:          "did:example:holder",
+			VerificationMethod: "did:example:holder#key-1",
+			Nonce:              "a-different-sessions-nonce",
+			Domain:             "x509_san_dns:verifier.example.com",
+			Cryptosuite:        openid4vp.CryptosuiteECDSA2019,
+		},
+	)
+	require.NoError(t, err)
+	replayBody, err := json.Marshal(openid4vp.VPResponse{
+		State:   state,
+		VPToken: map[string][]string{scope: {string(replayed)}},
+	})
+	require.NoError(t, err)
+	replayEnc, err := jwe.Encrypt(replayBody,
+		jwe.WithKey(jwa.ECDH_ES(), ephemeralPubJWK),
+		jwe.WithContentEncryption(jwa.A256GCM()),
+	)
+	require.NoError(t, err)
+
+	saveSession(t, nil)
+	_, err = client.VerificationDirectPost(ctx, &VerificationDirectPostRequest{Response: string(replayEnc)})
+	require.Error(t, err, "a presentation bound to another session must be refused")
+	assert.Contains(t, err.Error(), "challenge")
+
+	// A credential that verifies perfectly but is not the type the request
+	// asked for. meta.type_values is the constraint; if it is not enforced on
+	// the response, the wallet chooses which credential answers the scope.
+	requestedTypes = [][]string{{openid4vp.BaseVCTypeIRI, "https://example.org/degree#DoctoralDegreeCredential"}}
+	saveSession(t, nil)
+	_, err = client.VerificationDirectPost(ctx, &VerificationDirectPostRequest{Response: string(encrypted)})
+	require.Error(t, err, "a credential of the wrong type must not answer the scope")
+	assert.Contains(t, err.Error(), "requested types")
 }

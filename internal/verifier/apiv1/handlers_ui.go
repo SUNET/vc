@@ -479,8 +479,15 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	}
 
 	authorizationContext := &cache.AuthorizationContext{
-		SessionID:           sessionID,
-		Scopes:              scopes,
+		SessionID: sessionID,
+		Scopes:    scopes,
+		// The query this session was built from, AFTER validation and VCTM
+		// augmentation - the one actually sent to the wallet. Verification
+		// compares the response against it: which format answers each scope,
+		// which types were asked for, whether holder binding was required.
+		// Without it here the request object cache is the only copy, and the
+		// verification path cannot see what it is checking against.
+		DCQLQuery:           req.DCQLQuery,
 		Code:                "",
 		RequestURI:          "",
 		WalletURI:           "",

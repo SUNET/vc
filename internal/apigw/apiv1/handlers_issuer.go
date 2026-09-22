@@ -661,6 +661,10 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 			SubjectDid:        did,
 			Cryptosuite:       cryptosuite,
 			MandatoryPointers: mandatoryPointers,
+			// Without the context that defines them, the configured types
+			// expand to relative IRIs and no verifier can match the query
+			// built from credential_type_values.
+			AdditionalContexts: c.cfg.GetCredentialMetadata(scope).GetCredentialContexts(),
 		})
 		if err != nil {
 			c.log.Error(err, "failed to call MakeVC20")

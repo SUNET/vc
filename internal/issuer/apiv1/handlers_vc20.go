@@ -27,6 +27,10 @@ type CreateVC20Request struct {
 	SubjectDID        string   `json:"subject_did,omitempty"`
 	Cryptosuite       string   `json:"cryptosuite"`
 	MandatoryPointers []string `json:"mandatory_pointers,omitempty"`
+	// AdditionalContexts are JSON-LD contexts appended after the VC 2.0 base
+	// context, so a configured custom type expands to the IRI a verifier
+	// constrains by instead of surviving as a relative one.
+	AdditionalContexts []string `json:"additional_contexts,omitempty"`
 }
 
 // CreateVC20Reply is the reply for W3C VC 2.0 issuance
@@ -110,6 +114,7 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 	credentialJSON, err := c.buildVC20CredentialJSON(
 		credentialID,
 		credentialTypes,
+		req.AdditionalContexts,
 		credentialSubject,
 		validFrom,
 		validUntil,
@@ -155,6 +160,7 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 func (c *Client) buildVC20CredentialJSON(
 	credentialID string,
 	types []string,
+	additionalContexts []string,
 	credentialSubject map[string]any,
 	validFrom time.Time,
 	validUntil *time.Time,
@@ -165,8 +171,14 @@ func (c *Client) buildVC20CredentialJSON(
 		types = append([]string{"VerifiableCredential"}, types...)
 	}
 
+	// The base context first, then whatever the credential type configures.
+	// A type this deployment defines has no meaning without its own context:
+	// JSON-LD leaves an undefined term as a relative IRI, which no verifier
+	// can match against meta.type_values.
+	contexts := append([]string{"https://www.w3.org/ns/credentials/v2"}, additionalContexts...)
+
 	cred := map[string]any{
-		"@context":          []string{"https://www.w3.org/ns/credentials/v2"},
+		"@context":          contexts,
 		"id":                credentialID,
 		"type":              types,
 		"issuer":            c.cfg.Issuer.JWTAttribute.Issuer,

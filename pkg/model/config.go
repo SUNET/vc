@@ -1831,6 +1831,20 @@ type CredentialMetadata struct {
 	// Unset leaves the scope unrequestable rather than guessed at.
 	CredentialTypeValues [][]string `yaml:"credential_type_values,omitempty" json:"-" validate:"omitempty,dive,required,dive,required"`
 
+	// CredentialContexts are JSON-LD contexts appended after the VC 2.0 base
+	// context when this credential is issued.
+	//
+	// This is what connects the two fields above. A term in credential_types
+	// that no context defines survives JSON-LD expansion as a RELATIVE IRI,
+	// so it can never equal the absolute IRI credential_type_values names,
+	// and a verifier constraining by that IRI will refuse every credential
+	// this deployment issues. Publish a context defining the term and name it
+	// here.
+	//
+	// The URL must be dereferenceable by the verifier, which expands the
+	// credential to compare it against the constraint.
+	CredentialContexts []string `yaml:"credential_contexts,omitempty" json:"-" validate:"omitempty,dive,required,url"`
+
 	MDDL *mdoc.MDDLSchema `yaml:"-" json:"-"`
 
 	// MDDLRaw holds the raw JSON bytes of the MDDL document, passed inline
@@ -2047,6 +2061,15 @@ func (c *CredentialMetadata) GetVCTURL() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.VCTURL
+}
+
+// GetCredentialContexts returns the JSON-LD contexts to issue this credential
+// with, nil-safe like the other accessors.
+func (c *CredentialMetadata) GetCredentialContexts() []string {
+	if c == nil {
+		return nil
+	}
+	return c.CredentialContexts
 }
 
 // GetVCTMRaw returns the raw VCTM JSON bytes under a read lock.
