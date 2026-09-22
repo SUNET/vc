@@ -2012,11 +2012,10 @@ func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string, r
 // GetVCTM returns the cached VCTM under a read lock so it is safe to call
 // concurrently with the background refresh loop.
 //
-// Nil receiver returns the zero value, as every accessor on this type does.
-// A nil *CredentialMetadata is reachable without a programming error:
-// GetCredentialMetadata is a map lookup, and credential_metadata can hold a
-// nil value for a present key. Taking the lock first turned those into a
-// panic in whatever request touched it.
+// Nil receiver returns the zero value, as every accessor here does: a nil
+// *CredentialMetadata is reachable without a programming error - a map lookup
+// that missed, or a present key holding nil - and taking the lock first turned
+// those into a panic.
 func (c *CredentialMetadata) GetVCTM() *sdjwtvc.VCTM {
 	if c == nil {
 		return nil

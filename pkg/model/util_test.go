@@ -499,11 +499,9 @@ func TestReplaceVCT(t *testing.T) {
 // TestCredentialMetadataAccessorsAreNilSafe pins every accessor against a nil
 // receiver.
 //
-// A nil *CredentialMetadata is reachable without a programming error:
-// GetCredentialMetadata returns nil for an absent key, and credential_metadata
-// can hold a nil value for a present key. Each accessor took c.mu.RLock()
-// before reading anything, so either turned into a panic in whatever request
-// touched it.
+// A nil *CredentialMetadata is reachable without a programming error - a map
+// lookup that missed, or a present key holding nil - and every accessor took
+// c.mu.RLock() before reading anything, so either turned into a panic.
 func TestCredentialMetadataAccessorsAreNilSafe(t *testing.T) {
 	var cm *CredentialMetadata
 
