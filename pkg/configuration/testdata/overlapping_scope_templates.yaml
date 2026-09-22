@@ -1,0 +1,40 @@
+# Two templates with DISTINCT scopes - the loader rejects any scope appearing
+# in two templates (validateNoDuplicateScopes), so that is not constructible.
+#
+# The ambiguity this fixture reproduces is the other one: a request naming
+# scopes from both templates. "profile" belongs to pid_basic alone, so a
+# request for "openid profile eduid" overlaps both, and the old any-overlap
+# matcher picked whichever the templates map happened to yield first.
+templates:
+  - id: "pid_basic"
+    name: "PID basic"
+    version: "1.0"
+    oidc_scopes:
+      - "pid"
+      - "profile"
+    dcql:
+      credentials:
+        - id: "eudi_pid"
+          format: "dc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:eudi:pid:1"
+    claim_mappings:
+      given_name: "given_name"
+    enabled: true
+
+  - id: "eduid_basic"
+    name: "eduID basic"
+    version: "1.0"
+    oidc_scopes:
+      - "eduid"
+    dcql:
+      credentials:
+        - id: "eduid"
+          format: "dc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:credential:eduid:1"
+    claim_mappings:
+      given_name: "first_name"
+    enabled: true
