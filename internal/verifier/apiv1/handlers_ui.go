@@ -139,7 +139,10 @@ func constraintFamily(format string) string {
 	switch format {
 	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
 		return "doctype"
-	case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON, openid4vp.FormatJwtVCJson:
+	// Not jwt_vc_json: DCQLMetaQuery refuses it, so calling it family-
+	// compatible here would approve an override the query builder then drops.
+	// The two have to agree on what is requestable.
+	case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON:
 		return "types"
 	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
 		return "vct"

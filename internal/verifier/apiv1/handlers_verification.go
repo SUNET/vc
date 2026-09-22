@@ -689,10 +689,10 @@ const (
 // SD-JWT: contains ~ separators (disclosure markers) and JWT dots
 // mDOC: base64url-encoded CBOR (doesn't look like JWT - no dots, or random data without ~)
 func detectCredentialFormat(vpToken string) CredentialFormat {
-	// W3C VC 2.0 is JSON-LD, plain or base64url-wrapped, and a JSON object is
-	// unambiguous - so test it first. The mdoc branch below base64-decodes and
-	// would otherwise claim a wrapped JSON body before anything looked at it.
-	if looksLikeJSONObject(vpToken) {
+	// W3C VC 2.0 is JSON-LD, and a JSON document is unambiguous - so test it
+	// first. The mdoc branch below base64-decodes and would otherwise claim a
+	// wrapped JSON body before anything looked at it.
+	if looksLikeJSONDocument(vpToken) {
 		return FormatVC20
 	}
 
@@ -736,18 +736,28 @@ func detectCredentialFormat(vpToken string) CredentialFormat {
 	return FormatUnknown
 }
 
-// looksLikeJSONObject reports whether the token is a JSON object, either
-// directly or base64url-encoded - the two shapes VC20Handler.decodeVPToken
-// accepts.
-func looksLikeJSONObject(vpToken string) bool {
-	if strings.HasPrefix(strings.TrimSpace(vpToken), "{") {
+// looksLikeJSONDocument reports whether the token is a JSON-LD document in any
+// shape VC20Handler.decodeVPToken accepts: an object or an expanded-form
+// array, plain or wrapped in base64url or standard base64.
+//
+// It has to accept exactly what the handler does. Anything narrower sends a
+// token the handler could verify down another format's branch instead.
+func looksLikeJSONDocument(vpToken string) bool {
+	if isJSONDocument([]byte(vpToken)) {
 		return true
 	}
-	decoded, err := base64.RawURLEncoding.DecodeString(vpToken)
-	if err != nil {
-		return false
+	if decoded, err := base64.RawURLEncoding.DecodeString(vpToken); err == nil {
+		return isJSONDocument(decoded)
 	}
-	return bytes.HasPrefix(bytes.TrimSpace(decoded), []byte("{"))
+	if decoded, err := base64.StdEncoding.DecodeString(vpToken); err == nil {
+		return isJSONDocument(decoded)
+	}
+	return false
+}
+
+func isJSONDocument(b []byte) bool {
+	trimmed := bytes.TrimSpace(b)
+	return bytes.HasPrefix(trimmed, []byte("{")) || bytes.HasPrefix(trimmed, []byte("["))
 }
 
 // mapToDisclosers converts a map of claims to []sdjwtvc.Discloser format.

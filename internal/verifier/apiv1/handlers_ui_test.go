@@ -1415,13 +1415,17 @@ func TestSameConstraintFamily(t *testing.T) {
 		{"mso_mdoc", "mso_mdoc_zk", true},
 		{"dc+sd-jwt", "vc+sd-jwt", true},
 		{"dc+sd-jwt", "", true},
-		{"ldp_vc", "jwt_vc_json", true},
+		// jwt_vc_json is NOT family-compatible with ldp_vc: nothing issues it
+		// and the verifier has no JWT-VC path, so DCQLMetaQuery refuses it and
+		// this has to agree.
+		{"ldp_vc", "jwt_vc_json", false},
 		// Crossing families.
 		{"dc+sd-jwt", "mso_mdoc", false},
 		{"dc+sd-jwt", "ldp_vc", false},
 		{"mso_mdoc", "jwt_vc_json", false},
 		// Unknown on either side is never a match: jwt_vc_json-ld is
-		// advertised by the issuer metadata but nothing issues it.
+		// advertised by the issuer metadata but nothing issues it, and
+		// jwt_vc_json is in the same position.
 		{"dc+sd-jwt", "jwt_vc_json-ld", false},
 		{"jwt_vc_json-ld", "dc+sd-jwt", false},
 		{"dc+sd-jwt", "something-new", false},

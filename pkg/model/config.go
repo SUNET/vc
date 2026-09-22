@@ -2240,7 +2240,12 @@ func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
 			return openid4vp.MetaQuery{}, false
 		}
 		return openid4vp.MetaQuery{VCTValues: []string{vct}}, true
-	case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON, openid4vp.FormatJwtVCJson:
+	// Not jwt_vc_json: a JWT-secured W3C VC is a compact JWT, which
+	// detectCredentialFormat reads as SD-JWT and the verifier would then
+	// process under the wrong credential model - and nothing in this stack
+	// issues it either (handlers_issuer.go has no case, SUNET/vc#686). Same
+	// treatment as jwt_vc_json-ld: advertised, not requestable.
+	case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON:
 		// type_values is an array of ALTERNATIVES, each an array of types a
 		// credential must carry all of (OpenID4VP 1.0 6.4.1).
 		//
