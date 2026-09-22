@@ -58,3 +58,8 @@ tmp/
 
 # Runtime secrets – never commit real values
 secrets.yaml
+
+# Per-profile secrets from the removed Fly tooling. Nothing generates these
+# any more, but a checkout that ran the old `make fly-launch-*` still has
+# them, and un-ignoring a real secret is not worth the tidiness.
+/secrets.sunet-vc*.yaml
