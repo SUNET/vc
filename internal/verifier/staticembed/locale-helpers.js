@@ -27,7 +27,11 @@ export function claimsForLocale(attributes) {
 
     const locales = Object.keys(attributes)
         .filter(populated)
-        .sort((a, b) => a.localeCompare(b));
+        // Collation pinned to "en": the default is the runtime's locale, so
+        // an unpinned localeCompare could order the same metadata differently
+        // in different browsers and pick a different bucket. SonarCloud wants
+        // localeCompare over the raw default sort; this satisfies both.
+        .sort((a, b) => a.localeCompare(b, "en"));
     const english = locales.find((l) => l.startsWith("en"));
     return attributes[english ?? locales[0]] ?? {};
 }
