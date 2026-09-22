@@ -129,11 +129,6 @@ comma                   := ,
 	release-check-issuer-jwks \
 	release-jwt-issuer build-jwt-issuer \
 	release-tsl-checker build-tsl-checker \
-	fly-launch-dev fly-launch-demo \
-	fly-deploy fly-deploy-dev fly-deploy-demo fly-deploy-dev-% fly-deploy-demo-% \
-	fly-status-dev fly-status-demo fly-status-dev-% fly-status-demo-% \
-	fly-logs-dev-% fly-logs-demo-% \
-	fly-destroy-dev fly-destroy-demo
 
 # ==============================================================================
 # Help Target
@@ -181,16 +176,6 @@ help: ## Show this help message
 	$(info   make test-cross-device           - Full cross-device flow (VCI→browser→QR→wallet→SSE→token))
 	$(info   make test-cross-device-quick     - QR rendering smoke test only)
 	$(info )
-	$(info Fly.io Deployment (profiles: dev = :local, demo = :demo):)
-	$(info   make fly-launch-dev              - Create dev Fly apps + secrets)
-	$(info   make fly-launch-demo             - Create demo Fly apps + secrets)
-	$(info   make fly-deploy-dev              - Deploy all services to dev)
-	$(info   make fly-deploy-demo             - Deploy all services to demo)
-	$(info   make fly-deploy-dev-SERVICE      - Deploy one service to dev  (e.g. fly-deploy-dev-apigw))
-	$(info   make fly-deploy-demo-SERVICE     - Deploy one service to demo (e.g. fly-deploy-demo-apigw))
-	$(info   make fly-status-{dev,demo}       - Show status for one environment)
-	$(info   make fly-logs-{dev,demo}-SERVICE - Show logs for one service in one environment)
-	$(info   make fly-destroy-{dev,demo} FLY_CONFIRM=yes - Destroy all apps in one environment)
 	$(info )
 	$(info Environment Variables:)
 	$(info   VERSION               - Docker image version (default: latest))
@@ -1081,10 +1066,6 @@ vscode: test-env gh-install ## Set up VS Code development environment
     sudo chmod +x /usr/local/bin/yq
 	$(info Installing act for local GitHub Actions testing)
 	curl -sfL https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash -s -- -b /usr/local/bin
-	$(info Installing flyctl)
-	curl -sL https://fly.io/install.sh | sh
-	sudo ln -sf "$$HOME/.fly/bin/flyctl" /usr/local/bin/flyctl
-	sudo ln -sf "$$HOME/.fly/bin/flyctl" /usr/local/bin/fly
 	$(info Installing Rust toolchain)
 	@if [ ! -x "$$HOME/.cargo/bin/cargo" ]; then \
 		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal; \
@@ -1275,73 +1256,3 @@ _promote:
 	echo "==> Promotion complete for $$SRC_TAG (:$(NEWTAG))"; \
 	echo ""
 
-# ==============================================================================
-# Fly.io Deployment Targets
-# ==============================================================================
-#
-# Two environments (profiles), each with its own committed config tree:
-#   dev   -> reads fly/dev/,  app prefix "sunet-vc",      docker tag ":local"
-#   demo  -> reads fly/demo/, app prefix "sunet-vc-demo", docker tag ":demo"
-#
-# The two trees are physically separate copies. Editing fly/dev/ can never
-# affect a demo deploy — that isolation is the point. To pick up a dev fix
-# in demo, port it by hand (typically: diff -u fly/dev fly/demo, then copy).
-#
-# Common entry points:
-#   make fly-deploy-dev              # deploy all services to dev
-#   make fly-deploy-demo             # deploy all services to demo
-#   make fly-deploy-dev-apigw        # deploy one service to dev
-#   make fly-deploy-demo-apigw       # deploy one service to demo
-#   make fly-launch-{dev,demo}       # first-time app + secret provisioning
-#   make fly-status-{dev,demo}       # per-env status
-#   make fly-logs-{dev,demo}-<svc>   # per-env logs for one service
-#   make fly-destroy-{dev,demo} FLY_CONFIRM=yes
-
-FLY_SERVICES    := mongodb go-trust oidc registry issuer verifier apigw wallet-backend wallet-frontend wallet
-FLY_REGION      ?= arn
-FLY_ORG         ?= sirosfoundation
-
-# Bare fly-deploy is deliberately disabled to prevent accidental
-# "which env did I just push to?" mistakes for the public demo.
-fly-deploy: ## (disabled) pick a profile: make fly-deploy-dev | fly-deploy-demo
-	@echo "Error: choose a profile: make fly-deploy-dev | make fly-deploy-demo" >&2; exit 1
-
-fly-launch-dev: ## Create Fly.io apps + secrets for the dev environment
-	./fly/deploy.sh launch --profile dev --region $(FLY_REGION) --org $(FLY_ORG)
-
-fly-launch-demo: ## Create Fly.io apps + secrets for the demo environment
-	./fly/deploy.sh launch --profile demo --region $(FLY_REGION) --org $(FLY_ORG)
-
-fly-deploy-dev: $(addprefix fly-deploy-dev-,$(FLY_SERVICES)) ## Deploy all services to dev
-
-fly-deploy-demo: $(addprefix fly-deploy-demo-,$(FLY_SERVICES)) ## Deploy all services to demo
-
-fly-deploy-dev-%: ## Deploy a specific service to dev (e.g., make fly-deploy-dev-apigw)
-	./fly/deploy.sh deploy --profile dev --service $* --region $(FLY_REGION) --org $(FLY_ORG)
-
-fly-deploy-demo-%: ## Deploy a specific service to demo (e.g., make fly-deploy-demo-apigw)
-	./fly/deploy.sh deploy --profile demo --service $* --region $(FLY_REGION) --org $(FLY_ORG)
-
-fly-status-dev: ## Show status of all dev Fly.io services
-	./fly/deploy.sh status --profile dev
-
-fly-status-demo: ## Show status of all demo Fly.io services
-	./fly/deploy.sh status --profile demo
-
-fly-status-dev-%: ## Show status of a specific dev service (e.g., make fly-status-dev-oidc)
-	@fly status -a sunet-vc-$*
-
-fly-status-demo-%: ## Show status of a specific demo service (e.g., make fly-status-demo-oidc)
-	@fly status -a sunet-vc-demo-$*
-
-fly-logs-dev-%: ## Show logs for a specific dev service (e.g., make fly-logs-dev-oidc)
-	@fly logs -a sunet-vc-$* --no-tail
-
-fly-logs-demo-%: ## Show logs for a specific demo service (e.g., make fly-logs-demo-oidc)
-	@fly logs -a sunet-vc-demo-$* --no-tail
-
-fly-destroy-dev: ## Destroy all dev Fly.io apps (requires FLY_CONFIRM=yes)
-	./fly/deploy.sh destroy --profile dev $(if $(filter yes,$(FLY_CONFIRM)),--confirm)
-
-fly-destroy-demo: ## Destroy all demo Fly.io apps (requires FLY_CONFIRM=yes)
-	./fly/deploy.sh destroy --profile demo $(if $(filter yes,$(FLY_CONFIRM)),--confirm)
