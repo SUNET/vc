@@ -173,13 +173,13 @@ func TestOAuthToken_PreAuth_TXCodeAttemptsLockout(t *testing.T) {
 	stored, getErr := client.cacheService.AuthContext.Get(t.Context(), &apigwcache.AuthorizationContext{Code: code})
 	require.NoError(t, getErr)
 	assert.Equal(t, apigwcache.MaxTXCodeAttempts, stored.TXCodeAttempts)
-	assert.False(t, stored.Forfeited, "code must not be forfeited until the next attempt trips the cap")
+	assert.False(t, stored.Forfeited, "code must not be forfeited until another wrong attempt trips the cap")
 
-	// The next attempt — even with the correct PIN — is rejected and forfeits the code.
+	// The next wrong-PIN attempt trips the cap and forfeits the code.
 	reply, err := client.OAuthToken(t.Context(), &openid4vci.TokenRequest{
 		GrantType:         openid4vci.GrantTypePreAuthorizedCode,
 		PreAuthorizedCode: code,
-		TXCode:            "123456",
+		TXCode:            "999999",
 	})
 	require.Error(t, err)
 	assert.Nil(t, reply)
@@ -191,4 +191,37 @@ func TestOAuthToken_PreAuth_TXCodeAttemptsLockout(t *testing.T) {
 	stored, getErr = client.cacheService.AuthContext.Get(t.Context(), &apigwcache.AuthorizationContext{Code: code})
 	require.NoError(t, getErr)
 	assert.True(t, stored.Forfeited, "code must be forfeited once the attempt budget is exhausted")
+}
+
+// TestOAuthToken_PreAuth_TXCodeSuccessDoesNotConsumeAttempts verifies that a
+// successful PIN comparison does not debit the per-code attempt budget, so
+// PIN-protected offers can still serve up to MaxPreAuthRedeemers wallets.
+func TestOAuthToken_PreAuth_TXCodeSuccessDoesNotConsumeAttempts(t *testing.T) {
+	client, code := newTokenTestClient(t, "123456")
+
+	// Exhaust MaxTXCodeAttempts - 1 wrong attempts.
+	for range apigwcache.MaxTXCodeAttempts - 1 {
+		_, err := client.OAuthToken(t.Context(), &openid4vci.TokenRequest{
+			GrantType:         openid4vci.GrantTypePreAuthorizedCode,
+			PreAuthorizedCode: code,
+			TXCode:            "999999",
+		})
+		require.Error(t, err)
+	}
+
+	// A correct PIN must still succeed and must not consume the attempt budget.
+	reply, err := client.OAuthToken(t.Context(), &openid4vci.TokenRequest{
+		GrantType:         openid4vci.GrantTypePreAuthorizedCode,
+		PreAuthorizedCode: code,
+		TXCode:            "123456",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, reply)
+	assert.NotEmpty(t, reply.AccessToken)
+
+	// The counter must still show only the failed attempts.
+	stored, getErr := client.cacheService.AuthContext.Get(t.Context(), &apigwcache.AuthorizationContext{Code: code})
+	require.NoError(t, getErr)
+	assert.Equal(t, apigwcache.MaxTXCodeAttempts-1, stored.TXCodeAttempts,
+		"successful PIN comparison must not consume the attempt budget")
 }

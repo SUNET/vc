@@ -519,19 +519,15 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
 				"tx_code is required for this credential offer", 400)
 		case preCheck.TXCode != "":
-			// Atomically debit the per-code PIN attempt budget before the
-			// constant-time compare so distributed guesses cannot exceed
-			// MaxTXCodeAttempts even when spread across many client IPs.
-			updated, attemptErr := c.cacheService.AuthContext.ConsumeTXCodeAttempt(ctx, code)
-			if attemptErr != nil {
-				if errors.Is(attemptErr, cache.ErrTXCodeAttemptsExceeded) {
-					return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-						"invalid tx_code", 400)
+			// Only failed comparisons debit the per-code PIN attempt budget so a
+			// successful redemption does not consume the shared multi-redeemer
+			// budget (up to MaxPreAuthRedeemers legitimate wallets). Debits are
+			// atomic to prevent brute-force distributed across many client IPs.
+			if subtle.ConstantTimeCompare([]byte(preCheck.TXCode), []byte(req.TXCode)) != 1 {
+				if _, attemptErr := c.cacheService.AuthContext.ConsumeTXCodeAttempt(ctx, code); attemptErr != nil && !errors.Is(attemptErr, cache.ErrTXCodeAttemptsExceeded) {
+					return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
+						"Authorization code is invalid or has already been used", 400, attemptErr)
 				}
-				return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
-					"Authorization code is invalid or has already been used", 400, attemptErr)
-			}
-			if subtle.ConstantTimeCompare([]byte(updated.TXCode), []byte(req.TXCode)) != 1 {
 				return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
 					"invalid tx_code", 400)
 			}
