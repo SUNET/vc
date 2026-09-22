@@ -7,7 +7,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -158,4 +160,62 @@ func TestDirectPostRequestBindsWithoutState(t *testing.T) {
 		assert.Equal(t, "s-1", req.State)
 		assert.Equal(t, "tok~", req.VPToken)
 	})
+}
+
+// TestProcessDirectPostEncryptedEndToEnd drives the whole encrypted path, not
+// just the resolver: a wallet posts `response` and nothing else, and the token
+// that comes out of the JWE has to reach session processing.
+//
+// The unit tests above would still pass if ProcessDirectPost dropped the
+// decrypted token on the floor and read the empty form field instead, which is
+// close to what the TODO stub did.
+func TestProcessDirectPostEncryptedEndToEnd(t *testing.T) {
+	client, _ := CreateTestClientWithMock(t, nil)
+	ctx := t.Context()
+
+	const (
+		sessionID = "session-e2e-jwt"
+		token     = "eyJhbGciOiJFUzI1NiJ9.e30.sig~"
+	)
+
+	require.NoError(t, client.cacheService.AuthContext.Create(ctx, &cache.AuthorizationContext{
+		SessionID:             sessionID,
+		Status:                cache.SessionStatusPending,
+		CreatedAt:             time.Now(),
+		ExpiresAt:             time.Now().Add(10 * time.Minute).Unix(),
+		ClientID:              "test-client",
+		RedirectURI:           "https://client.example.com/callback",
+		State:                 "client-state",
+		Scopes:                []string{"openid"},
+		WalletFollowsRedirect: true,
+	}))
+
+	_, ephemeralPubJWK, err := client.ephemeralEncryptionKey(ctx, sessionID)
+	require.NoError(t, err)
+
+	raw, err := json.Marshal(openid4vp.VPResponse{
+		State:   sessionID,
+		VPToken: map[string][]string{"pid": {token}},
+	})
+	require.NoError(t, err)
+	response, err := jwe.Encrypt(raw,
+		jwe.WithKey(jwa.ECDH_ES(), ephemeralPubJWK),
+		jwe.WithContentEncryption(jwa.A256GCM()),
+	)
+	require.NoError(t, err)
+
+	// No state, no vp_token: the only thing a direct_post.jwt wallet sends.
+	resp, err := client.ProcessDirectPost(ctx, &DirectPostRequest{Response: string(response)})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	session, err := client.cacheService.AuthContext.GetByID(ctx, sessionID)
+	require.NoError(t, err)
+	require.NotNil(t, session, "the session was found by the state inside the JWE")
+
+	assert.Equal(t, token, session.VPToken, "the DECRYPTED token has to be what gets processed")
+	assert.Equal(t, cache.SessionStatusCodeIssued, session.Status)
+	assert.NotEmpty(t, session.Code)
+	assert.Contains(t, resp.RedirectURI, "code="+session.Code)
+	assert.Contains(t, resp.RedirectURI, "state=client-state")
 }
