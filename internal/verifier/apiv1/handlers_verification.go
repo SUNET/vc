@@ -174,15 +174,21 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		responseParams.State = vpResponse.State
 		responseParams.VPToken = vpToken
 
-		// Validate response parameters
-		if err := responseParams.Validate(); err != nil {
-			c.log.Error(err, "response parameters validation failed", "scope", scope)
-			return nil, fmt.Errorf("invalid response for scope %s: %w", scope, err)
-		}
-
 		// Detect credential format and process accordingly
 		format := detectCredentialFormat(vpToken)
 		c.log.Debug("Detected credential format", "scope", scope, "format", format)
+
+		// ResponseParameters.Validate parses the token as an SD-JWT, so it can
+		// only speak for that format - it rejected a perfectly good mdoc or
+		// JSON-LD token as "invalid JWT format". Each format's own branch
+		// below validates it properly; this stays as the SD-JWT shape check
+		// it always was.
+		if format == FormatSDJWT {
+			if err := responseParams.Validate(); err != nil {
+				c.log.Error(err, "response parameters validation failed", "scope", scope)
+				return nil, fmt.Errorf("invalid response for scope %s: %w", scope, err)
+			}
+		}
 
 		switch format {
 		case FormatSDJWT:
