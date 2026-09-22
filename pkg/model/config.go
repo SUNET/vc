@@ -1801,7 +1801,7 @@ type CredentialMetadata struct {
 	// Only meaningful for a file that declares its own vct: a local VCTM has
 	// no other source for one, so turning the back-fill off for a file without
 	// it is refused at config load rather than failing at the first issuance.
-	PublishNewVCT *bool `yaml:"publish_new_vct,omitempty" json:"-"`
+	PublishNewVCT *bool `yaml:"publish_new_vct,omitempty" json:"-" default:"true" doc_example:"true"`
 
 	// Doctype is the mdoc doctype value to resolve via
 	// Common.CredentialRegistry, used only when neither MDDLFilePath nor
