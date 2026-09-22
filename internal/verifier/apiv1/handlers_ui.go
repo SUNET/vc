@@ -387,7 +387,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		Validations:              req.Validations,
 	}
 
-	_, ephemeralPublicJWK, err := c.openid4vp.EphemeralKeyCache.GenerateAndStore(authorizationContext.EphemeralEncryptionKeyID)
+	_, ephemeralPublicJWK, err := c.ephemeralEncryptionKey(ctx, authorizationContext.EphemeralEncryptionKeyID)
 	if err != nil {
 		return nil, err
 	}

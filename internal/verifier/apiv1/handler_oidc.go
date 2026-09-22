@@ -672,7 +672,7 @@ type DirectPostResponse struct {
 // The decryption mirrors VerificationDirectPost, which has done this correctly
 // for the non-OIDC endpoint all along: the kid in the JWE header names the
 // ephemeral key cached for the session.
-func (c *Client) resolveDirectPost(req *DirectPostRequest) (state, vpToken string, err error) {
+func (c *Client) resolveDirectPost(ctx context.Context, req *DirectPostRequest) (state, vpToken string, err error) {
 	if req.Response == "" {
 		if req.State == "" {
 			c.log.Error(nil, "direct_post has neither state nor an encrypted response")
@@ -681,18 +681,13 @@ func (c *Client) resolveDirectPost(req *DirectPostRequest) (state, vpToken strin
 		return req.State, "", nil
 	}
 
-	if c.openid4vp == nil || c.openid4vp.EphemeralKeyCache == nil {
-		c.log.Error(nil, "encrypted direct_post received but no ephemeral key cache is configured")
-		return "", "", errors.New("encrypted response received but no ephemeral key cache is configured")
-	}
-
 	kid, err := jose.ExtractKIDFromCompactJWT(req.Response)
 	if err != nil {
 		c.log.Error(err, "failed to read the kid from the encrypted response")
 		return "", "", fmt.Errorf("encrypted response has no usable kid: %w", err)
 	}
 
-	privateEphemeralJWK, found := c.openid4vp.EphemeralKeyCache.Get(kid)
+	privateEphemeralJWK, found := c.cacheService.EphemeralEncryptionKey.Get(ctx, kid)
 	if !found {
 		c.log.Debug("no ephemeral key for the encrypted response", "kid", kid)
 		return "", "", errors.New("ephemeral key not found for the encrypted response")
@@ -748,7 +743,7 @@ func (c *Client) resolveDirectPost(req *DirectPostRequest) (state, vpToken strin
 func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) (*DirectPostResponse, error) {
 	// An encrypted response has to be opened before anything in it can be
 	// used - including the state this session is looked up by.
-	state, encryptedVPToken, err := c.resolveDirectPost(req)
+	state, encryptedVPToken, err := c.resolveDirectPost(ctx, req)
 	if err != nil {
 		return nil, err
 	}

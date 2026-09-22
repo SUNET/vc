@@ -44,7 +44,7 @@ func TestResolveDirectPostEncrypted(t *testing.T) {
 		token = "eyJhbGciOiJFUzI1NiJ9.e30.sig~"
 	)
 
-	_, ephemeralPubJWK, err := client.openid4vp.EphemeralKeyCache.GenerateAndStore(kid)
+	_, ephemeralPubJWK, err := client.ephemeralEncryptionKey(t.Context(), kid)
 	require.NoError(t, err)
 
 	encrypt := func(t *testing.T, payload any) string {
@@ -66,14 +66,14 @@ func TestResolveDirectPostEncrypted(t *testing.T) {
 			VPToken: map[string][]string{"pid": {token}},
 		})}
 
-		gotState, gotToken, err := client.resolveDirectPost(req)
+		gotState, gotToken, err := client.resolveDirectPost(t.Context(), req)
 		require.NoError(t, err)
 		assert.Equal(t, state, gotState, "the session is looked up by the decrypted state")
 		assert.Equal(t, token, gotToken)
 	})
 
 	t.Run("plain direct_post still uses the form fields", func(t *testing.T) {
-		gotState, gotToken, err := client.resolveDirectPost(&DirectPostRequest{
+		gotState, gotToken, err := client.resolveDirectPost(t.Context(), &DirectPostRequest{
 			State: state, VPToken: token,
 		})
 		require.NoError(t, err)
@@ -82,12 +82,12 @@ func TestResolveDirectPostEncrypted(t *testing.T) {
 	})
 
 	t.Run("neither state nor response is refused", func(t *testing.T) {
-		_, _, err := client.resolveDirectPost(&DirectPostRequest{})
+		_, _, err := client.resolveDirectPost(t.Context(), &DirectPostRequest{})
 		require.Error(t, err)
 	})
 
 	t.Run("a response encrypted to an unknown key is refused", func(t *testing.T) {
-		_, _, err := client.resolveDirectPost(&DirectPostRequest{
+		_, _, err := client.resolveDirectPost(t.Context(), &DirectPostRequest{
 			Response: "eyJhbGciOiJFQ0RILUVTIiwia2lkIjoibm8tc3VjaC1raWQifQ..aaaa.bbbb.cccc",
 		})
 		require.Error(t, err)
@@ -97,7 +97,7 @@ func TestResolveDirectPostEncrypted(t *testing.T) {
 		// The ephemeral public key is published in the request object, so
 		// anyone can encrypt to it. Decryption alone must not be taken as
 		// proof of which session the payload belongs to.
-		_, _, err := client.resolveDirectPost(&DirectPostRequest{Response: encrypt(t, openid4vp.VPResponse{
+		_, _, err := client.resolveDirectPost(t.Context(), &DirectPostRequest{Response: encrypt(t, openid4vp.VPResponse{
 			State:   "some-other-session",
 			VPToken: map[string][]string{"pid": {token}},
 		})})
@@ -107,7 +107,7 @@ func TestResolveDirectPostEncrypted(t *testing.T) {
 
 	t.Run("several credentials are refused rather than guessed at", func(t *testing.T) {
 		// This flow maps one credential onto the OIDC claims it issues.
-		_, _, err := client.resolveDirectPost(&DirectPostRequest{Response: encrypt(t, openid4vp.VPResponse{
+		_, _, err := client.resolveDirectPost(t.Context(), &DirectPostRequest{Response: encrypt(t, openid4vp.VPResponse{
 			State:   state,
 			VPToken: map[string][]string{"pid": {token}, "ehic": {token}},
 		})})
