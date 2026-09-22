@@ -23,12 +23,19 @@ func TestCOSEKeyCoordinatesAreFixedWidth(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, key.X, 32, "P-256 X must be 32 bytes")
 	assert.Len(t, key.Y, 32, "P-256 Y must be 32 bytes")
+	// Padded on the LEFT, value intact - length alone would also be satisfied
+	// by a serializer that moved or mangled the bytes.
+	assert.Equal(t, append(make([]byte, 31), 1), key.X)
+	assert.Equal(t, append(make([]byte, 31), 2), key.Y)
 
-	// And a full-width coordinate is unchanged.
-	big32 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(1))
-	full, err := NewCOSEKeyFromECDSAPublic(&ecdsa.PublicKey{Curve: elliptic.P256(), X: big32, Y: big32})
+	// A full-width coordinate is passed through byte for byte, and X and Y
+	// are not transposed.
+	x := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(1))
+	y := new(big.Int).Sub(x, big.NewInt(7))
+	full, err := NewCOSEKeyFromECDSAPublic(&ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y})
 	require.NoError(t, err)
-	assert.Len(t, full.X, 32)
+	assert.Equal(t, x.Bytes(), full.X)
+	assert.Equal(t, y.Bytes(), full.Y)
 }
 
 // TestECDHSharedSecretIsFixedWidth pins the ECDH Z conversion. Per SEC1 2.3.5
@@ -43,10 +50,11 @@ func TestECDHSharedSecretIsFixedWidth(t *testing.T) {
 	assert.Len(t, ecdhSharedSecret(elliptic.P256(), big.NewInt(1)), 32)
 	assert.Len(t, ecdhSharedSecret(elliptic.P384(), big.NewInt(1)), 48)
 
-	// A full-width coordinate is unchanged.
+	// A full-width secret is passed through byte for byte.
 	full := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(1))
-	assert.Len(t, ecdhSharedSecret(elliptic.P256(), full), 32)
+	assert.Equal(t, full.Bytes(), ecdhSharedSecret(elliptic.P256(), full))
 
-	// The padding is on the left: the value must survive a round trip.
-	assert.Equal(t, big.NewInt(1), new(big.Int).SetBytes(ecdhSharedSecret(elliptic.P256(), big.NewInt(1))))
+	// And padding is on the left, so the value is preserved: HKDF must see
+	// the same number the peer derived, not a shifted one.
+	assert.Equal(t, append(make([]byte, 31), 1), ecdhSharedSecret(elliptic.P256(), big.NewInt(1)))
 }
