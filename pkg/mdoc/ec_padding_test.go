@@ -1,6 +1,7 @@
 package mdoc
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"math/big"
@@ -57,4 +58,38 @@ func TestECDHSharedSecretIsFixedWidth(t *testing.T) {
 	// And padding is on the left, so the value is preserved: HKDF must see
 	// the same number the peer derived, not a shifted one.
 	assert.Equal(t, append(make([]byte, 31), 1), ecdhSharedSecret(elliptic.P256(), big.NewInt(1)))
+}
+
+// TestCOSEKeyRejectsOversizedCoordinate covers the other half of FillBytes:
+// it pads a short integer, but PANICS on one too wide for the destination.
+//
+// The key is not always one we generated. ParseDeviceKey decodes a COSE_Key
+// from the wire and builds an ecdsa.PublicKey straight from the CBOR byte
+// strings, with no width or on-curve check, so a peer can hand us a 64-byte
+// X on a P-256 curve. That has to be an error, not a process panic.
+func TestCOSEKeyRejectsOversizedCoordinate(t *testing.T) {
+	wide := new(big.Int).Lsh(big.NewInt(1), 400) // far past P-256's 32 bytes
+
+	_, err := NewCOSEKeyFromECDSAPublic(&ecdsa.PublicKey{Curve: elliptic.P256(), X: wide, Y: big.NewInt(2)})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "X coordinate")
+
+	_, err = NewCOSEKeyFromECDSAPublic(&ecdsa.PublicKey{Curve: elliptic.P256(), X: big.NewInt(1), Y: wide})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Y coordinate")
+
+	// A missing coordinate is refused rather than dereferenced.
+	_, err = NewCOSEKeyFromECDSAPublic(&ecdsa.PublicKey{Curve: elliptic.P256()})
+	require.Error(t, err)
+
+	// The same key straight off the wire, which is how it actually arrives.
+	encoder, err := NewCBOREncoder()
+	require.NoError(t, err)
+	oversized := bytes.Repeat([]byte{0xff}, 64) // zeros would parse to 0 and legitimately fit
+	raw, err := encoder.Marshal(&COSEKey{Kty: KeyTypeEC2, Crv: CurveP256, X: oversized, Y: oversized})
+	require.NoError(t, err)
+	parsed, err := ParseDeviceKey(raw, "cose")
+	require.NoError(t, err, "parsing is lenient today - the width check has to hold on the way back out")
+	_, err = publicKeyToCOSEKey(parsed)
+	require.Error(t, err)
 }
