@@ -522,15 +522,19 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// trust them. The SD-JWT and mdoc branches both put that decision
 			// to the evaluator, and a PDP configured to deny an issuer has to
 			// deny it here too.
-			issuerKey, err := resolver.ResolveKey(ctx, vc20Result.VerificationMethod)
-			if err != nil {
-				c.log.Error(err, "failed to resolve the W3C issuer key for trust evaluation", "scope", scope)
-				return nil, fmt.Errorf("W3C issuer trust evaluation failed for scope %s: %w", scope, err)
+			//
+			// The key the signature was VERIFIED with, not a fresh resolution
+			// of the same verification method: a rotating or remote resolver
+			// can answer differently the second time, and then the key trusted
+			// is not the key that signed.
+			if vc20Result.IssuerKey == nil {
+				c.log.Error(nil, "W3C verification returned no issuer key to evaluate", "scope", scope)
+				return nil, fmt.Errorf("W3C verification for scope %s produced no issuer key to evaluate", scope)
 			}
 			decision, err := c.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
 				SubjectID:      vc20Result.Issuer,
 				KeyType:        trust.KeyTypeJWK,
-				Key:            issuerKey,
+				Key:            vc20Result.IssuerKey,
 				Role:           trust.RoleCredentialIssuer,
 				CredentialType: scope,
 			})

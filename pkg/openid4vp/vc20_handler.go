@@ -172,6 +172,12 @@ type VC20VerificationResult struct {
 	ProofPurpose       string    `json:"proofPurpose"`
 	ProofCreated       time.Time `json:"proofCreated"`
 
+	// IssuerKey is the key this credential's signature was actually verified
+	// with. A caller evaluating trust must judge THIS key: resolving the
+	// verification method again can return a different one from a rotating or
+	// remote resolver, and then the key trusted is not the key that signed.
+	IssuerKey crypto.PublicKey `json:"-"`
+
 	// TypeIRIs are the credential's types in fully expanded form, which is
 	// what DCQL meta.type_values is expressed in. Types above holds whatever
 	// the document carried, usually compact terms.
@@ -344,6 +350,7 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 	// presentation bound to this exchange from a bare credential.
 	result.HolderBound = h.requireHolderBinding
 	result.Holder = holder
+	result.IssuerKey = pubKey
 	return result, nil
 }
 
