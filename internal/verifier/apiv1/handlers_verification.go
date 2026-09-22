@@ -747,15 +747,21 @@ func (c *Client) defaultTokenAllowed(authCtx *cache.AuthorizationContext, scopeQ
 }
 
 func (c *Client) vpTokensForScope(scopeQueryIDs map[string]string, defaultAllowed bool, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
-	if tokens, ok := vpResponse.VPToken[scope]; ok && len(tokens) > 0 {
-		return tokens, nil
-	}
-
-	if queryID, mapped := scopeQueryIDs[scope]; mapped {
-		if tokens, ok := vpResponse.VPToken[queryID]; ok && len(tokens) > 0 {
-			c.log.Debug("resolved VP token through the scope's DCQL query id", "scope", scope, "query_id", queryID)
-			return tokens, nil
+	// One key per scope: its DCQL query id when the mapping names one,
+	// otherwise its own name (which is what a config-built query uses).
+	//
+	// A mapped scope must NOT also be read under its own name. With scope A
+	// mapped to query id B and scope B mapped to query id C, a wallet keying
+	// by query id returns A's credential under "B" - and a scope-name lookup
+	// would hand it to scope B, which would then validate A's credential
+	// under B's rules and never look at C. The collision guard above does not
+	// see it, because the two resolved ids differ.
+	key := queryIDForScopeIn(scopeQueryIDs, scope)
+	if tokens, ok := vpResponse.VPToken[key]; ok && len(tokens) > 0 {
+		if key != scope {
+			c.log.Debug("resolved VP token through the scope's DCQL query id", "scope", scope, "query_id", key)
 		}
+		return tokens, nil
 	}
 
 	// See defaultAllowed at the call site for what makes _default ambiguous.

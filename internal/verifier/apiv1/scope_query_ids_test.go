@@ -126,17 +126,38 @@ func TestVPTokensForScope(t *testing.T) {
 			want:             []string{"token-pid"},
 		},
 		{
-			// The scope's own key wins, so a wallet that answers correctly is
-			// never second-guessed by the mapping.
-			name: "scope key preferred over the mapped query id",
+			// A mapped scope is answered under its query id and nothing else.
+			// The request carried a credential query with id "eudi_pid" and
+			// none with id "pid", so a response keyed by the scope name is
+			// not a correct answer to it.
+			name: "the mapped query id wins over the scope's own key",
 			authCtx: &cache.AuthorizationContext{
 				Scopes:        []string{"pid", "ehic"},
 				ScopeQueryIDs: map[string]string{"pid": "eudi_pid"},
 			},
 			credentialScopes: []string{"pid", "ehic"},
-			vpToken:          map[string][]string{"pid": {"right"}, "eudi_pid": {"wrong"}},
+			vpToken:          map[string][]string{"pid": {"wrong"}, "eudi_pid": {"right"}},
 			scope:            "pid",
 			want:             []string{"right"},
+		},
+		{
+			// The reason the scope name must not be a fallback: with pid
+			// mapped to eudi_pid and eudi_pid itself a requested scope mapped
+			// onto something else, the wallet returns pid's credential under
+			// "eudi_pid". Reading scope names too would hand it to scope
+			// eudi_pid, which would validate pid's credential under its own
+			// rules and never look at its real query. The collision guard
+			// cannot see this: the two resolved ids differ.
+			name: "one scope's query id is another scope's name",
+			authCtx: &cache.AuthorizationContext{
+				Scopes:        []string{"pid", "eudi_pid"},
+				ScopeQueryIDs: map[string]string{"pid": "eudi_pid", "eudi_pid": "other_query"},
+			},
+			credentialScopes: []string{"pid", "eudi_pid"},
+			vpToken:          map[string][]string{"eudi_pid": {"belongs-to-pid"}},
+			scope:            "eudi_pid",
+			defaultAllowed:   false,
+			wantError:        "VP token not found for scope",
 		},
 		{
 			// The shape an ordinary OIDC request has: several scopes asked for,
