@@ -7,6 +7,7 @@ import {
     requestCredentialFromAuthorizationRequestURI,
 } from "./dc-api-polyfill.js";
 import { groupPresets } from "./preset-helpers.js";
+import { claimsForLocale } from "./locale-helpers.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
 const credentialAttributesSchema = v.object({
@@ -447,9 +448,9 @@ Alpine.data("app", () => ({
 
         /** @type {Record<string, (string|null)[]>} */
         const claims = {}
-        // ?? {}: a credential whose metadata document never loaded carries no
-        // locale bucket, and Object.entries(undefined) throws.
-        for (const [label, path] of Object.entries(chosenCredential.attributes['en-US'] ?? {})) {
+        // Not attributes['en-US'] directly: a credential whose claims live
+        // only under another locale would send no claim paths at all.
+        for (const [label, path] of Object.entries(claimsForLocale(chosenCredential.attributes))) {
             claims[label] = path;
         }
 
