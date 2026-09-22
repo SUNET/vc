@@ -175,6 +175,14 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// and caches a successful presentation having validated no VP token. The
 	// check used to fire only when the query had credentials, so a query with
 	// none skipped it.
+	// How many credentials the request can actually come back with. Zero when
+	// the session predates the cached query, where the scope count stays the
+	// only signal available.
+	credentialQueries := 0
+	if authCtx.DCQLQuery != nil {
+		credentialQueries = len(authCtx.DCQLQuery.Credentials)
+	}
+
 	credentialScopes := c.credentialScopes(authCtx, scopeQueryIDs)
 	if len(credentialScopes) == 0 {
 		c.log.Error(nil, "no requested scope corresponds to a requested credential", "scopes", authCtx.Scopes)
@@ -199,7 +207,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(credentialScopes))
 
 	for _, scope := range credentialScopes {
-		vpTokens, err := c.vpTokensForScope(scopeQueryIDs, credentialScopes, vpResponse, scope)
+		vpTokens, err := c.vpTokensForScope(scopeQueryIDs, credentialScopes, credentialQueries, vpResponse, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -717,7 +725,7 @@ func queryIDForScopeIn(scopeQueryIDs map[string]string, scope string) string {
 	return scope
 }
 
-func (c *Client) vpTokensForScope(scopeQueryIDs map[string]string, credentialScopes []string, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
+func (c *Client) vpTokensForScope(scopeQueryIDs map[string]string, credentialScopes []string, credentialQueries int, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
 	if tokens, ok := vpResponse.VPToken[scope]; ok && len(tokens) > 0 {
 		return tokens, nil
 	}
@@ -733,9 +741,17 @@ func (c *Client) vpTokensForScope(scopeQueryIDs map[string]string, credentialSco
 	// more than one CREDENTIAL being asked for, not more than one OIDC scope.
 	// Counting the raw list refused the plain-string vp_token for an ordinary
 	// "openid pid" request, which asks for exactly one credential.
-	if len(credentialScopes) != 1 {
-		c.log.Error(nil, "VP token not found for scope and multiple credentials requested", "scope", scope)
-		return nil, fmt.Errorf("VP token not found for scope %s: _default fallback is only allowed when a single credential is requested", scope)
+	//
+	// The scope count alone is not the test either. A template author writes
+	// the queries, and there can be more of them than the scopes that map onto
+	// them - one requested scope against a two-credential query leaves this at
+	// 1. Accepting _default there would validate one credential and let the
+	// others go unchecked, which is the whole reason the fallback is
+	// restricted. Both counts have to say "exactly one".
+	if len(credentialScopes) != 1 || credentialQueries > 1 {
+		c.log.Error(nil, "VP token not found for scope and more than one credential requested",
+			"scope", scope, "credential_scopes", len(credentialScopes), "credential_queries", credentialQueries)
+		return nil, fmt.Errorf("VP token not found for scope %s: the _default fallback is only allowed when the request asks for exactly one credential (scopes=%d, queries=%d)", scope, len(credentialScopes), credentialQueries)
 	}
 	if tokens, ok := vpResponse.VPToken["_default"]; ok && len(tokens) > 0 {
 		return tokens, nil
