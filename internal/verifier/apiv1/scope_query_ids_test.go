@@ -13,13 +13,9 @@ import (
 )
 
 // TestScopeQueryIDs covers the mapping that lets VerificationDirectPost find a
-// wallet's response.
-//
-// A wallet keys its vp_token by DCQL credential query id, but every shipped
-// presentation template names its query something other than the OIDC scope the
-// request is made with - eudi_pid for pid, eudi_ehic for ehic. The verifier
-// resolves tokens per scope, so without a mapping it reads a key the wallet
-// never sent and the whole presentation fails after the user completed it.
+// wallet's response. A wallet keys vp_token by query id, and every shipped
+// template names its query something other than the request's scope (eudi_pid
+// for pid), so without the mapping the verifier reads a key never sent.
 func TestScopeQueryIDs(t *testing.T) {
 	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
 		"pid":      sdJWTScope("urn:eudi:pid:1"),
@@ -60,14 +56,10 @@ func TestScopeQueryIDsNoTemplateNames(t *testing.T) {
 	assert.Empty(t, client.ScopeQueryIDs(t.Context(), dcql, []string{"pid"}))
 }
 
-// TestUncoveredScopesRejectsUnaskedCredential covers the request side of the
-// same missing relationship.
-//
-// createDCQLQuery selects ONE template by scope. If the request names other
-// configured credentials the template does not cover, the query goes out
-// covering a subset while authCtx.Scopes keeps the full list - and
-// VerificationDirectPost then waits for a VP token for a credential the wallet
-// was never asked about, failing only after a completed presentation.
+// TestUncoveredScopesRejectsUnaskedCredential covers the request side.
+// createDCQLQuery selects ONE template, so a request naming credentials it does
+// not cover goes out as a subset while authCtx.Scopes keeps the full list -
+// then waits for a token the wallet was never asked for.
 func TestUncoveredScopesRejectsUnaskedCredential(t *testing.T) {
 	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
 		"pid":  sdJWTScope("urn:eudi:pid:1"),
@@ -213,15 +205,11 @@ func (t stubTemplate) GetID() string                 { return t.id }
 func (t stubTemplate) GetOIDCScopes() []string       { return t.scopes }
 func (t stubTemplate) GetDCQLQuery() *openid4vp.DCQL { return t.dcql }
 
-// TestScopeQueryIDsAliasTemplateScope covers a review finding, and the shape
-// half the shipped templates actually have.
-//
-// eudi_pid_full is selected by the OIDC scope "pid_full" while the credential
-// is configured as "pid"; the eduID full and age templates do the same. Such a
-// scope is not a credential_metadata key, so it has no constraint of its own -
-// but it is what lands in authCtx.Scopes and what the response is looked up by.
-// Skipping unconfigured scopes left precisely these templates as broken as
-// before the fix.
+// TestScopeQueryIDsAliasTemplateScope covers the shape half the shipped
+// templates have: eudi_pid_full is selected by scope "pid_full" while the
+// credential is configured as "pid". Such a scope has no constraint of its own
+// but is what lands in authCtx.Scopes, so skipping unconfigured scopes left
+// exactly these templates broken.
 func TestScopeQueryIDsAliasTemplateScope(t *testing.T) {
 	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
 		"pid": sdJWTScope("urn:eudi:pid:1"),
@@ -392,15 +380,10 @@ func TestCredentialScopes(t *testing.T) {
 	})
 }
 
-// TestScopeQueryIDsSharedQueryIsAmbiguous covers a review finding: uniqueness
-// has to hold in both directions.
-//
-// queryIDForConstraint already refuses a scope that matches several queries,
-// but two scopes can still land on the SAME query - aliases sharing a
-// credential's vct, against a template with one query. Keeping both pairs would
-// have VerificationDirectPost resolve that single VP token twice and process it
-// under each scope, duplicating it in the cache and applying each scope's
-// validations to the other's credential.
+// TestScopeQueryIDsSharedQueryIsAmbiguous: uniqueness must hold both ways.
+// queryIDForConstraint refuses a scope matching several queries, but two scopes
+// can still land on one - aliases sharing a vct. Keeping both would process the
+// single VP token twice, under each scope's validations.
 func TestScopeQueryIDsSharedQueryIsAmbiguous(t *testing.T) {
 	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
 		"pid":       sdJWTScope("urn:eudi:pid:1"),
@@ -452,14 +435,10 @@ func TestScopeQueryIDsRebuildForLegacySession(t *testing.T) {
 	assert.Equal(t, []string{"token"}, tokens)
 }
 
-// TestUncoveredScopesRejectsAmbiguousCoverage covers a review finding: the
-// coverage check and the mapping have to agree, or an ambiguous request is sent
-// and fails only after the user completes a presentation.
-//
-// Two configured aliases sharing a vct, against a template with one query:
-// ScopeQueryIDs refuses to map either, since nothing says which scope the query
-// answers. The coverage check made its own weaker check and reported both as
-// covered, so the request went out and direct-post failed afterwards.
+// TestUncoveredScopesRejectsAmbiguousCoverage: the coverage check and the
+// mapping must agree. ScopeQueryIDs refuses to map two aliases sharing a vct
+// onto one query; a weaker coverage check reported both covered, so the request
+// went out and direct-post failed afterwards.
 func TestUncoveredScopesRejectsAmbiguousCoverage(t *testing.T) {
 	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
 		"pid":       sdJWTScope("urn:eudi:pid:1"),
@@ -478,15 +457,11 @@ func TestUncoveredScopesRejectsAmbiguousCoverage(t *testing.T) {
 	assert.Empty(t, client.uncoveredScopes(t.Context(), dcql, []string{"pid"}))
 }
 
-// TestScopeQueryIDsDirectKeyedCollision covers a review finding: a template
-// query is free to be NAMED after a configured scope.
-//
-// With a query called "pid" and an alias sharing its constraint, "pid" looked
-// like a direct hit needing no mapping while the alias mapped onto it - so the
-// collision went unnoticed, the request passed coverage, and
-// VerificationDirectPost processed the one VP token twice, under each scope's
-// validations. Identity pairings are tracked for collisions now even though
-// they are not persisted.
+// TestScopeQueryIDsDirectKeyedCollision: a template query may be NAMED after a
+// configured scope. A query "pid" looked like a direct hit needing no mapping
+// while an alias mapped onto it, so the collision went unnoticed and the one VP
+// token was processed twice. Identity pairings are tracked now, though not
+// persisted.
 func TestScopeQueryIDsDirectKeyedCollision(t *testing.T) {
 	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
 		"pid":       sdJWTScope("urn:eudi:pid:1"),
@@ -504,13 +479,9 @@ func TestScopeQueryIDsDirectKeyedCollision(t *testing.T) {
 		"a contested query must leave both scopes unanswered, so the request is refused up front")
 }
 
-// TestUncoveredScopesIgnoresNameOnlyMatches covers the other half of the same
-// finding: a query named after a configured scope but constrained for a
-// different credential must not pass as covering it.
-//
-// Template query ids are arbitrary, so a name match says nothing. Accepting one
-// would send the request and then resolve that scope's VP token under the wrong
-// scope's validations.
+// TestUncoveredScopesIgnoresNameOnlyMatches: a query named after a scope but
+// constrained for another credential must not count as covering it. Query ids
+// are arbitrary, so a name match says nothing.
 func TestUncoveredScopesIgnoresNameOnlyMatches(t *testing.T) {
 	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
 		"pid":  sdJWTScope("urn:eudi:pid:1"),

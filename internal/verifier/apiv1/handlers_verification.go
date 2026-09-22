@@ -161,12 +161,17 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		}
 	}
 
+	// A query that asked for nothing cannot be satisfied by anything.
+	if authCtx.DCQLQuery != nil && len(authCtx.DCQLQuery.Credentials) == 0 {
+		c.log.Error(nil, "DCQL query requests no credentials", "scopes", authCtx.Scopes)
+		return nil, fmt.Errorf("DCQL query requests no credentials")
+	}
+	// Unconditional: with no credential scope the loop below runs zero times
+	// and caches a successful presentation having validated no VP token. The
+	// check used to fire only when the query had credentials, so a query with
+	// none skipped it.
 	credentialScopes := c.credentialScopes(authCtx)
-	if len(credentialScopes) == 0 && authCtx.DCQLQuery != nil && len(authCtx.DCQLQuery.Credentials) > 0 {
-		// The query asked for credentials but nothing is left to check them
-		// against - a template selected by an ordinary scope alone would do
-		// this. Falling through would cache a successful presentation having
-		// validated no VP token whatsoever.
+	if len(credentialScopes) == 0 {
 		c.log.Error(nil, "no requested scope corresponds to a requested credential", "scopes", authCtx.Scopes)
 		return nil, fmt.Errorf("no requested scope corresponds to a requested credential")
 	}
@@ -623,26 +628,17 @@ type VerificationCallbackResponse struct {
 // credentialScopes returns the requested scopes that are part of the
 // presentation, in request order.
 //
-// A non-standard scope is always kept, even when nothing obviously represents
-// it. Dropping on uncertainty is the dangerous direction on a validation path:
-// the scope would vanish from the loop instead of failing in it, and a request
-// whose scopes all vanished would cache a successful presentation having
-// validated no VP token at all.
+// A non-standard scope is always kept: dropping on uncertainty would remove it
+// from the validation loop rather than fail in it.
 //
-// A scope OIDC Core defines is kept only when it really is a credential - named
-// by a query, paired with one, or configured in credential_metadata. Otherwise
-// it is dropped, which is the reason this function exists: authCtx.Scopes
-// always carries "openid", the shipped eudi_pid_basic template is selected by
-// "pid profile", and no wallet returns a credential for those, so requiring a
-// VP token for them failed every request naming more than one scope.
+// A standard OIDC scope is kept only when it really is a credential - named by
+// a query, paired with one, or configured in credential_metadata. "openid" is
+// always present and the shipped template is selected by "pid profile", so
+// requiring a VP token for those failed every multi-scope request. The test is
+// that narrow because a standard scope CAN be a credential: a template may be
+// selected by one, and nothing stops credential_metadata configuring one.
 //
-// The check is that narrow because a standard scope CAN be a credential here:
-// PresentationBuilder deliberately lets one select a template, and nothing
-// stops credential_metadata configuring "profile". Excluding those by name
-// would skip validating a credential the request actually asked for.
-//
-// With no DCQL query cached, every scope is returned - the behaviour that
-// predates this.
+// No cached query means every scope is returned, as before.
 func (c *Client) credentialScopes(authCtx *cache.AuthorizationContext) []string {
 	if authCtx.DCQLQuery == nil {
 		return authCtx.Scopes
@@ -673,22 +669,15 @@ func (c *Client) isCredentialScope(authCtx *cache.AuthorizationContext, scope st
 	})
 }
 
-// vpTokensForScope finds the VP tokens a wallet returned for one requested
-// scope, in the three ways a response can name them.
+// vpTokensForScope finds the VP tokens a wallet returned for one scope, in the
+// three ways a response can name them:
 //
-// The scope's own key comes first, which is what a query built from
-// credential_metadata produces - buildDCQLQueryFromConfig keys each query by
-// the scope itself.
-//
-// Then the scope's DCQL credential query id. A wallet keys vp_token by query
-// id (OpenID4VP 1.0), and a template names its queries whatever its author
-// chose, so without this the verifier reads a key the wallet never sent.
-// ScopeQueryIDs carries only the differing pairs.
-//
-// Then "_default", for a wallet that sent vp_token as a plain string rather
-// than a map. That is only safe for a single-scope request: with several
-// scopes the same credential would be reused for each, carrying whichever
-// validations belong to the others.
+//   - the scope's own key, which config-built queries use;
+//   - its DCQL query id, since a wallet keys vp_token by query id and a
+//     template names its queries whatever its author chose;
+//   - "_default", for a wallet that sent a plain string. Single-scope requests
+//     only: otherwise one credential would answer every scope, carrying the
+//     others' validations.
 func (c *Client) vpTokensForScope(authCtx *cache.AuthorizationContext, credentialScopes []string, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
 	if tokens, ok := vpResponse.VPToken[scope]; ok && len(tokens) > 0 {
 		return tokens, nil

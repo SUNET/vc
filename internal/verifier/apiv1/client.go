@@ -412,26 +412,20 @@ func (c *Client) ScopeQueryIDs(ctx context.Context, dcql *openid4vp.DCQL, scopes
 }
 
 // resolveScopeQueries works out which credential query answers each requested
-// scope, including the scopes answered by a query of their own name, and drops
-// any pairing that turns out to be contested.
+// scope, and drops any pairing that turns out to be contested.
 //
-// One query answers one scope, and uniqueness has to hold in both directions.
-// queryIDForConstraint already refuses a scope matching several queries. Here
-// the inverse: several scopes can land on one query - aliases sharing a
-// credential's vct - and keeping those would have VerificationDirectPost
-// resolve that single VP token once per scope, caching it twice and applying
-// each scope's validations to the other's credential.
+// Uniqueness must hold in both directions. queryIDForConstraint refuses a scope
+// matching several queries; here the inverse - several scopes landing on one,
+// as aliases sharing a vct do - which would resolve that single VP token once
+// per scope, applying each scope's validations to the other's credential.
 //
-// Identity pairings are tracked for that purpose even though they are not
-// persisted, because a template query is free to be NAMED after a configured
-// scope: with a query called "pid" and an alias sharing its constraint, "pid"
-// would look direct while the alias mapped onto it, and the collision would go
-// unnoticed.
+// Identity pairings are tracked for that, though not persisted: a template
+// query may be NAMED after a configured scope, so a query "pid" would look
+// direct while an alias mapped onto it and the collision went unnoticed.
 //
-// Nothing here can say which scope a contested query was meant for, so both
-// pairings go and those scopes fall back to their own key - where they fail
-// loudly, and where uncoveredScopes sees them as unanswered and rejects the
-// request before a wallet is ever involved.
+// A contested query cannot be attributed, so both pairings go and those scopes
+// fall back to their own key, where uncoveredScopes rejects the request before
+// a wallet is involved.
 func (c *Client) resolveScopeQueries(ctx context.Context, dcql *openid4vp.DCQL, scopes []string) map[string]string {
 	if dcql == nil || c.cfg.Common == nil {
 		return nil
@@ -471,21 +465,13 @@ func (c *Client) resolveScopeQueries(ctx context.Context, dcql *openid4vp.DCQL, 
 
 // queryIDForScope finds the credential query that answers one requested scope.
 //
-// A configured scope is matched by its own constraint, which is exact.
-//
-// An UNCONFIGURED scope is matched to the query only when the request produced
-// exactly one. That case is not an oddity: half the shipped templates are
-// selected by a scope that is not a credential_metadata key at all -
-// eudi_pid_full triggers on "pid_full" while the credential is configured as
-// "pid", and the eduID full/age templates do the same. Such a scope has no
-// constraint of its own to match on, yet it is what lands in authCtx.Scopes and
-// what the response is looked up by, so skipping it left exactly those
-// templates as broken as before.
-//
-// Even then, only a scope the selected template declares, and only when the
-// request produced one query: a template's queries carry no record of which of
-// its oidc_scopes each answers, so with several there is nothing to choose on
-// and the scope is left unmapped rather than guessed at.
+// A configured scope is matched by its own constraint, which is exact. An
+// unconfigured one is matched only when the template declares it AND produced
+// exactly one query: half the shipped templates are selected by a scope that is
+// not a credential_metadata key (eudi_pid_full on "pid_full", the credential
+// configured as "pid"), so skipping those left exactly those templates broken -
+// but a template records no mapping from its oidc_scopes to its queries, so
+// with several there is nothing to choose on.
 func (c *Client) queryIDForScope(dcql *openid4vp.DCQL, scope string, templateScopes []string) (string, bool) {
 	if constructor, configured := c.cfg.Common.CredentialMetadata[scope]; configured {
 		meta, ok := constructor.DCQLMetaQuery()
@@ -560,27 +546,18 @@ func queryIDForConstraint(dcql *openid4vp.DCQL, meta openid4vp.MetaQuery) (strin
 	return found, found != ""
 }
 
-// uncoveredScopes returns the requested scopes the built query cannot actually
-// answer: configured, with a constraint this repo can express, and yet with no
-// query of their own to be resolved through.
-//
-// Such a scope is a request the verifier cannot fulfil. It stays in
-// authCtx.Scopes, VerificationDirectPost requires a VP token for every entry
-// there, and the wallet was never asked for this one - so the flow fails only
-// after the user has completed a presentation, naming a credential they were
-// never prompted for. A template covering some of a request's scopes and not
-// others is how that happens.
+// uncoveredScopes returns the requested scopes the built query cannot answer:
+// configured, expressible, and yet with no query to resolve through. Such a
+// scope stays in authCtx.Scopes, where direct-post requires a VP token for it -
+// so the flow fails only after the user has presented a credential they were
+// never asked for. A template covering some scopes and not others does this.
 //
 // Coverage comes from resolveScopeQueries so this and the mapping direct-post
-// resolves through cannot disagree. A contested query - two aliases sharing a
-// vct against a template with one credential - leaves both scopes unanswered,
-// refusing the request before a wallet is involved. And a query merely named
-// after a scope, while constrained for another type, no longer counts as
-// covering it.
+// uses cannot disagree: a contested query leaves both scopes unanswered, and a
+// query merely named after a scope does not count as covering it.
 //
-// W3C scopes are not reported: a template may legitimately cover one with
-// meta.type_values and there is no way to tell yet, so rejecting them would
-// break working deployments.
+// W3C scopes are not reported - a template may legitimately cover one with
+// meta.type_values and there is no way to tell yet.
 func (c *Client) uncoveredScopes(ctx context.Context, dcql *openid4vp.DCQL, scopes []string) []string {
 	if dcql == nil || c.cfg.Common == nil {
 		return nil

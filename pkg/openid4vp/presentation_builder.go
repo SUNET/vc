@@ -108,12 +108,10 @@ func (pb *PresentationBuilder) BuildDCQLQuery(ctx context.Context, scopes []stri
 //
 // The template's declared oidc_scopes come back alongside the query.
 //
-// matched is the part BuildDCQLQuery cannot express: it answers "no template"
-// with the generic placeholder, which constrains nothing and reads to a caller
-// exactly like success. Inferring that case back out of the returned query is
-// not possible either - a DCQL credential id is arbitrary, nothing reserves the
-// placeholder's, and a template using the same id would be discarded. So the
-// builder says so directly.
+// matched is what BuildDCQLQuery cannot express: it answers "no template" with
+// a generic placeholder that constrains nothing and reads like success, and
+// that case cannot be inferred back out of the query since credential ids are
+// arbitrary.
 func (pb *PresentationBuilder) TemplateDCQLQuery(_ context.Context, scopes []string) (*DCQL, []string, bool) {
 	if len(scopes) == 0 {
 		return nil, nil, false

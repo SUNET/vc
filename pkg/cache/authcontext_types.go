@@ -135,14 +135,12 @@ type AuthorizationContext struct {
 	// ScopeQueryIDs maps a requested scope to the id of the DCQL credential
 	// query that stands for it, for the scopes where the two differ.
 	//
-	// A wallet keys its vp_token by credential query id, not by scope
-	// (OpenID4VP 1.0), and a template names its queries whatever its author
-	// chose: the shipped PID template asks for "eudi_pid" while the request is
-	// made with scope "pid". VerificationDirectPost resolves tokens per scope,
-	// so without this it reads a key the wallet never sent.
+	// A wallet keys vp_token by query id, not by scope (OpenID4VP 1.0), and a
+	// template names its queries whatever its author chose - the shipped PID
+	// template asks for "eudi_pid" while the request uses scope "pid" - so
+	// without this the verifier reads a key the wallet never sent.
 	//
-	// Only differing pairs are stored; an absent entry means the scope can be
-	// looked up directly.
+	// Only differing pairs are stored; an absent entry looks up directly.
 	ScopeQueryIDs map[string]string                      `json:"scope_query_ids,omitempty" bson:"scope_query_ids,omitempty"`
 	Validations   map[string][]openid4vp.ClaimValidation `json:"validations,omitempty" bson:"validations,omitempty" validate:"omitempty,dive,dive"`
 	WalletID      string                                 `json:"wallet_id,omitempty" bson:"wallet_id,omitempty" validate:"omitempty,max=128,printascii"`
