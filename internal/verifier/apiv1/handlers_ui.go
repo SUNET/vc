@@ -447,6 +447,18 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		sessionID = uuid.NewString()
 	}
 
+	// The DCQL arrives from the caller with only validate:"required" behind
+	// it, so nothing checked that its credential queries carry the constraint
+	// their format needs. An empty meta is not a narrow request, it is no
+	// request at all - DCQL reads it as matching every credential of that
+	// format - and the verifier would happily sign and serve it.
+	for _, credential := range req.DCQLQuery.Credentials {
+		if err := openid4vp.ValidateCredentialQuery(credential); err != nil {
+			c.log.Error(err, "rejected an invalid credential query from the UI interaction request", "credential_id", credential.ID, "format", credential.Format)
+			return nil, fmt.Errorf("credential query %q is invalid: %w", credential.ID, err)
+		}
+	}
+
 	// Collect all credential IDs from DCQL query
 	scopes := make([]string, 0, len(req.DCQLQuery.Credentials))
 	for _, credential := range req.DCQLQuery.Credentials {

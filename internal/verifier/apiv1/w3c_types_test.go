@@ -140,3 +140,38 @@ func TestZKPresetOverrideSurvivesTheUsabilityCheck(t *testing.T) {
 	assert.Equal(t, "eu.europa.ec.eudi.pid.1", cred.Meta.DoctypeValue, "from the scope's own mso_mdoc metadata")
 	assert.Len(t, cred.Meta.ZKSystemType, 1, "the preset supplies the ZK system types")
 }
+
+// TestUIInteractionRejectsUnconstrainedQuery covers a review finding: the DCQL
+// in a UI interaction request arrives from the caller with only
+// validate:"required" behind it, so ValidateCredentialQuery - which this PR
+// extended - had no production caller at all and nothing checked that a
+// credential query carried the constraint its format needs.
+//
+// An empty meta is not a narrow request but no request: DCQL reads it as
+// matching every credential of that format.
+func TestUIInteractionRejectsUnconstrainedQuery(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid": sdJWTScope("urn:eudi:pid:1"),
+	}, nil)
+
+	for _, tc := range []struct {
+		name string
+		cred openid4vp.CredentialQuery
+	}{
+		{"W3C with no type_values", openid4vp.CredentialQuery{ID: "diploma", Format: "ldp_vc"}},
+		{"W3C with an empty alternative", openid4vp.CredentialQuery{
+			ID: "diploma", Format: "ldp_vc",
+			Meta: openid4vp.MetaQuery{TypeValues: [][]string{{}}},
+		}},
+		{"SD-JWT with no vct_values", openid4vp.CredentialQuery{ID: "pid", Format: openid4vp.FormatSDJWTVC}},
+		{"mdoc with no doctype_value", openid4vp.CredentialQuery{ID: "mdl", Format: openid4vp.FormatMsoMdoc}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := client.UIInteraction(t.Context(), &UIInteractionRequest{
+				DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{tc.cred}},
+			})
+			require.Error(t, err, "an unconstrained query must not be signed and served")
+			assert.Contains(t, err.Error(), tc.cred.ID)
+		})
+	}
+}
