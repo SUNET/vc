@@ -2,6 +2,8 @@ package credential
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -33,6 +35,27 @@ type CachingDocumentLoader struct {
 	log      *logger.Log
 }
 
+// contextHTTPClient fetches remote JSON-LD contexts without following
+// redirects, and without waiting indefinitely.
+//
+// A redirect would defeat any decision made about the URL before the fetch.
+// The issuer allowlists which context URLs it may dereference
+// (issuer.jsonld_context_allowlist), and passing http.DefaultClient would let
+// an allowlisted endpoint answer 302 and send the fetch somewhere that was
+// never allowed - the classic way an allowlist on the first hop is bypassed.
+//
+// A context that redirects therefore fails to load rather than being followed.
+// The W3C base contexts are preloaded below and never fetched, so this only
+// affects contexts a deployment publishes itself, which it can serve directly.
+func contextHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			return fmt.Errorf("refusing to follow a redirect while loading a JSON-LD context (to %s)", req.URL)
+		},
+	}
+}
+
 // NewCachingDocumentLoader creates a new caching document loader
 func NewCachingDocumentLoader() *CachingDocumentLoader {
 	cache := ttlcache.New[string, *ld.RemoteDocument](
@@ -41,7 +64,7 @@ func NewCachingDocumentLoader() *CachingDocumentLoader {
 	go cache.Start()
 
 	l := &CachingDocumentLoader{
-		fallback: ld.NewDefaultDocumentLoader(nil),
+		fallback: ld.NewDefaultDocumentLoader(contextHTTPClient()),
 		cache:    cache,
 		log:      logger.NewSimple("loader"),
 	}
