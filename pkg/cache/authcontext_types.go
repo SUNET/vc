@@ -78,8 +78,8 @@ type AuthorizationContext struct {
 
 	// TXCode is the transaction code (PIN) the wallet must present at the
 	// token endpoint for a pre-authorized credential offer. Empty when the
-	// offer does not require a PIN.
-	TXCode string `json:"tx_code,omitempty" bson:"tx_code,omitempty" validate:"omitempty,max=32,printascii"`
+	// offer does not require a PIN. Bound matches openid4vci.TokenRequest.TXCode.
+	TXCode string `json:"tx_code,omitempty" bson:"tx_code,omitempty" validate:"omitempty,max=64,printascii"`
 
 	// TXCodeAttempts counts the number of tx_code (PIN) attempts consumed
 	// for this pre-authorized code. Bounded by MaxTXCodeAttempts.
