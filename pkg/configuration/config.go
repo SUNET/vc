@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -129,11 +132,13 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 			return nil, fmt.Errorf("failed to build credential registry client: %w", err)
 		}
 
-		// Load VCTM data and derive Attributes before validation.
+		if err := checkCredentialMetadataEntries(cfg); err != nil {
+			return nil, err
+		}
+
+		// Load VCTM data and derive Attributes before validation. No nil
+		// guard: checkCredentialMetadataEntries above has refused those.
 		for scope, constructor := range cfg.Common.CredentialMetadata {
-			if constructor == nil {
-				continue
-			}
 			if err := constructor.LoadCredentialSchema(ctx, scope, registry); err != nil {
 				return nil, fmt.Errorf("failed to load VCTM for scope %q: %w", scope, err)
 			}
@@ -179,6 +184,30 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	}
 
 	return cfg, nil
+}
+
+// checkCredentialMetadataEntries refuses a common.credential_metadata key
+// whose value is nil.
+//
+// That is a config typo - a scope written with nothing under it - not an
+// absent scope, and skipping it only moves the failure: the verifier's
+// Client.New iterates the map and dereferences the entry at startup. Here
+// rather than in ResolveVCTUrls because that is gated on an APIGW stanza, so
+// a verifier-only config file never reaches it.
+func checkCredentialMetadataEntries(cfg *model.Cfg) error {
+	if cfg.Common == nil {
+		return nil
+	}
+	var empty []string
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		if cfg.Common.CredentialMetadata[scope] == nil {
+			empty = append(empty, scope)
+		}
+	}
+	if len(empty) > 0 {
+		return fmt.Errorf("common.credential_metadata: no configuration under %s", strings.Join(empty, ", "))
+	}
+	return nil
 }
 
 // checkMongoRequirement enforces common.mongo.uri for the services that
