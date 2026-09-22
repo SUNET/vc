@@ -2153,17 +2153,56 @@ func (c *CredentialMetadata) doctype() string {
 	return c.Doctype
 }
 
-// W3CTypes returns the compact-term types this scope issues, defaulting to the
-// bare base type as the issuer metadata always advertised.
+// checkW3CTypeConsistency rejects a W3C scope that can be requested but not
+// matched.
+//
+// credential_types and credential_type_values are deliberately independent -
+// a scope may be issue-only or request-only - but configuring the request half
+// alone is not one of those cases: the issuer mints a bare VerifiableCredential
+// while the verifier asks for narrower IRIs, so the request can never match
+// anything this issuer produced.
+//
+// The two cannot be checked against each other beyond that: going from compact
+// terms to expanded IRIs needs a JSON-LD expansion this repo does not do.
+func (cfg *Cfg) checkW3CTypeConsistency() error {
+	if cfg.Common == nil {
+		return nil
+	}
+	for scope, constructor := range cfg.Common.CredentialMetadata {
+		if constructor == nil || !openid4vp.IsW3CVCFormatIdentifier(constructor.Format) {
+			continue
+		}
+		if len(constructor.w3cTypeValues()) > 0 && len(constructor.CredentialTypes) == 0 {
+			return fmt.Errorf("scope %q configures credential_type_values but no credential_types: it would be requested by those types and issued as a bare VerifiableCredential, which cannot match", scope)
+		}
+	}
+	return nil
+}
+
+// baseVCType is the compact term every W3C VC must carry, the counterpart of
+// baseVCTypeIRI on the DCQL side.
+const baseVCType = "VerifiableCredential"
+
+// W3CTypes returns the compact-term types this scope issues, always including
+// the base type and defaulting to it alone, as the issuer metadata always
+// advertised.
+//
+// The base type is prepended when a config omits it: the W3C VC data model
+// requires every credential to carry it, and a verifier's type_values
+// alternatives name its IRI, which MatchTypeValues needs the credential to
+// have. Issuing without it produces a credential that matches nothing.
 //
 // The issuance side. A verifier reads CredentialTypeValues: different
 // representation, and a different reading of the bare base type - issuing one
 // is merely unspecific, requesting one matches every W3C credential.
 func (c *CredentialMetadata) W3CTypes() []string {
 	if c == nil || len(c.CredentialTypes) == 0 {
-		return []string{"VerifiableCredential"}
+		return []string{baseVCType}
 	}
-	return slices.Clone(c.CredentialTypes)
+	if slices.Contains(c.CredentialTypes, baseVCType) {
+		return slices.Clone(c.CredentialTypes)
+	}
+	return append([]string{baseVCType}, c.CredentialTypes...)
 }
 
 // baseVCTypeIRI is the expanded form of the type every W3C VC carries; a query
@@ -2332,7 +2371,7 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 		}
 	}
 
-	return nil
+	return cfg.checkW3CTypeConsistency()
 }
 
 // applyCommonCredentialConfig sets the fields of CredentialConfigurationsSupported

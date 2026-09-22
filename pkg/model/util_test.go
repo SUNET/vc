@@ -564,3 +564,71 @@ func TestW3CTypes(t *testing.T) {
 	got[1] = "mutated"
 	assert.Equal(t, []string{"VerifiableCredential", "DiplomaCredential"}, cm.CredentialTypes)
 }
+
+// TestW3CTypesAlwaysCarriesTheBaseType covers a review finding: the W3C VC data
+// model requires every credential to carry VerifiableCredential, and a
+// verifier's type_values alternatives name its IRI - so minting without it
+// produces a credential that matches nothing.
+func TestW3CTypesAlwaysCarriesTheBaseType(t *testing.T) {
+	tests := []struct {
+		name string
+		cm   *CredentialMetadata
+		want []string
+	}{
+		{"unset defaults to the base type", &CredentialMetadata{}, []string{baseVCType}},
+		{"nil receiver too", nil, []string{baseVCType}},
+		{
+			"a config omitting the base type gets it prepended",
+			&CredentialMetadata{CredentialTypes: []string{"DiplomaCredential"}},
+			[]string{baseVCType, "DiplomaCredential"},
+		},
+		{
+			"a config already naming it is left alone",
+			&CredentialMetadata{CredentialTypes: []string{baseVCType, "DiplomaCredential"}},
+			[]string{baseVCType, "DiplomaCredential"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.cm.W3CTypes())
+		})
+	}
+}
+
+// TestCheckW3CTypeConsistency covers the other half: a scope configured to be
+// requested by narrow types but issued as a bare VerifiableCredential can never
+// match, so it is rejected at config load rather than at presentation time.
+func TestCheckW3CTypeConsistency(t *testing.T) {
+	diploma := [][]string{{baseVCTypeIRI, "https://example.org/diploma#DiplomaCredential"}}
+
+	cfgWith := func(cm *CredentialMetadata) *Cfg {
+		return &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{"diploma": cm}}}
+	}
+
+	err := cfgWith(&CredentialMetadata{Format: "ldp_vc", CredentialTypeValues: diploma}).checkW3CTypeConsistency()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "diploma")
+
+	// Both halves configured: the ordinary case.
+	assert.NoError(t, cfgWith(&CredentialMetadata{
+		Format:               "ldp_vc",
+		CredentialTypes:      []string{baseVCType, "DiplomaCredential"},
+		CredentialTypeValues: diploma,
+	}).checkW3CTypeConsistency())
+
+	// Issue-only is legitimate: the scope simply is not requestable.
+	assert.NoError(t, cfgWith(&CredentialMetadata{
+		Format:          "ldp_vc",
+		CredentialTypes: []string{baseVCType, "DiplomaCredential"},
+	}).checkW3CTypeConsistency())
+
+	// A base-only alternative narrows nothing, so there is nothing to mismatch.
+	assert.NoError(t, cfgWith(&CredentialMetadata{
+		Format:               "ldp_vc",
+		CredentialTypeValues: [][]string{{baseVCTypeIRI}},
+	}).checkW3CTypeConsistency())
+
+	// Not a W3C format.
+	assert.NoError(t, cfgWith(&CredentialMetadata{Format: "dc+sd-jwt"}).checkW3CTypeConsistency())
+}
