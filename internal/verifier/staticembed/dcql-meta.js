@@ -4,8 +4,15 @@
 
 /** @typedef {{ format?: string, vct?: string, vct_values?: string[], type_values?: string[][] }} CredentialAttributes */
 
-/** W3C VC format identifiers, constrained by type_values rather than vct_values. */
-const W3C_FORMATS = ["ldp_vc", "vc+ld+json", "jwt_vc_json"];
+/**
+ * W3C VC format identifiers, constrained by type_values rather than vct_values.
+ *
+ * jwt_vc_json is deliberately absent, matching the backend: nothing issues it
+ * and the verifier reads a compact JWT-VC as SD-JWT, so it is advertised in
+ * issuer metadata but never requestable. Listing it here would emit a
+ * type_values query for a credential that cannot be verified.
+ */
+const W3C_FORMATS = ["ldp_vc", "vc+ld+json"];
 
 /**
  * SD-JWT VC format identifiers, constrained by vct_values. Enumerated rather

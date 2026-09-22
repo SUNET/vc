@@ -661,7 +661,7 @@ func TestValidateCredentialQueryRejectsUnconstrainedTypes(t *testing.T) {
 	base := []string{BaseVCTypeIRI}
 	narrowing := []string{BaseVCTypeIRI, "https://example.org/diploma#DiplomaCredential"}
 
-	for _, format := range []string{"ldp_vc", FormatVCLDJSON, FormatJwtVCJson} {
+	for _, format := range []string{"ldp_vc", FormatVCLDJSON} {
 		t.Run(format, func(t *testing.T) {
 			refused := [][][]string{
 				{{}},              // empty alternative
@@ -683,6 +683,27 @@ func TestValidateCredentialQueryRejectsUnconstrainedTypes(t *testing.T) {
 				ID: "diploma", Format: format,
 				Meta: MetaQuery{TypeValues: [][]string{narrowing}},
 			}), "an alternative that actually narrows is fine")
+		})
+	}
+}
+
+// TestValidateCredentialQueryRefusesUnrequestableFormats pins the formats that
+// are advertised in issuer metadata but cannot be answered.
+//
+// Nothing issues either, and a compact JWT-VC is read as SD-JWT by the
+// verifier, so it would be verified under the wrong credential model. They
+// have to be refused HERE rather than dropped to the default branch, which
+// allows an unrecognised format through without validating it at all -
+// UIInteraction calls this on the live ingress.
+func TestValidateCredentialQueryRefusesUnrequestableFormats(t *testing.T) {
+	for _, format := range []string{FormatJwtVCJson, "jwt_vc_json-ld"} {
+		t.Run(format, func(t *testing.T) {
+			err := ValidateCredentialQuery(CredentialQuery{
+				ID: "diploma", Format: format,
+				Meta: MetaQuery{TypeValues: [][]string{{BaseVCTypeIRI, "https://example.org/diploma#DiplomaCredential"}}},
+			})
+			require.Error(t, err, "a well-formed query in an unrequestable format must still be refused")
+			assert.Contains(t, err.Error(), "not requestable")
 		})
 	}
 }

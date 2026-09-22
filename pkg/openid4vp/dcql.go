@@ -592,7 +592,11 @@ func NewTrustedAuthorityOpenIDFederation(trustAnchors ...string) TrustedAuthorit
 // for the specified format.
 func ValidateCredentialQuery(query CredentialQuery) error {
 	switch query.Format {
-	case FormatLdpVCDCQL, FormatVCLDJSON, FormatJwtVCJson:
+	// Not FormatJwtVCJson: UIInteraction calls this on the live ingress, and
+	// the rest of the stack refuses that format - nothing issues it and the
+	// verifier reads a compact JWT-VC as SD-JWT. Accepting it here would let
+	// it in through the one door still open.
+	case FormatLdpVCDCQL, FormatVCLDJSON:
 		// W3C VC format requires type_values, and every alternative must
 		// actually constrain: MatchTypeValues reads an empty alternative as
 		// satisfied by any credential, and one satisfied alternative answers
@@ -643,6 +647,17 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 		}
 	case FormatMsoMdocZk:
 		return validateMsoMdocZkQuery(query)
+	// Refused explicitly, NOT left to the default below. Both are advertised
+	// in issuer metadata and neither is requestable: nothing issues them, and
+	// the verifier reads a compact JWT-VC as SD-JWT, so it would verify one
+	// under the wrong credential model. UIInteraction validates here on the
+	// live ingress, and "allow but do not validate" would wave them through
+	// with no constraint at all.
+	case FormatJwtVCJson, "jwt_vc_json-ld":
+		return &DCQLValidationError{
+			Field:   "format",
+			Message: fmt.Sprintf("format %q is advertised but not requestable: nothing issues it and there is no verification path for it", query.Format),
+		}
 	default:
 		// Unknown format - allow but don't validate
 	}

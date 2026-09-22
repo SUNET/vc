@@ -38,7 +38,7 @@ describe("dcqlMetaFor", () => {
         assert.deepEqual(meta, { vct_values: ["urn:eudi:pid:1"] });
     });
 
-    for (const format of ["ldp_vc", "vc+ld+json", "jwt_vc_json"]) {
+    for (const format of ["ldp_vc", "vc+ld+json"]) {
         it(`constrains ${format} by type_values`, () => {
             const { meta } = dcqlMetaFor({ format, type_values: diplomaTypes });
             assert.deepEqual(meta, { type_values: diplomaTypes });
@@ -97,7 +97,9 @@ describe("dcqlMetaFor refuses an empty constraint in every format", () => {
 describe("dcqlMetaFor refuses formats it cannot constrain", () => {
     // jwt_vc_json-ld is advertised by the issuer metadata but nothing issues
     // it, and it is a W3C format - so the old default sent vct_values for it.
-    for (const format of ["jwt_vc_json-ld", "mso_mdoc_zk", "something-new"]) {
+    // jwt_vc_json is in the same position: advertised, never requestable,
+    // because a compact JWT-VC is read as SD-JWT by the verifier.
+    for (const format of ["jwt_vc_json", "jwt_vc_json-ld", "mso_mdoc_zk", "something-new"]) {
         it(`refuses ${format} rather than treating it as SD-JWT`, () => {
             const { meta, error } = dcqlMetaFor({ format, vct: "urn:eudi:pid:1" });
             assert.equal(meta, undefined);

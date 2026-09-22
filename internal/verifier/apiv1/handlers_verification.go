@@ -521,6 +521,32 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				return nil, fmt.Errorf("W3C VC verification failed for scope %s: %w", scope, err)
 			}
 
+			// Resolving the issuer's key says who signed it, not whether we
+			// trust them. The SD-JWT and mdoc branches both put that decision
+			// to the evaluator, and a PDP configured to deny an issuer has to
+			// deny it here too.
+			issuerKey, err := resolver.ResolveKey(ctx, vc20Result.VerificationMethod)
+			if err != nil {
+				c.log.Error(err, "failed to resolve the W3C issuer key for trust evaluation", "scope", scope)
+				return nil, fmt.Errorf("W3C issuer trust evaluation failed for scope %s: %w", scope, err)
+			}
+			decision, err := c.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
+				SubjectID:      vc20Result.Issuer,
+				KeyType:        trust.KeyTypeJWK,
+				Key:            issuerKey,
+				Role:           trust.RoleCredentialIssuer,
+				CredentialType: scope,
+			})
+			if err != nil {
+				c.log.Error(err, "W3C issuer trust evaluation failed", "scope", scope, "issuer", vc20Result.Issuer)
+				return nil, fmt.Errorf("W3C issuer trust evaluation failed for scope %s: %w", scope, err)
+			}
+			if !decision.Trusted {
+				c.log.Warn("W3C issuer not trusted", "scope", scope,
+					"issuer", vc20Result.Issuer, "reason", decision.Reason)
+				return nil, fmt.Errorf("W3C issuer not trusted for scope %s: %s", scope, decision.Reason)
+			}
+
 			c.log.Debug("W3C VC verified successfully", "scope", scope,
 				"issuer", vc20Result.Issuer, "cryptosuite", vc20Result.Cryptosuite,
 				"selective_disclosure", vc20Result.IsSelectiveDisclosure)
