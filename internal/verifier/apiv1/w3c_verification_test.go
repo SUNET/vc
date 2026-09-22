@@ -321,3 +321,37 @@ func TestRequestedQueryResolvesTemplateNamedQueries(t *testing.T) {
 	_, ok = client.requestedQuery(ambiguous, "pid")
 	assert.False(t, ok, "guessing between queries would attribute a constraint to the wrong credential")
 }
+
+// TestCreateDCQLQueryValidatesWhatItSends pins the request side of the same
+// rule the verification side enforces.
+//
+// A presentation template is written by hand and goes out signed without
+// passing through /ui/interaction's validation, so createDCQLQuery is the only
+// place its queries are checked. Left unchecked, an unconstrained query is
+// discovered at the response - after the user has been sent to their wallet
+// and come back.
+func TestCreateDCQLQueryValidatesWhatItSends(t *testing.T) {
+	assert.NoError(t, validateDCQL(nil), "no query is not an invalid query")
+
+	assert.NoError(t, validateDCQL(&openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+		ID: "pid", Format: openid4vp.FormatSDJWTVC,
+		Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}},
+	}}}), "a constrained query is fine")
+
+	for _, unusable := range []openid4vp.CredentialQuery{
+		// SD-JWT with nothing to match on.
+		{ID: "pid", Format: openid4vp.FormatSDJWTVC},
+		// The empty format means dc+sd-jwt, so the same rule applies.
+		{ID: "pid", Format: ""},
+		// W3C naming only the base type matches every W3C credential.
+		{ID: "diploma", Format: openid4vp.FormatLdpVCDCQL,
+			Meta: openid4vp.MetaQuery{TypeValues: [][]string{{openid4vp.BaseVCTypeIRI}}}},
+		// Advertised but not requestable.
+		{ID: "diploma", Format: openid4vp.FormatJwtVCJson,
+			Meta: openid4vp.MetaQuery{TypeValues: [][]string{{openid4vp.BaseVCTypeIRI, "https://example.org/d#D"}}}},
+	} {
+		err := validateDCQL(&openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{unusable}})
+		require.Error(t, err, "%+v must not be sent to a wallet", unusable)
+		assert.Contains(t, err.Error(), unusable.ID, "the error names the offending query")
+	}
+}
