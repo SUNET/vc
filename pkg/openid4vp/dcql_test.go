@@ -644,3 +644,37 @@ func TestValidateCredentialQuery_VCLDJSON(t *testing.T) {
 		}}},
 	}))
 }
+
+// TestValidateCredentialQueryRejectsEmptyTypeAlternative pins a review finding:
+// requiring type_values to be non-empty is not enough. MatchTypeValues reads an
+// empty alternative as satisfied by any credential, and one satisfied
+// alternative answers the whole constraint - so [[]] is an unconstrained
+// request wearing a constraint's shape, and it reached this validator from
+// templates and API-supplied queries that never pass through config validation.
+func TestValidateCredentialQueryRejectsEmptyTypeAlternative(t *testing.T) {
+	base := []string{"https://www.w3.org/2018/credentials#VerifiableCredential"}
+
+	for _, format := range []string{"ldp_vc", FormatVCLDJSON, FormatJwtVCJson} {
+		t.Run(format, func(t *testing.T) {
+			err := ValidateCredentialQuery(CredentialQuery{
+				ID: "diploma", Format: format,
+				Meta: MetaQuery{TypeValues: [][]string{{}}},
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "type_values")
+
+			// A real alternative beside an empty one is still refused: one
+			// satisfied alternative answers the whole constraint.
+			err = ValidateCredentialQuery(CredentialQuery{
+				ID: "diploma", Format: format,
+				Meta: MetaQuery{TypeValues: [][]string{base, {}}},
+			})
+			require.Error(t, err)
+
+			assert.NoError(t, ValidateCredentialQuery(CredentialQuery{
+				ID: "diploma", Format: format,
+				Meta: MetaQuery{TypeValues: [][]string{base}},
+			}))
+		})
+	}
+}

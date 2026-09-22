@@ -589,7 +589,19 @@ func NewTrustedAuthorityOpenIDFederation(trustAnchors ...string) TrustedAuthorit
 func ValidateCredentialQuery(query CredentialQuery) error {
 	switch query.Format {
 	case "ldp_vc", FormatVCLDJSON, FormatJwtVCJson:
-		// W3C VC format requires type_values
+		// W3C VC format requires type_values, and every alternative must
+		// actually constrain: MatchTypeValues reads an empty alternative as
+		// satisfied by any credential, and one satisfied alternative answers
+		// the whole constraint - so [[]] is an unconstrained request wearing
+		// a constraint's shape.
+		for i, alternative := range query.Meta.TypeValues {
+			if len(alternative) == 0 {
+				return &DCQLValidationError{
+					Field:   fmt.Sprintf("meta.type_values[%d]", i),
+					Message: "each type_values alternative must name at least one type",
+				}
+			}
+		}
 		if len(query.Meta.TypeValues) == 0 {
 			return &DCQLValidationError{
 				Field:   "meta.type_values",
