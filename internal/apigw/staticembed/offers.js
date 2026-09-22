@@ -40,6 +40,9 @@ Alpine.data("app", () => ({
     /** @type {boolean} */
     loading: false,
 
+    /** @type {boolean} */
+    opaque: false,
+
     /** @type {string | null} */
     error: null,
 
@@ -108,6 +111,11 @@ Alpine.data("app", () => ({
         const credential = formData.get("credential");
         if (!credential || typeof credential !== "string") {
             this.error = "Credential is required";
+            return;
+        }
+
+        if (this.opaque) {
+            window.location.hash = `scope=${encodeURIComponent(credential)}&wallet_id=opaque`;
             return;
         }
 
