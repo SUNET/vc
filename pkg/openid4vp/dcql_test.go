@@ -707,3 +707,21 @@ func TestValidateCredentialQueryRefusesUnrequestableFormats(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateCredentialQueryTreatsEmptyFormatAsSDJWT pins the empty format.
+//
+// Format's zero value means dc+sd-jwt everywhere that decides what a format
+// means - DCQLMetaQuery, the UI builder, the verifier's format check - so the
+// validator has to agree. Falling through to the permissive default let a
+// query with no format and no vct_values through unconstrained, and it was
+// then treated as SD-JWT by everything downstream.
+func TestValidateCredentialQueryTreatsEmptyFormatAsSDJWT(t *testing.T) {
+	err := ValidateCredentialQuery(CredentialQuery{ID: "pid", Format: ""})
+	require.Error(t, err, "an empty format is SD-JWT, which requires vct_values")
+	assert.Contains(t, err.Error(), "vct_values")
+
+	assert.NoError(t, ValidateCredentialQuery(CredentialQuery{
+		ID: "pid", Format: "",
+		Meta: MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}},
+	}), "and it is satisfied the same way SD-JWT is")
+}
