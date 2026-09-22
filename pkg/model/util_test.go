@@ -396,3 +396,55 @@ func TestDCQLMetaQueryByFormat(t *testing.T) {
 		})
 	}
 }
+
+// TestPublishNewVCT covers the option apigw uses to decide whether a published
+// VCTM keeps the vct its file declares or takes the /type-metadata URL it is
+// served from.
+//
+// The default preserves the file's value, which is what lets a URN survive
+// publication; a file declaring no vct is rewritten either way, since the
+// credential body, the served document and DCQL vct_values need one value to
+// agree on.
+func TestPublishNewVCT(t *testing.T) {
+	const hosted = "https://apigw.example/type-metadata/pid"
+
+	localVCTM := func(vct string, publishNew bool) *CredentialMetadata {
+		raw := []byte(`{"name":"PID"}`)
+		if vct != "" {
+			raw = []byte(`{"vct":"` + vct + `","name":"PID"}`)
+		}
+		return &CredentialMetadata{
+			Format:        openid4vp.FormatSDJWTVC,
+			VCTMFilePath:  "/path/to/vctm_pid.json",
+			VCTM:          &sdjwtvc.VCTM{VCT: vct},
+			VCTMRaw:       raw,
+			PublishNewVCT: publishNew,
+		}
+	}
+
+	tests := []struct {
+		name    string
+		cm      *CredentialMetadata
+		wantVCT string
+	}{
+		{"default keeps the file's urn", localVCTM("urn:eudi:pid:1", false), "urn:eudi:pid:1"},
+		{"publish_new_vct takes the hosting url", localVCTM("urn:eudi:pid:1", true), hosted},
+		{"an empty vct is back-filled regardless", localVCTM("", false), hosted},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{"pid": tt.cm}}}
+			require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+
+			assert.Equal(t, tt.wantVCT, tt.cm.GetVCTM().VCT)
+			// The served document has to carry the same value, or a wallet
+			// dereferencing vct#integrity gets a document naming another type.
+			assert.Contains(t, string(tt.cm.GetVCTMRaw()), tt.wantVCT)
+			meta, ok := tt.cm.DCQLMetaQuery()
+			require.True(t, ok)
+			assert.Equal(t, []string{tt.wantVCT}, meta.VCTValues,
+				"the query must ask for the same identifier the credential will carry")
+		})
+	}
+}

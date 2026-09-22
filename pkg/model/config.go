@@ -1784,6 +1784,19 @@ type CredentialMetadata struct {
 	// externally. The mso_mdoc analogue of vctm_url.
 	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath VCT Doctype,omitempty,url"`
 
+	// PublishNewVCT makes apigw rewrite a file-loaded VCTM's vct to the
+	// /type-metadata/{scope} URL it publishes the document at, replacing
+	// whatever the file declared.
+	//
+	// Default false, which preserves the file's own vct - the behaviour that
+	// lets a URN survive publication. A file that declares no vct is rewritten
+	// either way, since the credential body, the served document and DCQL
+	// vct_values all need one value to agree on.
+	//
+	// Only meaningful for a local VCTM (vctm_file_path): an external source is
+	// authoritative and is never rewritten.
+	PublishNewVCT bool `yaml:"publish_new_vct,omitempty" json:"-"`
+
 	// Doctype is the mdoc doctype value to resolve via
 	// Common.CredentialRegistry, used only when neither MDDLFilePath nor
 	// MDDLUrl is set. Requires Common.CredentialRegistry.Enable, same as
@@ -2164,8 +2177,11 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 		constructor.mu.Lock()
 		constructor.VCTURL = vctURL
 
-		// Only back-fill a locally-hosted VCTM's vct when the file did not carry one.
-		if constructor.IsLocalVCTM() && constructor.VCTM.VCT == "" {
+		// A locally-hosted VCTM's vct is rewritten to the hosting URL when the
+		// file carries none, or when publish_new_vct asks for it explicitly.
+		// Otherwise the file's own value is preserved, which is what keeps a
+		// URN working.
+		if constructor.IsLocalVCTM() && (constructor.VCTM.VCT == "" || constructor.PublishNewVCT) {
 			constructor.VCTM.VCT = vctURL
 			if constructor.VCTMRaw != nil {
 				var doc map[string]json.RawMessage
