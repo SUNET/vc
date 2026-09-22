@@ -2696,6 +2696,9 @@ func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string) 
 // element ID, since document data is keyed by element directly rather than
 // nested under the mdoc namespace - see MDDLSchema.Presentation.
 func (c *CredentialMetadata) DeclaredClaimNames() (map[string]bool, bool) {
+	if c == nil {
+		return nil, false
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 

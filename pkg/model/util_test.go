@@ -495,6 +495,7 @@ func TestReplaceVCT(t *testing.T) {
 			assert.Equal(t, "PID", served["name"], "and keep the rest of the file")
 		})
 	}
+}
 
 // TestCredentialMetadataAccessorsAreNilSafe pins every accessor against a nil
 // receiver.
@@ -515,6 +516,10 @@ func TestCredentialMetadataAccessorsAreNilSafe(t *testing.T) {
 		assert.Nil(t, cm.GetMDDLRaw())
 		assert.False(t, cm.IsLocalVCTM())
 		assert.False(t, cm.IsLocalMDDL())
+
+		names, loaded := cm.DeclaredClaimNames()
+		assert.Nil(t, names)
+		assert.False(t, loaded)
 
 		meta, ok := cm.DCQLMetaQuery()
 		assert.False(t, ok)
