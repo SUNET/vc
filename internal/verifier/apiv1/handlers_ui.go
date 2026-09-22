@@ -33,7 +33,11 @@ type UICredentialInfo struct {
 	// emitting a meaningless "vct_values": null.
 	VCTValues []string `json:"vct_values,omitempty"`
 	// TypeValues is the W3C equivalent: the type alternatives a wallet matches
-	// an ldp_vc, vc+ld+json or jwt_vc_json credential by, as expanded IRIs.
+	// an ldp_vc or vc+ld+json credential by, as expanded IRIs.
+	//
+	// Not jwt_vc_json: DCQLMetaQuery, constraintFamily and the JS builder all
+	// refuse it, because nothing issues it and a compact JWT-VC reads as
+	// SD-JWT here - so such a scope is dropped and never reaches this struct.
 	//
 	// From credential_type_values, not credential_types. Empty for other
 	// formats and for a W3C scope whose configured alternatives narrow

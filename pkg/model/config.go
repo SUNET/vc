@@ -1817,6 +1817,20 @@ type CredentialMetadata struct {
 	// A verifier constrains by CredentialTypeValues instead, which cannot be
 	// derived from this - a scope that is both issued and requested sets both.
 	// W3C formats only; defaults to the bare base type, as before.
+	//
+	// A CUSTOM term here needs CredentialContexts to define it, and the three
+	// fields only work as a set. Configuring a term with no context issues a
+	// credential whose type expands to a relative IRI, which can never equal
+	// the absolute IRI credential_type_values names - so the deployment
+	// issues credentials its own verifier refuses. A complete example:
+	//
+	//	credential_types:        ["VerifiableCredential", "DiplomaCredential"]
+	//	credential_contexts:     ["https://example.org/diploma"]
+	//	credential_type_values:  [["https://www.w3.org/2018/credentials#VerifiableCredential",
+	//	                           "https://example.org/diploma#DiplomaCredential"]]
+	//
+	// where https://example.org/diploma is published and defines
+	// DiplomaCredential as that IRI.
 	CredentialTypes []string `yaml:"credential_types,omitempty" json:"-" validate:"omitempty,dive,required"`
 
 	// CredentialTypeValues is the DCQL meta.type_values a verifier REQUESTS
