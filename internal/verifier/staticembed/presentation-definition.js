@@ -155,38 +155,20 @@ const dcqlQueryCredentialSchema = v.object({
     // vct_values (dc+sd-jwt/jwt_vc_json) and doctype_value (mso_mdoc) are
     // both optional here, not either/or required - which meta property
     // applies depends on the credential's format (OpenID4VP 1.0 6.4.1).
-    meta: v.intersect([
-        v.object({
-            vct_values: v.optional(v.array(v.string())),
-            doctype_value: v.optional(v.string()),
-            type_values: v.optional(v.array(v.array(v.string()))),
-            // zk_system_type (mso_mdoc_zk only) is an array of flat
-            // {id, system, ...params} objects - declared explicitly since
-            // the catch-all record below only accepts string/string[]
-            // values, not array-of-object, and would otherwise reject
-            // (not silently drop) this entire query at the
-            // v.safeParse(dcqlQuerySchema, ...) gate right before it's
-            // sent - "Malformed predefined DCQL query" with no further
-            // detail. See the identical fix on metadataResponseSchema's
-            // preset meta - same root cause, different validation
-            // checkpoint (that one stripped the field silently; this one
-            // rejects the whole query instead).
-            zk_system_type: v.optional(v.array(v.record(v.string(), v.string()))),
-        }),
-        // v.intersect validates the object against EVERY member schema, not
-        // just "whichever keys aren't already declared above" - confirmed
-        // live (both via the deployed error and a local valibot repro):
-        // this catch-all record still runs against the ENTIRE meta object,
-        // zk_system_type included, so its value union has to independently
-        // accept zk_system_type's own array-of-objects shape too, or the
-        // intersection fails even though the object schema above already
-        // declared and accepted the field.
-        v.record(v.string(), v.union([
-            v.string(),
-            v.array(v.string()),
-            v.array(v.record(v.string(), v.string())),
-        ])),
-    ]),
+    // looseObject, not intersect([object, record]): v.intersect validates
+    // against every member AND merges their outputs, and that merge cannot
+    // reconcile a nested array - so a W3C query carrying type_values
+    // (string[][]) was rejected outright at the safeParse gate with
+    // "Invalid type: Expected Object but received unknown", even though each
+    // member accepted it on its own. looseObject validates the fields below
+    // and passes any format-specific extras through untouched, which is what
+    // the catch-all record was there for.
+    meta: v.looseObject({
+        vct_values: v.optional(v.array(v.string())),
+        doctype_value: v.optional(v.string()),
+        type_values: v.optional(v.array(v.array(v.string()))),
+        zk_system_type: v.optional(v.array(v.record(v.string(), v.string()))),
+    }),
     claims: v.optional(v.array(v.object({
         path: v.array(v.nullable(v.string())),
     }))),
