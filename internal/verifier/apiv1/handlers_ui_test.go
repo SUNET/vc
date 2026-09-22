@@ -1392,9 +1392,13 @@ func TestUIMetadataNeverSerializesNullAttributes(t *testing.T) {
 	require.Contains(t, reply.Credentials, "pid_mdoc")
 	assert.NotNil(t, reply.Credentials["pid_mdoc"].Attributes)
 
+	// The picker reads attributes["en-US"] unconditionally, so the locale
+	// bucket has to exist or selecting the credential throws.
+	assert.Contains(t, reply.Credentials["pid_mdoc"].Attributes, "en-US")
+
 	encoded, err := json.Marshal(reply.Credentials["pid_mdoc"])
 	require.NoError(t, err)
-	assert.Contains(t, string(encoded), `"attributes":{}`,
-		"the UI schema rejects null here, which would fail the whole response")
+	assert.Contains(t, string(encoded), `"attributes":{"en-US":{}}`,
+		"the UI schema rejects null here, and an empty outer map throws on selection")
 	assert.NotContains(t, string(encoded), `"attributes":null`)
 }

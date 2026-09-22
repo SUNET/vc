@@ -106,6 +106,10 @@ type UIMetadataReply struct {
 	DCAPIAutoAttempt bool `json:"dc_api_auto_attempt"`
 }
 
+// uiDefaultLocale is the locale bucket presentation-definition.js reads
+// attributes from, and the one every shipped VCTM and MDDL populates.
+const uiDefaultLocale = "en-US"
+
 func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 	reply := &UIMetadataReply{
 		Credentials:      make(map[string]*UICredentialInfo),
@@ -127,9 +131,13 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		// and takes the whole picker down rather than just this credential.
 		// A scope whose metadata document never loaded - a registry-backed
 		// mdoc with the registry disabled, say - has no attributes at all.
+		//
+		// The locale bucket has to exist too: the picker reads
+		// attributes["en-US"] unconditionally, so an empty outer map parses
+		// and then throws when the credential is selected.
 		attributes := constructor.GetAttributes()
-		if attributes == nil {
-			attributes = map[string]map[string][]*string{}
+		if len(attributes) == 0 {
+			attributes = map[string]map[string][]*string{uiDefaultLocale: {}}
 		}
 		info := &UICredentialInfo{
 			Format:     constructor.Format,

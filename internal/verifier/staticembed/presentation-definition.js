@@ -447,7 +447,9 @@ Alpine.data("app", () => ({
 
         /** @type {Record<string, (string|null)[]>} */
         const claims = {}
-        for (const [label, path] of Object.entries(chosenCredential.attributes['en-US'])) {
+        // ?? {}: a credential whose metadata document never loaded carries no
+        // locale bucket, and Object.entries(undefined) throws.
+        for (const [label, path] of Object.entries(chosenCredential.attributes['en-US'] ?? {})) {
             claims[label] = path;
         }
 
