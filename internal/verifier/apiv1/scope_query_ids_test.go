@@ -97,13 +97,13 @@ func TestVPTokensForScope(t *testing.T) {
 		name             string
 		authCtx          *cache.AuthorizationContext
 		credentialScopes []string
-		// credentialQueries is how many credential queries the request
-		// carried; 0 stands for a session with no cached DCQL.
-		credentialQueries int
-		vpToken           map[string][]string
-		scope             string
-		want              []string
-		wantError         string
+		// defaultAllowed is what defaultTokenAllowed decided for this
+		// request; see TestDefaultTokenAllowed for how it is derived.
+		defaultAllowed bool
+		vpToken        map[string][]string
+		scope          string
+		want           []string
+		wantError      string
 	}{
 		{
 			name:             "keyed by the scope, as a config-built query is",
@@ -144,6 +144,7 @@ func TestVPTokensForScope(t *testing.T) {
 			name:             "plain-string vp_token with a single requested credential",
 			authCtx:          &cache.AuthorizationContext{Scopes: []string{"openid", "profile", "pid"}},
 			credentialScopes: []string{"pid"},
+			defaultAllowed:   true,
 			vpToken:          map[string][]string{"_default": {"token-pid"}},
 			scope:            "pid",
 			want:             []string{"token-pid"},
@@ -156,12 +157,13 @@ func TestVPTokensForScope(t *testing.T) {
 			credentialScopes: []string{"pid", "ehic"},
 			vpToken:          map[string][]string{"_default": {"token"}},
 			scope:            "pid",
-			wantError:        "_default fallback is only allowed when the request asks for exactly one credential",
+			wantError:        "_default fallback is only allowed when the request asks for exactly one credential and that scope is it",
 		},
 		{
 			name:             "nothing usable",
 			authCtx:          &cache.AuthorizationContext{Scopes: []string{"pid"}},
 			credentialScopes: []string{"pid"},
+			defaultAllowed:   true,
 			vpToken:          map[string][]string{"something_else": {"token"}},
 			scope:            "pid",
 			wantError:        "VP token not found for scope: pid",
@@ -171,13 +173,12 @@ func TestVPTokensForScope(t *testing.T) {
 			// be more of them than the scopes that map onto them. One scope
 			// against a two-credential query left the scope count at 1, so
 			// _default was accepted and only one credential was ever validated.
-			name:              "plain-string vp_token refused when the query asks for two credentials",
-			authCtx:           &cache.AuthorizationContext{Scopes: []string{"openid", "pid"}},
-			credentialScopes:  []string{"pid"},
-			credentialQueries: 2,
-			vpToken:           map[string][]string{"_default": {"token"}},
-			scope:             "pid",
-			wantError:         "_default fallback is only allowed when the request asks for exactly one credential",
+			name:             "plain-string vp_token refused when _default cannot be attributed",
+			authCtx:          &cache.AuthorizationContext{Scopes: []string{"openid", "pid"}},
+			credentialScopes: []string{"pid"},
+			vpToken:          map[string][]string{"_default": {"token"}},
+			scope:            "pid",
+			wantError:        "_default fallback is only allowed when the request asks for exactly one credential and that scope is it",
 		},
 		{
 			// A mapping that points at a key the wallet did not send must not
@@ -190,13 +191,13 @@ func TestVPTokensForScope(t *testing.T) {
 			credentialScopes: []string{"pid", "ehic"},
 			vpToken:          map[string][]string{"ehic": {"token-ehic"}},
 			scope:            "pid",
-			wantError:        "_default fallback is only allowed when the request asks for exactly one credential",
+			wantError:        "_default fallback is only allowed when the request asks for exactly one credential and that scope is it",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := client.vpTokensForScope(tt.authCtx.ScopeQueryIDs, tt.credentialScopes, tt.credentialQueries, openid4vp.VPResponse{VPToken: tt.vpToken}, tt.scope)
+			got, err := client.vpTokensForScope(tt.authCtx.ScopeQueryIDs, tt.defaultAllowed, openid4vp.VPResponse{VPToken: tt.vpToken}, tt.scope)
 			if tt.wantError != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantError)
@@ -247,8 +248,7 @@ func TestScopeQueryIDsAliasTemplateScope(t *testing.T) {
 	// And the response then resolves, which is the whole point.
 	tokens, err := client.vpTokensForScope(
 		pairs,
-		[]string{"pid_full"},
-		len(dcql.Credentials),
+		false,
 		openid4vp.VPResponse{VPToken: map[string][]string{"eudi_pid": {"token-pid"}}},
 		"pid_full",
 	)
@@ -446,8 +446,7 @@ func TestScopeQueryIDsRebuildForLegacySession(t *testing.T) {
 	require.Equal(t, map[string]string{"pid": "eudi_pid"}, rebuilt)
 
 	legacy.ScopeQueryIDs = rebuilt
-	tokens, err := client.vpTokensForScope(legacy.ScopeQueryIDs, client.credentialScopes(legacy, legacy.ScopeQueryIDs),
-		len(legacy.DCQLQuery.Credentials),
+	tokens, err := client.vpTokensForScope(legacy.ScopeQueryIDs, false,
 		openid4vp.VPResponse{VPToken: map[string][]string{"eudi_pid": {"token"}}}, "pid")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"token"}, tokens)
@@ -545,4 +544,77 @@ func TestQueryIDForScopeIn(t *testing.T) {
 // context: the request-local mapping is just the one the context carries.
 func (c *Client) credentialScopesLit(authCtx *cache.AuthorizationContext) []string {
 	return c.credentialScopes(authCtx, authCtx.ScopeQueryIDs)
+}
+
+// TestDefaultTokenAllowed pins when a plain-string vp_token can be attributed.
+//
+// Two counts look like they answer this and neither does. A template author
+// writes the DCQL, so there can be more credential queries than the scopes
+// mapped onto them; and credentialScopes deliberately keeps an unclaimed
+// non-standard scope, so it fails in the validation loop rather than
+// disappearing from it - which makes a length check read "openid profile
+// custom_claim" as a single-credential request and cache the template's PID
+// under custom_claim.
+func TestDefaultTokenAllowed(t *testing.T) {
+	client, _ := CreateTestClientWithMock(t, nil)
+
+	onePID := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{ID: "pid"}}}
+	twoCredentials := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{ID: "pid"}, {ID: "ehic"}}}
+
+	tests := []struct {
+		name             string
+		authCtx          *cache.AuthorizationContext
+		scopeQueryIDs    map[string]string
+		credentialScopes []string
+		want             bool
+	}{
+		{
+			name:             "the ordinary single-credential request",
+			authCtx:          &cache.AuthorizationContext{Scopes: []string{"openid", "pid"}, DCQLQuery: onePID},
+			credentialScopes: []string{"pid"},
+			want:             true,
+		},
+		{
+			// The finding: profile selects the template, custom_claim is kept
+			// because dropping it would skip its validation, and it is the
+			// only scope left - but it is not the credential the query asks
+			// for, so nothing can be attributed to it.
+			name:             "an unclaimed scope left alone in the list",
+			authCtx:          &cache.AuthorizationContext{Scopes: []string{"openid", "profile", "custom_claim"}, DCQLQuery: onePID},
+			credentialScopes: []string{"custom_claim"},
+			want:             false,
+		},
+		{
+			name:             "one scope but the query asks for two credentials",
+			authCtx:          &cache.AuthorizationContext{Scopes: []string{"openid", "pid"}, DCQLQuery: twoCredentials},
+			credentialScopes: []string{"pid"},
+			want:             false,
+		},
+		{
+			name:             "an aliased scope resolved through its query id",
+			authCtx:          &cache.AuthorizationContext{Scopes: []string{"pid_full"}, DCQLQuery: onePID},
+			scopeQueryIDs:    map[string]string{"pid_full": "pid"},
+			credentialScopes: []string{"pid_full"},
+			want:             true,
+		},
+		{
+			name:             "more than one credential scope",
+			authCtx:          &cache.AuthorizationContext{Scopes: []string{"pid", "ehic"}, DCQLQuery: twoCredentials},
+			credentialScopes: []string{"pid", "ehic"},
+			want:             false,
+		},
+		{
+			// No cached query: the scope count is all there is, as before.
+			name:             "a session that predates the cached query",
+			authCtx:          &cache.AuthorizationContext{Scopes: []string{"pid"}},
+			credentialScopes: []string{"pid"},
+			want:             true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, client.defaultTokenAllowed(tt.authCtx, tt.scopeQueryIDs, tt.credentialScopes))
+		})
+	}
 }

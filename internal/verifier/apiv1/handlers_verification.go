@@ -175,14 +175,6 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// and caches a successful presentation having validated no VP token. The
 	// check used to fire only when the query had credentials, so a query with
 	// none skipped it.
-	// How many credentials the request can actually come back with. Zero when
-	// the session predates the cached query, where the scope count stays the
-	// only signal available.
-	credentialQueries := 0
-	if authCtx.DCQLQuery != nil {
-		credentialQueries = len(authCtx.DCQLQuery.Credentials)
-	}
-
 	credentialScopes := c.credentialScopes(authCtx, scopeQueryIDs)
 	if len(credentialScopes) == 0 {
 		c.log.Error(nil, "no requested scope corresponds to a requested credential", "scopes", authCtx.Scopes)
@@ -204,10 +196,12 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		claimedBy[key] = scope
 	}
 
+	defaultAllowed := c.defaultTokenAllowed(authCtx, scopeQueryIDs, credentialScopes)
+
 	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(credentialScopes))
 
 	for _, scope := range credentialScopes {
-		vpTokens, err := c.vpTokensForScope(scopeQueryIDs, credentialScopes, credentialQueries, vpResponse, scope)
+		vpTokens, err := c.vpTokensForScope(scopeQueryIDs, defaultAllowed, vpResponse, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -725,7 +719,34 @@ func queryIDForScopeIn(scopeQueryIDs map[string]string, scope string) string {
 	return scope
 }
 
-func (c *Client) vpTokensForScope(scopeQueryIDs map[string]string, credentialScopes []string, credentialQueries int, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
+// defaultTokenAllowed reports whether a plain-string vp_token, which the
+// wallet keys as "_default", can be attributed to a scope at all.
+//
+// "_default" names no query, so it is only unambiguous when the request can
+// come back with exactly one credential AND the one scope left really is that
+// credential.
+//
+// Neither count alone is that test. A template author writes the queries and
+// there can be more of them than the scopes mapped onto them; and
+// credentialScopes keeps an unclaimed non-standard scope on purpose, so that
+// it fails in the validation loop rather than vanishing from it - "openid
+// profile custom_claim" selects the PID template through profile and leaves
+// custom_claim alone in the list, where a length check reads as "one
+// credential".
+//
+// A session with no cached query has only the scope count to go on, as before.
+func (c *Client) defaultTokenAllowed(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string, credentialScopes []string) bool {
+	if len(credentialScopes) != 1 {
+		return false
+	}
+	if authCtx.DCQLQuery == nil {
+		return true
+	}
+	return len(authCtx.DCQLQuery.Credentials) <= 1 &&
+		c.isCredentialScope(authCtx, scopeQueryIDs, credentialScopes[0])
+}
+
+func (c *Client) vpTokensForScope(scopeQueryIDs map[string]string, defaultAllowed bool, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
 	if tokens, ok := vpResponse.VPToken[scope]; ok && len(tokens) > 0 {
 		return tokens, nil
 	}
@@ -737,21 +758,10 @@ func (c *Client) vpTokensForScope(scopeQueryIDs map[string]string, credentialSco
 		}
 	}
 
-	// credentialScopes, not authCtx.Scopes: what makes _default ambiguous is
-	// more than one CREDENTIAL being asked for, not more than one OIDC scope.
-	// Counting the raw list refused the plain-string vp_token for an ordinary
-	// "openid pid" request, which asks for exactly one credential.
-	//
-	// The scope count alone is not the test either. A template author writes
-	// the queries, and there can be more of them than the scopes that map onto
-	// them - one requested scope against a two-credential query leaves this at
-	// 1. Accepting _default there would validate one credential and let the
-	// others go unchecked, which is the whole reason the fallback is
-	// restricted. Both counts have to say "exactly one".
-	if len(credentialScopes) != 1 || credentialQueries > 1 {
-		c.log.Error(nil, "VP token not found for scope and more than one credential requested",
-			"scope", scope, "credential_scopes", len(credentialScopes), "credential_queries", credentialQueries)
-		return nil, fmt.Errorf("VP token not found for scope %s: the _default fallback is only allowed when the request asks for exactly one credential (scopes=%d, queries=%d)", scope, len(credentialScopes), credentialQueries)
+	// See defaultAllowed at the call site for what makes _default ambiguous.
+	if !defaultAllowed {
+		c.log.Error(nil, "VP token not found for scope and _default cannot be attributed", "scope", scope)
+		return nil, fmt.Errorf("VP token not found for scope %s: the _default fallback is only allowed when the request asks for exactly one credential and that scope is it", scope)
 	}
 	if tokens, ok := vpResponse.VPToken["_default"]; ok && len(tokens) > 0 {
 		return tokens, nil
