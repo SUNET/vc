@@ -164,6 +164,9 @@ func TestUIInteractionRejectsUnconstrainedQuery(t *testing.T) {
 			Meta: openid4vp.MetaQuery{TypeValues: [][]string{{}}},
 		}},
 		{"SD-JWT with no vct_values", openid4vp.CredentialQuery{ID: "pid", Format: openid4vp.FormatSDJWTVC}},
+		// The legacy spelling this repo still issues: DCQLMetaQuery and the JS
+		// builder both treat it as SD-JWT, so the gate must too.
+		{"legacy vc+sd-jwt with no vct_values", openid4vp.CredentialQuery{ID: "pid_legacy", Format: "vc+sd-jwt"}},
 		{"mdoc with no doctype_value", openid4vp.CredentialQuery{ID: "mdl", Format: openid4vp.FormatMsoMdoc}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

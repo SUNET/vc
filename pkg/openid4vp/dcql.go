@@ -608,7 +608,11 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 				Message: "type_values is required for W3C VC format",
 			}
 		}
-	case FormatSDJWTVC:
+	// "vc+sd-jwt" is the legacy spelling this repo still issues, and both
+	// DCQLMetaQuery and the UI builder classify it as SD-JWT. Leaving it to
+	// the permissive default meant a query in that format passed validation
+	// with no constraint at all.
+	case FormatSDJWTVC, "vc+sd-jwt":
 		// SD-JWT VC format requires vct_values
 		if len(query.Meta.VCTValues) == 0 {
 			return &DCQLValidationError{
