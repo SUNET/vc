@@ -459,6 +459,13 @@ func TestPublishNewVCT(t *testing.T) {
 				assert.Equal(t, integrityBefore, tt.cm.Integrity,
 					"and must not recompute an SRI pinned elsewhere")
 			}
+
+			// Whatever the option says about the SERVED document, the bytes
+			// sent to the issuer always declare the vct: BuildCredentialWithSigner
+			// rejects an empty one, so publishing a file verbatim must not
+			// leave the scope loadable but unissuable.
+			assert.Contains(t, string(tt.cm.GetVCTMIssuanceRaw()), tt.wantVCT,
+				"issuance bytes must carry the resolved identifier")
 		})
 	}
 }

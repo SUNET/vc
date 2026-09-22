@@ -2025,6 +2025,53 @@ func (c *CredentialMetadata) GetVCTMRaw() []byte {
 	return c.VCTMRaw
 }
 
+// GetVCTMIssuanceRaw returns the VCTM bytes to send to the issuer inline.
+//
+// These are not always the bytes /type-metadata serves. Under
+// publish_new_vct: false the served document is published exactly as written -
+// its SRI may be pinned somewhere this deployment does not control - but the
+// issuer's parser requires a vct, so the resolved identifier is injected into
+// the issuance copy only. Otherwise the two are byte-identical.
+func (c *CredentialMetadata) GetVCTMIssuanceRaw() []byte {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.VCTM == nil {
+		return c.VCTMRaw
+	}
+	raw, _ := vctmRawWithVCT(c.VCTMRaw, c.VCTM.VCT)
+	return raw
+}
+
+// vctmRawWithVCT returns raw with "vct" set to vct, and reports whether it had
+// to change anything. Bytes that already declare a non-empty vct are returned
+// untouched, as are bytes that do not parse - a caller must never lose the
+// document over a rewrite it cannot make.
+func vctmRawWithVCT(raw []byte, vct string) ([]byte, bool) {
+	if raw == nil || vct == "" {
+		return raw, false
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return raw, false
+	}
+	if existing, ok := doc["vct"]; ok {
+		var declared string
+		if json.Unmarshal(existing, &declared) == nil && declared != "" {
+			return raw, false
+		}
+	}
+	vctJSON, err := json.Marshal(vct)
+	if err != nil {
+		return raw, false
+	}
+	doc["vct"] = vctJSON
+	updated, err := json.Marshal(doc)
+	if err != nil {
+		return raw, false
+	}
+	return updated, true
+}
+
 // GetAttributes returns the derived attributes under a read lock.
 func (c *CredentialMetadata) GetAttributes() map[string]map[string][]*string {
 	c.mu.RLock()
@@ -2148,9 +2195,11 @@ func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
 //     hosting URL. If the file already carried a vct (URN or any other
 //     Collision-Resistant Name per SD-JWT VC §3.2.2.1), it is preserved
 //     verbatim in both VCTM.VCT and the served VCTMRaw. Only when the
-//     file has no vct does ResolveVCTUrls back-fill VCTM.VCT and
-//     VCTMRaw's "vct" from the hosting URL so the credential body,
-//     served VCTM, and DCQL vct_values still agree on a single value.
+//     file has no vct does ResolveVCTUrls back-fill VCTM.VCT from the
+//     hosting URL so the credential body, served VCTM, and DCQL
+//     vct_values still agree on a single value. It rewrites the served
+//     VCTMRaw to match unless publish_new_vct is false; issuance takes
+//     its copy from GetVCTMIssuanceRaw either way.
 //   - External VCTM (vctm_url or vct via registry): the source is
 //     authoritative. VCTM.VCT and VCTMRaw are left untouched. VCTURL is
 //     set to the source URL (vctm_url or the resolved vct), but that
@@ -2193,19 +2242,14 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 			// document whose SRI is pinned somewhere this deployment does not
 			// control. Rewriting them would change the hash under whoever
 			// published it.
-			if BoolVal(constructor.PublishNewVCT, true) && constructor.VCTMRaw != nil {
-				var doc map[string]json.RawMessage
-				if err := json.Unmarshal(constructor.VCTMRaw, &doc); err == nil {
-					vctJSON, _ := json.Marshal(vctURL)
-					doc["vct"] = vctJSON
-					if updated, err := json.Marshal(doc); err == nil {
-						constructor.VCTMRaw = updated
-						// Rebuild Integrity to match the rewritten bytes so
-						// vct#integrity in issued credentials still verifies
-						// against the served /type-metadata document.
-						if sri, sriErr := constructor.VCTM.SRIIntegrity(updated); sriErr == nil {
-							constructor.Integrity = sri
-						}
+			if BoolVal(constructor.PublishNewVCT, true) {
+				if updated, changed := vctmRawWithVCT(constructor.VCTMRaw, vctURL); changed {
+					constructor.VCTMRaw = updated
+					// Rebuild Integrity to match the rewritten bytes so
+					// vct#integrity in issued credentials still verifies
+					// against the served /type-metadata document.
+					if sri, sriErr := constructor.VCTM.SRIIntegrity(updated); sriErr == nil {
+						constructor.Integrity = sri
 					}
 				}
 			}

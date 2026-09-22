@@ -432,7 +432,7 @@ func (c *Client) createCredentialViaOIDCRP(ctx context.Context, credentialType s
 		DocumentData: documentData,
 		Jwk:          jwk,
 		Integrity:    credMeta.GetIntegrity(),
-		Vctm:         credMeta.GetVCTMRaw(),
+		Vctm:         credMeta.GetVCTMIssuanceRaw(),
 	})
 	if err != nil {
 		c.log.Error(err, "failed to call MakeSDJWT")
