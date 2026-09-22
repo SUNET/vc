@@ -24,8 +24,8 @@ func TestParseAndVerify_ValidCredential(t *testing.T) {
 	holderJWK := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.Y.Bytes()),
+		"x":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.X.FillBytes(make([]byte, 32))),
+		"y":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.Y.FillBytes(make([]byte, 32))),
 	}
 
 	testClaim := "test_claim"
@@ -175,8 +175,8 @@ func TestParseAndVerify_WithKeyBinding(t *testing.T) {
 	holderJWK := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.Y.Bytes()),
+		"x":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.X.FillBytes(make([]byte, 32))),
+		"y":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.Y.FillBytes(make([]byte, 32))),
 	}
 
 	testClaim := "test_claim"
@@ -260,8 +260,8 @@ func TestParseAndVerify_InvalidNonce(t *testing.T) {
 	holderJWK := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.Y.Bytes()),
+		"x":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.X.FillBytes(make([]byte, 32))),
+		"y":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.Y.FillBytes(make([]byte, 32))),
 	}
 
 	testClaim := "test_claim"
@@ -630,8 +630,8 @@ func TestJWKToPublicKey_ECDSA(t *testing.T) {
 	jwkMap := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.Y.Bytes()),
+		"x":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.X.FillBytes(make([]byte, 32))),
+		"y":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.Y.FillBytes(make([]byte, 32))),
 	}
 
 	// Convert to public key

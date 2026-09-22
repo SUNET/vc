@@ -71,8 +71,8 @@ func signTestJWTWithJWK(t *testing.T, issuer, credentialType string) string {
 	token.Header["jwk"] = map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(pubKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(pubKey.Y.Bytes()),
+		"x":   base64.RawURLEncoding.EncodeToString(pubKey.X.FillBytes(make([]byte, 32))),
+		"y":   base64.RawURLEncoding.EncodeToString(pubKey.Y.FillBytes(make([]byte, 32))),
 	}
 
 	signedJWT, err := token.SignedString(privateKey)
