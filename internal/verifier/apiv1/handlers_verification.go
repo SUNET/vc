@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"encoding/base64"
@@ -17,6 +18,7 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/revocation"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/trust"
 
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v3/jwa"
@@ -466,6 +468,44 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				})
 			}
 
+		case FormatVC20:
+			// W3C VC 2.0 Data Integrity. The cryptosuites, RDF canonicalization
+			// and JSON-LD handling live in openid4vp.VC20Handler; what the
+			// verifier supplies is key resolution, which is the same trust
+			// evaluator the other formats use - trust.KeyResolver and
+			// openid4vp.VC20KeyResolver declare the same method, and both
+			// configured evaluators implement it.
+			resolver, ok := c.trustEvaluator.(trust.KeyResolver)
+			if !ok {
+				c.log.Error(nil, "trust evaluator cannot resolve verification methods", "scope", scope)
+				return nil, fmt.Errorf("W3C VC verification for scope %s needs a key-resolving trust evaluator", scope)
+			}
+
+			vc20Handler, err := openid4vp.NewVC20Handler(openid4vp.WithVC20KeyResolver(resolver))
+			if err != nil {
+				c.log.Error(err, "failed to create W3C VC handler", "scope", scope)
+				return nil, fmt.Errorf("failed to create W3C VC handler for scope %s: %w", scope, err)
+			}
+
+			vc20Result, err := vc20Handler.VerifyAndExtract(ctx, vpToken)
+			if err != nil {
+				c.log.Error(err, "W3C VC verification failed", "scope", scope)
+				return nil, fmt.Errorf("W3C VC verification failed for scope %s: %w", scope, err)
+			}
+
+			c.log.Debug("W3C VC verified successfully", "scope", scope,
+				"issuer", vc20Result.Issuer, "cryptosuite", vc20Result.Cryptosuite,
+				"selective_disclosure", vc20Result.IsSelectiveDisclosure)
+
+			// The whole credential map, so a configured validation can address
+			// credentialSubject.* the way the document is actually shaped;
+			// display flattens the subject alone, which is the user-facing part.
+			scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
+				Scope:      scope,
+				Credential: vc20Result.Claims,
+				Claims:     credentialToDisclosers(vc20Result.CredentialSubject),
+			})
+
 		default:
 			c.log.Error(nil, "Unknown credential format", "scope", scope, "format", format)
 			return nil, fmt.Errorf("unknown credential format for scope %s", scope)
@@ -632,6 +672,9 @@ const (
 	// FormatMDocZK represents a zero-knowledge-proof presentation of an
 	// ISO/IEC 18013-5 mDOC credential (mso_mdoc_zk) - see pkg/mdoc/zk*.go.
 	FormatMDocZK CredentialFormat = "mso_mdoc_zk"
+	// FormatVC20 represents a W3C VC 2.0 Data Integrity credential or
+	// presentation (ldp_vc / vc+ld+json), carried as JSON-LD.
+	FormatVC20 CredentialFormat = "ldp_vc"
 	// FormatUnknown represents an unrecognized format
 	FormatUnknown CredentialFormat = "unknown"
 )
@@ -640,6 +683,13 @@ const (
 // SD-JWT: contains ~ separators (disclosure markers) and JWT dots
 // mDOC: base64url-encoded CBOR (doesn't look like JWT - no dots, or random data without ~)
 func detectCredentialFormat(vpToken string) CredentialFormat {
+	// W3C VC 2.0 is JSON-LD, plain or base64url-wrapped, and a JSON object is
+	// unambiguous - so test it first. The mdoc branch below base64-decodes and
+	// would otherwise claim a wrapped JSON body before anything looked at it.
+	if looksLikeJSONObject(vpToken) {
+		return FormatVC20
+	}
+
 	// SD-JWT format: <issuer-jwt>~<disclosure1>~<disclosure2>~...[~<kb-jwt>]
 	// Must contain at least one ~ and the first part must look like a JWT (has 2 dots)
 	if strings.Contains(vpToken, "~") {
@@ -678,6 +728,20 @@ func detectCredentialFormat(vpToken string) CredentialFormat {
 	}
 
 	return FormatUnknown
+}
+
+// looksLikeJSONObject reports whether the token is a JSON object, either
+// directly or base64url-encoded - the two shapes VC20Handler.decodeVPToken
+// accepts.
+func looksLikeJSONObject(vpToken string) bool {
+	if strings.HasPrefix(strings.TrimSpace(vpToken), "{") {
+		return true
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(vpToken)
+	if err != nil {
+		return false
+	}
+	return bytes.HasPrefix(bytes.TrimSpace(decoded), []byte("{"))
 }
 
 // mapToDisclosers converts a map of claims to []sdjwtvc.Discloser format.
