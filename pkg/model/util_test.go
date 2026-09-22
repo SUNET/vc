@@ -457,6 +457,13 @@ func TestPublishNewVCT(t *testing.T) {
 				// dereferencing vct#integrity gets a document naming another type.
 				assert.Contains(t, string(tt.cm.GetVCTMRaw()), tt.wantVCT)
 			}
+
+			// And so does what the issuer metadata advertises: three readers
+			// of one decision - the published document, the DCQL query, and
+			// credential_configurations_supported - which is where this option
+			// kept leaking, one reader at a time.
+			assert.Equal(t, tt.wantVCT, tt.cm.vctIdentifier(),
+				"issuer metadata resolves its advertised vct through this")
 		})
 	}
 }

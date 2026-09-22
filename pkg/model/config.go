@@ -2453,13 +2453,14 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 
 		// Advertise the VCTM's own vct (URN or foreign URL) so it matches the
 		// credential body's vct claim (which BuildCredentialWithSigner sets
-		// from vctm.VCT). Fall back to VCTURL only when the VCTM has none --
-		// ResolveVCTUrls back-fills that case for local scopes, so the
-		// fallback value equals the hosting URL by construction.
-		resolvedVCT := vctm.VCT
-		if resolvedVCT == "" {
-			resolvedVCT = constructor.GetVCTURL()
-		}
+		// from vctm.VCT).
+		//
+		// vctIdentifier, not an inline VCTURL fallback: the two must agree, and
+		// they stopped agreeing the moment publish_new_vct could leave a local
+		// VCTM's vct deliberately empty. The old fallback assumed
+		// ResolveVCTUrls always back-fills, so it advertised the hosting URL
+		// for a scope whose credential body would carry nothing.
+		resolvedVCT := constructor.vctIdentifier()
 		switch constructor.Format {
 		case "dc+sd-jwt":
 			// Appendix A.3: only vct is format-specific for dc+sd-jwt
