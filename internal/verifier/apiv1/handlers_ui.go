@@ -161,21 +161,33 @@ func sameConstraintFamily(configured, override string) bool {
 // attributes from, and the one every shipped VCTM and MDDL populates.
 const uiDefaultLocale = "en-US"
 
-// sameConstraintFamily reports whether two formats are matched by the same
-// DCQL meta field, so a preset's format override cannot pair a format with a
-// constraint it does not use.
-func sameConstraintFamily(configured, override string) bool {
-	family := func(f string) string {
-		switch f {
-		case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
-			return "doctype"
-		case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON, openid4vp.FormatJwtVCJson:
-			return "types"
-		default:
-			return "vct"
-		}
+// constraintFamily names the DCQL meta field a format is matched by, or "" for
+// a format this repo cannot build a constraint for.
+//
+// Every format is listed: treating an unknown one as SD-JWT let a preset
+// override a scope to jwt_vc_json-ld - advertised by the issuer metadata but
+// not requestable - while keeping vct_values, pairing a W3C format with the
+// wrong meta field.
+func constraintFamily(format string) string {
+	switch format {
+	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
+		return "doctype"
+	case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON, openid4vp.FormatJwtVCJson:
+		return "types"
+	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
+		return "vct"
+	default:
+		return ""
 	}
-	return family(configured) == family(override)
+}
+
+// sameConstraintFamily reports whether two formats are matched by the same DCQL
+// meta field, so a preset's format override cannot pair a format with a
+// constraint it does not use. An unknown format on either side is never a
+// match.
+func sameConstraintFamily(configured, override string) bool {
+	family := constraintFamily(configured)
+	return family != "" && family == constraintFamily(override)
 }
 
 func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {

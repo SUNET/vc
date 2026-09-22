@@ -7,6 +7,15 @@
 /** W3C VC format identifiers, constrained by type_values rather than vct_values. */
 const W3C_FORMATS = ["ldp_vc", "vc+ld+json", "jwt_vc_json"];
 
+/**
+ * SD-JWT VC format identifiers, constrained by vct_values. Enumerated rather
+ * than used as a default: treating every unrecognised format as SD-JWT sent
+ * vct_values for a W3C identifier this repo cannot request by, such as
+ * jwt_vc_json-ld, which the issuer metadata advertises but nothing issues.
+ * "" honours the server's own default of dc+sd-jwt.
+ */
+const SD_JWT_FORMATS = ["dc+sd-jwt", "vc+sd-jwt", ""];
+
 /** The expanded type every W3C VC carries; an alternative naming only it matches all of them. */
 const BASE_VC_TYPE_IRI = "https://www.w3.org/2018/credentials#VerifiableCredential";
 
@@ -70,6 +79,9 @@ export function dcqlMetaFor(attrs) {
         return { meta: { type_values: typeValues } };
     }
 
+    if (!SD_JWT_FORMATS.includes(attrs.format ?? "")) {
+        return { error: `Selected credential has an unsupported format: ${attrs.format}` };
+    }
     const vctValues = (attrs.vct_values?.length ? attrs.vct_values : [attrs.vct])
         .filter((v) => v);
     if (!vctValues.length) {

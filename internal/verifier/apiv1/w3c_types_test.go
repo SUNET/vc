@@ -140,3 +140,34 @@ func TestZKPresetOverrideSurvivesTheUsabilityCheck(t *testing.T) {
 	assert.Equal(t, "eu.europa.ec.eudi.pid.1", cred.Meta.DoctypeValue, "from the scope's own mso_mdoc metadata")
 	assert.Len(t, cred.Meta.ZKSystemType, 1, "the preset supplies the ZK system types")
 }
+
+// TestSameConstraintFamily pins the format-override check, including the case
+// that motivated it: jwt_vc_json-ld is advertised by the issuer metadata but
+// this repo cannot build a constraint for it, and treating unknown formats as
+// SD-JWT let a preset pair it with vct_values.
+func TestSameConstraintFamily(t *testing.T) {
+	tests := []struct {
+		configured, override string
+		want                 bool
+	}{
+		// The case the override exists for.
+		{"mso_mdoc", "mso_mdoc_zk", true},
+		{"dc+sd-jwt", "vc+sd-jwt", true},
+		{"dc+sd-jwt", "", true},
+		{"ldp_vc", "jwt_vc_json", true},
+		// Crossing families pairs a format with a constraint it does not use.
+		{"dc+sd-jwt", "mso_mdoc", false},
+		{"dc+sd-jwt", "ldp_vc", false},
+		{"mso_mdoc", "jwt_vc_json", false},
+		// Unknown on either side is never a match.
+		{"dc+sd-jwt", "jwt_vc_json-ld", false},
+		{"jwt_vc_json-ld", "dc+sd-jwt", false},
+		{"dc+sd-jwt", "something-new", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.configured+"->"+tt.override, func(t *testing.T) {
+			assert.Equal(t, tt.want, sameConstraintFamily(tt.configured, tt.override))
+		})
+	}
+}

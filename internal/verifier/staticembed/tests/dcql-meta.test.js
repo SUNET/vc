@@ -93,3 +93,23 @@ describe("dcqlMetaFor refuses an empty constraint in every format", () => {
         }
     });
 });
+
+describe("dcqlMetaFor refuses formats it cannot constrain", () => {
+    // jwt_vc_json-ld is advertised by the issuer metadata but nothing issues
+    // it, and it is a W3C format - so the old default sent vct_values for it.
+    for (const format of ["jwt_vc_json-ld", "mso_mdoc_zk", "something-new"]) {
+        it(`refuses ${format} rather than treating it as SD-JWT`, () => {
+            const { meta, error } = dcqlMetaFor({ format, vct: "urn:eudi:pid:1" });
+            assert.equal(meta, undefined);
+            assert.match(error, /unsupported format/);
+        });
+    }
+
+    it("still accepts the legacy vc+sd-jwt spelling and an absent format", () => {
+        for (const attrs of [{ format: "vc+sd-jwt", vct: "urn:eudi:pid:1" }, { vct: "urn:eudi:pid:1" }]) {
+            const { meta, error } = dcqlMetaFor(attrs);
+            assert.equal(error, undefined);
+            assert.deepEqual(meta, { vct_values: ["urn:eudi:pid:1"] });
+        }
+    });
+});
