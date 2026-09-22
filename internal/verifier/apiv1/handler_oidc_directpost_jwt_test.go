@@ -36,8 +36,11 @@ func TestResolveDirectPostEncrypted(t *testing.T) {
 	client, _ := CreateTestClientWithMock(t, nil)
 
 	const (
-		kid   = "test-ephemeral-kid"
-		state = "test-state-123"
+		// In this flow state IS the session id, and the ephemeral key is
+		// cached under the same value - so the kid the wallet echoes back
+		// equals the state inside the JWE.
+		kid   = "test-session-123"
+		state = kid
 		token = "eyJhbGciOiJFUzI1NiJ9.e30.sig~"
 	)
 
@@ -88,6 +91,18 @@ func TestResolveDirectPostEncrypted(t *testing.T) {
 			Response: "eyJhbGciOiJFQ0RILUVTIiwia2lkIjoibm8tc3VjaC1raWQifQ..aaaa.bbbb.cccc",
 		})
 		require.Error(t, err)
+	})
+
+	t.Run("a response encrypted to one session cannot claim another", func(t *testing.T) {
+		// The ephemeral public key is published in the request object, so
+		// anyone can encrypt to it. Decryption alone must not be taken as
+		// proof of which session the payload belongs to.
+		_, _, err := client.resolveDirectPost(&DirectPostRequest{Response: encrypt(t, openid4vp.VPResponse{
+			State:   "some-other-session",
+			VPToken: map[string][]string{"pid": {token}},
+		})})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "different session")
 	})
 
 	t.Run("several credentials are refused rather than guessed at", func(t *testing.T) {

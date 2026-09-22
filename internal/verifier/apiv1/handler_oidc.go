@@ -715,6 +715,21 @@ func (c *Client) resolveDirectPost(req *DirectPostRequest) (state, vpToken strin
 		return "", "", ErrInvalidRequest
 	}
 
+	// The state must name the session this JWE was encrypted FOR. Decryption
+	// alone proves nothing about that: the ephemeral public key is published
+	// in the request object's client_metadata.jwks, so anyone who can fetch a
+	// request object can encrypt to it. Without this, a payload encrypted to
+	// one session's key could carry another session's state and be processed
+	// against it.
+	//
+	// In this flow the two are the same value - the request object sets
+	// state = sessionID and the key is cached under sessionID, which is the
+	// kid the wallet echoes back.
+	if vpResponse.State != kid {
+		c.log.Error(nil, "encrypted direct_post state does not match the key it was encrypted to", "kid", kid, "state", vpResponse.State)
+		return "", "", errors.New("the encrypted response names a different session than the key it was encrypted to")
+	}
+
 	// This flow maps one credential to the OIDC claims it issues, so several
 	// would leave nothing to choose between them. Refuse rather than pick.
 	tokens := make([]string, 0, len(vpResponse.VPToken))
