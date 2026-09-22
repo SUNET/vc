@@ -220,6 +220,15 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		}
 		// Find the credential node in the expanded format for result extraction
 		// Keep original bytes for vc20 library verification
+		//
+		// This DISCARDS any presentation wrapper and its proof, so a holder
+		// binding cannot be checked afterwards - the credential node alone
+		// looks identical to a bare credential. Refuse rather than report it
+		// as "not a presentation", which would be misleading for a response
+		// that really is one.
+		if h.requireHolderBinding && expandedContainsPresentation(expanded) {
+			return nil, errors.New("expanded-form presentations are not supported when holder binding is required; send the compacted form")
+		}
 		credMap, err = h.extractCredentialFromExpanded(expanded)
 		if err != nil {
 			return nil, fmt.Errorf("failed to extract credential from expanded JSON-LD: %w", err)
@@ -637,28 +646,11 @@ func (h *VC20Handler) extractProof(cred map[string]any) (map[string]any, error) 
 	return proofMap, nil
 }
 
-// expandedTypes returns a credential's types as fully expanded IRIs.
-//
-// DCQL meta.type_values names expanded IRIs (OpenID4VP 1.0 B.3.2), while a
-// compacted credential carries terms like "UniversityDegreeCredential". The
-// two are only comparable through the document's own @context, so expansion is
-// the comparison - a term the context does not define expands to nothing, and
-// the constraint correctly fails to match.
-func expandedTypes(credBytes []byte) ([]string, error) {
-	var doc any
-	if err := json.Unmarshal(credBytes, &doc); err != nil {
-		return nil, fmt.Errorf("parsing credential for expansion: %w", err)
-	}
-
-	opts := ld.NewJsonLdOptions("")
-	opts.DocumentLoader = credential.GetGlobalLoader()
-
-	expanded, err := ld.NewJsonLdProcessor().Expand(doc, opts)
-	if err != nil {
-		return nil, fmt.Errorf("expanding credential: %w", err)
-	}
-
-	var iris []string
+// expandedContainsPresentation reports whether an expanded JSON-LD document
+// carries a VerifiablePresentation node. Expanded nodes name their types in
+// @type as absolute IRIs, not the compact "VerifiablePresentation".
+func expandedContainsPresentation(expanded []any) bool {
+	const vpIRI = "https://www.w3.org/2018/credentials#VerifiablePresentation"
 	for _, node := range expanded {
 		nodeMap, ok := node.(map[string]any)
 		if !ok {
@@ -668,6 +660,53 @@ func expandedTypes(credBytes []byte) ([]string, error) {
 		if !ok {
 			continue
 		}
+		for _, t := range types {
+			if iri, ok := t.(string); ok && iri == vpIRI {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// expandedTypes returns a credential's types as fully expanded IRIs.
+//
+// DCQL meta.type_values names expanded IRIs (OpenID4VP 1.0 B.3.2), while a
+// compacted credential carries terms like "UniversityDegreeCredential". The
+// two are only comparable through the document's own @context, so expansion is
+// the comparison - a term the context does not define expands to nothing, and
+// the constraint correctly fails to match.
+func expandedTypes(credMap map[string]any) ([]string, error) {
+	// The identified credential node, NOT the whole document. Expanding raw
+	// bytes collects @type from every top-level node, so an expanded-form
+	// response carrying a decoy node beside the credential would satisfy a
+	// type constraint the credential itself does not meet.
+	doc, err := json.Marshal(credMap)
+	if err != nil {
+		return nil, fmt.Errorf("re-encoding credential for expansion: %w", err)
+	}
+	var parsed any
+	if err := json.Unmarshal(doc, &parsed); err != nil {
+		return nil, fmt.Errorf("parsing credential for expansion: %w", err)
+	}
+
+	opts := ld.NewJsonLdOptions("")
+	opts.DocumentLoader = credential.GetGlobalLoader()
+
+	expanded, err := ld.NewJsonLdProcessor().Expand(parsed, opts)
+	if err != nil {
+		return nil, fmt.Errorf("expanding credential: %w", err)
+	}
+
+	// Exactly one node: a single JSON object expands to one top-level node,
+	// and only that node's types are the credential's.
+	var iris []string
+	if len(expanded) > 0 {
+		nodeMap, ok := expanded[0].(map[string]any)
+		if !ok {
+			return nil, errors.New("expanded credential is not a node object")
+		}
+		types, _ := nodeMap["@type"].([]any)
 		for _, t := range types {
 			iri, ok := t.(string)
 			if !ok {
@@ -863,7 +902,7 @@ func (h *VC20Handler) buildResult(
 	// The expanded form, which is what a DCQL type_values constraint is
 	// written in. Best effort: a credential whose context cannot be resolved
 	// still verifies, it just cannot satisfy a type constraint.
-	if iris, err := expandedTypes(credBytes); err == nil {
+	if iris, err := expandedTypes(credMap); err == nil {
 		result.TypeIRIs = iris
 	}
 

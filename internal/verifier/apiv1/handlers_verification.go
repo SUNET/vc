@@ -180,7 +180,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 		// The wallet does not get to choose which format answers a scope.
 		// Detection reads the token; the request said what was asked for.
-		if requested, ok := requestedQuery(authCtx, scope); ok && !formatMatchesRequest(format, requested.Format) {
+		if requested, ok := c.requestedQuery(authCtx, scope); ok && !formatMatchesRequest(format, requested.Format) {
 			c.log.Error(nil, "returned credential format does not answer the request",
 				"scope", scope, "detected", format, "requested", requested.Format)
 			return nil, fmt.Errorf("scope %s was requested as %q but the response is %q", scope, requested.Format, format)
@@ -501,7 +501,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// default). The credential's issuer proof says it was issued; only
 			// a proof over the PRESENTATION, carrying this session's nonce and
 			// naming this verifier, says the holder is presenting it now.
-			requested, haveQuery := requestedQuery(authCtx, scope)
+			requested, haveQuery := c.requestedQuery(authCtx, scope)
 			if !haveQuery || requested.RequiresCryptographicHolderBinding() {
 				vc20Opts = append(vc20Opts, openid4vp.WithVC20PresentationBinding(authCtx.Nonce, authCtx.ClientID))
 			}
@@ -547,7 +547,14 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// The type constraint the request carried, enforced on what came
 			// back. Without this the wallet chooses which credential answers
 			// the scope and meta.type_values is decoration.
-			if haveQuery && len(requested.Meta.TypeValues) > 0 {
+			// Fail closed. Skipping the constraint because the query could
+			// not be recovered would let any valid W3C credential answer the
+			// scope, which is the failure this check exists to prevent.
+			if !haveQuery {
+				c.log.Error(nil, "cannot recover the query this scope was requested under", "scope", scope)
+				return nil, fmt.Errorf("cannot verify the constraint for scope %s: the request it was made under is no longer available", scope)
+			}
+			if len(requested.Meta.TypeValues) > 0 {
 				if !openid4vp.MatchTypeValues(vc20Result.TypeIRIs, requested.Meta.TypeValues) {
 					c.log.Error(nil, "returned W3C credential does not carry the requested types",
 						"scope", scope, "got", vc20Result.TypeIRIs, "want", requested.Meta.TypeValues)
@@ -793,13 +800,27 @@ func detectCredentialFormat(vpToken string) CredentialFormat {
 }
 
 // requestedQuery returns the DCQL credential query this scope was requested
-// under, if the session cached one. Config-built queries use the scope as the
-// query id.
-func requestedQuery(authCtx *cache.AuthorizationContext, scope string) (openid4vp.CredentialQuery, bool) {
-	if authCtx == nil || authCtx.DCQLQuery == nil {
+// under. Config-built queries use the scope as the query id.
+//
+// Falls back to RequestObjectCache exactly as the ZK path does: authCtx's
+// Mongo-persisted DCQLQuery has been observed coming back nil for a session
+// whose wallet had just rendered a consent screen from that very query, so the
+// persisted field alone is not a reliable source. The request object cache
+// holds the query that was signed and served to the wallet.
+func (c *Client) requestedQuery(authCtx *cache.AuthorizationContext, scope string) (openid4vp.CredentialQuery, bool) {
+	if authCtx == nil {
 		return openid4vp.CredentialQuery{}, false
 	}
-	for _, q := range authCtx.DCQLQuery.Credentials {
+	dcqlQuery := authCtx.DCQLQuery
+	if dcqlQuery == nil && c.openid4vp != nil && c.openid4vp.RequestObjectCache != nil {
+		if requestObject, found := c.openid4vp.RequestObjectCache.Get(authCtx.RequestObjectID); found {
+			dcqlQuery = requestObject.DCQLQuery
+		}
+	}
+	if dcqlQuery == nil {
+		return openid4vp.CredentialQuery{}, false
+	}
+	for _, q := range dcqlQuery.Credentials {
 		if q.ID == scope {
 			return q, true
 		}
