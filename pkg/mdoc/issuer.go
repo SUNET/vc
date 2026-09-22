@@ -505,11 +505,14 @@ func NewCOSEKeyFromECDSAPublic(pub *ecdsa.PublicKey) (*COSEKey, error) {
 		return nil, fmt.Errorf("unsupported curve")
 	}
 
+	// COSE_Key EC2 coordinates are fixed-width per curve (RFC 9052 7.1.1);
+	// Bytes() drops a leading zero and would emit a short one.
+	byteLen := (pub.Curve.Params().BitSize + 7) / 8
 	key := &COSEKey{
 		Kty: KeyTypeEC2,
 		Crv: crv,
-		X:   pub.X.Bytes(),
-		Y:   pub.Y.Bytes(),
+		X:   pub.X.FillBytes(make([]byte, byteLen)),
+		Y:   pub.Y.FillBytes(make([]byte, byteLen)),
 	}
 	return key, nil
 }

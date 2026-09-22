@@ -882,11 +882,16 @@ func (c *Client) publicKeyJWK() (map[string]any, error) {
 		return nil, fmt.Errorf("expected ECDSA public key")
 	}
 
+	// FillBytes, not Bytes(): a coordinate whose high byte is zero encodes
+	// short otherwise, and this JWK goes into both the proof-of-possession
+	// and the DPoP header - roughly 1 issuance in 125 would be rejected for
+	// a malformed key.
+	byteLen := (ecKey.Curve.Params().BitSize + 7) / 8
 	return map[string]any{
 		"kty": "EC",
 		"crv": ecKey.Curve.Params().Name,
-		"x":   base64.RawURLEncoding.EncodeToString(ecKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(ecKey.Y.Bytes()),
+		"x":   base64.RawURLEncoding.EncodeToString(ecKey.X.FillBytes(make([]byte, byteLen))),
+		"y":   base64.RawURLEncoding.EncodeToString(ecKey.Y.FillBytes(make([]byte, byteLen))),
 	}, nil
 }
 
