@@ -1402,3 +1402,34 @@ func TestUIMetadataNeverSerializesNullAttributes(t *testing.T) {
 		"the UI schema rejects null here, and an empty outer map throws on selection")
 	assert.NotContains(t, string(encoded), `"attributes":null`)
 }
+
+// TestSameConstraintFamily pins the preset format-override check. The meta is
+// derived from the CONFIGURED format, so an override crossing families pairs a
+// format with a constraint it does not use.
+func TestSameConstraintFamily(t *testing.T) {
+	tests := []struct {
+		configured, override string
+		want                 bool
+	}{
+		// The case the override exists for.
+		{"mso_mdoc", "mso_mdoc_zk", true},
+		{"dc+sd-jwt", "vc+sd-jwt", true},
+		{"dc+sd-jwt", "", true},
+		{"ldp_vc", "jwt_vc_json", true},
+		// Crossing families.
+		{"dc+sd-jwt", "mso_mdoc", false},
+		{"dc+sd-jwt", "ldp_vc", false},
+		{"mso_mdoc", "jwt_vc_json", false},
+		// Unknown on either side is never a match: jwt_vc_json-ld is
+		// advertised by the issuer metadata but nothing issues it.
+		{"dc+sd-jwt", "jwt_vc_json-ld", false},
+		{"jwt_vc_json-ld", "dc+sd-jwt", false},
+		{"dc+sd-jwt", "something-new", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.configured+"->"+tt.override, func(t *testing.T) {
+			assert.Equal(t, tt.want, sameConstraintFamily(tt.configured, tt.override))
+		})
+	}
+}

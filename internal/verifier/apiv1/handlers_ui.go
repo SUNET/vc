@@ -106,6 +106,33 @@ type UIMetadataReply struct {
 	DCAPIAutoAttempt bool `json:"dc_api_auto_attempt"`
 }
 
+// constraintFamily names the DCQL meta field a format is matched by, or "" for
+// a format this repo cannot build a constraint for.
+//
+// Every format is named: treating an unknown one as SD-JWT would let a preset
+// override a scope to a W3C identifier while keeping vct_values.
+func constraintFamily(format string) string {
+	switch format {
+	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
+		return "doctype"
+	// "vc+ld+json" as a literal: this repo issues it but has no constant for
+	// it on this branch.
+	case openid4vp.FormatLdpVCDCQL, "vc+ld+json", openid4vp.FormatJwtVCJson:
+		return "types"
+	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
+		return "vct"
+	default:
+		return ""
+	}
+}
+
+// sameConstraintFamily reports whether two formats are matched by the same DCQL
+// meta field. An unknown format on either side is never a match.
+func sameConstraintFamily(configured, override string) bool {
+	family := constraintFamily(configured)
+	return family != "" && family == constraintFamily(override)
+}
+
 // uiDefaultLocale is the locale bucket presentation-definition.js reads
 // attributes from, and the one every shipped VCTM and MDDL populates.
 const uiDefaultLocale = "en-US"
@@ -259,11 +286,20 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					uiCred.Meta.VCTValues = mq.VCTValues
 				}
 
-				// A preset's Format/ZKSystemType override lets an otherwise
-				// plain-format scope (e.g. mso_mdoc) be requested as a ZK
-				// proof (mso_mdoc_zk) instead - see
-				// model.VerificationPresetScope's own doc comment.
+				// A preset's Format/ZKSystemType override lets a plain
+				// mso_mdoc scope be requested as mso_mdoc_zk instead.
+				//
+				// The override must keep the credential's constraint family -
+				// mdoc matches on doctype_value, SD-JWT on vct_values - since
+				// the meta above was derived from the CONFIGURED format.
+				// Crossing families pairs a format with a constraint it does
+				// not use, which no wallet can match.
 				if scopeCfg != nil && scopeCfg.Format != "" {
+					if meta != nil && !sameConstraintFamily(meta.Format, scopeCfg.Format) {
+						c.log.Error(nil, "credential omitted from a verifier UI preset: format override changes the DCQL constraint",
+							"preset", label, "scope", scope, "configured", meta.Format, "override", scopeCfg.Format)
+						continue
+					}
 					uiCred.Format = scopeCfg.Format
 					uiCred.Meta.ZKSystemType = scopeCfg.ZKSystemType
 				}
