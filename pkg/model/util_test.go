@@ -429,10 +429,22 @@ func TestPublishNewVCT(t *testing.T) {
 	}{
 		{"unset back-fills an empty vct, as before", localVCTM("", nil), hosted},
 		{"explicit true back-fills too", localVCTM("", new(true)), hosted},
-		{"false turns the back-fill off", localVCTM("", new(false)), ""},
 		{"a declared urn is kept whatever the setting", localVCTM("urn:eudi:pid:1", nil), "urn:eudi:pid:1"},
 		{"and is still kept with it explicitly on", localVCTM("urn:eudi:pid:1", new(true)), "urn:eudi:pid:1"},
 	}
+
+	// Disabling the back-fill for a file that declares no vct leaves a scope
+	// that can be neither issued (parseVCTM rejects an empty vct at mint time)
+	// nor requested, and a local VCTM has no other source for one - so it is
+	// refused at load rather than at the first credential request.
+	t.Run("false without a vct in the file is refused", func(t *testing.T) {
+		cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{
+			"pid": localVCTM("", new(false)),
+		}}}
+		err := cfg.ResolveVCTUrls("https://apigw.example")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "publish_new_vct")
+	})
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

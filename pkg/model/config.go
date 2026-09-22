@@ -1798,10 +1798,9 @@ type CredentialMetadata struct {
 	// Only meaningful for a local VCTM (vctm_file_path): an external source is
 	// authoritative and is never rewritten.
 	//
-	// Turning it off leaves the vct empty unless the file supplies one, and an
-	// empty vct means the credential body, the served document and DCQL
-	// vct_values have nothing to agree on - so only disable it where the vct
-	// is genuinely provided another way.
+	// Only meaningful for a file that declares its own vct: a local VCTM has
+	// no other source for one, so turning the back-fill off for a file without
+	// it is refused at config load rather than failing at the first issuance.
 	PublishNewVCT *bool `yaml:"publish_new_vct,omitempty" json:"-"`
 
 	// Doctype is the mdoc doctype value to resolve via
@@ -2232,7 +2231,16 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 		if constructor.GetVCTURL() == "" {
 			return fmt.Errorf("VCTURL is empty for scope %q after resolution (check vctm_file_path, vctm_url, or vct)", scope)
 		}
-		// Local scopes get VCTM.VCT rewritten above; external ones must carry it themselves.
+		// A local VCTM's vct comes from the file or from the back-fill; there
+		// is no third source, so turning the back-fill off for a file that
+		// declares none leaves a scope that cannot be issued (parseVCTM
+		// rejects an empty vct at mint time, after a successful /token) and
+		// cannot be requested (DCQLMetaQuery reports it unconstrainable).
+		// Refuse it here rather than at the first credential request.
+		if constructor.IsLocalVCTM() && vctm.VCT == "" {
+			return fmt.Errorf("scope %q sets publish_new_vct: false but its VCTM file declares no vct; a local VCTM has no other source for one, so the scope could be neither issued nor requested", scope)
+		}
+		// External scopes must carry it themselves.
 		if !constructor.IsLocalVCTM() && vctm.VCT == "" {
 			return fmt.Errorf("external VCTM for scope %q has empty vct (check vctm_url source or the resolved vct); BuildCredentialWithSigner and DCQL vct_values require it", scope)
 		}
