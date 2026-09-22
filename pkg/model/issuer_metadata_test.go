@@ -1030,3 +1030,27 @@ func TestIssuerMetadata_VCLDJSONGetsCredentialDefinition(t *testing.T) {
 	require.NotNil(t, diploma.CredentialDefinition, "vc+ld+json is a W3C format and needs credential_definition")
 	assert.Equal(t, []string{"VerifiableCredential", "DiplomaCredential"}, diploma.CredentialDefinition.Type)
 }
+
+// TestW3CCredentialDefinitionAdvertisesContext pins the @context in
+// credential_definition.
+//
+// OpenID4VCI requires it for ldp_vc, and it was omitted entirely - a wallet
+// had no way to expand the types advertised beside it. It also has to match
+// what the credential is actually issued with, which is the same list
+// credential_contexts feeds to the issuer.
+func TestW3CCredentialDefinitionAdvertisesContext(t *testing.T) {
+	cm := &CredentialMetadata{
+		Format:             "ldp_vc",
+		CredentialTypes:    []string{"UniversityDegreeCredential"},
+		CredentialContexts: []string{"https://example.org/degree"},
+	}
+
+	assert.Equal(t,
+		[]string{VCContextV2, "https://example.org/degree"},
+		cm.W3CContexts(),
+		"the base context first, then what the credential type configures")
+
+	// Nil-safe and still correct for a scope configuring no extra context.
+	assert.Equal(t, []string{VCContextV2}, (*CredentialMetadata)(nil).W3CContexts())
+	assert.Equal(t, []string{VCContextV2}, (&CredentialMetadata{}).W3CContexts())
+}

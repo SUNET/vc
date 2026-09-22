@@ -2063,6 +2063,25 @@ func (c *CredentialMetadata) GetVCTURL() string {
 	return c.VCTURL
 }
 
+// VCContextV2 is the W3C VC 2.0 base context every credential this repo issues
+// carries first.
+const VCContextV2 = "https://www.w3.org/ns/credentials/v2"
+
+// W3CContexts returns the full @context a W3C credential of this type is
+// issued with: the VC 2.0 base, then whatever credential_contexts configures.
+//
+// One source for two readers. The issuer builds the credential's @context from
+// the same list (sent as MakeVC20Request.additional_contexts), and issuer
+// metadata advertises it - OpenID4VCI requires @context in
+// credential_definition for ldp_vc, and a wallet cannot expand the types
+// without it.
+func (c *CredentialMetadata) W3CContexts() []string {
+	if c == nil {
+		return []string{VCContextV2}
+	}
+	return append([]string{VCContextV2}, c.CredentialContexts...)
+}
+
 // GetCredentialContexts returns the JSON-LD contexts to issue this credential
 // with, nil-safe like the other accessors.
 func (c *CredentialMetadata) GetCredentialContexts() []string {
@@ -2615,6 +2634,11 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 			// advertised.
 			credConfig.CredentialDefinition = &openid4vci.CredentialDefinition{
 				Type: constructor.W3CTypes(),
+				// REQUIRED for ldp_vc (OpenID4VCI 1.0 Appendix A.1.2). It was
+				// omitted entirely, so a wallet had no way to expand the types
+				// advertised beside it - and after credential_contexts, the
+				// advertised context has to match what is actually issued.
+				Context: constructor.W3CContexts(),
 			}
 			credConfig.VCT = resolvedVCT
 		default:

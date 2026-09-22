@@ -175,7 +175,7 @@ func (c *Client) buildVC20CredentialJSON(
 	// A type this deployment defines has no meaning without its own context:
 	// JSON-LD leaves an undefined term as a relative IRI, which no verifier
 	// can match against meta.type_values.
-	contexts := append([]string{"https://www.w3.org/ns/credentials/v2"}, additionalContexts...)
+	contexts := append([]string{credential.ContextV2}, additionalContexts...)
 
 	cred := map[string]any{
 		"@context":          contexts,
