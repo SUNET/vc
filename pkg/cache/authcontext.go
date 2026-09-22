@@ -13,6 +13,11 @@ import (
 
 var ErrNoDocuments = errors.New("no documents found")
 
+// ErrTXCodeAttemptsExceeded is returned by ConsumeTXCodeAttempt when the
+// pre-authorized code has already used its MaxTXCodeAttempts budget. When
+// this happens the code is atomically forfeited to prevent further guesses.
+var ErrTXCodeAttemptsExceeded = errors.New("tx_code attempt limit exceeded")
+
 // MemoryStore implements authorization context storage using an in-memory ttlcache.
 // Suitable for single-instance deployments.
 type MemoryStore struct {
@@ -273,6 +278,47 @@ func (c *MemoryStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThu
 	// Use PreviousOrDefaultTTL to preserve the original TTL — repeated redemptions
 	// by different clients must not extend the code's lifetime.
 	doc.RedeemedBy = append(doc.RedeemedBy, dpopThumbprint)
+	c.cache.Set(sessionID, doc, ttlcache.PreviousOrDefaultTTL)
+
+	return doc, nil
+}
+
+// ConsumeTXCodeAttempt atomically records a tx_code attempt on a
+// pre-authorized code. When the attempt budget is exhausted the code is
+// forfeited in the same critical section so concurrent guesses cannot slip
+// past the cap.
+func (c *MemoryStore) ConsumeTXCodeAttempt(ctx context.Context, code string) (*AuthorizationContext, error) {
+	if code == "" {
+		return nil, errors.New("code cannot be empty")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	indexKey := fmt.Sprintf("code:%s", code)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return nil, ErrNoDocuments
+	}
+
+	doc := item.Value()
+
+	if doc.Forfeited {
+		return nil, errors.New("pre-authorized code has been forfeited")
+	}
+
+	if doc.TXCodeAttempts >= MaxTXCodeAttempts {
+		doc.Forfeited = true
+		c.cache.Set(sessionID, doc, ttlcache.PreviousOrDefaultTTL)
+		return nil, ErrTXCodeAttemptsExceeded
+	}
+
+	doc.TXCodeAttempts++
 	c.cache.Set(sessionID, doc, ttlcache.PreviousOrDefaultTTL)
 
 	return doc, nil

@@ -24,6 +24,11 @@ type (
 	Token                = pkgcache.Token
 )
 
+// Re-export selected constants from pkg/cache.
+const (
+	MaxTXCodeAttempts = pkgcache.MaxTXCodeAttempts
+)
+
 // NewTestMemoryStore returns an in-memory AuthContextStore for use in tests only.
 var NewTestMemoryStore = pkgcache.NewMemoryStore
 

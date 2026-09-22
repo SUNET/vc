@@ -108,7 +108,7 @@ Alpine.data("app", () => ({
     /** @type {boolean} */
     loggedIn: false,
 
-    /** @type {"saml" | "oidc" | "openid4vp" | null} */
+    /** @type {"saml" | "oidc" | "openid4vp" | "preauth" | null} */
     authMethod: null,
 
     /** @type {number | null} */
@@ -153,14 +153,9 @@ Alpine.data("app", () => ({
 
     setAuthMethod() {
         const authMethod = this.$el.dataset.authMethod || null;
-        const validMethods = ["openid4vp", "saml", "oidc"];
+        const validMethods = ["openid4vp", "saml", "oidc", "preauth"];
 
-        if (
-            !authMethod ||
-            authMethod !== "saml" &&
-            authMethod !== "oidc" &&
-            authMethod !== "openid4vp"
-        ) {
+        if (!authMethod || !validMethods.includes(authMethod)) {
             this.error = `Unknown auth method: '${authMethod}'`;
             return;
         }

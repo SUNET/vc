@@ -145,6 +145,12 @@ definitions:
         $ref: '#/definitions/openid4vci.CredentialOfferResult'
       credential_offer_url:
         type: string
+      tx_code:
+        description: |-
+          TXCode is the transaction code (PIN) the wallet must present at the
+          token endpoint. Only set when apigw.auth_providers.preauth.enable_pin
+          is true; must be delivered to the end user out-of-band.
+        type: string
     type: object
   apiv1.DatastorePreAuthOfferRequest:
     properties:
@@ -767,6 +773,77 @@ definitions:
     properties:
       authorization:
         type: string
+      bbs_commitment:
+        description: |-
+          BBSCommitment OPTIONAL. Base64url-encoded `commitment_with_proof`
+          for a blind BBS credential.
+
+          Unlike the mdoc and SD-JWT paths, a BBS credential is signed over a
+          commitment the WALLET produces: it commits to messages the issuer
+          never sees, and to the public keys of its device-held key binding
+          keys, together with proof it actually holds them. So the wallet
+          participates at issuance and an issuer cannot add BBS afterwards.
+
+          This needs no extra round-trip. The commitment challenge is computed
+          wallet-locally by Fiat-Shamir with no issuer nonce, so the finished
+          commitment simply rides alongside the key proof. Freshness still
+          comes from the c_nonce-bound key proof; a commitment proof
+          demonstrates knowledge, not recency, and must not be relied on for
+          the latter.
+        type: string
+      bbs_committed_claims:
+        description: |-
+          BBSCommittedClaims OPTIONAL. RFC 6901 pointers naming the claims the
+          holder committed to, in message order.
+
+          The issuer needs these and cannot derive them. It never sees the
+          values — that is what blind issuance means — but it must still place
+          those claims in the credential's claim map, and it cannot name what
+          it cannot see. The count is checked against the commitment rather
+          than taken on trust; a credential whose header described a different
+          message vector than the one being signed would verify against
+          nothing, with the failure pointing nowhere.
+
+          Meaningful only alongside BBSCommitment, and rejected without it.
+          Empty alongside one is legitimate rather than a mistake: a commitment
+          can carry key binding keys and no holder claims at all, which is what
+          a wallet binding a credential to a device key without hiding any of
+          its own values sends.
+        items:
+          type: string
+        type: array
+      bbs_key_binding:
+        description: |-
+          BBSKeyBinding OPTIONAL. Whether the commitment carries key binding
+          keys. Absent means it does not.
+
+          This selects the message layout the credential is signed under, and a
+          verifier reads it back out of the header, so the two ends must agree.
+          It is on the wire because the issuer cannot see inside the commitment
+          without the wallet saying so - but it is not taken on trust: the
+          native signer checks the claim against the commitment it was given
+          and refuses to sign a mismatch. A wallet that lies here gets a failed
+          issuance, not a credential bound to nothing.
+        type: boolean
+      bbs_suite:
+        description: |-
+          BBSSuite REQUIRED with BBSCommitment. Which cipher suite the
+          commitment was built under: "plain" or "schnorr".
+
+          The suite selects the domain separation everything is computed under
+          - the api_id, and so generator derivation and every hash-to-scalar -
+          so holder and issuer must agree or the commitment verifies against
+          nothing. Carried explicitly, and required rather than defaulted,
+          because a wrong guess is indistinguishable from a corrupt commitment,
+          a wrong issuer key, or a tampered proof: the request fails either
+          way, but only this way does the error say what to fix.
+
+          A different axis from BBSKeyBinding despite the similar name. The
+          suite picks the domain separation; key binding picks the message
+          layout a verifier reads under. "schnorr" with no key binding keys is
+          the ordinary unbound issuance, not a contradiction - which is why
+          this cannot be derived from BBSKeyBinding.
+        type: string
       credential_configuration_id:
         description: |-
           CredentialConfigurationID REQUIRED if a credential_identifiers parameter was not returned from
@@ -804,6 +881,14 @@ definitions:
           to which the issued Credential instances will be bound to. The proofs parameter contains exactly one
           parameter named as the proof type in Appendix F, the value set for this parameter is a non-empty array
           containing parameters as defined by the corresponding proof type.
+          "Exactly one proof type" is enforced in Validate() below, not via a
+          struct tag: the go-playground/validator custom validation function
+          registered for this used to be named "single_proof_type", but it was
+          never actually being invoked here (confirmed live with a canary panic
+          that never fired) for reasons not tracked down within the time spent
+          investigating -- moving the check to Validate(), which already runs
+          reliably for this request, sidesteps whatever is wrong with the
+          struct-tag path rather than leaving proof-type-count unchecked.
     required:
     - authorization
     - dpoP
@@ -896,6 +981,12 @@ definitions:
         items:
           $ref: '#/definitions/openid4vci.AuthorizationDetailsParameter'
         type: array
+      client_assertion:
+        maxLength: 8192
+        type: string
+      client_assertion_type:
+        maxLength: 256
+        type: string
       client_id:
         type: string
       code_challenge:
@@ -1012,9 +1103,15 @@ definitions:
     properties:
       attestation:
         description: |-
-          Attestation contains a single JWT representing a key attestation
-          as defined in Appendix D.1
-        type: string
+          Attestation contains an array of JWTs representing key attestations
+          as defined in Appendix D.1. Confirmed as an array (not a bare string)
+          against the EUDI reference wallet's pinned eudi-lib-jvm-openid4vci-kt
+          (lpidproto PLAN.md workstream 7): it sends "attestation" with the same
+          array shape as "jwt", which this field previously rejected with a JSON
+          unmarshal error.
+        items:
+          type: string
+        type: array
       di_vp:
         description: |-
           DIVP contains an array of W3C Verifiable Presentations
@@ -1060,10 +1157,12 @@ definitions:
         description: Header field
         type: string
       grant_type:
-        description: GrantType REQUIRED. "authorization_code" or "urn:ietf:params:oauth:grant-type:pre-authorized_code".
+        description: GrantType REQUIRED. "authorization_code", "urn:ietf:params:oauth:grant-type:pre-authorized_code",
+          or "refresh_token".
         enum:
         - authorization_code
         - urn:ietf:params:oauth:grant-type:pre-authorized_code
+        - refresh_token
         type: string
       pre-authorized_code:
         description: PreAuthorizedCode REQUIRED for pre-authorized_code grant. The
@@ -1074,8 +1173,17 @@ definitions:
         description: RedirectURI REQUIRED for authorization_code grant, if the "redirect_uri"
           parameter was included in the authorization request.
         type: string
+      refresh_token:
+        description: RefreshToken REQUIRED for refresh_token grant. The refresh token
+          previously issued to the client.
+        maxLength: 256
+        type: string
       tx_code:
-        description: TXCode OPTIONAL. String value containing a Transaction Code.
+        description: |-
+          TXCode OPTIONAL. String value containing a Transaction Code as
+          defined in OpenID4VCI §6.1. Bounded here to a defensive upper limit;
+          the actual accepted length is set by the offer's tx_code metadata.
+        maxLength: 64
         type: string
     required:
     - grant_type
@@ -1110,6 +1218,15 @@ definitions:
           expire in one hour from the time the response was generated. If omitted,
           the authorization server SHOULD provide the expiration time via other means
           or document the default value.
+        type: integer
+      refresh_token:
+        description: |-
+          RefreshToken OPTIONAL. A refresh token bound to the DPoP key, allowing the client to obtain
+          fresh access tokens for credential re-issuance without full re-authentication.
+        type: string
+      refresh_token_expires_in:
+        description: RefreshTokenExpiresIn OPTIONAL. Lifetime in seconds of the refresh
+          token.
         type: integer
       scope:
         description: Scope OPTIONAL, if identical to the scope requested by the client;

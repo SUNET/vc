@@ -431,11 +431,11 @@ Each key under a data source is a credential type.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>`
 
-| Field           | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Example                                 | Default | Required |
-| --------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------- | -------- |
-| `auth_provider` | `string`   | Auth provider for this credential type (openid4vp, saml, or oidc)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | -                                       | -       | Yes      |
-| `auth_claims`   | `[]string` | The normalized claim names used for datastore identity lookup when auth_provider is saml or oidc. Not used for openid4vp (use AuthScopes instead). These names must match the BSON field names under "identities." in the datastore. Use attribute_mappings (in auth_providers) to normalize provider-specific attribute names (e.g. SAML urn:oid:2.5.4.42, eIDAS date_of_birth) to these canonical names. Available identity fields: given_name, family_name, birth_date, birth_place, authentic_source_person_id, personal_administrative_number. | `[given_name, family_name, birth_date]` | -       | No       |
-| `auth_scopes`   | `object`   | Credential scope keys to their per-scope authentication config. Used only for openid4vp: the wallet must present a credential matching any one of the listed scopes (OR logic). Each entry specifies which claims to extract from that particular credential type.                                                                                                                                                                                                                                                                                  | -                                       | -       | No       |
+| Field           | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Example                                 | Default | Required |
+| --------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | ------- | -------- |
+| `auth_provider` | `string`   | Auth provider for this credential type (openid4vp, saml, oidc, or preauth). Use preauth to restrict issuance to pre-authorized credential offers only; wallet-initiated PAR/authorize requests for such a scope are rejected.                                                                                                                                                                                                                                                                                                                                                                    | -                                       | -       | Yes      |
+| `auth_claims`   | `[]string` | The normalized claim names used for datastore identity lookup when auth_provider is saml or oidc. Not used for openid4vp (use AuthScopes instead). Must be empty when auth_provider is preauth. These names must match the BSON field names under "identities." in the datastore. Use attribute_mappings (in auth_providers) to normalize provider-specific attribute names (e.g. SAML urn:oid:2.5.4.42, eIDAS date_of_birth) to these canonical names. Available identity fields: given_name, family_name, birth_date, birth_place, authentic_source_person_id, personal_administrative_number. | `[given_name, family_name, birth_date]` | -       | No       |
+| `auth_scopes`   | `object`   | Credential scope keys to their per-scope authentication config. Used only for openid4vp: the wallet must present a credential matching any one of the listed scopes (OR logic). Each entry specifies which claims to extract from that particular credential type.                                                                                                                                                                                                                                                                                                                               | -                                       | -       | No       |
 
 ### `auth_scopes` entry
 
@@ -512,10 +512,11 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 
 > **Path:** `.apigw.auth_providers`
 
-| Field  | Type     | Description               | Example | Default | Required |
-| ------ | -------- | ------------------------- | ------- | ------- | -------- |
-| `saml` | `object` | The SAML SP auth provider | -       | -       | No       |
-| `oidc` | `object` | The OIDC RP auth provider | -       | -       | No       |
+| Field     | Type     | Description                                                                                 | Example | Default | Required |
+| --------- | -------- | ------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `saml`    | `object` | The SAML SP auth provider                                                                   | -       | -       | No       |
+| `oidc`    | `object` | The OIDC RP auth provider                                                                   | -       | -       | No       |
+| `preauth` | `object` | The pre-authorized credential offer flow (data_sources scopes with auth_provider: preauth). | -       | -       | No       |
 
 ### `saml`
 
@@ -669,6 +670,14 @@ persisted in the database.
 | ---------------------- | -------- | ------------------------------------------------------------------------------ | ------- | ------- | ---------------- |
 | `enable`               | `bool`   | Enable activates dynamic client registration                                   | -       | -       | No               |
 | `initial_access_token` | `string` | Bearer token for registration Required by some OIDC Providers (e.g., Keycloak) | -       | -       | Yes (if enabled) |
+
+### `preauth`
+
+> **Path:** `.apigw.auth_providers.preauth`
+
+| Field        | Type   | Description                                                                                                                                                                                                                  | Example | Default | Required |
+| ------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `enable_pin` | `bool` | EnablePIN, when true, generates a numeric transaction code (PIN) for each pre-authorized credential offer created via /api/v1/datastore/preauth_offer. The wallet must include the PIN in the token request. Default: false. | -       | `false` | No       |
 
 ### `remotes` entry
 

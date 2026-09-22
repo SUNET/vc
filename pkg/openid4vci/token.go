@@ -41,8 +41,10 @@ type TokenRequest struct {
 	// PreAuthorizedCode REQUIRED for pre-authorized_code grant. The code representing the authorization to obtain Credentials.
 	PreAuthorizedCode string `form:"pre-authorized_code" json:"pre-authorized_code" validate:"required_if=GrantType urn:ietf:params:oauth:grant-type:pre-authorized_code,omitempty,max=128,printascii"`
 
-	// TXCode OPTIONAL. String value containing a Transaction Code.
-	TXCode string `form:"tx_code" json:"tx_code"`
+	// TXCode OPTIONAL. String value containing a Transaction Code as
+	// defined in OpenID4VCI §6.1. Bounded here to a defensive upper limit;
+	// the actual accepted length is set by the offer's tx_code metadata.
+	TXCode string `form:"tx_code" json:"tx_code" validate:"omitempty,max=64,printascii"`
 
 	// Refresh Token Flow fields
 

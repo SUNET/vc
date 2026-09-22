@@ -1047,3 +1047,54 @@ func TestDatastorePreAuthOffer_DocumentDataCached(t *testing.T) {
 	preAuthCode := reply.CredentialOffer.ID
 	assert.True(t, client.HasVCIDocuments(t.Context(), preAuthCode))
 }
+
+func TestDatastorePreAuthOffer_PINDisabledByDefault(t *testing.T) {
+	client, datastore := newPreAuthOfferTestClient(t)
+	seedDoc(t, datastore, "SUNET", "pid", "doc-p1", []string{"person-1"}, map[string]any{"family_name": "Doe"})
+
+	reply, err := client.DatastorePreAuthOffer(t.Context(), &DatastorePreAuthOfferRequest{
+		AuthenticSource: "SUNET",
+		Scope:           "pid",
+		DocumentID:      "doc-p1",
+	})
+	require.NoError(t, err)
+
+	assert.Empty(t, reply.TXCode)
+
+	authCtx, err := client.cacheService.AuthContext.GetByID(t.Context(), reply.CredentialOffer.ID)
+	require.NoError(t, err)
+	assert.Empty(t, authCtx.TXCode)
+
+	grant, ok := reply.CredentialOffer.Grants[openid4vci.GrantTypePreAuthorizedCode].(openid4vci.GrantPreAuthorizedCode)
+	require.True(t, ok)
+	assert.Nil(t, grant.TXCode)
+}
+
+func TestDatastorePreAuthOffer_PINEnabled(t *testing.T) {
+	client, datastore := newPreAuthOfferTestClient(t)
+	client.cfg.APIGW.AuthProviders.PreAuth.EnablePIN = true
+
+	seedDoc(t, datastore, "SUNET", "pid", "doc-p2", []string{"person-1"}, map[string]any{"family_name": "Doe"})
+
+	reply, err := client.DatastorePreAuthOffer(t.Context(), &DatastorePreAuthOfferRequest{
+		AuthenticSource: "SUNET",
+		Scope:           "pid",
+		DocumentID:      "doc-p2",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, reply.TXCode, preAuthPINLength)
+	for _, r := range reply.TXCode {
+		require.True(t, r >= '0' && r <= '9', "PIN must be numeric, got %q", reply.TXCode)
+	}
+
+	authCtx, err := client.cacheService.AuthContext.GetByID(t.Context(), reply.CredentialOffer.ID)
+	require.NoError(t, err)
+	assert.Equal(t, reply.TXCode, authCtx.TXCode)
+
+	grant, ok := reply.CredentialOffer.Grants[openid4vci.GrantTypePreAuthorizedCode].(openid4vci.GrantPreAuthorizedCode)
+	require.True(t, ok)
+	require.NotNil(t, grant.TXCode)
+	assert.Equal(t, "numeric", grant.TXCode.InputMode)
+	assert.Equal(t, preAuthPINLength, grant.TXCode.Length)
+}

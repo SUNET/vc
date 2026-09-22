@@ -339,15 +339,16 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	// which both this library's CredentialRequest.Validate and
 	// ResolveCredentialFormatWithAuthDetails already handle as the normal path.
 	authCtx := &cache.AuthorizationContext{
-		SessionID:    preAuthCode,
-		Code:         preAuthCode,
-		Status:       "code_issued",
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(5 * time.Minute).Unix(),
-		Scopes:       []string{session.CredentialType},
-		Nonce:        nonce,
-		AuthProvider: model.AuthProviderOIDC,
-		Identifier:   identifier,
+		SessionID:     preAuthCode,
+		Code:          preAuthCode,
+		Status:        "code_issued",
+		CreatedAt:     time.Now(),
+		ExpiresAt:     time.Now().Add(5 * time.Minute).Unix(),
+		Scopes:        []string{session.CredentialType},
+		Nonce:         nonce,
+		AuthProvider:  model.AuthProviderOIDC,
+		Identifier:    identifier,
+		PreAuthorized: true,
 	}
 	if credSourceErr == nil {
 		authCtx.DataSource = string(credSource.DataSource)
