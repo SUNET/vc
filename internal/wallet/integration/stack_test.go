@@ -1367,16 +1367,6 @@ func computeS256(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }
 
-func publicKeyJWK(t *testing.T, key *ecdsa.PrivateKey) map[string]any {
-	t.Helper()
-	return map[string]any{
-		"kty": "EC",
-		"crv": key.Curve.Params().Name,
-		"x":   jwktest.Coord(key.PublicKey.X, key.PublicKey.Curve),
-		"y":   jwktest.Coord(key.PublicKey.Y, key.PublicKey.Curve),
-	}
-}
-
 func createDPoPProof(t *testing.T, method, uri, accessToken string, key *ecdsa.PrivateKey) string {
 	t.Helper()
 
@@ -1394,7 +1384,7 @@ func createDPoPProof(t *testing.T, method, uri, accessToken string, key *ecdsa.P
 	signingMethod, _ := jose.GetSigningMethodFromKey(key)
 	token := jwtv5.NewWithClaims(signingMethod, body)
 	token.Header["typ"] = "dpop+jwt"
-	token.Header["jwk"] = publicKeyJWK(t, key)
+	token.Header["jwk"] = jwktest.PublicKeyJWK(&key.PublicKey)
 
 	// Remove default alg and set from jose
 	_, alg := jose.GetSigningMethodFromKey(key)
@@ -1421,7 +1411,7 @@ func createProofJWT(t *testing.T, audience, cNonce string, key *ecdsa.PrivateKey
 	token := jwtv5.NewWithClaims(signingMethod, body)
 	token.Header["typ"] = "openid4vci-proof+jwt"
 	token.Header["alg"] = alg
-	token.Header["jwk"] = publicKeyJWK(t, key)
+	token.Header["jwk"] = jwktest.PublicKeyJWK(&key.PublicKey)
 
 	signed, err := token.SignedString(key)
 	require.NoError(t, err, "signing proof JWT")
@@ -1461,7 +1451,7 @@ func createSyntheticSDJWT(t *testing.T, key *ecdsa.PrivateKey) string {
 		"vct":     "urn:eudi:pid:1",
 		"_sd_alg": "sha-256",
 		"cnf": map[string]any{
-			"jwk": publicKeyJWK(t, key),
+			"jwk": jwktest.PublicKeyJWK(&key.PublicKey),
 		},
 	}
 

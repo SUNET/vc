@@ -1,6 +1,7 @@
 package jwktest
 
 import (
+	"crypto/ecdsa"
 	"crypto/elliptic"
 	"encoding/base64"
 	"math/big"
@@ -26,4 +27,18 @@ func TestCoord(t *testing.T) {
 	wide, err := base64.RawURLEncoding.DecodeString(Coord(big.NewInt(1), elliptic.P384()))
 	require.NoError(t, err)
 	assert.Len(t, wide, 48)
+}
+
+func TestPublicKeyJWK(t *testing.T) {
+	// X has a zero high byte, Y does not: both must still come out 32 bytes.
+	key := &ecdsa.PublicKey{Curve: elliptic.P256(), X: big.NewInt(1), Y: new(big.Int).Lsh(big.NewInt(1), 255)}
+
+	jwk := PublicKeyJWK(key)
+	assert.Equal(t, "EC", jwk["kty"])
+	assert.Equal(t, "P-256", jwk["crv"])
+	for _, c := range []string{"x", "y"} {
+		raw, err := base64.RawURLEncoding.DecodeString(jwk[c].(string))
+		require.NoError(t, err)
+		assert.Len(t, raw, 32, "%s must be the full curve width", c)
+	}
 }

@@ -2,6 +2,7 @@
 package jwktest
 
 import (
+	"crypto/ecdsa"
 	"crypto/elliptic"
 	"encoding/base64"
 	"math/big"
@@ -16,4 +17,15 @@ import (
 func Coord(v *big.Int, curve elliptic.Curve) string {
 	size := (curve.Params().BitSize + 7) / 8
 	return base64.RawURLEncoding.EncodeToString(v.FillBytes(make([]byte, size)))
+}
+
+// PublicKeyJWK renders an EC public key as a JWK object, with both
+// coordinates at the curve's fixed width.
+func PublicKeyJWK(key *ecdsa.PublicKey) map[string]any {
+	return map[string]any{
+		"kty": "EC",
+		"crv": key.Curve.Params().Name,
+		"x":   Coord(key.X, key.Curve),
+		"y":   Coord(key.Y, key.Curve),
+	}
 }
