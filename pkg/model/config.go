@@ -2153,38 +2153,6 @@ func (c *CredentialMetadata) doctype() string {
 	return c.Doctype
 }
 
-// checkW3CTypeConsistency rejects a W3C scope that can be requested but not
-// matched.
-//
-// credential_types and credential_type_values are deliberately independent -
-// a scope may be issue-only or request-only - but configuring the request half
-// alone is not one of those cases: the issuer mints a bare VerifiableCredential
-// while the verifier asks for narrower IRIs, so the request can never match
-// anything this issuer produced.
-//
-// The two cannot be checked against each other beyond that: going from compact
-// terms to expanded IRIs needs a JSON-LD expansion this repo does not do.
-func (cfg *Cfg) checkW3CTypeConsistency() error {
-	if cfg.Common == nil {
-		return nil
-	}
-	for scope, constructor := range cfg.Common.CredentialMetadata {
-		if constructor == nil || !openid4vp.IsW3CVCFormatIdentifier(constructor.Format) {
-			continue
-		}
-		// Narrowing, not merely present: credential_types naming only the base
-		// type mints the same bare VerifiableCredential as an absent list, so
-		// checking for presence alone let that config through.
-		issuesNarrowly := slices.ContainsFunc(constructor.W3CTypes(), func(t string) bool {
-			return t != "" && t != baseVCType
-		})
-		if len(constructor.w3cTypeValues()) > 0 && !issuesNarrowly {
-			return fmt.Errorf("scope %q is requested by credential_type_values but credential_types names nothing narrower than %s: it would be issued as a bare credential, which cannot match", scope, baseVCType)
-		}
-	}
-	return nil
-}
-
 // baseVCType is the compact term every W3C VC must carry, the counterpart of
 // baseVCTypeIRI on the DCQL side.
 const baseVCType = "VerifiableCredential"
@@ -2377,7 +2345,7 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 		}
 	}
 
-	return cfg.checkW3CTypeConsistency()
+	return nil
 }
 
 // applyCommonCredentialConfig sets the fields of CredentialConfigurationsSupported
