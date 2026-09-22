@@ -178,6 +178,14 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		format := detectCredentialFormat(vpToken)
 		c.log.Debug("Detected credential format", "scope", scope, "format", format)
 
+		// The wallet does not get to choose which format answers a scope.
+		// Detection reads the token; the request said what was asked for.
+		if requested, ok := requestedQuery(authCtx, scope); ok && !formatMatchesRequest(format, requested.Format) {
+			c.log.Error(nil, "returned credential format does not answer the request",
+				"scope", scope, "detected", format, "requested", requested.Format)
+			return nil, fmt.Errorf("scope %s was requested as %q but the response is %q", scope, requested.Format, format)
+		}
+
 		// ResponseParameters.Validate parses the token as an SD-JWT, so it can
 		// only speak for that format - it rejected a perfectly good mdoc or
 		// JSON-LD token as "invalid JWT format". Each format's own branch
@@ -481,6 +489,20 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// evaluator the other formats use - trust.KeyResolver and
 			// openid4vp.VC20KeyResolver declare the same method, and both
 			// configured evaluators implement it.
+			// A W3C presentation proves holder binding with a proof over the
+			// VP carrying the verifier's challenge and domain. VC20Handler
+			// verifies the ISSUER's proof on the credential and unwraps a VP
+			// without checking its proof, so nothing here binds the response
+			// to this session - a captured credential would replay.
+			//
+			// Refuse rather than accept that silently. A query may opt out
+			// with require_cryptographic_holder_binding: false, and then
+			// issuer-proof-only verification is exactly what was asked for.
+			if requested, ok := requestedQuery(authCtx, scope); !ok || requested.RequiresCryptographicHolderBinding() {
+				c.log.Error(nil, "W3C holder binding is required but cannot be verified yet", "scope", scope)
+				return nil, fmt.Errorf("scope %s requires cryptographic holder binding, which W3C VC verification cannot check yet; set require_cryptographic_holder_binding: false only if an unbound credential is acceptable for this scope", scope)
+			}
+
 			resolver, ok := c.trustEvaluator.(trust.KeyResolver)
 			if !ok {
 				c.log.Error(nil, "trust evaluator cannot resolve verification methods", "scope", scope)
@@ -734,6 +756,40 @@ func detectCredentialFormat(vpToken string) CredentialFormat {
 	}
 
 	return FormatUnknown
+}
+
+// requestedQuery returns the DCQL credential query this scope was requested
+// under, if the session cached one. Config-built queries use the scope as the
+// query id.
+func requestedQuery(authCtx *cache.AuthorizationContext, scope string) (openid4vp.CredentialQuery, bool) {
+	if authCtx == nil || authCtx.DCQLQuery == nil {
+		return openid4vp.CredentialQuery{}, false
+	}
+	for _, q := range authCtx.DCQLQuery.Credentials {
+		if q.ID == scope {
+			return q, true
+		}
+	}
+	return openid4vp.CredentialQuery{}, false
+}
+
+// formatMatchesRequest reports whether a sniffed format answers the format the
+// request asked for. Detection reads the token, not the request, so without
+// this a valid credential of one format satisfies a scope that asked for
+// another as long as its signature resolves.
+func formatMatchesRequest(detected CredentialFormat, requested string) bool {
+	switch requested {
+	case openid4vp.FormatMsoMdoc:
+		return detected == FormatMDoc
+	case openid4vp.FormatMsoMdocZk:
+		return detected == FormatMDocZK
+	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
+		return detected == FormatSDJWT
+	case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON:
+		return detected == FormatVC20
+	default:
+		return false
+	}
 }
 
 // looksLikeJSONDocument reports whether the token is a JSON-LD document in any

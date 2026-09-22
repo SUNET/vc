@@ -86,14 +86,28 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 	_, ephemeralPubJWK, err := client.openid4vp.EphemeralKeyCache.GenerateAndStore(kid)
 	require.NoError(t, err)
 
-	require.NoError(t, client.cacheService.AuthContext.Save(ctx, &cache.AuthorizationContext{
-		SessionID:                "w3c-session",
-		State:                    state,
-		Nonce:                    "w3c-nonce",
-		ClientID:                 "x509_san_dns:verifier.example.com",
-		Scopes:                   []string{scope},
-		EphemeralEncryptionKeyID: kid,
-	}))
+	// The query the request was built from. require_cryptographic_holder_binding
+	// is explicitly false: this credential carries only the issuer's proof, and
+	// the verifier refuses to pretend an unbound credential satisfies a request
+	// that asked for binding.
+	saveSession := func(t *testing.T, holderBinding *bool) {
+		t.Helper()
+		require.NoError(t, client.cacheService.AuthContext.Save(ctx, &cache.AuthorizationContext{
+			SessionID:                "w3c-session",
+			State:                    state,
+			Nonce:                    "w3c-nonce",
+			ClientID:                 "x509_san_dns:verifier.example.com",
+			Scopes:                   []string{scope},
+			EphemeralEncryptionKeyID: kid,
+			DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+				ID:                                scope,
+				Format:                            openid4vp.FormatLdpVCDCQL,
+				Meta:                              openid4vp.MetaQuery{TypeValues: [][]string{{openid4vp.BaseVCTypeIRI, "https://example.org/degree#UniversityDegreeCredential"}}},
+				RequireCryptographicHolderBinding: holderBinding,
+			}}},
+		}))
+	}
+	saveSession(t, new(false))
 
 	body, err := json.Marshal(openid4vp.VPResponse{
 		State:   state,
@@ -127,4 +141,18 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 	subject, ok := cached[0].Credential["credentialSubject"].(map[string]any)
 	require.True(t, ok, "the whole credential map is cached, so validations can address credentialSubject.*")
 	assert.Equal(t, "Master of Science", subject["degree"])
+
+	// The same credential against a request that DID ask for holder binding
+	// must be refused, not accepted. VC20Handler verifies the issuer's proof
+	// and unwraps a VP without checking its proof, so nothing binds this
+	// response to this session - accepting it would let a captured credential
+	// replay. nil is the spec default, which is true.
+	for _, binding := range []*bool{nil, new(true)} {
+		saveSession(t, binding)
+		_, err = client.VerificationDirectPost(ctx, &VerificationDirectPostRequest{
+			Response: string(encrypted),
+		})
+		require.Error(t, err, "an unbound credential must not satisfy a request requiring holder binding")
+		assert.Contains(t, err.Error(), "holder binding")
+	}
 }
