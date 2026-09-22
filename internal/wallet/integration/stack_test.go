@@ -41,6 +41,7 @@ import (
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/testsupport/jwktest"
 	"github.com/SUNET/vc/pkg/vcclient"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
@@ -1371,8 +1372,8 @@ func publicKeyJWK(t *testing.T, key *ecdsa.PrivateKey) map[string]any {
 	return map[string]any{
 		"kty": "EC",
 		"crv": key.Curve.Params().Name,
-		"x":   ecCoord(key.PublicKey.X, key.PublicKey.Curve),
-		"y":   ecCoord(key.PublicKey.Y, key.PublicKey.Curve),
+		"x":   jwktest.Coord(key.PublicKey.X, key.PublicKey.Curve),
+		"y":   jwktest.Coord(key.PublicKey.Y, key.PublicKey.Curve),
 	}
 }
 

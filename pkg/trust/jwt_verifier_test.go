@@ -6,11 +6,10 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"encoding/base64"
-	"math/big"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/testsupport/jwktest"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 	"github.com/stretchr/testify/assert"
@@ -72,8 +71,8 @@ func signTestJWTWithJWK(t *testing.T, issuer, credentialType string) string {
 	token.Header["jwk"] = map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   ecCoord(pubKey.X, pubKey.Curve),
-		"y":   ecCoord(pubKey.Y, pubKey.Curve),
+		"x":   jwktest.Coord(pubKey.X, pubKey.Curve),
+		"y":   jwktest.Coord(pubKey.Y, pubKey.Curve),
 	}
 
 	signedJWT, err := token.SignedString(privateKey)
@@ -203,11 +202,4 @@ func TestValidateSigningMethodForKey_ECDSA(t *testing.T) {
 	err = ValidateSigningMethodForKey(rsaToken, &ecKey.PublicKey)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected signing method")
-}
-
-// ecCoord renders an EC coordinate as a JWK value: base64url of the
-// fixed-width big-endian bytes. FillBytes, not Bytes(), because the latter
-// drops a leading zero and yields a short, invalid coordinate.
-func ecCoord(v *big.Int, curve elliptic.Curve) string {
-	return base64.RawURLEncoding.EncodeToString(v.FillBytes(make([]byte, (curve.Params().BitSize+7)/8)))
 }

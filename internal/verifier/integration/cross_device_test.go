@@ -30,7 +30,6 @@ import (
 	"html"
 	"io"
 	"log"
-	"math/big"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -50,6 +49,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/testsupport/jwktest"
 )
 
 // Stack service addresses (Docker bridge IPs on vc-dev-net)
@@ -895,8 +895,8 @@ func publicKeyJWK(t *testing.T, key *ecdsa.PrivateKey) map[string]any {
 	return map[string]any{
 		"kty": "EC",
 		"crv": key.Curve.Params().Name,
-		"x":   ecCoord(key.PublicKey.X, key.PublicKey.Curve),
-		"y":   ecCoord(key.PublicKey.Y, key.PublicKey.Curve),
+		"x":   jwktest.Coord(key.PublicKey.X, key.PublicKey.Curve),
+		"y":   jwktest.Coord(key.PublicKey.Y, key.PublicKey.Curve),
 	}
 }
 
@@ -1001,11 +1001,4 @@ func writeKeyFile(t *testing.T, key *ecdsa.PrivateKey) string {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 	return f.Name()
-}
-
-// ecCoord renders an EC coordinate as a JWK value: base64url of the
-// fixed-width big-endian bytes. FillBytes, not Bytes(), because the latter
-// drops a leading zero and yields a short, invalid coordinate.
-func ecCoord(v *big.Int, curve elliptic.Curve) string {
-	return base64.RawURLEncoding.EncodeToString(v.FillBytes(make([]byte, (curve.Params().BitSize+7)/8)))
 }
