@@ -30,6 +30,7 @@ import (
 	"html"
 	"io"
 	"log"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -894,8 +895,8 @@ func publicKeyJWK(t *testing.T, key *ecdsa.PrivateKey) map[string]any {
 	return map[string]any{
 		"kty": "EC",
 		"crv": key.Curve.Params().Name,
-		"x":   base64.RawURLEncoding.EncodeToString(key.PublicKey.X.FillBytes(make([]byte, (key.PublicKey.Curve.Params().BitSize+7)/8))),
-		"y":   base64.RawURLEncoding.EncodeToString(key.PublicKey.Y.FillBytes(make([]byte, (key.PublicKey.Curve.Params().BitSize+7)/8))),
+		"x":   ecCoord(key.PublicKey.X, key.PublicKey.Curve),
+		"y":   ecCoord(key.PublicKey.Y, key.PublicKey.Curve),
 	}
 }
 
@@ -1000,4 +1001,11 @@ func writeKeyFile(t *testing.T, key *ecdsa.PrivateKey) string {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 	return f.Name()
+}
+
+// ecCoord renders an EC coordinate as a JWK value: base64url of the
+// fixed-width big-endian bytes. FillBytes, not Bytes(), because the latter
+// drops a leading zero and yields a short, invalid coordinate.
+func ecCoord(v *big.Int, curve elliptic.Curve) string {
+	return base64.RawURLEncoding.EncodeToString(v.FillBytes(make([]byte, (curve.Params().BitSize+7)/8)))
 }

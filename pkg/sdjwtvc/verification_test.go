@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"math/big"
 	"testing"
 	"time"
 
@@ -24,8 +25,8 @@ func TestParseAndVerify_ValidCredential(t *testing.T) {
 	holderJWK := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.X.FillBytes(make([]byte, (holderPrivateKey.PublicKey.Curve.Params().BitSize+7)/8))),
-		"y":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.Y.FillBytes(make([]byte, (holderPrivateKey.PublicKey.Curve.Params().BitSize+7)/8))),
+		"x":   ecCoord(holderPrivateKey.PublicKey.X, holderPrivateKey.PublicKey.Curve),
+		"y":   ecCoord(holderPrivateKey.PublicKey.Y, holderPrivateKey.PublicKey.Curve),
 	}
 
 	testClaim := "test_claim"
@@ -175,8 +176,8 @@ func TestParseAndVerify_WithKeyBinding(t *testing.T) {
 	holderJWK := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.X.FillBytes(make([]byte, (holderPrivateKey.PublicKey.Curve.Params().BitSize+7)/8))),
-		"y":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.Y.FillBytes(make([]byte, (holderPrivateKey.PublicKey.Curve.Params().BitSize+7)/8))),
+		"x":   ecCoord(holderPrivateKey.PublicKey.X, holderPrivateKey.PublicKey.Curve),
+		"y":   ecCoord(holderPrivateKey.PublicKey.Y, holderPrivateKey.PublicKey.Curve),
 	}
 
 	testClaim := "test_claim"
@@ -260,8 +261,8 @@ func TestParseAndVerify_InvalidNonce(t *testing.T) {
 	holderJWK := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.X.FillBytes(make([]byte, (holderPrivateKey.PublicKey.Curve.Params().BitSize+7)/8))),
-		"y":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.Y.FillBytes(make([]byte, (holderPrivateKey.PublicKey.Curve.Params().BitSize+7)/8))),
+		"x":   ecCoord(holderPrivateKey.PublicKey.X, holderPrivateKey.PublicKey.Curve),
+		"y":   ecCoord(holderPrivateKey.PublicKey.Y, holderPrivateKey.PublicKey.Curve),
 	}
 
 	testClaim := "test_claim"
@@ -630,8 +631,8 @@ func TestJWKToPublicKey_ECDSA(t *testing.T) {
 	jwkMap := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.X.FillBytes(make([]byte, (privateKey.PublicKey.Curve.Params().BitSize+7)/8))),
-		"y":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.Y.FillBytes(make([]byte, (privateKey.PublicKey.Curve.Params().BitSize+7)/8))),
+		"x":   ecCoord(privateKey.PublicKey.X, privateKey.PublicKey.Curve),
+		"y":   ecCoord(privateKey.PublicKey.Y, privateKey.PublicKey.Curve),
 	}
 
 	// Convert to public key
@@ -684,4 +685,11 @@ func TestJWKToPublicKey_InvalidFormat(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.expectError)
 		})
 	}
+}
+
+// ecCoord renders an EC coordinate as a JWK value: base64url of the
+// fixed-width big-endian bytes. FillBytes, not Bytes(), because the latter
+// drops a leading zero and yields a short, invalid coordinate.
+func ecCoord(v *big.Int, curve elliptic.Curve) string {
+	return base64.RawURLEncoding.EncodeToString(v.FillBytes(make([]byte, (curve.Params().BitSize+7)/8)))
 }

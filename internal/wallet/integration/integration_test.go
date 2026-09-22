@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -379,8 +380,8 @@ func createMockSDJWT(t *testing.T) string {
 			"jwk": map[string]any{
 				"kty": "EC",
 				"crv": "P-256",
-				"x":   base64.RawURLEncoding.EncodeToString(key.PublicKey.X.FillBytes(make([]byte, (key.PublicKey.Curve.Params().BitSize+7)/8))),
-				"y":   base64.RawURLEncoding.EncodeToString(key.PublicKey.Y.FillBytes(make([]byte, (key.PublicKey.Curve.Params().BitSize+7)/8))),
+				"x":   ecCoord(key.PublicKey.X, key.PublicKey.Curve),
+				"y":   ecCoord(key.PublicKey.Y, key.PublicKey.Curve),
 			},
 		},
 	})
@@ -1201,4 +1202,11 @@ func extractStepNames(result *apiv1.ScenarioResult) []string {
 		names[i] = s.Name
 	}
 	return names
+}
+
+// ecCoord renders an EC coordinate as a JWK value: base64url of the
+// fixed-width big-endian bytes. FillBytes, not Bytes(), because the latter
+// drops a leading zero and yields a short, invalid coordinate.
+func ecCoord(v *big.Int, curve elliptic.Curve) string {
+	return base64.RawURLEncoding.EncodeToString(v.FillBytes(make([]byte, (curve.Params().BitSize+7)/8)))
 }
