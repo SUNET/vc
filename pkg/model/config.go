@@ -2172,8 +2172,14 @@ func (cfg *Cfg) checkW3CTypeConsistency() error {
 		if constructor == nil || !openid4vp.IsW3CVCFormatIdentifier(constructor.Format) {
 			continue
 		}
-		if len(constructor.w3cTypeValues()) > 0 && len(constructor.CredentialTypes) == 0 {
-			return fmt.Errorf("scope %q configures credential_type_values but no credential_types: it would be requested by those types and issued as a bare VerifiableCredential, which cannot match", scope)
+		// Narrowing, not merely present: credential_types naming only the base
+		// type mints the same bare VerifiableCredential as an absent list, so
+		// checking for presence alone let that config through.
+		issuesNarrowly := slices.ContainsFunc(constructor.W3CTypes(), func(t string) bool {
+			return t != "" && t != baseVCType
+		})
+		if len(constructor.w3cTypeValues()) > 0 && !issuesNarrowly {
+			return fmt.Errorf("scope %q is requested by credential_type_values but credential_types names nothing narrower than %s: it would be issued as a bare credential, which cannot match", scope, baseVCType)
 		}
 	}
 	return nil

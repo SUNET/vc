@@ -617,6 +617,16 @@ func TestCheckW3CTypeConsistency(t *testing.T) {
 		CredentialTypeValues: diploma,
 	}).checkW3CTypeConsistency())
 
+	// Base-only credential_types mints the same bare credential as an absent
+	// list, so it must be refused the same way.
+	err = cfgWith(&CredentialMetadata{
+		Format:               "ldp_vc",
+		CredentialTypes:      []string{baseVCType},
+		CredentialTypeValues: diploma,
+	}).checkW3CTypeConsistency()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), baseVCType)
+
 	// Issue-only is legitimate: the scope simply is not requestable.
 	assert.NoError(t, cfgWith(&CredentialMetadata{
 		Format:          "ldp_vc",
