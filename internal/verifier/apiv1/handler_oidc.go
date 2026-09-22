@@ -18,7 +18,11 @@ import (
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/oauth2"
 
+	"github.com/SUNET/vc/pkg/openid4vp"
+
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/lestrrat-go/jwx/v3/jwa"
+	"github.com/lestrrat-go/jwx/v3/jwe"
 	"github.com/skip2/go-qrcode"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -642,7 +646,11 @@ func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObject
 
 // DirectPostRequest represents a direct_post callback from a wallet
 type DirectPostRequest struct {
-	State                  string `json:"state" form:"state" binding:"required" validate:"required,max=256,printascii"`
+	// Not binding:"required": with response_mode=direct_post.jwt the wallet
+	// posts only `response`, and state travels inside that JWE (OpenID4VP 1.0
+	// 8.3.1). Requiring it here rejected a conformant wallet before anything
+	// could be decrypted. ProcessDirectPost requires one of state/response.
+	State                  string `json:"state" form:"state" validate:"omitempty,max=256,printascii"`
 	VPToken                string `json:"vp_token" form:"vp_token" validate:"omitempty"`                               // For standard direct_post (JWT, can be very large)
 	PresentationSubmission string `json:"presentation_submission" form:"presentation_submission" validate:"omitempty"` // For standard direct_post (JSON, can be large)
 	Response               string `json:"response" form:"response" validate:"omitempty"`                               // For DC API encrypted JWT response (can be very large)
@@ -653,10 +661,87 @@ type DirectPostResponse struct {
 	RedirectURI string
 }
 
+// resolveDirectPost returns the state this response belongs to, and the VP
+// token when it arrived encrypted.
+//
+// response_mode=direct_post.jwt posts a single `response` parameter holding a
+// JWE; state and vp_token are inside it (OpenID4VP 1.0 8.3.1). Plain
+// direct_post posts them as form fields. Both reach this endpoint, so the
+// encrypted case is opened here rather than assumed away.
+//
+// The decryption mirrors VerificationDirectPost, which has done this correctly
+// for the non-OIDC endpoint all along: the kid in the JWE header names the
+// ephemeral key cached for the session.
+func (c *Client) resolveDirectPost(req *DirectPostRequest) (state, vpToken string, err error) {
+	if req.Response == "" {
+		if req.State == "" {
+			c.log.Error(nil, "direct_post has neither state nor an encrypted response")
+			return "", "", ErrInvalidRequest
+		}
+		return req.State, "", nil
+	}
+
+	if c.openid4vp == nil || c.openid4vp.EphemeralKeyCache == nil {
+		c.log.Error(nil, "encrypted direct_post received but no ephemeral key cache is configured")
+		return "", "", errors.New("encrypted response received but no ephemeral key cache is configured")
+	}
+
+	kid, err := jose.ExtractKIDFromCompactJWT(req.Response)
+	if err != nil {
+		c.log.Error(err, "failed to read the kid from the encrypted response")
+		return "", "", fmt.Errorf("encrypted response has no usable kid: %w", err)
+	}
+
+	privateEphemeralJWK, found := c.openid4vp.EphemeralKeyCache.Get(kid)
+	if !found {
+		c.log.Debug("no ephemeral key for the encrypted response", "kid", kid)
+		return "", "", errors.New("ephemeral key not found for the encrypted response")
+	}
+
+	decrypted, err := jwe.Decrypt([]byte(req.Response), jwe.WithKey(jwa.ECDH_ES(), privateEphemeralJWK))
+	if err != nil {
+		c.log.Error(err, "failed to decrypt the direct_post response", "kid", kid)
+		return "", "", fmt.Errorf("failed to decrypt the response: %w", err)
+	}
+
+	vpResponse := openid4vp.VPResponse{}
+	if err := json.Unmarshal(decrypted, &vpResponse); err != nil {
+		c.log.Error(err, "failed to parse the decrypted direct_post response")
+		return "", "", fmt.Errorf("failed to parse the decrypted response: %w", err)
+	}
+
+	if vpResponse.State == "" {
+		c.log.Error(nil, "decrypted direct_post response carries no state")
+		return "", "", ErrInvalidRequest
+	}
+
+	// This flow maps one credential to the OIDC claims it issues, so several
+	// would leave nothing to choose between them. Refuse rather than pick.
+	tokens := make([]string, 0, len(vpResponse.VPToken))
+	for _, credentialTokens := range vpResponse.VPToken {
+		tokens = append(tokens, credentialTokens...)
+	}
+	if len(tokens) != 1 {
+		c.log.Error(nil, "encrypted direct_post did not carry exactly one VP token", "count", len(tokens), "state", vpResponse.State)
+		return "", "", fmt.Errorf("expected exactly one VP token in the encrypted response, got %d", len(tokens))
+	}
+
+	return vpResponse.State, tokens[0], nil
+}
+
 // ProcessDirectPost processes a direct_post response from a wallet
 func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) (*DirectPostResponse, error) {
-	// Get session by state
-	session, err := c.cacheService.AuthContext.GetByID(ctx, req.State)
+	// An encrypted response has to be opened before anything in it can be
+	// used - including the state this session is looked up by.
+	state, encryptedVPToken, err := c.resolveDirectPost(req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get session by state. In this flow state IS the session id: the request
+	// object sets state = sessionID, and the ephemeral key is cached under the
+	// same value, which is why the kid in the JWE header resolves it.
+	session, err := c.cacheService.AuthContext.GetByID(ctx, state)
 	if err != nil {
 		return nil, ErrSessionNotFound
 	}
@@ -667,15 +752,8 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 	var vpToken string
 	var presentationSubmission any
 
-	// Check if this is a DC API response (encrypted JWT) or standard form-encoded
-	if req.Response != "" {
-		// DC API response - should be an encrypted JWT (JWE)
-		c.log.Debug("Processing DC API encrypted response", "state", req.State)
-
-		// TODO: Implement JWT decryption using session ephemeral keys
-		// The response parameter contains a JWE that must be decrypted before use.
-		c.log.Error(nil, "DC API response decryption not yet implemented")
-		return nil, fmt.Errorf("DC API encrypted response handling not yet implemented")
+	if encryptedVPToken != "" {
+		vpToken = encryptedVPToken
 	} else if req.VPToken != "" {
 		// Standard direct_post with form-encoded parameters
 		vpToken = req.VPToken
@@ -693,7 +771,7 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 	}
 
 	// Validate and parse VP token
-	c.log.Debug("Processing VP token", "state", req.State, "vp_token_length", len(vpToken))
+	c.log.Debug("Processing VP token", "state", state, "vp_token_length", len(vpToken))
 
 	// Extract and map claims from VP token
 	oidcClaims, err := c.extractAndMapClaims(ctx, vpToken, strings.Join(session.Scopes, " "))
