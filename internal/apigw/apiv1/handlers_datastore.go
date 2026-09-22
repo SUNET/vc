@@ -640,16 +640,17 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 	// (not credential_configuration_id) in the credential request. Most wallets
 	// use credential_configuration_id for pre-auth flows, so we keep it simple.
 	authCtx := &cache.AuthorizationContext{
-		SessionID:    preAuthCode,
-		Code:         preAuthCode,
-		Status:       "code_issued",
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(5 * time.Minute).Unix(),
-		Scopes:       []string{req.Scope},
-		Nonce:        nonce,
-		DataSource:   string(model.DataSourceDatastore),
-		AuthProvider: model.AuthProviderDatastore,
-		TXCode:       pin,
+		SessionID:     preAuthCode,
+		Code:          preAuthCode,
+		Status:        "code_issued",
+		CreatedAt:     time.Now(),
+		ExpiresAt:     time.Now().Add(5 * time.Minute).Unix(),
+		Scopes:        []string{req.Scope},
+		Nonce:         nonce,
+		DataSource:    string(model.DataSourceDatastore),
+		AuthProvider:  model.AuthProviderDatastore,
+		TXCode:        pin,
+		PreAuthorized: true,
 	}
 	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		return nil, fmt.Errorf("failed to store pre-auth code: %w", err)

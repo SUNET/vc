@@ -70,6 +70,12 @@ type AuthorizationContext struct {
 	Code      string `json:"code,omitempty" bson:"code,omitempty" validate:"omitempty,max=128,printascii"`
 	Forfeited bool   `json:"forfeited,omitempty" bson:"forfeited,omitempty"`
 
+	// PreAuthorized marks the context as belonging to an OID4VCI
+	// pre-authorized code offer. The token endpoint rejects cross-grant
+	// use so a pre-auth code cannot be redeemed via authorization_code
+	// (which would skip the tx_code check) and vice versa.
+	PreAuthorized bool `json:"pre_authorized,omitempty" bson:"pre_authorized,omitempty"`
+
 	// RedeemedBy tracks DPoP thumbprints that have redeemed a pre-authorized code.
 	// Pre-authorized codes may be redeemed by multiple distinct clients (each
 	// identified by a unique DPoP key), but a given client must not redeem

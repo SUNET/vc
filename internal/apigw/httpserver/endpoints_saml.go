@@ -345,15 +345,16 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	// wallet fall back to credential_configuration_id, which the token
 	// endpoint and CredentialRequest.Validate already handle.
 	authCtx := &cache.AuthorizationContext{
-		SessionID:    preAuthCode,
-		Code:         preAuthCode,
-		Status:       "code_issued",
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(5 * time.Minute).Unix(),
-		Scopes:       []string{session.CredentialType},
-		Nonce:        nonce,
-		AuthProvider: model.AuthProviderSAML,
-		Identifier:   identifier,
+		SessionID:     preAuthCode,
+		Code:          preAuthCode,
+		Status:        "code_issued",
+		CreatedAt:     time.Now(),
+		ExpiresAt:     time.Now().Add(5 * time.Minute).Unix(),
+		Scopes:        []string{session.CredentialType},
+		Nonce:         nonce,
+		AuthProvider:  model.AuthProviderSAML,
+		Identifier:    identifier,
+		PreAuthorized: true,
 	}
 	if credSourceErr == nil {
 		authCtx.DataSource = string(credSource.DataSource)

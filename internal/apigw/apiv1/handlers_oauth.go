@@ -493,6 +493,12 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
 				"Authorization code is invalid or has already been used", 400, err)
 		}
+		// Reject cross-grant use: a pre-authorized code must not be redeemable
+		// via authorization_code (which would bypass the tx_code check).
+		if preCheck.PreAuthorized {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+				"pre-authorized code cannot be used with authorization_code grant", 400)
+		}
 		if preCheck.WalletClientID != "" && clientID != preCheck.WalletClientID {
 			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
 				"client_id does not match the authorization request", 400)
@@ -510,6 +516,27 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		if err != nil {
 			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
 				"Authorization code is invalid or has already been used", 400, err)
+		}
+		// Reject cross-grant use: a plain authorization_code context must not
+		// be redeemable via the pre-authorized_code grant.
+		if !preCheck.PreAuthorized {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+				"authorization code cannot be used with pre-authorized_code grant", 400)
+		}
+		// Reject an already-forfeited context up front.
+		if preCheck.Forfeited {
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+				"Authorization code is invalid or has already been used", 400)
+		}
+		// If the attempt budget is exhausted, trip forfeiture atomically so
+		// a subsequent correct-PIN request cannot slip past the cap.
+		if preCheck.TXCodeAttempts >= cache.MaxTXCodeAttempts {
+			if _, attemptErr := c.cacheService.AuthContext.ConsumeTXCodeAttempt(ctx, code); attemptErr != nil && !errors.Is(attemptErr, cache.ErrTXCodeAttemptsExceeded) {
+				return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
+					"Authorization code is invalid or has already been used", 400, attemptErr)
+			}
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+				"Authorization code is invalid or has already been used", 400)
 		}
 		switch {
 		case preCheck.TXCode == "" && req.TXCode != "":

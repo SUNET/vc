@@ -76,14 +76,15 @@ func newTokenTestClient(t *testing.T, storedTXCode string) (*Client, string) {
 	preAuthCode := "test-pre-auth-code"
 
 	err = authContextStore.Save(t.Context(), &apigwcache.AuthorizationContext{
-		SessionID:    preAuthCode,
-		Code:         preAuthCode,
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(5 * time.Minute).Unix(),
-		Scopes:       []string{"pid"},
-		AuthProvider: model.AuthProviderDatastore,
-		DataSource:   string(model.DataSourceDatastore),
-		TXCode:       storedTXCode,
+		SessionID:     preAuthCode,
+		Code:          preAuthCode,
+		CreatedAt:     time.Now(),
+		ExpiresAt:     time.Now().Add(5 * time.Minute).Unix(),
+		Scopes:        []string{"pid"},
+		AuthProvider:  model.AuthProviderDatastore,
+		DataSource:    string(model.DataSourceDatastore),
+		TXCode:        storedTXCode,
+		PreAuthorized: true,
 	})
 	require.NoError(t, err)
 
@@ -224,4 +225,71 @@ func TestOAuthToken_PreAuth_TXCodeSuccessDoesNotConsumeAttempts(t *testing.T) {
 	require.NoError(t, getErr)
 	assert.Equal(t, apigwcache.MaxTXCodeAttempts-1, stored.TXCodeAttempts,
 		"successful PIN comparison must not consume the attempt budget")
+}
+
+// TestOAuthToken_PreAuthCodeRejectedInAuthorizationCodeFlow verifies that a
+// pre-authorized code cannot be redeemed via the authorization_code grant,
+// which would otherwise bypass the tx_code (PIN) check. The exact error
+// depends on which upstream authorization_code guard fires first (client
+// authentication, PKCE, DPoP…); the safety property this test enforces is
+// that the pre-auth context is left untouched.
+func TestOAuthReject_PreAuthCodeInAuthorizationCodeFlow(t *testing.T) {
+	client, code := newTokenTestClient(t, "123456")
+
+	reply, err := client.OAuthToken(t.Context(), &openid4vci.TokenRequest{
+		GrantType: "authorization_code",
+		Code:      code,
+		ClientID:  "wallet-1",
+	})
+	require.Error(t, err)
+	assert.Nil(t, reply)
+
+	var oauthErr *oauth2.OAuthError
+	require.ErrorAs(t, err, &oauthErr)
+
+	stored, getErr := client.cacheService.AuthContext.Get(t.Context(), &apigwcache.AuthorizationContext{Code: code})
+	require.NoError(t, getErr)
+	assert.False(t, stored.Forfeited, "cross-grant rejection must not burn the pre-auth code")
+	assert.Empty(t, stored.RedeemedBy, "cross-grant rejection must not record a redeemer")
+	assert.Zero(t, stored.TXCodeAttempts, "cross-grant rejection must not debit the PIN attempt budget")
+}
+
+// TestOAuthToken_PreAuth_CorrectPINRejectedAfterCap verifies that once the
+// tx_code attempt budget is exhausted (and the context marked forfeited),
+// a subsequent request with the correct PIN is still rejected instead of
+// proceeding to redemption.
+func TestOAuthToken_PreAuth_CorrectPINRejectedAfterCap(t *testing.T) {
+	client, code := newTokenTestClient(t, "123456")
+
+	for range apigwcache.MaxTXCodeAttempts {
+		_, err := client.OAuthToken(t.Context(), &openid4vci.TokenRequest{
+			GrantType:         openid4vci.GrantTypePreAuthorizedCode,
+			PreAuthorizedCode: code,
+			TXCode:            "999999",
+		})
+		require.Error(t, err)
+	}
+	// Trip the cap so the context is forfeited.
+	_, err := client.OAuthToken(t.Context(), &openid4vci.TokenRequest{
+		GrantType:         openid4vci.GrantTypePreAuthorizedCode,
+		PreAuthorizedCode: code,
+		TXCode:            "999999",
+	})
+	require.Error(t, err)
+
+	reply, err := client.OAuthToken(t.Context(), &openid4vci.TokenRequest{
+		GrantType:         openid4vci.GrantTypePreAuthorizedCode,
+		PreAuthorizedCode: code,
+		TXCode:            "123456",
+	})
+	require.Error(t, err)
+	assert.Nil(t, reply)
+
+	var oauthErr *oauth2.OAuthError
+	require.ErrorAs(t, err, &oauthErr)
+	assert.Equal(t, oauth2.ErrCodeInvalidGrant, oauthErr.ErrorCode)
+
+	stored, getErr := client.cacheService.AuthContext.Get(t.Context(), &apigwcache.AuthorizationContext{Code: code})
+	require.NoError(t, getErr)
+	assert.True(t, stored.Forfeited, "code must remain forfeited")
 }
