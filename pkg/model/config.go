@@ -1841,8 +1841,10 @@ type CredentialMetadata struct {
 	// this deployment issues. Publish a context defining the term and name it
 	// here.
 	//
-	// The URL must be dereferenceable by the verifier, which expands the
-	// credential to compare it against the constraint.
+	// The URL must be dereferenceable by BOTH sides, and the issuer's need is
+	// the sharper one: signing canonicalizes the credential to RDF, so an
+	// unreachable context fails issuance outright rather than degrading
+	// verification. Publish it before configuring it.
 	CredentialContexts []string `yaml:"credential_contexts,omitempty" json:"-" validate:"omitempty,dive,required,url"`
 
 	MDDL *mdoc.MDDLSchema `yaml:"-" json:"-"`

@@ -8,24 +8,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestExpandedTypesTakesOnlyTheCredentialNode pins the constraint against a
-// decoy.
+// TestExpandedTypesIgnoresDecoyNodes pins type isolation against the realistic
+// attack: a wallet sends expanded JSON-LD carrying a decoy node beside the
+// credential, hoping its type satisfies the constraint.
 //
-// Expanding the whole document collects @type from every top-level node, so an
-// expanded-form response could carry a second node holding the requested type
-// and satisfy a constraint the credential itself does not meet. Only the
-// identified credential node's types are the credential's.
-func TestExpandedTypesTakesOnlyTheCredentialNode(t *testing.T) {
+// The test proves the hazard and the protection in one pass, so it cannot go
+// vacuous: expanding the WHOLE document really does pick up the decoy, while
+// the path the handler actually takes - extractCredentialFromExpanded, then
+// expandedTypes on that node alone - does not.
+func TestExpandedTypesIgnoresDecoyNodes(t *testing.T) {
 	const decoy = "https://example.org/degree#UniversityDegreeCredential"
+	const vcIRI = "https://www.w3.org/2018/credentials#VerifiableCredential"
 
-	var credNode map[string]any
-	require.NoError(t, json.Unmarshal([]byte(
-		`{"@type":["https://www.w3.org/2018/credentials#VerifiableCredential"]}`), &credNode))
+	expanded := []any{
+		map[string]any{
+			"@type": []any{vcIRI},
+			"https://www.w3.org/2018/credentials#credentialSubject": []any{
+				map[string]any{"@id": "did:example:subject"},
+			},
+		},
+		map[string]any{"@type": []any{decoy}},
+	}
 
-	iris, err := expandedTypes(credNode)
+	h, err := NewVC20Handler()
 	require.NoError(t, err)
-	assert.NotContains(t, iris, decoy, "a sibling node's type is not the credential's")
-	assert.Contains(t, iris, "https://www.w3.org/2018/credentials#VerifiableCredential")
+
+	// credBytes is the WHOLE document, as the handler keeps it for signature
+	// verification; credMap is the credential node it identified. buildResult
+	// gets both, and which one it reads for types is the whole question -
+	// reading the document picks up the decoy.
+	credBytes, err := json.Marshal(expanded)
+	require.NoError(t, err)
+	credMap, err := h.extractCredentialFromExpanded(expanded)
+	require.NoError(t, err)
+
+	result, err := h.buildResult(credBytes, credMap, map[string]any{}, false)
+	require.NoError(t, err)
+	assert.Contains(t, result.TypeIRIs, vcIRI, "the credential's own type is read")
+	assert.NotContains(t, result.TypeIRIs, decoy, "a sibling node's type is not the credential's")
+
 }
 
 // TestExpandedTypesDropsRelativeIRIs pins the other half: a term no context
