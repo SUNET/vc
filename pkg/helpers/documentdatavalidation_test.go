@@ -152,6 +152,19 @@ func TestGetValidationSchema(t *testing.T) {
 			gotLocal, err := getValidationSchema(localLocation, jsonschema.NewCompiler())
 			assert.NoError(t, err)
 			assert.NotNil(t, gotLocal)
+
+			// Schemas from independent compilers can't be compared via reflect.DeepEqual
+			// (retrievalURI, cached maps, compiler pointer differ). Assert semantic
+			// equivalence by requiring identical validation outcomes on the same inputs.
+			probes := []map[string]any{
+				{"name": "test_value", "age": 21},   // valid
+				{"name": "test_value", "age": "21"}, // wrong type
+				{"name": "test_value", "age": 19},   // below minimum
+				{"name": "test_value"},              // missing required
+			}
+			for _, doc := range probes {
+				assert.Equal(t, gotRemote.Validate(doc).IsValid(), gotLocal.Validate(doc).IsValid(), "validation outcome differs for %v", doc)
+			}
 		})
 	}
 }
