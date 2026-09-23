@@ -273,6 +273,22 @@ describe("isIssuanceAvailable fails closed", () => {
 describe("offers.js polyfill invariant", () => {
     const source = readFileSync(new URL("../offers.js", import.meta.url), "utf8");
 
+    it("does not claim the user cancelled on NotAllowedError", () => {
+        // isUserCancel() is true for EVERY NotAllowedError, but the polyfill
+        // raises that for a blocked popup, for no provider supporting the
+        // protocol, and for any error the wallet itself reports. Telling the
+        // operator they cancelled sends them looking in the wrong place.
+        // Matched on the import rather than on any mention, so the comment
+        // in offers.js explaining why it is not used stays allowed.
+        assert.equal(
+            /import\s*\{[^}]*\bisUserCancel\b[^}]*\}/.test(source),
+            false,
+            "offers.js must not branch on isUserCancel(): it cannot distinguish a " +
+                "user who closed the wallet from a popup the browser blocked. Use the " +
+                "library's own NotAllowedError message, which hedges correctly.",
+        );
+    });
+
     it("does not install the DC API polyfill", () => {
         assert.equal(
             /\binstallPolyfill\b/.test(source),

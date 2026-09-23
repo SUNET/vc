@@ -1343,7 +1343,15 @@ type CredentialOfferWallets struct {
 
 // CredentialOffers holds credential offer configurations
 type CredentialOffers struct {
-	// IssuerURL is the issuer URL for credential offers
+	// IssuerURL is the issuer IDENTIFIER published as `credential_issuer`
+	// inside each credential offer. It is NOT where offers are retrieved
+	// from: a by-reference offer (`credential_offer_uri`) is served by this
+	// gateway at apigw.public_url + /credential-offer/{uuid}, because that
+	// is the origin this service actually answers on. OpenID4VCI 1.0 does
+	// not require the two to be the same, and deployments where they differ
+	// are legitimate - so do not "reconcile" them by deriving one from the
+	// other. Building the retrieval URL from this field would hand out a
+	// credential_offer_uri that 404s.
 	IssuerURL string `yaml:"issuer_url" validate:"required"`
 	// Wallets holds wallet redirect configurations
 	Wallets map[string]CredentialOfferWallets `yaml:"wallets" validate:"required" doc_key:"wallet name"`

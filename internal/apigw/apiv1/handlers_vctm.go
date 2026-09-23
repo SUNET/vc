@@ -212,6 +212,18 @@ func (c *Client) credentialOfferReferenceURL(ctx context.Context, offerParams *o
 		return "", err
 	}
 
+	// The by-reference QR is the one rendering that leaves this machine: a
+	// phone fetches the offer from the URL encoded in it. Over cleartext that
+	// fetch is readable and tamperable, and the offer names the issuer the
+	// wallet then talks to. public_url is validated as http OR https, and
+	// http is legitimate for local development, so this warns rather than
+	// refuses - but it should never be seen in a deployment.
+	if !strings.HasPrefix(offerURI.String(), "https://") {
+		c.log.Warn("credential offer will be retrieved over cleartext; set apigw.public_url to an https URL",
+			"offer_uri", offerURI.String(),
+		)
+	}
+
 	if c.credentialOfferStore == nil {
 		return "", errors.New("credential offer store not configured")
 	}

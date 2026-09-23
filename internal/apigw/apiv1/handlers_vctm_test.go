@@ -381,6 +381,32 @@ func TestUICreateCredentialOffer_NoPublicURLRefuses(t *testing.T) {
 	require.Error(t, err)
 }
 
+// http public_url is legitimate for local development, so a cleartext
+// retrieval URL warns rather than refuses - the offer must still be usable.
+// If this ever starts erroring, that is a deliberate policy change and the
+// warning in credentialOfferReferenceURL should go with it.
+func TestUICreateCredentialOffer_CleartextPublicURLStillWorks(t *testing.T) {
+	credMeta := map[string]*model.CredentialMetadata{
+		"siros_id": {VCTM: &sdjwtvc.VCTM{Name: "SIROS ID", VCT: "urn:siros:id"}},
+	}
+	client, store := newOfferTestClientWithStore(t, credMeta)
+	client.cfg.APIGW.PublicURL = "http://apigw.localhost:8080"
+
+	reply, err := client.UICreateCredentialOffer(t.Context(), &UICredentialOfferRequest{Scope: "siros_id"})
+	require.NoError(t, err)
+
+	values, err := url.ParseQuery(strings.TrimPrefix(reply.QR.URI, "openid-credential-offer://?"))
+	require.NoError(t, err)
+	offerURI := openid4vci.CredentialOfferURI(values.Get("credential_offer_uri"))
+	require.True(t, strings.HasPrefix(offerURI.String(), "http://apigw.localhost:8080/credential-offer/"),
+		"the reference must follow public_url even when it is cleartext, got %q", offerURI.String())
+
+	uuid, err := offerURI.UUID()
+	require.NoError(t, err)
+	_, err = store.Get(t.Context(), uuid)
+	require.NoError(t, err, "the offer must still be retrievable")
+}
+
 // GET /offers/:scope is unauthenticated, so a by-reference id generated
 // fresh per request would let anyone grow the credential-offer collection
 // without limit by asking for one valid scope in a loop. The id is derived

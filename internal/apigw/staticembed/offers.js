@@ -15,7 +15,7 @@ import * as v from "valibot";
 // combined bundle carrying the polyfill and the web-wallets registry in one
 // module instance (sirosfoundation/dc-api#23). Until then the same-device
 // button stays dormant and the QR is the same-device path too.
-import { getUserFriendlyErrorMessage, isUserCancel } from "./dc-api.js";
+import { getUserFriendlyErrorMessage } from "./dc-api.js";
 import { credentialOfferData, isIssuanceAvailable, issuanceResult, OID4VCI_PROTOCOL } from "./offers-helpers.js";
 
 
@@ -222,9 +222,16 @@ Alpine.data("app", () => ({
             this.issuanceStatus = outcome.status;
         } catch (err) {
             console.error("Error starting issuance over the DC API:", err);
-            this.error = isUserCancel(err)
-                ? "Issuance was cancelled. You can still scan the QR code."
-                : getUserFriendlyErrorMessage(err);
+            // Deliberately NOT branching on isUserCancel(): it is true for
+            // every NotAllowedError, and the polyfill raises that for a
+            // blocked popup, for no provider supporting the protocol, and
+            // for any error the wallet itself reports - not just for a user
+            // who closed the window. Claiming "you cancelled" for a popup
+            // the browser blocked sends the operator looking in the wrong
+            // place. The library's own message for NotAllowedError already
+            // hedges honestly ("You denied the credential request or no
+            // wallet is available."), so use it and point back at the QR.
+            this.error = `${getUserFriendlyErrorMessage(err)} You can still scan the QR code.`;
         }
     },
 
