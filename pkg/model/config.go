@@ -2101,6 +2101,15 @@ func (c *CredentialMetadata) GetVCTURL() string {
 // carries first.
 const VCContextV2 = "https://www.w3.org/ns/credentials/v2"
 
+// W3CTypeValuesForCheck exposes the narrowing type alternatives for config
+// validation, which lives in another package.
+func (c *CredentialMetadata) W3CTypeValuesForCheck() [][]string {
+	if c == nil {
+		return nil
+	}
+	return c.w3cTypeValues()
+}
+
 // W3CContexts returns the full @context a W3C credential of this type is
 // issued with: the VC 2.0 base, then whatever credential_contexts configures.
 //

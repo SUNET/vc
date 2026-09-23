@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	neturl "net/url"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -193,7 +194,41 @@ func (l *CachingDocumentLoader) fetchContext(rawURL string) (*ld.RemoteDocument,
 		return nil, fmt.Errorf("JSON-LD context %q is not valid JSON: %w", rawURL, err)
 	}
 
-	return &ld.RemoteDocument{DocumentURL: resp.Request.URL.String(), Document: document}, nil
+	doc := &ld.RemoteDocument{DocumentURL: resp.Request.URL.String(), Document: document}
+
+	// A context served as application/json may name the real context in a
+	// Link header (JSON-LD 1.1 section 6.1). Honour that: json-gold resolves
+	// ContextURL through the DocumentLoader it was given - this one - so the
+	// fetch re-enters the scheme and dial checks.
+	//
+	// rel=alternate is NOT honoured, and that difference is the point. The
+	// processor resolves ContextURL through us; json-gold resolved alternate
+	// by calling its own loader, which is how file:// became reachable.
+	if ctxURL := contextLinkTarget(resp); ctxURL != "" {
+		doc.ContextURL = resp.Request.URL.ResolveReference(&neturl.URL{Path: ctxURL}).String()
+		if abs, err := neturl.Parse(ctxURL); err == nil && abs.IsAbs() {
+			doc.ContextURL = abs.String()
+		}
+	}
+
+	return doc, nil
+}
+
+// contextLinkTarget returns the target of a Link header naming the document's
+// JSON-LD context, if the response is plain JSON. A response already served as
+// application/ld+json IS the context and needs no indirection.
+func contextLinkTarget(resp *http.Response) string {
+	contentType := resp.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "application/ld+json") {
+		return ""
+	}
+	links := ld.ParseLinkHeader(resp.Header.Get("Link"))["http://www.w3.org/ns/json-ld#context"]
+	if len(links) != 1 {
+		// Zero is the ordinary case. More than one is ambiguous, and JSON-LD
+		// 1.1 makes it an error rather than a choice.
+		return ""
+	}
+	return links[0]["target"]
 }
 
 // LoadDocument implements ld.DocumentLoader

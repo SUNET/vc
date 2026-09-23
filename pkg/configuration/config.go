@@ -13,6 +13,7 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/creasty/defaults"
 	"github.com/kelseyhightower/envconfig"
@@ -136,6 +137,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 			return nil, err
 		}
 
+		if err := checkW3CTypeConsistency(cfg); err != nil {
+			return nil, err
+		}
+
 		// Load VCTM data and derive Attributes before validation. No nil
 		// guard: checkCredentialMetadataEntries above has refused those.
 		for scope, constructor := range cfg.Common.CredentialMetadata {
@@ -206,6 +211,42 @@ func checkCredentialMetadataEntries(cfg *model.Cfg) error {
 	}
 	if len(empty) > 0 {
 		return fmt.Errorf("common.credential_metadata: no configuration under %s", strings.Join(empty, ", "))
+	}
+	return nil
+}
+
+// checkW3CTypeConsistency refuses a W3C scope that asks for a type it does not
+// issue.
+//
+// credential_type_values is what a verifier constrains by, credential_types is
+// what the issuer mints, and credential_contexts is what gives a custom term a
+// meaning. Configure the first to narrow past the base type without the other
+// two and the deployment issues credentials its own verifier refuses: the
+// query requires an IRI the credential cannot carry, because the term was
+// never minted, or never had a context to expand against.
+//
+// The three only work as a set, which the field documentation says - this
+// makes saying it unnecessary.
+func checkW3CTypeConsistency(cfg *model.Cfg) error {
+	if cfg.Common == nil {
+		return nil
+	}
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		credential := cfg.Common.CredentialMetadata[scope]
+		if credential == nil || !openid4vp.IsW3CVCFormatIdentifier(credential.Format) {
+			continue
+		}
+		// Only a constraint that narrows past the base type needs a custom
+		// term behind it; an unset or base-only list requests nothing special.
+		if len(credential.W3CTypeValuesForCheck()) == 0 {
+			continue
+		}
+		if len(credential.CredentialTypes) == 0 {
+			return fmt.Errorf("common.credential_metadata.%s: credential_type_values narrows the request but credential_types is unset, so only VerifiableCredential is issued and the query can never match", scope)
+		}
+		if len(credential.CredentialContexts) == 0 {
+			return fmt.Errorf("common.credential_metadata.%s: credential_type_values narrows the request and credential_types names a custom term, but credential_contexts is unset - an undefined term expands to a relative IRI and can never equal the configured one", scope)
+		}
 	}
 	return nil
 }

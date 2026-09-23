@@ -137,3 +137,49 @@ func TestFetchContextRejectsOversizedBody(t *testing.T) {
 	_, err := loader.LoadDocument(srv.URL)
 	require.Error(t, err, "a context larger than the cap must not be accepted whole")
 }
+
+// TestFetchContextHonoursContextLink pins the difference between the two Link
+// relations.
+//
+// rel="http://www.w3.org/ns/json-ld#context" is how a context served as plain
+// JSON names itself (JSON-LD 1.1 6.1), and json-gold resolves ContextURL
+// through the DocumentLoader it was given - this one - so it re-enters the
+// scheme and dial checks. rel=alternate was resolved by json-gold calling its
+// OWN loader, which is how file:// became reachable, so that one stays
+// unhonoured.
+func TestFetchContextHonoursContextLink(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Link", `<https://example.org/real-context.jsonld>; rel="http://www.w3.org/ns/json-ld#context"`)
+		w.Header().Add("Link", `<file:///etc/passwd>; rel="alternate"; type="application/ld+json"`)
+		_, _ = w.Write([]byte(`{"name":"not a context"}`))
+	}))
+	defer srv.Close()
+
+	loader := NewCachingDocumentLoader()
+	loader.client = srv.Client()
+
+	doc, err := loader.LoadDocument(srv.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "https://example.org/real-context.jsonld", doc.ContextURL,
+		"the context link is recorded, and will be fetched back through this loader")
+	assert.NotContains(t, doc.ContextURL, "file://", "the alternate link is still ignored")
+}
+
+// TestFetchContextIgnoresContextLinkOnLDJSON: a response already served as
+// application/ld+json IS the context, so no indirection applies.
+func TestFetchContextIgnoresContextLinkOnLDJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/ld+json")
+		w.Header().Set("Link", `<https://example.org/other.jsonld>; rel="http://www.w3.org/ns/json-ld#context"`)
+		_, _ = w.Write([]byte(`{"@context":{"Foo":"https://example.org/ns#Foo"}}`))
+	}))
+	defer srv.Close()
+
+	loader := NewCachingDocumentLoader()
+	loader.client = srv.Client()
+
+	doc, err := loader.LoadDocument(srv.URL)
+	require.NoError(t, err)
+	assert.Empty(t, doc.ContextURL)
+}
