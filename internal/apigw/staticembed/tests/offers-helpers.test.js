@@ -26,6 +26,17 @@ describe("OID4VCI_PROTOCOL", () => {
 });
 
 describe("isIssuanceAvailable", () => {
+    // These cases are about what the PROBES report, so give them the one
+    // precondition the predicate checks first: something to actually call.
+    // The absence of it is covered in "fails closed" below.
+    before(() => {
+        Object.defineProperty(globalThis, "navigator", {
+            value: { credentials: { get: async () => null, create: async () => null } },
+            configurable: true,
+            writable: true,
+        });
+    });
+
     afterEach(clearGlobals);
 
     it("is false on a browser with neither the DC API nor a registered web wallet", () => {
@@ -174,6 +185,83 @@ describe("the vendored polyfill and the availability gate", () => {
             protocols: ["openid4vp-v1-signed"],
         });
         assert.equal(isIssuanceAvailable(), false);
+    });
+});
+
+// offers.js calls navigator.credentials.create() whenever the predicate is
+// true, and calls the predicate from Alpine's init(). So a probe that throws
+// does not merely hide a button - it aborts the component and takes the QR
+// rendering with it. Every one of these must be false, never a throw.
+describe("isIssuanceAvailable fails closed", () => {
+    /** @type {PropertyDescriptor | undefined} */
+    let savedNavigator;
+
+    before(() => {
+        savedNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    });
+
+    function setNavigator(value) {
+        Object.defineProperty(globalThis, "navigator", {
+            value,
+            configurable: true,
+            writable: true,
+        });
+    }
+
+    afterEach(() => {
+        if (savedNavigator) {
+            Object.defineProperty(globalThis, "navigator", savedNavigator);
+        } else {
+            delete globalThis.navigator;
+        }
+        clearGlobals();
+    });
+
+    it("is false when navigator.credentials.create is missing", () => {
+        setNavigator({ credentials: { get: async () => null } });
+        // A shim can claim the protocol without providing the call it gates.
+        globalThis.DigitalCredential = { userAgentAllowsProtocol: () => true };
+        assert.equal(isIssuanceAvailable(), false);
+    });
+
+    it("is false when navigator.credentials is missing entirely", () => {
+        setNavigator({});
+        globalThis.DigitalWallets = { supportsProtocol: () => true };
+        assert.equal(isIssuanceAvailable(), false);
+    });
+
+    it("is false, not a throw, when userAgentAllowsProtocol throws", () => {
+        setNavigator({ credentials: { create: async () => null } });
+        globalThis.DigitalCredential = {
+            userAgentAllowsProtocol: () => {
+                throw new Error("hostile shim");
+            },
+        };
+        assert.equal(isIssuanceAvailable(), false);
+    });
+
+    it("is false, not a throw, when supportsProtocol throws", () => {
+        setNavigator({ credentials: { create: async () => null } });
+        globalThis.DigitalWallets = {
+            supportsProtocol: () => {
+                throw new Error("hostile registry");
+            },
+        };
+        assert.equal(isIssuanceAvailable(), false);
+    });
+
+    it("ignores a truthy non-boolean from the native probe", () => {
+        setNavigator({ credentials: { create: async () => null } });
+        globalThis.DigitalCredential = { userAgentAllowsProtocol: () => "yes" };
+        assert.equal(isIssuanceAvailable(), false);
+    });
+
+    it("is still true for genuine native support", () => {
+        setNavigator({ credentials: { create: async () => null } });
+        globalThis.DigitalCredential = {
+            userAgentAllowsProtocol: (p) => p === "openid4vci-v1",
+        };
+        assert.equal(isIssuanceAvailable(), true);
     });
 });
 

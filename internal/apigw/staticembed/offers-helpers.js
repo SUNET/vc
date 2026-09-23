@@ -53,11 +53,30 @@ export const OID4VCI_PROTOCOL = OID4VCI_PROTOCOLS.V1;
  * @returns {boolean}
  */
 export function isIssuanceAvailable() {
-    if (isProtocolAllowed(OID4VCI_PROTOCOL)) {
-        return true;
+    // Fail closed, in both senses. offers.js calls
+    // navigator.credentials.create() whenever this is true, so a shim that
+    // reports support without providing create() would render a button that
+    // throws on click; and this runs inside Alpine's init(), so a probe that
+    // throws would abort the whole component - taking the QR down with it -
+    // rather than just hiding one button. Every path below therefore returns
+    // false instead of propagating.
+    if (typeof navigator === "undefined" || typeof navigator.credentials?.create !== "function") {
+        return false;
     }
 
-    return globalThis.DigitalWallets?.supportsProtocol?.(OID4VCI_PROTOCOL) === true;
+    try {
+        if (isProtocolAllowed(OID4VCI_PROTOCOL) === true) {
+            return true;
+        }
+    } catch {
+        // A hostile or half-installed DigitalCredential shim.
+    }
+
+    try {
+        return globalThis.DigitalWallets?.supportsProtocol?.(OID4VCI_PROTOCOL) === true;
+    } catch {
+        return false;
+    }
 }
 
 /**

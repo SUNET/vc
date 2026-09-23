@@ -25,8 +25,11 @@
 // "bundle" script), which breaks the six module-level bindings the polyfill
 // reassigns — installPolyfill() threw "TypeError: Assignment to constant
 // variable." before reaching `_installed = true`. The six declarations below
-// are `let` again; nothing else is changed. Fix belongs upstream in the
-// bundle script, see sirosfoundation/dc-api#20.
+// are `let` again; nothing else is changed. Fixed upstream in
+// sirosfoundation/dc-api#21, which removes the `sed` rewrite outright and
+// adds a test that rebuilds and invokes each bundle; drop this patch and
+// re-vendor once that releases. (#20 is the issuance API issue #21 closes,
+// not the bundle bug.)
 //
 //   Library: https://github.com/sirosfoundation/dc-api
 //
