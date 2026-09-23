@@ -260,6 +260,8 @@ apigw:
           as_array: true
         "urn:oasis:names:tc:SAML:attribute:subject-id":
           claim: "subject_id"
+    preauth:
+      enable_pin: true
   data_sources:
     datastore:
       import:
@@ -309,6 +311,15 @@ apigw:
             - "ehic"
             - "mdl"
             - "eduid"
+        # Interop testbed (webuild-cs01, University of the Aegean). Static
+        # allowlist entry lets the headless testbed wallet pass PAR client
+        # validation without going through the wallet-attestation PDP.
+        "wallet-client":
+          type: "public"
+          redirect_uri: "https://dev-i4mlab.aegean.gr/wallet-client/oauth/callback"
+          scopes:
+            - "pid"
+            - "ehic"
     credential_offers:
       issuer_url: "https://sunet-vc-apigw.fly.dev"
       wallets:

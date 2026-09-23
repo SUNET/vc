@@ -92,7 +92,11 @@ window.adminApp = function () {
                 document_id: '',
                 identity_mapping_ids_str: '',
                 document_data: []
-            }
+            },
+            offerLoading: false,
+            /** @type {{credential_offer_url: string, tx_code?: string, credential_offer: any}|null} */
+            offerResult: null,
+            offerError: ''
         },
 
         // Import view state
@@ -370,6 +374,41 @@ window.adminApp = function () {
 
         toggleDocDetail(idx) {
             this.ds.detailIdx = this.ds.detailIdx === idx ? null : idx;
+        },
+
+        async createPreAuthOffer(doc) {
+            this.ds.offerLoading = true;
+            this.ds.offerError = '';
+            this.ds.offerResult = null;
+            try {
+                const resp = await this.apiFetch('/api/v1/datastore/preauth_offer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        authentic_source: doc.meta?.authentic_source,
+                        scope: doc.meta?.scope,
+                        document_id: doc.meta?.document_id,
+                    }),
+                    credentials: 'same-origin',
+                });
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    throw new Error(text || resp.statusText);
+                }
+                this.ds.offerResult = await resp.json();
+            } catch (e) {
+                this.ds.offerError = 'Failed: ' + e.message;
+            }
+            this.ds.offerLoading = false;
+        },
+
+        async copyToClipboard(text) {
+            try {
+                await navigator.clipboard.writeText(text);
+                this.showToast('Copied to clipboard', 'success');
+            } catch (e) {
+                this.showToast('Copy failed: ' + e.message, 'danger');
+            }
         },
 
         async createDocument() {

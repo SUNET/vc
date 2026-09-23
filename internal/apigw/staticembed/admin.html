@@ -292,6 +292,7 @@
                                             <td class="text-nowrap">
                                                 <button class="btn btn-sm btn-outline-info" @click="toggleDocDetail(idx)">View</button>
                                                 <button class="btn btn-sm btn-outline-warning" @click="openEditDocument(idx)">Edit</button>
+                                                <button class="btn btn-sm btn-outline-success" @click="createPreAuthOffer(doc)" :disabled="ds.offerLoading">Offer</button>
                                                 <button class="btn btn-sm btn-outline-danger" @click="deleteDocument(doc)">Del</button>
                                             </td>
                                         </tr>
@@ -317,6 +318,53 @@
                                         <pre class="doc-json" x-text="JSON.stringify(ds.docs[ds.detailIdx]?.identity_mapping_ids, null, 2)"></pre>
                                         <h6 class="mt-3">Document Data</h6>
                                         <pre class="doc-json" x-text="JSON.stringify(ds.docs[ds.detailIdx]?.document_data, null, 2)"></pre>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Pre-authorized offer modal -->
+                    <template x-if="ds.offerResult || ds.offerError || ds.offerLoading">
+                        <div class="modal d-block" tabindex="-1" style="background:rgba(0,0,0,0.5);" @click.self="ds.offerResult = null; ds.offerError = ''">
+                            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title">Pre-Authorized Credential Offer</h5>
+                                        <button type="button" class="btn-close" @click="ds.offerResult = null; ds.offerError = ''"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <template x-if="ds.offerLoading">
+                                            <div class="text-center py-4">
+                                                <span class="spinner-border"></span>
+                                            </div>
+                                        </template>
+                                        <template x-if="ds.offerError">
+                                            <div class="alert alert-danger" x-text="ds.offerError"></div>
+                                        </template>
+                                        <template x-if="ds.offerResult">
+                                            <div>
+                                                <template x-if="ds.offerResult.tx_code">
+                                                    <div class="mb-3">
+                                                        <h6>Transaction Code (PIN)</h6>
+                                                        <div class="input-group">
+                                                            <input class="form-control font-monospace fs-4" readonly :value="ds.offerResult.tx_code">
+                                                            <button class="btn btn-outline-secondary" @click="copyToClipboard(ds.offerResult.tx_code)">Copy</button>
+                                                        </div>
+                                                        <small class="text-muted">Deliver this PIN to the wallet user out-of-band.</small>
+                                                    </div>
+                                                </template>
+                                                <div class="mb-3">
+                                                    <h6>Credential Offer URL</h6>
+                                                    <div class="input-group">
+                                                        <input class="form-control font-monospace" readonly :value="ds.offerResult.credential_offer_url">
+                                                        <button class="btn btn-outline-secondary" @click="copyToClipboard(ds.offerResult.credential_offer_url)">Copy</button>
+                                                    </div>
+                                                </div>
+                                                <h6>Credential Offer</h6>
+                                                <pre class="doc-json" x-text="JSON.stringify(ds.offerResult.credential_offer, null, 2)"></pre>
+                                            </div>
+                                        </template>
                                     </div>
                                 </div>
                             </div>

@@ -2,21 +2,34 @@ package httpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
+	"strings"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/vcclient"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/codes"
 )
+
+// acceptsHTML reports whether the caller's Accept header explicitly asks
+// for text/html. Browsers always send it; standards-conformant headless
+// wallets (HAIP, OpenID4VCI test tooling) don't. Everything else is
+// treated as a headless client so the OpenID4VP presentation-during-
+// issuance handoff can be driven purely via HTTP 302.
+func acceptsHTML(c *gin.Context) bool {
+	return strings.Contains(c.GetHeader("Accept"), "text/html")
+}
 
 func (s *Service) endpointOAuthPar(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointAuthPar")
@@ -27,6 +40,15 @@ func (s *Service) endpointOAuthPar(ctx context.Context, c *gin.Context) (any, er
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "binding error")
 		return nil, err
+	}
+
+	// authorization_details arrives as a JSON-array string in the form body per OpenID4VCI §5.1.1; gin's form binder can't decode it into a []struct.
+	if request.AuthorizationDetailsRaw != "" && len(request.AuthorizationDetails) == 0 {
+		if err := json.Unmarshal([]byte(request.AuthorizationDetailsRaw), &request.AuthorizationDetails); err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			s.log.Error(err, "authorization_details parse error")
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "invalid authorization_details", 400, err)
+		}
 	}
 
 	// Extract OAuth-Client-Attestation headers (draft-ietf-oauth-attestation-based-client-auth-04 §3.1)
@@ -244,6 +266,17 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			return nil, err
 		}
 
+		// Headless wallets (interop testbeds, HAIP-conformant clients)
+		// cannot drive the JS-based consent.html countdown redirect. Skip
+		// the browser UI and 302 straight to the wallet's openid4vp://
+		// authorization request URL.
+		if !acceptsHTML(c) {
+			s.log.Debug("endpointOAuthAuthorizationConsent: headless client, 302 to wallet URL",
+				"redirect_url", reply.RedirectURL)
+			c.Redirect(http.StatusFound, reply.RedirectURL)
+			return nil, nil
+		}
+
 		// Pass the wallet redirect URL via the template data attribute
 		// (cookies are no longer used for this purpose).
 		redirectURL = reply.RedirectURL
@@ -395,9 +428,70 @@ func (s *Service) endpointOAuthAuthorizationConsentCallback(ctx context.Context,
 		return nil, err
 	}
 
+	if !acceptsHTML(c) {
+		return nil, s.headlessConsentComplete(ctx, c, session, request.ResponseCode)
+	}
+
 	c.Redirect(http.StatusFound, "/authorization/consent/#/credentials")
 
 	return nil, nil
+}
+
+// headlessConsentComplete finishes the OpenID4VP-driven authorization for
+// non-browser clients by running the same UserLookup the SPA would run on
+// the "Confirm" click and then 302ing to the wallet's redirect_uri with
+// the OAuth code. Mirrors endpointUserLookup so the two paths stay in sync.
+func (s *Service) headlessConsentComplete(ctx context.Context, c *gin.Context, session sessions.Session, responseCode string) error {
+	scope, ok := session.Get("scope").(string)
+	if !ok {
+		return errors.New("scope not found in session")
+	}
+	requestURI, ok := session.Get("request_uri").(string)
+	if !ok {
+		return errors.New("request_uri not found in session")
+	}
+	authProvider, ok := session.Get("auth_provider").(string)
+	if !ok {
+		return errors.New("auth_provider not found in session")
+	}
+	if authProvider != model.AuthProviderOpenID4VP {
+		return fmt.Errorf("headless consent completion supports only openid4vp, got %q", authProvider)
+	}
+
+	vctm, err := s.apiv1.GetVCTMFromScope(ctx, &apiv1.GetVCTMFromScopeRequest{Scope: scope})
+	if err != nil && !errors.Is(err, apiv1.ErrScopeIsMDoc) {
+		return fmt.Errorf("get VCTM: %w", err)
+	}
+	var mddl *mdoc.MDDLSchema
+	if errors.Is(err, apiv1.ErrScopeIsMDoc) {
+		mddl, err = s.apiv1.GetMDDLFromScope(ctx, &apiv1.GetMDDLFromScopeRequest{Scope: scope})
+		if err != nil {
+			return fmt.Errorf("get MDDL: %w", err)
+		}
+	}
+
+	reply, err := s.apiv1.UserLookup(ctx, &vcclient.UserLookupRequest{
+		RequestURI:   requestURI,
+		AuthProvider: authProvider,
+		ResponseCode: responseCode,
+		VCTM:         vctm,
+		MDDL:         mddl,
+	})
+	if err != nil {
+		return fmt.Errorf("user lookup: %w", err)
+	}
+	if reply == nil || reply.RedirectURL == "" {
+		return errors.New("user lookup returned empty redirect URL")
+	}
+
+	session.Clear()
+	if err := session.Save(); err != nil {
+		s.log.Error(err, "session clear error")
+	}
+
+	s.log.Debug("headless consent complete: 302 to wallet", "redirect_url", reply.RedirectURL)
+	c.Redirect(http.StatusFound, reply.RedirectURL)
+	return nil
 }
 
 func (s *Service) endpointOAuthAuthorizationConsentSvgTemplate(ctx context.Context, c *gin.Context) (any, error) {

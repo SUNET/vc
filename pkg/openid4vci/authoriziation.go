@@ -37,10 +37,15 @@ type PARRequest struct {
 	Scope        string `json:"scope" form:"scope"`
 	State        string `json:"state" form:"state"`
 
-	Prompt               string                          `json:"prompt" form:"prompt"`
-	AuthorizationDetails []AuthorizationDetailsParameter `json:"authorization_details" form:"authorization_details"`
-	CodeChallenge        string                          `json:"code_challenge" form:"code_challenge" validate:"required"`
-	CodeChallengeMethod  string                          `json:"code_challenge_method" form:"code_challenge_method" validate:"required,oneof=S256 plain"`
+	Prompt string `json:"prompt" form:"prompt"`
+	// AuthorizationDetails carries the parsed authorization_details array. The
+	// form-body variant is a single JSON-array string in AuthorizationDetailsRaw,
+	// which the endpoint post-parses because gin's form binder cannot decode a
+	// JSON array into a []struct field.
+	AuthorizationDetails    []AuthorizationDetailsParameter `json:"authorization_details" form:"-"`
+	AuthorizationDetailsRaw string                          `json:"-" form:"authorization_details" validate:"omitempty,max=16384"`
+	CodeChallenge           string                          `json:"code_challenge" form:"code_challenge" validate:"required"`
+	CodeChallengeMethod     string                          `json:"code_challenge_method" form:"code_challenge_method" validate:"required,oneof=S256 plain"`
 
 	// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-additional-request-paramete
 	WalletIssuer string `json:"wallet_issuer" form:"wallet_issuer"`

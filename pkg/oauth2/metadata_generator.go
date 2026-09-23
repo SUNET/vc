@@ -26,9 +26,12 @@ func GenerateMetadata(cfg *MetadataConfig) *AuthorizationServerMetadata {
 		PushedAuthorizationRequestEndpoint:  cfg.IssuerURL + "/op/par",
 		RequiredPushedAuthorizationRequests: true,
 		GrantTypesSupported:                 grantTypes,
-		TokenEndpointAuthMethodsSupported:   []string{"none"},
-		ResponseTypesSupported:              []string{"code"},
-		CodeChallengeMethodsSupported:       []string{"S256"},
-		DPOPSigningALGValuesSupported:       []string{"ES256"},
+		// "attest_jwt_client_auth" per draft-ietf-oauth-attestation-based-client-auth-07 §10.1; "none" kept for pre-authorized_code anonymous access.
+		TokenEndpointAuthMethodsSupported:             []string{"attest_jwt_client_auth", "none"},
+		ClientAttestationSigningALGValuesSupported:    []string{"ES256", "ES384", "ES512"},
+		ClientAttestationPoPSigningALGValuesSupported: []string{"ES256", "ES384", "ES512"},
+		ResponseTypesSupported:                        []string{"code"},
+		CodeChallengeMethodsSupported:                 []string{"S256"},
+		DPOPSigningALGValuesSupported:                 []string{"ES256"},
 	}
 }

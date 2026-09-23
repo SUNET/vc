@@ -1,0 +1,555 @@
+{
+  "name": "PID SD-JWT VC Type Metadata",
+  "vct": "urn:eudi:pid_urn",
+  "description": "Person Identification Data per EUDI ARF PID Rulebook v1.0 (urn:eudi:pid:1).",
+  "$comment": "Implementation of this type metadata may require Member State–specific clarifications to align with national policies governing the display of included claims.",
+  "display": [
+    {
+      "locale": "en-US",
+      "name": "PID",
+      "description": "Person Identification Data",
+      "rendering": {
+        "simple": {
+          "logo": {
+            "uri": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4MjkgNTA0IiB3aWR0aD0iODI5IiBoZWlnaHQ9IjUwNCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImJnIiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3R5bGU9InN0b3AtY29sb3I6IzFhM2E1YyIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiMwZDFmMzMiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImhlYWRlciIgeDE9IjAlIiB5MT0iMCUiIHgyPSIxMDAlIiB5Mj0iMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojMjM0YjczIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3R5bGU9InN0b3AtY29sb3I6IzFhM2E1YyIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxjbGlwUGF0aCBpZD0icGhvdG9DbGlwIj4KICAgICAgPHJlY3QgeD0iNDgiIHk9IjE0MCIgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIHJ4PSI4IiByeT0iOCIvPgogICAgPC9jbGlwUGF0aD4KICA8L2RlZnM+CgogIDwhLS0gQ2FyZCBiYWNrZ3JvdW5kIC0tPgogIDxyZWN0IHdpZHRoPSI4MjkiIGhlaWdodD0iNTA0IiByeD0iMjQiIHJ5PSIyNCIgZmlsbD0idXJsKCNiZykiLz4KCiAgPCEtLSBIZWFkZXIgYmFuZCAtLT4KICA8cmVjdCB3aWR0aD0iODI5IiBoZWlnaHQ9IjkwIiByeD0iMjQiIHJ5PSIyNCIgZmlsbD0idXJsKCNoZWFkZXIpIi8+CiAgPHJlY3QgeT0iNjAiIHdpZHRoPSI4MjkiIGhlaWdodD0iMzAiIGZpbGw9InVybCgjaGVhZGVyKSIvPgoKICA8IS0tIEVVIHN0YXJzIGRlY29yYXRpb24gLS0+CiAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNDgsIDI4KSIgZmlsbD0iI2YwYzA0MCIgb3BhY2l0eT0iMC45Ij4KICAgIDxjaXJjbGUgY3g9IjAiIGN5PSIwIiByPSIzIi8+PGNpcmNsZSBjeD0iNiIgY3k9Ii04IiByPSIzIi8+PGNpcmNsZSBjeD0iMTUiIGN5PSItMTEiIHI9IjMiLz4KICAgIDxjaXJjbGUgY3g9IjI0IiBjeT0iLTgiIHI9IjMiLz48Y2lyY2xlIGN4PSIzMCIgY3k9IjAiIHI9IjMiLz48Y2lyY2xlIGN4PSIyNCIgY3k9IjgiIHI9IjMiLz4KICAgIDxjaXJjbGUgY3g9IjE1IiBjeT0iMTEiIHI9IjMiLz48Y2lyY2xlIGN4PSI2IiBjeT0iOCIgcj0iMyIvPgogIDwvZz4KCiAgPCEtLSBUaXRsZSAtLT4KICA8dGV4dCB4PSIxMDAiIHk9IjUyIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsLCBIZWx2ZXRpY2EsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjgiIGZvbnQtd2VpZ2h0PSJib2xkIiBsZXR0ZXItc3BhY2luZz0iMSI+UEVSU09OIElERU5USUZJQ0FUSU9OIERBVEE8L3RleHQ+CgogIDwhLS0gSXNzdWluZyBjb3VudHJ5IC0tPgogIDx0ZXh0IHg9IjEwMCIgeT0iNzgiIGZpbGw9IndoaXRlIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgb3BhY2l0eT0iMC43NSI+SXNzdWluZyBjb3VudHJ5OjwvdGV4dD4KICA8dGV4dCB4PSIyMzUiIHk9Ijc4IiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsLCBIZWx2ZXRpY2EsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiIGZvbnQtd2VpZ2h0PSJib2xkIj57e2lzc3VpbmdfY291bnRyeX19PC90ZXh0PgoKICA8IS0tIFBob3RvIGZyYW1lIC0tPgogIDxyZWN0IHg9IjQ4IiB5PSIxNDAiIHdpZHRoPSIxMjAiIGhlaWdodD0iMTUwIiByeD0iOCIgcnk9IjgiIGZpbGw9IndoaXRlIiBvcGFjaXR5PSIwLjE1Ii8+CiAgPGltYWdlIGlkPSJwaWN0dXJlIiB4PSI0OCIgeT0iMTQwIiB3aWR0aD0iMTIwIiBoZWlnaHQ9IjE1MCIgY2xpcC1wYXRoPSJ1cmwoI3Bob3RvQ2xpcCkiIHByZXNlcnZlQXNwZWN0UmF0aW89InhNaWRZTWlkIHNsaWNlIiBocmVmPSJ7e3BpY3R1cmV9fSIvPgogIDx0ZXh0IHg9IjEwOCIgeT0iMjIyIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsLCBIZWx2ZXRpY2EsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIG9wYWNpdHk9IjAuNCI+UEhPVE88L3RleHQ+CgogIDwhLS0gTmFtZSBsYWJlbHMgLS0+CiAgPHRleHQgeD0iMjAwIiB5PSIxNjAiIGZpbGw9IndoaXRlIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgb3BhY2l0eT0iMC42NSI+Rmlyc3QgbmFtZTwvdGV4dD4KICA8dGV4dCB4PSIyMDAiIHk9IjE4NSIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjI0IiBmb250LXdlaWdodD0iYm9sZCI+e3tnaXZlbl9uYW1lfX08L3RleHQ+CgogIDx0ZXh0IHg9IjIwMCIgeT0iMjI1IiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsLCBIZWx2ZXRpY2EsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIG9wYWNpdHk9IjAuNjUiPkxhc3QgbmFtZTwvdGV4dD4KICA8dGV4dCB4PSIyMDAiIHk9IjI1MCIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjI0IiBmb250LXdlaWdodD0iYm9sZCI+e3tmYW1pbHlfbmFtZX19PC90ZXh0PgoKICA8IS0tIERhdGUgb2YgYmlydGggLS0+CiAgPHRleHQgeD0iMjAwIiB5PSIzMDAiIGZpbGw9IndoaXRlIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgb3BhY2l0eT0iMC42NSI+RGF0ZSBvZiBiaXJ0aDwvdGV4dD4KICA8dGV4dCB4PSIyMDAiIHk9IjMyNSIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjIwIj57e2JpcnRoX2RhdGV9fTwvdGV4dD4KCiAgPCEtLSBQZXJzb25hbCBJRCAtLT4KICA8dGV4dCB4PSI1MzAiIHk9IjE2MCIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBvcGFjaXR5PSIwLjY1Ij5QZXJzb25hbCBJRDwvdGV4dD4KICA8dGV4dCB4PSI1MzAiIHk9IjE4NSIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4Ij57e3BlcnNvbmFsX2FkbWluaXN0cmF0aXZlX251bWJlcn19PC90ZXh0PgoKICA8IS0tIEJvdHRvbSBiYXIgLS0+CiAgPHJlY3QgeT0iNDAwIiB3aWR0aD0iODI5IiBoZWlnaHQ9IjEwNCIgcng9IjAiIHJ5PSIwIiBmaWxsPSJ3aGl0ZSIgb3BhY2l0eT0iMC4wNiIvPgogIDxyZWN0IHk9IjQ4MCIgd2lkdGg9IjgyOSIgaGVpZ2h0PSIyNCIgcng9IjI0IiByeT0iMjQiIGZpbGw9IndoaXRlIiBvcGFjaXR5PSIwLjA2Ii8+CgogIDwhLS0gRG9jdW1lbnQgbnVtYmVyIC0tPgogIDx0ZXh0IHg9IjQ4IiB5PSI0MzUiIGZpbGw9IndoaXRlIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgb3BhY2l0eT0iMC42Ij5Eb2N1bWVudCBudW1iZXI8L3RleHQ+CiAgPHRleHQgeD0iNDgiIHk9IjQ2MCIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iYm9sZCI+e3tkb2N1bWVudF9udW1iZXJ9fTwvdGV4dD4KCiAgPCEtLSBFeHBpcnkgZGF0ZSAtLT4KICA8dGV4dCB4PSI2ODAiIHk9IjQzNSIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBvcGFjaXR5PSIwLjYiIHRleHQtYW5jaG9yPSJlbmQiPlZhbGlkIHVudGlsPC90ZXh0PgogIDx0ZXh0IHg9IjY4MCIgeT0iNDYwIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsLCBIZWx2ZXRpY2EsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIHRleHQtYW5jaG9yPSJlbmQiPnt7ZXhwaXJ5X2RhdGV9fTwvdGV4dD4KCiAgPCEtLSBEZWNvcmF0aXZlIHJpbmdzIC0tPgogIDxjaXJjbGUgY3g9Ijc3MCIgY3k9IjQ0NSIgcj0iMzAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgb3BhY2l0eT0iMC4xNSIvPgogIDxjaXJjbGUgY3g9Ijc3MCIgY3k9IjQ0NSIgcj0iMjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMS41IiBvcGFjaXR5PSIwLjE1Ii8+Cjwvc3ZnPgo="
+          }
+        },
+        "svg_templates": [
+          {
+            "uri": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4MjkgNTA0IiB3aWR0aD0iODI5IiBoZWlnaHQ9IjUwNCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImJnIiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3R5bGU9InN0b3AtY29sb3I6IzFhM2E1YyIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiMwZDFmMzMiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImhlYWRlciIgeDE9IjAlIiB5MT0iMCUiIHgyPSIxMDAlIiB5Mj0iMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojMjM0YjczIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3R5bGU9InN0b3AtY29sb3I6IzFhM2E1YyIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxjbGlwUGF0aCBpZD0icGhvdG9DbGlwIj4KICAgICAgPHJlY3QgeD0iNDgiIHk9IjE0MCIgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxNTAiIHJ4PSI4IiByeT0iOCIvPgogICAgPC9jbGlwUGF0aD4KICA8L2RlZnM+CgogIDwhLS0gQ2FyZCBiYWNrZ3JvdW5kIC0tPgogIDxyZWN0IHdpZHRoPSI4MjkiIGhlaWdodD0iNTA0IiByeD0iMjQiIHJ5PSIyNCIgZmlsbD0idXJsKCNiZykiLz4KCiAgPCEtLSBIZWFkZXIgYmFuZCAtLT4KICA8cmVjdCB3aWR0aD0iODI5IiBoZWlnaHQ9IjkwIiByeD0iMjQiIHJ5PSIyNCIgZmlsbD0idXJsKCNoZWFkZXIpIi8+CiAgPHJlY3QgeT0iNjAiIHdpZHRoPSI4MjkiIGhlaWdodD0iMzAiIGZpbGw9InVybCgjaGVhZGVyKSIvPgoKICA8IS0tIEVVIHN0YXJzIGRlY29yYXRpb24gLS0+CiAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNDgsIDI4KSIgZmlsbD0iI2YwYzA0MCIgb3BhY2l0eT0iMC45Ij4KICAgIDxjaXJjbGUgY3g9IjAiIGN5PSIwIiByPSIzIi8+PGNpcmNsZSBjeD0iNiIgY3k9Ii04IiByPSIzIi8+PGNpcmNsZSBjeD0iMTUiIGN5PSItMTEiIHI9IjMiLz4KICAgIDxjaXJjbGUgY3g9IjI0IiBjeT0iLTgiIHI9IjMiLz48Y2lyY2xlIGN4PSIzMCIgY3k9IjAiIHI9IjMiLz48Y2lyY2xlIGN4PSIyNCIgY3k9IjgiIHI9IjMiLz4KICAgIDxjaXJjbGUgY3g9IjE1IiBjeT0iMTEiIHI9IjMiLz48Y2lyY2xlIGN4PSI2IiBjeT0iOCIgcj0iMyIvPgogIDwvZz4KCiAgPCEtLSBUaXRsZSAtLT4KICA8dGV4dCB4PSIxMDAiIHk9IjUyIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsLCBIZWx2ZXRpY2EsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjgiIGZvbnQtd2VpZ2h0PSJib2xkIiBsZXR0ZXItc3BhY2luZz0iMSI+UEVSU09OIElERU5USUZJQ0FUSU9OIERBVEE8L3RleHQ+CgogIDwhLS0gSXNzdWluZyBjb3VudHJ5IC0tPgogIDx0ZXh0IHg9IjEwMCIgeT0iNzgiIGZpbGw9IndoaXRlIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgb3BhY2l0eT0iMC43NSI+SXNzdWluZyBjb3VudHJ5OjwvdGV4dD4KICA8dGV4dCB4PSIyMzUiIHk9Ijc4IiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsLCBIZWx2ZXRpY2EsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiIGZvbnQtd2VpZ2h0PSJib2xkIj57e2lzc3VpbmdfY291bnRyeX19PC90ZXh0PgoKICA8IS0tIFBob3RvIGZyYW1lIC0tPgogIDxyZWN0IHg9IjQ4IiB5PSIxNDAiIHdpZHRoPSIxMjAiIGhlaWdodD0iMTUwIiByeD0iOCIgcnk9IjgiIGZpbGw9IndoaXRlIiBvcGFjaXR5PSIwLjE1Ii8+CiAgPGltYWdlIGlkPSJwaWN0dXJlIiB4PSI0OCIgeT0iMTQwIiB3aWR0aD0iMTIwIiBoZWlnaHQ9IjE1MCIgY2xpcC1wYXRoPSJ1cmwoI3Bob3RvQ2xpcCkiIHByZXNlcnZlQXNwZWN0UmF0aW89InhNaWRZTWlkIHNsaWNlIiBocmVmPSJ7e3BpY3R1cmV9fSIvPgogIDx0ZXh0IHg9IjEwOCIgeT0iMjIyIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsLCBIZWx2ZXRpY2EsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIG9wYWNpdHk9IjAuNCI+UEhPVE88L3RleHQ+CgogIDwhLS0gTmFtZSBsYWJlbHMgLS0+CiAgPHRleHQgeD0iMjAwIiB5PSIxNjAiIGZpbGw9IndoaXRlIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgb3BhY2l0eT0iMC42NSI+Rmlyc3QgbmFtZTwvdGV4dD4KICA8dGV4dCB4PSIyMDAiIHk9IjE4NSIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjI0IiBmb250LXdlaWdodD0iYm9sZCI+e3tnaXZlbl9uYW1lfX08L3RleHQ+CgogIDx0ZXh0IHg9IjIwMCIgeT0iMjI1IiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsLCBIZWx2ZXRpY2EsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIG9wYWNpdHk9IjAuNjUiPkxhc3QgbmFtZTwvdGV4dD4KICA8dGV4dCB4PSIyMDAiIHk9IjI1MCIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjI0IiBmb250LXdlaWdodD0iYm9sZCI+e3tmYW1pbHlfbmFtZX19PC90ZXh0PgoKICA8IS0tIERhdGUgb2YgYmlydGggLS0+CiAgPHRleHQgeD0iMjAwIiB5PSIzMDAiIGZpbGw9IndoaXRlIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgb3BhY2l0eT0iMC42NSI+RGF0ZSBvZiBiaXJ0aDwvdGV4dD4KICA8dGV4dCB4PSIyMDAiIHk9IjMyNSIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjIwIj57e2JpcnRoX2RhdGV9fTwvdGV4dD4KCiAgPCEtLSBQZXJzb25hbCBJRCAtLT4KICA8dGV4dCB4PSI1MzAiIHk9IjE2MCIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBvcGFjaXR5PSIwLjY1Ij5QZXJzb25hbCBJRDwvdGV4dD4KICA8dGV4dCB4PSI1MzAiIHk9IjE4NSIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4Ij57e3BlcnNvbmFsX2FkbWluaXN0cmF0aXZlX251bWJlcn19PC90ZXh0PgoKICA8IS0tIEJvdHRvbSBiYXIgLS0+CiAgPHJlY3QgeT0iNDAwIiB3aWR0aD0iODI5IiBoZWlnaHQ9IjEwNCIgcng9IjAiIHJ5PSIwIiBmaWxsPSJ3aGl0ZSIgb3BhY2l0eT0iMC4wNiIvPgogIDxyZWN0IHk9IjQ4MCIgd2lkdGg9IjgyOSIgaGVpZ2h0PSIyNCIgcng9IjI0IiByeT0iMjQiIGZpbGw9IndoaXRlIiBvcGFjaXR5PSIwLjA2Ii8+CgogIDwhLS0gRG9jdW1lbnQgbnVtYmVyIC0tPgogIDx0ZXh0IHg9IjQ4IiB5PSI0MzUiIGZpbGw9IndoaXRlIiBmb250LWZhbWlseT0iQXJpYWwsIEhlbHZldGljYSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgb3BhY2l0eT0iMC42Ij5Eb2N1bWVudCBudW1iZXI8L3RleHQ+CiAgPHRleHQgeD0iNDgiIHk9IjQ2MCIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iYm9sZCI+e3tkb2N1bWVudF9udW1iZXJ9fTwvdGV4dD4KCiAgPCEtLSBFeHBpcnkgZGF0ZSAtLT4KICA8dGV4dCB4PSI2ODAiIHk9IjQzNSIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgSGVsdmV0aWNhLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBvcGFjaXR5PSIwLjYiIHRleHQtYW5jaG9yPSJlbmQiPlZhbGlkIHVudGlsPC90ZXh0PgogIDx0ZXh0IHg9IjY4MCIgeT0iNDYwIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsLCBIZWx2ZXRpY2EsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIHRleHQtYW5jaG9yPSJlbmQiPnt7ZXhwaXJ5X2RhdGV9fTwvdGV4dD4KCiAgPCEtLSBEZWNvcmF0aXZlIHJpbmdzIC0tPgogIDxjaXJjbGUgY3g9Ijc3MCIgY3k9IjQ0NSIgcj0iMzAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgb3BhY2l0eT0iMC4xNSIvPgogIDxjaXJjbGUgY3g9Ijc3MCIgY3k9IjQ0NSIgcj0iMjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMS41IiBvcGFjaXR5PSIwLjE1Ii8+Cjwvc3ZnPgo=",
+            "properties": {
+              "orientation": "landscape",
+              "color_scheme": "light",
+              "contrast": "normal"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "claims": [
+    {
+      "path": [
+        "iss"
+      ],
+      "mandatory": true,
+      "sd": "never"
+    },
+    {
+      "path": [
+        "nbf"
+      ],
+      "mandatory": false,
+      "sd": "never"
+    },
+    {
+      "path": [
+        "exp"
+      ],
+      "mandatory": true,
+      "sd": "never"
+    },
+    {
+      "path": [
+        "cnf"
+      ],
+      "mandatory": true,
+      "sd": "never"
+    },
+    {
+      "path": [
+        "vct"
+      ],
+      "mandatory": true,
+      "sd": "never"
+    },
+    {
+      "path": [
+        "status"
+      ],
+      "mandatory": false,
+      "sd": "never"
+    },
+    {
+      "path": [
+        "sub"
+      ],
+      "mandatory": false,
+      "sd": "never"
+    },
+    {
+      "path": [
+        "iat"
+      ],
+      "mandatory": true,
+      "sd": "never"
+    },
+    {
+      "path": [
+        "family_name"
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "svg_id": "family_name",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Last name",
+          "description": "Current last name(s) or surname(s)."
+        }
+      ]
+    },
+    {
+      "path": [
+        "given_name"
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "svg_id": "given_name",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "First name",
+          "description": "Current first name(s), including middle name(s) if applicable."
+        }
+      ]
+    },
+    {
+      "path": [
+        "birthdate"
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "svg_id": "birth_date",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Date of birth",
+          "description": "Full birth date (day, month, year)."
+        }
+      ]
+    },
+    {
+      "path": [
+        "place_of_birth"
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Place of birth",
+          "description": "Place where the person was born."
+        }
+      ]
+    },
+    {
+      "path": [
+        "place_of_birth",
+        "locality"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "City of birth",
+          "description": "Municipality, city, town, or village where the person was born."
+        }
+      ]
+    },
+    {
+      "path": [
+        "place_of_birth",
+        "region"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Region of birth",
+          "description": "State, province, district, or local area where the person was born."
+        }
+      ]
+    },
+    {
+      "path": [
+        "place_of_birth",
+        "country"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Country of birth",
+          "description": "Country where the person was born."
+        }
+      ]
+    },
+    {
+      "path": [
+        "nationalities"
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Nationalities",
+          "description": "Country or countries of nationality."
+        }
+      ]
+    },
+    {
+      "path": [
+        "nationalities",
+        null
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Nationality",
+          "description": "Country of nationality."
+        }
+      ]
+    },
+    {
+      "path": [
+        "address"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Address",
+          "description": "Person's residential address."
+        }
+      ]
+    },
+    {
+      "path": [
+        "address",
+        "house_number"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Residence number",
+          "description": "Street number of residence."
+        }
+      ]
+    },
+    {
+      "path": [
+        "address",
+        "street_address"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Residence street",
+          "description": "Street name of residence."
+        }
+      ]
+    },
+    {
+      "path": [
+        "address",
+        "locality"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "City of residence",
+          "description": "Municipality, city, town, or village of residence."
+        }
+      ]
+    },
+    {
+      "path": [
+        "address",
+        "region"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "State of residence",
+          "description": "State, province, or regional division of residence."
+        }
+      ]
+    },
+    {
+      "path": [
+        "address",
+        "postal_code"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Residence ZIP",
+          "description": "Postal or ZIP code of residence."
+        }
+      ]
+    },
+    {
+      "path": [
+        "address",
+        "country"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Country of residence",
+          "description": "Country where the person currently resides."
+        }
+      ]
+    },
+    {
+      "path": [
+        "address",
+        "formatted"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Full address",
+          "description": "Full formatted address of residence."
+        }
+      ]
+    },
+    {
+      "path": [
+        "personal_administrative_number"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "svg_id": "personal_administrative_number",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Personal ID",
+          "description": "Unique personal identifier assigned by the authority."
+        }
+      ]
+    },
+    {
+      "path": [
+        "picture"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "svg_id": "picture",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Picture",
+          "description": "Portrait image of the person."
+        }
+      ]
+    },
+    {
+      "path": [
+        "birth_family_name"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Birth last name",
+          "description": "Last name(s) or surname(s) at birth."
+        }
+      ]
+    },
+    {
+      "path": [
+        "birth_given_name"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Birth first name",
+          "description": "First name(s), including middle name(s), at birth."
+        }
+      ]
+    },
+    {
+      "path": [
+        "sex"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Sex",
+          "description": "Recorded sex or gender, using standard codes."
+        }
+      ]
+    },
+    {
+      "path": [
+        "email"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Email",
+          "description": "Person's email address."
+        }
+      ]
+    },
+    {
+      "path": [
+        "phone_number"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Mobile",
+          "description": "Person's mobile phone number."
+        }
+      ]
+    },
+    {
+      "path": [
+        "date_of_expiry"
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "svg_id": "expiry_date",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Expiry date",
+          "description": "End date of the document's validity."
+        }
+      ]
+    },
+    {
+      "path": [
+        "issuing_authority"
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Issuing authority",
+          "description": "Name of the issuing body or Member State (two-letter code)."
+        }
+      ]
+    },
+    {
+      "path": [
+        "issuing_country"
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "svg_id": "issuing_country",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Issuing country",
+          "description": "Member State where the document was issued."
+        }
+      ]
+    },
+    {
+      "path": [
+        "document_number"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "svg_id": "document_number",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Document number",
+          "description": "Unique identifier of the PID document."
+        }
+      ]
+    },
+    {
+      "path": [
+        "issuing_jurisdiction"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Issuing region",
+          "description": "Regional or local subdivision that issued the document."
+        }
+      ]
+    },
+    {
+      "path": [
+        "date_of_issuance"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Issue date",
+          "description": "Start date of the document's validity."
+        }
+      ]
+    },
+    {
+      "path": [
+        "trust_anchor"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Trust anchor",
+          "description": "The trust anchor used to verify the document."
+        }
+      ]
+    },
+    {
+      "path": [
+        "attestation_legal_category"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Attestation legal category",
+          "description": "Legal category of the attestation under CIR 2024/2977."
+        }
+      ]
+    }
+  ]
+}
