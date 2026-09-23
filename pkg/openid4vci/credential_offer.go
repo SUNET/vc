@@ -1,6 +1,7 @@
 package openid4vci
 
 import (
+	"errors"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -194,8 +195,19 @@ func (c *CredentialOffer) QR(recoveryLevel, size int, walletURL string) (*QR, er
 // what the issuer UI produces) can safely be content-addressed so that the
 // same offer maps to the same stored document. Pass uuid.NewString() for the
 // former.
-func (c *CredentialOfferParameters) CredentialOfferURI(offerUUID string) (CredentialOfferURI, error) {
-	u, err := url.Parse(c.CredentialIssuer)
+// baseURL is the public origin of the service that actually serves
+// GET /credential-offer/{offerUUID}. It is deliberately NOT derived from
+// CredentialIssuer: that field is the issuer IDENTIFIER, and OpenID4VCI 1.0
+// does not require the offer to be retrievable from it. A deployment whose
+// issuer identifier differs from the origin its API gateway answers on is
+// perfectly legal, and building the retrieval URL from the identifier would
+// hand out a credential_offer_uri that 404s.
+func (c *CredentialOfferParameters) CredentialOfferURI(baseURL, offerUUID string) (CredentialOfferURI, error) {
+	if baseURL == "" {
+		return "", errors.New("credential offer URI: base URL is empty")
+	}
+
+	u, err := url.Parse(baseURL)
 	if err != nil {
 		return "", err
 	}

@@ -3,7 +3,20 @@
 //
 // This is the library's own polyfill: it shims navigator.credentials.get()
 // AND navigator.credentials.create(), so an openid4vci-v1 issuance request
-// can be fulfilled by a web wallet registered through window.DigitalWallets.
+// can be fulfilled by a wallet registered with THIS module instance through
+// the registerWallet() it exports. It neither defines nor reads
+// window.DigitalWallets — that global belongs to the library's separate
+// web-wallets bundle, which inlines its own copy of this file and therefore
+// its own registry, so a wallet registered there is invisible to the
+// create() shim here (sirosfoundation/dc-api#23).
+//
+// offers.js deliberately does NOT install this. Installing it rebinds
+// navigator.credentials.{get,create} page-wide and replaces
+// DigitalCredential.userAgentAllowsProtocol with a shim answering from the
+// registry above — fabricating a global DigitalCredential outright when the
+// browser has none — which would make the page's availability gate report
+// the polyfill's state while claiming to report the browser's.
+//
 // Nothing in this repo shims navigator.credentials.* itself — that belongs
 // in the library (same rule as the verifier's DC API support).
 //

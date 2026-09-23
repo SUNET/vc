@@ -207,7 +207,7 @@ func (c *Client) credentialOfferReferenceURL(ctx context.Context, offerParams *o
 		return "", err
 	}
 
-	offerURI, err := offerParams.CredentialOfferURI(offerUUID)
+	offerURI, err := offerParams.CredentialOfferURI(c.cfg.APIGW.PublicURL, offerUUID)
 	if err != nil {
 		return "", err
 	}
