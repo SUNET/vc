@@ -588,6 +588,13 @@ type DatastorePreAuthOfferReply struct {
 //	@Param			req	body		DatastorePreAuthOfferRequest	true	" "
 //	@Router			/api/v1/datastore/preauth_offer [post]
 func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAuthOfferRequest) (*DatastorePreAuthOfferReply, error) {
+	// Only scopes explicitly marked auth_provider: preauth can be minted
+	// as no-user-auth offers. Otherwise this endpoint could bypass the
+	// SAML/OIDC/OpenID4VP flow declared in data_sources.
+	if err := c.requirePreAuthScope(req.Scope); err != nil {
+		return nil, err
+	}
+
 	// Look up the document from the datastore
 	doc, err := c.datastoreStore.GetByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
 	if err != nil {
@@ -683,4 +690,21 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 		"offer_id", credentialOffer.ID)
 
 	return reply, nil
+}
+
+// requirePreAuthScope returns an error unless scope is configured in
+// data_sources with auth_provider: preauth in at least one data source. A
+// scope that resolves only through SAML/OIDC/OpenID4VP is not allowed to
+// be issued via a pre-authorized credential offer.
+func (c *Client) requirePreAuthScope(scope string) error {
+	sources, err := c.cfg.APIGW.DataSources.LookupCredentialSources(scope)
+	if err != nil {
+		return fmt.Errorf("scope %q is not configured for pre-authorized issuance: %w", scope, err)
+	}
+	for _, src := range sources {
+		if src.AuthProvider == model.AuthProviderPreAuth {
+			return nil
+		}
+	}
+	return fmt.Errorf("scope %q is not configured for pre-authorized issuance (auth_provider must be %q)", scope, model.AuthProviderPreAuth)
 }

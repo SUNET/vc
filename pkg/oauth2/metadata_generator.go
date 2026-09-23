@@ -5,6 +5,11 @@ type MetadataConfig struct {
 	IssuerURL     string
 	TokenEndpoint string
 	GrantTypes    []string // If empty, defaults to authorization_code + pre-authorized_code
+	// WalletAttestationEnabled controls advertisement of
+	// "attest_jwt_client_auth" (draft-ietf-oauth-attestation-based-client-auth-07 §10.1).
+	// Only deployments that have wired up a wallet-attestation evaluator can
+	// accept it; verifier and pre-auth-only apigw setups must leave it off.
+	WalletAttestationEnabled bool
 }
 
 // GenerateMetadata creates OAuth2 Authorization Server Metadata from configuration.
@@ -18,16 +23,21 @@ func GenerateMetadata(cfg *MetadataConfig) *AuthorizationServerMetadata {
 		}
 	}
 
+	// "none" is always advertised for pre-authorized_code anonymous access.
+	authMethods := []string{"none"}
+	if cfg.WalletAttestationEnabled {
+		authMethods = append([]string{"attest_jwt_client_auth"}, authMethods...)
+	}
+
 	return &AuthorizationServerMetadata{
-		Issuer:                              cfg.IssuerURL,
-		AuthorizationEndpoint:               cfg.IssuerURL + "/authorize",
-		TokenEndpoint:                       cfg.TokenEndpoint,
-		JWKSURI:                             cfg.IssuerURL + "/jwks",
-		PushedAuthorizationRequestEndpoint:  cfg.IssuerURL + "/op/par",
-		RequiredPushedAuthorizationRequests: true,
-		GrantTypesSupported:                 grantTypes,
-		// "attest_jwt_client_auth" per draft-ietf-oauth-attestation-based-client-auth-07 §10.1; "none" kept for pre-authorized_code anonymous access.
-		TokenEndpointAuthMethodsSupported:             []string{"attest_jwt_client_auth", "none"},
+		Issuer:                                        cfg.IssuerURL,
+		AuthorizationEndpoint:                         cfg.IssuerURL + "/authorize",
+		TokenEndpoint:                                 cfg.TokenEndpoint,
+		JWKSURI:                                       cfg.IssuerURL + "/jwks",
+		PushedAuthorizationRequestEndpoint:            cfg.IssuerURL + "/op/par",
+		RequiredPushedAuthorizationRequests:           true,
+		GrantTypesSupported:                           grantTypes,
+		TokenEndpointAuthMethodsSupported:             authMethods,
 		ClientAttestationSigningALGValuesSupported:    []string{"ES256", "ES384", "ES512"},
 		ClientAttestationPoPSigningALGValuesSupported: []string{"ES256", "ES384", "ES512"},
 		ResponseTypesSupported:                        []string{"code"},

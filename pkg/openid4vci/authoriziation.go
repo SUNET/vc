@@ -1,8 +1,10 @@
 package openid4vci
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 )
@@ -104,8 +106,9 @@ func BindAuthorizationRequest(body io.ReadCloser) (*PARRequest, error) {
 	authorizationRequest := &PARRequest{}
 
 	v := map[string]any{}
+	var err error
 
-	err := json.NewDecoder(body).Decode(&v)
+	err = json.NewDecoder(body).Decode(&v)
 	if err != nil {
 		return nil, err
 	}
@@ -115,12 +118,12 @@ func BindAuthorizationRequest(body io.ReadCloser) (*PARRequest, error) {
 		d := details.(string)
 		delete(v, "authorization_details")
 
-		decodedAuthorizationDetails, err := url.QueryUnescape(d)
+		authorizationRequest.AuthorizationDetailsRaw, err = url.QueryUnescape(d)
 		if err != nil {
 			return nil, err
 		}
 
-		if err = json.Unmarshal([]byte(decodedAuthorizationDetails), &authorizationRequest.AuthorizationDetails); err != nil {
+		if err := authorizationRequest.ParseAuthorizationDetails(); err != nil {
 			return nil, err
 		}
 	}
@@ -135,4 +138,35 @@ func BindAuthorizationRequest(body io.ReadCloser) (*PARRequest, error) {
 	}
 
 	return authorizationRequest, nil
+}
+
+// ParseAuthorizationDetails populates AuthorizationDetails from
+// AuthorizationDetailsRaw. No-op when Raw is empty or the slice is already
+// populated, so it is safe to call unconditionally after gin's binder.
+func (r *PARRequest) ParseAuthorizationDetails() error {
+	if r == nil || r.AuthorizationDetailsRaw == "" || len(r.AuthorizationDetails) > 0 {
+		return nil
+	}
+	trimmed := bytes.TrimSpace([]byte(r.AuthorizationDetailsRaw))
+	if len(trimmed) == 0 {
+		return errors.New("authorization_details is empty")
+	}
+	if trimmed[0] != '[' {
+		return errors.New("authorization_details must be a JSON array")
+	}
+	if err := json.Unmarshal(trimmed, &r.AuthorizationDetails); err != nil {
+		return fmt.Errorf("authorization_details parse: %w", err)
+	}
+	validate, err := NewValidator()
+	if err != nil {
+		return err
+	}
+	for i := range r.AuthorizationDetails {
+		if err := validate.Struct(&r.AuthorizationDetails[i]); err != nil {
+			return fmt.Errorf("authorization_details[%d]: %w", i, err)
+		}
+	}
+	// Raw is now redundant; drop it so downstream sees only the parsed slice.
+	r.AuthorizationDetailsRaw = ""
+	return nil
 }

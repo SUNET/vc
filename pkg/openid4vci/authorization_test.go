@@ -159,3 +159,82 @@ func TestAuthorizeBinding(t *testing.T) {
 		})
 	}
 }
+
+func TestParseAuthorizationDetails(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		wantErr bool
+		wantLen int
+	}{
+		{
+			name:    "valid array with credential_configuration_id",
+			raw:     `[{"type":"openid_credential","credential_configuration_id":"TestCredential"}]`,
+			wantLen: 1,
+		},
+		{
+			name:    "valid array with format+vct",
+			raw:     `[{"type":"openid_credential","format":"vc+sd-jwt","vct":"SD_JWT_VC_example_in_OpenID4VCI"}]`,
+			wantLen: 1,
+		},
+		{
+			name:    "empty array is accepted",
+			raw:     `[]`,
+			wantLen: 0,
+		},
+		{
+			name:    "null value rejected",
+			raw:     `null`,
+			wantErr: true,
+		},
+		{
+			name:    "object (non-array) rejected",
+			raw:     `{"type":"openid_credential","credential_configuration_id":"TestCredential"}`,
+			wantErr: true,
+		},
+		{
+			name:    "entry missing type",
+			raw:     `[{"credential_configuration_id":"TestCredential"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "entry with wrong type value",
+			raw:     `[{"type":"unknown","credential_configuration_id":"TestCredential"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "entry missing both credential_configuration_id and format",
+			raw:     `[{"type":"openid_credential"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "entry with format but no vct",
+			raw:     `[{"type":"openid_credential","format":"vc+sd-jwt"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "empty input is a no-op",
+			raw:     "",
+			wantLen: 0,
+		},
+		{
+			name:    "malformed json rejected",
+			raw:     `[not json`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &PARRequest{AuthorizationDetailsRaw: tt.raw}
+			err := r.ParseAuthorizationDetails()
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Len(t, r.AuthorizationDetails, tt.wantLen)
+			assert.Empty(t, r.AuthorizationDetailsRaw, "raw should be cleared after successful parse")
+		})
+	}
+}

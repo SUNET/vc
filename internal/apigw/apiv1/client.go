@@ -115,7 +115,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	}
 
 	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand if needed)
-	c.oauth2Metadata = c.cfg.APIGW.Delivery.OpenID4VCI.GenerateMetadata(ctx, c.cfg.APIGW.PublicURL)
+	c.oauth2Metadata = c.cfg.APIGW.Delivery.OpenID4VCI.GenerateMetadata(ctx, c.cfg.APIGW.PublicURL, cfg.APIGW.Trust.WalletAttestation.Enabled)
 
 	// Load PKI signing key and chain for metadata signing
 	c.pkiSigner, c.pkiSigningCert, c.pkiSignerChain, err = pki.LoadSigner(c.cfg.APIGW.KeyConfig)

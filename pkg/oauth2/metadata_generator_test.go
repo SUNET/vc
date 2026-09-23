@@ -26,7 +26,7 @@ func TestGenerateMetadata(t *testing.T) {
 				assert.Equal(t, "https://issuer.example.com/op/par", metadata.PushedAuthorizationRequestEndpoint)
 				assert.Equal(t, "https://issuer.example.com/jwks", metadata.JWKSURI)
 				assert.True(t, metadata.RequiredPushedAuthorizationRequests)
-				assert.Contains(t, metadata.TokenEndpointAuthMethodsSupported, "attest_jwt_client_auth")
+				assert.NotContains(t, metadata.TokenEndpointAuthMethodsSupported, "attest_jwt_client_auth")
 				assert.Contains(t, metadata.TokenEndpointAuthMethodsSupported, "none")
 				assert.Contains(t, metadata.ClientAttestationSigningALGValuesSupported, "ES256")
 				assert.Contains(t, metadata.ClientAttestationPoPSigningALGValuesSupported, "ES256")
@@ -45,6 +45,30 @@ func TestGenerateMetadata(t *testing.T) {
 				assert.Equal(t, "https://auth.company.com", metadata.Issuer)
 				assert.Equal(t, "https://auth.company.com/oauth/token", metadata.TokenEndpoint)
 				assert.Equal(t, "https://auth.company.com/authorize", metadata.AuthorizationEndpoint)
+			},
+		},
+		{
+			name: "wallet attestation enabled advertises attest_jwt_client_auth",
+			cfg: &MetadataConfig{ // #nosec G101
+				IssuerURL:                "https://issuer.example.com",
+				TokenEndpoint:            "https://issuer.example.com/token",
+				WalletAttestationEnabled: true,
+			},
+			verify: func(t *testing.T, metadata *AuthorizationServerMetadata) {
+				assert.Contains(t, metadata.TokenEndpointAuthMethodsSupported, "attest_jwt_client_auth")
+				assert.Contains(t, metadata.TokenEndpointAuthMethodsSupported, "none")
+			},
+		},
+		{
+			name: "wallet attestation disabled omits attest_jwt_client_auth",
+			cfg: &MetadataConfig{ // #nosec G101
+				IssuerURL:                "https://issuer.example.com",
+				TokenEndpoint:            "https://issuer.example.com/token",
+				WalletAttestationEnabled: false,
+			},
+			verify: func(t *testing.T, metadata *AuthorizationServerMetadata) {
+				assert.NotContains(t, metadata.TokenEndpointAuthMethodsSupported, "attest_jwt_client_auth")
+				assert.Equal(t, []string{"none"}, metadata.TokenEndpointAuthMethodsSupported)
 			},
 		},
 	}

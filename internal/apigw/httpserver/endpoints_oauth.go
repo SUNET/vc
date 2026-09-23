@@ -2,7 +2,6 @@ package httpserver
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -42,13 +41,11 @@ func (s *Service) endpointOAuthPar(ctx context.Context, c *gin.Context) (any, er
 		return nil, err
 	}
 
-	// authorization_details arrives as a JSON-array string in the form body per OpenID4VCI §5.1.1; gin's form binder can't decode it into a []struct.
-	if request.AuthorizationDetailsRaw != "" && len(request.AuthorizationDetails) == 0 {
-		if err := json.Unmarshal([]byte(request.AuthorizationDetailsRaw), &request.AuthorizationDetails); err != nil {
-			span.SetStatus(codes.Error, err.Error())
-			s.log.Error(err, "authorization_details parse error")
-			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "invalid authorization_details", 400, err)
-		}
+	// gin's form binder cannot decode the JSON-array-string authorization_details (OpenID4VCI §5.1.1); PARRequest post-parses and validates it.
+	if err := request.ParseAuthorizationDetails(); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "authorization_details validation error")
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "invalid authorization_details", 400, err)
 	}
 
 	// Extract OAuth-Client-Attestation headers (draft-ietf-oauth-attestation-based-client-auth-04 §3.1)

@@ -940,6 +940,14 @@ func newPreAuthOfferTestClient(t *testing.T) (*Client, *memoryDatastoreStore) {
 						Wallets:   map[string]model.CredentialOfferWallets{},
 					},
 				},
+				DataSources: model.DataSources{
+					Datastore: model.DatastoreConfig{
+						Scopes: map[string]model.DatastoreScope{
+							"pid":  {AuthProvider: model.AuthProviderPreAuth},
+							"ehic": {AuthProvider: model.AuthProviderPreAuth},
+						},
+					},
+				},
 			},
 		},
 		cacheService: &cache.Service{
@@ -1097,4 +1105,33 @@ func TestDatastorePreAuthOffer_PINEnabled(t *testing.T) {
 	require.NotNil(t, grant.TXCode)
 	assert.Equal(t, "numeric", grant.TXCode.InputMode)
 	assert.Equal(t, preAuthPINLength, grant.TXCode.Length)
+}
+
+func TestDatastorePreAuthOffer_RejectsNonPreauthScope(t *testing.T) {
+	client, datastore := newPreAuthOfferTestClient(t)
+	client.cfg.APIGW.DataSources.Datastore.Scopes["diploma"] = model.DatastoreScope{AuthProvider: model.AuthProviderSAML}
+
+	seedDoc(t, datastore, "SUNET", "diploma", "doc-d1", []string{"person-1"}, map[string]any{"family_name": "Doe"})
+
+	reply, err := client.DatastorePreAuthOffer(t.Context(), &DatastorePreAuthOfferRequest{
+		AuthenticSource: "SUNET",
+		Scope:           "diploma",
+		DocumentID:      "doc-d1",
+	})
+	require.Error(t, err)
+	assert.Nil(t, reply)
+	assert.Contains(t, err.Error(), "not configured for pre-authorized issuance")
+}
+
+func TestDatastorePreAuthOffer_RejectsUnknownScope(t *testing.T) {
+	client, _ := newPreAuthOfferTestClient(t)
+
+	reply, err := client.DatastorePreAuthOffer(t.Context(), &DatastorePreAuthOfferRequest{
+		AuthenticSource: "SUNET",
+		Scope:           "not-configured",
+		DocumentID:      "doc-x",
+	})
+	require.Error(t, err)
+	assert.Nil(t, reply)
+	assert.Contains(t, err.Error(), "not configured for pre-authorized issuance")
 }

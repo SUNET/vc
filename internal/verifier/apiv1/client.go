@@ -142,7 +142,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	}
 
 	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand in handler)
-	c.oauth2Metadata = c.cfg.Verifier.Inbound.OpenID4VP.GenerateMetadata(ctx, c.cfg.Verifier.PublicURL)
+	c.oauth2Metadata = c.cfg.Verifier.Inbound.OpenID4VP.GenerateMetadata(ctx, c.cfg.Verifier.PublicURL, c.cfg.Verifier.Trust.WalletAttestation.Enabled)
 
 	// Load presentation request templates if configured
 	if err := c.loadPresentationTemplates(ctx); err != nil {
