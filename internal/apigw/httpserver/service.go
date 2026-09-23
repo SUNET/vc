@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/internal/apigw/cache"
 	datasources "github.com/SUNET/vc/internal/apigw/data_sources"
 	"github.com/SUNET/vc/internal/apigw/staticembed"
+	"github.com/SUNET/vc/internal/webvendor"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -151,7 +152,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		c.Next()
 	})
 
-	s.gin.StaticFS("/static", http.FS(staticembed.FS))
+	s.gin.StaticFS("/static", http.FS(webvendor.Overlay(staticembed.FS)))
 
 	tmpl := template.New("").Funcs(template.FuncMap{
 		"json": func(v any) (any, error) {

@@ -3,22 +3,15 @@
 // no extra dependencies. Covers pure logic only; the Alpine component in
 // offers.js is not exercised here.
 
-import { afterEach, before, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
     credentialOfferData,
-    isIssuanceAvailable,
     issuanceResult,
     OID4VCI_PROTOCOL,
 } from "../offers-helpers.js";
-
-/** Remove whatever the previous test planted on the global object. */
-function clearGlobals() {
-    delete globalThis.DigitalCredential;
-    delete globalThis.DigitalWallets;
-}
 
 describe("OID4VCI_PROTOCOL", () => {
     it("is the OpenID4VCI 1.0 DC API protocol identifier", () => {
@@ -26,153 +19,10 @@ describe("OID4VCI_PROTOCOL", () => {
     });
 });
 
-describe("isIssuanceAvailable", () => {
-    // These cases are about what the PROBES report, so give them the one
-    // precondition the predicate checks first: something to actually call.
-    // The absence of it is covered in "fails closed" below.
-    before(() => {
-        Object.defineProperty(globalThis, "navigator", {
-            value: { credentials: { get: async () => null, create: async () => null } },
-            configurable: true,
-            writable: true,
-        });
-    });
-
-    afterEach(clearGlobals);
-
-    it("is false on a browser with neither the DC API nor a registered web wallet", () => {
-        assert.equal(isIssuanceAvailable(), false);
-    });
-
-    it("is true when the native user agent allows openid4vci-v1", () => {
-        globalThis.DigitalCredential = {
-            userAgentAllowsProtocol: (protocol) => protocol === "openid4vci-v1",
-        };
-        assert.equal(isIssuanceAvailable(), true);
-    });
-
-    // The whole point of the predicate: DigitalCredential being defined is
-    // NOT the question. A browser that has the DC API but refuses the
-    // issuance protocol must not get the button.
-    it("is false when the DC API exists but refuses openid4vci-v1", () => {
-        globalThis.DigitalCredential = {
-            userAgentAllowsProtocol: (protocol) => protocol === "openid4vp-v1-signed",
-        };
-        assert.equal(isIssuanceAvailable(), false);
-    });
-
-    it("is false when the DC API exists without userAgentAllowsProtocol", () => {
-        globalThis.DigitalCredential = {};
-        assert.equal(isIssuanceAvailable(), false);
-    });
-
-    it("is true when a web wallet registered with the polyfill supports openid4vci-v1", () => {
-        globalThis.DigitalWallets = {
-            supportsProtocol: (protocol) => protocol === "openid4vci-v1",
-        };
-        assert.equal(isIssuanceAvailable(), true);
-    });
-
-    it("is false when the registered web wallets support only presentation", () => {
-        globalThis.DigitalWallets = {
-            supportsProtocol: (protocol) => protocol === "openid4vp-v1-signed",
-        };
-        assert.equal(isIssuanceAvailable(), false);
-    });
-
-    it("is false when DigitalWallets exists without supportsProtocol", () => {
-        globalThis.DigitalWallets = {};
-        assert.equal(isIssuanceAvailable(), false);
-    });
-
-    it("ignores a truthy non-boolean supportsProtocol result", () => {
-        globalThis.DigitalWallets = { supportsProtocol: () => "yes" };
-        assert.equal(isIssuanceAvailable(), false);
-    });
-});
-
-// offers.js calls navigator.credentials.create() whenever the predicate is
-// true, and calls the predicate from Alpine's init(). So a probe that throws
-// does not merely hide a button - it aborts the component and takes the QR
-// rendering with it. Every one of these must be false, never a throw.
-describe("isIssuanceAvailable fails closed", () => {
-    /** @type {PropertyDescriptor | undefined} */
-    let savedNavigator;
-
-    before(() => {
-        savedNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
-    });
-
-    function setNavigator(value) {
-        Object.defineProperty(globalThis, "navigator", {
-            value,
-            configurable: true,
-            writable: true,
-        });
-    }
-
-    afterEach(() => {
-        if (savedNavigator) {
-            Object.defineProperty(globalThis, "navigator", savedNavigator);
-        } else {
-            delete globalThis.navigator;
-        }
-        clearGlobals();
-    });
-
-    it("is false when navigator.credentials.create is missing", () => {
-        setNavigator({ credentials: { get: async () => null } });
-        // A shim can claim the protocol without providing the call it gates.
-        globalThis.DigitalCredential = { userAgentAllowsProtocol: () => true };
-        assert.equal(isIssuanceAvailable(), false);
-    });
-
-    it("is false when navigator.credentials is missing entirely", () => {
-        setNavigator({});
-        globalThis.DigitalWallets = { supportsProtocol: () => true };
-        assert.equal(isIssuanceAvailable(), false);
-    });
-
-    it("is false, not a throw, when userAgentAllowsProtocol throws", () => {
-        setNavigator({ credentials: { create: async () => null } });
-        globalThis.DigitalCredential = {
-            userAgentAllowsProtocol: () => {
-                throw new Error("hostile shim");
-            },
-        };
-        assert.equal(isIssuanceAvailable(), false);
-    });
-
-    it("is false, not a throw, when supportsProtocol throws", () => {
-        setNavigator({ credentials: { create: async () => null } });
-        globalThis.DigitalWallets = {
-            supportsProtocol: () => {
-                throw new Error("hostile registry");
-            },
-        };
-        assert.equal(isIssuanceAvailable(), false);
-    });
-
-    it("ignores a truthy non-boolean from the native probe", () => {
-        setNavigator({ credentials: { create: async () => null } });
-        globalThis.DigitalCredential = { userAgentAllowsProtocol: () => "yes" };
-        assert.equal(isIssuanceAvailable(), false);
-    });
-
-    it("is still true for genuine native support", () => {
-        setNavigator({ credentials: { create: async () => null } });
-        globalThis.DigitalCredential = {
-            userAgentAllowsProtocol: (p) => p === "openid4vci-v1",
-        };
-        assert.equal(isIssuanceAvailable(), true);
-    });
-});
-
-// offers.js is not exercised here (no Alpine, no DOM), so this is a source
-// assertion rather than a behavioural one. It guards the invariant the whole
-// block above exists for: the page must read the browser's own globals, which
-// it can only do while nothing has installed the polyfill over them.
-describe("offers.js polyfill invariant", () => {
+// offers.js is not exercised here (no Alpine, no DOM), so these are source
+// assertions rather than behavioural ones. They guard two choices that are
+// invisible from the helpers alone and expensive to get wrong.
+describe("offers.js DC API wiring", () => {
     const source = readFileSync(new URL("../offers.js", import.meta.url), "utf8");
 
     it("does not claim the user cancelled on NotAllowedError", () => {
@@ -191,16 +41,19 @@ describe("offers.js polyfill invariant", () => {
         );
     });
 
-    it("does not install the DC API polyfill", () => {
+    it("installs the combined bundle, not the standalone polyfill", () => {
+        // The library's separate polyfill and web-wallets bundles each inline
+        // their own wallet registry, so a wallet registered through one is
+        // invisible to the other's create() shim (sirosfoundation/dc-api#23).
+        // Only the combined /full bundle carries both in one module instance,
+        // and installing the wrong one fails silently: the button renders or
+        // hides correctly, and create() rejects with a provider present.
+        assert.match(source, /from "\.\/dc-api-full\.js"/);
         assert.equal(
-            /\binstallPolyfill\b/.test(source),
+            /dc-api-polyfill\.js/.test(source),
             false,
-            "offers.js must not install the vendored polyfill: it shims " +
-                "DigitalCredential.userAgentAllowsProtocol page-wide (and " +
-                "fabricates the global outright when the browser has none), " +
-                "so isIssuanceAvailable() would stop reporting native " +
-                "support while still claiming to. Install it only together " +
-                "with a combined bundle - sirosfoundation/dc-api#23.",
+            "offers.js must install the combined bundle: the standalone polyfill " +
+                "cannot see wallets registered through window.DigitalWallets.",
         );
     });
 });

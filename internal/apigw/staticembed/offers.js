@@ -1,25 +1,25 @@
 import Alpine from "alpinejs";
 import * as v from "valibot";
 
-// No DC API polyfill is vendored here, and the same-device button below is
-// dormant because of it: isIssuanceAvailable() can only answer from the
-// browser's own globals, and no shipping browser natively allows
-// openid4vci-v1.
+// The DC API polyfill and the web-wallet registry, in ONE module instance
+// (@sirosfoundation/dc-api /full). Installing them lets a web wallet register
+// itself through window.DigitalWallets and be found by the
+// navigator.credentials.create() call below.
 //
-// The library's standalone polyfill bundle is not the missing piece. It
-// cannot be combined with the web-wallets bundle that defines
-// window.DigitalWallets - each inlines its own copy of the wallet registry -
-// so installing it would shim navigator.credentials.{get,create} page-wide,
-// fabricate a global DigitalCredential on browsers that have none, and route
-// create() to a registry nothing can register with. That is a page-wide side
-// effect for no gain, which is why it was removed rather than left unused.
+// It must be the combined bundle: the library's separate polyfill and
+// web-wallets bundles each inline their own copy of the wallet registry, so a
+// wallet registered through one is invisible to the other's create() shim
+// (sirosfoundation/dc-api#23, fixed in 0.7.0).
 //
-// sirosfoundation/dc-api#23 adds a single combined bundle carrying both
-// halves in one module instance. That is the artifact to vendor here, and
-// installing it is what lights this button up. Until then the QR is the
-// same-device path too.
-import { getUserFriendlyErrorMessage } from "./dc-api.js";
-import { credentialOfferData, isIssuanceAvailable, issuanceResult, OID4VCI_PROTOCOL } from "./offers-helpers.js";
+// isIssuanceAvailable() is the library's own, and it is asked AFTER the
+// install on purpose: installing shims
+// DigitalCredential.userAgentAllowsProtocol to answer from the polyfill's
+// registry, which is exactly what we want it to report once a wallet has
+// registered. It still returns false - and the button still does not render -
+// until one actually does.
+import { installPolyfill, enableWebWallets } from "./dc-api-full.js";
+import { getUserFriendlyErrorMessage, isIssuanceAvailable } from "./dc-api.js";
+import { credentialOfferData, issuanceResult, OID4VCI_PROTOCOL } from "./offers-helpers.js";
 
 
 const CredentialSchema = v.object({
@@ -71,9 +71,10 @@ Alpine.data("app", () => ({
     /**
      * Whether the same-device DC API button is rendered at all. Re-evaluated
      * whenever an offer is loaded, since a wallet extension can install
-     * itself after the page has started. See isIssuanceAvailable() in
-     * offers-helpers.js for why this is not simply "the browser has the
-     * DC API", and why it is false on every browser today.
+     * itself after the page has started. The library's
+     * isIssuanceAvailable() answers "can openid4vci-v1 actually be
+     * fulfilled", not "does this browser have the DC API" - so it stays
+     * false, and the button stays hidden, until a wallet registers.
      * @type {boolean}
      */
     issuanceAvailable: false,
@@ -96,7 +97,16 @@ Alpine.data("app", () => ({
             this.error = "Failed to load credential types: " + err.message;
         }
 
-        this.issuanceAvailable = isIssuanceAvailable();
+        try {
+            installPolyfill();
+            enableWebWallets();
+        } catch (err) {
+            // A page that cannot install the shim simply has no same-device
+            // path; the QR is unaffected, so do not fail the whole component.
+            console.warn("DC API polyfill not installed:", err);
+        }
+
+        this.issuanceAvailable = isIssuanceAvailable(OID4VCI_PROTOCOL);
 
         // Setup error watcher
         this.$watch("error", (newVal) => {
@@ -184,7 +194,7 @@ Alpine.data("app", () => ({
             const jsonData = await res.json();
 
             const data = v.parse(CredentialOfferSchema, jsonData);
-            this.issuanceAvailable = isIssuanceAvailable();
+            this.issuanceAvailable = isIssuanceAvailable(OID4VCI_PROTOCOL);
             this.credentialOffer = data;
         } catch (err) {
             console.error("Error loading credential offer:", err);
