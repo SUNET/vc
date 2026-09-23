@@ -238,3 +238,58 @@ func TestParseAuthorizationDetails(t *testing.T) {
 		})
 	}
 }
+
+func TestParseAuthorizationDetails_ValidatesJSONBinderInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		details []AuthorizationDetailsParameter
+		wantErr bool
+	}{
+		{
+			name: "prepopulated valid entry accepted",
+			details: []AuthorizationDetailsParameter{
+				{Type: "openid_credential", CredentialConfigurationID: "TestCredential"},
+			},
+		},
+		{
+			name: "prepopulated entry with wrong type rejected",
+			details: []AuthorizationDetailsParameter{
+				{Type: "unknown", CredentialConfigurationID: "TestCredential"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "prepopulated entry missing type rejected",
+			details: []AuthorizationDetailsParameter{
+				{CredentialConfigurationID: "TestCredential"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "prepopulated entry missing credential id and format rejected",
+			details: []AuthorizationDetailsParameter{
+				{Type: "openid_credential"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "prepopulated entry with format but no vct rejected",
+			details: []AuthorizationDetailsParameter{
+				{Type: "openid_credential", Format: "vc+sd-jwt"},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &PARRequest{AuthorizationDetails: tt.details}
+			err := r.ParseAuthorizationDetails()
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}

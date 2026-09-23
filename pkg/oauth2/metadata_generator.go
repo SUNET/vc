@@ -25,8 +25,11 @@ func GenerateMetadata(cfg *MetadataConfig) *AuthorizationServerMetadata {
 
 	// "none" is always advertised for pre-authorized_code anonymous access.
 	authMethods := []string{"none"}
+	var attestationALGs, attestationPoPALGs []string
 	if cfg.WalletAttestationEnabled {
 		authMethods = append([]string{"attest_jwt_client_auth"}, authMethods...)
+		attestationALGs = []string{"ES256", "ES384", "ES512"}
+		attestationPoPALGs = []string{"ES256", "ES384", "ES512"}
 	}
 
 	return &AuthorizationServerMetadata{
@@ -38,8 +41,8 @@ func GenerateMetadata(cfg *MetadataConfig) *AuthorizationServerMetadata {
 		RequiredPushedAuthorizationRequests:           true,
 		GrantTypesSupported:                           grantTypes,
 		TokenEndpointAuthMethodsSupported:             authMethods,
-		ClientAttestationSigningALGValuesSupported:    []string{"ES256", "ES384", "ES512"},
-		ClientAttestationPoPSigningALGValuesSupported: []string{"ES256", "ES384", "ES512"},
+		ClientAttestationSigningALGValuesSupported:    attestationALGs,
+		ClientAttestationPoPSigningALGValuesSupported: attestationPoPALGs,
 		ResponseTypesSupported:                        []string{"code"},
 		CodeChallengeMethodsSupported:                 []string{"S256"},
 		DPOPSigningALGValuesSupported:                 []string{"ES256"},

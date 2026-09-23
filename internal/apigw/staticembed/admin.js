@@ -57,6 +57,7 @@ window.adminApp = function () {
         subject: '',
         scopes: [],
         scopeTemplates: {},
+        preauthScopes: [],
         allowedAuthenticSources: [],
         hasIdentityMapping: false,
         csrfToken: '',
@@ -176,6 +177,7 @@ window.adminApp = function () {
                     this.subject = data.subject || '';
                     this.scopes = (data.scopes || []).sort();
                     this.scopeTemplates = data.scope_templates || {};
+                    this.preauthScopes = data.preauth_scopes || [];
                     this.allowedAuthenticSources = (data.allowed_authentic_sources || []).sort();
                     this.hasIdentityMapping = data.has_identity_mapping || false;
                     this.unrestricted = data.unrestricted || false;
@@ -381,6 +383,10 @@ window.adminApp = function () {
             this.ds.offerError = '';
             this.ds.offerResult = null;
             try {
+                const scope = doc.meta?.scope;
+                if (!this.canPreAuthOffer(scope)) {
+                    throw new Error('scope is not configured for pre-authorized issuance');
+                }
                 const resp = await this.apiFetch('/api/v1/datastore/preauth_offer', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -409,6 +415,15 @@ window.adminApp = function () {
             } catch (e) {
                 this.showToast('Copy failed: ' + e.message, 'danger');
             }
+        },
+
+        canPreAuthOffer(scope) {
+            return !!scope && Array.isArray(this.preauthScopes) && this.preauthScopes.includes(scope);
+        },
+
+        closeOfferModal() {
+            this.ds.offerResult = null;
+            this.ds.offerError = '';
         },
 
         async createDocument() {

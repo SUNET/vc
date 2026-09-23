@@ -140,22 +140,30 @@ func BindAuthorizationRequest(body io.ReadCloser) (*PARRequest, error) {
 	return authorizationRequest, nil
 }
 
-// ParseAuthorizationDetails populates AuthorizationDetails from
-// AuthorizationDetailsRaw. No-op when Raw is empty or the slice is already
-// populated, so it is safe to call unconditionally after gin's binder.
+// ParseAuthorizationDetails ensures AuthorizationDetails is populated and
+// per-entry validated. It decodes the form-body JSON string in
+// AuthorizationDetailsRaw when the slice is empty, then validates every
+// entry (including entries populated by gin's JSON binder), so the same
+// per-field validation applies regardless of the request encoding.
 func (r *PARRequest) ParseAuthorizationDetails() error {
-	if r == nil || r.AuthorizationDetailsRaw == "" || len(r.AuthorizationDetails) > 0 {
+	if r == nil {
 		return nil
 	}
-	trimmed := bytes.TrimSpace([]byte(r.AuthorizationDetailsRaw))
-	if len(trimmed) == 0 {
-		return errors.New("authorization_details is empty")
+	if r.AuthorizationDetailsRaw != "" && len(r.AuthorizationDetails) == 0 {
+		trimmed := bytes.TrimSpace([]byte(r.AuthorizationDetailsRaw))
+		if len(trimmed) == 0 {
+			return errors.New("authorization_details is empty")
+		}
+		if trimmed[0] != '[' {
+			return errors.New("authorization_details must be a JSON array")
+		}
+		if err := json.Unmarshal(trimmed, &r.AuthorizationDetails); err != nil {
+			return fmt.Errorf("authorization_details parse: %w", err)
+		}
 	}
-	if trimmed[0] != '[' {
-		return errors.New("authorization_details must be a JSON array")
-	}
-	if err := json.Unmarshal(trimmed, &r.AuthorizationDetails); err != nil {
-		return fmt.Errorf("authorization_details parse: %w", err)
+	r.AuthorizationDetailsRaw = ""
+	if len(r.AuthorizationDetails) == 0 {
+		return nil
 	}
 	validate, err := NewValidator()
 	if err != nil {
@@ -166,7 +174,5 @@ func (r *PARRequest) ParseAuthorizationDetails() error {
 			return fmt.Errorf("authorization_details[%d]: %w", i, err)
 		}
 	}
-	// Raw is now redundant; drop it so downstream sees only the parsed slice.
-	r.AuthorizationDetailsRaw = ""
 	return nil
 }

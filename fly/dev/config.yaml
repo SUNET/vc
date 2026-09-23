@@ -287,6 +287,8 @@ apigw:
         mdl:
           auth_provider: oidc
           auth_claims: ["given_name", "family_name", "birthdate"]
+        diploma:
+          auth_provider: preauth
     assertion:
       scopes:
         eduid:

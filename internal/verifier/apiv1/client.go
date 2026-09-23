@@ -141,8 +141,12 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		return nil, err
 	}
 
-	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand in handler)
-	c.oauth2Metadata = c.cfg.Verifier.Inbound.OpenID4VP.GenerateMetadata(ctx, c.cfg.Verifier.PublicURL, c.cfg.Verifier.Trust.WalletAttestation.Enabled)
+	// Advertise attest_jwt_client_auth only when the evaluator will actually be wired (needs Enabled + PDPURL).
+	c.oauth2Metadata = c.cfg.Verifier.Inbound.OpenID4VP.GenerateMetadata(
+		ctx,
+		c.cfg.Verifier.PublicURL,
+		c.cfg.Verifier.Trust.WalletAttestation.Enabled && c.cfg.Verifier.Trust.PDPURL != "",
+	)
 
 	// Load presentation request templates if configured
 	if err := c.loadPresentationTemplates(ctx); err != nil {

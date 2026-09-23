@@ -28,8 +28,8 @@ func TestGenerateMetadata(t *testing.T) {
 				assert.True(t, metadata.RequiredPushedAuthorizationRequests)
 				assert.NotContains(t, metadata.TokenEndpointAuthMethodsSupported, "attest_jwt_client_auth")
 				assert.Contains(t, metadata.TokenEndpointAuthMethodsSupported, "none")
-				assert.Contains(t, metadata.ClientAttestationSigningALGValuesSupported, "ES256")
-				assert.Contains(t, metadata.ClientAttestationPoPSigningALGValuesSupported, "ES256")
+				assert.Empty(t, metadata.ClientAttestationSigningALGValuesSupported)
+				assert.Empty(t, metadata.ClientAttestationPoPSigningALGValuesSupported)
 				assert.Contains(t, metadata.ResponseTypesSupported, "code")
 				assert.Contains(t, metadata.CodeChallengeMethodsSupported, "S256")
 				assert.Contains(t, metadata.DPOPSigningALGValuesSupported, "ES256")
@@ -57,6 +57,8 @@ func TestGenerateMetadata(t *testing.T) {
 			verify: func(t *testing.T, metadata *AuthorizationServerMetadata) {
 				assert.Contains(t, metadata.TokenEndpointAuthMethodsSupported, "attest_jwt_client_auth")
 				assert.Contains(t, metadata.TokenEndpointAuthMethodsSupported, "none")
+				assert.Contains(t, metadata.ClientAttestationSigningALGValuesSupported, "ES256")
+				assert.Contains(t, metadata.ClientAttestationPoPSigningALGValuesSupported, "ES256")
 			},
 		},
 		{
@@ -69,6 +71,8 @@ func TestGenerateMetadata(t *testing.T) {
 			verify: func(t *testing.T, metadata *AuthorizationServerMetadata) {
 				assert.NotContains(t, metadata.TokenEndpointAuthMethodsSupported, "attest_jwt_client_auth")
 				assert.Equal(t, []string{"none"}, metadata.TokenEndpointAuthMethodsSupported)
+				assert.Empty(t, metadata.ClientAttestationSigningALGValuesSupported)
+				assert.Empty(t, metadata.ClientAttestationPoPSigningALGValuesSupported)
 			},
 		},
 	}

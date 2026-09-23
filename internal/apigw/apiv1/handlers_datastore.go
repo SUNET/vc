@@ -692,19 +692,25 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 	return reply, nil
 }
 
-// requirePreAuthScope returns an error unless scope is configured in
-// data_sources with auth_provider: preauth in at least one data source. A
-// scope that resolves only through SAML/OIDC/OpenID4VP is not allowed to
-// be issued via a pre-authorized credential offer.
+// requirePreAuthScope returns a helpers.Error with title "invalid_scope"
+// unless scope is configured in data_sources with auth_provider: preauth in at
+// least one data source. The transport layer maps that title to HTTP 400 via
+// httphelpers.StatusCode.
 func (c *Client) requirePreAuthScope(scope string) error {
 	sources, err := c.cfg.APIGW.DataSources.LookupCredentialSources(scope)
 	if err != nil {
-		return fmt.Errorf("scope %q is not configured for pre-authorized issuance: %w", scope, err)
+		return helpers.NewErrorDetails(
+			"invalid_scope",
+			fmt.Sprintf("scope %q is not configured for pre-authorized issuance: %s", scope, err),
+		)
 	}
 	for _, src := range sources {
 		if src.AuthProvider == model.AuthProviderPreAuth {
 			return nil
 		}
 	}
-	return fmt.Errorf("scope %q is not configured for pre-authorized issuance (auth_provider must be %q)", scope, model.AuthProviderPreAuth)
+	return helpers.NewErrorDetails(
+		"invalid_scope",
+		fmt.Sprintf("scope %q is not configured for pre-authorized issuance (auth_provider must be %q)", scope, model.AuthProviderPreAuth),
+	)
 }

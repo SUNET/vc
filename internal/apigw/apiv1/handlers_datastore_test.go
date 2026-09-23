@@ -1121,6 +1121,9 @@ func TestDatastorePreAuthOffer_RejectsNonPreauthScope(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, reply)
 	assert.Contains(t, err.Error(), "not configured for pre-authorized issuance")
+	var helperErr *helpers.Error
+	require.ErrorAs(t, err, &helperErr)
+	assert.Equal(t, "invalid_scope", helperErr.Title)
 }
 
 func TestDatastorePreAuthOffer_RejectsUnknownScope(t *testing.T) {
@@ -1134,4 +1137,7 @@ func TestDatastorePreAuthOffer_RejectsUnknownScope(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, reply)
 	assert.Contains(t, err.Error(), "not configured for pre-authorized issuance")
+	var helperErr *helpers.Error
+	require.ErrorAs(t, err, &helperErr)
+	assert.Equal(t, "invalid_scope", helperErr.Title)
 }
