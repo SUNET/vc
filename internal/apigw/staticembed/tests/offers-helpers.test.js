@@ -5,6 +5,7 @@
 
 import { afterEach, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
     credentialOfferData,
@@ -79,12 +80,19 @@ describe("isIssuanceAvailable", () => {
 });
 
 // The same-device button is gated on isIssuanceAvailable() alone, and in the
-// state this repo actually ships - the vendored polyfill installed, no wallet
-// registered, no native openid4vci-v1 support - it must stay false so the
+// state this repo actually ships - the vendored polyfill present but NOT
+// installed, no native openid4vci-v1 support - it must stay false so the
 // button does not render. A create() that rejects with NotAllowedError is
 // exactly what the gate exists to prevent, so a change that turns this true
 // without also making create() work is a regression, not a fix.
-describe("isIssuanceAvailable with the vendored polyfill installed", () => {
+//
+// These tests also pin down WHY offers.js does not install the polyfill:
+// installing it replaces DigitalCredential.userAgentAllowsProtocol with a
+// shim answering from the polyfill's own wallet registry, and fabricates a
+// global DigitalCredential when the browser has none. The gate's native
+// clause would then report the polyfill's state while claiming to report the
+// browser's.
+describe("the vendored polyfill and the availability gate", () => {
     /** @type {typeof import("../dc-api-polyfill.js")} */
     let polyfill;
 
@@ -108,34 +116,52 @@ describe("isIssuanceAvailable with the vendored polyfill installed", () => {
         clearGlobals();
     });
 
+    it("is false in the state this page ships: polyfill not installed", () => {
+        assert.equal(polyfill.isPolyfillInstalled(), false);
+        assert.equal(isIssuanceAvailable(), false);
+    });
+
+    it("leaves the browser's globals untouched when not installed", () => {
+        // The page must see the browser's own answer, not the library's.
+        assert.equal(globalThis.DigitalCredential, undefined);
+        assert.equal(globalThis.DigitalWallets, undefined);
+    });
+
     it("installs without throwing", () => {
         polyfill.installPolyfill();
         assert.equal(polyfill.isPolyfillInstalled(), true);
     });
 
-    it("does not define window.DigitalWallets", () => {
+    it("does not define window.DigitalWallets even once installed", () => {
         polyfill.installPolyfill();
         // That global comes from the library's separate web-wallets bundle,
-        // which cannot share this module's registry — sirosfoundation/dc-api#23.
+        // which cannot share this module's registry - sirosfoundation/dc-api#23.
         assert.equal(globalThis.DigitalWallets, undefined);
     });
 
-    it("is false in the state this page ships: installed, nothing registered", () => {
+    // The reason offers.js does not install it. Both assertions below are
+    // side effects on globals this page does not own.
+    it("fabricates a global DigitalCredential when installed on a browser without one", () => {
+        assert.equal(globalThis.DigitalCredential, undefined);
         polyfill.installPolyfill();
-        assert.equal(isIssuanceAvailable(), false);
+        assert.notEqual(globalThis.DigitalCredential, undefined);
     });
 
-    // Not hardwired false: the polyfill's own registry is coherent, and a
-    // wallet registered with this module instance is both reported here and
-    // found by this instance's create().
-    it("is true for a wallet registered with the same module instance", () => {
+    it("makes the gate's native clause answer from the polyfill's registry once installed", () => {
         polyfill.installPolyfill();
+        assert.equal(isIssuanceAvailable(), false);
+
         polyfill.registerWallet({
             id: "w",
             name: "W",
             url: "https://wallet.example.com/",
             protocols: ["openid4vci-v1"],
         });
+
+        // True via userAgentAllowsProtocol - which reads as "the user agent
+        // natively allows this" but is now the polyfill's shim. Nothing
+        // native changed. This is the conflation the page avoids by not
+        // installing.
         assert.equal(isIssuanceAvailable(), true);
     });
 
@@ -148,6 +174,27 @@ describe("isIssuanceAvailable with the vendored polyfill installed", () => {
             protocols: ["openid4vp-v1-signed"],
         });
         assert.equal(isIssuanceAvailable(), false);
+    });
+});
+
+// offers.js is not exercised here (no Alpine, no DOM), so this is a source
+// assertion rather than a behavioural one. It guards the invariant the whole
+// block above exists for: the page must read the browser's own globals, which
+// it can only do while nothing has installed the polyfill over them.
+describe("offers.js polyfill invariant", () => {
+    const source = readFileSync(new URL("../offers.js", import.meta.url), "utf8");
+
+    it("does not install the DC API polyfill", () => {
+        assert.equal(
+            /\binstallPolyfill\b/.test(source),
+            false,
+            "offers.js must not install the vendored polyfill: it shims " +
+                "DigitalCredential.userAgentAllowsProtocol page-wide (and " +
+                "fabricates the global outright when the browser has none), " +
+                "so isIssuanceAvailable() would stop reporting native " +
+                "support while still claiming to. Install it only together " +
+                "with a combined bundle - sirosfoundation/dc-api#23.",
+        );
     });
 });
 

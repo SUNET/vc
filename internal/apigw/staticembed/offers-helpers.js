@@ -33,10 +33,14 @@ export const OID4VCI_PROTOCOL = OID4VCI_PROTOCOLS.V1;
  *      needs a single combined bundle (one module instance) from the
  *      library before the clause can ever be true.
  *
- * The polyfill's own registerWallet() is the one path that is coherent
- * today: a wallet registered through the very module instance this page
- * installs is both reported here and found by that instance's create().
- * Nothing on this page calls it.
+ * This reads the browser's OWN globals, and it only does so because
+ * offers.js deliberately does not install the vendored polyfill. Installing
+ * it replaces DigitalCredential.userAgentAllowsProtocol with a shim that
+ * answers from the polyfill's wallet registry (and fabricates a global
+ * DigitalCredential outright when the browser has none), so clause 1 would
+ * stop reporting native support while still claiming to. If the polyfill is
+ * ever installed on this page, capture native support before installing it
+ * — do not let this function read a shimmed global.
  *
  * Do not "fix" this by making it return true — a true that leads to a
  * create() which rejects is exactly what the gate exists to prevent.

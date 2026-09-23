@@ -1,14 +1,20 @@
 import Alpine from "alpinejs";
 import * as v from "valibot";
 
-// The library's own polyfill, vendored alongside this file. Installing it
-// shims navigator.credentials.create() so that a wallet registered with THIS
-// module instance (its registerWallet) can fulfil the openid4vci-v1 call
-// below. Nothing registers one today, so it is inert and the native DC API
-// (if any) is used unchanged — and isIssuanceAvailable() correspondingly
-// returns false, so the button it gates does not render. See that function
-// and sirosfoundation/dc-api#23.
-import { installPolyfill } from "./dc-api-polyfill.js";
+// The library's polyfill is vendored alongside this file but deliberately
+// NOT installed. Installing it would shim navigator.credentials.create()
+// and .get() for the whole page and, on a browser with no DC API at all,
+// define a global DigitalCredential of its own — so every other consumer on
+// the page would see a DC API the browser does not have, and
+// isIssuanceAvailable() below would be reading the polyfill's own wallet
+// registry through a DigitalCredential the polyfill invented, rather than
+// the browser's native answer. Nothing registers a wallet with it, so that
+// costs a page-wide side effect and buys nothing.
+//
+// It gets installed when there is something for it to route to: a single
+// combined bundle carrying the polyfill and the web-wallets registry in one
+// module instance (sirosfoundation/dc-api#23). Until then the same-device
+// button stays dormant and the QR is the same-device path too.
 import { getUserFriendlyErrorMessage, isUserCancel } from "./dc-api.js";
 import { credentialOfferData, isIssuanceAvailable, OID4VCI_PROTOCOL } from "./offers-helpers.js";
 
@@ -61,10 +67,10 @@ Alpine.data("app", () => ({
 
     /**
      * Whether the same-device DC API button is rendered at all. Re-evaluated
-     * whenever an offer is loaded, since a wallet can register itself with
-     * the polyfill after the page has started. See isIssuanceAvailable() in
+     * whenever an offer is loaded, since a wallet extension can install
+     * itself after the page has started. See isIssuanceAvailable() in
      * offers-helpers.js for why this is not simply "the browser has the
-     * DC API".
+     * DC API", and why it is false on every browser today.
      * @type {boolean}
      */
     issuanceAvailable: false,
@@ -85,12 +91,6 @@ Alpine.data("app", () => ({
             }
         } catch (err) {
             this.error = "Failed to load credential types: " + err.message;
-        }
-
-        try {
-            installPolyfill();
-        } catch (err) {
-            console.warn("DC API polyfill not installed:", err);
         }
 
         this.issuanceAvailable = isIssuanceAvailable();
