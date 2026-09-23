@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import {
     credentialOfferData,
     isIssuanceAvailable,
+    issuanceResult,
     OID4VCI_PROTOCOL,
 } from "../offers-helpers.js";
 
@@ -333,5 +334,25 @@ describe("credentialOfferData", () => {
 
         const nullOffer = new URLSearchParams({ credential_offer: "null" }).toString();
         assert.throws(() => credentialOfferData(nullOffer), /not a JSON object/);
+    });
+});
+
+// navigator.credentials.create() may resolve with no credential at all - the
+// W3C API allows it and the vendored polyfill hands the native result back
+// unchanged. The page used to discard the result and announce a handover
+// regardless, stranding the operator on a page that looked finished.
+describe("issuanceResult", () => {
+    it("treats null as nothing having started", () => {
+        assert.deepEqual(issuanceResult(null), { pending: true });
+    });
+
+    it("treats undefined as nothing having started", () => {
+        assert.deepEqual(issuanceResult(undefined), { pending: true });
+    });
+
+    it("reports a handover for a real credential", () => {
+        const out = issuanceResult({ type: "digital", protocol: "openid4vci-v1", data: {} });
+        assert.equal("pending" in out, false);
+        assert.match(out.status, /wallet/i);
     });
 });

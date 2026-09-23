@@ -107,3 +107,24 @@ export function credentialOfferData(offer) {
 
     return parsed;
 }
+
+/**
+ * Interpret what navigator.credentials.create() resolved with.
+ *
+ * The call can resolve with NO credential - the W3C API allows it, and the
+ * vendored polyfill hands the native result straight back, which may be null.
+ * That is not success: nothing was issued, and the page must not tell the
+ * operator their wallet has taken over when it has not. It is not an error
+ * either, since nothing failed; the QR is still there and still works.
+ *
+ * @param {unknown} result  whatever create() resolved with
+ * @returns {{ status: string } | { pending: true }}
+ *   status to show on a real handover, pending when nothing came back
+ */
+export function issuanceResult(result) {
+    if (!result) {
+        return { pending: true };
+    }
+
+    return { status: "Your wallet has taken over the issuance." };
+}

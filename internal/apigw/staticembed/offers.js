@@ -16,7 +16,7 @@ import * as v from "valibot";
 // module instance (sirosfoundation/dc-api#23). Until then the same-device
 // button stays dormant and the QR is the same-device path too.
 import { getUserFriendlyErrorMessage, isUserCancel } from "./dc-api.js";
-import { credentialOfferData, isIssuanceAvailable, OID4VCI_PROTOCOL } from "./offers-helpers.js";
+import { credentialOfferData, isIssuanceAvailable, issuanceResult, OID4VCI_PROTOCOL } from "./offers-helpers.js";
 
 
 const CredentialSchema = v.object({
@@ -203,13 +203,23 @@ Alpine.data("app", () => ({
         try {
             const data = credentialOfferData(this.credentialOffer.offer);
 
-            await navigator.credentials.create({
+            const result = await navigator.credentials.create({
                 digital: {
                     requests: [{ protocol: OID4VCI_PROTOCOL, data }],
                 },
             });
 
-            this.issuanceStatus = "Your wallet has taken over the issuance.";
+            // create() can resolve with nothing at all. Reporting a handover
+            // that did not happen would strand the operator on a page that
+            // looks finished, so say plainly that nothing started and leave
+            // the QR as the way forward.
+            const outcome = issuanceResult(result);
+            if ("pending" in outcome) {
+                this.error = "No wallet took the issuance request. You can still scan the QR code.";
+                return;
+            }
+
+            this.issuanceStatus = outcome.status;
         } catch (err) {
             console.error("Error starting issuance over the DC API:", err);
             this.error = isUserCancel(err)
