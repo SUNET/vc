@@ -28,13 +28,6 @@ func (c *Client) UICredentialOffers(ctx context.Context) (*CredentialOfferLookup
 	return c.CredentialOfferLookupMetadata, nil
 }
 
-// OpaqueWalletID is a reserved wallet id. The credential offer itself is
-// wallet-independent, so the UI no longer selects a wallet before an offer
-// is produced; the id stays reserved (rejected at config load, see
-// pkg/configuration) so that no configured wallet can collide with the
-// opaque "openid-credential-offer://" rendering.
-const OpaqueWalletID = "opaque"
-
 type UICredentialOfferRequest struct {
 	Scope string `json:"scope" uri:"scope" binding:"required"`
 }

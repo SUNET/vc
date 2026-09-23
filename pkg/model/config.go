@@ -1344,8 +1344,10 @@ type CredentialOfferWallets struct {
 // CredentialOffers holds credential offer configurations
 type CredentialOffers struct {
 	// IssuerURL is the issuer IDENTIFIER published as `credential_issuer`
-	// inside each credential offer. It MUST equal apigw.public_url, and
-	// config load refuses the mismatch: issuer metadata is generated from
+	// inside each credential offer. It MUST be byte-identical to
+	// apigw.public_url - a trailing slash on one of them is a mismatch,
+	// because both are published verbatim - and config load refuses
+	// anything else: issuer metadata is generated from
 	// public_url and declares that as its own `credential_issuer`, so a
 	// wallet resolving an offer to
 	// {credential_issuer}/.well-known/openid-credential-issuer would
