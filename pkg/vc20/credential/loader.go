@@ -2,12 +2,12 @@ package credential
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	neturl "net/url"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/SUNET/vc/pkg/logger"
@@ -38,61 +38,55 @@ type CachingDocumentLoader struct {
 	log      *logger.Log
 }
 
-// hostOf returns the host of a context URL, or "" if it has none - a relative
-// or malformed reference, which has nothing to fetch.
-func hostOf(raw string) string {
+// schemeOf returns the scheme of a context URL, or "" if it has none.
+func schemeOf(raw string) string {
 	u, err := neturl.Parse(raw)
 	if err != nil {
 		return ""
 	}
-	return u.Hostname()
+	return u.Scheme
 }
 
-// contextHTTPClient fetches remote JSON-LD contexts, refusing redirects that
-// leave the public internet, and without waiting indefinitely.
+// isInternalAddr reports whether an address is one the public internet cannot
+// reach, and which a context fetch therefore has no business connecting to.
+func isInternalAddr(ip net.IP) bool {
+	return ip == nil || ip.IsLoopback() || ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
+// contextHTTPClient fetches remote JSON-LD contexts, refusing to CONNECT to
+// anything the public internet cannot reach.
 //
-// Redirects cannot simply be refused: w3id.org exists to redirect, and the
-// Data Integrity contexts resolve through it to w3.org. But a redirect also
-// defeats any decision made about the URL before the fetch - the issuer
-// allowlists which context URLs it may dereference
-// (issuer.jsonld_context_allowlist), and an allowlisted endpoint answering 302
-// would otherwise send that fetch anywhere the issuer can reach.
+// The check is at dial time on purpose. Checking the URL before the request
+// covers only the paths this package controls, and json-gold takes others:
+// it follows redirects, and a Link header with rel=alternate makes it call its
+// OWN loader recursively, which never re-enters CachingDocumentLoader. A dial
+// hook sees every one of those, including the recursive fetch, because they
+// all end up opening a socket through this client.
 //
-// So redirects are followed, but never to a private, loopback or link-local
-// address, which is where an allowlist bypass would be aiming.
+// It is also the only layer that survives DNS rebinding: the address checked
+// is the address connected to, not one resolved a moment earlier.
+//
+// Redirects themselves stay allowed - w3id.org exists to redirect and the Data
+// Integrity contexts resolve through it - they just cannot land anywhere
+// internal.
 func contextHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout: 10 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return errors.New("too many redirects while loading a JSON-LD context")
-			}
-			if internal, addr := resolvesToInternalAddress(req.URL.Hostname()); internal {
-				return fmt.Errorf("refusing to follow a JSON-LD context redirect to an internal address (%s -> %s)", req.URL, addr)
-			}
-			return nil
-		},
-	}
-}
-
-// resolvesToInternalAddress reports whether a host resolves to any address the
-// public internet cannot reach, and which one.
-func resolvesToInternalAddress(host string) (bool, string) {
-	if host == "" {
-		return true, "empty host"
-	}
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		// Unresolvable is not reachable; let the request fail on its own terms.
-		return false, ""
-	}
-	for _, ip := range ips {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
-			return true, ip.String()
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	dialer.Control = func(_, address string, _ syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return fmt.Errorf("refusing a JSON-LD context connection to an unparsable address %q: %w", address, err)
 		}
+		if ip := net.ParseIP(host); isInternalAddr(ip) {
+			return fmt.Errorf("refusing to connect to internal address %s while loading a JSON-LD context", host)
+		}
+		return nil
 	}
-	return false, ""
+
+	return &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: &http.Transport{DialContext: dialer.DialContext},
+	}
 }
 
 // NewCachingDocumentLoader creates a new caching document loader
@@ -117,18 +111,16 @@ func (l *CachingDocumentLoader) LoadDocument(url string) (*ld.RemoteDocument, er
 		return item.Value(), nil
 	}
 
-	// Every remote fetch passes through here - the top-level context, and any
-	// nested @context or @import a context itself references. Those nested
-	// URLs are fresh requests, not redirects, so the client's redirect policy
-	// never sees them: an allowlisted context could otherwise name
-	// http://169.254.169.254/ and have it fetched.
+	// http(s) only. json-gold's loader opens any other URL as a LOCAL FILE
+	// (os.Open), and at verification the context list comes from the wallet -
+	// so file:///etc/passwd would be read and parsed as a context. Where the
+	// connection may go is enforced at dial time by contextHTTPClient; what
+	// may be opened at all is enforced here.
 	//
 	// Preloaded contexts are served from the cache above and never reach this.
-	if host := hostOf(url); host != "" {
-		if internal, addr := resolvesToInternalAddress(host); internal {
-			l.log.Warn("refused to load a JSON-LD context from an internal address", "url", url, "address", addr)
-			return nil, fmt.Errorf("refusing to load JSON-LD context %q: it resolves to an internal address (%s)", url, addr)
-		}
+	if scheme := schemeOf(url); scheme != "http" && scheme != "https" {
+		l.log.Warn("refused a non-HTTP JSON-LD context", "url", url, "scheme", scheme)
+		return nil, fmt.Errorf("refusing to load JSON-LD context %q: only http and https are fetched, got scheme %q", url, scheme)
 	}
 
 	// Fallback to network

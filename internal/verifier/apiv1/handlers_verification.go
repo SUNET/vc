@@ -180,10 +180,28 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 		// The wallet does not get to choose which format answers a scope.
 		// Detection reads the token; the request said what was asked for.
-		if requested, ok := c.requestedQuery(authCtx, scope); ok && !formatMatchesRequest(format, requested.Format) {
-			c.log.Error(nil, "returned credential format does not answer the request",
-				"scope", scope, "detected", format, "requested", requested.Format)
-			return nil, fmt.Errorf("scope %s was requested as %q but the response is %q", scope, requested.Format, format)
+		// The wallet does not get to choose which format answers a scope.
+		// Detection reads the token; the request said what was asked for.
+		//
+		// Conditional, deliberately, and this is the weak spot: requestedQuery
+		// cannot resolve a scope for a session with no cached query, or for a
+		// multi-credential template whose query ids differ from the scope. It
+		// is NOT failed closed because formats other than W3C were verified
+		// without any such cross-check before this PR, and refusing here would
+		// take working multi-query templates away. The W3C branch does fail
+		// closed, since its constraint checking depends on the query.
+		//
+		// SUNET/vc#683 persists the scope-to-query mapping, which resolves the
+		// ambiguity properly; once it lands this can stop being conditional.
+		if requested, ok := c.requestedQuery(authCtx, scope); ok {
+			if !formatMatchesRequest(format, requested.Format) {
+				c.log.Error(nil, "returned credential format does not answer the request",
+					"scope", scope, "detected", format, "requested", requested.Format)
+				return nil, fmt.Errorf("scope %s was requested as %q but the response is %q", scope, requested.Format, format)
+			}
+		} else {
+			c.log.Warn("cannot check the returned format against the request: the query this scope was requested under could not be resolved",
+				"scope", scope, "detected", format)
 		}
 
 		// ResponseParameters.Validate parses the token as an SD-JWT, so it can
