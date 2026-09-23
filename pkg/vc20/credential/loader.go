@@ -2,6 +2,7 @@ package credential
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -204,11 +205,19 @@ func (l *CachingDocumentLoader) fetchContext(rawURL string) (*ld.RemoteDocument,
 	// rel=alternate is NOT honoured, and that difference is the point. The
 	// processor resolves ContextURL through us; json-gold resolved alternate
 	// by calling its own loader, which is how file:// became reachable.
-	if ctxURL := contextLinkTarget(resp); ctxURL != "" {
-		doc.ContextURL = resp.Request.URL.ResolveReference(&neturl.URL{Path: ctxURL}).String()
-		if abs, err := neturl.Parse(ctxURL); err == nil && abs.IsAbs() {
-			doc.ContextURL = abs.String()
+	ctxURL, err := contextLinkTarget(resp)
+	if err != nil {
+		return nil, fmt.Errorf("loading JSON-LD context %q: %w", rawURL, err)
+	}
+	if ctxURL != "" {
+		// Resolved against the response URL, so a relative target works and a
+		// scheme-relative or query-bearing one is not mangled. Parsing first
+		// and resolving the result is the only form that handles all three.
+		ref, err := neturl.Parse(ctxURL)
+		if err != nil {
+			return nil, fmt.Errorf("loading JSON-LD context %q: its context link target %q is not a URL: %w", rawURL, ctxURL, err)
 		}
+		doc.ContextURL = resp.Request.URL.ResolveReference(ref).String()
 	}
 
 	return doc, nil
@@ -217,18 +226,27 @@ func (l *CachingDocumentLoader) fetchContext(rawURL string) (*ld.RemoteDocument,
 // contextLinkTarget returns the target of a Link header naming the document's
 // JSON-LD context, if the response is plain JSON. A response already served as
 // application/ld+json IS the context and needs no indirection.
-func contextLinkTarget(resp *http.Response) string {
+func contextLinkTarget(resp *http.Response) (string, error) {
 	contentType := resp.Header.Get("Content-Type")
 	if strings.HasPrefix(contentType, "application/ld+json") {
-		return ""
+		return "", nil
 	}
-	links := ld.ParseLinkHeader(resp.Header.Get("Link"))["http://www.w3.org/ns/json-ld#context"]
-	if len(links) != 1 {
-		// Zero is the ordinary case. More than one is ambiguous, and JSON-LD
-		// 1.1 makes it an error rather than a choice.
-		return ""
+	// Values, not Get: a response may send several Link headers, and Get
+	// returns only the first - so a second one would be invisible, including
+	// a second context link, which is the case this function has to detect.
+	links := ld.ParseLinkHeader(strings.Join(resp.Header.Values("Link"), ", "))["http://www.w3.org/ns/json-ld#context"]
+	switch len(links) {
+	case 0:
+		return "", nil
+	case 1:
+		return links[0]["target"], nil
+	default:
+		// JSON-LD 1.1 6.1 makes this an error rather than a choice, and
+		// json-gold raises MultipleContextLinkHeaders for it. Dropping the
+		// header instead would parse an ambiguous document as though it named
+		// no context at all.
+		return "", errors.New("the response carries multiple JSON-LD context links, which is ambiguous")
 	}
-	return links[0]["target"]
 }
 
 // LoadDocument implements ld.DocumentLoader

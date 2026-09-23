@@ -183,3 +183,43 @@ func TestFetchContextIgnoresContextLinkOnLDJSON(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, doc.ContextURL)
 }
+
+// TestFetchContextRejectsMultipleContextLinks: JSON-LD 1.1 6.1 makes two
+// context links an error, not a choice. Dropping the header instead would
+// parse an ambiguous document as though it named no context at all.
+func TestFetchContextRejectsMultipleContextLinks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Add("Link", `<https://example.org/a.jsonld>; rel="http://www.w3.org/ns/json-ld#context"`)
+		w.Header().Add("Link", `<https://example.org/b.jsonld>; rel="http://www.w3.org/ns/json-ld#context"`)
+		_, _ = w.Write([]byte(`{"name":"ambiguous"}`))
+	}))
+	defer srv.Close()
+
+	loader := NewCachingDocumentLoader()
+	loader.client = srv.Client()
+
+	_, err := loader.LoadDocument(srv.URL)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "multiple JSON-LD context links")
+}
+
+// TestFetchContextResolvesRelativeContextLink: a relative target resolves
+// against the response URL, which is what makes a context link usable at all
+// for a document served from a path.
+func TestFetchContextResolvesRelativeContextLink(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Link", `<real-context.jsonld>; rel="http://www.w3.org/ns/json-ld#context"`)
+		_, _ = w.Write([]byte(`{"name":"not a context"}`))
+	}))
+	defer srv.Close()
+
+	loader := NewCachingDocumentLoader()
+	loader.client = srv.Client()
+
+	doc, err := loader.LoadDocument(srv.URL + "/schemas/diploma")
+	require.NoError(t, err)
+	assert.Equal(t, srv.URL+"/schemas/real-context.jsonld", doc.ContextURL,
+		"resolved against the response URL, not treated as an absolute path")
+}
