@@ -81,10 +81,13 @@ func newOfferTestClientWithStore(t *testing.T, credMeta map[string]*model.Creden
 				CredentialMetadata: credMeta,
 			},
 			APIGW: &model.APIGW{
-				// Deliberately NOT the same as the issuer identifier below:
-				// the by-reference endpoint is served by this gateway, and
-				// OpenID4VCI does not require the two to coincide.
-				PublicURL: "https://apigw.example.com",
+				// Same origin as the issuer identifier below, which config
+				// load now requires: offers publish issuer_url as
+				// credential_issuer, and issuer metadata is generated from
+				// public_url and declares that. A wallet resolving the offer
+				// would fail discovery if they differed, so
+				// checkCredentialOfferIssuerIdentity refuses the mismatch.
+				PublicURL: "https://issuer.example.com",
 				Delivery: model.APIGWDelivery{
 					CredentialOffers: model.CredentialOffers{
 						IssuerURL: "https://issuer.example.com",
@@ -325,8 +328,7 @@ func TestUICreateCredentialOffer_QRIsByReference(t *testing.T) {
 	// Rooted at the gateway that actually serves /credential-offer/, NOT at
 	// the issuer identifier - those are different fields and a deployment may
 	// legally differ in both.
-	require.True(t, strings.HasPrefix(offerURI.String(), "https://apigw.example.com/credential-offer/"), "offer URI must point at the gateway's by-reference endpoint, got %q", offerURI.String())
-	require.NotContains(t, offerURI.String(), "issuer.example.com")
+	require.True(t, strings.HasPrefix(offerURI.String(), "https://issuer.example.com/credential-offer/"), "offer URI must point at the gateway's by-reference endpoint, got %q", offerURI.String())
 
 	uuid, err := offerURI.UUID()
 	require.NoError(t, err)
@@ -337,19 +339,17 @@ func TestUICreateCredentialOffer_QRIsByReference(t *testing.T) {
 	require.Equal(t, []string{"siros_id"}, doc.CredentialOfferParameters.CredentialConfigurationIDs)
 }
 
-// The by-reference QR is only useful if it points at something that serves
-// it. That is APIGW.PublicURL, not CredentialOffers.IssuerURL - the latter
-// is the issuer IDENTIFIER, which OpenID4VCI never requires the offer to be
-// retrievable from. Building the URL from the identifier would hand out a
-// credential_offer_uri that 404s wherever the two differ, and it would do so
-// silently, since the QR itself still scans.
+// The by-reference QR must be built from the origin that serves it, i.e.
+// APIGW.PublicURL. Config load requires that to equal
+// CredentialOffers.IssuerURL, so the two agree here - but the URL must still
+// be derived from public_url rather than from the offer's credential_issuer,
+// because those are different fields that happen to hold one identity, and
+// only one of them is a statement about where this service answers.
 func TestUICreateCredentialOffer_ReferenceURIUsesGatewayOrigin(t *testing.T) {
 	credMeta := map[string]*model.CredentialMetadata{
 		"siros_id": {VCTM: &sdjwtvc.VCTM{Name: "SIROS ID", VCT: "urn:siros:id"}},
 	}
 	client, store := newOfferTestClientWithStore(t, credMeta)
-	require.NotEqual(t, client.cfg.APIGW.PublicURL, client.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
-		"this test is only meaningful while the two origins differ")
 
 	reply, err := client.UICreateCredentialOffer(t.Context(), &UICredentialOfferRequest{Scope: "siros_id"})
 	require.NoError(t, err)
@@ -360,7 +360,6 @@ func TestUICreateCredentialOffer_ReferenceURIUsesGatewayOrigin(t *testing.T) {
 	require.True(t, strings.HasPrefix(offerURI.String(), client.cfg.APIGW.PublicURL+"/credential-offer/"),
 		"offer URI must be rooted at the gateway origin, got %q", offerURI.String())
 
-	// The identifier still travels inside the offer, where it belongs.
 	uuid, err := offerURI.UUID()
 	require.NoError(t, err)
 	doc, err := store.Get(t.Context(), uuid)
@@ -390,7 +389,9 @@ func TestUICreateCredentialOffer_CleartextPublicURLStillWorks(t *testing.T) {
 		"siros_id": {VCTM: &sdjwtvc.VCTM{Name: "SIROS ID", VCT: "urn:siros:id"}},
 	}
 	client, store := newOfferTestClientWithStore(t, credMeta)
+	// Both, since config load requires them to agree.
 	client.cfg.APIGW.PublicURL = "http://apigw.localhost:8080"
+	client.cfg.APIGW.Delivery.CredentialOffers.IssuerURL = "http://apigw.localhost:8080"
 
 	reply, err := client.UICreateCredentialOffer(t.Context(), &UICredentialOfferRequest{Scope: "siros_id"})
 	require.NoError(t, err)

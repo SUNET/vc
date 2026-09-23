@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -174,6 +175,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkCredentialOfferIssuerIdentity(cfg, serviceName); err != nil {
+		return nil, err
+	}
+
 	if err := checkOpaqueWalletSentinel(cfg, serviceName); err != nil {
 		return nil, err
 	}
@@ -234,6 +239,51 @@ func checkOpaqueWalletSentinel(cfg *model.Cfg, serviceName string) error {
 	if _, ok := cfg.APIGW.Delivery.CredentialOffers.Wallets["opaque"]; ok {
 		return fmt.Errorf(`apigw.delivery.credential_offers.wallets: "opaque" is reserved and cannot be used as a wallet id`)
 	}
+	return nil
+}
+
+// checkCredentialOfferIssuerIdentity rejects an apigw config whose
+// credential-offer issuer identifier disagrees with the origin this gateway
+// actually is.
+//
+// Every credential offer this service produces publishes
+// apigw.delivery.credential_offers.issuer_url as `credential_issuer`, and a
+// wallet resolves that identifier to
+// {credential_issuer}/.well-known/openid-credential-issuer. But the issuer
+// metadata is generated from apigw.public_url and declares THAT as its own
+// `credential_issuer` (see APIGW.IssuerMetadata.Generate, called with
+// PublicURL in internal/apigw/apiv1/client.go). So when the two differ the
+// wallet fetches metadata from an origin that either serves none or serves a
+// document naming a different issuer, and discovery fails - for every offer
+// route, not just the UI one.
+//
+// There is no useful deployment on the far side of this: the two fields name
+// one thing, and OpenID4VCI requires the metadata's `credential_issuer` to
+// match the identifier the wallet resolved. Refusing at startup turns a
+// silent interop failure - visible only in a wallet, at the end of a flow -
+// into a message at boot.
+func checkCredentialOfferIssuerIdentity(cfg *model.Cfg, serviceName string) error {
+	if serviceName != "apigw" || cfg.APIGW == nil {
+		return nil
+	}
+
+	issuerURL := cfg.APIGW.Delivery.CredentialOffers.IssuerURL
+	publicURL := cfg.APIGW.PublicURL
+	if issuerURL == "" || publicURL == "" {
+		// Absence is the required-tag's business, not this check's.
+		return nil
+	}
+
+	if strings.TrimRight(issuerURL, "/") != strings.TrimRight(publicURL, "/") {
+		return fmt.Errorf(
+			"apigw.delivery.credential_offers.issuer_url (%q) must equal apigw.public_url (%q): "+
+				"offers publish the former as credential_issuer, but issuer metadata is served from "+
+				"the latter and declares it as credential_issuer, so a wallet resolving the offer "+
+				"would fail discovery",
+			issuerURL, publicURL,
+		)
+	}
+
 	return nil
 }
 
