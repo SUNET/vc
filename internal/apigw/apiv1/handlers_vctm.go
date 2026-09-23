@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -26,25 +27,45 @@ func (c *Client) UICredentialOffers(ctx context.Context) (*CredentialOfferLookup
 	return c.CredentialOfferLookupMetadata, nil
 }
 
-// OpaqueWalletID is a reserved wallet_id value that triggers an opaque
-// credential-offer URI (openid-credential-offer://?...) instead of a
-// configured wallet's custom scheme. Configuring a wallet with this id is
-// rejected at config load.
+// OpaqueWalletID is a reserved wallet id. The credential offer itself is
+// wallet-independent, so the UI no longer selects a wallet before an offer
+// is produced; the id stays reserved (rejected at config load, see
+// pkg/configuration) so that no configured wallet can collide with the
+// opaque "openid-credential-offer://" rendering.
 const OpaqueWalletID = "opaque"
 
 type UICredentialOfferRequest struct {
-	Scope    string `json:"scope" uri:"scope" binding:"required"`
-	WalletID string `json:"wallet_id" uri:"wallet_id" binding:"required"`
+	Scope string `json:"scope" uri:"scope" binding:"required"`
 }
 
+// CredentialOfferWalletReply is one configured wallet's rendering of the
+// very same offer: the wallet's redirect_uri carrying the offer as its
+// query string.
+type CredentialOfferWalletReply struct {
+	Name string `json:"name" validate:"required"`
+	URI  string `json:"uri" validate:"required"`
+}
+
+// CredentialOfferReply carries one wallet-independent credential offer in
+// every form the issuer UI needs to render it:
+//
+//	Offer   the bare "credential_offer=..." query string, which is also the
+//	        payload the DC API (openid4vci-v1) issuance request is built from
+//	URI     the opaque, wallet-agnostic by-value deep link
+//	QR      the by-reference ("credential_offer_uri=...") rendering, which is
+//	        the one place where offer size actually matters
+//	Wallets one entry per configured wallet, same offer, wallet's own prefix
 type CredentialOfferReply struct {
-	Name string            `json:"name" validate:"required"`
-	ID   string            `json:"id" validate:"required"`
-	QR   openid4vp.QRReply `json:"qr" validate:"required"`
+	Name    string                                `json:"name" validate:"required"`
+	ID      string                                `json:"id" validate:"required"`
+	Offer   string                                `json:"offer" validate:"required"`
+	URI     string                                `json:"uri" validate:"required"`
+	QR      openid4vp.QRReply                     `json:"qr" validate:"required"`
+	Wallets map[string]CredentialOfferWalletReply `json:"wallets"`
 }
 
 func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialOfferRequest) (*CredentialOfferReply, error) {
-	c.log.Debug("UICreateCredentialOffer", "scope", req.Scope, "wallet_id", req.WalletID)
+	c.log.Debug("UICreateCredentialOffer", "scope", req.Scope)
 	vctmReq := &GetVCTMFromScopeRequest{
 		Scope: req.Scope,
 	}
@@ -89,35 +110,84 @@ func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialO
 		return nil, err
 	}
 
-	var credentialOfferURL string
-	if req.WalletID == OpaqueWalletID {
-		credentialOfferURL = fmt.Sprintf("openid-credential-offer://?%s", credentialOffer)
-		c.log.Debug("UICreateCredentialOffer: opaque offer created", "scope", req.Scope, "issuer_url", c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL)
-	} else {
-		wallet, ok := c.cfg.APIGW.Delivery.CredentialOffers.Wallets[req.WalletID]
-		if !ok {
-			err := errors.New("invalid wallet id")
-			return nil, err
-		}
-		credentialOfferURL = fmt.Sprintf("%s?%s", wallet.RedirectURI, credentialOffer)
-		c.log.Debug("UICreateCredentialOffer: offer created", "scope", req.Scope, "wallet_redirect_uri", wallet.RedirectURI, "issuer_url", c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL)
-	}
+	// The opaque, wallet-agnostic by-value form. Every configured wallet's
+	// rendering below is the exact same offer behind a different prefix -
+	// the offer is wallet-independent, only the scheme/host differs.
+	credentialOfferURL := fmt.Sprintf("openid-credential-offer://?%s", credentialOffer)
 
-	// Encoded as built, not round-tripped through url.Parse: the wallet
-	// redirect URI may have an empty authority ("openid-credential-offer://"),
-	// which url.URL cannot represent - see GenerateQR's doc comment.
-	qr, err := openid4vp.GenerateQR(credentialOfferURL, qrcode.Medium, 256)
+	// The QR is scanned by whatever wallet happens to be on the phone, and
+	// it is the one rendering where the size of the encoded payload matters,
+	// so it carries the offer by reference rather than by value.
+	qrURL, err := c.credentialOfferReferenceURL(ctx, &offerParams)
 	if err != nil {
 		return nil, err
 	}
 
+	// Encoded as built, not round-tripped through url.Parse: the offer URI
+	// has an empty authority ("openid-credential-offer://"), which url.URL
+	// cannot represent - see GenerateQR's doc comment.
+	qr, err := openid4vp.GenerateQR(qrURL, qrcode.Medium, 256)
+	if err != nil {
+		return nil, err
+	}
+
+	wallets := make(map[string]CredentialOfferWalletReply, len(c.cfg.APIGW.Delivery.CredentialOffers.Wallets))
+	for id, wallet := range c.cfg.APIGW.Delivery.CredentialOffers.Wallets {
+		wallets[id] = CredentialOfferWalletReply{
+			Name: wallet.Label,
+			URI:  fmt.Sprintf("%s?%s", wallet.RedirectURI, credentialOffer),
+		}
+	}
+
+	c.log.Debug("UICreateCredentialOffer: offer created",
+		"scope", req.Scope,
+		"issuer_url", c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL,
+		"wallets", len(wallets),
+	)
+
 	reply := &CredentialOfferReply{
-		Name: offerName,
-		ID:   offerID,
-		QR:   *qr,
+		Name:    offerName,
+		ID:      offerID,
+		Offer:   credentialOffer.String(),
+		URI:     credentialOfferURL,
+		QR:      *qr,
+		Wallets: wallets,
 	}
 
 	return reply, nil
+}
+
+// credentialOfferReferenceURL stores the offer under a fresh UUID and returns
+// the by-reference ("credential_offer_uri=...") deep link pointing at it.
+//
+// The referenced document is served by GET /credential-offer/:credential_offer_uuid
+// (VCICredentialOfferURI), which until now had nothing writing to the store
+// it reads from.
+func (c *Client) credentialOfferReferenceURL(ctx context.Context, offerParams *openid4vci.CredentialOfferParameters) (string, error) {
+	offerURI, err := offerParams.CredentialOfferURI()
+	if err != nil {
+		return "", err
+	}
+
+	uuid, err := offerURI.UUID()
+	if err != nil {
+		return "", err
+	}
+
+	if c.credentialOfferStore == nil {
+		return "", errors.New("credential offer store not configured")
+	}
+
+	if err := c.credentialOfferStore.Save(ctx, &db.CredentialOfferDocument{
+		UUID:                      uuid,
+		CredentialOfferParameters: *offerParams,
+	}); err != nil {
+		return "", err
+	}
+
+	query := url.Values{"credential_offer_uri": {offerURI.String()}}
+
+	return fmt.Sprintf("openid-credential-offer://?%s", query.Encode()), nil
 }
 
 // ErrScopeIsMDoc is returned by GetVCTMFromScope when the scope is an

@@ -45,6 +45,23 @@
   
   See complete examples in [config.yaml](config.yaml).
 
+- **Issuer credential-offer UI route**: `GET /offers/:scope/:wallet_id` is now
+  `GET /offers/:scope`. The credential offer is wallet-independent, so no
+  wallet is selected before it is produced; the single response carries the
+  offer once plus one entry per configured wallet. This is the internal
+  operator UI's own endpoint, not a wallet-facing one.
+
+### Changed
+
+- The issuer's `/offers` page now renders one credential offer three ways:
+  a QR code (cross-device, carrying the offer by reference), a same-device
+  "Open in wallet" button over the W3C Digital Credentials API
+  (`openid4vci-v1`, rendered only when such a request can actually be
+  fulfilled), and one shortcut button per configured wallet.
+- `GET /credential-offer/:credential_offer_uuid` now has a writer: offers
+  shown in the issuer UI are persisted under a UUID so the QR can carry the
+  offer by reference instead of by value.
+
 ## [0.3.2] - 2024-04-29
 
 ### Change
