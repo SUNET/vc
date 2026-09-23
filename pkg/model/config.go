@@ -1877,6 +1877,15 @@ type CredentialMetadata struct {
 	//
 	// The issuer also refuses to fetch a context it has not been told about -
 	// name it in issuer.jsonld_context_allowlist as well, or issuance fails.
+	//
+	// Resolved and PINNED at config load, which has three consequences worth
+	// knowing before configuring this. The host must be reachable when the
+	// service starts, or it will not start. The document is then fixed for
+	// the life of the process, so republishing the context does not affect a
+	// running service - restart it. And startup verifies that the context
+	// actually defines credential_types and that the result matches
+	// credential_type_values, so a mismatch is a boot failure rather than a
+	// presentation that silently never matches.
 	CredentialContexts []string `yaml:"credential_contexts,omitempty" json:"-" validate:"omitempty,dive,required,url"`
 
 	MDDL *mdoc.MDDLSchema `yaml:"-" json:"-"`

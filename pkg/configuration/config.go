@@ -14,6 +14,7 @@ import (
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/vc20/credential"
 
 	"github.com/creasty/defaults"
 	"github.com/kelseyhightower/envconfig"
@@ -138,6 +139,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		}
 
 		if err := checkW3CTypeConsistency(cfg); err != nil {
+			return nil, err
+		}
+
+		if err := resolveW3CContexts(cfg, log); err != nil {
 			return nil, err
 		}
 
@@ -284,6 +289,94 @@ func customTypes(types []string) []string {
 		}
 	}
 	return out
+}
+
+// resolveW3CContexts pins every configured JSON-LD context and checks that the
+// types this deployment issues can actually satisfy the queries it builds.
+//
+// The structural checks above can only see that the three fields are present
+// together. Whether a context DEFINES a term, and whether the resulting IRIs
+// are the ones credential_type_values names, is only answerable by expanding
+// the types against the contexts - which means resolving them.
+//
+// Doing that here buys three things beyond the check itself. A broken or
+// unreachable context becomes a startup failure rather than an issuance
+// failure after the user has reached their wallet. The signing path never
+// fetches, because the document is pinned for the life of the process. And
+// what a context endpoint does afterwards - redirect, change, disappear -
+// cannot affect an issued credential.
+//
+// The cost is the network dependency at boot, which is the deliberate
+// trade-off: a deployment configuring credential_contexts must have those
+// hosts reachable when the service starts.
+func resolveW3CContexts(cfg *model.Cfg, log *logger.Log) error {
+	if cfg.Common == nil {
+		return nil
+	}
+	loader := credential.GetGlobalLoader()
+
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		cm := cfg.Common.CredentialMetadata[scope]
+		if cm == nil || !openid4vp.IsW3CVCFormatIdentifier(cm.Format) || len(cm.CredentialContexts) == 0 {
+			continue
+		}
+
+		for _, contextURL := range cm.CredentialContexts {
+			if err := loader.PinRemoteContext(contextURL); err != nil {
+				return fmt.Errorf("common.credential_metadata.%s: credential_contexts %q could not be loaded, so credentials of this type cannot be signed: %w", scope, contextURL, err)
+			}
+			log.Info("pinned JSON-LD context", "scope", scope, "url", contextURL)
+		}
+
+		expanded, err := credential.ExpandTypes(cm.CredentialContexts, cm.W3CTypes())
+		if err != nil {
+			return fmt.Errorf("common.credential_metadata.%s: credential_types could not be expanded against credential_contexts: %w", scope, err)
+		}
+
+		// Every configured term must survive expansion. One that does not is
+		// undefined by every configured context, and the credential would
+		// carry a type identifying nothing.
+		if missing := undefinedTypes(cm.W3CTypes(), expanded); len(missing) > 0 {
+			return fmt.Errorf("common.credential_metadata.%s: credential_contexts defines none of %s - the issued credential's type would expand to a relative IRI", scope, strings.Join(missing, ", "))
+		}
+
+		// And the query this deployment builds has to be answerable by the
+		// credential it issues. MatchTypeValues is satisfied by any ONE
+		// alternative, so one being satisfiable is enough.
+		if alternatives := cm.W3CTypeValuesForCheck(); len(alternatives) > 0 && !anyAlternativeSatisfied(alternatives, expanded) {
+			return fmt.Errorf("common.credential_metadata.%s: no credential_type_values alternative is satisfied by the types this scope issues (expanded: %s) - the deployment would issue credentials its own verifier refuses", scope, strings.Join(expanded, ", "))
+		}
+	}
+	return nil
+}
+
+// undefinedTypes returns the configured terms that expansion did not turn into
+// an IRI, ignoring the base type which the VC 2.0 context always defines.
+func undefinedTypes(configured []string, expanded []string) []string {
+	if len(configured) <= len(expanded) {
+		return nil
+	}
+	// Expansion drops what it cannot resolve, so a shortfall means some term
+	// was undefined; name the custom ones, since the base always resolves.
+	return customTypes(configured)
+}
+
+// anyAlternativeSatisfied reports whether the credential's types contain all
+// of any one alternative, which is how MatchTypeValues decides.
+func anyAlternativeSatisfied(alternatives [][]string, credentialTypes []string) bool {
+	for _, alternative := range alternatives {
+		satisfied := true
+		for _, required := range alternative {
+			if !slices.Contains(credentialTypes, required) {
+				satisfied = false
+				break
+			}
+		}
+		if satisfied {
+			return true
+		}
+	}
+	return false
 }
 
 // checkMongoRequirement enforces common.mongo.uri for the services that
