@@ -236,19 +236,54 @@ func checkW3CTypeConsistency(cfg *model.Cfg) error {
 		if credential == nil || !openid4vp.IsW3CVCFormatIdentifier(credential.Format) {
 			continue
 		}
-		// Only a constraint that narrows past the base type needs a custom
-		// term behind it; an unset or base-only list requests nothing special.
+
+		// A custom term needs a context WHENEVER it is minted, not only when
+		// something requests it by type. Without one the issued credential
+		// carries a type that expands to a relative IRI, which identifies
+		// nothing - the credential is malformed whether or not this
+		// deployment happens to query for it.
+		if custom := customTypes(credential.CredentialTypes); len(custom) > 0 && len(credential.CredentialContexts) == 0 {
+			return fmt.Errorf("common.credential_metadata.%s: credential_types names %s, which no credential_contexts defines - the issued credential's type would expand to a relative IRI", scope, strings.Join(custom, ", "))
+		}
+
+		// type_values are matched as fully expanded IRIs (OpenID4VP 1.0
+		// B.3.2). A relative one cannot equal anything a credential expands
+		// to - the verifier drops relative IRIs from the credential side for
+		// the same reason - so such a query is guaranteed not to match.
+		for i, alternative := range credential.CredentialTypeValues {
+			for _, t := range alternative {
+				if t == "" || strings.Contains(t, ":") {
+					continue
+				}
+				return fmt.Errorf("common.credential_metadata.%s: credential_type_values[%d] contains %q, which is a relative IRI - type_values are matched as fully expanded IRIs, so this can never match a credential", scope, i, t)
+			}
+		}
+
+		// Only a constraint that narrows past the base type needs a term
+		// behind it; an unset or base-only list requests nothing special.
 		if len(credential.W3CTypeValuesForCheck()) == 0 {
 			continue
 		}
-		if len(credential.CredentialTypes) == 0 {
-			return fmt.Errorf("common.credential_metadata.%s: credential_type_values narrows the request but credential_types is unset, so only VerifiableCredential is issued and the query can never match", scope)
-		}
-		if len(credential.CredentialContexts) == 0 {
-			return fmt.Errorf("common.credential_metadata.%s: credential_type_values narrows the request and credential_types names a custom term, but credential_contexts is unset - an undefined term expands to a relative IRI and can never equal the configured one", scope)
+		// Unset AND base-only are the same failure: the issuer mints only
+		// VerifiableCredential while the query demands more. The missing
+		// context is already caught above, for any custom term.
+		if len(customTypes(credential.CredentialTypes)) == 0 {
+			return fmt.Errorf("common.credential_metadata.%s: credential_type_values narrows the request, but credential_types names no type beyond VerifiableCredential - the issued credential cannot carry what the query demands", scope)
 		}
 	}
 	return nil
+}
+
+// customTypes returns the configured types that are not the base type every
+// W3C credential carries.
+func customTypes(types []string) []string {
+	var out []string
+	for _, t := range types {
+		if t != "" && t != "VerifiableCredential" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // checkMongoRequirement enforces common.mongo.uri for the services that
