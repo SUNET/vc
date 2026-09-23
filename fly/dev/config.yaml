@@ -1,0 +1,320 @@
+---
+common:
+  secret_file_path: "/secrets.yaml"
+  skip_secrets_perm_check: true
+  # Dev profile. false is deliberate: paired with allow_unsigned_metadata
+  # below, it flags this as a local-only environment where MITM'd SWAMID QA
+  # metadata is an accepted risk. Do not flip on without mounting a
+  # federation signing cert and setting metadata_signing_cert_path.
+  production: false
+  mongo:
+    uri: ""
+
+  credential_metadata:
+    pid:
+      vctm_file_path: "/metadata/vctm_pid.json"
+      format: "dc+sd-jwt"
+    ehic:
+      vctm_file_path: "/metadata/vctm_ehic.json"
+      format: "dc+sd-jwt"
+    eduid:
+      vctm_file_path: "/metadata/vctm_eduid.json"
+      format: "dc+sd-jwt"
+    #pid_mdoc:
+    #  mddl_file_path: "/metadata/pid_mdoc.mdoc.json"
+    #  format: "mso_mdoc"
+    mdl:
+      mddl_file_path: "/metadata/mdl.mdoc.json"
+      format: "mso_mdoc"
+
+issuer:
+  issuer_url: "https://sunet-vc-apigw.fly.dev"
+  api_server:
+    addr: :8080
+    trust_proxy_tls: true
+    tls:
+      enable: false
+  grpc_server:
+    addr: :8090
+  registry_client:
+    addr: sunet-vc-registry.internal:8090
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  jwt_attribute:
+    issuer: https://sunet-vc-apigw.fly.dev
+    enable_not_before: true
+    valid_duration: 3600
+    verifiable_credential_type: "https://credential.sunet.se/identity_credential"
+  pseudonym_seed: true
+
+verifier:
+  api_server:
+    addr: 0.0.0.0:8080
+    trust_proxy_tls: true
+    tls:
+      enable: false
+    cors:
+      allowed_origins:
+        - "https://sunet-vc-wallet.fly.dev"
+  public_url: "https://sunet-vc-verifier.fly.dev"
+  supported_wallets:
+    "Fly Wallet": "https://sunet-vc-wallet.fly.dev/cb"
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  outbound:
+    oidc_provider:
+      issuer: "https://sunet-vc-verifier.fly.dev"
+      subject_type: "public"
+      code_duration: 300
+      session_duration: 3600
+      access_token_duration: 3600
+      id_token_duration: 3600
+      refresh_token_duration: 86400
+  inbound:
+    openid4vp:
+      token_endpoint: "https://sunet-vc-verifier.fly.dev/token"
+      clients:
+        "1003":
+          type: "public"
+          redirect_uri: "https://dev.wallet.sunet.se"
+          scopes:
+            - "pid"
+            - "ehic"
+        "fly-wallet":
+          type: "public"
+          redirect_uri: "https://sunet-vc-wallet.fly.dev"
+          scopes:
+            - "pid"
+            - "ehic"
+      supported_credentials:
+        - vct: "urn:eudi:pid:1"
+          scopes:
+            - "pid"
+        - vct: "urn:eudi:ehic:1"
+          scopes:
+            - "ehic"
+  presets:
+    "PID":
+      credentials:
+        pid:
+          exclude_claims:
+            - path: ["trust_anchor"]
+            - path: ["attestation_legal_category"]
+    "EHIC":
+      credentials:
+        ehic:
+    "PID Age Over 18":
+      credentials:
+        pid:
+          claims:
+            - path: ["birthdate"]
+          validations:
+            - rule: "age_over"
+              path: ["birthdate"]
+              value: 18
+    "PID + EHIC":
+      credentials:
+        pid:
+          exclude_claims:
+            - path: ["trust_anchor"]
+            - path: ["attestation_legal_category"]
+        ehic:
+
+registry:
+  api_server:
+    addr: :8080
+    trust_proxy_tls: true
+    tls:
+      enable: false
+  public_url: "https://sunet-vc-registry.fly.dev"
+  grpc_server:
+    addr: :8090
+  token_status_lists:
+    key_config:
+      private_key_path: "/pki/signing_ec_private.pem"
+      chain_path: "/pki/signing_ec_chain.pem"
+  admin_gui:
+    enable: true
+
+apigw:
+  key_config:
+    private_key_path: "/pki/signing_ec_private.pem"
+    chain_path: "/pki/signing_ec_chain.pem"
+  admin_ui_enable: true
+  dashboard:
+    enable: true
+  api_server:
+    addr: :8080
+    trust_proxy_tls: true
+    tls:
+      enable: false
+    cors:
+      allowed_origins:
+        - "https://sunet-vc-wallet.fly.dev"
+    api_auth:
+      oidc:
+        enable: true
+        issuer_url: "https://sunet-vc-oidc.fly.dev/realms/vc"
+        audience: "apigw-oidc-client"
+        client_id: "apigw-oidc-client"
+        redirect_uri: "https://sunet-vc-apigw.fly.dev/ui/callback"
+        scopes: ["openid", "email"]
+      rules:
+        - "(vc (service apigw)(method *)(path /api/v1/*)(subject admin@sunet.se)(authentic_source *)(scope *))"
+  public_url: "https://sunet-vc-apigw.fly.dev"
+  registry_public_url: "https://sunet-vc-registry.fly.dev"
+  issuer_client:
+    addr: sunet-vc-issuer.internal:8090
+  registry_client:
+    addr: sunet-vc-registry.internal:8090
+  issuer_metadata:
+    authorization_servers:
+      - "https://sunet-vc-apigw.fly.dev"
+  identity_mapping_import:
+    file_paths:
+      - "/bootstrapping/identity_mappings.json"
+    users:
+      - "100"
+      - "102"
+  auth_providers:
+    oidc:
+      enable: true
+      issuer_url: "https://sunet-vc-oidc.fly.dev/realms/vc"
+      redirect_uri: "https://sunet-vc-apigw.fly.dev/oidcrp/callback"
+      scopes: ["openid", "profile"]
+      session_duration: 300
+      attribute_mapping:
+        birthdate:
+          claim: "birthdate"
+          required: true
+        given_name:
+          claim: "given_name"
+          required: true
+        family_name:
+          claim: "family_name"
+          required: true
+      registration:
+        preconfigured:
+          enable: true
+          client_id: "apigw-oidc-client"
+    saml:
+      enable: true
+      entity_id: "https://sunet-vc-apigw.fly.dev/samlsp/metadata"
+      static_idp_metadata:
+        entity_id: "https://idp.dev.eduid.se/idp.xml"
+        metadata_url: "https://mds.swamid.se/qa/entities/https%3A%2F%2Fidp.dev.eduid.se%2Fidp.xml"
+      certificate_path: "/pki/saml_sp.crt"
+      private_key_path: "/pki/saml_sp.key"
+      acs_endpoint: "https://sunet-vc-apigw.fly.dev/samlsp/acs"
+      session_duration: 300
+      metadata_cache_ttl: 86400
+      allow_unsigned_metadata: true
+      metadata:
+        organization:
+          name: "SUNET"
+          display_name: "SUNET"
+          url: "https://sunet.se/"
+        contact_persons:
+          - type: technical
+            given_name: "SUNET"
+            sur_name: "Support"
+            email: "masv@sunet.se"
+          - type: administrative
+            given_name: "SUNET"
+            sur_name: "Operations"
+            email: "masv@sunet.se"
+        ui_info:
+          display_name: "SUNET VC Issuer (dev)"
+          description: "SUNET verifiable credentials issuer — development environment. Issues eduID-based digital credentials for research and education."
+          information_url: "https://sunet.se/"
+          privacy_statement_url: "https://sunet.se/om-sunet/information-om-behandling-av-personuppgifter/"
+      attribute_mapping:
+        # https://www.oidc.se/specifications/claim-mappings-to-other-specs.html
+        "urn:oid:2.5.4.4":
+          claim: "family_name"
+        "urn:oid:2.5.4.42":
+          claim: "given_name"
+        "urn:oid:2.5.4.3":
+          claim: "common_name"
+        "urn:oid:2.16.840.1.113730.3.1.241":
+          claim: "name"
+        # schacDateOfBirth (YYYYMMDD) — eduID's actual DoB attribute. The
+        # older urn:oid:1.3.6.1.5.5.7.9.1 dateOfBirth is intentionally not
+        # mapped: eduID emits both, and having two mappings to `birthdate`
+        # would make the winning value depend on map iteration order.
+        "urn:oid:1.3.6.1.4.1.25178.1.2.3":
+          claim: "birthdate"
+          transform: "yyyymmdd_to_iso"
+        "urn:oid:2.5.4.6":
+          claim: "nationalities"
+          transform: "country_alpha2"
+          as_array: true
+        "urn:oid:1.2.752.29.4.13":
+          claim: "personal_administrative_number"
+        "urn:oid:1.3.6.1.4.1.5923.1.1.1.6":
+          claim: "preferred_username"
+        "urn:oid:1.3.6.1.4.1.5923.1.1.1.11":
+          claim: "assurance"
+          as_array: true
+        "urn:oasis:names:tc:SAML:attribute:subject-id":
+          claim: "subject_id"
+  data_sources:
+    datastore:
+      import:
+        file_paths:
+          - "/bootstrapping/diploma.json"
+          - "/bootstrapping/ehic.json"
+          - "/bootstrapping/pda1.json"
+          - "/bootstrapping/pid.json"
+          - "/bootstrapping/mdl.json"
+          #- "/bootstrapping/pid_mdoc.json"
+        users:
+          - "100"
+          - "102"
+      scopes:
+        pid:
+          auth_provider: oidc
+          auth_claims: ["given_name", "family_name", "birthdate"]
+        ehic:
+          auth_provider: openid4vp
+          auth_scopes:
+            pid:
+              auth_claims: ["given_name", "family_name", "birthdate"]
+        mdl:
+          auth_provider: oidc
+          auth_claims: ["given_name", "family_name", "birthdate"]
+    assertion:
+      scopes:
+        eduid:
+          auth_provider: saml
+          # ISO date for date_of_expiry is derived at issuance time from this
+          # duration so freshly issued credentials never ship pre-expired.
+          # date_of_issuance is populated at issuance time from now(); do not
+          # set it as a static default.
+          expiry_duration: "8760h"
+          defaults:
+            issuing_authority: "SUNET"
+            issuing_country: "SE"
+  delivery:
+    openid4vci:
+      token_endpoint: "https://sunet-vc-apigw.fly.dev/token"
+      clients:
+        "fly-wallet":
+          type: "public"
+          redirect_uri: "https://sunet-vc-wallet.fly.dev"
+          scopes:
+            - "pid"
+            - "ehic"
+            - "mdl"
+            - "eduid"
+    credential_offers:
+      issuer_url: "https://sunet-vc-apigw.fly.dev"
+      wallets:
+        dev_wallet:
+          label: "Dev Wallet"
+          redirect_uri: "https://dev.wallet.sunet.se/credential-offer"
+        fly_wallet:
+          label: "Fly Wallet"
+          redirect_uri: "https://sunet-vc-wallet.fly.dev/credential-offer"

@@ -1,0 +1,10 @@
+{
+	"$schema": "https://raw.githubusercontent.com/sirosfoundation/wallet-frontend/release/sirosid/branding/.schemas/theme.schema.json",
+	"brand": {
+		"color": "#E47527",
+		"colorLight": "#EC9558",
+		"colorLighter": "#F4B689",
+		"colorDark": "#B85A15",
+		"colorDarker": "#8A430F"
+	}
+}
