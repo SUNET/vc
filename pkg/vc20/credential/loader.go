@@ -3,6 +3,7 @@ package credential
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	neturl "net/url"
@@ -16,6 +17,10 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/piprate/json-gold/ld"
 )
+
+// maxContextBytes caps a context document, so a hostile or broken endpoint
+// cannot stream indefinitely into memory.
+const maxContextBytes = 4 << 20
 
 var (
 	globalLoader *CachingDocumentLoader
@@ -33,9 +38,9 @@ func GetGlobalLoader() *CachingDocumentLoader {
 // CachingDocumentLoader is a document loader that caches contexts in memory
 // and preloads common contexts to avoid network requests
 type CachingDocumentLoader struct {
-	fallback ld.DocumentLoader
-	cache    *ttlcache.Cache[string, *ld.RemoteDocument]
-	log      *logger.Log
+	client *http.Client
+	cache  *ttlcache.Cache[string, *ld.RemoteDocument]
+	log    *logger.Log
 }
 
 // schemeOf returns the scheme of a context URL, or "" if it has none.
@@ -47,11 +52,56 @@ func schemeOf(raw string) string {
 	return u.Scheme
 }
 
+// nonPublicRanges are address blocks the public internet does not route to,
+// beyond what net.IP's own predicates cover. IsPrivate knows only RFC 1918 and
+// RFC 4193, so the shared-address and reserved blocks have to be listed.
+var nonPublicRanges = func() []*net.IPNet {
+	blocks := []string{
+		"100.64.0.0/10",   // RFC 6598 carrier-grade NAT
+		"192.0.0.0/24",    // RFC 6890 IETF protocol assignments
+		"192.0.2.0/24",    // TEST-NET-1
+		"198.18.0.0/15",   // RFC 2544 benchmarking
+		"198.51.100.0/24", // TEST-NET-2
+		"203.0.113.0/24",  // TEST-NET-3
+		"240.0.0.0/4",     // reserved
+		"2001:db8::/32",   // IPv6 documentation
+		"64:ff9b::/96",    // IPv4/IPv6 translation
+	}
+	out := make([]*net.IPNet, 0, len(blocks))
+	for _, b := range blocks {
+		if _, n, err := net.ParseCIDR(b); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}()
+
 // isInternalAddr reports whether an address is one the public internet cannot
 // reach, and which a context fetch therefore has no business connecting to.
+//
+// Deliberately broader than net.IP's predicates: those cover loopback, RFC
+// 1918 private space and link-local, but not carrier-grade NAT, the reserved
+// and benchmarking blocks, or multicast generally. An unparsable address
+// counts as internal, so the failure direction is refusal.
 func isInternalAddr(ip net.IP) bool {
-	return ip == nil || ip.IsLoopback() || ip.IsPrivate() ||
-		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+	if ip == nil {
+		return true
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsMulticast() || ip.IsInterfaceLocalMulticast() {
+		return true
+	}
+	// An IPv4-mapped IPv6 address must be judged as the IPv4 address it is.
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	for _, block := range nonPublicRanges {
+		if block.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // contextHTTPClient fetches remote JSON-LD contexts, refusing to CONNECT to
@@ -97,12 +147,53 @@ func NewCachingDocumentLoader() *CachingDocumentLoader {
 	go cache.Start()
 
 	l := &CachingDocumentLoader{
-		fallback: ld.NewDefaultDocumentLoader(contextHTTPClient()),
-		cache:    cache,
-		log:      logger.NewSimple("loader"),
+		client: contextHTTPClient(),
+		cache:  cache,
+		log:    logger.NewSimple("loader"),
 	}
 	l.preloadContexts()
 	return l
+}
+
+// fetchContext retrieves a JSON-LD context over HTTP and nothing else.
+//
+// Link: rel=alternate is deliberately not followed. json-gold's loader
+// implements it by recursing into itself, which is how a file:// target became
+// reachable; a context this stack fetches is either served as JSON at its own
+// URL or it is not used. The W3C base contexts are preloaded and never come
+// through here.
+func (l *CachingDocumentLoader) fetchContext(rawURL string) (*ld.RemoteDocument, error) {
+	u, err := neturl.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("JSON-LD context %q is not a URL: %w", rawURL, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		l.log.Warn("refused a non-HTTP JSON-LD context", "url", rawURL, "scheme", u.Scheme)
+		return nil, fmt.Errorf("refusing to load JSON-LD context %q: only http and https are fetched, got scheme %q", rawURL, u.Scheme)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("building request for JSON-LD context %q: %w", rawURL, err)
+	}
+	req.Header.Set("Accept", "application/ld+json, application/json;q=0.9")
+
+	resp, err := l.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("loading JSON-LD context %q: %w", rawURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("loading JSON-LD context %q: HTTP %d", rawURL, resp.StatusCode)
+	}
+
+	var document any
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxContextBytes)).Decode(&document); err != nil {
+		return nil, fmt.Errorf("JSON-LD context %q is not valid JSON: %w", rawURL, err)
+	}
+
+	return &ld.RemoteDocument{DocumentURL: resp.Request.URL.String(), Document: document}, nil
 }
 
 // LoadDocument implements ld.DocumentLoader
@@ -111,20 +202,15 @@ func (l *CachingDocumentLoader) LoadDocument(url string) (*ld.RemoteDocument, er
 		return item.Value(), nil
 	}
 
-	// http(s) only. json-gold's loader opens any other URL as a LOCAL FILE
-	// (os.Open), and at verification the context list comes from the wallet -
-	// so file:///etc/passwd would be read and parsed as a context. Where the
-	// connection may go is enforced at dial time by contextHTTPClient; what
-	// may be opened at all is enforced here.
+	// Fetched here rather than by json-gold's loader, which calls os.Open for
+	// any non-HTTP URL - and resolves a Link: rel=alternate header by calling
+	// ITSELF, so an http context could name a file:// alternate and have it
+	// read. At verification the context list comes from the wallet, so that is
+	// a remote-triggered local file read. Nothing in this path can open a
+	// file: it makes an HTTP request or it fails.
 	//
 	// Preloaded contexts are served from the cache above and never reach this.
-	if scheme := schemeOf(url); scheme != "http" && scheme != "https" {
-		l.log.Warn("refused a non-HTTP JSON-LD context", "url", url, "scheme", scheme)
-		return nil, fmt.Errorf("refusing to load JSON-LD context %q: only http and https are fetched, got scheme %q", url, scheme)
-	}
-
-	// Fallback to network
-	doc, err := l.fallback.LoadDocument(url)
+	doc, err := l.fetchContext(url)
 	if err != nil {
 		return nil, err
 	}

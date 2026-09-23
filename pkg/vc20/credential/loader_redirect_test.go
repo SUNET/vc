@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,8 +16,15 @@ func TestIsInternalAddr(t *testing.T) {
 	for _, internal := range []string{
 		"127.0.0.1", "::1", // loopback
 		"10.1.2.3", "192.168.0.1", "172.16.0.1", // private
-		"169.254.169.254", // link-local, the cloud metadata endpoint
-		"0.0.0.0",         // unspecified
+		"169.254.169.254",                          // link-local, the cloud metadata endpoint
+		"0.0.0.0",                                  // unspecified
+		"100.64.0.1",                               // RFC 6598 carrier-grade NAT, which IsPrivate misses
+		"198.18.0.1",                               // RFC 2544 benchmarking
+		"192.0.2.1", "198.51.100.1", "203.0.113.1", // TEST-NET
+		"240.0.0.1",       // reserved
+		"224.0.0.1",       // multicast
+		"::ffff:10.0.0.1", // IPv4-mapped private address
+		"2001:db8::1",     // IPv6 documentation
 	} {
 		assert.True(t, isInternalAddr(net.ParseIP(internal)), "%s must be refused", internal)
 	}
@@ -81,4 +89,51 @@ func TestLoadDocumentServesPreloadedContexts(t *testing.T) {
 	doc, err := loader.LoadDocument(ContextV2)
 	require.NoError(t, err)
 	assert.NotNil(t, doc)
+}
+
+// TestFetchContextIgnoresLinkAlternate pins the path that made file:// legal
+// again after the scheme check.
+//
+// json-gold resolves a Link: rel=alternate header by calling its OWN loader,
+// so an http context could name a file:// alternate and have it read. This
+// loader fetches the URL it was given and nothing else.
+func TestFetchContextIgnoresLinkAlternate(t *testing.T) {
+	served := `{"@context":{"Foo":"https://example.org/ns#Foo"}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Link", `<file:///etc/passwd>; rel="alternate"; type="application/ld+json"`)
+		_, _ = w.Write([]byte(served))
+	}))
+	defer srv.Close()
+
+	loader := NewCachingDocumentLoader()
+	// The dial hook refuses loopback, so point the fetch at the server through
+	// a client without that policy to isolate what this test is about: that
+	// the Link header is not followed.
+	loader.client = srv.Client()
+
+	doc, err := loader.LoadDocument(srv.URL)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+
+	ctx, ok := doc.Document.(map[string]any)
+	require.True(t, ok, "the document served at the URL is what comes back")
+	assert.Contains(t, ctx, "@context")
+	assert.Empty(t, doc.ContextURL, "no alternate target is recorded or followed")
+}
+
+// TestFetchContextRejectsOversizedBody: a context is capped, so a hostile or
+// broken endpoint cannot stream indefinitely into memory.
+func TestFetchContextRejectsOversizedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"@context":{"x":"` + strings.Repeat("a", maxContextBytes) + `"}}`))
+	}))
+	defer srv.Close()
+
+	loader := NewCachingDocumentLoader()
+	loader.client = srv.Client()
+
+	_, err := loader.LoadDocument(srv.URL)
+	require.Error(t, err, "a context larger than the cap must not be accepted whole")
 }
