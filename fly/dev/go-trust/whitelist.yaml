@@ -1,0 +1,10 @@
+issuers:
+  - "https://sunet-vc-apigw.fly.dev"
+  - "https://sunet-vc-apigw.fly.dev/*"
+
+verifiers:
+  - "https://sunet-vc-verifier.fly.dev"
+  - "https://sunet-vc-verifier.fly.dev/*"
+
+trusted_subjects:
+  - "*"
