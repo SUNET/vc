@@ -1,0 +1,70 @@
+{
+	admin off
+	auto_https off
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+:8080 {
+	# Local healthcheck for Fly — stays 200 even if upstreams are down.
+	@health path /healthz
+	handle @health {
+		respond "ok" 200
+	}
+
+	# WebSocket v2 engine listens on the wallet-backend's engine port (8082),
+	# reached via fly `.internal` DNS since fly-proxy only exposes 8080 for
+	# that app. Must come before @backend so /api/v2/* isn't caught by /api/*.
+	@engine path /api/v2/*
+	handle @engine {
+		reverse_proxy http://{$WALLET_ENGINE_UPSTREAM} {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+
+	# All go-wallet-backend routes served under known prefixes.
+	# Match go-wallet-backend/internal/server/providers.go: AS routes under
+	# /auth, root-level user/session/tenant/issuer/verifier/storage/helper/
+	# keystore/wallet-provider/v1/proxy/registry/jwks, /status for capability
+	# discovery, plus WebSocket /api/*.
+	@backend path \
+		/auth /auth/* \
+		/user /user/* \
+		/api /api/* \
+		/tenant /tenant/* \
+		/issuer /issuer/* \
+		/verifier /verifier/* \
+		/storage /storage/* \
+		/helper /helper/* \
+		/keystore /keystore/* \
+		/wallet-provider /wallet-provider/* \
+		/v1 /v1/* \
+		/proxy \
+		/registry /registry/* \
+		/jwks /jwks/* \
+		/status
+	handle @backend {
+		reverse_proxy https://{$WALLET_BACKEND_UPSTREAM} {
+			header_up Host {$WALLET_BACKEND_UPSTREAM}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-For {remote_host}
+			transport http {
+				tls
+			}
+		}
+	}
+
+	# Wallet-frontend static server catches everything else.
+	handle {
+		reverse_proxy https://{$WALLET_FRONTEND_UPSTREAM} {
+			header_up Host {$WALLET_FRONTEND_UPSTREAM}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-For {remote_host}
+			transport http {
+				tls
+			}
+		}
+	}
+}
