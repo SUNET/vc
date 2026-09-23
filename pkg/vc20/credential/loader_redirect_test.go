@@ -54,3 +54,35 @@ func TestContextLoaderFetchesDirectly(t *testing.T) {
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
+
+// TestLoadDocumentRefusesInternalAddresses pins the nested case.
+//
+// JSON-LD processing dereferences whatever a context references - nested
+// @context and @import URLs - and those are fresh requests, not redirects, so
+// the client's redirect policy never sees them. An allowlisted context could
+// otherwise name an internal address and have it fetched. LoadDocument is the
+// single funnel every remote fetch passes through.
+func TestLoadDocumentRefusesInternalAddresses(t *testing.T) {
+	var hit bool
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit = true
+		_, _ = w.Write([]byte(`{"@context":{}}`))
+	}))
+	defer internal.Close()
+
+	loader := NewCachingDocumentLoader()
+	_, err := loader.LoadDocument(internal.URL)
+	require.Error(t, err, "a context on an internal address must not be fetched")
+	assert.Contains(t, err.Error(), "internal address")
+	assert.False(t, hit, "and the address must never be contacted")
+}
+
+// TestLoadDocumentServesPreloadedContexts: a preloaded context is returned
+// from the cache and never reaches the address check, which is why the W3C
+// base contexts keep working regardless of where they would resolve.
+func TestLoadDocumentServesPreloadedContexts(t *testing.T) {
+	loader := NewCachingDocumentLoader()
+	doc, err := loader.LoadDocument(ContextV2)
+	require.NoError(t, err)
+	assert.NotNil(t, doc)
+}

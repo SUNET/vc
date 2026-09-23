@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"sync"
 	"time"
 
@@ -35,6 +36,16 @@ type CachingDocumentLoader struct {
 	fallback ld.DocumentLoader
 	cache    *ttlcache.Cache[string, *ld.RemoteDocument]
 	log      *logger.Log
+}
+
+// hostOf returns the host of a context URL, or "" if it has none - a relative
+// or malformed reference, which has nothing to fetch.
+func hostOf(raw string) string {
+	u, err := neturl.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 // contextHTTPClient fetches remote JSON-LD contexts, refusing redirects that
@@ -104,6 +115,20 @@ func NewCachingDocumentLoader() *CachingDocumentLoader {
 func (l *CachingDocumentLoader) LoadDocument(url string) (*ld.RemoteDocument, error) {
 	if item := l.cache.Get(url); item != nil {
 		return item.Value(), nil
+	}
+
+	// Every remote fetch passes through here - the top-level context, and any
+	// nested @context or @import a context itself references. Those nested
+	// URLs are fresh requests, not redirects, so the client's redirect policy
+	// never sees them: an allowlisted context could otherwise name
+	// http://169.254.169.254/ and have it fetched.
+	//
+	// Preloaded contexts are served from the cache above and never reach this.
+	if host := hostOf(url); host != "" {
+		if internal, addr := resolvesToInternalAddress(host); internal {
+			l.log.Warn("refused to load a JSON-LD context from an internal address", "url", url, "address", addr)
+			return nil, fmt.Errorf("refusing to load JSON-LD context %q: it resolves to an internal address (%s)", url, addr)
+		}
 	}
 
 	// Fallback to network
