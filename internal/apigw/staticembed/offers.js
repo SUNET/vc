@@ -1,20 +1,23 @@
 import Alpine from "alpinejs";
 import * as v from "valibot";
 
-// The library's polyfill is vendored alongside this file but deliberately
-// NOT installed. Installing it would shim navigator.credentials.create()
-// and .get() for the whole page and, on a browser with no DC API at all,
-// define a global DigitalCredential of its own — so every other consumer on
-// the page would see a DC API the browser does not have, and
-// isIssuanceAvailable() below would be reading the polyfill's own wallet
-// registry through a DigitalCredential the polyfill invented, rather than
-// the browser's native answer. Nothing registers a wallet with it, so that
-// costs a page-wide side effect and buys nothing.
+// No DC API polyfill is vendored here, and the same-device button below is
+// dormant because of it: isIssuanceAvailable() can only answer from the
+// browser's own globals, and no shipping browser natively allows
+// openid4vci-v1.
 //
-// It gets installed when there is something for it to route to: a single
-// combined bundle carrying the polyfill and the web-wallets registry in one
-// module instance (sirosfoundation/dc-api#23). Until then the same-device
-// button stays dormant and the QR is the same-device path too.
+// The library's standalone polyfill bundle is not the missing piece. It
+// cannot be combined with the web-wallets bundle that defines
+// window.DigitalWallets - each inlines its own copy of the wallet registry -
+// so installing it would shim navigator.credentials.{get,create} page-wide,
+// fabricate a global DigitalCredential on browsers that have none, and route
+// create() to a registry nothing can register with. That is a page-wide side
+// effect for no gain, which is why it was removed rather than left unused.
+//
+// sirosfoundation/dc-api#23 adds a single combined bundle carrying both
+// halves in one module instance. That is the artifact to vendor here, and
+// installing it is what lights this button up. Until then the QR is the
+// same-device path too.
 import { getUserFriendlyErrorMessage } from "./dc-api.js";
 import { credentialOfferData, isIssuanceAvailable, issuanceResult, OID4VCI_PROTOCOL } from "./offers-helpers.js";
 
