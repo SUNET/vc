@@ -428,12 +428,16 @@ func TestValidateCredentialQuery(t *testing.T) {
 			expectError: false,
 		},
 		{
+			// Fully expanded IRIs, which is what type_values is matched as
+			// (OpenID4VP 1.0 B.3.2). This fixture used compact terms and
+			// expected them to pass - the exact field mix-up the validator
+			// now refuses.
 			name: "valid ldp_vc query with type values",
 			query: CredentialQuery{
 				ID:     "test_credential",
 				Format: "ldp_vc",
 				Meta: MetaQuery{
-					TypeValues: [][]string{{"VerifiableCredential", "PersonalID"}},
+					TypeValues: [][]string{{BaseVCTypeIRI, "https://example.org/id#PersonalID"}},
 				},
 			},
 			expectError: false,

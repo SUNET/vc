@@ -669,6 +669,11 @@ func TestValidateCredentialQueryRejectsUnconstrainedTypes(t *testing.T) {
 				{narrowing, {}},   // one real alternative beside an empty one
 				{narrowing, base}, // one real alternative beside a base-only one
 				{{""}},            // an empty string is not a type
+				// A compact term in the expanded field narrows nothing:
+				// type_values are matched as fully expanded IRIs, and the
+				// verifier drops relative IRIs from the credential side too.
+				{{BaseVCTypeIRI, "DiplomaCredential"}},
+				{{"DiplomaCredential"}},
 			}
 			for _, typeValues := range refused {
 				err := ValidateCredentialQuery(CredentialQuery{

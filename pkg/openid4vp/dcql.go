@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 )
 
 type DCQL struct {
@@ -609,13 +610,20 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 			// (CredentialMetadata.w3cTypeValues) already refuses that; an
 			// API-supplied query has to be held to the same rule, or the
 			// request over-discloses without ever looking unconstrained.
+			// Absolute, not merely different from the base. type_values are
+			// matched as fully expanded IRIs (OpenID4VP 1.0 B.3.2), so a
+			// compact term like "DiplomaCredential" narrows nothing: it
+			// cannot equal anything a credential expands to, and the verifier
+			// drops relative IRIs from the credential side for the same
+			// reason. Config load refuses these too; this is the path
+			// templates and API callers arrive by.
 			narrowing := slices.ContainsFunc(alternative, func(t string) bool {
-				return t != "" && t != BaseVCTypeIRI
+				return t != "" && t != BaseVCTypeIRI && strings.Contains(t, ":")
 			})
 			if !narrowing {
 				return &DCQLValidationError{
 					Field:   fmt.Sprintf("meta.type_values[%d]", i),
-					Message: "each type_values alternative must name at least one type beyond " + BaseVCTypeIRI + ", or it matches every W3C credential",
+					Message: "each type_values alternative must name at least one fully expanded IRI beyond " + BaseVCTypeIRI + "; a relative term matches nothing and a base-only alternative matches every W3C credential",
 				}
 			}
 		}
