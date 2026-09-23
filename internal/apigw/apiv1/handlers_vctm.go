@@ -19,6 +19,7 @@ import (
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/vcclient"
 
+	"github.com/google/uuid"
 	"github.com/skip2/go-qrcode"
 )
 
@@ -157,19 +158,56 @@ func (c *Client) UICreateCredentialOffer(ctx context.Context, req *UICredentialO
 	return reply, nil
 }
 
-// credentialOfferReferenceURL stores the offer under a fresh UUID and returns
-// the by-reference ("credential_offer_uri=...") deep link pointing at it.
+// credentialOfferUINamespace is the UUIDv5 namespace for issuer-UI credential
+// offers. Fixed for all time: changing it orphans every already-stored offer.
+var credentialOfferUINamespace = uuid.MustParse("053b4aae-8b08-46ea-b9c5-3da8ac7a4d82")
+
+// credentialOfferUIUUID derives the by-reference document id from the offer
+// itself, so the same offer always maps to the same document.
+//
+// This is what bounds the size of the credential-offer collection. GET
+// /offers/:scope is the operator UI's own endpoint on the unauthenticated
+// root group, so a freshly generated id per request would let anyone who can
+// reach the issuer grow that collection without limit simply by asking for
+// one valid scope in a loop - and a rate limit alone does not fix that, it
+// only slows it down. Neither store implementation has an expiry mechanism to
+// lean on instead: the Mongo collection indexes uuid only (no TTL index), and
+// the SQL credential_offer table has no expiry column, so bounding growth by
+// retention time would need a schema change plus something to sweep with.
+// Content-addressing bounds it by configuration instead: at most one document
+// per distinct offer, which is one per configured scope, however many requests
+// arrive. Unknown scopes never reach here - they fail the VCTM/MDDL lookup
+// above - so the set of reachable offers is exactly the configured one.
+//
+// This is safe only because the offer carries no secret: it is an
+// authorization_code grant with no issuer_state, byte-identical to the offer
+// already embedded in the by-value QR and deep links on the same page. An
+// offer carrying a one-time pre-authorized code must keep a fresh,
+// unguessable id, which is why the choice is made here and not inside
+// CredentialOfferURI.
+func credentialOfferUIUUID(offerParams *openid4vci.CredentialOfferParameters) (string, error) {
+	raw, err := offerParams.Marshal()
+	if err != nil {
+		return "", err
+	}
+
+	return uuid.NewSHA1(credentialOfferUINamespace, raw).String(), nil
+}
+
+// credentialOfferReferenceURL stores the offer under its content-addressed
+// UUID and returns the by-reference ("credential_offer_uri=...") deep link
+// pointing at it.
 //
 // The referenced document is served by GET /credential-offer/:credential_offer_uuid
 // (VCICredentialOfferURI), which until now had nothing writing to the store
 // it reads from.
 func (c *Client) credentialOfferReferenceURL(ctx context.Context, offerParams *openid4vci.CredentialOfferParameters) (string, error) {
-	offerURI, err := offerParams.CredentialOfferURI()
+	offerUUID, err := credentialOfferUIUUID(offerParams)
 	if err != nil {
 		return "", err
 	}
 
-	uuid, err := offerURI.UUID()
+	offerURI, err := offerParams.CredentialOfferURI(offerUUID)
 	if err != nil {
 		return "", err
 	}
@@ -178,11 +216,22 @@ func (c *Client) credentialOfferReferenceURL(ctx context.Context, offerParams *o
 		return "", errors.New("credential offer store not configured")
 	}
 
-	if err := c.credentialOfferStore.Save(ctx, &db.CredentialOfferDocument{
-		UUID:                      uuid,
-		CredentialOfferParameters: *offerParams,
-	}); err != nil {
-		return "", err
+	// Write only when the document is not already there. uuid is uniquely
+	// indexed, so a repeat request would otherwise fail on the duplicate key
+	// rather than reuse what is already stored.
+	if _, err := c.credentialOfferStore.Get(ctx, offerUUID); err != nil {
+		if saveErr := c.credentialOfferStore.Save(ctx, &db.CredentialOfferDocument{
+			UUID:                      offerUUID,
+			CredentialOfferParameters: *offerParams,
+		}); saveErr != nil {
+			// A concurrent request may have inserted the same document in
+			// between. Its content is identical by construction, so the offer
+			// this reply points at is served either way - only a store that
+			// still has nothing under this id is a real failure.
+			if _, getErr := c.credentialOfferStore.Get(ctx, offerUUID); getErr != nil {
+				return "", saveErr
+			}
+		}
 	}
 
 	query := url.Values{"credential_offer_uri": {offerURI.String()}}

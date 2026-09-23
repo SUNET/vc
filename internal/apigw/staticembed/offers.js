@@ -2,9 +2,12 @@ import Alpine from "alpinejs";
 import * as v from "valibot";
 
 // The library's own polyfill, vendored alongside this file. Installing it
-// lets a web wallet registered through window.DigitalWallets fulfil the
-// openid4vci-v1 create() call below; with no wallet registered it is inert
-// and the native DC API (if any) is used unchanged.
+// shims navigator.credentials.create() so that a wallet registered with THIS
+// module instance (its registerWallet) can fulfil the openid4vci-v1 call
+// below. Nothing registers one today, so it is inert and the native DC API
+// (if any) is used unchanged — and isIssuanceAvailable() correspondingly
+// returns false, so the button it gates does not render. See that function
+// and sirosfoundation/dc-api#23.
 import { installPolyfill } from "./dc-api-polyfill.js";
 import { getUserFriendlyErrorMessage, isUserCancel } from "./dc-api.js";
 import { credentialOfferData, isIssuanceAvailable, OID4VCI_PROTOCOL } from "./offers-helpers.js";

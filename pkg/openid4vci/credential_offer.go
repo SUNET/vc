@@ -9,7 +9,6 @@ import (
 	"time"
 
 	vccrypto "github.com/SUNET/vc/pkg/crypto"
-	"github.com/google/uuid"
 	"github.com/skip2/go-qrcode"
 )
 
@@ -186,13 +185,22 @@ func (c *CredentialOffer) QR(recoveryLevel, size int, walletURL string) (*QR, er
 }
 
 // CredentialOfferURI https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-sending-credential-offer-by-uri
-func (c *CredentialOfferParameters) CredentialOfferURI() (CredentialOfferURI, error) {
+//
+// offerUUID is the id the offer is (or will be) stored under, and is chosen
+// by the caller rather than generated here: how it is derived is a policy
+// decision that differs per offer kind. An offer carrying a one-time
+// pre-authorized code needs a fresh, unguessable id; an offer that carries no
+// secret at all (an authorization_code grant with no issuer_state, which is
+// what the issuer UI produces) can safely be content-addressed so that the
+// same offer maps to the same stored document. Pass uuid.NewString() for the
+// former.
+func (c *CredentialOfferParameters) CredentialOfferURI(offerUUID string) (CredentialOfferURI, error) {
 	u, err := url.Parse(c.CredentialIssuer)
 	if err != nil {
 		return "", err
 	}
 
-	q := u.JoinPath("credential-offer", uuid.NewString())
+	q := u.JoinPath("credential-offer", offerUUID)
 
 	return CredentialOfferURI(q.String()), nil
 }

@@ -178,7 +178,21 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "/", http.StatusOK, s.endpointIndex)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "offers", http.StatusOK, s.endpointUICredentialOffers)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "offers/:scope", http.StatusOK, s.endpointUICreateCredentialOffer)
+
+	// Creating an offer persists a by-reference credential-offer document, and
+	// this route sits on the unauthenticated root group (it is the operator
+	// UI's own endpoint). The document id is content-addressed, so repeat
+	// requests reuse one document rather than accumulate - see
+	// credentialOfferUIUUID - and this limit caps the request rate on top of
+	// that, the same way the credential endpoints below are capped.
+	offerRPM := 20
+	if s.cfg.APIGW.RateLimit != nil && s.cfg.APIGW.RateLimit.CredentialOfferRequestsPerMinute > 0 {
+		offerRPM = s.cfg.APIGW.RateLimit.CredentialOfferRequestsPerMinute
+	}
+	offerRL := httphelpers.NewRateLimiter(s.cacheService.RateLimit, offerRPM)
+	rgOffers := rgRoot.Group("")
+	rgOffers.Use(offerRL.Middleware())
+	s.httpHelpers.Server.RegEndpoint(ctx, rgOffers, http.MethodGet, "offers/:scope", http.StatusOK, s.endpointUICreateCredentialOffer)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPost, "nonce", http.StatusOK, s.endpointVCINonce)
 

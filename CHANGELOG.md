@@ -60,7 +60,21 @@
   fulfilled), and one shortcut button per configured wallet.
 - `GET /credential-offer/:credential_offer_uuid` now has a writer: offers
   shown in the issuer UI are persisted under a UUID so the QR can carry the
-  offer by reference instead of by value.
+  offer by reference instead of by value. The UUID is derived from the offer,
+  so repeated requests reuse one stored document rather than accumulating —
+  `GET /offers/:scope` is unauthenticated, and neither the Mongo nor the SQL
+  credential-offer store has an expiry mechanism to bound growth with.
+- `GET /offers/:scope` is rate limited, configurable via the new
+  `apigw.rate_limit.credential_offer_requests_per_minute` (default 20).
+
+### Note
+
+- The issuer's same-device "Open in wallet" button is present but dormant: no
+  shipping browser natively allows `openid4vci-v1`, and the `window.DigitalWallets`
+  registry it would otherwise use cannot share a module instance with the
+  vendored DC API polyfill (sirosfoundation/dc-api#23). Its gate,
+  `isIssuanceAvailable()`, therefore returns false and the button does not
+  render.
 
 ## [0.3.2] - 2024-04-29
 

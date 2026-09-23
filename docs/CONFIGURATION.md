@@ -951,11 +951,12 @@ Example rules:
 
 > **Path:** `.apigw.rate_limit`
 
-| Field                            | Type  | Description                                                         | Example | Default | Required |
-| -------------------------------- | ----- | ------------------------------------------------------------------- | ------- | ------- | -------- |
-| `token_requests_per_minute`      | `int` | Maximum token endpoint requests per minute per IP. Default: 20      | -       | `20`    | No       |
-| `credential_requests_per_minute` | `int` | Maximum credential endpoint requests per minute per IP. Default: 30 | -       | `30`    | No       |
-| `datastore_requests_per_minute`  | `int` | Maximum datastore endpoint requests per minute per IP. Default: 60  | -       | `60`    | No       |
+| Field                                  | Type  | Description                                                                                              | Example | Default | Required |
+| -------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `token_requests_per_minute`            | `int` | Maximum token endpoint requests per minute per IP. Default: 20                                           | -       | `20`    | No       |
+| `credential_requests_per_minute`       | `int` | Maximum credential endpoint requests per minute per IP. Default: 30                                      | -       | `30`    | No       |
+| `datastore_requests_per_minute`        | `int` | Maximum datastore endpoint requests per minute per IP. Default: 60                                       | -       | `60`    | No       |
+| `credential_offer_requests_per_minute` | `int` | Maximum issuer-UI credential offer creation requests (GET /offers/:scope) per minute per IP. Default: 20 | -       | `20`    | No       |
 
 ### `dashboard`
 

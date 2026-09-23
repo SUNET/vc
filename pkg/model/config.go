@@ -1431,6 +1431,8 @@ type APIGWRateLimit struct {
 	CredentialRequestsPerMinute int `yaml:"credential_requests_per_minute" default:"30"`
 	// DatastoreRequestsPerMinute is the maximum datastore endpoint requests per minute per IP. Default: 60
 	DatastoreRequestsPerMinute int `yaml:"datastore_requests_per_minute" default:"60"`
+	// CredentialOfferRequestsPerMinute is the maximum issuer-UI credential offer creation requests (GET /offers/:scope) per minute per IP. Default: 20
+	CredentialOfferRequestsPerMinute int `yaml:"credential_offer_requests_per_minute" default:"20"`
 }
 
 // APIGWDashboard configures the /dashboard demo landing page that lists every service in the deployment.

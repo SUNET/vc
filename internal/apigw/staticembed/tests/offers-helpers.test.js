@@ -3,7 +3,7 @@
 // no extra dependencies. Covers pure logic only; the Alpine component in
 // offers.js is not exercised here.
 
-import { afterEach, describe, it } from "node:test";
+import { afterEach, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
@@ -74,6 +74,79 @@ describe("isIssuanceAvailable", () => {
 
     it("ignores a truthy non-boolean supportsProtocol result", () => {
         globalThis.DigitalWallets = { supportsProtocol: () => "yes" };
+        assert.equal(isIssuanceAvailable(), false);
+    });
+});
+
+// The same-device button is gated on isIssuanceAvailable() alone, and in the
+// state this repo actually ships - the vendored polyfill installed, no wallet
+// registered, no native openid4vci-v1 support - it must stay false so the
+// button does not render. A create() that rejects with NotAllowedError is
+// exactly what the gate exists to prevent, so a change that turns this true
+// without also making create() work is a regression, not a fix.
+describe("isIssuanceAvailable with the vendored polyfill installed", () => {
+    /** @type {typeof import("../dc-api-polyfill.js")} */
+    let polyfill;
+
+    before(async () => {
+        // installPolyfill() rebinds navigator.credentials.{get,create}.
+        Object.defineProperty(globalThis, "navigator", {
+            value: { credentials: { get: async () => null, create: async () => null } },
+            configurable: true,
+            writable: true,
+        });
+        polyfill = await import("../dc-api-polyfill.js");
+    });
+
+    afterEach(() => {
+        for (const w of polyfill.getRegisteredWallets()) {
+            polyfill.unregisterWallet(w.id);
+        }
+        if (polyfill.isPolyfillInstalled()) {
+            polyfill.uninstallPolyfill();
+        }
+        clearGlobals();
+    });
+
+    it("installs without throwing", () => {
+        polyfill.installPolyfill();
+        assert.equal(polyfill.isPolyfillInstalled(), true);
+    });
+
+    it("does not define window.DigitalWallets", () => {
+        polyfill.installPolyfill();
+        // That global comes from the library's separate web-wallets bundle,
+        // which cannot share this module's registry — sirosfoundation/dc-api#23.
+        assert.equal(globalThis.DigitalWallets, undefined);
+    });
+
+    it("is false in the state this page ships: installed, nothing registered", () => {
+        polyfill.installPolyfill();
+        assert.equal(isIssuanceAvailable(), false);
+    });
+
+    // Not hardwired false: the polyfill's own registry is coherent, and a
+    // wallet registered with this module instance is both reported here and
+    // found by this instance's create().
+    it("is true for a wallet registered with the same module instance", () => {
+        polyfill.installPolyfill();
+        polyfill.registerWallet({
+            id: "w",
+            name: "W",
+            url: "https://wallet.example.com/",
+            protocols: ["openid4vci-v1"],
+        });
+        assert.equal(isIssuanceAvailable(), true);
+    });
+
+    it("stays false for a wallet that only does presentation", () => {
+        polyfill.installPolyfill();
+        polyfill.registerWallet({
+            id: "w",
+            name: "W",
+            url: "https://wallet.example.com/",
+            protocols: ["openid4vp-v1-signed"],
+        });
         assert.equal(isIssuanceAvailable(), false);
     });
 });

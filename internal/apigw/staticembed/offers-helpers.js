@@ -10,23 +10,41 @@ export const OID4VCI_PROTOCOL = OID4VCI_PROTOCOLS.V1;
 /**
  * Can an openid4vci-v1 issuance request actually be fulfilled on this device?
  *
- * This is deliberately the ONLY place the question is asked. It is not
+ * This is deliberately the ONLY place the question is asked, and it is the
+ * only thing that decides whether the same-device button renders. It is not
  * "does the browser have the DC API" (isDCAPIAvailable), which is a weaker
  * claim: a browser can expose DigitalCredential and still have nothing that
  * can take an issuance request, in which case navigator.credentials.create()
  * rejects with NotAllowedError — a worse outcome than the QR code that
- * already works. So the same-device button is rendered only when this
- * returns true.
+ * already works.
  *
- * Two ways it can be true:
- *   1. the native user agent allows the protocol
- *      (DigitalCredential.userAgentAllowsProtocol, via the library), or
- *   2. a web wallet supporting it is registered with the DC API polyfill,
- *      which exposes window.DigitalWallets.
+ * TODAY THIS RETURNS FALSE EVERYWHERE, AND THE BUTTON IS DELIBERATELY
+ * DORMANT. Both of its clauses are unreachable on a shipping browser:
  *
- * TEMPORARY: replace this whole function with isIssuanceAvailable() from
- * @sirosfoundation/dc-api once sirosfoundation/dc-api#20 ships it. The
- * predicate belongs in the library, not here.
+ *   1. No shipping user agent natively allows `openid4vci-v1`, so
+ *      DigitalCredential.userAgentAllowsProtocol (via the library's
+ *      isProtocolAllowed) says no.
+ *   2. Nothing defines `window.DigitalWallets` on this page. That global
+ *      comes from the library's web-wallets bundle, and vendoring that
+ *      bundle alongside dc-api-polyfill.js would NOT connect the two:
+ *      each bundle inlines its own copy of the wallet registry and its own
+ *      installPolyfill, so a wallet registered through one is invisible to
+ *      the create() shim in the other. See sirosfoundation/dc-api#23 — this
+ *      needs a single combined bundle (one module instance) from the
+ *      library before the clause can ever be true.
+ *
+ * The polyfill's own registerWallet() is the one path that is coherent
+ * today: a wallet registered through the very module instance this page
+ * installs is both reported here and found by that instance's create().
+ * Nothing on this page calls it.
+ *
+ * Do not "fix" this by making it return true — a true that leads to a
+ * create() which rejects is exactly what the gate exists to prevent.
+ *
+ * Replace the whole function with isIssuanceAvailable() from
+ * @sirosfoundation/dc-api once the library ships it (sirosfoundation/dc-api#20)
+ * on top of the combined bundle (#23). The predicate belongs in the library,
+ * not here.
  *
  * @returns {boolean}
  */

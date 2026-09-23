@@ -25,6 +25,7 @@ import (
 // be exercised without Mongo/SQL.
 type memCredentialOfferStore struct {
 	docs    map[string]*db.CredentialOfferDocument
+	saves   int
 	saveErr error
 }
 
@@ -36,6 +37,12 @@ func (m *memCredentialOfferStore) Save(_ context.Context, doc *db.CredentialOffe
 	if m.saveErr != nil {
 		return m.saveErr
 	}
+	// uuid is uniquely indexed in both real implementations, so an insert
+	// over an existing id is an error there too.
+	if _, ok := m.docs[doc.UUID]; ok {
+		return errors.New("duplicate key")
+	}
+	m.saves++
 	m.docs[doc.UUID] = doc
 	return nil
 }
@@ -322,9 +329,13 @@ func TestUICreateCredentialOffer_QRIsByReference(t *testing.T) {
 	require.Equal(t, []string{"siros_id"}, doc.CredentialOfferParameters.CredentialConfigurationIDs)
 }
 
-// Two calls for the same scope must not collide on the by-reference UUID,
-// which is uniquely indexed in the store.
-func TestUICreateCredentialOffer_QRReferenceIsUnique(t *testing.T) {
+// GET /offers/:scope is unauthenticated, so a by-reference id generated
+// fresh per request would let anyone grow the credential-offer collection
+// without limit by asking for one valid scope in a loop. The id is derived
+// from the offer instead, so repeated requests reuse one stored document:
+// the collection is bounded by how many distinct offers the issuer can
+// produce, not by how many requests arrive.
+func TestUICreateCredentialOffer_StoredOffersAreBounded(t *testing.T) {
 	credMeta := map[string]*model.CredentialMetadata{
 		"siros_id": {VCTM: &sdjwtvc.VCTM{Name: "SIROS ID", VCT: "urn:siros:id"}},
 	}
@@ -332,14 +343,34 @@ func TestUICreateCredentialOffer_QRReferenceIsUnique(t *testing.T) {
 
 	first, err := client.UICreateCredentialOffer(t.Context(), &UICredentialOfferRequest{Scope: "siros_id"})
 	require.NoError(t, err)
-	second, err := client.UICreateCredentialOffer(t.Context(), &UICredentialOfferRequest{Scope: "siros_id"})
+
+	for range 50 {
+		next, err := client.UICreateCredentialOffer(t.Context(), &UICredentialOfferRequest{Scope: "siros_id"})
+		require.NoError(t, err)
+		require.Equal(t, first.QR.URI, next.QR.URI, "the same offer must map to the same by-reference URI")
+		require.Equal(t, first.Offer, next.Offer)
+	}
+
+	require.Len(t, store.docs, 1, "51 requests for one scope must leave exactly one stored offer")
+	require.Equal(t, 1, store.saves, "the document must be written once, not rewritten per request")
+}
+
+// Bounded, but not collapsed: two different scopes are two different offers
+// and must not share a document.
+func TestUICreateCredentialOffer_DistinctScopesDistinctReferences(t *testing.T) {
+	credMeta := map[string]*model.CredentialMetadata{
+		"siros_id": {VCTM: &sdjwtvc.VCTM{Name: "SIROS ID", VCT: "urn:siros:id"}},
+		"ehic":     {VCTM: &sdjwtvc.VCTM{Name: "EHIC", VCT: "urn:siros:ehic"}},
+	}
+	client, store := newOfferTestClientWithStore(t, credMeta)
+
+	first, err := client.UICreateCredentialOffer(t.Context(), &UICredentialOfferRequest{Scope: "siros_id"})
+	require.NoError(t, err)
+	second, err := client.UICreateCredentialOffer(t.Context(), &UICredentialOfferRequest{Scope: "ehic"})
 	require.NoError(t, err)
 
 	require.NotEqual(t, first.QR.URI, second.QR.URI)
 	require.Len(t, store.docs, 2)
-
-	// The by-value renderings are unaffected: the offer itself is identical.
-	require.Equal(t, first.Offer, second.Offer)
 }
 
 // A store that cannot persist the offer must fail the request rather than

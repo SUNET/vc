@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -24,11 +25,13 @@ import (
 type offersAPI struct {
 	unimplementedApiv1
 	gotScope string
+	calls    int
 	err      error
 }
 
 func (o *offersAPI) UICreateCredentialOffer(_ context.Context, req *apiv1.UICredentialOfferRequest) (*apiv1.CredentialOfferReply, error) {
 	o.gotScope = req.Scope
+	o.calls++
 	if o.err != nil {
 		return nil, o.err
 	}
@@ -47,8 +50,10 @@ func (o *offersAPI) UICreateCredentialOffer(_ context.Context, req *apiv1.UICred
 	}, nil
 }
 
-// offersTestEngine registers the offer route exactly as service.go does.
-func offersTestEngine(t *testing.T, mockAPI Apiv1) *gin.Engine {
+// offersTestEngine registers the offer route the way service.go does, with
+// the rate limiter optionally wired in the same shape (rgRoot.Group("") +
+// RateLimiter.Middleware()). rpm <= 0 leaves it off.
+func offersTestEngine(t *testing.T, mockAPI Apiv1, rpm int) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -74,6 +79,9 @@ func offersTestEngine(t *testing.T, mockAPI Apiv1) *gin.Engine {
 
 	engine := gin.New()
 	rg := engine.Group("")
+	if rpm > 0 {
+		rg.Use(httphelpers.NewRateLimiter(cache.NewMemoryRateLimitCounter(), rpm).Middleware())
+	}
 	helpers.Server.RegEndpoint(ctx, rg, http.MethodGet, "offers/:scope", http.StatusOK, s.endpointUICreateCredentialOffer)
 
 	return engine
@@ -83,7 +91,7 @@ func offersTestEngine(t *testing.T, mockAPI Apiv1) *gin.Engine {
 // wallet is chosen before it is produced.
 func TestEndpointUICreateCredentialOffer_Route(t *testing.T) {
 	api := &offersAPI{}
-	engine := offersTestEngine(t, api)
+	engine := offersTestEngine(t, api, 0)
 
 	req := httptest.NewRequest(http.MethodGet, "/offers/siros_id", nil)
 	w := httptest.NewRecorder()
@@ -114,7 +122,7 @@ func TestEndpointUICreateCredentialOffer_Route(t *testing.T) {
 
 // The old two-segment form is gone; nothing is registered to serve it.
 func TestEndpointUICreateCredentialOffer_TwoSegmentRouteGone(t *testing.T) {
-	engine := offersTestEngine(t, &offersAPI{})
+	engine := offersTestEngine(t, &offersAPI{}, 0)
 
 	req := httptest.NewRequest(http.MethodGet, "/offers/siros_id/local", nil)
 	w := httptest.NewRecorder()
@@ -153,4 +161,26 @@ func TestOffersTemplate_ThreeRenderings(t *testing.T) {
 	require.Contains(t, out, `x-if="issuanceAvailable"`)
 	require.Contains(t, out, "handleIssueOnThisDevice")
 	require.Contains(t, out, "handleOpenInWallet(wallet.uri)")
+}
+
+// Creating an offer writes to the credential-offer store from an
+// unauthenticated route, so the route is rate limited (service.go registers
+// it on its own rgRoot.Group("") with RateLimiter.Middleware, the same shape
+// as the credential endpoints). The content-addressed document id is what
+// actually bounds storage growth - see TestUICreateCredentialOffer_StoredOffersAreBounded
+// in internal/apigw/apiv1 - this caps the request rate on top of it.
+func TestEndpointUICreateCredentialOffer_RateLimited(t *testing.T) {
+	api := &offersAPI{}
+	engine := offersTestEngine(t, api, 3)
+
+	for i := range 3 {
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/offers/siros_id", nil))
+		require.Equal(t, http.StatusOK, w.Code, "request %d should be within the limit", i+1)
+	}
+
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/offers/siros_id", nil))
+	require.Equal(t, http.StatusTooManyRequests, w.Code, "the request over the limit must be rejected before it reaches the store")
+	require.Equal(t, 3, api.calls, "a rate limited request must not reach UICreateCredentialOffer")
 }
