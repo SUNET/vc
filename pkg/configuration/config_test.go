@@ -184,14 +184,22 @@ func TestCheckCredentialOfferIssuerIdentity(t *testing.T) {
 		errContains string
 	}{
 		{name: "equal", issuerURL: "https://a.example", publicURL: "https://a.example", service: "apigw"},
-		{name: "equal but for a trailing slash", issuerURL: "https://a.example/", publicURL: "https://a.example", service: "apigw"},
+		// NOT accepted: both values are published verbatim, so a trailing
+		// slash on one of them means a wallet compares two different issuer
+		// identifiers. Normalising here would hide the mismatch this check
+		// exists to catch.
+		{
+			name: "differs only by a trailing slash", issuerURL: "https://a.example/", publicURL: "https://a.example",
+			service: "apigw", wantErr: true, errContains: "byte-identical",
+		},
+		{name: "trailing slash on both", issuerURL: "https://a.example/", publicURL: "https://a.example/", service: "apigw"},
 		{
 			name: "different origins", issuerURL: "https://issuer.example", publicURL: "https://apigw.example",
-			service: "apigw", wantErr: true, errContains: "must equal apigw.public_url",
+			service: "apigw", wantErr: true, errContains: "must be byte-identical",
 		},
 		{
 			name: "different scheme only", issuerURL: "http://a.example", publicURL: "https://a.example",
-			service: "apigw", wantErr: true, errContains: "must equal apigw.public_url",
+			service: "apigw", wantErr: true, errContains: "must be byte-identical",
 		},
 		// Absence is the required-tag's business, not this check's.
 		{name: "issuer url unset", issuerURL: "", publicURL: "https://a.example", service: "apigw"},

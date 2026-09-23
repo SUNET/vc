@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -259,9 +258,11 @@ func checkOpaqueWalletSentinel(cfg *model.Cfg, serviceName string) error {
 //
 // There is no useful deployment on the far side of this: the two fields name
 // one thing, and OpenID4VCI requires the metadata's `credential_issuer` to
-// match the identifier the wallet resolved. Refusing at startup turns a
-// silent interop failure - visible only in a wallet, at the end of a flow -
-// into a message at boot.
+// match the identifier the wallet resolved - as a string. So this compares
+// them exactly rather than normalising: a trailing slash on one of them is
+// still two different identifiers once they are published. Refusing at
+// startup turns a silent interop failure - visible only in a wallet, at the
+// end of a flow - into a message at boot.
 func checkCredentialOfferIssuerIdentity(cfg *model.Cfg, serviceName string) error {
 	if serviceName != "apigw" || cfg.APIGW == nil {
 		return nil
@@ -274,12 +275,19 @@ func checkCredentialOfferIssuerIdentity(cfg *model.Cfg, serviceName string) erro
 		return nil
 	}
 
-	if strings.TrimRight(issuerURL, "/") != strings.TrimRight(publicURL, "/") {
+	// Compared EXACTLY, not normalised. Both values are emitted verbatim -
+	// the offer sets credential_issuer to issuer_url as written, and
+	// IssuerMetadata.Generate sets it to public_url as written, neither
+	// trimming anything. Accepting "https://x/" against "https://x" here
+	// would let the two publish different strings for one identity, and a
+	// wallet comparing issuer identifiers compares strings. Normalising at
+	// this check would hide exactly the mismatch it exists to catch.
+	if issuerURL != publicURL {
 		return fmt.Errorf(
-			"apigw.delivery.credential_offers.issuer_url (%q) must equal apigw.public_url (%q): "+
-				"offers publish the former as credential_issuer, but issuer metadata is served from "+
-				"the latter and declares it as credential_issuer, so a wallet resolving the offer "+
-				"would fail discovery",
+			"apigw.delivery.credential_offers.issuer_url (%q) must be byte-identical to apigw.public_url (%q): "+
+				"offers publish the former as credential_issuer and issuer metadata publishes the latter, "+
+				"both verbatim, so any difference - a trailing slash included - makes a wallet compare two "+
+				"different issuer identifiers and fail discovery",
 			issuerURL, publicURL,
 		)
 	}
