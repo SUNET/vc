@@ -38,7 +38,7 @@
             </template>
             <template x-if="!loading && !credentialOffer">
                 <div class="box">
-                    <p class="block">Select which <em>type of credential</em> you want to issue. You also need to select what <em>wallet</em> to issue it to.</p>
+                    <p class="block">Select which <em>type of credential</em> you want to issue.</p>
                     <form x-ref="offersForm" @submit.prevent="handleOffersForm">
                         <div class="container is-max-tablet">
                             <div class="field">
@@ -46,28 +46,11 @@
                                 <div class="select">
                                     <select id="credential" name="credential" required>
                                         <option value="" disabled selected>Select credential</option>
-                                        <template x-for="(cred, id) in credentials">
+                                        <template x-for="(cred, id) in credentials" :key="id">
                                             <option :value="id" x-text="cred.name" :title="cred.description"></option>
                                         </template>
                                     </select>
                                 </div>
-                            </div>
-                            <div class="field">
-                                <label class="label">Wallet</label>
-                                <div class="radios">
-                                    <template x-for="(label, id) in wallets">
-                                        <label class="radio">
-                                            <input type="radio" name="wallet" :value="id" :required="!opaque" :disabled="opaque" />
-                                            <span x-text="label"></span>
-                                        </label>
-                                    </template>
-                                </div>
-                            </div>
-                            <div class="field">
-                                <label class="checkbox">
-                                    <input type="checkbox" name="opaque" x-model="opaque" />
-                                    Generate opaque credential offer (no specific wallet)
-                                </label>
                             </div>
                             <input type="submit" value="Submit" class="button is-primary">
                         </div>
@@ -77,11 +60,37 @@
             <template x-if="!loading && credentialOffer">
                 <div class="box is-flex is-flex-direction-column is-align-items-center is-gap-2">
                     <h2 class="title has-text-centered has-text-weight-bold is-size-4" x-text="credentialOffer.name"></h2>
-                    <p class="has-text-centered">You can either scan the QR code with your mobile device or press the button below to proceed in the browser.</p>
-                    <img :src="`data:image/png;base64,${credentialOffer.qr.base64_image}`" alt="" />
-                    <button class="button is-primary" @click="handleCredentialOfferProceed">Proceed</button>
-                    <p class="block has-text-centered is-size-7">You will be redirected to your wallet in order to begin the process.</p>
+
+                    <!-- 1. Cross-device: scan with whatever wallet is on the phone. -->
+                    <p class="has-text-centered">Scan this QR code with the wallet on your mobile device.</p>
+                    <img :src="`data:image/png;base64,${credentialOffer.qr.base64_image}`" alt="Credential offer QR code" />
+
+                    <!-- 2. Same-device, over the W3C Digital Credentials API.
+                         Rendered only when an openid4vci-v1 request can
+                         actually be fulfilled here - see isIssuanceAvailable(). -->
+                    <template x-if="issuanceAvailable">
+                        <div class="is-flex is-flex-direction-column is-align-items-center is-gap-2 mt-4">
+                            <button class="button is-primary" @click="handleIssueOnThisDevice">Open in wallet on this device</button>
+                            <p class="has-text-centered is-size-7">Your browser will ask which wallet should receive the credential.</p>
+                        </div>
+                    </template>
+                    <template x-if="issuanceStatus">
+                        <div class="notification is-success" style="width: 100%" x-text="issuanceStatus"></div>
+                    </template>
+
+                    <!-- 3. One shortcut per configured wallet: the same offer
+                         behind that wallet's own redirect URI. -->
+                    <template x-if="Object.keys(credentialOffer.wallets).length > 0">
+                        <div class="is-flex is-flex-direction-column is-align-items-stretch is-gap-2 mt-4" style="width: 100%">
+                            <p class="has-text-centered is-size-7">Or open it directly in a known wallet:</p>
+                            <template x-for="(wallet, id) in credentialOffer.wallets" :key="id">
+                                <button class="button is-link is-light" x-text="wallet.name" @click="handleOpenInWallet(wallet.uri)"></button>
+                            </template>
+                        </div>
+                    </template>
+
                     <pre style="width: 100%" x-text="credentialOffer.qr.uri"></pre>
+                    <button class="button is-ghost" @click="handleReset">Choose another credential</button>
                 </div>
             </template>
         </div>
