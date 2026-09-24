@@ -9,6 +9,12 @@ import (
 	"net/url"
 )
 
+// maxAuthorizationDetailsBytes bounds the raw JSON encoding of
+// authorization_details on every request path (form-body raw string, generic
+// JSON body, and gin's JSON binder). Kept in one place so the form-tag
+// validator (max=16384) and the JSON paths stay in lockstep.
+const maxAuthorizationDetailsBytes = 16384
+
 // AuthorizationDetailsParameter https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-using-authorization-details
 type AuthorizationDetailsParameter struct {
 	Type string `json:"type" form:"type" validate:"required,oneof=openid_credential"`
@@ -129,6 +135,9 @@ func BindAuthorizationRequest(body io.ReadCloser) (*PARRequest, error) {
 			if err != nil {
 				return nil, err
 			}
+			if len(raw) > maxAuthorizationDetailsBytes {
+				return nil, fmt.Errorf("authorization_details exceeds %d bytes", maxAuthorizationDetailsBytes)
+			}
 			authorizationRequest.AuthorizationDetailsRaw = string(raw)
 		case nil:
 			return nil, errors.New("authorization_details must not be null")
@@ -172,6 +181,9 @@ func (r *PARRequest) UnmarshalJSON(data []byte) error {
 	if bytes.Equal(raw, []byte("null")) {
 		return errors.New("authorization_details must not be null")
 	}
+	if len(raw) > maxAuthorizationDetailsBytes {
+		return fmt.Errorf("authorization_details exceeds %d bytes", maxAuthorizationDetailsBytes)
+	}
 	if raw[0] != '[' {
 		return errors.New("authorization_details must be a JSON array")
 	}
@@ -195,6 +207,9 @@ func (r *PARRequest) ParseAuthorizationDetails() error {
 		if len(trimmed) == 0 {
 			return errors.New("authorization_details is empty")
 		}
+		if len(trimmed) > maxAuthorizationDetailsBytes {
+			return fmt.Errorf("authorization_details exceeds %d bytes", maxAuthorizationDetailsBytes)
+		}
 		if trimmed[0] != '[' {
 			return errors.New("authorization_details must be a JSON array")
 		}
@@ -211,7 +226,14 @@ func (r *PARRequest) ParseAuthorizationDetails() error {
 		return err
 	}
 	for i := range r.AuthorizationDetails {
-		if err := validate.Struct(&r.AuthorizationDetails[i]); err != nil {
+		detail := &r.AuthorizationDetails[i]
+		if detail.CredentialConfigurationID != "" && detail.Format != "" {
+			return fmt.Errorf("authorization_details[%d]: credential_configuration_id and format are mutually exclusive", i)
+		}
+		if detail.VCT != "" && detail.Format == "" {
+			return fmt.Errorf("authorization_details[%d]: vct requires format", i)
+		}
+		if err := validate.Struct(detail); err != nil {
 			return fmt.Errorf("authorization_details[%d]: %w", i, err)
 		}
 	}

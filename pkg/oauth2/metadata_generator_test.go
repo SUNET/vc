@@ -75,6 +75,31 @@ func TestGenerateMetadata(t *testing.T) {
 				assert.Empty(t, metadata.ClientAttestationPoPSigningALGValuesSupported)
 			},
 		},
+		{
+			name: "wallet attestation narrowed by AllowedSignatureAlgorithms",
+			cfg: &MetadataConfig{ // #nosec G101
+				IssuerURL:                  "https://issuer.example.com",
+				TokenEndpoint:              "https://issuer.example.com/token",
+				WalletAttestationEnabled:   true,
+				AllowedSignatureAlgorithms: []string{"ES256", "RS256"},
+			},
+			verify: func(t *testing.T, metadata *AuthorizationServerMetadata) {
+				assert.Equal(t, []string{"ES256"}, metadata.ClientAttestationSigningALGValuesSupported)
+				assert.Equal(t, []string{"ES256"}, metadata.ClientAttestationPoPSigningALGValuesSupported)
+			},
+		},
+		{
+			name: "wallet attestation with empty AllowedSignatureAlgorithms keeps full base set",
+			cfg: &MetadataConfig{ // #nosec G101
+				IssuerURL:                "https://issuer.example.com",
+				TokenEndpoint:            "https://issuer.example.com/token",
+				WalletAttestationEnabled: true,
+			},
+			verify: func(t *testing.T, metadata *AuthorizationServerMetadata) {
+				assert.Equal(t, []string{"ES256", "ES384", "ES512"}, metadata.ClientAttestationSigningALGValuesSupported)
+				assert.Equal(t, []string{"ES256", "ES384", "ES512"}, metadata.ClientAttestationPoPSigningALGValuesSupported)
+			},
+		},
 	}
 
 	for _, tt := range tests {

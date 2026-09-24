@@ -1111,11 +1111,12 @@ func (c *OpenID4VPConfig) GetPresentationRequestsDir() string {
 
 // GenerateMetadata generates OAuth2 metadata from the OpenID4VP configuration.
 // Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
-func (c *OpenID4VPConfig) GenerateMetadata(ctx context.Context, issuerURL string, walletAttestationEnabled bool) *oauth2.AuthorizationServerMetadata {
+func (c *OpenID4VPConfig) GenerateMetadata(ctx context.Context, issuerURL string, walletAttestationEnabled bool, allowedSignatureAlgorithms []string) *oauth2.AuthorizationServerMetadata {
 	return oauth2.GenerateMetadata(&oauth2.MetadataConfig{
-		IssuerURL:                issuerURL,
-		TokenEndpoint:            c.TokenEndpoint,
-		WalletAttestationEnabled: walletAttestationEnabled,
+		IssuerURL:                  issuerURL,
+		TokenEndpoint:              c.TokenEndpoint,
+		WalletAttestationEnabled:   walletAttestationEnabled,
+		AllowedSignatureAlgorithms: allowedSignatureAlgorithms,
 	})
 }
 
@@ -2539,12 +2540,13 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 
 // GenerateMetadata generates OAuth2 metadata from configuration.
 // Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
-func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string, walletAttestationEnabled bool) *oauth2.AuthorizationServerMetadata {
+func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string, walletAttestationEnabled bool, allowedSignatureAlgorithms []string) *oauth2.AuthorizationServerMetadata {
 	metadata := oauth2.GenerateMetadata(&oauth2.MetadataConfig{
-		IssuerURL:                issuerURL,
-		TokenEndpoint:            cfg.TokenEndpoint,
-		GrantTypes:               cfg.GrantTypes,
-		WalletAttestationEnabled: walletAttestationEnabled,
+		IssuerURL:                  issuerURL,
+		TokenEndpoint:              cfg.TokenEndpoint,
+		GrantTypes:                 cfg.GrantTypes,
+		WalletAttestationEnabled:   walletAttestationEnabled,
+		AllowedSignatureAlgorithms: allowedSignatureAlgorithms,
 	})
 
 	return metadata

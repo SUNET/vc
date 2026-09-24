@@ -148,6 +148,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		ctx,
 		c.cfg.Verifier.PublicURL,
 		false,
+		c.cfg.Verifier.Trust.AllowedSignatureAlgorithms,
 	)
 
 	// Load presentation request templates if configured

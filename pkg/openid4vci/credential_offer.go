@@ -203,8 +203,8 @@ func (c *CredentialOffer) QR(recoveryLevel, size int, walletURL string) (*QR, er
 // perfectly legal, and building the retrieval URL from the identifier would
 // hand out a credential_offer_uri that 404s.
 func (c *CredentialOfferParameters) CredentialOfferURI(baseURL, offerUUID string) (CredentialOfferURI, error) {
-	if baseURL == "" {
-		return "", errors.New("credential offer URI: base URL is empty")
+	if baseURL == "" || offerUUID == "" {
+		return "", errors.New("credential offer URI: base URL and offer UUID are required")
 	}
 
 	u, err := url.Parse(baseURL)

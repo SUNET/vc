@@ -10,7 +10,17 @@ type MetadataConfig struct {
 	// Only deployments that have wired up a wallet-attestation evaluator can
 	// accept it; verifier and pre-auth-only apigw setups must leave it off.
 	WalletAttestationEnabled bool
+	// AllowedSignatureAlgorithms narrows the advertised
+	// client_attestation_signing_alg_values_supported /
+	// client_attestation_pop_signing_alg_values_supported lists to the
+	// intersection with the deployment's Trust.AllowedSignatureAlgorithms.
+	// Empty means: advertise the full built-in set.
+	AllowedSignatureAlgorithms []string
 }
+
+// walletAttestationBaseALGs is the built-in set supported by the evaluator;
+// AllowedSignatureAlgorithms may only narrow it, never widen.
+var walletAttestationBaseALGs = []string{"ES256", "ES384", "ES512"}
 
 // GenerateMetadata creates OAuth2 Authorization Server Metadata from configuration.
 // This eliminates the need for separate JSON files and ensures all options are derived from configuration.
@@ -28,8 +38,8 @@ func GenerateMetadata(cfg *MetadataConfig) *AuthorizationServerMetadata {
 	var attestationALGs, attestationPoPALGs []string
 	if cfg.WalletAttestationEnabled {
 		authMethods = append([]string{"attest_jwt_client_auth"}, authMethods...)
-		attestationALGs = []string{"ES256", "ES384", "ES512"}
-		attestationPoPALGs = []string{"ES256", "ES384", "ES512"}
+		attestationALGs = intersectALGs(walletAttestationBaseALGs, cfg.AllowedSignatureAlgorithms)
+		attestationPoPALGs = intersectALGs(walletAttestationBaseALGs, cfg.AllowedSignatureAlgorithms)
 	}
 
 	return &AuthorizationServerMetadata{
@@ -47,4 +57,25 @@ func GenerateMetadata(cfg *MetadataConfig) *AuthorizationServerMetadata {
 		CodeChallengeMethodsSupported:                 []string{"S256"},
 		DPOPSigningALGValuesSupported:                 []string{"ES256"},
 	}
+}
+
+// intersectALGs returns the members of base that also appear in allowed. If
+// allowed is empty, the full base is returned unchanged.
+func intersectALGs(base, allowed []string) []string {
+	if len(allowed) == 0 {
+		out := make([]string, len(base))
+		copy(out, base)
+		return out
+	}
+	set := make(map[string]struct{}, len(allowed))
+	for _, a := range allowed {
+		set[a] = struct{}{}
+	}
+	out := make([]string, 0, len(base))
+	for _, a := range base {
+		if _, ok := set[a]; ok {
+			out = append(out, a)
+		}
+	}
+	return out
 }
