@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"math/big"
 	"net/url"
 )
 
@@ -419,10 +420,21 @@ func NewSessionEncryptionReader(eReaderPriv *ecdsa.PrivateKey, eDevicePub *ecdsa
 	return newSessionEncryption(eReaderPriv, eDevicePub, sessionTranscript, true)
 }
 
+// ecdhSharedSecret renders an ECDH x-coordinate as the fixed-width shared
+// secret Z that key derivation expects, left-padded to the curve's byte length.
+func ecdhSharedSecret(curve elliptic.Curve, x *big.Int) []byte {
+	return x.FillBytes(make([]byte, (curve.Params().BitSize+7)/8))
+}
+
 func newSessionEncryption(priv *ecdsa.PrivateKey, pub *ecdsa.PublicKey, sessionTranscript []byte, isReader bool) (*SessionEncryption, error) {
-	// Perform ECDH
+	// Perform ECDH. The shared secret Z is the FIXED-LENGTH x-coordinate
+	// (SEC1 2.3.5, RFC 5903 - and ISO 18013-5 9.1.1.5 derives from it), so a
+	// coordinate whose high byte is zero must still occupy the full width.
+	// x.Bytes() drops it, which for about 1 session in 125 fed HKDF 31 bytes
+	// where the peer fed it 32 - different SKReader/SKDevice, and a session
+	// that fails to decrypt for no visible reason.
 	x, _ := priv.Curve.ScalarMult(pub.X, pub.Y, priv.D.Bytes())
-	sharedSecret := x.Bytes()
+	sharedSecret := ecdhSharedSecret(priv.Curve, x)
 
 	// Derive session keys using HKDF-SHA256
 	// Per ISO 18013-5 section 9.1.1.5
