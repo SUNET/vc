@@ -14,12 +14,23 @@ import (
 // ephemeralEncryptionKey returns the ephemeral encryption key pair for kid,
 // reusing the stored private half when one exists.
 //
-// The keys live in the cache service, not in openid4vp's in-process cache.
-// That cache is per-process, so with more than one verifier replica a wallet's
-// encrypted response could land on a node that never held the key and fail to
-// decrypt - the request object is served by one replica and the response
-// posted to whichever the load balancer picks. APIGW already resolves its
+// The keys live in the cache service, not in openid4vp's in-process cache,
+// so that a deployment CAN share them between replicas: the request object is
+// served by one replica and the response posted to whichever the load
+// balancer picks, so a key held only by the issuing process would leave the
+// wallet's encrypted response undecryptable. APIGW already resolves its
 // ephemeral keys this way.
+//
+// Sharing is what common.ha.enable buys, not something the cache service does
+// on its own - pkg/cache's factory returns a Mongo-backed store when HA is on
+// and a per-process MemoryCache when it is off. So running more than one
+// replica without HA has the same problem this move was made to avoid; the
+// cache service is simply where that is fixable, and where APIGW already
+// fixes it.
+//
+// The reuse guarantee below holds either way: SetNX is atomic in both
+// backends - ttlcache's GetOrSet within a process, an InsertOne against a
+// unique key across nodes.
 //
 // Reuse rather than regenerate: a request object can be built more than once
 // for the same session, and replacing the private key under an unchanged kid
