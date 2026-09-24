@@ -414,6 +414,24 @@ func (s *Service) endpointOAuthAuthorizationConsentCallback(ctx context.Context,
 		return nil, err
 	}
 
+	// Bind the wallet's response_code to the verifier code stored when the
+	// matching VP request was created. Without this a callback carrying an
+	// unrelated but well-formed verifier code would still mark this request
+	// URI consented, because OAuthAuthorizationConsentCallback is a no-op.
+	expected, _ := session.Get("verifier_context_id").(string)
+	if expected == "" {
+		err := errors.New("verifier_context_id not found in session")
+		s.log.Error(err, "missing verifier_context_id")
+		c.AbortWithStatus(http.StatusBadRequest)
+		return nil, err
+	}
+	if request.ResponseCode == "" || request.ResponseCode != expected {
+		err := errors.New("response_code does not match session verifier_context_id")
+		s.log.Error(err, "response_code mismatch")
+		c.AbortWithStatus(http.StatusForbidden)
+		return nil, err
+	}
+
 	session.Set("response_code", request.ResponseCode)
 	if err := session.Save(); err != nil {
 		s.log.Error(err, "session save error")

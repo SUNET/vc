@@ -1141,3 +1141,27 @@ func TestDatastorePreAuthOffer_RejectsUnknownScope(t *testing.T) {
 	require.ErrorAs(t, err, &helperErr)
 	assert.Equal(t, "invalid_scope", helperErr.Title)
 }
+
+func TestDatastorePreAuthOffer_ChecksDatastoreEntrySpecifically(t *testing.T) {
+	client, datastore := newPreAuthOfferTestClient(t)
+	// Datastore configures 'diploma' as SAML; another source (assertion) is
+	// preauth. The endpoint issues a datastore-backed offer, so it must reject
+	// based on the datastore entry alone.
+	client.cfg.APIGW.DataSources.Datastore.Scopes["diploma"] = model.DatastoreScope{AuthProvider: model.AuthProviderSAML}
+	client.cfg.APIGW.DataSources.Assertion.Scopes = map[string]model.AssertionScope{
+		"diploma": {AuthProvider: model.AuthProviderPreAuth},
+	}
+
+	seedDoc(t, datastore, "SUNET", "diploma", "doc-d2", []string{"person-1"}, map[string]any{"family_name": "Doe"})
+
+	reply, err := client.DatastorePreAuthOffer(t.Context(), &DatastorePreAuthOfferRequest{
+		AuthenticSource: "SUNET",
+		Scope:           "diploma",
+		DocumentID:      "doc-d2",
+	})
+	require.Error(t, err)
+	assert.Nil(t, reply)
+	var helperErr *helpers.Error
+	require.ErrorAs(t, err, &helperErr)
+	assert.Equal(t, "invalid_scope", helperErr.Title)
+}

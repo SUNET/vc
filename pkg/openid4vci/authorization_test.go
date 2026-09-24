@@ -293,3 +293,46 @@ func TestParseAuthorizationDetails_ValidatesJSONBinderInput(t *testing.T) {
 		})
 	}
 }
+
+func TestPARRequestUnmarshalJSON(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+		wantLen int
+	}{
+		{
+			name:    "authorization_details as JSON array",
+			body:    `{"response_type":"code","authorization_details":[{"type":"openid_credential","credential_configuration_id":"TestCredential"}]}`,
+			wantLen: 1,
+		},
+		{
+			name: "authorization_details omitted",
+			body: `{"response_type":"code"}`,
+		},
+		{
+			name:    "authorization_details explicit null rejected",
+			body:    `{"response_type":"code","authorization_details":null}`,
+			wantErr: true,
+		},
+		{
+			name:    "authorization_details object rejected",
+			body:    `{"response_type":"code","authorization_details":{"type":"openid_credential"}}`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &PARRequest{}
+			err := json.Unmarshal([]byte(tt.body), r)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Len(t, r.AuthorizationDetails, tt.wantLen)
+			assert.Equal(t, "code", r.ResponseType)
+		})
+	}
+}

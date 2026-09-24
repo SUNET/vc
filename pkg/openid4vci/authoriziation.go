@@ -113,14 +113,27 @@ func BindAuthorizationRequest(body io.ReadCloser) (*PARRequest, error) {
 		return nil, err
 	}
 
-	details, ok := v["authorization_details"]
-	if ok {
-		d := details.(string)
+	if details, ok := v["authorization_details"]; ok {
 		delete(v, "authorization_details")
-
-		authorizationRequest.AuthorizationDetailsRaw, err = url.QueryUnescape(d)
-		if err != nil {
-			return nil, err
+		// authorization_details may arrive as a JSON array (standard) or a
+		// URL-encoded JSON-array string (form-body variant surfaced via the
+		// generic JSON decode above). Reject anything else, including null.
+		switch d := details.(type) {
+		case string:
+			authorizationRequest.AuthorizationDetailsRaw, err = url.QueryUnescape(d)
+			if err != nil {
+				return nil, err
+			}
+		case []any:
+			raw, err := json.Marshal(d)
+			if err != nil {
+				return nil, err
+			}
+			authorizationRequest.AuthorizationDetailsRaw = string(raw)
+		case nil:
+			return nil, errors.New("authorization_details must not be null")
+		default:
+			return nil, fmt.Errorf("authorization_details must be a JSON array or encoded string, got %T", details)
 		}
 
 		if err := authorizationRequest.ParseAuthorizationDetails(); err != nil {
@@ -138,6 +151,34 @@ func BindAuthorizationRequest(body io.ReadCloser) (*PARRequest, error) {
 	}
 
 	return authorizationRequest, nil
+}
+
+// UnmarshalJSON captures the raw authorization_details value so JSON binders
+// can reject a present-but-null field the same way the form parser does.
+// gin's JSON binding otherwise treats null and an omitted field identically.
+func (r *PARRequest) UnmarshalJSON(data []byte) error {
+	type alias PARRequest
+	aux := struct {
+		AuthorizationDetails json.RawMessage `json:"authorization_details,omitempty"`
+		*alias
+	}{alias: (*alias)(r)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	raw := bytes.TrimSpace(aux.AuthorizationDetails)
+	if len(raw) == 0 {
+		return nil
+	}
+	if bytes.Equal(raw, []byte("null")) {
+		return errors.New("authorization_details must not be null")
+	}
+	if raw[0] != '[' {
+		return errors.New("authorization_details must be a JSON array")
+	}
+	if err := json.Unmarshal(raw, &r.AuthorizationDetails); err != nil {
+		return fmt.Errorf("authorization_details parse: %w", err)
+	}
+	return nil
 }
 
 // ParseAuthorizationDetails ensures AuthorizationDetails is populated and
