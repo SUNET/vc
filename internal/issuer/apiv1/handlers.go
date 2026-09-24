@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
-	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -48,24 +47,28 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		Integrity: req.Integrity,
 	}
 
-	// Call registry to allocate a status list entry for revocation support
-	if c.registryClient == nil {
-		return nil, fmt.Errorf("registry client not configured")
-	}
-
-	grpcReply, err := c.registryClient.TokenStatusListAddStatus(ctx, &apiv1_registry.TokenStatusListAddStatusRequest{
-		Status: 0, // VALID status for new credential
-	})
+	// Allocate a status list entry for revocation support. allocateOrDegrade
+	// goes through whichever backend is configured - vc's own built-in
+	// Token Status List (registry) or an external
+	// draft-ietf-oauth-status-list-21 service - and, only for the external
+	// backend with degraded_mode=proceed, returns (nil, nil) instead of an
+	// error so the credential is still issued, just without a status
+	// claim. See status_allocator.go.
+	alloc, err := c.allocateOrDegrade(ctx)
 	if err != nil {
-		c.log.Error(err, "failed to get status list entry from registry")
+		c.log.Error(err, "failed to allocate status list entry")
 		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
 	}
 
-	opts.TokenStatusList = &sdjwtvc.TokenStatusListReference{
-		Index: grpcReply.GetIndex(),
-		URI:   grpcReply.GetStatusListUri(),
+	var statusSection, statusIndex int64
+	if alloc != nil {
+		opts.TokenStatusList = &sdjwtvc.TokenStatusListReference{
+			Index: alloc.Index,
+			URI:   alloc.URI,
+		}
+		statusSection, statusIndex = alloc.Section, alloc.Index
+		c.log.Debug("status list entry allocated", "section", alloc.Section, "index", alloc.Index, "uri", alloc.URI)
 	}
-	c.log.Debug("status list entry allocated", "section", grpcReply.GetSection(), "index", grpcReply.GetIndex(), "uri", grpcReply.GetStatusListUri())
 
 	// Build SD-JWT using sdjwtvc package with the signer interface.
 	// The VCTM bytes come from the caller (APIGW); BuildCredentialWithSigner
@@ -93,8 +96,8 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 				Credential: token,
 			},
 		},
-		TokenStatusListSection: grpcReply.GetSection(),
-		TokenStatusListIndex:   grpcReply.GetIndex(),
+		TokenStatusListSection: statusSection,
+		TokenStatusListIndex:   statusIndex,
 	}
 
 	return reply, nil
@@ -174,18 +177,23 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		return nil, fmt.Errorf("failed to load MDDL schema: %w", err)
 	}
 
-	// Allocate status list entry for revocation support (if registry is configured)
-	var statusSection, statusIndex int64
-	if c.registryClient != nil {
-		grpcReply, err := c.registryClient.TokenStatusListAddStatus(ctx, &apiv1_registry.TokenStatusListAddStatusRequest{
-			Status: 0, // VALID status for new credential
-		})
+	// Allocate a status list entry for revocation support, if any allocator
+	// (vc's own registry-backed Token Status List, or an external
+	// draft-ietf-oauth-status-list-21 service) is configured. Always
+	// best-effort here, regardless of backend: mDL issuance has never
+	// required one (unlike SD-JWT and BBS above), so an allocation failure
+	// - or the feature simply not being configured - just logs and issues
+	// the mdoc without revocation support, matching this path's own
+	// pre-existing (registry-only) behaviour exactly when the registry is
+	// what is configured.
+	var mdocStatusSection, mdocStatusIndex int64
+	if c.statusAllocator != nil {
+		alloc, err := c.statusAllocator.Allocate(ctx)
 		if err != nil {
 			c.log.Info("failed to allocate status list entry, issuing without revocation support", "error", err)
 		} else {
-			statusSection = grpcReply.GetSection()
-			statusIndex = grpcReply.GetIndex()
-			c.log.Debug("status list entry allocated for mdoc", "section", statusSection, "index", statusIndex)
+			mdocStatusSection, mdocStatusIndex = alloc.Section, alloc.Index
+			c.log.Debug("status list entry allocated for mdoc", "section", mdocStatusSection, "index", mdocStatusIndex)
 		}
 	}
 
@@ -216,8 +224,8 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 
 	reply := &CreateMDocReply{
 		MDoc:              mdocBytes,
-		StatusListSection: statusSection,
-		StatusListIndex:   statusIndex,
+		StatusListSection: mdocStatusSection,
+		StatusListIndex:   mdocStatusIndex,
 		ValidFrom:         issued.ValidFrom.Format(time.RFC3339),
 		ValidUntil:        issued.ValidUntil.Format(time.RFC3339),
 	}

@@ -8,9 +8,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
-	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/bbs"
-	"github.com/SUNET/vc/pkg/tokenstatuslist"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 )
@@ -110,36 +108,49 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	// through the issuer header rather than a claim, since a claim would
 	// be one of the signed messages and so selectively disclosable - and
 	// revocation status a holder can decline to reveal is not revocation.
-	if c.registryClient == nil {
-		return nil, grpcstatus.Error(codes.FailedPrecondition, "registry client not configured")
+	//
+	// A distinct precondition error from "configured but the call failed"
+	// below - this is a deployment that never asked for revocation support
+	// at all, which a caller cannot fix by retrying.
+	if c.statusAllocator == nil {
+		return nil, grpcstatus.Error(codes.FailedPrecondition,
+			"no revocation status allocator configured (set issuer.registry_client or issuer.status_service.ingestion_url)")
 	}
-	statusEntry, err := c.registryClient.TokenStatusListAddStatus(ctx, &apiv1_registry.TokenStatusListAddStatusRequest{
-		Status: 0, // VALID status for new credential
-	})
+
+	// allocateOrDegrade goes through whichever backend is configured -
+	// vc's own built-in Token Status List (registry) or an external
+	// draft-ietf-oauth-status-list-21 service - and, only for the external
+	// backend with degraded_mode=proceed, returns (nil, nil) instead of an
+	// error so the credential is still issued, just without a status
+	// entry. See status_allocator.go.
+	statusEntry, err := c.allocateOrDegrade(ctx)
 	if err != nil {
-		c.log.Error(err, "failed to get status list entry from registry")
-		// Unavailable, not Internal: the registry is a separate service and
-		// this says nothing about the request, so a caller retrying later
-		// is doing the right thing. The wrapped cause stays in the log -
-		// returning it would cross gRPC into the APIGW and out of the
-		// credential endpoint to a wallet that can do nothing with it.
+		c.log.Error(err, "failed to allocate a status list entry")
+		// Unavailable, not Internal: the status backend is a separate
+		// service and this says nothing about the request, so a caller
+		// retrying later is doing the right thing. The wrapped cause stays
+		// in the log - returning it would cross gRPC into the APIGW and
+		// out of the credential endpoint to a wallet that can do nothing
+		// with it.
 		return nil, grpcstatus.Error(codes.Unavailable, "could not allocate a revocation entry")
 	}
 
-	// The entry above is now allocated and marked VALID for a credential
-	// that does not exist yet. Every path from here that fails leaves it
-	// that way, so each one hands it back: an entry saying VALID with
-	// nothing referencing it is not exploitable - no credential carries
-	// that index - but it is a wrong answer sitting in a list whose whole
-	// job is answering that question, and it accumulates.
+	// The entry above (if any) is now allocated and marked VALID for a
+	// credential that does not exist yet. Every path from here that fails
+	// leaves it that way, so each one hands it back: an entry saying VALID
+	// with nothing referencing it is not exploitable - no credential
+	// carries that index - but it is a wrong answer sitting in a list
+	// whose whole job is answering that question, and it accumulates.
 	//
 	// Best-effort by construction: the issuance has already failed, and a
-	// registry that cannot be reached to invalidate could not have been
-	// reached to allocate either. Logged, never returned in place of the
-	// real error.
+	// status backend that cannot be reached to invalidate could not have
+	// been reached to allocate either. Logged, never returned in place of
+	// the real error.
 	extraHeader, err := c.bbsIssuerHeader(statusEntry)
 	if err != nil {
-		c.invalidateStatusEntry(ctx, statusEntry)
+		if statusEntry != nil {
+			c.statusAllocator.Invalidate(ctx, statusEntry)
+		}
 		// Building our own header cannot be anything but our fault, and its
 		// error names internal structure. Coarse code, detail to the log.
 		c.log.Error(err, "failed to build the bbs issuer header", "scope", req.Scope)
@@ -172,7 +183,9 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 		// a caller which check failed and how - and did it under whatever
 		// gRPC code the transport picked by default.
 		c.log.Error(err, "failed to issue bbs credential", "scope", req.Scope, "vct", req.VCT)
-		c.invalidateStatusEntry(ctx, statusEntry)
+		if statusEntry != nil {
+			c.statusAllocator.Invalidate(ctx, statusEntry)
+		}
 		switch {
 		case errors.Is(err, bbs.ErrVerification):
 			return nil, grpcstatus.Error(codes.InvalidArgument, "commitment did not verify")
@@ -181,39 +194,18 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 		}
 	}
 
-	return &CreateJWPReply{
+	reply := &CreateJWPReply{
 		Data: []*apiv1_issuer.Credential{
 			{
 				Credential: credential,
 			},
 		},
-		TokenStatusListSection: statusEntry.GetSection(),
-		TokenStatusListIndex:   statusEntry.GetIndex(),
-	}, nil
-}
-
-// invalidateStatusEntry hands back a status list entry allocated for a
-// credential that was never issued.
-//
-// The entry is allocated and marked VALID before signing, so every failure
-// after that point leaves a list saying VALID about a credential that does
-// not exist. Not exploitable - nothing carries that index - but it is a
-// wrong answer sitting in a list whose entire job is answering that
-// question, and it accumulates one per failed issuance.
-//
-// Best-effort by construction, and it has to be: the issuance has already
-// failed, and a registry unreachable for this call was reachable for the
-// allocation moments ago, so there is nothing better to do than say so.
-// Logged, never returned in place of the real error.
-func (c *Client) invalidateStatusEntry(ctx context.Context, entry *apiv1_registry.TokenStatusListAddStatusReply) {
-	if _, err := c.registryClient.TokenStatusListUpdateStatus(ctx, &apiv1_registry.TokenStatusListUpdateStatusRequest{
-		Section: entry.GetSection(),
-		Index:   entry.GetIndex(),
-		Status:  uint32(tokenstatuslist.StatusInvalid),
-	}); err != nil {
-		c.log.Error(err, "could not invalidate the status entry of a failed bbs issuance",
-			"section", entry.GetSection(), "index", entry.GetIndex())
 	}
+	if statusEntry != nil {
+		reply.TokenStatusListSection = statusEntry.Section
+		reply.TokenStatusListIndex = statusEntry.Index
+	}
+	return reply, nil
 }
 
 // bbsIssuerHeader builds the issuer header members the container does not
@@ -224,7 +216,13 @@ func (c *Client) invalidateStatusEntry(ctx context.Context, entry *apiv1_registr
 // it could offer a credential no verifier could attribute; the same argument
 // applies to validity and revocation. Everything a holder may legitimately
 // choose to reveal belongs in the claims instead, where BBS can hide it.
-func (c *Client) bbsIssuerHeader(status *apiv1_registry.TokenStatusListAddStatusReply) (json.RawMessage, error) {
+//
+// status is nil when issuance is proceeding without a status entry (the
+// external status service degraded per degraded_mode=proceed - see
+// allocateOrDegrade); the "status" member is then omitted entirely rather
+// than sent with a zero index and empty uri, which would read as a real,
+// resolvable status_list claim it is not.
+func (c *Client) bbsIssuerHeader(status *statusAllocation) (json.RawMessage, error) {
 	now := time.Now()
 	validity := c.cfg.Issuer.BBS.DefaultValidity
 	if validity <= 0 {
@@ -235,12 +233,14 @@ func (c *Client) bbsIssuerHeader(status *apiv1_registry.TokenStatusListAddStatus
 		"iss": c.cfg.Issuer.JWTAttribute.Issuer,
 		"iat": now.Unix(),
 		"exp": now.Add(validity).Unix(),
-		"status": map[string]any{
+	}
+	if status != nil {
+		header["status"] = map[string]any{
 			"status_list": map[string]any{
-				"idx": status.GetIndex(),
-				"uri": status.GetStatusListUri(),
+				"idx": status.Index,
+				"uri": status.URI,
 			},
-		},
+		}
 	}
 
 	encoded, err := json.Marshal(header)

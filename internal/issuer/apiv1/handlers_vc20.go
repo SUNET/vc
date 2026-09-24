@@ -9,7 +9,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/vc20/credential"
@@ -91,17 +90,19 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 	defaultExpiry := validFrom.AddDate(1, 0, 0)
 	validUntil = &defaultExpiry
 
-	// Allocate status list entry for revocation support (if registry is configured)
+	// Allocate a status list entry for revocation support, if any allocator
+	// (vc's own registry-backed Token Status List, or an external
+	// draft-ietf-oauth-status-list-21 service) is configured. Best-effort
+	// here regardless of backend, matching this path's own pre-existing
+	// (registry-only) behaviour exactly when the registry is what is
+	// configured - VC 2.0 issuance has never required a status entry.
 	var statusSection, statusIndex int64
-	if c.registryClient != nil {
-		grpcReply, err := c.registryClient.TokenStatusListAddStatus(ctx, &apiv1_registry.TokenStatusListAddStatusRequest{
-			Status: 0, // VALID status for new credential
-		})
+	if c.statusAllocator != nil {
+		alloc, err := c.statusAllocator.Allocate(ctx)
 		if err != nil {
 			c.log.Info("failed to allocate status list entry, issuing without revocation support", "error", err)
 		} else {
-			statusSection = grpcReply.GetSection()
-			statusIndex = grpcReply.GetIndex()
+			statusSection, statusIndex = alloc.Section, alloc.Index
 			c.log.Debug("status list entry allocated for vc20", "section", statusSection, "index", statusIndex)
 		}
 	}

@@ -544,6 +544,12 @@ type Issuer struct {
 	// BBS holds blind BBS issuance configuration. Absent disables the
 	// "jwp" credential format entirely.
 	BBS *BBSConfig `yaml:"bbs" validate:"omitempty"`
+	// StatusService configures using an external draft-ietf-oauth-status-
+	// list-21 service (e.g. siros-status-service) for credential revocation
+	// status, instead of (or alongside) this issuer's own built-in Token
+	// Status List (RegistryClient above). Absent (the default) is a
+	// complete no-op. See StatusServiceConfig for details.
+	StatusService *StatusServiceConfig `yaml:"status_service" validate:"omitempty"`
 }
 
 // BBSConfig holds the issuer's blind BBS key pair.

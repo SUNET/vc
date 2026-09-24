@@ -20,6 +20,19 @@ import (
 	"google.golang.org/grpc"
 )
 
+// setRegistry wires a test double in as c's registry-backed status
+// allocator, exactly as initStatusAllocator would when
+// Issuer.StatusService is unconfigured. Every issuance path now goes
+// through c.statusAllocator rather than c.registryClient directly (see
+// status_allocator.go), so a test double must be wired in as both: the
+// legacy field, kept for tests and code that specifically want to assert
+// against the registry client stub, and the allocator, which is what
+// MakeSDJWT/MakeJWP/MakeVC20 actually consult.
+func setRegistry(c *Client, client apiv1_registry.RegistryServiceClient) {
+	c.registryClient = client
+	c.statusAllocator = &registryStatusAllocator{client: client, log: c.log}
+}
+
 // mockRegistryClient implements apiv1_registry.RegistryServiceClient for testing
 type mockRegistryClient struct {
 	section int64
@@ -88,7 +101,7 @@ func mockNewClient(ctx context.Context, t *testing.T, keyType string, log *logge
 	assert.NoError(t, err)
 
 	// Inject mock registry client for Token Status List allocation
-	client.registryClient = &mockRegistryClient{section: 0, index: 0}
+	setRegistry(client, &mockRegistryClient{section: 0, index: 0})
 
 	// Override key if RSA is requested for testing
 	if keyType == "rsa" {

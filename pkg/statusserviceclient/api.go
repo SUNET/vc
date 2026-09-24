@@ -1,0 +1,250 @@
+package statusserviceclient
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"path"
+	"strings"
+	"time"
+)
+
+// classifyStatus turns an HTTP status code into either nil (2xx), a
+// permanent error (4xx - retrying cannot help: bad request, unauthorized,
+// forbidden, not found, gone), or a plain (retryable) error (5xx, or
+// anything else unexpected).
+func classifyStatus(statusCode int, body []byte) error {
+	if statusCode >= 200 && statusCode < 300 {
+		return nil
+	}
+	msg := fmt.Sprintf("status service returned %d: %s", statusCode, strings.TrimSpace(string(body)))
+	if statusCode >= 400 && statusCode < 500 {
+		return permanent(fmt.Errorf("%s", msg))
+	}
+	return fmt.Errorf("%s", msg)
+}
+
+// getToken returns a valid access token, using the cached one if it has
+// more than tokenRefreshSkew left, and otherwise fetching (and retrying) a
+// fresh one. Safe for concurrent use.
+func (c *Client) getToken(ctx context.Context) (string, error) {
+	c.tokenMu.Lock()
+	defer c.tokenMu.Unlock()
+
+	if c.token != "" && time.Until(c.tokenExp) > tokenRefreshSkew {
+		return c.token, nil
+	}
+
+	var token string
+	var expiresIn int64
+	err := retry(ctx, c.foregroundRetry(), func(ctx context.Context) error {
+		t, exp, err := c.fetchToken(ctx)
+		if err != nil {
+			return err
+		}
+		token, expiresIn = t, exp
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("fetch access token: %w", err)
+	}
+
+	c.token = token
+	c.tokenExp = time.Now().Add(time.Duration(expiresIn) * time.Second)
+	return c.token, nil
+}
+
+type tokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int64  `json:"expires_in"`
+}
+
+// fetchToken performs a single (non-retried) token request. Matches
+// siros-status-service's internal/as handleToken: form-encoded, not JSON.
+func (c *Client) fetchToken(ctx context.Context) (string, int64, error) {
+	tokenURL := strings.TrimRight(c.cfg.ASURL, "/") + "/token"
+
+	assertion, err := buildAssertion(c.cfg.IssuerID, c.cfg.Key, tokenURL)
+	if err != nil {
+		return "", 0, permanent(err) // a signing failure will not fix itself by retrying
+	}
+
+	form := url.Values{
+		"grant_type":            {"client_credentials"},
+		"client_assertion_type": {"urn:ietf:params:oauth:client-assertion-type:jwt-bearer"},
+		"client_assertion":      {assertion},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", 0, permanent(err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", 0, err // network error: retryable
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err := classifyStatus(resp.StatusCode, body); err != nil {
+		return "", 0, err
+	}
+
+	var tr tokenResponse
+	if err := json.Unmarshal(body, &tr); err != nil {
+		return "", 0, permanent(fmt.Errorf("decode token response: %w", err))
+	}
+	if tr.AccessToken == "" {
+		return "", 0, permanent(fmt.Errorf("token response carried no access_token"))
+	}
+	if tr.ExpiresIn <= 0 {
+		tr.ExpiresIn = 3600
+	}
+	return tr.AccessToken, tr.ExpiresIn, nil
+}
+
+type allocateRequest struct {
+	Exp *time.Time `json:"exp,omitempty"`
+}
+
+type allocateResponse struct {
+	ListURL string    `json:"list_url"`
+	Index   uint64    `json:"index"`
+	Exp     time.Time `json:"exp"`
+}
+
+// allocateOnce performs a single (non-retried) POST /allocate call.
+func (c *Client) allocateOnce(ctx context.Context) (Entry, error) {
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return Entry{}, err
+	}
+
+	var body []byte
+	if c.cfg.AllocateExpiry > 0 {
+		exp := time.Now().Add(c.cfg.AllocateExpiry)
+		body, err = json.Marshal(allocateRequest{Exp: &exp})
+		if err != nil {
+			return Entry{}, permanent(err)
+		}
+	} else {
+		body = []byte("{}")
+	}
+
+	allocateURL := strings.TrimRight(c.cfg.IngestionURL, "/") + "/allocate"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, allocateURL, bytes.NewReader(body))
+	if err != nil {
+		return Entry{}, permanent(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return Entry{}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusUnauthorized {
+		// The cached token may have been rejected (e.g. the AS restarted
+		// its trust store, or the token expired right at the skew
+		// boundary). Drop it so the next attempt fetches a fresh one
+		// instead of retrying with the same token forever.
+		c.tokenMu.Lock()
+		c.token = ""
+		c.tokenMu.Unlock()
+	}
+	if err := classifyStatus(resp.StatusCode, respBody); err != nil {
+		return Entry{}, err
+	}
+
+	var ar allocateResponse
+	if err := json.Unmarshal(respBody, &ar); err != nil {
+		return Entry{}, permanent(fmt.Errorf("decode allocate response: %w", err))
+	}
+	if ar.ListURL == "" {
+		return Entry{}, permanent(fmt.Errorf("allocate response carried no list_url"))
+	}
+
+	listID, err := ListIDFromURL(ar.ListURL)
+	if err != nil {
+		return Entry{}, permanent(fmt.Errorf("allocate response list_url %q: %w", ar.ListURL, err))
+	}
+
+	return Entry{ListURL: ar.ListURL, ListID: listID, Index: ar.Index, Exp: ar.Exp}, nil
+}
+
+// ListIDFromURL extracts the list ID (the final path segment) from a
+// list_url such as "https://status.example.org/lists/<id>", for use in the
+// PATCH /status/{listID}/{idx} path - the allocate response does not return
+// the ID separately, only the full verifier-facing URL.
+func ListIDFromURL(listURL string) (string, error) {
+	u, err := url.Parse(listURL)
+	if err != nil {
+		return "", err
+	}
+	id := path.Base(u.Path)
+	if id == "" || id == "." || id == "/" {
+		return "", fmt.Errorf("could not determine list ID from path %q", u.Path)
+	}
+	return id, nil
+}
+
+type setStatusRequest struct {
+	Status string `json:"status"`
+}
+
+// setStatusOnce performs a single (non-retried) PATCH /status/{listID}/{idx}
+// call.
+func (c *Client) setStatusOnce(ctx context.Context, listID string, idx uint64, status Status) error {
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return err
+	}
+
+	body, err := json.Marshal(setStatusRequest{Status: string(status)})
+	if err != nil {
+		return permanent(err)
+	}
+
+	statusURL := fmt.Sprintf("%s/status/%s/%d", strings.TrimRight(c.cfg.IngestionURL, "/"), url.PathEscape(listID), idx)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, statusURL, bytes.NewReader(body))
+	if err != nil {
+		return permanent(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusUnauthorized {
+		c.tokenMu.Lock()
+		c.token = ""
+		c.tokenMu.Unlock()
+	}
+	return classifyStatus(resp.StatusCode, respBody)
+}
+
+// SetStatus updates the status of a previously allocated index, retrying
+// transient failures (network errors, 5xx) with backoff bounded by
+// TakeFallbackTimeout. A permanent failure (the status service's answer to
+// "no", such as 403 not-owner, 404 not-found, or 410 archived) is returned
+// immediately, unretried.
+func (c *Client) SetStatus(ctx context.Context, listID string, idx uint64, status Status) error {
+	return retry(ctx, c.foregroundRetry(), func(ctx context.Context) error {
+		return c.setStatusOnce(ctx, listID, idx, status)
+	})
+}
