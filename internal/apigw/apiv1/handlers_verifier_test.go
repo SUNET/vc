@@ -39,7 +39,8 @@ func TestBuildIssuanceAuthDCQL(t *testing.T) {
 		},
 	}
 
-	dcql := buildIssuanceAuthDCQL(vpAuth, cfg)
+	dcql, err := buildIssuanceAuthDCQL(vpAuth, cfg)
+	require.NoError(t, err)
 	require.NotNil(t, dcql)
 	require.Len(t, dcql.Credentials, 2)
 
@@ -63,4 +64,59 @@ func TestBuildIssuanceAuthDCQL(t *testing.T) {
 	// alphabetically for deterministic iteration.
 	require.Len(t, dcql.CredentialSets, 1)
 	assert.Equal(t, [][]string{{"eduid"}, {"pid"}}, dcql.CredentialSets[0].Options)
+}
+
+// TestBuildIssuanceAuthDCQLByFormat pins the constraint to the credential's
+// format. An mso_mdoc auth scope carries no vct, so vct_values matches nothing
+// in any wallet - it has to go out as doctype_value (OpenID4VP 1.0 6.4.1).
+func TestBuildIssuanceAuthDCQLByFormat(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				// Registry-backed: a doctype and no MDDL document, the shape
+				// that a "has an MDDL?" test gets wrong.
+				"pid_mdoc": {Format: "mso_mdoc", Doctype: "eu.europa.ec.eudi.pid.1"},
+				"pid":      {Format: "dc+sd-jwt", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}},
+			},
+		},
+	}
+	vpAuth := &model.OpenID4VPCredentialAuth{
+		AuthScopes: map[string]model.AuthScopeEntry{
+			"pid_mdoc": {AuthClaims: []string{"family_name"}},
+			"pid":      {AuthClaims: []string{"given_name"}},
+		},
+	}
+
+	dcql, err := buildIssuanceAuthDCQL(vpAuth, cfg)
+	require.NoError(t, err)
+	require.Len(t, dcql.Credentials, 2)
+
+	byID := map[string]openid4vp.CredentialQuery{}
+	for _, cq := range dcql.Credentials {
+		byID[cq.ID] = cq
+	}
+
+	assert.Equal(t, "eu.europa.ec.eudi.pid.1", byID["pid_mdoc"].Meta.DoctypeValue)
+	assert.Empty(t, byID["pid_mdoc"].Meta.VCTValues, "an mdoc credential has no vct to be matched by")
+
+	assert.Equal(t, []string{"urn:eudi:pid:1"}, byID["pid"].Meta.VCTValues)
+	assert.Empty(t, byID["pid"].Meta.DoctypeValue)
+}
+
+// TestBuildIssuanceAuthDCQLRejectsUnusableScope covers an auth_scopes key that
+// names no configured credential. GetCredentialMetadata returns nil for it, and
+// the request must be refused rather than sent out with an empty constraint
+// that matches every credential in the wallet.
+func TestBuildIssuanceAuthDCQLRejectsUnusableScope(t *testing.T) {
+	cfg := &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{}}}
+	vpAuth := &model.OpenID4VPCredentialAuth{
+		AuthScopes: map[string]model.AuthScopeEntry{"nosuch": {AuthClaims: []string{"given_name"}}},
+	}
+
+	var dcql *openid4vp.DCQL
+	var err error
+	require.NotPanics(t, func() { dcql, err = buildIssuanceAuthDCQL(vpAuth, cfg) })
+	require.Error(t, err)
+	assert.Nil(t, dcql)
+	assert.Contains(t, err.Error(), "nosuch")
 }

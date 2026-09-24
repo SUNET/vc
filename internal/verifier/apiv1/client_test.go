@@ -366,3 +366,38 @@ func TestClient_createDCQLQuery(t *testing.T) {
 		})
 	}
 }
+
+// sdJWTScope is a dc+sd-jwt credential_metadata entry whose VCTM declares its
+// own vct. VCTURL is deliberately left unset: dcqlClientFor runs ResolveVCTUrls,
+// which derives it exactly as the server does at startup, so these fixtures
+// exercise the real resolution rather than a hand-built approximation of it.
+func sdJWTScope(vct string) *model.CredentialMetadata {
+	return &model.CredentialMetadata{
+		Format:       "dc+sd-jwt",
+		VCTMFilePath: "/path/to/vctm",
+		VCTM:         &sdjwtvc.VCTM{VCT: vct},
+	}
+}
+
+// w3cScope is the same thing in a format DCQL has no expressible constraint for.
+func w3cScope(vct string) *model.CredentialMetadata {
+	cm := sdJWTScope(vct)
+	cm.Format = "ldp_vc"
+	return cm
+}
+
+// dcqlClientFor builds a verifier client over the given credential_metadata and
+// presets, with VCT URLs resolved as the server resolves them at startup.
+func dcqlClientFor(t *testing.T, credMeta map[string]*model.CredentialMetadata, presets map[string]model.PresetDefinition) *Client {
+	t.Helper()
+
+	cfg := &model.Cfg{
+		Common:   &model.Common{CredentialMetadata: credMeta},
+		Verifier: &model.Verifier{Presets: presets},
+	}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+	return client
+}

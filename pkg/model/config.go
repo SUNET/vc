@@ -1784,6 +1784,22 @@ type CredentialMetadata struct {
 	// externally. The mso_mdoc analogue of vctm_url.
 	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath VCT Doctype,omitempty,url"`
 
+	// ReplaceVCT decides what happens to a local VCTM that ALREADY declares
+	// a vct: false (the default) publishes the file's own identifier, true
+	// overwrites it with the /type-metadata/{scope} URL apigw serves the
+	// document at.
+	//
+	// A file that declares NO vct always takes the hosting URL, whatever this
+	// says - there is nothing to preserve, and a Type Metadata document
+	// without a vct is not one (SD-JWT VC 6.3). So the served bytes always
+	// carry an identifier, and it is always the one the credential names.
+	//
+	// The default keeps a URN working: an identifier chosen outside this
+	// deployment survives publication. Set true when this deployment owns the
+	// type and the hosting URL is meant to be canonical. Only meaningful for
+	// a local VCTM (vctm_file_path): an external source is authoritative.
+	ReplaceVCT *bool `yaml:"replace_vct,omitempty" json:"-" default:"false" doc_example:"false"`
+
 	// Doctype is the mdoc doctype value to resolve via
 	// Common.CredentialRegistry, used only when neither MDDLFilePath nor
 	// MDDLUrl is set. Requires Common.CredentialRegistry.Enable, same as
@@ -1889,6 +1905,14 @@ func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string, registr
 	var vctm sdjwtvc.VCTM
 	if err := json.Unmarshal(rawBytes, &vctm); err != nil {
 		return fmt.Errorf("failed to unmarshal VCTM for scope %s: %w", scope, err)
+	}
+
+	// A literal "null" is valid JSON and unmarshals into a zero VCTM without
+	// error, so the scope would load and advertise and then fail every
+	// issuance at parseVCTM - after a successful /token. Refuse it here.
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(rawBytes, &doc); err != nil || doc == nil {
+		return fmt.Errorf("VCTM for scope %s is not a JSON object", scope)
 	}
 
 	// Swap cached data under write lock so concurrent readers see a
@@ -2007,6 +2031,32 @@ func (c *CredentialMetadata) GetVCTMRaw() []byte {
 	return c.VCTMRaw
 }
 
+// vctmRawWithVCT returns raw with "vct" set to vct, and reports whether it had
+// to change anything. Bytes that already declare a non-empty vct are returned
+// untouched, as are bytes that do not parse - a caller must never lose the
+// document over a rewrite it cannot make.
+func vctmRawWithVCT(raw []byte, vct string) ([]byte, bool) {
+	if raw == nil || vct == "" {
+		return raw, false
+	}
+	var doc map[string]json.RawMessage
+	// A JSON "null" unmarshals without error and leaves doc nil, and assigning
+	// into a nil map panics - on every issuance, since this runs there too.
+	if err := json.Unmarshal(raw, &doc); err != nil || doc == nil {
+		return raw, false
+	}
+	vctJSON, err := json.Marshal(vct)
+	if err != nil {
+		return raw, false
+	}
+	doc["vct"] = vctJSON
+	updated, err := json.Marshal(doc)
+	if err != nil {
+		return raw, false
+	}
+	return updated, true
+}
+
 // GetAttributes returns the derived attributes under a read lock.
 func (c *CredentialMetadata) GetAttributes() map[string]map[string][]*string {
 	c.mu.RLock()
@@ -2048,6 +2098,79 @@ func (c *CredentialMetadata) IsLocalMDDL() bool {
 	return c.MDDLFilePath != ""
 }
 
+// vctIdentifier returns the credential's canonical vct - the value the body
+// carries, the issuer metadata advertises, and a wallet tags it by.
+//
+// VCTURL is a fallback, not a second identifier: ResolveVCTUrls back-fills
+// VCTM.VCT from it, so the two agree after resolution.
+func (c *CredentialMetadata) vctIdentifier() string {
+	if vctm := c.GetVCTM(); vctm != nil && vctm.VCT != "" {
+		return vctm.VCT
+	}
+	return c.GetVCTURL()
+}
+
+// doctype resolves the mdoc doctype the ISSUED credential actually carries.
+//
+// The loaded MDDL wins: loadMDDLSchema fills it in all three cases, including
+// the registry lookup keyed by the configured doctype, and IssuerMetadata
+// always advertises mddl.DocType - so the configured value is a source
+// selector, not necessarily the doctype the issued credential carries.
+//
+// It is the fallback for a scope whose MDDL never loaded. There is deliberately
+// no fall back to the VCTM's vct: an mdoc carries a doctype and never a vct,
+// and that vct may be a back-filled hosting URL, so it would ask for something
+// no issued mdoc has. Empty makes DCQLMetaQuery report the scope instead.
+func (c *CredentialMetadata) doctype() string {
+	if mddl := c.GetMDDL(); mddl != nil && mddl.DocType != "" {
+		return mddl.DocType
+	}
+	return c.Doctype
+}
+
+// DCQLMetaQuery returns the DCQL meta constraint for this credential type, and
+// whether one could be expressed at all.
+//
+// Chosen by FORMAT (OpenID4VP 1.0 6.4.1), not by which metadata document is
+// loaded: keying off "has an MDDL" routes W3C credentials into the SD-JWT
+// branch, and keying off "has a VCTM" mislabels an mdoc that carries one.
+//
+//   - mso_mdoc: doctype_value, see doctype.
+//   - dc+sd-jwt, the legacy vc+sd-jwt spelling, and an empty format (Format
+//     defaults to dc+sd-jwt): vct_values, see vctIdentifier.
+//   - anything else: ok is false.
+//
+// ok=false means no constraint can be built - a nil receiver, a W3C format
+// with no configured type list, mso_mdoc_zk (below), or a missing identifier -
+// and callers must refuse the scope rather than send an empty meta, which DCQL
+// reads as matching everything.
+func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
+	if c == nil {
+		return openid4vp.MetaQuery{}, false
+	}
+	switch c.Format {
+	// Not mso_mdoc_zk: validateMsoMdocZkQuery also wants a non-empty
+	// meta.zk_system_type, and those specs live on VerificationPresetScope.
+	// A ZK request comes the other way round - a plain mso_mdoc scope with a
+	// preset overriding Format and supplying ZKSystemType - so that path never
+	// asks for the zk format here.
+	case openid4vp.FormatMsoMdoc:
+		doctype := c.doctype()
+		return openid4vp.MetaQuery{DoctypeValue: doctype}, doctype != ""
+	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
+		// vc+sd-jwt is the legacy spelling this repo still issues and treats
+		// as SD-JWT elsewhere; rejecting it here would take a working
+		// deployment's scope away. "" honours Format's own default.
+		vct := c.vctIdentifier()
+		if vct == "" {
+			return openid4vp.MetaQuery{}, false
+		}
+		return openid4vp.MetaQuery{VCTValues: []string{vct}}, true
+	default:
+		return openid4vp.MetaQuery{}, false
+	}
+}
+
 // ResolveVCTUrls fills in VCTURL for every VCTM-backed scope (scopes
 // without a loaded VCTM, such as mso_mdoc doctypes, are skipped) and
 // enforces the vct identifier contract:
@@ -2057,9 +2180,10 @@ func (c *CredentialMetadata) IsLocalMDDL() bool {
 //     hosting URL. If the file already carried a vct (URN or any other
 //     Collision-Resistant Name per SD-JWT VC §3.2.2.1), it is preserved
 //     verbatim in both VCTM.VCT and the served VCTMRaw. Only when the
-//     file has no vct does ResolveVCTUrls back-fill VCTM.VCT and
-//     VCTMRaw's "vct" from the hosting URL so the credential body,
-//     served VCTM, and DCQL vct_values still agree on a single value.
+//     file has no vct - or replace_vct is set - does ResolveVCTUrls
+//     write the hosting URL into both VCTM.VCT and the served VCTMRaw,
+//     so the credential body, served VCTM, and DCQL vct_values always
+//     agree on a single value that the served document declares.
 //   - External VCTM (vctm_url or vct via registry): the source is
 //     authoritative. VCTM.VCT and VCTMRaw are left untouched. VCTURL is
 //     set to the source URL (vctm_url or the resolved vct), but that
@@ -2091,23 +2215,20 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 		constructor.mu.Lock()
 		constructor.VCTURL = vctURL
 
-		// Only back-fill a locally-hosted VCTM's vct when the file did not carry one.
-		if constructor.IsLocalVCTM() && constructor.VCTM.VCT == "" {
+		// One identifier, always present in the served document. A file that
+		// declares no vct takes the hosting URL - a Type Metadata document
+		// without a vct is not one, so there is no "serve it bare" case. A
+		// file that declares one keeps it unless replace_vct says otherwise,
+		// which is what lets a URN survive publication.
+		if constructor.IsLocalVCTM() && (constructor.VCTM.VCT == "" || BoolVal(constructor.ReplaceVCT, false)) {
 			constructor.VCTM.VCT = vctURL
-			if constructor.VCTMRaw != nil {
-				var doc map[string]json.RawMessage
-				if err := json.Unmarshal(constructor.VCTMRaw, &doc); err == nil {
-					vctJSON, _ := json.Marshal(vctURL)
-					doc["vct"] = vctJSON
-					if updated, err := json.Marshal(doc); err == nil {
-						constructor.VCTMRaw = updated
-						// Rebuild Integrity to match the rewritten bytes so
-						// vct#integrity in issued credentials still verifies
-						// against the served /type-metadata document.
-						if sri, sriErr := constructor.VCTM.SRIIntegrity(updated); sriErr == nil {
-							constructor.Integrity = sri
-						}
-					}
+			if updated, changed := vctmRawWithVCT(constructor.VCTMRaw, vctURL); changed {
+				constructor.VCTMRaw = updated
+				// Rebuild Integrity to match the rewritten bytes so
+				// vct#integrity in issued credentials still verifies
+				// against the served /type-metadata document.
+				if sri, sriErr := constructor.VCTM.SRIIntegrity(updated); sriErr == nil {
+					constructor.Integrity = sri
 				}
 			}
 		}
@@ -2116,8 +2237,12 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 
 	// Validate that every constructor got a non-empty VCTURL.
 	for scope, constructor := range cfg.Common.CredentialMetadata {
+		// A present key holding nil is a malformed config entry, not an
+		// absent scope, and every consumer would have to guard it separately
+		// - Client.New dereferences it during verifier startup. Refuse it
+		// here so one check covers them all.
 		if constructor == nil {
-			continue
+			return fmt.Errorf("credential_metadata entry for scope %q is empty", scope)
 		}
 		vctm := constructor.GetVCTM()
 		if vctm == nil {
@@ -2126,7 +2251,7 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 		if constructor.GetVCTURL() == "" {
 			return fmt.Errorf("VCTURL is empty for scope %q after resolution (check vctm_file_path, vctm_url, or vct)", scope)
 		}
-		// Local scopes get VCTM.VCT rewritten above; external ones must carry it themselves.
+		// External scopes must carry it themselves.
 		if !constructor.IsLocalVCTM() && vctm.VCT == "" {
 			return fmt.Errorf("external VCTM for scope %q has empty vct (check vctm_url source or the resolved vct); BuildCredentialWithSigner and DCQL vct_values require it", scope)
 		}
@@ -2347,13 +2472,13 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 
 		// Advertise the VCTM's own vct (URN or foreign URL) so it matches the
 		// credential body's vct claim (which BuildCredentialWithSigner sets
-		// from vctm.VCT). Fall back to VCTURL only when the VCTM has none --
-		// ResolveVCTUrls back-fills that case for local scopes, so the
-		// fallback value equals the hosting URL by construction.
-		resolvedVCT := vctm.VCT
-		if resolvedVCT == "" {
-			resolvedVCT = constructor.GetVCTURL()
-		}
+		// from vctm.VCT).
+		//
+		// vctIdentifier, not an inline VCTURL fallback: the two must agree.
+		// The old fallback advertised the hosting URL regardless, which is
+		// wrong for a file declaring its own vct - the credential body carries
+		// vctm.VCT, so the metadata has to name the same value.
+		resolvedVCT := constructor.vctIdentifier()
 		switch constructor.Format {
 		case "dc+sd-jwt":
 			// Appendix A.3: only vct is format-specific for dc+sd-jwt

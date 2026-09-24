@@ -1,8 +1,16 @@
 package model
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/SUNET/vc/pkg/mdoc"
+	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBoolVal(t *testing.T) {
@@ -274,5 +282,217 @@ func TestOpenID4VPConfig_GetPresentationRequestsDir(t *testing.T) {
 	c = &OpenID4VPConfig{PresentationRequestsDir: "/tmp/requests"}
 	if c.GetPresentationRequestsDir() != "/tmp/requests" {
 		t.Errorf("unexpected dir: %s", c.GetPresentationRequestsDir())
+	}
+}
+
+// TestDCQLMetaQueryByFormat pins the meta constraint to the credential's
+// FORMAT (OpenID4VP 1.0 6.4.1) rather than to whichever metadata document
+// happens to be loaded.
+//
+// Both misreadings are represented below: an mso_mdoc scope that carries a
+// VCTM (which a "has a VCTM?" test calls SD-JWT) and a registry-backed mdoc
+// scope with a configured doctype and no MDDL (which a "has an MDDL?" test
+// leaves unconstrained).
+func TestDCQLMetaQueryByFormat(t *testing.T) {
+	tests := []struct {
+		name        string
+		cm          *CredentialMetadata
+		wantOK      bool
+		wantVCTs    []string
+		wantDoctype string
+	}{
+		{
+			name:     "sd-jwt is constrained by its canonical vct",
+			cm:       &CredentialMetadata{Format: openid4vp.FormatSDJWTVC, VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}},
+			wantOK:   true,
+			wantVCTs: []string{"urn:eudi:pid:1"},
+		},
+		{
+			// Still issued by this repo and treated as SD-JWT elsewhere.
+			name:     "legacy vc+sd-jwt is treated as SD-JWT",
+			cm:       &CredentialMetadata{Format: "vc+sd-jwt", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}},
+			wantOK:   true,
+			wantVCTs: []string{"urn:eudi:pid:1"},
+		},
+		{
+			// Format's own `default:"dc+sd-jwt"`.
+			name:     "empty format follows the declared default",
+			cm:       &CredentialMetadata{VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}},
+			wantOK:   true,
+			wantVCTs: []string{"urn:eudi:pid:1"},
+		},
+		{
+			// Fallback for a scope whose MDDL never loaded.
+			name:        "configured doctype is used when no MDDL is loaded",
+			cm:          &CredentialMetadata{Format: openid4vp.FormatMsoMdoc, Doctype: "eu.europa.ec.eudi.pid.1"},
+			wantOK:      true,
+			wantDoctype: "eu.europa.ec.eudi.pid.1",
+		},
+		{
+			// The MDDL wins: loadMDDLSchema fills it from the registry lookup
+			// too, and IssuerMetadata advertises mddl.DocType in every case,
+			// so the configured value is a source selector and not necessarily
+			// the doctype the issued credential carries.
+			name: "the loaded MDDL wins over a differing configured doctype",
+			cm: &CredentialMetadata{
+				Format:  openid4vp.FormatMsoMdoc,
+				Doctype: "eu.europa.ec.eudi.pid.1",
+				MDDL:    &mdoc.MDDLSchema{DocType: "org.iso.18013.5.1.mDL"},
+			},
+			wantOK:      true,
+			wantDoctype: "org.iso.18013.5.1.mDL",
+		},
+		{
+			// Routed by format, not by which document is loaded: a VCTM does
+			// not make this an SD-JWT scope.
+			name: "an mdoc carrying a VCTM is still an mdoc",
+			cm: &CredentialMetadata{
+				Format:  openid4vp.FormatMsoMdoc,
+				Doctype: "org.iso.18013.5.1.mDL",
+				VCTM:    &sdjwtvc.VCTM{VCT: "urn:something:else:1"},
+			},
+			wantOK:      true,
+			wantDoctype: "org.iso.18013.5.1.mDL",
+		},
+		{
+			// An mdoc carries a doctype and never a vct, and ResolveVCTUrls
+			// may back-fill that vct from the hosting URL - so using it as a
+			// doctype_value would ask for something no issued mdoc has.
+			name:   "an mdoc with only a VCTM is unusable, not a vct query",
+			cm:     &CredentialMetadata{Format: openid4vp.FormatMsoMdoc, VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"}},
+			wantOK: false,
+		},
+		{
+			name:   "an mdoc with no identifier at all is unusable",
+			cm:     &CredentialMetadata{Format: openid4vp.FormatMsoMdoc},
+			wantOK: false,
+		},
+		{
+			// meta.type_values, which credential_metadata cannot supply yet.
+			name:   "W3C has no expressible constraint",
+			cm:     &CredentialMetadata{Format: "ldp_vc", VCTM: &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"}},
+			wantOK: false,
+		},
+		{
+			// Reachable from a valid config: a map lookup that missed.
+			name:   "nil receiver reports rather than panics",
+			cm:     nil,
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var meta openid4vp.MetaQuery
+			var ok bool
+			require.NotPanics(t, func() { meta, ok = tt.cm.DCQLMetaQuery() })
+			assert.Equal(t, tt.wantOK, ok)
+			if !tt.wantOK {
+				assert.Equal(t, openid4vp.MetaQuery{}, meta, "an unusable constraint must be empty, not partially filled")
+				return
+			}
+			assert.Equal(t, tt.wantVCTs, meta.VCTValues)
+			assert.Equal(t, tt.wantDoctype, meta.DoctypeValue)
+			assert.Nil(t, meta.TypeValues)
+		})
+	}
+}
+
+// TestVCTMRawWithVCTMalformed pins the refusal path. A JSON "null" unmarshals
+// without error into a nil map, and assigning into one panics - which would
+// take down issuance, not just config load, since the same helper runs there.
+func TestVCTMRawWithVCTMalformed(t *testing.T) {
+	for _, raw := range []string{"null", "[]", `"a string"`, "not json at all", ""} {
+		t.Run(raw, func(t *testing.T) {
+			got, changed := vctmRawWithVCT([]byte(raw), "https://apigw.example/type-metadata/pid")
+			assert.False(t, changed, "an unrewritable document must be refused, not rewritten")
+			assert.Equal(t, raw, string(got), "and handed back untouched")
+		})
+	}
+
+	// And resolution survives one: the scope keeps its in-memory identifier
+	// rather than panicking on the unrewritable bytes. loadVCTM refuses such
+	// a document earlier, so this is the second line of defence.
+	cm := &CredentialMetadata{
+		Format: openid4vp.FormatSDJWTVC, VCTMFilePath: "/path/to/vctm.json",
+		VCTM: &sdjwtvc.VCTM{}, VCTMRaw: []byte("null"),
+	}
+	cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{"pid": cm}}}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+	assert.Equal(t, "https://apigw.example/type-metadata/pid", cm.GetVCTM().VCT)
+	assert.Equal(t, "null", string(cm.GetVCTMRaw()), "unrewritable bytes are left alone")
+}
+
+// TestResolveVCTUrlsRejectsNilEntry pins the malformed-entry rule at the one
+// place every consumer goes through.
+//
+// A present key holding nil is a config typo, not an absent scope. Left to
+// each caller it is a panic waiting to happen - Client.New dereferences it
+// during verifier startup, before any handler-level guard can run.
+func TestResolveVCTUrlsRejectsNilEntry(t *testing.T) {
+	cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{"broken": nil}}}
+	err := cfg.ResolveVCTUrls("https://apigw.example")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "broken")
+}
+
+// TestReplaceVCT states what the option means, and what it deliberately does
+// not touch.
+//
+// The served document ALWAYS declares a vct - one without it is not Type
+// Metadata (SD-JWT VC 6.3), so there is no "publish it bare" case. What the
+// option decides is whose identifier that is when the file brought its own:
+// the file's by default, so a URN survives publication, or the hosting URL
+// when this deployment owns the type.
+func TestReplaceVCT(t *testing.T) {
+	const hosted = "https://apigw.example/type-metadata/pid"
+
+	localVCTM := func(vct string, replace *bool) *CredentialMetadata {
+		raw := []byte(`{"name":"PID"}`)
+		if vct != "" {
+			raw = []byte(`{"vct":"` + vct + `","name":"PID"}`)
+		}
+		return &CredentialMetadata{
+			Format:       openid4vp.FormatSDJWTVC,
+			VCTMFilePath: "/path/to/vctm_pid.json",
+			VCTM:         &sdjwtvc.VCTM{VCT: vct},
+			VCTMRaw:      raw,
+			ReplaceVCT:   replace,
+		}
+	}
+
+	tests := []struct {
+		name    string
+		cm      *CredentialMetadata
+		wantVCT string
+	}{
+		{"no vct in the file takes the hosting URL", localVCTM("", nil), hosted},
+		{"and replace_vct changes nothing there", localVCTM("", new(true)), hosted},
+		{"a declared urn is kept by default", localVCTM("urn:eudi:pid:1", nil), "urn:eudi:pid:1"},
+		{"explicit false keeps it too", localVCTM("urn:eudi:pid:1", new(false)), "urn:eudi:pid:1"},
+		{"replace_vct overwrites a declared urn", localVCTM("urn:eudi:pid:1", new(true)), hosted},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{"pid": tt.cm}}}
+			require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"),
+				"the option must never make a scope unloadable")
+
+			// One identifier, four readers: the body, the query, the issuer
+			// metadata, and the document served at the hosting URL.
+			assert.Equal(t, tt.wantVCT, tt.cm.GetVCTM().VCT)
+			assert.Equal(t, tt.wantVCT, tt.cm.vctIdentifier())
+
+			meta, ok := tt.cm.DCQLMetaQuery()
+			require.True(t, ok, "the scope stays requestable whatever the option says")
+			assert.Equal(t, []string{tt.wantVCT}, meta.VCTValues)
+
+			var served map[string]any
+			require.NoError(t, json.Unmarshal(tt.cm.GetVCTMRaw(), &served))
+			assert.Equal(t, tt.wantVCT, served["vct"],
+				"the served document must declare the same identifier the credential names")
+			assert.Equal(t, "PID", served["name"], "and keep the rest of the file")
+		})
 	}
 }

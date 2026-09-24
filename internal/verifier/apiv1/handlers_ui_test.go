@@ -369,8 +369,10 @@ func TestUIMetadataCredentialFormatFromMetadata(t *testing.T) {
 					VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 				},
 				"mdl": {
-					Format: openid4vp.FormatMsoMdoc,
-					VCTM:   &sdjwtvc.VCTM{VCT: "org.iso.18013.5.1.mDL"},
+					// An mdoc names itself by doctype; a VCTM-only mdoc scope
+					// has no constraint the UI can offer.
+					Format:  openid4vp.FormatMsoMdoc,
+					Doctype: "org.iso.18013.5.1.mDL",
 				},
 			},
 		},
@@ -1214,4 +1216,237 @@ func TestUIMetadataPresetCategoryOrder(t *testing.T) {
 	assert.Equal(t, 5, reply.Presets["Apple preset"].Order)
 	assert.Empty(t, reply.Presets["Uncategorized"].Category,
 		"an uncategorized preset carries no Category, distinct from any named group")
+}
+
+// TestUIMetadataMdocDoctypeIdentifier covers the picker's identifier for mdoc
+// scopes.
+//
+// presentation-definition.js sends UICredentialInfo.VCT as meta.doctype_value
+// for an mso_mdoc credential, but the chain that filled it read VCTM.VCT, then
+// VCTURL, then the MDDL's doctype - never the configured Doctype. A
+// registry-backed scope therefore advertised an empty identifier and the UI
+// sent an empty doctype_value, which matches nothing; and a scope carrying
+// both documents advertised the VCTM's vct while the server-side builders used
+// the MDDL's doctype.
+func TestUIMetadataMdocDoctypeIdentifier(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				// Registry-backed: doctype configured, no MDDL document.
+				"pid_mdoc": {
+					Format:  openid4vp.FormatMsoMdoc,
+					Doctype: "eu.europa.ec.eudi.pid.1",
+				},
+				// Both documents present, disagreeing.
+				"mdl": {
+					Format: openid4vp.FormatMsoMdoc,
+					VCTM:   &sdjwtvc.VCTM{VCT: "urn:something:else:1"},
+					MDDL:   &mdoc.MDDLSchema{DocType: "org.iso.18013.5.1.mDL"},
+				},
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+
+	require.Contains(t, reply.Credentials, "pid_mdoc")
+	assert.Equal(t, "eu.europa.ec.eudi.pid.1", reply.Credentials["pid_mdoc"].VCT,
+		"a registry-backed mdoc scope names itself by its configured doctype")
+	assert.Empty(t, reply.Credentials["pid_mdoc"].VCTValues,
+		"an mdoc credential has no vct for a wallet to match")
+
+	require.Contains(t, reply.Credentials, "mdl")
+	assert.Equal(t, "org.iso.18013.5.1.mDL", reply.Credentials["mdl"].VCT,
+		"the MDDL's doctype wins over a VCTM's vct, as the server-side builders do")
+}
+
+// TestUIMetadataOmitsUnconstrainableCredential covers a scope the UI cannot
+// build a usable DCQL query for. Offering it in the picker would send a
+// credential query with an empty meta, which DCQL reads as unconstrained.
+func TestUIMetadataOmitsUnconstrainableCredential(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"pid": {
+					Format:       openid4vp.FormatSDJWTVC,
+					VCTMFilePath: "/path/to/vctm_pid",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+				"diploma_ldp": {
+					Format:       "ldp_vc",
+					VCTMFilePath: "/path/to/vctm_diploma",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+				},
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+
+	require.Contains(t, reply.Credentials, "pid")
+	assert.Equal(t, []string{"urn:eudi:pid:1"}, reply.Credentials["pid"].VCTValues,
+		"the VCTM file's own vct is preserved, not replaced by the hosting URL")
+	assert.NotContains(t, reply.Credentials, "diploma_ldp",
+		"a scope the UI cannot build a usable query for must not be offered in the picker")
+}
+
+// TestUIMetadataPresetDropsUnconstrainableCredential covers a review finding:
+// the preset path used to return an error, which took the whole /ui/metadata
+// response down - hiding every usable credential and preset - over one scope
+// the picker loop merely skips.
+//
+// A scope with no expressible constraint is not a malformed config; it is a
+// credential this verifier cannot ask for. It is dropped, and a preset left
+// with nothing to request is dropped with it.
+func TestUIMetadataPresetDropsUnconstrainableCredential(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid":         sdJWTScope("urn:eudi:pid:1"),
+		"diploma_ldp": w3cScope("urn:eudi:diploma:1"),
+	}, map[string]model.PresetDefinition{
+		"Mixed":   {Credentials: map[string]*model.VerificationPresetScope{"pid": nil, "diploma_ldp": nil}},
+		"OnlyW3C": {Credentials: map[string]*model.VerificationPresetScope{"diploma_ldp": nil}},
+		"OnlyPID": {Credentials: map[string]*model.VerificationPresetScope{"pid": nil}},
+	})
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err, "one unconstrainable scope must not fail the whole response")
+
+	require.Contains(t, reply.Presets, "Mixed")
+	require.Len(t, reply.Presets["Mixed"].Credentials, 1,
+		"the unconstrainable credential is dropped, the usable one stays")
+	assert.Equal(t, "pid", reply.Presets["Mixed"].Credentials[0].ID)
+
+	assert.NotContains(t, reply.Presets, "OnlyW3C",
+		"a preset with nothing left to request would ask the wallet for nothing")
+	assert.Contains(t, reply.Presets, "OnlyPID")
+
+	// The picker itself is unaffected and still lists the usable credential.
+	assert.Contains(t, reply.Credentials, "pid")
+	assert.NotContains(t, reply.Credentials, "diploma_ldp")
+}
+
+// TestUIMetadataRejectsEmptyCredentialEntry pins the nil guard on the picker
+// loop. credential_metadata can hold a nil value for a present key, and Format
+// is a direct field read rather than one of the nil-safe accessors, so the
+// whole UI panicked on a config that merely parses.
+//
+// An error, not a skip: the preset path refuses a dangling scope the same way,
+// and a malformed entry is not the same as a credential that legitimately has
+// no expressible constraint - see
+// TestUIMetadataPresetDropsUnconstrainableCredential.
+func TestUIMetadataRejectsEmptyCredentialEntry(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"broken": nil,
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	var reply *UIMetadataReply
+	var err error
+	require.NotPanics(t, func() { reply, err = client.UIMetadata(t.Context()) })
+	require.Error(t, err)
+	assert.Nil(t, reply)
+	assert.Contains(t, err.Error(), "broken")
+}
+
+// TestUIMetadataNeverSerializesNullAttributes covers a review finding on
+// registry-backed mdoc scopes. Attributes is a required, non-nullable record in
+// presentation-definition.js's metadataResponseSchema, and a nil Go map
+// marshals to null - so a scope whose metadata document never loaded made the
+// whole response fail to parse, taking down every other credential and preset
+// with it.
+func TestUIMetadataNeverSerializesNullAttributes(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				// Registry-backed, no MDDL loaded: doctype resolves, so it is
+				// offered, but nothing ever set Attributes.
+				"pid_mdoc": {Format: openid4vp.FormatMsoMdoc, Doctype: "eu.europa.ec.eudi.pid.1"},
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+	require.Contains(t, reply.Credentials, "pid_mdoc")
+	assert.NotNil(t, reply.Credentials["pid_mdoc"].Attributes)
+
+	// The picker reads attributes["en-US"] unconditionally, so the locale
+	// bucket has to exist or selecting the credential throws.
+	assert.Contains(t, reply.Credentials["pid_mdoc"].Attributes, "en-US")
+
+	encoded, err := json.Marshal(reply.Credentials["pid_mdoc"])
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"attributes":{"en-US":{}}`,
+		"the UI schema rejects null here, and an empty outer map throws on selection")
+	assert.NotContains(t, string(encoded), `"attributes":null`)
+}
+
+// TestSameConstraintFamily pins the preset format-override check. The meta is
+// derived from the CONFIGURED format, so an override crossing families pairs a
+// format with a constraint it does not use.
+func TestSameConstraintFamily(t *testing.T) {
+	tests := []struct {
+		configured, override string
+		want                 bool
+	}{
+		// The case the override exists for.
+		{"mso_mdoc", "mso_mdoc_zk", true},
+		{"dc+sd-jwt", "vc+sd-jwt", true},
+		{"dc+sd-jwt", "", true},
+		{"ldp_vc", "jwt_vc_json", true},
+		// Crossing families.
+		{"dc+sd-jwt", "mso_mdoc", false},
+		{"dc+sd-jwt", "ldp_vc", false},
+		{"mso_mdoc", "jwt_vc_json", false},
+		// Unknown on either side is never a match: jwt_vc_json-ld is
+		// advertised by the issuer metadata but nothing issues it.
+		{"dc+sd-jwt", "jwt_vc_json-ld", false},
+		{"jwt_vc_json-ld", "dc+sd-jwt", false},
+		{"dc+sd-jwt", "something-new", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.configured+"->"+tt.override, func(t *testing.T) {
+			assert.Equal(t, tt.want, sameConstraintFamily(tt.configured, tt.override))
+		})
+	}
+}
+
+// TestValidZKSystemTypes mirrors what openid4vp.validateMsoMdocZkQuery
+// requires, so a preset overriding a scope to mso_mdoc_zk cannot publish a
+// query the server's own validator rejects at request time.
+func TestValidZKSystemTypes(t *testing.T) {
+	ok := []openid4vp.ZKSystemTypeSpec{{ID: "longfellow-libzk-v1_8_1", System: "longfellow-libzk-v1"}}
+	assert.True(t, validZKSystemTypes(ok))
+
+	assert.False(t, validZKSystemTypes(nil), "the ZK format requires a system list")
+	assert.False(t, validZKSystemTypes([]openid4vp.ZKSystemTypeSpec{}))
+	assert.False(t, validZKSystemTypes([]openid4vp.ZKSystemTypeSpec{{System: "longfellow-libzk-v1"}}),
+		"id is required for circuit resolution")
+	assert.False(t, validZKSystemTypes([]openid4vp.ZKSystemTypeSpec{{ID: "x"}}),
+		"system is required")
+	assert.False(t, validZKSystemTypes(append(ok, openid4vp.ZKSystemTypeSpec{ID: "y"})),
+		"one unusable entry invalidates the request")
 }
