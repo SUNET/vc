@@ -84,7 +84,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	// looks the private half up by the kid in the JWE header, so the two
 	// halves meet without extra plumbing.
 	if responseModeRequiresEncryption(responseMode) {
-		if c.openid4vp == nil || c.openid4vp.EphemeralKeyCache == nil {
+		if c.cacheService == nil || c.cacheService.EphemeralEncryptionKey == nil {
 			// Better a named error than a nil dereference: response_mode
 			// asks the wallet to encrypt, and without a key cache we cannot
 			// give it anything to encrypt to.
@@ -96,7 +96,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 		// rebuilds and re-signs on every call - and regenerating would
 		// replace the private key under an unchanged kid, stranding a wallet
 		// that still holds an earlier request object.
-		ephemeralPublicJWK, err := c.openid4vp.EphemeralKeyCache.GenerateAndStoreIfAbsent(sessionID)
+		_, ephemeralPublicJWK, err := c.ephemeralEncryptionKey(ctx, sessionID)
 		if err != nil {
 			c.log.Error(err, "Failed to generate ephemeral encryption key")
 			return "", fmt.Errorf("generating ephemeral encryption key: %w", err)

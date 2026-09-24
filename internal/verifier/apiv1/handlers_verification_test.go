@@ -327,7 +327,7 @@ func TestVerificationDirectPost(t *testing.T) {
 
 			// Generate ephemeral key and store it
 			kid := "test-ephemeral-kid"
-			_, ephemeralPubJWK, err := client.openid4vp.EphemeralKeyCache.GenerateAndStore(kid)
+			_, ephemeralPubJWK, err := client.ephemeralEncryptionKey(ctx, kid)
 			require.NoError(t, err)
 
 			// Create auth context
@@ -412,7 +412,7 @@ func TestVerificationDirectPostDecoyDisclosure(t *testing.T) {
 	})
 
 	kid := "test-ephemeral-kid"
-	_, ephemeralPubJWK, err := client.openid4vp.EphemeralKeyCache.GenerateAndStore(kid)
+	_, ephemeralPubJWK, err := client.ephemeralEncryptionKey(ctx, kid)
 	require.NoError(t, err)
 
 	state := "test-state-decoy"
