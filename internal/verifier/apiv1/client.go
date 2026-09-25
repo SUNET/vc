@@ -371,6 +371,9 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 			if uncovered := c.uncoveredScopes(ctx, dcql, scopes); len(uncovered) > 0 {
 				return nil, fmt.Errorf("the presentation template selected for this request does not cover requested scope(s) %v; a wallet would never be asked for them", uncovered)
 			}
+			if unclaimed := c.unclaimedRequiredQueries(ctx, dcql, scopes); len(unclaimed) > 0 {
+				return nil, fmt.Errorf("the presentation template selected for this request asks the wallet for credential query/queries %v that no requested scope claims; the response for them would never be verified", unclaimed)
+			}
 			c.log.Info("DCQL query built from presentation template", "credential_count", len(dcql.Credentials))
 			return dcql, nil
 		}
@@ -578,6 +581,55 @@ func (c *Client) uncoveredScopes(ctx context.Context, dcql *openid4vp.DCQL, scop
 		}
 	}
 	return uncovered
+}
+
+// unclaimedRequiredQueries reports DCQL credential query ids that the wallet
+// will be asked for but that no requested scope maps to.
+//
+// uncoveredScopes checks the other direction - every requested scope has a
+// query. Both are needed, because verification iterates over the REQUESTED
+// SCOPES and looks up each one's query: a query nothing maps to is never
+// visited, so its vp_token is never validated, never trust-evaluated, and
+// never reaches scopeCredentials. The session is then accepted having
+// verified less than it asked for, silently, which is the worst shape for
+// this to take - the template author asked for that credential on purpose.
+//
+// Only decidable for a multi-query template that sets no credential_sets -
+// which per OpenID4VP means every credential query is required, and where
+// the single-query default-token path cannot apply. With credential_sets
+// present the queries are alternatives ("A or B"), so an id nothing claims
+// may be perfectly legitimate, and deciding needs the whole set/option
+// relationship modelled rather than this counting. That case is left alone
+// deliberately rather than guessed at: refusing a valid template is as bad
+// as accepting an under-verified one.
+func (c *Client) unclaimedRequiredQueries(ctx context.Context, dcql *openid4vp.DCQL, scopes []string) []string {
+	if dcql == nil || len(dcql.CredentialSets) > 0 {
+		return nil
+	}
+
+	// A single query is reachable without a scope mapping: verification's
+	// default-token path attributes an unlabelled credential to the sole
+	// requested scope, and defaultTokenAllowed permits that only while
+	// len(Credentials) <= 1. It is from the second query on that an
+	// unclaimed one has no way to be read - which is also the only shape
+	// where a wallet could return one and have it ignored.
+	if len(dcql.Credentials) <= 1 {
+		return nil
+	}
+
+	resolved := c.resolveScopeQueries(ctx, dcql, scopes)
+	claimed := make(map[string]bool, len(resolved))
+	for _, queryID := range resolved {
+		claimed[queryID] = true
+	}
+
+	var unclaimed []string
+	for _, q := range dcql.Credentials {
+		if !claimed[q.ID] {
+			unclaimed = append(unclaimed, q.ID)
+		}
+	}
+	return unclaimed
 }
 
 // buildDCQLQueryFromConfig builds a DCQL query using credential constructor config.
