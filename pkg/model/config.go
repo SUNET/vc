@@ -2046,9 +2046,17 @@ func (c *CredentialMetadata) GetVCTMRaw() []byte {
 }
 
 // vctmRawWithVCT returns raw with "vct" set to vct, and reports whether it had
-// to change anything. Bytes that already declare a non-empty vct are returned
-// untouched, as are bytes that do not parse - a caller must never lose the
-// document over a rewrite it cannot make.
+// to change anything.
+//
+// The member is overwritten whether or not the document already declares one:
+// deciding WHETHER to rewrite belongs to the caller, because that is what
+// replace_vct governs, and ResolveVCTUrls only calls this once it has made
+// that decision. An earlier version skipped documents with a vct already set,
+// which made replace_vct: true a no-op for exactly the documents it exists
+// for.
+//
+// Bytes that do not parse are returned untouched - a caller must never lose
+// the document over a rewrite it cannot make.
 func vctmRawWithVCT(raw []byte, vct string) ([]byte, bool) {
 	if raw == nil || vct == "" {
 		return raw, false
