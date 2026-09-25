@@ -148,6 +148,41 @@ func (c *Client) allocateOrDegrade(ctx context.Context) (*statusAllocation, erro
 	return nil, err
 }
 
+// allocateOptionalStatus allocates a status entry for an issuance path that
+// has never REQUIRED one (mdoc, VC 2.0), without throwing away the external
+// backend's degraded-mode contract.
+//
+// Those paths were best-effort against the registry long before an external
+// service existed, and that stays: no allocator configured, or a registry
+// allocation that fails, issues the credential without revocation support
+// and logs. But `degraded_mode: fail` is an operator saying "reject the
+// issuance rather than issue something unrevocable", and honouring it only
+// in the SD-JWT/BBS paths would make the setting quietly format-dependent.
+// So when the external backend is the one configured, this defers to
+// allocateOrDegrade, which fails or degrades as configured.
+//
+// Returns (nil, nil) when there is nothing to allocate or the failure is one
+// the caller should absorb; a non-nil error means the issuance must stop.
+func (c *Client) allocateOptionalStatus(ctx context.Context, format string) (*statusAllocation, error) {
+	if c.statusAllocator == nil {
+		return nil, nil
+	}
+
+	if c.statusServiceClient != nil {
+		// External backend: degraded_mode decides, exactly as it does for
+		// the formats that always allocate.
+		return c.allocateOrDegrade(ctx)
+	}
+
+	alloc, err := c.statusAllocator.Allocate(ctx)
+	if err != nil {
+		c.log.Info("failed to allocate status list entry, issuing without revocation support",
+			"format", format, "error", err)
+		return nil, nil
+	}
+	return alloc, nil
+}
+
 // statusServiceDegradedModeProceeds reports whether a failed external
 // allocation should degrade to "issue without a status claim" (true, the
 // default) rather than fail the request (false, degraded_mode: "fail").

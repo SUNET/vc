@@ -168,6 +168,12 @@ const (
 	// actually expires, so a token never expires mid-flight inside a
 	// request that already started using it.
 	tokenRefreshSkew = 30 * time.Second
+
+	// entryExpirySkew discards a pooled entry this long before its stated
+	// expiry. An entry handed out at the last moment still has to survive
+	// being signed into a credential and that credential being used, so
+	// "not expired yet" is not the same as "worth issuing".
+	entryExpirySkew = 60 * time.Second
 )
 
 // ErrPoolExhausted is returned by Take when the pool is empty and the
@@ -276,6 +282,21 @@ func (c *Client) Close() {
 		close(c.stopCh)
 	})
 	c.wg.Wait()
+}
+
+// expired reports whether a pooled entry is too close to its expiry to put
+// into a credential.
+//
+// An entry with NO stated expiry is never expired. The status service sets
+// `exp` at its discretion and may omit it, in which case Entry.Exp is the
+// zero time - and treating that as "expired long ago" would discard every
+// entry from such a service, emptying the pool as fast as it refills and
+// turning a working deployment into an endless allocate loop.
+func (c *Client) expired(e Entry) bool {
+	if e.Exp.IsZero() {
+		return false
+	}
+	return time.Now().Add(entryExpirySkew).After(e.Exp)
 }
 
 // retryConfig returns the retry parameters for on-demand (foreground) calls

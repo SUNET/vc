@@ -125,6 +125,19 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 		return nil, err
 	}
 
+	// From here on New owns a running background goroutine (the status
+	// service client's pool refill loop, which retries indefinitely), so
+	// every later failure has to hand it back. A deferred cleanup rather
+	// than a Close() before each return: this way a step added below is
+	// covered without anyone remembering to, which is how the leak this
+	// replaces came about.
+	ok := false
+	defer func() {
+		if !ok {
+			c.closeStatusServiceClient()
+		}
+	}()
+
 	// Initialize mDL issuer if certificate chain is configured
 	if err := c.initMDocIssuer(ctx); err != nil {
 		c.log.Info("mDL issuer not initialized", "error", err)
@@ -144,7 +157,18 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 
 	c.log.Info("Started")
 
+	ok = true
 	return c, nil
+}
+
+// closeStatusServiceClient stops the external status-service client's
+// background refill goroutine, if one was started. Safe to call when none
+// was: Close is idempotent (sync.Once) and the field is nil unless
+// issuer.status_service is configured.
+func (c *Client) closeStatusServiceClient() {
+	if c.statusServiceClient != nil {
+		c.statusServiceClient.Close()
+	}
 }
 
 // initSigner initializes the signing service (software or PKCS#11)
@@ -460,9 +484,7 @@ func (c *Client) GetIACAs(_ context.Context) (*apiv1_issuer.GetIACAsReply, error
 // Close closes all client connections and stops any background goroutines
 // (the external status service client's pool refill loop, if configured).
 func (c *Client) Close() error {
-	if c.statusServiceClient != nil {
-		c.statusServiceClient.Close()
-	}
+	c.closeStatusServiceClient()
 	if c.registryConn != nil {
 		return c.registryConn.Close()
 	}

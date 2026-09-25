@@ -50,16 +50,45 @@ func newPool(c *Client) *pool {
 	}
 }
 
-// take pops one entry from the pool, returning (Entry{}, false) if empty.
+// take pops one usable entry from the pool, returning (Entry{}, false) if
+// none is left.
+//
+// Entries are discarded rather than returned once their Exp has passed. The
+// pool is a cache of slots the status service has already committed to, and
+// nothing refreshes them while they sit here - so on a quiet issuer an entry
+// can go stale before it is ever used, and handing it out would put an
+// already-expired status_list reference into an issued credential, where a
+// verifier resolving it is the one who finds out.
+//
+// This pops from the end, so the oldest entries are the last to be reached
+// and the most likely to have expired; discarding is what stops them
+// accumulating at the bottom of the slice forever.
 func (p *pool) take() (Entry, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if len(p.entries) == 0 {
+	var e Entry
+	found := false
+	for len(p.entries) > 0 {
+		candidate := p.entries[len(p.entries)-1]
+		p.entries = p.entries[:len(p.entries)-1]
+		if p.c.expired(candidate) {
+			continue
+		}
+		e = candidate
+		found = true
+		break
+	}
+
+	if !found {
+		// Signal a refill: the pool is empty, or held nothing but stale
+		// entries, and either way it needs topping up.
+		select {
+		case p.wake <- struct{}{}:
+		default:
+		}
 		return Entry{}, false
 	}
-	e := p.entries[len(p.entries)-1]
-	p.entries = p.entries[:len(p.entries)-1]
 
 	if len(p.entries) <= p.c.cfg.LowWaterMark {
 		select {

@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -186,3 +187,90 @@ func TestStatusServiceKey_RefusesHSMBackedIssuerKey(t *testing.T) {
 		t.Fatal("an HSM-backed (non-raw-key) issuer key must not be defaulted silently")
 	}
 }
+
+// The mdoc and VC 2.0 paths have always been best-effort about status
+// entries - neither format requires one - but `degraded_mode: fail` is an
+// operator asking for issuance to be REFUSED rather than produce something
+// unrevocable. Honouring that only in the SD-JWT/BBS paths would make the
+// setting quietly depend on which credential format was requested, so
+// allocateOptionalStatus routes the external backend through
+// allocateOrDegrade while keeping the registry best-effort.
+
+func TestAllocateOptionalStatus_NoAllocatorIsNotAnError(t *testing.T) {
+	c := &Client{log: logger.NewSimple("test"), cfg: &model.Cfg{Issuer: &model.Issuer{}}}
+
+	alloc, err := c.allocateOptionalStatus(context.Background(), "mdoc")
+	if err != nil {
+		t.Fatalf("an unconfigured allocator must not fail issuance, got %v", err)
+	}
+	if alloc != nil {
+		t.Fatalf("want no allocation, got %+v", alloc)
+	}
+}
+
+func TestAllocateOptionalStatus_ExternalDegradedModeFailRefuses(t *testing.T) {
+	client := newFailingExternalClient(t)
+	c := &Client{
+		log:                 logger.NewSimple("test"),
+		cfg:                 &model.Cfg{Issuer: &model.Issuer{StatusService: &model.StatusServiceConfig{IngestionURL: "set", DegradedMode: "fail"}}},
+		statusServiceClient: client,
+		statusAllocator:     &externalStatusAllocator{client: client, log: logger.NewSimple("test")},
+	}
+
+	for _, format := range []string{"mdoc", "vc20"} {
+		t.Run(format, func(t *testing.T) {
+			alloc, err := c.allocateOptionalStatus(context.Background(), format)
+			if err == nil {
+				t.Fatal("degraded_mode=fail must refuse the issuance, not issue without a status claim")
+			}
+			if alloc != nil {
+				t.Fatalf("want a nil allocation on error, got %+v", alloc)
+			}
+		})
+	}
+}
+
+func TestAllocateOptionalStatus_ExternalDegradedModeProceedIssues(t *testing.T) {
+	client := newFailingExternalClient(t)
+	c := &Client{
+		log:                 logger.NewSimple("test"),
+		cfg:                 &model.Cfg{Issuer: &model.Issuer{StatusService: &model.StatusServiceConfig{IngestionURL: "set", DegradedMode: "proceed"}}},
+		statusServiceClient: client,
+		statusAllocator:     &externalStatusAllocator{client: client, log: logger.NewSimple("test")},
+	}
+
+	alloc, err := c.allocateOptionalStatus(context.Background(), "mdoc")
+	if err != nil {
+		t.Fatalf("degraded_mode=proceed must still issue, got %v", err)
+	}
+	if alloc != nil {
+		t.Fatalf("want a nil allocation, got %+v", alloc)
+	}
+}
+
+// The registry backend keeps the behaviour these paths always had: a failed
+// allocation is logged and the credential issued anyway. degraded_mode is an
+// external-service setting and must not start governing the registry.
+func TestAllocateOptionalStatus_RegistryStaysBestEffort(t *testing.T) {
+	c := &Client{
+		log:             logger.NewSimple("test"),
+		cfg:             &model.Cfg{Issuer: &model.Issuer{}},
+		statusAllocator: &failingAllocator{},
+	}
+
+	alloc, err := c.allocateOptionalStatus(context.Background(), "vc20")
+	if err != nil {
+		t.Fatalf("registry failures must stay best-effort here, got %v", err)
+	}
+	if alloc != nil {
+		t.Fatalf("want no allocation, got %+v", alloc)
+	}
+}
+
+// failingAllocator stands in for a registry allocator whose backend is down.
+type failingAllocator struct{}
+
+func (f *failingAllocator) Allocate(context.Context) (*statusAllocation, error) {
+	return nil, fmt.Errorf("registry unavailable")
+}
+func (f *failingAllocator) Invalidate(context.Context, *statusAllocation) {}

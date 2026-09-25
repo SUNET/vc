@@ -91,20 +91,18 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 	validUntil = &defaultExpiry
 
 	// Allocate a status list entry for revocation support, if any allocator
-	// (vc's own registry-backed Token Status List, or an external
-	// draft-ietf-oauth-status-list-21 service) is configured. Best-effort
-	// here regardless of backend, matching this path's own pre-existing
-	// (registry-only) behaviour exactly when the registry is what is
-	// configured - VC 2.0 issuance has never required a status entry.
+	// is configured. Best-effort for the registry backend, matching this
+	// path's pre-existing behaviour - VC 2.0 issuance has never required a
+	// status entry - but an external service's degraded_mode is honoured.
+	// See allocateOptionalStatus.
 	var statusSection, statusIndex int64
-	if c.statusAllocator != nil {
-		alloc, err := c.statusAllocator.Allocate(ctx)
-		if err != nil {
-			c.log.Info("failed to allocate status list entry, issuing without revocation support", "error", err)
-		} else {
-			statusSection, statusIndex = alloc.Section, alloc.Index
-			c.log.Debug("status list entry allocated for vc20", "section", statusSection, "index", statusIndex)
-		}
+	statusAlloc, err := c.allocateOptionalStatus(ctx, "vc20")
+	if err != nil {
+		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
+	}
+	if statusAlloc != nil {
+		statusSection, statusIndex = statusAlloc.Section, statusAlloc.Index
+		c.log.Debug("status list entry allocated for vc20", "section", statusSection, "index", statusIndex)
 	}
 
 	// Build the credential JSON structure

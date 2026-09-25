@@ -178,23 +178,19 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 	}
 
 	// Allocate a status list entry for revocation support, if any allocator
-	// (vc's own registry-backed Token Status List, or an external
-	// draft-ietf-oauth-status-list-21 service) is configured. Always
-	// best-effort here, regardless of backend: mDL issuance has never
-	// required one (unlike SD-JWT and BBS above), so an allocation failure
-	// - or the feature simply not being configured - just logs and issues
-	// the mdoc without revocation support, matching this path's own
-	// pre-existing (registry-only) behaviour exactly when the registry is
-	// what is configured.
+	// is configured. Best-effort for the registry backend, which is what
+	// this path has always done - mDL issuance has never required a status
+	// entry - but an external service's degraded_mode is honoured, so
+	// `fail` rejects the issuance here as it does for SD-JWT and BBS. See
+	// allocateOptionalStatus.
 	var mdocStatusSection, mdocStatusIndex int64
-	if c.statusAllocator != nil {
-		alloc, err := c.statusAllocator.Allocate(ctx)
-		if err != nil {
-			c.log.Info("failed to allocate status list entry, issuing without revocation support", "error", err)
-		} else {
-			mdocStatusSection, mdocStatusIndex = alloc.Section, alloc.Index
-			c.log.Debug("status list entry allocated for mdoc", "section", mdocStatusSection, "index", mdocStatusIndex)
-		}
+	alloc, err := c.allocateOptionalStatus(ctx, "mdoc")
+	if err != nil {
+		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
+	}
+	if alloc != nil {
+		mdocStatusSection, mdocStatusIndex = alloc.Section, alloc.Index
+		c.log.Debug("status list entry allocated for mdoc", "section", mdocStatusSection, "index", mdocStatusIndex)
 	}
 
 	// Issue the mdoc

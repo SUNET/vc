@@ -288,9 +288,11 @@ func TestListIDFromURL(t *testing.T) {
 		t.Fatalf("got %q, want abc123", got)
 	}
 
+	// A control character makes url.Parse itself fail; the point of the
+	// case is that a malformed input is rejected rather than silently
+	// yielding some substring as a list ID.
 	if _, err := ListIDFromURL("not a url with a path\x7f"); err == nil {
-		// Not every malformed input necessarily errors at url.Parse, but a
-		// URL with no path segment must be rejected.
+		t.Fatal("want an error for a URL containing a control character")
 	}
 	if _, err := ListIDFromURL("https://status.example.org/"); err == nil {
 		t.Fatal("want an error for a URL with no list ID segment")

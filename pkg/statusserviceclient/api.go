@@ -17,6 +17,26 @@ import (
 // permanent error (4xx - retrying cannot help: bad request, unauthorized,
 // forbidden, not found, gone), or a plain (retryable) error (5xx, or
 // anything else unexpected).
+// classifyResourceStatus is classifyStatus for calls made with a CACHED
+// access token.
+//
+// A 401 there is not the service saying "no" - it is the cached token being
+// stale, which is the one 4xx worth another attempt: the token has just been
+// cleared, so the retry fetches a fresh one and asks again. Classifying it
+// permanent (as a bare classifyStatus does) stops the retry loop dead and
+// turns a routine token expiry into a failed allocation.
+//
+// Token-endpoint responses keep using classifyStatus: a 4xx there really is
+// a refusal, and retrying it would hammer the AS with credentials it has
+// already rejected.
+func classifyResourceStatus(statusCode int, body []byte) error {
+	if statusCode == http.StatusUnauthorized {
+		return fmt.Errorf("status service returned 401 for a cached token: %s",
+			strings.TrimSpace(string(body)))
+	}
+	return classifyStatus(statusCode, body)
+}
+
 func classifyStatus(statusCode int, body []byte) error {
 	if statusCode >= 200 && statusCode < 300 {
 		return nil
@@ -162,7 +182,7 @@ func (c *Client) allocateOnce(ctx context.Context) (Entry, error) {
 		c.token = ""
 		c.tokenMu.Unlock()
 	}
-	if err := classifyStatus(resp.StatusCode, respBody); err != nil {
+	if err := classifyResourceStatus(resp.StatusCode, respBody); err != nil {
 		return Entry{}, err
 	}
 
@@ -235,7 +255,7 @@ func (c *Client) setStatusOnce(ctx context.Context, listID string, idx uint64, s
 		c.token = ""
 		c.tokenMu.Unlock()
 	}
-	return classifyStatus(resp.StatusCode, respBody)
+	return classifyResourceStatus(resp.StatusCode, respBody)
 }
 
 // SetStatus updates the status of a previously allocated index, retrying

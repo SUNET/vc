@@ -61,6 +61,18 @@ func retry(ctx context.Context, cfg retryConfig, fn func(ctx context.Context) er
 		maxBackoff = defaultRetryMaxBackoff
 	}
 
+	// Bound the whole operation, fn's own HTTP call included. Checking
+	// maxElapsed only between attempts bounds the RETRY loop but not the
+	// request inside it: http.Client.Do gets this same ctx, and its own
+	// timeout is the transport's (10s by default) not ours, so one stuck
+	// request could outlive a 5s TakeFallbackTimeout and block a caller
+	// past the bound the config advertises.
+	if cfg.maxElapsed > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, cfg.maxElapsed)
+		defer cancel()
+	}
+
 	start := time.Now()
 	var lastErr error
 	for attempt := 1; ; attempt++ {
