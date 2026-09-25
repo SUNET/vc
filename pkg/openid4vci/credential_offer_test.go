@@ -531,7 +531,7 @@ func TestCredentialOfferURIQR(t *testing.T) {
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			p, err := tt.parameters.CredentialOfferURI()
+			p, err := tt.parameters.CredentialOfferURI(tt.parameters.CredentialIssuer, uuid.NewString())
 			assert.NoError(t, err)
 
 			qr, err := p.QR(0, 256, tt.walletURL, tt.issuerURL)
@@ -579,7 +579,7 @@ func TestCredentialOfferURI(t *testing.T) {
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.parameters.CredentialOfferURI()
+			got, err := tt.parameters.CredentialOfferURI(tt.parameters.CredentialIssuer, uuid.NewString())
 			assert.NoError(t, err)
 
 			u, err := url.Parse(got.String())
@@ -648,7 +648,7 @@ func TestCredentialOfferUriUUID(t *testing.T) {
 
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
-			uri, err := tt.have.CredentialOfferURI()
+			uri, err := tt.have.CredentialOfferURI(tt.have.CredentialIssuer, uuid.NewString())
 			assert.NoError(t, err)
 
 			got, err := uri.UUID()
