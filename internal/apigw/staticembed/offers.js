@@ -83,6 +83,9 @@ Alpine.data("app", () => ({
     issuanceStatus: null,
 
     /** @type {string | null} */
+    copyStatus: null,
+
+    /** @type {string | null} */
     error: null,
 
     init() {
@@ -256,6 +259,22 @@ Alpine.data("app", () => ({
         if (uri) {
             window.location.href = uri;
         }
+    },
+
+    /** Copy the opaque credential-offer URI to the clipboard. */
+    async handleCopyOffer() {
+        const uri = this.credentialOffer?.qr?.uri;
+        if (!uri) {
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(uri);
+            this.copyStatus = "Copied!";
+        } catch (err) {
+            console.error("Error copying credential offer:", err);
+            this.copyStatus = "Copy failed";
+        }
+        setTimeout(() => { this.copyStatus = null; }, 2000);
     },
 
     /** Return to the credential-type picker. */

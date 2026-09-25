@@ -100,6 +100,21 @@ func TestGenerateMetadata(t *testing.T) {
 				assert.Equal(t, []string{"ES256", "ES384", "ES512"}, metadata.ClientAttestationPoPSigningALGValuesSupported)
 			},
 		},
+		{
+			name: "wallet attestation with empty algorithm intersection suppresses attest_jwt_client_auth",
+			cfg: &MetadataConfig{ // #nosec G101
+				IssuerURL:                  "https://issuer.example.com",
+				TokenEndpoint:              "https://issuer.example.com/token",
+				WalletAttestationEnabled:   true,
+				AllowedSignatureAlgorithms: []string{"RS256"},
+			},
+			verify: func(t *testing.T, metadata *AuthorizationServerMetadata) {
+				assert.NotContains(t, metadata.TokenEndpointAuthMethodsSupported, "attest_jwt_client_auth")
+				assert.Equal(t, []string{"none"}, metadata.TokenEndpointAuthMethodsSupported)
+				assert.Empty(t, metadata.ClientAttestationSigningALGValuesSupported)
+				assert.Empty(t, metadata.ClientAttestationPoPSigningALGValuesSupported)
+			},
+		},
 	}
 
 	for _, tt := range tests {

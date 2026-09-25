@@ -37,9 +37,15 @@ func GenerateMetadata(cfg *MetadataConfig) *AuthorizationServerMetadata {
 	authMethods := []string{"none"}
 	var attestationALGs, attestationPoPALGs []string
 	if cfg.WalletAttestationEnabled {
-		authMethods = append([]string{"attest_jwt_client_auth"}, authMethods...)
 		attestationALGs = intersectALGs(walletAttestationBaseALGs, cfg.AllowedSignatureAlgorithms)
 		attestationPoPALGs = intersectALGs(walletAttestationBaseALGs, cfg.AllowedSignatureAlgorithms)
+		// Advertising attest_jwt_client_auth without any supported
+		// algorithm would let a wallet pick this method and then fail
+		// on every signature - the evaluator rejects anything outside
+		// AllowedSignatureAlgorithms. Suppress the method entirely.
+		if len(attestationALGs) > 0 {
+			authMethods = append([]string{"attest_jwt_client_auth"}, authMethods...)
+		}
 	}
 
 	return &AuthorizationServerMetadata{
