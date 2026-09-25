@@ -190,6 +190,11 @@ type Client struct {
 	tokenMu  sync.Mutex
 	token    string
 	tokenExp time.Time
+	// tokenFetch is held by whichever caller is currently fetching a token,
+	// so the others wait for that one result instead of stampeding the AS.
+	// It is a channel rather than a second mutex because a waiter must be
+	// able to give up when its own context expires - see getToken.
+	tokenFetch chan struct{}
 
 	pool *pool
 
@@ -251,10 +256,11 @@ func New(cfg Config, log *logger.Log) (*Client, error) {
 	}
 
 	c := &Client{
-		cfg:    cfg,
-		http:   httpClient,
-		log:    log.New("statusserviceclient"),
-		stopCh: make(chan struct{}),
+		tokenFetch: make(chan struct{}, 1),
+		cfg:        cfg,
+		http:       httpClient,
+		log:        log.New("statusserviceclient"),
+		stopCh:     make(chan struct{}),
 	}
 	c.pool = newPool(c)
 

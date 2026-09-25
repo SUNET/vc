@@ -2,8 +2,13 @@ package statusserviceclient
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -79,5 +84,55 @@ func TestRetry_LeavesTheCallerContextAlone(t *testing.T) {
 	})
 	if err := ctx.Err(); err != nil {
 		t.Fatalf("caller context must be untouched, got %v", err)
+	}
+}
+
+// getToken used to hold tokenMu across the whole retrying token exchange, so
+// a caller arriving behind another fetch waited on a mutex - and a mutex
+// wait cannot be cancelled. That made TakeFallbackTimeout unenforceable:
+// the second caller's own deadline was ignored until the first one finished.
+func TestGetToken_WaiterHonoursItsOwnDeadline(t *testing.T) {
+	release := make(chan struct{})
+	var hits int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		<-release // hold the first fetch open
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"t","token_type":"Bearer","expires_in":3600}`))
+	}))
+	defer server.Close()
+	defer close(release)
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	c, err := New(Config{
+		IngestionURL: server.URL, ASURL: server.URL,
+		IssuerID: "https://issuer.example.org", Key: key,
+		PoolSize: 0, RefillInterval: time.Hour,
+		RetryInitialBackoff: time.Millisecond, RetryMaxBackoff: time.Millisecond,
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer c.Close()
+
+	// First caller: occupies the fetch and blocks on the server.
+	go func() { _, _ = c.getToken(context.Background()) }()
+	// Give it time to claim the single-flight slot.
+	time.Sleep(50 * time.Millisecond)
+
+	// Second caller: its own deadline must win.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	if _, err := c.getToken(ctx); err == nil {
+		t.Fatal("want the waiter's deadline to be honoured")
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("waiter blocked %v: it was pinned behind the other fetch", elapsed)
 	}
 }

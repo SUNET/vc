@@ -52,11 +52,26 @@ func classifyStatus(statusCode int, body []byte) error {
 // more than tokenRefreshSkew left, and otherwise fetching (and retrying) a
 // fresh one. Safe for concurrent use.
 func (c *Client) getToken(ctx context.Context) (string, error) {
-	c.tokenMu.Lock()
-	defer c.tokenMu.Unlock()
+	if token, ok := c.cachedToken(); ok {
+		return token, nil
+	}
 
-	if c.token != "" && time.Until(c.tokenExp) > tokenRefreshSkew {
-		return c.token, nil
+	// Only one caller fetches; the rest wait for it. Crucially they wait on
+	// ctx too, so a foreground Take or SetStatus still honours its own
+	// deadline instead of being pinned behind someone else's retrying token
+	// exchange - holding tokenMu across the whole fetch made
+	// TakeFallbackTimeout unenforceable, since a mutex wait cannot be
+	// cancelled.
+	select {
+	case c.tokenFetch <- struct{}{}:
+		defer func() { <-c.tokenFetch }()
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+
+	// The winner of a previous race may have just stored one.
+	if token, ok := c.cachedToken(); ok {
+		return token, nil
 	}
 
 	var token string
@@ -73,9 +88,25 @@ func (c *Client) getToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("fetch access token: %w", err)
 	}
 
+	c.tokenMu.Lock()
 	c.token = token
 	c.tokenExp = time.Now().Add(time.Duration(expiresIn) * time.Second)
-	return c.token, nil
+	c.tokenMu.Unlock()
+
+	return token, nil
+}
+
+// cachedToken returns the cached access token when it has more than
+// tokenRefreshSkew left. The lock is held only across these few lines, never
+// across a network call.
+func (c *Client) cachedToken() (string, bool) {
+	c.tokenMu.Lock()
+	defer c.tokenMu.Unlock()
+
+	if c.token != "" && time.Until(c.tokenExp) > tokenRefreshSkew {
+		return c.token, true
+	}
+	return "", false
 }
 
 type tokenResponse struct {
