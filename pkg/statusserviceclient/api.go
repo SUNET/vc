@@ -143,7 +143,14 @@ func (c *Client) fetchToken(ctx context.Context) (string, int64, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	// Not discarded: a connection dropped after the headers, or mid-body,
+	// is a transient network failure. Swallowing it here turns it into a
+	// JSON decode error below, which is marked permanent and stops the
+	// retry loop - the one case the loop exists for.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", 0, fmt.Errorf("read token response: %w", err)
+	}
 	if err := classifyStatus(resp.StatusCode, body); err != nil {
 		return "", 0, err
 	}
@@ -203,7 +210,12 @@ func (c *Client) allocateOnce(ctx context.Context) (Entry, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	// As in fetchToken: a truncated response is retryable, and discarding
+	// the read error would disguise it as a permanent decode failure.
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return Entry{}, fmt.Errorf("read allocate response: %w", err)
+	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		// The cached token may have been rejected (e.g. the AS restarted
 		// its trust store, or the token expired right at the skew
@@ -242,6 +254,14 @@ func ListIDFromURL(listURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// A trailing slash has to be rejected rather than trimmed: path.Base
+	// turns "/lists/" into "lists", so a malformed list_url would silently
+	// yield the collection name as a list ID and SetStatus would go on to
+	// PATCH the wrong resource.
+	if strings.HasSuffix(u.Path, "/") {
+		return "", fmt.Errorf("list URL path %q ends in a slash, so it names no list", u.Path)
+	}
+
 	id := path.Base(u.Path)
 	if id == "" || id == "." || id == "/" {
 		return "", fmt.Errorf("could not determine list ID from path %q", u.Path)
@@ -280,7 +300,12 @@ func (c *Client) setStatusOnce(ctx context.Context, listID string, idx uint64, s
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	// A truncated response here only costs the error message its detail,
+	// but propagate it anyway rather than reporting a misleading status.
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("read status response: %w", err)
+	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		c.tokenMu.Lock()
 		c.token = ""

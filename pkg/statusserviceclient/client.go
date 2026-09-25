@@ -86,6 +86,7 @@ package statusserviceclient
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"fmt"
 	"net/http"
 	"sync"
@@ -221,6 +222,14 @@ func New(cfg Config, log *logger.Log) (*Client, error) {
 	}
 	if cfg.Key == nil {
 		return nil, fmt.Errorf("statusserviceclient: Key is required")
+	}
+	// buildAssertion labels every client assertion ES256, so a key on any
+	// other curve produces a JWT the status service rejects - and a
+	// rejection is retried, so a misconfiguration would surface as a slow
+	// loop of 4xx rather than as the configuration error it is.
+	if cfg.Key.Curve != elliptic.P256() {
+		return nil, fmt.Errorf("statusserviceclient: Key must be on the P-256 curve (client assertions are ES256), got %s",
+			cfg.Key.Curve.Params().Name)
 	}
 	if cfg.PoolSize <= 0 {
 		cfg.PoolSize = defaultPoolSize

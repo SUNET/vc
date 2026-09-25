@@ -1,6 +1,14 @@
 package statusserviceclient
 
 import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -84,5 +92,50 @@ func TestPoolTake_ZeroExpiryIsNotExpired(t *testing.T) {
 	}
 	if got.ListID != "no-exp" {
 		t.Fatalf("got %q", got.ListID)
+	}
+}
+
+// The expiry check has to cover Take's synchronous fallback too, not just
+// the pooled path. An entry allocated on demand goes straight into a
+// credential, so if AllocateExpiry or the service's own maximum lifetime is
+// shorter than entryExpirySkew, every allocation is born inside the window
+// and handing one back would issue a credential that outlives its status
+// list.
+func TestTake_FallbackRejectsAnEntryInsideTheSkewWindow(t *testing.T) {
+	var allocations int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/token") {
+			_, _ = w.Write([]byte(`{"access_token":"t","token_type":"Bearer","expires_in":3600}`))
+			return
+		}
+		atomic.AddInt32(&allocations, 1)
+		// Always allocates something already inside the skew window.
+		exp := time.Now().Add(entryExpirySkew / 2).UTC().Format(time.RFC3339)
+		_, _ = w.Write([]byte(`{"list_url":"https://status.example.org/lists/abc","index":1,"exp":"` + exp + `"}`))
+	}))
+	defer server.Close()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	c, err := New(Config{
+		IngestionURL: server.URL, ASURL: server.URL,
+		IssuerID: "https://issuer.example.org", Key: key,
+		PoolSize: 0, RefillInterval: time.Hour,
+		RetryInitialBackoff: time.Millisecond, RetryMaxBackoff: 2 * time.Millisecond,
+		TakeFallbackTimeout: 150 * time.Millisecond,
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer c.Close()
+
+	if _, err := c.Take(context.Background()); err == nil {
+		t.Fatal("Take must not return an entry that is already inside the expiry skew window")
+	}
+	if atomic.LoadInt32(&allocations) == 0 {
+		t.Fatal("the fallback should have attempted an allocation")
 	}
 }

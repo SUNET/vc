@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -134,5 +135,41 @@ func TestGetToken_WaiterHonoursItsOwnDeadline(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
 		t.Fatalf("waiter blocked %v: it was pinned behind the other fetch", elapsed)
+	}
+}
+
+// path.Base("/lists/") is "lists", so a list_url with a trailing slash would
+// silently yield the collection name as a list ID and SetStatus would PATCH
+// the wrong resource. It has to be rejected, not trimmed.
+func TestListIDFromURL_RejectsTrailingSlash(t *testing.T) {
+	for _, u := range []string{
+		"https://status.example.org/lists/",
+		"https://status.example.org/",
+	} {
+		if id, err := ListIDFromURL(u); err == nil {
+			t.Fatalf("%q must be rejected, got list ID %q", u, id)
+		}
+	}
+}
+
+// A key on any other curve produces an assertion labelled ES256 that the
+// status service rejects - and a rejection is retried, so the operator sees
+// a slow loop of 4xx instead of the configuration error it is.
+func TestNew_RejectsNonP256Key(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	_, err = New(Config{
+		IngestionURL: "https://status.example.org",
+		ASURL:        "https://as.example.org",
+		IssuerID:     "https://issuer.example.org",
+		Key:          key,
+	}, nil)
+	if err == nil {
+		t.Fatal("a P-384 key must be rejected at construction")
+	}
+	if !strings.Contains(err.Error(), "P-256") {
+		t.Fatalf("the error should name the required curve, got %v", err)
 	}
 }

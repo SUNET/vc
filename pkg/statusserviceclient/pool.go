@@ -2,6 +2,7 @@ package statusserviceclient
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -222,6 +223,17 @@ func (c *Client) Take(ctx context.Context) (Entry, error) {
 		e, err := c.allocateOnce(ctx)
 		if err != nil {
 			return err
+		}
+		// The same check pool.take applies, for the same reason: an entry
+		// too close to expiry must not reach a credential. A freshly
+		// allocated one can still fail it - if AllocateExpiry or the
+		// service's own maximum lifetime is shorter than entryExpirySkew,
+		// every allocation is born inside the window - so this is retried
+		// rather than silently accepted, and a caller that keeps failing
+		// gets a configuration error rather than an unusable reference.
+		if c.expired(e) {
+			return fmt.Errorf("status service allocated an entry expiring at %s, within the %s skew: check AllocateExpiry against the service's maximum lifetime",
+				e.Exp.Format(time.RFC3339), entryExpirySkew)
 		}
 		entry = e
 		return nil
