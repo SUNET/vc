@@ -101,8 +101,22 @@ Alpine.data("app", () => ({
         }
 
         try {
-            installPolyfill();
-            enableWebWallets();
+            // If the page carries an external WalletCompanion/DigitalWallets
+            // registry that already advertises openid4vci-v1, do NOT install
+            // our polyfill. The polyfill replaces navigator.credentials.create
+            // with a shim that only searches its private _wallets list, and
+            // enableWebWallets() early-returns without populating that list
+            // when an external companion exists - so with the shim installed
+            // the shown button always rejects with NotAllowedError. Skipping
+            // the install leaves the external registry's own create() path in
+            // place, which isIssuanceAvailable() will still report available.
+            const externalCompanionOwnsProtocol =
+                typeof globalThis.WalletCompanion?.supportsProtocol === "function" && globalThis.WalletCompanion.supportsProtocol(OID4VCI_PROTOCOL) === true ||
+                typeof globalThis.DigitalWallets?.supportsProtocol === "function" && globalThis.DigitalWallets.supportsProtocol(OID4VCI_PROTOCOL) === true;
+            if (!externalCompanionOwnsProtocol) {
+                installPolyfill();
+                enableWebWallets();
+            }
         } catch (err) {
             // A page that cannot install the shim simply has no same-device
             // path; the QR is unaffected, so do not fail the whole component.

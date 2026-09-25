@@ -208,8 +208,38 @@ func TestParseAuthorizationDetails(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "entry with format but no vct",
+			name:    "entry with vc+sd-jwt but no vct",
 			raw:     `[{"type":"openid_credential","format":"vc+sd-jwt"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "entry with dc+sd-jwt but no vct",
+			raw:     `[{"type":"openid_credential","format":"dc+sd-jwt"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "entry with vc+sd-jwt and stray doctype",
+			raw:     `[{"type":"openid_credential","format":"vc+sd-jwt","vct":"urn:eudi:pid:1","doctype":"org.iso.18013.5.1.mDL"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "valid mso_mdoc with doctype",
+			raw:     `[{"type":"openid_credential","format":"mso_mdoc","doctype":"org.iso.18013.5.1.mDL"}]`,
+			wantLen: 1,
+		},
+		{
+			name:    "entry with mso_mdoc but no doctype",
+			raw:     `[{"type":"openid_credential","format":"mso_mdoc"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "entry with mso_mdoc and stray vct",
+			raw:     `[{"type":"openid_credential","format":"mso_mdoc","doctype":"org.iso.18013.5.1.mDL","vct":"urn:eudi:pid:1"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "entry with credential_configuration_id and stray doctype",
+			raw:     `[{"type":"openid_credential","credential_configuration_id":"TestCredential","doctype":"org.iso.18013.5.1.mDL"}]`,
 			wantErr: true,
 		},
 		{

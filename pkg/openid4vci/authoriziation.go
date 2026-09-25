@@ -25,8 +25,15 @@ type AuthorizationDetailsParameter struct {
 	// Format REQUIRED when credential_configuration_id parameter is not present. String identifying the format of the Credential the Wallet needs. This Credential format identifier determines further claims in the authorization details object needed to identify the Credential type in the requested format. This specification defines Credential Format Profiles in Appendix A. It MUST NOT be present if credential_configuration_id parameter is present.
 	Format string `json:"format,omitempty" form:"format" validate:"required_without=CredentialConfigurationID"`
 
-	// VCT REQUIRED. String as defined in Appendix A.3.2. This claim contains the type values the Wallet requests authorization for at the Credential Issuer. It MUST only be present if the format claim is present. It MUST not be present otherwise.
-	VCT string `json:"vct,omitempty" form:"vct" validate:"required_with=Format"`
+	// VCT is the SD-JWT VC type identifier (Appendix A.3.2). Required for
+	// format="vc+sd-jwt" / "dc+sd-jwt"; must be absent for other formats.
+	// Enforced format-specifically in ParseAuthorizationDetails.
+	VCT string `json:"vct,omitempty" form:"vct"`
+
+	// Doctype is the ISO mdoc doctype identifier (Appendix A.2.2). Required
+	// for format="mso_mdoc"; must be absent for other formats. Enforced
+	// format-specifically in ParseAuthorizationDetails.
+	Doctype string `json:"doctype,omitempty" form:"doctype"`
 
 	// Claims OPTIONAL. Object as defined in Appendix A.3.2 excluding the display and value_type parameters. mandatory parameter here is used by the Wallet to indicate to the Issuer that it only accepts Credential(s) issued with those claim(s).
 	Claims map[string]any `json:"claims,omitempty" form:"claims"`
@@ -230,11 +237,42 @@ func (r *PARRequest) ParseAuthorizationDetails() error {
 		if detail.CredentialConfigurationID != "" && detail.Format != "" {
 			return fmt.Errorf("authorization_details[%d]: credential_configuration_id and format are mutually exclusive", i)
 		}
-		if detail.VCT != "" && detail.Format == "" {
-			return fmt.Errorf("authorization_details[%d]: vct requires format", i)
+		if err := detail.checkFormatFields(); err != nil {
+			return fmt.Errorf("authorization_details[%d]: %w", i, err)
 		}
 		if err := validate.Struct(detail); err != nil {
 			return fmt.Errorf("authorization_details[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// checkFormatFields enforces which of vct/doctype belongs with which format.
+// Unknown formats are permissive so downstream (issuer metadata lookup) owns
+// the final say; the credential_configuration_id path (Format=="") must have
+// neither field set.
+func (a *AuthorizationDetailsParameter) checkFormatFields() error {
+	switch a.Format {
+	case "":
+		if a.VCT != "" {
+			return errors.New("vct requires format")
+		}
+		if a.Doctype != "" {
+			return errors.New("doctype requires format")
+		}
+	case "vc+sd-jwt", "dc+sd-jwt":
+		if a.VCT == "" {
+			return fmt.Errorf("format %q requires vct", a.Format)
+		}
+		if a.Doctype != "" {
+			return fmt.Errorf("doctype not permitted with format %q", a.Format)
+		}
+	case "mso_mdoc":
+		if a.Doctype == "" {
+			return fmt.Errorf("format %q requires doctype", a.Format)
+		}
+		if a.VCT != "" {
+			return fmt.Errorf("vct not permitted with format %q", a.Format)
 		}
 	}
 	return nil
