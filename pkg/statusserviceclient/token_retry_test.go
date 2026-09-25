@@ -138,17 +138,38 @@ func TestGetToken_WaiterHonoursItsOwnDeadline(t *testing.T) {
 	}
 }
 
-// path.Base("/lists/") is "lists", so a list_url with a trailing slash would
-// silently yield the collection name as a list ID and SetStatus would PATCH
-// the wrong resource. It has to be rejected, not trimmed.
-func TestListIDFromURL_RejectsTrailingSlash(t *testing.T) {
-	for _, u := range []string{
-		"https://status.example.org/lists/",
-		"https://status.example.org/",
+// The list_url goes into a credential's status.status_list.uri as well as
+// giving up the ID for PATCH, so anything a verifier could not resolve has
+// to be refused. Deriving a good-looking ID from an unusable URL is the bad
+// outcome: the client would PATCH the right entry while the credential
+// carried a reference nobody can follow.
+func TestListIDFromURL_RejectsUnusableURLs(t *testing.T) {
+	for _, tc := range []struct{ name, url string }{
+		// path.Base("/lists/") is "lists" - the collection, not a list.
+		{"trailing slash", "https://status.example.org/lists/"},
+		{"root only", "https://status.example.org/"},
+		// Relative values yield an ID from something unresolvable.
+		{"relative with path", "lists/abc"},
+		{"bare segment", "abc"},
+		{"scheme-relative", "//status.example.org/lists/abc"},
+		{"path only", "/lists/abc"},
 	} {
-		if id, err := ListIDFromURL(u); err == nil {
-			t.Fatalf("%q must be rejected, got list ID %q", u, id)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			if id, err := ListIDFromURL(tc.url); err == nil {
+				t.Fatalf("%q must be rejected, got list ID %q", tc.url, id)
+			}
+		})
+	}
+}
+
+// The shape the status service actually returns must still work.
+func TestListIDFromURL_AcceptsAVerifierFacingURL(t *testing.T) {
+	id, err := ListIDFromURL("https://status.example.org/lists/abc123")
+	if err != nil {
+		t.Fatalf("a well-formed list_url must be accepted: %v", err)
+	}
+	if id != "abc123" {
+		t.Fatalf("got %q, want abc123", id)
 	}
 }
 

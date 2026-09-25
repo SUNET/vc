@@ -249,11 +249,26 @@ func (c *Client) allocateOnce(ctx context.Context) (Entry, error) {
 // list_url such as "https://status.example.org/lists/<id>", for use in the
 // PATCH /status/{listID}/{idx} path - the allocate response does not return
 // the ID separately, only the full verifier-facing URL.
+//
+// The same value is what goes into a credential's `status.status_list.uri`,
+// so this validates the whole URL rather than just reaching for the last
+// segment. Anything a verifier could not resolve has to be rejected here:
+// deriving a usable list ID from an unusable URL is the bad outcome, because
+// the client would then happily PATCH the right entry while the credential
+// carries a reference nobody can follow.
 func ListIDFromURL(listURL string) (string, error) {
 	u, err := url.Parse(listURL)
 	if err != nil {
 		return "", err
 	}
+
+	// Absolute, with a host: the contract is a verifier-facing URL, and a
+	// relative value like "lists/abc" (or bare "abc") would yield a
+	// perfectly good-looking list ID from something no verifier can fetch.
+	if u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("list URL %q is not absolute: a verifier-facing scheme and host are required", listURL)
+	}
+
 	// A trailing slash has to be rejected rather than trimmed: path.Base
 	// turns "/lists/" into "lists", so a malformed list_url would silently
 	// yield the collection name as a list ID and SetStatus would go on to
