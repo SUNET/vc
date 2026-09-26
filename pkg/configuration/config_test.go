@@ -220,3 +220,60 @@ func TestCheckCredentialOfferIssuerIdentity(t *testing.T) {
 		})
 	}
 }
+
+// NewPolicyEngine returns (nil, nil) for a policy that defines no rules, and
+// a nil engine reads to every caller as "no policy configured" - so
+// `issuance_policy: {}` on a scope disabled the very check it was asked for,
+// which is the opposite of the documented behaviour that an unmatched query
+// denies issuance.
+//
+// And IssuancePolicy's own documentation promised a malformed rule "fails
+// startup"; BuildEngine only ran from the OIDC callback, so it did not.
+func TestCheckIssuancePolicies(t *testing.T) {
+	withAssertionPolicy := func(p *model.IssuancePolicy) *model.Cfg {
+		return &model.Cfg{APIGW: &model.APIGW{
+			DataSources: model.DataSources{
+				Assertion: model.AssertionConfig{
+					Scopes: map[string]model.AssertionScope{
+						"org_credential": {AuthProvider: "oidc", IssuancePolicy: p},
+					},
+				},
+			},
+		}}
+	}
+
+	t.Run("no policy configured is fine", func(t *testing.T) {
+		require.NoError(t, checkIssuancePolicies(withAssertionPolicy(nil), "apigw"))
+	})
+
+	t.Run("configured but empty is refused", func(t *testing.T) {
+		err := checkIssuancePolicies(withAssertionPolicy(&model.IssuancePolicy{}), "apigw")
+		require.Error(t, err, "an empty policy would let every issuance through")
+		require.Contains(t, err.Error(), "defines no rules")
+		require.Contains(t, err.Error(), "org_credential", "the error must name the scope")
+	})
+
+	t.Run("empty rules list is refused too", func(t *testing.T) {
+		err := checkIssuancePolicies(withAssertionPolicy(&model.IssuancePolicy{Rules: []string{}}), "apigw")
+		require.Error(t, err)
+	})
+
+	t.Run("a usable policy passes", func(t *testing.T) {
+		err := checkIssuancePolicies(withAssertionPolicy(&model.IssuancePolicy{
+			Rules: []string{"(credential (scope org_credential))"},
+		}), "apigw")
+		require.NoError(t, err)
+	})
+
+	t.Run("a malformed rule fails at startup, as documented", func(t *testing.T) {
+		err := checkIssuancePolicies(withAssertionPolicy(&model.IssuancePolicy{
+			Rules: []string{"(((not balanced"},
+		}), "apigw")
+		require.Error(t, err, "BuildEngine ran only from the OIDC callback before this")
+	})
+
+	// Only apigw owns data_sources.
+	t.Run("other services are unaffected", func(t *testing.T) {
+		require.NoError(t, checkIssuancePolicies(withAssertionPolicy(&model.IssuancePolicy{}), "verifier"))
+	})
+}

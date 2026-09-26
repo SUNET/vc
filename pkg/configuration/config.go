@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/SUNET/vc/pkg/issuance"
 	"maps"
 	"os"
 	"path/filepath"
@@ -183,6 +184,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkIssuancePolicies(cfg, serviceName); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 
@@ -248,6 +253,72 @@ func checkMongoRequirement(cfg *model.Cfg, serviceName string) error {
 		return fmt.Errorf("common.mongo.uri is required for the %s service when common.sql.backend is %q", serviceName, backend)
 	case cfg.Common.HA.Enable:
 		return fmt.Errorf("common.mongo.uri is required for the %s service because common.ha.enable is set and HA caching has no relational backend", serviceName)
+	}
+
+	return nil
+}
+
+// checkIssuancePolicies builds every configured issuance policy at startup,
+// so a broken one is a boot error rather than a surprise on the first
+// authentication callback.
+//
+// IssuancePolicy's own documentation says a rule with the wrong number or
+// order of dimensions "fails startup instead of silently never matching at
+// evaluation time". That was not true: BuildEngine ran only from
+// GetPolicyEngine, inside the OIDC callback, so a malformed rule sat
+// undetected until someone tried to authenticate.
+//
+// It also refuses a policy that is configured but defines no rules.
+// NewPolicyEngine returns (nil, nil) for one, and a nil engine reads to
+// every caller as "no policy configured" - so `issuance_policy: {}` on a
+// scope disabled the very check it was asked for, which is the opposite of
+// the documented behaviour that an unmatched query denies issuance. An
+// operator who writes that has made a mistake worth naming at boot.
+func checkIssuancePolicies(cfg *model.Cfg, serviceName string) error {
+	if serviceName != "apigw" || cfg.APIGW == nil {
+		return nil
+	}
+
+	type scopePolicy struct {
+		kind   string
+		scope  string
+		policy *model.IssuancePolicy
+	}
+	var policies []scopePolicy
+
+	ds := cfg.APIGW.DataSources
+	for scope, sc := range ds.Datastore.Scopes {
+		policies = append(policies, scopePolicy{"datastore", scope, sc.IssuancePolicy})
+	}
+	for scope, sc := range ds.Assertion.Scopes {
+		policies = append(policies, scopePolicy{"assertion", scope, sc.IssuancePolicy})
+	}
+	for scope, sc := range ds.ExternalAPI.Scopes {
+		policies = append(policies, scopePolicy{"external_api", scope, sc.IssuancePolicy})
+	}
+
+	slices.SortFunc(policies, func(a, b scopePolicy) int {
+		if c := strings.Compare(a.kind, b.kind); c != 0 {
+			return c
+		}
+		return strings.Compare(a.scope, b.scope)
+	})
+
+	for _, p := range policies {
+		if p.policy == nil {
+			continue
+		}
+		where := fmt.Sprintf("apigw.data_sources.%s.scopes.%s.issuance_policy", p.kind, p.scope)
+
+		engine, err := issuance.NewPolicyEngine(p.policy)
+		if err != nil {
+			return fmt.Errorf("%s: %w", where, err)
+		}
+		if engine == nil {
+			return fmt.Errorf("%s is configured but defines no rules: "+
+				"a policy with no rules would let every issuance through, which is the opposite of what configuring one asks for; "+
+				"add rules (or rules_file), or remove the issuance_policy block", where)
+		}
 	}
 
 	return nil

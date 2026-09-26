@@ -339,7 +339,29 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			}
 
 			s.log.Debug("consent: initiating OIDC auth for VCI", "scope", scope, "session_id", sessionID)
-			authReq, err := s.authProviders.OIDC().InitiateAuthForVCI(ctx, scope, sessionID)
+
+			// Look up per-scope OIDC request params and dynamic params from auth context
+			var oidcParams *model.OIDCRequestParams
+			var dynamicParams map[string]string
+			if scopeCfg := s.cfg.APIGW.DataSources.LookupScopePolicyConfig(scope); scopeCfg != nil {
+				oidcParams = scopeCfg.OIDCRequestParams
+			}
+			authCtx, authCtxErr := s.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: sessionID})
+			if authCtxErr != nil {
+				// Not fatal here: a session legitimately carries no dynamic
+				// parameters, and Get reports that as an error too, so
+				// failing on every lookup error would break those flows. What
+				// must not happen is proceeding SILENTLY - resolveTemplate
+				// now refuses to emit an unresolved placeholder, so a scope
+				// that actually needed these fails with a clear template
+				// error instead of sending "{{.org_id}}" to the OP.
+				s.log.Info("no authorization context for dynamic OIDC parameters",
+					"session_id", sessionID, "scope", scope, "error", authCtxErr)
+			} else if len(authCtx.DynamicParams) > 0 {
+				dynamicParams = authCtx.DynamicParams
+			}
+
+			authReq, err := s.authProviders.OIDC().InitiateAuthForVCI(ctx, scope, sessionID, oidcParams, dynamicParams)
 			if err != nil {
 				span.SetStatus(codes.Error, err.Error())
 				return nil, err
