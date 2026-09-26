@@ -1111,10 +1111,12 @@ func (c *OpenID4VPConfig) GetPresentationRequestsDir() string {
 
 // GenerateMetadata generates OAuth2 metadata from the OpenID4VP configuration.
 // Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
-func (c *OpenID4VPConfig) GenerateMetadata(ctx context.Context, issuerURL string) *oauth2.AuthorizationServerMetadata {
+func (c *OpenID4VPConfig) GenerateMetadata(ctx context.Context, issuerURL string, walletAttestationEnabled bool, allowedSignatureAlgorithms []string) *oauth2.AuthorizationServerMetadata {
 	return oauth2.GenerateMetadata(&oauth2.MetadataConfig{
-		IssuerURL:     issuerURL,
-		TokenEndpoint: c.TokenEndpoint,
+		IssuerURL:                  issuerURL,
+		TokenEndpoint:              c.TokenEndpoint,
+		WalletAttestationEnabled:   walletAttestationEnabled,
+		AllowedSignatureAlgorithms: allowedSignatureAlgorithms,
 	})
 }
 
@@ -1343,7 +1345,21 @@ type CredentialOfferWallets struct {
 
 // CredentialOffers holds credential offer configurations
 type CredentialOffers struct {
-	// IssuerURL is the issuer URL for credential offers
+	// IssuerURL is the issuer IDENTIFIER published as `credential_issuer`
+	// inside each credential offer. It MUST be byte-identical to
+	// apigw.public_url - a trailing slash on one of them is a mismatch,
+	// because both are published verbatim - and config load refuses
+	// anything else: issuer metadata is generated from
+	// public_url and declares that as its own `credential_issuer`, so a
+	// wallet resolving an offer to
+	// {credential_issuer}/.well-known/openid-credential-issuer would
+	// otherwise reach an origin serving no metadata, or metadata naming a
+	// different issuer.
+	//
+	// It is still not where offers are RETRIEVED from. A by-reference offer
+	// (`credential_offer_uri`) is built from apigw.public_url, because that
+	// field is the statement about where this service answers; this one is
+	// an identity claim that happens to hold the same string.
 	IssuerURL string `yaml:"issuer_url" validate:"required"`
 	// Wallets holds wallet redirect configurations
 	Wallets map[string]CredentialOfferWallets `yaml:"wallets" validate:"required" doc_key:"wallet name"`
@@ -1431,6 +1447,8 @@ type APIGWRateLimit struct {
 	CredentialRequestsPerMinute int `yaml:"credential_requests_per_minute" default:"30"`
 	// DatastoreRequestsPerMinute is the maximum datastore endpoint requests per minute per IP. Default: 60
 	DatastoreRequestsPerMinute int `yaml:"datastore_requests_per_minute" default:"60"`
+	// CredentialOfferRequestsPerMinute is the maximum issuer-UI credential offer creation requests (GET /offers/:scope) per minute per IP. Default: 20
+	CredentialOfferRequestsPerMinute int `yaml:"credential_offer_requests_per_minute" default:"20"`
 }
 
 // APIGWDashboard configures the /dashboard demo landing page that lists every service in the deployment.
@@ -2681,11 +2699,13 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 
 // GenerateMetadata generates OAuth2 metadata from configuration.
 // Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
-func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string) *oauth2.AuthorizationServerMetadata {
+func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string, walletAttestationEnabled bool, allowedSignatureAlgorithms []string) *oauth2.AuthorizationServerMetadata {
 	metadata := oauth2.GenerateMetadata(&oauth2.MetadataConfig{
-		IssuerURL:     issuerURL,
-		TokenEndpoint: cfg.TokenEndpoint,
-		GrantTypes:    cfg.GrantTypes,
+		IssuerURL:                  issuerURL,
+		TokenEndpoint:              cfg.TokenEndpoint,
+		GrantTypes:                 cfg.GrantTypes,
+		WalletAttestationEnabled:   walletAttestationEnabled,
+		AllowedSignatureAlgorithms: allowedSignatureAlgorithms,
 	})
 
 	return metadata

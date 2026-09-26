@@ -5,7 +5,18 @@
 	"pushed_authorization_request_endpoint": "http://vc_dev_apigw:8080/par",
 	"require_pushed_authorization_requests": true,
 	"token_endpoint_auth_methods_supported": [
+		"attest_jwt_client_auth",
 		"none"
+	],
+	"client_attestation_signing_alg_values_supported": [
+		"ES256",
+		"ES384",
+		"ES512"
+	],
+	"client_attestation_pop_signing_alg_values_supported": [
+		"ES256",
+		"ES384",
+		"ES512"
 	],
 	"response_types_supported": [
 		"code"

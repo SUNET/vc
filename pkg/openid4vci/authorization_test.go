@@ -159,3 +159,210 @@ func TestAuthorizeBinding(t *testing.T) {
 		})
 	}
 }
+
+func TestParseAuthorizationDetails(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		wantErr bool
+		wantLen int
+	}{
+		{
+			name:    "valid array with credential_configuration_id",
+			raw:     `[{"type":"openid_credential","credential_configuration_id":"TestCredential"}]`,
+			wantLen: 1,
+		},
+		{
+			name:    "valid array with format+vct",
+			raw:     `[{"type":"openid_credential","format":"vc+sd-jwt","vct":"SD_JWT_VC_example_in_OpenID4VCI"}]`,
+			wantLen: 1,
+		},
+		{
+			name:    "empty array is accepted",
+			raw:     `[]`,
+			wantLen: 0,
+		},
+		{
+			name:    "null value rejected",
+			raw:     `null`,
+			wantErr: true,
+		},
+		{
+			name:    "object (non-array) rejected",
+			raw:     `{"type":"openid_credential","credential_configuration_id":"TestCredential"}`,
+			wantErr: true,
+		},
+		{
+			name:    "entry missing type",
+			raw:     `[{"credential_configuration_id":"TestCredential"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "entry with wrong type value",
+			raw:     `[{"type":"unknown","credential_configuration_id":"TestCredential"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "entry missing both credential_configuration_id and format",
+			raw:     `[{"type":"openid_credential"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "entry with vc+sd-jwt but no vct",
+			raw:     `[{"type":"openid_credential","format":"vc+sd-jwt"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "entry with dc+sd-jwt but no vct",
+			raw:     `[{"type":"openid_credential","format":"dc+sd-jwt"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "entry with vc+sd-jwt and stray doctype",
+			raw:     `[{"type":"openid_credential","format":"vc+sd-jwt","vct":"urn:eudi:pid:1","doctype":"org.iso.18013.5.1.mDL"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "valid mso_mdoc with doctype",
+			raw:     `[{"type":"openid_credential","format":"mso_mdoc","doctype":"org.iso.18013.5.1.mDL"}]`,
+			wantLen: 1,
+		},
+		{
+			name:    "entry with mso_mdoc but no doctype",
+			raw:     `[{"type":"openid_credential","format":"mso_mdoc"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "entry with mso_mdoc and stray vct",
+			raw:     `[{"type":"openid_credential","format":"mso_mdoc","doctype":"org.iso.18013.5.1.mDL","vct":"urn:eudi:pid:1"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "entry with credential_configuration_id and stray doctype",
+			raw:     `[{"type":"openid_credential","credential_configuration_id":"TestCredential","doctype":"org.iso.18013.5.1.mDL"}]`,
+			wantErr: true,
+		},
+		{
+			name:    "empty input is a no-op",
+			raw:     "",
+			wantLen: 0,
+		},
+		{
+			name:    "malformed json rejected",
+			raw:     `[not json`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &PARRequest{AuthorizationDetailsRaw: tt.raw}
+			err := r.ParseAuthorizationDetails()
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Len(t, r.AuthorizationDetails, tt.wantLen)
+			assert.Empty(t, r.AuthorizationDetailsRaw, "raw should be cleared after successful parse")
+		})
+	}
+}
+
+func TestParseAuthorizationDetails_ValidatesJSONBinderInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		details []AuthorizationDetailsParameter
+		wantErr bool
+	}{
+		{
+			name: "prepopulated valid entry accepted",
+			details: []AuthorizationDetailsParameter{
+				{Type: "openid_credential", CredentialConfigurationID: "TestCredential"},
+			},
+		},
+		{
+			name: "prepopulated entry with wrong type rejected",
+			details: []AuthorizationDetailsParameter{
+				{Type: "unknown", CredentialConfigurationID: "TestCredential"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "prepopulated entry missing type rejected",
+			details: []AuthorizationDetailsParameter{
+				{CredentialConfigurationID: "TestCredential"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "prepopulated entry missing credential id and format rejected",
+			details: []AuthorizationDetailsParameter{
+				{Type: "openid_credential"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "prepopulated entry with format but no vct rejected",
+			details: []AuthorizationDetailsParameter{
+				{Type: "openid_credential", Format: "vc+sd-jwt"},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &PARRequest{AuthorizationDetails: tt.details}
+			err := r.ParseAuthorizationDetails()
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestPARRequestUnmarshalJSON(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+		wantLen int
+	}{
+		{
+			name:    "authorization_details as JSON array",
+			body:    `{"response_type":"code","authorization_details":[{"type":"openid_credential","credential_configuration_id":"TestCredential"}]}`,
+			wantLen: 1,
+		},
+		{
+			name: "authorization_details omitted",
+			body: `{"response_type":"code"}`,
+		},
+		{
+			name:    "authorization_details explicit null rejected",
+			body:    `{"response_type":"code","authorization_details":null}`,
+			wantErr: true,
+		},
+		{
+			name:    "authorization_details object rejected",
+			body:    `{"response_type":"code","authorization_details":{"type":"openid_credential"}}`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &PARRequest{}
+			err := json.Unmarshal([]byte(tt.body), r)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Len(t, r.AuthorizationDetails, tt.wantLen)
+			assert.Equal(t, "code", r.ResponseType)
+		})
+	}
+}

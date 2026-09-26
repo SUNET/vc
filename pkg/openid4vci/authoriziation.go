@@ -1,11 +1,19 @@
 package openid4vci
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 )
+
+// maxAuthorizationDetailsBytes bounds the raw JSON encoding of
+// authorization_details on every request path (form-body raw string, generic
+// JSON body, and gin's JSON binder). Kept in one place so the form-tag
+// validator (max=16384) and the JSON paths stay in lockstep.
+const maxAuthorizationDetailsBytes = 16384
 
 // AuthorizationDetailsParameter https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-using-authorization-details
 type AuthorizationDetailsParameter struct {
@@ -17,8 +25,15 @@ type AuthorizationDetailsParameter struct {
 	// Format REQUIRED when credential_configuration_id parameter is not present. String identifying the format of the Credential the Wallet needs. This Credential format identifier determines further claims in the authorization details object needed to identify the Credential type in the requested format. This specification defines Credential Format Profiles in Appendix A. It MUST NOT be present if credential_configuration_id parameter is present.
 	Format string `json:"format,omitempty" form:"format" validate:"required_without=CredentialConfigurationID"`
 
-	// VCT REQUIRED. String as defined in Appendix A.3.2. This claim contains the type values the Wallet requests authorization for at the Credential Issuer. It MUST only be present if the format claim is present. It MUST not be present otherwise.
-	VCT string `json:"vct,omitempty" form:"vct" validate:"required_with=Format"`
+	// VCT is the SD-JWT VC type identifier (Appendix A.3.2). Required for
+	// format="vc+sd-jwt" / "dc+sd-jwt"; must be absent for other formats.
+	// Enforced format-specifically in ParseAuthorizationDetails.
+	VCT string `json:"vct,omitempty" form:"vct"`
+
+	// Doctype is the ISO mdoc doctype identifier (Appendix A.2.2). Required
+	// for format="mso_mdoc"; must be absent for other formats. Enforced
+	// format-specifically in ParseAuthorizationDetails.
+	Doctype string `json:"doctype,omitempty" form:"doctype"`
 
 	// Claims OPTIONAL. Object as defined in Appendix A.3.2 excluding the display and value_type parameters. mandatory parameter here is used by the Wallet to indicate to the Issuer that it only accepts Credential(s) issued with those claim(s).
 	Claims map[string]any `json:"claims,omitempty" form:"claims"`
@@ -37,10 +52,15 @@ type PARRequest struct {
 	Scope        string `json:"scope" form:"scope"`
 	State        string `json:"state" form:"state"`
 
-	Prompt               string                          `json:"prompt" form:"prompt"`
-	AuthorizationDetails []AuthorizationDetailsParameter `json:"authorization_details" form:"authorization_details"`
-	CodeChallenge        string                          `json:"code_challenge" form:"code_challenge" validate:"required"`
-	CodeChallengeMethod  string                          `json:"code_challenge_method" form:"code_challenge_method" validate:"required,oneof=S256 plain"`
+	Prompt string `json:"prompt" form:"prompt"`
+	// AuthorizationDetails carries the parsed authorization_details array. The
+	// form-body variant is a single JSON-array string in AuthorizationDetailsRaw,
+	// which the endpoint post-parses because gin's form binder cannot decode a
+	// JSON array into a []struct field.
+	AuthorizationDetails    []AuthorizationDetailsParameter `json:"authorization_details" form:"-"`
+	AuthorizationDetailsRaw string                          `json:"-" form:"authorization_details" validate:"omitempty,max=16384"`
+	CodeChallenge           string                          `json:"code_challenge" form:"code_challenge" validate:"required"`
+	CodeChallengeMethod     string                          `json:"code_challenge_method" form:"code_challenge_method" validate:"required,oneof=S256 plain"`
 
 	// https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-additional-request-paramete
 	WalletIssuer string `json:"wallet_issuer" form:"wallet_issuer"`
@@ -99,23 +119,40 @@ func BindAuthorizationRequest(body io.ReadCloser) (*PARRequest, error) {
 	authorizationRequest := &PARRequest{}
 
 	v := map[string]any{}
+	var err error
 
-	err := json.NewDecoder(body).Decode(&v)
+	err = json.NewDecoder(body).Decode(&v)
 	if err != nil {
 		return nil, err
 	}
 
-	details, ok := v["authorization_details"]
-	if ok {
-		d := details.(string)
+	if details, ok := v["authorization_details"]; ok {
 		delete(v, "authorization_details")
-
-		decodedAuthorizationDetails, err := url.QueryUnescape(d)
-		if err != nil {
-			return nil, err
+		// authorization_details may arrive as a JSON array (standard) or a
+		// URL-encoded JSON-array string (form-body variant surfaced via the
+		// generic JSON decode above). Reject anything else, including null.
+		switch d := details.(type) {
+		case string:
+			authorizationRequest.AuthorizationDetailsRaw, err = url.QueryUnescape(d)
+			if err != nil {
+				return nil, err
+			}
+		case []any:
+			raw, err := json.Marshal(d)
+			if err != nil {
+				return nil, err
+			}
+			if len(raw) > maxAuthorizationDetailsBytes {
+				return nil, fmt.Errorf("authorization_details exceeds %d bytes", maxAuthorizationDetailsBytes)
+			}
+			authorizationRequest.AuthorizationDetailsRaw = string(raw)
+		case nil:
+			return nil, errors.New("authorization_details must not be null")
+		default:
+			return nil, fmt.Errorf("authorization_details must be a JSON array or encoded string, got %T", details)
 		}
 
-		if err = json.Unmarshal([]byte(decodedAuthorizationDetails), &authorizationRequest.AuthorizationDetails); err != nil {
+		if err := authorizationRequest.ParseAuthorizationDetails(); err != nil {
 			return nil, err
 		}
 	}
@@ -130,4 +167,113 @@ func BindAuthorizationRequest(body io.ReadCloser) (*PARRequest, error) {
 	}
 
 	return authorizationRequest, nil
+}
+
+// UnmarshalJSON captures the raw authorization_details value so JSON binders
+// can reject a present-but-null field the same way the form parser does.
+// gin's JSON binding otherwise treats null and an omitted field identically.
+func (r *PARRequest) UnmarshalJSON(data []byte) error {
+	type alias PARRequest
+	aux := struct {
+		AuthorizationDetails json.RawMessage `json:"authorization_details,omitempty"`
+		*alias
+	}{alias: (*alias)(r)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	raw := bytes.TrimSpace(aux.AuthorizationDetails)
+	if len(raw) == 0 {
+		return nil
+	}
+	if bytes.Equal(raw, []byte("null")) {
+		return errors.New("authorization_details must not be null")
+	}
+	if len(raw) > maxAuthorizationDetailsBytes {
+		return fmt.Errorf("authorization_details exceeds %d bytes", maxAuthorizationDetailsBytes)
+	}
+	if raw[0] != '[' {
+		return errors.New("authorization_details must be a JSON array")
+	}
+	if err := json.Unmarshal(raw, &r.AuthorizationDetails); err != nil {
+		return fmt.Errorf("authorization_details parse: %w", err)
+	}
+	return nil
+}
+
+// ParseAuthorizationDetails ensures AuthorizationDetails is populated and
+// per-entry validated. It decodes the form-body JSON string in
+// AuthorizationDetailsRaw when the slice is empty, then validates every
+// entry (including entries populated by gin's JSON binder), so the same
+// per-field validation applies regardless of the request encoding.
+func (r *PARRequest) ParseAuthorizationDetails() error {
+	if r == nil {
+		return nil
+	}
+	if r.AuthorizationDetailsRaw != "" && len(r.AuthorizationDetails) == 0 {
+		trimmed := bytes.TrimSpace([]byte(r.AuthorizationDetailsRaw))
+		if len(trimmed) == 0 {
+			return errors.New("authorization_details is empty")
+		}
+		if len(trimmed) > maxAuthorizationDetailsBytes {
+			return fmt.Errorf("authorization_details exceeds %d bytes", maxAuthorizationDetailsBytes)
+		}
+		if trimmed[0] != '[' {
+			return errors.New("authorization_details must be a JSON array")
+		}
+		if err := json.Unmarshal(trimmed, &r.AuthorizationDetails); err != nil {
+			return fmt.Errorf("authorization_details parse: %w", err)
+		}
+	}
+	r.AuthorizationDetailsRaw = ""
+	if len(r.AuthorizationDetails) == 0 {
+		return nil
+	}
+	validate, err := NewValidator()
+	if err != nil {
+		return err
+	}
+	for i := range r.AuthorizationDetails {
+		detail := &r.AuthorizationDetails[i]
+		if detail.CredentialConfigurationID != "" && detail.Format != "" {
+			return fmt.Errorf("authorization_details[%d]: credential_configuration_id and format are mutually exclusive", i)
+		}
+		if err := detail.checkFormatFields(); err != nil {
+			return fmt.Errorf("authorization_details[%d]: %w", i, err)
+		}
+		if err := validate.Struct(detail); err != nil {
+			return fmt.Errorf("authorization_details[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// checkFormatFields enforces which of vct/doctype belongs with which format.
+// Unknown formats are permissive so downstream (issuer metadata lookup) owns
+// the final say; the credential_configuration_id path (Format=="") must have
+// neither field set.
+func (a *AuthorizationDetailsParameter) checkFormatFields() error {
+	switch a.Format {
+	case "":
+		if a.VCT != "" {
+			return errors.New("vct requires format")
+		}
+		if a.Doctype != "" {
+			return errors.New("doctype requires format")
+		}
+	case "vc+sd-jwt", "dc+sd-jwt":
+		if a.VCT == "" {
+			return fmt.Errorf("format %q requires vct", a.Format)
+		}
+		if a.Doctype != "" {
+			return fmt.Errorf("doctype not permitted with format %q", a.Format)
+		}
+	case "mso_mdoc":
+		if a.Doctype == "" {
+			return fmt.Errorf("format %q requires doctype", a.Format)
+		}
+		if a.VCT != "" {
+			return fmt.Errorf("vct not permitted with format %q", a.Format)
+		}
+	}
+	return nil
 }

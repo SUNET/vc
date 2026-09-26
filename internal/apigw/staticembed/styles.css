@@ -72,3 +72,77 @@
         margin-bottom: 2px;
     }
 }
+.vc-offer-uri {
+    position: relative;
+    width: 100%;
+}
+
+.vc-offer-uri > pre {
+    width: 100%;
+    padding-right: 2.75rem;
+    margin: 0;
+    overflow-x: auto;
+}
+
+.vc-copy-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.9rem;
+    height: 1.9rem;
+    padding: 0;
+    border: 1px solid var(--bulma-border, #dbdbdb);
+    border-radius: 6px;
+    background: var(--bulma-scheme-main, #fff);
+    color: var(--bulma-text-50, #7a7a7a);
+    cursor: pointer;
+    transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.vc-copy-btn:hover,
+.vc-copy-btn:focus-visible {
+    color: var(--bulma-primary, #485fc7);
+    border-color: currentColor;
+    background: var(--bulma-scheme-main-bis, #fafafa);
+    outline: none;
+}
+
+.vc-copy-btn[data-tooltip]::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    right: 50%;
+    transform: translateX(50%);
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    font-size: 0.72rem;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+}
+
+.vc-copy-btn[data-tooltip]::before {
+    content: "";
+    position: absolute;
+    bottom: calc(100% + 1px);
+    right: 50%;
+    transform: translateX(50%);
+    border: 5px solid transparent;
+    border-top-color: rgba(0, 0, 0, 0.85);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+}
+
+.vc-copy-btn:hover[data-tooltip]::after,
+.vc-copy-btn:hover[data-tooltip]::before,
+.vc-copy-btn:focus-visible[data-tooltip]::after,
+.vc-copy-btn:focus-visible[data-tooltip]::before {
+    opacity: 1;
+}

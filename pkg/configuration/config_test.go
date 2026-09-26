@@ -158,3 +158,65 @@ func TestSignMetadataRateLimitDefaults(t *testing.T) {
 	assert.Equal(t, 20, rl.Burst,
 		"Burst should default to 20")
 }
+
+// Every credential offer publishes credential_offers.issuer_url as
+// `credential_issuer`, but issuer metadata is generated from apigw.public_url
+// and declares THAT. When the two disagree a wallet resolves the offer to an
+// origin serving no metadata (or metadata naming someone else) and discovery
+// fails - silently, at the end of a flow, inside the wallet. There is no
+// deployment on the far side of that, so config load refuses it.
+func TestCheckCredentialOfferIssuerIdentity(t *testing.T) {
+	newCfg := func(issuerURL, publicURL string) *model.Cfg {
+		return &model.Cfg{APIGW: &model.APIGW{
+			PublicURL: publicURL,
+			Delivery: model.APIGWDelivery{
+				CredentialOffers: model.CredentialOffers{IssuerURL: issuerURL},
+			},
+		}}
+	}
+
+	tests := []struct {
+		name        string
+		issuerURL   string
+		publicURL   string
+		service     string
+		wantErr     bool
+		errContains string
+	}{
+		{name: "equal", issuerURL: "https://a.example", publicURL: "https://a.example", service: "apigw"},
+		// NOT accepted: both values are published verbatim, so a trailing
+		// slash on one of them means a wallet compares two different issuer
+		// identifiers. Normalising here would hide the mismatch this check
+		// exists to catch.
+		{
+			name: "differs only by a trailing slash", issuerURL: "https://a.example/", publicURL: "https://a.example",
+			service: "apigw", wantErr: true, errContains: "byte-identical",
+		},
+		{name: "trailing slash on both", issuerURL: "https://a.example/", publicURL: "https://a.example/", service: "apigw"},
+		{
+			name: "different origins", issuerURL: "https://issuer.example", publicURL: "https://apigw.example",
+			service: "apigw", wantErr: true, errContains: "must be byte-identical",
+		},
+		{
+			name: "different scheme only", issuerURL: "http://a.example", publicURL: "https://a.example",
+			service: "apigw", wantErr: true, errContains: "must be byte-identical",
+		},
+		// Absence is the required-tag's business, not this check's.
+		{name: "issuer url unset", issuerURL: "", publicURL: "https://a.example", service: "apigw"},
+		{name: "public url unset", issuerURL: "https://a.example", publicURL: "", service: "apigw"},
+		// Only apigw builds credential offers.
+		{name: "not apigw", issuerURL: "https://issuer.example", publicURL: "https://apigw.example", service: "verifier"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkCredentialOfferIssuerIdentity(newCfg(tt.issuerURL, tt.publicURL), tt.service)
+			if tt.wantErr {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.errContains)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
