@@ -474,3 +474,73 @@ func TestPresentationBuilder_CopyDCQLMetaQuery(t *testing.T) {
 		})
 	}
 }
+
+// TestTemplateSelectionIsConsistentAndDeterministic pins the one thing the
+// request path and the claim-mapping path must agree on: which template.
+//
+// FindTemplateByScopes used to range the templates map and take any scope
+// overlap, while TemplateDCQLQuery used the scope index with non-standard
+// scopes first. Map order is random, so a request overlapping two templates
+// could be BUILT from one and have the other's claim mappings applied to
+// whatever came back, differently on different runs.
+//
+// Note the loader already refuses one scope in two templates
+// (validateNoDuplicateScopes), so the ambiguity is a request naming scopes
+// from several templates, not two templates claiming one scope.
+func TestTemplateSelectionIsConsistentAndDeterministic(t *testing.T) {
+	ctx := t.Context()
+
+	config, err := configuration.LoadPresentationRequestsFromFile(ctx, "../configuration/testdata/overlapping_scope_templates.yaml")
+	if err != nil {
+		t.Fatalf("Failed to load test config: %v", err)
+	}
+	builder := openid4vp.NewPresentationBuilder(config.GetEnabledTemplates())
+
+	tests := []struct {
+		name   string
+		scopes []string
+		want   string
+	}{
+		{"a request within one template", []string{"openid", "profile", "pid"}, "pid_basic"},
+
+		// Two credential scopes from different templates: request order
+		// decides, and both paths have to read it the same way.
+		{"two credential scopes, pid first", []string{"openid", "pid", "eduid"}, "pid_basic"},
+		{"two credential scopes, eduid first", []string{"openid", "eduid", "pid"}, "eduid_basic"},
+
+		// profile is a standard OIDC scope, so it is considered only after
+		// every credential scope - it never decides which template answers.
+		{"a standard scope never decides it", []string{"openid", "profile", "eduid"}, "eduid_basic"},
+		{"even when it comes first", []string{"profile", "openid", "eduid"}, "eduid_basic"},
+
+		// With nothing else to go on, the standard scope still resolves.
+		{"a standard scope alone still resolves", []string{"openid", "profile"}, "pid_basic"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Repeated, because the defect was map iteration order: one pass
+			// could pass by luck.
+			for range 50 {
+				extraction := builder.FindTemplateByScopes(tt.scopes)
+				if extraction == nil {
+					t.Fatalf("FindTemplateByScopes(%v) found nothing", tt.scopes)
+				}
+				if extraction.GetID() != tt.want {
+					t.Fatalf("claim extraction chose %q, want %q", extraction.GetID(), tt.want)
+				}
+
+				_, templateScopes, ok := builder.TemplateDCQLQuery(ctx, tt.scopes)
+				if !ok {
+					t.Fatalf("TemplateDCQLQuery(%v) built nothing", tt.scopes)
+				}
+				// The request path returns the chosen template's own scopes;
+				// they must be the scopes of the template extraction picked.
+				if !slices.Equal(templateScopes, extraction.GetOIDCScopes()) {
+					t.Fatalf("request built from scopes %v but claims mapped by template %q with scopes %v",
+						templateScopes, extraction.GetID(), extraction.GetOIDCScopes())
+				}
+			}
+		})
+	}
+}

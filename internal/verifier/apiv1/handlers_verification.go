@@ -144,24 +144,66 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	redirectURI := u.String()
 
 	// Process all VP tokens for the requested scopes
-	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(authCtx.Scopes))
+	// Only the scopes a credential query actually stands for. authCtx.Scopes is
+	// the raw OIDC scope list, which carries "openid" (always, per OIDC Core)
+	// and whatever else the RP asked for - the shipped eudi_pid_basic template
+	// is selected by "pid profile". Requiring a VP token for those meant any
+	// request naming more than one scope failed here, since no wallet returns a
+	// credential for "profile".
+	// A session created before ScopeQueryIDs existed has a cached DCQLQuery and
+	// no mapping, so a template-built query's response would not resolve. The
+	// mapping is a pure function of the request, so rebuild it rather than fail
+	// a presentation the user has already completed mid rolling deploy.
+	//
+	// Held locally, never written back: MemoryStore.Get returns the cached
+	// *AuthorizationContext itself, so assigning here would mutate an object
+	// concurrent direct-post requests are reading.
+	scopeQueryIDs := authCtx.ScopeQueryIDs
+	if scopeQueryIDs == nil && authCtx.DCQLQuery != nil {
+		if rebuilt := c.ScopeQueryIDs(ctx, authCtx.DCQLQuery, authCtx.Scopes); len(rebuilt) > 0 {
+			c.log.Info("rebuilt the scope-to-query mapping for a session that predates it", "scopes", authCtx.Scopes)
+			scopeQueryIDs = rebuilt
+		}
+	}
 
-	for _, scope := range authCtx.Scopes {
-		vpTokens, ok := vpResponse.VPToken[scope]
-		if !ok || len(vpTokens) == 0 {
-			// Fallback: wallet sent vp_token as a plain string (single credential).
-			// Only allow this when exactly one scope was requested; otherwise
-			// the same credential would be reused for every scope with potentially
-			// wrong validations.
-			if len(authCtx.Scopes) != 1 {
-				c.log.Error(nil, "VP token not found for scope and multiple scopes requested", "scope", scope)
-				return nil, fmt.Errorf("VP token not found for scope %s: _default fallback is only allowed when a single scope is requested", scope)
-			}
-			vpTokens, ok = vpResponse.VPToken["_default"]
-			if !ok || len(vpTokens) == 0 {
-				c.log.Error(nil, "VP token not found for scope", "scope", scope)
-				return nil, fmt.Errorf("VP token not found for scope: %s", scope)
-			}
+	// A query that asked for nothing cannot be satisfied by anything.
+	if authCtx.DCQLQuery != nil && len(authCtx.DCQLQuery.Credentials) == 0 {
+		c.log.Error(nil, "DCQL query requests no credentials", "scopes", authCtx.Scopes)
+		return nil, fmt.Errorf("DCQL query requests no credentials")
+	}
+	// Unconditional: with no credential scope the loop below runs zero times
+	// and caches a successful presentation having validated no VP token. The
+	// check used to fire only when the query had credentials, so a query with
+	// none skipped it.
+	credentialScopes := c.credentialScopes(authCtx, scopeQueryIDs)
+	if len(credentialScopes) == 0 {
+		c.log.Error(nil, "no requested scope corresponds to a requested credential", "scopes", authCtx.Scopes)
+		return nil, fmt.Errorf("no requested scope corresponds to a requested credential")
+	}
+	// Two scopes must not resolve to one vp_token key. resolveScopeQueries
+	// refuses to build such a mapping, but a session cached before it existed
+	// reaches here with only its persisted pairs - and a scope that IS a query
+	// id resolves to itself, so it can collide with another scope mapped onto
+	// it. Both would then read the same credential and validate it twice,
+	// under each scope's rules.
+	claimedBy := make(map[string]string, len(credentialScopes))
+	for _, scope := range credentialScopes {
+		key := queryIDForScopeIn(scopeQueryIDs, scope)
+		if owner, taken := claimedBy[key]; taken {
+			c.log.Error(nil, "two scopes resolve to the same DCQL query id", "query_id", key, "scopes", []string{owner, scope})
+			return nil, fmt.Errorf("scopes %q and %q both resolve to DCQL query id %q; the response cannot be attributed", owner, scope, key)
+		}
+		claimedBy[key] = scope
+	}
+
+	defaultAllowed := c.defaultTokenAllowed(authCtx, scopeQueryIDs, credentialScopes)
+
+	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(credentialScopes))
+
+	for _, scope := range credentialScopes {
+		vpTokens, err := c.vpTokensForScope(authCtx, scopeQueryIDs, defaultAllowed, vpResponse, scope)
+		if err != nil {
+			return nil, err
 		}
 		if len(vpTokens) > 1 {
 			c.log.Info("multiple VP tokens received for scope, using first", "scope", scope, "count", len(vpTokens))
@@ -329,8 +371,14 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				}
 			}
 			if dcqlQuery != nil {
+				// By the scope's QUERY ID, not the scope: a template names its
+				// queries whatever its author chose, so matching on the scope
+				// found nothing for a template-built request and left zkMeta
+				// empty - the ZK verification then failed for want of a
+				// zk_system_type that was in the query all along.
+				queryID := queryIDForScopeIn(scopeQueryIDs, scope)
 				for _, cq := range dcqlQuery.Credentials {
-					if cq.ID == scope && openid4vp.IsMdocZkFormat(cq.Format) {
+					if cq.ID == queryID && openid4vp.IsMdocZkFormat(cq.Format) {
 						zkMeta = cq.Meta
 						for _, claim := range cq.Claims {
 							if len(claim.Path) == 0 || claim.Path[len(claim.Path)-1] == nil {
@@ -604,6 +652,178 @@ type VerificationCallbackRequest struct {
 
 type VerificationCallbackResponse struct {
 	CredentialData []sdjwtvc.CredentialCache `json:"credential_data"`
+}
+
+// credentialScopes returns the requested scopes that are part of the
+// presentation, in request order.
+//
+// A non-standard scope is always kept: dropping on uncertainty would remove it
+// from the validation loop rather than fail in it.
+//
+// A standard OIDC scope is kept only when it really is a credential - named by
+// a query, paired with one, or configured in credential_metadata. "openid" is
+// always present and the shipped template is selected by "pid profile", so
+// requiring a VP token for those failed every multi-scope request. The test is
+// that narrow because a standard scope CAN be a credential: a template may be
+// selected by one, and nothing stops credential_metadata configuring one.
+//
+// No cached query means every scope is returned, as before.
+func (c *Client) credentialScopes(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string) []string {
+	if authCtx.DCQLQuery == nil {
+		return authCtx.Scopes
+	}
+	scopes := make([]string, 0, len(authCtx.Scopes))
+	for _, scope := range authCtx.Scopes {
+		if openid4vp.StandardOIDCScopes[scope] && !c.isCredentialScope(authCtx, scopeQueryIDs, scope) {
+			continue
+		}
+		scopes = append(scopes, scope)
+	}
+	return scopes
+}
+
+// isCredentialScope reports whether a scope names a credential this request
+// actually asked for.
+func (c *Client) isCredentialScope(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string, scope string) bool {
+	if _, mapped := scopeQueryIDs[scope]; mapped {
+		return true
+	}
+	if c.cfg.Common != nil {
+		if _, configured := c.cfg.Common.CredentialMetadata[scope]; configured {
+			return true
+		}
+	}
+	return slices.ContainsFunc(authCtx.DCQLQuery.Credentials, func(cred openid4vp.CredentialQuery) bool {
+		return cred.ID == scope
+	})
+}
+
+// vpTokensForScope finds the VP tokens a wallet returned for one scope, in the
+// three ways a response can name them:
+//
+//   - the scope's own key, which config-built queries use;
+//   - its DCQL query id, since a wallet keys vp_token by query id and a
+//     template names its queries whatever its author chose;
+//   - "_default", for a wallet that sent a plain string. Single-scope requests
+//     only: otherwise one credential would answer every scope, carrying the
+//     others' validations.
+//
+// queryIDForScopeIn returns the DCQL credential query id that stands for scope
+// in this session, which is the scope itself unless ScopeQueryIDs says
+// otherwise. Only differing pairs are persisted, so an absent entry means the
+// two already agree.
+func queryIDForScopeIn(scopeQueryIDs map[string]string, scope string) string {
+	if queryID, mapped := scopeQueryIDs[scope]; mapped {
+		return queryID
+	}
+	return scope
+}
+
+// scopeNamedByQuery reports whether the request's DCQL actually asks for this
+// scope: a credential query carries its id, either directly or through the
+// scope-to-query mapping.
+func scopeNamedByQuery(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string, scope string) bool {
+	if authCtx == nil || authCtx.DCQLQuery == nil {
+		return false
+	}
+	queryID := queryIDForScopeIn(scopeQueryIDs, scope)
+	return slices.ContainsFunc(authCtx.DCQLQuery.Credentials, func(cred openid4vp.CredentialQuery) bool {
+		return cred.ID == queryID
+	})
+}
+
+// defaultTokenAllowed reports whether a plain-string vp_token, which the
+// wallet keys as "_default", can be attributed to a scope at all.
+//
+// "_default" names no query, so it is only unambiguous when the request can
+// come back with exactly one credential AND the one scope left really is that
+// credential.
+//
+// Neither count alone is that test. A template author writes the queries and
+// there can be more of them than the scopes mapped onto them; and
+// credentialScopes keeps an unclaimed non-standard scope on purpose, so that
+// it fails in the validation loop rather than vanishing from it - "openid
+// profile custom_claim" selects the PID template through profile and leaves
+// custom_claim alone in the list, where a length check reads as "one
+// credential".
+//
+// A session with no cached query has only the scope count to go on, as before.
+func (c *Client) defaultTokenAllowed(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string, credentialScopes []string) bool {
+	if len(credentialScopes) != 1 {
+		return false
+	}
+	if authCtx.DCQLQuery == nil {
+		return true
+	}
+	// Named by the query, not merely configured. isCredentialScope accepts a
+	// scope that credential_metadata configures, which is the right test for
+	// deciding whether to VALIDATE a scope - but not for attributing an
+	// unlabelled credential to it. A template selected by an unrelated scope
+	// can leave a configured-but-unrequested scope as the only entry in
+	// credentialScopes, and "_default" would then cache that template's
+	// credential under a scope the request never asked for.
+	return len(authCtx.DCQLQuery.Credentials) <= 1 &&
+		scopeNamedByQuery(authCtx, scopeQueryIDs, credentialScopes[0])
+}
+
+func (c *Client) vpTokensForScope(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string, defaultAllowed bool, vpResponse openid4vp.VPResponse, scope string) ([]string, error) {
+	// One key per scope: its DCQL query id when the mapping names one,
+	// otherwise its own name (which is what a config-built query uses).
+	//
+	// A mapped scope must NOT also be read under its own name. With scope A
+	// mapped to query id B and scope B mapped to query id C, a wallet keying
+	// by query id returns A's credential under "B" - and a scope-name lookup
+	// would hand it to scope B, which would then validate A's credential
+	// under B's rules and never look at C. The collision guard above does not
+	// see it, because the two resolved ids differ.
+	key := queryIDForScopeIn(scopeQueryIDs, scope)
+
+	// The key has to name a credential the request actually asked for.
+	// Scopes are kept in the loop even when no query obviously stands for
+	// them - dropping one would let it vanish instead of failing here - but
+	// keeping it must not mean accepting whatever the wallet chose to key by
+	// that name. For "openid pid custom_claim" the template is selected by
+	// pid, nothing claims custom_claim, and without this a token keyed
+	// "custom_claim" would be validated and cached as though the request had
+	// asked for it, while the template's own query went unprocessed.
+	if !knownQueryKey(authCtx, key) {
+		c.log.Error(nil, "VP token key names no credential this request asked for", "scope", scope, "key", key)
+		return nil, fmt.Errorf("scope %s resolves to key %q, which names no credential query in this request", scope, key)
+	}
+
+	if tokens, ok := vpResponse.VPToken[key]; ok && len(tokens) > 0 {
+		if key != scope {
+			c.log.Debug("resolved VP token through the scope's DCQL query id", "scope", scope, "query_id", key)
+		}
+		return tokens, nil
+	}
+
+	// See defaultAllowed at the call site for what makes _default ambiguous.
+	if !defaultAllowed {
+		c.log.Error(nil, "VP token not found for scope and _default cannot be attributed", "scope", scope)
+		return nil, fmt.Errorf("VP token not found for scope %s: the _default fallback is only allowed when the request asks for exactly one credential and that scope is it", scope)
+	}
+	if tokens, ok := vpResponse.VPToken["_default"]; ok && len(tokens) > 0 {
+		return tokens, nil
+	}
+
+	c.log.Error(nil, "VP token not found for scope", "scope", scope)
+	return nil, fmt.Errorf("VP token not found for scope: %s", scope)
+}
+
+// knownQueryKey reports whether key names a credential query in the DCQL
+// this request was built from.
+//
+// A session with no cached DCQL predates the mapping and is accepted as
+// before - there is nothing to check against, and refusing would break
+// sessions mid rolling deploy.
+func knownQueryKey(authCtx *cache.AuthorizationContext, key string) bool {
+	if authCtx == nil || authCtx.DCQLQuery == nil {
+		return true
+	}
+	return slices.ContainsFunc(authCtx.DCQLQuery.Credentials, func(cred openid4vp.CredentialQuery) bool {
+		return cred.ID == key
+	})
 }
 
 func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCallbackRequest) (*VerificationCallbackResponse, error) {
