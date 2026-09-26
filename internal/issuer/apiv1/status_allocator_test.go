@@ -6,6 +6,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"fmt"
+	"github.com/SUNET/vc/pkg/pki"
+	"github.com/golang-jwt/jwt/v5"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -78,7 +80,7 @@ func newFailingExternalClient(t *testing.T) *statusserviceclient.Client {
 		IngestionURL:        server.URL,
 		ASURL:               server.URL,
 		IssuerID:            "https://issuer.example.org",
-		Key:                 key,
+		Signer:              pki.NewKeyMaterialSigner(&pki.KeyMaterial{PrivateKey: key, SigningMethod: jwt.SigningMethodES256}),
 		PoolSize:            1,
 		RetryInitialBackoff: time.Millisecond,
 		RetryMaxBackoff:     5 * time.Millisecond,
@@ -136,55 +138,82 @@ func TestAllocateOrDegrade_ExternalDegradedModeFail(t *testing.T) {
 	}
 }
 
-// TestStatusServiceKey_DefaultsToIssuerKey checks requirement #2 ("default
-// to the issuer signing key"): with no explicit
-// issuer.status_service.key_config, a usable P-256 issuer signing key is
-// reused as-is.
-func TestStatusServiceKey_DefaultsToIssuerKey(t *testing.T) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+// opaqueSigner stands in for a PKCS#11-backed key: a public key and a Sign
+// method, with the private half unreachable through the interface. That is
+// the point - possession is demonstrated by signing, not by handing over
+// bytes.
+type opaqueSigner struct {
+	pub *ecdsa.PublicKey
+	alg string
+}
+
+func (o *opaqueSigner) Sign(context.Context, []byte) ([]byte, error) {
+	return []byte("signature"), nil
+}
+func (o *opaqueSigner) Algorithm() string { return o.alg }
+func (o *opaqueSigner) KeyID() string     { return "test-key" }
+func (o *opaqueSigner) PublicKey() any    { return o.pub }
+
+func newOpaqueSigner(t *testing.T, curve elliptic.Curve, alg string) *opaqueSigner {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	c := &Client{privateKey: key, cfg: &model.Cfg{Issuer: &model.Issuer{}}}
+	return &opaqueSigner{pub: &key.PublicKey, alg: alg}
+}
 
-	got, err := c.statusServiceKey(&model.StatusServiceConfig{})
+// Requirement #2 ("default to the issuer signing key"): with no explicit
+// issuer.status_service.key_config, the issuer's own signer is reused.
+func TestStatusServiceSigner_DefaultsToIssuerSigner(t *testing.T) {
+	signer := newOpaqueSigner(t, elliptic.P256(), "ES256")
+	c := &Client{signer: signer, cfg: &model.Cfg{Issuer: &model.Issuer{}}}
+
+	got, err := c.statusServiceSigner(&model.StatusServiceConfig{})
 	if err != nil {
-		t.Fatalf("statusServiceKey: %v", err)
+		t.Fatalf("statusServiceSigner: %v", err)
 	}
-	if got != key {
-		t.Fatal("want the issuer's own P-256 key reused as-is")
+	if got != pki.Signer(signer) {
+		t.Fatal("want the issuer's own signer reused as-is")
 	}
 }
 
-// TestStatusServiceKey_RefusesNonP256IssuerKey checks that an issuer whose
-// own signing key cannot be defaulted (not EC, or EC but not P-256) fails
-// loudly and names the fix, rather than silently disabling the feature.
-func TestStatusServiceKey_RefusesNonP256IssuerKey(t *testing.T) {
-	p384Key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	if err != nil {
-		t.Fatalf("generate key: %v", err)
-	}
-	c := &Client{privateKey: p384Key, cfg: &model.Cfg{Issuer: &model.Issuer{}}}
+// An HSM-backed key must be ACCEPTED. The assertion proves possession by
+// producing a signature, which is exactly what a PKCS#11 device does, and
+// nothing in this path needs the private half. An earlier version refused
+// it because HSM key material "never leaves the device" - true, and beside
+// the point.
+func TestStatusServiceSigner_AcceptsAnHSMBackedKey(t *testing.T) {
+	signer := newOpaqueSigner(t, elliptic.P256(), "ES256")
+	c := &Client{signer: signer, cfg: &model.Cfg{Issuer: &model.Issuer{}}}
 
-	_, err = c.statusServiceKey(&model.StatusServiceConfig{})
-	if err == nil {
-		t.Fatal("a non-P-256 issuer key must not be defaulted silently")
-	}
-	if !strings.Contains(err.Error(), "status_service.key_config") {
-		t.Fatalf("error should point at the fix (issuer.status_service.key_config), got: %v", err)
+	if _, err := c.statusServiceSigner(&model.StatusServiceConfig{}); err != nil {
+		t.Fatalf("an HSM-backed P-256 signer must be usable: %v", err)
 	}
 }
 
-// TestStatusServiceKey_RefusesHSMBackedIssuerKey checks the PKCS#11 case
-// specifically: the issuer's own key is not a raw *ecdsa.PrivateKey at all
-// (simulated here by any non-ecdsa value, standing in for a PKCS#11-backed
-// crypto.Signer wrapper), and must be refused the same way.
-func TestStatusServiceKey_RefusesHSMBackedIssuerKey(t *testing.T) {
-	c := &Client{privateKey: "not-a-real-key", cfg: &model.Cfg{Issuer: &model.Issuer{}}}
+// ES256 on P-256 is still required, because that is what the status
+// service's AS verifies - and the error has to name the fix rather than
+// silently disable the feature.
+func TestStatusServiceSigner_RefusesWhatCannotSignES256(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		signer *opaqueSigner
+	}{
+		{"wrong curve", newOpaqueSigner(t, elliptic.P384(), "ES256")},
+		{"wrong algorithm", newOpaqueSigner(t, elliptic.P256(), "RS256")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Client{signer: tt.signer, cfg: &model.Cfg{Issuer: &model.Issuer{}}}
 
-	_, err := c.statusServiceKey(&model.StatusServiceConfig{})
-	if err == nil {
-		t.Fatal("an HSM-backed (non-raw-key) issuer key must not be defaulted silently")
+			_, err := c.statusServiceSigner(&model.StatusServiceConfig{})
+			if err == nil {
+				t.Fatal("must not be defaulted silently")
+			}
+			if !strings.Contains(err.Error(), "status_service.key_config") {
+				t.Fatalf("error should point at the fix, got: %v", err)
+			}
+		})
 	}
 }
 

@@ -120,7 +120,7 @@ type tokenResponse struct {
 func (c *Client) fetchToken(ctx context.Context) (string, int64, error) {
 	tokenURL := strings.TrimRight(c.cfg.ASURL, "/") + "/token"
 
-	assertion, err := buildAssertion(c.cfg.IssuerID, c.cfg.Key, tokenURL)
+	assertion, err := buildAssertion(ctx, c.cfg.IssuerID, c.cfg.Signer, tokenURL)
 	if err != nil {
 		return "", 0, permanent(err) // a signing failure will not fix itself by retrying
 	}

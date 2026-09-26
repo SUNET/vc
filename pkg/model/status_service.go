@@ -43,14 +43,18 @@ type StatusServiceConfig struct {
 	// KeyConfig is the EC (P-256) key pair used to sign the RFC 7523
 	// client assertion. Defaults to Issuer.KeyConfig - this issuer's own
 	// credential-signing key - requirement #2 ("default to the issuer
-	// signing key"). That default only works when Issuer.KeyConfig
-	// resolves to a raw, file-loaded P-256 ECDSA key: an HSM-backed
-	// (PKCS#11) key's private material never leaves the device, so it
-	// cannot be handed to the JWT signing call this package makes, and a
-	// non-EC key (e.g. RSA) cannot produce the ES256 assertion the status
-	// service expects. Startup fails with a clear error naming this field
-	// when defaulting isn't possible, rather than silently disabling the
-	// feature.
+	// signing key").
+	//
+	// An HSM-backed (PKCS#11) key is fine, here or as the default. The
+	// assertion proves possession of the key by signing with it, which is
+	// what the device does; the private half never needs to be readable.
+	// Signing goes through pkg/jose.MakeJWT and a pki.Signer, the same path
+	// every other JWT in this repository takes.
+	//
+	// The requirement is ES256 on P-256, because that is what the status
+	// service's AS verifies - a non-EC key (e.g. RSA) cannot produce it.
+	// Startup fails with an error naming this field when the resolved key
+	// cannot, rather than silently disabling the feature.
 	KeyConfig *pki.KeyConfig `yaml:"key_config,omitempty" validate:"omitempty"`
 	// PoolSize is how many pre-allocated (list_url, index) pairs this
 	// process keeps ready in memory so credential issuance is never

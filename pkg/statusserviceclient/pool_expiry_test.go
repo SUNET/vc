@@ -122,7 +122,7 @@ func TestTake_FallbackRejectsAnEntryInsideTheSkewWindow(t *testing.T) {
 	}
 	c, err := New(Config{
 		IngestionURL: server.URL, ASURL: server.URL,
-		IssuerID: "https://issuer.example.org", Key: key,
+		IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
 		PoolSize: 0, RefillInterval: time.Hour,
 		RetryInitialBackoff: time.Millisecond, RetryMaxBackoff: 2 * time.Millisecond,
 		TakeFallbackTimeout: 150 * time.Millisecond,

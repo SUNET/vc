@@ -88,6 +88,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"fmt"
+	"github.com/SUNET/vc/pkg/pki"
 	"net/http"
 	"sync"
 	"time"
@@ -115,9 +116,14 @@ type Config struct {
 	ASURL string
 	// IssuerID is this issuer's self-asserted identity (RFC 7523 iss/sub).
 	IssuerID string
-	// Key signs the RFC 7523 client assertion. Must be a P-256 key: the
-	// status service's AS verifies an ES256 signature.
-	Key *ecdsa.PrivateKey
+	// Signer signs the RFC 7523 client assertion. Must sign ES256, which
+	// the status service's AS requires and which means a P-256 EC key.
+	//
+	// A pki.Signer rather than a raw key so the key can live in an HSM: the
+	// assertion proves possession by producing a signature, and nothing
+	// here ever needs the private half. This is also how the rest of the
+	// repository signs JWTs (pkg/jose.MakeJWT).
+	Signer pki.Signer
 	// PoolSize is the target number of pre-allocated entries. Defaults to
 	// 50 when zero.
 	PoolSize int
@@ -220,16 +226,23 @@ func New(cfg Config, log *logger.Log) (*Client, error) {
 	if cfg.IssuerID == "" {
 		return nil, fmt.Errorf("statusserviceclient: IssuerID is required")
 	}
-	if cfg.Key == nil {
-		return nil, fmt.Errorf("statusserviceclient: Key is required")
+	if cfg.Signer == nil {
+		return nil, fmt.Errorf("statusserviceclient: Signer is required")
 	}
-	// buildAssertion labels every client assertion ES256, so a key on any
-	// other curve produces a JWT the status service rejects - and a
-	// rejection is retried, so a misconfiguration would surface as a slow
-	// loop of 4xx rather than as the configuration error it is.
-	if cfg.Key.Curve != elliptic.P256() {
-		return nil, fmt.Errorf("statusserviceclient: Key must be on the P-256 curve (client assertions are ES256), got %s",
-			cfg.Key.Curve.Params().Name)
+	// Checked here rather than left to the first request: the status
+	// service rejects a non-ES256 assertion, a rejection is retried, and a
+	// misconfiguration would otherwise surface as a slow loop of 4xx rather
+	// than as the configuration error it is.
+	if alg := cfg.Signer.Algorithm(); alg != "ES256" {
+		return nil, fmt.Errorf("statusserviceclient: Signer must sign ES256 (the status service's client assertions), got %s", alg)
+	}
+	pub, ok := cfg.Signer.PublicKey().(*ecdsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("statusserviceclient: Signer must hold an EC public key, got %T", cfg.Signer.PublicKey())
+	}
+	if pub.Curve != elliptic.P256() {
+		return nil, fmt.Errorf("statusserviceclient: Signer must use the P-256 curve (client assertions are ES256), got %s",
+			pub.Curve.Params().Name)
 	}
 	if cfg.PoolSize <= 0 {
 		cfg.PoolSize = defaultPoolSize

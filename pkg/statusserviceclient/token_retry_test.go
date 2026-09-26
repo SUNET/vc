@@ -111,7 +111,7 @@ func TestGetToken_WaiterHonoursItsOwnDeadline(t *testing.T) {
 	}
 	c, err := New(Config{
 		IngestionURL: server.URL, ASURL: server.URL,
-		IssuerID: "https://issuer.example.org", Key: key,
+		IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
 		PoolSize: 0, RefillInterval: time.Hour,
 		RetryInitialBackoff: time.Millisecond, RetryMaxBackoff: time.Millisecond,
 	}, nil)
@@ -185,7 +185,7 @@ func TestNew_RejectsNonP256Key(t *testing.T) {
 		IngestionURL: "https://status.example.org",
 		ASURL:        "https://as.example.org",
 		IssuerID:     "https://issuer.example.org",
-		Key:          key,
+		Signer:       softwareSigner(key),
 	}, nil)
 	if err == nil {
 		t.Fatal("a P-384 key must be rejected at construction")

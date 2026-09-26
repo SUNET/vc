@@ -1,12 +1,15 @@
 package statusserviceclient
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/go-jose/go-jose/v4"
+	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/pki"
+	josev4 "github.com/go-jose/go-jose/v4"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -22,17 +25,17 @@ import (
 // (tools/loadtest/identity.go) exactly, since it must match what that
 // service's AS verifies: same claim set, same short lifetime, same ES256 +
 // embedded-jwk-header construction.
-func buildAssertion(issuerID string, key *ecdsa.PrivateKey, audience string) (string, error) {
-	now := time.Now()
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.RegisteredClaims{
-		Issuer:    issuerID,
-		Subject:   issuerID,
-		Audience:  jwt.ClaimStrings{audience},
-		IssuedAt:  jwt.NewNumericDate(now),
-		ExpiresAt: jwt.NewNumericDate(now.Add(assertionLifetime)),
-	})
+//
+// It signs through pki.Signer rather than a raw key, so the signing key can
+// live in an HSM: the assertion is proof of possession, and possession is
+// demonstrated by producing the signature, not by holding the bytes.
+func buildAssertion(ctx context.Context, issuerID string, signer pki.Signer, audience string) (string, error) {
+	pub, ok := signer.PublicKey().(*ecdsa.PublicKey)
+	if !ok {
+		return "", fmt.Errorf("client assertion signer must hold an EC public key, got %T", signer.PublicKey())
+	}
 
-	jwk := jose.JSONWebKey{Key: &key.PublicKey}
+	jwk := josev4.JSONWebKey{Key: pub}
 	raw, err := jwk.MarshalJSON()
 	if err != nil {
 		return "", fmt.Errorf("marshal client assertion jwk: %w", err)
@@ -41,9 +44,23 @@ func buildAssertion(issuerID string, key *ecdsa.PrivateKey, audience string) (st
 	if err := json.Unmarshal(raw, &jwkMap); err != nil {
 		return "", fmt.Errorf("unmarshal client assertion jwk: %w", err)
 	}
-	token.Header["jwk"] = jwkMap
 
-	signed, err := token.SignedString(key)
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"iss": issuerID,
+		"sub": issuerID,
+		"aud": []string{audience},
+		"iat": now.Unix(),
+		"exp": now.Add(assertionLifetime).Unix(),
+	}
+
+	// jose.MakeJWT, not a direct SignedString: it is how everything else in
+	// this repository signs a JWT, it takes a pki.Signer rather than raw key
+	// material - so a PKCS#11 key works, the private half never having to
+	// leave the device - and it converts an ASN.1 DER ECDSA signature to the
+	// JWS P1363 form for backends that return DER. alg and kid come from the
+	// signer.
+	signed, err := jose.MakeJWT(ctx, jwt.MapClaims{"jwk": jwkMap}, claims, signer)
 	if err != nil {
 		return "", fmt.Errorf("sign client assertion: %w", err)
 	}

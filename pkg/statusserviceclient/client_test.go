@@ -6,6 +6,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
+	"github.com/SUNET/vc/pkg/pki"
+	"github.com/golang-jwt/jwt/v5"
 	"net/http"
 	"testing"
 	"time"
@@ -31,7 +33,7 @@ func fastConfigAs(fake *fakeStatusService, issuerID string, key *ecdsa.PrivateKe
 		IngestionURL:        fake.ingestionURL,
 		ASURL:               fake.asURL,
 		IssuerID:            issuerID,
-		Key:                 key,
+		Signer:              softwareSigner(key),
 		PoolSize:            5,
 		LowWaterMark:        2,
 		RetryInitialBackoff: 5 * time.Millisecond,
@@ -297,4 +299,13 @@ func TestListIDFromURL(t *testing.T) {
 	if _, err := ListIDFromURL("https://status.example.org/"); err == nil {
 		t.Fatal("want an error for a URL with no list ID segment")
 	}
+}
+
+// softwareSigner wraps a raw test key as a pki.Signer, the same shape
+// production code gets from pki.LoadSigner for a file-based key.
+func softwareSigner(key *ecdsa.PrivateKey) pki.Signer {
+	return pki.NewKeyMaterialSigner(&pki.KeyMaterial{
+		PrivateKey:    key,
+		SigningMethod: jwt.SigningMethodES256,
+	})
 }

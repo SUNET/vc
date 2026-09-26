@@ -300,7 +300,7 @@ func (c *Client) initStatusAllocator(ctx context.Context) error {
 		return fmt.Errorf("issuer.status_service.as_url is required when issuer.status_service.ingestion_url is set")
 	}
 
-	key, err := c.statusServiceKey(scfg)
+	signer, err := c.statusServiceSigner(scfg)
 	if err != nil {
 		return fmt.Errorf("failed to resolve issuer.status_service signing key: %w", err)
 	}
@@ -314,7 +314,7 @@ func (c *Client) initStatusAllocator(ctx context.Context) error {
 		IngestionURL:   scfg.IngestionURL,
 		ASURL:          scfg.ASURL,
 		IssuerID:       issuerID,
-		Key:            key,
+		Signer:         signer,
 		PoolSize:       scfg.PoolSize,
 		LowWaterMark:   scfg.PoolLowWaterMark,
 		AllocateExpiry: scfg.AllocateExpiry,
@@ -331,45 +331,59 @@ func (c *Client) initStatusAllocator(ctx context.Context) error {
 	return nil
 }
 
-// statusServiceKey resolves the EC (P-256) key used to sign the external
-// status service's RFC 7523 client assertion: scfg.KeyConfig when set,
-// otherwise the issuer's own credential-signing key (requirement: "default
-// to the issuer signing key") - but only when that key is directly usable,
-// i.e. a raw, file-loaded P-256 key.
+// statusServiceSigner resolves the signer used for the external status
+// service's RFC 7523 client assertions: issuer.status_service.key_config
+// when set, otherwise the issuer's own credential-signing key (requirement:
+// "default to the issuer signing key").
 //
-// An HSM-backed (PKCS#11) Issuer.KeyConfig cannot be defaulted: its private
-// material never leaves the device, so there is nothing here to hand to the
-// JWT signing call statusserviceclient makes - the identical limitation
-// initMDocIssuer above already has for the same reason. A non-EC key (e.g.
-// RSA) cannot be defaulted either, since the status service authenticates
-// issuers via ES256 client assertions specifically. Both cases fail
-// startup with a message telling the operator to configure
-// issuer.status_service.key_config explicitly, rather than silently
-// disabling the feature they asked for.
-func (c *Client) statusServiceKey(scfg *model.StatusServiceConfig) (*ecdsa.PrivateKey, error) {
+// An HSM-backed (PKCS#11) key works for both. The assertion proves
+// possession of the key by producing a signature with it, which is exactly
+// what a PKCS#11 device does; nothing here needs the private half, and
+// pkg/jose.MakeJWT - what everything else in this repository signs JWTs
+// with - takes a pki.Signer for precisely that reason. An earlier version
+// of this refused to default to an HSM key on the grounds that its material
+// "never leaves the device", which is true and beside the point.
+//
+// What is still required is ES256 on P-256, because that is what the status
+// service's AS verifies. A signer that cannot produce it fails startup with
+// a message naming issuer.status_service.key_config, rather than silently
+// disabling the feature the operator asked for.
+func (c *Client) statusServiceSigner(scfg *model.StatusServiceConfig) (pki.Signer, error) {
 	if scfg.KeyConfig != nil {
-		km, err := pki.NewKeyLoader().LoadKeyMaterial(scfg.KeyConfig)
+		signer, _, _, err := pki.LoadSigner(scfg.KeyConfig)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("issuer.status_service.key_config: %w", err)
 		}
-		key, ok := km.PrivateKey.(*ecdsa.PrivateKey)
-		if !ok {
-			return nil, fmt.Errorf("issuer.status_service.key_config must load an EC private key, got %T", km.PrivateKey)
+		if err := requireES256P256(signer); err != nil {
+			return nil, fmt.Errorf("issuer.status_service.key_config %w", err)
 		}
-		if key.Curve != elliptic.P256() {
-			return nil, fmt.Errorf("issuer.status_service.key_config must be a P-256 key, got curve %s", key.Curve.Params().Name)
-		}
-		return key, nil
+		return signer, nil
 	}
 
-	key, ok := c.privateKey.(*ecdsa.PrivateKey)
+	if c.signer == nil {
+		return nil, fmt.Errorf("issuer.status_service.key_config is not set and the issuer has no signing key configured")
+	}
+	if err := requireES256P256(c.signer); err != nil {
+		return nil, fmt.Errorf("issuer.status_service.key_config is not set, and the issuer's own signing key %w; configure issuer.status_service.key_config explicitly", err)
+	}
+	return c.signer, nil
+}
+
+// requireES256P256 reports why signer cannot sign a status-service client
+// assertion, or nil when it can. Phrased to read as the tail of a sentence
+// naming which key was being considered.
+func requireES256P256(signer pki.Signer) error {
+	if alg := signer.Algorithm(); alg != "ES256" {
+		return fmt.Errorf("must sign ES256, got %s", alg)
+	}
+	pub, ok := signer.PublicKey().(*ecdsa.PublicKey)
 	if !ok {
-		return nil, fmt.Errorf("issuer.status_service.key_config is not set, and the issuer's own signing key is not a usable P-256 EC key (got %T); configure issuer.status_service.key_config explicitly", c.privateKey)
+		return fmt.Errorf("must be an EC key, got %T", signer.PublicKey())
 	}
-	if key.Curve != elliptic.P256() {
-		return nil, fmt.Errorf("issuer.status_service.key_config is not set, and the issuer's own signing key is EC but not P-256 (%s); configure issuer.status_service.key_config explicitly", key.Curve.Params().Name)
+	if pub.Curve != elliptic.P256() {
+		return fmt.Errorf("must be a P-256 key, got curve %s", pub.Curve.Params().Name)
 	}
-	return key, nil
+	return nil
 }
 
 // initMDocIssuer initializes the mDL issuer for ISO 18013-5 credentials
