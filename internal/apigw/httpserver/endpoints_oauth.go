@@ -347,7 +347,17 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 				oidcParams = scopeCfg.OIDCRequestParams
 			}
 			authCtx, authCtxErr := s.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: sessionID})
-			if authCtxErr == nil && len(authCtx.DynamicParams) > 0 {
+			if authCtxErr != nil {
+				// Not fatal here: a session legitimately carries no dynamic
+				// parameters, and Get reports that as an error too, so
+				// failing on every lookup error would break those flows. What
+				// must not happen is proceeding SILENTLY - resolveTemplate
+				// now refuses to emit an unresolved placeholder, so a scope
+				// that actually needed these fails with a clear template
+				// error instead of sending "{{.org_id}}" to the OP.
+				s.log.Info("no authorization context for dynamic OIDC parameters",
+					"session_id", sessionID, "scope", scope, "error", authCtxErr)
+			} else if len(authCtx.DynamicParams) > 0 {
 				dynamicParams = authCtx.DynamicParams
 			}
 

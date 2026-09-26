@@ -193,3 +193,58 @@ func authURLParam(t *testing.T, opts []oauth2.AuthCodeOption, key string) string
 	}
 	return u.Query().Get(key)
 }
+
+// resolveTemplate used to hand the template back verbatim when it had no
+// data, so a configured "{{.org_id}}" reached the OP as those literal
+// characters whenever the dynamic parameters were missing - the request was
+// not bound to the value it was meant to carry, and nothing said so.
+func TestResolveTemplate_RefusesUnresolvedPlaceholders(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		tmpl string
+		data map[string]string
+	}{
+		{"nil data", "{{.org_id}}", nil},
+		{"empty data", "{{.org_id}}", map[string]string{}},
+		{"wrong key", "{{.org_id}}", map[string]string{"other": "x"}},
+		{"placeholder inside JSON", `{"id_token":{"org_id":{"value":"{{.org_id}}"}}}`, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveTemplate(tt.tmpl, tt.data)
+			if err == nil {
+				t.Fatalf("want an error rather than the literal template; got %q", got)
+			}
+		})
+	}
+}
+
+// A string with no actions is not a template and must pass through, or every
+// static acr_values breaks.
+func TestResolveTemplate_PassesThroughLiterals(t *testing.T) {
+	for _, tt := range []struct{ name, in string }{
+		{"plain", "urn:example:loa3"},
+		{"json without placeholders", `{"id_token":{"acr":{"essential":true}}}`},
+		{"empty", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveTemplate(tt.in, nil)
+			if err != nil {
+				t.Fatalf("a literal must pass through: %v", err)
+			}
+			if got != tt.in {
+				t.Fatalf("got %q, want %q", got, tt.in)
+			}
+		})
+	}
+}
+
+// And the normal case still renders.
+func TestResolveTemplate_RendersWithData(t *testing.T) {
+	got, err := resolveTemplate("{{.org_id}}", map[string]string{"org_id": "siros"})
+	if err != nil {
+		t.Fatalf("resolveTemplate: %v", err)
+	}
+	if got != "siros" {
+		t.Fatalf("got %q, want siros", got)
+	}
+}

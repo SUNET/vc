@@ -442,10 +442,16 @@ func resolveJSONTemplate(tmplStr string, data map[string]string) (string, error)
 
 // resolveTemplate resolves Go template syntax in a string using dynamic params as data.
 func resolveTemplate(tmplStr string, data map[string]string) (string, error) {
-	if len(data) == 0 {
-		return tmplStr, nil
-	}
-
+	// No early return for empty data. It used to hand the template back
+	// verbatim, so a configured "{{.org_id}}" reached the OP as those literal
+	// characters whenever the dynamic parameters were missing - from a cache
+	// lookup that failed, a session that carried none, anything. The request
+	// was then not bound to the value it was supposed to carry, and nothing
+	// said so.
+	//
+	// Executing with missingkey=error instead makes a template that needs a
+	// value and has none an error, while a string containing no actions
+	// passes through unchanged as before.
 	tmpl, err := template.New("param").Option("missingkey=error").Parse(tmplStr)
 	if err != nil {
 		return "", fmt.Errorf("invalid template %q: %w", tmplStr, err)
