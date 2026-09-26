@@ -51,6 +51,14 @@ func (s *KeyMaterialSigner) Sign(ctx context.Context, data []byte) ([]byte, erro
 		return EncodeECDSASignature(r, sigS, key.Curve)
 	case *rsa.PrivateKey:
 		return rsa.SignPKCS1v15(rand.Reader, key, hash, hashed)
+	case crypto.Signer:
+		// An HSM/PKCS#11 key: the device signs, we never see the private
+		// half. For ECDSA this returns ASN.1 DER rather than P1363, which
+		// the Signer interface documents as expected from crypto.Signer
+		// backends and which jose.MakeJWT converts.
+		//
+		// After the concrete cases, which satisfy crypto.Signer too.
+		return key.Sign(rand.Reader, hashed, hash)
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", s.km.PrivateKey)
 	}
@@ -71,6 +79,11 @@ func (s *KeyMaterialSigner) SignDigest(ctx context.Context, digest []byte) ([]by
 	case *rsa.PrivateKey:
 		// Use crypto.Signer interface for RSA signing. This is PKCS#1 v1.5 signature
 		// (not encryption), a standard scheme for JWT RS256/RS384/RS512.
+		hash := getHashForAlgorithm(s.km.SigningMethod.Alg())
+		return key.Sign(rand.Reader, digest, hash)
+	case crypto.Signer:
+		// An HSM/PKCS#11 key signing a pre-computed digest, which is what
+		// the device does natively. As in Sign, an ECDSA result is ASN.1 DER.
 		hash := getHashForAlgorithm(s.km.SigningMethod.Alg())
 		return key.Sign(rand.Reader, digest, hash)
 	default:
