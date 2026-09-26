@@ -67,13 +67,11 @@ func TestKeyMaterialSigner_HSMSigns(t *testing.T) {
 	}
 
 	// Verified against the public half, so this checks the signature rather
-	// than merely that no error came back. crypto.Signer returns ASN.1 DER
-	// for ECDSA, which the Signer interface documents and jose.MakeJWT
-	// converts for JWS.
+	// than merely that no error came back - and in IEEE P1363 form, which is
+	// what both signing methods promise regardless of what the device
+	// returned.
 	digest := sha256.Sum256(data)
-	if !ecdsa.VerifyASN1(pub, digest[:], sig) {
-		t.Fatal("signature does not verify against the key's public half")
-	}
+	assertP1363Verifies(t, pub, digest[:], sig)
 }
 
 func TestKeyMaterialSigner_HSMSignsDigest(t *testing.T) {
@@ -85,9 +83,7 @@ func TestKeyMaterialSigner_HSMSignsDigest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an HSM key must be able to sign a digest: %v", err)
 	}
-	if !ecdsa.VerifyASN1(pub, digest[:], sig) {
-		t.Fatal("digest signature does not verify")
-	}
+	assertP1363Verifies(t, pub, digest[:], sig)
 }
 
 // The review finding named PKCS11PrivateKey specifically: "PublicKey()
@@ -197,5 +193,26 @@ func TestKeyMaterialSigner_RawRSAStillSigns(t *testing.T) {
 	digest := sha256.Sum256(data)
 	if err := rsa.VerifyPKCS1v15(&key.PublicKey, crypto.SHA256, digest[:], sig); err != nil {
 		t.Fatalf("raw RSA signature must verify: %v", err)
+	}
+}
+
+// assertP1363Verifies checks the signature is fixed-size R||S for the curve
+// AND verifies. Checking only that it verifies would miss the shape, and
+// ASN.1 DER happens to verify through VerifyASN1 - which is exactly the
+// confusion this guards against.
+func assertP1363Verifies(t *testing.T, pub *ecdsa.PublicKey, digest, sig []byte) {
+	t.Helper()
+
+	want := 2 * GetKeySizeForCurve(pub.Curve)
+	if len(sig) != want {
+		t.Fatalf("signature is %d bytes, want %d: pki.RawSigner promises IEEE P1363, not ASN.1 DER", len(sig), want)
+	}
+
+	r, s, err := DecodeECDSASignature(sig, pub.Curve)
+	if err != nil {
+		t.Fatalf("decoding P1363 signature: %v", err)
+	}
+	if !ecdsa.Verify(pub, digest, r, s) {
+		t.Fatal("signature does not verify against the key's public half")
 	}
 }

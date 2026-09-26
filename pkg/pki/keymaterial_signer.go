@@ -61,7 +61,11 @@ func (s *KeyMaterialSigner) Sign(ctx context.Context, data []byte) ([]byte, erro
 		if err := requireHSMSignable(key); err != nil {
 			return nil, err
 		}
-		return key.Sign(rand.Reader, hashed, hash)
+		sig, err := key.Sign(rand.Reader, hashed, hash)
+		if err != nil {
+			return nil, err
+		}
+		return normalizeHSMECDSASignature(key, sig)
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", s.km.PrivateKey)
 	}
@@ -91,7 +95,11 @@ func (s *KeyMaterialSigner) SignDigest(ctx context.Context, digest []byte) ([]by
 			return nil, err
 		}
 		hash := getHashForAlgorithm(s.km.SigningMethod.Alg())
-		return key.Sign(rand.Reader, digest, hash)
+		sig, err := key.Sign(rand.Reader, digest, hash)
+		if err != nil {
+			return nil, err
+		}
+		return normalizeHSMECDSASignature(key, sig)
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", s.km.PrivateKey)
 	}
@@ -207,4 +215,22 @@ func requireHSMSignable(signer crypto.Signer) error {
 	default:
 		return fmt.Errorf("unsupported HSM public key type: %T", pub)
 	}
+}
+
+// normalizeHSMECDSASignature converts an opaque signer's ECDSA output to
+// IEEE P1363.
+//
+// Both of this type's signing methods promise that form - Sign because JWS
+// requires it, SignDigest because pki.RawSigner's contract says so outright
+// and its callers (the VC 2.0 Data Integrity suites) have no converter
+// downstream the way jose.MakeJWT does for JWS. An HSM returning ASN.1 DER
+// would otherwise produce a Data Integrity proof of the wrong shape, which
+// fails as a malformed proof rather than as a wrong key.
+func normalizeHSMECDSASignature(signer crypto.Signer, sig []byte) ([]byte, error) {
+	pub, ok := signer.Public().(*ecdsa.PublicKey)
+	if !ok {
+		// requireHSMSignable has already refused anything else.
+		return sig, nil
+	}
+	return ECDSASignatureToP1363(sig, pub.Curve)
 }
