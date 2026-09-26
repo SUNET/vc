@@ -51,6 +51,21 @@ func (s *KeyMaterialSigner) Sign(ctx context.Context, data []byte) ([]byte, erro
 		return EncodeECDSASignature(r, sigS, key.Curve)
 	case *rsa.PrivateKey:
 		return rsa.SignPKCS1v15(rand.Reader, key, hash, hashed)
+	case crypto.Signer:
+		// An HSM/PKCS#11 key: the device signs, we never see the private
+		// half. For ECDSA this returns ASN.1 DER rather than P1363, which
+		// the Signer interface documents as expected from crypto.Signer
+		// backends and which jose.MakeJWT converts.
+		//
+		// After the concrete cases, which satisfy crypto.Signer too.
+		if err := requireHSMSignable(key); err != nil {
+			return nil, err
+		}
+		sig, err := key.Sign(rand.Reader, hashed, hash)
+		if err != nil {
+			return nil, err
+		}
+		return normalizeHSMECDSASignature(key, sig)
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", s.km.PrivateKey)
 	}
@@ -73,6 +88,18 @@ func (s *KeyMaterialSigner) SignDigest(ctx context.Context, digest []byte) ([]by
 		// (not encryption), a standard scheme for JWT RS256/RS384/RS512.
 		hash := getHashForAlgorithm(s.km.SigningMethod.Alg())
 		return key.Sign(rand.Reader, digest, hash)
+	case crypto.Signer:
+		// An HSM/PKCS#11 key signing a pre-computed digest, which is what
+		// the device does natively. As in Sign, an ECDSA result is ASN.1 DER.
+		if err := requireHSMSignable(key); err != nil {
+			return nil, err
+		}
+		hash := getHashForAlgorithm(s.km.SigningMethod.Alg())
+		sig, err := key.Sign(rand.Reader, digest, hash)
+		if err != nil {
+			return nil, err
+		}
+		return normalizeHSMECDSASignature(key, sig)
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", s.km.PrivateKey)
 	}
@@ -94,6 +121,16 @@ func (s *KeyMaterialSigner) PublicKey() any {
 	case *ecdsa.PrivateKey:
 		return key.Public()
 	case *rsa.PrivateKey:
+		return key.Public()
+	case crypto.Signer:
+		// An HSM/PKCS#11 key. Its private half is unreadable by design, but
+		// the public half is exactly what crypto.Signer exists to expose -
+		// and returning nil here made every caller that asks for the public
+		// key (this one, and determineKeyID's kid derivation) behave as
+		// though an HSM key had no public key at all.
+		//
+		// Listed after the concrete cases on purpose: those types satisfy
+		// crypto.Signer too, and a type switch takes the first match.
 		return key.Public()
 	default:
 		return nil
@@ -146,4 +183,54 @@ func (s *KeyMaterialSigner) GetCertificate() *x509.Certificate {
 // GetCertificateChain returns the certificate chain if available.
 func (s *KeyMaterialSigner) GetCertificateChain() []string {
 	return s.km.Chain
+}
+
+// requireHSMSignable refuses an opaque signer this package cannot drive
+// correctly.
+//
+// ECDSA is fine: the device signs the digest and returns ASN.1 DER, which is
+// what crypto.Signer backends do and what jose.MakeJWT converts for JWS.
+//
+// RSA is not, yet. PKCS11PrivateKey.Sign selects CKM_RSA_PKCS and hands it
+// the bare digest, but that mechanism only applies PKCS#1 v1.5 PADDING - it
+// does not prepend the DigestInfo structure RFC 8017 requires inside the
+// padding, which is why crypto/rsa does that itself and why the hash-
+// specific CKM_SHA256_RSA_PKCS mechanisms exist. Signing through it as-is
+// produces something that pads correctly and verifies nowhere.
+//
+// Refused rather than quietly wrong: an RS256 assertion that no verifier
+// accepts is worse than a startup error naming the reason. Making it work
+// means either wrapping the digest in DigestInfo here or selecting the
+// hash-specific mechanism in PKCS11PrivateKey.Sign - a change to HSM code
+// that cannot be honestly verified without a device.
+func requireHSMSignable(signer crypto.Signer) error {
+	switch pub := signer.Public().(type) {
+	case *ecdsa.PublicKey:
+		return nil
+	case *rsa.PublicKey:
+		return fmt.Errorf("RSA keys held in an HSM cannot be signed with through this path: "+
+			"PKCS#11 CKM_RSA_PKCS is given a bare digest and adds no DigestInfo, so the signature "+
+			"would not verify as %s; use an EC (P-256) key, or add DigestInfo encoding to the PKCS#11 signer",
+			"RS256")
+	default:
+		return fmt.Errorf("unsupported HSM public key type: %T", pub)
+	}
+}
+
+// normalizeHSMECDSASignature converts an opaque signer's ECDSA output to
+// IEEE P1363.
+//
+// Both of this type's signing methods promise that form - Sign because JWS
+// requires it, SignDigest because pki.RawSigner's contract says so outright
+// and its callers (the VC 2.0 Data Integrity suites) have no converter
+// downstream the way jose.MakeJWT does for JWS. An HSM returning ASN.1 DER
+// would otherwise produce a Data Integrity proof of the wrong shape, which
+// fails as a malformed proof rather than as a wrong key.
+func normalizeHSMECDSASignature(signer crypto.Signer, sig []byte) ([]byte, error) {
+	pub, ok := signer.Public().(*ecdsa.PublicKey)
+	if !ok {
+		// requireHSMSignable has already refused anything else.
+		return sig, nil
+	}
+	return ECDSASignatureToP1363(sig, pub.Curve)
 }
