@@ -75,6 +75,17 @@ type StatusServiceConfig struct {
 	// know any individual credential's real intended expiry, so it cannot
 	// pass a more specific value even if it wanted to.
 	AllocateExpiry time.Duration `yaml:"allocate_expiry"`
+	//
+	// IMPORTANT: omission is not a promise that the entry outlives the
+	// credential. The service answers with now + its own MAX_EXPIRY, fixed
+	// at allocation time, and a pooled entry has already been sitting here
+	// before any credential uses it. An issuer minting 365-day credentials
+	// against a service whose maximum is shorter hands out credentials that
+	// outlive their status entry and become uncheckable near the end of
+	// their life. Set this to cover the longest credential lifetime plus the
+	// pool's lead time when the service's maximum is not comfortably larger;
+	// entries that come back already inside the client's expiry skew are
+	// refused rather than issued (see statusserviceclient's Take).
 	// DegradedMode controls what happens when the pool is empty AND a
 	// bounded synchronous allocation attempt also fails - i.e. the status
 	// service is unreachable or erroring at the exact moment a credential

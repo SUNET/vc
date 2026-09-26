@@ -263,6 +263,13 @@ func extractECPublicKeyFromHSM(ctx *pkcs11.Ctx, session pkcs11.SessionHandle, ke
 	return publicKey, nil, nil
 }
 
+// KeyMaterialSigner reaches HSM keys through crypto.Signer - its Sign,
+// SignDigest and PublicKey all depend on this type satisfying it. Asserted
+// at compile time because the failure otherwise appears far away and late:
+// as "unsupported key type" on the first signature, or as a nil public key
+// during a startup check.
+var _ crypto.Signer = (*PKCS11PrivateKey)(nil)
+
 // PKCS11PrivateKey wraps HSM key information for use with standard crypto interfaces
 type PKCS11PrivateKey struct {
 	Config    *PKCS11Config
