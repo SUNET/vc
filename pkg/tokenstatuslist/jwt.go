@@ -76,11 +76,9 @@ func (sl *StatusList) GenerateJWT(cfg JWTSigningConfig) (string, error) {
 
 	// Build the claims
 	claims := JWTClaims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:  sl.Subject,
-			Issuer:   sl.Issuer,
-			IssuedAt: jwt.NewNumericDate(now),
-		},
+		Subject:  sl.Subject,
+		Issuer:   sl.Issuer,
+		IssuedAt: jwt.NewNumericDate(now),
 		StatusList: StatusListClaim{
 			Bits:           Bits,
 			Lst:            lst,

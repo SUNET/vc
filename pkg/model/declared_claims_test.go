@@ -9,16 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func ptr(s string) *string { return &s }
-
 func TestDeclaredClaimNames_VCTM(t *testing.T) {
 	m := &CredentialMetadata{VCTM: &sdjwtvc.VCTM{Claims: []sdjwtvc.Claim{
-		{Path: []*string{ptr("given_name")}},
-		{Path: []*string{ptr("family_name")}},
+		{Path: []*string{new("given_name")}},
+		{Path: []*string{new("family_name")}},
 		// A nested claim contributes its top-level object, so an address
 		// object from the provider is admitted and handled downstream.
-		{Path: []*string{ptr("address"), ptr("street_address")}},
-		{Path: []*string{ptr("address"), ptr("country")}},
+		{Path: []*string{new("address"), new("street_address")}},
+		{Path: []*string{new("address"), new("country")}},
 		{Path: nil},            // malformed entries must not panic
 		{Path: []*string{nil}}, //
 	}}}

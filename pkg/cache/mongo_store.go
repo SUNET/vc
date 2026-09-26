@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -359,10 +360,8 @@ func (s *MongoStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThum
 			if existing.Forfeited {
 				return nil, errors.New("pre-authorized code has been forfeited")
 			}
-			for _, tp := range existing.RedeemedBy {
-				if tp == dpopThumbprint {
-					return nil, errors.New("pre-authorized code already redeemed by this client")
-				}
+			if slices.Contains(existing.RedeemedBy, dpopThumbprint) {
+				return nil, errors.New("pre-authorized code already redeemed by this client")
 			}
 			if len(existing.RedeemedBy) >= MaxPreAuthRedeemers {
 				return nil, errors.New("pre-authorized code has reached the maximum number of redemptions")
@@ -372,6 +371,64 @@ func (s *MongoStore) RedeemPreAuthorizedCode(ctx context.Context, code, dpopThum
 	}
 
 	return &result, nil
+}
+
+// ConsumeTXCodeAttempt atomically records a tx_code attempt on a
+// pre-authorized code. The filter enforces the attempt budget in a single
+// FindOneAndUpdate so concurrent guesses cannot exceed the cap; when the
+// budget is exhausted the code is forfeited in a follow-up write and
+// ErrTXCodeAttemptsExceeded is returned.
+func (s *MongoStore) ConsumeTXCodeAttempt(ctx context.Context, code string) (*AuthorizationContext, error) {
+	if code == "" {
+		return nil, errors.New("code cannot be empty")
+	}
+
+	filter := bson.M{
+		"code":      code,
+		"forfeited": bson.M{"$ne": true},
+		// tx_code_attempts is omitempty, so it may be absent on new docs;
+		// treat missing as 0 for the cap check.
+		"$expr": bson.M{
+			"$lt": bson.A{
+				bson.M{"$ifNull": bson.A{"$tx_code_attempts", 0}},
+				MaxTXCodeAttempts,
+			},
+		},
+	}
+	update := bson.M{"$inc": bson.M{"tx_code_attempts": 1}}
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+
+	var result AuthorizationContext
+	err := s.coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&result)
+	if err == nil {
+		return &result, nil
+	}
+	if !errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, fmt.Errorf("failed to record tx_code attempt: %w", err)
+	}
+
+	var existing AuthorizationContext
+	findErr := s.coll.FindOne(ctx, bson.M{"code": code}).Decode(&existing)
+	if findErr != nil {
+		if errors.Is(findErr, mongo.ErrNoDocuments) {
+			return nil, ErrNoDocuments
+		}
+		return nil, fmt.Errorf("failed to look up pre-authorized code: %w", findErr)
+	}
+	if existing.Forfeited {
+		return nil, errors.New("pre-authorized code has been forfeited")
+	}
+	if existing.TXCodeAttempts >= MaxTXCodeAttempts {
+		_, upErr := s.coll.UpdateOne(ctx,
+			bson.M{"code": code, "forfeited": bson.M{"$ne": true}},
+			bson.M{"$set": bson.M{"forfeited": true}},
+		)
+		if upErr != nil {
+			return nil, fmt.Errorf("failed to forfeit pre-authorized code after tx_code lockout: %w", upErr)
+		}
+		return nil, ErrTXCodeAttemptsExceeded
+	}
+	return nil, fmt.Errorf("failed to record tx_code attempt: %w", err)
 }
 
 // Consent marks an authorization context as consented.

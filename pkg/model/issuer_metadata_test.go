@@ -2,6 +2,8 @@ package model
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/mdoc"
@@ -525,6 +527,291 @@ func TestIssuerMetadata_Generate_DefaultValues(t *testing.T) {
 	assert.Nil(t, credConfig.CredentialDefinition, "vc+sd-jwt should not have credential_definition")
 }
 
+// TestIssuerMetadata_Generate_PreservesEmbeddedVCT pins the Generate stage's
+// contract: credConfig.VCT is always VCTM.VCT verbatim, with a defensive
+// fallback to VCTURL only when VCTM.VCT is empty. The upstream ResolveVCTUrls
+// stage preserves the file's own vct for both local and external sources and
+// only back-fills VCTM.VCT from the hosting URL when the local file left it
+// empty -- covered by TestIssuerMetadata_Generate_PreservesEmbeddedVCT_LocalFile
+// and _ExternalURL below.
+func TestIssuerMetadata_Generate_PreservesEmbeddedVCT(t *testing.T) {
+	const baseURL = "https://issuer.sunet.se"
+	const vctURL = baseURL + "/type-metadata/test_cred"
+
+	tests := []struct {
+		name    string
+		vctmVCT string
+		format  string
+		wantVCT string
+	}{
+		{name: "dc+sd-jwt with URN VCT", vctmVCT: "urn:eudi:pid:1", format: "dc+sd-jwt", wantVCT: "urn:eudi:pid:1"},
+		{name: "vc+sd-jwt with URN VCT", vctmVCT: "urn:eudi:ehic:1", format: "vc+sd-jwt", wantVCT: "urn:eudi:ehic:1"},
+		{name: "dc+sd-jwt with foreign URL VCT", vctmVCT: "https://registry.siros.org/sirosfoundation/demo_pid_rb_1_5.vctm.json", format: "dc+sd-jwt", wantVCT: "https://registry.siros.org/sirosfoundation/demo_pid_rb_1_5.vctm.json"},
+		{name: "jwt_vc_json with URN VCT", vctmVCT: "urn:example:diploma:1", format: "jwt_vc_json", wantVCT: "urn:example:diploma:1"},
+		{name: "dc+sd-jwt with empty VCT falls back to VCTURL", vctmVCT: "", format: "dc+sd-jwt", wantVCT: vctURL},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &IssuerMetadata{}
+			credMeta := map[string]*CredentialMetadata{
+				"test_cred": {
+					VCTM:   &sdjwtvc.VCTM{VCT: tt.vctmVCT},
+					VCTURL: vctURL,
+					Format: tt.format,
+				},
+			}
+			metadata, err := cfg.Generate(context.Background(), baseURL, credMeta)
+			require.NoError(t, err)
+			credConfig, exists := metadata.CredentialConfigurationsSupported["test_cred"]
+			require.True(t, exists)
+			assert.Equal(t, tt.wantVCT, credConfig.VCT)
+		})
+	}
+}
+
+// TestIssuerMetadata_Generate_PreservesEmbeddedVCT_LocalFile pins the
+// end-to-end contract for a scope configured with vctm_file_path -- apigw
+// hosts the VCTM under /type-metadata/<scope>, and VCTURL is always the
+// hosting URL. VCTM.VCT keeps whatever the file declared (URN or foreign
+// registry URL); only an empty file vct is back-filled from the hosting URL.
+// credConfig.VCT and the served VCTMRaw's vct always match VCTM.VCT, so the
+// credential body (BuildCredentialWithSigner stamps body["vct"] = vctm.VCT),
+// DCQL vct_values, and the wallet's stored tag all reference the same value.
+func TestIssuerMetadata_Generate_PreservesEmbeddedVCT_LocalFile(t *testing.T) {
+	const baseURL = "https://demo-1.issuer.id.siros.org"
+	const scope = "demo_pid_rb_1_5"
+	hostingURL := baseURL + "/type-metadata/" + scope
+
+	tests := []struct {
+		name    string
+		fileVCT string
+		wantVCT string
+	}{
+		{name: "file's foreign registry URL vct is preserved", fileVCT: "https://registry.siros.org/sirosfoundation/demo_pid_rb_1_5.vctm.json", wantVCT: "https://registry.siros.org/sirosfoundation/demo_pid_rb_1_5.vctm.json"},
+		{name: "file's URN vct is preserved", fileVCT: "urn:eudi:pid:1", wantVCT: "urn:eudi:pid:1"},
+		{name: "file with no vct is back-filled from the hosting URL", fileVCT: "", wantVCT: hostingURL},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(map[string]any{
+				"vct":  tt.fileVCT,
+				"name": "Demo PID",
+			})
+			require.NoError(t, err)
+
+			cfg := &Cfg{
+				Common: &Common{
+					CredentialMetadata: map[string]*CredentialMetadata{
+						scope: {
+							Format:       "dc+sd-jwt",
+							VCTMFilePath: "/vctms/" + scope + ".json",
+							VCTM:         &sdjwtvc.VCTM{VCT: tt.fileVCT, Name: "Demo PID"},
+							VCTMRaw:      raw,
+						},
+					},
+				},
+			}
+
+			require.NoError(t, cfg.ResolveVCTUrls(baseURL))
+
+			constructor := cfg.Common.CredentialMetadata[scope]
+			assert.Equal(t, hostingURL, constructor.VCTURL, "VCTURL for a local file is always the hosting URL")
+			assert.Equal(t, tt.wantVCT, constructor.VCTM.VCT)
+
+			var doc map[string]any
+			require.NoError(t, json.Unmarshal(constructor.VCTMRaw, &doc))
+			assert.Equal(t, tt.wantVCT, doc["vct"], "served VCTM document must carry the same vct as VCTM.VCT")
+
+			metadata, err := (&IssuerMetadata{}).Generate(context.Background(), baseURL, cfg.Common.CredentialMetadata)
+			require.NoError(t, err)
+			credConfig, exists := metadata.CredentialConfigurationsSupported[scope]
+			require.True(t, exists)
+			assert.Equal(t, tt.wantVCT, credConfig.VCT)
+		})
+	}
+}
+
+// TestIssuerMetadata_Generate_PreservesEmbeddedVCT_ExternalURL pins the
+// external-source contract: when the VCTM is loaded via vctm_url, apigw is
+// NOT the registry -- the external source is authoritative. ResolveVCTUrls
+// must leave VCTM.VCT and VCTMRaw untouched, VCTURL is set to the external
+// URL, and credConfig.VCT advertises the file's own vct verbatim (URN or
+// foreign URL). This must stay stable regardless of what the local case
+// rewrites.
+func TestIssuerMetadata_Generate_PreservesEmbeddedVCT_ExternalURL(t *testing.T) {
+	const baseURL = "https://demo-1.issuer.id.siros.org"
+	const scope = "demo_pid_rb_1_5"
+	const vctmURL = "https://registry.siros.org/sirosfoundation/demo_pid_rb_1_5.vctm.json"
+
+	tests := []struct {
+		name    string
+		fileVCT string
+	}{
+		{name: "external URL vct is preserved verbatim", fileVCT: vctmURL},
+		{name: "external URN vct is preserved verbatim", fileVCT: "urn:eudi:pid:1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(map[string]any{
+				"vct":  tt.fileVCT,
+				"name": "Demo PID",
+			})
+			require.NoError(t, err)
+
+			cfg := &Cfg{
+				Common: &Common{
+					CredentialMetadata: map[string]*CredentialMetadata{
+						scope: {
+							Format:  "dc+sd-jwt",
+							VCTMUrl: vctmURL,
+							VCTM:    &sdjwtvc.VCTM{VCT: tt.fileVCT, Name: "Demo PID"},
+							VCTMRaw: raw,
+						},
+					},
+				},
+			}
+
+			require.NoError(t, cfg.ResolveVCTUrls(baseURL))
+
+			constructor := cfg.Common.CredentialMetadata[scope]
+			assert.Equal(t, vctmURL, constructor.VCTURL, "VCTURL for an external VCTM is the vctm_url")
+			assert.Equal(t, tt.fileVCT, constructor.VCTM.VCT, "external VCTM.VCT must be preserved verbatim")
+
+			var doc map[string]any
+			require.NoError(t, json.Unmarshal(constructor.VCTMRaw, &doc))
+			assert.Equal(t, tt.fileVCT, doc["vct"], "external VCTMRaw must not be rewritten")
+
+			metadata, err := (&IssuerMetadata{}).Generate(context.Background(), baseURL, cfg.Common.CredentialMetadata)
+			require.NoError(t, err)
+			credConfig, exists := metadata.CredentialConfigurationsSupported[scope]
+			require.True(t, exists)
+			assert.Equal(t, tt.fileVCT, credConfig.VCT)
+		})
+	}
+}
+
+// TestIssuerMetadata_Generate_ServedMetadata_MixedSources exercises the exact
+// startup wiring apigw's Client.New runs -- ResolveVCTUrls then
+// IssuerMetadata.Generate against cfg.Common.CredentialMetadata -- with a
+// locally-published (vctm_file_path) scope with its own URN, a local scope
+// with no vct at all, and an external (vctm_url) scope side by side. It
+// then marshals the result to JSON (what /.well-known/openid-credential-issuer
+// serves). Each scope must carry its own vct with zero cross-contamination:
+//
+//   - local_pid_urn: keeps the URN from the file ("urn:eudi:pid:1"); apigw
+//     hosts the metadata under /type-metadata/local_pid_urn but that URL is
+//     never advertised as vct.
+//   - local_pid_nofile: had no vct, so ResolveVCTUrls back-fills the hosting
+//     URL and the served vct is /type-metadata/local_pid_nofile.
+//   - external_pid: source is authoritative; keeps the file's URN and the
+//     apigw's /type-metadata/external_pid URL never appears in it.
+func TestIssuerMetadata_Generate_ServedMetadata_MixedSources(t *testing.T) {
+	const baseURL = "https://demo-1.issuer.id.siros.org"
+	const localURNScope = "local_pid_urn"
+	const localNoFileVCTScope = "local_pid_nofile"
+	const externalScope = "external_pid"
+	const localURN = "urn:eudi:pid:1"
+	const externalVCT = "urn:eudi:pid:1"
+	const externalVCTMUrl = "https://registry.siros.org/sirosfoundation/external_pid.vctm.json"
+
+	localURNHostingURL := baseURL + "/type-metadata/" + localURNScope
+	localNoFileHostingURL := baseURL + "/type-metadata/" + localNoFileVCTScope
+	externalHostingURL := baseURL + "/type-metadata/" + externalScope
+
+	localURNRaw, err := json.Marshal(map[string]any{
+		"vct":  localURN,
+		"name": "Local PID (URN)",
+	})
+	require.NoError(t, err)
+	localNoFileRaw, err := json.Marshal(map[string]any{
+		"name": "Local PID (no vct)",
+	})
+	require.NoError(t, err)
+	externalRaw, err := json.Marshal(map[string]any{
+		"vct":  externalVCT,
+		"name": "External PID",
+	})
+	require.NoError(t, err)
+
+	cfg := &Cfg{
+		Common: &Common{
+			CredentialMetadata: map[string]*CredentialMetadata{
+				localURNScope: {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/vctms/" + localURNScope + ".json",
+					VCTM:         &sdjwtvc.VCTM{VCT: localURN, Name: "Local PID (URN)"},
+					VCTMRaw:      localURNRaw,
+				},
+				localNoFileVCTScope: {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/vctms/" + localNoFileVCTScope + ".json",
+					VCTM:         &sdjwtvc.VCTM{Name: "Local PID (no vct)"},
+					VCTMRaw:      localNoFileRaw,
+				},
+				externalScope: {
+					Format:  "dc+sd-jwt",
+					VCTMUrl: externalVCTMUrl,
+					VCTM:    &sdjwtvc.VCTM{VCT: externalVCT, Name: "External PID"},
+					VCTMRaw: externalRaw,
+				},
+			},
+		},
+	}
+
+	require.NoError(t, cfg.ResolveVCTUrls(baseURL))
+
+	metadata, err := (&IssuerMetadata{}).Generate(context.Background(), baseURL, cfg.Common.CredentialMetadata)
+	require.NoError(t, err)
+
+	served, err := json.Marshal(metadata)
+	require.NoError(t, err)
+
+	var doc struct {
+		CredentialConfigurationsSupported map[string]struct {
+			VCT string `json:"vct"`
+		} `json:"credential_configurations_supported"`
+	}
+	require.NoError(t, json.Unmarshal(served, &doc))
+
+	assert.Equal(t, localURN, doc.CredentialConfigurationsSupported[localURNScope].VCT,
+		"local scope with an explicit URN: served vct must keep the URN")
+	assert.Equal(t, localNoFileHostingURL, doc.CredentialConfigurationsSupported[localNoFileVCTScope].VCT,
+		"local scope without a file vct: served vct must be the hosting URL")
+	assert.Equal(t, externalVCT, doc.CredentialConfigurationsSupported[externalScope].VCT,
+		"external scope: served vct must be the file's own vct")
+
+	// The local URN scope's hosting URL must not sneak in as its advertised vct.
+	assert.NotContains(t, string(served), fmt.Sprintf(`%q:%q`, "vct", localURNHostingURL),
+		"the local URN scope must not advertise its apigw hosting URL as vct")
+	assert.NotContains(t, string(served), fmt.Sprintf(`%q:%q`, "vct", externalHostingURL),
+		"the external scope must not advertise the apigw hosting URL as its vct")
+}
+
+// TestIssuerMetadata_Generate_MDDLDoctype_Preserved locks in the mso_mdoc
+// branch's already-correct behavior: MDDL.DocType is copied verbatim into
+// credConfig.Doctype, no hosting URL rewrites (regression guard alongside
+// TestIssuerMetadata_Generate_PreservesEmbeddedVCT).
+func TestIssuerMetadata_Generate_MDDLDoctype_Preserved(t *testing.T) {
+	cfg := &IssuerMetadata{}
+	credMeta := map[string]*CredentialMetadata{
+		"test_mdl": {
+			Format: "mso_mdoc",
+			MDDL: &mdoc.MDDLSchema{
+				Format:  "mso_mdoc",
+				DocType: "org.iso.18013.5.1.mDL",
+			},
+		},
+	}
+	metadata, err := cfg.Generate(context.Background(), "https://issuer.sunet.se", credMeta)
+	require.NoError(t, err)
+	credConfig, exists := metadata.CredentialConfigurationsSupported["test_mdl"]
+	require.True(t, exists)
+	assert.Equal(t, "org.iso.18013.5.1.mDL", credConfig.Doctype)
+	assert.Empty(t, credConfig.VCT, "mso_mdoc scopes must not set VCT")
+}
+
 func TestIssuerMetadata_Generate_MultipleCredentials(t *testing.T) {
 	cfg := &IssuerMetadata{}
 
@@ -560,11 +847,11 @@ func TestIssuerMetadata_Generate_MultipleCredentials(t *testing.T) {
 
 	ehicConfig := metadata.CredentialConfigurationsSupported["ehic"]
 	assert.Equal(t, "vc+sd-jwt", ehicConfig.Format)
-	assert.Equal(t, baseURL+"/type-metadata/ehic", ehicConfig.VCT)
+	assert.Equal(t, "urn:eudi:ehic:1", ehicConfig.VCT)
 
 	diplomaConfig := metadata.CredentialConfigurationsSupported["diploma"]
 	assert.Equal(t, "vc+sd-jwt", diplomaConfig.Format) // default
-	assert.Equal(t, baseURL+"/type-metadata/diploma", diplomaConfig.VCT)
+	assert.Equal(t, "urn:eudi:diploma:1", diplomaConfig.VCT)
 }
 
 func TestIssuerMetadata_Generate_DisclosurePolicy(t *testing.T) {
@@ -580,10 +867,9 @@ func TestIssuerMetadata_Generate_DisclosurePolicy(t *testing.T) {
 		expectRoots  []string
 	}{
 		{
-			name:         "no policy configured defaults to none",
+			name:         "no policy configured omits field",
 			policy:       nil,
-			expectPolicy: true,
-			expectType:   "none",
+			expectPolicy: false,
 		},
 		{
 			name: "none policy",
@@ -615,36 +901,72 @@ func TestIssuerMetadata_Generate_DisclosurePolicy(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			credMeta := map[string]*CredentialMetadata{
-				"test_cred": {
+	// Both the VCTM/SD-JWT and mso_mdoc/MDDL branches of Generate must honor
+	// the opt-in contract: an unset policy is omitted, and a set policy is
+	// propagated verbatim.
+	formats := []struct {
+		name  string
+		build func(policy *openid4vci.EmbeddedDisclosurePolicy) *CredentialMetadata
+	}{
+		{
+			name: "dc+sd-jwt",
+			build: func(policy *openid4vci.EmbeddedDisclosurePolicy) *CredentialMetadata {
+				return &CredentialMetadata{
 					VCTM:             &sdjwtvc.VCTM{VCT: baseURL + "/type-metadata/test_cred"},
 					VCTURL:           baseURL + "/type-metadata/test_cred",
 					Format:           "dc+sd-jwt",
-					DisclosurePolicy: tt.policy,
-				},
-			}
+					DisclosurePolicy: policy,
+				}
+			},
+		},
+		{
+			name: "mso_mdoc",
+			build: func(policy *openid4vci.EmbeddedDisclosurePolicy) *CredentialMetadata {
+				return &CredentialMetadata{
+					Format: "mso_mdoc",
+					MDDL: &mdoc.MDDLSchema{
+						Format:  "mso_mdoc",
+						DocType: "org.iso.18013.5.1.mDL",
+					},
+					DisclosurePolicy: policy,
+				}
+			},
+		},
+	}
 
-			ctx := context.Background()
-			metadata, err := cfg.Generate(ctx, baseURL, credMeta)
-			require.NoError(t, err)
+	for _, f := range formats {
+		t.Run(f.name, func(t *testing.T) {
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					credMeta := map[string]*CredentialMetadata{
+						"test_cred": f.build(tt.policy),
+					}
 
-			credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
+					ctx := context.Background()
+					metadata, err := cfg.Generate(ctx, baseURL, credMeta)
+					require.NoError(t, err)
 
-			if !tt.expectPolicy {
-				assert.Nil(t, credConfig.DisclosurePolicy)
-				return
-			}
+					credConfig := metadata.CredentialConfigurationsSupported["test_cred"]
 
-			require.NotNil(t, credConfig.DisclosurePolicy)
-			assert.Equal(t, tt.expectType, credConfig.DisclosurePolicy.PolicyType)
+					if !tt.expectPolicy {
+						assert.Nil(t, credConfig.DisclosurePolicy)
+						// omitempty must keep the field out of the marshalled metadata too
+						js, err := json.Marshal(credConfig)
+						require.NoError(t, err)
+						assert.NotContains(t, string(js), "disclosure_policy")
+						return
+					}
 
-			if tt.expectRPs != nil {
-				assert.Equal(t, tt.expectRPs, credConfig.DisclosurePolicy.AuthorizedRelyingParties)
-			}
-			if tt.expectRoots != nil {
-				assert.Equal(t, tt.expectRoots, credConfig.DisclosurePolicy.TrustedRoots)
+					require.NotNil(t, credConfig.DisclosurePolicy)
+					assert.Equal(t, tt.expectType, credConfig.DisclosurePolicy.PolicyType)
+
+					if tt.expectRPs != nil {
+						assert.Equal(t, tt.expectRPs, credConfig.DisclosurePolicy.AuthorizedRelyingParties)
+					}
+					if tt.expectRoots != nil {
+						assert.Equal(t, tt.expectRoots, credConfig.DisclosurePolicy.TrustedRoots)
+					}
+				})
 			}
 		})
 	}

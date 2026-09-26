@@ -16,13 +16,6 @@ import (
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
 )
 
-// int64Ptr is a helper to create a pointer to an int64
-//
-//go:fix inline
-func int64Ptr(v int64) *int64 {
-	return new(v)
-}
-
 // mockTokenStatusListIssuer is a mock implementation of the TokenStatusListIssuer interface for testing
 type mockTokenStatusListIssuer struct {
 	jwtCache cache.Cache[string]

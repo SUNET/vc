@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/internal/apigw/cache"
 	datasources "github.com/SUNET/vc/internal/apigw/data_sources"
 	"github.com/SUNET/vc/internal/apigw/staticembed"
+	"github.com/SUNET/vc/internal/webvendor"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -151,7 +152,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 		c.Next()
 	})
 
-	s.gin.StaticFS("/static", http.FS(staticembed.FS))
+	s.gin.StaticFS("/static", http.FS(webvendor.Overlay(staticembed.FS)))
 
 	tmpl := template.New("").Funcs(template.FuncMap{
 		"json": func(v any) (any, error) {
@@ -178,7 +179,21 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "/", http.StatusOK, s.endpointIndex)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "offers", http.StatusOK, s.endpointUICredentialOffers)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "offers/:scope/:wallet_id", http.StatusOK, s.endpointUICreateCredentialOffer)
+
+	// Creating an offer persists a by-reference credential-offer document, and
+	// this route sits on the unauthenticated root group (it is the operator
+	// UI's own endpoint). The document id is content-addressed, so repeat
+	// requests reuse one document rather than accumulate - see
+	// credentialOfferUIUUID - and this limit caps the request rate on top of
+	// that, the same way the credential endpoints below are capped.
+	offerRPM := 20
+	if s.cfg.APIGW.RateLimit != nil && s.cfg.APIGW.RateLimit.CredentialOfferRequestsPerMinute > 0 {
+		offerRPM = s.cfg.APIGW.RateLimit.CredentialOfferRequestsPerMinute
+	}
+	offerRL := httphelpers.NewRateLimiter(s.cacheService.RateLimit, offerRPM)
+	rgOffers := rgRoot.Group("")
+	rgOffers.Use(offerRL.Middleware())
+	s.httpHelpers.Server.RegEndpoint(ctx, rgOffers, http.MethodGet, "offers/:scope", http.StatusOK, s.endpointUICreateCredentialOffer)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodPost, "nonce", http.StatusOK, s.endpointVCINonce)
 
@@ -240,6 +255,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCRP, http.MethodGet, "/callback", http.StatusOK, s.endpointOIDCRPCallback)
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "health", 200, s.endpointHealth)
+
+	if s.cfg.APIGW.Dashboard.Enable {
+		s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "dashboard", http.StatusOK, s.endpointDashboard)
+		s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "dashboard/proxy", http.StatusOK, s.endpointDashboardProxy)
+	}
 
 	// Prometheus metrics scrape endpoint
 	if s.metricsHandler != nil {

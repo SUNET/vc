@@ -189,14 +189,12 @@ func TestGenerateJWT(t *testing.T) {
 	statuses := []uint8{0, 1, 2, 1, 0, 3, 2, 1}
 
 	cfg := JWTConfig{
-		TokenConfig: TokenConfig{
-			Issuer:    "https://example.com",
-			Subject:   "https://example.com/statuslists/1",
-			Statuses:  statuses,
-			ExpiresIn: 24 * time.Hour,
-			TTL:       43200,
-			KeyID:     "key-1",
-		},
+		Issuer:        "https://example.com",
+		Subject:       "https://example.com/statuslists/1",
+		Statuses:      statuses,
+		ExpiresIn:     24 * time.Hour,
+		TTL:           43200,
+		KeyID:         "key-1",
 		SigningKey:    privateKey,
 		SigningMethod: jwt.SigningMethodES256,
 	}
@@ -301,11 +299,9 @@ func TestGenerateJWTWithJWKHeader(t *testing.T) {
 
 func TestGenerateJWTMissingKey(t *testing.T) {
 	cfg := JWTConfig{
-		TokenConfig: TokenConfig{
-			Issuer:   "https://example.com",
-			Subject:  "https://example.com/statuslists/1",
-			Statuses: []uint8{1, 2, 3},
-		},
+		Issuer:     "https://example.com",
+		Subject:    "https://example.com/statuslists/1",
+		Statuses:   []uint8{1, 2, 3},
 		SigningKey: nil,
 	}
 
@@ -321,13 +317,11 @@ func TestGenerateCWT(t *testing.T) {
 	statuses := []uint8{0, 1, 2, 1, 0, 3, 2, 1}
 
 	cfg := CWTConfig{
-		TokenConfig: TokenConfig{
-			Issuer:    "https://example.com",
-			Subject:   "https://example.com/statuslists/1",
-			Statuses:  statuses,
-			ExpiresIn: 24 * time.Hour,
-			TTL:       43200,
-		},
+		Issuer:     "https://example.com",
+		Subject:    "https://example.com/statuslists/1",
+		Statuses:   statuses,
+		ExpiresIn:  24 * time.Hour,
+		TTL:        43200,
 		SigningKey: privateKey,
 	}
 
@@ -359,11 +353,9 @@ func TestGetStatusFromCWT(t *testing.T) {
 	statuses := []uint8{5, 10, 15, 20, 25}
 
 	cfg := CWTConfig{
-		TokenConfig: TokenConfig{
-			Issuer:   "https://example.com",
-			Subject:  "https://example.com/statuslists/1",
-			Statuses: statuses,
-		},
+		Issuer:     "https://example.com",
+		Subject:    "https://example.com/statuslists/1",
+		Statuses:   statuses,
 		SigningKey: privateKey,
 	}
 
@@ -540,14 +532,12 @@ func TestParseJWT(t *testing.T) {
 	statuses := []uint8{5, 10, 15, 20, 25}
 
 	cfg := JWTConfig{
-		TokenConfig: TokenConfig{
-			Issuer:    "https://example.com",
-			Subject:   "https://example.com/statuslists/1",
-			Statuses:  statuses,
-			ExpiresIn: 24 * time.Hour,
-			TTL:       43200,
-			KeyID:     "key-1",
-		},
+		Issuer:        "https://example.com",
+		Subject:       "https://example.com/statuslists/1",
+		Statuses:      statuses,
+		ExpiresIn:     24 * time.Hour,
+		TTL:           43200,
+		KeyID:         "key-1",
 		SigningKey:    privateKey,
 		SigningMethod: jwt.SigningMethodES256,
 	}
@@ -580,11 +570,9 @@ func TestGetStatusFromJWT(t *testing.T) {
 	statuses := []uint8{5, 10, 15, 20, 25}
 
 	cfg := JWTConfig{
-		TokenConfig: TokenConfig{
-			Issuer:   "https://example.com",
-			Subject:  "https://example.com/statuslists/1",
-			Statuses: statuses,
-		},
+		Issuer:        "https://example.com",
+		Subject:       "https://example.com/statuslists/1",
+		Statuses:      statuses,
 		SigningKey:    privateKey,
 		SigningMethod: jwt.SigningMethodES256,
 	}

@@ -210,7 +210,6 @@ func (b *MSOBuilder) Build() (*COSESign1, map[string][]cbor.Tag, error) {
 	validFromStr := b.validFrom.UTC().Format(time.RFC3339)
 	validUntilStr := b.validUntil.UTC().Format(time.RFC3339)
 
-
 	mso := map[string]any{
 		"version":         "1.0",
 		"digestAlgorithm": string(b.digestAlgorithm),

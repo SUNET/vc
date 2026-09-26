@@ -17,6 +17,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const preAuthPINLength = 6
+
 // DatastoreUploadReply is the reply for a document upload
 type DatastoreUploadReply struct {
 	DocumentID string `json:"document_id"`
@@ -564,6 +566,10 @@ type DatastorePreAuthOfferRequest struct {
 type DatastorePreAuthOfferReply struct {
 	CredentialOffer    *openid4vci.CredentialOfferResult `json:"credential_offer"`
 	CredentialOfferURL string                            `json:"credential_offer_url"`
+	// TXCode is the transaction code (PIN) the wallet must present at the
+	// token endpoint. Only set when apigw.auth_providers.preauth.enable_pin
+	// is true; must be delivered to the end user out-of-band.
+	TXCode string `json:"tx_code,omitempty"`
 }
 
 // DatastorePreAuthOffer generates a pre-authorized credential offer for a specific
@@ -582,6 +588,13 @@ type DatastorePreAuthOfferReply struct {
 //	@Param			req	body		DatastorePreAuthOfferRequest	true	" "
 //	@Router			/api/v1/datastore/preauth_offer [post]
 func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAuthOfferRequest) (*DatastorePreAuthOfferReply, error) {
+	// Only scopes explicitly marked auth_provider: preauth can be minted
+	// as no-user-auth offers. Otherwise this endpoint could bypass the
+	// SAML/OIDC/OpenID4VP flow declared in data_sources.
+	if err := c.requirePreAuthScope(req.Scope); err != nil {
+		return nil, err
+	}
+
 	// Look up the document from the datastore
 	doc, err := c.datastoreStore.GetByKey(ctx, req.AuthenticSource, req.Scope, req.DocumentID)
 	if err != nil {
@@ -609,6 +622,23 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 		return nil, fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
+	// Optionally generate a transaction code (PIN) that the wallet must
+	// present at the token endpoint.
+	var pin string
+	if c.cfg.APIGW.AuthProviders.PreAuth.EnablePIN {
+		pin, err = crypto.GenerateNumericCode(preAuthPINLength)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate transaction code: %w", err)
+		}
+		grant, _ := credentialOffer.Grants[openid4vci.GrantTypePreAuthorizedCode].(openid4vci.GrantPreAuthorizedCode)
+		grant.TXCode = &openid4vci.TXCode{
+			InputMode:   "numeric",
+			Length:      preAuthPINLength,
+			Description: "Enter the PIN provided by the issuer",
+		}
+		credentialOffer.Grants[openid4vci.GrantTypePreAuthorizedCode] = grant
+	}
+
 	// Create and persist the authorization context so the wallet can redeem
 	// the offer via the token endpoint.
 	// Note: AuthorizationDetails is intentionally left empty. If set, the token
@@ -617,15 +647,17 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 	// (not credential_configuration_id) in the credential request. Most wallets
 	// use credential_configuration_id for pre-auth flows, so we keep it simple.
 	authCtx := &cache.AuthorizationContext{
-		SessionID:    preAuthCode,
-		Code:         preAuthCode,
-		Status:       "code_issued",
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(5 * time.Minute).Unix(),
-		Scopes:       []string{req.Scope},
-		Nonce:        nonce,
-		DataSource:   string(model.DataSourceDatastore),
-		AuthProvider: model.AuthProviderDatastore,
+		SessionID:     preAuthCode,
+		Code:          preAuthCode,
+		Status:        "code_issued",
+		CreatedAt:     time.Now(),
+		ExpiresAt:     time.Now().Add(5 * time.Minute).Unix(),
+		Scopes:        []string{req.Scope},
+		Nonce:         nonce,
+		DataSource:    string(model.DataSourceDatastore),
+		AuthProvider:  model.AuthProviderDatastore,
+		TXCode:        pin,
+		PreAuthorized: true,
 	}
 	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		return nil, fmt.Errorf("failed to store pre-auth code: %w", err)
@@ -648,6 +680,7 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 	reply := &DatastorePreAuthOfferReply{
 		CredentialOffer:    credentialOffer,
 		CredentialOfferURL: credentialOfferURL,
+		TXCode:             pin,
 	}
 
 	c.log.Info("Pre-authorized credential offer created for datastore document",
@@ -657,4 +690,26 @@ func (c *Client) DatastorePreAuthOffer(ctx context.Context, req *DatastorePreAut
 		"offer_id", credentialOffer.ID)
 
 	return reply, nil
+}
+
+// requirePreAuthScope enforces that the scope is registered under
+// data_sources.datastore with auth_provider: preauth. Checking any source is
+// unsafe: a scope may appear under datastore with saml/oidc and separately
+// under another source with preauth, yet this endpoint always mints an offer
+// from the datastore document.
+func (c *Client) requirePreAuthScope(scope string) error {
+	entry, ok := c.cfg.APIGW.DataSources.Datastore.Scopes[scope]
+	if !ok {
+		return helpers.NewErrorDetails(
+			"invalid_scope",
+			fmt.Sprintf("scope %q is not configured for pre-authorized issuance (no datastore entry)", scope),
+		)
+	}
+	if entry.AuthProvider != model.AuthProviderPreAuth {
+		return helpers.NewErrorDetails(
+			"invalid_scope",
+			fmt.Sprintf("scope %q is not configured for pre-authorized issuance (datastore auth_provider must be %q)", scope, model.AuthProviderPreAuth),
+		)
+	}
+	return nil
 }

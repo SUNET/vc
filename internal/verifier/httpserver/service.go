@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/internal/verifier/middleware"
 	"github.com/SUNET/vc/internal/verifier/notify"
 	"github.com/SUNET/vc/internal/verifier/staticembed"
+	"github.com/SUNET/vc/internal/webvendor"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -123,7 +124,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		return nil, err
 	}
 
-	s.gin.StaticFS("/static", http.FS(staticembed.FS))
+	s.gin.StaticFS("/static", http.FS(webvendor.Overlay(staticembed.FS)))
 
 	tmpl := template.New("").Funcs(template.FuncMap{
 		"toJSON": func(v any) string {

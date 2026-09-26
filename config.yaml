@@ -214,7 +214,15 @@ apigw:
         mdl:
           auth_provider: oidc
           auth_claims: ["given_name", "family_name", "birth_date"]
+        # Example: a credential issuable only via /api/v1/datastore/preauth_offer.
+        # Wallet-initiated PAR requests for this scope are rejected.
+        #micro_credential:
+        #  auth_provider: preauth
   auth_providers:
+    # preauth (data_sources scopes with auth_provider: preauth).
+    # Set enable_pin: true to require a PIN on pre-authorized credential offers.
+    #preauth:
+    #  enable_pin: true
     oidc:
       enable: true
       issuer_url: "http://mock-oauth2.vc.docker:8080/default"

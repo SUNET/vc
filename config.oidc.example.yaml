@@ -69,6 +69,11 @@ apigw:
         ehic:
           auth_provider: oidc
           auth_claims: ["given_name", "family_name", "birthdate"]
+        # "preauth" restricts issuance to pre-authorized credential offers
+        # (e.g. via POST /api/v1/datastore/preauth_offer). Wallet-initiated
+        # PAR requests for this scope are rejected with invalid_scope.
+        micro_credential:
+          auth_provider: preauth
 
     # External API: credential data is fetched from a remote API at issuance time.
     # OIDC identifies the user; the remote API provides the credential data.
@@ -80,6 +85,10 @@ apigw:
 
   # ── Auth providers ───────────────────────────────────────────────
   auth_providers:
+    # preauth (data_sources scopes with auth_provider: preauth).
+    # Set enable_pin: true to require a PIN on pre-authorized credential offers.
+    #preauth:
+    #  enable_pin: true
     oidc:
       enable: true
       issuer_url: "https://accounts.google.com"

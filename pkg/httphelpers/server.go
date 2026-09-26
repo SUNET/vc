@@ -76,7 +76,10 @@ func (s *serverHandler) RegEndpoint(ctx context.Context, rg *gin.RouterGroup, me
 		}
 
 		if res == nil {
-			c.Status(defaultStatus)
+			// Preserve any status the handler already set (e.g. via c.Redirect).
+			if c.Writer.Status() == http.StatusOK {
+				c.Status(defaultStatus)
+			}
 			return
 		}
 

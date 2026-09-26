@@ -227,8 +227,7 @@ func NewServerError(description string, cause error) *OAuthError {
 // GetHTTPStatus returns the HTTP status code for an error
 // Returns the OAuthError's HTTPStatus if it's an OAuthError, otherwise 500
 func GetHTTPStatus(err error) int {
-	var oauthErr *OAuthError
-	if errors.As(err, &oauthErr) {
+	if oauthErr, ok := errors.AsType[*OAuthError](err); ok {
 		return oauthErr.HTTPStatus
 	}
 	return http.StatusInternalServerError
@@ -242,8 +241,7 @@ func IsOAuthError(err error) bool {
 
 // AsOAuthError converts an error to OAuthError, or wraps it if it's not already one
 func AsOAuthError(err error) *OAuthError {
-	var oauthErr *OAuthError
-	if errors.As(err, &oauthErr) {
+	if oauthErr, ok := errors.AsType[*OAuthError](err); ok {
 		return oauthErr
 	}
 	// Wrap unknown errors as server errors

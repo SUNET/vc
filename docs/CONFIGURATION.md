@@ -231,17 +231,18 @@ sets none of them is an OpenID4VP 1.0 deployment.
 
 > **Path:** `.common.credential_metadata.<credential scope>`
 
-| Field               | Type     | Description                                                                                                                                                                                                                                                                                                          | Example       | Default     | Required                                                                         |
-| ------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ----------- | -------------------------------------------------------------------------------- |
-| `vctm_file_path`    | `string` | Path to a local VCTM JSON file. When set, apigw will publish the VCTM at /type-metadata/:scope. Used for every format except mso_mdoc.                                                                                                                                                                               | -             | -           | Yes (if none of vctm_url, mddl_file_path, mddl_url, vct, doctype set)            |
-| `vctm_url`          | `string` | URL where the VCTM is already published externally. When set, the VCTM is fetched from this URL at startup for internal use but NOT re-published by apigw. Used for every format except mso_mdoc.                                                                                                                    | -             | -           | Yes (if none of vctm_file_path, mddl_file_path, mddl_url, vct, doctype set)      |
-| `vct`               | `string` | Vct claim value to resolve via Common.CredentialRegistry (a TS11 registry client), used only when neither VCTMFilePath nor VCTMUrl is set. Requires Common.CredentialRegistry.Enable - this field being present in a scope's config does not itself turn registry lookups on. Used for every format except mso_mdoc. | -             | -           | Yes (if none of vctm_file_path, vctm_url, mddl_file_path, mddl_url, doctype set) |
-| `mddl_file_path`    | `string` | Path to a local MDDL (mso_mdoc) schema JSON file, as produced by registry-cli's mddl format generator.                                                                                                                                                                                                               | -             | -           | Yes (if none of vctm_file_path, vctm_url, mddl_url, vct, doctype set)            |
-| `mddl_url`          | `string` | URL where the MDDL schema is already published externally. The mso_mdoc analogue of vctm_url.                                                                                                                                                                                                                        | -             | -           | Yes (if none of vctm_file_path, vctm_url, mddl_file_path, vct, doctype set)      |
-| `doctype`           | `string` | Mdoc doctype value to resolve via Common.CredentialRegistry, used only when neither MDDLFilePath nor MDDLUrl is set. Requires Common.CredentialRegistry.Enable, same as VCT. Used only for mso_mdoc.                                                                                                                 | -             | -           | Yes (if none of vctm_file_path, vctm_url, mddl_file_path, mddl_url, vct set)     |
-| `format`            | `string` | Credential format to issue                                                                                                                                                                                                                                                                                           | `"dc+sd-jwt"` | `dc+sd-jwt` | No                                                                               |
-| `disclosure_policy` | `object` | The embedded disclosure policy for this credential type. Per ARF 3.0 §6.6.2.8 and CIR 2024/2979 Annex III. Only applicable to QEAAs and PuB-EAAs (not PIDs). When omitted, the metadata publishes policy_type "none" (no restrictions).                                                                              | -             | -           | No                                                                               |
-| `attributes`        | `object` | Claim names to their source fields and transformation rules for credential issuance                                                                                                                                                                                                                                  | -             | -           | No                                                                               |
+| Field               | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Example       | Default     | Required                                                                         |
+| ------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ----------- | -------------------------------------------------------------------------------- |
+| `vctm_file_path`    | `string` | Path to a local VCTM JSON file. When set, apigw will publish the VCTM at /type-metadata/:scope. Used for every format except mso_mdoc.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | -             | -           | Yes (if none of vctm_url, mddl_file_path, mddl_url, vct, doctype set)            |
+| `vctm_url`          | `string` | URL where the VCTM is already published externally. When set, the VCTM is fetched from this URL at startup for internal use but NOT re-published by apigw. Used for every format except mso_mdoc.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | -             | -           | Yes (if none of vctm_file_path, mddl_file_path, mddl_url, vct, doctype set)      |
+| `vct`               | `string` | Vct claim value to resolve via Common.CredentialRegistry (a TS11 registry client), used only when neither VCTMFilePath nor VCTMUrl is set. Requires Common.CredentialRegistry.Enable - this field being present in a scope's config does not itself turn registry lookups on. Used for every format except mso_mdoc.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | -             | -           | Yes (if none of vctm_file_path, vctm_url, mddl_file_path, mddl_url, doctype set) |
+| `mddl_file_path`    | `string` | Path to a local MDDL (mso_mdoc) schema JSON file, as produced by registry-cli's mddl format generator.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | -             | -           | Yes (if none of vctm_file_path, vctm_url, mddl_url, vct, doctype set)            |
+| `mddl_url`          | `string` | URL where the MDDL schema is already published externally. The mso_mdoc analogue of vctm_url.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | -             | -           | Yes (if none of vctm_file_path, vctm_url, mddl_file_path, vct, doctype set)      |
+| `replace_vct`       | `bool`   | ReplaceVCT decides what happens to a local VCTM that ALREADY declares a vct: false (the default) publishes the file's own identifier, true overwrites it with the /type-metadata/{scope} URL apigw serves the document at. A file that declares NO vct always takes the hosting URL, whatever this says - there is nothing to preserve, and a Type Metadata document without a vct is not one (SD-JWT VC 6.3). So the served bytes always carry an identifier, and it is always the one the credential names. The default keeps a URN working: an identifier chosen outside this deployment survives publication. Set true when this deployment owns the type and the hosting URL is meant to be canonical. Only meaningful for a local VCTM (vctm_file_path): an external source is authoritative. | `false`       | `false`     | No                                                                               |
+| `doctype`           | `string` | Mdoc doctype value to resolve via Common.CredentialRegistry, used only when neither MDDLFilePath nor MDDLUrl is set. Requires Common.CredentialRegistry.Enable, same as VCT. Used only for mso_mdoc.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | -             | -           | Yes (if none of vctm_file_path, vctm_url, mddl_file_path, mddl_url, vct set)     |
+| `format`            | `string` | Credential format to issue                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `"dc+sd-jwt"` | `dc+sd-jwt` | No                                                                               |
+| `disclosure_policy` | `object` | The embedded disclosure policy for this credential type. Per CIR 2024/2979 Annex III and ETSI TS 119 472-3 §4.2.5. Only applicable to QEAAs and PuB-EAAs (not PIDs). Optional and off by default: when omitted, no `disclosure_policy` field is emitted in the credential issuer metadata.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | -             | -           | No                                                                               |
+| `attributes`        | `object` | Claim names to their source fields and transformation rules for credential issuance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | -             | -           | No                                                                               |
 
 ### `disclosure_policy`
 
@@ -280,6 +281,7 @@ Configuration for the API Gateway service that handles credential issuance reque
 | `trust`                   | `object` | Trust evaluation configuration for OpenID4VP credential validation. When configured, credentials presented via VP are validated against a PDP.                                                                      | -                           | -       | No       |
 | `federation`              | `object` | OpenID Federation entity configuration. When enabled, serves /.well-known/openid-federation as a self-signed JWT.                                                                                                   | -                           | -       | No       |
 | `rate_limit`              | `object` | Per-endpoint rate limiting for the APIGW.                                                                                                                                                                           | -                           | -       | No       |
+| `dashboard`               | `object` | The /dashboard demo landing page.                                                                                                                                                                                   | -                           | -       | No       |
 
 ### `api_server`
 
@@ -430,11 +432,11 @@ Each key under a data source is a credential type.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>`
 
-| Field           | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Example                                 | Default | Required |
-| --------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------- | -------- |
-| `auth_provider` | `string`   | Auth provider for this credential type (openid4vp, saml, or oidc)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | -                                       | -       | Yes      |
-| `auth_claims`   | `[]string` | The normalized claim names used for datastore identity lookup when auth_provider is saml or oidc. Not used for openid4vp (use AuthScopes instead). These names must match the BSON field names under "identities." in the datastore. Use attribute_mappings (in auth_providers) to normalize provider-specific attribute names (e.g. SAML urn:oid:2.5.4.42, eIDAS date_of_birth) to these canonical names. Available identity fields: given_name, family_name, birth_date, birth_place, authentic_source_person_id, personal_administrative_number. | `[given_name, family_name, birth_date]` | -       | No       |
-| `auth_scopes`   | `object`   | Credential scope keys to their per-scope authentication config. Used only for openid4vp: the wallet must present a credential matching any one of the listed scopes (OR logic). Each entry specifies which claims to extract from that particular credential type.                                                                                                                                                                                                                                                                                  | -                                       | -       | No       |
+| Field           | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Example                                 | Default | Required |
+| --------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | ------- | -------- |
+| `auth_provider` | `string`   | Auth provider for this credential type (openid4vp, saml, oidc, or preauth). Use preauth to restrict issuance to pre-authorized credential offers only; wallet-initiated PAR/authorize requests for such a scope are rejected.                                                                                                                                                                                                                                                                                                                                                                    | -                                       | -       | Yes      |
+| `auth_claims`   | `[]string` | The normalized claim names used for datastore identity lookup when auth_provider is saml or oidc. Not used for openid4vp (use AuthScopes instead). Must be empty when auth_provider is preauth. These names must match the BSON field names under "identities." in the datastore. Use attribute_mappings (in auth_providers) to normalize provider-specific attribute names (e.g. SAML urn:oid:2.5.4.42, eIDAS date_of_birth) to these canonical names. Available identity fields: given_name, family_name, birth_date, birth_place, authentic_source_person_id, personal_administrative_number. | `[given_name, family_name, birth_date]` | -       | No       |
+| `auth_scopes`   | `object`   | Credential scope keys to their per-scope authentication config. Used only for openid4vp: the wallet must present a credential matching any one of the listed scopes (OR logic). Each entry specifies which claims to extract from that particular credential type.                                                                                                                                                                                                                                                                                                                               | -                                       | -       | No       |
 
 ### `auth_scopes` entry
 
@@ -469,9 +471,11 @@ Each entry represents one acceptable credential type the wallet can present.
 
 The data comes directly from the SAML attributes or OIDC claims.
 
-| Field           | Type     | Description                                           | Example | Default | Required |
-| --------------- | -------- | ----------------------------------------------------- | ------- | ------- | -------- |
-| `auth_provider` | `string` | Auth provider for this credential type (saml or oidc) | -       | -       | Yes      |
+| Field             | Type     | Description                                                                                                                                                                                                                                                                                                                      | Example   | Default | Required |
+| ----------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------- | -------- |
+| `auth_provider`   | `string` | Auth provider for this credential type (saml or oidc)                                                                                                                                                                                                                                                                            | -         | -       | Yes      |
+| `defaults`        | `object` | Claim values injected into the assertion document for credential-level fields the authentication assertion cannot supply (e.g. issuing_authority, issuing_country, date_of_expiry). Merged after attribute_mapping — real attributes always win.                                                                                 | -         | -       | No       |
+| `expiry_duration` | `string` | ExpiryDuration, if set, computes date_of_expiry at issuance time as now+duration (formatted as ISO YYYY-MM-DD) and overrides any static date_of_expiry in Defaults. Prevents freshly issued credentials from shipping pre-expired when a static date is left un-rotated. Uses Go duration syntax; example: "8760h" for one year. | `"8760h"` | -       | No       |
 
 ### `external_api`
 
@@ -501,7 +505,7 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 | ----------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- | -------- |
 | `claim`     | `string` | Target claim name (supports dot-notation for nesting)                                                                                                    | `"identity.given_name"` | -       | Yes      |
 | `required`  | `bool`   | Required indicates if this attribute must be present in the assertion/response                                                                           | -                       | `false` | No       |
-| `transform` | `string` | Optional transformation to apply Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3"                                         | -                       | -       | No       |
+| `transform` | `string` | Optional transformation to apply Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3", "yyyymmdd_to_iso"                      | -                       | -       | No       |
 | `default`   | `string` | Optional default value if attribute is missing                                                                                                           | -                       | -       | No       |
 | `as_array`  | `bool`   | AsArray wraps a scalar value in a single-element array before setting the claim. No-op when the value is already a slice (e.g. multi-valued OIDC claim). | -                       | -       | No       |
 
@@ -509,10 +513,11 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 
 > **Path:** `.apigw.auth_providers`
 
-| Field  | Type     | Description               | Example | Default | Required |
-| ------ | -------- | ------------------------- | ------- | ------- | -------- |
-| `saml` | `object` | The SAML SP auth provider | -       | -       | No       |
-| `oidc` | `object` | The OIDC RP auth provider | -       | -       | No       |
+| Field     | Type     | Description                                                                                 | Example | Default | Required |
+| --------- | -------- | ------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `saml`    | `object` | The SAML SP auth provider                                                                   | -       | -       | No       |
+| `oidc`    | `object` | The OIDC RP auth provider                                                                   | -       | -       | No       |
+| `preauth` | `object` | The pre-authorized credential offer flow (data_sources scopes with auth_provider: preauth). | -       | -       | No       |
 
 ### `saml`
 
@@ -535,6 +540,7 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 | `metadata_signing_cert_path` | `string` | Path to the X.509 certificate used to verify metadata signatures. When set, all fetched metadata (MDQ and static) must carry a valid XML signature from this certificate.                                                                                                                                                                                 | -                                         | -       | No                                               |
 | `allow_unsigned_metadata`    | `bool`   | AllowUnsignedMetadata permits MDQ/URL metadata without signature verification. This is INSECURE (MITM → fake IdP) and should only be used in development. When false (default), MDQ and URL metadata sources require MetadataSigningCertPath. Local metadata files are allowed unsigned regardless (with a startup warning).                              | -                                         | `false` | No                                               |
 | `metadata_cache_ttl`         | `int`    | MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ                                                                                                                                                                                                                                                                     | -                                         | -       | No                                               |
+| `metadata`                   | `object` | Metadata carries the federation-facing description of this SP that goes into the published SAML metadata (mdui:UIInfo, md:Organization, md:ContactPerson). Required for SWAMID acceptance; harmless when empty.                                                                                                                                           | -                                         | -       | No                                               |
 
 ### `static_idp_metadata`
 
@@ -545,6 +551,73 @@ Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers
 | `entity_id`     | `string` | IdP entity identifier                                                         | -       | -       | Yes                                               |
 | `metadata_path` | `string` | File path to IdP metadata XML                                                 | -       | -       | Yes (if metadata_url not set; mutually exclusive) |
 | `metadata_url`  | `string` | HTTP(S) URL to fetch IdP metadata from (mutually exclusive with MetadataPath) | -       | -       | No                                                |
+
+### `metadata`
+
+> **Path:** `.apigw.auth_providers.saml.metadata`
+
+> **Constraint** (`contact_persons`): When contact_persons is set, SWAMID Tech 6.1.4 requires at least one 'technical' and one 'administrative' contact. Other types (support, billing, other) may appear alongside them.
+
+These descriptors are not populated by crewjam/saml by default; the samlsp
+service serializes them into the published SP metadata XML.
+
+| Field             | Type     | Description                                                                                                                                   | Example | Default | Required |
+| ----------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `organization`    | `object` | Organization becomes md:Organization on the EntityDescriptor.                                                                                 | -       | -       | No       |
+| `contact_persons` | `array`  | ContactPersons becomes one or more md:ContactPerson on the EntityDescriptor. SWAMID requires at least types "technical" and "administrative". | -       | -       | No       |
+| `ui_info`         | `object` | UIInfo becomes mdui:UIInfo inside md:Extensions on the SPSSODescriptor.                                                                       | -       | -       | No       |
+
+### `organization`
+
+> **Path:** `.apigw.auth_providers.saml.metadata.organization`
+
+A single language tag applies to all three localized fields; SWAMID Tech
+6.1.4 mandates at least "en".
+
+| Field          | Type     | Description  | Example | Default | Required |
+| -------------- | -------- | ------------ | ------- | ------- | -------- |
+| `name`         | `string` | Name         | -       | -       | Yes      |
+| `display_name` | `string` | Display Name | -       | -       | Yes      |
+| `url`          | `string` | URL          | -       | -       | Yes      |
+| `lang`         | `string` | Lang         | -       | `en`    | No       |
+
+### `contact_persons` entry
+
+> **Path:** `.apigw.auth_providers.saml.metadata.contact_persons[]`
+
+| Field        | Type     | Description | Example | Default | Required |
+| ------------ | -------- | ----------- | ------- | ------- | -------- |
+| `type`       | `string` | Type        | -       | -       | Yes      |
+| `company`    | `string` | Company     | -       | -       | No       |
+| `given_name` | `string` | Given Name  | -       | -       | No       |
+| `sur_name`   | `string` | Sur Name    | -       | -       | No       |
+| `email`      | `string` | Email       | -       | -       | No       |
+| `phone`      | `string` | Phone       | -       | -       | No       |
+
+### `ui_info`
+
+> **Path:** `.apigw.auth_providers.saml.metadata.ui_info`
+
+A single language tag applies to all localized child elements.
+
+| Field                   | Type     | Description           | Example | Default | Required |
+| ----------------------- | -------- | --------------------- | ------- | ------- | -------- |
+| `display_name`          | `string` | Display Name          | -       | -       | Yes      |
+| `description`           | `string` | Description           | -       | -       | Yes      |
+| `information_url`       | `string` | Information URL       | -       | -       | Yes      |
+| `privacy_statement_url` | `string` | Privacy Statement URL | -       | -       | Yes      |
+| `logo`                  | `object` | Logo                  | -       | -       | No       |
+| `lang`                  | `string` | Lang                  | -       | `en`    | No       |
+
+### `logo`
+
+> **Path:** `.apigw.auth_providers.saml.metadata.ui_info.logo`
+
+| Field    | Type     | Description | Example | Default | Required |
+| -------- | -------- | ----------- | ------- | ------- | -------- |
+| `url`    | `string` | URL         | -       | -       | Yes      |
+| `height` | `int`    | Height      | -       | -       | Yes      |
+| `width`  | `int`    | Width       | -       | -       | Yes      |
 
 ### `oidc`
 
@@ -599,6 +672,14 @@ persisted in the database.
 | `enable`               | `bool`   | Enable activates dynamic client registration                                   | -       | -       | No               |
 | `initial_access_token` | `string` | Bearer token for registration Required by some OIDC Providers (e.g., Keycloak) | -       | -       | Yes (if enabled) |
 
+### `preauth`
+
+> **Path:** `.apigw.auth_providers.preauth`
+
+| Field        | Type   | Description                                                                                                                                                                                                                  | Example | Default | Required |
+| ------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `enable_pin` | `bool` | EnablePIN, when true, generates a numeric transaction code (PIN) for each pre-authorized credential offer created via /api/v1/datastore/preauth_offer. The wallet must include the PIN in the token request. Default: false. | -       | `false` | No       |
+
 ### `remotes` entry
 
 > **Path:** `.apigw.remotes.<remote name>`
@@ -649,10 +730,10 @@ persisted in the database.
 
 > **Path:** `.apigw.delivery.credential_offers`
 
-| Field        | Type     | Description                      | Example | Default | Required |
-| ------------ | -------- | -------------------------------- | ------- | ------- | -------- |
-| `issuer_url` | `string` | Issuer URL for credential offers | -       | -       | Yes      |
-| `wallets`    | `object` | Wallet redirect configurations   | -       | -       | Yes      |
+| Field        | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Example | Default | Required |
+| ------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `issuer_url` | `string` | Issuer IDENTIFIER published as `credential_issuer` inside each credential offer. It MUST be byte-identical to apigw.public_url - a trailing slash on one of them is a mismatch, because both are published verbatim - and config load refuses anything else: issuer metadata is generated from public_url and declares that as its own `credential_issuer`, so a wallet resolving an offer to {credential_issuer}/.well-known/openid-credential-issuer would otherwise reach an origin serving no metadata, or metadata naming a different issuer. It is still not where offers are RETRIEVED from. A by-reference offer (`credential_offer_uri`) is built from apigw.public_url, because that field is the statement about where this service answers; this one is an identity claim that happens to hold the same string. | -       | -       | Yes      |
+| `wallets`    | `object` | Wallet redirect configurations                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | -       | -       | Yes      |
 
 ### `wallets` entry
 
@@ -871,11 +952,47 @@ Example rules:
 
 > **Path:** `.apigw.rate_limit`
 
-| Field                            | Type  | Description                                                         | Example | Default | Required |
-| -------------------------------- | ----- | ------------------------------------------------------------------- | ------- | ------- | -------- |
-| `token_requests_per_minute`      | `int` | Maximum token endpoint requests per minute per IP. Default: 20      | -       | `20`    | No       |
-| `credential_requests_per_minute` | `int` | Maximum credential endpoint requests per minute per IP. Default: 30 | -       | `30`    | No       |
-| `datastore_requests_per_minute`  | `int` | Maximum datastore endpoint requests per minute per IP. Default: 60  | -       | `60`    | No       |
+| Field                                  | Type  | Description                                                                                              | Example | Default | Required |
+| -------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `token_requests_per_minute`            | `int` | Maximum token endpoint requests per minute per IP. Default: 20                                           | -       | `20`    | No       |
+| `credential_requests_per_minute`       | `int` | Maximum credential endpoint requests per minute per IP. Default: 30                                      | -       | `30`    | No       |
+| `datastore_requests_per_minute`        | `int` | Maximum datastore endpoint requests per minute per IP. Default: 60                                       | -       | `60`    | No       |
+| `credential_offer_requests_per_minute` | `int` | Maximum issuer-UI credential offer creation requests (GET /offers/:scope) per minute per IP. Default: 20 | -       | `20`    | No       |
+
+### `dashboard`
+
+> **Path:** `.apigw.dashboard`
+
+Intended for dev/demo environments; opt in by setting enable: true. Off by
+default so no shared-config deployment starts exposing its service inventory
+to anonymous callers without an explicit action from the operator.
+
+| Field      | Type     | Description                                                                                                                                                                     | Example | Default                        | Required |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------ | -------- |
+| `enable`   | `bool`   | Enable serves GET /dashboard. Default: false (opt-in).                                                                                                                          | -       | `false`                        | No       |
+| `title`    | `string` | Title overrides the page heading. Default: "SUNET Verifiable Credentials".                                                                                                      | -       | `SUNET Verifiable Credentials` | No       |
+| `services` | `array`  | Services optionally augments or overrides the auto-discovered service list. Entries with a Name that matches an auto-discovered service replace it; other entries are appended. | -       | -                              | No       |
+
+### `services` entry
+
+> **Path:** `.apigw.dashboard.services[]`
+
+| Field         | Type     | Description                                                       | Example | Default | Required |
+| ------------- | -------- | ----------------------------------------------------------------- | ------- | ------- | -------- |
+| `name`        | `string` | Display name and match key (e.g. "apigw", "issuer").              | -       | -       | Yes      |
+| `url`         | `string` | Primary public URL for the service.                               | -       | -       | Yes      |
+| `description` | `string` | Optional free-form text shown under the service name.             | -       | -       | No       |
+| `links`       | `array`  | Ordered list of extra labelled URLs (health, metadata, UIs, ...). | -       | -       | No       |
+
+### `links` entry
+
+> **Path:** `.apigw.dashboard.services[].links[]`
+
+| Field   | Type     | Description                                                                                                                                               | Example | Default | Required |
+| ------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `label` | `string` | Label                                                                                                                                                     | -       | -       | Yes      |
+| `url`   | `string` | URL                                                                                                                                                       | -       | -       | Yes      |
+| `type`  | `string` | How the dashboard follows this link. "json" opens the response in an in-page viewer (pretty-printed, no navigation). "page" (default) opens in a new tab. | -       | `page`  | No       |
 
 ## `issuer` (Top-level)
 

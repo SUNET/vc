@@ -2,7 +2,10 @@ package credential
 
 import (
 	"fmt"
+	"log/slog"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/biter777/countries"
@@ -42,7 +45,29 @@ func (t *ClaimTransformer) TransformClaims(
 			}
 		}
 
-		value = ApplyTransform(value, attrCfg.Transform)
+		transformed, terr := applyTransformOrError(value, attrCfg.Transform)
+		if terr != nil {
+			if attrCfg.Required {
+				return nil, fmt.Errorf("failed to transform required attribute %s (claim: %s): %w", attrID, attrCfg.Claim, terr)
+			}
+			continue
+		}
+		value = transformed
+
+		// Multi-valued attribute mapped to a non-array claim: keep the first
+		// value and warn so operators can spot IdP release changes.
+		if !attrCfg.AsArray {
+			if slice, ok := value.([]string); ok {
+				if len(slice) > 1 {
+					slog.Warn("attribute has multiple values, collapsing to first for non-array claim",
+						"attribute", attrID, "claim", attrCfg.Claim, "count", len(slice))
+				}
+				if len(slice) == 0 {
+					continue
+				}
+				value = slice[0]
+			}
+		}
 
 		if attrCfg.AsArray {
 			value = wrapAsArray(value)
@@ -58,36 +83,72 @@ func (t *ClaimTransformer) TransformClaims(
 
 // ApplyTransform applies a named transformation to a value.
 func ApplyTransform(value any, transform string) any {
+	v, _ := applyTransformOrError(value, transform)
+	return v
+}
+
+// applyTransformOrError is the error-returning form used by TransformClaims
+// so that invalid inputs to a validating transform (currently
+// yyyymmdd_to_iso) can reject required claims or be skipped for optional
+// ones, instead of silently passing an invalid value into the credential.
+func applyTransformOrError(value any, transform string) (any, error) {
 	if transform == "" {
-		return value
+		return value, nil
+	}
+
+	// Apply per element for slice-typed inputs (multi-valued SAML attrs) so
+	// e.g. country_alpha2 maps each nationality individually.
+	if slice, ok := value.([]string); ok {
+		out := make([]string, 0, len(slice))
+		for _, item := range slice {
+			transformed, err := applyTransformOrError(item, transform)
+			if err != nil {
+				return value, err
+			}
+			s, ok := transformed.(string)
+			if !ok {
+				s = item
+			}
+			out = append(out, s)
+		}
+		return out, nil
 	}
 
 	str, ok := value.(string)
 	if !ok {
-		return value
+		return value, nil
 	}
 
 	switch transform {
 	case "lowercase":
-		return strings.ToLower(str)
+		return strings.ToLower(str), nil
 	case "uppercase":
-		return strings.ToUpper(str)
+		return strings.ToUpper(str), nil
 	case "trim":
-		return strings.TrimSpace(str)
+		return strings.TrimSpace(str), nil
 	case "country_alpha2":
 		cc := countries.ByName(str)
 		if cc == countries.Unknown {
-			return value
+			return value, nil
 		}
-		return cc.Alpha2()
+		return cc.Alpha2(), nil
 	case "country_alpha3":
 		cc := countries.ByName(str)
 		if cc == countries.Unknown {
-			return value
+			return value, nil
 		}
-		return cc.Alpha3()
+		return cc.Alpha3(), nil
+	case "yyyymmdd_to_iso":
+		// SCHAC schacDateOfBirth is "YYYYMMDD"; SD-JWT VC birthdate is ISO "YYYY-MM-DD".
+		// time.Parse validates day-of-month, so impossible dates like 20240230
+		// surface as an error instead of being emitted verbatim.
+		t, err := time.Parse("20060102", str)
+		if err != nil {
+			return value, fmt.Errorf("invalid YYYYMMDD date %q: %w", str, err)
+		}
+		return t.Format("2006-01-02"), nil
 	default:
-		return value
+		return value, nil
 	}
 }
 
@@ -100,6 +161,38 @@ func wrapAsArray(value any) any {
 	default:
 		return v
 	}
+}
+
+// MergeDefaults injects default claim values into doc for any claim path
+// whose key is not already present, treating each defaults key as a
+// dot-notation claim path (matching the AttributeMapping Claim field).
+// Existing values — including nested ones — always win. Overlapping default
+// paths ("identity" and "identity.country") are rejected because merging
+// them is otherwise order-dependent on Go map iteration.
+func MergeDefaults(doc, defaults map[string]any) error {
+	paths := make([]string, 0, len(defaults))
+	for k := range defaults {
+		paths = append(paths, k)
+	}
+	sort.Strings(paths)
+
+	for i, p := range paths {
+		for _, q := range paths[i+1:] {
+			if strings.HasPrefix(q, p+".") {
+				return fmt.Errorf("overlapping default paths: %q is a prefix of %q", p, q)
+			}
+		}
+	}
+
+	for _, path := range paths {
+		if _, present := GetNestedValue(doc, path); present {
+			continue
+		}
+		if err := SetNestedValue(doc, path, defaults[path]); err != nil {
+			return fmt.Errorf("failed to set default %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 // SetNestedValue sets a value in a map using dot-notation path.

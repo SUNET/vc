@@ -84,10 +84,8 @@ func TestBuildEntityConfiguration(t *testing.T) {
 	t.Run("claims structure", func(t *testing.T) {
 		jwksJSON := json.RawMessage(`{"keys":[]}`)
 		claims := entityConfigClaims{
-			RegisteredClaims: jwt.RegisteredClaims{
-				Issuer:  "https://issuer.example.com",
-				Subject: "https://issuer.example.com",
-			},
+			Issuer:         "https://issuer.example.com",
+			Subject:        "https://issuer.example.com",
 			JWKS:           jwksJSON,
 			AuthorityHints: []string{"https://anchor.example.com"},
 			Metadata: &EntityMetadata{

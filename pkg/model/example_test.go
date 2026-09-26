@@ -6,13 +6,6 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 )
 
-func ExampleBoolPtr() {
-	p := model.BoolPtr(true)
-	fmt.Println(*p)
-	// Output:
-	// true
-}
-
 func ExampleBoolVal() {
 	t := true
 	fmt.Println(model.BoolVal(&t, false))

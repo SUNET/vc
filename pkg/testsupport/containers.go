@@ -42,12 +42,10 @@ func StartMongoContainer(t *testing.T) (uri string, client *mongo.Client, cleanu
 	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        "mongo:7",
-			ExposedPorts: []string{"27017/tcp"},
-			WaitingFor:   wait.ForLog("Waiting for connections"),
-		},
-		Started: true,
+		Image:        "mongo:7",
+		ExposedPorts: []string{"27017/tcp"},
+		WaitingFor:   wait.ForLog("Waiting for connections"),
+		Started:      true,
 	})
 	if err != nil {
 		cancel()

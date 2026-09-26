@@ -118,6 +118,15 @@ func (e *EphemeralEncryptionKeyCache) GenerateAndStoreIfAbsent(kid string) (jwk.
 // decorateEncryptionKey sets the parameters a wallet requires on a public
 // encryption key: the key ID it is advertised under, its use, and the
 // key-agreement algorithm to use with it.
+// DecorateEncryptionKey stamps the members OpenID4VP requires on a key
+// advertised in client_metadata.jwks: use, alg and kid. Exported so a caller
+// holding its own key store - the verifier keeps its ephemeral keys in the
+// shared cache service, not in this in-process cache - advertises exactly the
+// same shape.
+func DecorateEncryptionKey(key jwk.Key, kid string) error {
+	return decorateEncryptionKey(key, kid)
+}
+
 func decorateEncryptionKey(key jwk.Key, kid string) error {
 	if err := key.Set(jwk.KeyUsageKey, "enc"); err != nil {
 		return err

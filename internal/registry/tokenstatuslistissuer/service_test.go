@@ -531,13 +531,11 @@ func TestGenerateStatusListTokenJWT_Success(t *testing.T) {
 	statuses := []uint8{0, 1, 2, 0, 1}
 
 	cfg := TokenConfig{
-		TokenConfig: tokenstatuslist.TokenConfig{
-			Subject:   "https://example.com/statuslists/1",
-			Issuer:    "https://example.com",
-			Statuses:  statuses,
-			TTL:       43200,
-			ExpiresIn: 12 * time.Hour,
-		},
+		Subject:       "https://example.com/statuslists/1",
+		Issuer:        "https://example.com",
+		Statuses:      statuses,
+		TTL:           43200,
+		ExpiresIn:     12 * time.Hour,
 		SigningMethod: jwt.SigningMethodES256,
 	}
 
@@ -561,13 +559,11 @@ func TestGenerateStatusListTokenCWT_Success(t *testing.T) {
 	statuses := []uint8{0, 1, 2, 0, 1}
 
 	cfg := TokenConfig{
-		TokenConfig: tokenstatuslist.TokenConfig{
-			Subject:   "https://example.com/statuslists/1",
-			Issuer:    "https://example.com",
-			Statuses:  statuses,
-			TTL:       43200,
-			ExpiresIn: 12 * time.Hour,
-		},
+		Subject:   "https://example.com/statuslists/1",
+		Issuer:    "https://example.com",
+		Statuses:  statuses,
+		TTL:       43200,
+		ExpiresIn: 12 * time.Hour,
 	}
 
 	cwt, err := service.GenerateStatusListTokenCWT(suite.ctx, cfg)

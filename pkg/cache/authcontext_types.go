@@ -27,6 +27,12 @@ const (
 	// redeem a single pre-authorized code. This prevents unbounded growth of
 	// the RedeemedBy array and child sessions if a code leaks.
 	MaxPreAuthRedeemers = 10
+
+	// MaxTXCodeAttempts caps the number of transaction-code (PIN) attempts
+	// per pre-authorized code. Once reached, the code is forfeited so an
+	// attacker who obtains the code cannot brute-force the PIN by
+	// distributing guesses across IPs (OID4VCI §6.3).
+	MaxTXCodeAttempts = 5
 )
 
 // Token represents an access token with expiration
@@ -64,11 +70,26 @@ type AuthorizationContext struct {
 	Code      string `json:"code,omitempty" bson:"code,omitempty" validate:"omitempty,max=128,printascii"`
 	Forfeited bool   `json:"forfeited,omitempty" bson:"forfeited,omitempty"`
 
+	// PreAuthorized marks the context as belonging to an OID4VCI
+	// pre-authorized code offer. The token endpoint rejects cross-grant
+	// use so a pre-auth code cannot be redeemed via authorization_code
+	// (which would skip the tx_code check) and vice versa.
+	PreAuthorized bool `json:"pre_authorized,omitempty" bson:"pre_authorized,omitempty"`
+
 	// RedeemedBy tracks DPoP thumbprints that have redeemed a pre-authorized code.
 	// Pre-authorized codes may be redeemed by multiple distinct clients (each
 	// identified by a unique DPoP key), but a given client must not redeem
 	// the same code twice.
 	RedeemedBy []string `json:"redeemed_by,omitempty" bson:"redeemed_by,omitempty"`
+
+	// TXCode is the transaction code (PIN) the wallet must present at the
+	// token endpoint for a pre-authorized credential offer. Empty when the
+	// offer does not require a PIN. Bound matches openid4vci.TokenRequest.TXCode.
+	TXCode string `json:"tx_code,omitempty" bson:"tx_code,omitempty" validate:"omitempty,max=64,printascii"`
+
+	// TXCodeAttempts counts the number of tx_code (PIN) attempts consumed
+	// for this pre-authorized code. Bounded by MaxTXCodeAttempts.
+	TXCodeAttempts int `json:"tx_code_attempts,omitempty" bson:"tx_code_attempts,omitempty"`
 
 	// Token fields
 	Token       *Token `json:"token,omitempty" bson:"token,omitempty"`
@@ -88,10 +109,10 @@ type AuthorizationContext struct {
 	RemoteName           string                                     `json:"remote_name,omitempty" bson:"remote_name,omitempty" validate:"omitempty,max=128,printascii"`
 
 	// Verifier-specific fields (presentation/RP flows)
-	RedirectURI            string         `json:"redirect_uri,omitempty" bson:"redirect_uri,omitempty" validate:"omitempty,max=2048,printascii"`
-	ResponseType           string         `json:"response_type,omitempty" bson:"response_type,omitempty" validate:"omitempty,max=32,printascii"`
-	ResponseMode           string         `json:"response_mode,omitempty" bson:"response_mode,omitempty" validate:"omitempty,max=32,printascii"`
-	ShowCredentialDetails  bool           `json:"show_credential_details,omitempty" bson:"show_credential_details,omitempty"`
+	RedirectURI           string `json:"redirect_uri,omitempty" bson:"redirect_uri,omitempty" validate:"omitempty,max=2048,printascii"`
+	ResponseType          string `json:"response_type,omitempty" bson:"response_type,omitempty" validate:"omitempty,max=32,printascii"`
+	ResponseMode          string `json:"response_mode,omitempty" bson:"response_mode,omitempty" validate:"omitempty,max=32,printascii"`
+	ShowCredentialDetails bool   `json:"show_credential_details,omitempty" bson:"show_credential_details,omitempty"`
 	// WalletFollowsRedirect is set when the user leaves /authorize for a
 	// same-device web wallet. ProcessDirectPost then returns redirect_uri so
 	// the wallet can send the browser back to the RP. Cross-device flows
@@ -119,7 +140,7 @@ type AuthorizationContext struct {
 func (a *AuthorizationContext) Validate() error {
 	v := validator.New(validator.WithRequiredStructEnabled())
 	v.RegisterTagNameFunc(func(fld reflect.StructField) string {
-		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
+		name, _, _ := strings.Cut(fld.Tag.Get("json"), ",")
 		if name == "-" {
 			return ""
 		}

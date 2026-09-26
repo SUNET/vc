@@ -9,7 +9,7 @@ import (
 )
 
 func getValidationSchema(schemaRef string, compiler *jsonschema.Compiler) (*jsonschema.Schema, error) {
-	origin := strings.Split(schemaRef, "//")[0]
+	origin, _, _ := strings.Cut(schemaRef, "//")
 
 	switch origin {
 	case "http:", "https:":

@@ -1,10 +1,22 @@
-# Need to use latest since alpine is built with muscl and protoc is compiled with glibc, so it won't work.
-
-FROM golang:1.27.0
+# Pre-built builder image used by dockerfiles/worker as GOBUILD_IMAGE.
+# Bakes in everything a worker build needs: protoc + swag + gRPC codegen
+# (via `make install-tools`), plus the C++ (cmake/build-essential) and
+# Rust (rustup/cargo) toolchains that third_party/ native libraries build
+# under. Worker layers skip these installs when they detect the tools are
+# already present (see dockerfiles/worker).
+# Pinned to -bookworm so glibc matches distroless/cc-debian12 at runtime.
+# Keep this tag aligned with GOBUILD_IMAGE default in dockerfiles/worker.
+FROM golang:1.27.1-bookworm
 
 WORKDIR /go/src/app
 
 COPY Makefile .
 RUN make install-tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        cmake pkg-config git ca-certificates curl build-essential && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --default-toolchain stable --profile minimal && \
+    rm -rf /var/lib/apt/lists/*
+ENV PATH=/root/.cargo/bin:$PATH
 RUN make clean-apt-cache
 

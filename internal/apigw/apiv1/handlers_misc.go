@@ -22,6 +22,11 @@ func (c *Client) Health(ctx context.Context, req *apiv1_status.StatusRequest) (*
 
 // buildStatusAggregator wires local components and downstream services into
 // the shared status.Aggregator. Called from New.
+//
+// Only services apigw actually depends on for issuance (issuer, registry) are
+// registered here. Peer services like the verifier are surfaced separately by
+// the /dashboard handler, not through this aggregator, so apigw's own /health
+// stays true to what apigw needs to serve requests.
 func (c *Client) buildStatusAggregator() *status.Aggregator {
 	return status.New("apigw").
 		Register("db", c.db).

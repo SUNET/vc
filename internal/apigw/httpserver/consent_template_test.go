@@ -76,3 +76,19 @@ func TestConsentTemplate_PreservesCustomSchemeRedirectURL(t *testing.T) {
 		require.Contains(t, buf.String(), "ZgotmplZ")
 	})
 }
+
+func TestConsentTemplate_PreAuthShowsNoticeAndNoRedirect(t *testing.T) {
+	tmpl := parseConsentTemplate(t)
+
+	var buf bytes.Buffer
+	err := tmpl.ExecuteTemplate(&buf, "consent.html", gin.H{
+		"AuthMethod":  "preauth",
+		"RedirectURL": "",
+	})
+	require.NoError(t, err)
+
+	out := buf.String()
+	require.Contains(t, out, "pre-authorized credential offer", "preauth notice text must be rendered")
+	require.Contains(t, out, `data-auth-method="preauth"`, "auth-method data attribute must be set to preauth")
+	require.Contains(t, out, `data-redirect-url=""`, "redirect URL must be empty for preauth")
+}

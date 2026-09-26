@@ -101,11 +101,9 @@ func TestGoTrustEvaluator_EvaluateUnsupportedKeyType(t *testing.T) {
 	eval := NewGoTrustEvaluator("https://pdp.example.com")
 
 	req := &EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: "https://issuer.example.com",
-			KeyType:   KeyType("unsupported"),
-			Key:       "some-key",
-		},
+		SubjectID: "https://issuer.example.com",
+		KeyType:   KeyType("unsupported"),
+		Key:       "some-key",
 	}
 
 	_, err := eval.Evaluate(context.Background(), req)
@@ -154,12 +152,10 @@ func TestGoTrustEvaluator_EvaluateJWK(t *testing.T) {
 	}
 
 	req := &EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: "https://issuer.example.com",
-			KeyType:   KeyTypeJWK,
-			Key:       pubKey,
-			Role:      RoleIssuer,
-		},
+		SubjectID: "https://issuer.example.com",
+		KeyType:   KeyTypeJWK,
+		Key:       pubKey,
+		Role:      RoleIssuer,
 	}
 
 	decision, err := eval.Evaluate(context.Background(), req)
@@ -191,12 +187,10 @@ func TestGoTrustEvaluator_EvaluateJWK_ECDSA(t *testing.T) {
 	}
 
 	req := &EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: "https://issuer.example.com",
-			KeyType:   KeyTypeJWK,
-			Key:       &privateKey.PublicKey,
-			Role:      RoleIssuer,
-		},
+		SubjectID: "https://issuer.example.com",
+		KeyType:   KeyTypeJWK,
+		Key:       &privateKey.PublicKey,
+		Role:      RoleIssuer,
 	}
 
 	decision, err := eval.Evaluate(context.Background(), req)
@@ -222,11 +216,9 @@ func TestGoTrustEvaluator_EvaluateJWK_Map(t *testing.T) {
 	}
 
 	req := &EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: "https://issuer.example.com",
-			KeyType:   KeyTypeJWK,
-			Key:       jwk,
-		},
+		SubjectID: "https://issuer.example.com",
+		KeyType:   KeyTypeJWK,
+		Key:       jwk,
 	}
 
 	decision, err := eval.Evaluate(context.Background(), req)
@@ -249,12 +241,10 @@ func TestGoTrustEvaluator_EvaluateX5C(t *testing.T) {
 	chain := createTestCertChainForGoTrust(t)
 
 	req := &EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: "https://issuer.example.com",
-			KeyType:   KeyTypeX5C,
-			Key:       chain,
-			Role:      RoleIssuer,
-		},
+		SubjectID: "https://issuer.example.com",
+		KeyType:   KeyTypeX5C,
+		Key:       chain,
+		Role:      RoleIssuer,
 	}
 
 	decision, err := eval.Evaluate(context.Background(), req)
@@ -280,11 +270,9 @@ func TestGoTrustEvaluator_EvaluateX5C_AsStrings(t *testing.T) {
 	x5cStrings := []string{"base64cert1", "base64cert2"}
 
 	req := &EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: "https://issuer.example.com",
-			KeyType:   KeyTypeX5C,
-			Key:       x5cStrings,
-		},
+		SubjectID: "https://issuer.example.com",
+		KeyType:   KeyTypeX5C,
+		Key:       x5cStrings,
 	}
 
 	decision, err := eval.Evaluate(context.Background(), req)
@@ -308,11 +296,9 @@ func TestGoTrustEvaluator_EvaluateX5C_CertChainType(t *testing.T) {
 	certChain := X5CCertChain(chain)
 
 	req := &EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: "https://issuer.example.com",
-			KeyType:   KeyTypeX5C,
-			Key:       certChain,
-		},
+		SubjectID: "https://issuer.example.com",
+		KeyType:   KeyTypeX5C,
+		Key:       certChain,
 	}
 
 	decision, err := eval.Evaluate(context.Background(), req)
@@ -334,15 +320,13 @@ func TestGoTrustEvaluator_EvaluateWithOptions(t *testing.T) {
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
 
 	req := &EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: "https://issuer.example.com",
-			KeyType:   KeyTypeJWK,
-			Key:       pubKey,
-			Options: &TrustOptions{
-				IncludeTrustChain:   true,
-				IncludeCertificates: true,
-				BypassCache:         true,
-			},
+		SubjectID: "https://issuer.example.com",
+		KeyType:   KeyTypeJWK,
+		Key:       pubKey,
+		Options: &TrustOptions{
+			IncludeTrustChain:   true,
+			IncludeCertificates: true,
+			BypassCache:         true,
 		},
 	}
 
@@ -365,11 +349,9 @@ func TestGoTrustEvaluator_EvaluateUntrusted(t *testing.T) {
 	pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
 
 	req := &EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: "https://untrusted-issuer.example.com",
-			KeyType:   KeyTypeJWK,
-			Key:       pubKey,
-		},
+		SubjectID: "https://untrusted-issuer.example.com",
+		KeyType:   KeyTypeJWK,
+		Key:       pubKey,
 	}
 
 	decision, err := eval.Evaluate(context.Background(), req)

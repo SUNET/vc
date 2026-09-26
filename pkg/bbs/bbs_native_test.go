@@ -1,5 +1,3 @@
-//go:build bbsnative
-
 package bbs
 
 import (
@@ -100,12 +98,6 @@ func disclosures(t *testing.T, names []string) []Disclosure {
 		}
 	}
 	return out
-}
-
-func TestAvailableWithTag(t *testing.T) {
-	if !Available() {
-		t.Fatal("Available() must be true with the bbsnative tag")
-	}
 }
 
 // The issuer path. The signature must match what the Rust and TypeScript

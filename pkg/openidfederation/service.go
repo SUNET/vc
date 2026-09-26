@@ -3,6 +3,7 @@ package openidfederation
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -67,9 +68,7 @@ func cloneMetadataMap(m map[string]any) map[string]any {
 		return nil
 	}
 	out := make(map[string]any, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
+	maps.Copy(out, m)
 	return out
 }
 
@@ -140,12 +139,10 @@ func (s *Service) BuildEntityConfiguration(metadata *EntityMetadata) (string, er
 
 	now := time.Now()
 	claims := entityConfigClaims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    s.entityID,
-			Subject:   s.entityID,
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(ttl) * time.Second)),
-		},
+		Issuer:         s.entityID,
+		Subject:        s.entityID,
+		IssuedAt:       jwt.NewNumericDate(now),
+		ExpiresAt:      jwt.NewNumericDate(now.Add(time.Duration(ttl) * time.Second)),
 		JWKS:           jwksBytes,
 		AuthorityHints: s.config.AuthorityHints,
 		Metadata:       metadata,

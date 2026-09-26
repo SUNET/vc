@@ -415,7 +415,7 @@ func TestCreateRequestObject_LegacyJARMParamsAreOptIn(t *testing.T) {
 	if client.cfg.Common == nil {
 		client.cfg.Common = &model.Common{}
 	}
-	client.cfg.Common.OpenID4VPCompat.SendLegacyJARMEncryptionParams = model.BoolPtr(true)
+	client.cfg.Common.OpenID4VPCompat.SendLegacyJARMEncryptionParams = new(true)
 
 	_, err := client.CreateRequestObject(ctx, "session-legacy", createTestDCQLForVP(t), "nonce-legacy", nil)
 	require.NoError(t, err)
@@ -473,7 +473,7 @@ func TestCreateRequestObject_EncryptedModeCarriesAKey(t *testing.T) {
 	// encrypts to a key we cannot decrypt with.
 	kid, ok := md.JWKS.Keys[0].KeyID()
 	require.True(t, ok)
-	_, found := client.openid4vp.EphemeralKeyCache.Get(kid)
+	_, found := client.cacheService.EphemeralEncryptionKey.Get(ctx, kid)
 	assert.True(t, found, "the ephemeral private key must be retrievable by the advertised kid")
 }
 
@@ -553,7 +553,7 @@ func TestCreateRequestObject_ReusesTheSessionKey(t *testing.T) {
 	// And the private half must still match what is advertised.
 	kid, ok := after.KeyID()
 	require.True(t, ok)
-	priv, found := client.openid4vp.EphemeralKeyCache.Get(kid)
+	priv, found := client.cacheService.EphemeralEncryptionKey.Get(ctx, kid)
 	require.True(t, found)
 	privPub, err := priv.PublicKey()
 	require.NoError(t, err)

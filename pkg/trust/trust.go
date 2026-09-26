@@ -157,10 +157,8 @@ type CombinedTrustService interface {
 // This is a convenience constructor.
 func NewEvaluationRequest(subjectID string, keyType KeyType, key any) *EvaluationRequest {
 	return &EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: subjectID,
-			KeyType:   keyType,
-			Key:       key,
-		},
+		SubjectID: subjectID,
+		KeyType:   keyType,
+		Key:       key,
 	}
 }

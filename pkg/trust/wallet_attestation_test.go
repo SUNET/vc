@@ -154,7 +154,7 @@ func createTestWIA(t *testing.T, instanceKey *ecdsa.PrivateKey) string {
 	require.NoError(t, err)
 	raw := ecdhKey.Bytes()
 
-	jwk := map[string]interface{}{
+	jwk := map[string]any{
 		"kty": "EC",
 		"crv": "P-256",
 		"x":   base64.RawURLEncoding.EncodeToString(raw[1:33]),
@@ -170,7 +170,7 @@ func createTestWIA(t *testing.T, instanceKey *ecdsa.PrivateKey) string {
 	claims := jwt.MapClaims{
 		"iss": "https://wallet-provider.example.com",
 		"sub": jkt,
-		"cnf": map[string]interface{}{
+		"cnf": map[string]any{
 			"jwk": jwk,
 			"jkt": jkt,
 		},

@@ -247,6 +247,89 @@ func TestGenerateSecureToken_Uniqueness(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// GenerateNumericCode
+// ---------------------------------------------------------------------------
+
+var numericCharset = regexp.MustCompile(`^[0-9]+$`)
+
+func TestGenerateNumericCode_Length(t *testing.T) {
+	t.Parallel()
+	for _, digits := range []int{1, 4, 6, 8, 12, 32} {
+		t.Run("digits_"+itoa(digits), func(t *testing.T) {
+			t.Parallel()
+			code, err := GenerateNumericCode(digits)
+			require.NoError(t, err)
+			assert.Len(t, code, digits)
+			assert.Regexp(t, numericCharset, code, "code must contain only ASCII digits")
+		})
+	}
+}
+
+func TestGenerateNumericCode_LeadingZerosAllowed(t *testing.T) {
+	t.Parallel()
+	// Over enough iterations, at least one 6-digit code must start with '0'
+	// — verifying we're not accidentally producing a decimal integer that
+	// drops leading zeros.
+	const iterations = 5000
+	sawLeadingZero := false
+	for range iterations {
+		code, err := GenerateNumericCode(6)
+		require.NoError(t, err)
+		require.Len(t, code, 6)
+		if code[0] == '0' {
+			sawLeadingZero = true
+			break
+		}
+	}
+	assert.True(t, sawLeadingZero,
+		"expected at least one leading-zero code over %d iterations", iterations)
+}
+
+func TestGenerateNumericCode_InvalidLength(t *testing.T) {
+	t.Parallel()
+	for _, digits := range []int{-1, 0, 33, 100} {
+		t.Run("digits_"+itoa(digits), func(t *testing.T) {
+			t.Parallel()
+			_, err := GenerateNumericCode(digits)
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestGenerateNumericCode_Distribution(t *testing.T) {
+	t.Parallel()
+	// Coarse sanity check: over many 1-digit codes each of 0..9 must appear.
+	const iterations = 2000
+	seen := [10]bool{}
+	for range iterations {
+		code, err := GenerateNumericCode(1)
+		require.NoError(t, err)
+		require.Len(t, code, 1)
+		seen[code[0]-'0'] = true
+	}
+	for d, ok := range seen {
+		assert.True(t, ok, "digit %d never generated over %d iterations", d, iterations)
+	}
+}
+
+func TestGenerateNumericCode_Uniqueness(t *testing.T) {
+	t.Parallel()
+	// 6-digit space is 1e6; 1000 draws should have very few collisions.
+	const iterations = 1000
+	seen := make(map[string]struct{}, iterations)
+	collisions := 0
+	for range iterations {
+		code, err := GenerateNumericCode(6)
+		require.NoError(t, err)
+		if _, dup := seen[code]; dup {
+			collisions++
+		}
+		seen[code] = struct{}{}
+	}
+	assert.Less(t, collisions, 10, "excessive collisions suggest a broken RNG (got %d)", collisions)
+}
+
+// ---------------------------------------------------------------------------
 // Benchmarks
 // ---------------------------------------------------------------------------
 

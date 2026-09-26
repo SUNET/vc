@@ -15,7 +15,7 @@ import (
 
 // ExtractKIDFromCompactJWT extracts the "kid" field from the header of a compact-serialized JWT/JWE.
 func ExtractKIDFromCompactJWT(compactToken string) (string, error) {
-	header := strings.SplitN(compactToken, ".", 2)[0]
+	header, _, _ := strings.Cut(compactToken, ".")
 	b, err := base64.RawURLEncoding.DecodeString(header)
 	if err != nil {
 		// Fall back to RawStdEncoding for compatibility
