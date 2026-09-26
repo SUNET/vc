@@ -2,12 +2,14 @@ package apiv1
 
 import (
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"fmt"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/golang-jwt/jwt/v5"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -138,42 +140,46 @@ func TestAllocateOrDegrade_ExternalDegradedModeFail(t *testing.T) {
 	}
 }
 
-// opaqueSigner stands in for a PKCS#11-backed key: a public key and a Sign
-// method, with the private half unreachable through the interface. That is
-// the point - possession is demonstrated by signing, not by handing over
-// bytes.
-type opaqueSigner struct {
-	pub *ecdsa.PublicKey
-	alg string
-}
+// hsmKey stands in for a PKCS#11 key: it implements crypto.Signer and
+// nothing more, so its private half is unreachable - which is the whole
+// point, and is how pkg/pki's loader stores an HSM key (see
+// signer_config.go's PrivateKey.(crypto.Signer) assertions).
+type hsmKey struct{ pub *ecdsa.PublicKey }
 
-func (o *opaqueSigner) Sign(context.Context, []byte) ([]byte, error) {
+func (h hsmKey) Public() crypto.PublicKey { return h.pub }
+func (h hsmKey) Sign(io.Reader, []byte, crypto.SignerOpts) ([]byte, error) {
 	return []byte("signature"), nil
 }
-func (o *opaqueSigner) Algorithm() string { return o.alg }
-func (o *opaqueSigner) KeyID() string     { return "test-key" }
-func (o *opaqueSigner) PublicKey() any    { return o.pub }
 
-func newOpaqueSigner(t *testing.T, curve elliptic.Curve, alg string) *opaqueSigner {
+// hsmSigner builds the signer PRODUCTION would build for an HSM key:
+// pki.NewKeyMaterialSigner over key material whose PrivateKey is only a
+// crypto.Signer. Going through the real wrapper matters - an earlier
+// version of this test used a hand-rolled pki.Signer that returned a public
+// key directly, which hid that KeyMaterialSigner.PublicKey() returned nil
+// for exactly this case and would have rejected every HSM key at startup.
+func hsmSigner(t *testing.T, curve elliptic.Curve, method jwt.SigningMethod) pki.Signer {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	return &opaqueSigner{pub: &key.PublicKey, alg: alg}
+	return pki.NewKeyMaterialSigner(&pki.KeyMaterial{
+		PrivateKey:    hsmKey{pub: &key.PublicKey},
+		SigningMethod: method,
+	})
 }
 
 // Requirement #2 ("default to the issuer signing key"): with no explicit
 // issuer.status_service.key_config, the issuer's own signer is reused.
 func TestStatusServiceSigner_DefaultsToIssuerSigner(t *testing.T) {
-	signer := newOpaqueSigner(t, elliptic.P256(), "ES256")
+	signer := hsmSigner(t, elliptic.P256(), jwt.SigningMethodES256)
 	c := &Client{signer: signer, cfg: &model.Cfg{Issuer: &model.Issuer{}}}
 
 	got, err := c.statusServiceSigner(&model.StatusServiceConfig{})
 	if err != nil {
 		t.Fatalf("statusServiceSigner: %v", err)
 	}
-	if got != pki.Signer(signer) {
+	if got != signer {
 		t.Fatal("want the issuer's own signer reused as-is")
 	}
 }
@@ -184,7 +190,7 @@ func TestStatusServiceSigner_DefaultsToIssuerSigner(t *testing.T) {
 // it because HSM key material "never leaves the device" - true, and beside
 // the point.
 func TestStatusServiceSigner_AcceptsAnHSMBackedKey(t *testing.T) {
-	signer := newOpaqueSigner(t, elliptic.P256(), "ES256")
+	signer := hsmSigner(t, elliptic.P256(), jwt.SigningMethodES256)
 	c := &Client{signer: signer, cfg: &model.Cfg{Issuer: &model.Issuer{}}}
 
 	if _, err := c.statusServiceSigner(&model.StatusServiceConfig{}); err != nil {
@@ -198,10 +204,10 @@ func TestStatusServiceSigner_AcceptsAnHSMBackedKey(t *testing.T) {
 func TestStatusServiceSigner_RefusesWhatCannotSignES256(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
-		signer *opaqueSigner
+		signer pki.Signer
 	}{
-		{"wrong curve", newOpaqueSigner(t, elliptic.P384(), "ES256")},
-		{"wrong algorithm", newOpaqueSigner(t, elliptic.P256(), "RS256")},
+		{"wrong curve", hsmSigner(t, elliptic.P384(), jwt.SigningMethodES256)},
+		{"wrong algorithm", hsmSigner(t, elliptic.P256(), jwt.SigningMethodRS256)},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &Client{signer: tt.signer, cfg: &model.Cfg{Issuer: &model.Issuer{}}}

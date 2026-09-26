@@ -95,6 +95,16 @@ func (s *KeyMaterialSigner) PublicKey() any {
 		return key.Public()
 	case *rsa.PrivateKey:
 		return key.Public()
+	case crypto.Signer:
+		// An HSM/PKCS#11 key. Its private half is unreadable by design, but
+		// the public half is exactly what crypto.Signer exists to expose -
+		// and returning nil here made every caller that asks for the public
+		// key (this one, and determineKeyID's kid derivation) behave as
+		// though an HSM key had no public key at all.
+		//
+		// Listed after the concrete cases on purpose: those types satisfy
+		// crypto.Signer too, and a type switch takes the first match.
+		return key.Public()
 	default:
 		return nil
 	}
