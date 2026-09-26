@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"encoding/base64"
@@ -17,6 +18,7 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/revocation"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/trust"
 
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v3/jwa"
@@ -172,15 +174,47 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		responseParams.State = vpResponse.State
 		responseParams.VPToken = vpToken
 
-		// Validate response parameters
-		if err := responseParams.Validate(); err != nil {
-			c.log.Error(err, "response parameters validation failed", "scope", scope)
-			return nil, fmt.Errorf("invalid response for scope %s: %w", scope, err)
-		}
-
 		// Detect credential format and process accordingly
 		format := detectCredentialFormat(vpToken)
 		c.log.Debug("Detected credential format", "scope", scope, "format", format)
+
+		// The wallet does not get to choose which format answers a scope.
+		// Detection reads the token; the request said what was asked for.
+		// The wallet does not get to choose which format answers a scope.
+		// Detection reads the token; the request said what was asked for.
+		//
+		// Conditional, deliberately, and this is the weak spot: requestedQuery
+		// cannot resolve a scope for a session with no cached query, or for a
+		// multi-credential template whose query ids differ from the scope. It
+		// is NOT failed closed because formats other than W3C were verified
+		// without any such cross-check before this PR, and refusing here would
+		// take working multi-query templates away. The W3C branch does fail
+		// closed, since its constraint checking depends on the query.
+		//
+		// SUNET/vc#683 persists the scope-to-query mapping, which resolves the
+		// ambiguity properly; once it lands this can stop being conditional.
+		if requested, ok := c.requestedQuery(authCtx, scope); ok {
+			if !formatMatchesRequest(format, requested.Format) {
+				c.log.Error(nil, "returned credential format does not answer the request",
+					"scope", scope, "detected", format, "requested", requested.Format)
+				return nil, fmt.Errorf("scope %s was requested as %q but the response is %q", scope, requested.Format, format)
+			}
+		} else {
+			c.log.Warn("cannot check the returned format against the request: the query this scope was requested under could not be resolved",
+				"scope", scope, "detected", format)
+		}
+
+		// ResponseParameters.Validate parses the token as an SD-JWT, so it can
+		// only speak for that format - it rejected a perfectly good mdoc or
+		// JSON-LD token as "invalid JWT format". Each format's own branch
+		// below validates it properly; this stays as the SD-JWT shape check
+		// it always was.
+		if format == FormatSDJWT {
+			if err := responseParams.Validate(); err != nil {
+				c.log.Error(err, "response parameters validation failed", "scope", scope)
+				return nil, fmt.Errorf("invalid response for scope %s: %w", scope, err)
+			}
+		}
 
 		switch format {
 		case FormatSDJWT:
@@ -466,6 +500,112 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				})
 			}
 
+		case FormatVC20:
+			// W3C VC 2.0 Data Integrity. The cryptosuites, RDF canonicalization
+			// and JSON-LD handling live in openid4vp.VC20Handler; what the
+			// verifier supplies is key resolution, which is the same trust
+			// evaluator the other formats use - trust.KeyResolver and
+			// openid4vp.VC20KeyResolver declare the same method, and both
+			// configured evaluators implement it.
+			resolver, ok := c.trustEvaluator.(trust.KeyResolver)
+			if !ok {
+				c.log.Error(nil, "trust evaluator cannot resolve verification methods", "scope", scope)
+				return nil, fmt.Errorf("W3C VC verification for scope %s needs a key-resolving trust evaluator", scope)
+			}
+
+			vc20Opts := []openid4vp.VC20HandlerOption{openid4vp.WithVC20KeyResolver(resolver)}
+
+			// Holder binding, when the request asked for it (the OpenID4VP
+			// default). The credential's issuer proof says it was issued; only
+			// a proof over the PRESENTATION, carrying this session's nonce and
+			// naming this verifier, says the holder is presenting it now.
+			requested, haveQuery := c.requestedQuery(authCtx, scope)
+			if !haveQuery || requested.RequiresCryptographicHolderBinding() {
+				vc20Opts = append(vc20Opts, openid4vp.WithVC20PresentationBinding(authCtx.Nonce, authCtx.ClientID))
+			}
+
+			vc20Handler, err := openid4vp.NewVC20Handler(vc20Opts...)
+			if err != nil {
+				c.log.Error(err, "failed to create W3C VC handler", "scope", scope)
+				return nil, fmt.Errorf("failed to create W3C VC handler for scope %s: %w", scope, err)
+			}
+
+			vc20Result, err := vc20Handler.VerifyAndExtract(ctx, vpToken)
+			if err != nil {
+				c.log.Error(err, "W3C VC verification failed", "scope", scope)
+				return nil, fmt.Errorf("W3C VC verification failed for scope %s: %w", scope, err)
+			}
+
+			// Resolving the issuer's key says who signed it, not whether we
+			// trust them. The SD-JWT and mdoc branches both put that decision
+			// to the evaluator, and a PDP configured to deny an issuer has to
+			// deny it here too.
+			//
+			// The key the signature was VERIFIED with, not a fresh resolution
+			// of the same verification method: a rotating or remote resolver
+			// can answer differently the second time, and then the key trusted
+			// is not the key that signed.
+			if vc20Result.IssuerKey == nil {
+				c.log.Error(nil, "W3C verification returned no issuer key to evaluate", "scope", scope)
+				return nil, fmt.Errorf("W3C verification for scope %s produced no issuer key to evaluate", scope)
+			}
+			decision, err := c.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
+				SubjectID:      vc20Result.Issuer,
+				KeyType:        trust.KeyTypeJWK,
+				Key:            vc20Result.IssuerKey,
+				Role:           trust.RoleCredentialIssuer,
+				CredentialType: scope,
+			})
+			if err != nil {
+				c.log.Error(err, "W3C issuer trust evaluation failed", "scope", scope, "issuer", vc20Result.Issuer)
+				return nil, fmt.Errorf("W3C issuer trust evaluation failed for scope %s: %w", scope, err)
+			}
+			if !decision.Trusted {
+				c.log.Warn("W3C issuer not trusted", "scope", scope,
+					"issuer", vc20Result.Issuer, "reason", decision.Reason)
+				return nil, fmt.Errorf("W3C issuer not trusted for scope %s: %s", scope, decision.Reason)
+			}
+
+			// The type constraint the request carried, enforced on what came
+			// back. Without this the wallet chooses which credential answers
+			// the scope and meta.type_values is decoration.
+			// Fail closed. Skipping the constraint because the query could
+			// not be recovered would let any valid W3C credential answer the
+			// scope, which is the failure this check exists to prevent.
+			if !haveQuery {
+				c.log.Error(nil, "cannot recover the query this scope was requested under", "scope", scope)
+				return nil, fmt.Errorf("cannot verify the constraint for scope %s: the request it was made under is no longer available", scope)
+			}
+			// Validate the query before trusting it as a constraint. Only
+			// UIInteraction validates the DCQL it is handed; a template-built
+			// query reaches here unchecked, and a length test is not enough -
+			// [[]] and [[VerifiableCredential]] both have length but match
+			// every W3C credential. ValidateCredentialQuery already encodes
+			// what counts as narrowing, so use it rather than restate it, and
+			// pick up anything added to it later for free.
+			if err := openid4vp.ValidateCredentialQuery(requested); err != nil {
+				c.log.Error(err, "the query this scope was requested under does not constrain it", "scope", scope)
+				return nil, fmt.Errorf("the query for scope %s cannot constrain a credential: %w", scope, err)
+			}
+			if !openid4vp.MatchTypeValues(vc20Result.TypeIRIs, requested.Meta.TypeValues) {
+				c.log.Error(nil, "returned W3C credential does not carry the requested types",
+					"scope", scope, "got", vc20Result.TypeIRIs, "want", requested.Meta.TypeValues)
+				return nil, fmt.Errorf("the credential returned for scope %s does not carry the requested types", scope)
+			}
+
+			c.log.Debug("W3C VC verified successfully", "scope", scope,
+				"issuer", vc20Result.Issuer, "cryptosuite", vc20Result.Cryptosuite,
+				"selective_disclosure", vc20Result.IsSelectiveDisclosure)
+
+			// The whole credential map, so a configured validation can address
+			// credentialSubject.* the way the document is actually shaped;
+			// display flattens the subject alone, which is the user-facing part.
+			scopeCredentials[scope] = append(scopeCredentials[scope], sdjwtvc.CredentialCache{
+				Scope:      scope,
+				Credential: vc20Result.Claims,
+				Claims:     credentialToDisclosers(vc20Result.CredentialSubject),
+			})
+
 		default:
 			c.log.Error(nil, "Unknown credential format", "scope", scope, "format", format)
 			return nil, fmt.Errorf("unknown credential format for scope %s", scope)
@@ -632,6 +772,9 @@ const (
 	// FormatMDocZK represents a zero-knowledge-proof presentation of an
 	// ISO/IEC 18013-5 mDOC credential (mso_mdoc_zk) - see pkg/mdoc/zk*.go.
 	FormatMDocZK CredentialFormat = "mso_mdoc_zk"
+	// FormatVC20 represents a W3C VC 2.0 Data Integrity credential or
+	// presentation (ldp_vc / vc+ld+json), carried as JSON-LD.
+	FormatVC20 CredentialFormat = "ldp_vc"
 	// FormatUnknown represents an unrecognized format
 	FormatUnknown CredentialFormat = "unknown"
 )
@@ -640,6 +783,13 @@ const (
 // SD-JWT: contains ~ separators (disclosure markers) and JWT dots
 // mDOC: base64url-encoded CBOR (doesn't look like JWT - no dots, or random data without ~)
 func detectCredentialFormat(vpToken string) CredentialFormat {
+	// W3C VC 2.0 is JSON-LD, and a JSON document is unambiguous - so test it
+	// first. The mdoc branch below base64-decodes and would otherwise claim a
+	// wrapped JSON body before anything looked at it.
+	if looksLikeJSONDocument(vpToken) {
+		return FormatVC20
+	}
+
 	// SD-JWT format: <issuer-jwt>~<disclosure1>~<disclosure2>~...[~<kb-jwt>]
 	// Must contain at least one ~ and the first part must look like a JWT (has 2 dots)
 	if strings.Contains(vpToken, "~") {
@@ -678,6 +828,94 @@ func detectCredentialFormat(vpToken string) CredentialFormat {
 	}
 
 	return FormatUnknown
+}
+
+// requestedQuery returns the DCQL credential query this scope was requested
+// under. Config-built queries use the scope as the query id.
+//
+// Falls back to RequestObjectCache exactly as the ZK path does: authCtx's
+// Mongo-persisted DCQLQuery has been observed coming back nil for a session
+// whose wallet had just rendered a consent screen from that very query, so the
+// persisted field alone is not a reliable source. The request object cache
+// holds the query that was signed and served to the wallet.
+func (c *Client) requestedQuery(authCtx *cache.AuthorizationContext, scope string) (openid4vp.CredentialQuery, bool) {
+	if authCtx == nil {
+		return openid4vp.CredentialQuery{}, false
+	}
+	dcqlQuery := authCtx.DCQLQuery
+	if dcqlQuery == nil && c.openid4vp != nil && c.openid4vp.RequestObjectCache != nil {
+		if requestObject, found := c.openid4vp.RequestObjectCache.Get(authCtx.RequestObjectID); found {
+			dcqlQuery = requestObject.DCQLQuery
+		}
+	}
+	if dcqlQuery == nil {
+		return openid4vp.CredentialQuery{}, false
+	}
+	for _, q := range dcqlQuery.Credentials {
+		if q.ID == scope {
+			return q, true
+		}
+	}
+
+	// A template names its queries whatever its author chose, and the shipped
+	// ones nearly all differ from the scope that selects them - "pid" selects
+	// a query with id "eudi_pid", "ehic" one with id "eudi_ehic". So an id
+	// lookup alone finds nothing for a template-built request.
+	//
+	// With exactly one credential query there is no ambiguity about which one
+	// the scope was requested under. With more than one there is, and this
+	// returns nothing so the caller refuses - guessing would attribute a
+	// constraint to the wrong credential.
+	//
+	// SUNET/vc#683 persists the real scope-to-query mapping; once that is in,
+	// this should consult it instead of inferring.
+	if len(dcqlQuery.Credentials) == 1 {
+		return dcqlQuery.Credentials[0], true
+	}
+	return openid4vp.CredentialQuery{}, false
+}
+
+// formatMatchesRequest reports whether a sniffed format answers the format the
+// request asked for. Detection reads the token, not the request, so without
+// this a valid credential of one format satisfies a scope that asked for
+// another as long as its signature resolves.
+func formatMatchesRequest(detected CredentialFormat, requested string) bool {
+	switch requested {
+	case openid4vp.FormatMsoMdoc:
+		return detected == FormatMDoc
+	case openid4vp.FormatMsoMdocZk:
+		return detected == FormatMDocZK
+	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
+		return detected == FormatSDJWT
+	case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON:
+		return detected == FormatVC20
+	default:
+		return false
+	}
+}
+
+// looksLikeJSONDocument reports whether the token is a JSON-LD document in any
+// shape VC20Handler.decodeVPToken accepts: an object or an expanded-form
+// array, plain or wrapped in base64url or standard base64.
+//
+// It has to accept exactly what the handler does. Anything narrower sends a
+// token the handler could verify down another format's branch instead.
+func looksLikeJSONDocument(vpToken string) bool {
+	if isJSONDocument([]byte(vpToken)) {
+		return true
+	}
+	if decoded, err := base64.RawURLEncoding.DecodeString(vpToken); err == nil {
+		return isJSONDocument(decoded)
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(vpToken); err == nil {
+		return isJSONDocument(decoded)
+	}
+	return false
+}
+
+func isJSONDocument(b []byte) bool {
+	trimmed := bytes.TrimSpace(b)
+	return bytes.HasPrefix(trimmed, []byte("{")) || bytes.HasPrefix(trimmed, []byte("["))
 }
 
 // mapToDisclosers converts a map of claims to []sdjwtvc.Discloser format.

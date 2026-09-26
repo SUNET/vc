@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"slices"
 	"time"
 
@@ -27,6 +28,10 @@ type CreateVC20Request struct {
 	SubjectDID        string   `json:"subject_did,omitempty"`
 	Cryptosuite       string   `json:"cryptosuite"`
 	MandatoryPointers []string `json:"mandatory_pointers,omitempty"`
+	// AdditionalContexts are JSON-LD contexts appended after the VC 2.0 base
+	// context, so a configured custom type expands to the IRI a verifier
+	// constrains by instead of surviving as a relative one.
+	AdditionalContexts []string `json:"additional_contexts,omitempty"`
 }
 
 // CreateVC20Reply is the reply for W3C VC 2.0 issuance
@@ -60,6 +65,10 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 	// Validate cryptosuite
 	if !isValidCryptosuite(cryptosuite) {
 		return nil, fmt.Errorf("unsupported cryptosuite: %s", cryptosuite)
+	}
+
+	if err := c.validateAdditionalContexts(req.AdditionalContexts); err != nil {
+		return nil, err
 	}
 
 	// Use credential types from request (required field)
@@ -110,6 +119,7 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 	credentialJSON, err := c.buildVC20CredentialJSON(
 		credentialID,
 		credentialTypes,
+		req.AdditionalContexts,
 		credentialSubject,
 		validFrom,
 		validUntil,
@@ -151,10 +161,50 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 	return reply, nil
 }
 
+// validateAdditionalContexts restricts the JSON-LD contexts a caller may ask
+// the issuer to sign with.
+//
+// Signing canonicalizes the credential to RDF, which DEREFERENCES every
+// context in it. So this field decides URLs the issuer will fetch, and the
+// caller supplies it: a scheme like file:// would read local files into the
+// resolution, and a non-absolute reference resolves against whatever base the
+// loader picks.
+//
+// Two checks, because the first cannot do the second's job: http(s) and
+// absolute rules out local file reads, and issuer.jsonld_context_allowlist
+// decides which hosts may be reached at all. Empty allowlist means no
+// additional context is accepted.
+func (c *Client) validateAdditionalContexts(contexts []string) error {
+	var allowed []string
+	if c.cfg != nil && c.cfg.Issuer != nil {
+		allowed = c.cfg.Issuer.JSONLDContextAllowlist
+	}
+
+	for _, raw := range contexts {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return fmt.Errorf("additional context %q is not a URL: %w", raw, err)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return fmt.Errorf("additional context %q must be an http(s) URL, got scheme %q", raw, u.Scheme)
+		}
+		if u.Host == "" {
+			return fmt.Errorf("additional context %q must be absolute", raw)
+		}
+		// The scheme check above rules out local file reads; it cannot rule
+		// out a host. Only contexts the deployment has named may be fetched.
+		if !slices.Contains(allowed, raw) {
+			return fmt.Errorf("additional context %q is not in issuer.jsonld_context_allowlist; the issuer will not dereference it", raw)
+		}
+	}
+	return nil
+}
+
 // buildVC20CredentialJSON builds the JSON-LD credential structure
 func (c *Client) buildVC20CredentialJSON(
 	credentialID string,
 	types []string,
+	additionalContexts []string,
 	credentialSubject map[string]any,
 	validFrom time.Time,
 	validUntil *time.Time,
@@ -165,8 +215,14 @@ func (c *Client) buildVC20CredentialJSON(
 		types = append([]string{"VerifiableCredential"}, types...)
 	}
 
+	// The base context first, then whatever the credential type configures.
+	// A type this deployment defines has no meaning without its own context:
+	// JSON-LD leaves an undefined term as a relative IRI, which no verifier
+	// can match against meta.type_values.
+	contexts := append([]string{credential.ContextV2}, additionalContexts...)
+
 	cred := map[string]any{
-		"@context":          []string{"https://www.w3.org/ns/credentials/v2"},
+		"@context":          contexts,
 		"id":                credentialID,
 		"type":              types,
 		"issuer":            c.cfg.Issuer.JWTAttribute.Issuer,

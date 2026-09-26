@@ -633,9 +633,14 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 		cryptosuite = "ecdsa-rdfc-2019"
 	}
 
-	// Default credential types
+	// Fall back to the scope's configured credential_types, not straight to the
+	// bare base type: a request without a credential_configuration_id took the
+	// hardcoded default, so the credential was minted as plain
+	// VerifiableCredential while a verifier constrained the request by the
+	// configured types - and nothing matched. W3CTypes itself defaults to the
+	// base type, so an unconfigured scope behaves as before.
 	if len(credentialTypes) == 0 {
-		credentialTypes = []string{"VerifiableCredential"}
+		credentialTypes = c.cfg.GetCredentialMetadata(scope).W3CTypes()
 	}
 
 	var subjectDIDs []string
@@ -656,6 +661,10 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 			SubjectDid:        did,
 			Cryptosuite:       cryptosuite,
 			MandatoryPointers: mandatoryPointers,
+			// Without the context that defines them, the configured types
+			// expand to relative IRIs and no verifier can match the query
+			// built from credential_type_values.
+			AdditionalContexts: c.cfg.GetCredentialMetadata(scope).GetCredentialContexts(),
 		})
 		if err != nil {
 			c.log.Error(err, "failed to call MakeVC20")

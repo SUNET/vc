@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 )
 
 type DCQL struct {
@@ -407,11 +408,25 @@ const (
 	// FormatLdpVCDCQL is the format identifier for W3C VC Data Integrity (used in DCQL).
 	// Note: This duplicates FormatLdpVC from vc20_handler.go but is needed for non-vc20 builds.
 	FormatLdpVCDCQL = "ldp_vc"
+
+	// BaseVCTypeIRI is the expanded form of the type every W3C VC carries.
+	// A type_values alternative naming only this constrains nothing.
+	BaseVCTypeIRI = "https://www.w3.org/2018/credentials#VerifiableCredential"
+	// FormatVCLDJSON is the other spelling this repo issues W3C VC Data
+	// Integrity under - see handlers_issuer.go, which routes it to issueVC20
+	// alongside ldp_vc.
+	FormatVCLDJSON = "vc+ld+json"
 )
 
-// IsW3CVCFormatIdentifier returns true if the format identifier is a W3C Verifiable Credential format (ldp_vc or jwt_vc_json).
+// IsW3CVCFormatIdentifier returns true if the format identifier is a W3C
+// Verifiable Credential format (ldp_vc, vc+ld+json or jwt_vc_json).
+//
+// vc+ld+json belongs here because this repo issues it as one: handlers_issuer.go
+// routes it to issueVC20 alongside ldp_vc. Leaving it out meant a query in that
+// format skipped the type_values requirement in ValidateCredentialQuery that
+// the other two are held to, so an unconstrained W3C query passed validation.
 func IsW3CVCFormatIdentifier(format string) bool {
-	return format == "ldp_vc" || format == FormatJwtVCJson
+	return format == FormatLdpVCDCQL || format == FormatVCLDJSON || format == FormatJwtVCJson
 }
 
 // IsSDJWTFormatIdentifier returns true if the format identifier is SD-JWT VC format.
@@ -578,15 +593,53 @@ func NewTrustedAuthorityOpenIDFederation(trustAnchors ...string) TrustedAuthorit
 // for the specified format.
 func ValidateCredentialQuery(query CredentialQuery) error {
 	switch query.Format {
-	case "ldp_vc", FormatJwtVCJson:
-		// W3C VC format requires type_values
+	// Not FormatJwtVCJson: UIInteraction calls this on the live ingress, and
+	// the rest of the stack refuses that format - nothing issues it and the
+	// verifier reads a compact JWT-VC as SD-JWT. Accepting it here would let
+	// it in through the one door still open.
+	case FormatLdpVCDCQL, FormatVCLDJSON:
+		// W3C VC format requires type_values, and every alternative must
+		// actually constrain: MatchTypeValues reads an empty alternative as
+		// satisfied by any credential, and one satisfied alternative answers
+		// the whole constraint - so [[]] is an unconstrained request wearing
+		// a constraint's shape.
+		for i, alternative := range query.Meta.TypeValues {
+			// Base-only is the same defect as empty, one step along: every
+			// W3C credential carries VerifiableCredential, so an alternative
+			// naming only it is satisfied by all of them. The config path
+			// (CredentialMetadata.w3cTypeValues) already refuses that; an
+			// API-supplied query has to be held to the same rule, or the
+			// request over-discloses without ever looking unconstrained.
+			// Absolute, not merely different from the base. type_values are
+			// matched as fully expanded IRIs (OpenID4VP 1.0 B.3.2), so a
+			// compact term like "DiplomaCredential" narrows nothing: it
+			// cannot equal anything a credential expands to, and the verifier
+			// drops relative IRIs from the credential side for the same
+			// reason. Config load refuses these too; this is the path
+			// templates and API callers arrive by.
+			narrowing := slices.ContainsFunc(alternative, func(t string) bool {
+				return t != "" && t != BaseVCTypeIRI && strings.Contains(t, ":")
+			})
+			if !narrowing {
+				return &DCQLValidationError{
+					Field:   fmt.Sprintf("meta.type_values[%d]", i),
+					Message: "each type_values alternative must name at least one fully expanded IRI beyond " + BaseVCTypeIRI + "; a relative term matches nothing and a base-only alternative matches every W3C credential",
+				}
+			}
+		}
 		if len(query.Meta.TypeValues) == 0 {
 			return &DCQLValidationError{
 				Field:   "meta.type_values",
 				Message: "type_values is required for W3C VC format",
 			}
 		}
-	case FormatSDJWTVC:
+	// "vc+sd-jwt" is the legacy spelling this repo still issues, and "" is
+	// Format's own default. DCQLMetaQuery, the UI builder and the verifier's
+	// format check all classify both as SD-JWT; leaving either to the
+	// permissive default below meant such a query passed validation with no
+	// constraint at all. Every place that decides what a format MEANS has to
+	// agree with every place that decides whether it is CONSTRAINED.
+	case FormatSDJWTVC, "vc+sd-jwt", "":
 		// SD-JWT VC format requires vct_values
 		if len(query.Meta.VCTValues) == 0 {
 			return &DCQLValidationError{
@@ -604,6 +657,17 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 		}
 	case FormatMsoMdocZk:
 		return validateMsoMdocZkQuery(query)
+	// Refused explicitly, NOT left to the default below. Both are advertised
+	// in issuer metadata and neither is requestable: nothing issues them, and
+	// the verifier reads a compact JWT-VC as SD-JWT, so it would verify one
+	// under the wrong credential model. UIInteraction validates here on the
+	// live ingress, and "allow but do not validate" would wave them through
+	// with no constraint at all.
+	case FormatJwtVCJson, "jwt_vc_json-ld":
+		return &DCQLValidationError{
+			Field:   "format",
+			Message: fmt.Sprintf("format %q is advertised but not requestable: nothing issues it and there is no verification path for it", query.Format),
+		}
 	default:
 		// Unknown format - allow but don't validate
 	}
@@ -666,7 +730,7 @@ func (e *DCQLValidationError) Error() string {
 func NewVC20CredentialQuery(id string, typeValues [][]string, claims []ClaimQuery) CredentialQuery {
 	return CredentialQuery{
 		ID:     id,
-		Format: "ldp_vc", // W3C VC Data Integrity format
+		Format: FormatLdpVCDCQL,
 		Meta: MetaQuery{
 			TypeValues: typeValues,
 		},

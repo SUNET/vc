@@ -8,6 +8,7 @@ import {
 } from "./dc-api-polyfill.js";
 import { groupPresets } from "./preset-helpers.js";
 import { claimsForLocale } from "./locale-helpers.js";
+import { dcqlMetaFor } from "./dcql-meta.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
 const credentialAttributesSchema = v.object({
@@ -17,6 +18,10 @@ const credentialAttributesSchema = v.object({
     // and null for one that emits the field without omitempty. The query
     // builder falls back to [vct] in both cases.
     vct_values: v.nullish(v.array(v.string())),
+    // type_values is the W3C VC constraint: an array of ALTERNATIVES, each an
+    // array of types a credential must carry all of. nullish for the same
+    // reason as vct_values - an older server sends neither.
+    type_values: v.nullish(v.array(v.array(v.string()))),
     attributes: v.record(
         v.string(),
         v.record(
@@ -117,6 +122,7 @@ const metadataResponseSchema = v.object({
             meta: v.object({
                 vct_values: v.optional(v.array(v.string())),
                 doctype_value: v.optional(v.string()),
+                type_values: v.optional(v.array(v.array(v.string()))),
                 // zk_system_type entries are a flat {id, system, ...params}
                 // string-keyed object on the wire (ZKSystemTypeSpec's own
                 // MarshalJSON flattens params to the top level, no nested
@@ -149,37 +155,20 @@ const dcqlQueryCredentialSchema = v.object({
     // vct_values (dc+sd-jwt/jwt_vc_json) and doctype_value (mso_mdoc) are
     // both optional here, not either/or required - which meta property
     // applies depends on the credential's format (OpenID4VP 1.0 6.4.1).
-    meta: v.intersect([
-        v.object({
-            vct_values: v.optional(v.array(v.string())),
-            doctype_value: v.optional(v.string()),
-            // zk_system_type (mso_mdoc_zk only) is an array of flat
-            // {id, system, ...params} objects - declared explicitly since
-            // the catch-all record below only accepts string/string[]
-            // values, not array-of-object, and would otherwise reject
-            // (not silently drop) this entire query at the
-            // v.safeParse(dcqlQuerySchema, ...) gate right before it's
-            // sent - "Malformed predefined DCQL query" with no further
-            // detail. See the identical fix on metadataResponseSchema's
-            // preset meta - same root cause, different validation
-            // checkpoint (that one stripped the field silently; this one
-            // rejects the whole query instead).
-            zk_system_type: v.optional(v.array(v.record(v.string(), v.string()))),
-        }),
-        // v.intersect validates the object against EVERY member schema, not
-        // just "whichever keys aren't already declared above" - confirmed
-        // live (both via the deployed error and a local valibot repro):
-        // this catch-all record still runs against the ENTIRE meta object,
-        // zk_system_type included, so its value union has to independently
-        // accept zk_system_type's own array-of-objects shape too, or the
-        // intersection fails even though the object schema above already
-        // declared and accepted the field.
-        v.record(v.string(), v.union([
-            v.string(),
-            v.array(v.string()),
-            v.array(v.record(v.string(), v.string())),
-        ])),
-    ]),
+    // looseObject, not intersect([object, record]): v.intersect validates
+    // against every member AND merges their outputs, and that merge cannot
+    // reconcile a nested array - so a W3C query carrying type_values
+    // (string[][]) was rejected outright at the safeParse gate with
+    // "Invalid type: Expected Object but received unknown", even though each
+    // member accepted it on its own. looseObject validates the fields below
+    // and passes any format-specific extras through untouched, which is what
+    // the catch-all record was there for.
+    meta: v.looseObject({
+        vct_values: v.optional(v.array(v.string())),
+        doctype_value: v.optional(v.string()),
+        type_values: v.optional(v.array(v.array(v.string()))),
+        zk_system_type: v.optional(v.array(v.record(v.string(), v.string()))),
+    }),
     claims: v.optional(v.array(v.object({
         path: v.array(v.nullable(v.string())),
     }))),
@@ -284,7 +273,7 @@ Alpine.data("app", () => ({
     /** @type {boolean} Whether sendDcqlQuery() calls navigator.credentials.get() before rendering the wallet link/QR screen; when false it goes straight to that screen. Separate from dcApiEnabled because an OS-level DC API matcher can reject a format with its own dialog before any JS runs, leaving no failure to catch - see DigitalCredentialsConfig.AutoAttempt. */
     dcApiAutoAttempt: true,
 
-     /** @type {{ id: string; format: string; vct: string; vct_values?: string[]; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
+     /** @type {{ id: string; format: string; vct: string; vct_values?: string[]; type_values?: string[][]; claims: Record<string, (string|null)[]>; claimTree: ClaimNode[]; } | null} */
     credentialAttributes: null,
 
     /**
@@ -467,6 +456,10 @@ Alpine.data("app", () => ({
             // page) to the absent form this object's type declares, keeping
             // the strict checkJs contract consistent.
             vct_values: chosenCredential.vct_values ?? undefined,
+            // Same reason as vct_values: without carrying this, a W3C
+            // credential picked here would fall back to vct_values and go out
+            // with a constraint its format does not use.
+            type_values: chosenCredential.type_values ?? undefined,
             claims,
             claimTree: buildClaimTree(claims),
         }
@@ -517,11 +510,13 @@ Alpine.data("app", () => ({
 
         if (!this.credentialAttributes) {
             this.error = "Selected attributes list is null";
+            this.loading = false;
             return;
         }
 
         if (!(this.$refs.attributesSelectionForm instanceof HTMLFormElement)) {
             this.error = "Attributes selection form not of type 'HtmlFormElement'";
+            this.loading = false;
             return;
         }
 
@@ -537,21 +532,14 @@ Alpine.data("app", () => ({
             claims.push({ path });
         }
 
-        // mso_mdoc credentials have no vct - the DCQL equivalent constraint
-        // is doctype_value (OpenID4VP 1.0 6.4.1), not vct_values. Sending
-        // vct_values for an mdoc credential matches nothing on the wallet
-        // side (no mdoc credential has a vct), so the request always comes
-        // back empty.
-        // vct_values carries the credential's canonical vct - the one value
-        // ResolveVCTUrls settles on, which the credential body carries and the
-        // issuer metadata advertises, so a wallet matching either finds it.
-        // Falls back to the single vct for an older server that sends no list.
-        const vctValues = this.credentialAttributes.vct_values?.length
-            ? this.credentialAttributes.vct_values
-            : [this.credentialAttributes.vct];
-        const meta = this.credentialAttributes.format === "mso_mdoc"
-            ? { doctype_value: this.credentialAttributes.vct }
-            : { vct_values: vctValues };
+        // The meta constraint follows the credential's format; the rules and
+        // the reasons live in dcql-meta.js so they can be unit tested.
+        const { meta, error: metaError } = dcqlMetaFor(this.credentialAttributes);
+        if (metaError) {
+            this.error = metaError;
+            this.loading = false;
+            return;
+        }
 
         /** @satisfies {DCQLQueryCredential} */
         const credential = {
@@ -569,6 +557,7 @@ Alpine.data("app", () => ({
         const { output: dcql_query, success } = v.safeParse(dcqlQuerySchema, dcqlQuery);
         if (!success) {
             this.error = "Invalid DCQL query";
+            this.loading = false;
             return;
         }
 

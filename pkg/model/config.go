@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -533,6 +534,21 @@ type Issuer struct {
 	MDoc *MDocConfig `yaml:"mdoc" validate:"omitempty"`
 	// AuditLog holds audit log configuration
 	AuditLog *AuditLog `yaml:"audit_log" validate:"omitempty"`
+	// JSONLDContextAllowlist names the JSON-LD context URLs this issuer may
+	// dereference when signing a W3C credential.
+	//
+	// additional_contexts arrives over gRPC from the caller, and signing
+	// canonicalizes the credential to RDF, which FETCHES every context in it.
+	// Without an allowlist that is a caller-directed outbound request from
+	// the issuer - reachable hosts include anything the issuer's network can
+	// reach, which is the part a scheme check cannot address.
+	//
+	// Empty means no additional context may be used: a request carrying one
+	// is refused. Nothing is lost by that default, since a deployment using
+	// custom W3C types has to publish its context anyway and can name it
+	// here. Matching is exact.
+	JSONLDContextAllowlist []string `yaml:"jsonld_context_allowlist" validate:"omitempty,dive,required,url" doc_example:"\"https://example.org/diploma\""`
+
 	// SignMetadataRateLimit configures the rate limiter for the SignMetadata gRPC endpoint.
 	// In HA setups each APIGW node refreshes two documents (VCI+OAuth2), so the defaults
 	// should accommodate the expected cluster size. Default: 2 req/s, burst 20.
@@ -1824,6 +1840,72 @@ type CredentialMetadata struct {
 	// VCT. Used only for mso_mdoc.
 	Doctype string `yaml:"doctype,omitempty" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath MDDLUrl VCT"`
 
+	// CredentialTypes lists the W3C VC types this scope ISSUES, most general
+	// first, e.g. ["VerifiableCredential", "DiplomaCredential"].
+	//
+	// Compact terms (OID4VCI Appendix A.1). Advertised as
+	// credential_definition.type, which is also where issueVC20 reads the
+	// types it mints, so advertised and issued stay in step.
+	//
+	// A verifier constrains by CredentialTypeValues instead, which cannot be
+	// derived from this - a scope that is both issued and requested sets both.
+	// W3C formats only; defaults to the bare base type, as before.
+	//
+	// A CUSTOM term here needs CredentialContexts to define it, and the three
+	// fields only work as a set. Configuring a term with no context issues a
+	// credential whose type expands to a relative IRI, which can never equal
+	// the absolute IRI credential_type_values names - so the deployment
+	// issues credentials its own verifier refuses. A complete example:
+	//
+	//	credential_types:        ["VerifiableCredential", "DiplomaCredential"]
+	//	credential_contexts:     ["https://example.org/diploma"]
+	//	credential_type_values:  [["https://www.w3.org/2018/credentials#VerifiableCredential",
+	//	                           "https://example.org/diploma#DiplomaCredential"]]
+	//
+	// where https://example.org/diploma is published and defines
+	// DiplomaCredential as that IRI.
+	CredentialTypes []string `yaml:"credential_types,omitempty" json:"-" validate:"omitempty,dive,required"`
+
+	// CredentialTypeValues is the DCQL meta.type_values a verifier REQUESTS
+	// this credential by: alternatives, each a set of types the credential
+	// must carry all of (OpenID4VP 1.0 6.4.1).
+	//
+	// Fully expanded IRIs - ".../2018/credentials#VerifiableCredential", not
+	// "VerifiableCredential". Separate from CredentialTypes because converting
+	// between them needs a JSON-LD expansion this repo does not do; guessing
+	// would emit a query wallets cannot match.
+	//
+	// Unset leaves the scope unrequestable rather than guessed at.
+	CredentialTypeValues [][]string `yaml:"credential_type_values,omitempty" json:"-" validate:"omitempty,dive,required,dive,required"`
+
+	// CredentialContexts are JSON-LD contexts appended after the VC 2.0 base
+	// context when this credential is issued.
+	//
+	// This is what connects the two fields above. A term in credential_types
+	// that no context defines survives JSON-LD expansion as a RELATIVE IRI,
+	// so it can never equal the absolute IRI credential_type_values names,
+	// and a verifier constraining by that IRI will refuse every credential
+	// this deployment issues. Publish a context defining the term and name it
+	// here.
+	//
+	// The URL must be dereferenceable by BOTH sides, and the issuer's need is
+	// the sharper one: signing canonicalizes the credential to RDF, so an
+	// unreachable context fails issuance outright rather than degrading
+	// verification. Publish it before configuring it.
+	//
+	// The issuer also refuses to fetch a context it has not been told about -
+	// name it in issuer.jsonld_context_allowlist as well, or issuance fails.
+	//
+	// Resolved and PINNED at config load, which has three consequences worth
+	// knowing before configuring this. The host must be reachable when the
+	// service starts, or it will not start. The document is then fixed for
+	// the life of the process, so republishing the context does not affect a
+	// running service - restart it. And startup verifies that the context
+	// actually defines credential_types and that the result matches
+	// credential_type_values, so a mismatch is a boot failure rather than a
+	// presentation that silently never matches.
+	CredentialContexts []string `yaml:"credential_contexts,omitempty" json:"-" validate:"omitempty,dive,required,url"`
+
 	MDDL *mdoc.MDDLSchema `yaml:"-" json:"-"`
 
 	// MDDLRaw holds the raw JSON bytes of the MDDL document, passed inline
@@ -2042,6 +2124,43 @@ func (c *CredentialMetadata) GetVCTURL() string {
 	return c.VCTURL
 }
 
+// VCContextV2 is the W3C VC 2.0 base context every credential this repo issues
+// carries first.
+const VCContextV2 = "https://www.w3.org/ns/credentials/v2"
+
+// W3CTypeValuesForCheck exposes the narrowing type alternatives for config
+// validation, which lives in another package.
+func (c *CredentialMetadata) W3CTypeValuesForCheck() [][]string {
+	if c == nil {
+		return nil
+	}
+	return c.w3cTypeValues()
+}
+
+// W3CContexts returns the full @context a W3C credential of this type is
+// issued with: the VC 2.0 base, then whatever credential_contexts configures.
+//
+// One source for two readers. The issuer builds the credential's @context from
+// the same list (sent as MakeVC20Request.additional_contexts), and issuer
+// metadata advertises it - OpenID4VCI requires @context in
+// credential_definition for ldp_vc, and a wallet cannot expand the types
+// without it.
+func (c *CredentialMetadata) W3CContexts() []string {
+	if c == nil {
+		return []string{VCContextV2}
+	}
+	return append([]string{VCContextV2}, c.CredentialContexts...)
+}
+
+// GetCredentialContexts returns the JSON-LD contexts to issue this credential
+// with, nil-safe like the other accessors.
+func (c *CredentialMetadata) GetCredentialContexts() []string {
+	if c == nil {
+		return nil
+	}
+	return c.CredentialContexts
+}
+
 // GetVCTMRaw returns the raw VCTM JSON bytes under a read lock.
 func (c *CredentialMetadata) GetVCTMRaw() []byte {
 	c.mu.RLock()
@@ -2146,6 +2265,48 @@ func (c *CredentialMetadata) doctype() string {
 	return c.Doctype
 }
 
+// baseVCType is the compact term every W3C VC must carry, the counterpart of
+// openid4vp.BaseVCTypeIRI on the DCQL side.
+const baseVCType = "VerifiableCredential"
+
+// W3CTypes returns the compact-term types this scope issues, always including
+// the base type and defaulting to it alone, as the issuer metadata always
+// advertised.
+//
+// The base type is prepended when a config omits it: the W3C VC data model
+// requires every credential to carry it, and a verifier's type_values
+// alternatives name its IRI, which MatchTypeValues needs the credential to
+// have. Issuing without it produces a credential that matches nothing.
+//
+// The issuance side. A verifier reads CredentialTypeValues: different
+// representation, and a different reading of the bare base type - issuing one
+// is merely unspecific, requesting one matches every W3C credential.
+func (c *CredentialMetadata) W3CTypes() []string {
+	if c == nil || len(c.CredentialTypes) == 0 {
+		return []string{baseVCType}
+	}
+	if slices.Contains(c.CredentialTypes, baseVCType) {
+		return slices.Clone(c.CredentialTypes)
+	}
+	return append([]string{baseVCType}, c.CredentialTypes...)
+}
+
+// w3cTypeValues returns the configured DCQL type_values, dropping alternatives
+// that would not narrow the request - one naming only the base type would turn
+// "cannot be built" into "asks for anything".
+func (c *CredentialMetadata) w3cTypeValues() [][]string {
+	var out [][]string
+	for _, alternative := range c.CredentialTypeValues {
+		narrowing := slices.ContainsFunc(alternative, func(t string) bool {
+			return t != "" && t != openid4vp.BaseVCTypeIRI
+		})
+		if narrowing {
+			out = append(out, slices.Clone(alternative))
+		}
+	}
+	return out
+}
+
 // DCQLMetaQuery returns the DCQL meta constraint for this credential type, and
 // whether one could be expressed at all.
 //
@@ -2156,7 +2317,12 @@ func (c *CredentialMetadata) doctype() string {
 //   - mso_mdoc: doctype_value, see doctype.
 //   - dc+sd-jwt, the legacy vc+sd-jwt spelling, and an empty format (Format
 //     defaults to dc+sd-jwt): vct_values, see vctIdentifier.
-//   - anything else: ok is false.
+//   - ldp_vc / vc+ld+json: type_values from credential_type_values - expanded
+//     IRIs, only alternatives that narrow past the base type. Not
+//     credential_types, which cannot be expanded.
+//   - anything else: ok is false, jwt_vc_json included. Nothing issues it and
+//     the verifier reads a compact JWT-VC as SD-JWT, so it is advertised in
+//     issuer metadata but never requestable.
 //
 // ok=false means no constraint can be built - a nil receiver, a W3C format
 // with no configured type list, mso_mdoc_zk (below), or a missing identifier -
@@ -2184,6 +2350,25 @@ func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
 			return openid4vp.MetaQuery{}, false
 		}
 		return openid4vp.MetaQuery{VCTValues: []string{vct}}, true
+	// Not jwt_vc_json: a JWT-secured W3C VC is a compact JWT, which
+	// detectCredentialFormat reads as SD-JWT and the verifier would then
+	// process under the wrong credential model - and nothing in this stack
+	// issues it either (handlers_issuer.go has no case, SUNET/vc#686). Same
+	// treatment as jwt_vc_json-ld: advertised, not requestable.
+	case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON:
+		// type_values is an array of ALTERNATIVES, each an array of types a
+		// credential must carry all of (OpenID4VP 1.0 6.4.1).
+		//
+		// Refused when credential_type_values is unset or names only the base
+		// type: a query constrained by that matches every W3C credential in
+		// the wallet, turning "this request cannot be built" into "this
+		// request asks for anything", which over-discloses silently instead of
+		// failing.
+		typeValues := c.w3cTypeValues()
+		if len(typeValues) == 0 {
+			return openid4vp.MetaQuery{}, false
+		}
+		return openid4vp.MetaQuery{TypeValues: typeValues}, true
 	default:
 		return openid4vp.MetaQuery{}, false
 	}
@@ -2501,10 +2686,31 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		case "dc+sd-jwt":
 			// Appendix A.3: only vct is format-specific for dc+sd-jwt
 			credConfig.VCT = resolvedVCT
-		case "jwt_vc_json", "ldp_vc", "jwt_vc_json-ld":
-			// Appendix A.1: credential_definition with type array is format-specific for W3C VC formats
+		// vc+ld+json belongs here: handlers_issuer.go issues it alongside
+		// ldp_vc, and DCQLMetaQuery treats it as a W3C format, so leaving it
+		// out sent it down the default branch with no credential_definition at
+		// all - its credential_types went unadvertised while a verifier
+		// constrained requests by them, which is the disagreement this field
+		// exists to remove.
+		//
+		// jwt_vc_json-ld stays advertised but is deliberately not requestable:
+		// nothing issues it (see handlers_issuer.go's format switch), so
+		// DCQLMetaQuery does not accept it either.
+		case openid4vp.FormatJwtVCJson, openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON, "jwt_vc_json-ld":
+			// Appendix A.1: credential_definition with type array is format-specific for W3C VC formats.
+			//
+			// credential_types when configured, so the advertised types, the
+			// types issueVC20 mints (it reads them back from here) and the DCQL
+			// type_values a verifier asks by all come from one place. The bare
+			// base type remains the default, which is what this always
+			// advertised.
 			credConfig.CredentialDefinition = &openid4vci.CredentialDefinition{
-				Type: []string{"VerifiableCredential"},
+				Type: constructor.W3CTypes(),
+				// REQUIRED for ldp_vc (OpenID4VCI 1.0 Appendix A.1.2). It was
+				// omitted entirely, so a wallet had no way to expand the types
+				// advertised beside it - and after credential_contexts, the
+				// advertised context has to match what is actually issued.
+				Context: constructor.W3CContexts(),
 			}
 			credConfig.VCT = resolvedVCT
 		default:

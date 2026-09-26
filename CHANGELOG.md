@@ -4,6 +4,13 @@
 
 ### Breaking Changes
 
+- **Status-list and DCQL changes** — see the entries below. The Docker image
+  still ships `/metadata`: an earlier revision of this branch removed it, but
+  the in-repo Fly environment configures `common.credential_metadata` with
+  `/metadata/...` paths and mounts nothing of its own, so removing the copy
+  left all four services failing at config load. Dropping it from the image
+  needs those configurations migrated first, which is its own change.
+
 - **Configuration Refactoring**: Migrated to centralized `key_config` using `pki.KeyConfig` across all services. All signing key configurations now use the unified PKI package structure. Existing configurations will fail validation without these updates.
   
   **Migration:** Update your configuration files with the new `key_config` structure:

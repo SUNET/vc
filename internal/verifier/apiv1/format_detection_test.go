@@ -56,3 +56,49 @@ func TestDetectCredentialFormat_PlainMDoc(t *testing.T) {
 func TestDetectCredentialFormat_Unknown(t *testing.T) {
 	assert.Equal(t, FormatUnknown, detectCredentialFormat("not valid base64!!!"))
 }
+
+// TestDetectCredentialFormat_VC20 pins W3C VC 2.0 detection, and the ordering
+// it depends on.
+//
+// A JSON-LD credential is a JSON object, plain or base64url-wrapped. The mdoc
+// branch base64-decodes anything without dots or tildes, so a wrapped JSON
+// body would be claimed as CBOR before anything looked at it - the JSON test
+// has to come first.
+func TestDetectCredentialFormat_VC20(t *testing.T) {
+	const credential = `{"@context":["https://www.w3.org/ns/credentials/v2"],` +
+		`"type":["VerifiableCredential","UniversityDegreeCredential"],` +
+		`"issuer":"did:example:issuer","credentialSubject":{"degree":"Master of Science"}}`
+
+	t.Run("plain JSON-LD", func(t *testing.T) {
+		assert.Equal(t, FormatVC20, detectCredentialFormat(credential))
+	})
+
+	t.Run("leading whitespace", func(t *testing.T) {
+		assert.Equal(t, FormatVC20, detectCredentialFormat("\n  "+credential))
+	})
+
+	t.Run("base64url-wrapped, which the mdoc branch would have claimed", func(t *testing.T) {
+		assert.Equal(t, FormatVC20,
+			detectCredentialFormat(base64.RawURLEncoding.EncodeToString([]byte(credential))))
+	})
+
+	// The detector has to accept exactly what VC20Handler.decodeVPToken does,
+	// or a token the handler could verify goes down another branch.
+	t.Run("standard base64, which decodeVPToken also accepts", func(t *testing.T) {
+		assert.Equal(t, FormatVC20,
+			detectCredentialFormat(base64.StdEncoding.EncodeToString([]byte(credential))))
+	})
+
+	t.Run("expanded JSON-LD, which is an array not an object", func(t *testing.T) {
+		const expanded = `[{"@type":["https://www.w3.org/2018/credentials#VerifiableCredential"]}]`
+		assert.Equal(t, FormatVC20, detectCredentialFormat(expanded))
+		assert.Equal(t, FormatVC20,
+			detectCredentialFormat(base64.RawURLEncoding.EncodeToString([]byte(expanded))))
+	})
+
+	t.Run("the other formats still classify", func(t *testing.T) {
+		assert.Equal(t, FormatSDJWT, detectCredentialFormat("eyJhbGciOiJFUzI1NiJ9.e30.sig~disclosure~"))
+		assert.Equal(t, FormatSDJWT, detectCredentialFormat("eyJhbGciOiJFUzI1NiJ9.e30.sig"))
+		assert.Equal(t, FormatUnknown, detectCredentialFormat("not a credential at all"))
+	})
+}
