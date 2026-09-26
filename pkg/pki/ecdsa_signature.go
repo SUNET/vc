@@ -24,6 +24,21 @@ func EncodeECDSASignature(r, s *big.Int, curve elliptic.Curve) ([]byte, error) {
 	rBytes := r.Bytes()
 	sBytes := s.Bytes()
 
+	// Refuse components that do not fit rather than slicing past the buffer.
+	// r.Bytes() on a value wider than the curve makes keySize-len(rBytes)
+	// negative, and the copy below then panics with "slice bounds out of
+	// range" - reachable from any DER signature this package is asked to
+	// convert, so a malformed or hostile one would take the process down
+	// instead of being rejected. Negative values have no place here either:
+	// big.Int.Bytes() discards the sign, so -1 and 1 would encode alike.
+	if r.Sign() < 0 || s.Sign() < 0 {
+		return nil, fmt.Errorf("ECDSA signature components must be non-negative")
+	}
+	if len(rBytes) > keySize || len(sBytes) > keySize {
+		return nil, fmt.Errorf("ECDSA signature component is %d/%d bytes, too wide for curve %s (%d bytes)",
+			len(rBytes), len(sBytes), curve.Params().Name, keySize)
+	}
+
 	// Copy R into first half (right-aligned, zero-padded on left)
 	copy(signature[keySize-len(rBytes):keySize], rBytes)
 
