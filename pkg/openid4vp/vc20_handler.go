@@ -129,6 +129,10 @@ func WithVC20AllowedSkew(skew time.Duration) VC20HandlerOption {
 //
 // Without this a credential is accepted on its issuer's signature alone, which
 // proves it was issued but not that this holder is presenting it now.
+// An empty challenge is accepted here rather than refused, because the
+// option cannot report an error - but verification refuses it. Requiring
+// binding while having no nonce to bind to is a caller bug, and the failure
+// belongs where it can be returned.
 func WithVC20PresentationBinding(challenge, domain string) VC20HandlerOption {
 	return func(h *VC20Handler) {
 		h.requireHolderBinding = true
@@ -766,13 +770,8 @@ func (h *VC20Handler) verifyPresentationProof(ctx context.Context, vpBytes []byt
 	// Binding to THIS request. The signature covers these values, so a
 	// mismatch means the presentation was made for someone else - which is
 	// exactly what replay looks like.
-	if challenge, _ := proof["challenge"].(string); challenge != h.expectedChallenge {
-		return "", errors.New("presentation proof challenge does not match this session's nonce")
-	}
-	if h.expectedDomain != "" {
-		if domain, _ := proof["domain"].(string); domain != h.expectedDomain {
-			return "", errors.New("presentation proof domain does not name this verifier")
-		}
+	if err := h.checkPresentationBinding(proof); err != nil {
+		return "", err
 	}
 
 	vm, _ := proof["verificationMethod"].(string)
@@ -1214,4 +1213,34 @@ func generateUUID() string {
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+// checkPresentationBinding ties the presentation to THIS request. The
+// signature covers these values, so a mismatch means the presentation was
+// made for someone else - which is what replay looks like.
+//
+// Both halves of the challenge must be non-empty. A missing or non-string
+// challenge asserts to "", and an empty expectedChallenge would then match
+// it, so holder binding would "succeed" having bound the presentation to
+// nothing - precisely what it exists to prevent. An empty expected challenge
+// is a caller requiring binding with no nonce to bind to, which is a bug
+// worth reporting rather than quietly tolerating.
+func (h *VC20Handler) checkPresentationBinding(proof map[string]any) error {
+	if h.expectedChallenge == "" {
+		return errors.New("holder binding was required but this session has no nonce to bind to")
+	}
+	challenge, _ := proof["challenge"].(string)
+	if challenge == "" {
+		return errors.New("presentation proof carries no challenge")
+	}
+	if challenge != h.expectedChallenge {
+		return errors.New("presentation proof challenge does not match this session's nonce")
+	}
+
+	if h.expectedDomain != "" {
+		if domain, _ := proof["domain"].(string); domain != h.expectedDomain {
+			return errors.New("presentation proof domain does not name this verifier")
+		}
+	}
+	return nil
 }

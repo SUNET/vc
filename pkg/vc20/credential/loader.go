@@ -190,8 +190,21 @@ func (l *CachingDocumentLoader) fetchContext(rawURL string) (*ld.RemoteDocument,
 		return nil, fmt.Errorf("loading JSON-LD context %q: HTTP %d", rawURL, resp.StatusCode)
 	}
 
+	// Read the bytes first, capped, instead of decoding through a
+	// LimitReader. json.Decoder.Decode stops at the end of the first JSON
+	// value and never looks at what follows, so a response that opens with a
+	// small valid value and then continues was accepted however long it ran -
+	// the cap constrained what Decode consumed, not what the body could be.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxContextBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading JSON-LD context %q: %w", rawURL, err)
+	}
+	if len(body) > maxContextBytes {
+		return nil, fmt.Errorf("JSON-LD context %q is larger than the %d byte limit", rawURL, maxContextBytes)
+	}
+
 	var document any
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxContextBytes)).Decode(&document); err != nil {
+	if err := json.Unmarshal(body, &document); err != nil {
 		return nil, fmt.Errorf("JSON-LD context %q is not valid JSON: %w", rawURL, err)
 	}
 

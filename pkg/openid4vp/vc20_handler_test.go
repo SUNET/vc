@@ -8,6 +8,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -1071,4 +1072,60 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// Holder binding that binds to nothing is not holder binding. A missing or
+// non-string `challenge` becomes "" when asserted, and an empty
+// expectedChallenge would have matched it - so a presentation carrying no
+// nonce at all would have satisfied a request that required one.
+func TestVerifyPresentationProof_FailsClosedOnEmptyChallenge(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected string
+		proofCh  any
+		wantErr  string
+	}{
+		{
+			name:     "no session nonce to bind to",
+			expected: "",
+			proofCh:  "something",
+			wantErr:  "no nonce to bind to",
+		},
+		{
+			name:     "proof carries no challenge",
+			expected: "session-nonce",
+			proofCh:  nil,
+			wantErr:  "carries no challenge",
+		},
+		{
+			name:     "proof challenge is not a string",
+			expected: "session-nonce",
+			proofCh:  42,
+			wantErr:  "carries no challenge",
+		},
+		{
+			name:     "both empty: the case that used to pass",
+			expected: "",
+			proofCh:  nil,
+			wantErr:  "no nonce to bind to",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &VC20Handler{requireHolderBinding: true, expectedChallenge: tt.expected}
+			proof := map[string]any{"proofPurpose": "authentication"}
+			if tt.proofCh != nil {
+				proof["challenge"] = tt.proofCh
+			}
+
+			err := h.checkPresentationBinding(proof)
+			if err == nil {
+				t.Fatal("want a refusal")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("got %v, want it to mention %q", err, tt.wantErr)
+			}
+		})
+	}
 }
