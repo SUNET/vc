@@ -601,16 +601,15 @@ func (c *Client) uncoveredScopes(ctx context.Context, dcql *openid4vp.DCQL, scop
 // verified less than it asked for, silently, which is the worst shape for
 // this to take - the template author asked for that credential on purpose.
 //
-// Only decidable for a multi-query template that sets no credential_sets -
-// which per OpenID4VP means every credential query is required, and where
-// the single-query default-token path cannot apply. With credential_sets
-// present the queries are alternatives ("A or B"), so an id nothing claims
-// may be perfectly legitimate, and deciding needs the whole set/option
-// relationship modelled rather than this counting. That case is left alone
-// deliberately rather than guessed at: refusing a valid template is as bad
-// as accepting an under-verified one.
+// What counts as required is requiredQueryIDs' business: every query when
+// there are no credential_sets, and otherwise the ids in any required set
+// that offers a single option. A set offering alternatives demands none of
+// them in particular, so an id nothing claims may be exactly right there and
+// is left alone. With credential_sets
+// Refusing a valid template is as bad as accepting an under-verified one,
+// so anything genuinely optional is left alone.
 func (c *Client) unclaimedRequiredQueries(ctx context.Context, dcql *openid4vp.DCQL, scopes []string) []string {
-	if dcql == nil || len(dcql.CredentialSets) > 0 {
+	if dcql == nil {
 		return nil
 	}
 
@@ -631,12 +630,47 @@ func (c *Client) unclaimedRequiredQueries(ctx context.Context, dcql *openid4vp.D
 	}
 
 	var unclaimed []string
-	for _, q := range dcql.Credentials {
-		if !claimed[q.ID] {
-			unclaimed = append(unclaimed, q.ID)
+	for _, id := range requiredQueryIDs(dcql) {
+		if !claimed[id] {
+			unclaimed = append(unclaimed, id)
 		}
 	}
 	return unclaimed
+}
+
+// requiredQueryIDs returns the DCQL credential query ids the wallet must
+// answer, as far as that can be decided from the query alone.
+//
+// With no credential_sets, OpenID4VP makes every credential query required.
+// With them, a set lists OPTIONS, and satisfying any one option satisfies
+// the set - so a set offering several options demands none of them in
+// particular and is skipped here. A required set with a SINGLE option is
+// different: there is no alternative, so every id in that option is required,
+// including the case a naive reading misses - Options [["a","b"]] requires
+// both a and b, not either.
+func requiredQueryIDs(dcql *openid4vp.DCQL) []string {
+	if len(dcql.CredentialSets) == 0 {
+		ids := make([]string, 0, len(dcql.Credentials))
+		for _, q := range dcql.Credentials {
+			ids = append(ids, q.ID)
+		}
+		return ids
+	}
+
+	seen := make(map[string]bool)
+	var ids []string
+	for _, set := range dcql.CredentialSets {
+		if !set.IsRequired() || len(set.Options) != 1 {
+			continue
+		}
+		for _, id := range set.Options[0] {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
 }
 
 // buildDCQLQueryFromConfig builds a DCQL query using credential constructor config.

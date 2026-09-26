@@ -50,26 +50,26 @@ func (pb *PresentationBuilder) BuildFromScopes(ctx context.Context, scopes []str
 		return nil, nil, fmt.Errorf("no scopes provided")
 	}
 
-	// Find first matching template by scope
-	var templateID string
-	for _, scope := range scopes {
-		if id, ok := pb.scopeIndex[scope]; ok {
-			templateID = id
-			break
-		}
-	}
-
-	if templateID == "" {
+	// Through selectTemplate, like every other path: picking the first
+	// matching scope instead meant "openid eduid" chose whichever template
+	// "openid" indexes, while claim extraction chose eduid's - so the query
+	// sent to the wallet and the mapping used to read the answer could come
+	// from different templates. Selection has to be one deterministic
+	// function of the request.
+	template, ok := pb.selectTemplate(scopes)
+	if !ok {
 		return nil, nil, fmt.Errorf("no template found for scopes %v", scopes)
 	}
 
-	template := pb.templates[templateID]
 	dcql := template.GetDCQLQuery()
 	if dcql == nil {
 		return nil, nil, fmt.Errorf("template %s has no DCQL query", template.GetID())
 	}
 
-	return dcql, template, nil
+	// A copy, for the reason TemplateDCQLQuery gives: a caller completing the
+	// query in place must not edit the template every later request is built
+	// from.
+	return copyDCQL(dcql), template, nil
 }
 
 // BuildFromTemplate creates a DCQL query from a specific template ID

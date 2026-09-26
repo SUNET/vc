@@ -218,7 +218,7 @@ func TestVPTokensForScope(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := client.vpTokensForScope(tt.authCtx.ScopeQueryIDs, tt.defaultAllowed, openid4vp.VPResponse{VPToken: tt.vpToken}, tt.scope)
+			got, err := client.vpTokensForScope(tt.authCtx, tt.authCtx.ScopeQueryIDs, tt.defaultAllowed, openid4vp.VPResponse{VPToken: tt.vpToken}, tt.scope)
 			if tt.wantError != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantError)
@@ -268,6 +268,7 @@ func TestScopeQueryIDsAliasTemplateScope(t *testing.T) {
 
 	// And the response then resolves, which is the whole point.
 	tokens, err := client.vpTokensForScope(
+		&cache.AuthorizationContext{DCQLQuery: dcql, ScopeQueryIDs: pairs},
 		pairs,
 		false,
 		openid4vp.VPResponse{VPToken: map[string][]string{"eudi_pid": {"token-pid"}}},
@@ -467,7 +468,7 @@ func TestScopeQueryIDsRebuildForLegacySession(t *testing.T) {
 	require.Equal(t, map[string]string{"pid": "eudi_pid"}, rebuilt)
 
 	legacy.ScopeQueryIDs = rebuilt
-	tokens, err := client.vpTokensForScope(legacy.ScopeQueryIDs, false,
+	tokens, err := client.vpTokensForScope(legacy, legacy.ScopeQueryIDs, false,
 		openid4vp.VPResponse{VPToken: map[string][]string{"eudi_pid": {"token"}}}, "pid")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"token"}, tokens)
@@ -675,4 +676,67 @@ func TestDefaultTokenAllowedRejectsMerelyConfiguredScope(t *testing.T) {
 
 	assert.False(t, client.defaultTokenAllowed(authCtx, nil, []string{"diploma_ldp"}),
 		"a scope the query never names cannot be attributed an unlabelled credential")
+}
+
+// A scope is kept in the loop even when no query obviously stands for it -
+// dropping one would let it vanish instead of failing. But keeping it must
+// not mean accepting whatever the wallet chose to key by that name.
+//
+// For "openid pid custom_claim" the template is selected by pid and nothing
+// claims custom_claim. Without this check a token keyed "custom_claim" was
+// validated and cached as though the request had asked for it, while the
+// template's own query went unprocessed.
+func TestVPTokensForScope_RefusesAKeyNamingNoQuery(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid": sdJWTScope("urn:eudi:pid:1"),
+	}, nil)
+
+	dcql := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+		{ID: "eudi_pid", Format: "dc+sd-jwt", Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}}},
+	}}
+	authCtx := &cache.AuthorizationContext{
+		Scopes:        []string{"openid", "pid", "custom_claim"},
+		DCQLQuery:     dcql,
+		ScopeQueryIDs: map[string]string{"pid": "eudi_pid"},
+	}
+
+	_, err := client.vpTokensForScope(
+		authCtx,
+		authCtx.ScopeQueryIDs,
+		false,
+		// The wallet answered under the unclaimed scope's own name.
+		openid4vp.VPResponse{VPToken: map[string][]string{"custom_claim": {"token-anything"}}},
+		"custom_claim",
+	)
+	require.Error(t, err, "a key naming no credential query must not be accepted")
+	assert.Contains(t, err.Error(), "names no credential query")
+
+	// The scope the template does claim still resolves.
+	tokens, err := client.vpTokensForScope(
+		authCtx,
+		authCtx.ScopeQueryIDs,
+		false,
+		openid4vp.VPResponse{VPToken: map[string][]string{"eudi_pid": {"token-pid"}}},
+		"pid",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"token-pid"}, tokens)
+}
+
+// A session with no cached DCQL predates the mapping and must still work,
+// or a rolling deploy breaks every in-flight session.
+func TestVPTokensForScope_LegacySessionWithoutDCQLStillResolves(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid": sdJWTScope("urn:eudi:pid:1"),
+	}, nil)
+
+	tokens, err := client.vpTokensForScope(
+		&cache.AuthorizationContext{Scopes: []string{"pid"}},
+		nil,
+		false,
+		openid4vp.VPResponse{VPToken: map[string][]string{"pid": {"token-pid"}}},
+		"pid",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"token-pid"}, tokens)
 }

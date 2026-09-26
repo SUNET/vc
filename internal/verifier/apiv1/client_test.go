@@ -420,6 +420,7 @@ func TestUnclaimedRequiredQueries(t *testing.T) {
 		}
 	}
 	yes := true
+	no := false
 
 	tests := []struct {
 		name    string
@@ -452,9 +453,9 @@ func TestUnclaimedRequiredQueries(t *testing.T) {
 			wantAny: true,
 		},
 		{
-			// credential_sets make the queries alternatives ("A or B"), so an
-			// unclaimed id may be perfectly legitimate and this cannot decide.
-			name: "credential_sets are left alone",
+			// Several options are alternatives ("A or B"), so neither is
+			// required in particular and an unclaimed id may be exactly right.
+			name: "a set offering alternatives is left alone",
 			dcql: &openid4vp.DCQL{
 				Credentials: []openid4vp.CredentialQuery{
 					q("a", "https://example.org/pid"),
@@ -462,6 +463,38 @@ func TestUnclaimedRequiredQueries(t *testing.T) {
 				},
 				CredentialSets: []openid4vp.CredentialSetQuery{
 					{Options: [][]string{{"a"}, {"b"}}, Required: &yes},
+				},
+			},
+			scopes:  []string{"pid"},
+			wantAny: false,
+		},
+		{
+			// A required set with ONE option requires every id in it:
+			// Options [["a","b"]] means both, not either. Skipping every
+			// query that had any credential_sets missed exactly this.
+			name: "a required single option requires all of its ids",
+			dcql: &openid4vp.DCQL{
+				Credentials: []openid4vp.CredentialQuery{
+					q("a", "https://example.org/pid"),
+					q("b", "https://example.org/unrequested"),
+				},
+				CredentialSets: []openid4vp.CredentialSetQuery{
+					{Options: [][]string{{"a", "b"}}, Required: &yes},
+				},
+			},
+			scopes:  []string{"pid"},
+			wantAny: true,
+		},
+		{
+			// An OPTIONAL set demands nothing, however it is shaped.
+			name: "an optional single option is left alone",
+			dcql: &openid4vp.DCQL{
+				Credentials: []openid4vp.CredentialQuery{
+					q("a", "https://example.org/pid"),
+					q("b", "https://example.org/unrequested"),
+				},
+				CredentialSets: []openid4vp.CredentialSetQuery{
+					{Options: [][]string{{"a", "b"}}, Required: &no},
 				},
 			},
 			scopes:  []string{"pid"},
