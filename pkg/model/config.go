@@ -2029,7 +2029,15 @@ func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string, r
 
 // GetVCTM returns the cached VCTM under a read lock so it is safe to call
 // concurrently with the background refresh loop.
+//
+// Nil receiver returns the zero value, as every accessor here does: a nil
+// *CredentialMetadata is reachable without a programming error - a map lookup
+// that missed, or a present key holding nil - and taking the lock first turned
+// those into a panic.
 func (c *CredentialMetadata) GetVCTM() *sdjwtvc.VCTM {
+	if c == nil {
+		return nil
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.VCTM
@@ -2037,6 +2045,9 @@ func (c *CredentialMetadata) GetVCTM() *sdjwtvc.VCTM {
 
 // GetVCTURL returns the published URL where the VCTM is served.
 func (c *CredentialMetadata) GetVCTURL() string {
+	if c == nil {
+		return ""
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.VCTURL
@@ -2044,15 +2055,26 @@ func (c *CredentialMetadata) GetVCTURL() string {
 
 // GetVCTMRaw returns the raw VCTM JSON bytes under a read lock.
 func (c *CredentialMetadata) GetVCTMRaw() []byte {
+	if c == nil {
+		return nil
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.VCTMRaw
 }
 
 // vctmRawWithVCT returns raw with "vct" set to vct, and reports whether it had
-// to change anything. Bytes that already declare a non-empty vct are returned
-// untouched, as are bytes that do not parse - a caller must never lose the
-// document over a rewrite it cannot make.
+// to change anything.
+//
+// The member is overwritten whether or not the document already declares one:
+// deciding WHETHER to rewrite belongs to the caller, because that is what
+// replace_vct governs, and ResolveVCTUrls only calls this once it has made
+// that decision. An earlier version skipped documents with a vct already set,
+// which made replace_vct: true a no-op for exactly the documents it exists
+// for.
+//
+// Bytes that do not parse are returned untouched - a caller must never lose
+// the document over a rewrite it cannot make.
 func vctmRawWithVCT(raw []byte, vct string) ([]byte, bool) {
 	if raw == nil || vct == "" {
 		return raw, false
@@ -2077,6 +2099,9 @@ func vctmRawWithVCT(raw []byte, vct string) ([]byte, bool) {
 
 // GetAttributes returns the derived attributes under a read lock.
 func (c *CredentialMetadata) GetAttributes() map[string]map[string][]*string {
+	if c == nil {
+		return nil
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.Attributes
@@ -2085,6 +2110,9 @@ func (c *CredentialMetadata) GetAttributes() map[string]map[string][]*string {
 // GetIntegrity returns the SRI integrity hash of the VCTM or MDDL document
 // under a read lock.
 func (c *CredentialMetadata) GetIntegrity() string {
+	if c == nil {
+		return ""
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.Integrity
@@ -2093,6 +2121,9 @@ func (c *CredentialMetadata) GetIntegrity() string {
 // GetMDDL returns the cached MDDL schema under a read lock so it is safe to
 // call concurrently with the background refresh loop.
 func (c *CredentialMetadata) GetMDDL() *mdoc.MDDLSchema {
+	if c == nil {
+		return nil
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.MDDL
@@ -2100,6 +2131,9 @@ func (c *CredentialMetadata) GetMDDL() *mdoc.MDDLSchema {
 
 // GetMDDLRaw returns the raw MDDL JSON bytes under a read lock.
 func (c *CredentialMetadata) GetMDDLRaw() []byte {
+	if c == nil {
+		return nil
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.MDDLRaw
@@ -2108,12 +2142,12 @@ func (c *CredentialMetadata) GetMDDLRaw() []byte {
 // IsLocalVCTM returns true when the VCTM is loaded from a local file
 // (i.e. apigw should publish it at /type-metadata/:scope).
 func (c *CredentialMetadata) IsLocalVCTM() bool {
-	return c.VCTMFilePath != ""
+	return c != nil && c.VCTMFilePath != ""
 }
 
 // IsLocalMDDL returns true when the MDDL schema is loaded from a local file.
 func (c *CredentialMetadata) IsLocalMDDL() bool {
-	return c.MDDLFilePath != ""
+	return c != nil && c.MDDLFilePath != ""
 }
 
 // vctIdentifier returns the credential's canonical vct - the value the body
@@ -2690,6 +2724,9 @@ func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string, 
 // element ID, since document data is keyed by element directly rather than
 // nested under the mdoc namespace - see MDDLSchema.Presentation.
 func (c *CredentialMetadata) DeclaredClaimNames() (map[string]bool, bool) {
+	if c == nil {
+		return nil, false
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
