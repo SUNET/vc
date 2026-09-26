@@ -199,3 +199,68 @@ func TestNew_RejectsNonP256Key(t *testing.T) {
 		t.Fatalf("the error should name the required curve, got %v", err)
 	}
 }
+
+// Every request this client makes goes to one of these two endpoints, so a
+// scheme it cannot speak has to be refused at construction. Otherwise the
+// issuer starts, serves, and fails on the first allocation with an obscure
+// transport error.
+func TestNew_RejectsEndpointsItCannotCall(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	base := func() Config {
+		return Config{
+			IngestionURL: "https://status.example.org",
+			ASURL:        "https://as.example.org",
+			IssuerID:     "https://issuer.example.org",
+			Signer:       softwareSigner(key),
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{"ingestion ftp", func(c *Config) { c.IngestionURL = "ftp://status.example.org" }, "IngestionURL"},
+		{"as ftp", func(c *Config) { c.ASURL = "ftp://as.example.org" }, "ASURL"},
+		{"ingestion file", func(c *Config) { c.IngestionURL = "file:///etc/passwd" }, "IngestionURL"},
+		{"ingestion relative", func(c *Config) { c.IngestionURL = "status.example.org" }, "IngestionURL"},
+		{"ingestion empty", func(c *Config) { c.IngestionURL = "" }, "IngestionURL"},
+		{"as empty", func(c *Config) { c.ASURL = "" }, "ASURL"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base()
+			tc.mutate(&cfg)
+
+			_, err := New(cfg, nil)
+			if err == nil {
+				t.Fatal("want a refusal at construction")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("the error should name the field, got: %v", err)
+			}
+		})
+	}
+}
+
+// And a well-formed pair still constructs.
+func TestNew_AcceptsHTTPEndpoints(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	c, err := New(Config{
+		IngestionURL:   "http://status.example.org",
+		ASURL:          "https://as.example.org",
+		IssuerID:       "https://issuer.example.org",
+		Signer:         softwareSigner(key),
+		PoolSize:       0,
+		RefillInterval: time.Hour,
+	}, nil)
+	if err != nil {
+		t.Fatalf("plain http must be allowed (local deployments): %v", err)
+	}
+	c.Close()
+}

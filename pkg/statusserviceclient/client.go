@@ -90,6 +90,7 @@ import (
 	"fmt"
 	"github.com/SUNET/vc/pkg/pki"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -217,11 +218,17 @@ type Client struct {
 // loop catches up - consistent with this issuer's own credential-issuance
 // path never being made to wait on this service's availability.
 func New(cfg Config, log *logger.Log) (*Client, error) {
-	if cfg.IngestionURL == "" {
-		return nil, fmt.Errorf("statusserviceclient: IngestionURL is required")
+	// Both endpoints are checked for scheme as well as presence. Every
+	// request this client makes goes to one of them, so a configuration
+	// like "ftp://status.example" would otherwise surface as an obscure
+	// transport error on the first allocation - and only once the issuer
+	// was already serving. The model tags enforce the same thing for
+	// config-driven callers; this covers a direct package caller too.
+	if err := requireHTTPEndpoint("IngestionURL", cfg.IngestionURL); err != nil {
+		return nil, err
 	}
-	if cfg.ASURL == "" {
-		return nil, fmt.Errorf("statusserviceclient: ASURL is required")
+	if err := requireHTTPEndpoint("ASURL", cfg.ASURL); err != nil {
+		return nil, err
 	}
 	if cfg.IssuerID == "" {
 		return nil, fmt.Errorf("statusserviceclient: IssuerID is required")
@@ -347,4 +354,23 @@ func (c *Client) backgroundRetry() retryConfig {
 		initialBackoff: c.cfg.RetryInitialBackoff,
 		maxBackoff:     c.cfg.RetryMaxBackoff,
 	}
+}
+
+// requireHTTPEndpoint rejects a missing endpoint, or one this client cannot
+// actually call.
+func requireHTTPEndpoint(name, raw string) error {
+	if raw == "" {
+		return fmt.Errorf("statusserviceclient: %s is required", name)
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("statusserviceclient: %s %q is not a URL: %w", name, raw, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("statusserviceclient: %s %q uses scheme %q, but this client speaks only http and https", name, raw, u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("statusserviceclient: %s %q has no host", name, raw)
+	}
+	return nil
 }

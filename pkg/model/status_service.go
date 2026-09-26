@@ -27,11 +27,11 @@ type StatusServiceConfig struct {
 	// typically the ingress-router's public URL (see siros-status-
 	// service's docs/design.md §15), which fronts every shard behind one
 	// address.
-	IngestionURL string `yaml:"ingestion_url" validate:"omitempty,url" doc_example:"\"https://status.siros.org\""`
+	IngestionURL string `yaml:"ingestion_url" validate:"omitempty,httpurl" doc_example:"\"https://status.siros.org\""`
 	// ASURL is the base URL of the status service's Authorization Server;
 	// POST {ASURL}/token is where client-assertion token requests go.
 	// Required whenever IngestionURL is set.
-	ASURL string `yaml:"as_url" validate:"omitempty,url" doc_example:"\"https://status-as.siros.org\""`
+	ASURL string `yaml:"as_url" validate:"omitempty,httpurl" doc_example:"\"https://status-as.siros.org\""`
 	// IssuerID is this issuer's self-asserted identity, sent as both `iss`
 	// and `sub` in the RFC 7523 client assertion. The status service has
 	// no separate registration step - this string plus KeyConfig's public
