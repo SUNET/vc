@@ -34,6 +34,38 @@ func TestEncodeECDSASignature_RefusesOversizedComponents(t *testing.T) {
 	}
 }
 
+// asn1.Unmarshal leaves R or S nil for a truncated DER sequence, and
+// (*big.Int)(nil).Bytes() dereferences nil - so the width check had to move
+// ahead of those calls, not merely exist.
+func TestEncodeECDSASignature_RefusesNilComponents(t *testing.T) {
+	var missing *big.Int
+
+	for _, tt := range []struct {
+		name string
+		r, s *big.Int
+	}{
+		{"R missing", missing, big.NewInt(1)},
+		{"S missing", big.NewInt(1), missing},
+		{"both missing", missing, missing},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := EncodeECDSASignature(tt.r, tt.s, elliptic.P256()); err == nil {
+				t.Fatal("want a refusal for a missing component")
+			}
+		})
+	}
+}
+
+// The shape asn1 actually produces: a SEQUENCE with nothing in it. It errors
+// on unmarshal, so the converter returns before encoding - this pins that
+// the encoder would survive it anyway, since it is exported and other
+// callers do not have that guard.
+func TestECDSASignatureToP1363_TruncatedSequence(t *testing.T) {
+	if _, err := ECDSASignatureToP1363([]byte{0x30, 0x00}, elliptic.P256()); err == nil {
+		t.Fatal("a truncated DER sequence must be refused, not panic")
+	}
+}
+
 // big.Int.Bytes() discards the sign, so -1 and 1 would encode identically.
 func TestEncodeECDSASignature_RefusesNegativeComponents(t *testing.T) {
 	if _, err := EncodeECDSASignature(big.NewInt(-1), big.NewInt(1), elliptic.P256()); err == nil {

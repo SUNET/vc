@@ -17,27 +17,36 @@ func EncodeECDSASignature(r, s *big.Int, curve elliptic.Curve) ([]byte, error) {
 		return nil, fmt.Errorf("unsupported curve: %s", curve.Params().Name)
 	}
 
-	// Create fixed-size signature buffer
-	signature := make([]byte, 2*keySize)
-
-	// Encode R and S as fixed-size big-endian integers
-	rBytes := r.Bytes()
-	sBytes := s.Bytes()
-
-	// Refuse components that do not fit rather than slicing past the buffer.
-	// r.Bytes() on a value wider than the curve makes keySize-len(rBytes)
-	// negative, and the copy below then panics with "slice bounds out of
-	// range" - reachable from any DER signature this package is asked to
-	// convert, so a malformed or hostile one would take the process down
-	// instead of being rejected. Negative values have no place here either:
-	// big.Int.Bytes() discards the sign, so -1 and 1 would encode alike.
+	// Every check below has to come BEFORE r.Bytes(), because those calls
+	// are themselves the hazard:
+	//
+	//   nil    - asn1.Unmarshal leaves R or S nil for a truncated DER
+	//            sequence, and (*big.Int)(nil).Bytes() dereferences nil.
+	//   sign   - big.Int.Bytes() discards it, so -1 and 1 encode alike.
+	//   width  - a value wider than the curve makes keySize-len(bytes)
+	//            negative, and the copy below panics with "slice bounds out
+	//            of range".
+	//
+	// All three are reachable from any DER signature this package is asked
+	// to convert, so a malformed or hostile one would take the process down
+	// rather than be rejected.
+	if r == nil || s == nil {
+		return nil, fmt.Errorf("ECDSA signature is missing its R or S component")
+	}
 	if r.Sign() < 0 || s.Sign() < 0 {
 		return nil, fmt.Errorf("ECDSA signature components must be non-negative")
 	}
+
+	rBytes := r.Bytes()
+	sBytes := s.Bytes()
+
 	if len(rBytes) > keySize || len(sBytes) > keySize {
 		return nil, fmt.Errorf("ECDSA signature component is %d/%d bytes, too wide for curve %s (%d bytes)",
 			len(rBytes), len(sBytes), curve.Params().Name, keySize)
 	}
+
+	// Create fixed-size signature buffer
+	signature := make([]byte, 2*keySize)
 
 	// Copy R into first half (right-aligned, zero-padded on left)
 	copy(signature[keySize-len(rBytes):keySize], rBytes)
