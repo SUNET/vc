@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -85,5 +86,57 @@ func TestKeyMaterialSigner_HSMSignsDigest(t *testing.T) {
 	}
 	if !ecdsa.VerifyASN1(pub, digest[:], sig) {
 		t.Fatal("digest signature does not verify")
+	}
+}
+
+// The review finding named PKCS11PrivateKey specifically: "PublicKey()
+// returns nil for PKCS11PrivateKey (and its signing switch does not handle
+// that type)". These use the real type rather than a stand-in, so the claim
+// is tested where it was made.
+func realPKCS11KeyMaterial(t *testing.T) (*KeyMaterial, *ecdsa.PublicKey) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	return &KeyMaterial{
+		PrivateKey: &PKCS11PrivateKey{
+			// A real HSM fills these from the device. The public half is a
+			// plain field, so the type can be exercised without one.
+			Config:    &PKCS11Config{ModulePath: "/nonexistent/module.so"},
+			KeyLabel:  "test-key",
+			PublicKey: &key.PublicKey,
+		},
+		SigningMethod: jwt.SigningMethodES256,
+	}, &key.PublicKey
+}
+
+func TestKeyMaterialSigner_RealPKCS11KeyExposesItsPublicHalf(t *testing.T) {
+	km, want := realPKCS11KeyMaterial(t)
+
+	got, ok := NewKeyMaterialSigner(km).PublicKey().(*ecdsa.PublicKey)
+	if !ok {
+		t.Fatal("PublicKey() must not return nil for a PKCS11PrivateKey")
+	}
+	if !got.Equal(want) {
+		t.Fatal("wrong public key")
+	}
+}
+
+// Signing needs a real device, so this asserts the ROUTING rather than a
+// signature: the type switch must reach the crypto.Signer branch and fail
+// inside the HSM call, not bounce off "unsupported key type" before getting
+// there. Those two failures look alike in a log and are not alike at all -
+// one is a missing module, the other is the key being unusable by design.
+func TestKeyMaterialSigner_RealPKCS11KeyReachesTheSigningPath(t *testing.T) {
+	km, _ := realPKCS11KeyMaterial(t)
+	signer := NewKeyMaterialSigner(km)
+
+	_, err := signer.Sign(context.Background(), []byte("data"))
+	if err == nil {
+		t.Skip("signing unexpectedly succeeded; a real PKCS#11 module must be present")
+	}
+	if strings.Contains(err.Error(), "unsupported key type") {
+		t.Fatalf("the type switch rejected a PKCS11PrivateKey before reaching the HSM: %v", err)
 	}
 }
