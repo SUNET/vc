@@ -105,7 +105,12 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 		state = "w3c-state"
 		scope = "diploma"
 	)
-	_, ephemeralPubJWK, err := client.openid4vp.EphemeralKeyCache.GenerateAndStore(kid)
+	// Through the production helper, not openid4vp's in-process cache: the
+	// ephemeral keys moved to the cache service so a wallet's encrypted
+	// response can be decrypted by whichever replica receives it, and
+	// VerificationDirectPost reads them from there. Seeding the old cache
+	// left this test encrypting to a key the code under test could not find.
+	_, ephemeralPubJWK, err := client.ephemeralEncryptionKey(ctx, kid)
 	require.NoError(t, err)
 
 	// The query the request was built from. require_cryptographic_holder_binding
