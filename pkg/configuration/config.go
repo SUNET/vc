@@ -33,6 +33,22 @@ var servicesRequiringVCTM = map[string]bool{
 	"verifier": true,
 }
 
+// servicesResolvingW3CContexts lists services that dereference JSON-LD
+// contexts at runtime, and therefore need those contexts pinned and their
+// custom types validated before the process starts serving.
+//
+// Wider than servicesRequiringVCTM on purpose. The issuer is excluded there
+// because it receives schemas inline and loads no VCTM - but it is the
+// process that resolves contexts while SIGNING, so an issuer whose
+// credential_contexts are unreachable or do not define the configured types
+// would otherwise discover that one issuance at a time, in production,
+// having already told the operator it started cleanly.
+var servicesResolvingW3CContexts = map[string]bool{
+	"apigw":    true,
+	"verifier": true,
+	"issuer":   true,
+}
+
 // mongoRequirement describes when a service needs common.mongo.uri.
 type mongoRequirement int
 
@@ -118,6 +134,19 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		log.Info("Secrets loaded from external file", "path", cfg.Common.SecretFilePath)
 	}
 
+	// W3C context work is gated separately from VCTM loading: the issuer
+	// needs the former and not the latter. Both are no-ops when nothing
+	// W3C is configured, so this costs a non-W3C deployment nothing.
+	if servicesResolvingW3CContexts[serviceName] {
+		if err := checkW3CTypeConsistency(cfg); err != nil {
+			return nil, err
+		}
+
+		if err := resolveW3CContexts(cfg, log); err != nil {
+			return nil, err
+		}
+	}
+
 	// Only services that depend on credentials need VCTM loading
 	// and the requirement check. Other services (registry) share
 	// the same config file but do not use credential constructors at all.
@@ -135,14 +164,6 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		}
 
 		if err := checkCredentialMetadataEntries(cfg); err != nil {
-			return nil, err
-		}
-
-		if err := checkW3CTypeConsistency(cfg); err != nil {
-			return nil, err
-		}
-
-		if err := resolveW3CContexts(cfg, log); err != nil {
 			return nil, err
 		}
 

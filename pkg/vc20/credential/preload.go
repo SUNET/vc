@@ -3,6 +3,7 @@ package credential
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/piprate/json-gold/ld"
@@ -24,12 +25,96 @@ import (
 // pinned here. The fetch still goes through LoadDocument, so scheme and
 // address policy apply to it.
 func (l *CachingDocumentLoader) PinRemoteContext(url string) error {
+	return l.pinContext(url, make(map[string]bool), 0)
+}
+
+// maxPinDepth bounds how far pinning follows references. Contexts nest a
+// couple of levels in practice; the bound is there so a hostile or looping
+// document cannot turn startup into an unbounded crawl. Cycles are caught by
+// the seen set, this catches depth.
+const maxPinDepth = 8
+
+// pinContext pins url and everything reaching it: the document itself, the
+// URL a Link header redirected the processor to, and any context the
+// document references by URL.
+//
+// Pinning only the requested URL would make the process-lifetime contract a
+// half-truth. json-gold resolves a Link-header ContextURL, a nested
+// "@context": "https://..." and an "@import" through this same loader, and
+// those lookups would land on the normal TTL - so after expiry a signature
+// or verification could fetch a context that has since changed, or fail
+// because it has gone, despite the configuration having been "pinned" at
+// startup. The point of pinning is that what was validated at boot is what
+// gets used, and that only holds if it covers the whole closure.
+func (l *CachingDocumentLoader) pinContext(url string, seen map[string]bool, depth int) error {
+	if url == "" || seen[url] {
+		return nil
+	}
+	if depth > maxPinDepth {
+		return fmt.Errorf("context %q nests deeper than %d levels", url, maxPinDepth)
+	}
+	seen[url] = true
+
 	doc, err := l.LoadDocument(url)
 	if err != nil {
 		return err
 	}
 	l.cache.Set(url, doc, ttlcache.NoTTL)
+
+	// The processor will ask for this one by name during expansion.
+	if doc.ContextURL != "" && doc.ContextURL != url {
+		if err := l.pinContext(doc.ContextURL, seen, depth+1); err != nil {
+			return fmt.Errorf("context %q links to %q: %w", url, doc.ContextURL, err)
+		}
+	}
+
+	for _, ref := range referencedContexts(doc.Document) {
+		if err := l.pinContext(ref, seen, depth+1); err != nil {
+			return fmt.Errorf("context %q references %q: %w", url, ref, err)
+		}
+	}
 	return nil
+}
+
+// referencedContexts collects the context URLs a loaded document refers to by
+// string - the values of "@context" and "@import" anywhere within it.
+//
+// Only absolute http(s) URLs are returned. A relative reference is left to
+// the processor and the loader's own address policy; the point here is to
+// find the documents that would otherwise be fetched later on a normal TTL.
+func referencedContexts(document any) []string {
+	var out []string
+	var walk func(any)
+	walk = func(node any) {
+		switch v := node.(type) {
+		case map[string]any:
+			for key, val := range v {
+				if key == "@context" || key == "@import" {
+					collectContextStrings(val, &out)
+				}
+				walk(val)
+			}
+		case []any:
+			for _, item := range v {
+				walk(item)
+			}
+		}
+	}
+	walk(document)
+	return out
+}
+
+func collectContextStrings(node any, out *[]string) {
+	switch v := node.(type) {
+	case string:
+		if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
+			*out = append(*out, v)
+		}
+	case []any:
+		for _, item := range v {
+			collectContextStrings(item, out)
+		}
+	}
 }
 
 // ExpandTypes returns the fully expanded type IRIs a credential carrying these
