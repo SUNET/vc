@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"io"
 	"strings"
@@ -138,5 +139,63 @@ func TestKeyMaterialSigner_RealPKCS11KeyReachesTheSigningPath(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "unsupported key type") {
 		t.Fatalf("the type switch rejected a PKCS11PrivateKey before reaching the HSM: %v", err)
+	}
+}
+
+// opaqueRSAKey is an HSM-held RSA key: crypto.Signer and nothing more.
+type opaqueRSAKey struct{ inner *rsa.PrivateKey }
+
+func (o opaqueRSAKey) Public() crypto.PublicKey { return o.inner.Public() }
+func (o opaqueRSAKey) Sign(r io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
+	return o.inner.Sign(r, digest, opts)
+}
+
+// The generic crypto.Signer path must not silently accept RSA. PKCS#11's
+// CKM_RSA_PKCS is handed a bare digest and adds only padding, not the
+// DigestInfo structure RFC 8017 requires inside it, so a signature made that
+// way pads correctly and verifies nowhere. An RS256 assertion no verifier
+// accepts is worse than an error naming the reason.
+func TestKeyMaterialSigner_RefusesRSAThroughTheHSMPath(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	signer := NewKeyMaterialSigner(&KeyMaterial{
+		PrivateKey:    opaqueRSAKey{inner: key},
+		SigningMethod: jwt.SigningMethodRS256,
+	})
+
+	if _, err := signer.Sign(context.Background(), []byte("data")); err == nil {
+		t.Fatal("an HSM-held RSA key must be refused, not signed with incorrectly")
+	} else if !strings.Contains(err.Error(), "DigestInfo") {
+		t.Fatalf("the error should say why, got: %v", err)
+	}
+
+	digest := sha256.Sum256([]byte("data"))
+	if _, err := signer.SignDigest(context.Background(), digest[:]); err == nil {
+		t.Fatal("SignDigest must refuse it too")
+	}
+}
+
+// A raw RSA key is unaffected: crypto/rsa does the DigestInfo wrapping, so
+// that path was always correct and must keep working.
+func TestKeyMaterialSigner_RawRSAStillSigns(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	signer := NewKeyMaterialSigner(&KeyMaterial{
+		PrivateKey:    key,
+		SigningMethod: jwt.SigningMethodRS256,
+	})
+
+	data := []byte("data")
+	sig, err := signer.Sign(context.Background(), data)
+	if err != nil {
+		t.Fatalf("a raw RSA key must still sign: %v", err)
+	}
+	digest := sha256.Sum256(data)
+	if err := rsa.VerifyPKCS1v15(&key.PublicKey, crypto.SHA256, digest[:], sig); err != nil {
+		t.Fatalf("raw RSA signature must verify: %v", err)
 	}
 }

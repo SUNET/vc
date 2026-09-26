@@ -58,6 +58,9 @@ func (s *KeyMaterialSigner) Sign(ctx context.Context, data []byte) ([]byte, erro
 		// backends and which jose.MakeJWT converts.
 		//
 		// After the concrete cases, which satisfy crypto.Signer too.
+		if err := requireHSMSignable(key); err != nil {
+			return nil, err
+		}
 		return key.Sign(rand.Reader, hashed, hash)
 	default:
 		return nil, fmt.Errorf("unsupported key type: %T", s.km.PrivateKey)
@@ -84,6 +87,9 @@ func (s *KeyMaterialSigner) SignDigest(ctx context.Context, digest []byte) ([]by
 	case crypto.Signer:
 		// An HSM/PKCS#11 key signing a pre-computed digest, which is what
 		// the device does natively. As in Sign, an ECDSA result is ASN.1 DER.
+		if err := requireHSMSignable(key); err != nil {
+			return nil, err
+		}
 		hash := getHashForAlgorithm(s.km.SigningMethod.Alg())
 		return key.Sign(rand.Reader, digest, hash)
 	default:
@@ -169,4 +175,36 @@ func (s *KeyMaterialSigner) GetCertificate() *x509.Certificate {
 // GetCertificateChain returns the certificate chain if available.
 func (s *KeyMaterialSigner) GetCertificateChain() []string {
 	return s.km.Chain
+}
+
+// requireHSMSignable refuses an opaque signer this package cannot drive
+// correctly.
+//
+// ECDSA is fine: the device signs the digest and returns ASN.1 DER, which is
+// what crypto.Signer backends do and what jose.MakeJWT converts for JWS.
+//
+// RSA is not, yet. PKCS11PrivateKey.Sign selects CKM_RSA_PKCS and hands it
+// the bare digest, but that mechanism only applies PKCS#1 v1.5 PADDING - it
+// does not prepend the DigestInfo structure RFC 8017 requires inside the
+// padding, which is why crypto/rsa does that itself and why the hash-
+// specific CKM_SHA256_RSA_PKCS mechanisms exist. Signing through it as-is
+// produces something that pads correctly and verifies nowhere.
+//
+// Refused rather than quietly wrong: an RS256 assertion that no verifier
+// accepts is worse than a startup error naming the reason. Making it work
+// means either wrapping the digest in DigestInfo here or selecting the
+// hash-specific mechanism in PKCS11PrivateKey.Sign - a change to HSM code
+// that cannot be honestly verified without a device.
+func requireHSMSignable(signer crypto.Signer) error {
+	switch pub := signer.Public().(type) {
+	case *ecdsa.PublicKey:
+		return nil
+	case *rsa.PublicKey:
+		return fmt.Errorf("RSA keys held in an HSM cannot be signed with through this path: "+
+			"PKCS#11 CKM_RSA_PKCS is given a bare digest and adds no DigestInfo, so the signature "+
+			"would not verify as %s; use an EC (P-256) key, or add DigestInfo encoding to the PKCS#11 signer",
+			"RS256")
+	default:
+		return fmt.Errorf("unsupported HSM public key type: %T", pub)
+	}
 }
