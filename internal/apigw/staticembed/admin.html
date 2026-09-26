@@ -7,13 +7,6 @@
     <link rel="stylesheet" href="/static/bootstrap.min.css">
     <link rel="stylesheet" href="/static/styles.css">
     <script src="/static/bootstrap.bundle.min.js"></script>
-    <script type="importmap">
-    {
-        "imports": {
-            "alpinejs": "/static/alpinejs.esm.min.js"
-        }
-    }
-    </script>
     <script src="/static/admin.js" type="module"></script>
     <link rel="icon" href="/static/favicon.png" type="image/png">
     <style>
@@ -299,6 +292,10 @@
                                             <td class="text-nowrap">
                                                 <button class="btn btn-sm btn-outline-info" @click="toggleDocDetail(idx)">View</button>
                                                 <button class="btn btn-sm btn-outline-warning" @click="openEditDocument(idx)">Edit</button>
+                                                <button class="btn btn-sm btn-outline-success"
+                                                        x-show="canPreAuthOffer(doc.meta?.scope)"
+                                                        @click="createPreAuthOffer(doc)"
+                                                        :disabled="ds.offerLoading">Offer</button>
                                                 <button class="btn btn-sm btn-outline-danger" @click="deleteDocument(doc)">Del</button>
                                             </td>
                                         </tr>
@@ -324,6 +321,53 @@
                                         <pre class="doc-json" x-text="JSON.stringify(ds.docs[ds.detailIdx]?.identity_mapping_ids, null, 2)"></pre>
                                         <h6 class="mt-3">Document Data</h6>
                                         <pre class="doc-json" x-text="JSON.stringify(ds.docs[ds.detailIdx]?.document_data, null, 2)"></pre>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Pre-authorized offer modal -->
+                    <template x-if="ds.offerResult || ds.offerError || ds.offerLoading">
+                        <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="preAuthOfferTitle" style="background:rgba(0,0,0,0.5);" @click.self="closeOfferModal()" @keydown.escape.window="closeOfferModal()">
+                            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title" id="preAuthOfferTitle">Pre-Authorized Credential Offer</h5>
+                                        <button type="button" class="btn-close" @click="closeOfferModal()"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <template x-if="ds.offerLoading">
+                                            <div class="text-center py-4">
+                                                <span class="spinner-border"></span>
+                                            </div>
+                                        </template>
+                                        <template x-if="ds.offerError">
+                                            <div class="alert alert-danger" x-text="ds.offerError"></div>
+                                        </template>
+                                        <template x-if="ds.offerResult">
+                                            <div>
+                                                <template x-if="ds.offerResult.tx_code">
+                                                    <div class="mb-3">
+                                                        <label for="preAuthTxCode" class="form-label"><h6 class="mb-1">Transaction Code (PIN)</h6></label>
+                                                        <div class="input-group">
+                                                            <input id="preAuthTxCode" class="form-control font-monospace fs-4" readonly :value="ds.offerResult.tx_code">
+                                                            <button class="btn btn-outline-secondary" @click="copyToClipboard(ds.offerResult.tx_code)">Copy</button>
+                                                        </div>
+                                                        <small class="text-muted">Deliver this PIN to the wallet user out-of-band.</small>
+                                                    </div>
+                                                </template>
+                                                <div class="mb-3">
+                                                    <label for="preAuthOfferUrl" class="form-label"><h6 class="mb-1">Credential Offer URL</h6></label>
+                                                    <div class="input-group">
+                                                        <input id="preAuthOfferUrl" class="form-control font-monospace" readonly :value="ds.offerResult.credential_offer_url">
+                                                        <button class="btn btn-outline-secondary" @click="copyToClipboard(ds.offerResult.credential_offer_url)">Copy</button>
+                                                    </div>
+                                                </div>
+                                                <h6>Credential Offer</h6>
+                                                <pre class="doc-json" x-text="JSON.stringify(ds.offerResult.credential_offer, null, 2)"></pre>
+                                            </div>
+                                        </template>
                                     </div>
                                 </div>
                             </div>

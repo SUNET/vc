@@ -12,21 +12,26 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/SUNET/vc/pkg/testsupport/jwktest"
 )
 
-func TestParseAndVerify_ValidCredential(t *testing.T) {
+// newIssuerAndHolder returns the two keys every verification test needs and
+// the holder's JWK, which three tests were each generating identically.
+func newIssuerAndHolder(t *testing.T) (*ecdsa.PrivateKey, *ecdsa.PrivateKey, map[string]any) {
+	t.Helper()
+
 	issuerPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
 	holderPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	holderJWK := map[string]any{
-		"kty": "EC",
-		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.Y.Bytes()),
-	}
+	return issuerPrivateKey, holderPrivateKey, jwktest.PublicKeyJWK(&holderPrivateKey.PublicKey)
+}
+
+func TestParseAndVerify_ValidCredential(t *testing.T) {
+	issuerPrivateKey, _, holderJWK := newIssuerAndHolder(t)
 
 	testClaim := "test_claim"
 	vctm := &VCTM{
@@ -166,18 +171,7 @@ func TestParseAndVerify_SkipTimeValidation(t *testing.T) {
 }
 
 func TestParseAndVerify_WithKeyBinding(t *testing.T) {
-	issuerPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-
-	holderPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-
-	holderJWK := map[string]any{
-		"kty": "EC",
-		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.Y.Bytes()),
-	}
+	issuerPrivateKey, holderPrivateKey, holderJWK := newIssuerAndHolder(t)
 
 	testClaim := "test_claim"
 	vctm := &VCTM{
@@ -251,18 +245,7 @@ func TestParseAndVerify_KeyBindingRequired(t *testing.T) {
 }
 
 func TestParseAndVerify_InvalidNonce(t *testing.T) {
-	issuerPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-
-	holderPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-
-	holderJWK := map[string]any{
-		"kty": "EC",
-		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(holderPrivateKey.PublicKey.Y.Bytes()),
-	}
+	issuerPrivateKey, holderPrivateKey, holderJWK := newIssuerAndHolder(t)
 
 	testClaim := "test_claim"
 	vctm := &VCTM{
@@ -627,12 +610,7 @@ func TestJWKToPublicKey_ECDSA(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create JWK map
-	jwkMap := map[string]any{
-		"kty": "EC",
-		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey.Y.Bytes()),
-	}
+	jwkMap := jwktest.PublicKeyJWK(&privateKey.PublicKey)
 
 	// Convert to public key
 	pubKey, err := jwkToPublicKey(jwkMap)

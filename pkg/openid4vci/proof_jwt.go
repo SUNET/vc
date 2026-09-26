@@ -329,8 +329,7 @@ func (p ProofJWTToken) Verify(publicKey crypto.PublicKey, opts *VerifyProofOptio
 	})
 	if err != nil {
 		// If the error is already an OpenID4VCI error (from keyFunc), return it as-is
-		var vciErr *Error
-		if errors.As(err, &vciErr) {
+		if vciErr, ok := errors.AsType[*Error](err); ok {
 			return vciErr
 		}
 		// Wrap JWT library errors (signature verification failures, etc.) as invalid_proof

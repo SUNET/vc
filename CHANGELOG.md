@@ -45,6 +45,37 @@
   
   See complete examples in [config.yaml](config.yaml).
 
+- **Issuer credential-offer UI route**: `GET /offers/:scope/:wallet_id` is now
+  `GET /offers/:scope`. The credential offer is wallet-independent, so no
+  wallet is selected before it is produced; the single response carries the
+  offer once plus one entry per configured wallet. This is the internal
+  operator UI's own endpoint, not a wallet-facing one.
+
+### Changed
+
+- The issuer's `/offers` page now renders one credential offer three ways:
+  a QR code (cross-device, carrying the offer by reference), a same-device
+  "Open in wallet" button over the W3C Digital Credentials API
+  (`openid4vci-v1`, rendered only when such a request can actually be
+  fulfilled), and one shortcut button per configured wallet.
+- `GET /credential-offer/:credential_offer_uuid` now has a writer: offers
+  shown in the issuer UI are persisted under a UUID so the QR can carry the
+  offer by reference instead of by value. The UUID is derived from the offer,
+  so repeated requests reuse one stored document rather than accumulating —
+  `GET /offers/:scope` is unauthenticated, and neither the Mongo nor the SQL
+  credential-offer store has an expiry mechanism to bound growth with.
+- `GET /offers/:scope` is rate limited, configurable via the new
+  `apigw.rate_limit.credential_offer_requests_per_minute` (default 20).
+
+### Note
+
+- The issuer's same-device "Open in wallet" button is present but dormant: no
+  shipping browser natively allows `openid4vci-v1`, and the `window.DigitalWallets`
+  registry it would otherwise use cannot share a module instance with the
+  vendored DC API polyfill (sirosfoundation/dc-api#23). Its gate,
+  `isIssuanceAvailable()`, therefore returns false and the button does not
+  render.
+
 ## [0.3.2] - 2024-04-29
 
 ### Change

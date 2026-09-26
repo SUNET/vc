@@ -73,8 +73,7 @@ func (s *Service) endpointAuthorize(ctx context.Context, c *gin.Context) (any, e
 		if request.RedirectURI != "" && request.State != "" {
 			// Use the actual OAuth error code if available
 			errorCode := "server_error"
-			var oauthErr *apiv1.OAuthError
-			if errors.As(err, &oauthErr) {
+			if oauthErr, ok := errors.AsType[*apiv1.OAuthError](err); ok {
 				errorCode = oauthErr.ErrorCode
 			}
 			errorURL := request.RedirectURI + "?error=" + errorCode + "&state=" + request.State

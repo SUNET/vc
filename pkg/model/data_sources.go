@@ -55,11 +55,15 @@ type IdentityMappingImport struct {
 
 // DatastoreScope configures a credential type backed by the datastore.
 type DatastoreScope struct {
-	// AuthProvider is the auth provider for this credential type (openid4vp, saml, or oidc)
-	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=openid4vp saml oidc"`
+	// AuthProvider is the auth provider for this credential type
+	// (openid4vp, saml, oidc, or preauth). Use preauth to restrict issuance
+	// to pre-authorized credential offers only; wallet-initiated PAR/authorize
+	// requests for such a scope are rejected.
+	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=openid4vp saml oidc preauth"`
 
 	// AuthClaims lists the normalized claim names used for datastore identity lookup
 	// when auth_provider is saml or oidc. Not used for openid4vp (use AuthScopes instead).
+	// Must be empty when auth_provider is preauth.
 	// These names must match the BSON field names under "identities." in the datastore.
 	// Use attribute_mappings (in auth_providers) to normalize provider-specific attribute
 	// names (e.g. SAML urn:oid:2.5.4.42, eIDAS date_of_birth) to these canonical names.
@@ -145,6 +149,41 @@ type AssertionScope struct {
 	// If configured, a SPOCP query is built from the returned claims and evaluated against these rules.
 	// A query that does not match any rule results in a hard deny.
 	IssuancePolicy *IssuancePolicy `yaml:"issuance_policy,omitempty"`
+
+	// Defaults holds claim values injected into the assertion document for
+	// credential-level fields the authentication assertion cannot supply
+	// (e.g. issuing_authority, issuing_country, date_of_expiry). Merged
+	// after attribute_mapping — real attributes always win.
+	Defaults map[string]any `yaml:"defaults,omitempty" doc_key:"claim path"`
+
+	// ExpiryDuration, if set, computes date_of_expiry at issuance time as
+	// now+duration (formatted as ISO YYYY-MM-DD) and overrides any static
+	// date_of_expiry in Defaults. Prevents freshly issued credentials from
+	// shipping pre-expired when a static date is left un-rotated. Uses Go
+	// duration syntax; example: "8760h" for one year.
+	ExpiryDuration string `yaml:"expiry_duration,omitempty" validate:"omitempty" doc_example:"\"8760h\""`
+}
+
+// ResolveDefaults returns Defaults with date_of_expiry populated from
+// ExpiryDuration when set, and date_of_issuance populated from now.
+// Injecting now keeps the callers testable.
+func (a AssertionScope) ResolveDefaults(now time.Time) (map[string]any, error) {
+	out := make(map[string]any, len(a.Defaults)+2)
+	for k, v := range a.Defaults {
+		out[k] = v
+	}
+	if a.ExpiryDuration != "" {
+		d, err := time.ParseDuration(a.ExpiryDuration)
+		if err != nil {
+			return nil, fmt.Errorf("invalid expiry_duration %q: %w", a.ExpiryDuration, err)
+		}
+		if d <= 0 {
+			return nil, fmt.Errorf("expiry_duration %q must be positive", a.ExpiryDuration)
+		}
+		out["date_of_expiry"] = now.Add(d).Format("2006-01-02")
+	}
+	out["date_of_issuance"] = now.Format("2006-01-02")
+	return out, nil
 }
 
 // ExternalAPIConfig groups external API credential scopes.

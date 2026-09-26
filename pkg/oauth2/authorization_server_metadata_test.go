@@ -15,16 +15,18 @@ import (
 )
 
 var mockAuthorizationServerMetadata = &AuthorizationServerMetadata{ // #nosec G101
-	Issuer:                                     "http://vc_dev_apigw:8080",
-	AuthorizationEndpoint:                      "http://vc_dev_apigw:8080/authorize",
-	TokenEndpoint:                              "http://vc_dev_apigw:8080/token",
-	ResponseTypesSupported:                     []string{"code"},
-	TokenEndpointAuthMethodsSupported:          []string{"none"},
-	CodeChallengeMethodsSupported:              []string{"S256"},
-	PushedAuthorizationRequestEndpoint:         "http://vc_dev_apigw:8080/par",
-	RequiredPushedAuthorizationRequests:        true,
-	DPOPSigningALGValuesSupported:              []string{"ES256"},
-	PreAuthorizedGrantAnonymousAccessSupported: false,
+	Issuer:                                        "http://vc_dev_apigw:8080",
+	AuthorizationEndpoint:                         "http://vc_dev_apigw:8080/authorize",
+	TokenEndpoint:                                 "http://vc_dev_apigw:8080/token",
+	ResponseTypesSupported:                        []string{"code"},
+	TokenEndpointAuthMethodsSupported:             []string{"attest_jwt_client_auth", "none"},
+	ClientAttestationSigningALGValuesSupported:    []string{"ES256", "ES384", "ES512"},
+	ClientAttestationPoPSigningALGValuesSupported: []string{"ES256", "ES384", "ES512"},
+	CodeChallengeMethodsSupported:                 []string{"S256"},
+	PushedAuthorizationRequestEndpoint:            "http://vc_dev_apigw:8080/par",
+	RequiredPushedAuthorizationRequests:           true,
+	DPOPSigningALGValuesSupported:                 []string{"ES256"},
+	PreAuthorizedGrantAnonymousAccessSupported:    false,
 }
 
 func TestMarshalMetadata(t *testing.T) {

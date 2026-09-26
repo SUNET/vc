@@ -45,6 +45,12 @@ type AuthorizationServerMetadata struct {
 	// TokenEndpointAuthSigningALGValuesSupported OPTIONAL.  JSON array containing a list of the JWS signing algorithms ("alg" values) supported by the token endpoint for the signature on the JWT [JWT] used to authenticate the client at the token endpoint for the "private_key_jwt" and "client_secret_jwt" authentication methods.  This metadata entry MUST be present if either of these authentication methods are specified in the "token_endpoint_auth_methods_supported" entry.  No default algorithms are implied if this entry is omitted.  Servers SHOULD support "RS256".  The value "none" MUST NOT be used.
 	TokenEndpointAuthSigningALGValuesSupported []string `json:"token_endpoint_auth_signing_alg_values_supported,omitempty"`
 
+	// ClientAttestationSigningALGValuesSupported lists the JWS "alg" values supported for the Client Attestation JWT signature (draft-ietf-oauth-attestation-based-client-auth-07 §10.1). MUST be present when "attest_jwt_client_auth" appears in TokenEndpointAuthMethodsSupported.
+	ClientAttestationSigningALGValuesSupported []string `json:"client_attestation_signing_alg_values_supported,omitempty"`
+
+	// ClientAttestationPoPSigningALGValuesSupported lists the JWS "alg" values supported for the Client Attestation PoP JWT signature (draft-ietf-oauth-attestation-based-client-auth-07 §10.1). MUST be present when "attest_jwt_client_auth" appears in TokenEndpointAuthMethodsSupported.
+	ClientAttestationPoPSigningALGValuesSupported []string `json:"client_attestation_pop_signing_alg_values_supported,omitempty"`
+
 	// ServiceDocumentation OPTIONAL.  URL of a page containing human-readable information that developers might want or need to know when using the authorization server.  In particular, if the authorization server does not support Dynamic Client Registration, then information on how to register clients needs to be provided in this documentation.
 	ServiceDocumentation string `json:"service_documentation,omitempty"`
 

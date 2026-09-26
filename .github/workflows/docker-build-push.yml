@@ -1,7 +1,10 @@
 name: Build and Publish Docker Images
 
-# Builds multi-arch container images for all services and pushes to GHCR.
-# Includes Trivy CVE scanning with SARIF upload to the Security tab.
+# Builds container images for all services and pushes to GHCR. Each arch
+# (amd64, arm64) is built on its own native runner — no cross-compilation
+# happens for the cgo/Rust/C++ native dependencies. A final manifest job
+# stitches the per-arch tags into a multi-arch manifest list and runs the
+# Trivy CVE scan once per service.
 #
 # Triggers:
 #   - Semver tags (v*.*.*): automatic build and push
@@ -26,17 +29,75 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  build:
+  # Resolve every mutable third_party ref (main / a tag) to a commit SHA
+  # ONCE, so every arch of every service in the release manifest links the
+  # same zk-cred-* commits. Without this, each matrix job resolves `main`
+  # independently and a rebuild of the same git tag can produce different
+  # native-library bytes on amd64 vs arm64.
+  resolve-refs:
     runs-on: ubuntu-latest
+    outputs:
+      bbs_sha: ${{ steps.resolve.outputs.bbs_sha }}
+      longfellow_sha: ${{ steps.resolve.outputs.longfellow_sha }}
+      vega_sha: ${{ steps.resolve.outputs.vega_sha }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.git_ref || github.ref }}
+
+      - name: Resolve native library refs to commit SHAs
+        id: resolve
+        # Same resolver as .github/workflows/test.yaml's zknative job so
+        # both pipelines agree on how ref -> SHA is derived.
+        run: |
+          set -euo pipefail
+          read_ref() {
+            sed -n "s/^$1[[:space:]]*?=[[:space:]]*//p" Makefile | head -n1
+          }
+          resolve() {
+            local name="$1" repo="$2" ref="$3" sha refs
+            if printf '%s' "$ref" | grep -Eiq '^[0-9a-f]{40}$'; then
+              sha="$ref"
+            else
+              refs=$(git ls-remote "$repo" "$ref")
+              sha=$(printf '%s\n' "$refs" | awk '$2 ~ /\^\{\}$/ { print $1; exit }')
+              [ -n "$sha" ] || sha=$(printf '%s\n' "$refs" | awk 'NR==1 { print $1 }')
+            fi
+            if ! printf '%s' "$sha" | grep -Eiq '^[0-9a-f]{40}$'; then
+              echo "::error::could not resolve $name ref '$ref'"
+              exit 1
+            fi
+            echo "$sha"
+          }
+          BBS_REF=$(read_ref ZK_CRED_BBS_REF)
+          LONGFELLOW_REF=$(read_ref ZK_CRED_LONGFELLOW_REF)
+          VEGA_REF=$(read_ref ZK_CRED_VEGA_REF)
+          for pair in "ZK_CRED_BBS_REF=$BBS_REF" "ZK_CRED_LONGFELLOW_REF=$LONGFELLOW_REF" "ZK_CRED_VEGA_REF=$VEGA_REF"; do
+            case "$pair" in *=) echo "::error::could not read ${pair%=} default from Makefile"; exit 1 ;; esac
+          done
+          echo "bbs_sha=$(resolve zk-cred-bbs https://github.com/sirosfoundation/zk-cred-bbs.git "$BBS_REF")" >> "$GITHUB_OUTPUT"
+          echo "longfellow_sha=$(resolve zk-cred-longfellow https://github.com/sirosfoundation/zk-cred-longfellow.git "$LONGFELLOW_REF")" >> "$GITHUB_OUTPUT"
+          echo "vega_sha=$(resolve zk-cred-vega https://github.com/sirosfoundation/zk-cred-vega.git "$VEGA_REF")" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: resolve-refs
     permissions:
       contents: read
       packages: write
-      security-events: write
 
     strategy:
       fail-fast: false
       matrix:
         service: [verifier, registry, apigw, issuer]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Checkout repository
@@ -44,11 +105,8 @@ jobs:
         with:
           ref: ${{ inputs.git_ref || github.ref }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
-
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -60,11 +118,105 @@ jobs:
       - name: Compute image name
         id: image
         run: |
-          # Lowercase the full repository path for GHCR compatibility
           REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           echo "name=${{ env.REGISTRY }}/${REPO}/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
 
-      - name: Extract metadata
+      - name: Extract metadata (per-arch tag suffixes)
+        id: meta
+        if: github.event_name != 'workflow_dispatch' || inputs.image_tag == ''
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          context: git
+          images: ${{ steps.image.outputs.name }}
+          flavor: |
+            latest=false
+            suffix=-${{ matrix.arch }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+
+      - name: Compute custom tag
+        id: custom-tag
+        if: github.event_name == 'workflow_dispatch' && inputs.image_tag != ''
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          SAFE_TAG=$(echo "${IMAGE_TAG}" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed 's/[^a-z0-9._-]/-/g' \
+            | sed 's/[-._]\{2,\}/-/g' \
+            | sed 's/^[-._]\+//; s/[-._]\+$//' \
+            | cut -c1-120 \
+          )
+          if [[ -z "${SAFE_TAG}" ]]; then
+            echo "::error::image_tag '${IMAGE_TAG}' produced an empty tag after sanitization"
+            exit 1
+          fi
+          echo "tags=${{ steps.image.outputs.name }}:${SAFE_TAG}-${ARCH}" >> "$GITHUB_OUTPUT"
+          echo "version=${SAFE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push (${{ matrix.arch }})
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./dockerfiles/worker
+          platforms: linux/${{ matrix.arch }}
+          push: true
+          # Verifier ships the native ZK payload; every other worker uses
+          # the plain runtime stage.
+          target: ${{ matrix.service == 'verifier' && 'runtime-verifier' || 'runtime' }}
+          tags: ${{ steps.custom-tag.outputs.tags || steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SERVICE_NAME=${{ matrix.service }}
+            BUILDTAG=${{ steps.custom-tag.outputs.version || steps.meta.outputs.version }}
+            ZK_CRED_BBS_REF=${{ needs.resolve-refs.outputs.bbs_sha }}
+            ZK_CRED_LONGFELLOW_REF=${{ needs.resolve-refs.outputs.longfellow_sha }}
+            ZK_CRED_VEGA_REF=${{ needs.resolve-refs.outputs.vega_sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}-${{ matrix.arch }}
+          cache-to: type=gha,scope=${{ matrix.service }}-${{ matrix.arch }},mode=max
+
+  manifest:
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [verifier, registry, apigw, issuer]
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.git_ref || github.ref }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image name
+        id: image
+        run: |
+          REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "name=${{ env.REGISTRY }}/${REPO}/${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract metadata (final multi-arch tags)
         id: meta
         if: github.event_name != 'workflow_dispatch' || inputs.image_tag == ''
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -89,7 +241,7 @@ jobs:
             | sed 's/[^a-z0-9._-]/-/g' \
             | sed 's/[-._]\{2,\}/-/g' \
             | sed 's/^[-._]\+//; s/[-._]\+$//' \
-            | cut -c1-128 \
+            | cut -c1-120 \
           )
           if [[ -z "${SAFE_TAG}" ]]; then
             echo "::error::image_tag '${IMAGE_TAG}' produced an empty tag after sanitization"
@@ -98,20 +250,22 @@ jobs:
           echo "tags=${{ steps.image.outputs.name }}:${SAFE_TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${SAFE_TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: ./dockerfiles/worker
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.custom-tag.outputs.tags || steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            SERVICE_NAME=${{ matrix.service }}
-            BUILDTAG=${{ steps.custom-tag.outputs.version || steps.meta.outputs.version }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+      - name: Create multi-arch manifest lists
+        env:
+          IMG: ${{ steps.image.outputs.name }}
+          TAGS: ${{ steps.custom-tag.outputs.tags || steps.meta.outputs.tags }}
+        run: |
+          # docker/metadata-action emits one full "name:tag" per line. For
+          # each such tag, stitch the two per-arch tags pushed by the
+          # `build` job into a manifest list under the un-suffixed name.
+          printf '%s\n' "$TAGS" | while IFS= read -r ref; do
+            [ -z "$ref" ] && continue
+            tag="${ref##*:}"
+            docker buildx imagetools create \
+              --tag "$IMG:$tag" \
+              "$IMG:$tag-amd64" \
+              "$IMG:$tag-arm64"
+          done
 
       - name: Run Trivy vulnerability scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -123,7 +277,7 @@ jobs:
 
       - name: Upload Trivy results to Security tab
         if: ${{ !cancelled() }}
-        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         continue-on-error: true
         with:
           sarif_file: trivy-results.sarif

@@ -21,13 +21,29 @@ type QRReply struct {
 	// SessionID   string `json:"session_id" bson:"session_id" validate:"required"`
 }
 
-func GenerateQR(uri *url.URL, recoveryLevel qrcode.RecoveryLevel, size int) (*QRReply, error) {
+// GenerateQR takes the URI as a string rather than a *url.URL on purpose.
+//
+// url.URL cannot faithfully round-trip a URI whose authority component is
+// empty. Parsing "openid-credential-offer://?credential_offer=..." yields an
+// empty Host and Path, and URL.String() then writes the "//" back only when
+// one of Host, Path or User is non-empty - so the value that comes out is
+// "openid-credential-offer:?credential_offer=...". That is a different URI
+// from the one the caller built, and the spec's own examples use the "//"
+// form (OpenID4VCI 1.0 section 4.1.2). Accepting a *url.URL here silently
+// corrupted every "scheme:?query" URI encoded into a QR code.
+func GenerateQR(uri string, recoveryLevel qrcode.RecoveryLevel, size int) (*QRReply, error) {
 	if size == 0 {
 		size = 256
 	}
 
+	// Validated, but never re-serialised: the QR carries the caller's own
+	// string, so an authority-less URI reaches the wallet as it was written.
+	if _, err := url.ParseRequestURI(uri); err != nil {
+		return nil, err
+	}
+
 	var buf bytes.Buffer
-	qrCode, err := qrcode.New(uri.String(), recoveryLevel)
+	qrCode, err := qrcode.New(uri, recoveryLevel)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create QRReply-code: %w", err)
 	}
@@ -43,7 +59,7 @@ func GenerateQR(uri *url.URL, recoveryLevel qrcode.RecoveryLevel, size int) (*QR
 
 	return &QRReply{
 		Base64Image: buf.String(),
-		URI:         uri.String(),
+		URI:         uri,
 	}, nil
 }
 

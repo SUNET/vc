@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
@@ -129,11 +132,13 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 			return nil, fmt.Errorf("failed to build credential registry client: %w", err)
 		}
 
-		// Load VCTM data and derive Attributes before validation.
+		if err := checkCredentialMetadataEntries(cfg); err != nil {
+			return nil, err
+		}
+
+		// Load VCTM data and derive Attributes before validation. No nil
+		// guard: checkCredentialMetadataEntries above has refused those.
 		for scope, constructor := range cfg.Common.CredentialMetadata {
-			if constructor == nil {
-				continue
-			}
 			if err := constructor.LoadCredentialSchema(ctx, scope, registry); err != nil {
 				return nil, fmt.Errorf("failed to load VCTM for scope %q: %w", scope, err)
 			}
@@ -152,6 +157,9 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 
 	// Nil out service sections this service doesn't own so that a shared
 	// config file won't fail validation on incomplete sibling stanzas.
+	if serviceName == "apigw" {
+		cfg.SeedDashboardDefaults()
+	}
 	switch serviceName {
 	case "issuer":
 		cfg.APIGW, cfg.Verifier, cfg.Registry = nil, nil, nil
@@ -171,7 +179,35 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkCredentialOfferIssuerIdentity(cfg, serviceName); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// checkCredentialMetadataEntries refuses a common.credential_metadata key
+// whose value is nil.
+//
+// That is a config typo - a scope written with nothing under it - not an
+// absent scope, and skipping it only moves the failure: the verifier's
+// Client.New iterates the map and dereferences the entry at startup. Here
+// rather than in ResolveVCTUrls because that is gated on an APIGW stanza, so
+// a verifier-only config file never reaches it.
+func checkCredentialMetadataEntries(cfg *model.Cfg) error {
+	if cfg.Common == nil {
+		return nil
+	}
+	var empty []string
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		if cfg.Common.CredentialMetadata[scope] == nil {
+			empty = append(empty, scope)
+		}
+	}
+	if len(empty) > 0 {
+		return fmt.Errorf("common.credential_metadata: no configuration under %s", strings.Join(empty, ", "))
+	}
+	return nil
 }
 
 // checkMongoRequirement enforces common.mongo.uri for the services that
@@ -212,6 +248,60 @@ func checkMongoRequirement(cfg *model.Cfg, serviceName string) error {
 		return fmt.Errorf("common.mongo.uri is required for the %s service when common.sql.backend is %q", serviceName, backend)
 	case cfg.Common.HA.Enable:
 		return fmt.Errorf("common.mongo.uri is required for the %s service because common.ha.enable is set and HA caching has no relational backend", serviceName)
+	}
+
+	return nil
+}
+
+// checkCredentialOfferIssuerIdentity rejects an apigw config whose
+// credential-offer issuer identifier disagrees with the origin this gateway
+// actually is.
+//
+// Every credential offer this service produces publishes
+// apigw.delivery.credential_offers.issuer_url as `credential_issuer`, and a
+// wallet resolves that identifier to
+// {credential_issuer}/.well-known/openid-credential-issuer. But the issuer
+// metadata is generated from apigw.public_url and declares THAT as its own
+// `credential_issuer` (see APIGW.IssuerMetadata.Generate, called with
+// PublicURL in internal/apigw/apiv1/client.go). So when the two differ the
+// wallet fetches metadata from an origin that either serves none or serves a
+// document naming a different issuer, and discovery fails - for every offer
+// route, not just the UI one.
+//
+// There is no useful deployment on the far side of this: the two fields name
+// one thing, and OpenID4VCI requires the metadata's `credential_issuer` to
+// match the identifier the wallet resolved - as a string. So this compares
+// them exactly rather than normalising: a trailing slash on one of them is
+// still two different identifiers once they are published. Refusing at
+// startup turns a silent interop failure - visible only in a wallet, at the
+// end of a flow - into a message at boot.
+func checkCredentialOfferIssuerIdentity(cfg *model.Cfg, serviceName string) error {
+	if serviceName != "apigw" || cfg.APIGW == nil {
+		return nil
+	}
+
+	issuerURL := cfg.APIGW.Delivery.CredentialOffers.IssuerURL
+	publicURL := cfg.APIGW.PublicURL
+	if issuerURL == "" || publicURL == "" {
+		// Absence is the required-tag's business, not this check's.
+		return nil
+	}
+
+	// Compared EXACTLY, not normalised. Both values are emitted verbatim -
+	// the offer sets credential_issuer to issuer_url as written, and
+	// IssuerMetadata.Generate sets it to public_url as written, neither
+	// trimming anything. Accepting "https://x/" against "https://x" here
+	// would let the two publish different strings for one identity, and a
+	// wallet comparing issuer identifiers compares strings. Normalising at
+	// this check would hide exactly the mismatch it exists to catch.
+	if issuerURL != publicURL {
+		return fmt.Errorf(
+			"apigw.delivery.credential_offers.issuer_url (%q) must be byte-identical to apigw.public_url (%q): "+
+				"offers publish the former as credential_issuer and issuer metadata publishes the latter, "+
+				"both verbatim, so any difference - a trailing slash included - makes a wallet compare two "+
+				"different issuer identifiers and fail discovery",
+			issuerURL, publicURL,
+		)
 	}
 
 	return nil

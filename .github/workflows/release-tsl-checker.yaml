@@ -1,0 +1,80 @@
+name: Release tsl_checker
+
+on:
+  push:
+    tags:
+      - "tsl-checker-v*"
+
+jobs:
+  build:
+    name: Build tsl_checker (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build tsl_checker
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION="${GITHUB_REF_NAME#tsl-checker-}"
+          go build -ldflags "-w -s --extldflags '-static' -X main.version=${VERSION}" \
+            -o tsl_checker-${{ matrix.goos }}-${{ matrix.goarch }} \
+            ./developer_tools/scripts/tsl_checker/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tsl_checker-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: tsl_checker-${{ matrix.goos }}-${{ matrix.goarch }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum tsl_checker-* > checksums-sha256.txt
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#tsl-checker-}" >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          name: "tsl_checker ${{ steps.version.outputs.version }}"
+          generate_release_notes: false
+          files: |
+            artifacts/tsl_checker-*
+            artifacts/checksums-sha256.txt

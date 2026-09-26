@@ -257,7 +257,7 @@ func TestDeviceSignedToWireMap_CBOREncodingIsDeterministic(t *testing.T) {
 	}
 
 	var first []byte
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		// Rebuild the map fresh each iteration - Go's map iteration order
 		// is randomized per range statement, so reusing one map instance
 		// wouldn't meaningfully re-exercise the ordering risk.
@@ -294,7 +294,7 @@ func TestBuildZkAttributes_StructuredValueCBOREncodingIsDeterministic(t *testing
 	}
 
 	var first []byte
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		attributes, _, err := buildZkAttributes(issuerSigned, []string{"driving_privileges"})
 		if err != nil {
 			t.Fatalf("buildZkAttributes: %v", err)
@@ -367,7 +367,7 @@ func TestBuildZkAttributes_OrderMatchesRequestedClaimIDsWithPseudonymLast(t *tes
 	wantOrder := []string{"family_name", "given_name", "age_over_18", PseudonymClaimIdentifier}
 
 	var firstIdentifiers []string
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		attributes, pseudonym, err := buildZkAttributes(issuerSigned, requestedClaimIDs)
 		if err != nil {
 			t.Fatalf("iteration %d: buildZkAttributes: %v", i, err)

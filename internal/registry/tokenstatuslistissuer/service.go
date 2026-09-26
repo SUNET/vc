@@ -15,7 +15,6 @@ import (
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/pki"
-	"github.com/SUNET/vc/pkg/tokenstatuslist"
 )
 
 // Service is the token status list issuer service
@@ -240,13 +239,11 @@ func (s *Service) refreshSection(ctx context.Context, section int64) {
 		return
 	}
 	tokenCfg := TokenConfig{
-		TokenConfig: tokenstatuslist.TokenConfig{
-			Subject:   subject,
-			Issuer:    s.cfg.Registry.PublicURL,
-			Statuses:  statuses,
-			TTL:       s.ttl,
-			ExpiresIn: s.tokenValidity,
-		},
+		Subject:       subject,
+		Issuer:        s.cfg.Registry.PublicURL,
+		Statuses:      statuses,
+		TTL:           s.ttl,
+		ExpiresIn:     s.tokenValidity,
 		SigningMethod: signingMethod,
 	}
 

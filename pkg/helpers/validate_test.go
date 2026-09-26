@@ -454,6 +454,45 @@ func TestAuthScopesSelfReference(t *testing.T) {
 			},
 			shouldError: false,
 		},
+		{
+			name: "preauth on datastore with no auth_claims/auth_scopes passes",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"micro_credential": {
+						AuthProvider: model.AuthProviderPreAuth,
+					},
+				}},
+			},
+			shouldError: false,
+		},
+		{
+			name: "preauth on datastore with auth_claims is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"micro_credential": {
+						AuthProvider: model.AuthProviderPreAuth,
+						AuthClaims:   []string{"given_name"},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "auth_claims_not_allowed_for_preauth",
+		},
+		{
+			name: "preauth on datastore with auth_scopes is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"micro_credential": {
+						AuthProvider: model.AuthProviderPreAuth,
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{"given_name"}},
+						},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "auth_scopes_not_allowed_for_preauth",
+		},
 	}
 
 	for _, tt := range tests {
@@ -467,6 +506,21 @@ func TestAuthScopesSelfReference(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExternalAPIScope_PreAuthRejected(t *testing.T) {
+	validate, err := NewValidator()
+	require.NoError(t, err)
+
+	scope := model.ExternalAPIScope{
+		Remote:       "ladok",
+		AuthProvider: model.AuthProviderPreAuth,
+	}
+
+	err = validate.Struct(scope)
+	require.Error(t, err, "external_api scopes must not accept preauth (no external preauth issuance path)")
+	assert.Contains(t, err.Error(), "auth_provider")
+	assert.Contains(t, err.Error(), "oneof")
 }
 
 func TestImagePNGValidator(t *testing.T) {

@@ -11,17 +11,15 @@ make help
 # Build
 make build                    # Build all services
 make build-SERVICE            # Build specific service (e.g., build-apigw)
-make build-apigw-saml        # Build apigw with SAML support
-make build-apigw-oidcrp      # Build apigw with OIDC RP support
-make build-apigw-all         # Build apigw with all features
-make build-issuer-hsm        # Build issuer with HSM/PKCS#11 support
+make build-verifier-zknative  # Build verifier with native ZK/PPID verification
+make build-zkvegaverifyworker # Build the isolated Vega ZK-verify subprocess worker
 
 # Test
 make test                    # Run all tests
 make test-SERVICE            # Test specific service
-make test-saml              # Test with SAML build tag
-make test-oidcrp            # Test with OIDC RP build tag
-make test-all-tags          # Test with all build tags
+make test-bbsnative          # Test pkg/bbs native cgo path (requires bbs-native-lib)
+make test-pkcs11             # Test with pkcs11 build tag (requires test-env)
+make test-zknative           # Test with zknative build tag (requires zk-native-lib zk-native-lib-vega)
 
 # Docker
 make docker-build                          # Build all images (VERSION=local)
@@ -75,51 +73,48 @@ W3C_TEST_PORT=8888   # W3C test server port (default: 8888)
 The build system manages 4 microservices:
 - **verifier** - Credential verification service (web worker)
 - **registry** - Central registry service (worker)
-- **apigw** - API gateway (worker, supports SAML/OIDCRP tags)
-- **issuer** - Credential issuing service (worker)
+- **apigw** - API gateway (worker)
+- **issuer** - Credential issuing service (worker; links `zk-cred-bbs` for blind BBS issuance, PKCS#11 for HSM signing)
 
 ### Build Configuration
 
-Each service has a specific build configuration:
+Every service is compiled with cgo enabled (`CGO_ENABLED=1`) and the
+`netgo,osusergo` build tags, then statically linked via `--extldflags
+'-static'`. The verifier additionally links `zk-cred-longfellow` (via the
+`zknative` build tag) and is dynamically linked because Longfellow's C++
+pulls in libm/libstdc++. The Docker builder stage in `dockerfiles/worker`
+fetches and builds every native library it needs from source — no
+host-side staging is required for `docker build`.
 
-```makefile
-verifier:static:           # Static linking, no CGO, no build tags
-registry:dynamic:          # Dynamic linking, CGO enabled
-apigw:static:              # Static linking, supports saml/oidcrp tags
-issuer:static:             # Static linking, supports pkcs11 tag
-```
+| Service    | Extra native libs linked into the main binary | Extra binaries shipped alongside | Docker stage       |
+| ---------- | --------------------------------------------- | -------------------------------- | ------------------ |
+| `verifier` | `zk-cred-bbs`, `zk-cred-longfellow`           | `zkvegaverifyworker`             | `runtime-verifier` |
+| `issuer`   | `zk-cred-bbs`                                 | —                                | `runtime`          |
+| `apigw`    | `zk-cred-bbs`                                 | —                                | `runtime`          |
+| `registry` | `zk-cred-bbs`                                 | —                                | `runtime`          |
+
+Every worker links `zk-cred-bbs` because `pkg/openid4vci` imports
+`pkg/bbs` transitively. That import is what forces cgo on for every
+worker; nothing else in the standard build actually calls into BBS.
 
 ### Template System
 
 The Makefile uses templates to generate targets dynamically:
 
-- **TEST_TEMPLATE** - Generates `test-SERVICE` targets
-- **BUILD_TEMPLATE** - Generates `build-SERVICE` targets
-- **DOCKER_BUILD_WEB_TEMPLATE** - Docker builds for web workers (verifier)
-- **DOCKER_BUILD_WORKER_TEMPLATE** - Docker builds for workers (registry, apigw, issuer)
+- **TEST_TEMPLATE** - Generates `test-SERVICE` targets (with `bbs-native-lib-staged` prereq)
+- **BUILD_TEMPLATE** - Generates `build-SERVICE` targets (with `bbs-native-lib-ensure` prereq — auto-stages on first run)
+- **DOCKER_BUILD_WORKER_TEMPLATE** - Generates `docker-build-SERVICE` targets
 - **DOCKER_PUSH_TEMPLATE** - Generates `docker-push-SERVICE` targets
 - **DOCKER_TAG_TEMPLATE** - Generates `docker-tag-SERVICE` targets
 
 ## How to Add a New Service
 
-Adding a new service requires only 3 edits:
+Adding a new service requires only 2 edits:
 
-1. **Add to SERVICES list** (line ~22):
+1. **Add to SERVICES list** (Configuration Variables block):
 ```makefile
-SERVICES := verifier registry apigw issuer newservice
-```
-
-2. **Add to WEB_SERVICES or WORKER_SERVICES** (lines ~23-24):
-```makefile
-WEB_SERVICES    := verifier newservice        # if web worker
-WORKER_SERVICES := registry apigw issuer  # OR worker
-```
-
-3. **Add build configuration** (lines ~38-45):
-```makefile
-BUILD_CONFIGS := \
-    newservice:static: \
-    # ... existing configs
+SERVICES        := verifier registry apigw issuer newservice
+WORKER_SERVICES := verifier registry apigw issuer newservice
 ```
 
 The templates will automatically generate all targets:
@@ -131,53 +126,60 @@ The templates will automatically generate all targets:
 
 ## Helper Functions
 
-### get-cgo
-Returns CGO configuration for a service based on BUILD_CONFIGS:
-```makefile
-$(call get-cgo,apigw)  # Returns CGO_ENABLED=0 or CGO_ENABLED=1
-```
-
-### get-tags
-Returns build tags for a service:
-```makefile
-$(call get-tags,apigw)  # Returns build tags like "saml" or empty
-```
-
-### get-ldflags
-Returns appropriate LDFLAGS (static vs dynamic):
-```makefile
-$(call get-ldflags,issuer)  # Returns static or dynamic LDFLAGS
-```
-
 ### docker-tag
 Generates consistent Docker image tags:
 ```makefile
 $(call docker-tag,verifier,1.2.3)  # Returns docker.sunet.se/iam_vc/verifier:1.2.3
 ```
 
-## Build Tags
+## Native library staging
 
-### Available Tags
-- **saml** - SAML authentication support
-- **oidcrp** - OpenID Connect Relying Party support
-- **pkcs11** - Hardware Security Module (HSM) support
-- **vc20** - W3C Verifiable Credentials 2.0 support
+The build never picks up a native library from GOPATH or the system
+package manager: each of `zk-cred-bbs`, `zk-cred-longfellow`, and
+`zk-cred-vega` is fetched from source (`ZK_CRED_*_REPO` / `ZK_CRED_*_REF`
+in the Makefile) and built into `third_party/`.
+
+- **bbsnative** (`pkg/bbs` + `pkg/bbs/bbsnative`) — Blind BBS issuance.
+  Staged by `make bbs-native-lib`, and is a prereq for every `make
+  build-SERVICE` and every `make test-SERVICE` because `pkg/openid4vci`
+  imports `pkg/bbs`. Runtime activation is configured in the
+  `issuer.bbs` block; the code path only fires on the issuer.
+- **pkcs11** (`pkg/pki`, `pkg/jose`) — HSM signing via `miekg/pkcs11`
+  (vendored, cgo). No separate staging step: the C headers ship with
+  the package. `make test-pkcs11` runs the SoftHSM2-backed tests
+  (requires `softhsm2-util` and `pkcs11-tool` locally, installed by
+  `make test-env`).
+- **zknative** (`pkg/mdoc/zknative`, `pkg/mdoc/zknative_vega`, and
+  `cmd/zkvegaverifyworker`) — Native ZK/PPID verification. Longfellow
+  is linked into the main verifier binary via `make
+  build-verifier-zknative` (prereq: `make zk-native-lib`); Vega is
+  compiled into a separate subprocess binary via `make
+  build-zkvegaverifyworker` (prereq: `make zk-native-lib-vega`). The
+  Docker `runtime-verifier` stage in `dockerfiles/worker` builds both
+  libraries inside the builder — no host staging is needed.
 
 ### Usage Examples
+
 ```bash
-# Build with specific tag
-make build-apigw-saml
+# Default build: every worker links pkg/bbs's cgo backend. The first
+# invocation stages zk-cred-bbs automatically (bbs-native-lib-ensure);
+# later invocations skip the presence check when the artifacts exist.
+make build-issuer
+make build-verifier
 
-# Test with specific tag
-make test-saml
-make test-oidcrp
+# Verifier with native ZK/PPID (Longfellow linked into the binary).
+# build-verifier-zknative also auto-stages zk-cred-longfellow on first
+# run; `make zk-native-lib` explicitly is only needed to force a refetch.
+make build-verifier-zknative
 
-# Test all tags
-make test-all-tags
+# Vega subprocess worker (execed by the zknative verifier at runtime).
+# Same auto-staging as above; `make zk-native-lib-vega` forces a refetch.
+make build-zkvegaverifyworker
 
-# Docker build with tags
-make docker-build-apigw-saml VERSION=myfeature
-make docker-build-issuer-hsm VERSION=myfeature
+# Run the tagged tests directly.
+make test-bbsnative
+make test-pkcs11
+make test-zknative
 ```
 
 ## Docker Workflows
@@ -211,14 +213,12 @@ make docker-push VERSION=staging
 
 ### Building Specific Services
 ```bash
-# Build only the API gateway
+# Build only the API gateway.
 make docker-build-apigw VERSION=myfeature
 
-# Build with SAML support
-make docker-build-apigw-saml VERSION=myfeature
-
-# Build with all features
-make docker-build-apigw-all VERSION=myfeature
+# Build only the verifier (gets the runtime-verifier stage automatically,
+# including the two native ZK shared objects and zkvegaverifyworker).
+make docker-build-verifier VERSION=myfeature
 ```
 
 ## Reserved Tag Guard
@@ -269,8 +269,9 @@ This performs:
 1. Verifies you're on the `main` branch (unless `FORCE=true`)
 2. Verifies the working tree is clean (unless `FORCE=true`)
 3. Bumps the latest `vX.Y.Z` tag according to `BUMP`
-4. Creates and pushes the new git tag
-5. Builds all Docker images tagged `:vX.Y.Z`
+4. Builds all Docker images tagged `:vX.Y.Z` (fail-fast: no git tag is
+   created if the build fails)
+5. Creates and pushes the new git tag
 6. Pushes images tagged `:vX.Y.Z`
 7. Retags and pushes all images as `:dev`
 
@@ -334,7 +335,7 @@ make --version
 ```bash
 # View service lists
 grep "^SERVICES" Makefile
-grep "^BUILD_CONFIGS" Makefile
+grep "^WORKER_SERVICES" Makefile
 
 # Check what targets exist for a service
 make -n build-apigw

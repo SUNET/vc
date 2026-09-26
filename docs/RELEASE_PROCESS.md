@@ -56,9 +56,11 @@ This will:
 1. Verify you are on the `main` branch
 2. Find the latest `vX.Y.Z` tag (e.g., `v0.4.0`)
 3. Bump the patch version (e.g., `v0.4.0` → `v0.4.1`)
-4. Create and push an annotated git tag
-5. Build all Docker images tagged as `:v0.4.1`
-6. Tag and push images as `:dev`
+4. Build all Docker images tagged as `:v0.4.1` (fail-fast: no git tag is
+   created if the build fails)
+5. Create and push an annotated git tag for `v0.4.1`
+6. Push images tagged as `:v0.4.1`
+7. Tag and push images as `:dev`
 
 ### Minor or major bump
 

@@ -369,8 +369,10 @@ func TestUIMetadataCredentialFormatFromMetadata(t *testing.T) {
 					VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 				},
 				"mdl": {
-					Format: openid4vp.FormatMsoMdoc,
-					VCTM:   &sdjwtvc.VCTM{VCT: "org.iso.18013.5.1.mDL"},
+					// An mdoc names itself by doctype; a VCTM-only mdoc scope
+					// has no constraint the UI can offer.
+					Format:  openid4vp.FormatMsoMdoc,
+					Doctype: "org.iso.18013.5.1.mDL",
 				},
 			},
 		},
@@ -945,45 +947,38 @@ func applyPerScopeValidations(scopes []string, validations map[string][]openid4v
 	return nil
 }
 
-// TestUIMetadataOffersBothVCTIdentifiers pins the UI to advertising BOTH
-// identifiers a wallet might match a credential type by: the VCTM's own vct
-// first, then the URL the VCTM is served from.
-//
-// Both are needed, because deployed wallets disagree about which one names a
-// credential type, and each behaviour is live-verified in this repo. The EUDI
-// reference wallet (multipaz) matches the issuer metadata's declared vct - the
-// type-metadata URL - per the finding-18 note in
-// internal/apigw/apiv1/handlers_verifier.go. Other wallets match the
-// credential's own vct claim, built from the VCTM (BuildCredentialWithSigner
-// sets body["vct"] = vctm.VCT), per the finding-16 note on
-// VCTIdentifiersForScopes in pkg/model/config.go. DCQL's meta.vct_values is an
-// acceptable-value list, so emitting both satisfies either wallet.
-//
-// The existing TestUIMetadata already asserts "VCT should be populated from
-// VCTM", but could not catch the original regression: it builds
-// CredentialMetadata directly and never sets VCTURL, so the empty-URL path was
-// the only one exercised. In production ResolveVCTUrls guarantees VCTURL is
-// non-empty for every VCTM-backed scope, which is exactly the case that
-// regressed - the UI advertised only https://apigw.example/type-metadata/pid
-// for a credential whose vct is urn:eudi:pid:1, so presentations started from
-// the UI matched nothing in wallets of the second kind.
-func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
+// TestUIMetadataAdvertisesCanonicalVCT pins the UI to advertising the
+// single canonical vct per VCTM in reply.Credentials[].VCTValues and every
+// preset's Meta.VCTValues. ResolveVCTUrls yields exactly one vct per VCTM
+// (preserved verbatim from the file for external scopes and for local
+// scopes whose file declares one, back-filled from the hosting URL only
+// when a local file left it empty), so the DCQL vct_values list carries at
+// most one value and reply.Credentials[].VCT names that same identifier --
+// the value the credential body carries, the metadata advertises, and a
+// wallet stores as the credential's type tag.
+func TestUIMetadataAdvertisesCanonicalVCT(t *testing.T) {
 	ctx := t.Context()
 
 	cfg := &model.Cfg{
 		Common: &model.Common{
 			CredentialMetadata: map[string]*model.CredentialMetadata{
-				// VCTURL is deliberately NOT hand-set: ResolveVCTUrls below
-				// derives it exactly as production does, so this fixture
-				// exercises the real code path rather than a hand-built
-				// approximation of it.
+				// External vctm_url: ResolveVCTUrls preserves VCTM.VCT
+				// verbatim (the URN); VCTURL is set to vctm_url but does
+				// not leak into vct_values.
 				"pid": {
-					Format:       "dc+sd-jwt",
-					VCTMFilePath: "/path/to/vctm",
-					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+					Format:  "dc+sd-jwt",
+					VCTMUrl: "https://registry.example/pid.vctm.json",
+					VCTM:    &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
 				},
-				// A VCTM file with no vct: ResolveVCTUrls back-fills VCTM.VCT
-				// from the derived URL, so the two collapse to one value.
+				// Local file with an explicit URN: ResolveVCTUrls keeps the
+				// URN as vct even though the file is hosted by apigw.
+				"eudi_pid": {
+					Format:       "dc+sd-jwt",
+					VCTMFilePath: "/path/to/eudi_pid",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:de:1"},
+				},
+				// Local file with no vct: ResolveVCTUrls back-fills VCTM.VCT
+				// from the hosting URL, so vct and vct_values match.
 				"novct": {
 					Format:       "dc+sd-jwt",
 					VCTMFilePath: "/path/to/novct",
@@ -993,24 +988,23 @@ func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
 		},
 		Verifier: &model.Verifier{
 			Presets: map[string]model.PresetDefinition{
-				"PID": {Credentials: model.VerificationPreset{"pid": nil}},
-				// Its own preset, not folded into "PID": the preset path
-				// resolves vct_values independently of reply.Credentials, so
-				// without a preset covering this scope Meta.VCTValues could
-				// regress for a back-filled VCTM while the credential-info
-				// assertions still passed.
-				"NOVCT": {Credentials: model.VerificationPreset{"novct": nil}},
+				"PID":     {Credentials: model.VerificationPreset{"pid": nil}},
+				"EUDIPID": {Credentials: model.VerificationPreset{"eudi_pid": nil}},
+				"NOVCT":   {Credentials: model.VerificationPreset{"novct": nil}},
 			},
 		},
 	}
 
-	// Resolve as the server does at startup: this is what populates VCTURL and
-	// back-fills an empty VCTM.VCT from it. Without this the "novct" case would
-	// only prove the URL fallback and never reach the de-duplication branch.
 	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
 	require.Equal(t, "https://apigw.example/type-metadata/novct",
 		cfg.Common.CredentialMetadata["novct"].GetVCTM().VCT,
-		"precondition: ResolveVCTUrls should have back-filled the empty vct from the URL")
+		"precondition: ResolveVCTUrls back-fills a local file's empty vct from the hosting URL")
+	require.Equal(t, "urn:eudi:pid:de:1",
+		cfg.Common.CredentialMetadata["eudi_pid"].GetVCTM().VCT,
+		"precondition: ResolveVCTUrls preserves a local file's explicit URN vct")
+	require.Equal(t, "urn:eudi:pid:1",
+		cfg.Common.CredentialMetadata["pid"].GetVCTM().VCT,
+		"precondition: ResolveVCTUrls preserves an external VCTM's vct verbatim")
 
 	client, _ := CreateTestClientWithMock(t, cfg)
 	client.cfg = cfg
@@ -1019,47 +1013,40 @@ func TestUIMetadataOffersBothVCTIdentifiers(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, reply)
 
-	t.Run("credential info uses the VCTM vct", func(t *testing.T) {
-		assert.Equal(t, "urn:eudi:pid:1", reply.Credentials["pid"].VCT,
-			"the identifier a wallet matches against is the VCTM's vct, not where the VCTM is served")
+	t.Run("external scope advertises the file's own vct", func(t *testing.T) {
+		assert.Equal(t, "urn:eudi:pid:1", reply.Credentials["pid"].VCT)
+		assert.Equal(t, []string{"urn:eudi:pid:1"}, reply.Credentials["pid"].VCTValues)
 	})
 
-	t.Run("credential info offers both identifiers, VCTM vct first", func(t *testing.T) {
-		assert.Equal(t,
-			[]string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
-			reply.Credentials["pid"].VCTValues,
-			"wallets disagree on which identifier names a credential type: multipaz "+
-				"matches the metadata URL, wwWallet the credential's own vct - so offer both")
+	t.Run("local scope with an explicit URN keeps the URN", func(t *testing.T) {
+		assert.Equal(t, "urn:eudi:pid:de:1", reply.Credentials["eudi_pid"].VCT)
+		assert.Equal(t, []string{"urn:eudi:pid:de:1"}, reply.Credentials["eudi_pid"].VCTValues)
 	})
 
-	t.Run("preset vct_values offer both identifiers", func(t *testing.T) {
+	t.Run("local scope without a file vct advertises the hosting URL", func(t *testing.T) {
+		assert.Equal(t, "https://apigw.example/type-metadata/novct", reply.Credentials["novct"].VCT)
+		assert.Equal(t, []string{"https://apigw.example/type-metadata/novct"}, reply.Credentials["novct"].VCTValues)
+	})
+
+	t.Run("preset vct_values for an external scope carry the file's vct", func(t *testing.T) {
 		preset := reply.Presets["PID"]
 		require.NotNil(t, preset)
 		require.Len(t, preset.Credentials, 1)
-		assert.Equal(t,
-			[]string{"urn:eudi:pid:1", "https://apigw.example/type-metadata/pid"},
-			preset.Credentials[0].Meta.VCTValues,
-			"DCQL meta.vct_values is an acceptable-value list, so both forms belong in it")
+		assert.Equal(t, []string{"urn:eudi:pid:1"}, preset.Credentials[0].Meta.VCTValues)
 	})
 
-	t.Run("preset vct_values also collapse for a back-filled VCTM", func(t *testing.T) {
+	t.Run("preset vct_values for a local URN scope carry the URN", func(t *testing.T) {
+		preset := reply.Presets["EUDIPID"]
+		require.NotNil(t, preset)
+		require.Len(t, preset.Credentials, 1)
+		assert.Equal(t, []string{"urn:eudi:pid:de:1"}, preset.Credentials[0].Meta.VCTValues)
+	})
+
+	t.Run("preset vct_values for a back-filled local scope carry the hosting URL", func(t *testing.T) {
 		preset := reply.Presets["NOVCT"]
 		require.NotNil(t, preset)
 		require.Len(t, preset.Credentials, 1)
-		assert.Equal(t,
-			[]string{"https://apigw.example/type-metadata/novct"},
-			preset.Credentials[0].Meta.VCTValues,
-			"the preset path resolves vct_values separately from reply.Credentials, "+
-				"so it needs its own coverage of the de-duplicated case")
-	})
-
-	t.Run("collapses to one value when the VCTM had no vct", func(t *testing.T) {
-		assert.Equal(t, "https://apigw.example/type-metadata/novct", reply.Credentials["novct"].VCT,
-			"a VCTM with no vct still needs a usable identifier")
-		assert.Equal(t, []string{"https://apigw.example/type-metadata/novct"},
-			reply.Credentials["novct"].VCTValues,
-			"ResolveVCTUrls back-filled VCTM.VCT from the URL, so the two are the same "+
-				"string and must be de-duplicated rather than listed twice")
+		assert.Equal(t, []string{"https://apigw.example/type-metadata/novct"}, preset.Credentials[0].Meta.VCTValues)
 	})
 }
 
@@ -1150,8 +1137,8 @@ func TestUIMetadata_DCAPIAutoAttempt(t *testing.T) {
 		want        bool
 	}{
 		{name: "unset defaults to true", autoAttempt: nil, want: true},
-		{name: "explicit true", autoAttempt: model.BoolPtr(true), want: true},
-		{name: "explicit false propagates", autoAttempt: model.BoolPtr(false), want: false},
+		{name: "explicit true", autoAttempt: new(true), want: true},
+		{name: "explicit false propagates", autoAttempt: new(false), want: false},
 	}
 
 	for _, tt := range tests {
@@ -1203,7 +1190,7 @@ func TestUIMetadataPresetCategoryOrder(t *testing.T) {
 				// alphabetical category-name sorting would get this backwards.
 				"Zebra preset":    {Category: "Z category", Order: 0, Credentials: model.VerificationPreset{"pid": nil}},
 				"Apple preset":    {Category: "A category", Order: 5, Credentials: model.VerificationPreset{"ehic": nil}},
-				"Featured preset": {Featured: model.BoolPtr(true), Credentials: model.VerificationPreset{"mdl": nil}},
+				"Featured preset": {Featured: new(true), Credentials: model.VerificationPreset{"mdl": nil}},
 				"Uncategorized":   {Credentials: model.VerificationPreset{"pid": nil}},
 			},
 		},
@@ -1229,4 +1216,237 @@ func TestUIMetadataPresetCategoryOrder(t *testing.T) {
 	assert.Equal(t, 5, reply.Presets["Apple preset"].Order)
 	assert.Empty(t, reply.Presets["Uncategorized"].Category,
 		"an uncategorized preset carries no Category, distinct from any named group")
+}
+
+// TestUIMetadataMdocDoctypeIdentifier covers the picker's identifier for mdoc
+// scopes.
+//
+// presentation-definition.js sends UICredentialInfo.VCT as meta.doctype_value
+// for an mso_mdoc credential, but the chain that filled it read VCTM.VCT, then
+// VCTURL, then the MDDL's doctype - never the configured Doctype. A
+// registry-backed scope therefore advertised an empty identifier and the UI
+// sent an empty doctype_value, which matches nothing; and a scope carrying
+// both documents advertised the VCTM's vct while the server-side builders used
+// the MDDL's doctype.
+func TestUIMetadataMdocDoctypeIdentifier(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				// Registry-backed: doctype configured, no MDDL document.
+				"pid_mdoc": {
+					Format:  openid4vp.FormatMsoMdoc,
+					Doctype: "eu.europa.ec.eudi.pid.1",
+				},
+				// Both documents present, disagreeing.
+				"mdl": {
+					Format: openid4vp.FormatMsoMdoc,
+					VCTM:   &sdjwtvc.VCTM{VCT: "urn:something:else:1"},
+					MDDL:   &mdoc.MDDLSchema{DocType: "org.iso.18013.5.1.mDL"},
+				},
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+
+	require.Contains(t, reply.Credentials, "pid_mdoc")
+	assert.Equal(t, "eu.europa.ec.eudi.pid.1", reply.Credentials["pid_mdoc"].VCT,
+		"a registry-backed mdoc scope names itself by its configured doctype")
+	assert.Empty(t, reply.Credentials["pid_mdoc"].VCTValues,
+		"an mdoc credential has no vct for a wallet to match")
+
+	require.Contains(t, reply.Credentials, "mdl")
+	assert.Equal(t, "org.iso.18013.5.1.mDL", reply.Credentials["mdl"].VCT,
+		"the MDDL's doctype wins over a VCTM's vct, as the server-side builders do")
+}
+
+// TestUIMetadataOmitsUnconstrainableCredential covers a scope the UI cannot
+// build a usable DCQL query for. Offering it in the picker would send a
+// credential query with an empty meta, which DCQL reads as unconstrained.
+func TestUIMetadataOmitsUnconstrainableCredential(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"pid": {
+					Format:       openid4vp.FormatSDJWTVC,
+					VCTMFilePath: "/path/to/vctm_pid",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+				},
+				"diploma_ldp": {
+					Format:       "ldp_vc",
+					VCTMFilePath: "/path/to/vctm_diploma",
+					VCTM:         &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+				},
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+	require.NoError(t, cfg.ResolveVCTUrls("https://apigw.example"))
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+
+	require.Contains(t, reply.Credentials, "pid")
+	assert.Equal(t, []string{"urn:eudi:pid:1"}, reply.Credentials["pid"].VCTValues,
+		"the VCTM file's own vct is preserved, not replaced by the hosting URL")
+	assert.NotContains(t, reply.Credentials, "diploma_ldp",
+		"a scope the UI cannot build a usable query for must not be offered in the picker")
+}
+
+// TestUIMetadataPresetDropsUnconstrainableCredential covers a review finding:
+// the preset path used to return an error, which took the whole /ui/metadata
+// response down - hiding every usable credential and preset - over one scope
+// the picker loop merely skips.
+//
+// A scope with no expressible constraint is not a malformed config; it is a
+// credential this verifier cannot ask for. It is dropped, and a preset left
+// with nothing to request is dropped with it.
+func TestUIMetadataPresetDropsUnconstrainableCredential(t *testing.T) {
+	client := dcqlClientFor(t, map[string]*model.CredentialMetadata{
+		"pid":         sdJWTScope("urn:eudi:pid:1"),
+		"diploma_ldp": w3cScope("urn:eudi:diploma:1"),
+	}, map[string]model.PresetDefinition{
+		"Mixed":   {Credentials: map[string]*model.VerificationPresetScope{"pid": nil, "diploma_ldp": nil}},
+		"OnlyW3C": {Credentials: map[string]*model.VerificationPresetScope{"diploma_ldp": nil}},
+		"OnlyPID": {Credentials: map[string]*model.VerificationPresetScope{"pid": nil}},
+	})
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err, "one unconstrainable scope must not fail the whole response")
+
+	require.Contains(t, reply.Presets, "Mixed")
+	require.Len(t, reply.Presets["Mixed"].Credentials, 1,
+		"the unconstrainable credential is dropped, the usable one stays")
+	assert.Equal(t, "pid", reply.Presets["Mixed"].Credentials[0].ID)
+
+	assert.NotContains(t, reply.Presets, "OnlyW3C",
+		"a preset with nothing left to request would ask the wallet for nothing")
+	assert.Contains(t, reply.Presets, "OnlyPID")
+
+	// The picker itself is unaffected and still lists the usable credential.
+	assert.Contains(t, reply.Credentials, "pid")
+	assert.NotContains(t, reply.Credentials, "diploma_ldp")
+}
+
+// TestUIMetadataRejectsEmptyCredentialEntry pins the nil guard on the picker
+// loop. credential_metadata can hold a nil value for a present key, and Format
+// is a direct field read rather than one of the nil-safe accessors, so the
+// whole UI panicked on a config that merely parses.
+//
+// An error, not a skip: the preset path refuses a dangling scope the same way,
+// and a malformed entry is not the same as a credential that legitimately has
+// no expressible constraint - see
+// TestUIMetadataPresetDropsUnconstrainableCredential.
+func TestUIMetadataRejectsEmptyCredentialEntry(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"broken": nil,
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	var reply *UIMetadataReply
+	var err error
+	require.NotPanics(t, func() { reply, err = client.UIMetadata(t.Context()) })
+	require.Error(t, err)
+	assert.Nil(t, reply)
+	assert.Contains(t, err.Error(), "broken")
+}
+
+// TestUIMetadataNeverSerializesNullAttributes covers a review finding on
+// registry-backed mdoc scopes. Attributes is a required, non-nullable record in
+// presentation-definition.js's metadataResponseSchema, and a nil Go map
+// marshals to null - so a scope whose metadata document never loaded made the
+// whole response fail to parse, taking down every other credential and preset
+// with it.
+func TestUIMetadataNeverSerializesNullAttributes(t *testing.T) {
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				// Registry-backed, no MDDL loaded: doctype resolves, so it is
+				// offered, but nothing ever set Attributes.
+				"pid_mdoc": {Format: openid4vp.FormatMsoMdoc, Doctype: "eu.europa.ec.eudi.pid.1"},
+			},
+		},
+		Verifier: &model.Verifier{},
+	}
+
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+	require.Contains(t, reply.Credentials, "pid_mdoc")
+	assert.NotNil(t, reply.Credentials["pid_mdoc"].Attributes)
+
+	// The picker reads attributes["en-US"] unconditionally, so the locale
+	// bucket has to exist or selecting the credential throws.
+	assert.Contains(t, reply.Credentials["pid_mdoc"].Attributes, "en-US")
+
+	encoded, err := json.Marshal(reply.Credentials["pid_mdoc"])
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"attributes":{"en-US":{}}`,
+		"the UI schema rejects null here, and an empty outer map throws on selection")
+	assert.NotContains(t, string(encoded), `"attributes":null`)
+}
+
+// TestSameConstraintFamily pins the preset format-override check. The meta is
+// derived from the CONFIGURED format, so an override crossing families pairs a
+// format with a constraint it does not use.
+func TestSameConstraintFamily(t *testing.T) {
+	tests := []struct {
+		configured, override string
+		want                 bool
+	}{
+		// The case the override exists for.
+		{"mso_mdoc", "mso_mdoc_zk", true},
+		{"dc+sd-jwt", "vc+sd-jwt", true},
+		{"dc+sd-jwt", "", true},
+		{"ldp_vc", "jwt_vc_json", true},
+		// Crossing families.
+		{"dc+sd-jwt", "mso_mdoc", false},
+		{"dc+sd-jwt", "ldp_vc", false},
+		{"mso_mdoc", "jwt_vc_json", false},
+		// Unknown on either side is never a match: jwt_vc_json-ld is
+		// advertised by the issuer metadata but nothing issues it.
+		{"dc+sd-jwt", "jwt_vc_json-ld", false},
+		{"jwt_vc_json-ld", "dc+sd-jwt", false},
+		{"dc+sd-jwt", "something-new", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.configured+"->"+tt.override, func(t *testing.T) {
+			assert.Equal(t, tt.want, sameConstraintFamily(tt.configured, tt.override))
+		})
+	}
+}
+
+// TestValidZKSystemTypes mirrors what openid4vp.validateMsoMdocZkQuery
+// requires, so a preset overriding a scope to mso_mdoc_zk cannot publish a
+// query the server's own validator rejects at request time.
+func TestValidZKSystemTypes(t *testing.T) {
+	ok := []openid4vp.ZKSystemTypeSpec{{ID: "longfellow-libzk-v1_8_1", System: "longfellow-libzk-v1"}}
+	assert.True(t, validZKSystemTypes(ok))
+
+	assert.False(t, validZKSystemTypes(nil), "the ZK format requires a system list")
+	assert.False(t, validZKSystemTypes([]openid4vp.ZKSystemTypeSpec{}))
+	assert.False(t, validZKSystemTypes([]openid4vp.ZKSystemTypeSpec{{System: "longfellow-libzk-v1"}}),
+		"id is required for circuit resolution")
+	assert.False(t, validZKSystemTypes([]openid4vp.ZKSystemTypeSpec{{ID: "x"}}),
+		"system is required")
+	assert.False(t, validZKSystemTypes(append(ok, openid4vp.ZKSystemTypeSpec{ID: "y"})),
+		"one unusable entry invalidates the request")
 }

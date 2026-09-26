@@ -20,14 +20,33 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 )
 
+// MaxMessageBytes is the gRPC message-size limit these services use in place
+// of grpc-go's 4 MiB default, on both ends of every connection.
+//
+// Credential Issuer Metadata is the payload that outgrew the default: it
+// carries one entry per configured scope, and each entry now inlines that
+// type's display metadata - logos included - so an issuer offering a handful
+// of types can publish several MiB. It is signed by the issuer over gRPC
+// (SignMetadata), so the transport limit is what decides whether an issuer
+// can sign its own metadata at all.
+//
+// Application-level guards stay below this deliberately, so an oversized
+// payload gets a specific error from the service rather than a generic
+// transport failure - see the issuer's maxMetadataJSONBytes.
+const MaxMessageBytes = 16 * 1024 * 1024
+
 // NewServerOptions returns gRPC server options with optional TLS/mTLS support.
-// If TLS is disabled, returns nil (for insecure server).
+// The message-size options (MaxMessageBytes) are always included, TLS or not.
 // If TLS is enabled without client CA, uses server-only TLS.
 // If TLS is enabled with client CA, uses mutual TLS (mTLS) requiring client certificates.
 // If AllowedClientFingerprints or AllowedClientDNs is set, adds an interceptor to verify client certs.
 func NewServerOptions(cfg model.GRPCServer) ([]grpc.ServerOption, error) {
+	sizeOpts := []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(MaxMessageBytes),
+		grpc.MaxSendMsgSize(MaxMessageBytes),
+	}
 	if !cfg.TLS.Enable {
-		return nil, nil
+		return sizeOpts, nil
 	}
 
 	// Load server certificate and key
@@ -68,7 +87,7 @@ func NewServerOptions(cfg model.GRPCServer) ([]grpc.ServerOption, error) {
 	}
 
 	creds := credentials.NewTLS(tlsConfig)
-	opts := []grpc.ServerOption{grpc.Creds(creds)}
+	opts := append(sizeOpts, grpc.Creds(creds))
 
 	// Add client identity verification interceptor if any allowlist is configured
 	allowedFingerprints, allowedDNs, err := buildClientAllowlists(cfg.TLS)

@@ -10,42 +10,34 @@ import (
 	"math/big"
 	"testing"
 	"time"
-
-	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
 
 // testReq creates an EvaluationRequest for testing
 func testReq(subjectID string, keyType KeyType, role Role) *EvaluationRequest {
 	return &EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: subjectID,
-			KeyType:   keyType,
-			Role:      role,
-		},
+		SubjectID: subjectID,
+		KeyType:   keyType,
+		Role:      role,
 	}
 }
 
 // testReqWithKey creates an EvaluationRequest with a key for testing
 func testReqWithKey(subjectID string, keyType KeyType, key any, role Role) *EvaluationRequest {
 	return &EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: subjectID,
-			KeyType:   keyType,
-			Key:       key,
-			Role:      role,
-		},
+		SubjectID: subjectID,
+		KeyType:   keyType,
+		Key:       key,
+		Role:      role,
 	}
 }
 
 // testReqWithOptions creates an EvaluationRequest with options for testing
 func testReqWithOptions(subjectID string, keyType KeyType, role Role, opts *TrustOptions) *EvaluationRequest {
 	return &EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: subjectID,
-			KeyType:   keyType,
-			Role:      role,
-			Options:   opts,
-		},
+		SubjectID: subjectID,
+		KeyType:   keyType,
+		Role:      role,
+		Options:   opts,
 	}
 }
 

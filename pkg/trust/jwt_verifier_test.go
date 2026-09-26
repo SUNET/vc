@@ -6,10 +6,10 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"encoding/base64"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/testsupport/jwktest"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 	"github.com/stretchr/testify/assert"
@@ -68,12 +68,7 @@ func signTestJWTWithJWK(t *testing.T, issuer, credentialType string) string {
 		"vct": credentialType,
 	})
 	pubKey := privateKey.PublicKey
-	token.Header["jwk"] = map[string]any{
-		"kty": "EC",
-		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(pubKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(pubKey.Y.Bytes()),
-	}
+	token.Header["jwk"] = jwktest.PublicKeyJWK(&pubKey)
 
 	signedJWT, err := token.SignedString(privateKey)
 	require.NoError(t, err)

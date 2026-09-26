@@ -11,28 +11,35 @@ import (
 // Common CSS styles for all admin pages
 const adminCSS = `
 <style>
+	:root {
+		--sunet-orange: #e9772a;
+		--sunet-orange-dark: #c65e1f;
+		--sunet-ink: #1f2937;
+	}
 	* { box-sizing: border-box; margin: 0; padding: 0; }
-	body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; }
+	body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; color: var(--sunet-ink); }
 	.container { max-width: 800px; margin: 0 auto; padding: 20px; }
 	.card { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 24px; margin-bottom: 20px; }
-	h1 { color: #333; margin-bottom: 20px; }
+	h1 { color: var(--sunet-ink); margin-bottom: 20px; }
 	h2 { color: #555; margin-bottom: 16px; font-size: 1.25rem; }
-	.nav { background: #2563eb; padding: 16px 20px; margin-bottom: 20px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
+	.nav { background: var(--sunet-ink); padding: 12px 20px; margin-bottom: 20px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
 	.nav a { color: white; text-decoration: none; margin-right: 20px; }
-	.nav a:hover { text-decoration: underline; }
+	.nav a:hover { color: var(--sunet-orange); text-decoration: none; }
+	.nav-brand { display: flex; align-items: center; gap: 12px; }
+	.nav-brand img { height: 28px; width: 28px; display: block; }
 	.nav-title { color: white; font-weight: bold; font-size: 1.1rem; }
 	.form-group { margin-bottom: 16px; }
 	label { display: block; margin-bottom: 6px; color: #555; font-weight: 500; }
-	input[type="text"], input[type="password"], input[type="number"], select { 
+	input[type="text"], input[type="password"], input[type="number"], select {
 		width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;
 	}
-	input:focus, select:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
-	.btn { 
+	input:focus, select:focus { outline: none; border-color: var(--sunet-orange); box-shadow: 0 0 0 3px rgba(233,119,42,0.15); }
+	.btn {
 		padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;
 		transition: background 0.2s;
 	}
-	.btn-primary { background: #2563eb; color: white; }
-	.btn-primary:hover { background: #1d4ed8; }
+	.btn-primary { background: var(--sunet-orange); color: white; }
+	.btn-primary:hover { background: var(--sunet-orange-dark); }
 	.btn-danger { background: #dc2626; color: white; }
 	.btn-danger:hover { background: #b91c1c; }
 	.btn-success { background: #16a34a; color: white; }
@@ -53,9 +60,17 @@ const adminCSS = `
 	.inline-form input, .inline-form select { width: auto; }
 	.login-container { display: flex; justify-content: center; align-items: center; min-height: 100vh; }
 	.login-card { width: 100%; max-width: 400px; }
-	.login-title { text-align: center; margin-bottom: 24px; }
+	.login-brand { display: flex; justify-content: center; margin-bottom: 16px; }
+	.login-brand img { height: 64px; width: 64px; display: block; }
+	.login-title { text-align: center; margin-bottom: 24px; color: var(--sunet-ink); }
 </style>
 `
+
+// headHTML renders the shared <head> content (favicon + CSS) for admin pages.
+const headHTML = `
+	<link rel="icon" type="image/png" href="/admin/static/favicon.png">
+	<link rel="shortcut icon" type="image/png" href="/admin/static/favicon.png">
+` + adminCSS
 
 // loginPageHTML generates the login page HTML
 func loginPageHTML(errorMsg string) string {
@@ -75,6 +90,7 @@ func loginPageHTML(errorMsg string) string {
 <body>
 	<div class="login-container">
 		<div class="card login-card">
+			<div class="login-brand"><img src="/admin/static/logo.png" alt="SUNET"></div>
 			<h1 class="login-title">Registry Admin</h1>
 			%s
 			<form method="POST" action="/admin/login">
@@ -91,7 +107,7 @@ func loginPageHTML(errorMsg string) string {
 		</div>
 	</div>
 </body>
-</html>`, adminCSS, errorHTML)
+</html>`, headHTML, errorHTML)
 }
 
 // dashboardPageHTML generates the dashboard page HTML
@@ -127,7 +143,7 @@ func dashboardPageHTML(username string) string {
 		</div>
 	</div>
 </body>
-</html>`, adminCSS, navBarHTML(username), html.EscapeString(username))
+</html>`, headHTML, navBarHTML(username), html.EscapeString(username))
 }
 
 // searchPageHTML generates the search page HTML
@@ -234,7 +250,7 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 		%s
 	</div>
 </body>
-</html>`, adminCSS, navBarHTML(""), alertHTML,
+</html>`, headHTML, navBarHTML(""), alertHTML,
 		html.EscapeString(searchIdentifier),
 		resultHTML)
 }
@@ -255,7 +271,8 @@ func navBarHTML(username string) string {
 	return fmt.Sprintf(`
 	<div class="container" style="padding-bottom: 0;">
 		<div class="nav">
-			<div>
+			<div class="nav-brand">
+				<img src="/admin/static/logo.png" alt="SUNET">
 				<span class="nav-title">Registry Admin</span>
 				<a href="/admin/dashboard" style="margin-left: 24px;">Dashboard</a>
 				<a href="/admin/search">Search</a>

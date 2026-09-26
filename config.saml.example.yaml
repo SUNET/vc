@@ -75,6 +75,11 @@ apigw:
         pda1:
           auth_provider: saml
           auth_claims: ["given_name", "family_name", "birthdate"]
+        # "preauth" restricts issuance to pre-authorized credential offers
+        # (e.g. via POST /api/v1/datastore/preauth_offer). Wallet-initiated
+        # PAR requests for this scope are rejected with invalid_scope.
+        study_certificate:
+          auth_provider: preauth
 
     # External API: credential data is fetched from a remote API at issuance time.
     # SAML identifies the user; the remote API provides the credential data.
@@ -96,6 +101,10 @@ apigw:
 
   # ── Auth providers ───────────────────────────────────────────────
   auth_providers:
+    # preauth (data_sources scopes with auth_provider: preauth).
+    # Set enable_pin: true to require a PIN on pre-authorized credential offers.
+    #preauth:
+    #  enable_pin: true
     saml:
       enable: true
       entity_id: "https://issuer.sunet.se/saml/sp"

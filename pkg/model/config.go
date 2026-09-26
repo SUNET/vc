@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,14 +34,6 @@ func BoolVal(b *bool, fallback bool) bool {
 		return *b
 	}
 	return fallback
-}
-
-// BoolPtr returns a pointer to the given bool value.
-// Useful for initializing *bool fields in struct literals.
-//
-//go:fix inline
-func BoolPtr(v bool) *bool {
-	return new(v)
 }
 
 // APIServer holds the HTTP API server configuration
@@ -341,6 +334,66 @@ type SAMLSP struct {
 
 	// MetadataCacheTTL in seconds (default: 3600) - how long to cache IdP metadata from MDQ
 	MetadataCacheTTL int `yaml:"metadata_cache_ttl"`
+
+	// Metadata carries the federation-facing description of this SP that goes
+	// into the published SAML metadata (mdui:UIInfo, md:Organization,
+	// md:ContactPerson). Required for SWAMID acceptance; harmless when empty.
+	Metadata *SAMLSPMetadata `yaml:"metadata,omitempty"`
+}
+
+// SAMLSPMetadata carries federation-facing SP descriptors.
+//
+// These descriptors are not populated by crewjam/saml by default; the samlsp
+// service serializes them into the published SP metadata XML.
+type SAMLSPMetadata struct {
+	// Organization becomes md:Organization on the EntityDescriptor.
+	Organization *SAMLOrganization `yaml:"organization,omitempty"`
+
+	// ContactPersons becomes one or more md:ContactPerson on the EntityDescriptor.
+	// SWAMID requires at least types "technical" and "administrative".
+	ContactPersons []SAMLContactPerson `yaml:"contact_persons,omitempty" validate:"omitempty,dive"`
+
+	// UIInfo becomes mdui:UIInfo inside md:Extensions on the SPSSODescriptor.
+	UIInfo *SAMLUIInfo `yaml:"ui_info,omitempty"`
+}
+
+// SAMLOrganization maps to md:Organization.
+//
+// A single language tag applies to all three localized fields; SWAMID Tech
+// 6.1.4 mandates at least "en".
+type SAMLOrganization struct {
+	Name        string `yaml:"name" validate:"required"`
+	DisplayName string `yaml:"display_name" validate:"required"`
+	URL         string `yaml:"url" validate:"required,url"`
+	Lang        string `yaml:"lang,omitempty" default:"en"`
+}
+
+// SAMLContactPerson maps to md:ContactPerson.
+type SAMLContactPerson struct {
+	Type      string `yaml:"type" validate:"required,oneof=technical support administrative billing other"`
+	Company   string `yaml:"company,omitempty"`
+	GivenName string `yaml:"given_name,omitempty"`
+	SurName   string `yaml:"sur_name,omitempty"`
+	Email     string `yaml:"email,omitempty" validate:"omitempty,email"`
+	Phone     string `yaml:"phone,omitempty"`
+}
+
+// SAMLUIInfo maps to mdui:UIInfo (namespace urn:oasis:names:tc:SAML:metadata:ui).
+// A single language tag applies to all localized child elements.
+type SAMLUIInfo struct {
+	DisplayName         string      `yaml:"display_name" validate:"required"`
+	Description         string      `yaml:"description" validate:"required"`
+	InformationURL      string      `yaml:"information_url" validate:"required,url"`
+	PrivacyStatementURL string      `yaml:"privacy_statement_url" validate:"required,url"`
+	Logo                *SAMLUILogo `yaml:"logo,omitempty"`
+	Lang                string      `yaml:"lang,omitempty" default:"en"`
+}
+
+// SAMLUILogo maps to mdui:Logo. Width and height are required by the spec.
+type SAMLUILogo struct {
+	URL    string `yaml:"url" validate:"required,url"`
+	Height int    `yaml:"height" validate:"required,gt=0"`
+	Width  int    `yaml:"width" validate:"required,gt=0"`
 }
 
 // StaticIDPConfig holds configuration for a single static IdP connection
@@ -451,8 +504,8 @@ type AttributeConfig struct {
 	Required bool `yaml:"required" default:"false"`
 
 	// Transform is an optional transformation to apply
-	// Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3"
-	Transform string `yaml:"transform,omitempty" validate:"omitempty,oneof=lowercase uppercase trim country_alpha2 country_alpha3"`
+	// Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3", "yyyymmdd_to_iso"
+	Transform string `yaml:"transform,omitempty" validate:"omitempty,oneof=lowercase uppercase trim country_alpha2 country_alpha3 yyyymmdd_to_iso"`
 
 	// Default is an optional default value if attribute is missing
 	Default string `yaml:"default,omitempty"`
@@ -1058,10 +1111,12 @@ func (c *OpenID4VPConfig) GetPresentationRequestsDir() string {
 
 // GenerateMetadata generates OAuth2 metadata from the OpenID4VP configuration.
 // Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
-func (c *OpenID4VPConfig) GenerateMetadata(ctx context.Context, issuerURL string) *oauth2.AuthorizationServerMetadata {
+func (c *OpenID4VPConfig) GenerateMetadata(ctx context.Context, issuerURL string, walletAttestationEnabled bool, allowedSignatureAlgorithms []string) *oauth2.AuthorizationServerMetadata {
 	return oauth2.GenerateMetadata(&oauth2.MetadataConfig{
-		IssuerURL:     issuerURL,
-		TokenEndpoint: c.TokenEndpoint,
+		IssuerURL:                  issuerURL,
+		TokenEndpoint:              c.TokenEndpoint,
+		WalletAttestationEnabled:   walletAttestationEnabled,
+		AllowedSignatureAlgorithms: allowedSignatureAlgorithms,
 	})
 }
 
@@ -1290,7 +1345,21 @@ type CredentialOfferWallets struct {
 
 // CredentialOffers holds credential offer configurations
 type CredentialOffers struct {
-	// IssuerURL is the issuer URL for credential offers
+	// IssuerURL is the issuer IDENTIFIER published as `credential_issuer`
+	// inside each credential offer. It MUST be byte-identical to
+	// apigw.public_url - a trailing slash on one of them is a mismatch,
+	// because both are published verbatim - and config load refuses
+	// anything else: issuer metadata is generated from
+	// public_url and declares that as its own `credential_issuer`, so a
+	// wallet resolving an offer to
+	// {credential_issuer}/.well-known/openid-credential-issuer would
+	// otherwise reach an origin serving no metadata, or metadata naming a
+	// different issuer.
+	//
+	// It is still not where offers are RETRIEVED from. A by-reference offer
+	// (`credential_offer_uri`) is built from apigw.public_url, because that
+	// field is the statement about where this service answers; this one is
+	// an identity claim that happens to hold the same string.
 	IssuerURL string `yaml:"issuer_url" validate:"required"`
 	// Wallets holds wallet redirect configurations
 	Wallets map[string]CredentialOfferWallets `yaml:"wallets" validate:"required" doc_key:"wallet name"`
@@ -1316,6 +1385,17 @@ type APIGWAuthProviders struct {
 	SAML SAMLSP `yaml:"saml,omitempty" validate:"omitempty"`
 	// OIDC configures the OIDC RP auth provider
 	OIDC OIDCRP `yaml:"oidc,omitempty" validate:"omitempty"`
+	// PreAuth configures the pre-authorized credential offer flow
+	// (data_sources scopes with auth_provider: preauth).
+	PreAuth PreAuth `yaml:"preauth,omitempty" validate:"omitempty"`
+}
+
+// PreAuth configures the pre-authorized credential offer flow.
+type PreAuth struct {
+	// EnablePIN, when true, generates a numeric transaction code (PIN) for
+	// each pre-authorized credential offer created via /api/v1/datastore/preauth_offer.
+	// The wallet must include the PIN in the token request. Default: false.
+	EnablePIN bool `yaml:"enable_pin" default:"false"`
 }
 
 // APIGW holds the configuration for the API Gateway service that handles credential issuance requests
@@ -1355,6 +1435,8 @@ type APIGW struct {
 	OpenIDFederation *openidfederation.Config `yaml:"federation,omitempty"`
 	// RateLimit configures per-endpoint rate limiting for the APIGW.
 	RateLimit *APIGWRateLimit `yaml:"rate_limit,omitempty"`
+	// Dashboard configures the /dashboard demo landing page.
+	Dashboard APIGWDashboard `yaml:"dashboard,omitempty"`
 }
 
 // APIGWRateLimit holds per-endpoint rate limit settings for the APIGW.
@@ -1365,6 +1447,46 @@ type APIGWRateLimit struct {
 	CredentialRequestsPerMinute int `yaml:"credential_requests_per_minute" default:"30"`
 	// DatastoreRequestsPerMinute is the maximum datastore endpoint requests per minute per IP. Default: 60
 	DatastoreRequestsPerMinute int `yaml:"datastore_requests_per_minute" default:"60"`
+	// CredentialOfferRequestsPerMinute is the maximum issuer-UI credential offer creation requests (GET /offers/:scope) per minute per IP. Default: 20
+	CredentialOfferRequestsPerMinute int `yaml:"credential_offer_requests_per_minute" default:"20"`
+}
+
+// APIGWDashboard configures the /dashboard demo landing page that lists every service in the deployment.
+//
+// Intended for dev/demo environments; opt in by setting enable: true. Off by
+// default so no shared-config deployment starts exposing its service inventory
+// to anonymous callers without an explicit action from the operator.
+type APIGWDashboard struct {
+	// Enable serves GET /dashboard. Default: false (opt-in).
+	Enable bool `yaml:"enable" default:"false"`
+	// Title overrides the page heading. Default: "SUNET Verifiable Credentials".
+	Title string `yaml:"title,omitempty" default:"SUNET Verifiable Credentials"`
+	// Services optionally augments or overrides the auto-discovered service list.
+	// Entries with a Name that matches an auto-discovered service replace it;
+	// other entries are appended.
+	Services []DashboardService `yaml:"services,omitempty" validate:"omitempty,dive"`
+}
+
+// DashboardService is a single entry on the /dashboard page.
+type DashboardService struct {
+	// Name is the display name and match key (e.g. "apigw", "issuer").
+	Name string `yaml:"name" validate:"required"`
+	// URL is the primary public URL for the service.
+	URL string `yaml:"url" validate:"required,httpurl"`
+	// Description is optional free-form text shown under the service name.
+	Description string `yaml:"description,omitempty"`
+	// Links is an ordered list of extra labelled URLs (health, metadata, UIs, ...).
+	Links []DashboardLink `yaml:"links,omitempty" validate:"omitempty,dive"`
+}
+
+// DashboardLink is a labelled URL shown under a service entry.
+type DashboardLink struct {
+	Label string `yaml:"label" validate:"required"`
+	URL   string `yaml:"url" validate:"required,httpurl"`
+	// Type controls how the dashboard follows this link. "json" opens the
+	// response in an in-page viewer (pretty-printed, no navigation).
+	// "page" (default) opens in a new tab.
+	Type string `yaml:"type,omitempty" default:"page" validate:"oneof=json page"`
 }
 
 // TokenStatusLists holds the configuration for Token Status List per draft-ietf-oauth-status-list
@@ -1435,6 +1557,99 @@ type Cfg struct {
 	Registry *Registry `yaml:"registry" validate:"omitempty"`
 }
 
+// SeedDashboardDefaults appends auto-discovered service entries (apigw,
+// issuer, verifier, registry) to cfg.APIGW.Dashboard.Services from the
+// currently populated sibling sections. Operator-supplied entries win:
+// a Name match in Services skips the corresponding default.
+//
+// Intended to be called by the config loader before it nils sibling
+// service sections, so the /dashboard handler has data to render even
+// when it can no longer read cfg.Issuer / cfg.Verifier / cfg.Registry
+// directly.
+func (cfg *Cfg) SeedDashboardDefaults() {
+	if cfg == nil || cfg.APIGW == nil {
+		return
+	}
+
+	have := map[string]bool{}
+	for _, s := range cfg.APIGW.Dashboard.Services {
+		have[s.Name] = true
+	}
+	add := func(s DashboardService) {
+		if s.URL == "" || have[s.Name] {
+			return
+		}
+		cfg.APIGW.Dashboard.Services = append(cfg.APIGW.Dashboard.Services, s)
+	}
+
+	if u := strings.TrimRight(cfg.APIGW.PublicURL, "/"); u != "" {
+		links := []DashboardLink{
+			{Label: "Health", URL: u + "/health", Type: "json"},
+			{Label: "Credential offers", URL: u + "/offers", Type: "page"},
+			{Label: "OpenID4VCI metadata", URL: u + "/.well-known/openid-credential-issuer", Type: "json"},
+			{Label: "OAuth2 metadata", URL: u + "/.well-known/oauth-authorization-server", Type: "json"},
+			{Label: "JWKS", URL: u + "/jwks", Type: "json"},
+		}
+		if cfg.APIGW.AdminUIEnable {
+			links = append(links, DashboardLink{Label: "Admin UI", URL: u + "/ui", Type: "page"})
+		}
+		if cfg.APIGW.OpenIDFederation != nil {
+			links = append(links, DashboardLink{Label: "OpenID federation", URL: u + "/.well-known/openid-federation", Type: "page"})
+		}
+		add(DashboardService{
+			Name:        "apigw",
+			URL:         u,
+			Description: "API gateway – credential issuance, OAuth2/OIDC, wallet-facing endpoints.",
+			Links:       links,
+		})
+	}
+
+	if cfg.Issuer != nil {
+		if u := strings.TrimRight(cfg.Issuer.IssuerURL, "/"); u != "" {
+			add(DashboardService{
+				Name:        "issuer",
+				URL:         u,
+				Description: "Credential issuer – signs verifiable credentials.",
+				Links: []DashboardLink{
+					{Label: "Health", URL: u + "/health", Type: "json"},
+					{Label: "JWKS", URL: u + "/jwks", Type: "json"},
+				},
+			})
+		}
+	}
+
+	if cfg.Verifier != nil {
+		if u := strings.TrimRight(cfg.Verifier.PublicURL, "/"); u != "" {
+			add(DashboardService{
+				Name:        "verifier",
+				URL:         u,
+				Description: "Credential verifier – OpenID4VP relying party.",
+				Links: []DashboardLink{
+					{Label: "Health", URL: u + "/health", Type: "json"},
+				},
+			})
+		}
+	}
+
+	if cfg.Registry != nil {
+		if u := strings.TrimRight(cfg.Registry.PublicURL, "/"); u != "" {
+			links := []DashboardLink{
+				{Label: "Health", URL: u + "/health", Type: "json"},
+				{Label: "Status lists", URL: u + "/statuslists", Type: "json"},
+			}
+			if BoolVal(cfg.Registry.AdminGUI.Enable, false) {
+				links = append(links, DashboardLink{Label: "Admin GUI", URL: u + "/admin", Type: "page"})
+			}
+			add(DashboardService{
+				Name:        "registry",
+				URL:         u,
+				Description: "Credential status registry - token status lists.",
+				Links:       links,
+			})
+		}
+	}
+}
+
 // LookupCredentialSources returns full data source information for a credential type
 // across all data sources where it is configured.
 // Returns an error if the credential type is not configured in any DataSource.
@@ -1483,31 +1698,15 @@ func (c *Cfg) GetFormatForScope(scope string) string {
 	return constructor.Format
 }
 
-// VCTUrlsForScopes resolves a list of scope keys to their resolved VCT URLs.
-// Scopes without a loaded VCTM are silently skipped.
-func (c *Cfg) VCTUrlsForScopes(scopes []string) []string {
-	urls := make([]string, 0, len(scopes))
-	for _, scope := range scopes {
-		constructor := c.GetCredentialMetadata(scope)
-		if constructor == nil {
-			continue
-		}
-		if v := constructor.GetVCTURL(); v != "" {
-			urls = append(urls, v)
-		}
-	}
-	return urls
-}
-
-// VCTIdentifiersForScopes resolves a list of scope keys to the vct value
-// actually embedded in issued credentials for that scope -- BuildCredentialWithSigner
-// (pkg/sdjwtvc/methods.go) sets body["vct"] = vctm.VCT, the VCTM's own
-// declared "vct" field, not the published type-metadata URL VCTUrlsForScopes
-// returns (that URL only appears in credential_configurations_supported's
-// issuer-metadata "vct", a different, cosmetic value from what's actually
-// embedded in a credential). DCQL queries built from VCTUrlsForScopes instead
-// of this never matched any real issued credential — confirmed live via a
-// fresh test issuance (lpidproto PLAN.md workstream 7 task 7.5, finding 16).
+// VCTIdentifiersForScopes returns the canonical vct identifier for each
+// scope -- VCTM.VCT -- which after ResolveVCTUrls is the single value shared
+// by the credential body (BuildCredentialWithSigner stamps body["vct"] =
+// vctm.VCT), the served VCTM document, the issuer metadata's
+// credential_configurations_supported[].vct, and DCQL vct_values. External
+// scopes keep the file's own value; local scopes keep the file's own value
+// too when the file declares one, and fall back to the /type-metadata/<scope>
+// hosting URL only when the local file left vct empty. Scopes without a
+// loaded VCTM are silently skipped.
 func (c *Cfg) VCTIdentifiersForScopes(scopes []string) []string {
 	ids := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
@@ -1603,6 +1802,22 @@ type CredentialMetadata struct {
 	// externally. The mso_mdoc analogue of vctm_url.
 	MDDLUrl string `yaml:"mddl_url" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath VCT Doctype,omitempty,url"`
 
+	// ReplaceVCT decides what happens to a local VCTM that ALREADY declares
+	// a vct: false (the default) publishes the file's own identifier, true
+	// overwrites it with the /type-metadata/{scope} URL apigw serves the
+	// document at.
+	//
+	// A file that declares NO vct always takes the hosting URL, whatever this
+	// says - there is nothing to preserve, and a Type Metadata document
+	// without a vct is not one (SD-JWT VC 6.3). So the served bytes always
+	// carry an identifier, and it is always the one the credential names.
+	//
+	// The default keeps a URN working: an identifier chosen outside this
+	// deployment survives publication. Set true when this deployment owns the
+	// type and the hosting URL is meant to be canonical. Only meaningful for
+	// a local VCTM (vctm_file_path): an external source is authoritative.
+	ReplaceVCT *bool `yaml:"replace_vct,omitempty" json:"-" default:"false" doc_example:"false"`
+
 	// Doctype is the mdoc doctype value to resolve via
 	// Common.CredentialRegistry, used only when neither MDDLFilePath nor
 	// MDDLUrl is set. Requires Common.CredentialRegistry.Enable, same as
@@ -1618,14 +1833,17 @@ type CredentialMetadata struct {
 	// Format is the credential format to issue
 	Format string `yaml:"format" json:"format" validate:"required" default:"dc+sd-jwt" doc_example:"\"dc+sd-jwt\""`
 	// DisclosurePolicy configures the embedded disclosure policy for this credential type.
-	// Per ARF 3.0 §6.6.2.8 and CIR 2024/2979 Annex III. Only applicable to QEAAs and PuB-EAAs (not PIDs).
-	// When omitted, the metadata publishes policy_type "none" (no restrictions).
+	// Per CIR 2024/2979 Annex III and ETSI TS 119 472-3 §4.2.5. Only applicable to QEAAs and PuB-EAAs (not PIDs).
+	// Optional and off by default: when omitted, no `disclosure_policy` field is emitted in the credential issuer metadata.
 	DisclosurePolicy *openid4vci.EmbeddedDisclosurePolicy `yaml:"disclosure_policy,omitempty" json:"-" validate:"omitempty"`
 	// Attributes maps claim names to their source fields and transformation rules for credential issuance
 	Attributes map[string]map[string][]*string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 
-	// VCTMRaw holds the raw JSON bytes of the VCTM document for serving
-	// via /type-metadata/:scope. Only populated for local VCTMs (VCTMFilePath).
+	// VCTMRaw holds the raw JSON bytes of the VCTM document, passed inline
+	// to the issuer at issuance time and served via /type-metadata/:scope
+	// for local VCTMs. Populated for every source (mirrors MDDLRaw): the
+	// issuer requires the bytes whatever the document came from, while
+	// publishing stays gated on IsLocalVCTM.
 	VCTMRaw []byte `yaml:"-" json:"-"`
 
 	// Integrity is the SRI hash of the VCTM or MDDL document (e.g. "sha256-...").
@@ -1707,6 +1925,14 @@ func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string, registr
 		return fmt.Errorf("failed to unmarshal VCTM for scope %s: %w", scope, err)
 	}
 
+	// A literal "null" is valid JSON and unmarshals into a zero VCTM without
+	// error, so the scope would load and advertise and then fail every
+	// issuance at parseVCTM - after a successful /token. Refuse it here.
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(rawBytes, &doc); err != nil || doc == nil {
+		return fmt.Errorf("VCTM for scope %s is not a JSON object", scope)
+	}
+
 	// Swap cached data under write lock so concurrent readers see a
 	// consistent snapshot.
 	c.mu.Lock()
@@ -1718,10 +1944,17 @@ func (c *CredentialMetadata) loadVCTM(ctx context.Context, scope string, registr
 	}
 	c.Attributes = vctm.Attributes()
 
-	// Only keep raw bytes for locally-served VCTMs.
-	if c.IsLocalVCTM() {
-		c.VCTMRaw = rawBytes
-	}
+	// Keep the raw bytes whatever the source. Serving /type-metadata/:scope
+	// is not the only thing that needs them: APIGW sends the VCTM inline in
+	// every MakeSDJWTRequest and the issuer validates it as required, so a
+	// scope configured by vct or vctm_url could not issue at all when these
+	// were dropped - it failed with "validation_error field:vctm" at
+	// POST /credential, after a successful /token. This mirrors MDDLRaw
+	// below, which is kept unconditionally for exactly the same reason.
+	// Publishing stays gated on IsLocalVCTM (see APIGW's TypeMetadata and
+	// ResolveVCTUrls): an externally-resolved document is used for issuance
+	// but still not re-published under this issuer's own URL.
+	c.VCTMRaw = rawBytes
 
 	return nil
 }
@@ -1784,11 +2017,11 @@ func (c *CredentialMetadata) loadMDDLSchema(ctx context.Context, scope string, r
 	c.Integrity = "sha256-" + base64.StdEncoding.EncodeToString(h[:])
 	c.Attributes = schema.Attributes()
 
-	// Unlike VCTMRaw (only needed to serve /type-metadata/:scope for local
-	// VCTMs), MDDLRaw is always required: APIGW sends it inline in every
-	// MakeMDocRequest and the issuer validates it as required, regardless of
-	// whether the schema came from a local file or mddl_url. Keep it
-	// unconditionally so mddl_url-configured scopes can actually issue.
+	// As with VCTMRaw above, MDDLRaw is required whatever the source: APIGW
+	// sends it inline in every MakeMDocRequest and the issuer validates it
+	// as required, regardless of whether the schema came from a local file
+	// or mddl_url. Keep it unconditionally so mddl_url-configured scopes can
+	// actually issue.
 	c.MDDLRaw = rawBytes
 
 	return nil
@@ -1814,6 +2047,32 @@ func (c *CredentialMetadata) GetVCTMRaw() []byte {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.VCTMRaw
+}
+
+// vctmRawWithVCT returns raw with "vct" set to vct, and reports whether it had
+// to change anything. Bytes that already declare a non-empty vct are returned
+// untouched, as are bytes that do not parse - a caller must never lose the
+// document over a rewrite it cannot make.
+func vctmRawWithVCT(raw []byte, vct string) ([]byte, bool) {
+	if raw == nil || vct == "" {
+		return raw, false
+	}
+	var doc map[string]json.RawMessage
+	// A JSON "null" unmarshals without error and leaves doc nil, and assigning
+	// into a nil map panics - on every issuance, since this runs there too.
+	if err := json.Unmarshal(raw, &doc); err != nil || doc == nil {
+		return raw, false
+	}
+	vctJSON, err := json.Marshal(vct)
+	if err != nil {
+		return raw, false
+	}
+	doc["vct"] = vctJSON
+	updated, err := json.Marshal(doc)
+	if err != nil {
+		return raw, false
+	}
+	return updated, true
 }
 
 // GetAttributes returns the derived attributes under a read lock.
@@ -1857,12 +2116,97 @@ func (c *CredentialMetadata) IsLocalMDDL() bool {
 	return c.MDDLFilePath != ""
 }
 
-// ResolveVCTUrls computes the URL-based VCT for each credential metadata entry
-// and stores it in VCTURL.  VCTM.VCT, VCTMRaw, and Integrity are left
-// unchanged — the served VCTM document preserves the original VCT
-// identifier from the VCTM file (e.g. a URN).
-// For local VCTMs the URL is built from apigwPublicURL + /type-metadata/{scope}.
-// For external VCTMs the VCTMUrl is used.
+// vctIdentifier returns the credential's canonical vct - the value the body
+// carries, the issuer metadata advertises, and a wallet tags it by.
+//
+// VCTURL is a fallback, not a second identifier: ResolveVCTUrls back-fills
+// VCTM.VCT from it, so the two agree after resolution.
+func (c *CredentialMetadata) vctIdentifier() string {
+	if vctm := c.GetVCTM(); vctm != nil && vctm.VCT != "" {
+		return vctm.VCT
+	}
+	return c.GetVCTURL()
+}
+
+// doctype resolves the mdoc doctype the ISSUED credential actually carries.
+//
+// The loaded MDDL wins: loadMDDLSchema fills it in all three cases, including
+// the registry lookup keyed by the configured doctype, and IssuerMetadata
+// always advertises mddl.DocType - so the configured value is a source
+// selector, not necessarily the doctype the issued credential carries.
+//
+// It is the fallback for a scope whose MDDL never loaded. There is deliberately
+// no fall back to the VCTM's vct: an mdoc carries a doctype and never a vct,
+// and that vct may be a back-filled hosting URL, so it would ask for something
+// no issued mdoc has. Empty makes DCQLMetaQuery report the scope instead.
+func (c *CredentialMetadata) doctype() string {
+	if mddl := c.GetMDDL(); mddl != nil && mddl.DocType != "" {
+		return mddl.DocType
+	}
+	return c.Doctype
+}
+
+// DCQLMetaQuery returns the DCQL meta constraint for this credential type, and
+// whether one could be expressed at all.
+//
+// Chosen by FORMAT (OpenID4VP 1.0 6.4.1), not by which metadata document is
+// loaded: keying off "has an MDDL" routes W3C credentials into the SD-JWT
+// branch, and keying off "has a VCTM" mislabels an mdoc that carries one.
+//
+//   - mso_mdoc: doctype_value, see doctype.
+//   - dc+sd-jwt, the legacy vc+sd-jwt spelling, and an empty format (Format
+//     defaults to dc+sd-jwt): vct_values, see vctIdentifier.
+//   - anything else: ok is false.
+//
+// ok=false means no constraint can be built - a nil receiver, a W3C format
+// with no configured type list, mso_mdoc_zk (below), or a missing identifier -
+// and callers must refuse the scope rather than send an empty meta, which DCQL
+// reads as matching everything.
+func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
+	if c == nil {
+		return openid4vp.MetaQuery{}, false
+	}
+	switch c.Format {
+	// Not mso_mdoc_zk: validateMsoMdocZkQuery also wants a non-empty
+	// meta.zk_system_type, and those specs live on VerificationPresetScope.
+	// A ZK request comes the other way round - a plain mso_mdoc scope with a
+	// preset overriding Format and supplying ZKSystemType - so that path never
+	// asks for the zk format here.
+	case openid4vp.FormatMsoMdoc:
+		doctype := c.doctype()
+		return openid4vp.MetaQuery{DoctypeValue: doctype}, doctype != ""
+	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
+		// vc+sd-jwt is the legacy spelling this repo still issues and treats
+		// as SD-JWT elsewhere; rejecting it here would take a working
+		// deployment's scope away. "" honours Format's own default.
+		vct := c.vctIdentifier()
+		if vct == "" {
+			return openid4vp.MetaQuery{}, false
+		}
+		return openid4vp.MetaQuery{VCTValues: []string{vct}}, true
+	default:
+		return openid4vp.MetaQuery{}, false
+	}
+}
+
+// ResolveVCTUrls fills in VCTURL for every VCTM-backed scope (scopes
+// without a loaded VCTM, such as mso_mdoc doctypes, are skipped) and
+// enforces the vct identifier contract:
+//
+//   - Local VCTM (vctm_file_path): apigw hosts the type metadata under
+//     apigwPublicURL + /type-metadata/{scope} and sets VCTURL to that
+//     hosting URL. If the file already carried a vct (URN or any other
+//     Collision-Resistant Name per SD-JWT VC §3.2.2.1), it is preserved
+//     verbatim in both VCTM.VCT and the served VCTMRaw. Only when the
+//     file has no vct - or replace_vct is set - does ResolveVCTUrls
+//     write the hosting URL into both VCTM.VCT and the served VCTMRaw,
+//     so the credential body, served VCTM, and DCQL vct_values always
+//     agree on a single value that the served document declares.
+//   - External VCTM (vctm_url or vct via registry): the source is
+//     authoritative. VCTM.VCT and VCTMRaw are left untouched. VCTURL is
+//     set to the source URL (vctm_url or the resolved vct), but that
+//     only drives helpers -- it never overwrites the identifier the
+//     wallet stores.
 func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 	if cfg.Common == nil {
 		return nil
@@ -1889,21 +2233,20 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 		constructor.mu.Lock()
 		constructor.VCTURL = vctURL
 
-		// Auto-populate VCTM.VCT from the resolved URL if the source file
-		// did not include a vct field. This ensures the served VCTM document
-		// and issued credentials reference the canonical dereferenceable URL.
-		if constructor.VCTM.VCT == "" {
+		// One identifier, always present in the served document. A file that
+		// declares no vct takes the hosting URL - a Type Metadata document
+		// without a vct is not one, so there is no "serve it bare" case. A
+		// file that declares one keeps it unless replace_vct says otherwise,
+		// which is what lets a URN survive publication.
+		if constructor.IsLocalVCTM() && (constructor.VCTM.VCT == "" || BoolVal(constructor.ReplaceVCT, false)) {
 			constructor.VCTM.VCT = vctURL
-		}
-
-		// Re-serialize VCTMRaw so the served document includes the vct field.
-		if constructor.IsLocalVCTM() && constructor.VCTMRaw != nil {
-			var doc map[string]json.RawMessage
-			if err := json.Unmarshal(constructor.VCTMRaw, &doc); err == nil {
-				vctJSON, _ := json.Marshal(constructor.VCTM.VCT)
-				doc["vct"] = vctJSON
-				if updated, err := json.Marshal(doc); err == nil {
-					constructor.VCTMRaw = updated
+			if updated, changed := vctmRawWithVCT(constructor.VCTMRaw, vctURL); changed {
+				constructor.VCTMRaw = updated
+				// Rebuild Integrity to match the rewritten bytes so
+				// vct#integrity in issued credentials still verifies
+				// against the served /type-metadata document.
+				if sri, sriErr := constructor.VCTM.SRIIntegrity(updated); sriErr == nil {
+					constructor.Integrity = sri
 				}
 			}
 		}
@@ -1912,11 +2255,23 @@ func (cfg *Cfg) ResolveVCTUrls(apigwPublicURL string) error {
 
 	// Validate that every constructor got a non-empty VCTURL.
 	for scope, constructor := range cfg.Common.CredentialMetadata {
-		if constructor == nil || constructor.GetVCTM() == nil {
+		// A present key holding nil is a malformed config entry, not an
+		// absent scope, and every consumer would have to guard it separately
+		// - Client.New dereferences it during verifier startup. Refuse it
+		// here so one check covers them all.
+		if constructor == nil {
+			return fmt.Errorf("credential_metadata entry for scope %q is empty", scope)
+		}
+		vctm := constructor.GetVCTM()
+		if vctm == nil {
 			continue
 		}
 		if constructor.GetVCTURL() == "" {
 			return fmt.Errorf("VCTURL is empty for scope %q after resolution (check vctm_file_path, vctm_url, or vct)", scope)
+		}
+		// External scopes must carry it themselves.
+		if !constructor.IsLocalVCTM() && vctm.VCT == "" {
+			return fmt.Errorf("external VCTM for scope %q has empty vct (check vctm_url source or the resolved vct); BuildCredentialWithSigner and DCQL vct_values require it", scope)
 		}
 	}
 
@@ -2123,9 +2478,6 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 			}
 
 			credConfig.DisclosurePolicy = constructor.DisclosurePolicy
-			if credConfig.DisclosurePolicy == nil {
-				credConfig.DisclosurePolicy = &openid4vci.EmbeddedDisclosurePolicy{PolicyType: "none"}
-			}
 			cfg.applyCommonCredentialConfig(&credConfig)
 			credentialConfigs[scope] = credConfig
 			continue
@@ -2136,8 +2488,15 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 			return nil, fmt.Errorf("credential constructor for scope %q has no VCTM metadata loaded (check vctm_file_path)", scope)
 		}
 
-		// Set format-specific parameters per OID4VCI 1.0 Appendix A
-		resolvedVCT := constructor.GetVCTURL()
+		// Advertise the VCTM's own vct (URN or foreign URL) so it matches the
+		// credential body's vct claim (which BuildCredentialWithSigner sets
+		// from vctm.VCT).
+		//
+		// vctIdentifier, not an inline VCTURL fallback: the two must agree.
+		// The old fallback advertised the hosting URL regardless, which is
+		// wrong for a file declaring its own vct - the credential body carries
+		// vctm.VCT, so the metadata has to name the same value.
+		resolvedVCT := constructor.vctIdentifier()
 		switch constructor.Format {
 		case "dc+sd-jwt":
 			// Appendix A.3: only vct is format-specific for dc+sd-jwt
@@ -2246,9 +2605,6 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		}
 
 		credConfig.DisclosurePolicy = constructor.DisclosurePolicy
-		if credConfig.DisclosurePolicy == nil {
-			credConfig.DisclosurePolicy = &openid4vci.EmbeddedDisclosurePolicy{PolicyType: "none"}
-		}
 		cfg.applyCommonCredentialConfig(&credConfig)
 		credentialConfigs[scope] = credConfig
 	}
@@ -2309,11 +2665,13 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 
 // GenerateMetadata generates OAuth2 metadata from configuration.
 // Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
-func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string) *oauth2.AuthorizationServerMetadata {
+func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string, walletAttestationEnabled bool, allowedSignatureAlgorithms []string) *oauth2.AuthorizationServerMetadata {
 	metadata := oauth2.GenerateMetadata(&oauth2.MetadataConfig{
-		IssuerURL:     issuerURL,
-		TokenEndpoint: cfg.TokenEndpoint,
-		GrantTypes:    cfg.GrantTypes,
+		IssuerURL:                  issuerURL,
+		TokenEndpoint:              cfg.TokenEndpoint,
+		GrantTypes:                 cfg.GrantTypes,
+		WalletAttestationEnabled:   walletAttestationEnabled,
+		AllowedSignatureAlgorithms: allowedSignatureAlgorithms,
 	})
 
 	return metadata

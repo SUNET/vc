@@ -15,7 +15,6 @@ import (
 	"github.com/SUNET/vc/pkg/trust"
 
 	"github.com/sirosfoundation/go-cryptoutil"
-	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 )
 
 // Verifier verifies mDoc documents according to ISO/IEC 18013-5:2021.
@@ -363,13 +362,11 @@ func (v *Verifier) verifyCertificateChainWithContext(ctx context.Context, chain 
 
 	// Delegate trust decision to TrustEvaluator (go-trust)
 	decision, err := v.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
-		EvaluationRequest: trustapi.EvaluationRequest{
-			SubjectID: issuerID,
-			KeyType:   trust.KeyTypeX5C,
-			Key:       chain,
-			Role:      trust.RoleCredentialIssuer,
-			DocType:   docType,
-		},
+		SubjectID: issuerID,
+		KeyType:   trust.KeyTypeX5C,
+		Key:       chain,
+		Role:      trust.RoleCredentialIssuer,
+		DocType:   docType,
 	})
 	if err != nil {
 		return fmt.Errorf("trust evaluation failed: %w", err)
