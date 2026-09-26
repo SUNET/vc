@@ -624,12 +624,14 @@ func (m *RegistryManager) ListRegistries() []RegistryInfo {
 //
 //	"x509_san_dns:example.com" -> "https://example.com"
 //	"x509_san_uri:https://example.com" -> "https://example.com"
+//	"decentralized_identifier:did:web:example.com" -> "did:web:example.com"
 //	"https://example.com" -> "https://example.com" (unchanged)
 func NormalizeSubjectID(id string) string {
-	for _, prefix := range []string{"x509_san_dns:", "x509_san_uri:"} {
+	for _, prefix := range []string{"x509_san_dns:", "x509_san_uri:", "decentralized_identifier:"} {
 		if strings.HasPrefix(id, prefix) {
 			bare := strings.TrimPrefix(id, prefix)
-			// x509_san_uri values are already URIs; x509_san_dns values are bare hostnames
+			// x509_san_uri values are already URIs and decentralized_identifier
+			// values are already DIDs; x509_san_dns values are bare hostnames.
 			if prefix == "x509_san_dns:" {
 				return "https://" + bare
 			}

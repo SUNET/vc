@@ -93,6 +93,18 @@ func TestSelect(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name:     "preauth always available",
+			selector: NewSelector(false, false),
+			scope:    "micro_credential",
+			ds: &model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"micro_credential": {AuthProvider: model.AuthProviderPreAuth},
+				}},
+			},
+			wantAuth:   model.AuthProviderPreAuth,
+			wantSource: model.DataSourceDatastore,
+		},
 	}
 
 	for _, tt := range tests {

@@ -28,6 +28,8 @@ func NewSelector(samlEnabled, oidcEnabled bool) *Selector {
 //   - openid4vp is always available (built-in)
 //   - saml requires the SAML SP service to be initialised
 //   - oidc requires the OIDC RP service to be initialised
+//   - preauth is always "available" so scope resolution succeeds; the OAuth
+//     endpoints then reject wallet-initiated flows for such scopes.
 func (s *Selector) Select(scope string, ds *model.DataSources) (string, model.CredentialSource, error) {
 	sources, err := ds.LookupCredentialSources(scope)
 	if err != nil {
@@ -51,6 +53,8 @@ func (s *Selector) isEnabled(provider string) bool {
 		return s.samlEnabled
 	case model.AuthProviderOIDC:
 		return s.oidcEnabled
+	case model.AuthProviderPreAuth:
+		return true
 	default:
 		return false
 	}

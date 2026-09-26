@@ -473,7 +473,7 @@ func TestCreateRequestObject_EncryptedModeCarriesAKey(t *testing.T) {
 	// encrypts to a key we cannot decrypt with.
 	kid, ok := md.JWKS.Keys[0].KeyID()
 	require.True(t, ok)
-	_, found := client.openid4vp.EphemeralKeyCache.Get(kid)
+	_, found := client.cacheService.EphemeralEncryptionKey.Get(ctx, kid)
 	assert.True(t, found, "the ephemeral private key must be retrievable by the advertised kid")
 }
 
@@ -553,7 +553,7 @@ func TestCreateRequestObject_ReusesTheSessionKey(t *testing.T) {
 	// And the private half must still match what is advertised.
 	kid, ok := after.KeyID()
 	require.True(t, ok)
-	priv, found := client.openid4vp.EphemeralKeyCache.Get(kid)
+	priv, found := client.cacheService.EphemeralEncryptionKey.Get(ctx, kid)
 	require.True(t, found)
 	privPub, err := priv.PublicKey()
 	require.NoError(t, err)

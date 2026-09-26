@@ -1,6 +1,12 @@
 package openid4vci
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
 func TestTokenRequestValidationCredentialOfferRequest(t *testing.T) {
 	tts := []struct {
@@ -41,4 +47,40 @@ func TestTokenRequestValidationCredentialOfferRequest(t *testing.T) {
 			//}
 		})
 	}
+}
+
+func TestTokenRequest_TXCodeValidation(t *testing.T) {
+	v, err := NewValidator()
+	require.NoError(t, err)
+
+	base := TokenRequest{GrantType: "urn:ietf:params:oauth:grant-type:pre-authorized_code", PreAuthorizedCode: "abc"}
+
+	t.Run("empty tx_code is valid", func(t *testing.T) {
+		req := base
+		assert.NoError(t, v.Struct(&req))
+	})
+
+	t.Run("short numeric tx_code is valid", func(t *testing.T) {
+		req := base
+		req.TXCode = "123456"
+		assert.NoError(t, v.Struct(&req))
+	})
+
+	t.Run("tx_code at max length is valid", func(t *testing.T) {
+		req := base
+		req.TXCode = strings.Repeat("9", 64)
+		assert.NoError(t, v.Struct(&req))
+	})
+
+	t.Run("tx_code exceeding max length is rejected", func(t *testing.T) {
+		req := base
+		req.TXCode = strings.Repeat("9", 65)
+		assert.Error(t, v.Struct(&req))
+	})
+
+	t.Run("non-ascii tx_code is rejected", func(t *testing.T) {
+		req := base
+		req.TXCode = "12345\u00e9" // 'é'
+		assert.Error(t, v.Struct(&req))
+	})
 }

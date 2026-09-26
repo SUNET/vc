@@ -6,6 +6,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/httphelpers"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/gin-contrib/sessions"
@@ -156,6 +157,16 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 		// Determine if running without authentication (anonymous mode).
 		authEnabled := s.cfg.APIGW != nil && (s.cfg.APIGW.APIServer.APIAuth.OIDC.Enable || s.cfg.APIGW.APIServer.APIAuth.JWKS.Enable)
 
+		// Scopes eligible for the datastore pre-authorized offer UI action.
+		preauthScopes := []string{}
+		if s.cfg.APIGW != nil {
+			for scope, cred := range s.cfg.APIGW.DataSources.Datastore.Scopes {
+				if cred.AuthProvider == model.AuthProviderPreAuth {
+					preauthScopes = append(preauthScopes, scope)
+				}
+			}
+		}
+
 		return gin.H{
 			"authenticated":             true,
 			"subject":                   subject,
@@ -165,6 +176,7 @@ func (s *Service) endpointAdminStatus(ctx context.Context, c *gin.Context) (any,
 			"has_identity_mapping":      hasIdentityMappingScope(pairs),
 			"csrf_token":                session.Get("csrf_token"),
 			"unrestricted":              !authEnabled,
+			"preauth_scopes":            preauthScopes,
 		}, nil
 	}
 	return gin.H{"authenticated": false}, nil

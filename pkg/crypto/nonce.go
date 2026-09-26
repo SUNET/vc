@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"math/big"
+	"strings"
 )
 
 // GenerateSecureToken generates a cryptographically secure random token encoded as a base64 URL-safe string.
@@ -51,4 +53,25 @@ func GenerateSecureToken(byteSize int, stringLength int) (string, error) {
 	}
 
 	return encoded, nil
+}
+
+// GenerateNumericCode returns a cryptographically random decimal string
+// whose length equals the digits argument, with leading zeros preserved.
+// Intended for short human-entered codes such as OpenID4VCI transaction
+// codes (PINs).
+func GenerateNumericCode(digits int) (string, error) {
+	if digits <= 0 || digits > 32 {
+		return "", fmt.Errorf("digits %d must be between 1 and 32", digits)
+	}
+	var sb strings.Builder
+	sb.Grow(digits)
+	ten := big.NewInt(10)
+	for i := 0; i < digits; i++ {
+		n, err := rand.Int(rand.Reader, ten)
+		if err != nil {
+			return "", fmt.Errorf("could not generate numeric code: %w", err)
+		}
+		sb.WriteByte(byte('0') + byte(n.Int64()))
+	}
+	return sb.String(), nil
 }

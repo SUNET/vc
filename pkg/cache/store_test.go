@@ -153,6 +153,39 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		assert.Error(t, err)
 	})
 
+	t.Run("ConsumeTXCodeAttempt", func(t *testing.T) {
+		doc := &AuthorizationContext{
+			SessionID: "contract-txcode-session",
+			Code:      "contract-txcode-code",
+			TXCode:    "123456",
+		}
+		require.NoError(t, store.Save(ctx, doc))
+
+		for i := range MaxTXCodeAttempts {
+			result, err := store.ConsumeTXCodeAttempt(ctx, "contract-txcode-code")
+			require.NoError(t, err)
+			assert.Equal(t, i+1, result.TXCodeAttempts)
+			assert.False(t, result.Forfeited)
+		}
+
+		// One over the cap: forfeits and reports lockout
+		_, err := store.ConsumeTXCodeAttempt(ctx, "contract-txcode-code")
+		assert.ErrorIs(t, err, ErrTXCodeAttemptsExceeded)
+
+		locked, err := store.GetByAuthorizationCode(ctx, "contract-txcode-code")
+		require.NoError(t, err)
+		assert.True(t, locked.Forfeited)
+
+		// After forfeiture, further calls surface the forfeited state, not lockout.
+		_, err = store.ConsumeTXCodeAttempt(ctx, "contract-txcode-code")
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, ErrTXCodeAttemptsExceeded)
+
+		// Unknown code
+		_, err = store.ConsumeTXCodeAttempt(ctx, "contract-txcode-missing")
+		assert.ErrorIs(t, err, ErrNoDocuments)
+	})
+
 	t.Run("Delete", func(t *testing.T) {
 		require.NoError(t, store.Delete(ctx, "contract-session-1"))
 
