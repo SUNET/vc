@@ -95,7 +95,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	}
 
 	// Get ephemeral private key from cache
-	privateEphemeralJWK, found := c.openid4vp.EphemeralKeyCache.Get(kid)
+	privateEphemeralJWK, found := c.cacheService.EphemeralEncryptionKey.Get(ctx, kid)
 	if !found {
 		c.log.Debug("No ephemeral key found in cache", "kid", kid)
 		return nil, errors.New("ephemeral key not found in cache")
@@ -437,7 +437,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// rather than a wrong one.
 			var readerPubKeyThumbprint []byte
 			if authCtx.EphemeralEncryptionKeyID != "" {
-				if privKey, found := c.openid4vp.EphemeralKeyCache.Get(authCtx.EphemeralEncryptionKeyID); found {
+				if privKey, found := c.cacheService.EphemeralEncryptionKey.Get(ctx, authCtx.EphemeralEncryptionKeyID); found {
 					pubKeyIface, err := privKey.PublicKey()
 					if err != nil {
 						c.log.Error(err, "failed to derive public key for ZK session transcript", "scope", scope)

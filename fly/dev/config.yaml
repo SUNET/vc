@@ -165,6 +165,10 @@ apigw:
         - "(vc (service apigw)(method *)(path /api/v1/*)(subject admin@sunet.se)(authentic_source *)(scope *))"
   public_url: "https://sunet-vc-apigw.fly.dev"
   registry_public_url: "https://sunet-vc-registry.fly.dev"
+  trust:
+    pdp_url: "http://sunet-vc-go-trust.internal:6001"
+    wallet_attestation:
+      enabled: true
   issuer_client:
     addr: sunet-vc-issuer.internal:8090
   registry_client:
@@ -260,6 +264,8 @@ apigw:
           as_array: true
         "urn:oasis:names:tc:SAML:attribute:subject-id":
           claim: "subject_id"
+    preauth:
+      enable_pin: true
   data_sources:
     datastore:
       import:
@@ -285,6 +291,8 @@ apigw:
         mdl:
           auth_provider: oidc
           auth_claims: ["given_name", "family_name", "birthdate"]
+        diploma:
+          auth_provider: preauth
     assertion:
       scopes:
         eduid:
@@ -309,6 +317,15 @@ apigw:
             - "ehic"
             - "mdl"
             - "eduid"
+        # Interop testbed (webuild-cs01, University of the Aegean). Static
+        # allowlist entry lets the headless testbed wallet pass PAR client
+        # validation without going through the wallet-attestation PDP.
+        "wallet-client":
+          type: "public"
+          redirect_uri: "https://dev-i4mlab.aegean.gr/wallet-client/oauth/callback"
+          scopes:
+            - "pid"
+            - "ehic"
     credential_offers:
       issuer_url: "https://sunet-vc-apigw.fly.dev"
       wallets:

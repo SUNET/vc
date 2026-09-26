@@ -49,6 +49,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/testsupport/walletflow"
 )
 
 // Stack service addresses (Docker bridge IPs on vc-dev-net)
@@ -168,7 +169,7 @@ func TestCrossDevice_FullFlow(t *testing.T) {
 
 	// Build authorize URL with PKCE
 	codeVerifier := uuid.New().String() + uuid.New().String()
-	codeChallenge := computeS256(codeVerifier)
+	codeChallenge := walletflow.ComputeS256(codeVerifier)
 	vpState := uuid.New().String()
 
 	// Use public URL for Chrome — the browser subprocess may not have access
@@ -281,7 +282,7 @@ func TestCrossDevice_QRCodeRenders(t *testing.T) {
 	browserCtx, browserCancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(t.Logf))
 	defer browserCancel()
 
-	codeChallenge := computeS256(uuid.New().String())
+	codeChallenge := walletflow.ComputeS256(uuid.New().String())
 	// Use public URL for Chrome navigation
 	authorizeURL := fmt.Sprintf("%s/authorize?response_type=code&client_id=%s&redirect_uri=%s&scope=%s&state=%s&code_challenge=%s&code_challenge_method=S256",
 		verifierPublicURL, vpClient.ClientID, url.QueryEscape(oauthRedirect), url.QueryEscape("openid pid"), uuid.New().String(), codeChallenge)
@@ -325,7 +326,7 @@ func TestCrossDevice_SSENotification(t *testing.T) {
 	defer browserCancel()
 
 	codeVerifier := uuid.New().String() + uuid.New().String()
-	codeChallenge := computeS256(codeVerifier)
+	codeChallenge := walletflow.ComputeS256(codeVerifier)
 	vpState := uuid.New().String()
 
 	// Use public URL for Chrome navigation
@@ -358,7 +359,7 @@ func TestCrossDevice_SSENotification(t *testing.T) {
 
 	// Build synthetic VP token and POST it
 	signingKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	syntheticSDJWT := createSyntheticSDJWT(t, signingKey)
+	syntheticSDJWT := walletflow.SyntheticSDJWT(t, signingKey)
 	kbJWT := createKeyBindingJWT(t, nonce, rewriteInternalToPublic(responseURI), syntheticSDJWT, signingKey)
 	vpToken := syntheticSDJWT + kbJWT
 
@@ -409,7 +410,7 @@ func issueCredentialVCI(t *testing.T) (credentialFile string, signingKey *ecdsa.
 	// PAR
 	signingKey, _ = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	codeVerifier := uuid.New().String() + uuid.New().String()
-	codeChallenge := computeS256(codeVerifier)
+	codeChallenge := walletflow.ComputeS256(codeVerifier)
 
 	parData := url.Values{
 		"response_type":         {"code"},
@@ -802,7 +803,7 @@ func doTokenRequest(t *testing.T, tokenEndpoint, code, codeVerifier string, sign
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	dpopProof := createDPoPProof(t, http.MethodPost, rewriteInternalToPublic(tokenEndpoint), "", signingKey)
+	dpopProof := walletflow.DPoPProof(t, http.MethodPost, rewriteInternalToPublic(tokenEndpoint), "", signingKey)
 	req.Header.Set("DPoP", dpopProof)
 
 	resp, err := http.DefaultClient.Do(req)
@@ -818,7 +819,7 @@ func doTokenRequest(t *testing.T, tokenEndpoint, code, codeVerifier string, sign
 
 func doCredentialRequest(t *testing.T, credEndpoint, accessToken, cNonce, credConfigID string, signingKey *ecdsa.PrivateKey, audience string) openid4vci.CredentialResponse {
 	t.Helper()
-	proofJWT := createProofJWT(t, audience, cNonce, signingKey)
+	proofJWT := walletflow.ProofJWT(t, audience, cNonce, oauthClientID, signingKey)
 	reqBody := map[string]any{
 		"credential_configuration_id": credConfigID,
 		"proofs": map[string]any{
@@ -831,7 +832,7 @@ func doCredentialRequest(t *testing.T, credEndpoint, accessToken, cNonce, credCo
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 
-	dpopProof := createDPoPProof(t, http.MethodPost, rewriteInternalToPublic(credEndpoint), accessToken, signingKey)
+	dpopProof := walletflow.DPoPProof(t, http.MethodPost, rewriteInternalToPublic(credEndpoint), accessToken, signingKey)
 	req.Header.Set("DPoP", dpopProof)
 	req.Header.Set("Authorization", "DPoP "+accessToken)
 
@@ -884,63 +885,6 @@ func fetchRequestObject(t *testing.T, sessionID string) (nonce, state, responseU
 // Crypto Helpers
 // ═══════════════════════════════════════════════════════════════════════════════
 
-func computeS256(verifier string) string {
-	h := sha256.Sum256([]byte(verifier))
-	return base64.RawURLEncoding.EncodeToString(h[:])
-}
-
-func publicKeyJWK(t *testing.T, key *ecdsa.PrivateKey) map[string]any {
-	t.Helper()
-	return map[string]any{
-		"kty": "EC",
-		"crv": key.Curve.Params().Name,
-		"x":   base64.RawURLEncoding.EncodeToString(key.PublicKey.X.Bytes()),
-		"y":   base64.RawURLEncoding.EncodeToString(key.PublicKey.Y.Bytes()),
-	}
-}
-
-func createDPoPProof(t *testing.T, method, uri, accessToken string, key *ecdsa.PrivateKey) string {
-	t.Helper()
-	body := jwtv5.MapClaims{
-		"jti": uuid.New().String(),
-		"htm": method,
-		"htu": uri,
-		"iat": time.Now().Unix(),
-	}
-	if accessToken != "" {
-		h := sha256.Sum256([]byte(accessToken))
-		body["ath"] = base64.RawURLEncoding.EncodeToString(h[:])
-	}
-	signingMethod, alg := jose.GetSigningMethodFromKey(key)
-	token := jwtv5.NewWithClaims(signingMethod, body)
-	token.Header["typ"] = "dpop+jwt"
-	token.Header["alg"] = alg
-	token.Header["jwk"] = publicKeyJWK(t, key)
-	signed, err := token.SignedString(key)
-	require.NoError(t, err)
-	return signed
-}
-
-func createProofJWT(t *testing.T, audience, cNonce string, key *ecdsa.PrivateKey) string {
-	t.Helper()
-	body := jwtv5.MapClaims{
-		"aud": audience,
-		"iat": time.Now().Unix(),
-		"iss": oauthClientID,
-	}
-	if cNonce != "" {
-		body["nonce"] = cNonce
-	}
-	signingMethod, alg := jose.GetSigningMethodFromKey(key)
-	token := jwtv5.NewWithClaims(signingMethod, body)
-	token.Header["typ"] = "openid4vci-proof+jwt"
-	token.Header["alg"] = alg
-	token.Header["jwk"] = publicKeyJWK(t, key)
-	signed, err := token.SignedString(key)
-	require.NoError(t, err)
-	return signed
-}
-
 func createKeyBindingJWT(t *testing.T, nonce, audience, sdJWT string, key *ecdsa.PrivateKey) string {
 	t.Helper()
 	sdHash := sha256.Sum256([]byte(sdJWT))
@@ -956,26 +900,6 @@ func createKeyBindingJWT(t *testing.T, nonce, audience, sdJWT string, key *ecdsa
 	signed, err := token.SignedString(key)
 	require.NoError(t, err)
 	return signed
-}
-
-func createSyntheticSDJWT(t *testing.T, key *ecdsa.PrivateKey) string {
-	t.Helper()
-	body := jwtv5.MapClaims{
-		"iss":     "https://test-issuer.example.com",
-		"sub":     "test-subject",
-		"iat":     time.Now().Unix(),
-		"exp":     time.Now().Add(1 * time.Hour).Unix(),
-		"vct":     "urn:eudi:pid:1",
-		"_sd_alg": "sha-256",
-		"cnf": map[string]any{
-			"jwk": publicKeyJWK(t, key),
-		},
-	}
-	signingMethod, _ := jose.GetSigningMethodFromKey(key)
-	token := jwtv5.NewWithClaims(signingMethod, body)
-	signed, err := token.SignedString(key)
-	require.NoError(t, err)
-	return signed + "~"
 }
 
 func writeKeyFile(t *testing.T, key *ecdsa.PrivateKey) string {
