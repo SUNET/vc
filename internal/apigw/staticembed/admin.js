@@ -57,6 +57,7 @@ window.adminApp = function () {
         subject: '',
         scopes: [],
         scopeTemplates: {},
+        preauthScopes: [],
         allowedAuthenticSources: [],
         hasIdentityMapping: false,
         csrfToken: '',
@@ -92,7 +93,11 @@ window.adminApp = function () {
                 document_id: '',
                 identity_mapping_ids_str: '',
                 document_data: []
-            }
+            },
+            offerLoading: false,
+            /** @type {{credential_offer_url: string, tx_code?: string, credential_offer: any}|null} */
+            offerResult: null,
+            offerError: ''
         },
 
         // Import view state
@@ -172,6 +177,7 @@ window.adminApp = function () {
                     this.subject = data.subject || '';
                     this.scopes = (data.scopes || []).sort();
                     this.scopeTemplates = data.scope_templates || {};
+                    this.preauthScopes = data.preauth_scopes || [];
                     this.allowedAuthenticSources = (data.allowed_authentic_sources || []).sort();
                     this.hasIdentityMapping = data.has_identity_mapping || false;
                     this.unrestricted = data.unrestricted || false;
@@ -370,6 +376,54 @@ window.adminApp = function () {
 
         toggleDocDetail(idx) {
             this.ds.detailIdx = this.ds.detailIdx === idx ? null : idx;
+        },
+
+        async createPreAuthOffer(doc) {
+            this.ds.offerLoading = true;
+            this.ds.offerError = '';
+            this.ds.offerResult = null;
+            try {
+                const scope = doc.meta?.scope;
+                if (!this.canPreAuthOffer(scope)) {
+                    throw new Error('scope is not configured for pre-authorized issuance');
+                }
+                const resp = await this.apiFetch('/api/v1/datastore/preauth_offer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        authentic_source: doc.meta?.authentic_source,
+                        scope: doc.meta?.scope,
+                        document_id: doc.meta?.document_id,
+                    }),
+                    credentials: 'same-origin',
+                });
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    throw new Error(text || resp.statusText);
+                }
+                this.ds.offerResult = await resp.json();
+            } catch (e) {
+                this.ds.offerError = 'Failed: ' + e.message;
+            }
+            this.ds.offerLoading = false;
+        },
+
+        async copyToClipboard(text) {
+            try {
+                await navigator.clipboard.writeText(text);
+                this.showToast('Copied to clipboard', 'success');
+            } catch (e) {
+                this.showToast('Copy failed: ' + e.message, 'danger');
+            }
+        },
+
+        canPreAuthOffer(scope) {
+            return !!scope && Array.isArray(this.preauthScopes) && this.preauthScopes.includes(scope);
+        },
+
+        closeOfferModal() {
+            this.ds.offerResult = null;
+            this.ds.offerError = '';
         },
 
         async createDocument() {

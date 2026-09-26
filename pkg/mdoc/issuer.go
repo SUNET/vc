@@ -505,11 +505,29 @@ func NewCOSEKeyFromECDSAPublic(pub *ecdsa.PublicKey) (*COSEKey, error) {
 		return nil, fmt.Errorf("unsupported curve")
 	}
 
+	// COSE_Key EC2 coordinates are fixed-width per curve (RFC 9052 7.1.1);
+	// Bytes() drops a leading zero and would emit a short one.
+	byteLen := (pub.Curve.Params().BitSize + 7) / 8
+
+	// FillBytes PANICS on a coordinate too wide for the destination, and this
+	// key is not always one we generated: ParseDeviceKey builds an
+	// ecdsa.PublicKey straight from CBOR byte strings of any length, with no
+	// width or on-curve check. Refuse it rather than take the process down.
+	if pub.X == nil || pub.Y == nil {
+		return nil, fmt.Errorf("EC public key has no coordinates")
+	}
+	if l := (pub.X.BitLen() + 7) / 8; l > byteLen {
+		return nil, fmt.Errorf("EC X coordinate is %d bytes, wider than the %d-byte %s curve", l, byteLen, pub.Curve.Params().Name)
+	}
+	if l := (pub.Y.BitLen() + 7) / 8; l > byteLen {
+		return nil, fmt.Errorf("EC Y coordinate is %d bytes, wider than the %d-byte %s curve", l, byteLen, pub.Curve.Params().Name)
+	}
+
 	key := &COSEKey{
 		Kty: KeyTypeEC2,
 		Crv: crv,
-		X:   pub.X.Bytes(),
-		Y:   pub.Y.Bytes(),
+		X:   pub.X.FillBytes(make([]byte, byteLen)),
+		Y:   pub.Y.FillBytes(make([]byte, byteLen)),
 	}
 	return key, nil
 }

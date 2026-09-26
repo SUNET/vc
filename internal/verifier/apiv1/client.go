@@ -141,8 +141,15 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		return nil, err
 	}
 
-	// Load OAuth2 metadata from configuration (unsigned, will be signed on-demand in handler)
-	c.oauth2Metadata = c.cfg.Verifier.Inbound.OpenID4VP.GenerateMetadata(ctx, c.cfg.Verifier.PublicURL)
+	// The verifier's PAR endpoint is a no-op today and there is no
+	// attestation evaluator wired up, so never advertise attest_jwt_client_auth
+	// on this metadata regardless of Trust.WalletAttestation configuration.
+	c.oauth2Metadata = c.cfg.Verifier.Inbound.OpenID4VP.GenerateMetadata(
+		ctx,
+		c.cfg.Verifier.PublicURL,
+		false,
+		c.cfg.Verifier.Trust.AllowedSignatureAlgorithms,
+	)
 
 	// Load presentation request templates if configured
 	if err := c.loadPresentationTemplates(ctx); err != nil {

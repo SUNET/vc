@@ -733,10 +733,10 @@ persisted in the database.
 
 > **Path:** `.apigw.delivery.credential_offers`
 
-| Field        | Type     | Description                      | Example | Default | Required |
-| ------------ | -------- | -------------------------------- | ------- | ------- | -------- |
-| `issuer_url` | `string` | Issuer URL for credential offers | -       | -       | Yes      |
-| `wallets`    | `object` | Wallet redirect configurations   | -       | -       | Yes      |
+| Field        | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Example | Default | Required |
+| ------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `issuer_url` | `string` | Issuer IDENTIFIER published as `credential_issuer` inside each credential offer. It MUST be byte-identical to apigw.public_url - a trailing slash on one of them is a mismatch, because both are published verbatim - and config load refuses anything else: issuer metadata is generated from public_url and declares that as its own `credential_issuer`, so a wallet resolving an offer to {credential_issuer}/.well-known/openid-credential-issuer would otherwise reach an origin serving no metadata, or metadata naming a different issuer. It is still not where offers are RETRIEVED from. A by-reference offer (`credential_offer_uri`) is built from apigw.public_url, because that field is the statement about where this service answers; this one is an identity claim that happens to hold the same string. | -       | -       | Yes      |
+| `wallets`    | `object` | Wallet redirect configurations                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | -       | -       | Yes      |
 
 ### `wallets` entry
 
@@ -955,11 +955,12 @@ Example rules:
 
 > **Path:** `.apigw.rate_limit`
 
-| Field                            | Type  | Description                                                         | Example | Default | Required |
-| -------------------------------- | ----- | ------------------------------------------------------------------- | ------- | ------- | -------- |
-| `token_requests_per_minute`      | `int` | Maximum token endpoint requests per minute per IP. Default: 20      | -       | `20`    | No       |
-| `credential_requests_per_minute` | `int` | Maximum credential endpoint requests per minute per IP. Default: 30 | -       | `30`    | No       |
-| `datastore_requests_per_minute`  | `int` | Maximum datastore endpoint requests per minute per IP. Default: 60  | -       | `60`    | No       |
+| Field                                  | Type  | Description                                                                                              | Example | Default | Required |
+| -------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `token_requests_per_minute`            | `int` | Maximum token endpoint requests per minute per IP. Default: 20                                           | -       | `20`    | No       |
+| `credential_requests_per_minute`       | `int` | Maximum credential endpoint requests per minute per IP. Default: 30                                      | -       | `30`    | No       |
+| `datastore_requests_per_minute`        | `int` | Maximum datastore endpoint requests per minute per IP. Default: 60                                       | -       | `60`    | No       |
+| `credential_offer_requests_per_minute` | `int` | Maximum issuer-UI credential offer creation requests (GET /offers/:scope) per minute per IP. Default: 20 | -       | `20`    | No       |
 
 ### `dashboard`
 

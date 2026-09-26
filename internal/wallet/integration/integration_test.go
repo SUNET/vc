@@ -25,6 +25,7 @@ import (
 	"github.com/SUNET/vc/internal/wallet/credential"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/testsupport/jwktest"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
@@ -376,12 +377,7 @@ func createMockSDJWT(t *testing.T) string {
 		"iat": time.Now().Unix(),
 		"vct": "urn:credential:test",
 		"cnf": map[string]any{
-			"jwk": map[string]any{
-				"kty": "EC",
-				"crv": "P-256",
-				"x":   base64.RawURLEncoding.EncodeToString(key.PublicKey.X.Bytes()),
-				"y":   base64.RawURLEncoding.EncodeToString(key.PublicKey.Y.Bytes()),
-			},
+			"jwk": jwktest.PublicKeyJWK(&key.PublicKey),
 		},
 	})
 	signed, err := token.SignedString(key)
