@@ -262,11 +262,19 @@ func ListIDFromURL(listURL string) (string, error) {
 		return "", err
 	}
 
-	// Absolute, with a host: the contract is a verifier-facing URL, and a
-	// relative value like "lists/abc" (or bare "abc") would yield a
-	// perfectly good-looking list ID from something no verifier can fetch.
-	if u.Scheme == "" || u.Host == "" {
+	// Absolute, with a host, over http(s): the contract is a verifier-facing
+	// URL, and anything else yields a perfectly good-looking list ID from
+	// something no verifier will fetch. A relative value like "lists/abc"
+	// (or a bare "abc") has no origin at all, and a non-HTTP scheme is
+	// refused outright by the resolver on the other side - see
+	// pkg/revocation's StatusListChecker, which rejects any scheme but
+	// http and https to limit SSRF surface. Accepting one here would mint
+	// credentials whose status reference that checker will not follow.
+	if u.Host == "" {
 		return "", fmt.Errorf("list URL %q is not absolute: a verifier-facing scheme and host are required", listURL)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("list URL %q uses scheme %q: a status list must be fetchable over http or https", listURL, u.Scheme)
 	}
 
 	// A trailing slash has to be rejected rather than trimmed: path.Base

@@ -153,6 +153,11 @@ func TestListIDFromURL_RejectsUnusableURLs(t *testing.T) {
 		{"bare segment", "abc"},
 		{"scheme-relative", "//status.example.org/lists/abc"},
 		{"path only", "/lists/abc"},
+		// Schemes the verifier's StatusListChecker refuses outright, so a
+		// credential referencing one could never have its status checked.
+		{"ftp", "ftp://status.example.org/lists/abc"},
+		{"file", "file:///etc/passwd"},
+		{"data", "data:application/json,{}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if id, err := ListIDFromURL(tc.url); err == nil {
