@@ -273,3 +273,134 @@ func TestOIDCOnlyScopeFieldsRejected(t *testing.T) {
 		})
 	}
 }
+
+// TestScopeProviderUniqueness pins that one scope cannot be configured under
+// the same auth_provider in two data sources.
+//
+// A scope in several data sources is legitimate when the providers differ -
+// ResolveDataSource exists to pick between them. With the same provider twice
+// there is nothing to pick with, and two readers choose independently:
+// LookupCredentialSources (used by ResolveDataSource and the auth provider
+// Selector) scans datastore/assertion/external_api, and LookupScopePolicyConfig
+// scans for the policy and OIDC request parameters. Those two orders disagreed,
+// so a credential could be issued from one entry while the gate governing it
+// was read off another. Aligning the orders makes them agree; refusing the
+// configuration means the order decides nothing at all.
+func TestScopeProviderUniqueness(t *testing.T) {
+	v, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oidcDatastore := map[string]model.DatastoreScope{
+		"pid": {AuthProvider: model.AuthProviderOIDC, AuthClaims: []string{"given_name"}},
+	}
+
+	for _, tc := range []struct {
+		name       string
+		ds         model.DataSources
+		wantReject bool
+	}{
+		{
+			name: "same scope and provider in datastore and assertion",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: oidcDatastore},
+				Assertion: model.AssertionConfig{Scopes: map[string]model.AssertionScope{
+					"pid": {AuthProvider: model.AuthProviderOIDC},
+				}},
+			},
+			wantReject: true,
+		},
+		{
+			name: "same scope and provider in datastore and external_api",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: oidcDatastore},
+				ExternalAPI: model.ExternalAPIConfig{Scopes: map[string]model.ExternalAPIScope{
+					"pid": {Remote: "ladok", AuthProvider: model.AuthProviderOIDC},
+				}},
+			},
+			wantReject: true,
+		},
+		{
+			// The documented, legitimate case: one scope, two data sources,
+			// told apart by the provider the flow authenticated with.
+			name: "same scope, different providers",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: oidcDatastore},
+				Assertion: model.AssertionConfig{Scopes: map[string]model.AssertionScope{
+					"pid": {AuthProvider: model.AuthProviderSAML},
+				}},
+			},
+		},
+		{
+			name: "different scopes, same provider",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: oidcDatastore},
+				Assertion: model.AssertionConfig{Scopes: map[string]model.AssertionScope{
+					"diploma": {AuthProvider: model.AuthProviderOIDC},
+				}},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := v.Struct(tc.ds)
+			if !tc.wantReject {
+				var verrs validator.ValidationErrors
+				if errors.As(err, &verrs) {
+					for _, ve := range verrs {
+						if ve.Tag() == "scope_provider_not_unique" {
+							t.Fatalf("expected acceptance, got: %v", err)
+						}
+					}
+				}
+
+				return
+			}
+			var verrs validator.ValidationErrors
+			if !errors.As(err, &verrs) {
+				t.Fatalf("expected validation errors, got %T: %v", err, err)
+			}
+			for _, ve := range verrs {
+				if ve.Tag() == "scope_provider_not_unique" {
+					return
+				}
+			}
+			t.Fatalf("expected a scope_provider_not_unique failure, got: %v", err)
+		})
+	}
+}
+
+// TestLookupScopePolicyConfigMatchesSourceResolution pins that the helper and
+// the data-source resolution agree on which entry wins.
+func TestLookupScopePolicyConfigMatchesSourceResolution(t *testing.T) {
+	policy := &model.IssuancePolicy{
+		Rules:         []string{"(credential (scope pid)(acr loa3))"},
+		QueryTemplate: []model.QueryDimension{{Dimension: "acr", Claim: "acr"}},
+	}
+
+	// The configuration the uniqueness rule now refuses, constructed directly
+	// so the two lookups can still be compared: if they ever diverge again,
+	// this says so without waiting for a deployment to hit it.
+	ds := &model.DataSources{
+		Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+			"pid": {AuthProvider: model.AuthProviderOIDC, IssuancePolicy: policy},
+		}},
+		Assertion: model.AssertionConfig{Scopes: map[string]model.AssertionScope{
+			"pid": {AuthProvider: model.AuthProviderOIDC},
+		}},
+	}
+
+	src, err := ds.ResolveDataSource("pid", model.AuthProviderOIDC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src.DataSource != model.DataSourceDatastore {
+		t.Fatalf("resolution picked %q; this test's premise has moved", src.DataSource)
+	}
+
+	got := ds.LookupScopePolicyConfig("pid", model.AuthProviderOIDC)
+	if got == nil || got.IssuancePolicy != policy {
+		t.Fatalf("the policy lookup must answer from the same data source the flow is issued from (%q), got %+v",
+			src.DataSource, got)
+	}
+}

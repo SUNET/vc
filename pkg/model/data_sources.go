@@ -456,19 +456,30 @@ type ScopePolicyConfig struct {
 // configuration, or find none where the OIDC one had a policy, and so skip the
 // gate it was supposed to apply. Which data source answers is now decided by
 // the provider the flow actually authenticated with.
+//
+// The data sources are consulted in the same order as
+// LookupCredentialSources, which is what ResolveDataSource and the auth
+// provider Selector pick from: datastore, then assertion, then external_api.
+// The two orders have to agree. They did not - this one tried assertion first -
+// and since nothing forbids the same scope and provider appearing in two data
+// sources, a flow could be issued from the datastore entry while its policy and
+// request parameters were read off the assertion one. validateScopeProviderUniqueness
+// now refuses that configuration outright, so the order decides nothing; it is
+// kept aligned anyway, because a rule enforced in one place and contradicted in
+// another is how the first version of this went wrong.
 func (ds *DataSources) LookupScopePolicyConfig(scope, authProvider string) *ScopePolicyConfig {
 	if ds == nil {
 		return nil
 	}
 
-	if s, ok := ds.Assertion.Scopes[scope]; ok && s.AuthProvider == authProvider {
+	if s, ok := ds.Datastore.Scopes[scope]; ok && s.AuthProvider == authProvider {
 		return &ScopePolicyConfig{
 			OIDCRequestParams: s.OIDCRequestParams,
 			IssuancePolicy:    s.IssuancePolicy,
 		}
 	}
 
-	if s, ok := ds.Datastore.Scopes[scope]; ok && s.AuthProvider == authProvider {
+	if s, ok := ds.Assertion.Scopes[scope]; ok && s.AuthProvider == authProvider {
 		return &ScopePolicyConfig{
 			OIDCRequestParams: s.OIDCRequestParams,
 			IssuancePolicy:    s.IssuancePolicy,

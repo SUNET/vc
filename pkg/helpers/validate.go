@@ -3,6 +3,7 @@ package helpers
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -505,6 +506,7 @@ func NewValidator() (*validator.Validate, error) {
 	// Register struct-level validation for DataSources: openid4vp auth_scopes must not self-reference
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		ds := sl.Current().Interface().(model.DataSources)
+		validateScopeProviderUniqueness(sl, ds)
 		for scope, cred := range ds.Datastore.Scopes {
 			switch cred.AuthProvider {
 			case model.AuthProviderOpenID4VP:
@@ -677,5 +679,66 @@ func reportOIDCOnlyScopeFields(sl validator.StructLevel, authProvider string, pa
 	}
 	if policy != nil {
 		sl.ReportError(policy, "IssuancePolicy", "IssuancePolicy", "oidc_only_scope_field", authProvider)
+	}
+}
+
+// validateScopeProviderUniqueness refuses the same credential scope appearing
+// under the same auth_provider in more than one data source.
+//
+// One scope in several data sources is legitimate and documented - that is
+// what ResolveDataSource exists to disambiguate - but only when the providers
+// differ. With the same provider twice there is nothing to disambiguate with,
+// and two pieces of code then pick a winner independently:
+// LookupCredentialSources (which ResolveDataSource and the auth provider
+// Selector read) takes the first match in datastore/assertion/external_api
+// order, and LookupScopePolicyConfig does its own scan for the issuance policy
+// and OIDC request parameters. Keeping those two orders aligned makes them
+// agree today; it does not stop a third reader from disagreeing tomorrow, and
+// the failure mode is a credential issued from one entry while the gate that
+// governs it was read off another.
+//
+// So the ambiguity is removed rather than arbitrated. An operator who means
+// two different configurations for one scope has to say which provider each
+// belongs to, which is the only way the flow could have told them apart.
+func validateScopeProviderUniqueness(sl validator.StructLevel, ds model.DataSources) {
+	// scope -> provider -> data sources declaring it.
+	seen := map[string]map[string][]string{}
+
+	record := func(scope, provider, source string) {
+		provider = strings.ToLower(strings.TrimSpace(provider))
+		if provider == "" {
+			// An absent provider is the `required` tag's business; counting
+			// it here would report the same mistake twice.
+			return
+		}
+		if seen[scope] == nil {
+			seen[scope] = map[string][]string{}
+		}
+		seen[scope][provider] = append(seen[scope][provider], source)
+	}
+
+	for scope, cred := range ds.Datastore.Scopes {
+		record(scope, cred.AuthProvider, "datastore")
+	}
+	for scope, cred := range ds.Assertion.Scopes {
+		record(scope, cred.AuthProvider, "assertion")
+	}
+	for scope, cred := range ds.ExternalAPI.Scopes {
+		record(scope, cred.AuthProvider, "external_api")
+	}
+
+	// Sorted so the reported order does not depend on map iteration.
+	scopes := slices.Sorted(maps.Keys(seen))
+	for _, scope := range scopes {
+		providers := slices.Sorted(maps.Keys(seen[scope]))
+		for _, provider := range providers {
+			sources := seen[scope][provider]
+			if len(sources) < 2 {
+				continue
+			}
+			slices.Sort(sources)
+			sl.ReportError(ds, "Scopes", "Scopes", "scope_provider_not_unique",
+				fmt.Sprintf("%s/%s in %s", scope, provider, strings.Join(sources, ", ")))
+		}
 	}
 }
