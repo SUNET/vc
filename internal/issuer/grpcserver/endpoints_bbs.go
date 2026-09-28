@@ -27,5 +27,6 @@ func (s *Service) MakeJWP(ctx context.Context, in *apiv1_issuer.MakeJWPRequest) 
 		TokenStatusListSection: reply.TokenStatusListSection,
 		TokenStatusListIndex:   reply.TokenStatusListIndex,
 		TokenStatusListUri:     reply.TokenStatusListURI,
+		TokenStatusListBackend: reply.TokenStatusListBackend,
 	}, nil
 }

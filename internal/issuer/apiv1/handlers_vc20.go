@@ -39,8 +39,11 @@ type CreateVC20Reply struct {
 	// StatusListURI is the list the entry was allocated in. Empty when no
 	// status entry was allocated, i.e. the credential is not revocable.
 	StatusListURI string `json:"status_list_uri,omitempty"`
-	ValidFrom     string `json:"valid_from"`
-	ValidUntil    string `json:"valid_until,omitempty"`
+	// StatusListBackend names the backend that issued the entry; see
+	// CreateCredentialReply.TokenStatusListBackend.
+	StatusListBackend string `json:"status_list_backend,omitempty"`
+	ValidFrom         string `json:"valid_from"`
+	ValidUntil        string `json:"valid_until,omitempty"`
 }
 
 // MakeVC20 creates a W3C VC 2.0 Data Integrity credential
@@ -101,13 +104,13 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 	// status entry - but an external service's degraded_mode is honoured.
 	// See allocateOptionalStatus.
 	var statusSection, statusIndex int64
-	var statusURI string
+	var statusURI, statusBackend string
 	statusAlloc, err := c.allocateOptionalStatus(ctx, "vc20")
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
 	}
 	if statusAlloc != nil {
-		statusSection, statusIndex, statusURI = statusAlloc.Section, statusAlloc.Index, statusAlloc.URI
+		statusSection, statusIndex, statusURI, statusBackend = statusAlloc.Section, statusAlloc.Index, statusAlloc.URI, statusAlloc.Backend
 		c.log.Debug("status list entry allocated for vc20", "section", statusSection, "index", statusIndex, "uri", statusURI)
 	}
 
@@ -148,6 +151,7 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 		StatusListSection: statusSection,
 		StatusListIndex:   statusIndex,
 		StatusListURI:     statusURI,
+		StatusListBackend: statusBackend,
 		ValidFrom:         validFrom.Format(time.RFC3339),
 	}
 

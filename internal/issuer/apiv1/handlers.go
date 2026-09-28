@@ -32,6 +32,11 @@ type CreateCredentialReply struct {
 	// draft-ietf-oauth-status-list service has no sections and identifies a
 	// list by this URI alone.
 	TokenStatusListURI string `json:"token_status_list_uri,omitempty"`
+	// TokenStatusListBackend names the status-list implementation that
+	// issued the entry ("registry" or "status_service"). Recorded at
+	// issuance because the URI alone does not identify the backend, and
+	// guessing at revocation time writes into the wrong list.
+	TokenStatusListBackend string `json:"token_status_list_backend,omitempty"`
 }
 
 // MakeSDJWT creates a credential generically for any credential type
@@ -67,13 +72,13 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 	}
 
 	var statusSection, statusIndex int64
-	var statusURI string
+	var statusURI, statusBackend string
 	if alloc != nil {
 		opts.TokenStatusList = &sdjwtvc.TokenStatusListReference{
 			Index: alloc.Index,
 			URI:   alloc.URI,
 		}
-		statusSection, statusIndex, statusURI = alloc.Section, alloc.Index, alloc.URI
+		statusSection, statusIndex, statusURI, statusBackend = alloc.Section, alloc.Index, alloc.URI, alloc.Backend
 		c.log.Debug("status list entry allocated", "section", alloc.Section, "index", alloc.Index, "uri", alloc.URI)
 	}
 
@@ -106,6 +111,7 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		TokenStatusListSection: statusSection,
 		TokenStatusListIndex:   statusIndex,
 		TokenStatusListURI:     statusURI,
+		TokenStatusListBackend: statusBackend,
 	}
 
 	return reply, nil
@@ -151,8 +157,11 @@ type CreateMDocReply struct {
 	// StatusListURI is the list the entry was allocated in. Empty when no
 	// status entry was allocated, i.e. the credential is not revocable.
 	StatusListURI string `json:"status_list_uri,omitempty"`
-	ValidFrom     string `json:"valid_from"`
-	ValidUntil    string `json:"valid_until"`
+	// StatusListBackend names the backend that issued the entry; see
+	// CreateCredentialReply.TokenStatusListBackend.
+	StatusListBackend string `json:"status_list_backend,omitempty"`
+	ValidFrom         string `json:"valid_from"`
+	ValidUntil        string `json:"valid_until"`
 }
 
 // MakeMDoc creates credential per ISO 18013-5
@@ -199,7 +208,7 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 	// `fail` rejects the issuance here as it does for SD-JWT and BBS. See
 	// allocateOptionalStatus.
 	var mdocStatusSection, mdocStatusIndex int64
-	var mdocStatusURI string
+	var mdocStatusURI, mdocStatusBackend string
 	var mdocStatusRef *mdoc.StatusReference
 	alloc, err := c.allocateOptionalStatus(ctx, "mdoc")
 	if err != nil {
@@ -207,7 +216,7 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 	}
 	if alloc != nil {
 		// allocateOptionalStatus guarantees a non-empty URI here.
-		mdocStatusSection, mdocStatusIndex, mdocStatusURI = alloc.Section, alloc.Index, alloc.URI
+		mdocStatusSection, mdocStatusIndex, mdocStatusURI, mdocStatusBackend = alloc.Section, alloc.Index, alloc.URI, alloc.Backend
 		mdocStatusRef = &mdoc.StatusReference{URI: mdocStatusURI, Index: mdocStatusIndex}
 		c.log.Debug("status list entry allocated for mdoc", "section", mdocStatusSection, "index", mdocStatusIndex, "uri", mdocStatusURI)
 	}
@@ -246,6 +255,7 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		StatusListSection: mdocStatusSection,
 		StatusListIndex:   mdocStatusIndex,
 		StatusListURI:     mdocStatusURI,
+		StatusListBackend: mdocStatusBackend,
 		ValidFrom:         issued.ValidFrom.Format(time.RFC3339),
 		ValidUntil:        issued.ValidUntil.Format(time.RFC3339),
 	}

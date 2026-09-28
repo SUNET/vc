@@ -270,8 +270,13 @@ type MakeSDJWTReply struct {
 	// list; an external draft-ietf-oauth-status-list service identifies a
 	// list by this URI alone.
 	TokenStatusListUri string `protobuf:"bytes,4,opt,name=token_status_list_uri,json=tokenStatusListUri,proto3" json:"token_status_list_uri,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Which status-list backend issued the entry ("registry" or
+	// "status_service"). Recorded at issuance: the URI alone does not
+	// identify the backend, and guessing at revocation time writes the
+	// status into the wrong list.
+	TokenStatusListBackend string `protobuf:"bytes,5,opt,name=token_status_list_backend,json=tokenStatusListBackend,proto3" json:"token_status_list_backend,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *MakeSDJWTReply) Reset() {
@@ -328,6 +333,13 @@ func (x *MakeSDJWTReply) GetTokenStatusListIndex() int64 {
 func (x *MakeSDJWTReply) GetTokenStatusListUri() string {
 	if x != nil {
 		return x.TokenStatusListUri
+	}
+	return ""
+}
+
+func (x *MakeSDJWTReply) GetTokenStatusListBackend() string {
+	if x != nil {
+		return x.TokenStatusListBackend
 	}
 	return ""
 }
@@ -461,8 +473,13 @@ type MakeJWPReply struct {
 	// list; an external draft-ietf-oauth-status-list service identifies a
 	// list by this URI alone.
 	TokenStatusListUri string `protobuf:"bytes,4,opt,name=token_status_list_uri,json=tokenStatusListUri,proto3" json:"token_status_list_uri,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Which status-list backend issued the entry ("registry" or
+	// "status_service"). Recorded at issuance: the URI alone does not
+	// identify the backend, and guessing at revocation time writes the
+	// status into the wrong list.
+	TokenStatusListBackend string `protobuf:"bytes,5,opt,name=token_status_list_backend,json=tokenStatusListBackend,proto3" json:"token_status_list_backend,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *MakeJWPReply) Reset() {
@@ -519,6 +536,13 @@ func (x *MakeJWPReply) GetTokenStatusListIndex() int64 {
 func (x *MakeJWPReply) GetTokenStatusListUri() string {
 	if x != nil {
 		return x.TokenStatusListUri
+	}
+	return ""
+}
+
+func (x *MakeJWPReply) GetTokenStatusListBackend() string {
+	if x != nil {
+		return x.TokenStatusListBackend
 	}
 	return ""
 }
@@ -610,8 +634,10 @@ type MakeMDocReply struct {
 	ValidUntil        string                 `protobuf:"bytes,5,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`                         // RFC3339 timestamp
 	// See token_status_list_uri on MakeSDJWTReply.
 	StatusListUri string `protobuf:"bytes,6,opt,name=status_list_uri,json=statusListUri,proto3" json:"status_list_uri,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// See token_status_list_backend on MakeSDJWTReply.
+	StatusListBackend string `protobuf:"bytes,7,opt,name=status_list_backend,json=statusListBackend,proto3" json:"status_list_backend,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *MakeMDocReply) Reset() {
@@ -682,6 +708,13 @@ func (x *MakeMDocReply) GetValidUntil() string {
 func (x *MakeMDocReply) GetStatusListUri() string {
 	if x != nil {
 		return x.StatusListUri
+	}
+	return ""
+}
+
+func (x *MakeMDocReply) GetStatusListBackend() string {
+	if x != nil {
+		return x.StatusListBackend
 	}
 	return ""
 }
@@ -1090,8 +1123,10 @@ type MakeVC20Reply struct {
 	ValidUntil        string                 `protobuf:"bytes,6,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`                         // RFC3339 timestamp (optional)
 	// See token_status_list_uri on MakeSDJWTReply.
 	StatusListUri string `protobuf:"bytes,7,opt,name=status_list_uri,json=statusListUri,proto3" json:"status_list_uri,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// See token_status_list_backend on MakeSDJWTReply.
+	StatusListBackend string `protobuf:"bytes,8,opt,name=status_list_backend,json=statusListBackend,proto3" json:"status_list_backend,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *MakeVC20Reply) Reset() {
@@ -1173,6 +1208,131 @@ func (x *MakeVC20Reply) GetStatusListUri() string {
 	return ""
 }
 
+func (x *MakeVC20Reply) GetStatusListBackend() string {
+	if x != nil {
+		return x.StatusListBackend
+	}
+	return ""
+}
+
+// SetCredentialStatusRequest asks for one issued credential's status-list
+// entry to be set to a new value.
+type SetCredentialStatusRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which backend issued the entry: "registry" or "status_service".
+	Backend string `protobuf:"bytes,1,opt,name=backend,proto3" json:"backend,omitempty"`
+	// The list the entry lives in.
+	StatusListUri string `protobuf:"bytes,2,opt,name=status_list_uri,json=statusListUri,proto3" json:"status_list_uri,omitempty"`
+	// Meaningful only for the registry backend, which shards its list.
+	Section int64 `protobuf:"varint,3,opt,name=section,proto3" json:"section,omitempty"`
+	Index   int64 `protobuf:"varint,4,opt,name=index,proto3" json:"index,omitempty"`
+	// draft-ietf-oauth-status-list value: 0 VALID, 1 INVALID, 2 SUSPENDED.
+	Status        uint32 `protobuf:"varint,5,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetCredentialStatusRequest) Reset() {
+	*x = SetCredentialStatusRequest{}
+	mi := &file_v1_issuer_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetCredentialStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetCredentialStatusRequest) ProtoMessage() {}
+
+func (x *SetCredentialStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_v1_issuer_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetCredentialStatusRequest.ProtoReflect.Descriptor instead.
+func (*SetCredentialStatusRequest) Descriptor() ([]byte, []int) {
+	return file_v1_issuer_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *SetCredentialStatusRequest) GetBackend() string {
+	if x != nil {
+		return x.Backend
+	}
+	return ""
+}
+
+func (x *SetCredentialStatusRequest) GetStatusListUri() string {
+	if x != nil {
+		return x.StatusListUri
+	}
+	return ""
+}
+
+func (x *SetCredentialStatusRequest) GetSection() int64 {
+	if x != nil {
+		return x.Section
+	}
+	return 0
+}
+
+func (x *SetCredentialStatusRequest) GetIndex() int64 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+func (x *SetCredentialStatusRequest) GetStatus() uint32 {
+	if x != nil {
+		return x.Status
+	}
+	return 0
+}
+
+type SetCredentialStatusReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetCredentialStatusReply) Reset() {
+	*x = SetCredentialStatusReply{}
+	mi := &file_v1_issuer_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetCredentialStatusReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetCredentialStatusReply) ProtoMessage() {}
+
+func (x *SetCredentialStatusReply) ProtoReflect() protoreflect.Message {
+	mi := &file_v1_issuer_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetCredentialStatusReply.ProtoReflect.Descriptor instead.
+func (*SetCredentialStatusReply) Descriptor() ([]byte, []int) {
+	return file_v1_issuer_proto_rawDescGZIP(), []int{17}
+}
+
 var File_v1_issuer_proto protoreflect.FileDescriptor
 
 const file_v1_issuer_proto_rawDesc = "" +
@@ -1192,12 +1352,13 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\fdocumentData\x18\x02 \x01(\fR\fdocumentData\x12 \n" +
 	"\x03jwk\x18\x03 \x01(\v2\x0e.v1.issuer.jwkR\x03jwk\x12\x1c\n" +
 	"\tintegrity\x18\x05 \x01(\tR\tintegrity\x12\x12\n" +
-	"\x04vctm\x18\x06 \x01(\fR\x04vctmJ\x04\b\x04\x10\x05\"\xee\x01\n" +
+	"\x04vctm\x18\x06 \x01(\fR\x04vctmJ\x04\b\x04\x10\x05\"\xa9\x02\n" +
 	"\x0eMakeSDJWTReply\x127\n" +
 	"\vcredentials\x18\x01 \x03(\v2\x15.v1.issuer.CredentialR\vcredentials\x129\n" +
 	"\x19token_status_list_section\x18\x02 \x01(\x03R\x16tokenStatusListSection\x125\n" +
 	"\x17token_status_list_index\x18\x03 \x01(\x03R\x14tokenStatusListIndex\x121\n" +
-	"\x15token_status_list_uri\x18\x04 \x01(\tR\x12tokenStatusListUri\"\xdd\x01\n" +
+	"\x15token_status_list_uri\x18\x04 \x01(\tR\x12tokenStatusListUri\x129\n" +
+	"\x19token_status_list_backend\x18\x05 \x01(\tR\x16tokenStatusListBackend\"\xdd\x01\n" +
 	"\x0eMakeJWPRequest\x12\x14\n" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12#\n" +
 	"\rdocument_data\x18\x02 \x01(\fR\fdocumentData\x12\x1e\n" +
@@ -1208,18 +1369,19 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\x03vct\x18\x05 \x01(\tR\x03vct\x12\x1f\n" +
 	"\vkey_binding\x18\x06 \x01(\bR\n" +
 	"keyBinding\x12\x14\n" +
-	"\x05suite\x18\a \x01(\rR\x05suite\"\xec\x01\n" +
+	"\x05suite\x18\a \x01(\rR\x05suite\"\xa7\x02\n" +
 	"\fMakeJWPReply\x127\n" +
 	"\vcredentials\x18\x01 \x03(\v2\x15.v1.issuer.CredentialR\vcredentials\x129\n" +
 	"\x19token_status_list_section\x18\x02 \x01(\x03R\x16tokenStatusListSection\x125\n" +
 	"\x17token_status_list_index\x18\x03 \x01(\x03R\x14tokenStatusListIndex\x121\n" +
-	"\x15token_status_list_uri\x18\x04 \x01(\tR\x12tokenStatusListUri\"\xbe\x01\n" +
+	"\x15token_status_list_uri\x18\x04 \x01(\tR\x12tokenStatusListUri\x129\n" +
+	"\x19token_status_list_backend\x18\x05 \x01(\tR\x16tokenStatusListBackend\"\xbe\x01\n" +
 	"\x0fMakeMDocRequest\x12\x14\n" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12#\n" +
 	"\rdocument_data\x18\x03 \x01(\fR\fdocumentData\x12*\n" +
 	"\x11device_public_key\x18\x04 \x01(\fR\x0fdevicePublicKey\x12*\n" +
 	"\x11device_key_format\x18\x05 \x01(\tR\x0fdeviceKeyFormat\x12\x12\n" +
-	"\x04mddl\x18\x06 \x01(\fR\x04mddlJ\x04\b\x02\x10\x03\"\xe7\x01\n" +
+	"\x04mddl\x18\x06 \x01(\fR\x04mddlJ\x04\b\x02\x10\x03\"\x97\x02\n" +
 	"\rMakeMDocReply\x12\x12\n" +
 	"\x04mdoc\x18\x01 \x01(\fR\x04mdoc\x12.\n" +
 	"\x13status_list_section\x18\x02 \x01(\x03R\x11statusListSection\x12*\n" +
@@ -1228,7 +1390,8 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"valid_from\x18\x04 \x01(\tR\tvalidFrom\x12\x1f\n" +
 	"\vvalid_until\x18\x05 \x01(\tR\n" +
 	"validUntil\x12&\n" +
-	"\x0fstatus_list_uri\x18\x06 \x01(\tR\rstatusListUri\",\n" +
+	"\x0fstatus_list_uri\x18\x06 \x01(\tR\rstatusListUri\x12.\n" +
+	"\x13status_list_backend\x18\a \x01(\tR\x11statusListBackend\",\n" +
 	"\n" +
 	"Credential\x12\x1e\n" +
 	"\n" +
@@ -1261,7 +1424,7 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\vsubject_did\x18\x04 \x01(\tR\n" +
 	"subjectDid\x12 \n" +
 	"\vcryptosuite\x18\x05 \x01(\tR\vcryptosuite\x12-\n" +
-	"\x12mandatory_pointers\x18\x06 \x03(\tR\x11mandatoryPointers\"\x98\x02\n" +
+	"\x12mandatory_pointers\x18\x06 \x03(\tR\x11mandatoryPointers\"\xc8\x02\n" +
 	"\rMakeVC20Reply\x12\x1e\n" +
 	"\n" +
 	"credential\x18\x01 \x01(\fR\n" +
@@ -1273,7 +1436,15 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"valid_from\x18\x05 \x01(\tR\tvalidFrom\x12\x1f\n" +
 	"\vvalid_until\x18\x06 \x01(\tR\n" +
 	"validUntil\x12&\n" +
-	"\x0fstatus_list_uri\x18\a \x01(\tR\rstatusListUri2\x99\x04\n" +
+	"\x0fstatus_list_uri\x18\a \x01(\tR\rstatusListUri\x12.\n" +
+	"\x13status_list_backend\x18\b \x01(\tR\x11statusListBackend\"\xa6\x01\n" +
+	"\x1aSetCredentialStatusRequest\x12\x18\n" +
+	"\abackend\x18\x01 \x01(\tR\abackend\x12&\n" +
+	"\x0fstatus_list_uri\x18\x02 \x01(\tR\rstatusListUri\x12\x18\n" +
+	"\asection\x18\x03 \x01(\x03R\asection\x12\x14\n" +
+	"\x05index\x18\x04 \x01(\x03R\x05index\x12\x16\n" +
+	"\x06status\x18\x05 \x01(\rR\x06status\"\x1a\n" +
+	"\x18SetCredentialStatusReply2\xfe\x04\n" +
 	"\rIssuerService\x12E\n" +
 	"\tMakeSDJWT\x12\x1b.v1.issuer.MakeSDJWTRequest\x1a\x19.v1.issuer.MakeSDJWTReply\"\x00\x12B\n" +
 	"\bMakeMDoc\x12\x1a.v1.issuer.MakeMDocRequest\x1a\x18.v1.issuer.MakeMDocReply\"\x00\x12B\n" +
@@ -1281,7 +1452,8 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\aMakeJWP\x12\x19.v1.issuer.MakeJWPRequest\x1a\x17.v1.issuer.MakeJWPReply\"\x00\x120\n" +
 	"\x04JWKS\x12\x10.v1.issuer.Empty\x1a\x14.v1.issuer.JwksReply\"\x00\x12N\n" +
 	"\fSignMetadata\x12\x1e.v1.issuer.SignMetadataRequest\x1a\x1c.v1.issuer.SignMetadataReply\"\x00\x128\n" +
-	"\bGetIACAs\x12\x10.v1.issuer.Empty\x1a\x18.v1.issuer.GetIACAsReply\"\x00\x12<\n" +
+	"\bGetIACAs\x12\x10.v1.issuer.Empty\x1a\x18.v1.issuer.GetIACAsReply\"\x00\x12c\n" +
+	"\x13SetCredentialStatus\x12%.v1.issuer.SetCredentialStatusRequest\x1a#.v1.issuer.SetCredentialStatusReply\"\x00\x12<\n" +
 	"\x06Status\x12\x18.v1.status.StatusRequest\x1a\x16.v1.status.StatusReply\"\x00B6Z4github.com/SUNET/vc/internal/gen/issuer/apiv1_issuerb\x06proto3"
 
 var (
@@ -1296,7 +1468,7 @@ func file_v1_issuer_proto_rawDescGZIP() []byte {
 	return file_v1_issuer_proto_rawDescData
 }
 
-var file_v1_issuer_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_v1_issuer_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_v1_issuer_proto_goTypes = []any{
 	(*SignMetadataRequest)(nil),        // 0: v1.issuer.SignMetadataRequest
 	(*SignMetadataReply)(nil),          // 1: v1.issuer.SignMetadataReply
@@ -1314,8 +1486,10 @@ var file_v1_issuer_proto_goTypes = []any{
 	(*Jwk)(nil),                        // 13: v1.issuer.jwk
 	(*MakeVC20Request)(nil),            // 14: v1.issuer.MakeVC20Request
 	(*MakeVC20Reply)(nil),              // 15: v1.issuer.MakeVC20Reply
-	(*apiv1_status.StatusRequest)(nil), // 16: v1.status.StatusRequest
-	(*apiv1_status.StatusReply)(nil),   // 17: v1.status.StatusReply
+	(*SetCredentialStatusRequest)(nil), // 16: v1.issuer.SetCredentialStatusRequest
+	(*SetCredentialStatusReply)(nil),   // 17: v1.issuer.SetCredentialStatusReply
+	(*apiv1_status.StatusRequest)(nil), // 18: v1.status.StatusRequest
+	(*apiv1_status.StatusReply)(nil),   // 19: v1.status.StatusReply
 }
 var file_v1_issuer_proto_depIdxs = []int32{
 	13, // 0: v1.issuer.MakeSDJWTRequest.jwk:type_name -> v1.issuer.jwk
@@ -1330,17 +1504,19 @@ var file_v1_issuer_proto_depIdxs = []int32{
 	10, // 9: v1.issuer.IssuerService.JWKS:input_type -> v1.issuer.Empty
 	0,  // 10: v1.issuer.IssuerService.SignMetadata:input_type -> v1.issuer.SignMetadataRequest
 	10, // 11: v1.issuer.IssuerService.GetIACAs:input_type -> v1.issuer.Empty
-	16, // 12: v1.issuer.IssuerService.Status:input_type -> v1.status.StatusRequest
-	4,  // 13: v1.issuer.IssuerService.MakeSDJWT:output_type -> v1.issuer.MakeSDJWTReply
-	8,  // 14: v1.issuer.IssuerService.MakeMDoc:output_type -> v1.issuer.MakeMDocReply
-	15, // 15: v1.issuer.IssuerService.MakeVC20:output_type -> v1.issuer.MakeVC20Reply
-	6,  // 16: v1.issuer.IssuerService.MakeJWP:output_type -> v1.issuer.MakeJWPReply
-	11, // 17: v1.issuer.IssuerService.JWKS:output_type -> v1.issuer.JwksReply
-	1,  // 18: v1.issuer.IssuerService.SignMetadata:output_type -> v1.issuer.SignMetadataReply
-	2,  // 19: v1.issuer.IssuerService.GetIACAs:output_type -> v1.issuer.GetIACAsReply
-	17, // 20: v1.issuer.IssuerService.Status:output_type -> v1.status.StatusReply
-	13, // [13:21] is the sub-list for method output_type
-	5,  // [5:13] is the sub-list for method input_type
+	16, // 12: v1.issuer.IssuerService.SetCredentialStatus:input_type -> v1.issuer.SetCredentialStatusRequest
+	18, // 13: v1.issuer.IssuerService.Status:input_type -> v1.status.StatusRequest
+	4,  // 14: v1.issuer.IssuerService.MakeSDJWT:output_type -> v1.issuer.MakeSDJWTReply
+	8,  // 15: v1.issuer.IssuerService.MakeMDoc:output_type -> v1.issuer.MakeMDocReply
+	15, // 16: v1.issuer.IssuerService.MakeVC20:output_type -> v1.issuer.MakeVC20Reply
+	6,  // 17: v1.issuer.IssuerService.MakeJWP:output_type -> v1.issuer.MakeJWPReply
+	11, // 18: v1.issuer.IssuerService.JWKS:output_type -> v1.issuer.JwksReply
+	1,  // 19: v1.issuer.IssuerService.SignMetadata:output_type -> v1.issuer.SignMetadataReply
+	2,  // 20: v1.issuer.IssuerService.GetIACAs:output_type -> v1.issuer.GetIACAsReply
+	17, // 21: v1.issuer.IssuerService.SetCredentialStatus:output_type -> v1.issuer.SetCredentialStatusReply
+	19, // 22: v1.issuer.IssuerService.Status:output_type -> v1.status.StatusReply
+	14, // [14:23] is the sub-list for method output_type
+	5,  // [5:14] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -1357,7 +1533,7 @@ func file_v1_issuer_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_v1_issuer_proto_rawDesc), len(file_v1_issuer_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

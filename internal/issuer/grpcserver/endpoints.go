@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
@@ -26,6 +27,7 @@ func (s *Service) MakeSDJWT(ctx context.Context, in *apiv1_issuer.MakeSDJWTReque
 		TokenStatusListSection: reply.TokenStatusListSection,
 		TokenStatusListIndex:   reply.TokenStatusListIndex,
 		TokenStatusListUri:     reply.TokenStatusListURI,
+		TokenStatusListBackend: reply.TokenStatusListBackend,
 	}, nil
 }
 
@@ -60,6 +62,7 @@ func (s *Service) MakeMDoc(ctx context.Context, in *apiv1_issuer.MakeMDocRequest
 		StatusListSection: reply.StatusListSection,
 		StatusListIndex:   reply.StatusListIndex,
 		StatusListUri:     reply.StatusListURI,
+		StatusListBackend: reply.StatusListBackend,
 		ValidFrom:         reply.ValidFrom,
 		ValidUntil:        reply.ValidUntil,
 	}, nil
@@ -79,4 +82,25 @@ func (s *Service) GetIACAs(ctx context.Context, _ *apiv1_issuer.Empty) (*apiv1_i
 // dependencies.
 func (s *Service) Status(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {
 	return s.apiv1.Health(ctx, req)
+}
+
+// SetCredentialStatus writes a new status-list value for an already-issued
+// credential, routing to whichever backend allocated the entry.
+func (s *Service) SetCredentialStatus(ctx context.Context, in *apiv1_issuer.SetCredentialStatusRequest) (*apiv1_issuer.SetCredentialStatusReply, error) {
+	if in == nil {
+		return nil, fmt.Errorf("request is required")
+	}
+	if in.Status > 255 {
+		return nil, fmt.Errorf("status value %d exceeds uint8 range", in.Status)
+	}
+	if err := s.apiv1.SetCredentialStatus(ctx, &apiv1.SetCredentialStatusRequest{
+		Backend:       in.Backend,
+		StatusListURI: in.StatusListUri,
+		Section:       in.Section,
+		Index:         in.Index,
+		Status:        uint8(in.Status),
+	}); err != nil {
+		return nil, err
+	}
+	return &apiv1_issuer.SetCredentialStatusReply{}, nil
 }

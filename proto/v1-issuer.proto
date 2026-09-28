@@ -17,6 +17,11 @@ service IssuerService {
     rpc JWKS (Empty) returns (JwksReply) {}
     rpc SignMetadata (SignMetadataRequest) returns (SignMetadataReply) {}
     rpc GetIACAs (Empty) returns (GetIACAsReply) {}
+    // SetCredentialStatus writes a new status-list value for an
+    // already-issued credential. The issuer is the one component configured
+    // with both status-list backends, so routing between them happens here
+    // rather than in every caller.
+    rpc SetCredentialStatus (SetCredentialStatusRequest) returns (SetCredentialStatusReply) {}
     rpc Status (v1.status.StatusRequest) returns (v1.status.StatusReply) {}
 }
 
@@ -58,6 +63,11 @@ message MakeSDJWTReply {
    // list; an external draft-ietf-oauth-status-list service identifies a
    // list by this URI alone.
    string token_status_list_uri = 4;
+   // Which status-list backend issued the entry ("registry" or
+   // "status_service"). Recorded at issuance: the URI alone does not
+   // identify the backend, and guessing at revocation time writes the
+   // status into the wrong list.
+   string token_status_list_backend = 5;
 }
 
 // MakeJWPRequest is the request for creating a blind BBS credential in JWP
@@ -106,6 +116,11 @@ message MakeJWPReply {
    // list; an external draft-ietf-oauth-status-list service identifies a
    // list by this URI alone.
    string token_status_list_uri = 4;
+   // Which status-list backend issued the entry ("registry" or
+   // "status_service"). Recorded at issuance: the URI alone does not
+   // identify the backend, and guessing at revocation time writes the
+   // status into the wrong list.
+   string token_status_list_backend = 5;
 }
 
 // MakeMDocRequest is the request for creating an mdoc document (ISO 18013-5)
@@ -127,6 +142,8 @@ message MakeMDocReply {
     string valid_until = 5;        // RFC3339 timestamp
     // See token_status_list_uri on MakeSDJWTReply.
     string status_list_uri = 6;
+    // See token_status_list_backend on MakeSDJWTReply.
+    string status_list_backend = 7;
 }
 
 message Credential {
@@ -180,4 +197,24 @@ message MakeVC20Reply {
     string valid_until = 6;            // RFC3339 timestamp (optional)
     // See token_status_list_uri on MakeSDJWTReply.
     string status_list_uri = 7;
+    // See token_status_list_backend on MakeSDJWTReply.
+    string status_list_backend = 8;
+}
+
+// SetCredentialStatusRequest asks for one issued credential's status-list
+// entry to be set to a new value.
+message SetCredentialStatusRequest {
+    // Which backend issued the entry: "registry" or "status_service".
+    string backend = 1;
+    // The list the entry lives in.
+    string status_list_uri = 2;
+    // Meaningful only for the registry backend, which shards its list.
+    int64 section = 3;
+    int64 index = 4;
+    // draft-ietf-oauth-status-list value: 0 VALID, 1 INVALID, 2 SUSPENDED.
+    uint32 status = 5;
+}
+
+message SetCredentialStatusReply {
+    // Empty reply; success is indicated by the absence of an error.
 }

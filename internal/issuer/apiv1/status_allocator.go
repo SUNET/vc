@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/statusserviceclient"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
@@ -23,7 +24,29 @@ type statusAllocation struct {
 	Section int64
 	Index   int64
 	URI     string
+	// Backend names which status-list implementation issued this entry.
+	//
+	// It is recorded rather than inferred later. At revocation time all
+	// that survives is the stored entry, and the URI alone does not say
+	// which backend owns it: a registry list and an external service's list
+	// are both just ".../statuslists/<something>", and an issuer can have
+	// been reconfigured between issuance and revocation. Guessing wrong
+	// means writing a status into the wrong list - flipping an unrelated
+	// credential while leaving the intended one valid. The allocator knows
+	// the answer for certain at the only moment it is free, so it says so.
+	Backend string
 }
+
+// The status-list backends an entry can come from.
+const (
+	// StatusBackendRegistry is vc's own built-in Token Status List, served
+	// by the registry service and addressed by (section, index).
+	StatusBackendRegistry = "registry"
+	// StatusBackendStatusService is an external
+	// draft-ietf-oauth-status-list service, addressed by (list URI, index);
+	// it has no sections.
+	StatusBackendStatusService = "status_service"
+)
 
 // statusAllocator allocates and updates status-list entries for issued
 // credentials, regardless of whether they come from vc's own built-in Token
@@ -63,7 +86,12 @@ func (a *registryStatusAllocator) Allocate(ctx context.Context) (*statusAllocati
 	if err != nil {
 		return nil, err
 	}
-	return &statusAllocation{Section: reply.GetSection(), Index: reply.GetIndex(), URI: reply.GetStatusListUri()}, nil
+	return &statusAllocation{
+		Section: reply.GetSection(),
+		Index:   reply.GetIndex(),
+		URI:     reply.GetStatusListUri(),
+		Backend: StatusBackendRegistry,
+	}, nil
 }
 
 func (a *registryStatusAllocator) Invalidate(ctx context.Context, alloc *statusAllocation) {
@@ -90,7 +118,11 @@ func (a *externalStatusAllocator) Allocate(ctx context.Context) (*statusAllocati
 	if err != nil {
 		return nil, err
 	}
-	return &statusAllocation{Index: int64(entry.Index), URI: entry.ListURL}, nil
+	return &statusAllocation{
+		Index:   int64(entry.Index),
+		URI:     entry.ListURL,
+		Backend: StatusBackendStatusService,
+	}, nil
 }
 
 func (a *externalStatusAllocator) Invalidate(ctx context.Context, alloc *statusAllocation) {
@@ -221,4 +253,84 @@ func (c *Client) allocateOptionalStatus(ctx context.Context, format string) (*st
 func (c *Client) statusServiceDegradedModeProceeds() bool {
 	scfg := c.cfg.Issuer.StatusService
 	return scfg == nil || scfg.DegradedMode == "" || scfg.DegradedMode == "proceed"
+}
+
+// SetCredentialStatusRequest asks for one already-issued credential's
+// status-list entry to be set to a new value.
+type SetCredentialStatusRequest struct {
+	// Backend names the status-list implementation that issued the entry,
+	// as recorded at issuance time. See statusAllocation.Backend for why
+	// this is carried rather than inferred from the URI.
+	Backend string `json:"backend" validate:"required,oneof=registry status_service"`
+	// StatusListURI is the list the entry lives in. Required for both
+	// backends: it is how the status service addresses a list, and for the
+	// registry it is what lets a caller confirm the entry it is acting on
+	// is the one it looked up.
+	StatusListURI string `json:"status_list_uri" validate:"required,url"`
+	// Section is meaningful only for the registry backend.
+	Section int64 `json:"section" validate:"gte=0"`
+	Index   int64 `json:"index" validate:"gte=0"`
+	// Status is the draft-ietf-oauth-status-list value to write: 0 VALID,
+	// 1 INVALID, 2 SUSPENDED.
+	Status uint8 `json:"status" validate:"gte=0,lte=255"`
+}
+
+// SetCredentialStatus writes a new status for an already-issued credential's
+// entry, routing to whichever backend allocated it.
+//
+// This is the revocation counterpart to allocation, and it lives here for
+// the same reason allocation does: the issuer is the one component
+// configured with both backends, so routing between them happens once, in
+// the place that already knows how to reach each. Callers (the apigw revoke
+// API) need to know nothing about status lists beyond what they recorded at
+// issuance.
+//
+// It refuses rather than guesses when the named backend is not configured.
+// Silently falling back to the other one would write the status into a
+// different list, which flips an unrelated credential and leaves the
+// intended one valid.
+func (c *Client) SetCredentialStatus(ctx context.Context, req *SetCredentialStatusRequest) error {
+	ctx, span := c.tracer.Start(ctx, "apiv1:SetCredentialStatus")
+	defer span.End()
+
+	if req == nil {
+		return errors.New("request is required")
+	}
+	if err := helpers.Check(ctx, c.cfg, req, c.log); err != nil {
+		return err
+	}
+
+	switch req.Backend {
+	case StatusBackendRegistry:
+		if c.registryClient == nil {
+			return fmt.Errorf("cannot set the status of entry %d/%d: this issuer has no registry client configured, and the entry was issued by the registry backend", req.Section, req.Index)
+		}
+		if _, err := c.registryClient.TokenStatusListUpdateStatus(ctx, &apiv1_registry.TokenStatusListUpdateStatusRequest{
+			Section: req.Section,
+			Index:   req.Index,
+			Status:  uint32(req.Status),
+		}); err != nil {
+			return fmt.Errorf("registry status update failed for %d/%d: %w", req.Section, req.Index, err)
+		}
+		return nil
+
+	case StatusBackendStatusService:
+		if c.statusServiceClient == nil {
+			return fmt.Errorf("cannot set the status of entry %d in %q: this issuer has no status service configured, and the entry was issued by an external status service", req.Index, req.StatusListURI)
+		}
+		listID, err := statusserviceclient.ListIDFromURL(req.StatusListURI)
+		if err != nil {
+			return fmt.Errorf("cannot determine the list ID of %q: %w", req.StatusListURI, err)
+		}
+		if err := c.statusServiceClient.SetStatus(ctx, listID, uint64(req.Index), statusserviceclient.Status(req.Status)); err != nil {
+			return fmt.Errorf("status service update failed for index %d in list %q: %w", req.Index, listID, err)
+		}
+		return nil
+
+	default:
+		// Validation above already rejects this; the branch exists so that
+		// adding a backend without adding a case here fails loudly rather
+		// than silently doing nothing.
+		return fmt.Errorf("unknown status list backend %q", req.Backend)
+	}
 }

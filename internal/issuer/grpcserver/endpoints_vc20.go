@@ -27,6 +27,7 @@ func (s *Service) MakeVC20(ctx context.Context, in *apiv1_issuer.MakeVC20Request
 		StatusListSection: reply.StatusListSection,
 		StatusListIndex:   reply.StatusListIndex,
 		StatusListUri:     reply.StatusListURI,
+		StatusListBackend: reply.StatusListBackend,
 		ValidFrom:         reply.ValidFrom,
 		ValidUntil:        reply.ValidUntil,
 	}, nil

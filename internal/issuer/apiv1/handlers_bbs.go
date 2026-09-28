@@ -45,6 +45,11 @@ type CreateJWPReply struct {
 	// draft-ietf-oauth-status-list service has no sections and identifies a
 	// list by this URI alone.
 	TokenStatusListURI string `json:"token_status_list_uri,omitempty"`
+	// TokenStatusListBackend names the status-list implementation that
+	// issued the entry ("registry" or "status_service"). Recorded at
+	// issuance because the URI alone does not identify the backend, and
+	// guessing at revocation time writes into the wrong list.
+	TokenStatusListBackend string `json:"token_status_list_backend,omitempty"`
 }
 
 // MakeJWP verifies the holder's commitment and blind-signs a credential.
@@ -211,6 +216,7 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 		reply.TokenStatusListSection = statusEntry.Section
 		reply.TokenStatusListIndex = statusEntry.Index
 		reply.TokenStatusListURI = statusEntry.URI
+		reply.TokenStatusListBackend = statusEntry.Backend
 	}
 	return reply, nil
 }
