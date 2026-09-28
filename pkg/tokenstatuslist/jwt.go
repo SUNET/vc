@@ -80,7 +80,7 @@ func (sl *StatusList) GenerateJWT(cfg JWTSigningConfig) (string, error) {
 		Issuer:   sl.Issuer,
 		IssuedAt: jwt.NewNumericDate(now),
 		StatusList: StatusListClaim{
-			Bits:           Bits,
+			Bits:           sl.BitsOrDefault(),
 			Lst:            lst,
 			AggregationURI: sl.AggregationURI,
 		},
@@ -167,8 +167,9 @@ func ParseJWT(tokenString string, keyFunc jwt.Keyfunc) (*JWTClaims, error) {
 // GetStatusFromJWT retrieves a status value from a parsed JWT Status List Token.
 // The index corresponds to the "idx" value in the Referenced Token's status claim.
 func GetStatusFromJWT(claims *JWTClaims, index int) (uint8, error) {
-	// Decode and decompress the status list
-	statuses, err := DecodeAndDecompress(claims.StatusList.Lst)
+	// The token's own bits member decides the layout. Reading it at a fixed
+	// width would return a different credential's status, not an error.
+	statuses, err := DecodeDecompressAndUnpack(claims.StatusList.Lst, claims.StatusList.Bits)
 	if err != nil {
 		return 0, fmt.Errorf("failed to decode status list: %w", err)
 	}

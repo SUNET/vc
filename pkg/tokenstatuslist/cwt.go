@@ -102,7 +102,7 @@ func (sl *StatusList) GenerateCWT(cfg CWTSigningConfig) ([]byte, error) {
 		cwtClaimSub: sl.Subject,
 		cwtClaimIat: now.Unix(),
 		cwtClaimStatusList: CWTStatusList{
-			Bits:           Bits,
+			Bits:           sl.BitsOrDefault(),
 			Lst:            compressedStatuses,
 			AggregationURI: sl.AggregationURI,
 		},
@@ -332,56 +332,17 @@ func ParseCWT(cwtBytes []byte) (map[int]any, error) {
 // GetStatusFromCWT retrieves a status value from parsed CWT claims.
 // The index corresponds to the "idx" value in the Referenced Token's status claim.
 func GetStatusFromCWT(claims map[int]any, index int) (uint8, error) {
-	// Get the status_list claim
 	statusListRaw, ok := claims[cwtClaimStatusList]
 	if !ok {
 		return 0, fmt.Errorf("status_list claim not found")
 	}
 
-	// The status_list can come back in different map formats depending on CBOR decoding
-	var lstBytes []byte
-
-	switch sl := statusListRaw.(type) {
-	case map[any]any:
-		// Try both int and int64 keys
-		for k, v := range sl {
-			switch key := k.(type) {
-			case int:
-				if key == statusListKeyLst {
-					if b, ok := v.([]byte); ok {
-						lstBytes = b
-					}
-				}
-			case int64:
-				if key == int64(statusListKeyLst) {
-					if b, ok := v.([]byte); ok {
-						lstBytes = b
-					}
-				}
-			case uint64:
-				if key == uint64(statusListKeyLst) {
-					if b, ok := v.([]byte); ok {
-						lstBytes = b
-					}
-				}
-			}
-		}
-	case map[int]any:
-		if b, ok := sl[statusListKeyLst].([]byte); ok {
-			lstBytes = b
-		}
-	case CWTStatusList:
-		lstBytes = sl.Lst
-	default:
-		return 0, fmt.Errorf("invalid status_list claim format: %T", statusListRaw)
+	bits, lstBytes, err := CWTStatusListMembers(statusListRaw)
+	if err != nil {
+		return 0, err
 	}
 
-	if lstBytes == nil {
-		return 0, fmt.Errorf("lst not found in status_list")
-	}
-
-	// Decompress
-	statuses, err := DecompressStatuses(lstBytes)
+	statuses, err := DecompressAndUnpack(lstBytes, bits)
 	if err != nil {
 		return 0, fmt.Errorf("failed to decompress status list: %w", err)
 	}
