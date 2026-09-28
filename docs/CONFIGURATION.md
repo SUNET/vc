@@ -501,13 +501,13 @@ The data comes directly from the SAML attributes or OIDC claims.
 
 Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys
 
-| Field       | Type     | Description                                                                                                                                              | Example                 | Default | Required |
-| ----------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- | -------- |
-| `claim`     | `string` | Target claim name (supports dot-notation for nesting)                                                                                                    | `"identity.given_name"` | -       | Yes      |
-| `required`  | `bool`   | Required indicates if this attribute must be present in the assertion/response                                                                           | -                       | `false` | No       |
-| `transform` | `string` | Optional transformation to apply Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3", "yyyymmdd_to_iso"                      | -                       | -       | No       |
-| `default`   | `string` | Optional default value if attribute is missing                                                                                                           | -                       | -       | No       |
-| `as_array`  | `bool`   | AsArray wraps a scalar value in a single-element array before setting the claim. No-op when the value is already a slice (e.g. multi-valued OIDC claim). | -                       | -       | No       |
+| Field       | Type     | Description                                                                                                                                                           | Example                 | Default | Required |
+| ----------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- | -------- |
+| `claim`     | `string` | Target claim name (supports dot-notation for nesting)                                                                                                                 | `"identity.given_name"` | -       | Yes      |
+| `required`  | `bool`   | Required indicates if this attribute must be present in the assertion/response                                                                                        | -                       | `false` | No       |
+| `transform` | `string` | Optional transformation to apply Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3", "yyyymmdd_to_iso", "swamid_highest_assurance_level" | -                       | -       | No       |
+| `default`   | `string` | Optional default value if attribute is missing                                                                                                                        | -                       | -       | No       |
+| `as_array`  | `bool`   | AsArray wraps a scalar value in a single-element array before setting the claim. No-op when the value is already a slice (e.g. multi-valued OIDC claim).              | -                       | -       | No       |
 
 ### `auth_providers`
 

@@ -21,11 +21,12 @@ const (
 )
 
 // swamidAssuranceURIs maps recognised SWAMID Assurance Framework URIs to a
-// canonical AL string.
+// canonical AL string. The URIs are the federation-defined identifier
+// strings, not endpoints; the `http://` scheme is what SWAMID publishes.
 var swamidAssuranceURIs = map[string]string{
-	"http://www.swamid.se/policy/assurance/al1": assuranceLevel1,
-	"http://www.swamid.se/policy/assurance/al2": assuranceLevel2,
-	"http://www.swamid.se/policy/assurance/al3": assuranceLevel3,
+	"http://www.swamid.se/policy/assurance/al1": assuranceLevel1, // NOSONAR — SWAMID Assurance Framework identifier, not an endpoint
+	"http://www.swamid.se/policy/assurance/al2": assuranceLevel2, // NOSONAR — SWAMID Assurance Framework identifier, not an endpoint
+	"http://www.swamid.se/policy/assurance/al3": assuranceLevel3, // NOSONAR — SWAMID Assurance Framework identifier, not an endpoint
 }
 
 // swamidAssuranceRank orders AL strings; higher is stronger.

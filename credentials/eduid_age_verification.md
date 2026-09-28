@@ -6,16 +6,32 @@ text_color: "#222222"
 
 # EduID Age Verification Credential
 
-A minimal age-attestation credential derived from an eduID SD-JWT credential
-presented via OpenID4VP during OpenID4VCI. The issuer verifies the presented
-credential, refuses if its assurance level is below the configured minimum
-(`AL2` by default), and derives age-threshold booleans from the presented
-`birthdate`.
+A planned age-attestation credential derived from an eduID SD-JWT credential
+presented via OpenID4VP during OpenID4VCI.
 
-The credential itself carries only the age thresholds and validity dates —
-no name, no birthdate, no address, no assurance level, no issuing metadata.
-Assurance level is enforced at issuance time and is not echoed onto the
-credential.
+## Status
+
+**Scaffold only.** The VCTM and the `common.credential_metadata` entry (in
+`fly/dev/config.yaml`, `fly/demo/config.yaml`) advertise the credential type,
+but the issuance path is not yet implemented. A request for this scope will
+not currently produce a credential. The full design and remaining work are
+in [`docs/EDUID_AGE_ZK_VEGA_PLAN.md`](../docs/EDUID_AGE_ZK_VEGA_PLAN.md).
+
+Concretely, the following are **not yet in code** and are tracked as
+Phase 2 work:
+
+- Wallet scope allowlist entry under `apigw.delivery.openid4vci.clients`.
+- Data-source / auth-provider wiring so `auth_providers.Select` can resolve
+  the scope.
+- Derivation of the `age_over_*` booleans from the presented eduID's
+  `birthdate` (helper existed briefly; deleted for now — the derivation
+  will land beside its caller in the `VCICredential` path).
+- Filtering the presented eduID's claim map against this credential's VCTM
+  before issuance, so no PII (name, birthdate, etc.) leaks into the age
+  credential body.
+- Enforcement of a per-scope `min_assurance_level` (default `AL2`, returning
+  `HTTP 403 insufficient_assurance` otherwise). This is not yet a field on
+  `model.CredentialMetadata` and no code reads it.
 
 ## Claims
 
@@ -27,27 +43,18 @@ credential.
 - `date_of_issuance` (date, mandatory): Start date of this credential's validity. [sd=always]
 - `date_of_expiry` (date, mandatory): End date of this credential's validity. [sd=never]
 
-## Issuance
+## Intended Issuance (Phase 2)
 
-The credential is issued through an **OpenID4VP-during-OpenID4VCI** flow. When
-the wallet requests scope `eduid_age_verification`, the issuer responds with a
-presentation request for the wallet's eduID credential. The wallet returns the
-presentation, the issuer verifies the signature and trust chain, checks
-`assurance_level >= min_assurance_level`, and mints this credential from the
-presented `birthdate`.
-
-## Assurance Level Enforcement
-
-Assurance level is a configuration concern, not a credential claim. The
-`credential_metadata.eduid_age_verification.min_assurance_level` config value
-(default: `AL2`) determines the minimum canonical assurance level (`AL1` /
-`AL2` / `AL3`) the presented eduID must attest. If the presented credential's
-`assurance_level` claim is absent or below the configured minimum, the issuer
-returns `HTTP 403 insufficient_assurance` and no credential is issued.
+The credential is to be issued through an **OpenID4VP-during-OpenID4VCI**
+flow. When the wallet requests scope `eduid_age_verification`, the issuer
+responds with a presentation request for the wallet's eduID credential. The
+wallet returns the presentation, the issuer verifies the signature and trust
+chain, checks that the presented eduID's `assurance_level` claim is at least
+the configured minimum, and mints this credential from the presented
+`birthdate`.
 
 ## Formats
 
-- `dc+sd-jwt` — traditional SD-JWT VC (implemented).
-- `zk+vega` — zero-knowledge variant using the Vega circuit. Reserved; design
-  in [`docs/EDUID_AGE_ZK_VEGA_PLAN.md`](../docs/EDUID_AGE_ZK_VEGA_PLAN.md); no
-  issuance path exists yet.
+- `dc+sd-jwt` — SD-JWT VC (SD-JWT variant of Phase 2).
+- `zk+vega` — zero-knowledge variant using the Vega circuit. Reserved for
+  the follow-up in [`docs/EDUID_AGE_ZK_VEGA_PLAN.md`](../docs/EDUID_AGE_ZK_VEGA_PLAN.md).
