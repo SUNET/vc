@@ -216,11 +216,23 @@ path can substitute the keys and mint a token the verifier accepts. Private
 and loopback addresses are allowed, so an in-cluster issuer works, as long as
 it is reached over TLS.
 
-A request carrying no bearer credentials is answered with `401` and a bare
-`WWW-Authenticate: Bearer` challenge (RFC 6750 section 3: no error code, since
-none was presented). An `Authorization` header that does use the Bearer scheme
-but cannot be parsed is `400 invalid_request`; a token that was checked and
+A request carrying no bearer credentials is answered with `401`, a bare
+`WWW-Authenticate: Bearer` challenge and an empty body (RFC 6750 section 3: no
+error code "or other error information", since none was presented). An
+`Authorization` header that does use the Bearer scheme but cannot be parsed —
+including one whose token falls outside RFC 6750's `b64token` syntax, such as
+`Bearer abc def` — is `400 invalid_request`; a token that was checked and
 rejected is `401 invalid_token`.
+
+If the key set itself cannot be retrieved, the answer is `503
+temporarily_unavailable` rather than `401`: no verdict on the token was
+reached, so reporting it as a bad credential would send a caller off to mint a
+new one and file a local outage as ordinary auth noise.
+
+In `static` mode the token file must hold a single `b64token` on one line
+(letters, digits, and `-` `.` `_` `~` `+` `/`, with optional trailing `=`).
+Anything else is refused at startup, since no `Authorization` header could ever
+carry it.
 
 Example (`config.yaml`):
 

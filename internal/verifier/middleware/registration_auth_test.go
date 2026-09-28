@@ -419,16 +419,19 @@ func TestRegistrationAuthHeaderErrors(t *testing.T) {
 			if got := rec.Header().Get("WWW-Authenticate"); got != tc.wantChallenge {
 				t.Errorf("challenge: want %q, got %q", tc.wantChallenge, got)
 			}
-			var body map[string]any
-			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-				t.Fatalf("decode body: %v (%s)", err, rec.Body.String())
-			}
 			if tc.wantCode == "" {
-				if got, ok := body["error"]; ok {
-					t.Errorf("no credentials presented: body must carry no error code, got %v", got)
+				// RFC 6750 section 3: no error code "or other error
+				// information" when nothing was presented, so the
+				// response carries no body at all.
+				if rec.Body.Len() != 0 {
+					t.Errorf("no credentials presented: response must carry no body, got %q", rec.Body.String())
 				}
 
 				return
+			}
+			var body map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode body: %v (%s)", err, rec.Body.String())
 			}
 			if got := body["error"]; got != tc.wantCode {
 				t.Errorf("error code: want %q, got %v", tc.wantCode, got)
@@ -454,6 +457,15 @@ func TestStaticBearerTokenFileContents(t *testing.T) {
 		{name: "whitespace only", contents: " \n\t ", wantError: "empty"},
 		{name: "token plus a comment line", contents: "s3cret\n# the registration token\n", wantError: "whitespace inside"},
 		{name: "two tokens", contents: "s3cret other\n", wantError: "whitespace inside"},
+		// The request parser applies RFC 6750's b64token grammar, so a file
+		// holding a value outside it can never match any Authorization
+		// header: the service would start, look enabled, and fail every
+		// registration as invalid_request. Caught here, where the message
+		// can point at the file.
+		{name: "comma", contents: "abc,def\n", wantError: "b64token"},
+		{name: "quotes", contents: `"s3cret"`, wantError: "b64token"},
+		{name: "percent-encoded", contents: "abc%20def\n", wantError: "b64token"},
+		{name: "padding only", contents: "===\n", wantError: "b64token"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "token")
@@ -528,5 +540,125 @@ func TestJWKSFetchRefusesNonHTTPSRedirect(t *testing.T) {
 		}
 		require.Error(t, err, "a redirect to a plaintext location must not be followed")
 		assert.Contains(t, err.Error(), "non-HTTPS")
+	})
+}
+
+// TestJWTValidateDistinguishesKeySetOutageFromBadToken pins whose fault a
+// failure is.
+//
+// Every verification error used to come back as 401 invalid_token, including
+// the ones where no verdict on the token was reached at all because the key
+// set never arrived. That sends a caller off to mint a new credential that
+// will fail the same way, and files a local outage under what reads as
+// ordinary auth noise - so the one signal an operator would act on is the one
+// that gets lost.
+func TestJWTValidateDistinguishesKeySetOutageFromBadToken(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	key, err := jwk.Import(privateKey.Public())
+	require.NoError(t, err)
+	require.NoError(t, key.Set(jwk.KeyIDKey, jwtKid))
+	set := jwk.NewSet()
+	require.NoError(t, set.AddKey(key))
+	jwksJSON, err := json.Marshal(set)
+	require.NoError(t, err)
+
+	signed := func(t *testing.T, aud string) string {
+		t.Helper()
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+			"iss": issuerExampleURL,
+			"aud": aud,
+			"sub": "client-reg-admin",
+			"exp": time.Now().Add(5 * time.Minute).Unix(),
+			"iat": time.Now().Unix(),
+		})
+		token.Header["kid"] = jwtKid
+		raw, err := token.SignedString(privateKey)
+		require.NoError(t, err)
+
+		return raw
+	}
+
+	validatorFor := func(t *testing.T, jwksURL string) *jwtBearerValidator {
+		t.Helper()
+		v, err := newJWTBearerValidator(&model.DynamicRegistrationJWTAuthConfig{
+			JWKSURI:            jwksURL,
+			Issuer:             issuerExampleURL,
+			Audience:           registerAudience,
+			AllowedSigningAlgs: []string{"RS256"},
+		})
+		require.NoError(t, err)
+
+		return v
+	}
+
+	assertOutage := func(t *testing.T, err error) {
+		t.Helper()
+		require.Error(t, err)
+		var authErr *registrationAuthError
+		require.ErrorAs(t, err, &authErr)
+		assert.Equal(t, http.StatusServiceUnavailable, authErr.status,
+			"an unfetchable key set is this service's failure, not the caller's")
+		assert.Equal(t, errCodeTemporarilyUnavailable, authErr.errorCode)
+	}
+
+	t.Run("JWKS endpoint answers 500", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "boom", http.StatusInternalServerError)
+		}))
+		defer srv.Close()
+
+		assertOutage(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
+	})
+
+	t.Run("JWKS endpoint unreachable", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write(jwksJSON)
+		}))
+		url := srv.URL
+		srv.Close() // nothing is listening any more
+
+		assertOutage(t, validatorFor(t, url).Validate(t.Context(), signed(t, registerAudience)))
+	})
+
+	t.Run("JWKS endpoint redirects to plaintext", func(t *testing.T) {
+		final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write(jwksJSON)
+		}))
+		defer final.Close()
+		redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, final.URL, http.StatusFound)
+		}))
+		defer redirector.Close()
+
+		assertOutage(t, validatorFor(t, redirector.URL).Validate(t.Context(), signed(t, registerAudience)))
+	})
+
+	// The contrast case: the key set arrived and the token lost on its
+	// merits, which must stay 401 invalid_token.
+	t.Run("key set fine, token rejected", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(jwksJSON)
+		}))
+		defer srv.Close()
+
+		err := validatorFor(t, srv.URL).Validate(t.Context(), signed(t, "wrong-audience"))
+		require.Error(t, err)
+		var authErr *registrationAuthError
+		require.ErrorAs(t, err, &authErr)
+		assert.Equal(t, http.StatusUnauthorized, authErr.status)
+		assert.Equal(t, errCodeInvalidToken, authErr.errorCode)
+	})
+
+	t.Run("a good token still passes", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(jwksJSON)
+		}))
+		defer srv.Close()
+
+		require.NoError(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
 	})
 }

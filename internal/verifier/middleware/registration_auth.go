@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,7 +32,35 @@ const (
 	errDescInvalidRegistrationAuthorizationToken = "invalid registration authorization token"
 	errDescMalformedBearerToken                  = "malformed bearer token in Authorization header"
 	errDescRegistrationAuthorizationRequired     = "authorization is required for dynamic client registration"
+
+	// RFC 6749 section 4.1.2.1, reused here for the one failure that is
+	// ours rather than the caller's: the key set could not be fetched, so
+	// no verdict on the token was reached at all.
+	errCodeTemporarilyUnavailable        = "temporarily_unavailable"
+	errDescRegistrationKeySetUnavailable = "registration authorization is temporarily unavailable: the signing key set could not be retrieved"
 )
+
+// errJWKSUnavailable marks a JWKS response that arrived but carried no key
+// set. go-oidc formats a non-2xx into its message rather than wrapping it, so
+// without this there is nothing for the caller to match on and an unreachable
+// key set is indistinguishable from a bad token.
+var errJWKSUnavailable = errors.New("JWKS endpoint did not return a key set")
+
+// keySetUnavailableMarker is how "the key set never arrived" survives the trip
+// up through go-oidc.
+//
+// The error chain does not survive it: oidc.IDTokenVerifier.Verify formats the
+// key set's error with %v (verify.go, "failed to verify signature: %v"), so by
+// the time Validate sees it, errors.Is and errors.As have nothing left to
+// walk. The text is all that is left, so the classification happens lower
+// down - in classifyingKeySet, where the chain is still intact - and is
+// carried out as this marker.
+//
+// Matching on a string is only safe because it is a string this package owns
+// on both ends: the constant is what classifyingKeySet emits and what Validate
+// looks for, so the two cannot drift. Matching on go-oidc's own wording
+// instead would break silently on an upgrade.
+const keySetUnavailableMarker = "vc-registration-auth: jwks-unavailable"
 
 // errNoBearerCredentials marks the case where the request carried nothing
 // that was even an attempt at a bearer token: no Authorization header, or one
@@ -189,20 +218,28 @@ func buildRegistrationAuthValidator(mode string, authCfg *model.DynamicRegistrat
 }
 
 func writeRegistrationAuthError(c *gin.Context, authErr *registrationAuthError) {
-	// An empty code is the "no credentials presented" case: RFC 6750
-	// section 3 says not to name an error there, so the challenge is bare
-	// and the body carries only a human-readable description.
+	// An empty code is the "no credentials presented" case. RFC 6750
+	// section 3: "the resource server SHOULD NOT include an error code or
+	// other error information" - so the challenge is bare and the response
+	// has no body at all. A description would be exactly the other error
+	// information the sentence excludes, and there is nothing to describe
+	// anyway: the client sent no credential, and the challenge header
+	// already says what to send instead.
 	if authErr.errorCode == "" {
 		c.Header("WWW-Authenticate", "Bearer")
 		c.Header("Cache-Control", "no-store")
 		c.Header("Pragma", "no-cache")
-		c.JSON(authErr.status, gin.H{"error_description": authErr.description})
-		c.Abort()
+		c.AbortWithStatus(authErr.status)
 
 		return
 	}
 
-	c.Header("WWW-Authenticate", fmt.Sprintf("Bearer error=\"%s\"", authErr.errorCode))
+	// No challenge on a server-side failure. WWW-Authenticate answers "what
+	// must you present to get in", and the answer to a key set this service
+	// cannot reach is not a different token.
+	if authErr.status < http.StatusInternalServerError {
+		c.Header("WWW-Authenticate", fmt.Sprintf("Bearer error=\"%s\"", authErr.errorCode))
+	}
 	// RFC 6749 section 5.2, and matching what the OIDC endpoints already do
 	// (see verifier/httpserver/endpoints_oidc.go): an authorization error is
 	// specific to one request's credential, so an intermediary holding on to
@@ -326,6 +363,15 @@ func newStaticBearerValidator(tokenFilePath string) (*staticBearerValidator, err
 	if strings.ContainsFunc(token, unicode.IsSpace) {
 		return nil, fmt.Errorf("static bearer token file contains whitespace inside the token (expected a single line holding only the token)")
 	}
+	// The same grammar the request parser applies. A file holding, say,
+	// "abc,def" would start cleanly and then fail every registration with
+	// invalid_request, because no Authorization header can carry that value
+	// - so the service would look enabled and be unusable. Checked here,
+	// where the message can say the file is wrong.
+	if !isB64Token(token) {
+		return nil, fmt.Errorf("static bearer token file contains characters outside RFC 6750 b64token syntax "+
+			"(allowed: letters, digits, and - . _ ~ + / with optional trailing =): %q cannot be sent in an Authorization header", token)
+	}
 
 	return &staticBearerValidator{tokenDigest: sha256.Sum256([]byte(token))}, nil
 }
@@ -359,8 +405,40 @@ type jwtBearerValidator struct {
 func newJWKSHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout:       jwksFetchTimeout,
+		Transport:     &jwksTransport{base: http.DefaultTransport},
 		CheckRedirect: refuseNonHTTPSRedirect,
 	}
+}
+
+// jwksTransport turns a JWKS response that is not a success into an error, so
+// that "the key set did not arrive" stays distinguishable from "the token was
+// rejected" all the way up to the response this service sends.
+//
+// Needed because go-oidc reports a non-2xx as a formatted string rather than a
+// wrapped error, leaving nothing for errors.Is to match - and an endpoint
+// answering 500 is as much an outage as one refusing the connection.
+type jwksTransport struct {
+	base http.RoundTripper
+}
+
+func (t *jwksTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3xx is deliberately passed through: redirects are the client's to
+	// follow, and CheckRedirect is where the scheme of the destination is
+	// judged. Swallowing them here would turn a legitimate https redirect
+	// into an outage and, worse, take the refusal of a plaintext one out of
+	// the picture entirely.
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusBadRequest {
+		_ = resp.Body.Close()
+
+		return nil, fmt.Errorf("%w: HTTP %s", errJWKSUnavailable, resp.Status)
+	}
+
+	return resp, nil
 }
 
 // refuseNonHTTPSRedirect stops a JWKS fetch from being walked off TLS.
@@ -410,7 +488,7 @@ func newJWTBearerValidator(cfg *model.DynamicRegistrationJWTAuthConfig) (*jwtBea
 	// destination, because a redirect nobody configured is not obvious
 	// from the setting that was.
 	keySetCtx := oidc.ClientContext(context.Background(), newJWKSHTTPClient())
-	keySet := oidc.NewRemoteKeySet(keySetCtx, cfg.JWKSURI)
+	keySet := &classifyingKeySet{inner: oidc.NewRemoteKeySet(keySetCtx, cfg.JWKSURI)}
 	oidcCfg := &oidc.Config{
 		ClientID:             cfg.Audience,
 		SupportedSigningAlgs: algs,
@@ -439,8 +517,65 @@ func (v *jwtBearerValidator) Validate(ctx context.Context, token string) error {
 	defer cancel()
 
 	if _, err := v.verifier.Verify(verifyCtx, token); err != nil {
+		// A key set this service could not fetch is not a token the client
+		// got wrong. Reporting it as invalid_token sends a caller off to
+		// mint a new credential that will fail the same way, and hides a
+		// local outage behind what reads as a client error - so the one
+		// signal an operator would page on looks like ordinary auth noise.
+		if isKeySetUnavailable(err) {
+			return &registrationAuthError{
+				status:      http.StatusServiceUnavailable,
+				errorCode:   errCodeTemporarilyUnavailable,
+				description: errDescRegistrationKeySetUnavailable,
+			}
+		}
+
 		return unauthorizedRegistrationError(errDescInvalidRegistrationAuthorizationToken)
 	}
 
 	return nil
+}
+
+// classifyingKeySet decides, while the error chain is still intact, whether a
+// verification failure was the key set not arriving or the token losing on its
+// merits - and records the former in a form that survives go-oidc's %v.
+type classifyingKeySet struct {
+	inner oidc.KeySet
+}
+
+func (k *classifyingKeySet) VerifySignature(ctx context.Context, jwt string) ([]byte, error) {
+	payload, err := k.inner.VerifySignature(ctx, jwt)
+	if err != nil && isTransportFailure(err) {
+		return nil, fmt.Errorf("%s: %w", keySetUnavailableMarker, err)
+	}
+
+	return payload, err
+}
+
+// isTransportFailure reports whether the key set failed to arrive, as opposed
+// to arriving and not matching.
+//
+// Every transport-level failure reaches here as a *url.Error - the http client
+// wraps what RoundTrip returns, and go-oidc wraps that with %w at this level -
+// which covers connection refused, DNS failure, TLS failure, the per-fetch
+// timeout, and the non-HTTPS redirect this package refuses. jwksTransport
+// turns a non-2xx response into one too, since go-oidc reports that as a
+// formatted string nothing can match on. The bare context errors are the
+// goroutine path, where go-oidc wraps the context error directly rather than a
+// client error.
+func isTransportFailure(err error) bool {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return true
+	}
+
+	return errors.Is(err, errJWKSUnavailable) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled)
+}
+
+// isKeySetUnavailable reports whether a verification failure was the key set
+// not arriving. See keySetUnavailableMarker for why this reads the text.
+func isKeySetUnavailable(err error) bool {
+	return err != nil && strings.Contains(err.Error(), keySetUnavailableMarker)
 }

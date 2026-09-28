@@ -61,6 +61,10 @@ verifier:
       refresh_token_duration: 86400
       # Dynamic Client Registration authorization policy for POST /register
       # Modes: open (default), static (file bearer token), jwt (JWKS validation)
+      # The token file must hold a single RFC 6750 b64token on one line
+      # (letters, digits, and - . _ ~ + / with optional trailing =);
+      # anything else is refused at startup, since no Authorization
+      # header could carry it.
       # dynamic_registration_auth:
       #   mode: "static"
       #   static_bearer_token_file: "/run/secrets/verifier_dcr_initial_access_token"
