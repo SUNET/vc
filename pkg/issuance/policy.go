@@ -22,7 +22,7 @@ type PolicyEngine struct {
 }
 
 // scopeDimension is always the first dimension in a "credential" query/rule,
-// regardless of QueryTemplate, matching BuildQuery's fixed ordering.
+// regardless of QueryTemplate, matching buildQuery's fixed ordering.
 const scopeDimension = "scope"
 
 // policyRuleDimensions returns the ordered dimension list a rule must match
@@ -176,28 +176,26 @@ func (pe *PolicyEngine) Evaluate(scope string, claims map[string]any, queryTempl
 	return nil
 }
 
-// BuildQuery constructs a SPOCP query S-expression from credential scope and OIDC claims.
-// The query has the form: (credential (scope <scope>) (dim1 <value1>) (dim2 <value2>) ...)
+// buildQuery constructs a SPOCP query S-expression from the credential scope
+// and the OIDC claims, and reports which template claims were not asserted.
+// The query has the form: (credential (scope <scope>) (dim1 <value1>) ...)
 //
 // The dimensions come from queryTemplate, in its order, so they line up with
-// the positions the rules were validated against. There is no longer a
-// claim-driven fallback for an absent template: it emitted whatever claims
-// the token happened to carry, in name order, which shifted the rule's
-// dimensions out of position and denied. See NewPolicyEngine.
-func BuildQuery(scope string, claims map[string]any, queryTemplate []model.QueryDimension) sexp.Element {
-	query, _ := buildQuery(scope, claims, queryTemplate)
-
-	return query
-}
-
-// buildQuery is BuildQuery plus the part a caller must not be able to ignore:
-// which template claims the provider did not assert.
+// the positions the rules were validated against. There is no claim-driven
+// fallback for an absent template: it emitted whatever claims the token
+// happened to carry, in name order, which shifted the rule's dimensions out of
+// position and denied. See NewPolicyEngine.
 //
-// They are returned rather than folded into the query because the query cannot
-// express the difference. An unresolved dimension is emitted empty, and an
-// empty dimension is exactly how a wildcard rule is written here, so absence
-// and "any value" become the same S-expression. Evaluate denies on a non-empty
-// missing list before querying.
+// The missing list is returned rather than folded into the query because the
+// query cannot express the difference. An unresolved dimension is emitted
+// empty, and an empty dimension is exactly how a wildcard rule is written
+// here, so absence and "any value" become the same S-expression. Evaluate
+// denies on a non-empty missing list before querying.
+//
+// Unexported for that reason: a caller holding only the query has already lost
+// the information that decides whether it may be asked, and an exported
+// helper that hands back just the S-expression is an invitation to rebuild the
+// hole. Evaluate is the way in.
 func buildQuery(scope string, claims map[string]any, queryTemplate []model.QueryDimension) (sexp.Element, []string) {
 	dims := make([]string, 0, len(queryTemplate)+1)
 	dims = append(dims, scopeDimension)

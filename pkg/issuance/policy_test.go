@@ -366,7 +366,7 @@ func TestEvaluate_BooleanClaims(t *testing.T) {
 }
 
 func TestBuildQuery_WithTemplate(t *testing.T) {
-	query := BuildQuery("pid", map[string]any{
+	query, _ := buildQuery("pid", map[string]any{
 		"acr":    "loa3",
 		"org_id": "123",
 		"sub":    "alice",
@@ -388,7 +388,7 @@ func TestBuildQuery_WithTemplate(t *testing.T) {
 // dimensions - the query carries the scope and nothing else, rather than
 // silently reaching for whatever claims happened to be present.
 func TestBuildQuery_WithoutTemplate(t *testing.T) {
-	query := BuildQuery("pid", map[string]any{
+	query, _ := buildQuery("pid", map[string]any{
 		"acr": "loa3",
 		"sub": "alice",
 	}, nil)
@@ -432,7 +432,7 @@ func TestToStringValue(t *testing.T) {
 // configuration documents and the doc_example advertises
 // ("identity.given_name").
 //
-// BuildQuery used a flat map lookup, so such a path never resolved. The
+// buildQuery used a flat map lookup, so such a path never resolved. The
 // dimension was then emitted empty, which matches a wildcard rule and fails
 // a rule requiring a value - a policy would widen or hard-deny with nothing
 // saying why. ProcessCallback fills the claims via idToken.Claims, so a
@@ -463,7 +463,7 @@ func TestBuildQueryResolvesNestedClaimPaths(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// String() renders the canonical length-prefixed SPOCP form,
 			// not the human-readable one the rules are written in.
-			q := BuildQuery("pid", claims, []model.QueryDimension{{Dimension: "dim", Claim: tc.claim}})
+			q, _ := buildQuery("pid", claims, []model.QueryDimension{{Dimension: "dim", Claim: tc.claim}})
 			assert.Equal(t, tc.want, q.String())
 		})
 	}
