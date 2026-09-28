@@ -301,6 +301,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodPost, "/mapping/bulk", http.StatusOK, s.endpointIdentityMappingBulkCreate)
 
 	// Datastore endpoints
+	// Credential revocation. On the authenticated api/v1 group: revoking
+	// somebody else's credential is as damaging as issuing one.
+	rgCredentialAdmin := rgAPIv1.Group("/credential")
+	s.httpHelpers.Server.RegEndpoint(ctx, rgCredentialAdmin, http.MethodPost, "/revoke", http.StatusOK, s.endpointCredentialRevoke)
+
 	rgDatastore := rgAPIv1.Group("/datastore")
 	// Rate limiting for datastore endpoints
 	datastoreRPM := 60

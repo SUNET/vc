@@ -45,6 +45,15 @@ type IdentityMappingStore interface {
 	SearchMappings(ctx context.Context, query *SearchMappingsQuery) ([]*model.IdentityMapping, error)
 }
 
+// CredentialStatusStore records which status-list entry was allocated for
+// which credential subject, so that a revocation request can find the entry
+// again. The apigw keeps this itself rather than only in the registry, so
+// that vc's local registry can be left out of a deployment entirely.
+type CredentialStatusStore interface {
+	Save(ctx context.Context, entry *CredentialStatusEntry) error
+	SearchByIdentifier(ctx context.Context, identifier string) ([]*CredentialStatusEntry, error)
+}
+
 // DynamicRegistrationStore defines the interface for OIDC dynamic client registration operations
 type DynamicRegistrationStore interface {
 	Save(ctx context.Context, creds *DynamicRegistrationCredentials) error
@@ -57,4 +66,6 @@ var (
 	_ DatastoreStore           = (*DatastoreColl)(nil)
 	_ IdentityMappingStore     = (*IdentityMappingsColl)(nil)
 	_ DynamicRegistrationStore = (*DynamicRegistrationColl)(nil)
+	_ CredentialStatusStore    = (*CredentialStatusColl)(nil)
+	_ CredentialStatusStore    = (*SQLCredentialStatusColl)(nil)
 )

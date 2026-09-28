@@ -536,7 +536,7 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 	// Save credential subject info to registry for status management
 	entries := make([]statusEntry, len(replies))
 	for i, r := range replies {
-		entries[i] = statusEntry{Section: r.TokenStatusListSection, Index: r.TokenStatusListIndex, URI: r.TokenStatusListUri}
+		entries[i] = statusEntry{Section: r.TokenStatusListSection, Index: r.TokenStatusListIndex, URI: r.TokenStatusListUri, Backend: r.TokenStatusListBackend}
 	}
 	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
 		return nil, err
@@ -596,7 +596,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 
 	entries := make([]statusEntry, len(replies))
 	for i, r := range replies {
-		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex, URI: r.StatusListUri}
+		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex, URI: r.StatusListUri, Backend: r.StatusListBackend}
 	}
 	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
 		return nil, err
@@ -676,7 +676,7 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	// Save credential subject info to registry for status management
 	entries := make([]statusEntry, len(replies))
 	for i, r := range replies {
-		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex, URI: r.StatusListUri}
+		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex, URI: r.StatusListUri, Backend: r.StatusListBackend}
 	}
 	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
 		return nil, err
@@ -690,15 +690,29 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 // Section is meaningful only for vc's own registry backend, which shards
 // its list into sections. An external draft-ietf-oauth-status-list service
 // has no such concept and always reports Section 0, which is why URI - not
-// Section - is what tells the two apart.
+// Section - is what identifies the entry, and Backend - not the URI - is
+// what says which implementation owns it.
 type statusEntry struct {
 	Section int64
 	Index   int64
 	URI     string
+	Backend string
 }
 
-// saveCredentialSubjects saves credential subject info linked to Token Status
-// List entries, once per credential issued in a (possibly batched) request.
+// saveCredentialSubjects records which status-list entry was allocated for
+// which credential subject, so revocation can find the entry again.
+//
+// The apigw's own store is authoritative and the write is REQUIRED: a
+// credential whose entry was not recorded can never be revoked, and the
+// entry is consumed either way. Failing the issuance leaves the wallet
+// without a credential and the slot unused, which is recoverable; letting
+// it through is not.
+//
+// The registry is written to as well when one is configured, because its
+// admin GUI reads from there - but only then, and only best-effort. The
+// local registry is optional (see APIGW.RegistryClient): a deployment using
+// an external draft-ietf-oauth-status-list service has no registry to write
+// to, and issuance must not depend on one.
 func (c *Client) saveCredentialSubjects(ctx context.Context, identifier string, entries []statusEntry) error {
 	if identifier == "" {
 		return nil
@@ -711,21 +725,39 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier string, 
 		//
 		// This used to skip on `e.Section <= 0` instead, which silently
 		// discarded EVERY entry allocated by an external status service,
-		// since those have no sections and always report Section 0. The
-		// mapping is what revocation looks the credential up by, so a
-		// discarded entry means a credential that can never be revoked.
+		// since those have no sections and always report Section 0.
 		if e.URI == "" {
 			continue
 		}
-		_, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
+
+		if c.db == nil || c.db.CredentialStatusColl == nil {
+			return errors.New("cannot record the credential's status list entry: no credential status store configured")
+		}
+		if err := c.db.CredentialStatusColl.Save(ctx, &db.CredentialStatusEntry{
+			StatusListURI: e.URI,
+			Index:         e.Index,
+			Identifier:    identifier,
+			Section:       e.Section,
+			Backend:       e.Backend,
+		}); err != nil {
+			c.log.Error(err, "failed to record credential status entry", "uri", e.URI, "index", e.Index)
+			return fmt.Errorf("failed to record credential status entry: %w", err)
+		}
+
+		if c.registryClient == nil {
+			continue
+		}
+		if _, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
 			Identifier:    identifier,
 			Section:       e.Section,
 			Index:         e.Index,
 			StatusListURI: e.URI,
-		})
-		if err != nil {
-			c.log.Error(err, "failed to save credential subject to registry")
-			return fmt.Errorf("failed to save credential subject: %w", err)
+		}); err != nil {
+			// Best-effort: the apigw's own record above is the one
+			// revocation uses, so a registry that is down costs its admin
+			// GUI a row, not the credential its revocability.
+			c.log.Error(err, "failed to mirror credential subject to the registry admin view",
+				"uri", e.URI, "index", e.Index)
 		}
 	}
 	return nil
@@ -1026,6 +1058,7 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 		Section: reply.TokenStatusListSection,
 		Index:   reply.TokenStatusListIndex,
 		URI:     reply.TokenStatusListUri,
+		Backend: reply.TokenStatusListBackend,
 	}}); err != nil {
 		return nil, err
 	}

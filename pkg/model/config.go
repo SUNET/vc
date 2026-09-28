@@ -1429,8 +1429,16 @@ type APIGW struct {
 	PublicURL string `yaml:"public_url" validate:"required,httpurl" doc_example:"\"https://issuer.sunet.se\""`
 	// IssuerClient is the gRPC client config for issuer
 	IssuerClient GRPCClientTLS `yaml:"issuer_client" validate:"required"`
-	// RegistryClient is the gRPC client config for registry
-	RegistryClient GRPCClientTLS `yaml:"registry_client" validate:"required"`
+	// RegistryClient is the gRPC client config for vc's own registry
+	// service, which hosts the built-in Token Status List.
+	//
+	// OPTIONAL: leave addr empty to run without a local registry. A
+	// deployment whose issuer uses an external
+	// draft-ietf-oauth-status-list service needs nothing from the
+	// registry - the apigw records status-list entries in its own
+	// database, and revocation goes through the issuer, which is the
+	// component configured with the backends.
+	RegistryClient GRPCClientTLS `yaml:"registry_client" validate:"omitempty"`
 	// IdentityMappingImport configures automatic import of identity mappings from JSON files at startup.
 	// When configured, APIGW reads JSON files and imports them into the
 	// identity mappings collection on first startup (skipped if data already exists).
