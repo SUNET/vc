@@ -355,6 +355,15 @@ func (ds *DataSources) ResolveDataSource(credentialType, authProvider string) (C
 
 // OIDCRequestParams configures additional parameters to include in the OIDC authorization request.
 // These allow the authentic source to inject dynamic values into the authentication flow.
+//
+// Templated values ("{{.org_id}}") are supplied by the caller that starts the
+// flow, and only the PAR/VCI path carries them (PARRequest.DynamicParams).
+// A scope configured with a template therefore CANNOT be started through
+// POST /oidcrp/initiate: that endpoint has no dynamic-parameter field, so
+// initiation fails with a template error naming the missing key rather than
+// sending the literal "{{.org_id}}" to the OP. Configure templates only for
+// scopes driven over PAR/VCI. See OIDCRPInitiateRequest for why this is a
+// decision (SUNET/vc#380) rather than a missing feature.
 type OIDCRequestParams struct {
 	// ACRValues requests specific authentication context class references from the OP.
 	// Supports Go template syntax for dynamic values: "{{.variable_name}}"

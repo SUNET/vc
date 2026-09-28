@@ -34,10 +34,18 @@ import (
 //
 // Dynamic parameters reach the OIDC request through the PAR/VCI path only:
 // PARRequest.DynamicParams -> AuthorizationContext.DynamicParams -> the
-// consent flow's InitiateAuthForVCI. Adding a field here would put
-// caller-supplied values into the outgoing authorization request from a second
-// entry point, which is an API contract decision rather than a fix; see the
-// discussion on PR #380.
+// consent flow's InitiateAuthForVCI.
+//
+// This is a decision, not a gap left to be closed later (SUNET/vc#380):
+// templated oidc_request_params are supported on the PAR/VCI path and
+// nowhere else. Adding a dynamic-parameter field here would accept
+// caller-supplied values into an authorization request this service sends
+// to the OP, and this endpoint is reachable without authentication - the
+// /oidcrp group carries no auth middleware, unlike api/v1 with its
+// SessionOrAPIAuth and CSRF, and /oidcrp/ is deliberately exempted from the
+// CORS origin check so the IdP redirect can land. So the prerequisite for
+// such a field is authenticating this endpoint, which is a separate change;
+// the field is not the hard part and must not be added without it.
 type OIDCRPInitiateRequest struct {
 	CredentialType string `json:"credential_type" binding:"required"`
 }

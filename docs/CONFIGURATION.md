@@ -456,6 +456,15 @@ Each entry represents one acceptable credential type the wallet can present.
 
 These allow the authentic source to inject dynamic values into the authentication flow.
 
+Templated values ("{{.org_id}}") are supplied by the caller that starts the
+flow, and only the PAR/VCI path carries them (PARRequest.DynamicParams).
+A scope configured with a template therefore CANNOT be started through
+POST /oidcrp/initiate: that endpoint has no dynamic-parameter field, so
+initiation fails with a template error naming the missing key rather than
+sending the literal "{{.org_id}}" to the OP. Configure templates only for
+scopes driven over PAR/VCI. See OIDCRPInitiateRequest for why this is a
+decision (SUNET/vc#380) rather than a missing feature.
+
 | Field           | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                             | Example                                                     | Default | Required |
 | --------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------- | -------- |
 | `acr_values`    | `string`   | ACRValues requests specific authentication context class references from the OP. Supports Go template syntax for dynamic values: "{{.variable_name}}"                                                                                                                                                                                                                                                                   | `"urn:example:loa3"`                                        | -       | No       |
