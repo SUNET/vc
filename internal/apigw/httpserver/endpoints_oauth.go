@@ -343,7 +343,7 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			// Look up per-scope OIDC request params and dynamic params from auth context
 			var oidcParams *model.OIDCRequestParams
 			var dynamicParams map[string]string
-			if scopeCfg := s.cfg.APIGW.DataSources.LookupScopePolicyConfig(scope); scopeCfg != nil {
+			if scopeCfg := s.cfg.APIGW.DataSources.LookupScopePolicyConfig(scope, model.AuthProviderOIDC); scopeCfg != nil {
 				oidcParams = scopeCfg.OIDCRequestParams
 			}
 			authCtx, authCtxErr := s.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: sessionID})

@@ -77,7 +77,7 @@ func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest,
 
 	// Look up per-scope OIDC request params
 	var oidcParams *model.OIDCRequestParams
-	if scopeCfg := c.cfg.APIGW.DataSources.LookupScopePolicyConfig(req.CredentialType); scopeCfg != nil {
+	if scopeCfg := c.cfg.APIGW.DataSources.LookupScopePolicyConfig(req.CredentialType, model.AuthProviderOIDC); scopeCfg != nil {
 		oidcParams = scopeCfg.OIDCRequestParams
 	}
 
@@ -200,7 +200,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	// This uses SPOCP rules to gate credential issuance on claim values.
 	// The raw OIDC claims (pre-transformation) are used for policy evaluation
 	// since the rules reference OIDC claim names, not mapped credential claim names.
-	if scopeCfg := c.cfg.APIGW.DataSources.LookupScopePolicyConfig(session.CredentialType); scopeCfg != nil && scopeCfg.IssuancePolicy != nil {
+	if scopeCfg := c.cfg.APIGW.DataSources.LookupScopePolicyConfig(session.CredentialType, model.AuthProviderOIDC); scopeCfg != nil && scopeCfg.IssuancePolicy != nil {
 		policyEngine, policyErr := issuance.GetPolicyEngine(scopeCfg.IssuancePolicy)
 		if policyErr != nil {
 			span.SetStatus(codes.Error, policyErr.Error())

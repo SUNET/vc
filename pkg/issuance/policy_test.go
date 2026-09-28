@@ -1,6 +1,8 @@
 package issuance
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/model"
@@ -15,15 +17,68 @@ func TestNewPolicyEngine_NilPolicy(t *testing.T) {
 	assert.Nil(t, engine)
 }
 
-func TestNewPolicyEngine_EmptyPolicy(t *testing.T) {
-	engine, err := NewPolicyEngine(&model.IssuancePolicy{})
-	require.NoError(t, err)
+// TestNewPolicyEngine_ConfiguredButNoRules covers every way a configured
+// policy can end up with nothing to match against.
+//
+// They used to fail in opposite directions, both silently. No rules and no
+// rules_file made BuildEngine return (nil, nil), which reads as "no policy
+// configured" - the gate disabled itself. A rules_file that parses to nothing
+// returns an engine with zero rules instead, which no query can satisfy -
+// every issuance for the scope denied at runtime. Neither is a deployment
+// anyone means to have, so both are refused where the scope can still be
+// named.
+func TestNewPolicyEngine_ConfiguredButNoRules(t *testing.T) {
+	t.Run("no rules and no rules_file", func(t *testing.T) {
+		engine, err := NewPolicyEngine(&model.IssuancePolicy{})
+		require.Error(t, err)
+		assert.Nil(t, engine)
+		assert.Contains(t, err.Error(), "neither rules nor rules_file")
+	})
+
+	for _, tc := range []struct {
+		name     string
+		contents string
+	}{
+		{"empty rules_file", ""},
+		{"comments-only rules_file", "# nothing here\n# still nothing\n"},
+		{"blank-lines-only rules_file", "\n\n   \n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "rules.spocp")
+			require.NoError(t, os.WriteFile(path, []byte(tc.contents), 0o600))
+
+			engine, err := NewPolicyEngine(&model.IssuancePolicy{
+				RulesFile:     path,
+				QueryTemplate: []model.QueryDimension{{Dimension: "acr", Claim: "acr"}},
+			})
+			require.Error(t, err, "a rules_file that loads no rules must not yield a usable engine")
+			assert.Nil(t, engine)
+			assert.Contains(t, err.Error(), "no rules were loaded")
+		})
+	}
+}
+
+// TestNewPolicyEngine_RulesWithoutQueryTemplate pins the refusal of the
+// claim-driven fallback.
+//
+// SPOCP matches rule dimensions to query dimensions by position. The fallback
+// built the query from whatever claims the token carried, in name order, so a
+// rule naming two claims matched only when those two sorted ahead of every
+// other claim present - and a real ID token always carries aud, iss, nonce
+// and sub. Such a policy denied every request while reading as configured.
+func TestNewPolicyEngine_RulesWithoutQueryTemplate(t *testing.T) {
+	engine, err := NewPolicyEngine(&model.IssuancePolicy{
+		Rules: []string{"(credential (scope pid)(acr loa3)(org_id))"},
+	})
+	require.Error(t, err)
 	assert.Nil(t, engine)
+	assert.Contains(t, err.Error(), "no query_template")
 }
 
 func TestNewPolicyEngine_InvalidRule(t *testing.T) {
 	policy := &model.IssuancePolicy{
-		Rules: []string{"(invalid (unclosed"},
+		Rules:         []string{"(invalid (unclosed"},
+		QueryTemplate: []model.QueryDimension{{Dimension: "email_verified", Claim: "email_verified"}},
 	}
 	engine, err := NewPolicyEngine(policy)
 	assert.Error(t, err)
@@ -36,10 +91,12 @@ func TestNewPolicyEngine_ValidRules(t *testing.T) {
 		Rules: []string{
 			"(credential (scope pid)(email_verified true))",
 		},
+		QueryTemplate: []model.QueryDimension{{Dimension: "email_verified", Claim: "email_verified"}},
 	}
 	engine, err := NewPolicyEngine(policy)
 	require.NoError(t, err)
 	require.NotNil(t, engine)
+	assert.Equal(t, 1, engine.RuleCount())
 }
 
 func TestEvaluate_SimpleMatch(t *testing.T) {
@@ -208,21 +265,59 @@ func TestEvaluate_MultipleRules(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestEvaluate_NoQueryTemplate pins the second half of the fallback removal.
+//
+// NewPolicyEngine refuses to build an engine without a template, but Evaluate
+// receives the template as its own argument, from a caller that reads it back
+// out of the config. A check that cannot decide has to refuse: with no
+// dimensions the query carries only the scope, so whether it matched would say
+// nothing about the claims.
 func TestEvaluate_NoQueryTemplate(t *testing.T) {
 	policy := &model.IssuancePolicy{
 		Rules: []string{
 			"(credential (scope pid)(email_verified true)(sub))",
 		},
+		QueryTemplate: []model.QueryDimension{
+			{Dimension: "email_verified", Claim: "email_verified"},
+			{Dimension: "sub", Claim: "sub"},
+		},
 	}
 	engine, err := NewPolicyEngine(policy)
 	require.NoError(t, err)
 
-	// Should pass: all claims included as dimensions, query template nil
 	err = engine.Evaluate("pid", map[string]any{
 		"email_verified": "true",
 		"sub":            "alice",
 	}, nil)
-	assert.NoError(t, err)
+	require.Error(t, err, "evaluating with no dimensions must refuse, not answer")
+	assert.Contains(t, err.Error(), "no query_template")
+}
+
+// TestEvaluate_FallbackWouldHaveDenied is the evidence that the removed
+// fallback was not merely unvalidated but wrong.
+//
+// The claim set is what a real ID token looks like. Both claims the rule names
+// are present and correct, and under the old claim-driven query this denied,
+// because aud/auth_time/iss/nonce/sub sorted in between acr and org_id and
+// pushed them out of the positions the rule occupied. With the template the
+// same claims pass.
+func TestEvaluate_FallbackWouldHaveDenied(t *testing.T) {
+	policy := &model.IssuancePolicy{
+		Rules: []string{"(credential (scope pid)(acr loa3)(org_id SE123))"},
+		QueryTemplate: []model.QueryDimension{
+			{Dimension: "acr", Claim: "acr"},
+			{Dimension: "org_id", Claim: "org_id"},
+		},
+	}
+	engine, err := NewPolicyEngine(policy)
+	require.NoError(t, err)
+
+	realIDToken := map[string]any{
+		"aud": "client", "auth_time": 1.0, "iss": "https://op",
+		"nonce": "n", "sub": "u1",
+		"acr": "loa3", "org_id": "SE123",
+	}
+	assert.NoError(t, engine.Evaluate("pid", realIDToken, policy.QueryTemplate))
 }
 
 func TestEvaluate_MissingClaim(t *testing.T) {
@@ -289,6 +384,9 @@ func TestBuildQuery_WithTemplate(t *testing.T) {
 	assert.Len(t, list.Elements, 3)
 }
 
+// TestBuildQuery_WithoutTemplate pins that no template means no claim
+// dimensions - the query carries the scope and nothing else, rather than
+// silently reaching for whatever claims happened to be present.
 func TestBuildQuery_WithoutTemplate(t *testing.T) {
 	query := BuildQuery("pid", map[string]any{
 		"acr": "loa3",
@@ -298,9 +396,28 @@ func TestBuildQuery_WithoutTemplate(t *testing.T) {
 	list, ok := query.(*sexp.List)
 	require.True(t, ok)
 	assert.Equal(t, "credential", list.Tag)
+	assert.Len(t, list.Elements, 1, "only the scope dimension")
+}
 
-	// Should have scope + 2 claim dimensions = 3 elements
-	assert.Len(t, list.Elements, 3)
+// TestToStringValueComposite pins determinism for object and array claims.
+//
+// A claim can legitimately be an object (an address) or an array. fmt's %v
+// walks a map in Go's randomised order, so the same claim value rendered to a
+// different atom between two requests and a rule written against one spelling
+// matched sometimes and denied sometimes, with nothing in the logs telling the
+// two runs apart.
+func TestToStringValueComposite(t *testing.T) {
+	nested := map[string]any{
+		"street": "Main", "city": "Stockholm", "zip": "11122",
+		"country": "SE", "region": "Sodermanland", "extra": "x",
+	}
+	first := toStringValue(nested)
+	for range 50 {
+		assert.Equal(t, first, toStringValue(nested), "composite claim must render identically every time")
+	}
+	assert.Equal(t, `{"city":"Stockholm","country":"SE","extra":"x","region":"Sodermanland","street":"Main","zip":"11122"}`, first)
+
+	assert.Equal(t, `["a","b"]`, toStringValue([]any{"a", "b"}))
 }
 
 func TestToStringValue(t *testing.T) {

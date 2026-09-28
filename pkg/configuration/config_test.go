@@ -249,7 +249,7 @@ func TestCheckIssuancePolicies(t *testing.T) {
 	t.Run("configured but empty is refused", func(t *testing.T) {
 		err := checkIssuancePolicies(withAssertionPolicy(&model.IssuancePolicy{}), "apigw")
 		require.Error(t, err, "an empty policy would let every issuance through")
-		require.Contains(t, err.Error(), "defines no rules")
+		require.Contains(t, err.Error(), "neither rules nor rules_file")
 		require.Contains(t, err.Error(), "org_credential", "the error must name the scope")
 	})
 
@@ -258,16 +258,59 @@ func TestCheckIssuancePolicies(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	// The layer below the one above: a rules_file is configured, so the
+	// policy does not look empty, but the file parses to nothing. That used
+	// to produce an engine with zero rules - an active policy no query can
+	// satisfy, denying every issuance for the scope at runtime while the
+	// config read as correct.
+	t.Run("a rules_file that loads no rules is refused", func(t *testing.T) {
+		for _, tc := range []struct {
+			name     string
+			contents string
+		}{
+			{"empty file", ""},
+			{"comments only", "# no rules here\n"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "rules.spocp")
+				require.NoError(t, os.WriteFile(path, []byte(tc.contents), 0o600))
+
+				err := checkIssuancePolicies(withAssertionPolicy(&model.IssuancePolicy{
+					RulesFile:     path,
+					QueryTemplate: []model.QueryDimension{{Dimension: "acr", Claim: "acr"}},
+				}), "apigw")
+				require.Error(t, err, "an empty rule set denies every issuance for the scope")
+				require.Contains(t, err.Error(), "no rules were loaded")
+				require.Contains(t, err.Error(), "org_credential", "the error must name the scope")
+			})
+		}
+	})
+
+	// SPOCP matches rule dimensions to query dimensions by position, and
+	// without a template the query was built from whatever claims the token
+	// carried, in name order. Such a policy denied everything while reading
+	// as configured.
+	t.Run("rules without a query_template are refused", func(t *testing.T) {
+		err := checkIssuancePolicies(withAssertionPolicy(&model.IssuancePolicy{
+			Rules: []string{"(credential (scope org_credential)(acr loa3)(org_id))"},
+		}), "apigw")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no query_template")
+		require.Contains(t, err.Error(), "org_credential")
+	})
+
 	t.Run("a usable policy passes", func(t *testing.T) {
 		err := checkIssuancePolicies(withAssertionPolicy(&model.IssuancePolicy{
-			Rules: []string{"(credential (scope org_credential))"},
+			Rules:         []string{"(credential (scope org_credential)(acr loa3))"},
+			QueryTemplate: []model.QueryDimension{{Dimension: "acr", Claim: "acr"}},
 		}), "apigw")
 		require.NoError(t, err)
 	})
 
 	t.Run("a malformed rule fails at startup, as documented", func(t *testing.T) {
 		err := checkIssuancePolicies(withAssertionPolicy(&model.IssuancePolicy{
-			Rules: []string{"(((not balanced"},
+			Rules:         []string{"(((not balanced"},
+			QueryTemplate: []model.QueryDimension{{Dimension: "acr", Claim: "acr"}},
 		}), "apigw")
 		require.Error(t, err, "BuildEngine ran only from the OIDC callback before this")
 	})

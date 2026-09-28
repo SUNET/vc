@@ -18,16 +18,15 @@ type Session struct {
 	// VCI flow integration fields (set when initiated from OpenID4VCI consent)
 	VCISessionID string `json:"vci_session_id" bson:"vci_session_id"` // Links back to the VCI AuthorizationContext session
 
-	// DynamicParams holds key-value parameters propagated from
-	// AuthorizationContext.DynamicParams. Nothing reads this field today -
-	// the templating it was stored for happens inside InitiateAuth, from
-	// its own argument, before this session is ever loaded again.
-	//
-	// Unverified caller input: they arrive in the PAR request body, nominally
-	// from the authentic source business system, but nothing here checks
-	// that. Templating is the intended use. They must never satisfy a policy
-	// dimension - see the note in apiv1.handlers_oidcrp on why letting them
-	// stand in for an OIDC-asserted claim would let a caller forge any
-	// dimension the OP did not assert.
-	DynamicParams map[string]string `json:"dynamic_params,omitempty" bson:"dynamic_params,omitempty"`
+	// No DynamicParams here. They were persisted onto the session and never
+	// read back: the templating they exist for runs inside InitiateAuth,
+	// from its own argument, before the session is loaded again. Storing
+	// them bought nothing and cost something - they are unverified caller
+	// input from the PAR request body, nominally from the authentic source
+	// business system though nothing checks that, so keeping a copy in the
+	// session store left a later reader free to reach for them as if the OP
+	// had asserted them. See AuthorizationContext.DynamicParams, which is
+	// where they legitimately live and where the VCI consent flow reads
+	// them, and the note in apiv1.handlers_oidcrp on why they must never
+	// satisfy a policy dimension.
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -23,6 +24,12 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/kaptinlin/jsonschema"
 )
+
+// spocpDimensionPattern is the shape of a SPOCP dimension name: a letter,
+// then letters, digits, underscores or hyphens. Deliberately narrower than
+// "anything without whitespace" so a name is written exactly one way in both
+// the query and the rule file that has to match it.
+var spocpDimensionPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 
 // NewValidator creates a new validator
 func NewValidator() (*validator.Validate, error) {
@@ -118,6 +125,24 @@ func NewValidator() (*validator.Validate, error) {
 		}
 
 		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for spocp_dimension - a SPOCP dimension
+	// name as written in a rule: a letter, then letters, digits, underscores
+	// or hyphens.
+	//
+	// These names are not free text. They are emitted into the query
+	// S-expression and have to be matched by name in a rule file, so a name
+	// carrying whitespace or punctuation is either unwritable there or
+	// writable in more than one way. The concrete hazard is the near-miss:
+	// " scope" is not equal to "scope", so it passes the reserved-name check
+	// that keeps operators from restating the auto-populated dimension,
+	// while still producing a rule shape no query matches.
+	err = validate.RegisterValidation("spocp_dimension", func(fl validator.FieldLevel) bool {
+		return spocpDimensionPattern.MatchString(fl.Field().String())
 	})
 	if err != nil {
 		return nil, err
@@ -416,6 +441,22 @@ func NewValidator() (*validator.Validate, error) {
 	// rather than a refused start.
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		policy := sl.Current().Interface().(model.IssuancePolicy)
+
+		// A policy with rules must say which dimensions its queries carry.
+		// SPOCP matches rule dimensions to query dimensions by position, and
+		// the fallback this replaces built the query from whatever claims the
+		// token returned, in name order - so a rule naming two claims matched
+		// only if those two sorted ahead of every other claim present. Real ID
+		// tokens always carry aud, iss, nonce and sub, so such a policy denied
+		// every request while reading as a working configuration.
+		//
+		// NewPolicyEngine refuses the same thing, since it is the one place
+		// every path goes through; reported here too so the failure names the
+		// field rather than arriving as a policy-construction error.
+		if len(policy.QueryTemplate) == 0 && (len(policy.Rules) > 0 || strings.TrimSpace(policy.RulesFile) != "") {
+			sl.ReportError(policy.QueryTemplate, "QueryTemplate", "QueryTemplate", "query_template_required_with_rules", "")
+		}
+
 		seen := make(map[string]bool, len(policy.QueryTemplate))
 		for _, d := range policy.QueryTemplate {
 			// The dive tag already reports an entry with no dimension. An
@@ -433,6 +474,33 @@ func NewValidator() (*validator.Validate, error) {
 			seen[d.Dimension] = true
 		}
 	}, model.IssuancePolicy{})
+
+	// Register struct-level validation for the three scope types: the two
+	// OIDC-only settings must not appear on a scope authenticated any other
+	// way.
+	//
+	// oidc_request_params customises the OIDC authorization request, and
+	// issuance_policy is evaluated in the OIDC callback. Neither has any
+	// effect on a saml, openid4vp or preauth scope, and nothing in the flow
+	// says so - for a policy that is the worst shape a security control can
+	// take: the configuration reads as a gate, passes validation, starts
+	// clean, and every credential goes out through a path that never consults
+	// it. Refused here rather than implemented elsewhere, because a gate that
+	// looks applied and is not is worse than one that was never offered.
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		scope := sl.Current().Interface().(model.DatastoreScope)
+		reportOIDCOnlyScopeFields(sl, scope.AuthProvider, scope.OIDCRequestParams, scope.IssuancePolicy)
+	}, model.DatastoreScope{})
+
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		scope := sl.Current().Interface().(model.AssertionScope)
+		reportOIDCOnlyScopeFields(sl, scope.AuthProvider, scope.OIDCRequestParams, scope.IssuancePolicy)
+	}, model.AssertionScope{})
+
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		scope := sl.Current().Interface().(model.ExternalAPIScope)
+		reportOIDCOnlyScopeFields(sl, scope.AuthProvider, scope.OIDCRequestParams, scope.IssuancePolicy)
+	}, model.ExternalAPIScope{})
 
 	// Register struct-level validation for DataSources: openid4vp auth_scopes must not self-reference
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
@@ -590,4 +658,24 @@ func ValidateDocumentData(ctx context.Context, completeDocument *model.CompleteD
 	}
 
 	return nil
+}
+
+// reportOIDCOnlyScopeFields reports oidc_request_params or issuance_policy
+// present on a scope whose auth_provider is not oidc.
+//
+// Shared by all three scope types deliberately: the same two fields are
+// declared on each, and the rule that only the OIDC path reads them is a
+// property of the fields, not of the data source. One function so a fourth
+// scope type cannot quietly acquire the fields without the check.
+func reportOIDCOnlyScopeFields(sl validator.StructLevel, authProvider string, params *model.OIDCRequestParams, policy *model.IssuancePolicy) {
+	if strings.TrimSpace(strings.ToLower(authProvider)) == string(model.AuthProviderOIDC) {
+		return
+	}
+
+	if params != nil {
+		sl.ReportError(params, "OIDCRequestParams", "OIDCRequestParams", "oidc_only_scope_field", authProvider)
+	}
+	if policy != nil {
+		sl.ReportError(policy, "IssuancePolicy", "IssuancePolicy", "oidc_only_scope_field", authProvider)
+	}
 }

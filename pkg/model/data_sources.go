@@ -23,7 +23,7 @@ type DataSources struct {
 // DatastoreConfig groups datastore credential scopes and optional data import settings.
 type DatastoreConfig struct {
 	// Scopes maps credential scope names to their datastore configuration
-	Scopes map[string]DatastoreScope `yaml:"scopes,omitempty" doc_key:"credential scope"`
+	Scopes map[string]DatastoreScope `yaml:"scopes,omitempty" validate:"omitempty,dive" doc_key:"credential scope"`
 
 	// Import configures automatic data import from JSON files at startup.
 	// When configured, APIGW reads JSON files and imports them into the
@@ -79,11 +79,22 @@ type DatastoreScope struct {
 
 	// OIDCRequestParams configures additional parameters to include in the OIDC authorization request.
 	// Used when the authentic source needs to pass dynamic values to the OP.
+	//
+	// Only meaningful when auth_provider is oidc - there is no authorization
+	// request to add parameters to otherwise - and rejected at startup on a
+	// scope with any other provider. See validateOIDCOnlyScopeFields.
 	OIDCRequestParams *OIDCRequestParams `yaml:"oidc_request_params,omitempty"`
 
 	// IssuancePolicy defines SPOCP rules that must be satisfied by the OIDC claims for credential issuance.
 	// If configured, a SPOCP query is built from the returned claims and evaluated against these rules.
 	// A query that does not match any rule results in a hard deny.
+	//
+	// Evaluated in the OIDC callback and nowhere else, so it is rejected at
+	// startup on a scope whose auth_provider is not oidc. Accepting it there
+	// would be the worst outcome available for a security control: the
+	// configuration reads as a gate, validates, starts, and issues every
+	// credential through the SAML or pre-authorized path without ever
+	// consulting it. See validateOIDCOnlyScopeFields.
 	IssuancePolicy *IssuancePolicy `yaml:"issuance_policy,omitempty"`
 }
 
@@ -132,7 +143,7 @@ func ExtractIdentityClaims(claims map[string]any, required []string) (map[string
 // AssertionConfig groups assertion credential scopes.
 type AssertionConfig struct {
 	// Scopes maps credential scope names to their assertion configuration
-	Scopes map[string]AssertionScope `yaml:"scopes,omitempty" doc_key:"credential scope"`
+	Scopes map[string]AssertionScope `yaml:"scopes,omitempty" validate:"omitempty,dive" doc_key:"credential scope"`
 }
 
 // AssertionScope configures a credential type backed by authentication assertions.
@@ -143,11 +154,22 @@ type AssertionScope struct {
 
 	// OIDCRequestParams configures additional parameters to include in the OIDC authorization request.
 	// Used when the authentic source needs to pass dynamic values to the OP.
+	//
+	// Only meaningful when auth_provider is oidc - there is no authorization
+	// request to add parameters to otherwise - and rejected at startup on a
+	// scope with any other provider. See validateOIDCOnlyScopeFields.
 	OIDCRequestParams *OIDCRequestParams `yaml:"oidc_request_params,omitempty"`
 
 	// IssuancePolicy defines SPOCP rules that must be satisfied by the OIDC claims for credential issuance.
 	// If configured, a SPOCP query is built from the returned claims and evaluated against these rules.
 	// A query that does not match any rule results in a hard deny.
+	//
+	// Evaluated in the OIDC callback and nowhere else, so it is rejected at
+	// startup on a scope whose auth_provider is not oidc. Accepting it there
+	// would be the worst outcome available for a security control: the
+	// configuration reads as a gate, validates, starts, and issues every
+	// credential through the SAML or pre-authorized path without ever
+	// consulting it. See validateOIDCOnlyScopeFields.
 	IssuancePolicy *IssuancePolicy `yaml:"issuance_policy,omitempty"`
 
 	// Defaults holds claim values injected into the assertion document for
@@ -189,7 +211,7 @@ func (a AssertionScope) ResolveDefaults(now time.Time) (map[string]any, error) {
 // ExternalAPIConfig groups external API credential scopes.
 type ExternalAPIConfig struct {
 	// Scopes maps credential scope names to their external API configuration
-	Scopes map[string]ExternalAPIScope `yaml:"scopes,omitempty" doc_key:"credential scope"`
+	Scopes map[string]ExternalAPIScope `yaml:"scopes,omitempty" validate:"omitempty,dive" doc_key:"credential scope"`
 }
 
 // ExternalAPIScope configures a credential type backed by an external API.
@@ -205,11 +227,22 @@ type ExternalAPIScope struct {
 
 	// OIDCRequestParams configures additional parameters to include in the OIDC authorization request.
 	// Used when the authentic source needs to pass dynamic values to the OP.
+	//
+	// Only meaningful when auth_provider is oidc - there is no authorization
+	// request to add parameters to otherwise - and rejected at startup on a
+	// scope with any other provider. See validateOIDCOnlyScopeFields.
 	OIDCRequestParams *OIDCRequestParams `yaml:"oidc_request_params,omitempty"`
 
 	// IssuancePolicy defines SPOCP rules that must be satisfied by the OIDC claims for credential issuance.
 	// If configured, a SPOCP query is built from the returned claims and evaluated against these rules.
 	// A query that does not match any rule results in a hard deny.
+	//
+	// Evaluated in the OIDC callback and nowhere else, so it is rejected at
+	// startup on a scope whose auth_provider is not oidc. Accepting it there
+	// would be the worst outcome available for a security control: the
+	// configuration reads as a gate, validates, starts, and issues every
+	// credential through the SAML or pre-authorized path without ever
+	// consulting it. See validateOIDCOnlyScopeFields.
 	IssuancePolicy *IssuancePolicy `yaml:"issuance_policy,omitempty"`
 }
 
@@ -368,7 +401,15 @@ type IssuancePolicy struct {
 	// determines the positional order of dimensions in the SPOCP query, which must
 	// match the order used in the rules.
 	// Special dimension "scope" is auto-populated with the credential type name.
-	// If empty, a default query is built with all claims as dimensions (sorted by key).
+	//
+	// Required whenever rules or rules_file is set. It used to be optional,
+	// with a fallback that emitted one dimension per claim the token happened
+	// to carry, in name order - but SPOCP matches by position, so a rule
+	// naming two claims only matched when those two sorted ahead of every
+	// other claim present. Against a real ID token (which always carries aud,
+	// iss, nonce, sub and usually auth_time) that fallback denied every
+	// request, so a policy written for it was a blanket deny that looked like
+	// a working configuration.
 	QueryTemplate []QueryDimension `yaml:"query_template,omitempty" validate:"omitempty,dive"`
 }
 
@@ -380,7 +421,15 @@ type QueryDimension struct {
 	// place the claim under, so it can only ever widen the rule shape into
 	// one no rule matches. "scope" is reserved - it is auto-populated with
 	// the credential type name.
-	Dimension string `yaml:"dimension" validate:"required" doc_example:"\"acr\""`
+	//
+	// Constrained to a bare identifier (letter first, then letters, digits,
+	// underscore or hyphen). A dimension name is written into the S-expression
+	// a rule has to match by name, so anything with whitespace or punctuation
+	// in it is either unwritable in a rule or writable in more than one way -
+	// and " scope" would slip past the reserved-name and duplicate checks,
+	// which compare the string as given, while still colliding with the
+	// auto-populated scope dimension at query time.
+	Dimension string `yaml:"dimension" validate:"required,spocp_dimension" doc_example:"\"acr\""`
 
 	// Claim is the OIDC claim whose value populates the dimension, in
 	// dot-notation for nested claims. Required for the same reason: a
@@ -395,27 +444,38 @@ type ScopePolicyConfig struct {
 }
 
 // LookupScopePolicyConfig returns the issuance policy and OIDC request params
-// for a credential scope across all data source types. Returns nil fields if none configured.
-func (ds *DataSources) LookupScopePolicyConfig(scope string) *ScopePolicyConfig {
+// configured for a credential scope under the given auth provider. Returns
+// nil when the scope has no entry for that provider.
+//
+// The provider is part of the lookup, not an afterthought. One credential
+// scope may legitimately be configured in several data sources with different
+// auth providers - that is exactly what ResolveDataSource exists to
+// disambiguate - and both of these settings only ever apply to the OIDC path.
+// Taking the first data source that happened to list the scope meant an OIDC
+// flow could pick up the entry belonging to the scope's SAML or pre-authorized
+// configuration, or find none where the OIDC one had a policy, and so skip the
+// gate it was supposed to apply. Which data source answers is now decided by
+// the provider the flow actually authenticated with.
+func (ds *DataSources) LookupScopePolicyConfig(scope, authProvider string) *ScopePolicyConfig {
 	if ds == nil {
 		return nil
 	}
 
-	if s, ok := ds.Assertion.Scopes[scope]; ok {
+	if s, ok := ds.Assertion.Scopes[scope]; ok && s.AuthProvider == authProvider {
 		return &ScopePolicyConfig{
 			OIDCRequestParams: s.OIDCRequestParams,
 			IssuancePolicy:    s.IssuancePolicy,
 		}
 	}
 
-	if s, ok := ds.Datastore.Scopes[scope]; ok {
+	if s, ok := ds.Datastore.Scopes[scope]; ok && s.AuthProvider == authProvider {
 		return &ScopePolicyConfig{
 			OIDCRequestParams: s.OIDCRequestParams,
 			IssuancePolicy:    s.IssuancePolicy,
 		}
 	}
 
-	if s, ok := ds.ExternalAPI.Scopes[scope]; ok {
+	if s, ok := ds.ExternalAPI.Scopes[scope]; ok && s.AuthProvider == authProvider {
 		return &ScopePolicyConfig{
 			OIDCRequestParams: s.OIDCRequestParams,
 			IssuancePolicy:    s.IssuancePolicy,

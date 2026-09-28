@@ -1,8 +1,8 @@
 package issuance
 
 import (
+	"encoding/json"
 	"fmt"
-	"sort"
 	"sync"
 
 	"github.com/SUNET/vc/pkg/credential"
@@ -26,10 +26,9 @@ type PolicyEngine struct {
 const scopeDimension = "scope"
 
 // policyRuleDimensions returns the ordered dimension list a rule must match
-// for the given QueryTemplate, for validation purposes. Returns nil when no
-// QueryTemplate is configured: in that mode BuildQuery emits one dimension
-// per OIDC claim present on a given request, so the dimension set isn't
-// statically fixed and can't be validated up front.
+// for the given QueryTemplate. A configured policy always has one (see
+// NewPolicyEngine), so this never returns nil for a real policy and rule
+// shape is therefore always validated at load time.
 func policyRuleDimensions(queryTemplate []model.QueryDimension) []string {
 	if len(queryTemplate) == 0 {
 		return nil
@@ -43,10 +42,51 @@ func policyRuleDimensions(queryTemplate []model.QueryDimension) []string {
 }
 
 // NewPolicyEngine creates a PolicyEngine from an IssuancePolicy configuration.
-// Returns nil if no policy is configured (no rules).
+//
+// Returns (nil, nil) only when no policy is configured at all. A policy that
+// IS configured but carries no rules is an error, not a silently disabled
+// gate: every way of arriving at an empty rule set is an operator mistake,
+// and none of them should be discovered at a callback.
+//
+// There are two such ways, and they used to fail differently. No rules and no
+// rules_file made BuildEngine return (nil, nil), which read to every caller
+// as "no policy here" - so `issuance_policy: {}` skipped the check it asked
+// for. A rules_file that exists but holds nothing parseable (empty, or only
+// comments) makes BuildEngine return an engine with zero rules instead, which
+// reads as an active policy that no query can ever satisfy - every issuance
+// for that scope denied, at runtime, with the config looking fine. Opposite
+// symptoms, one cause; both are refused here so they surface at startup, with
+// the scope named.
 func NewPolicyEngine(policy *model.IssuancePolicy) (*PolicyEngine, error) {
 	if policy == nil {
 		return nil, nil
+	}
+
+	if len(policy.Rules) == 0 && policy.RulesFile == "" {
+		return nil, fmt.Errorf("issuance policy is configured but defines neither rules nor rules_file: " +
+			"add rules, or remove the issuance_policy block")
+	}
+
+	// A policy with rules must say which dimensions its queries carry.
+	//
+	// The old alternative - no query_template, one dimension per claim the
+	// request happened to return, sorted by name - could not express a
+	// policy. SPOCP matches the rule's dimensions against the query's by
+	// position, so a rule naming two claims only matches when those two sort
+	// ahead of every other claim in the token. A real ID token carries aud,
+	// auth_time, iss, nonce and sub whatever else it carries, so the
+	// documented example "(credential (scope org_credential)(acr ...)
+	// (org_id))" denies against a token that asserts both acr and org_id.
+	// Every such policy was a blanket deny that read as a working
+	// configuration, so it is refused rather than left advertised.
+	//
+	// Requiring it also makes rule-shape validation unconditional: dims is
+	// now always known, so a rule with the wrong dimensions is caught here
+	// rather than never matching at evaluation time.
+	if len(policy.QueryTemplate) == 0 {
+		return nil, fmt.Errorf("issuance policy defines rules but no query_template: " +
+			"rules are matched against query dimensions by position, so the dimensions each rule expects " +
+			"must be stated; list them in query_template in the order the rules use them")
 	}
 
 	dims := policyRuleDimensions(policy.QueryTemplate)
@@ -54,11 +94,20 @@ func NewPolicyEngine(policy *model.IssuancePolicy) (*PolicyEngine, error) {
 	if err != nil {
 		return nil, err
 	}
-	if engine == nil {
-		return nil, nil
+	if engine == nil || engine.RuleCount() == 0 {
+		return nil, fmt.Errorf("issuance policy is configured but no rules were loaded "+
+			"(rules_file %q is empty or holds only comments): "+
+			"an empty rule set denies every issuance for this scope, "+
+			"so add rules, or remove the issuance_policy block", policy.RulesFile)
 	}
 
 	return &PolicyEngine{engine: engine}, nil
+}
+
+// RuleCount reports how many rules this policy loaded. Non-zero for any
+// engine NewPolicyEngine returns; exposed for start-up logging.
+func (pe *PolicyEngine) RuleCount() int {
+	return pe.engine.RuleCount()
 }
 
 // engineCache caches PolicyEngine instances by IssuancePolicy pointer.
@@ -80,9 +129,8 @@ func GetPolicyEngine(policy *model.IssuancePolicy) (*PolicyEngine, error) {
 	if err != nil {
 		return nil, err
 	}
-	if engine == nil {
-		return nil, nil
-	}
+	// A non-nil policy now always yields either an engine with rules or an
+	// error, so there is no "configured but inert" result to pass on.
 
 	actual, _ := engineCache.LoadOrStore(policy, engine)
 	return actual.(*PolicyEngine), nil
@@ -91,6 +139,16 @@ func GetPolicyEngine(policy *model.IssuancePolicy) (*PolicyEngine, error) {
 // Evaluate checks if the given claims satisfy the issuance policy for the specified scope.
 // Returns nil if authorized, or an error describing why issuance was denied.
 func (pe *PolicyEngine) Evaluate(scope string, claims map[string]any, queryTemplate []model.QueryDimension) error {
+	// Belt and braces with NewPolicyEngine's check. An engine only exists
+	// for a policy that had a template, but Evaluate is handed the template
+	// separately by its caller, and a check that cannot decide has to
+	// refuse: without dimensions the query would carry only the scope, and
+	// whether that matched would say nothing about the claims.
+	if len(queryTemplate) == 0 {
+		return fmt.Errorf("issuance policy for scope %q was evaluated with no query_template: "+
+			"the query would carry no claim dimensions, so it cannot decide anything", scope)
+	}
+
 	query := BuildQuery(scope, claims, queryTemplate)
 
 	if !pe.engine.QueryElement(query) {
@@ -100,33 +158,25 @@ func (pe *PolicyEngine) Evaluate(scope string, claims map[string]any, queryTempl
 }
 
 // BuildQuery constructs a SPOCP query S-expression from credential scope and OIDC claims.
-// The query has the form: (credential (scope <scope>) (claim1 <value1>) (claim2 <value2>) ...)
+// The query has the form: (credential (scope <scope>) (dim1 <value1>) (dim2 <value2>) ...)
+//
+// The dimensions come from queryTemplate, in its order, so they line up with
+// the positions the rules were validated against. There is no longer a
+// claim-driven fallback for an absent template: it emitted whatever claims
+// the token happened to carry, in name order, which shifted the rule's
+// dimensions out of position and denied. See NewPolicyEngine.
 func BuildQuery(scope string, claims map[string]any, queryTemplate []model.QueryDimension) sexp.Element {
 	dims := make([]string, 0, len(queryTemplate)+1)
 	dims = append(dims, scopeDimension)
 	values := map[string]string{scopeDimension: scope}
 
-	if len(queryTemplate) > 0 {
-		// Use explicit template: iterate in defined order to match rule positions
-		for _, dim := range queryTemplate {
-			dims = append(dims, dim.Dimension)
-			if value, ok := lookupClaim(claims, dim.Claim); ok {
-				values[dim.Dimension] = toStringValue(value)
-			}
-			// Claim not present — leave values[dim.Dimension] unset;
-			// BuildTaggedQuery emits an empty dimension, matching wildcard rules.
+	for _, dim := range queryTemplate {
+		dims = append(dims, dim.Dimension)
+		if value, ok := lookupClaim(claims, dim.Claim); ok {
+			values[dim.Dimension] = toStringValue(value)
 		}
-	} else {
-		// Default: include all claims as dimensions, sorted by key for deterministic ordering
-		keys := make([]string, 0, len(claims))
-		for k := range claims {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, claimName := range keys {
-			dims = append(dims, claimName)
-			values[claimName] = toStringValue(claims[claimName])
-		}
+		// Claim not present — leave values[dim.Dimension] unset;
+		// BuildTaggedQuery emits an empty dimension, matching wildcard rules.
 	}
 
 	return spocputil.BuildTaggedQuery("credential", dims, values)
@@ -153,6 +203,16 @@ func lookupClaim(claims map[string]any, path string) (any, bool) {
 	return credential.GetNestedValue(claims, path)
 }
 
+// toStringValue renders a claim value as the atom that goes into one query
+// dimension.
+//
+// The composite case has to be deterministic. A claim can legitimately be an
+// object or an array (an address, a list of entitlements), and fmt's %v on a
+// map iterates in Go's randomised order - so the same claims would render as
+// different atoms between two requests, and a rule written against one of
+// those spellings would match sometimes and deny sometimes, with nothing in
+// the logs distinguishing the runs. json.Marshal sorts object keys, so the
+// same value always renders the same way.
 func toStringValue(v any) string {
 	switch val := v.(type) {
 	case string:
@@ -167,6 +227,14 @@ func toStringValue(v any) string {
 	case int:
 		return fmt.Sprintf("%d", val)
 	default:
-		return fmt.Sprintf("%v", val)
+		encoded, err := json.Marshal(val)
+		if err != nil {
+			// Nothing reaching here from a decoded ID token is unmarshalable,
+			// but a value that cannot be rendered stably must not be rendered
+			// unstably: %v at least keeps the dimension populated, and an
+			// unmatched rule denies, which is the safe direction.
+			return fmt.Sprintf("%v", val)
+		}
+		return string(encoded)
 	}
 }

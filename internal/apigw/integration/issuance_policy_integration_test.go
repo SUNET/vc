@@ -34,6 +34,14 @@ func issuancePolicyForPID() *model.IssuancePolicy {
 // the callback path in handlers_oidcrp.go would see. A test that fabricated
 // the claim map would still pass if the callback stopped returning acr at
 // all, which is the failure this is meant to catch.
+//
+// What this does NOT establish is that the callback handler still consults a
+// policy: it evaluates one here, so deleting the gate from apiv1.OIDCRPCallback
+// would leave it green. That half is
+// apiv1.TestOIDCRPCallbackAppliesIssuancePolicy, which drives the handler
+// itself and asserts its return value. This one remains for what it does
+// cover: that the claims reaching a policy from a real signed ID token are the
+// ones a policy can be written against.
 func TestIssuancePolicyIntegration_MockOPClaims(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -132,17 +140,22 @@ func TestIssuancePolicyIntegration_ScopeLookup(t *testing.T) {
 	ds := &model.DataSources{
 		Datastore: model.DatastoreConfig{
 			Scopes: map[string]model.DatastoreScope{
-				"pid": {IssuancePolicy: issuancePolicyForPID()},
+				"pid": {AuthProvider: model.AuthProviderOIDC, IssuancePolicy: issuancePolicyForPID()},
 			},
 		},
 	}
 
-	pid := ds.LookupScopePolicyConfig("pid")
+	pid := ds.LookupScopePolicyConfig("pid", model.AuthProviderOIDC)
 	require.NotNil(t, pid)
 	require.NotNil(t, pid.IssuancePolicy)
 	assert.Equal(t, []string{"(credential (scope pid)(acr loa3))"}, pid.IssuancePolicy.Rules)
 
-	if other := ds.LookupScopePolicyConfig("diploma"); other != nil {
+	// The scope exists, but not under this provider - and the lookup is
+	// what decides which data source's settings an OIDC flow gets.
+	assert.Nil(t, ds.LookupScopePolicyConfig("pid", model.AuthProviderSAML),
+		"a scope configured for oidc must not answer a saml lookup")
+
+	if other := ds.LookupScopePolicyConfig("diploma", model.AuthProviderOIDC); other != nil {
 		assert.Nil(t, other.IssuancePolicy, "a scope with no policy of its own must not inherit one")
 	}
 }

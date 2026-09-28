@@ -310,14 +310,11 @@ func checkIssuancePolicies(cfg *model.Cfg, serviceName string) error {
 		}
 		where := fmt.Sprintf("apigw.data_sources.%s.scopes.%s.issuance_policy", p.kind, p.scope)
 
-		engine, err := issuance.NewPolicyEngine(p.policy)
-		if err != nil {
+		// NewPolicyEngine now refuses every way of ending up with no rules -
+		// no source configured, and a rules_file that parses to nothing -
+		// so the only thing left to do here is name the scope it happened on.
+		if _, err := issuance.NewPolicyEngine(p.policy); err != nil {
 			return fmt.Errorf("%s: %w", where, err)
-		}
-		if engine == nil {
-			return fmt.Errorf("%s is configured but defines no rules: "+
-				"a policy with no rules would let every issuance through, which is the opposite of what configuring one asks for; "+
-				"add rules (or rules_file), or remove the issuance_policy block", where)
 		}
 	}
 
