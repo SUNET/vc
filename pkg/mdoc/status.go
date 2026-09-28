@@ -159,9 +159,22 @@ func (sm *StatusManager) StatusList() *tokenstatuslist.StatusList {
 }
 
 // ExtractStatusReference extracts the status reference from a Document.
+//
+// The MSO's status parameter (draft-ietf-oauth-status-list Section 6.3) is
+// the canonical location and is checked first. A "status" issuer-signed data
+// element is accepted as a fallback because implementations that predate
+// Section 6.3 put it there - but it is strictly weaker: a data element is
+// subject to selective disclosure, so a holder can simply not present it.
+//
+// This function does not verify anything. The caller must have verified the
+// document before trusting what comes back.
 func ExtractStatusReference(doc *DocumentMdoc) (*StatusReference, error) {
 	if doc == nil {
 		return nil, errors.New("document is nil")
+	}
+
+	if ref := statusFromMSO(doc); ref != nil {
+		return ref, nil
 	}
 
 	// Look for status reference in issuer signed items
@@ -265,4 +278,23 @@ func parseStatusElement(value any) (*StatusReference, bool) {
 		URI:   uri,
 		Index: index,
 	}, true
+}
+
+// statusFromMSO reads the MSO's status parameter. It returns nil when the
+// document carries no MSO status - never an error, because the data-element
+// fallback above still has to be tried.
+func statusFromMSO(doc *DocumentMdoc) *StatusReference {
+	sign1, err := ParseIssuerAuth(doc.IssuerSigned.IssuerAuth)
+	if err != nil {
+		return nil
+	}
+	mso, err := DecodeMSOPayload(sign1)
+	if err != nil || mso.Status == nil || mso.Status.StatusList == nil {
+		return nil
+	}
+	ref := *mso.Status.StatusList
+	if ref.URI == "" {
+		return nil
+	}
+	return &ref
 }

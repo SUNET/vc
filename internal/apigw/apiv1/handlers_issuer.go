@@ -536,7 +536,7 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 	// Save credential subject info to registry for status management
 	entries := make([]statusEntry, len(replies))
 	for i, r := range replies {
-		entries[i] = statusEntry{Section: r.TokenStatusListSection, Index: r.TokenStatusListIndex}
+		entries[i] = statusEntry{Section: r.TokenStatusListSection, Index: r.TokenStatusListIndex, URI: r.TokenStatusListUri}
 	}
 	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
 		return nil, err
@@ -596,7 +596,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 
 	entries := make([]statusEntry, len(replies))
 	for i, r := range replies {
-		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex}
+		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex, URI: r.StatusListUri}
 	}
 	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
 		return nil, err
@@ -676,7 +676,7 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	// Save credential subject info to registry for status management
 	entries := make([]statusEntry, len(replies))
 	for i, r := range replies {
-		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex}
+		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex, URI: r.StatusListUri}
 	}
 	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
 		return nil, err
@@ -685,9 +685,16 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	return credentials, nil
 }
 
+// statusEntry is one status-list slot allocated for one issued credential.
+//
+// Section is meaningful only for vc's own registry backend, which shards
+// its list into sections. An external draft-ietf-oauth-status-list service
+// has no such concept and always reports Section 0, which is why URI - not
+// Section - is what tells the two apart.
 type statusEntry struct {
 	Section int64
 	Index   int64
+	URI     string
 }
 
 // saveCredentialSubjects saves credential subject info linked to Token Status
@@ -698,13 +705,23 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier string, 
 	}
 
 	for _, e := range entries {
-		if e.Section <= 0 {
+		// An entry with no list URI is one that was never allocated - the
+		// issuance path leaves URI empty exactly when it issued a
+		// credential without a status claim. Nothing to record.
+		//
+		// This used to skip on `e.Section <= 0` instead, which silently
+		// discarded EVERY entry allocated by an external status service,
+		// since those have no sections and always report Section 0. The
+		// mapping is what revocation looks the credential up by, so a
+		// discarded entry means a credential that can never be revoked.
+		if e.URI == "" {
 			continue
 		}
 		_, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
-			Identifier: identifier,
-			Section:    e.Section,
-			Index:      e.Index,
+			Identifier:    identifier,
+			Section:       e.Section,
+			Index:         e.Index,
+			StatusListURI: e.URI,
 		})
 		if err != nil {
 			c.log.Error(err, "failed to save credential subject to registry")
@@ -1008,6 +1025,7 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 	if err := c.saveCredentialSubjects(ctx, identifier, []statusEntry{{
 		Section: reply.TokenStatusListSection,
 		Index:   reply.TokenStatusListIndex,
+		URI:     reply.TokenStatusListUri,
 	}}); err != nil {
 		return nil, err
 	}

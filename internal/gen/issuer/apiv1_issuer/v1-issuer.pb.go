@@ -264,8 +264,14 @@ type MakeSDJWTReply struct {
 	Credentials            []*Credential          `protobuf:"bytes,1,rep,name=credentials,proto3" json:"credentials,omitempty"`
 	TokenStatusListSection int64                  `protobuf:"varint,2,opt,name=token_status_list_section,json=tokenStatusListSection,proto3" json:"token_status_list_section,omitempty"` // Token Status List section
 	TokenStatusListIndex   int64                  `protobuf:"varint,3,opt,name=token_status_list_index,json=tokenStatusListIndex,proto3" json:"token_status_list_index,omitempty"`       // Token Status List index
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// The status list the entry lives in. Empty means no status entry
+	// was allocated and the credential is not revocable. Section is
+	// meaningful only for vc's own registry backend, which shards its
+	// list; an external draft-ietf-oauth-status-list service identifies a
+	// list by this URI alone.
+	TokenStatusListUri string `protobuf:"bytes,4,opt,name=token_status_list_uri,json=tokenStatusListUri,proto3" json:"token_status_list_uri,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *MakeSDJWTReply) Reset() {
@@ -317,6 +323,13 @@ func (x *MakeSDJWTReply) GetTokenStatusListIndex() int64 {
 		return x.TokenStatusListIndex
 	}
 	return 0
+}
+
+func (x *MakeSDJWTReply) GetTokenStatusListUri() string {
+	if x != nil {
+		return x.TokenStatusListUri
+	}
+	return ""
 }
 
 // MakeJWPRequest is the request for creating a blind BBS credential in JWP
@@ -442,8 +455,14 @@ type MakeJWPReply struct {
 	Credentials            []*Credential          `protobuf:"bytes,1,rep,name=credentials,proto3" json:"credentials,omitempty"`
 	TokenStatusListSection int64                  `protobuf:"varint,2,opt,name=token_status_list_section,json=tokenStatusListSection,proto3" json:"token_status_list_section,omitempty"` // Token Status List section
 	TokenStatusListIndex   int64                  `protobuf:"varint,3,opt,name=token_status_list_index,json=tokenStatusListIndex,proto3" json:"token_status_list_index,omitempty"`       // Token Status List index
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// The status list the entry lives in. Empty means no status entry
+	// was allocated and the credential is not revocable. Section is
+	// meaningful only for vc's own registry backend, which shards its
+	// list; an external draft-ietf-oauth-status-list service identifies a
+	// list by this URI alone.
+	TokenStatusListUri string `protobuf:"bytes,4,opt,name=token_status_list_uri,json=tokenStatusListUri,proto3" json:"token_status_list_uri,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *MakeJWPReply) Reset() {
@@ -495,6 +514,13 @@ func (x *MakeJWPReply) GetTokenStatusListIndex() int64 {
 		return x.TokenStatusListIndex
 	}
 	return 0
+}
+
+func (x *MakeJWPReply) GetTokenStatusListUri() string {
+	if x != nil {
+		return x.TokenStatusListUri
+	}
+	return ""
 }
 
 // MakeMDocRequest is the request for creating an mdoc document (ISO 18013-5)
@@ -582,8 +608,10 @@ type MakeMDocReply struct {
 	StatusListIndex   int64                  `protobuf:"varint,3,opt,name=status_list_index,json=statusListIndex,proto3" json:"status_list_index,omitempty"`       // Token Status List index
 	ValidFrom         string                 `protobuf:"bytes,4,opt,name=valid_from,json=validFrom,proto3" json:"valid_from,omitempty"`                            // RFC3339 timestamp
 	ValidUntil        string                 `protobuf:"bytes,5,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`                         // RFC3339 timestamp
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// See token_status_list_uri on MakeSDJWTReply.
+	StatusListUri string `protobuf:"bytes,6,opt,name=status_list_uri,json=statusListUri,proto3" json:"status_list_uri,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MakeMDocReply) Reset() {
@@ -647,6 +675,13 @@ func (x *MakeMDocReply) GetValidFrom() string {
 func (x *MakeMDocReply) GetValidUntil() string {
 	if x != nil {
 		return x.ValidUntil
+	}
+	return ""
+}
+
+func (x *MakeMDocReply) GetStatusListUri() string {
+	if x != nil {
+		return x.StatusListUri
 	}
 	return ""
 }
@@ -1053,8 +1088,10 @@ type MakeVC20Reply struct {
 	StatusListIndex   int64                  `protobuf:"varint,4,opt,name=status_list_index,json=statusListIndex,proto3" json:"status_list_index,omitempty"`       // Status list index
 	ValidFrom         string                 `protobuf:"bytes,5,opt,name=valid_from,json=validFrom,proto3" json:"valid_from,omitempty"`                            // RFC3339 timestamp
 	ValidUntil        string                 `protobuf:"bytes,6,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`                         // RFC3339 timestamp (optional)
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// See token_status_list_uri on MakeSDJWTReply.
+	StatusListUri string `protobuf:"bytes,7,opt,name=status_list_uri,json=statusListUri,proto3" json:"status_list_uri,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MakeVC20Reply) Reset() {
@@ -1129,6 +1166,13 @@ func (x *MakeVC20Reply) GetValidUntil() string {
 	return ""
 }
 
+func (x *MakeVC20Reply) GetStatusListUri() string {
+	if x != nil {
+		return x.StatusListUri
+	}
+	return ""
+}
+
 var File_v1_issuer_proto protoreflect.FileDescriptor
 
 const file_v1_issuer_proto_rawDesc = "" +
@@ -1148,11 +1192,12 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\fdocumentData\x18\x02 \x01(\fR\fdocumentData\x12 \n" +
 	"\x03jwk\x18\x03 \x01(\v2\x0e.v1.issuer.jwkR\x03jwk\x12\x1c\n" +
 	"\tintegrity\x18\x05 \x01(\tR\tintegrity\x12\x12\n" +
-	"\x04vctm\x18\x06 \x01(\fR\x04vctmJ\x04\b\x04\x10\x05\"\xbb\x01\n" +
+	"\x04vctm\x18\x06 \x01(\fR\x04vctmJ\x04\b\x04\x10\x05\"\xee\x01\n" +
 	"\x0eMakeSDJWTReply\x127\n" +
 	"\vcredentials\x18\x01 \x03(\v2\x15.v1.issuer.CredentialR\vcredentials\x129\n" +
 	"\x19token_status_list_section\x18\x02 \x01(\x03R\x16tokenStatusListSection\x125\n" +
-	"\x17token_status_list_index\x18\x03 \x01(\x03R\x14tokenStatusListIndex\"\xdd\x01\n" +
+	"\x17token_status_list_index\x18\x03 \x01(\x03R\x14tokenStatusListIndex\x121\n" +
+	"\x15token_status_list_uri\x18\x04 \x01(\tR\x12tokenStatusListUri\"\xdd\x01\n" +
 	"\x0eMakeJWPRequest\x12\x14\n" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12#\n" +
 	"\rdocument_data\x18\x02 \x01(\fR\fdocumentData\x12\x1e\n" +
@@ -1163,17 +1208,18 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\x03vct\x18\x05 \x01(\tR\x03vct\x12\x1f\n" +
 	"\vkey_binding\x18\x06 \x01(\bR\n" +
 	"keyBinding\x12\x14\n" +
-	"\x05suite\x18\a \x01(\rR\x05suite\"\xb9\x01\n" +
+	"\x05suite\x18\a \x01(\rR\x05suite\"\xec\x01\n" +
 	"\fMakeJWPReply\x127\n" +
 	"\vcredentials\x18\x01 \x03(\v2\x15.v1.issuer.CredentialR\vcredentials\x129\n" +
 	"\x19token_status_list_section\x18\x02 \x01(\x03R\x16tokenStatusListSection\x125\n" +
-	"\x17token_status_list_index\x18\x03 \x01(\x03R\x14tokenStatusListIndex\"\xbe\x01\n" +
+	"\x17token_status_list_index\x18\x03 \x01(\x03R\x14tokenStatusListIndex\x121\n" +
+	"\x15token_status_list_uri\x18\x04 \x01(\tR\x12tokenStatusListUri\"\xbe\x01\n" +
 	"\x0fMakeMDocRequest\x12\x14\n" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12#\n" +
 	"\rdocument_data\x18\x03 \x01(\fR\fdocumentData\x12*\n" +
 	"\x11device_public_key\x18\x04 \x01(\fR\x0fdevicePublicKey\x12*\n" +
 	"\x11device_key_format\x18\x05 \x01(\tR\x0fdeviceKeyFormat\x12\x12\n" +
-	"\x04mddl\x18\x06 \x01(\fR\x04mddlJ\x04\b\x02\x10\x03\"\xbf\x01\n" +
+	"\x04mddl\x18\x06 \x01(\fR\x04mddlJ\x04\b\x02\x10\x03\"\xe7\x01\n" +
 	"\rMakeMDocReply\x12\x12\n" +
 	"\x04mdoc\x18\x01 \x01(\fR\x04mdoc\x12.\n" +
 	"\x13status_list_section\x18\x02 \x01(\x03R\x11statusListSection\x12*\n" +
@@ -1181,7 +1227,8 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\n" +
 	"valid_from\x18\x04 \x01(\tR\tvalidFrom\x12\x1f\n" +
 	"\vvalid_until\x18\x05 \x01(\tR\n" +
-	"validUntil\",\n" +
+	"validUntil\x12&\n" +
+	"\x0fstatus_list_uri\x18\x06 \x01(\tR\rstatusListUri\",\n" +
 	"\n" +
 	"Credential\x12\x1e\n" +
 	"\n" +
@@ -1214,7 +1261,7 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\vsubject_did\x18\x04 \x01(\tR\n" +
 	"subjectDid\x12 \n" +
 	"\vcryptosuite\x18\x05 \x01(\tR\vcryptosuite\x12-\n" +
-	"\x12mandatory_pointers\x18\x06 \x03(\tR\x11mandatoryPointers\"\xf0\x01\n" +
+	"\x12mandatory_pointers\x18\x06 \x03(\tR\x11mandatoryPointers\"\x98\x02\n" +
 	"\rMakeVC20Reply\x12\x1e\n" +
 	"\n" +
 	"credential\x18\x01 \x01(\fR\n" +
@@ -1225,7 +1272,8 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\n" +
 	"valid_from\x18\x05 \x01(\tR\tvalidFrom\x12\x1f\n" +
 	"\vvalid_until\x18\x06 \x01(\tR\n" +
-	"validUntil2\x99\x04\n" +
+	"validUntil\x12&\n" +
+	"\x0fstatus_list_uri\x18\a \x01(\tR\rstatusListUri2\x99\x04\n" +
 	"\rIssuerService\x12E\n" +
 	"\tMakeSDJWT\x12\x1b.v1.issuer.MakeSDJWTRequest\x1a\x19.v1.issuer.MakeSDJWTReply\"\x00\x12B\n" +
 	"\bMakeMDoc\x12\x1a.v1.issuer.MakeMDocRequest\x1a\x18.v1.issuer.MakeMDocReply\"\x00\x12B\n" +

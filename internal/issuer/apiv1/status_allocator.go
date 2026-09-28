@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
@@ -138,7 +139,27 @@ func (c *Client) allocateOrDegrade(ctx context.Context) (*statusAllocation, erro
 
 	alloc, err := c.statusAllocator.Allocate(ctx)
 	if err == nil {
-		return alloc, nil
+		// An allocation without a list URI is unusable: the credential
+		// would carry an index into a list nothing identifies, so no
+		// verifier could resolve it and the slot would be consumed for
+		// nothing. Hand the entry back and treat it as an allocation
+		// failure, so degraded_mode decides what happens next exactly as
+		// it does for any other failure of the backend.
+		//
+		// This is checked here rather than in each issuance path because
+		// every format needs the URI - SD-JWT and JWP put it in the
+		// credential's status claim, mdoc in the MSO, VC 2.0 in
+		// credentialStatus - and a check per path is a check that will be
+		// missing from the next path somebody adds.
+		switch {
+		case alloc == nil:
+			err = errors.New("status allocator returned no entry and no error")
+		case alloc.URI == "":
+			err = fmt.Errorf("status allocation returned no status list URI (section %d, index %d)", alloc.Section, alloc.Index)
+			c.statusAllocator.Invalidate(ctx, alloc)
+		default:
+			return alloc, nil
+		}
 	}
 
 	if c.statusServiceClient != nil && c.statusServiceDegradedModeProceeds() {
@@ -178,6 +199,17 @@ func (c *Client) allocateOptionalStatus(ctx context.Context, format string) (*st
 	if err != nil {
 		c.log.Info("failed to allocate status list entry, issuing without revocation support",
 			"format", format, "error", err)
+		return nil, nil
+	}
+	// Same reasoning as allocateOrDegrade: an entry with no list URI is
+	// not usable by any format. This path is best-effort, so hand the slot
+	// back and issue without revocation support rather than failing.
+	if alloc == nil || alloc.URI == "" {
+		if alloc != nil {
+			c.statusAllocator.Invalidate(ctx, alloc)
+		}
+		c.log.Info("status allocation returned no status list URI, issuing without revocation support",
+			"format", format)
 		return nil, nil
 	}
 	return alloc, nil

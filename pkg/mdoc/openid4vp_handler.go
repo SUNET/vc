@@ -146,9 +146,18 @@ type MDocVerificationResult struct {
 type MDocDocumentClaims struct {
 	DocType    string
 	Namespaces map[string]map[string]any
+
+	// Status is the Token Status List reference from the document's MSO,
+	// nil when the credential was issued without one.
+	Status *StatusReference
 }
 
 // GetClaims returns a flat map of all claims from all namespaces.
+//
+// The MSO's status parameter is surfaced under the "status" key in the same
+// shape a JOSE Referenced Token uses, so that one format-independent
+// revocation check reads mdoc, SD-JWT and JWP credentials alike instead of
+// each format needing its own extractor.
 func (dc *MDocDocumentClaims) GetClaims() map[string]any {
 	claims := make(map[string]any)
 	for ns, nsItems := range dc.Namespaces {
@@ -163,6 +172,17 @@ func (dc *MDocDocumentClaims) GetClaims() map[string]any {
 			}
 		}
 	}
+	// Written last, so it wins over any data element that happens to be
+	// called "status": the MSO one is the issuer-signed, non-withholdable
+	// reference, and a holder-controlled element must not shadow it.
+	if dc.Status != nil {
+		claims["status"] = map[string]any{
+			"status_list": map[string]any{
+				"idx": dc.Status.Index,
+				"uri": dc.Status.URI,
+			},
+		}
+	}
 	return claims
 }
 
@@ -171,6 +191,13 @@ func (h *MDocHandler) extractDocumentClaims(doc *DocumentMdoc) (*MDocDocumentCla
 	claims := &MDocDocumentClaims{
 		DocType:    doc.DocType,
 		Namespaces: make(map[string]map[string]any),
+	}
+
+	// The document's signature was verified by VerifyDeviceResponse before
+	// this is reached, so the MSO's contents can be read here. A document
+	// with no status parameter simply is not revocable.
+	if ref, err := ExtractStatusReference(doc); err == nil {
+		claims.Status = ref
 	}
 
 	for ns, items := range doc.IssuerSigned.NameSpaces {

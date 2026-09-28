@@ -52,6 +52,12 @@ message MakeSDJWTReply {
    repeated Credential credentials = 1;
    int64 token_status_list_section = 2; // Token Status List section
    int64 token_status_list_index = 3;   // Token Status List index
+   // The status list the entry lives in. Empty means no status entry
+   // was allocated and the credential is not revocable. Section is
+   // meaningful only for vc's own registry backend, which shards its
+   // list; an external draft-ietf-oauth-status-list service identifies a
+   // list by this URI alone.
+   string token_status_list_uri = 4;
 }
 
 // MakeJWPRequest is the request for creating a blind BBS credential in JWP
@@ -94,6 +100,12 @@ message MakeJWPReply {
    repeated Credential credentials = 1;
    int64 token_status_list_section = 2; // Token Status List section
    int64 token_status_list_index = 3;   // Token Status List index
+   // The status list the entry lives in. Empty means no status entry
+   // was allocated and the credential is not revocable. Section is
+   // meaningful only for vc's own registry backend, which shards its
+   // list; an external draft-ietf-oauth-status-list service identifies a
+   // list by this URI alone.
+   string token_status_list_uri = 4;
 }
 
 // MakeMDocRequest is the request for creating an mdoc document (ISO 18013-5)
@@ -113,6 +125,8 @@ message MakeMDocReply {
     int64 status_list_index = 3;   // Token Status List index
     string valid_from = 4;         // RFC3339 timestamp
     string valid_until = 5;        // RFC3339 timestamp
+    // See token_status_list_uri on MakeSDJWTReply.
+    string status_list_uri = 6;
 }
 
 message Credential {
@@ -164,4 +178,6 @@ message MakeVC20Reply {
     int64 status_list_index = 4;       // Status list index
     string valid_from = 5;             // RFC3339 timestamp
     string valid_until = 6;            // RFC3339 timestamp (optional)
+    // See token_status_list_uri on MakeSDJWTReply.
+    string status_list_uri = 7;
 }

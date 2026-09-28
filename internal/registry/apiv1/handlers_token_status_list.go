@@ -148,6 +148,13 @@ type SaveCredentialSubjectRequest struct {
 	Identifier string `json:"identifier" validate:"required"`
 	Section    int64  `json:"section" validate:"gte=0"`
 	Index      int64  `json:"index" validate:"gte=0"`
+	// StatusListURI is required: it is what identifies the list an entry
+	// belongs to when the entry came from an external
+	// draft-ietf-oauth-status-list service, which has no sections. A
+	// mapping saved without it cannot be resolved back to a status list,
+	// so the credential it describes could never be revoked - failing
+	// here is better than recording something useless.
+	StatusListURI string `json:"status_list_uri" validate:"required,url"`
 }
 
 // SaveCredentialSubject saves credential subject info linked to a Token Status List entry
@@ -158,9 +165,10 @@ func (c *Client) SaveCredentialSubject(ctx context.Context, req *SaveCredentialS
 	}
 
 	doc := &db.CredentialSubjectDoc{
-		Identifier: req.Identifier,
-		Section:    req.Section,
-		Index:      req.Index,
+		Identifier:    req.Identifier,
+		Section:       req.Section,
+		Index:         req.Index,
+		StatusListURI: req.StatusListURI,
 	}
 
 	if err := c.credentialSubjects.Add(ctx, doc); err != nil {
@@ -168,6 +176,6 @@ func (c *Client) SaveCredentialSubject(ctx context.Context, req *SaveCredentialS
 		return err
 	}
 
-	c.log.Debug("saved credential subject", "identifier", req.Identifier, "section", req.Section, "index", req.Index)
+	c.log.Debug("saved credential subject", "identifier", req.Identifier, "section", req.Section, "index", req.Index, "status_list_uri", req.StatusListURI)
 	return nil
 }

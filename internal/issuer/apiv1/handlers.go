@@ -26,6 +26,12 @@ type CreateCredentialReply struct {
 	Data                   []*apiv1_issuer.Credential `json:"data"`
 	TokenStatusListSection int64                      `json:"token_status_list_section"`
 	TokenStatusListIndex   int64                      `json:"token_status_list_index"`
+	// TokenStatusListURI is the list the entry was allocated in. Empty when
+	// no status entry was allocated, i.e. the credential is not revocable.
+	// Section is meaningful only for vc's own registry backend; an external
+	// draft-ietf-oauth-status-list service has no sections and identifies a
+	// list by this URI alone.
+	TokenStatusListURI string `json:"token_status_list_uri,omitempty"`
 }
 
 // MakeSDJWT creates a credential generically for any credential type
@@ -61,12 +67,13 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 	}
 
 	var statusSection, statusIndex int64
+	var statusURI string
 	if alloc != nil {
 		opts.TokenStatusList = &sdjwtvc.TokenStatusListReference{
 			Index: alloc.Index,
 			URI:   alloc.URI,
 		}
-		statusSection, statusIndex = alloc.Section, alloc.Index
+		statusSection, statusIndex, statusURI = alloc.Section, alloc.Index, alloc.URI
 		c.log.Debug("status list entry allocated", "section", alloc.Section, "index", alloc.Index, "uri", alloc.URI)
 	}
 
@@ -98,6 +105,7 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		},
 		TokenStatusListSection: statusSection,
 		TokenStatusListIndex:   statusIndex,
+		TokenStatusListURI:     statusURI,
 	}
 
 	return reply, nil
@@ -133,11 +141,18 @@ type CreateMDocRequest struct {
 
 // CreateMDocReply is the reply for mDL credential creation
 type CreateMDocReply struct {
-	MDoc              []byte `json:"mdoc"`
-	StatusListSection int64  `json:"status_list_section"`
-	StatusListIndex   int64  `json:"status_list_index"`
-	ValidFrom         string `json:"valid_from"`
-	ValidUntil        string `json:"valid_until"`
+	MDoc []byte `json:"mdoc"`
+	// StatusListSection is meaningful only for vc's own registry backend,
+	// which shards its list into sections. An external
+	// draft-ietf-oauth-status-list service has no such concept and leaves
+	// it 0 - StatusListURI is what identifies the list in that case.
+	StatusListSection int64 `json:"status_list_section"`
+	StatusListIndex   int64 `json:"status_list_index"`
+	// StatusListURI is the list the entry was allocated in. Empty when no
+	// status entry was allocated, i.e. the credential is not revocable.
+	StatusListURI string `json:"status_list_uri,omitempty"`
+	ValidFrom     string `json:"valid_from"`
+	ValidUntil    string `json:"valid_until"`
 }
 
 // MakeMDoc creates credential per ISO 18013-5
@@ -184,20 +199,28 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 	// `fail` rejects the issuance here as it does for SD-JWT and BBS. See
 	// allocateOptionalStatus.
 	var mdocStatusSection, mdocStatusIndex int64
+	var mdocStatusURI string
+	var mdocStatusRef *mdoc.StatusReference
 	alloc, err := c.allocateOptionalStatus(ctx, "mdoc")
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
 	}
 	if alloc != nil {
-		mdocStatusSection, mdocStatusIndex = alloc.Section, alloc.Index
-		c.log.Debug("status list entry allocated for mdoc", "section", mdocStatusSection, "index", mdocStatusIndex)
+		// allocateOptionalStatus guarantees a non-empty URI here.
+		mdocStatusSection, mdocStatusIndex, mdocStatusURI = alloc.Section, alloc.Index, alloc.URI
+		mdocStatusRef = &mdoc.StatusReference{URI: mdocStatusURI, Index: mdocStatusIndex}
+		c.log.Debug("status list entry allocated for mdoc", "section", mdocStatusSection, "index", mdocStatusIndex, "uri", mdocStatusURI)
 	}
 
-	// Issue the mdoc
+	// Issue the mdoc. The status reference goes into the MSO
+	// (draft-ietf-oauth-status-list Section 6.3), which is what the issuer
+	// signs unconditionally - a data element could be withheld by the
+	// holder, and a revocation pointer the holder can drop is not one.
 	issuanceReq := &mdoc.IssuanceRequest{
 		DevicePublicKey: deviceKey,
 		DocumentData:    req.DocumentData,
 		Schema:          schema,
+		Status:          mdocStatusRef,
 	}
 
 	issued, err := c.mdocIssuer.Issue(issuanceReq)
@@ -222,6 +245,7 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		MDoc:              mdocBytes,
 		StatusListSection: mdocStatusSection,
 		StatusListIndex:   mdocStatusIndex,
+		StatusListURI:     mdocStatusURI,
 		ValidFrom:         issued.ValidFrom.Format(time.RFC3339),
 		ValidUntil:        issued.ValidUntil.Format(time.RFC3339),
 	}

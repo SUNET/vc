@@ -123,6 +123,11 @@ type IssuanceRequest struct {
 	// Custom validity period (optional)
 	ValidFrom  *time.Time
 	ValidUntil *time.Time
+	// Status is the Token Status List entry allocated for this credential.
+	// Nil issues a credential with no status parameter, which cannot be
+	// revoked. Both members matter: an index without the list URI that
+	// resolves it is not a reference a verifier can follow.
+	Status *StatusReference
 }
 
 // IssuedDocumentMdoc contains the issued mDL document.
@@ -185,7 +190,8 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		WithDigestAlgorithm(i.digestAlgorithm).
 		WithValidity(validFrom, validUntil).
 		WithDeviceKey(deviceKey).
-		WithSigner(i.signerKey, i.certChain)
+		WithSigner(i.signerKey, i.certChain).
+		WithStatus(req.Status)
 
 	// Add every claim declared by the schema, across all of its namespaces.
 	// This one generic pass replaces per-doctype element lists: adding a new

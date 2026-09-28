@@ -39,6 +39,12 @@ type CreateJWPReply struct {
 	Data                   []*apiv1_issuer.Credential `json:"data"`
 	TokenStatusListSection int64                      `json:"token_status_list_section"`
 	TokenStatusListIndex   int64                      `json:"token_status_list_index"`
+	// TokenStatusListURI is the list the entry was allocated in. Empty when
+	// no status entry was allocated, i.e. the credential is not revocable.
+	// Section is meaningful only for vc's own registry backend; an external
+	// draft-ietf-oauth-status-list service has no sections and identifies a
+	// list by this URI alone.
+	TokenStatusListURI string `json:"token_status_list_uri,omitempty"`
 }
 
 // MakeJWP verifies the holder's commitment and blind-signs a credential.
@@ -204,6 +210,7 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	if statusEntry != nil {
 		reply.TokenStatusListSection = statusEntry.Section
 		reply.TokenStatusListIndex = statusEntry.Index
+		reply.TokenStatusListURI = statusEntry.URI
 	}
 	return reply, nil
 }

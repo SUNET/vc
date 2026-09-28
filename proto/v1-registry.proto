@@ -42,6 +42,12 @@ message SaveCredentialSubjectRequest {
     string Identifier = 1; // Subject identifier (authentic_source_person_id)
     int64 Section = 2;     // Token Status List section
     int64 Index = 3;       // Token Status List index
+    // StatusListURI is the list the entry lives in. It is REQUIRED to
+    // record an entry allocated by an external
+    // draft-ietf-oauth-status-list service, which has no sections and
+    // always reports Section 0 - without it such an entry cannot be found
+    // again, and so cannot be revoked.
+    string StatusListURI = 4;
 }
 
 message SaveCredentialSubjectReply {

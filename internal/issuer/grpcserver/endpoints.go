@@ -25,6 +25,7 @@ func (s *Service) MakeSDJWT(ctx context.Context, in *apiv1_issuer.MakeSDJWTReque
 		Credentials:            reply.Data,
 		TokenStatusListSection: reply.TokenStatusListSection,
 		TokenStatusListIndex:   reply.TokenStatusListIndex,
+		TokenStatusListUri:     reply.TokenStatusListURI,
 	}, nil
 }
 
@@ -58,6 +59,7 @@ func (s *Service) MakeMDoc(ctx context.Context, in *apiv1_issuer.MakeMDocRequest
 		Mdoc:              reply.MDoc,
 		StatusListSection: reply.StatusListSection,
 		StatusListIndex:   reply.StatusListIndex,
+		StatusListUri:     reply.StatusListURI,
 		ValidFrom:         reply.ValidFrom,
 		ValidUntil:        reply.ValidUntil,
 	}, nil

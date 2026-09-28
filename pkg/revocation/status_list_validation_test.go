@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -219,4 +220,46 @@ func TestStatusListToken_ContentTypeWithParameters(t *testing.T) {
 	result, err := checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 1})
 	require.NoError(t, err)
 	require.Equal(t, StatusInvalid, result.Status)
+}
+
+// TestMdocClaimsFeedTheSharedRevocationExtractor pins the contract that lets
+// ONE revocation check cover every credential format: mdoc surfaces its MSO
+// status parameter under the "status" key, in the same shape a JOSE
+// Referenced Token uses, so ExtractStatusListReference reads mdoc, SD-JWT
+// and JWP alike. If GetClaims stopped emitting it, mdoc would drop out of
+// the check silently - the verifier would see a credential with no status
+// and treat it as simply not revocable.
+func TestMdocClaimsFeedTheSharedRevocationExtractor(t *testing.T) {
+	dc := &mdoc.MDocDocumentClaims{
+		DocType:    "org.iso.18013.5.1.mDL",
+		Namespaces: map[string]map[string]any{},
+		Status:     &mdoc.StatusReference{URI: "https://registry.example.com/statuslists/3", Index: 9},
+	}
+
+	ref := ExtractStatusListReference(dc.GetClaims())
+	require.NotNil(t, ref, "the shared status extractor found nothing in mdoc claims")
+	require.Equal(t, "https://registry.example.com/statuslists/3", ref.URI)
+	require.Equal(t, int64(9), ref.Index)
+}
+
+// TestMdocMSOStatusWinsOverADataElement: the MSO reference is issuer-signed
+// and cannot be withheld; a "status" data element can be chosen by whoever
+// assembles the presentation. If the element won, a holder could point the
+// verifier at a list the issuer never used.
+func TestMdocMSOStatusWinsOverADataElement(t *testing.T) {
+	dc := &mdoc.MDocDocumentClaims{
+		DocType: "org.iso.18013.5.1.mDL",
+		Namespaces: map[string]map[string]any{
+			mdoc.Namespace: {"status": map[string]any{
+				"status_list": map[string]any{"uri": "https://attacker.example.com/list", "idx": 0},
+			}},
+		},
+		Status: &mdoc.StatusReference{URI: "https://issuer.example.com/statuslists/1", Index: 5},
+	}
+
+	ref := ExtractStatusListReference(dc.GetClaims())
+	require.NotNil(t, ref)
+	require.Equal(t, "https://issuer.example.com/statuslists/1", ref.URI,
+		"the MSO reference must win over a holder-supplied data element")
+	require.Equal(t, int64(5), ref.Index)
 }
