@@ -455,7 +455,15 @@ func NewValidator() (*validator.Validate, error) {
 		if cfg.JWT != nil {
 			sl.ReportError(cfg.JWT, "JWT", "JWT", "auth_config_requires_non_open_mode", mode)
 		}
-		if strings.TrimSpace(cfg.StaticBearerTokenFile) != "" {
+		// Not TrimSpace: the question here is whether the operator wrote
+		// the key, not whether what they wrote is usable. Trimming first
+		// made `static_bearer_token_file: " "` under the default mode look
+		// like an absent setting, so the one configuration this guard
+		// exists to catch - auth settings with no mode to activate them -
+		// slipped through and left /register open. The same value under
+		// mode: static is rejected outright, and an intent that fails one
+		// way must not pass the other.
+		if cfg.StaticBearerTokenFile != "" {
 			sl.ReportError(cfg.StaticBearerTokenFile, "StaticBearerTokenFile", "StaticBearerTokenFile", "auth_config_requires_non_open_mode", mode)
 		}
 	}, model.DynamicRegistrationAuthConfig{})

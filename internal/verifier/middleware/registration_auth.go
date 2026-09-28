@@ -247,8 +247,49 @@ func extractBearerToken(authHeader string) (string, error) {
 	if token == "" {
 		return "", fmt.Errorf("empty bearer token")
 	}
+	// RFC 6750 section 2.1 gives the credential one syntax, b64token, and
+	// anything outside it is not a token that was rejected - it is a header
+	// that cannot carry one. `Bearer abc def` is the case that matters:
+	// passing it through meant answering 401 invalid_token, telling a client
+	// its credential was refused when the real fault is the header it built.
+	// Checked here rather than in each validator, so every mode classifies
+	// the same header the same way.
+	if !isB64Token(token) {
+		return "", fmt.Errorf("bearer token contains characters outside RFC 6750 b64token syntax")
+	}
 
 	return token, nil
+}
+
+// isB64Token reports whether s matches RFC 6750 section 2.1's b64token:
+//
+//	1*( ALPHA / DIGIT / "-" / "." / "_" / "~" / "+" / "/" ) *"="
+//
+// Deliberately not a base64 decode. The grammar is a character set plus
+// optional trailing padding, not a well-formed encoding - issuers mint tokens
+// in this alphabet that are not base64 of anything (a JWT is three such
+// segments joined by dots), and rejecting those would refuse valid
+// credentials.
+func isB64Token(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	body := strings.TrimRight(s, "=")
+	if body == "" {
+		return false
+	}
+
+	for _, r := range body {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+		case r == '-', r == '.', r == '_', r == '~', r == '+', r == '/':
+		default:
+			return false
+		}
+	}
+
+	return true
 }
 
 // staticBearerValidator holds the expected token as a SHA-256 digest.
@@ -302,6 +343,36 @@ type jwtBearerValidator struct {
 	verifier *oidc.IDTokenVerifier
 }
 
+// newJWKSHTTPClient builds the client go-oidc fetches the key set with.
+//
+// It carries its own timeout (see the note at the call site on why the default
+// client's absence of one is not survivable here) and refuses to follow a
+// redirect to anything but https.
+//
+// That second part is the other half of requiring https on jwks_uri.
+// Validating the configured URL only constrains the first hop, and Go's client
+// follows redirects by default - so an endpoint answering 302 to an http://
+// location would have the key set fetched in the clear after all, while the
+// configuration still read as https and nothing in it looked wrong. The key
+// set is what every registration token is judged against, so whoever serves it
+// decides which signatures verify.
+func newJWKSHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout:       jwksFetchTimeout,
+		CheckRedirect: refuseNonHTTPSRedirect,
+	}
+}
+
+// refuseNonHTTPSRedirect stops a JWKS fetch from being walked off TLS.
+func refuseNonHTTPSRedirect(req *http.Request, _ []*http.Request) error {
+	if !strings.EqualFold(req.URL.Scheme, "https") {
+		return fmt.Errorf("refusing to follow JWKS redirect to non-HTTPS %q: "+
+			"the key set is the trust root for registration tokens and must not be fetched in the clear", req.URL.String())
+	}
+
+	return nil
+}
+
 func newJWTBearerValidator(cfg *model.DynamicRegistrationJWTAuthConfig) (*jwtBearerValidator, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("jwt mode requires dynamic_registration_auth.jwt configuration")
@@ -328,7 +399,17 @@ func newJWTBearerValidator(cfg *model.DynamicRegistrationJWTAuthConfig) (*jwtBea
 	// JWKS endpoint hangs that goroutine indefinitely; and since the
 	// inflight request is only cleared when it finishes, every later
 	// verification joins the same dead fetch and times out too.
-	keySetCtx := oidc.ClientContext(context.Background(), &http.Client{Timeout: jwksFetchTimeout})
+	//
+	// CheckRedirect is the other half of requiring https on jwks_uri.
+	// Validating the configured URL only constrains the first hop: Go's
+	// client follows redirects by default, so an endpoint that answers
+	// 302 to an http:// location would have the key set - the thing every
+	// registration token is judged against - fetched in the clear after
+	// all, and the config would still read as https. The scheme is
+	// therefore enforced on every hop, and the refusal names the
+	// destination, because a redirect nobody configured is not obvious
+	// from the setting that was.
+	keySetCtx := oidc.ClientContext(context.Background(), newJWKSHTTPClient())
 	keySet := oidc.NewRemoteKeySet(keySetCtx, cfg.JWKSURI)
 	oidcCfg := &oidc.Config{
 		ClientID:             cfg.Audience,

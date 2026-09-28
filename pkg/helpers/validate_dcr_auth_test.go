@@ -47,6 +47,24 @@ func TestDynamicRegistrationAuthModeMatchesConfig(t *testing.T) {
 			wantTag: "auth_config_requires_non_open_mode",
 		},
 		{
+			// The guard asks whether the operator wrote the key, not
+			// whether what they wrote is usable. Trimming first made a
+			// whitespace-only path look absent under the default mode, so
+			// the exact configuration this exists to catch - auth settings
+			// with no mode to activate them - slipped through and left
+			// /register open. Under mode: static the same value is
+			// rejected, and an intent that fails one way must not pass the
+			// other.
+			name:    "whitespace-only token file with no mode",
+			cfg:     model.DynamicRegistrationAuthConfig{StaticBearerTokenFile: " "},
+			wantTag: "auth_config_requires_non_open_mode",
+		},
+		{
+			name:    "whitespace-only token file with mode open",
+			cfg:     model.DynamicRegistrationAuthConfig{Mode: "open", StaticBearerTokenFile: "\t\n"},
+			wantTag: "auth_config_requires_non_open_mode",
+		},
+		{
 			name: "jwt block with mode jwt",
 			cfg:  model.DynamicRegistrationAuthConfig{Mode: "jwt", JWT: jwtCfg},
 		},

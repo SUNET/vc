@@ -287,6 +287,53 @@ func TestExtractBearerToken(t *testing.T) {
 	assert.NotErrorIs(t, err, errNoBearerCredentials)
 }
 
+// TestExtractBearerTokenB64TokenSyntax pins RFC 6750 section 2.1's grammar for
+// the credential itself.
+//
+// `Bearer abc def` is the case that motivated this: the remainder is non-empty,
+// so it used to reach the validator and come back as 401 invalid_token - the
+// answer for a credential that was checked and refused. It is not one. No
+// b64token contains a space, so the fault is in the header the client built,
+// which is 400 invalid_request. The malformed and rejected cases have to stay
+// distinguishable or the status code stops meaning anything.
+func TestExtractBearerTokenB64TokenSyntax(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		header string
+		want   string
+	}{
+		{"plain token", "Bearer abc123", "abc123"},
+		{"jwt", "Bearer eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJhIn0.c2ln", "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJhIn0.c2ln"},
+		{"base64 padding", "Bearer YWJjZA==", "YWJjZA=="},
+		{"every allowed punctuation", "Bearer a-b.c_d~e+f/g", "a-b.c_d~e+f/g"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := extractBearerToken(tc.header)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	for _, tc := range []struct {
+		name   string
+		header string
+	}{
+		{"internal space", "Bearer abc def"},
+		{"internal tab", "Bearer abc\tdef"},
+		{"comma", "Bearer abc,def"},
+		{"quoted", `Bearer "abc"`},
+		{"percent", "Bearer abc%20def"},
+		{"padding only", "Bearer ==="},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := extractBearerToken(tc.header)
+			require.Error(t, err, "a header that cannot hold a b64token is malformed, not a rejected token")
+			assert.NotErrorIs(t, err, errNoBearerCredentials,
+				"the Bearer scheme was used, so this is 400 invalid_request and not a challenge")
+		})
+	}
+}
+
 func TestExtractBearerTokenCaseInsensitiveScheme(t *testing.T) {
 	token, err := extractBearerToken("bearer token-value")
 	require.NoError(t, err)
@@ -352,6 +399,7 @@ func TestRegistrationAuthHeaderErrors(t *testing.T) {
 		{"not a bearer scheme", "Basic dXNlcjpwYXNz", "", http.StatusUnauthorized, "Bearer"},
 		{"bearer with no value", "Bearer", "invalid_request", http.StatusBadRequest, `Bearer error="invalid_request"`},
 		{"bearer with blank value", "Bearer    ", "invalid_request", http.StatusBadRequest, `Bearer error="invalid_request"`},
+		{"bearer with internal whitespace", "Bearer abc def", "invalid_request", http.StatusBadRequest, `Bearer error="invalid_request"`},
 		{"well-formed but wrong token", "Bearer wrong", "invalid_token", http.StatusUnauthorized, `Bearer error="invalid_token"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -423,4 +471,62 @@ func TestStaticBearerTokenFileContents(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.wantError)
 		})
 	}
+}
+
+// TestJWKSFetchRefusesNonHTTPSRedirect pins the hop the config validator
+// cannot see.
+//
+// Requiring https on jwks_uri constrains only the first request. Go's client
+// follows redirects by default, so a JWKS endpoint answering 302 to an http://
+// location would have the key set - the trust root every registration token is
+// judged against - fetched in the clear, with the configuration still reading
+// as https.
+func TestJWKSFetchRefusesNonHTTPSRedirect(t *testing.T) {
+	t.Run("the redirect policy itself", func(t *testing.T) {
+		for _, tc := range []struct {
+			name       string
+			target     string
+			wantRefuse bool
+		}{
+			{"https to http", "http://evil.example.com/jwks.json", true},
+			{"https to plain-http loopback", "http://127.0.0.1:9/jwks.json", true},
+			{"https to https", "https://auth.example.com/keys.json", false},
+			{"https to HTTPS uppercase", "HTTPS://auth.example.com/keys.json", false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				req, err := http.NewRequest(http.MethodGet, tc.target, nil)
+				require.NoError(t, err)
+
+				err = refuseNonHTTPSRedirect(req, nil)
+				if tc.wantRefuse {
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), "non-HTTPS")
+
+					return
+				}
+				require.NoError(t, err)
+			})
+		}
+	})
+
+	// End to end through the client the validator actually uses, so the
+	// policy cannot be correct while being wired to nothing.
+	t.Run("the client refuses to follow one", func(t *testing.T) {
+		final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"keys":[]}`))
+		}))
+		defer final.Close()
+
+		redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, final.URL, http.StatusFound)
+		}))
+		defer redirector.Close()
+
+		resp, err := newJWKSHTTPClient().Get(redirector.URL)
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		require.Error(t, err, "a redirect to a plaintext location must not be followed")
+		assert.Contains(t, err.Error(), "non-HTTPS")
+	})
 }
