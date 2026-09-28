@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/vc20/contextstore"
 	"github.com/SUNET/vc/pkg/vc20/credential"
 	ecdsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/ecdsa"
 	eddsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/eddsa"
@@ -116,6 +118,7 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 		credentialSubject,
 		validFrom,
 		validUntil,
+		statusAlloc,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build credential JSON: %w", err)
@@ -162,6 +165,7 @@ func (c *Client) buildVC20CredentialJSON(
 	credentialSubject map[string]any,
 	validFrom time.Time,
 	validUntil *time.Time,
+	status *statusAllocation,
 ) ([]byte, error) {
 	// Ensure VerifiableCredential is in types
 	hasVC := slices.Contains(types, "VerifiableCredential")
@@ -170,7 +174,7 @@ func (c *Client) buildVC20CredentialJSON(
 	}
 
 	cred := map[string]any{
-		"@context":          []string{"https://www.w3.org/ns/credentials/v2"},
+		"@context":          []string{credential.ContextV2},
 		"id":                credentialID,
 		"type":              types,
 		"issuer":            c.cfg.Issuer.JWTAttribute.Issuer,
@@ -180,6 +184,29 @@ func (c *Client) buildVC20CredentialJSON(
 
 	if validUntil != nil {
 		cred["validUntil"] = validUntil.Format(time.RFC3339)
+	}
+
+	// credentialStatus, when an entry was allocated. The context that
+	// defines TokenStatusListEntry has to be added alongside it: vc signs
+	// VC 2.0 with Data Integrity over canonicalized RDF, and terms no
+	// context defines expand to relative IRIs and vanish from the canonical
+	// form - the status would then not be covered by the proof at all, so a
+	// verifier could have it stripped or rewritten without the signature
+	// failing. Adding the context only when there is a status keeps it out
+	// of credentials that have none.
+	if status != nil {
+		cred["@context"] = []string{credential.ContextV2, contextstore.TokenStatusListContextURL}
+		cred["credentialStatus"] = map[string]any{
+			// The entry identifies itself by the list it is in and its
+			// place in that list, which is exactly what a verifier needs
+			// to resolve it and what the other formats carry as
+			// status_list.{uri,idx}.
+			"id":              fmt.Sprintf("%s#%d", status.URI, status.Index),
+			"type":            contextstore.TokenStatusListEntryType,
+			"statusListUri":   status.URI,
+			"statusListIndex": strconv.FormatInt(status.Index, 10),
+			"statusPurpose":   "revocation",
+		}
 	}
 
 	return json.Marshal(cred)

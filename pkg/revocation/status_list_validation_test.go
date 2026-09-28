@@ -12,6 +12,7 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
+	"github.com/SUNET/vc/pkg/vc20/contextstore"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
@@ -262,4 +263,50 @@ func TestMdocMSOStatusWinsOverADataElement(t *testing.T) {
 	require.Equal(t, "https://issuer.example.com/statuslists/1", ref.URI,
 		"the MSO reference must win over a holder-supplied data element")
 	require.Equal(t, int64(5), ref.Index)
+}
+
+// TestVC20CredentialStatusReachesTheStatusCheck closes the loop for W3C VC
+// 2.0: not just that ExtractCredentialStatusReference parses an entry, but
+// that the registered checker consults it and performs the real lookup.
+//
+// Without this, a regression where StatusListChecker.Extract stopped trying
+// credentialStatus would turn every VC 2.0 credential from "checked" into
+// "refused by the fail-closed guard" - still safe, but completely broken,
+// and the fail-closed tests would all keep passing.
+func TestVC20CredentialStatusReachesTheStatusCheck(t *testing.T) {
+	f := newStatusListFixture(t)
+
+	statuses := make([]uint8, 64)
+	statuses[42] = tokenstatuslist.StatusInvalid
+
+	f.sign(t, tokenstatuslist.JWTTypHeader, jwt.MapClaims{
+		"sub":         f.uri(),
+		"iat":         time.Now().Unix(),
+		"status_list": statusListClaim(t, statuses, 8),
+	})
+
+	claims := map[string]any{
+		"type": []any{"VerifiableCredential"},
+		"credentialStatus": map[string]any{
+			"id":              f.uri() + "#42",
+			"type":            contextstore.TokenStatusListEntryType,
+			"statusListUri":   f.uri(),
+			"statusListIndex": "42",
+			"statusPurpose":   "revocation",
+		},
+	}
+
+	registry := NewRegistry(f.checker)
+	result, err := registry.Validate(t.Context(), claims)
+	require.NoError(t, err)
+	require.NotNil(t, result, "a VC 2.0 credentialStatus must reach the status check")
+	require.Equal(t, StatusInvalid, result.Status)
+
+	// And a valid index through the same path, so the test cannot pass by
+	// refusing everything.
+	claims["credentialStatus"].(map[string]any)["statusListIndex"] = "7"
+	result, err = registry.Validate(t.Context(), claims)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, StatusValid, result.Status)
 }

@@ -31,6 +31,22 @@ func (r *Registry) Validate(ctx context.Context, claims map[string]any) (*CheckR
 			return checker.CheckStatus(ctx, ref)
 		}
 	}
+
+	// Nothing extracted. If the credential itself says it carries revocation
+	// information, that is not "not revocable" - it is a credential whose
+	// revocation state we cannot determine, because the mechanism it names
+	// is one no registered checker implements or the entry is malformed.
+	// Returning (nil, nil) here would let a revoked credential through on
+	// an unrecognised type name.
+	//
+	// The caller's fail_open setting governs what happens next, exactly as
+	// it does for a status list that could not be fetched: this is the same
+	// class of answer, "unknown", and must not be silently downgraded to
+	// "fine".
+	if declaresStatus(claims) {
+		return nil, fmt.Errorf("credential declares revocation information that no registered checker could read")
+	}
+
 	return nil, nil // Credential is not revocable
 }
 

@@ -82,8 +82,15 @@ func (c *StatusListChecker) Supports(scheme Scheme) bool {
 }
 
 // Extract extracts a Token Status List reference from credential claims.
+//
+// SD-JWT, JWP and mdoc all present it as the JOSE "status" claim (mdoc via
+// MDocDocumentClaims.GetClaims, which surfaces the MSO parameter in that
+// shape). W3C VC 2.0 has no such claim, so credentialStatus is tried next.
 func (c *StatusListChecker) Extract(claims map[string]any) *Reference {
-	return ExtractStatusListReference(claims)
+	if ref := ExtractStatusListReference(claims); ref != nil {
+		return ref
+	}
+	return ExtractCredentialStatusReference(claims)
 }
 
 // CheckStatus checks the revocation status via Token Status List.
