@@ -6,12 +6,14 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -2722,4 +2724,22 @@ func (c *CredentialMetadata) DeclaredClaimNames() (map[string]bool, bool) {
 	}
 
 	return names, loaded
+}
+
+// StatusListURL returns the URL this registry serves the Status List Token
+// for one section at. It is the value that goes into an issued credential's
+// status_list.uri, and it is therefore also how a stored status entry is
+// recognised as belonging to THIS registry rather than to an external
+// draft-ietf-oauth-status-list service.
+//
+// One construction, used by everything that needs it: the gRPC allocation
+// reply, the Status List Token's own sub claim, and the admin path that
+// decides whether it may touch a given entry. Three hand-rolled copies of
+// this join would be three chances for the sub check (Section 8.3) or the
+// ownership check to disagree with what was actually issued.
+func (r *Registry) StatusListURL(section int64) (string, error) {
+	if r == nil || r.PublicURL == "" {
+		return "", errors.New("registry public_url is not configured")
+	}
+	return url.JoinPath(r.PublicURL, "statuslists", strconv.FormatInt(section, 10))
 }

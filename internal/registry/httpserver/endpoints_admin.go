@@ -149,7 +149,7 @@ func (s *Service) endpointAdminUpdateStatus(ctx context.Context, c *gin.Context)
 	}
 
 	if err := s.apiv1.UpdateStatus(ctx, request); err != nil {
-		s.log.Error(err, "Status update failed", "section", request.Section, "index", request.Index, "status", request.Status)
+		s.log.Error(err, "Status update failed", "section", request.Section, "index", request.Index, "status", request.Status, "status_list_uri", request.StatusListURI)
 		c.Header("Content-Type", "text/html")
 		// Preserve search params on error
 		searchParams := &apiv1.SearchPersonRequest{
@@ -158,7 +158,7 @@ func (s *Service) endpointAdminUpdateStatus(ctx context.Context, c *gin.Context)
 		return HTMLResponse(searchPageHTML("Failed to update status: "+err.Error(), nil, "", searchParams)), nil
 	}
 
-	s.log.Info("Status updated via admin GUI", "section", request.Section, "index", request.Index, "status", request.Status)
+	s.log.Info("Status updated via admin GUI", "section", request.Section, "index", request.Index, "status", request.Status, "status_list_uri", request.StatusListURI)
 
 	// Re-run the search to show updated results
 	searchParams := &apiv1.SearchPersonRequest{

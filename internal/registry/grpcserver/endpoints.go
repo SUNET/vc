@@ -3,7 +3,6 @@ package grpcserver
 import (
 	"context"
 	"fmt"
-	"net/url"
 
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
@@ -20,11 +19,9 @@ func (s *Service) TokenStatusListAddStatus(ctx context.Context, req *apiv1_regis
 		return nil, err
 	}
 
-	baseURL, err := url.Parse(s.cfg.Registry.PublicURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid registry public URL: %w", err)
-	}
-	baseURL.Path, err = url.JoinPath(baseURL.Path, "statuslists", fmt.Sprintf("%d", section))
+	// Same construction as the Status List Token's sub claim and as the
+	// admin ownership check - see model.Registry.StatusListURL.
+	statusListURI, err := s.cfg.Registry.StatusListURL(section)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct status list URI: %w", err)
 	}
@@ -32,7 +29,7 @@ func (s *Service) TokenStatusListAddStatus(ctx context.Context, req *apiv1_regis
 	reply := &apiv1_registry.TokenStatusListAddStatusReply{
 		Section:       section,
 		Index:         index,
-		StatusListUri: baseURL.String(),
+		StatusListUri: statusListURI,
 	}
 
 	return reply, nil
