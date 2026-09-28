@@ -468,3 +468,64 @@ func TestBuildQueryResolvesNestedClaimPaths(t *testing.T) {
 		})
 	}
 }
+
+// TestEvaluateAbsentClaimIsNotAWildcard pins the difference between "any
+// value" and "no value", which the query S-expression cannot express.
+//
+// An unresolved dimension is emitted empty, as `(org_id)` — and that is also
+// how a wildcard rule is written under this rule set's convention, so SPOCP
+// matched them against each other. `(credential (scope pid)(org_id))`, the
+// weakest rule an operator can write for that dimension, therefore authorized
+// a token carrying no org_id at all: asserting nothing satisfied it.
+//
+// An operator who genuinely does not care about a dimension leaves it out of
+// query_template, where it appears in neither the query nor the rule shape.
+// Listing it is a statement that the provider must assert it.
+func TestEvaluateAbsentClaimIsNotAWildcard(t *testing.T) {
+	policy := &model.IssuancePolicy{
+		Rules:         []string{"(credential (scope pid)(org_id))"},
+		QueryTemplate: []model.QueryDimension{{Dimension: "org_id", Claim: "org_id"}},
+	}
+	engine, err := NewPolicyEngine(policy)
+	require.NoError(t, err)
+
+	t.Run("present satisfies the wildcard", func(t *testing.T) {
+		require.NoError(t, engine.Evaluate("pid", map[string]any{"org_id": "SE123"}, policy.QueryTemplate))
+	})
+
+	t.Run("absent is denied", func(t *testing.T) {
+		err := engine.Evaluate("pid", map[string]any{"sub": "alice"}, policy.QueryTemplate)
+		require.Error(t, err, "a claim the OP did not assert must not satisfy a wildcard dimension")
+		assert.Contains(t, err.Error(), "did not assert")
+		assert.Contains(t, err.Error(), "org_id", "the denial must name the claim that was missing")
+	})
+
+	t.Run("absent is denied even against a value rule", func(t *testing.T) {
+		valuePolicy := &model.IssuancePolicy{
+			Rules: []string{"(credential (scope pid)(acr loa3)(org_id SE123))"},
+			QueryTemplate: []model.QueryDimension{
+				{Dimension: "acr", Claim: "acr"},
+				{Dimension: "org_id", Claim: "org_id"},
+			},
+		}
+		valueEngine, err := NewPolicyEngine(valuePolicy)
+		require.NoError(t, err)
+
+		err = valueEngine.Evaluate("pid", map[string]any{"acr": "loa3"}, valuePolicy.QueryTemplate)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "org_id")
+	})
+
+	t.Run("a nested claim path still resolves", func(t *testing.T) {
+		nestedPolicy := &model.IssuancePolicy{
+			Rules:         []string{"(credential (scope pid)(given_name Alice))"},
+			QueryTemplate: []model.QueryDimension{{Dimension: "given_name", Claim: "identity.given_name"}},
+		}
+		nestedEngine, err := NewPolicyEngine(nestedPolicy)
+		require.NoError(t, err)
+
+		require.NoError(t, nestedEngine.Evaluate("pid", map[string]any{
+			"identity": map[string]any{"given_name": "Alice"},
+		}, nestedPolicy.QueryTemplate), "dot-notation resolution must count as present")
+	})
+}

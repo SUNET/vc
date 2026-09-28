@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/issuance"
 	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/creasty/defaults"
@@ -313,6 +314,35 @@ func TestCheckIssuancePolicies(t *testing.T) {
 			QueryTemplate: []model.QueryDimension{{Dimension: "acr", Claim: "acr"}},
 		}), "apigw")
 		require.Error(t, err, "BuildEngine ran only from the OIDC callback before this")
+	})
+
+	// Building an engine and throwing it away meant the first OIDC callback
+	// parsed the rules file again — so a file edited between boot and that
+	// callback decided authorization without ever having been validated,
+	// either failing at request time despite a clean start or quietly
+	// enforcing different rules than the ones checked here. Priming the
+	// shared cache makes the validated engine the one that serves requests.
+	t.Run("the validated engine is the one the callback will use", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "rules.spocp")
+		require.NoError(t, os.WriteFile(path, []byte("(credential (scope org_credential)(acr loa3))\n"), 0o600))
+
+		policy := &model.IssuancePolicy{
+			RulesFile:     path,
+			QueryTemplate: []model.QueryDimension{{Dimension: "acr", Claim: "acr"}},
+		}
+		require.NoError(t, checkIssuancePolicies(withAssertionPolicy(policy), "apigw"))
+
+		// Replace the file with rules that would decide differently. If the
+		// callback re-read it, this is what would be enforced.
+		require.NoError(t, os.WriteFile(path, []byte("(credential (scope org_credential)(acr loa1))\n"), 0o600))
+
+		engine, err := issuance.GetPolicyEngine(policy)
+		require.NoError(t, err)
+		require.NotNil(t, engine)
+		require.NoError(t, engine.Evaluate("org_credential", map[string]any{"acr": "loa3"}, policy.QueryTemplate),
+			"the engine validated at startup must still be the one answering, not one re-read from the changed file")
+		require.Error(t, engine.Evaluate("org_credential", map[string]any{"acr": "loa1"}, policy.QueryTemplate),
+			"and the replacement file's rules must not have taken effect")
 	})
 
 	// Only apigw owns data_sources.

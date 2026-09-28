@@ -23,6 +23,21 @@ import (
 )
 
 // OIDCRPInitiateRequest represents the request to initiate OIDC authentication
+//
+// Carries no dynamic parameters, so a scope whose oidc_request_params contain
+// a template ("{{.org_id}}") cannot be initiated through this endpoint: there
+// is no value to substitute and flow initiation fails with a template error
+// naming the missing key. That is the intended behaviour, not an oversight to
+// work around - the alternative, sending the literal "{{.org_id}}" to the OP,
+// produced an authorization request that was not bound to the value it was
+// meant to carry and said nothing about it.
+//
+// Dynamic parameters reach the OIDC request through the PAR/VCI path only:
+// PARRequest.DynamicParams -> AuthorizationContext.DynamicParams -> the
+// consent flow's InitiateAuthForVCI. Adding a field here would put
+// caller-supplied values into the outgoing authorization request from a second
+// entry point, which is an API contract decision rather than a fix; see the
+// discussion on PR #380.
 type OIDCRPInitiateRequest struct {
 	CredentialType string `json:"credential_type" binding:"required"`
 }
@@ -97,6 +112,13 @@ func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest,
 
 // OIDCRPCallback processes OIDC callback and issues credential
 //
+// The results are named so that the deferred session cleanup below actually
+// sees them. Every `return nil, fmt.Errorf(...)` in this function assigns the
+// named err on its way out, whereas the local error variables these branches
+// use (policyErr, lookupErr, derr, resolveErr, saveErr, ...) do not - so with
+// an unnamed result the cleanup fired for a handful of paths and silently
+// skipped the rest, including the policy denial.
+//
 //	@Summary		OIDC Provider Callback
 //	@ID				oidcrp-callback
 //	@Description	Receives and processes the authorization code from the OIDC Provider
@@ -108,7 +130,7 @@ func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest,
 //	@Success		200		{object}	OIDCRPCallbackResponse
 //	@Failure		400		{object}	helpers.ErrorResponse	"Bad Request"
 //	@Router			/oidcrp/callback [get]
-func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest, oidcrpService any) (*OIDCRPCallbackResponse, error) {
+func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest, oidcrpService any) (resp *OIDCRPCallbackResponse, err error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:OIDCRPCallback")
 	defer span.End()
 
@@ -154,7 +176,13 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, fmt.Errorf("failed to retrieve session: %w", err)
 	}
 
-	// Ensure session is cleaned up if any subsequent step fails
+	// Ensure the session is cleaned up if any subsequent step fails.
+	//
+	// This reads the named result, so it covers every error return past this
+	// point rather than only the ones that happen to assign the local `err`.
+	// The policy denial was one of the ones it missed: the request was
+	// refused, but the OIDC session stayed in the cache until its TTL, still
+	// usable.
 	defer func() {
 		if err != nil {
 			service.DeleteSession(ctx, req.State)

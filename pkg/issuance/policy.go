@@ -149,11 +149,30 @@ func (pe *PolicyEngine) Evaluate(scope string, claims map[string]any, queryTempl
 			"the query would carry no claim dimensions, so it cannot decide anything", scope)
 	}
 
-	query := BuildQuery(scope, claims, queryTemplate)
+	query, missing := buildQuery(scope, claims, queryTemplate)
+
+	// An absent claim is not a wildcard.
+	//
+	// An unresolved dimension is emitted empty, as `(org_id)`, and that is
+	// also how a wildcard rule is written under this rule set's convention -
+	// so SPOCP matched them against each other and `(credential (scope pid)
+	// (org_id))`, meaning "any org_id", authorized a token carrying no
+	// org_id at all. "Any value" has to mean a value exists, or the weakest
+	// rule an operator can write is satisfied by asserting nothing.
+	//
+	// Denying rather than emitting a sentinel, because an operator who does
+	// not care about a dimension already has a way to say so: leave it out
+	// of query_template, and it appears in neither the query nor the rule
+	// shape. Listing it is a statement that the OP must assert it.
+	if len(missing) > 0 {
+		return fmt.Errorf("issuance policy denied: scope %q requires claims the provider did not assert: %v",
+			scope, missing)
+	}
 
 	if !pe.engine.QueryElement(query) {
 		return fmt.Errorf("issuance policy denied: claims do not satisfy any rule for scope %q", scope)
 	}
+
 	return nil
 }
 
@@ -166,20 +185,36 @@ func (pe *PolicyEngine) Evaluate(scope string, claims map[string]any, queryTempl
 // the token happened to carry, in name order, which shifted the rule's
 // dimensions out of position and denied. See NewPolicyEngine.
 func BuildQuery(scope string, claims map[string]any, queryTemplate []model.QueryDimension) sexp.Element {
+	query, _ := buildQuery(scope, claims, queryTemplate)
+
+	return query
+}
+
+// buildQuery is BuildQuery plus the part a caller must not be able to ignore:
+// which template claims the provider did not assert.
+//
+// They are returned rather than folded into the query because the query cannot
+// express the difference. An unresolved dimension is emitted empty, and an
+// empty dimension is exactly how a wildcard rule is written here, so absence
+// and "any value" become the same S-expression. Evaluate denies on a non-empty
+// missing list before querying.
+func buildQuery(scope string, claims map[string]any, queryTemplate []model.QueryDimension) (sexp.Element, []string) {
 	dims := make([]string, 0, len(queryTemplate)+1)
 	dims = append(dims, scopeDimension)
 	values := map[string]string{scopeDimension: scope}
 
+	var missing []string
 	for _, dim := range queryTemplate {
 		dims = append(dims, dim.Dimension)
-		if value, ok := lookupClaim(claims, dim.Claim); ok {
-			values[dim.Dimension] = toStringValue(value)
+		value, ok := lookupClaim(claims, dim.Claim)
+		if !ok {
+			missing = append(missing, dim.Claim)
+			continue
 		}
-		// Claim not present — leave values[dim.Dimension] unset;
-		// BuildTaggedQuery emits an empty dimension, matching wildcard rules.
+		values[dim.Dimension] = toStringValue(value)
 	}
 
-	return spocputil.BuildTaggedQuery("credential", dims, values)
+	return spocputil.BuildTaggedQuery("credential", dims, values), missing
 }
 
 // lookupClaim resolves a query template's claim path against the OIDC claims.

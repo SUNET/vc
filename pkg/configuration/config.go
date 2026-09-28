@@ -310,10 +310,22 @@ func checkIssuancePolicies(cfg *model.Cfg, serviceName string) error {
 		}
 		where := fmt.Sprintf("apigw.data_sources.%s.scopes.%s.issuance_policy", p.kind, p.scope)
 
-		// NewPolicyEngine now refuses every way of ending up with no rules -
-		// no source configured, and a rules_file that parses to nothing -
-		// so the only thing left to do here is name the scope it happened on.
-		if _, err := issuance.NewPolicyEngine(p.policy); err != nil {
+		// GetPolicyEngine, not NewPolicyEngine: it builds through the same
+		// cache the OIDC callback reads, keyed on the policy pointer, so the
+		// engine validated here is the engine that later serves requests.
+		//
+		// Building and discarding meant the first callback parsed the rules
+		// file again, and a file edited between boot and that callback would
+		// then decide authorization without ever having been validated -
+		// either failing at request time despite a clean start, or, worse,
+		// quietly enforcing different rules than the ones this check passed.
+		// Config pointers are stable for the process lifetime, so priming
+		// the cache here also means the rules file is read exactly once.
+		//
+		// NewPolicyEngine underneath refuses every way of ending up with no
+		// rules - no source configured, and a rules_file that parses to
+		// nothing - so the only thing left to do here is name the scope.
+		if _, err := issuance.GetPolicyEngine(p.policy); err != nil {
 			return fmt.Errorf("%s: %w", where, err)
 		}
 	}

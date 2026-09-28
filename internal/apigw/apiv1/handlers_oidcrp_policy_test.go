@@ -194,6 +194,47 @@ func TestOIDCRPCallbackAppliesIssuancePolicy(t *testing.T) {
 	}
 }
 
+// TestOIDCRPCallbackDeletesSessionOnPolicyDenial pins the cleanup that the
+// denial path used to skip.
+//
+// The deferred cleanup keys off the function's error result, and the denial
+// branch returned through a local `policyErr` — so the outer error stayed nil,
+// the cleanup did not run, and a session whose code had already been redeemed
+// sat in the cache until its TTL. The request was refused and the state that
+// carried it was kept, which is the wrong half of the transaction to preserve.
+//
+// Asserted through the handler rather than by inspecting the branch, so it
+// also covers the other error returns that use their own local variables.
+func TestOIDCRPCallbackDeletesSessionOnPolicyDenial(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		asserts map[string]any
+	}{
+		{"policy denies", map[string]any{"acr": "loa1"}},
+		{"policy passes but a later step fails", map[string]any{"acr": "loa3"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, service := newPolicyGateTestClient(t, tc.asserts)
+
+			ctx := t.Context()
+			authReq, err := service.InitiateAuth(ctx, "pid", nil, nil)
+			require.NoError(t, err)
+
+			session, err := service.GetSession(ctx, authReq.State)
+			require.NoError(t, err)
+
+			_, err = client.OIDCRPCallback(ctx, &OIDCRPCallbackRequest{
+				Code:  "policy-test-code|" + session.Nonce,
+				State: authReq.State,
+			}, service)
+			require.Error(t, err)
+
+			_, err = service.GetSession(ctx, authReq.State)
+			require.Error(t, err, "a failed callback must not leave its OIDC session behind")
+		})
+	}
+}
+
 // newPolicyGateTestClient wires a Client with only what the callback needs to
 // reach the policy gate, a real oidcrp.Service, and a scope configured with a
 // policy that requires acr loa3.
