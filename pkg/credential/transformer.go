@@ -96,6 +96,17 @@ func applyTransformOrError(value any, transform string) (any, error) {
 		return value, nil
 	}
 
+	// Reducing transforms collapse a multi-valued attribute to a single value,
+	// so they must run before the per-element slice loop below.
+	switch transform {
+	case "swamid_highest_assurance_level":
+		al := SWAMIDHighestAssuranceLevel(value)
+		if al == "" {
+			return value, fmt.Errorf("no recognized SWAMID assurance level URI in eduPersonAssurance")
+		}
+		return al, nil
+	}
+
 	// Apply per element for slice-typed inputs (multi-valued SAML attrs) so
 	// e.g. country_alpha2 maps each nationality individually.
 	if slice, ok := value.([]string); ok {

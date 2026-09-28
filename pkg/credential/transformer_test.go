@@ -385,6 +385,43 @@ func TestTransformClaims(t *testing.T) {
 				"nationalities": []string{"SE"},
 			},
 		},
+		{
+			name: "transform swamid_highest_assurance_level picks highest SWAMID AL and ignores REFEDS URIs",
+			mapping: model.AttributeMapping{
+				"epa": {Claim: "assurance_level", Transform: "swamid_highest_assurance_level"},
+			},
+			attributes: map[string]any{
+				"epa": []string{
+					"http://www.swamid.se/policy/assurance/al1",
+					"http://www.swamid.se/policy/assurance/al2",
+					"https://refeds.org/assurance",
+					"https://refeds.org/assurance/profile/cappuccino",
+					"https://refeds.org/assurance/IAP/low",
+					"https://refeds.org/assurance/IAP/medium",
+				},
+			},
+			want: map[string]any{"assurance_level": "AL2"},
+		},
+		{
+			name: "transform swamid_highest_assurance_level scalar SWAMID input",
+			mapping: model.AttributeMapping{
+				"epa": {Claim: "assurance_level", Transform: "swamid_highest_assurance_level"},
+			},
+			attributes: map[string]any{
+				"epa": "http://www.swamid.se/policy/assurance/al3",
+			},
+			want: map[string]any{"assurance_level": "AL3"},
+		},
+		{
+			name: "transform swamid_highest_assurance_level only REFEDS URIs is skipped when optional",
+			mapping: model.AttributeMapping{
+				"epa": {Claim: "assurance_level", Transform: "swamid_highest_assurance_level"},
+			},
+			attributes: map[string]any{
+				"epa": []string{"https://refeds.org/assurance/IAP/high"},
+			},
+			want: map[string]any{},
+		},
 	}
 
 	for _, tt := range tests {

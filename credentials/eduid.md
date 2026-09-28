@@ -56,6 +56,7 @@ A verifiable credential for educational identity, based on PID ARF 1.8. Provides
 - `document_number` "Document Number" (string): Unique identifier of the eduID document [sd=always]
 - `issuing_jurisdiction` "Issuing Region" (string): Regional or local subdivision that issued the document [sd=never]
 - `trust_anchor` "Trust Anchor" (string): The trust anchor used to verify the document [sd=never]
+- `assurance_level` "Assurance Level (canonical)" (string): Canonical identity assurance level (`AL1`, `AL2`, or `AL3`). Derived from SAML attribute `eduPersonAssurance` (SWAMID Assurance Framework or REFEDS IAP profile URIs). [sd=always]
 
 ## Images
 

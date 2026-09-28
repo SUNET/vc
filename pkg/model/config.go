@@ -504,8 +504,8 @@ type AttributeConfig struct {
 	Required bool `yaml:"required" default:"false"`
 
 	// Transform is an optional transformation to apply
-	// Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3", "yyyymmdd_to_iso"
-	Transform string `yaml:"transform,omitempty" validate:"omitempty,oneof=lowercase uppercase trim country_alpha2 country_alpha3 yyyymmdd_to_iso"`
+	// Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3", "yyyymmdd_to_iso", "swamid_highest_assurance_level"
+	Transform string `yaml:"transform,omitempty" validate:"omitempty,oneof=lowercase uppercase trim country_alpha2 country_alpha3 yyyymmdd_to_iso swamid_highest_assurance_level"`
 
 	// Default is an optional default value if attribute is missing
 	Default string `yaml:"default,omitempty"`

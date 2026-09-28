@@ -16,6 +16,9 @@ common:
     eduid:
       vctm_file_path: "/metadata/vctm_eduid.json"
       format: "dc+sd-jwt"
+    eduid_age_verification:
+      vctm_file_path: "/metadata/vctm_eduid_age_verification.json"
+      format: "dc+sd-jwt"
     #pid_mdoc:
     #  mddl_file_path: "/metadata/pid_mdoc.mdoc.json"
     #  format: "mso_mdoc"
@@ -252,8 +255,8 @@ apigw:
         "urn:oid:1.3.6.1.4.1.5923.1.1.1.6":
           claim: "preferred_username"
         "urn:oid:1.3.6.1.4.1.5923.1.1.1.11":
-          claim: "assurance"
-          as_array: true
+          claim: "assurance_level"
+          transform: "swamid_highest_assurance_level"
         "urn:oasis:names:tc:SAML:attribute:subject-id":
           claim: "subject_id"
   data_sources:
