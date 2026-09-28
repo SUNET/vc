@@ -64,7 +64,9 @@ verifier:
       # dynamic_registration_auth:
       #   mode: "static"
       #   static_bearer_token_file: "/run/secrets/verifier_dcr_initial_access_token"
-      # Or JWT mode:
+      # Or JWT mode. jwks_uri and issuer must be https: the key set decides
+      # which registration tokens verify, so over plaintext anyone on the
+      # path picks the keys. Private/loopback addresses are fine over TLS.
       # dynamic_registration_auth:
       #   mode: "jwt"
       #   jwt:
@@ -72,6 +74,7 @@ verifier:
       #     issuer: "https://auth.example.com"
       #     audience: "vc-verifier-register"
       #     allowed_signing_algs: ["RS256", "ES256"]
+      #     # Omit for the 60s default; set 0 to turn the tolerance off.
       #     clock_skew_seconds: 60
   inbound:
     openid4vp:

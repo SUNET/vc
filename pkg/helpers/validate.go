@@ -123,6 +123,41 @@ func NewValidator() (*validator.Validate, error) {
 		return nil, err
 	}
 
+	// Register custom validation for https_endpoint - a server-side endpoint,
+	// configured by the operator, that must be reached over TLS.
+	//
+	// Deliberately not httpsurl. That one is for URIs supplied by a
+	// registering client, so besides the scheme it resolves the host and
+	// refuses private/loopback addresses, to stop an outsider aiming the
+	// server at its own network. These URLs come from the deployment's own
+	// config file, where an in-cluster issuer on a private address is the
+	// normal case and not an attack, and where resolving at startup would
+	// make config validation fail whenever DNS happens to be unavailable.
+	//
+	// The scheme is what cannot be relaxed: the endpoint behind such a URL
+	// supplies the keys a token is judged against, so over plaintext anyone
+	// on the path chooses those keys and the signature check proves nothing.
+	err = validate.RegisterValidation("https_endpoint", func(fl validator.FieldLevel) bool {
+		urlStr := fl.Field().String()
+		if urlStr == "" {
+			return false
+		}
+
+		parsedURL, err := url.Parse(urlStr)
+		if err != nil {
+			return false
+		}
+
+		if !strings.EqualFold(parsedURL.Scheme, "https") {
+			return false
+		}
+
+		return parsedURL.Host != ""
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	// Register custom validation for redirect_uri - validates OAuth 2.0 redirect URI format.
 	// Used by OIDC dynamic client registration (RFC 7591) for redirect_uris.
 	// Per RFC 6749: must have a scheme and must not contain a fragment.

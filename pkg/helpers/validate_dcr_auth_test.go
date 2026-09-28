@@ -99,7 +99,7 @@ func TestDynamicRegistrationJWTClockSkewBound(t *testing.T) {
 			JWKSURI:          "https://auth.example.com/jwks.json",
 			Issuer:           "https://auth.example.com",
 			Audience:         "vc-verifier-register",
-			ClockSkewSeconds: skew,
+			ClockSkewSeconds: &skew,
 		}
 	}
 
@@ -121,6 +121,55 @@ func TestDynamicRegistrationJWTClockSkewBound(t *testing.T) {
 			}
 			if !tc.wantReject && err != nil {
 				t.Fatalf("clock_skew_seconds=%d must be accepted, got: %v", tc.skew, err)
+			}
+		})
+	}
+}
+
+// TestDynamicRegistrationJWTEndpointsRequireHTTPS pins the scheme on the two
+// URLs that decide whether a registration token is believed.
+//
+// The key set is the trust root for jwt mode: whoever serves it decides which
+// signatures verify. Fetched over plaintext, that is anyone on the network
+// path, who can then swap in their own keys and mint a token this verifier
+// accepts - so the whole check reduces to "someone on the wire said yes".
+//
+// Private and loopback addresses stay allowed, unlike the httpsurl tag used
+// for client-supplied URIs: an in-cluster issuer is a normal deployment, not
+// an SSRF attempt, and this value comes from the operator's own config file.
+func TestDynamicRegistrationJWTEndpointsRequireHTTPS(t *testing.T) {
+	v, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		jwksURI    string
+		issuer     string
+		wantReject bool
+	}{
+		{"both https", "https://auth.example.com/jwks.json", "https://auth.example.com", false},
+		{"plaintext jwks", "http://auth.example.com/jwks.json", "https://auth.example.com", true},
+		{"plaintext issuer", "https://auth.example.com/jwks.json", "http://auth.example.com", true},
+		{"uppercase scheme accepted", "HTTPS://auth.example.com/jwks.json", "https://auth.example.com", false},
+		{"private address over https", "https://10.0.0.7:8443/jwks.json", "https://10.0.0.7:8443", false},
+		{"loopback over https", "https://127.0.0.1:8443/jwks.json", "https://127.0.0.1:8443", false},
+		{"plaintext loopback still rejected", "http://127.0.0.1:8443/jwks.json", "https://auth.example.com", true},
+		{"no host", "https:///jwks.json", "https://auth.example.com", true},
+		{"not a url at all", "auth.example.com/jwks.json", "https://auth.example.com", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := v.Struct(model.DynamicRegistrationJWTAuthConfig{
+				JWKSURI:  tc.jwksURI,
+				Issuer:   tc.issuer,
+				Audience: "vc-verifier-register",
+			})
+			if tc.wantReject && err == nil {
+				t.Fatalf("jwks_uri=%q issuer=%q must be rejected", tc.jwksURI, tc.issuer)
+			}
+			if !tc.wantReject && err != nil {
+				t.Fatalf("jwks_uri=%q issuer=%q must be accepted, got: %v", tc.jwksURI, tc.issuer, err)
 			}
 		})
 	}

@@ -93,9 +93,11 @@ func TestRegistrationAuthMiddlewareStaticMode(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, registerPath, nil)
 		resp := httptest.NewRecorder()
 		r.ServeHTTP(resp, req)
-		// 400, not 401: no Authorization header at all is invalid_request
-		// per RFC 6750 section 3.1, not a rejected token.
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
+		// 401 with a bare Bearer challenge: no Authorization header at all
+		// is "you need to authenticate" per RFC 6750 section 3, not a
+		// malformed request and not a rejected token.
+		assert.Equal(t, http.StatusUnauthorized, resp.Code)
+		assert.Equal(t, "Bearer", resp.Header().Get("WWW-Authenticate"))
 	})
 
 	t.Run("invalid token", func(t *testing.T) {
@@ -261,11 +263,28 @@ func TestExtractBearerToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "abc123", token)
 
+	// An absent header and a non-Bearer scheme both mean "no bearer
+	// credentials were presented", which the middleware answers with a
+	// challenge rather than a parse complaint. The sentinel is what carries
+	// that distinction, so assert on it and not merely on "some error".
 	_, err = extractBearerToken("")
-	require.Error(t, err)
+	require.ErrorIs(t, err, errNoBearerCredentials)
+
+	_, err = extractBearerToken("   ")
+	require.ErrorIs(t, err, errNoBearerCredentials)
 
 	_, err = extractBearerToken("Basic abc123")
+	require.ErrorIs(t, err, errNoBearerCredentials)
+
+	// These did use the Bearer scheme, so they are malformed requests, not
+	// missing credentials.
+	_, err = extractBearerToken("Bearer")
 	require.Error(t, err)
+	assert.NotErrorIs(t, err, errNoBearerCredentials)
+
+	_, err = extractBearerToken("Bearer    ")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, errNoBearerCredentials)
 }
 
 func TestExtractBearerTokenCaseInsensitiveScheme(t *testing.T) {
@@ -285,12 +304,19 @@ func TestRSAExponentEncodingSanity(t *testing.T) {
 	assert.True(t, privateKey.PublicKey.N.Cmp(big.NewInt(0)) > 0)
 }
 
-// TestRegistrationAuthHeaderErrorsAreInvalidRequest pins RFC 6750 section
-// 3.1's split: a missing or malformed Authorization header is
-// invalid_request, and only a credential that was actually judged and
-// rejected is invalid_token. Answering "your token is bad" to a client that
-// sent no token sends it looking in the wrong place.
-func TestRegistrationAuthHeaderErrorsAreInvalidRequest(t *testing.T) {
+// TestRegistrationAuthHeaderErrors pins RFC 6750's three-way split, which
+// this middleware previously collapsed into two.
+//
+//   - No bearer credentials at all (absent header, or another scheme):
+//     section 3 says answer with a challenge and, explicitly, no error code.
+//     401, bare `WWW-Authenticate: Bearer`, no `error` in the body. A client
+//     that sent nothing has to be able to learn that a token is what it
+//     needs; naming an error describes a credential it never presented.
+//   - The Bearer scheme used but unparseable: invalid_request, and section
+//     3.1 pairs that with 400. Not 401, which clients read as "refresh and
+//     retry" and would loop on.
+//   - A credential actually judged and rejected: invalid_token, 401.
+func TestRegistrationAuthHeaderErrors(t *testing.T) {
 	dir := t.TempDir()
 	tokenFile := filepath.Join(dir, "token")
 	if err := os.WriteFile(tokenFile, []byte("s3cret"), 0o600); err != nil {
@@ -311,19 +337,22 @@ func TestRegistrationAuthHeaderErrorsAreInvalidRequest(t *testing.T) {
 		t.Fatalf("middleware: %v", err)
 	}
 
-	// RFC 6750 section 3.1 pairs each code with a status: invalid_request is
-	// 400, invalid_token is 401. Asserting both together, since a client
-	// keying off the status alone is the case that matters.
+	// Status, error code and challenge asserted together: a client keying
+	// off any one of the three has to be able to tell the cases apart.
+	// wantCode "" means the body must carry no error field at all.
 	for _, tc := range []struct {
-		name       string
-		header     string
-		wantCode   string
-		wantStatus int
+		name          string
+		header        string
+		wantCode      string
+		wantStatus    int
+		wantChallenge string
 	}{
-		{"no header at all", "", "invalid_request", http.StatusBadRequest},
-		{"not a bearer scheme", "Basic dXNlcjpwYXNz", "invalid_request", http.StatusBadRequest},
-		{"bearer with no value", "Bearer", "invalid_request", http.StatusBadRequest},
-		{"well-formed but wrong token", "Bearer wrong", "invalid_token", http.StatusUnauthorized},
+		{"no header at all", "", "", http.StatusUnauthorized, "Bearer"},
+		{"blank header", "   ", "", http.StatusUnauthorized, "Bearer"},
+		{"not a bearer scheme", "Basic dXNlcjpwYXNz", "", http.StatusUnauthorized, "Bearer"},
+		{"bearer with no value", "Bearer", "invalid_request", http.StatusBadRequest, `Bearer error="invalid_request"`},
+		{"bearer with blank value", "Bearer    ", "invalid_request", http.StatusBadRequest, `Bearer error="invalid_request"`},
+		{"well-formed but wrong token", "Bearer wrong", "invalid_token", http.StatusUnauthorized, `Bearer error="invalid_token"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
@@ -339,9 +368,19 @@ func TestRegistrationAuthHeaderErrorsAreInvalidRequest(t *testing.T) {
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("want status %d, got %d", tc.wantStatus, rec.Code)
 			}
+			if got := rec.Header().Get("WWW-Authenticate"); got != tc.wantChallenge {
+				t.Errorf("challenge: want %q, got %q", tc.wantChallenge, got)
+			}
 			var body map[string]any
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 				t.Fatalf("decode body: %v (%s)", err, rec.Body.String())
+			}
+			if tc.wantCode == "" {
+				if got, ok := body["error"]; ok {
+					t.Errorf("no credentials presented: body must carry no error code, got %v", got)
+				}
+
+				return
 			}
 			if got := body["error"]; got != tc.wantCode {
 				t.Errorf("error code: want %q, got %v", tc.wantCode, got)

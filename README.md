@@ -210,6 +210,18 @@ Supported modes:
 - `static`: requires a fixed bearer token loaded from local file
 - `jwt`: requires a signed JWT bearer token validated with configured `issuer`, `audience`, and `jwks_uri`
 
+`jwks_uri` and `issuer` must be `https`. The key set is the trust root for
+every token accepted in `jwt` mode, so over plaintext anyone on the network
+path can substitute the keys and mint a token the verifier accepts. Private
+and loopback addresses are allowed, so an in-cluster issuer works, as long as
+it is reached over TLS.
+
+A request carrying no bearer credentials is answered with `401` and a bare
+`WWW-Authenticate: Bearer` challenge (RFC 6750 section 3: no error code, since
+none was presented). An `Authorization` header that does use the Bearer scheme
+but cannot be parsed is `400 invalid_request`; a token that was checked and
+rejected is `401 invalid_token`.
+
 Example (`config.yaml`):
 
 ```yaml
@@ -232,6 +244,7 @@ verifier:
           issuer: "https://auth.example.com"
           audience: "vc-verifier-register"
           allowed_signing_algs: ["RS256", "ES256"]
+          # Omit for the 60s default; set 0 to turn the tolerance off.
           clock_skew_seconds: 60
 ```
 

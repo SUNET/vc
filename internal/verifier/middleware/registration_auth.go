@@ -29,8 +29,20 @@ const (
 	errCodeInvalidRequest                        = "invalid_request"
 	errCodeInvalidToken                          = "invalid_token"
 	errDescInvalidRegistrationAuthorizationToken = "invalid registration authorization token"
-	errDescMissingOrInvalidBearerToken           = "missing or invalid bearer token"
+	errDescMalformedBearerToken                  = "malformed bearer token in Authorization header"
+	errDescRegistrationAuthorizationRequired     = "authorization is required for dynamic client registration"
 )
+
+// errNoBearerCredentials marks the case where the request carried nothing
+// that was even an attempt at a bearer token: no Authorization header, or one
+// using some other scheme entirely.
+//
+// RFC 6750 section 3 keeps this apart from a bad token, and the difference is
+// the whole point of the challenge: a client that sent nothing needs to be
+// told authorization exists and takes a Bearer token, which is a 401 carrying
+// a bare `WWW-Authenticate: Bearer` and - explicitly - no error code, since
+// naming an error would describe a credential that was never presented.
+var errNoBearerCredentials = errors.New("no bearer credentials presented")
 
 // jwksFetchTimeout bounds one JWKS fetch. Shorter than the per-request
 // verification deadline below, so a slow endpoint fails the fetch rather
@@ -49,6 +61,10 @@ type registrationAuthError struct {
 }
 
 func (e *registrationAuthError) Error() string {
+	if e.errorCode == "" {
+		return e.description
+	}
+
 	return e.errorCode + ": " + e.description
 }
 
@@ -60,19 +76,38 @@ func unauthorizedRegistrationError(description string) *registrationAuthError {
 	}
 }
 
-// malformedRequestError is the header-level failure: nothing was presented
-// that could be judged as a token.
+// malformedRequestError is the header-level failure: the Bearer scheme was
+// used, but the header cannot be parsed into a token.
 //
 // 400, not 401, per RFC 6750 section 3.1. The distinction is not cosmetic:
 // clients commonly treat 401 as "the token was rejected, refresh and retry",
-// and answering that to a request whose Authorization header was missing or
-// unparseable sends them into a refresh loop over a request that will never
-// succeed until it is corrected.
+// and answering that to a request whose Authorization header was unparseable
+// sends them into a refresh loop over a request that will never succeed until
+// it is corrected. A request that presented no bearer credentials at all is a
+// different case again - see missingCredentialsError.
 func malformedRequestError(description string) *registrationAuthError {
 	return &registrationAuthError{
 		status:      http.StatusBadRequest,
 		errorCode:   errCodeInvalidRequest,
 		description: description,
+	}
+}
+
+// missingCredentialsError is the answer to a request that presented no bearer
+// credentials at all.
+//
+// 401 with an empty error code, which writeRegistrationAuthError renders as a
+// bare `WWW-Authenticate: Bearer` challenge and a body without an `error`
+// field. RFC 6750 section 3: "If the request lacks any authentication
+// information [...] the resource server SHOULD NOT include an error code or
+// other error information." Answering 400 invalid_request here, as an earlier
+// version of this middleware did, tells a client that its request was
+// malformed when the request was fine and only unauthenticated - so it has no
+// way to learn that acquiring a token is what it needs to do.
+func missingCredentialsError() *registrationAuthError {
+	return &registrationAuthError{
+		status:      http.StatusUnauthorized,
+		description: errDescRegistrationAuthorizationRequired,
 	}
 }
 
@@ -108,7 +143,12 @@ func NewRegistrationAuthMiddleware(cfg *model.Cfg, log *logger.Log) (gin.Handler
 	return func(c *gin.Context) {
 		token, err := extractBearerToken(c.GetHeader("Authorization"))
 		if err != nil {
-			writeRegistrationAuthError(c, malformedRequestError(errDescMissingOrInvalidBearerToken))
+			if errors.Is(err, errNoBearerCredentials) {
+				writeRegistrationAuthError(c, missingCredentialsError())
+				return
+			}
+
+			writeRegistrationAuthError(c, malformedRequestError(errDescMalformedBearerToken))
 			return
 		}
 
@@ -149,6 +189,19 @@ func buildRegistrationAuthValidator(mode string, authCfg *model.DynamicRegistrat
 }
 
 func writeRegistrationAuthError(c *gin.Context, authErr *registrationAuthError) {
+	// An empty code is the "no credentials presented" case: RFC 6750
+	// section 3 says not to name an error there, so the challenge is bare
+	// and the body carries only a human-readable description.
+	if authErr.errorCode == "" {
+		c.Header("WWW-Authenticate", "Bearer")
+		c.Header("Cache-Control", "no-store")
+		c.Header("Pragma", "no-cache")
+		c.JSON(authErr.status, gin.H{"error_description": authErr.description})
+		c.Abort()
+
+		return
+	}
+
 	c.Header("WWW-Authenticate", fmt.Sprintf("Bearer error=\"%s\"", authErr.errorCode))
 	// RFC 6749 section 5.2, and matching what the OIDC endpoints already do
 	// (see verifier/httpserver/endpoints_oidc.go): an authorization error is
@@ -164,13 +217,33 @@ func writeRegistrationAuthError(c *gin.Context, authErr *registrationAuthError) 
 	c.Abort()
 }
 
+// extractBearerToken splits an Authorization header into its two outcomes.
+//
+// errNoBearerCredentials: nothing was presented under the Bearer scheme - an
+// absent or blank header, or one naming a different scheme. The caller answers
+// that with a challenge (401), because no credential of ours was rejected.
+//
+// Any other error: the Bearer scheme was used but the header cannot be parsed
+// as one - "Bearer" with nothing after it, or only whitespace. That is a
+// defect in the request itself, and the caller answers 400 invalid_request,
+// not 401, so a client does not read it as "refresh your token and retry" and
+// loop on a request that cannot succeed until it is corrected.
 func extractBearerToken(authHeader string) (string, error) {
-	parts := strings.SplitN(strings.TrimSpace(authHeader), " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
-		return "", fmt.Errorf("invalid authorization header")
+	trimmed := strings.TrimSpace(authHeader)
+	if trimmed == "" {
+		return "", errNoBearerCredentials
 	}
 
-	token := strings.TrimSpace(parts[1])
+	scheme, rest, found := strings.Cut(trimmed, " ")
+	if !strings.EqualFold(scheme, "bearer") {
+		return "", errNoBearerCredentials
+	}
+
+	if !found {
+		return "", fmt.Errorf("authorization header names the bearer scheme but carries no token")
+	}
+
+	token := strings.TrimSpace(rest)
 	if token == "" {
 		return "", fmt.Errorf("empty bearer token")
 	}
@@ -266,8 +339,13 @@ func newJWTBearerValidator(cfg *model.DynamicRegistrationJWTAuthConfig) (*jwtBea
 	// directions: a token that expired within the tolerance is still
 	// accepted, and go-oidc's fixed five-minute nbf leeway shrinks by the
 	// same amount. See ClockSkewSeconds' own doc comment.
-	if cfg.ClockSkewSeconds > 0 {
-		skew := time.Duration(cfg.ClockSkewSeconds) * time.Second
+	//
+	// nil means the key was absent from the config and defaults have not
+	// run (this constructor is also called directly from tests); an
+	// explicit 0 means the operator turned the tolerance off and must not
+	// be treated as absent.
+	if cfg.ClockSkewSeconds != nil && *cfg.ClockSkewSeconds > 0 {
+		skew := time.Duration(*cfg.ClockSkewSeconds) * time.Second
 		oidcCfg.Now = func() time.Time { return time.Now().Add(-skew) }
 	}
 	verifier := oidc.NewVerifier(cfg.Issuer, keySet, oidcCfg)

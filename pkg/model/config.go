@@ -1092,10 +1092,21 @@ type DynamicRegistrationAuthConfig struct {
 // DynamicRegistrationJWTAuthConfig configures JWT verification for registration authorization.
 type DynamicRegistrationJWTAuthConfig struct {
 	// JWKSURI is the URL to fetch signing keys from.
-	JWKSURI string `yaml:"jwks_uri" validate:"required,httpurl"`
+	//
+	// HTTPS only. This key set is the trust root for every registration
+	// token accepted in jwt mode: whoever controls the bytes it returns
+	// decides which signatures verify. Over plaintext that is anyone on the
+	// network path, who can then mint a token this verifier accepts and
+	// register clients at will - so the signature check would be theatre,
+	// not protection.
+	JWKSURI string `yaml:"jwks_uri" validate:"required,https_endpoint"`
 
 	// Issuer is the required issuer claim (iss).
-	Issuer string `yaml:"issuer" validate:"required,httpurl"`
+	//
+	// HTTPS only, both because OpenID Connect Discovery requires it and
+	// because an http issuer paired with an https key set is a sign the
+	// deployment was copied from a plaintext one.
+	Issuer string `yaml:"issuer" validate:"required,https_endpoint"`
 
 	// Audience is the required audience claim (aud).
 	Audience string `yaml:"audience" validate:"required"`
@@ -1117,7 +1128,14 @@ type DynamicRegistrationJWTAuthConfig struct {
 	// leeway is gone and a token with a legitimately future nbf starts
 	// being rejected, which is the opposite of what raising a skew
 	// tolerance is meant to achieve.
-	ClockSkewSeconds int `yaml:"clock_skew_seconds,omitempty" default:"60" validate:"omitempty,min=0,max=299"`
+	//
+	// A pointer so that an explicit zero survives. Defaults are applied
+	// after unmarshalling and creasty/defaults fills any field still at its
+	// zero value, so as a plain int, clock_skew_seconds: 0 - the one value
+	// an operator writes on purpose, to turn the tolerance off - is
+	// indistinguishable from the key being absent and gets overwritten with
+	// 60. Unset stays nil until the default is applied; zero stays zero.
+	ClockSkewSeconds *int `yaml:"clock_skew_seconds,omitempty" default:"60" validate:"omitempty,min=0,max=299"`
 }
 
 // OpenID4VPConfig holds OpenID4VP-specific configuration
