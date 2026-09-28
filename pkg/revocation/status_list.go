@@ -3,10 +3,12 @@ package revocation
 import (
 	"context"
 	"crypto"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
@@ -172,24 +174,74 @@ func (c *StatusListChecker) fetchStatusList(ctx context.Context, uri string) ([]
 	}
 
 	contentType := resp.Header.Get("Content-Type")
-	return c.parseStatusListToken(ctx, body, contentType)
+	// The URI travels with the bytes: Section 8.3 requires the token's sub
+	// to equal the uri the Referenced Token pointed at, and a parser that
+	// cannot see the uri cannot make that check.
+	return c.parseStatusListToken(ctx, uri, body, contentType)
 }
 
-func (c *StatusListChecker) parseStatusListToken(ctx context.Context, data []byte, contentType string) ([]uint8, error) {
-	switch contentType {
+func (c *StatusListChecker) parseStatusListToken(ctx context.Context, uri string, data []byte, contentType string) ([]uint8, error) {
+	// A Content-Type may carry parameters (charset, boundary); compare only
+	// the media type itself.
+	mediaType := contentType
+	if i := strings.IndexByte(mediaType, ';'); i >= 0 {
+		mediaType = mediaType[:i]
+	}
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+
+	switch mediaType {
 	case tokenstatuslist.MediaTypeCWT:
-		return c.parseCWTStatusList(ctx, data)
+		return c.parseCWTStatusList(ctx, uri, data)
 	case tokenstatuslist.MediaTypeJWT:
-		return c.parseJWTStatusList(ctx, data)
+		return c.parseJWTStatusList(ctx, uri, data)
 	default:
 		if len(data) > 0 && data[0] == 0xD2 {
-			return c.parseCWTStatusList(ctx, data)
+			return c.parseCWTStatusList(ctx, uri, data)
 		}
-		return c.parseJWTStatusList(ctx, data)
+		return c.parseJWTStatusList(ctx, uri, data)
 	}
 }
 
-func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, data []byte) ([]uint8, error) {
+// resolveStatusListKey resolves the key a Status List Token was signed with.
+//
+// draft-ietf-oauth-status-list Section 5.1 does NOT require an iss claim -
+// the REQUIRED claims are sub, iat and status_list - so refusing a token
+// without one rejects spec-compliant status services (this is what vc did,
+// and siros-status-service is one of them). What the specification DOES
+// require is that sub equals the uri the credential pointed at, which makes
+// the uri an identifier for the list that is always present and always
+// checked. So the issuer identity used for key resolution is iss when the
+// token carries one, and the list URI otherwise.
+//
+// It is never absent: an empty issuer would hand the resolver a blank
+// identity to look up, so the URI standing in keeps resolution keyed to
+// something the caller actually asked for.
+func (c *StatusListChecker) resolveStatusListKey(ctx context.Context, issuer, uri, kid string) (any, error) {
+	if issuer == "" {
+		issuer = uri
+	}
+	return c.keyResolver.ResolveKey(ctx, issuer, kid)
+}
+
+// checkSubject enforces Section 8.3: "the sub claim value MUST be equal to
+// the uri claim in the status_list object of the Referenced Token".
+//
+// Without it, ANY status list token the issuer ever signed is accepted for
+// ANY uri - so a stale or unrelated list (one where the index in question
+// happens to still read VALID) can be served in place of the real one and
+// a revoked credential verifies. The signature alone does not bind a token
+// to the list it claims to be.
+func checkSubject(subject, uri string) error {
+	if subject == "" {
+		return errors.New("status list token has no sub claim; it cannot be bound to the requested list URI")
+	}
+	if subject != uri {
+		return fmt.Errorf("status list token sub %q does not match the requested status list URI %q", subject, uri)
+	}
+	return nil
+}
+
+func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, uri string, data []byte) ([]uint8, error) {
 	// Decode COSE_Sign1 (CBOR Tag 18)
 	var coseTag cbor.Tag
 	if err := cbor.Unmarshal(data, &coseTag); err != nil {
@@ -231,10 +283,17 @@ func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, data []byte)
 	if err := cbor.Unmarshal(payloadBytes, &claims); err != nil {
 		return nil, fmt.Errorf("failed to decode CWT claims: %w", err)
 	}
-	issuer, _ := claims[1].(string) // CWT claim 1 = iss
+	issuer, _ := claims[1].(string)  // CWT claim 1 = iss (OPTIONAL)
+	subject, _ := claims[2].(string) // CWT claim 2 = sub (REQUIRED)
+
+	// Bind the token to the list that was asked for BEFORE trusting
+	// anything in it.
+	if err := checkSubject(subject, uri); err != nil {
+		return nil, err
+	}
 
 	// Resolve signing key and verify signature
-	key, err := c.keyResolver.ResolveKey(ctx, issuer, kid)
+	key, err := c.resolveStatusListKey(ctx, issuer, uri, kid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve CWT signing key: %w", err)
 	}
@@ -258,68 +317,57 @@ func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, data []byte)
 		return nil, fmt.Errorf("CWT signature verification failed: %w", verifyErr)
 	}
 
+	// The signature is verified; the claims can now be trusted. Expiry is
+	// checked here because, unlike the JWT path, nothing else does it.
+	if exp, ok := cwtTime(claims[4]); ok && time.Now().After(exp) {
+		return nil, fmt.Errorf("status list token expired at %s", exp.Format(time.RFC3339))
+	}
+
 	// Extract status list from verified claims
 	statusListRaw, ok := claims[65534]
 	if !ok {
 		return nil, errors.New("status_list claim not found in CWT")
 	}
 
-	var lstBytes []byte
-	switch sl := statusListRaw.(type) {
-	case map[any]any:
-		for k, v := range sl {
-			switch key := k.(type) {
-			case int:
-				if key == 2 {
-					if b, ok := v.([]byte); ok {
-						lstBytes = b
-					}
-				}
-			case int64:
-				if key == 2 {
-					if b, ok := v.([]byte); ok {
-						lstBytes = b
-					}
-				}
-			case uint64:
-				if key == 2 {
-					if b, ok := v.([]byte); ok {
-						lstBytes = b
-					}
-				}
-			}
-		}
-	case map[int]any:
-		if b, ok := sl[2].([]byte); ok {
-			lstBytes = b
-		}
-	default:
-		return nil, fmt.Errorf("invalid status_list claim format: %T", statusListRaw)
+	bits, lstBytes, err := tokenstatuslist.CWTStatusListMembers(statusListRaw)
+	if err != nil {
+		return nil, err
 	}
 
-	if lstBytes == nil {
-		return nil, errors.New("lst not found in status_list claim")
-	}
-
-	return tokenstatuslist.DecompressStatuses(lstBytes)
+	return tokenstatuslist.DecompressAndUnpack(lstBytes, bits)
 }
 
-func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, data []byte) ([]uint8, error) {
-	tokenString := string(data)
+// cwtTime reads a CWT NumericDate claim, which a CBOR decoder can hand back
+// as any of several integer or float types.
+func cwtTime(raw any) (time.Time, bool) {
+	switch v := raw.(type) {
+	case int64:
+		return time.Unix(v, 0), true
+	case int:
+		return time.Unix(int64(v), 0), true
+	case uint64:
+		return time.Unix(int64(v), 0), true
+	case float64:
+		return time.Unix(int64(v), 0), true
+	default:
+		return time.Time{}, false
+	}
+}
+
+func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, uri string, data []byte) ([]uint8, error) {
+	tokenString := strings.TrimSpace(string(data))
 
 	if c.keyResolver == nil {
 		return nil, errors.New("status list JWT signature verification required but no key resolver configured")
 	}
 
-	// Build a jwt.Keyfunc that delegates to the generic KeyResolver
+	// Build a jwt.Keyfunc that delegates to the generic KeyResolver. iss is
+	// OPTIONAL per Section 5.1; see resolveStatusListKey.
 	keyFunc := func(token *jwt.Token) (any, error) {
 		claims, _ := token.Claims.(jwt.MapClaims)
 		issuer, _ := claims["iss"].(string)
 		kid, _ := token.Header["kid"].(string)
-		if issuer == "" {
-			return nil, errors.New("status list token missing iss claim")
-		}
-		return c.keyResolver.ResolveKey(ctx, issuer, kid)
+		return c.resolveStatusListKey(ctx, issuer, uri, kid)
 	}
 
 	token, err := jwt.Parse(tokenString, keyFunc, jwt.WithValidMethods([]string{
@@ -335,9 +383,21 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, data []byte)
 		return nil, errors.New("invalid JWT token")
 	}
 
+	// Section 5.1: the typ header MUST be statuslist+jwt. Without this a
+	// token minted for any other purpose by the same issuer - an access
+	// token, an attestation - is accepted as a status list.
+	if typ, _ := token.Header["typ"].(string); !strings.EqualFold(typ, tokenstatuslist.JWTTypHeader) {
+		return nil, fmt.Errorf("status list token has typ %q, expected %q", typ, tokenstatuslist.JWTTypHeader)
+	}
+
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil, errors.New("failed to extract JWT claims")
+	}
+
+	subject, _ := claims["sub"].(string)
+	if err := checkSubject(subject, uri); err != nil {
+		return nil, err
 	}
 
 	statusListClaim, ok := claims["status_list"].(map[string]any)
@@ -350,7 +410,39 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, data []byte)
 		return nil, errors.New("lst not found in status_list claim")
 	}
 
-	return tokenstatuslist.DecodeAndDecompress(lst)
+	bits, err := jsonBits(statusListClaim["bits"])
+	if err != nil {
+		return nil, err
+	}
+
+	return tokenstatuslist.DecodeDecompressAndUnpack(lst, bits)
+}
+
+// jsonBits reads the REQUIRED status_list.bits member. An absent or
+// unreadable one is an error, never a fall back to the default width:
+// guessing returns another credential's status instead of failing.
+func jsonBits(raw any) (int, error) {
+	switch v := raw.(type) {
+	case float64:
+		if v != float64(int(v)) {
+			return 0, fmt.Errorf("status_list bits %v is not an integer", v)
+		}
+		return int(v), nil
+	case int:
+		return v, nil
+	case int64:
+		return int(v), nil
+	case json.Number:
+		i, err := v.Int64()
+		if err != nil {
+			return 0, fmt.Errorf("status_list bits %q is not an integer: %w", v.String(), err)
+		}
+		return int(i), nil
+	case nil:
+		return 0, errors.New("status_list claim is missing the required bits member")
+	default:
+		return 0, fmt.Errorf("status_list bits has unexpected type %T", raw)
+	}
 }
 
 func mapStatusCode(code uint8) Status {

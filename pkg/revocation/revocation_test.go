@@ -98,27 +98,27 @@ func TestStatusListChecker_CheckStatus(t *testing.T) {
 	// Create a test status list with entry 0=valid, 1=revoked, 2=suspended
 	statuses := []uint8{tokenstatuslist.StatusValid, tokenstatuslist.StatusInvalid, tokenstatuslist.StatusSuspended}
 
-	encoded, err := tokenstatuslist.CompressAndEncode(statuses)
-	require.NoError(t, err)
-
 	// Generate an EC key pair for signing the status list token
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	// Create a properly signed JWT status list token
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
-		"iss":         "https://registry.test",
-		"status_list": map[string]any{"lst": encoded},
-	})
-	signedJWT, err := token.SignedString(privateKey)
-	require.NoError(t, err)
-
-	// Serve the status list token
+	// The token's sub MUST equal the URI it is served from (Section 8.3),
+	// so the server has to exist before the token can be minted.
+	var signedJWT string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
 		_, _ = w.Write([]byte(signedJWT))
 	}))
 	defer server.Close()
+
+	statusListURI := server.URL + "/statuslists/0"
+
+	sl := tokenstatuslist.NewWithConfig(statuses, "https://registry.test", statusListURI)
+	signedJWT, err = sl.GenerateJWT(tokenstatuslist.JWTSigningConfig{
+		SigningKey:    privateKey,
+		SigningMethod: jwt.SigningMethodES256,
+	})
+	require.NoError(t, err)
 
 	statusCache := cache.NewMemoryCache[[]uint8](5 * time.Minute)
 	checker, err := NewStatusListChecker(
@@ -131,28 +131,28 @@ func TestStatusListChecker_CheckStatus(t *testing.T) {
 	registry := NewRegistry(checker)
 
 	t.Run("valid credential", func(t *testing.T) {
-		ref := &Reference{Scheme: SchemeStatusList, URI: server.URL + "/statuslists/0", Index: 0}
+		ref := &Reference{Scheme: SchemeStatusList, URI: statusListURI, Index: 0}
 		result, err := registry.CheckStatus(t.Context(), ref)
 		require.NoError(t, err)
 		assert.Equal(t, StatusValid, result.Status)
 	})
 
 	t.Run("revoked credential", func(t *testing.T) {
-		ref := &Reference{Scheme: SchemeStatusList, URI: server.URL + "/statuslists/0", Index: 1}
+		ref := &Reference{Scheme: SchemeStatusList, URI: statusListURI, Index: 1}
 		result, err := registry.CheckStatus(t.Context(), ref)
 		require.NoError(t, err)
 		assert.Equal(t, StatusInvalid, result.Status)
 	})
 
 	t.Run("suspended credential", func(t *testing.T) {
-		ref := &Reference{Scheme: SchemeStatusList, URI: server.URL + "/statuslists/0", Index: 2}
+		ref := &Reference{Scheme: SchemeStatusList, URI: statusListURI, Index: 2}
 		result, err := registry.CheckStatus(t.Context(), ref)
 		require.NoError(t, err)
 		assert.Equal(t, StatusSuspended, result.Status)
 	})
 
 	t.Run("index out of range", func(t *testing.T) {
-		ref := &Reference{Scheme: SchemeStatusList, URI: server.URL + "/statuslists/0", Index: 999}
+		ref := &Reference{Scheme: SchemeStatusList, URI: statusListURI, Index: 999}
 		_, err := registry.CheckStatus(t.Context(), ref)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "out of range")
