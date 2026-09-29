@@ -194,6 +194,61 @@ func (v *JWTTrustVerifier) EvaluateIssuerTrust(ctx context.Context, vpToken stri
 	return nil
 }
 
+// VerifyStatusListToken verifies a Status List Token's signature using key
+// material carried in its OWN header - x5c or jwk, and the same DID and
+// kid/JWKS paths every other JWT here uses - and then evaluates trust in
+// the signer through go-trust.
+//
+// A status list decides whether a credential is still valid, so the
+// question "may this party say that" is the same trust question asked of
+// the credential's issuer, and it has to be answered the same way. Taking
+// the key from a configured file or from JWKS discovery alone answers only
+// "is this the key I expected", never "is this party trusted to speak for
+// these credentials" - and with revocation.fail_open at its default, a
+// failure to answer is tolerated.
+//
+// The role is RoleCredentialIssuer because that is what a status list
+// signer is acting as: go-trust has no status-specific role, and the
+// statement being trusted is about the issuer's own credentials.
+//
+// The returned token has a verified signature AND a trusted signer. It is
+// distinct from EvaluateIssuerTrust only in that a Status List Token is a
+// plain JWT rather than an SD-JWT, so there is nothing to split and no vct
+// to read.
+func (v *JWTTrustVerifier) VerifyStatusListToken(ctx context.Context, tokenString, listURI string) (*jwt.Token, error) {
+	if v.trustEvaluator == nil {
+		return nil, fmt.Errorf("trust evaluator not initialized")
+	}
+
+	token, keyInfo, err := v.VerifyJWTSignature(ctx, tokenString, listURI)
+	if err != nil {
+		return nil, err
+	}
+
+	decision, err := v.trustEvaluator.Evaluate(ctx, &EvaluationRequest{
+		SubjectID: keyInfo.IssuerID,
+		KeyType:   keyInfo.KeyType,
+		Key:       keyInfo.KeyMaterial,
+		Role:      RoleCredentialIssuer,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("trust evaluation error for status list %q: %w", listURI, err)
+	}
+	if !decision.Trusted {
+		v.log.Warn("Status list signer not trusted",
+			"list_uri", listURI, "issuer_id", keyInfo.IssuerID,
+			"key_type", keyInfo.KeyType, "reason", decision.Reason,
+			"trust_framework", decision.TrustFramework)
+		return nil, fmt.Errorf("status list %q is signed by an untrusted party: %s", listURI, decision.Reason)
+	}
+
+	v.log.Info("Status list signer trust verified",
+		"list_uri", listURI, "issuer_id", keyInfo.IssuerID,
+		"key_type", keyInfo.KeyType, "trust_framework", decision.TrustFramework)
+
+	return token, nil
+}
+
 // extractJWTKeyMaterial extracts key type, key material, and public key from the JWT header.
 // It supports x5c certificate chains, embedded JWKs, DID-based key resolution, and kid/JWKS resolution.
 func (v *JWTTrustVerifier) extractJWTKeyMaterial(ctx context.Context, token *jwt.Token, issuerID, scope, credentialType string) (*JWTKeyMaterial, error) {

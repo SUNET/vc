@@ -32,6 +32,10 @@ type StatusListChecker struct {
 	// statusListKey is the signing key named directly by configuration,
 	// for a service that publishes it nowhere a resolver can follow.
 	statusListKey crypto.PublicKey
+	// tokenVerifier verifies a Status List Token against key material in
+	// its own header and evaluates trust in the signer. When set it is the
+	// authority; see WithTokenVerifier.
+	tokenVerifier StatusListTokenVerifier
 }
 
 // StatusListCheckerOption configures a StatusListChecker.
@@ -43,6 +47,39 @@ type StatusListCheckerOption func(*StatusListChecker)
 func WithFallbackIssuer(issuer string) StatusListCheckerOption {
 	return func(c *StatusListChecker) {
 		c.fallbackIssuer = issuer
+	}
+}
+
+// StatusListTokenVerifier verifies a Status List Token's signature using
+// key material carried in the token's own header (x5c or jwk) and evaluates
+// trust in the signer through go-trust.
+//
+// Declared here as an interface rather than importing the trust package so
+// that pkg/revocation stays free of the trust stack; the verifier service
+// supplies the implementation, the same way it supplies the KeyResolver.
+type StatusListTokenVerifier interface {
+	// VerifyStatusListToken returns the parsed token only if its signature
+	// verified AND its signer is trusted. listURI is passed for diagnostics
+	// and policy scope.
+	VerifyStatusListToken(ctx context.Context, tokenString, listURI string) (*jwt.Token, error)
+}
+
+// WithTokenVerifier supplies trust-evaluated verification for Status List
+// Tokens, and is the path a deployment with a PDP should use.
+//
+// The key material comes from the token's own header - x5c or jwk - and
+// go-trust decides whether that party may speak for these credentials. That
+// is a different question from the one a key resolver answers: resolving a
+// key establishes "this is the key I expected to find", never "this signer
+// is trusted to say a credential is revoked". A status list is exactly such
+// a statement, so it is the same trust question asked of a credential's
+// issuer and it is answered the same way.
+//
+// When set it takes precedence over both WithStatusListKey and the
+// KeyResolver, which remain for deployments without a trust framework.
+func WithTokenVerifier(v StatusListTokenVerifier) StatusListCheckerOption {
+	return func(c *StatusListChecker) {
+		c.tokenVerifier = v
 	}
 }
 
@@ -106,8 +143,12 @@ func NewStatusListChecker(opts ...StatusListCheckerOption) (*StatusListChecker, 
 	if c.cache == nil {
 		return nil, errors.New("cache is required: use WithCache")
 	}
-	if c.keyResolver == nil {
-		return nil, errors.New("key resolver is required: use WithKeyResolver")
+	// Either path can verify a token: a key resolver, or trust-evaluated
+	// verification from the token's own header. Requiring the resolver
+	// unconditionally forced a deployment that verifies through go-trust to
+	// configure one it would never consult.
+	if c.keyResolver == nil && c.tokenVerifier == nil {
+		return nil, errors.New("status list verification needs a key resolver or a token verifier: use WithKeyResolver or WithTokenVerifier")
 	}
 
 	return c, nil
@@ -396,7 +437,14 @@ func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, uri string, 
 		return nil, err
 	}
 
-	// Resolve signing key and verify signature
+	// Resolve signing key and verify signature.
+	//
+	// The CWT path has no trust-evaluated equivalent yet - JWTTrustVerifier
+	// works on JWTs - so it still needs a resolver, and says so rather than
+	// failing later with a nil dereference.
+	if c.keyResolver == nil {
+		return nil, errors.New("status list CWT verification requires a key resolver; only the JWT path can verify through the trust framework")
+	}
 	key, err := c.resolveStatusListKey(ctx, issuer, uri, kid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve CWT signing key: %w", err)
@@ -461,8 +509,19 @@ func cwtTime(raw any) (time.Time, bool) {
 func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, uri string, data []byte) ([]uint8, error) {
 	tokenString := strings.TrimSpace(string(data))
 
+	// Trust-evaluated verification is the authority when configured: the key
+	// comes from the token's own x5c or jwk header and go-trust decides
+	// whether that signer may speak for these credentials.
+	if c.tokenVerifier != nil {
+		token, err := c.tokenVerifier.VerifyStatusListToken(ctx, tokenString, uri)
+		if err != nil {
+			return nil, err
+		}
+		return c.statusesFromVerifiedJWT(token, uri)
+	}
+
 	if c.keyResolver == nil {
-		return nil, errors.New("status list JWT signature verification required but no key resolver configured")
+		return nil, errors.New("status list JWT signature verification required but no key resolver or token verifier configured")
 	}
 
 	// Build a jwt.Keyfunc that delegates to the generic KeyResolver. iss is
@@ -487,6 +546,13 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, uri string, 
 		return nil, errors.New("invalid JWT token")
 	}
 
+	return c.statusesFromVerifiedJWT(token, uri)
+}
+
+// statusesFromVerifiedJWT applies the checks that follow signature
+// verification, whichever path performed it: typ, sub, and the status_list
+// members. Shared so the trust-evaluated path cannot quietly skip them.
+func (c *StatusListChecker) statusesFromVerifiedJWT(token *jwt.Token, uri string) ([]uint8, error) {
 	// Section 5.1: the typ header MUST be statuslist+jwt. Without this a
 	// token minted for any other purpose by the same issuer - an access
 	// token, an attestation - is accepted as a status list.
@@ -502,6 +568,16 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, uri string, 
 	subject, _ := claims["sub"].(string)
 	if err := checkSubject(subject, uri); err != nil {
 		return nil, err
+	}
+
+	// Expiry is checked HERE rather than left to the parser. The
+	// trust-evaluated path goes through JWTTrustVerifier, which parses with
+	// jwt.WithoutClaimsValidation so that trust - not the clock - decides
+	// what to do with the key material; without this an expired status list
+	// would be accepted on that path while being rejected on the other.
+	// The CWT path checks its own exp for the same reason.
+	if exp, err := claims.GetExpirationTime(); err == nil && exp != nil && time.Now().After(exp.Time) {
+		return nil, fmt.Errorf("status list token expired at %s", exp.Time.Format(time.RFC3339))
 	}
 
 	statusListClaim, ok := claims["status_list"].(map[string]any)

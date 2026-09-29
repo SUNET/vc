@@ -201,6 +201,17 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 			revocation.WithKeyResolver(jwksKeyResolverAdapter{resolver: c.jwksResolver}),
 			revocation.WithFallbackIssuer(cfg.Verifier.Revocation.StatusListIssuer),
 		}
+		// Trust-evaluated verification, and the path a deployment with a
+		// PDP takes: the key comes from the status list token's own x5c or
+		// jwk header and go-trust decides whether that signer may speak for
+		// these credentials. The options above remain for deployments
+		// running without a trust framework.
+		//
+		// c.jwtTrustVerifier is built above and is never nil; it carries
+		// the same ParseX5C/ParseJWK and evaluator the credential paths use,
+		// so a status list is trusted on exactly the same terms as the
+		// credential it describes.
+		statusListOpts = append(statusListOpts, revocation.WithTokenVerifier(c.jwtTrustVerifier))
 		// Loaded at startup, not per request: a key file that is missing or
 		// malformed should stop the service rather than surface later as
 		// every external status list failing to verify - which fail_open
