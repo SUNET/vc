@@ -172,8 +172,25 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 //
 // Two checks, because the first cannot do the second's job: http(s) and
 // absolute rules out local file reads, and issuer.jsonld_context_allowlist
-// decides which hosts may be reached at all. Empty allowlist means no
+// decides which contexts a CALLER may name. Empty allowlist means no
 // additional context is accepted.
+//
+// The allowlist is deliberately described as "which contexts a caller may
+// name", not "which hosts may be reached at all", because it is checked
+// here and only here, against the literal top-level URL. Canonicalization
+// dereferences the whole context graph, and a nested @context inside an
+// allowlisted document is fetched without consulting this list - so
+// allowlisting a context is also trusting what that context imports.
+//
+// What DOES cover the whole graph is the address policy in
+// credential.contextHTTPClient: enforced at dial time, so it survives
+// redirects, nested @context/@import, json-gold's recursive self-calls and
+// DNS rebinding. That bounds where fetches can land (never a non-public
+// address); it does not bound them to this list. Making the allowlist
+// transitive is a separate decision - the loader is a process-wide
+// singleton shared with the verifier, which must canonicalize contexts a
+// wallet presents, and the only layer with full coverage sees host:port
+// rather than URLs. See the discussion on SUNET/vc#685.
 func (c *Client) validateAdditionalContexts(contexts []string) error {
 	var allowed []string
 	if c.cfg != nil && c.cfg.Issuer != nil {
