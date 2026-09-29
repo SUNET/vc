@@ -256,6 +256,29 @@ func TestBuildOIDCDocument_DoesNotMutateIdentityClaims(t *testing.T) {
 		assert.NotContains(t, raw, "authentic_source_person_id",
 			"the provider's own claim map must not be written to either")
 	})
+
+	// Assertion defaults are dot-notation paths, so MergeDefaults walks into
+	// nested maps to set one. A shallow copy of the top level would leave that
+	// nested map shared with the identity claims.
+	t.Run("default path nested inside an existing claim", func(t *testing.T) {
+		c, _, _, _ := claimsTestClient(t)
+		c.cfg.APIGW.DataSources.Assertion.Scopes["unknown-scope"] = model.AssertionScope{
+			AuthProvider: "oidc",
+			Defaults:     map[string]any{"address.locality": "Stockholm"},
+		}
+
+		address := map[string]any{"country": "SE"}
+		cc, err := c.newCallbackClaims("unknown-scope", map[string]any{"address": address}, nil)
+		require.NoError(t, err)
+
+		doc, err := c.buildOIDCDocument(cc, "https://issuer.example", true)
+		require.NoError(t, err)
+
+		documentAddress, ok := doc.DocumentData["address"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "Stockholm", documentAddress["locality"])
+		assert.NotContains(t, address, "locality", "a nested default must not reach the identity claims")
+	})
 }
 
 // TestCallbackClaims_TransformerOutputNotFiltered preserves the condition the

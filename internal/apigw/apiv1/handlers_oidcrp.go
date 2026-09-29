@@ -435,10 +435,13 @@ func (c *Client) createCredentialViaOIDCRP(ctx context.Context, credentialType s
 //     LookupDatastoreByIdentity, whose claim names come from the operator's
 //     auth_claims configuration, and ResolveVCIIdentifier/ResolveIdentifier,
 //     which look for authentic_source_person_id or for family_name, given_name
-//     and birth_date. None of those names belong to the credential-type
-//     vocabulary - authentic_source_person_id is declared by no shipped VCTM
-//     at all - so filtering identity claims against the credential type
-//     removes precisely the claims identity resolution needs.
+//     and birth_date. Those names are chosen independently of the credential
+//     type, so whether the credential type happens to declare them is a
+//     coincidence: some do (vctm_pid, mdl.mdoc, pid_mdoc declare family_name,
+//     given_name and birth_date), many declare none of them, and
+//     authentic_source_person_id is declared by no shipped VCTM or MDDL at
+//     all. Filtering this set against the credential type therefore removes
+//     claims identity resolution needs.
 //   - Document data is what the credential will say. It ends up in
 //     CompleteDocument.DocumentData and is signed into the credential, so it
 //     must carry only what the credential type declares (issue #623).
@@ -489,13 +492,13 @@ func (c *Client) newCallbackClaims(credentialType string, raw map[string]any, tr
 // site that turns callback claims into a document goes through it, so a site
 // added later is a visible call site rather than a silent omission.
 //
-// The result is always a map of its own, because callers mutate it: a caller
-// merging assertion defaults into it must not reach the identity claims that
-// identity resolution reads afterwards, or a default named sub or
-// authentic_source_person_id would come back as an authenticated identifier.
-// Filtering alone does not guarantee that - filterClaimsByCredentialType hands
-// its input straight back when there is no metadata to filter against, and
-// with a transformer configured there is no filtering at all.
+// The result is always the caller's own to mutate: a caller merging assertion
+// defaults into it must not reach the identity claims that identity resolution
+// reads afterwards, or a default named sub or authentic_source_person_id would
+// come back as an authenticated identifier. Filtering alone does not guarantee
+// that - filterClaimsByCredentialType hands its input straight back when there
+// is no metadata to filter against, and with a transformer configured there is
+// no filtering at all.
 func (cc *callbackClaims) documentData() map[string]any {
 	claims := cc.identity
 	if cc.filter {
@@ -507,7 +510,41 @@ func (cc *callbackClaims) documentData() map[string]any {
 		// at signing.
 		claims = cc.c.filterClaimsByCredentialType(cc.credentialType, cc.identity)
 	}
-	return maps.Clone(claims)
+	return cloneClaims(claims)
+}
+
+// cloneClaims copies the map and slice spine of a claim set, so that a caller
+// mutating the copy cannot reach the original. A shallow copy is not enough:
+// assertion defaults are dot-notation paths, and MergeDefaults walks into
+// nested maps to set one, which would otherwise write straight into a nested
+// map the identity claims still share.
+//
+// Leaf values are not copied. Nothing here replaces a leaf in place, so
+// sharing them is safe and keeps this to the structure that is actually walked.
+func cloneClaims(claims map[string]any) map[string]any {
+	if claims == nil {
+		return nil
+	}
+	out := make(map[string]any, len(claims))
+	for name, value := range claims {
+		out[name] = cloneClaimValue(value)
+	}
+	return out
+}
+
+func cloneClaimValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		return cloneClaims(v)
+	case []any:
+		out := make([]any, len(v))
+		for i, element := range v {
+			out[i] = cloneClaimValue(element)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 // buildOIDCDocument builds the document an OIDC callback stores for later
