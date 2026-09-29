@@ -83,7 +83,7 @@ func TestIssueBBSPassesTheCommitmentThrough(t *testing.T) {
 	}
 	c := bbsTestClient(t, issuer)
 
-	credentials, err := c.issueBBS(context.Background(), "pid_jwp", []byte(`{"given_name":"Alice"}`), "", bbsRequest())
+	credentials, err := c.issueBBS(context.Background(), "pid_jwp", []byte(`{"given_name":"Alice"}`), "", "", bbsRequest())
 	if err != nil {
 		t.Fatalf("issueBBS: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestIssueBBSTakesKeyBindingFromTheCommitmentAssertion(t *testing.T) {
 			// A proof is present in both cases, which is the point.
 			req.Proof = &openid4vci.Proof{ProofType: "jwt", JWT: "not.a.real.jwt"}
 
-			if _, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", req); err != nil {
+			if _, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", "", req); err != nil {
 				t.Fatalf("issueBBS: %v", err)
 			}
 			if issuer.got.KeyBinding != tc.asserted {
@@ -162,7 +162,7 @@ func TestIssueBBSRefusesWithoutACommitment(t *testing.T) {
 	req := bbsRequest()
 	req.BBSCommitment = ""
 
-	_, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", req)
+	_, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", "", req)
 	if err == nil {
 		t.Fatal("a jwp issuance without bbs_commitment must fail")
 	}
@@ -182,7 +182,7 @@ func TestIssueBBSRefusesAScopeWithNoVCT(t *testing.T) {
 	issuer := &recordingIssuerClient{}
 	c := bbsTestClient(t, issuer)
 
-	_, err := c.issueBBS(context.Background(), "no_vct", validBBSDocumentData, "", bbsRequest())
+	_, err := c.issueBBS(context.Background(), "no_vct", validBBSDocumentData, "", "", bbsRequest())
 	if err == nil {
 		t.Fatal("a scope with no vct must fail rather than issue an untyped credential")
 	}
@@ -195,7 +195,7 @@ func TestIssueBBSRejectsAnUnknownScope(t *testing.T) {
 	issuer := &recordingIssuerClient{}
 	c := bbsTestClient(t, issuer)
 
-	if _, err := c.issueBBS(context.Background(), "not_configured", validBBSDocumentData, "", bbsRequest()); err == nil {
+	if _, err := c.issueBBS(context.Background(), "not_configured", validBBSDocumentData, "", "", bbsRequest()); err == nil {
 		t.Fatal("an unconfigured scope must fail")
 	}
 }
@@ -227,7 +227,7 @@ func TestIssueBBSForwardsTheSuiteTheHolderChose(t *testing.T) {
 			req.BBSSuite = tc.wire
 			req.BBSKeyBinding = tc.bound
 
-			if _, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", req); err != nil {
+			if _, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", "", req); err != nil {
 				t.Fatalf("issueBBS: %v", err)
 			}
 			if issuer.got.Suite != tc.want {
@@ -247,7 +247,7 @@ func TestIssueBBSRefusesAnUnknownSuite(t *testing.T) {
 	req := bbsRequest()
 	req.BBSSuite = "not-a-suite"
 
-	_, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", req)
+	_, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", "", req)
 	if err == nil {
 		t.Fatal("an unknown suite must fail")
 	}

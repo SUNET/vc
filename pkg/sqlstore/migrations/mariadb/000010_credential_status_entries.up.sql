@@ -12,6 +12,8 @@ CREATE TABLE credential_status_entries (
     identifier      VARCHAR(512) NOT NULL,
     section         BIGINT NOT NULL DEFAULT 0,
     backend         VARCHAR(64) NOT NULL,
+    -- What authorization is decided against; see CredentialStatusEntry.
+    authentic_source VARCHAR(256) NOT NULL DEFAULT '',
     scope           VARCHAR(256) NOT NULL DEFAULT '',
     issued_at       DATETIME(6) NOT NULL,
     PRIMARY KEY (status_list_uri, idx)

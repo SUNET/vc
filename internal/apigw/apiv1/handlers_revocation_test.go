@@ -197,3 +197,66 @@ func TestRevokeCredential_IssuerFailureIsReported(t *testing.T) {
 	require.Nil(t, reply)
 	require.Contains(t, err.Error(), "failed to set status of entry 9")
 }
+
+// TestRevokeCredential_RefusesEntriesOutsideTheCallersAuthorization is the
+// security case: the route authenticates its caller, but authentication is
+// not authorization. The identifier in the request is the CALLER'S OWN
+// INPUT, so without binding to something recorded at issuance, any principal
+// the API auth accepts could revoke any subject's credentials by naming
+// them.
+func TestRevokeCredential_RefusesEntriesOutsideTheCallersAuthorization(t *testing.T) {
+	issuer := &recordingIssuer{}
+	mine := registryEntry()
+	mine.AuthenticSource, mine.Scope = "SUNET", "pid"
+	theirs := externalEntry()
+	theirs.AuthenticSource, theirs.Scope = "OTHER_ORG", "ehic"
+
+	c := revokeClient(t, &stubStatusStore{entries: []*db.CredentialStatusEntry{mine, theirs}}, issuer)
+
+	reply, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{
+		Identifier:              "person-1",
+		AllowedAuthenticSources: []string{"SUNET"},
+		AllowedScopes:           []string{"pid"},
+	})
+	require.NoError(t, err)
+	require.Len(t, reply.Revoked, 1, "only the entry inside the caller's authorization may be revoked")
+	require.Equal(t, "https://registry.example.com/statuslists/4", reply.Revoked[0].StatusListURI)
+
+	require.Len(t, issuer.calls, 1, "the unauthorized entry must never reach the issuer")
+	require.Equal(t, "registry", issuer.calls[0].Backend)
+}
+
+// TestRevokeCredential_AllEntriesUnauthorizedIsAnError: refusing every entry
+// must not read as success-with-nothing-done, and must not disclose that the
+// subject holds credentials elsewhere.
+func TestRevokeCredential_AllEntriesUnauthorizedIsAnError(t *testing.T) {
+	issuer := &recordingIssuer{}
+	theirs := registryEntry()
+	theirs.AuthenticSource, theirs.Scope = "OTHER_ORG", "ehic"
+
+	c := revokeClient(t, &stubStatusStore{entries: []*db.CredentialStatusEntry{theirs}}, issuer)
+
+	_, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{
+		Identifier:              "person-1",
+		AllowedAuthenticSources: []string{"SUNET"},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not authorized")
+	require.NotContains(t, err.Error(), "OTHER_ORG", "an unauthorized caller must not learn where else the subject holds credentials")
+	require.Empty(t, issuer.calls)
+}
+
+// TestRevokeCredential_NoConstraintSuppliedActsOnEverything documents the
+// nil case honestly: an empty list is "no constraint was supplied", which is
+// what a deployment with no SPOCP rules produces - and is exactly the
+// configuration the route registration refuses to serve.
+func TestRevokeCredential_NoConstraintSuppliedActsOnEverything(t *testing.T) {
+	issuer := &recordingIssuer{}
+	c := revokeClient(t, &stubStatusStore{entries: []*db.CredentialStatusEntry{
+		registryEntry(), externalEntry(),
+	}}, issuer)
+
+	reply, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{Identifier: "person-1"})
+	require.NoError(t, err)
+	require.Len(t, reply.Revoked, 2)
+}

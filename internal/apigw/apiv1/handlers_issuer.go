@@ -448,13 +448,13 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 	switch format {
 	case "mso_mdoc":
-		credentials, issueErr = c.issueMDoc(ctx, scope, documentData, jwks, identifier)
+		credentials, issueErr = c.issueMDoc(ctx, scope, documentData, jwks, identifier, authContext.AuthenticSource)
 	case "vc+sd-jwt", "dc+sd-jwt":
-		credentials, issueErr = c.issueSDJWT(ctx, scope, documentData, jwks, identifier)
+		credentials, issueErr = c.issueSDJWT(ctx, scope, documentData, jwks, identifier, authContext.AuthenticSource)
 	case "ldp_vc", "vc+ld+json":
-		credentials, issueErr = c.issueVC20(ctx, scope, documentData, identifier, req)
+		credentials, issueErr = c.issueVC20(ctx, scope, documentData, identifier, authContext.AuthenticSource, req)
 	case "jwp":
-		credentials, issueErr = c.issueBBS(ctx, scope, documentData, identifier, req)
+		credentials, issueErr = c.issueBBS(ctx, scope, documentData, identifier, authContext.AuthenticSource, req)
 	default:
 		c.log.Error(nil, "unsupported or missing credential format", "format", format)
 		issueErr = errors.New("unsupported or missing credential format: " + format)
@@ -494,7 +494,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 }
 
 // issueSDJWT issues SD-JWT credentials, one per JWK.
-func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier string) ([]openid4vci.Credential, error) {
+func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier, authenticSource string) ([]openid4vci.Credential, error) {
 	credMeta := c.cfg.GetCredentialMetadata(scope)
 	if credMeta == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
@@ -539,7 +539,7 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 	for i, r := range replies {
 		entries[i] = statusEntry{Section: r.TokenStatusListSection, Index: r.TokenStatusListIndex, URI: r.TokenStatusListUri, Backend: r.TokenStatusListBackend}
 	}
-	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
+	if err := c.saveCredentialSubjects(ctx, identifier, authenticSource, scope, entries); err != nil {
 		return nil, err
 	}
 
@@ -551,7 +551,7 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 // scope's credential metadata, so the issuer never needs a doctype-specific
 // Go struct - adding a new mdoc document type requires only a new MDDL
 // schema, never a Go change (mirrors issueSDJWT's VCTM-driven approach).
-func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier string) ([]openid4vci.Credential, error) {
+func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier, authenticSource string) ([]openid4vci.Credential, error) {
 	credentialMetadata := c.cfg.GetCredentialMetadata(scope)
 	if credentialMetadata == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
@@ -599,7 +599,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 	for i, r := range replies {
 		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex, URI: r.StatusListUri, Backend: r.StatusListBackend}
 	}
-	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
+	if err := c.saveCredentialSubjects(ctx, identifier, authenticSource, scope, entries); err != nil {
 		return nil, err
 	}
 
@@ -608,7 +608,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 
 // issueVC20 issues W3C VC 2.0 Data Integrity credentials, one per JWT proof.
 // Caller must ensure only JWT proof types are present (singular Proof or Proofs.JWT).
-func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, identifier string, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
+func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, identifier, authenticSource string, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
 	hasNoJWTProof := req.Proof != nil && req.Proof.ProofType != "jwt"
 	hasNoJWTProofs := req.Proofs != nil && len(req.Proofs.JWT) == 0
 	if hasNoJWTProof || hasNoJWTProofs {
@@ -679,7 +679,7 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	for i, r := range replies {
 		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex, URI: r.StatusListUri, Backend: r.StatusListBackend}
 	}
-	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
+	if err := c.saveCredentialSubjects(ctx, identifier, authenticSource, scope, entries); err != nil {
 		return nil, err
 	}
 
@@ -714,7 +714,7 @@ type statusEntry struct {
 // local registry is optional (see APIGW.RegistryClient): a deployment using
 // an external draft-ietf-oauth-status-list service has no registry to write
 // to, and issuance must not depend on one.
-func (c *Client) saveCredentialSubjects(ctx context.Context, identifier string, entries []statusEntry) error {
+func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authenticSource, scope string, entries []statusEntry) error {
 	if identifier == "" {
 		return nil
 	}
@@ -747,11 +747,13 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier string, 
 			return errors.New("cannot record the credential's status list entry: no credential status store configured")
 		}
 		if err := c.db.CredentialStatusColl.Save(ctx, &db.CredentialStatusEntry{
-			StatusListURI: e.URI,
-			Index:         e.Index,
-			Identifier:    identifier,
-			Section:       e.Section,
-			Backend:       e.Backend,
+			StatusListURI:   e.URI,
+			Index:           e.Index,
+			Identifier:      identifier,
+			Section:         e.Section,
+			Backend:         e.Backend,
+			AuthenticSource: authenticSource,
+			Scope:           scope,
 		}); err != nil {
 			c.log.Error(err, "failed to record credential status entry", "uri", e.URI, "index", e.Index)
 			return fmt.Errorf("failed to record credential status entry: %w", err)
@@ -994,7 +996,7 @@ func docLookupSessionID(authContext *cache.AuthorizationContext) string {
 // so the wallet gets unlinkable copies; BBS needs none, because each
 // presentation re-randomises. A second copy would need a second commitment,
 // which is a second request.
-func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte, identifier string, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
+func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte, identifier, authenticSource string, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
 	credentialMetadata := c.cfg.GetCredentialMetadata(scope)
 	if credentialMetadata == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
@@ -1076,7 +1078,7 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 		return nil, fmt.Errorf("MakeJWP returned %d credentials, want exactly 1", count)
 	}
 
-	if err := c.saveCredentialSubjects(ctx, identifier, []statusEntry{{
+	if err := c.saveCredentialSubjects(ctx, identifier, authenticSource, scope, []statusEntry{{
 		Section: reply.TokenStatusListSection,
 		Index:   reply.TokenStatusListIndex,
 		URI:     reply.TokenStatusListUri,

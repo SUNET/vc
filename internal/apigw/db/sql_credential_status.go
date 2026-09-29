@@ -23,13 +23,14 @@ func NewSQLCredentialStatusColl(service *Service, db *sqlx.DB, dialect sqlstore.
 }
 
 type credentialStatusRow struct {
-	StatusListURI string    `db:"status_list_uri"`
-	Index         int64     `db:"idx"`
-	Identifier    string    `db:"identifier"`
-	Section       int64     `db:"section"`
-	Backend       string    `db:"backend"`
-	Scope         string    `db:"scope"`
-	IssuedAt      time.Time `db:"issued_at"`
+	StatusListURI   string    `db:"status_list_uri"`
+	Index           int64     `db:"idx"`
+	Identifier      string    `db:"identifier"`
+	Section         int64     `db:"section"`
+	Backend         string    `db:"backend"`
+	AuthenticSource string    `db:"authentic_source"`
+	Scope           string    `db:"scope"`
+	IssuedAt        time.Time `db:"issued_at"`
 }
 
 // Save records one allocated status-list entry, upserting on
@@ -43,15 +44,15 @@ func (c *SQLCredentialStatusColl) Save(ctx context.Context, entry *CredentialSta
 		entry.IssuedAt = time.Now().UTC()
 	}
 
-	updateCols := []string{"identifier", "section", "backend", "scope", "issued_at"}
+	updateCols := []string{"identifier", "section", "backend", "authentic_source", "scope", "issued_at"}
 	query := c.dialect.Rebind(`INSERT INTO credential_status_entries
-		(status_list_uri, idx, identifier, section, backend, scope, issued_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?) ` +
+		(status_list_uri, idx, identifier, section, backend, authentic_source, scope, issued_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?) ` +
 		c.dialect.UpsertClause([]string{"status_list_uri", "idx"}, updateCols))
 
 	if _, err := c.db.ExecContext(ctx, query,
 		entry.StatusListURI, entry.Index, entry.Identifier,
-		entry.Section, entry.Backend, entry.Scope, entry.IssuedAt,
+		entry.Section, entry.Backend, entry.AuthenticSource, entry.Scope, entry.IssuedAt,
 	); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return err
@@ -64,7 +65,7 @@ func (c *SQLCredentialStatusColl) SearchByIdentifier(ctx context.Context, identi
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:credential_status:search")
 	defer span.End()
 
-	query := c.dialect.Rebind(`SELECT status_list_uri, idx, identifier, section, backend, scope, issued_at
+	query := c.dialect.Rebind(`SELECT status_list_uri, idx, identifier, section, backend, authentic_source, scope, issued_at
 		FROM credential_status_entries WHERE identifier = ?`)
 
 	rows := []credentialStatusRow{}
@@ -76,13 +77,14 @@ func (c *SQLCredentialStatusColl) SearchByIdentifier(ctx context.Context, identi
 	entries := make([]*CredentialStatusEntry, 0, len(rows))
 	for _, r := range rows {
 		entries = append(entries, &CredentialStatusEntry{
-			StatusListURI: r.StatusListURI,
-			Index:         r.Index,
-			Identifier:    r.Identifier,
-			Section:       r.Section,
-			Backend:       r.Backend,
-			Scope:         r.Scope,
-			IssuedAt:      r.IssuedAt,
+			StatusListURI:   r.StatusListURI,
+			Index:           r.Index,
+			Identifier:      r.Identifier,
+			Section:         r.Section,
+			Backend:         r.Backend,
+			AuthenticSource: r.AuthenticSource,
+			Scope:           r.Scope,
+			IssuedAt:        r.IssuedAt,
 		})
 	}
 	return entries, nil

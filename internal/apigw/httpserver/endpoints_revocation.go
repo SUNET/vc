@@ -26,6 +26,20 @@ func (s *Service) endpointCredentialRevoke(ctx context.Context, c *gin.Context) 
 		return nil, err
 	}
 
+	// Authorization, not authentication: the middleware says WHO the caller
+	// is, these say what they may act on. Filled here rather than bound from
+	// the body - a caller that could set them would be authorizing itself.
+	if allowed, ok := c.Get("spocp_allowed_authentic_sources"); ok {
+		if sources, ok := allowed.([]string); ok {
+			request.AllowedAuthenticSources = sources
+		}
+	}
+	if allowed, ok := c.Get("spocp_allowed_scopes"); ok {
+		if scopes, ok := allowed.([]string); ok {
+			request.AllowedScopes = scopes
+		}
+	}
+
 	reply, err := s.apiv1.RevokeCredential(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())

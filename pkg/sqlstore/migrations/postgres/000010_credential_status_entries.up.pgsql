@@ -21,6 +21,8 @@ CREATE TABLE credential_status_entries (
     -- Recorded because the URI alone does not identify the backend, and
     -- guessing at revocation time writes the status into the wrong list.
     backend         VARCHAR(64) NOT NULL,
+    -- What authorization is decided against; see CredentialStatusEntry.
+    authentic_source VARCHAR(256) NOT NULL DEFAULT '',
     scope           VARCHAR(256) NOT NULL DEFAULT '',
     issued_at       TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (status_list_uri, idx)

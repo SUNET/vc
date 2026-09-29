@@ -50,7 +50,7 @@ func persistenceClient(t *testing.T, registry apiv1_registry.RegistryServiceClie
 func TestSaveCredentialSubjects_ExternalAllocationIsPersisted(t *testing.T) {
 	c, store := persistenceClient(t, nil)
 
-	err := c.saveCredentialSubjects(t.Context(), "person-1", []statusEntry{
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
 		{Section: 0, Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
 	})
 	require.NoError(t, err)
@@ -61,6 +61,13 @@ func TestSaveCredentialSubjects_ExternalAllocationIsPersisted(t *testing.T) {
 	require.Equal(t, "https://status.example.com/statuslists/abc", store.saved[0].StatusListURI)
 	require.Equal(t, "status_service", store.saved[0].Backend,
 		"the backend must be recorded, or revocation cannot route the entry")
+	// Authorization is decided against these at revocation time. If they are
+	// not recorded here there is nothing to decide against but the subject
+	// identifier, which is the caller's own input and authorizes nothing.
+	require.Equal(t, "SUNET", store.saved[0].AuthenticSource,
+		"the authentic source must be recorded, or revocation cannot be authorized")
+	require.Equal(t, "pid", store.saved[0].Scope,
+		"the scope must be recorded, or revocation cannot be authorized")
 }
 
 // TestSaveCredentialSubjects_NoRegistryIsFine: the local registry is
@@ -69,7 +76,7 @@ func TestSaveCredentialSubjects_NoRegistryIsFine(t *testing.T) {
 	c, store := persistenceClient(t, nil)
 	require.Nil(t, c.registryClient)
 
-	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-1", []statusEntry{
+	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
 		{Index: 3, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
 	}))
 	require.Len(t, store.saved, 1)
@@ -83,7 +90,7 @@ func TestSaveCredentialSubjects_RegistryIsMirroredBestEffort(t *testing.T) {
 	rec := &recordingRegistryClient{}
 	c, store := persistenceClient(t, rec)
 
-	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-2", []statusEntry{
+	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-2", "SUNET", "pid", []statusEntry{
 		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
 	}))
 	require.Len(t, store.saved, 1)
@@ -94,7 +101,7 @@ func TestSaveCredentialSubjects_RegistryIsMirroredBestEffort(t *testing.T) {
 	// A failing registry does not fail issuance.
 	failing := &recordingRegistryClient{err: errors.New("registry down")}
 	c2, store2 := persistenceClient(t, failing)
-	require.NoError(t, c2.saveCredentialSubjects(t.Context(), "person-3", []statusEntry{
+	require.NoError(t, c2.saveCredentialSubjects(t.Context(), "person-3", "SUNET", "pid", []statusEntry{
 		{Section: 4, Index: 6, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
 	}))
 	require.Len(t, store2.saved, 1, "the authoritative record is still written")
@@ -109,7 +116,7 @@ func TestSaveCredentialSubjects_StoreFailureFailsIssuance(t *testing.T) {
 	c, store := persistenceClient(t, nil)
 	store.err = errors.New("database unavailable")
 
-	err := c.saveCredentialSubjects(t.Context(), "person-1", []statusEntry{
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
 		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
 	})
 	require.Error(t, err)
@@ -122,7 +129,7 @@ func TestSaveCredentialSubjects_StoreFailureFailsIssuance(t *testing.T) {
 func TestSaveCredentialSubjects_NoAllocationIsNotRecorded(t *testing.T) {
 	c, store := persistenceClient(t, nil)
 
-	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-3", []statusEntry{{Section: 0, Index: 0}}))
+	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-3", "SUNET", "pid", []statusEntry{{Section: 0, Index: 0}}))
 	require.Empty(t, store.saved, "nothing was allocated, so there is nothing to record")
 }
 
@@ -131,7 +138,7 @@ func TestSaveCredentialSubjects_NoAllocationIsNotRecorded(t *testing.T) {
 func TestSaveCredentialSubjects_NoIdentifierIsNotRecorded(t *testing.T) {
 	c, store := persistenceClient(t, nil)
 
-	require.NoError(t, c.saveCredentialSubjects(t.Context(), "", []statusEntry{
+	require.NoError(t, c.saveCredentialSubjects(t.Context(), "", "SUNET", "pid", []statusEntry{
 		{Section: 1, Index: 1, URI: "https://registry.example.com/statuslists/1", Backend: "registry"},
 	}))
 	require.Empty(t, store.saved)
@@ -149,7 +156,7 @@ func TestSaveCredentialSubjects_ExternalEntriesAreNotMirrored(t *testing.T) {
 	rec := &recordingRegistryClient{}
 	c, store := persistenceClient(t, rec)
 
-	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-1", []statusEntry{
+	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
 		{Section: 0, Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
 		{Section: 0, Index: 17, URI: "https://status.example.com/statuslists/def", Backend: "status_service"},
 		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},

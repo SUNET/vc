@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+
+	"github.com/SUNET/vc/internal/apigw/db"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/pkg/helpers"
@@ -28,6 +31,19 @@ type RevokeCredentialRequest struct {
 	// knows exactly which credential to revoke should say so.
 	StatusListURI string `json:"status_list_uri,omitempty" validate:"omitempty,url"`
 	Index         *int64 `json:"index,omitempty" validate:"omitempty,gte=0"`
+
+	// AllowedAuthenticSources and AllowedScopes are the sets the SPOCP
+	// engine says this caller may act on. They are filled in by the HTTP
+	// layer from the authorization middleware and are NOT caller-settable
+	// (`json:"-" form:"-"`, same as the datastore and identity-mapping
+	// requests) - a caller that could set them would be authorizing itself.
+	//
+	// Authentication is not authorization: without these, any principal the
+	// API auth accepts could revoke ANY subject's credentials just by naming
+	// the identifier, which is the caller's own input and establishes
+	// nothing.
+	AllowedAuthenticSources []string `json:"-" form:"-"`
+	AllowedScopes           []string `json:"-" form:"-"`
 }
 
 // RevokedEntry describes one entry the request acted on.
@@ -92,8 +108,20 @@ func (c *Client) RevokeCredential(ctx context.Context, req *RevokeCredentialRequ
 
 	reply := &RevokeCredentialReply{Identifier: req.Identifier, Revoked: []*RevokedEntry{}}
 
+	var refused int
 	for _, e := range entries {
 		if req.StatusListURI != "" && (e.StatusListURI != req.StatusListURI || e.Index != *req.Index) {
+			continue
+		}
+		// An entry the caller is not authorized for is skipped, not
+		// reported: telling an unauthorized caller that a subject holds a
+		// credential in some other authentic source is itself a disclosure.
+		// The count feeds the error below, so the request still fails rather
+		// than silently succeeding with nothing done.
+		if !c.mayRevoke(req, e) {
+			c.log.Info("refusing to revoke an entry outside the caller's authorization",
+				"identifier", req.Identifier, "authentic_source", e.AuthenticSource, "scope", e.Scope)
+			refused++
 			continue
 		}
 		if _, err := c.issuerClient.SetCredentialStatus(ctx, &apiv1_issuer.SetCredentialStatusRequest{
@@ -120,6 +148,9 @@ func (c *Client) RevokeCredential(ctx context.Context, req *RevokeCredentialRequ
 	// credential's status to change and no status changed, so answering OK
 	// would report a revocation that did not happen.
 	if len(reply.Revoked) == 0 {
+		if refused > 0 {
+			return nil, fmt.Errorf("not authorized to revoke any recorded status list entry for identifier %q%s", req.Identifier, narrowedTo(req))
+		}
 		return nil, fmt.Errorf("no status list entry is recorded for identifier %q%s", req.Identifier, narrowedTo(req))
 	}
 
@@ -133,4 +164,25 @@ func narrowedTo(req *RevokeCredentialRequest) string {
 		return ""
 	}
 	return fmt.Sprintf(" at index %d of %q", *req.Index, req.StatusListURI)
+}
+
+// mayRevoke reports whether the caller's authorization covers this entry.
+//
+// The lists come from the SPOCP engine via the HTTP layer. A nil list means
+// "no constraint was supplied", which is what a deployment with no rules
+// produces - and that is precisely the configuration the route registration
+// refuses to serve (see the httpserver), so reaching here with nil means the
+// caller is a session or principal the engine placed no limit on.
+//
+// Matching is on the authentic source and scope the entry was ISSUED under,
+// recorded at issuance. The subject identifier is not a basis for this
+// decision: it is the caller's own input.
+func (c *Client) mayRevoke(req *RevokeCredentialRequest, e *db.CredentialStatusEntry) bool {
+	if len(req.AllowedAuthenticSources) > 0 && !slices.Contains(req.AllowedAuthenticSources, e.AuthenticSource) {
+		return false
+	}
+	if len(req.AllowedScopes) > 0 && !slices.Contains(req.AllowedScopes, e.Scope) {
+		return false
+	}
+	return true
 }

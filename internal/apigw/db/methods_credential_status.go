@@ -35,9 +35,16 @@ type CredentialStatusEntry struct {
 	// ("registry" or "status_service"). Recorded because the URI alone does
 	// not identify it, and guessing at revocation time writes the status
 	// into the wrong list.
-	Backend  string    `bson:"backend"`
-	Scope    string    `bson:"scope,omitempty"`
-	IssuedAt time.Time `bson:"issued_at"`
+	Backend string `bson:"backend"`
+	// AuthenticSource and Scope are what authorization is decided against:
+	// the SPOCP engine hands a caller the set of authentic sources and
+	// scopes it may act on, and revocation has to be able to tell whether
+	// an entry is inside that set. Without them the only thing an entry
+	// could be matched on is the subject identifier the caller supplied,
+	// which is the caller's own input and authorizes nothing.
+	AuthenticSource string    `bson:"authentic_source,omitempty"`
+	Scope           string    `bson:"scope,omitempty"`
+	IssuedAt        time.Time `bson:"issued_at"`
 }
 
 // CredentialStatusColl is the Mongo-backed CredentialStatusStore.

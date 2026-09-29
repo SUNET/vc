@@ -314,11 +314,22 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	// Refusing to register the route is the fail-closed option: an operator
 	// who has not configured api_auth gets no revocation endpoint at all,
 	// which is visible, rather than an open one, which is not.
-	if s.cfg.APIGW.APIServer.APIAuth.JWKS.Enable || s.cfg.APIGW.APIServer.APIAuth.OIDC.Enable {
+	authenticates := s.cfg.APIGW.APIServer.APIAuth.JWKS.Enable || s.cfg.APIGW.APIServer.APIAuth.OIDC.Enable
+	switch {
+	case !authenticates:
+		s.log.Warn("Credential revocation endpoint NOT registered: apigw.api_server.api_auth has neither jwks nor oidc enabled, so api/v1 does not authenticate. Configure api_auth to enable POST /api/v1/credential/revoke.")
+	case s.spocpEngine == nil:
+		// Authentication is not authorization. With no SPOCP rules the
+		// engine is nil and every principal the API auth accepts is
+		// unconstrained, so any of them could revoke ANY subject's
+		// credentials by naming the identifier - which is their own input.
+		// Revocation is destructive and has nothing to undo it from the
+		// wallet's side, so it is not offered until a deployment has said
+		// who may perform it.
+		s.log.Warn("Credential revocation endpoint NOT registered: apigw.api_server.api_auth has no SPOCP rules, so authenticated callers are unconstrained and could revoke any subject's credentials. Add a rule covering POST /api/v1/credential/revoke to enable it.")
+	default:
 		rgCredentialAdmin := rgAPIv1.Group("/credential")
 		s.httpHelpers.Server.RegEndpoint(ctx, rgCredentialAdmin, http.MethodPost, "/revoke", http.StatusOK, s.endpointCredentialRevoke)
-	} else {
-		s.log.Warn("Credential revocation endpoint NOT registered: apigw.api_server.api_auth has neither jwks nor oidc enabled, so api/v1 does not authenticate. Configure api_auth to enable POST /api/v1/credential/revoke.")
 	}
 
 	rgDatastore := rgAPIv1.Group("/datastore")
