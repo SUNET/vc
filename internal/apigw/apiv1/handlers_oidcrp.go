@@ -488,16 +488,26 @@ func (c *Client) newCallbackClaims(credentialType string, raw map[string]any, tr
 // This is the one place the "does this need filtering" decision is made. Every
 // site that turns callback claims into a document goes through it, so a site
 // added later is a visible call site rather than a silent omission.
+//
+// The result is always a map of its own, because callers mutate it: a caller
+// merging assertion defaults into it must not reach the identity claims that
+// identity resolution reads afterwards, or a default named sub or
+// authentic_source_person_id would come back as an authenticated identifier.
+// Filtering alone does not guarantee that - filterClaimsByCredentialType hands
+// its input straight back when there is no metadata to filter against, and
+// with a transformer configured there is no filtering at all.
 func (cc *callbackClaims) documentData() map[string]any {
-	if !cc.filter {
-		return cc.identity
+	claims := cc.identity
+	if cc.filter {
+		// Raw OIDC claims used to pass through verbatim, which put every
+		// ID-token claim into the credential - including ones the credential
+		// type never declares. Those can never be selectively disclosed, so a
+		// wallet has to present them every time, and the standard ones (iss,
+		// aud, exp, iat, nonce) collide with the envelope the issuer fills in
+		// at signing.
+		claims = cc.c.filterClaimsByCredentialType(cc.credentialType, cc.identity)
 	}
-	// Raw OIDC claims used to pass through verbatim, which put every ID-token
-	// claim into the credential - including ones the credential type never
-	// declares. Those can never be selectively disclosed, so a wallet has to
-	// present them every time, and the standard ones (iss, aud, exp, iat,
-	// nonce) collide with the envelope the issuer fills in at signing.
-	return cc.c.filterClaimsByCredentialType(cc.credentialType, cc.identity)
+	return maps.Clone(claims)
 }
 
 // buildOIDCDocument builds the document an OIDC callback stores for later

@@ -210,6 +210,54 @@ func TestBuildOIDCDocument_KeepsIssue623Filtering(t *testing.T) {
 	})
 }
 
+// TestBuildOIDCDocument_DoesNotMutateIdentityClaims: assertion defaults are
+// credential content, not an authenticated identity. Merging them must not
+// reach the claim set ResolveVCIIdentifier reads afterwards, or a default
+// named sub or authentic_source_person_id would come back as an authenticated
+// identifier. The two cases here are the ones where document data would
+// otherwise still be the identity map itself.
+func TestBuildOIDCDocument_DoesNotMutateIdentityClaims(t *testing.T) {
+	setDefaults := func(c *Client, scope string) {
+		c.cfg.APIGW.DataSources.Assertion.Scopes[scope] = model.AssertionScope{
+			AuthProvider: "oidc",
+			Defaults:     map[string]any{"authentic_source_person_id": "default-not-an-identity"},
+		}
+	}
+
+	t.Run("transformer configured, nothing is filtered", func(t *testing.T) {
+		c, _, _, _ := claimsTestClient(t)
+		setDefaults(c, "ehic")
+
+		transformer := oidcrp.NewClaimTransformer(model.AttributeMapping{"given_name": {Claim: "given_name"}})
+		cc, err := c.newCallbackClaims("ehic", oidcIdentityClaims(), transformer)
+		require.NoError(t, err)
+
+		doc, err := c.buildOIDCDocument(cc, "https://issuer.example", true)
+		require.NoError(t, err)
+
+		assert.Equal(t, "default-not-an-identity", doc.DocumentData["authentic_source_person_id"])
+		assert.NotContains(t, cc.identity, "authentic_source_person_id",
+			"an assertion default must not become an authenticated identity")
+	})
+
+	t.Run("no metadata to filter against", func(t *testing.T) {
+		c, _, _, _ := claimsTestClient(t)
+		setDefaults(c, "unknown-scope")
+
+		raw := map[string]any{"given_name": "Helen"}
+		cc, err := c.newCallbackClaims("unknown-scope", raw, nil)
+		require.NoError(t, err)
+
+		doc, err := c.buildOIDCDocument(cc, "https://issuer.example", true)
+		require.NoError(t, err)
+
+		assert.Equal(t, "default-not-an-identity", doc.DocumentData["authentic_source_person_id"])
+		assert.NotContains(t, cc.identity, "authentic_source_person_id")
+		assert.NotContains(t, raw, "authentic_source_person_id",
+			"the provider's own claim map must not be written to either")
+	})
+}
+
 // TestCallbackClaims_TransformerOutputNotFiltered preserves the condition the
 // filter has always had: with an attribute_mapping configured the operator has
 // already declared which claims the credential gets, and filtering that output
