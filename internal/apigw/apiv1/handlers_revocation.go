@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/SUNET/vc/internal/apigw/db"
 
@@ -32,18 +31,26 @@ type RevokeCredentialRequest struct {
 	StatusListURI string `json:"status_list_uri,omitempty" validate:"omitempty,url"`
 	Index         *int64 `json:"index,omitempty" validate:"omitempty,gte=0"`
 
-	// AllowedAuthenticSources and AllowedScopes are the sets the SPOCP
-	// engine says this caller may act on. They are filled in by the HTTP
-	// layer from the authorization middleware and are NOT caller-settable
-	// (`json:"-" form:"-"`, same as the datastore and identity-mapping
-	// requests) - a caller that could set them would be authorizing itself.
+	// Authorize reports whether this caller may revoke an entry issued
+	// under a given (authentic source, scope). It is supplied by the HTTP
+	// layer and is NOT caller-settable (`json:"-" form:"-"`) - a caller
+	// that could set it would be authorizing itself.
 	//
-	// Authentication is not authorization: without these, any principal the
-	// API auth accepts could revoke ANY subject's credentials just by naming
-	// the identifier, which is the caller's own input and establishes
-	// nothing.
-	AllowedAuthenticSources []string `json:"-" form:"-"`
-	AllowedScopes           []string `json:"-" form:"-"`
+	// A PAIR, deliberately, and not two membership lists. Flattening the
+	// caller's grants into an allowed-sources list and an allowed-scopes
+	// list authorizes their Cartesian product: grants of (SUNET, pid) and
+	// (OTHER, ehic) put both values in both lists, so an entry recorded as
+	// (SUNET, ehic) would pass although that combination was never granted.
+	//
+	// The closure also carries the method and path, so a rule that
+	// authorizes some other route does not authorize revocation.
+	//
+	// Nil means no authorization decision can be made, and every entry is
+	// refused. Authentication is not authorization: without this, any
+	// principal the API auth accepts could revoke ANY subject's credentials
+	// just by naming the identifier, which is the caller's own input and
+	// establishes nothing.
+	Authorize func(authenticSource, scope string) bool `json:"-" form:"-"`
 }
 
 // RevokedEntry describes one entry the request acted on.
@@ -168,21 +175,21 @@ func narrowedTo(req *RevokeCredentialRequest) string {
 
 // mayRevoke reports whether the caller's authorization covers this entry.
 //
-// The lists come from the SPOCP engine via the HTTP layer. A nil list means
-// "no constraint was supplied", which is what a deployment with no rules
-// produces - and that is precisely the configuration the route registration
-// refuses to serve (see the httpserver), so reaching here with nil means the
-// caller is a session or principal the engine placed no limit on.
+// The decision is delegated to the HTTP layer's closure so that the
+// authentic source and scope are checked as ONE pair against the engine,
+// together with the method and path - see RevokeCredentialRequest.Authorize
+// for why neither of those can be dropped.
 //
 // Matching is on the authentic source and scope the entry was ISSUED under,
 // recorded at issuance. The subject identifier is not a basis for this
 // decision: it is the caller's own input.
+//
+// A nil Authorize refuses everything. That is the fail-closed reading: a
+// caller arrived at a destructive operation with no way to decide whether
+// they may perform it.
 func (c *Client) mayRevoke(req *RevokeCredentialRequest, e *db.CredentialStatusEntry) bool {
-	if len(req.AllowedAuthenticSources) > 0 && !slices.Contains(req.AllowedAuthenticSources, e.AuthenticSource) {
+	if req.Authorize == nil {
 		return false
 	}
-	if len(req.AllowedScopes) > 0 && !slices.Contains(req.AllowedScopes, e.Scope) {
-		return false
-	}
-	return true
+	return req.Authorize(e.AuthenticSource, e.Scope)
 }

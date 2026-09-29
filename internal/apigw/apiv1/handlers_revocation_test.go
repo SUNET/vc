@@ -92,7 +92,7 @@ func TestRevokeCredential_WorksWithoutALocalRegistry(t *testing.T) {
 	c := revokeClient(t, &stubStatusStore{entries: []*db.CredentialStatusEntry{externalEntry()}}, issuer)
 	require.Nil(t, c.registryClient, "this test must not depend on a registry client")
 
-	reply, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{Identifier: "person-1"})
+	reply, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{Identifier: "person-1", Authorize: allowAll})
 	require.NoError(t, err)
 	require.Len(t, reply.Revoked, 1)
 
@@ -112,7 +112,7 @@ func TestRevokeCredential_CarriesTheRecordedBackend(t *testing.T) {
 		externalEntry(), registryEntry(),
 	}}, issuer)
 
-	reply, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{Identifier: "person-1"})
+	reply, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{Identifier: "person-1", Authorize: allowAll})
 	require.NoError(t, err)
 	require.Len(t, reply.Revoked, 2)
 
@@ -129,7 +129,7 @@ func TestRevokeCredential_NothingRecordedIsNotSuccess(t *testing.T) {
 	issuer := &recordingIssuer{}
 	c := revokeClient(t, &stubStatusStore{}, issuer)
 
-	_, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{Identifier: "nobody"})
+	_, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{Identifier: "nobody", Authorize: allowAll})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no status list entry is recorded")
 	require.Empty(t, issuer.calls)
@@ -148,6 +148,7 @@ func TestRevokeCredential_NarrowsToOneEntry(t *testing.T) {
 		Identifier:    "person-1",
 		StatusListURI: "https://registry.example.com/statuslists/4",
 		Index:         &idx,
+		Authorize:     allowAll,
 	})
 	require.NoError(t, err)
 	require.Len(t, reply.Revoked, 1)
@@ -162,6 +163,7 @@ func TestRevokeCredential_NarrowingNeedsBothHalves(t *testing.T) {
 	_, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{
 		Identifier:    "person-1",
 		StatusListURI: "https://registry.example.com/statuslists/4",
+		Authorize:     allowAll,
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "must be given together")
@@ -177,7 +179,7 @@ func TestRevokeCredential_SuspendAndReinstate(t *testing.T) {
 			c := revokeClient(t, &stubStatusStore{entries: []*db.CredentialStatusEntry{registryEntry()}}, issuer)
 
 			s := status
-			_, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{Identifier: "person-1", Status: &s})
+			_, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{Identifier: "person-1", Status: &s, Authorize: allowAll})
 			require.NoError(t, err)
 			require.Len(t, issuer.calls, 1)
 			require.Equal(t, uint32(status), issuer.calls[0].Status)
@@ -192,7 +194,7 @@ func TestRevokeCredential_IssuerFailureIsReported(t *testing.T) {
 	issuer := &recordingIssuer{err: errors.New("backend unreachable")}
 	c := revokeClient(t, &stubStatusStore{entries: []*db.CredentialStatusEntry{registryEntry()}}, issuer)
 
-	reply, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{Identifier: "person-1"})
+	reply, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{Identifier: "person-1", Authorize: allowAll})
 	require.Error(t, err)
 	require.Nil(t, reply)
 	require.Contains(t, err.Error(), "failed to set status of entry 9")
@@ -214,9 +216,8 @@ func TestRevokeCredential_RefusesEntriesOutsideTheCallersAuthorization(t *testin
 	c := revokeClient(t, &stubStatusStore{entries: []*db.CredentialStatusEntry{mine, theirs}}, issuer)
 
 	reply, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{
-		Identifier:              "person-1",
-		AllowedAuthenticSources: []string{"SUNET"},
-		AllowedScopes:           []string{"pid"},
+		Identifier: "person-1",
+		Authorize:  grants(pair{"SUNET", "pid"}),
 	})
 	require.NoError(t, err)
 	require.Len(t, reply.Revoked, 1, "only the entry inside the caller's authorization may be revoked")
@@ -237,8 +238,8 @@ func TestRevokeCredential_AllEntriesUnauthorizedIsAnError(t *testing.T) {
 	c := revokeClient(t, &stubStatusStore{entries: []*db.CredentialStatusEntry{theirs}}, issuer)
 
 	_, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{
-		Identifier:              "person-1",
-		AllowedAuthenticSources: []string{"SUNET"},
+		Identifier: "person-1",
+		Authorize:  grants(pair{"SUNET", "pid"}),
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not authorized")
@@ -246,17 +247,51 @@ func TestRevokeCredential_AllEntriesUnauthorizedIsAnError(t *testing.T) {
 	require.Empty(t, issuer.calls)
 }
 
-// TestRevokeCredential_NoConstraintSuppliedActsOnEverything documents the
-// nil case honestly: an empty list is "no constraint was supplied", which is
-// what a deployment with no SPOCP rules produces - and is exactly the
-// configuration the route registration refuses to serve.
-func TestRevokeCredential_NoConstraintSuppliedActsOnEverything(t *testing.T) {
+// TestRevokeCredential_NoAuthorizerRefusesEverything is the fail-closed
+// reading of a missing decision: a caller reached a destructive operation
+// with no way to tell whether they may perform it.
+func TestRevokeCredential_NoAuthorizerRefusesEverything(t *testing.T) {
 	issuer := &recordingIssuer{}
-	c := revokeClient(t, &stubStatusStore{entries: []*db.CredentialStatusEntry{
-		registryEntry(), externalEntry(),
-	}}, issuer)
+	c := revokeClient(t, &stubStatusStore{entries: []*db.CredentialStatusEntry{registryEntry()}}, issuer)
 
-	reply, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{Identifier: "person-1"})
-	require.NoError(t, err)
-	require.Len(t, reply.Revoked, 2)
+	_, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{Identifier: "person-1"})
+	require.Error(t, err)
+	require.Empty(t, issuer.calls)
 }
+
+// TestRevokeCredential_PairsAreAtomic is the Cartesian-product case: grants
+// of (SUNET, pid) and (OTHER, ehic) must NOT authorize (SUNET, ehic).
+// Flattening the grants into a source list and a scope list would, because
+// both values appear in both lists.
+func TestRevokeCredential_PairsAreAtomic(t *testing.T) {
+	issuer := &recordingIssuer{}
+	crossed := registryEntry()
+	crossed.AuthenticSource, crossed.Scope = "SUNET", "ehic"
+
+	c := revokeClient(t, &stubStatusStore{entries: []*db.CredentialStatusEntry{crossed}}, issuer)
+
+	_, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{
+		Identifier: "person-1",
+		Authorize:  grants(pair{"SUNET", "pid"}, pair{"OTHER", "ehic"}),
+	})
+	require.Error(t, err, "(SUNET, ehic) was never granted, even though both values appear among the grants")
+	require.Contains(t, err.Error(), "not authorized")
+	require.Empty(t, issuer.calls)
+}
+
+type pair struct{ source, scope string }
+
+// grants builds an authorizer that permits exactly the listed pairs, the way
+// a SPOCP rule set does - never their Cartesian product.
+func grants(allowed ...pair) func(string, string) bool {
+	return func(source, scope string) bool {
+		for _, p := range allowed {
+			if p.source == source && p.scope == scope {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func allowAll(string, string) bool { return true }
