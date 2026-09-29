@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
@@ -351,8 +352,12 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 		entry := vpAuth.AuthScopes[authScope]
 		scopeClaimQueries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims))
 		for _, claim := range entry.AuthClaims {
+			// AuthClaims are documented as claim paths. Split on "." so a
+			// dotted path like "address.locality" becomes the nested DCQL
+			// path ["address", "locality"] rather than a single literal
+			// segment the wallet cannot match.
 			scopeClaimQueries = append(scopeClaimQueries, openid4vp.ClaimQuery{
-				Path: openid4vp.StringPath(claim),
+				Path: openid4vp.StringPath(strings.Split(claim, ".")...),
 			})
 		}
 		// By format, so an mso_mdoc auth scope is constrained by its doctype

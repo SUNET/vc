@@ -18,8 +18,8 @@ type AgeOverThresholdsArgs struct {
 	Input string `yaml:"input" validate:"required" doc_example:"birthdate"`
 
 	// Thresholds are the ages (in years) to expose. Each N produces
-	// age_over_N (boolean).
-	Thresholds []int `yaml:"thresholds" validate:"required,min=1" doc_example:"[13, 15, 18, 21, 65]"`
+	// age_over_N (boolean). Every entry must be positive.
+	Thresholds []int `yaml:"thresholds" validate:"required,min=1,dive,gt=0" doc_example:"[13, 15, 18, 21, 65]"`
 }
 
 // Apply implements Applier.

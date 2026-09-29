@@ -86,7 +86,7 @@ type DatastoreScope struct {
 
 	// Derivations are generic post-verification steps that compute
 	// additional claims from the source data (see credential.ApplyDerivations).
-	Derivations []primitives.Derivation `yaml:"derivations,omitempty" doc_key:"derivation index"`
+	Derivations []primitives.Derivation `yaml:"derivations,omitempty" validate:"omitempty,dive" doc_key:"derivation index"`
 }
 
 // AuthScopeEntry configures per-scope authentication requirements for OpenID4VP.
@@ -158,7 +158,7 @@ type AssertionScope struct {
 
 	// Derivations are generic post-verification steps that compute
 	// additional claims from the assertion (see credential.ApplyDerivations).
-	Derivations []primitives.Derivation `yaml:"derivations,omitempty" doc_key:"derivation index"`
+	Derivations []primitives.Derivation `yaml:"derivations,omitempty" validate:"omitempty,dive" doc_key:"derivation index"`
 }
 
 // ResolveDefaults returns Defaults with date_of_expiry populated from
@@ -200,13 +200,13 @@ type ExternalAPIScope struct {
 
 	// Derivations are generic post-verification steps that compute
 	// additional claims from the API response (see credential.ApplyDerivations).
-	Derivations []primitives.Derivation `yaml:"derivations,omitempty" doc_key:"derivation index"`
+	Derivations []primitives.Derivation `yaml:"derivations,omitempty" validate:"omitempty,dive" doc_key:"derivation index"`
 }
 
 // PresentationConfig groups presentation-derived credential scopes.
 type PresentationConfig struct {
 	// Scopes maps credential scope names to their presentation configuration.
-	Scopes map[string]PresentationScope `yaml:"scopes,omitempty" doc_key:"credential scope"`
+	Scopes map[string]PresentationScope `yaml:"scopes,omitempty" validate:"omitempty,dive" doc_key:"credential scope"`
 }
 
 // PresentationScope configures a credential type whose data is derived from
@@ -243,7 +243,7 @@ type PresentationScope struct {
 	// Derivations are generic post-verification steps that compute additional
 	// claims from the presented credential's own claims
 	// (see credential.ApplyDerivations).
-	Derivations []primitives.Derivation `yaml:"derivations,omitempty" doc_key:"derivation index"`
+	Derivations []primitives.Derivation `yaml:"derivations,omitempty" validate:"omitempty,dive" doc_key:"derivation index"`
 }
 
 // ResolveDefaults returns Defaults with date_of_expiry populated from
@@ -384,6 +384,10 @@ func (ds *DataSources) ResolveDataSource(credentialType, authProvider string) (C
 // (datastore, assertion, external_api, or presentation) owns the given
 // credential type. Returns nil if the scope is unknown or has no derivations.
 // The lookup order mirrors LookupCredentialSources.
+//
+// Prefer DerivationsForSource when the caller knows which data source is in
+// use — a credential type may exist in multiple data sources with different
+// derivation lists, and this fallback picks by fixed map order.
 func (ds *DataSources) DerivationsFor(credentialType string) []primitives.Derivation {
 	if ds == nil {
 		return nil
@@ -399,6 +403,39 @@ func (ds *DataSources) DerivationsFor(credentialType string) []primitives.Deriva
 	}
 	if cred, ok := ds.Presentation.Scopes[credentialType]; ok && len(cred.Derivations) > 0 {
 		return cred.Derivations
+	}
+	return nil
+}
+
+// DerivationsForSource returns the Derivations list configured on the scope
+// owned by the given data source. This is the source-aware variant of
+// DerivationsFor: when a credential type is configured in multiple data
+// sources, only the derivations of the source that was actually used should
+// run. Returns nil if the scope is unknown for that source or has no
+// derivations. An empty source falls back to DerivationsFor.
+func (ds *DataSources) DerivationsForSource(credentialType string, source DataSourceType) []primitives.Derivation {
+	if ds == nil {
+		return nil
+	}
+	switch source {
+	case DataSourceDatastore:
+		if cred, ok := ds.Datastore.Scopes[credentialType]; ok {
+			return cred.Derivations
+		}
+	case DataSourceAssertion:
+		if cred, ok := ds.Assertion.Scopes[credentialType]; ok {
+			return cred.Derivations
+		}
+	case DataSourceExternalAPI:
+		if cred, ok := ds.ExternalAPI.Scopes[credentialType]; ok {
+			return cred.Derivations
+		}
+	case DataSourcePresentation:
+		if cred, ok := ds.Presentation.Scopes[credentialType]; ok {
+			return cred.Derivations
+		}
+	case "":
+		return ds.DerivationsFor(credentialType)
 	}
 	return nil
 }

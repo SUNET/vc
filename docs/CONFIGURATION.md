@@ -474,10 +474,10 @@ Each list entry under a scope's `derivations` field is keyed by primitive name (
 
 Emits one boolean claim per threshold, named age_over_N.
 
-| Field        | Type     | Description                                                      | Example                | Default | Required |
-| ------------ | -------- | ---------------------------------------------------------------- | ---------------------- | ------- | -------- |
-| `input`      | `string` | Birthdate claim name (value must be ISO YYYY-MM-DD).             | `birthdate`            | -       | Yes      |
-| `thresholds` | `[]int`  | Ages (in years) to expose. Each N produces age_over_N (boolean). | `[13, 15, 18, 21, 65]` | -       | Yes      |
+| Field        | Type     | Description                                                                                    | Example                | Default | Required |
+| ------------ | -------- | ---------------------------------------------------------------------------------------------- | ---------------------- | ------- | -------- |
+| `input`      | `string` | Birthdate claim name (value must be ISO YYYY-MM-DD).                                           | `birthdate`            | -       | Yes      |
+| `thresholds` | `[]int`  | Ages (in years) to expose. Each N produces age_over_N (boolean). Every entry must be positive. | `[13, 15, 18, 21, 65]` | -       | Yes      |
 
 ### `lowercase`
 
@@ -1840,10 +1840,10 @@ Each list entry under a scope's `derivations` field is keyed by primitive name (
 
 AgeOverThresholds emits one boolean claim per configured threshold, named age_over_N, from an ISO YYYY-MM-DD birthdate.
 
-| Field        | Type     | Description                                                      | Example                | Default | Required |
-| ------------ | -------- | ---------------------------------------------------------------- | ---------------------- | ------- | -------- |
-| `input`      | `string` | Birthdate claim name (value must be ISO YYYY-MM-DD).             | `birthdate`            | -       | Yes      |
-| `thresholds` | `[]int`  | Ages (in years) to expose. Each N produces age_over_N (boolean). | `[13, 15, 18, 21, 65]` | -       | Yes      |
+| Field        | Type     | Description                                                                                    | Example                | Default | Required |
+| ------------ | -------- | ---------------------------------------------------------------------------------------------- | ---------------------- | ------- | -------- |
+| `input`      | `string` | Birthdate claim name (value must be ISO YYYY-MM-DD).                                           | `birthdate`            | -       | Yes      |
+| `thresholds` | `[]int`  | Ages (in years) to expose. Each N produces age_over_N (boolean). Every entry must be positive. | `[13, 15, 18, 21, 65]` | -       | Yes      |
 
 ### lowercase
 

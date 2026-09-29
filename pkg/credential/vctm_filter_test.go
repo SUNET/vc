@@ -12,7 +12,7 @@ func TestFilterAgainstVCTM(t *testing.T) {
 		{Path: []*string{new("age_over_18")}},
 		{Path: []*string{new("date_of_issuance")}},
 		{Path: []*string{new("date_of_expiry")}},
-		{Path: []*string{new("address"), new("locality")}}, // nested path — top-level "address" is allowed
+		{Path: []*string{new("address"), new("locality")}}, // nested path — only address.locality allowed
 	}}
 	doc := map[string]any{
 		"age_over_13":      true,
@@ -22,7 +22,7 @@ func TestFilterAgainstVCTM(t *testing.T) {
 		"given_name":       "Alice",
 		"family_name":      "Smith",
 		"birthdate":        "1996-01-30",
-		"address":          map[string]any{"locality": "Stockholm"},
+		"address":          map[string]any{"locality": "Stockholm", "street": "Kungsgatan 1"},
 	}
 	got := FilterAgainstVCTM(doc, vctm)
 
@@ -35,6 +35,16 @@ func TestFilterAgainstVCTM(t *testing.T) {
 		if _, ok := got[k]; ok {
 			t.Errorf("expected key %q to be filtered out", k)
 		}
+	}
+	addr, ok := got["address"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected address to be a map, got %T", got["address"])
+	}
+	if _, ok := addr["locality"]; !ok {
+		t.Errorf("expected address.locality to survive")
+	}
+	if _, ok := addr["street"]; ok {
+		t.Errorf("expected undeclared sibling address.street to be filtered out")
 	}
 }
 

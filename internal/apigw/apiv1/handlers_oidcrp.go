@@ -179,8 +179,15 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 
 	// Apply the credential type's derivations (from data_sources.<*>.<scope>.derivations)
 	// after rename+select and before identity resolution so downstream code sees
-	// canonicalised values.
-	if derivs := c.cfg.APIGW.DataSources.DerivationsFor(session.CredentialType); len(derivs) > 0 {
+	// canonicalised values. Resolve derivations against the actual OIDC-backed
+	// data source, so a scope also present in (say) datastore does not inherit
+	// its rules here.
+	credSourceForDerivs, dsErr := c.cfg.APIGW.DataSources.ResolveDataSource(session.CredentialType, model.AuthProviderOIDC)
+	if dsErr != nil {
+		span.SetStatus(codes.Error, dsErr.Error())
+		return nil, fmt.Errorf("OIDC data source resolution failed: %w", dsErr)
+	}
+	if derivs := c.cfg.APIGW.DataSources.DerivationsForSource(session.CredentialType, credSourceForDerivs.DataSource); len(derivs) > 0 {
 		derived, derr := credential.ApplyDerivations(derivs, claims, time.Now())
 		if derr != nil {
 			span.SetStatus(codes.Error, derr.Error())

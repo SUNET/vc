@@ -62,11 +62,15 @@ func (c *Client) ResolveIdentifier(ctx context.Context, authenticSource string, 
 }
 
 // requireIdentifier validates that a non-empty identifier exists for data sources
-// that require it. Assertion-based and datastore-based issuance allow an empty
-// identifier because the data comes from trusted sources (IdP claims or
-// pre-uploaded documents) rather than identity-mapped lookups.
+// that require it. Assertion-based, datastore-based, and presentation-based
+// issuance allow an empty identifier because the data comes from trusted
+// sources (IdP claims, pre-uploaded documents, or a verified presented
+// credential) rather than identity-mapped lookups.
 func requireIdentifier(identifier string, dataSource model.DataSourceType) (string, error) {
-	if identifier == "" && dataSource != model.DataSourceAssertion && dataSource != model.DataSourceDatastore {
+	if identifier == "" &&
+		dataSource != model.DataSourceAssertion &&
+		dataSource != model.DataSourceDatastore &&
+		dataSource != model.DataSourcePresentation {
 		return "", errors.New("no identifier in auth context")
 	}
 	return identifier, nil
@@ -323,13 +327,18 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 		// Apply the scope's configured derivations to the cached document.
 		// Presentation is handled above (its derivations run against
-		// VerifiedClaims, not against the assembled doc).
-		if derivs := c.cfg.APIGW.DataSources.DerivationsFor(scope); len(derivs) > 0 {
-			derived, err := credential.ApplyDerivations(derivs, document.DocumentData, time.Now())
-			if err != nil {
-				return nil, err
+		// VerifiedClaims, not against the assembled doc). Assertion sources
+		// already apply derivations in the SAML ACS / OIDC callback before
+		// caching the document, so re-running them here would double-transform
+		// values (e.g. yyyymmdd_to_iso parsing an already-ISO date).
+		if authContext.DataSource != string(model.DataSourceAssertion) {
+			if derivs := c.cfg.APIGW.DataSources.DerivationsForSource(scope, model.DataSourceType(authContext.DataSource)); len(derivs) > 0 {
+				derived, err := credential.ApplyDerivations(derivs, document.DocumentData, time.Now())
+				if err != nil {
+					return nil, err
+				}
+				maps.Copy(document.DocumentData, derived)
 			}
-			maps.Copy(document.DocumentData, derived)
 		}
 	}
 

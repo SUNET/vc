@@ -196,8 +196,15 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 
 	// Apply the credential type's derivations (from data_sources.<*>.<scope>.derivations)
 	// after rename+select and before identity resolution so downstream code sees
-	// canonicalised values.
-	if derivs := s.cfg.APIGW.DataSources.DerivationsFor(session.CredentialType); len(derivs) > 0 {
+	// canonicalised values. Resolve derivations against the actual SAML-backed
+	// data source, so a scope also present in (say) datastore does not inherit
+	// its rules here.
+	credSourceForDerivs, dsErr := s.cfg.APIGW.DataSources.ResolveDataSource(session.CredentialType, model.AuthProviderSAML)
+	if dsErr != nil {
+		span.SetStatus(codes.Error, dsErr.Error())
+		return nil, fmt.Errorf("SAML data source resolution failed: %w", dsErr)
+	}
+	if derivs := s.cfg.APIGW.DataSources.DerivationsForSource(session.CredentialType, credSourceForDerivs.DataSource); len(derivs) > 0 {
 		derived, derr := credential.ApplyDerivations(derivs, claims, time.Now())
 		if derr != nil {
 			span.SetStatus(codes.Error, derr.Error())
