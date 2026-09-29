@@ -139,3 +139,64 @@ func TestTake_FallbackRejectsAnEntryInsideTheSkewWindow(t *testing.T) {
 		t.Fatal("the fallback should have attempted an allocation")
 	}
 }
+
+// TestTake_ReleasesAndStopsWhenEveryAllocationIsBornExpired is the leak
+// case: a rejected entry has already been RESERVED on the service, so
+// dropping it and retrying spends another remote VALID slot every attempt.
+// The condition that causes it - AllocateExpiry or the service's maximum
+// lifetime being shorter than the skew - is a configuration fact that does
+// not change between attempts, so retrying can only burn slots until the
+// timeout.
+func TestTake_ReleasesAndStopsWhenEveryAllocationIsBornExpired(t *testing.T) {
+	var allocations, releases int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/token"):
+			_, _ = w.Write([]byte(`{"access_token":"t","token_type":"Bearer","expires_in":3600}`))
+		case r.Method == http.MethodPatch:
+			atomic.AddInt32(&releases, 1)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			atomic.AddInt32(&allocations, 1)
+			exp := time.Now().Add(entryExpirySkew / 2).UTC().Format(time.RFC3339)
+			_, _ = w.Write([]byte(`{"list_url":"` + "https://status.example.org/lists/abc" + `","index":1,"exp":"` + exp + `"}`))
+		}
+	}))
+	defer server.Close()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	c, err := New(Config{
+		IngestionURL: server.URL, ASURL: server.URL,
+		IssuerID: "https://issuer.example.org", Signer: softwareSigner(key),
+		// PoolSize 1, not 0: zero is defaulted to 50, and the background
+		// refill would then be allocating alongside the path under test.
+		PoolSize: 1, RefillInterval: time.Hour,
+		RetryInitialBackoff: time.Millisecond, RetryMaxBackoff: 2 * time.Millisecond,
+		TakeFallbackTimeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer c.Close()
+
+	if _, err := c.Take(context.Background()); err == nil {
+		t.Fatal("Take must not return an entry inside the expiry skew window")
+	}
+
+	// One allocation from the background refill (PoolSize 1) and one from
+	// Take's fallback, each released. What must NOT happen is unbounded
+	// growth: before this fix the refill pushed born-expired entries, take()
+	// discarded them and signalled another refill, and the loop never ended.
+	gotAlloc := atomic.LoadInt32(&allocations)
+	gotRelease := atomic.LoadInt32(&releases)
+	if gotAlloc > 2 {
+		t.Fatalf("allocated %d entries; a configuration error that cannot change between attempts must not be retried into a loop", gotAlloc)
+	}
+	if gotRelease != gotAlloc {
+		t.Fatalf("allocated %d entries but released %d: every reserved entry that can never be issued must be handed back", gotAlloc, gotRelease)
+	}
+}

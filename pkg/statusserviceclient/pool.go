@@ -172,6 +172,21 @@ func (p *pool) refill(ctx context.Context) {
 			if err != nil {
 				return err
 			}
+			// An entry born inside the expiry skew must not go into the
+			// pool. take() would discard it on the way out and signal
+			// another refill, and since the cause - AllocateExpiry or the
+			// service's own maximum lifetime being shorter than the skew -
+			// is a configuration fact, every replacement is born the same
+			// way. That is a hot loop consuming a remote VALID slot per
+			// iteration, for as long as the process runs.
+			//
+			// backgroundRetry has no maxElapsed, so this MUST be permanent
+			// or the retry itself would spin on it.
+			if p.c.expired(e) {
+				p.c.releaseUnusable(ctx, e)
+				return permanent(fmt.Errorf("status service allocated an entry expiring at %s, within the %s skew: check AllocateExpiry against the service's maximum lifetime",
+					e.Exp.Format(time.RFC3339), entryExpirySkew))
+			}
 			entry = e
 			return nil
 		})
@@ -232,8 +247,17 @@ func (c *Client) Take(ctx context.Context) (Entry, error) {
 		// rather than silently accepted, and a caller that keeps failing
 		// gets a configuration error rather than an unusable reference.
 		if c.expired(e) {
-			return fmt.Errorf("status service allocated an entry expiring at %s, within the %s skew: check AllocateExpiry against the service's maximum lifetime",
-				e.Exp.Format(time.RFC3339), entryExpirySkew)
+			// The entry is already RESERVED on the service. Dropping it and
+			// retrying consumes another remote VALID slot every attempt,
+			// and the condition that caused it - AllocateExpiry or the
+			// service's own maximum lifetime being shorter than the skew -
+			// is a configuration fact that will not change between
+			// attempts. So hand this one back and stop: at most one slot is
+			// spent, and the caller gets the configuration error straight
+			// away instead of after the whole retry budget.
+			c.releaseUnusable(ctx, e)
+			return permanent(fmt.Errorf("status service allocated an entry expiring at %s, within the %s skew: check AllocateExpiry against the service's maximum lifetime",
+				e.Exp.Format(time.RFC3339), entryExpirySkew))
 		}
 		entry = e
 		return nil
@@ -254,3 +278,23 @@ func (e *poolExhaustedError) Error() string {
 	return ErrPoolExhausted.Error() + ": " + e.cause.Error()
 }
 func (e *poolExhaustedError) Unwrap() []error { return []error{ErrPoolExhausted, e.cause} }
+
+// releaseUnusable marks an entry INVALID that was allocated but can never be
+// issued, so the slot is not left reserved-but-unused on the service.
+//
+// Best-effort and one-shot on purpose: this runs on a path that is already
+// failing, and retrying the release would spend the caller's remaining time
+// budget on cleanup rather than on the error it is about to return. A
+// release that does not land costs one leaked slot, which is the same cost
+// as not trying - never worse.
+func (c *Client) releaseUnusable(ctx context.Context, e Entry) {
+	listID, err := ListIDFromURL(e.ListURL)
+	if err != nil {
+		c.log.Error(err, "cannot determine the list ID to release an unusable status entry", "list_url", e.ListURL)
+		return
+	}
+	if err := c.setStatusOnce(ctx, listID, e.Index, StatusInvalid); err != nil {
+		c.log.Error(err, "could not release an unusable status entry; the slot stays reserved on the service",
+			"list_id", listID, "index", e.Index)
+	}
+}
