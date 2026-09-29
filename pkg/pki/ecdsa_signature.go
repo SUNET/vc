@@ -99,27 +99,62 @@ type ecdsaASN1Signature struct {
 // either form.
 //
 // HSM and other crypto.Signer backends return ASN.1 DER, while JWS (RFC 7518
-// §3.4) and pki.RawSigner both require the fixed-size R||S concatenation. A
-// signature already of the expected length is returned unchanged, so a
-// backend that does the right thing costs nothing.
+// §3.4) and pki.RawSigner both require the fixed-size R||S concatenation.
+//
+// DER is tried FIRST, and length is only the fallback. Length cannot decide
+// this: a valid P-256 DER signature is exactly 64 bytes whenever r and s
+// together are six bytes short of full width, which happens for roughly one
+// signature in 2^48 - and the old order returned those unchanged, handing
+// back DER bytes labelled as P1363. That is silent: the value is the right
+// length and simply does not verify. This repository has already been bitten
+// by the mirror image of it (go-cryptoutil's RawSigToASN1 treating a leading
+// 0x30 as proof of DER), which is why the decision is structural here.
+//
+// The residual ambiguity runs the other way - a raw R||S that happens to
+// parse as well-formed DER - and is far smaller: it needs the first byte to
+// be 0x30, the second to be the exact remaining length, the interior tags to
+// line up, AND both integers to land in [1, N-1]. The range check below is
+// what closes most of that gap, so it is not merely a sanity check.
 func ECDSASignatureToP1363(signature []byte, curve elliptic.Curve) ([]byte, error) {
 	keySize := GetKeySizeForCurve(curve)
 	if keySize == 0 {
 		return nil, fmt.Errorf("unsupported curve: %s", curve.Params().Name)
 	}
+
+	var parsed ecdsaASN1Signature
+	rest, derErr := asn1.Unmarshal(signature, &parsed)
+	if derErr == nil && len(rest) == 0 && validECDSAScalars(parsed.R, parsed.S, curve) {
+		return EncodeECDSASignature(parsed.R, parsed.S, curve)
+	}
+
 	if len(signature) == 2*keySize {
 		return signature, nil
 	}
 
-	var parsed ecdsaASN1Signature
-	rest, err := asn1.Unmarshal(signature, &parsed)
-	if err != nil {
+	if derErr != nil {
 		return nil, fmt.Errorf("ECDSA signature is %d bytes (expected %d) and is not valid ASN.1 DER: %w",
-			len(signature), 2*keySize, err)
+			len(signature), 2*keySize, derErr)
 	}
 	if len(rest) > 0 {
 		return nil, fmt.Errorf("ECDSA signature has %d trailing bytes after ASN.1 DER decoding", len(rest))
 	}
+	return nil, fmt.Errorf("ECDSA signature is %d bytes (expected %d) and its ASN.1 DER R/S are not valid scalars for %s",
+		len(signature), 2*keySize, curve.Params().Name)
+}
 
-	return EncodeECDSASignature(parsed.R, parsed.S, curve)
+// validECDSAScalars reports whether r and s are in [1, N-1], the range a
+// signature's components must occupy. Anything outside it did not come from
+// signing with this curve, so a "DER" parse that produces one is a raw
+// signature that happened to look like DER.
+func validECDSAScalars(r, s *big.Int, curve elliptic.Curve) bool {
+	if r == nil || s == nil {
+		return false
+	}
+	n := curve.Params().N
+	for _, v := range []*big.Int{r, s} {
+		if v.Sign() <= 0 || v.Cmp(n) >= 0 {
+			return false
+		}
+	}
+	return true
 }
