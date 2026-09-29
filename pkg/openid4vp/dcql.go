@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"math"
 	"slices"
-	"strings"
+
+	"github.com/SUNET/vc/pkg/vc20/credential"
 )
 
 type DCQL struct {
@@ -618,7 +619,9 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 			// reason. Config load refuses these too; this is the path
 			// templates and API callers arrive by.
 			narrowing := slices.ContainsFunc(alternative, func(t string) bool {
-				return t != "" && t != BaseVCTypeIRI && strings.Contains(t, ":")
+				// Strict: see credential.IsAbsoluteIRI. A colon alone does
+				// not make a reference absolute.
+				return t != "" && t != BaseVCTypeIRI && credential.IsAbsoluteIRI(t)
 			})
 			if !narrowing {
 				return &DCQLValidationError{

@@ -88,23 +88,42 @@ func TestReferencedContexts(t *testing.T) {
 				"Term":    "https://example.org/Term",
 				"nested":  map[string]any{"@context": "https://example.org/three.jsonld"},
 			},
-			// Relative references are the processor's business, not ours.
+			// Relative: json-gold resolves this against the document's own
+			// URL and fetches it later, so it belongs in the pinned closure
+			// too - skipping it made the contract a half-truth.
 			"relative.jsonld",
+			"../up/one.jsonld",
+			// Non-http after resolution is still excluded.
+			"mailto:someone@example.org",
 		},
 	}
 
-	got := referencedContexts(doc)
+	got := referencedContexts(doc, "https://example.org/deep/base.jsonld")
 	want := map[string]bool{
-		"https://example.org/one.jsonld":   true,
-		"https://example.org/two.jsonld":   true,
-		"https://example.org/three.jsonld": true,
+		"https://example.org/one.jsonld":           true,
+		"https://example.org/two.jsonld":           true,
+		"https://example.org/three.jsonld":         true,
+		"https://example.org/deep/relative.jsonld": true,
+		"https://example.org/up/one.jsonld":        true,
 	}
 	if len(got) != len(want) {
-		t.Fatalf("got %v, want the three absolute URLs", got)
+		t.Fatalf("got %v, want %d entries including the resolved relative ones", got, len(want))
 	}
 	for _, u := range got {
 		if !want[u] {
-			t.Errorf("unexpected %q - only absolute http(s) context URLs belong here", u)
+			t.Errorf("unexpected %q - only http(s) context URLs, absolute or resolved, belong here", u)
 		}
+	}
+}
+
+// TestReferencedContexts_NoBaseSkipsRelatives: with no usable base there is
+// nothing to resolve against, and guessing would pin a URL the processor
+// will never ask for.
+func TestReferencedContexts_NoBaseSkipsRelatives(t *testing.T) {
+	doc := map[string]any{"@context": []any{"relative.jsonld", "https://example.org/abs.jsonld"}}
+
+	got := referencedContexts(doc, "")
+	if len(got) != 1 || got[0] != "https://example.org/abs.jsonld" {
+		t.Fatalf("got %v, want only the absolute URL", got)
 	}
 }

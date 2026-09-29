@@ -734,7 +734,12 @@ func expandedTypes(credMap map[string]any) ([]string, error) {
 			// stable, so it must never satisfy a type constraint. Dropping it
 			// here means such a credential fails the constraint rather than
 			// matching by string coincidence.
-			if !strings.Contains(iri, ":") {
+			//
+			// The strict test, not `strings.Contains(iri, ":")`: a relative
+			// reference like "/relative:Type" carries a colon and is still
+			// relative, so the loose version admitted exactly the values
+			// meta.type_values must never contain.
+			if !credential.IsAbsoluteIRI(iri) {
 				continue
 			}
 			iris = append(iris, iri)

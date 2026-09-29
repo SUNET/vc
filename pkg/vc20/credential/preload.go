@@ -3,6 +3,7 @@ package credential
 import (
 	"encoding/json"
 	"fmt"
+	neturl "net/url"
 	"strings"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -68,7 +69,13 @@ func (l *CachingDocumentLoader) pinContext(url string, seen map[string]bool, dep
 		}
 	}
 
-	for _, ref := range referencedContexts(doc.Document) {
+	// Relative references resolve against the document's own URL, the way
+	// json-gold does before calling LoadDocument.
+	base := doc.DocumentURL
+	if base == "" {
+		base = url
+	}
+	for _, ref := range referencedContexts(doc.Document, base) {
 		if err := l.pinContext(ref, seen, depth+1); err != nil {
 			return fmt.Errorf("context %q references %q: %w", url, ref, err)
 		}
@@ -77,20 +84,31 @@ func (l *CachingDocumentLoader) pinContext(url string, seen map[string]bool, dep
 }
 
 // referencedContexts collects the context URLs a loaded document refers to by
-// string - the values of "@context" and "@import" anywhere within it.
+// string - the values of "@context" and "@import" anywhere within it -
+// resolving relative references against base.
 //
-// Only absolute http(s) URLs are returned. A relative reference is left to
-// the processor and the loader's own address policy; the point here is to
-// find the documents that would otherwise be fetched later on a normal TTL.
-func referencedContexts(document any) []string {
+// Relative references are resolved rather than skipped because json-gold
+// resolves them against RemoteDocument.DocumentURL before calling
+// LoadDocument (see ld/context.go). Leaving them out meant a document
+// containing "nested.jsonld" was fetched later on the normal TTL, so after
+// expiry it could change or fail while startup had reported the whole
+// closure pinned. Skipping them made the pinning contract a half-truth in
+// exactly the way pinning exists to prevent.
+func referencedContexts(document any, base string) []string {
 	var out []string
+	// An unparsable base leaves relative references unresolvable; they are
+	// then skipped rather than guessed at.
+	baseURL, err := neturl.Parse(base)
+	if err != nil {
+		baseURL = nil
+	}
 	var walk func(any)
 	walk = func(node any) {
 		switch v := node.(type) {
 		case map[string]any:
 			for key, val := range v {
 				if key == "@context" || key == "@import" {
-					collectContextStrings(val, &out)
+					collectContextStrings(val, baseURL, &out)
 				}
 				walk(val)
 			}
@@ -104,15 +122,29 @@ func referencedContexts(document any) []string {
 	return out
 }
 
-func collectContextStrings(node any, out *[]string) {
+func collectContextStrings(node any, base *neturl.URL, out *[]string) {
 	switch v := node.(type) {
 	case string:
 		if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
 			*out = append(*out, v)
+			return
+		}
+		// Relative: resolve against the document that referenced it, which
+		// is what the processor will do when it fetches this later.
+		if base == nil || v == "" {
+			return
+		}
+		ref, err := neturl.Parse(v)
+		if err != nil {
+			return
+		}
+		resolved := base.ResolveReference(ref)
+		if resolved.Scheme == "http" || resolved.Scheme == "https" {
+			*out = append(*out, resolved.String())
 		}
 	case []any:
 		for _, item := range v {
-			collectContextStrings(item, out)
+			collectContextStrings(item, base, out)
 		}
 	}
 }
@@ -164,8 +196,22 @@ func ExpandTypes(contexts []string, types []string) ([]string, error) {
 	return iris, nil
 }
 
-// isAbsoluteIRI reports whether expansion produced a real identifier rather
+// IsAbsoluteIRI reports whether expansion produced a real identifier rather
 // than leaving a term as-is.
+//
+// Exported because three other packages were deciding the same question
+// with `strings.Contains(s, ":")`, which is not the same test: a relative
+// reference such as "/relative:Type" or "path/to:thing" contains a colon
+// and is still relative. A term a document's context does not define
+// survives expansion unchanged, so admitting one of those lets a constraint
+// be satisfied by string coincidence.
+//
+// The rule: a colon must appear before any '/', '#' or '?', and not at
+// position zero.
+func IsAbsoluteIRI(s string) bool {
+	return isAbsoluteIRI(s)
+}
+
 func isAbsoluteIRI(s string) bool {
 	for i := range len(s) {
 		if s[i] == ':' {

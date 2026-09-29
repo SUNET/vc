@@ -33,18 +33,36 @@ var servicesRequiringVCTM = map[string]bool{
 	"verifier": true,
 }
 
-// servicesResolvingW3CContexts lists services that dereference JSON-LD
-// contexts at runtime, and therefore need those contexts pinned and their
-// custom types validated before the process starts serving.
+// servicesCheckingW3CTypes lists services whose startup validates the
+// STRUCTURAL consistency of the W3C type configuration - that
+// credential_types, credential_type_values and credential_contexts agree
+// with one another.
 //
-// Wider than servicesRequiringVCTM on purpose. The issuer is excluded there
-// because it receives schemas inline and loads no VCTM - but it is the
-// process that resolves contexts while SIGNING, so an issuer whose
-// credential_contexts are unreachable or do not define the configured types
-// would otherwise discover that one issuance at a time, in production,
-// having already told the operator it started cleanly.
-var servicesResolvingW3CContexts = map[string]bool{
+// This is a pure inspection of the config, with no network access, so every
+// service that carries the credential configuration runs it: a scope whose
+// issuance list can never satisfy its own query constraint is a mistake
+// worth failing on wherever it is noticed.
+var servicesCheckingW3CTypes = map[string]bool{
 	"apigw":    true,
+	"verifier": true,
+	"issuer":   true,
+}
+
+// servicesResolvingW3CContexts lists services that actually DEREFERENCE
+// JSON-LD contexts at runtime, and therefore need them fetched and pinned
+// before the process starts serving.
+//
+// Narrower than servicesCheckingW3CTypes, because this one reaches the
+// network. The issuer resolves contexts while SIGNING and the verifier
+// while canonicalizing a presentation, so for those two an unreachable
+// context is a failure worth having at startup rather than one issuance at
+// a time in production.
+//
+// The apigw is NOT in this list: it never touches the JSON-LD loader, and
+// only forwards credential_contexts to the issuer over gRPC. Pinning there
+// bought nothing and made an apigw refuse to start whenever a context host
+// was unreachable - a dependency it does not otherwise have.
+var servicesResolvingW3CContexts = map[string]bool{
 	"verifier": true,
 	"issuer":   true,
 }
@@ -137,11 +155,15 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 	// W3C context work is gated separately from VCTM loading: the issuer
 	// needs the former and not the latter. Both are no-ops when nothing
 	// W3C is configured, so this costs a non-W3C deployment nothing.
-	if servicesResolvingW3CContexts[serviceName] {
+	if servicesCheckingW3CTypes[serviceName] {
 		if err := checkW3CTypeConsistency(cfg); err != nil {
 			return nil, err
 		}
+	}
 
+	// Separate gate: the check above reads config, this one reaches the
+	// network. See servicesResolvingW3CContexts.
+	if servicesResolvingW3CContexts[serviceName] {
 		if err := resolveW3CContexts(cfg, log); err != nil {
 			return nil, err
 		}
@@ -258,8 +280,8 @@ func checkW3CTypeConsistency(cfg *model.Cfg) error {
 		return nil
 	}
 	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
-		credential := cfg.Common.CredentialMetadata[scope]
-		if credential == nil || !openid4vp.IsW3CVCFormatIdentifier(credential.Format) {
+		cm := cfg.Common.CredentialMetadata[scope]
+		if cm == nil || !openid4vp.IsW3CVCFormatIdentifier(cm.Format) {
 			continue
 		}
 
@@ -268,7 +290,7 @@ func checkW3CTypeConsistency(cfg *model.Cfg) error {
 		// carries a type that expands to a relative IRI, which identifies
 		// nothing - the credential is malformed whether or not this
 		// deployment happens to query for it.
-		if custom := customTypes(credential.CredentialTypes); len(custom) > 0 && len(credential.CredentialContexts) == 0 {
+		if custom := customTypes(cm.CredentialTypes); len(custom) > 0 && len(cm.CredentialContexts) == 0 {
 			return fmt.Errorf("common.credential_metadata.%s: credential_types names %s, which no credential_contexts defines - the issued credential's type would expand to a relative IRI", scope, strings.Join(custom, ", "))
 		}
 
@@ -276,9 +298,11 @@ func checkW3CTypeConsistency(cfg *model.Cfg) error {
 		// B.3.2). A relative one cannot equal anything a credential expands
 		// to - the verifier drops relative IRIs from the credential side for
 		// the same reason - so such a query is guaranteed not to match.
-		for i, alternative := range credential.CredentialTypeValues {
+		for i, alternative := range cm.CredentialTypeValues {
 			for _, t := range alternative {
-				if t == "" || strings.Contains(t, ":") {
+				// Strict: see credential.IsAbsoluteIRI. "/relative:Type"
+				// contains a colon and is still relative.
+				if t == "" || credential.IsAbsoluteIRI(t) {
 					continue
 				}
 				return fmt.Errorf("common.credential_metadata.%s: credential_type_values[%d] contains %q, which is a relative IRI - type_values are matched as fully expanded IRIs, so this can never match a credential", scope, i, t)
@@ -287,13 +311,13 @@ func checkW3CTypeConsistency(cfg *model.Cfg) error {
 
 		// Only a constraint that narrows past the base type needs a term
 		// behind it; an unset or base-only list requests nothing special.
-		if len(credential.W3CTypeValuesForCheck()) == 0 {
+		if len(cm.W3CTypeValuesForCheck()) == 0 {
 			continue
 		}
 		// Unset AND base-only are the same failure: the issuer mints only
 		// VerifiableCredential while the query demands more. The missing
 		// context is already caught above, for any custom term.
-		if len(customTypes(credential.CredentialTypes)) == 0 {
+		if len(customTypes(cm.CredentialTypes)) == 0 {
 			return fmt.Errorf("common.credential_metadata.%s: credential_type_values narrows the request, but credential_types names no type beyond VerifiableCredential - the issued credential cannot carry what the query demands", scope)
 		}
 	}
