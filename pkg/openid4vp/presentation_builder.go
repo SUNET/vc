@@ -50,26 +50,26 @@ func (pb *PresentationBuilder) BuildFromScopes(ctx context.Context, scopes []str
 		return nil, nil, fmt.Errorf("no scopes provided")
 	}
 
-	// Find first matching template by scope
-	var templateID string
-	for _, scope := range scopes {
-		if id, ok := pb.scopeIndex[scope]; ok {
-			templateID = id
-			break
-		}
-	}
-
-	if templateID == "" {
+	// Through selectTemplate, like every other path: picking the first
+	// matching scope instead meant "openid eduid" chose whichever template
+	// "openid" indexes, while claim extraction chose eduid's - so the query
+	// sent to the wallet and the mapping used to read the answer could come
+	// from different templates. Selection has to be one deterministic
+	// function of the request.
+	template, ok := pb.selectTemplate(scopes)
+	if !ok {
 		return nil, nil, fmt.Errorf("no template found for scopes %v", scopes)
 	}
 
-	template := pb.templates[templateID]
 	dcql := template.GetDCQLQuery()
 	if dcql == nil {
 		return nil, nil, fmt.Errorf("template %s has no DCQL query", template.GetID())
 	}
 
-	return dcql, template, nil
+	// A copy, for the reason TemplateDCQLQuery gives: a caller completing the
+	// query in place must not edit the template every later request is built
+	// from.
+	return copyDCQL(dcql), template, nil
 }
 
 // BuildFromTemplate creates a DCQL query from a specific template ID
@@ -89,50 +89,76 @@ func (pb *PresentationBuilder) BuildFromTemplate(ctx context.Context, templateID
 
 // BuildDCQLQuery creates a DCQL query from OIDC scopes.
 // This attempts to find matching templates, and falls back to a generic DCQL query if none are found.
-// All scopes are considered for matching, including standard OIDC scopes like "openid".
-// This allows standard OIDC scopes to optionally map to credentials if configured.
-// Non-standard scopes are prioritized over standard scopes to prevent "openid" from
-// always being selected when it appears first in the request.
+//
+// A caller with a better fallback than the generic query - building from
+// credential_metadata, say - wants TemplateDCQLQuery instead, which reports the
+// no-match case instead of standing in for it.
 func (pb *PresentationBuilder) BuildDCQLQuery(ctx context.Context, scopes []string) (*DCQL, error) {
-	if len(scopes) == 0 {
-		// Return a generic DCQL query when no scopes provided
-		return pb.createGenericDCQL(), nil
+	if dcql, _, matched := pb.TemplateDCQLQuery(ctx, scopes); matched {
+		return dcql, nil
 	}
-
-	// Prioritize non-standard scopes over standard OIDC scopes.
-	// This prevents "openid" (which typically appears first) from always being selected.
-	// First, try non-standard scopes
-	for _, scope := range scopes {
-		if StandardOIDCScopes[scope] {
-			continue // Skip standard scopes in first pass
-		}
-		if templateID, ok := pb.scopeIndex[scope]; ok {
-			template := pb.templates[templateID]
-			dcql := template.GetDCQLQuery()
-			if dcql != nil {
-				// Return a copy to avoid modifications to the template
-				return copyDCQL(dcql), nil
-			}
-		}
-	}
-
-	// Then, try standard OIDC scopes (if configured with a template)
-	for _, scope := range scopes {
-		if !StandardOIDCScopes[scope] {
-			continue // Already tried non-standard scopes
-		}
-		if templateID, ok := pb.scopeIndex[scope]; ok {
-			template := pb.templates[templateID]
-			dcql := template.GetDCQLQuery()
-			if dcql != nil {
-				// Return a copy to avoid modifications to the template
-				return copyDCQL(dcql), nil
-			}
-		}
-	}
-
-	// No template found, return generic DCQL
 	return pb.createGenericDCQL(), nil
+}
+
+// TemplateDCQLQuery returns a copy of the DCQL query of the template matching
+// scopes, and whether one matched at all. All scopes are considered, including
+// standard OIDC scopes like "openid", so a standard scope can map to a
+// credential when configured; non-standard scopes are tried first so "openid"
+// does not win merely by appearing first in the request.
+//
+// The template's declared oidc_scopes come back alongside the query.
+//
+// matched is what BuildDCQLQuery cannot express: it answers "no template" with
+// a generic placeholder that constrains nothing and reads like success, and
+// that case cannot be inferred back out of the query since credential ids are
+// arbitrary.
+// selectTemplate returns the template a request for these scopes is built
+// from, and the scope that chose it.
+//
+// Non-standard scopes are considered before standard ones so "openid", which
+// usually comes first and which several templates carry, does not decide it.
+// Within each pass the caller's scope order wins, so selection is a pure
+// function of the request - it must be, because the request and the claim
+// mapping have to agree on one template.
+func (pb *PresentationBuilder) selectTemplate(scopes []string) (PresentationRequestTemplate, bool) {
+	for _, standard := range []bool{false, true} {
+		for _, scope := range scopes {
+			if StandardOIDCScopes[scope] != standard {
+				continue
+			}
+			if templateID, ok := pb.scopeIndex[scope]; ok {
+				if template, ok := pb.templates[templateID]; ok {
+					return template, true
+				}
+			}
+		}
+	}
+	return nil, false
+}
+
+func (pb *PresentationBuilder) TemplateDCQLQuery(_ context.Context, scopes []string) (*DCQL, []string, bool) {
+	if len(scopes) == 0 {
+		return nil, nil, false
+	}
+
+	template, ok := pb.selectTemplate(scopes)
+	if !ok {
+		return nil, nil, false
+	}
+	dcql := template.GetDCQLQuery()
+	if dcql == nil {
+		return nil, nil, false
+	}
+
+	// A copy, so a caller completing the query in place (see the verifier's
+	// augmentVCTValuesFromConfig) cannot edit the template every later request
+	// is built from.
+	//
+	// The template's own oidc_scopes come back with it: they are the only
+	// record of which requested scopes this query is meant to answer, and a
+	// caller pairing scopes to queries has nothing else to go on for a scope
+	// that configures no credential.
+	return copyDCQL(dcql), slices.Clone(template.GetOIDCScopes()), true
 }
 
 // copyDCQL creates a deep copy of a DCQL query
@@ -301,34 +327,17 @@ func (pb *PresentationBuilder) FindTemplateByScopes(scopes []string) Presentatio
 		return nil
 	}
 
-	// Try to find a template where all requested scopes match
-	for _, template := range pb.templates {
-		templateScopes := template.GetOIDCScopes()
-		if scopesMatch(scopes, templateScopes) {
-			return template
-		}
+	// The SAME rule the request was built with. Ranging pb.templates and
+	// taking any scope overlap picked a different template on different runs -
+	// map order is random, and the shipped eudi_pid_basic and eduid_basic both
+	// declare "profile" - so a request for "pid profile" could be built from
+	// the PID template and then have eduID's claim mappings applied to the
+	// credential that came back.
+	template, ok := pb.selectTemplate(scopes)
+	if !ok {
+		return nil
 	}
-
-	return nil
-}
-
-// scopesMatch checks if the requested scopes match the template scopes.
-// A template matches if it contains at least one of the requested scopes.
-// All scopes are considered for matching, including standard OIDC scopes like "openid".
-// This allows standard OIDC scopes to optionally map to credentials if configured.
-func scopesMatch(requestedScopes []string, templateScopes []string) bool {
-	if len(requestedScopes) == 0 {
-		return false
-	}
-
-	// Check if template contains any of the requested scopes
-	for _, requestedScope := range requestedScopes {
-		if slices.Contains(templateScopes, requestedScope) {
-			return true // Match found
-		}
-	}
-
-	return false
+	return template
 }
 
 // GetClaimMappings is a helper to extract claim mappings from a template
