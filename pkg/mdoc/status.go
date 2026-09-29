@@ -3,6 +3,7 @@ package mdoc
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -158,6 +159,11 @@ func (sm *StatusManager) StatusList() *tokenstatuslist.StatusList {
 	return sm.statusList
 }
 
+// ErrNoStatusReference reports that a document carries no revocation
+// reference at all, which is a normal credential rather than a failure. It
+// is distinct from an unreadable reference, which is an error.
+var ErrNoStatusReference = errors.New("no status reference found")
+
 // ExtractStatusReference extracts the status reference from a Document.
 //
 // The MSO's status parameter (draft-ietf-oauth-status-list Section 6.3) is
@@ -173,7 +179,16 @@ func ExtractStatusReference(doc *DocumentMdoc) (*StatusReference, error) {
 		return nil, errors.New("document is nil")
 	}
 
-	if ref := statusFromMSO(doc); ref != nil {
+	ref, err := statusFromMSO(doc)
+	if err != nil {
+		// The MSO carries a status parameter that cannot be read. That is
+		// not the same as carrying none: the issuer signed something here,
+		// so the credential claims to be revocable and its state is
+		// unknown. Reporting "absent" would make it verify as permanently
+		// valid.
+		return nil, err
+	}
+	if ref != nil {
 		return ref, nil
 	}
 
@@ -217,7 +232,7 @@ func ExtractStatusReference(doc *DocumentMdoc) (*StatusReference, error) {
 		}
 	}
 
-	return nil, errors.New("no status reference found")
+	return nil, ErrNoStatusReference
 }
 
 // parseStatusElement parses a status element value into a StatusReference.
@@ -280,21 +295,38 @@ func parseStatusElement(value any) (*StatusReference, bool) {
 	}, true
 }
 
-// statusFromMSO reads the MSO's status parameter. It returns nil when the
-// document carries no MSO status - never an error, because the data-element
-// fallback above still has to be tried.
-func statusFromMSO(doc *DocumentMdoc) *StatusReference {
+// statusFromMSO reads the MSO's status parameter.
+//
+// (nil, nil) means the MSO carries no status parameter, so the data-element
+// fallback is still worth trying. A non-nil error means it carries one that
+// cannot be used, which must not be reported as absence - see
+// ExtractStatusReference.
+//
+// A document whose IssuerAuth or MSO will not decode at all is treated as
+// "no status": that document fails verification for its own reasons long
+// before anything asks about revocation, and reporting it here would
+// replace a precise error with a misleading one.
+func statusFromMSO(doc *DocumentMdoc) (*StatusReference, error) {
 	sign1, err := ParseIssuerAuth(doc.IssuerSigned.IssuerAuth)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	mso, err := DecodeMSOPayload(sign1)
-	if err != nil || mso.Status == nil || mso.Status.StatusList == nil {
-		return nil
+	if err != nil {
+		return nil, nil
+	}
+	if mso.Status == nil {
+		return nil, nil
+	}
+	if mso.Status.StatusList == nil {
+		return nil, errors.New("mdoc MSO carries a status parameter with no status_list member")
 	}
 	ref := *mso.Status.StatusList
 	if ref.URI == "" {
-		return nil
+		return nil, errors.New("mdoc MSO status_list has no uri, so the list cannot be resolved")
 	}
-	return &ref
+	if ref.Index < 0 {
+		return nil, fmt.Errorf("mdoc MSO status_list has a negative index (%d)", ref.Index)
+	}
+	return &ref, nil
 }

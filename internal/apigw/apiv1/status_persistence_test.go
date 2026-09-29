@@ -136,3 +136,27 @@ func TestSaveCredentialSubjects_NoIdentifierIsNotRecorded(t *testing.T) {
 	}))
 	require.Empty(t, store.saved)
 }
+
+// TestSaveCredentialSubjects_ExternalEntriesAreNotMirrored: the registry's
+// credential_subjects collection has a UNIQUE index on (section, index).
+// That is correct for its own sharded list and wrong for anything else -
+// every entry an external status service issues reports section 0, so the
+// second one to land at any given index collides, either with another
+// list's entry or with the registry's own entry at (0, index). The registry
+// also refuses to act on entries it does not own, so mirroring them would
+// add rows it can only display.
+func TestSaveCredentialSubjects_ExternalEntriesAreNotMirrored(t *testing.T) {
+	rec := &recordingRegistryClient{}
+	c, store := persistenceClient(t, rec)
+
+	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-1", []statusEntry{
+		{Section: 0, Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+		{Section: 0, Index: 17, URI: "https://status.example.com/statuslists/def", Backend: "status_service"},
+		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
+	}))
+
+	require.Len(t, store.saved, 3, "all three are recorded authoritatively")
+	require.Len(t, rec.saved, 1, "only the registry-backed entry may be mirrored")
+	require.Equal(t, int64(4), rec.saved[0].Section)
+	require.Equal(t, "https://registry.example.com/statuslists/4", rec.saved[0].StatusListURI)
+}

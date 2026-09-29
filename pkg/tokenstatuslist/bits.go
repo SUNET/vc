@@ -81,6 +81,13 @@ func Unpack(raw []byte, bits int) ([]uint8, error) {
 	}
 
 	perByte := 8 / bits
+	// Unpacking expands: at bits=1 one byte becomes eight statuses, so a
+	// compressed list that decompresses to the permitted maximum would
+	// allocate eight times that here. The decompression cap alone does not
+	// bound this, and the input is a remotely supplied token.
+	if len(raw) > maxUnpackedStatuses/perByte {
+		return nil, fmt.Errorf("status list of %d bytes at %d bits per entry expands to more than the maximum of %d statuses", len(raw), bits, maxUnpackedStatuses)
+	}
 	mask := uint8(1<<bits - 1)
 	out := make([]uint8, 0, len(raw)*perByte)
 	for _, b := range raw {
@@ -90,6 +97,13 @@ func Unpack(raw []byte, bits int) ([]uint8, error) {
 	}
 	return out, nil
 }
+
+// maxUnpackedStatuses bounds how many status values a single list may
+// expand to, which is what actually determines the memory a decode costs.
+// It matches the decompressed-bytes cap in types.go, so the widest list
+// (bits=8, one byte per status) is unaffected and narrower ones are held to
+// the same memory rather than to the same byte count.
+const maxUnpackedStatuses = 50 << 20
 
 // DecompressAndUnpack decompresses a zlib-compressed status byte array and
 // expands it into one status per index using the bits value the Status List

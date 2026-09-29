@@ -7,6 +7,8 @@ import (
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/statusserviceclient"
+	"github.com/SUNET/vc/pkg/tokenstatuslist"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/stretchr/testify/require"
@@ -125,5 +127,57 @@ func TestSetCredentialStatus_RequiresAListURI(t *testing.T) {
 		Status:  1,
 	})
 	require.Error(t, err, "section and index alone do not identify an entry")
+	require.Empty(t, rec.updates)
+}
+
+// TestExternalStatusName_IsALookupNotACast is the regression test for a bug
+// that made every external revoke silently meaningless.
+//
+// statusserviceclient.Status is a STRING type whose values are "VALID",
+// "INVALID" and "SUSPENDED". Writing statusserviceclient.Status(uint8(1))
+// compiles and looks like a conversion between status representations, but
+// Go converts the integer to the UTF-8 encoding of that code point: the
+// service received "\x01", a status it has never heard of, for every
+// revoke, suspend and reinstate.
+func TestExternalStatusName_IsALookupNotACast(t *testing.T) {
+	for status, want := range map[uint8]statusserviceclient.Status{
+		tokenstatuslist.StatusValid:     statusserviceclient.StatusValid,
+		tokenstatuslist.StatusInvalid:   statusserviceclient.StatusInvalid,
+		tokenstatuslist.StatusSuspended: statusserviceclient.StatusSuspended,
+	} {
+		got, err := externalStatusName(status)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		// The cast the bug made produces a one-byte control character.
+		require.NotEqual(t, statusserviceclient.Status(rune(status)), got)
+		require.Greater(t, len(string(got)), 1, "a real status name is a word, not a byte")
+	}
+}
+
+// TestExternalStatusName_RefusesAnUnknownValue: there is no safe default.
+// Guessing INVALID revokes a credential nobody asked to revoke; guessing
+// VALID un-revokes one.
+func TestExternalStatusName_RefusesAnUnknownValue(t *testing.T) {
+	for _, status := range []uint8{3, 4, 255} {
+		_, err := externalStatusName(status)
+		require.Error(t, err, "status %d has no name in the external API", status)
+	}
+}
+
+// TestSetCredentialStatus_RejectsAStatusWithNoName: the same rule at the
+// request boundary, so an unnameable status is refused before any backend
+// is contacted rather than after the registry has already been written.
+func TestSetCredentialStatus_RejectsAStatusWithNoName(t *testing.T) {
+	rec := &recordingRegistry{}
+	c := statusUpdateClient(t, rec)
+
+	err := c.SetCredentialStatus(t.Context(), &SetCredentialStatusRequest{
+		Backend:       StatusBackendRegistry,
+		StatusListURI: "https://registry.example.com/statuslists/4",
+		Section:       4,
+		Index:         9,
+		Status:        7,
+	})
+	require.Error(t, err)
 	require.Empty(t, rec.updates)
 }

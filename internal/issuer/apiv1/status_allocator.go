@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/helpers"
@@ -37,15 +38,12 @@ type statusAllocation struct {
 	Backend string
 }
 
-// The status-list backends an entry can come from.
+// The status-list backends an entry can come from. Aliases of the shared
+// names in pkg/tokenstatuslist, which is where they are defined so that the
+// issuer, the apigw and the database layer cannot disagree about spelling.
 const (
-	// StatusBackendRegistry is vc's own built-in Token Status List, served
-	// by the registry service and addressed by (section, index).
-	StatusBackendRegistry = "registry"
-	// StatusBackendStatusService is an external
-	// draft-ietf-oauth-status-list service, addressed by (list URI, index);
-	// it has no sections.
-	StatusBackendStatusService = "status_service"
+	StatusBackendRegistry      = tokenstatuslist.BackendRegistry
+	StatusBackendStatusService = tokenstatuslist.BackendStatusService
 )
 
 // statusAllocator allocates and updates status-list entries for issued
@@ -117,6 +115,14 @@ func (a *externalStatusAllocator) Allocate(ctx context.Context) (*statusAllocati
 	entry, err := a.client.Take(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// Entry.Index is uint64 and statusAllocation.Index is int64, so a value
+	// above MaxInt64 would wrap to a negative index. Nothing downstream
+	// checks the sign - it would be written into a credential's status
+	// claim and into the entry record - so refuse it here rather than
+	// issue a credential pointing at index -1.
+	if entry.Index > math.MaxInt64 {
+		return nil, fmt.Errorf("status service returned index %d, which does not fit a signed 64-bit index", entry.Index)
 	}
 	return &statusAllocation{
 		Index:   int64(entry.Index),
@@ -261,7 +267,7 @@ type SetCredentialStatusRequest struct {
 	// Backend names the status-list implementation that issued the entry,
 	// as recorded at issuance time. See statusAllocation.Backend for why
 	// this is carried rather than inferred from the URI.
-	Backend string `json:"backend" validate:"required,oneof=registry status_service"`
+	Backend string `json:"backend" validate:"required"`
 	// StatusListURI is the list the entry lives in. Required for both
 	// backends: it is how the status service addresses a list, and for the
 	// registry it is what lets a caller confirm the entry it is acting on
@@ -272,7 +278,13 @@ type SetCredentialStatusRequest struct {
 	Index   int64 `json:"index" validate:"gte=0"`
 	// Status is the draft-ietf-oauth-status-list value to write: 0 VALID,
 	// 1 INVALID, 2 SUSPENDED.
-	Status uint8 `json:"status" validate:"gte=0,lte=255"`
+	//
+	// Only those three are accepted. The wire format has room for 0-255,
+	// but this issuer has no way to express an unassigned value to the
+	// external backend - its API speaks the names - so accepting one would
+	// mean either inventing a name or writing something the operator did
+	// not ask for.
+	Status uint8 `json:"status" validate:"oneof=0 1 2"`
 }
 
 // SetCredentialStatus writes a new status for an already-issued credential's
@@ -300,6 +312,13 @@ func (c *Client) SetCredentialStatus(ctx context.Context, req *SetCredentialStat
 		return err
 	}
 
+	// Checked before the switch so that an unknown name is refused by the
+	// same rule everywhere, rather than by a validator tag here and a
+	// default branch there that could drift apart.
+	if !tokenstatuslist.ValidBackend(req.Backend) {
+		return fmt.Errorf("unknown status list backend %q", req.Backend)
+	}
+
 	switch req.Backend {
 	case StatusBackendRegistry:
 		if c.registryClient == nil {
@@ -322,7 +341,12 @@ func (c *Client) SetCredentialStatus(ctx context.Context, req *SetCredentialStat
 		if err != nil {
 			return fmt.Errorf("cannot determine the list ID of %q: %w", req.StatusListURI, err)
 		}
-		if err := c.statusServiceClient.SetStatus(ctx, listID, uint64(req.Index), statusserviceclient.Status(req.Status)); err != nil {
+
+		status, err := externalStatusName(req.Status)
+		if err != nil {
+			return err
+		}
+		if err := c.statusServiceClient.SetStatus(ctx, listID, uint64(req.Index), status); err != nil {
 			return fmt.Errorf("status service update failed for index %d in list %q: %w", req.Index, listID, err)
 		}
 		return nil
@@ -332,5 +356,32 @@ func (c *Client) SetCredentialStatus(ctx context.Context, req *SetCredentialStat
 		// adding a backend without adding a case here fails loudly rather
 		// than silently doing nothing.
 		return fmt.Errorf("unknown status list backend %q", req.Backend)
+	}
+}
+
+// externalStatusName maps a draft-ietf-oauth-status-list numeric status to
+// the name the external status service's API uses.
+//
+// The conversion has to be a lookup, not a cast. statusserviceclient.Status
+// is a STRING type whose values are "VALID"/"INVALID"/"SUSPENDED", so
+// statusserviceclient.Status(uint8(1)) does not produce "INVALID" - Go
+// converts the integer to the UTF-8 encoding of that code point, yielding
+// "\x01", which the service receives as a status it has never heard of.
+// Every revoke, suspend and reinstate against an external backend would
+// have been silently meaningless.
+//
+// An unrecognised value is an error rather than a default, because there is
+// no safe guess: defaulting to INVALID revokes a credential the caller did
+// not ask to revoke, and defaulting to VALID un-revokes one.
+func externalStatusName(status uint8) (statusserviceclient.Status, error) {
+	switch status {
+	case tokenstatuslist.StatusValid:
+		return statusserviceclient.StatusValid, nil
+	case tokenstatuslist.StatusInvalid:
+		return statusserviceclient.StatusInvalid, nil
+	case tokenstatuslist.StatusSuspended:
+		return statusserviceclient.StatusSuspended, nil
+	default:
+		return "", fmt.Errorf("status %d has no name in the external status service API (only 0 VALID, 1 INVALID and 2 SUSPENDED do)", status)
 	}
 }

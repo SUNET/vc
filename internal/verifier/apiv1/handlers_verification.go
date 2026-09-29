@@ -145,6 +145,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	// Process all VP tokens for the requested scopes
 	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(authCtx.Scopes))
+	credentialFormats := make(map[string]CredentialFormat, len(authCtx.Scopes))
 
 	for _, scope := range authCtx.Scopes {
 		vpTokens, ok := vpResponse.VPToken[scope]
@@ -180,6 +181,10 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 		// Detect credential format and process accordingly
 		format := detectCredentialFormat(vpToken)
+		// Remembered per scope because the revocation check below has to
+		// know it: a ZK mDOC presentation carries no MSO and so no status
+		// reference, which is "cannot tell" rather than "not revocable".
+		credentialFormats[scope] = format
 		c.log.Debug("Detected credential format", "scope", scope, "format", format)
 
 		switch format {
@@ -504,6 +509,28 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				c.log.Debug("Skipping revocation check for exempt scope", "scope", scope)
 				continue
 			}
+			// A ZK mDOC presentation proves statements about claims without
+			// revealing the document, so no MSO reaches the verifier and
+			// there is no status parameter to read. That is not "this
+			// credential is not revocable" - the credential may well carry
+			// one - it is "we cannot tell", which is the same answer a
+			// status list that would not fetch gives. Letting it fall
+			// through to Validate would find no status and treat a revoked
+			// credential as valid.
+			//
+			// fail_open therefore governs it, and skip_scopes is the way to
+			// allow ZK presentations for a scope where that is acceptable.
+			if !formatCanCarryStatus(credentialFormats[scope]) && len(scopeCredentials[scope]) > 0 {
+				err := fmt.Errorf("revocation status of a ZK mDOC presentation cannot be determined: the proof carries no MSO, so it has no status reference")
+				if c.cfg.Verifier.Revocation.FailOpen {
+					c.log.Info("Revocation check indeterminate (fail-open: allowing)", "scope", scope, "err", err)
+				} else {
+					c.log.Error(err, "revocation check failed", "scope", scope)
+					return nil, fmt.Errorf("revocation check failed for scope %s: %w", scope, err)
+				}
+				continue
+			}
+
 			for _, cc := range scopeCredentials[scope] {
 				result, err := c.revocationRegistry.Validate(ctx, cc.Credential)
 				if err != nil {
@@ -751,4 +778,21 @@ func claimKeys(m map[string]any) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// formatCanCarryStatus reports whether a presentation in this format can
+// carry a revocation reference at all.
+//
+// Every format but one can: SD-JWT and JWP carry the JOSE "status" claim,
+// and a plain mso_mdoc presentation carries the issuer-signed MSO, whose
+// status parameter MDocDocumentClaims surfaces in the same shape. A ZK
+// mDOC presentation proves statements about claims WITHOUT revealing the
+// document, so no MSO reaches the verifier and there is nothing to read.
+//
+// That absence must not be read as "this credential is not revocable" - the
+// credential may well be - so callers treat it as an indeterminate result
+// and let fail_open decide, exactly as they do for a status list that
+// would not fetch.
+func formatCanCarryStatus(format CredentialFormat) bool {
+	return format != FormatMDocZK
 }

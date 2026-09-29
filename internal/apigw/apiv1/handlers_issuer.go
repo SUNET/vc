@@ -21,6 +21,7 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/tokenstatuslist"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -744,7 +745,16 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier string, 
 			return fmt.Errorf("failed to record credential status entry: %w", err)
 		}
 
-		if c.registryClient == nil {
+		// Only registry-backed entries are mirrored. The registry's
+		// credential_subjects collection has a UNIQUE index on
+		// (section, index), which is correct for its own sharded list and
+		// wrong for anything else: every entry an external status service
+		// issues reports section 0, so the second one to land at any given
+		// index collides - with another list's entry, or with the
+		// registry's own entry at (0, index). The registry also refuses to
+		// act on entries it does not own, so mirroring them would add rows
+		// it can only display.
+		if c.registryClient == nil || e.Backend != tokenstatuslist.BackendRegistry {
 			continue
 		}
 		if _, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{

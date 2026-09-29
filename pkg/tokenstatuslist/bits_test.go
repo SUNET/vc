@@ -137,3 +137,27 @@ func TestGetStatusFromJWTHonoursTokenBits(t *testing.T) {
 		}
 	}
 }
+
+// TestUnpackRefusesAnExpandingBomb: DecompressStatuses caps the
+// DECOMPRESSED bytes, but unpacking expands them again - eight statuses per
+// byte at bits=1 - so that cap alone does not bound the memory a decode
+// costs. The input is a remotely supplied status list token.
+func TestUnpackRefusesAnExpandingBomb(t *testing.T) {
+	// One byte over what bits=1 may expand to.
+	raw := make([]byte, maxUnpackedStatuses/8+1)
+	if _, err := Unpack(raw, 1); err == nil {
+		t.Fatal("Unpack accepted an input that expands past the status cap")
+	}
+
+	// The widest layout is unaffected: at bits=8 there is no expansion, so
+	// the existing byte cap already bounds it.
+	if _, err := Unpack(make([]byte, 1024), 8); err != nil {
+		t.Fatalf("bits=8 must be unaffected: %v", err)
+	}
+
+	// And a list just inside the cap still decodes, so the guard is not
+	// simply refusing everything.
+	if _, err := Unpack(make([]byte, 1024), 1); err != nil {
+		t.Fatalf("an ordinary bits=1 list must still decode: %v", err)
+	}
+}

@@ -194,10 +194,22 @@ func (h *MDocHandler) extractDocumentClaims(doc *DocumentMdoc) (*MDocDocumentCla
 	}
 
 	// The document's signature was verified by VerifyDeviceResponse before
-	// this is reached, so the MSO's contents can be read here. A document
-	// with no status parameter simply is not revocable.
-	if ref, err := ExtractStatusReference(doc); err == nil {
+	// this is reached, so the MSO's contents can be read here.
+	//
+	// A document with no status parameter simply is not revocable, and that
+	// is not an error. A document carrying one that cannot be read IS an
+	// error: the issuer signed a revocation pointer, so the credential
+	// claims to be revocable and its state is unknown. Swallowing that
+	// would leave claims.Status nil, emit no "status" claim, and make the
+	// credential verify as permanently valid.
+	ref, err := ExtractStatusReference(doc)
+	switch {
+	case err == nil:
 		claims.Status = ref
+	case errors.Is(err, ErrNoStatusReference):
+		// Not revocable; nothing to carry.
+	default:
+		return nil, fmt.Errorf("unreadable status reference in %s: %w", doc.DocType, err)
 	}
 
 	for ns, items := range doc.IssuerSigned.NameSpaces {

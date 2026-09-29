@@ -301,10 +301,25 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodPost, "/mapping/bulk", http.StatusOK, s.endpointIdentityMappingBulkCreate)
 
 	// Datastore endpoints
-	// Credential revocation. On the authenticated api/v1 group: revoking
-	// somebody else's credential is as damaging as issuing one.
-	rgCredentialAdmin := rgAPIv1.Group("/credential")
-	s.httpHelpers.Server.RegEndpoint(ctx, rgCredentialAdmin, http.MethodPost, "/revoke", http.StatusOK, s.endpointCredentialRevoke)
+	// Credential revocation, on the api/v1 group - but only when that group
+	// actually authenticates.
+	//
+	// APIAuth returns a pass-through when neither api_auth.jwks nor
+	// api_auth.oidc is enabled (it logs api_auth_mode=none), so being under
+	// rgAPIv1 is not by itself an authentication guarantee. The rest of
+	// api/v1 has always behaved that way; revocation must not, because an
+	// unauthenticated caller could revoke anybody's credential, and unlike
+	// a read there is nothing to undo it from the wallet's side.
+	//
+	// Refusing to register the route is the fail-closed option: an operator
+	// who has not configured api_auth gets no revocation endpoint at all,
+	// which is visible, rather than an open one, which is not.
+	if s.cfg.APIGW.APIServer.APIAuth.JWKS.Enable || s.cfg.APIGW.APIServer.APIAuth.OIDC.Enable {
+		rgCredentialAdmin := rgAPIv1.Group("/credential")
+		s.httpHelpers.Server.RegEndpoint(ctx, rgCredentialAdmin, http.MethodPost, "/revoke", http.StatusOK, s.endpointCredentialRevoke)
+	} else {
+		s.log.Warn("Credential revocation endpoint NOT registered: apigw.api_server.api_auth has neither jwks nor oidc enabled, so api/v1 does not authenticate. Configure api_auth to enable POST /api/v1/credential/revoke.")
+	}
 
 	rgDatastore := rgAPIv1.Group("/datastore")
 	// Rate limiting for datastore endpoints
