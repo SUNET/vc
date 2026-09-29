@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"errors"
+	"maps"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
@@ -26,9 +27,7 @@ func (c *Client) buildPresentationDocument(scope string, pScope model.Presentati
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range derived {
-		doc[k] = v
-	}
+	maps.Copy(doc, derived)
 
 	defaults, err := pScope.ResolveDefaults(now)
 	if err != nil {
@@ -46,4 +45,3 @@ func (c *Client) buildPresentationDocument(scope string, pScope model.Presentati
 	}
 	return credential.FilterAgainstVCTM(doc, credMeta.VCTM), nil
 }
-

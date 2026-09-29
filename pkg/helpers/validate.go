@@ -272,9 +272,9 @@ func NewValidator() (*validator.Validate, error) {
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		d := sl.Current()
 		count := 0
-		for i := range d.NumField() {
-			f := d.Field(i)
-			if f.Kind() == reflect.Ptr && !f.IsNil() {
+		for _, f := range d.Fields() {
+			f := f
+			if f.Kind() == reflect.Pointer && !f.IsNil() {
 				count++
 			}
 		}

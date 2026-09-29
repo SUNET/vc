@@ -91,7 +91,7 @@ func (d *Derivation) selected() (Applier, string, error) {
 	)
 	for i := range v.NumField() {
 		f := v.Field(i)
-		if f.Kind() != reflect.Ptr || f.IsNil() {
+		if f.Kind() != reflect.Pointer || f.IsNil() {
 			continue
 		}
 		a, ok := f.Interface().(Applier)
@@ -137,10 +137,10 @@ func indexByte(s string, b byte) int {
 // FieldNames returns the YAML names of every primitive field on Derivation
 // in declaration order. Used by gen_config_docs to enumerate primitives.
 func FieldNames() []string {
-	t := reflect.TypeOf(Derivation{})
+	t := reflect.TypeFor[Derivation]()
 	out := make([]string, 0, t.NumField())
-	for i := range t.NumField() {
-		out = append(out, yamlKey(t.Field(i)))
+	for field := range t.Fields() {
+		out = append(out, yamlKey(field))
 	}
 	return out
 }

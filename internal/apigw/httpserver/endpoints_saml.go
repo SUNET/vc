@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"time"
 
@@ -202,9 +203,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 			span.SetStatus(codes.Error, derr.Error())
 			return nil, fmt.Errorf("SAML derivations failed: %w", derr)
 		}
-		for k, v := range derived {
-			claims[k] = v
-		}
+		maps.Copy(claims, derived)
 	}
 
 	claimKeys := make([]string, 0, len(claims))

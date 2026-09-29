@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/elliptic"
 	"fmt"
+	"slices"
 )
 
 // bytesToUint converts a byte slice to uint (helper for PKCS11)
@@ -11,8 +12,8 @@ import (
 func bytesToUint(b []byte) uint {
 	var result uint
 	// Read in little-endian order
-	for i := len(b) - 1; i >= 0; i-- {
-		result = result<<8 | uint(b[i])
+	for _, v := range slices.Backward(b) {
+		result = result<<8 | uint(v)
 	}
 	return result
 }

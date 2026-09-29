@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -328,9 +329,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 			if err != nil {
 				return nil, err
 			}
-			for k, v := range derived {
-				document.DocumentData[k] = v
-			}
+			maps.Copy(document.DocumentData, derived)
 		}
 	}
 

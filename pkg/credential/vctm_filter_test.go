@@ -6,15 +6,13 @@ import (
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
-func strPtr(s string) *string { return &s }
-
 func TestFilterAgainstVCTM(t *testing.T) {
 	vctm := &sdjwtvc.VCTM{Claims: []sdjwtvc.Claim{
-		{Path: []*string{strPtr("age_over_13")}},
-		{Path: []*string{strPtr("age_over_18")}},
-		{Path: []*string{strPtr("date_of_issuance")}},
-		{Path: []*string{strPtr("date_of_expiry")}},
-		{Path: []*string{strPtr("address"), strPtr("locality")}}, // nested path — top-level "address" is allowed
+		{Path: []*string{new("age_over_13")}},
+		{Path: []*string{new("age_over_18")}},
+		{Path: []*string{new("date_of_issuance")}},
+		{Path: []*string{new("date_of_expiry")}},
+		{Path: []*string{new("address"), new("locality")}}, // nested path — top-level "address" is allowed
 	}}
 	doc := map[string]any{
 		"age_over_13":      true,
@@ -50,7 +48,7 @@ func TestFilterAgainstVCTM_NilVCTM(t *testing.T) {
 
 func TestFilterAgainstVCTM_EmptyDoc(t *testing.T) {
 	vctm := &sdjwtvc.VCTM{Claims: []sdjwtvc.Claim{
-		{Path: []*string{strPtr("age_over_13")}},
+		{Path: []*string{new("age_over_13")}},
 	}}
 	got := FilterAgainstVCTM(map[string]any{}, vctm)
 	if len(got) != 0 {
@@ -60,9 +58,9 @@ func TestFilterAgainstVCTM_EmptyDoc(t *testing.T) {
 
 func TestFilterAgainstVCTM_SkipsEmptyOrWildcardPath(t *testing.T) {
 	vctm := &sdjwtvc.VCTM{Claims: []sdjwtvc.Claim{
-		{Path: nil},                        // defensive: skipped
-		{Path: []*string{nil}},             // wildcard head: skipped
-		{Path: []*string{strPtr("kept")}},
+		{Path: nil},            // defensive: skipped
+		{Path: []*string{nil}}, // wildcard head: skipped
+		{Path: []*string{new("kept")}},
 	}}
 	doc := map[string]any{"kept": 1, "dropped": 2}
 	got := FilterAgainstVCTM(doc, vctm)

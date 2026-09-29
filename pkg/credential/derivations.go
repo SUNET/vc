@@ -2,6 +2,7 @@ package credential
 
 import (
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/SUNET/vc/pkg/credential/primitives"
@@ -18,9 +19,7 @@ func ApplyDerivations(list []primitives.Derivation, claims map[string]any, now t
 		if err != nil {
 			return nil, fmt.Errorf("derivations[%d]: %w", i, err)
 		}
-		for k, v := range derived {
-			out[k] = v
-		}
+		maps.Copy(out, derived)
 	}
 	return out, nil
 }

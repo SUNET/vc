@@ -198,8 +198,8 @@ func extractFromCredential(raw []byte, source string) (string, int64, string, er
 func extractFromJWT(s string) (string, int64, error) {
 	// SD-JWT VC: <jwt>~<disclosure>~...~<kb-jwt>?
 	jwtPart := s
-	if i := strings.IndexByte(s, '~'); i >= 0 {
-		jwtPart = s[:i]
+	if before, _, ok := strings.Cut(s, "~"); ok {
+		jwtPart = before
 	}
 	parts := strings.Split(jwtPart, ".")
 	if len(parts) < 2 {

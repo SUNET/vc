@@ -242,7 +242,7 @@ func TestMergeDefaults_OverlappingPathsRejected(t *testing.T) {
 }
 
 func TestMergeDefaults_DeterministicOrder(t *testing.T) {
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		claims := map[string]any{}
 		err := MergeDefaults(claims, map[string]any{
 			"a.b": "1",
