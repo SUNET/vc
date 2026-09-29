@@ -295,7 +295,9 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	// Presentation-source scopes derive their whole document from the
 	// presented credential's claims (already stashed on
 	// authContext.VerifiedClaims by VerificationDirectPost). No cache lookup.
-	if pScope, ok := c.cfg.APIGW.DataSources.Presentation.Scopes[scope]; ok {
+	// Also requires DataSource=="presentation" so a scope configured in
+	// multiple sources doesn't route non-presentation flows through here.
+	if pScope, ok := c.cfg.APIGW.DataSources.Presentation.Scopes[scope]; ok && authContext.DataSource == string(model.DataSourcePresentation) {
 		docData, err := c.buildPresentationDocument(scope, pScope, authContext, time.Now())
 		if err != nil {
 			return nil, err

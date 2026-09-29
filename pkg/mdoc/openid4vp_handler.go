@@ -140,6 +140,13 @@ func (h *MDocHandler) verifyAndExtract(ctx context.Context, vpToken string, sess
 		}
 		for i := range deviceResponse.Documents {
 			doc := &deviceResponse.Documents[i]
+			// VerifyDeviceAuth returns nil when a document carries neither a
+			// device signature nor a MAC. Require one to be present on the
+			// bound path so a wallet cannot omit device authentication and
+			// still satisfy the request-binding guarantee this API promises.
+			if !hasDeviceAuth(doc) {
+				return nil, fmt.Errorf("device auth binding failed for %q: presentation carries no device signature or MAC", doc.DocType)
+			}
 			mso := verifyResult.Documents[i].MSO
 			if mso == nil {
 				return nil, fmt.Errorf("device auth binding failed for %q: verified MSO missing", doc.DocType)
@@ -167,6 +174,13 @@ func (h *MDocHandler) verifyAndExtract(ctx context.Context, vpToken string, sess
 			return nil, fmt.Errorf("failed to extract claims from %s: %w", doc.DocType, err)
 		}
 
+		// Reject a DeviceResponse that carries two documents with the same
+		// docType — MDocVerificationResult.Documents is a map keyed by
+		// docType, so a silent overwrite would let one document's claims
+		// mask another's downstream.
+		if _, dup := result.Documents[doc.DocType]; dup {
+			return nil, fmt.Errorf("mdoc DeviceResponse contains duplicate docType %q", doc.DocType)
+		}
 		result.Documents[doc.DocType] = claims
 	}
 
