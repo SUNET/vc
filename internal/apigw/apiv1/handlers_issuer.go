@@ -333,11 +333,22 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		// values (e.g. yyyymmdd_to_iso parsing an already-ISO date).
 		if authContext.DataSource != string(model.DataSourceAssertion) {
 			if derivs := c.cfg.APIGW.DataSources.DerivationsForSource(scope, model.DataSourceType(authContext.DataSource)); len(derivs) > 0 {
-				derived, err := credential.ApplyDerivations(derivs, document.DocumentData, time.Now())
+				// The memory cache returns the stored map reference, so
+				// non-idempotent derivations (yyyymmdd_to_iso overwriting the
+				// source date) would corrupt the cached copy and fail on a
+				// second issuance. Work on a clone and replace the local
+				// document with a shallow copy so the cache stays untouched.
+				docData := maps.Clone(document.DocumentData)
+				derived, err := credential.ApplyDerivations(derivs, docData, time.Now())
 				if err != nil {
 					return nil, err
 				}
-				maps.Copy(document.DocumentData, derived)
+				maps.Copy(docData, derived)
+				document = &model.CompleteDocument{
+					Meta:               document.Meta,
+					IdentityMappingIDs: document.IdentityMappingIDs,
+					DocumentData:       docData,
+				}
 			}
 		}
 	}

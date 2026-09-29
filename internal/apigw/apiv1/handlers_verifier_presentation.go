@@ -116,10 +116,10 @@ func setClaimPath(dst map[string]any, path string, val any) {
 // enforceFromScopeType refuses a presented credential whose type does not
 // match pScope.FromScope. For SD-JWT VC the top-level `vct` claim carries
 // the canonical type identifier and is compared against the configured
-// credential metadata's vct. For other formats (e.g. mso_mdoc) the DCQL
-// query slot's meta constraint is the trust anchor, and a stronger check
-// belongs in VPTokenValidator.validateAgainstDCQL — refuse here rather
-// than accept an unverifiable presentation.
+// credential metadata's vct. For mso_mdoc the doctype (surfaced as a
+// synthetic top-level `docType` claim by extractMDocClaimsFromToken) is
+// compared against the configured MDDL doctype (falling back to the
+// scope's `doctype` field).
 func (c *Client) enforceFromScopeType(pScope model.PresentationScope, presented map[string]any) error {
 	fromMeta := c.cfg.GetCredentialMetadata(pScope.FromScope)
 	if fromMeta == nil {
@@ -127,6 +127,19 @@ func (c *Client) enforceFromScopeType(pScope model.PresentationScope, presented 
 			fmt.Sprintf("from_scope %q has no credential_metadata entry", pScope.FromScope),
 			500)
 	}
+	switch {
+	case isSDJWTFormat(fromMeta.Format):
+		return c.enforceSDJWTType(pScope, fromMeta, presented)
+	case isMDocFormat(fromMeta.Format):
+		return c.enforceMDocType(pScope, fromMeta, presented)
+	default:
+		return helpers.NewErrorDetailsWithStatus("presentation_scope_misconfigured",
+			fmt.Sprintf("from_scope %q has unsupported format %q for presentation type enforcement", pScope.FromScope, fromMeta.Format),
+			500)
+	}
+}
+
+func (c *Client) enforceSDJWTType(pScope model.PresentationScope, fromMeta *model.CredentialMetadata, presented map[string]any) error {
 	vctRaw, ok := presented["vct"]
 	if !ok {
 		return helpers.NewErrorDetailsWithStatus("presentation_type_unverifiable",
@@ -157,6 +170,47 @@ func (c *Client) enforceFromScopeType(pScope model.PresentationScope, presented 
 			403)
 	}
 	return nil
+}
+
+func (c *Client) enforceMDocType(pScope model.PresentationScope, fromMeta *model.CredentialMetadata, presented map[string]any) error {
+	docTypeRaw, ok := presented["docType"]
+	if !ok {
+		return helpers.NewErrorDetailsWithStatus("presentation_type_unverifiable",
+			fmt.Sprintf("presented credential carries no docType; cannot enforce from_scope %q", pScope.FromScope),
+			400)
+	}
+	docType, ok := docTypeRaw.(string)
+	if !ok || docType == "" {
+		return helpers.NewErrorDetailsWithStatus("presentation_type_unverifiable",
+			"presented credential docType is not a non-empty string",
+			400)
+	}
+	expected := ""
+	if mddl := fromMeta.GetMDDL(); mddl != nil && mddl.DocType != "" {
+		expected = mddl.DocType
+	}
+	if expected == "" {
+		expected = fromMeta.Doctype
+	}
+	if expected == "" {
+		return helpers.NewErrorDetailsWithStatus("presentation_scope_misconfigured",
+			fmt.Sprintf("from_scope %q has no canonical doctype", pScope.FromScope),
+			500)
+	}
+	if docType != expected {
+		return helpers.NewErrorDetailsWithStatus("presentation_type_mismatch",
+			fmt.Sprintf("presented credential docType %q does not match from_scope %q (expected %q)", docType, pScope.FromScope, expected),
+			403)
+	}
+	return nil
+}
+
+func isSDJWTFormat(format string) bool {
+	return format == "dc+sd-jwt" || format == "vc+sd-jwt"
+}
+
+func isMDocFormat(format string) bool {
+	return format == "mso_mdoc"
 }
 
 // claimValueMatches returns true if val (a scalar string or a list of them)

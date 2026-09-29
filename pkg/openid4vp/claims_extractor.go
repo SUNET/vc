@@ -195,6 +195,14 @@ func extractMDocClaimsFromToken(vpToken string) (map[string]any, error) {
 
 	claims := make(map[string]any)
 	for _, doc := range deviceResponse.Documents {
+		// Surface the mdoc doctype so downstream type enforcement (e.g. the
+		// apigw presentation-scope check) has a canonical anchor. isInternalClaim
+		// filters this key out of OIDC wildcard mapping.
+		if doc.DocType != "" {
+			if _, present := claims["docType"]; !present {
+				claims["docType"] = doc.DocType
+			}
+		}
 		for ns, items := range doc.IssuerSigned.NameSpaces {
 			for _, anyItem := range items {
 				var elementID string
@@ -326,6 +334,7 @@ func isInternalClaim(key string) bool {
 		"cnf",     // Confirmation - internal key binding
 		"status",  // Token status list reference
 		"vct",     // Verifiable credential type - internal metadata
+		"docType", // mdoc document type - internal metadata (surfaced by extractMDocClaimsFromToken)
 	}
 
 	return slices.Contains(internalClaims, key)

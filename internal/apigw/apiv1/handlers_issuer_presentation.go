@@ -34,10 +34,11 @@ func (c *Client) buildPresentationDocument(scope string, pScope model.Presentati
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range defaults {
-		if _, present := doc[k]; !present {
-			doc[k] = v
-		}
+	// Presentation Defaults are documented as claim paths (dot-notation), so
+	// use MergeDefaults to place e.g. "identity.country" under the nested
+	// identity object rather than as a literal top-level key.
+	if err := credential.MergeDefaults(doc, defaults); err != nil {
+		return nil, err
 	}
 
 	credMeta := c.cfg.GetCredentialMetadata(scope)
