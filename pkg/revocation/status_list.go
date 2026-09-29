@@ -46,14 +46,16 @@ func WithFallbackIssuer(issuer string) StatusListCheckerOption {
 	}
 }
 
-// WithStatusListKey sets the public key that verifies Status List Tokens
-// carrying no iss claim, for a service that publishes it nowhere a resolver
-// can reach.
+// WithStatusListKey PINS the public key that verifies Status List Tokens,
+// for a service that publishes it nowhere a resolver can reach.
 //
-// It takes precedence over WithFallbackIssuer, because it names the key
-// instead of a place to go looking for one - and an issuer identity whose
-// JWKS does not carry the status-list key resolves to nothing, which with
-// fail_open turns a revoked credential into an accepted one.
+// Once set it is used for every status list token, whether or not the token
+// carries an iss claim. An operator who names a key is saying which key
+// signs these lists; going to a resolver anyway could return a different
+// one. It therefore takes precedence over both the token's iss and
+// WithFallbackIssuer - an issuer identity whose JWKS does not carry the
+// status-list key resolves to nothing, which with fail_open turns a revoked
+// credential into an accepted one.
 func WithStatusListKey(key crypto.PublicKey) StatusListCheckerOption {
 	return func(c *StatusListChecker) {
 		c.statusListKey = key
@@ -259,9 +261,13 @@ func (c *StatusListChecker) parseStatusListToken(ctx context.Context, uri string
 // without iss is refused. Refusing is the fail-closed answer: an
 // unverifiable status list must not be treated as a readable one.
 func (c *StatusListChecker) resolveStatusListKey(ctx context.Context, issuer, uri, kid string) (any, error) {
-	if issuer == "" && c.statusListKey != nil {
-		// Named directly: nothing to resolve, and nothing that could
-		// resolve to a different key later.
+	if c.statusListKey != nil {
+		// Named directly, so it PINS the key - regardless of whether the
+		// token carries an iss. An operator who names a key is saying which
+		// key signs these lists; consulting a resolver anyway could return
+		// a different one, which is the opposite of what pinning means, and
+		// it made the documented precedence untrue for every token that did
+		// carry an iss.
 		return c.statusListKey, nil
 	}
 	if issuer == "" {

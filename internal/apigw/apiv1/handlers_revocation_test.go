@@ -36,10 +36,20 @@ type stubStatusStore struct {
 	entries []*db.CredentialStatusEntry
 	saved   []*db.CredentialStatusEntry
 	err     error
+	// failAfter, when non-zero, lets the first N saves succeed and fails
+	// the next - so a partial failure part-way through a batch can be
+	// exercised.
+	failAfter int
 }
 
 func (s *stubStatusStore) Save(_ context.Context, e *db.CredentialStatusEntry) error {
 	s.saved = append(s.saved, e)
+	if s.failAfter > 0 {
+		if len(s.saved) <= s.failAfter {
+			return nil
+		}
+		return errors.New("database unavailable")
+	}
 	return s.err
 }
 

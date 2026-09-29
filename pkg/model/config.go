@@ -546,6 +546,28 @@ type Issuer struct {
 	// BBS holds blind BBS issuance configuration. Absent disables the
 	// "jwp" credential format entirely.
 	BBS *BBSConfig `yaml:"bbs" validate:"omitempty"`
+	// VC20StatusEnable turns on the credentialStatus entry in issued W3C
+	// VC 2.0 credentials. OFF by default, and deliberately so.
+	//
+	// Two things are not true yet, and both are visible to third parties
+	// rather than to us:
+	//
+	//   - The JSON-LD context that defines TokenStatusListEntry lives under
+	//     an RFC 2606 ".invalid" namespace, which no third-party verifier
+	//     can dereference. vc resolves it from its embedded bundle, so our
+	//     own stack works and nobody else's does; a credential issued with
+	//     it cannot have its Data Integrity proof reconstructed elsewhere.
+	//   - Nothing verifies it. The verifier's revocation check covers
+	//     SD-JWT, JWP and mdoc; W3C VC verification arrives separately, so
+	//     a status emitted today is a reference no verifier fetches.
+	//
+	// Issuance is implemented and tested so that flipping this is the whole
+	// change once the namespace is chosen and verification lands. Until
+	// then, defaulting it on would mint credentials that look revocable and
+	// are not - which is worse than minting none, because the reference
+	// invites reliance on it.
+	VC20StatusEnable *bool `yaml:"vc20_status_enable,omitempty" validate:"omitempty"`
+
 	// StatusService configures using an external draft-ietf-oauth-status-
 	// list-21 service (e.g. siros-status-service) for credential revocation
 	// status, instead of (or alongside) this issuer's own built-in Token
@@ -872,10 +894,13 @@ type RevocationConfig struct {
 	// verify. With revocation.fail_open at its default of true, that
 	// failure is tolerated and a REVOKED credential is accepted.
 	//
+	// Setting this PINS the key: it is used for every Status List Token,
+	// whether or not the token carries an `iss`. Naming a key is a
+	// statement about which key signs these lists, so consulting a resolver
+	// anyway could return a different one.
+	//
 	// Configure this, or status_list_issuer, or tokens without an `iss`
 	// claim are refused outright - see WithStatusListKey in pkg/revocation.
-	// This one takes precedence, because it names the key directly instead
-	// of a place to go looking for one.
 	StatusListKeyFile string `yaml:"status_list_key_file,omitempty" json:"status_list_key_file,omitempty" validate:"omitempty,file" doc_example:"\"/etc/vc/status-list-signing.pub.pem\""`
 }
 

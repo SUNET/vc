@@ -719,6 +719,11 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 		return nil
 	}
 
+	// Entries whose mapping has been written in this loop. If a later one
+	// fails, these are stranded too: the request fails as a whole, so no
+	// credential is delivered for any of them.
+	var recorded []statusEntry
+
 	for _, e := range entries {
 		// An entry with no list URI is one that was never allocated - the
 		// issuance path leaves URI empty exactly when it issued a
@@ -756,8 +761,16 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 			Scope:           scope,
 		}); err != nil {
 			c.log.Error(err, "failed to record credential status entry", "uri", e.URI, "index", e.Index)
+			// The entries were allocated before we got here and are VALID
+			// on their backend. Failing without releasing them leaves live
+			// slots nothing points at, and since the caller may retry,
+			// every attempt would strand another set. Release this one and
+			// the ones already recorded in this loop - recorded is not
+			// issued, because this request is about to fail.
+			c.releaseAllocations(ctx, append(recorded, e))
 			return fmt.Errorf("failed to record credential status entry: %w", err)
 		}
+		recorded = append(recorded, e)
 
 		// Only registry-backed entries are mirrored. The registry's
 		// credential_subjects collection has a UNIQUE index on
@@ -785,6 +798,36 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 		}
 	}
 	return nil
+}
+
+// releaseAllocations marks status-list entries INVALID because the
+// credentials they were allocated for will not be issued.
+//
+// Best-effort: this runs on a path that is already failing, and the entries
+// are unreferenced either way - a release that does not land costs one
+// unusable slot, which is what not trying costs. What it must not do is
+// turn a mapping failure into a second error the caller sees instead of the
+// first.
+//
+// It goes through the issuer rather than a backend directly, because the
+// issuer is the component that knows how to reach each backend and routes
+// on the recorded Backend - see its SetCredentialStatus.
+func (c *Client) releaseAllocations(ctx context.Context, entries []statusEntry) {
+	for _, e := range entries {
+		if e.URI == "" || c.issuerClient == nil {
+			continue
+		}
+		if _, err := c.issuerClient.SetCredentialStatus(ctx, &apiv1_issuer.SetCredentialStatusRequest{
+			Backend:       e.Backend,
+			StatusListUri: e.URI,
+			Section:       e.Section,
+			Index:         e.Index,
+			Status:        uint32(tokenstatuslist.StatusInvalid),
+		}); err != nil {
+			c.log.Error(err, "could not release a status entry for a credential that will not be issued; the slot stays VALID and unreferenced",
+				"uri", e.URI, "index", e.Index, "backend", e.Backend)
+		}
+	}
 }
 
 // convertJWKToCOSEKey converts a JWK to CBOR-encoded COSE_Key bytes

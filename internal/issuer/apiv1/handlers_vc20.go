@@ -198,7 +198,7 @@ func (c *Client) buildVC20CredentialJSON(
 	// verifier could have it stripped or rewritten without the signature
 	// failing. Adding the context only when there is a status keeps it out
 	// of credentials that have none.
-	if status != nil {
+	if status != nil && c.vc20StatusEnabled() {
 		cred["@context"] = []string{credential.ContextV2, contextstore.TokenStatusListContextURL}
 		cred["credentialStatus"] = map[string]any{
 			// The entry identifies itself by the list it is in and its
@@ -274,4 +274,18 @@ func isValidCryptosuite(cryptosuite string) bool {
 	default:
 		return false
 	}
+}
+
+// vc20StatusEnabled reports whether issued VC 2.0 credentials should carry
+// a credentialStatus entry.
+//
+// Off unless issuer.vc20_status_enable is explicitly true. See that field
+// for why: the context namespace is a placeholder no third party can
+// resolve, and no verifier checks the result yet, so a credential emitted
+// with one would look revocable without being so.
+func (c *Client) vc20StatusEnabled() bool {
+	if c.cfg == nil || c.cfg.Issuer == nil || c.cfg.Issuer.VC20StatusEnable == nil {
+		return false
+	}
+	return *c.cfg.Issuer.VC20StatusEnable
 }

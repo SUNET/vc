@@ -12,16 +12,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func vc20Builder(t *testing.T) *Client {
+func vc20Builder(t *testing.T, statusEnabled bool) *Client {
 	t.Helper()
 	return &Client{cfg: &model.Cfg{Issuer: &model.Issuer{
-		JWTAttribute: model.JWTAttribute{Issuer: "https://issuer.example.com"},
+		JWTAttribute:     model.JWTAttribute{Issuer: "https://issuer.example.com"},
+		VC20StatusEnable: &statusEnabled,
 	}}}
 }
 
 func buildVC20(t *testing.T, status *statusAllocation) map[string]any {
+	return buildVC20WithStatusEnabled(t, status, true)
+}
+
+func buildVC20WithStatusEnabled(t *testing.T, status *statusAllocation, enabled bool) map[string]any {
 	t.Helper()
-	raw, err := vc20Builder(t).buildVC20CredentialJSON(
+	raw, err := vc20Builder(t, enabled).buildVC20CredentialJSON(
 		"urn:uuid:11111111-2222-3333-4444-555555555555",
 		[]string{"VerifiableCredential"},
 		map[string]any{"id": "did:example:holder"},
@@ -87,4 +92,33 @@ func TestVC20WithoutAnAllocationCarriesNeither(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, contexts, 1)
 	require.Equal(t, credential.ContextV2, contexts[0])
+}
+
+// TestVC20StatusIsOffByDefault: the context namespace is a placeholder no
+// third party can dereference, and no verifier checks the result yet. A
+// credential emitted with a status would therefore LOOK revocable without
+// being so, which is worse than emitting none - the reference invites
+// reliance on it.
+func TestVC20StatusIsOffByDefault(t *testing.T) {
+	cred := buildVC20WithStatusEnabled(t, &statusAllocation{
+		Index: 42,
+		URI:   "https://status.example.com/statuslists/7",
+	}, false)
+
+	require.NotContains(t, cred, "credentialStatus",
+		"VC 2.0 status must not be emitted unless issuer.vc20_status_enable is explicitly true")
+
+	contexts, ok := cred["@context"].([]any)
+	require.True(t, ok)
+	require.Len(t, contexts, 1, "the placeholder context must not be published either")
+	require.Equal(t, credential.ContextV2, contexts[0])
+}
+
+// TestVC20StatusUnsetConfigIsOff pins the default itself: a nil pointer is
+// off, so the feature cannot arrive by upgrade.
+func TestVC20StatusUnsetConfigIsOff(t *testing.T) {
+	c := &Client{cfg: &model.Cfg{Issuer: &model.Issuer{
+		JWTAttribute: model.JWTAttribute{Issuer: "https://issuer.example.com"},
+	}}}
+	require.False(t, c.vc20StatusEnabled())
 }

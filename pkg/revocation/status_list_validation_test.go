@@ -573,3 +573,50 @@ type failingKeyResolver struct{}
 func (failingKeyResolver) ResolveKey(_ context.Context, issuer, _ string) (any, error) {
 	return nil, errors.New("no JWKS published for " + issuer)
 }
+
+// TestStatusListToken_ConfiguredKeyPinsEvenWithIss: naming a key is a
+// statement about which key signs these lists. Consulting the resolver
+// anyway because the token happened to carry an iss would return a
+// different key - and made the documented precedence untrue for exactly the
+// tokens most likely to be encountered.
+func TestStatusListToken_ConfiguredKeyPinsEvenWithIss(t *testing.T) {
+	pinned, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	var token string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
+		_, _ = w.Write([]byte(token))
+	}))
+	t.Cleanup(server.Close)
+
+	// The resolver would hand back a DIFFERENT key, which is the situation
+	// a rotating or mis-scoped JWKS produces.
+	checker, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](5*time.Minute)),
+		WithHTTPClient(server.Client()),
+		WithKeyResolver(testKeyResolver{key: &other.PublicKey}),
+		WithStatusListKey(&pinned.PublicKey),
+	)
+	require.NoError(t, err)
+
+	uri := server.URL + "/statuslists/0"
+	statuses := make([]uint8, 8)
+	statuses[2] = tokenstatuslist.StatusInvalid
+
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+		"iss":         "https://status.example.com",
+		"sub":         uri,
+		"iat":         time.Now().Unix(),
+		"status_list": statusListClaim(t, statuses, 8),
+	})
+	tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+	token, err = tok.SignedString(pinned)
+	require.NoError(t, err)
+
+	result, err := checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 2})
+	require.NoError(t, err, "a token carrying iss must still verify against the pinned key")
+	require.Equal(t, StatusInvalid, result.Status)
+}

@@ -31,13 +31,20 @@ func (r *recordingRegistryClient) SaveCredentialSubject(_ context.Context, in *a
 }
 
 func persistenceClient(t *testing.T, registry apiv1_registry.RegistryServiceClient) (*Client, *stubStatusStore) {
+	c, store, _ := persistenceClientWithIssuer(t, registry)
+	return c, store
+}
+
+func persistenceClientWithIssuer(t *testing.T, registry apiv1_registry.RegistryServiceClient) (*Client, *stubStatusStore, *recordingIssuer) {
 	t.Helper()
 	store := &stubStatusStore{}
+	issuer := &recordingIssuer{}
 	return &Client{
 		log:            logger.NewSimple("test"),
 		db:             &db.Service{CredentialStatusColl: store},
 		registryClient: registry,
-	}, store
+		issuerClient:   issuer,
+	}, store, issuer
 }
 
 // TestSaveCredentialSubjects_ExternalAllocationIsPersisted is the regression
@@ -166,4 +173,45 @@ func TestSaveCredentialSubjects_ExternalEntriesAreNotMirrored(t *testing.T) {
 	require.Len(t, rec.saved, 1, "only the registry-backed entry may be mirrored")
 	require.Equal(t, int64(4), rec.saved[0].Section)
 	require.Equal(t, "https://registry.example.com/statuslists/4", rec.saved[0].StatusListURI)
+}
+
+// TestSaveCredentialSubjects_StoreFailureReleasesAllocations: the entries
+// were allocated, and are VALID on their backend, before this runs. Failing
+// without releasing them strands live slots that nothing points at - and
+// since the caller may retry, every attempt would strand another set.
+func TestSaveCredentialSubjects_StoreFailureReleasesAllocations(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+	store.err = errors.New("database unavailable")
+
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+	})
+	require.Error(t, err)
+
+	require.Len(t, issuer.calls, 1, "an allocated entry that will never be issued must be released")
+	require.Equal(t, uint32(1), issuer.calls[0].Status, "released entries are marked INVALID")
+	require.Equal(t, "https://status.example.com/statuslists/abc", issuer.calls[0].StatusListUri)
+	require.Equal(t, "status_service", issuer.calls[0].Backend, "released through the backend that allocated it")
+}
+
+// TestSaveCredentialSubjects_FailureReleasesEarlierEntriesToo: the request
+// fails as a whole, so entries recorded before the failing one are stranded
+// as well - no credential is delivered for any of them.
+func TestSaveCredentialSubjects_FailureReleasesEarlierEntriesToo(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+	store.failAfter = 1
+
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
+		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+	})
+	require.Error(t, err)
+
+	require.Len(t, issuer.calls, 2, "both the failing entry and the one already recorded must be released")
+	released := map[string]bool{}
+	for _, call := range issuer.calls {
+		released[call.StatusListUri] = true
+	}
+	require.True(t, released["https://registry.example.com/statuslists/4"])
+	require.True(t, released["https://status.example.com/statuslists/abc"])
 }
