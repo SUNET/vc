@@ -2,7 +2,10 @@ package model
 
 import (
 	"fmt"
+	"maps"
 	"time"
+
+	"github.com/SUNET/vc/pkg/credential/primitives"
 )
 
 // DataSources groups all data source configurations for credential issuance.
@@ -18,6 +21,10 @@ type DataSources struct {
 	// ExternalAPI configures credential types backed by an external API
 	// Each credential references a named remote defined in APIGW.Remotes
 	ExternalAPI ExternalAPIConfig `yaml:"external_api,omitempty"`
+
+	// Presentation configures credential types whose data is derived from
+	// another credential the wallet presents via OpenID4VP during OpenID4VCI.
+	Presentation PresentationConfig `yaml:"presentation,omitempty"`
 }
 
 // DatastoreConfig groups datastore credential scopes and optional data import settings.
@@ -76,6 +83,10 @@ type DatastoreScope struct {
 	// of the listed scopes (OR logic). Each entry specifies which claims to extract
 	// from that particular credential type.
 	AuthScopes map[string]AuthScopeEntry `yaml:"auth_scopes,omitempty"`
+
+	// Derivations are generic post-verification steps that compute
+	// additional claims from the source data (see credential.ApplyDerivations).
+	Derivations []primitives.Derivation `yaml:"derivations,omitempty" doc_key:"derivation index"`
 }
 
 // AuthScopeEntry configures per-scope authentication requirements for OpenID4VP.
@@ -144,6 +155,10 @@ type AssertionScope struct {
 	// shipping pre-expired when a static date is left un-rotated. Uses Go
 	// duration syntax; example: "8760h" for one year.
 	ExpiryDuration string `yaml:"expiry_duration,omitempty" validate:"omitempty" doc_example:"\"8760h\""`
+
+	// Derivations are generic post-verification steps that compute
+	// additional claims from the assertion (see credential.ApplyDerivations).
+	Derivations []primitives.Derivation `yaml:"derivations,omitempty" doc_key:"derivation index"`
 }
 
 // ResolveDefaults returns Defaults with date_of_expiry populated from
@@ -151,9 +166,7 @@ type AssertionScope struct {
 // Injecting now keeps the callers testable.
 func (a AssertionScope) ResolveDefaults(now time.Time) (map[string]any, error) {
 	out := make(map[string]any, len(a.Defaults)+2)
-	for k, v := range a.Defaults {
-		out[k] = v
-	}
+	maps.Copy(out, a.Defaults)
 	if a.ExpiryDuration != "" {
 		d, err := time.ParseDuration(a.ExpiryDuration)
 		if err != nil {
@@ -184,6 +197,72 @@ type ExternalAPIScope struct {
 
 	// AttributeMapping defines how to map API response data to credential claims
 	AttributeMapping AttributeMapping `yaml:"attribute_mapping,omitempty" doc_key:"attribute"`
+
+	// Derivations are generic post-verification steps that compute
+	// additional claims from the API response (see credential.ApplyDerivations).
+	Derivations []primitives.Derivation `yaml:"derivations,omitempty" doc_key:"derivation index"`
+}
+
+// PresentationConfig groups presentation-derived credential scopes.
+type PresentationConfig struct {
+	// Scopes maps credential scope names to their presentation configuration.
+	Scopes map[string]PresentationScope `yaml:"scopes,omitempty" doc_key:"credential scope"`
+}
+
+// PresentationScope configures a credential type whose data is derived from
+// another credential presented by the wallet via OpenID4VP during OpenID4VCI.
+type PresentationScope struct {
+	// FromScope names the credential scope the wallet must present (e.g. "eduid").
+	// The presented credential is verified against the issuer trust chain before
+	// its claims are consumed.
+	FromScope string `yaml:"from_scope" validate:"required" doc_example:"\"eduid\""`
+
+	// AuthProvider is fixed to "openid4vp" for now; kept as a field for
+	// symmetry with the other data sources and so future providers can be
+	// added without a config-shape change.
+	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=openid4vp" default:"openid4vp"`
+
+	// RequiredClaims maps a claim path on the presented credential to an
+	// allow-list of exact-match values. Empty list = presence-only (any
+	// value passes). Populated list = the claim's value must equal one of
+	// the listed strings (or, when the claim is an array, at least one
+	// array element must match). Every key must be present on the
+	// presented credential's verified claims; missing keys fail issuance.
+	RequiredClaims map[string][]string `yaml:"required_claims" validate:"required,min=1" doc_key:"claim path"`
+
+	// Defaults holds claim values injected into the derived credential
+	// document for fields the presented credential does not carry
+	// (e.g. issuing_authority, issuing_country).
+	Defaults map[string]any `yaml:"defaults,omitempty" doc_key:"claim path"`
+
+	// ExpiryDuration, if set, computes date_of_expiry at issuance time as
+	// now+duration (formatted as ISO YYYY-MM-DD). Same semantics as
+	// AssertionScope.ExpiryDuration.
+	ExpiryDuration string `yaml:"expiry_duration,omitempty" doc_example:"\"8760h\""`
+
+	// Derivations are generic post-verification steps that compute additional
+	// claims from the presented credential's own claims
+	// (see credential.ApplyDerivations).
+	Derivations []primitives.Derivation `yaml:"derivations,omitempty" doc_key:"derivation index"`
+}
+
+// ResolveDefaults returns Defaults with date_of_expiry populated from
+// ExpiryDuration when set, and date_of_issuance populated from now.
+func (p PresentationScope) ResolveDefaults(now time.Time) (map[string]any, error) {
+	out := make(map[string]any, len(p.Defaults)+2)
+	maps.Copy(out, p.Defaults)
+	if p.ExpiryDuration != "" {
+		d, err := time.ParseDuration(p.ExpiryDuration)
+		if err != nil {
+			return nil, fmt.Errorf("invalid expiry_duration %q: %w", p.ExpiryDuration, err)
+		}
+		if d <= 0 {
+			return nil, fmt.Errorf("expiry_duration %q must be positive", p.ExpiryDuration)
+		}
+		out["date_of_expiry"] = now.Add(d).Format("2006-01-02")
+	}
+	out["date_of_issuance"] = now.Format("2006-01-02")
+	return out, nil
 }
 
 // Remote defines an external API connection.
@@ -214,9 +293,10 @@ type Remote struct {
 type DataSourceType string
 
 const (
-	DataSourceDatastore   DataSourceType = "datastore"
-	DataSourceAssertion   DataSourceType = "assertion"
-	DataSourceExternalAPI DataSourceType = "external_api"
+	DataSourceDatastore    DataSourceType = "datastore"
+	DataSourceAssertion    DataSourceType = "assertion"
+	DataSourceExternalAPI  DataSourceType = "external_api"
+	DataSourcePresentation DataSourceType = "presentation"
 )
 
 // RemoteType identifies the protocol type of an external API connection.
@@ -266,6 +346,13 @@ func (ds *DataSources) LookupCredentialSources(credentialType string) ([]Credent
 		})
 	}
 
+	if cred, ok := ds.Presentation.Scopes[credentialType]; ok {
+		sources = append(sources, CredentialSource{
+			DataSource:   DataSourcePresentation,
+			AuthProvider: cred.AuthProvider,
+		})
+	}
+
 	if len(sources) == 0 {
 		return nil, fmt.Errorf("credential type %q has no data source configured", credentialType)
 	}
@@ -291,4 +378,27 @@ func (ds *DataSources) ResolveDataSource(credentialType, authProvider string) (C
 	return CredentialSource{}, fmt.Errorf(
 		"credential type %q has no data source configured for auth provider %q", credentialType, authProvider,
 	)
+}
+
+// DerivationsFor returns the Derivations list configured on whichever scope
+// (datastore, assertion, external_api, or presentation) owns the given
+// credential type. Returns nil if the scope is unknown or has no derivations.
+// The lookup order mirrors LookupCredentialSources.
+func (ds *DataSources) DerivationsFor(credentialType string) []primitives.Derivation {
+	if ds == nil {
+		return nil
+	}
+	if cred, ok := ds.Datastore.Scopes[credentialType]; ok && len(cred.Derivations) > 0 {
+		return cred.Derivations
+	}
+	if cred, ok := ds.Assertion.Scopes[credentialType]; ok && len(cred.Derivations) > 0 {
+		return cred.Derivations
+	}
+	if cred, ok := ds.ExternalAPI.Scopes[credentialType]; ok && len(cred.Derivations) > 0 {
+		return cred.Derivations
+	}
+	if cred, ok := ds.Presentation.Scopes[credentialType]; ok && len(cred.Derivations) > 0 {
+		return cred.Derivations
+	}
+	return nil
 }

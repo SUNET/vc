@@ -154,15 +154,15 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		}
 	}()
 
-	// Build transformer from config (nil means passthrough — OIDC claims already use standard names)
-	c.log.Debug("OIDCRPCallback: building claim transformer", "credential_type", session.CredentialType)
-	transformer := service.BuildTransformer()
+	// Build mapper from config (nil means passthrough — OIDC claims already use standard names)
+	c.log.Debug("OIDCRPCallback: building attribute mapper", "credential_type", session.CredentialType)
+	mapper := service.BuildAttributeMapper()
 
 	var claims map[string]any
-	if transformer != nil {
+	if mapper != nil {
 		c.log.Debug("OIDCRPCallback: transforming claims", "raw_claims_count", len(authResp.Claims))
 		// Transform OIDC claims to credential claims
-		claims, err = transformer.TransformClaims(authResp.Claims)
+		claims, err = mapper.Apply(authResp.Claims)
 		if err != nil {
 			span.SetStatus(codes.Error, err.Error())
 			return nil, err
@@ -175,6 +175,18 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		// every time, and the standard ones (iss, aud, exp, iat, nonce)
 		// collide with the envelope the issuer fills in at signing.
 		claims = c.filterClaimsByCredentialType(session.CredentialType, authResp.Claims)
+	}
+
+	// Apply the credential type's derivations (from data_sources.<*>.<scope>.derivations)
+	// after rename+select and before identity resolution so downstream code sees
+	// canonicalised values.
+	if derivs := c.cfg.APIGW.DataSources.DerivationsFor(session.CredentialType); len(derivs) > 0 {
+		derived, derr := credential.ApplyDerivations(derivs, claims, time.Now())
+		if derr != nil {
+			span.SetStatus(codes.Error, derr.Error())
+			return nil, fmt.Errorf("OIDC derivations failed: %w", derr)
+		}
+		maps.Copy(claims, derived)
 	}
 
 	// Log the resulting document data for diagnostics.

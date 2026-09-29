@@ -901,7 +901,50 @@ func buildDocument(reg *TypeRegistry) []*DocSection {
 		sections = append(sections, sec)
 	}
 
+	// Derivation primitives section, rendered by walking the fields of
+	// pkg/credential/primitives.Derivation (the single source of truth).
+	if sec := buildPrimitivesSection(reg); sec != nil {
+		sections = append(sections, sec)
+	}
+
 	return sections
+}
+
+// buildPrimitivesSection renders the "Derivation Primitives" catalog by
+// walking the fields of pkg/credential/primitives.Derivation as parsed into
+// the type registry. Each pointer field names a primitive (via its yaml
+// tag); the pointed-at Args struct supplies the parameter table and its
+// doc comment supplies the summary.
+func buildPrimitivesSection(reg *TypeRegistry) *DocSection {
+	d := reg.Lookup("Derivation")
+	if d == nil {
+		return nil
+	}
+	sec := &DocSection{
+		YAMLKey:     "primitives",
+		Title:       "Derivation Primitives",
+		Description: structDescription(d),
+	}
+	for _, f := range d.Fields {
+		if f.Tag.YAMLName == "" || f.Tag.YAMLName == "-" {
+			continue
+		}
+		argsName := resolveTypeName(f.TypeExpr)
+		if argsName == "" {
+			continue
+		}
+		argsDef := reg.Lookup(argsName)
+		if argsDef == nil {
+			continue
+		}
+		sub := buildStructSubSection(reg, argsDef, fmt.Sprintf("<scope>.derivations[].%s", f.Tag.YAMLName))
+		sub.Title = f.Tag.YAMLName
+		if desc := fieldDescription(f); desc != "" {
+			sub.Desc = desc
+		}
+		sec.Subs = append(sec.Subs, sub)
+	}
+	return sec
 }
 
 func buildSecretsSection(reg *TypeRegistry) *DocSection {
@@ -1061,6 +1104,11 @@ func buildStructSubSection(reg *TypeRegistry, def *StructDef, path string) *SubS
 
 	for _, f := range def.Fields {
 		if f.Tag.YAMLName == "" || f.Tag.YAMLName == "-" {
+			continue
+		}
+		// Primitive Args structs always pair `input` with an `output` that
+		// mirrors it; the description covers the semantics, so skip the row.
+		if def.PkgName == "primitives" && f.Tag.YAMLName == "output" {
 			continue
 		}
 		row := TableRow{
@@ -1344,6 +1392,7 @@ func sectionLabel(yamlKey string) string {
 		"verifier":     "Verifier",
 		"registry":     "Registry",
 		"secrets_file": "Secrets File Reference",
+		"primitives":   "Derivation Primitives",
 	}
 	if l, ok := labels[yamlKey]; ok {
 		return l
@@ -1468,6 +1517,7 @@ func main() {
 		filepath.Join(root, "pkg/openid4vci"),
 		filepath.Join(root, "pkg/openidfederation"),
 		filepath.Join(root, "pkg/sqlstore"),
+		filepath.Join(root, "pkg/credential/primitives"),
 	}
 	for _, d := range dirs {
 		if _, err := os.Stat(d); os.IsNotExist(err) {

@@ -8,7 +8,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
@@ -26,7 +25,6 @@ type presentationRequestTemplate interface {
 	GetID() string
 	GetOIDCScopes() []string
 	GetClaimMappings() map[string]string
-	GetClaimTransforms() map[string]any
 }
 
 // NewClaimsExtractor creates a new claims extractor
@@ -318,126 +316,6 @@ func (ce *ClaimsExtractor) extractNestedClaim(claims map[string]any, path string
 	return nil, fmt.Errorf("unexpected error extracting claim at path '%s'", path)
 }
 
-// ApplyClaimTransforms applies transformations to claim values
-// transformDefs: Map of OIDC claim name to transform definition
-func (ce *ClaimsExtractor) ApplyClaimTransforms(claims map[string]any, transformDefs map[string]ClaimTransformDef) (map[string]any, error) {
-	if len(transformDefs) == 0 {
-		return claims, nil // No transforms to apply
-	}
-
-	transformedClaims := make(map[string]any)
-
-	// Copy all claims first
-	maps.Copy(transformedClaims, claims)
-
-	// Apply transforms
-	for claimName, transformDef := range transformDefs {
-		value, exists := transformedClaims[claimName]
-		if !exists {
-			continue // Claim not present, skip transform
-		}
-
-		transformed, err := ce.applyTransform(value, transformDef)
-		if err != nil {
-			return nil, fmt.Errorf("failed to transform claim '%s': %w", claimName, err)
-		}
-
-		transformedClaims[claimName] = transformed
-	}
-
-	return transformedClaims, nil
-}
-
-// ClaimTransformDef defines a claim transformation
-type ClaimTransformDef struct {
-	Type   string            // Transform type: date_format, boolean_string, uppercase, lowercase, etc.
-	Params map[string]string // Transform parameters
-}
-
-// applyTransform applies a specific transformation to a claim value
-func (ce *ClaimsExtractor) applyTransform(value any, transform ClaimTransformDef) (any, error) {
-	switch transform.Type {
-	case "date_format":
-		return ce.transformDateFormat(value, transform.Params)
-	case "boolean_string":
-		return ce.transformBooleanString(value, transform.Params)
-	case "uppercase":
-		return ce.transformUppercase(value)
-	case "lowercase":
-		return ce.transformLowercase(value)
-	default:
-		return nil, fmt.Errorf("unknown transform type: %s", transform.Type)
-	}
-}
-
-// transformDateFormat converts a date from one format to another
-// Params: "from" (source format), "to" (target format)
-// Formats use Go's time format strings
-func (ce *ClaimsExtractor) transformDateFormat(value any, params map[string]string) (any, error) {
-	dateStr, ok := value.(string)
-	if !ok {
-		return nil, fmt.Errorf("date value is not a string: %T", value)
-	}
-
-	fromFormat := params["from"]
-	toFormat := params["to"]
-
-	if fromFormat == "" || toFormat == "" {
-		return nil, fmt.Errorf("date_format transform requires 'from' and 'to' parameters")
-	}
-
-	// Parse the date string
-	parsedDate, err := time.Parse(fromFormat, dateStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse date '%s' with format '%s': %w", dateStr, fromFormat, err)
-	}
-
-	// Format to target format
-	return parsedDate.Format(toFormat), nil
-}
-
-// transformBooleanString converts boolean to "yes"/"no" strings
-// Params: "true_value" (default "yes"), "false_value" (default "no")
-func (ce *ClaimsExtractor) transformBooleanString(value any, params map[string]string) (any, error) {
-	boolVal, ok := value.(bool)
-	if !ok {
-		return nil, fmt.Errorf("boolean value is not a bool: %T", value)
-	}
-
-	trueValue := params["true_value"]
-	if trueValue == "" {
-		trueValue = "yes"
-	}
-
-	falseValue := params["false_value"]
-	if falseValue == "" {
-		falseValue = "no"
-	}
-
-	if boolVal {
-		return trueValue, nil
-	}
-	return falseValue, nil
-}
-
-// transformUppercase converts string to uppercase
-func (ce *ClaimsExtractor) transformUppercase(value any) (any, error) {
-	str, ok := value.(string)
-	if !ok {
-		return nil, fmt.Errorf("uppercase value is not a string: %T", value)
-	}
-	return strings.ToUpper(str), nil
-}
-
-// transformLowercase converts string to lowercase
-func (ce *ClaimsExtractor) transformLowercase(value any) (any, error) {
-	str, ok := value.(string)
-	if !ok {
-		return nil, fmt.Errorf("lowercase value is not a string: %T", value)
-	}
-	return strings.ToLower(str), nil
-}
-
 // isInternalClaim checks if a claim is an internal SD-JWT structural claim that should
 // never be forwarded to relying parties. Only filters SD-JWT mechanics — standard JWT
 // claims (iss, iat, exp, nbf) are passed through since RPs may need them.
@@ -453,32 +331,22 @@ func isInternalClaim(key string) bool {
 	return slices.Contains(internalClaims, key)
 }
 
-// ExtractAndMapClaims is a convenience function that combines extraction, mapping, and transformation
-// This is the main entry point for the complete claims processing pipeline
+// ExtractAndMapClaims extracts claims from a VP token and maps them to OIDC claims.
+// Value normalisation (date reformatting, case folding, etc.) is out of scope;
+// it belongs downstream as scope-config derivations.
 func (ce *ClaimsExtractor) ExtractAndMapClaims(
 	ctx context.Context,
 	vpToken string,
 	claimMappings map[string]string,
-	transformDefs map[string]ClaimTransformDef,
 ) (map[string]any, error) {
-	// Step 1: Extract claims from VP token
 	vpClaims, err := ce.ExtractClaimsFromVPToken(ctx, vpToken)
 	if err != nil {
 		return nil, fmt.Errorf("extraction failed: %w", err)
 	}
 
-	// Step 2: Map VP claims to OIDC claims
 	oidcClaims, err := ce.MapClaimsToOIDC(vpClaims, claimMappings)
 	if err != nil {
 		return nil, fmt.Errorf("mapping failed: %w", err)
-	}
-
-	// Step 3: Apply transformations
-	if len(transformDefs) > 0 {
-		oidcClaims, err = ce.ApplyClaimTransforms(oidcClaims, transformDefs)
-		if err != nil {
-			return nil, fmt.Errorf("transformation failed: %w", err)
-		}
 	}
 
 	return oidcClaims, nil

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Flatten converts a Person into a flat map suitable for claim transformation.
+// Flatten converts a Person into a flat map suitable for attribute_mapping.
 func (p *Person) Flatten() map[string]any {
 	m := map[string]any{
 		"sourcedId":  p.SourcedID,

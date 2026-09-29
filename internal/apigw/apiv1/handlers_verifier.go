@@ -248,6 +248,17 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	c.log.Debug("Found credential metadata", "scope", scope, "vct", credMetaCfg.GetVCTURL())
 
+	// Presentation-source scopes derive their whole document from the
+	// presented credential — there is no datastore lookup by identity.
+	if pScope, ok := c.cfg.APIGW.DataSources.Presentation.Scopes[scope]; ok {
+		if err := c.finalisePresentationVerification(ctx, authCtx, pScope, credential); err != nil {
+			return nil, err
+		}
+		return &VerificationDirectPostResponse{
+			PresentationDuringIssuanceSession: authCtx.SessionID,
+		}, nil
+	}
+
 	// Extract identity from validated credential using the matched auth scope's claims.
 	// The vpAuth config tells us which claims to extract based on which credential was presented.
 	vpAuth2 := c.cfg.GetOpenID4VPAuth(scope)

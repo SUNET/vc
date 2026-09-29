@@ -44,9 +44,6 @@ type PresentationRequestTemplate struct {
 	// Special value "*" means map all claims through unchanged
 	ClaimMappings map[string]string `yaml:"claim_mappings" json:"claim_mappings" validate:"required"`
 
-	// ClaimTransforms defines optional transformations for claims
-	ClaimTransforms map[string]ClaimTransform `yaml:"claim_transforms,omitempty" json:"claim_transforms,omitempty"`
-
 	// Enabled indicates whether this template is active
 	Enabled bool `yaml:"enabled" json:"enabled"`
 }
@@ -69,20 +66,6 @@ func (t *PresentationRequestTemplate) GetDCQLQuery() *openid4vp.DCQL {
 // GetClaimMappings returns the claim mappings (for claims extraction)
 func (t *PresentationRequestTemplate) GetClaimMappings() map[string]string {
 	return t.ClaimMappings
-}
-
-// GetClaimTransforms returns the claim transforms (for claims extraction)
-func (t *PresentationRequestTemplate) GetClaimTransforms() map[string]ClaimTransform {
-	return t.ClaimTransforms
-}
-
-// ClaimTransform defines how to transform a claim value
-type ClaimTransform struct {
-	// Type of transformation (e.g., "date_format", "uppercase", "concat")
-	Type string `yaml:"type" json:"type" validate:"required"`
-
-	// Parameters for the transformation (type-specific)
-	Params map[string]string `yaml:"params,omitempty" json:"params,omitempty"`
 }
 
 // PresentationRequestConfig holds all presentation request templates

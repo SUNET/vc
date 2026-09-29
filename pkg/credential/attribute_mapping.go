@@ -5,30 +5,31 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/SUNET/vc/pkg/model"
-	"github.com/biter777/countries"
 )
 
-// ClaimTransformer transforms external attributes/claims into credential document structures.
-// Protocol-agnostic — works for SAML OIDs, OIDC claim names, or any other attribute source.
-type ClaimTransformer struct {
+// AttributeMapper maps protocol-specific attribute names to canonical claim
+// paths using a supplied AttributeMapping. Value normalisation (case folding,
+// date reformatting, canonicalisation, etc.) is intentionally NOT the
+// mapper's job — those live as derivations in the target scope config.
+type AttributeMapper struct {
 	mapping model.AttributeMapping
 }
 
-// NewClaimTransformer creates a new claim transformer from an attribute mapping.
-func NewClaimTransformer(mapping model.AttributeMapping) *ClaimTransformer {
-	return &ClaimTransformer{
+// NewAttributeMapper creates a new attribute mapper from an attribute mapping.
+func NewAttributeMapper(mapping model.AttributeMapping) *AttributeMapper {
+	return &AttributeMapper{
 		mapping: mapping,
 	}
 }
 
-// TransformClaims converts external attributes (keyed by protocol-specific identifiers)
-// to a generic document structure using the configured mapping.
-func (t *ClaimTransformer) TransformClaims(
-	attributes map[string]any,
-) (map[string]any, error) {
+// Apply converts external attributes (keyed by protocol-specific
+// identifiers) into a generic claim document. It renames attributes to their
+// mapped claim names and honours per-attribute required + default + as_array.
+// Data sources are rename-only; value transformation lives in derivations on
+// the target scope.
+func (t *AttributeMapper) Apply(attributes map[string]any) (map[string]any, error) {
 	doc := make(map[string]any)
 
 	for attrID, attrCfg := range t.mapping {
@@ -44,15 +45,6 @@ func (t *ClaimTransformer) TransformClaims(
 				continue
 			}
 		}
-
-		transformed, terr := applyTransformOrError(value, attrCfg.Transform)
-		if terr != nil {
-			if attrCfg.Required {
-				return nil, fmt.Errorf("failed to transform required attribute %s (claim: %s): %w", attrID, attrCfg.Claim, terr)
-			}
-			continue
-		}
-		value = transformed
 
 		// Multi-valued attribute mapped to a non-array claim: keep the first
 		// value and warn so operators can spot IdP release changes.
@@ -79,88 +71,6 @@ func (t *ClaimTransformer) TransformClaims(
 	}
 
 	return doc, nil
-}
-
-// ApplyTransform applies a named transformation to a value.
-func ApplyTransform(value any, transform string) any {
-	v, _ := applyTransformOrError(value, transform)
-	return v
-}
-
-// applyTransformOrError is the error-returning form used by TransformClaims
-// so that invalid inputs to a validating transform (currently
-// yyyymmdd_to_iso) can reject required claims or be skipped for optional
-// ones, instead of silently passing an invalid value into the credential.
-func applyTransformOrError(value any, transform string) (any, error) {
-	if transform == "" {
-		return value, nil
-	}
-
-	// Reducing transforms collapse a multi-valued attribute to a single value,
-	// so they must run before the per-element slice loop below.
-	switch transform {
-	case "swamid_highest_assurance_level":
-		al := SWAMIDHighestAssuranceLevel(value)
-		if al == "" {
-			return value, fmt.Errorf("no recognized SWAMID assurance level URI in eduPersonAssurance")
-		}
-		return al, nil
-	}
-
-	// Apply per element for slice-typed inputs (multi-valued SAML attrs) so
-	// e.g. country_alpha2 maps each nationality individually.
-	if slice, ok := value.([]string); ok {
-		out := make([]string, 0, len(slice))
-		for _, item := range slice {
-			transformed, err := applyTransformOrError(item, transform)
-			if err != nil {
-				return value, err
-			}
-			s, ok := transformed.(string)
-			if !ok {
-				s = item
-			}
-			out = append(out, s)
-		}
-		return out, nil
-	}
-
-	str, ok := value.(string)
-	if !ok {
-		return value, nil
-	}
-
-	switch transform {
-	case "lowercase":
-		return strings.ToLower(str), nil
-	case "uppercase":
-		return strings.ToUpper(str), nil
-	case "trim":
-		return strings.TrimSpace(str), nil
-	case "country_alpha2":
-		cc := countries.ByName(str)
-		if cc == countries.Unknown {
-			return value, nil
-		}
-		return cc.Alpha2(), nil
-	case "country_alpha3":
-		cc := countries.ByName(str)
-		if cc == countries.Unknown {
-			return value, nil
-		}
-		return cc.Alpha3(), nil
-	case "yyyymmdd_to_iso":
-		// SCHAC schacDateOfBirth is "YYYYMMDD"; SD-JWT VC birthdate is ISO "YYYY-MM-DD".
-		// time.Parse validates day-of-month, so impossible dates like 20240230
-		// surface as an error instead of being emitted verbatim.
-		t, err := time.Parse("20060102", str)
-		if err != nil {
-			return value, fmt.Errorf("invalid YYYYMMDD date %q: %w", str, err)
-		}
-		return t.Format("2006-01-02"), nil
-	default:
-		return value, nil
-	}
 }
 
 // wrapAsArray wraps a scalar string value in a single-element []string.

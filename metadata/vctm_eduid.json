@@ -180,8 +180,8 @@
       "display": [
         {
           "locale": "en-US",
-          "label": "Assurance level (canonical)",
-          "description": "Canonical identity assurance level (AL1, AL2, or AL3). Derived from SAML attribute eduPersonAssurance."
+          "label": "Assurance level (SWAMID URI)",
+          "description": "Strongest recognised SWAMID Assurance Framework URI (e.g. http://www.swamid.se/policy/assurance/al2). Derived from SAML attribute eduPersonAssurance."
         }
       ]
     },

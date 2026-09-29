@@ -150,17 +150,17 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		}
 	}()
 
-	// Build transformer from config
-	transformer, err := s.authProviders.SAML().BuildTransformer()
+	// Build mapper from config
+	mapper, err := s.authProviders.SAML().BuildAttributeMapper()
 	if err != nil {
-		span.SetStatus(codes.Error, "transformer creation failed")
-		return nil, fmt.Errorf("failed to create transformer: %w", err)
+		span.SetStatus(codes.Error, "mapper creation failed")
+		return nil, fmt.Errorf("failed to create mapper: %w", err)
 	}
 
 	// Convert SAML attributes (map[string][]string) to map[string]any.
 	// Preserve the full slice when the assertion released more than one value
 	// for the same attribute so mappings with `as_array: true` (or per-element
-	// transforms like country_alpha2) don't lose values. The transformer
+	// transforms like country_alpha2) don't lose values. The mapper
 	// collapses to first-value with a warning for non-array claims.
 	samlAttrs := make(map[string]any)
 	for key, values := range assertion.Attributes {
@@ -186,11 +186,25 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		"names", rawAttrNames,
 		"has_nameid", assertion.NameID != "")
 
-	// Transform SAML attributes to credential claims using the generic transformer
-	claims, err := transformer.TransformClaims(samlAttrs)
+	// Transform SAML attributes to credential claims using the generic mapper
+	claims, err := mapper.Apply(samlAttrs)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
+	}
+
+	// Apply the credential type's derivations (from data_sources.<*>.<scope>.derivations)
+	// after rename+select and before identity resolution so downstream code sees
+	// canonicalised values.
+	if derivs := s.cfg.APIGW.DataSources.DerivationsFor(session.CredentialType); len(derivs) > 0 {
+		derived, derr := credential.ApplyDerivations(derivs, claims, time.Now())
+		if derr != nil {
+			span.SetStatus(codes.Error, derr.Error())
+			return nil, fmt.Errorf("SAML derivations failed: %w", derr)
+		}
+		for k, v := range derived {
+			claims[k] = v
+		}
 	}
 
 	claimKeys := make([]string, 0, len(claims))

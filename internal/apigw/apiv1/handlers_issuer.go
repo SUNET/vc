@@ -14,6 +14,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/bbs"
+	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
@@ -285,27 +286,52 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	docSessionID := docLookupSessionID(authContext)
 
 	c.log.Debug("VCICredential: retrieving credential data", "auth_provider", authContext.AuthProvider, "scope", scope, "session_id", authContext.SessionID, "doc_session_id", docSessionID)
-	// Retrieve credential data based on the auth provider used during authorization
-	switch authContext.AuthProvider {
-	case model.AuthProviderOpenID4VP, model.AuthProviderSAML, model.AuthProviderOIDC, model.AuthProviderDatastore:
-		// Session-based auth providers: retrieve from session cache
-		docs, ok := c.cacheService.Document.Get(ctx, docSessionID)
-		if !ok || len(docs) == 0 {
-			c.log.Error(nil, "no documents found in cache for session", "session_id", docSessionID)
-			return nil, errors.New("no documents found for session " + docSessionID)
+
+	// Presentation-source scopes derive their whole document from the
+	// presented credential's claims (already stashed on
+	// authContext.VerifiedClaims by VerificationDirectPost). No cache lookup.
+	if pScope, ok := c.cfg.APIGW.DataSources.Presentation.Scopes[scope]; ok {
+		docData, err := c.buildPresentationDocument(scope, pScope, authContext, time.Now())
+		if err != nil {
+			return nil, err
 		}
-		if len(docs) > 1 {
-			c.log.Info("multiple documents in cache for session, using first", "session_id", docSessionID, "count", len(docs))
+		document = &model.CompleteDocument{DocumentData: docData}
+	} else {
+		// Retrieve credential data based on the auth provider used during authorization
+		switch authContext.AuthProvider {
+		case model.AuthProviderOpenID4VP, model.AuthProviderSAML, model.AuthProviderOIDC, model.AuthProviderDatastore:
+			// Session-based auth providers: retrieve from session cache
+			docs, ok := c.cacheService.Document.Get(ctx, docSessionID)
+			if !ok || len(docs) == 0 {
+				c.log.Error(nil, "no documents found in cache for session", "session_id", docSessionID)
+				return nil, errors.New("no documents found for session " + docSessionID)
+			}
+			if len(docs) > 1 {
+				c.log.Info("multiple documents in cache for session, using first", "session_id", docSessionID, "count", len(docs))
+			}
+			for _, doc := range docs {
+				document = doc
+				break
+			}
+			if document == nil || document.DocumentData == nil {
+				return nil, errors.New("cached document is empty for session " + docSessionID)
+			}
+		default:
+			return nil, fmt.Errorf("unsupported or missing auth provider: %q", authContext.AuthProvider)
 		}
-		for _, doc := range docs {
-			document = doc
-			break
+
+		// Apply the scope's configured derivations to the cached document.
+		// Presentation is handled above (its derivations run against
+		// VerifiedClaims, not against the assembled doc).
+		if derivs := c.cfg.APIGW.DataSources.DerivationsFor(scope); len(derivs) > 0 {
+			derived, err := credential.ApplyDerivations(derivs, document.DocumentData, time.Now())
+			if err != nil {
+				return nil, err
+			}
+			for k, v := range derived {
+				document.DocumentData[k] = v
+			}
 		}
-		if document == nil || document.DocumentData == nil {
-			return nil, errors.New("cached document is empty for session " + docSessionID)
-		}
-	default:
-		return nil, fmt.Errorf("unsupported or missing auth provider: %q", authContext.AuthProvider)
 	}
 
 	documentData, err := json.Marshal(document.DocumentData)

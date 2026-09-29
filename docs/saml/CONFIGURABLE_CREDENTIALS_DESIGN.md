@@ -61,8 +61,9 @@ issuer:
         credential_type: "pid"  # Maps to credential_constructor["pid"]
         credential_config_id: "urn:eudi:pid:1"  # For OpenID4VCI offers
         
-        # Attribute transformation rules
-        # Maps SAML attributes → generic claim names → VCTM claim paths
+        # Attribute mapping (rename-only)
+        # Maps SAML attributes → generic claim names → VCTM claim paths.
+        # Value transformation belongs in the target scope's derivations.
         attributes:
           # Direct mappings
           "urn:oid:2.5.4.42":  # SAML givenName
@@ -86,7 +87,8 @@ issuer:
           "urn:oid:0.9.2342.19200300.100.1.3":  # mail
             claim: "email_address"
             required: false
-            transform: "lowercase"  # Optional transformation
+            # Value transformations (e.g. lowercase) live on the target scope's
+            # derivations block — see docs/CONFIGURATION.md § Derivation Primitives.
       
       - saml_type: "diploma"
         credential_type: "diploma"
