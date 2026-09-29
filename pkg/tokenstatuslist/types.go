@@ -36,21 +36,25 @@ const (
 )
 
 // StatusListClaim represents the status_list claim in the Status List Token (Section 4.2)
-// This structure is used in both JWT and CWT formats for serialization.
+//
+// This is the JWT/JSON shape: Lst is base64url text. The CWT shape, where
+// lst is raw bytes, is CWTStatusList. The cbor tags here name the draft's
+// text keys so the two agree if this struct is ever encoded that way; they
+// used to name integer labels, which the draft's CDDL does not use.
 type StatusListClaim struct {
 	// Bits: REQUIRED. Integer specifying the number of bits per Referenced Token
 	// in the compressed byte array (lst). The allowed values for bits are 1, 2, 4 and 8.
-	Bits int `json:"bits" cbor:"1,keyasint" validate:"required,oneof=1 2 4 8"`
+	Bits int `json:"bits" cbor:"bits" validate:"required,oneof=1 2 4 8"`
 
 	// Lst: REQUIRED. String that contains the status values for all the Referenced Tokens
 	// it conveys statuses for. The value MUST be the base64url-encoded (for JWT) or
 	// raw bytes (for CWT) compressed byte array as specified in Section 4.1.
-	Lst string `json:"lst" cbor:"2,keyasint" validate:"required"`
+	Lst string `json:"lst" cbor:"lst" validate:"required"`
 
 	// AggregationURI: OPTIONAL. String that contains a URI to retrieve the
 	// Status List Aggregation for this type of Referenced Token or Issuer.
 	// See Section 9 for further details.
-	AggregationURI string `json:"aggregation_uri,omitempty" cbor:"3,keyasint,omitempty"`
+	AggregationURI string `json:"aggregation_uri,omitempty" cbor:"aggregation_uri,omitempty"`
 }
 
 // StatusList represents a list of status values and provides methods for

@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -423,6 +424,11 @@ func TestStatusListToken_CWTTypHeaderIsEnforced(t *testing.T) {
 	// The real value is accepted in both encodings a COSE header can use.
 	require.NoError(t, checkCWTTypeHeader(map[int64]any{int64(16): tokenstatuslist.CWTTypHeader}))
 	require.NoError(t, checkCWTTypeHeader(map[int64]any{int64(16): []byte(tokenstatuslist.CWTTypHeader)}))
+
+	// The bare subtype vc used to write is still read, so a list published
+	// by an older vc verifies until it is next regenerated.
+	require.NoError(t, checkCWTTypeHeader(map[int64]any{int64(16): "statuslist+cwt"}))
+	require.NoError(t, checkCWTTypeHeader(map[int64]any{int64(16): []byte("statuslist+cwt")}))
 }
 
 // serveCWT serves a hand-built COSE_Sign1 with the given protected headers
@@ -674,4 +680,159 @@ func TestStatusListToken_PinnedKeyDoesNotAnswerForAnotherIssuer(t *testing.T) {
 	result, err := checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 1})
 	require.NoError(t, err, "a registry list must still verify when an external key is configured")
 	require.Equal(t, StatusInvalid, result.Status)
+}
+
+// cwtLayout describes one spelling of the CWT status list wire format, so
+// the same end-to-end path can be driven with the draft's layout and with
+// the one vc used to write.
+type cwtLayout struct {
+	statusListClaim int
+	typ             string
+	members         func(bits int, lst []byte) any
+}
+
+func textMembers(bits int, lst []byte) any {
+	return map[string]any{"bits": bits, "lst": lst}
+}
+
+func intMembers(bits int, lst []byte) any {
+	return map[int]any{1: bits, 2: lst}
+}
+
+// serveSignedCWT mints a genuinely signed status list CWT in the given
+// layout, serves it, and asks the checker for one index. Unlike serveCWT
+// above (which tests the typ gate with a junk signature) this one has to
+// get all the way through verification, because what is under test is
+// whether the claims are FOUND.
+func serveSignedCWT(t *testing.T, layout cwtLayout, statuses []uint8, index int) (*CheckResult, error) {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	var token []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeCWT)
+		_, _ = w.Write(token)
+	}))
+	t.Cleanup(server.Close)
+
+	uri := server.URL + "/statuslists/0"
+
+	compressed, err := tokenstatuslist.CompressStatuses(statuses)
+	require.NoError(t, err)
+
+	encoder, err := mdoc.NewCBOREncoder()
+	require.NoError(t, err)
+
+	payload, err := encoder.Marshal(map[int]any{
+		1:                      "https://status.example.com",
+		2:                      uri,
+		6:                      time.Now().Unix(),
+		layout.statusListClaim: layout.members(8, compressed),
+	})
+	require.NoError(t, err)
+
+	// mdoc.Sign1 builds its own protected header (alg only), but a status
+	// list CWT also has to carry the content type there, and the signature
+	// covers those bytes - so the protected header is built first and
+	// signed as chosen.
+	protectedBytes, err := encoder.Marshal(map[int64]any{int64(1): int64(-7), int64(16): layout.typ})
+	require.NoError(t, err)
+	sign1, err := signCWTWithProtected(t, protectedBytes, payload, key)
+	require.NoError(t, err)
+
+	token, err = encoder.Marshal(cbor.Tag{Number: 18, Content: []any{
+		sign1.Protected, map[any]any{}, sign1.Payload, sign1.Signature,
+	}})
+	require.NoError(t, err)
+
+	checker, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](5*time.Minute)),
+		WithHTTPClient(server.Client()),
+		WithKeyResolver(testKeyResolver{key: &key.PublicKey}),
+	)
+	require.NoError(t, err)
+
+	return checker.CheckStatus(t.Context(), &Reference{
+		Scheme: SchemeStatusList, URI: uri, Index: int64(index),
+	})
+}
+
+// signCWTWithProtected signs a COSE_Sign1 over protected bytes the caller
+// chose, which mdoc.Sign1 does not allow (it builds its own).
+func signCWTWithProtected(t *testing.T, protectedBytes, payload []byte, key *ecdsa.PrivateKey) (*mdoc.COSESign1, error) {
+	t.Helper()
+
+	encoder, err := mdoc.NewCBOREncoder()
+	require.NoError(t, err)
+
+	sigStructure, err := encoder.Marshal([]any{"Signature1", protectedBytes, []byte{}, payload})
+	require.NoError(t, err)
+
+	digest := sha256.Sum256(sigStructure)
+	r, sv, err := ecdsa.Sign(rand.Reader, key, digest[:])
+	require.NoError(t, err)
+
+	signature := make([]byte, 64)
+	r.FillBytes(signature[:32])
+	sv.FillBytes(signature[32:])
+
+	return &mdoc.COSESign1{
+		Protected:   protectedBytes,
+		Unprotected: map[any]any{},
+		Payload:     payload,
+		Signature:   signature,
+	}, nil
+}
+
+// TestStatusListToken_CWTLayouts drives the whole CWT path with both
+// spellings. The draft's is what vc writes; the legacy one is what an older
+// vc wrote, and a deployment must not go dark on revocation for the refresh
+// cycle it takes for its lists to be regenerated.
+func TestStatusListToken_CWTLayouts(t *testing.T) {
+	statuses := make([]uint8, 16)
+	statuses[3] = tokenstatuslist.StatusInvalid
+
+	layouts := map[string]cwtLayout{
+		"draft labels, text members, full media type": {
+			statusListClaim: 65533,
+			typ:             "application/statuslist+cwt",
+			members:         textMembers,
+		},
+		"legacy labels, integer members, bare subtype": {
+			statusListClaim: 65534,
+			typ:             "statuslist+cwt",
+			members:         intMembers,
+		},
+		"legacy labels with the draft media type": {
+			statusListClaim: 65534,
+			typ:             "application/statuslist+cwt",
+			members:         intMembers,
+		},
+	}
+
+	for name, layout := range layouts {
+		t.Run(name, func(t *testing.T) {
+			result, err := serveSignedCWT(t, layout, statuses, 3)
+			require.NoError(t, err)
+			require.Equal(t, StatusInvalid, result.Status)
+		})
+	}
+}
+
+// TestStatusListToken_CWTWithOnlyTTLIsRefused: 65534 now means ttl, and a
+// token carrying one but no status_list has to be reported as missing a
+// status_list rather than being read as a malformed one.
+func TestStatusListToken_CWTWithOnlyTTLIsRefused(t *testing.T) {
+	statuses := make([]uint8, 16)
+
+	_, err := serveSignedCWT(t, cwtLayout{
+		statusListClaim: 65534,
+		typ:             "application/statuslist+cwt",
+		members:         func(int, []byte) any { return uint64(43200) },
+	}, statuses, 3)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "status_list claim not found")
 }

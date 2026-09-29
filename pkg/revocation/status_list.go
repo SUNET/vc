@@ -349,7 +349,7 @@ func checkCWTTypeHeader(headers map[int64]any) error {
 	default:
 		return fmt.Errorf("status list CWT typ header has unexpected type %T, expected %q", raw, tokenstatuslist.CWTTypHeader)
 	}
-	if !strings.EqualFold(typ, tokenstatuslist.CWTTypHeader) {
+	if !tokenstatuslist.AcceptedCWTTypHeader(typ) {
 		return fmt.Errorf("status list CWT has typ %q, expected %q", typ, tokenstatuslist.CWTTypHeader)
 	}
 	return nil
@@ -475,8 +475,10 @@ func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, uri string, 
 		return nil, fmt.Errorf("status list token expired at %s", exp.Format(time.RFC3339))
 	}
 
-	// Extract status list from verified claims
-	statusListRaw, ok := claims[65534]
+	// Extract status list from verified claims. The label moved when vc
+	// was aligned with the draft, so both are read - see
+	// tokenstatuslist.CWTStatusListClaim.
+	statusListRaw, ok := tokenstatuslist.CWTStatusListClaim(claims)
 	if !ok {
 		return nil, errors.New("status_list claim not found in CWT")
 	}

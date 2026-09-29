@@ -11,6 +11,57 @@ import "fmt"
 // per member they wanted, which is how status_list.bits came to be ignored
 // everywhere - adding a member meant writing the whole dance again, so nobody
 // did. Normalising once makes reading a new member a map lookup.
+// statusListMap is a decoded StatusList structure whose members can be
+// looked up by either the draft's text key or vc's former integer label.
+//
+// Both spellings exist in the wild: the draft's CDDL says text, vc emitted
+// integers, and go-wallet-backend currently reads integers. Reading either
+// costs nothing and means a layout change on one side does not take the
+// other down.
+type statusListMap struct {
+	text map[string]any
+	ints map[int64]any
+}
+
+func (m statusListMap) get(textKey string, intKey int64) (any, bool) {
+	if v, ok := m.text[textKey]; ok {
+		return v, true
+	}
+	v, ok := m.ints[intKey]
+	return v, ok
+}
+
+// normalizeStatusListMap flattens the shapes a CBOR decoder can hand back
+// for the StatusList structure, keyed either way.
+func normalizeStatusListMap(raw any) (statusListMap, bool) {
+	out := statusListMap{text: map[string]any{}, ints: map[int64]any{}}
+	switch m := raw.(type) {
+	case map[string]any:
+		out.text = m
+		return out, true
+	case map[any]any:
+		for k, v := range m {
+			switch key := k.(type) {
+			case string:
+				out.text[key] = v
+			case int:
+				out.ints[int64(key)] = v
+			case int64:
+				out.ints[key] = v
+			case uint64:
+				out.ints[int64(key)] = v
+			}
+		}
+		return out, true
+	default:
+		if ints, ok := normalizeCBORIntMap(raw); ok {
+			out.ints = ints
+			return out, true
+		}
+		return out, false
+	}
+}
+
 func normalizeCBORIntMap(raw any) (map[int64]any, bool) {
 	switch m := raw.(type) {
 	case map[int64]any:
@@ -56,12 +107,12 @@ func CWTStatusListMembers(raw any) (bits int, lst []byte, err error) {
 		return sl.Bits, sl.Lst, nil
 	}
 
-	m, ok := normalizeCBORIntMap(raw)
+	m, ok := normalizeStatusListMap(raw)
 	if !ok {
 		return 0, nil, fmt.Errorf("invalid status_list claim format: %T", raw)
 	}
 
-	rawBits, ok := m[statusListKeyBits]
+	rawBits, ok := m.get(statusListTextBits, statusListKeyBits)
 	if !ok {
 		return 0, nil, fmt.Errorf("bits not found in status_list claim")
 	}
@@ -73,7 +124,8 @@ func CWTStatusListMembers(raw any) (bits int, lst []byte, err error) {
 		return 0, nil, err
 	}
 
-	lst, ok = m[statusListKeyLst].([]byte)
+	rawLst, _ := m.get(statusListTextLst, statusListKeyLst)
+	lst, ok = rawLst.([]byte)
 	if !ok || len(lst) == 0 {
 		return 0, nil, fmt.Errorf("lst not found in status_list claim")
 	}

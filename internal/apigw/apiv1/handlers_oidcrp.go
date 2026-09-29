@@ -406,7 +406,16 @@ func (c *Client) createCredentialViaOIDCRP(ctx context.Context, credentialType s
 		return "", fmt.Errorf("unsupported credential type: %s", credentialType)
 	}
 
-	// Call the issuer's MakeSDJWT method
+	// NOT REVOCABLE. This path allocates no status list entry and records
+	// nothing, so a credential issued here has no credentialStatus/status
+	// claim and can never be revoked. Revocation is wired into the
+	// OpenID4VCI path only (PAR -> token -> /credential, see
+	// handlers_issuer.go) - see docs/REVOCATION.md.
+	//
+	// Adding it here means threading an allocation and a release through
+	// this flow as well, and deciding what identifier the entry is recorded
+	// under, since the OIDC-RP flow's subject is not the same thing as the
+	// authentic-source person id issuance uses. That is its own change.
 	reply, err := client.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
 		Scope:        credentialType,
 		DocumentData: documentData,
