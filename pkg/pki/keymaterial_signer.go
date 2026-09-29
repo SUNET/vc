@@ -232,5 +232,10 @@ func normalizeHSMECDSASignature(signer crypto.Signer, sig []byte) ([]byte, error
 		// requireHSMSignable has already refused anything else.
 		return sig, nil
 	}
-	return ECDSASignatureToP1363(sig, pub.Curve)
+	// Ask the signer rather than infer: a PKCS#11 signer using CKM_ECDSA
+	// returns raw R||S, and inference can misread one of those as DER
+	// whenever its bytes happen to parse - which would convert a perfectly
+	// good HSM signature into different R/S values and produce a proof that
+	// simply does not verify.
+	return ECDSASignatureToP1363For(signer, sig, pub.Curve)
 }

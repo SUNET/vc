@@ -574,11 +574,15 @@ func (failingKeyResolver) ResolveKey(_ context.Context, issuer, _ string) (any, 
 	return nil, errors.New("no JWKS published for " + issuer)
 }
 
-// TestStatusListToken_ConfiguredKeyPinsEvenWithIss: naming a key is a
-// statement about which key signs these lists. Consulting the resolver
-// anyway because the token happened to carry an iss would return a
-// different key - and made the documented precedence untrue for exactly the
-// tokens most likely to be encountered.
+// TestStatusListToken_ConfiguredKeyPinsEvenWithIss: within its scope, a
+// named key is a statement about which key signs these lists. Consulting
+// the resolver anyway because the token happened to carry an iss would
+// return a different key - and made the documented precedence untrue for
+// exactly the tokens most likely to be encountered.
+//
+// Scope is the configured status-list issuer; a token from a DIFFERENT
+// issuer still goes to the resolver, which
+// TestStatusListToken_PinnedKeyDoesNotAnswerForAnotherIssuer covers.
 func TestStatusListToken_ConfiguredKeyPinsEvenWithIss(t *testing.T) {
 	pinned, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
@@ -598,6 +602,8 @@ func TestStatusListToken_ConfiguredKeyPinsEvenWithIss(t *testing.T) {
 		WithCache(cache.NewMemoryCache[[]uint8](5*time.Minute)),
 		WithHTTPClient(server.Client()),
 		WithKeyResolver(testKeyResolver{key: &other.PublicKey}),
+		// The pin is scoped to this issuer, so the token below carries it.
+		WithFallbackIssuer("https://status.example.com"),
 		WithStatusListKey(&pinned.PublicKey),
 	)
 	require.NoError(t, err)
@@ -618,5 +624,54 @@ func TestStatusListToken_ConfiguredKeyPinsEvenWithIss(t *testing.T) {
 
 	result, err := checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 2})
 	require.NoError(t, err, "a token carrying iss must still verify against the pinned key")
+	require.Equal(t, StatusInvalid, result.Status)
+}
+
+// TestStatusListToken_PinnedKeyDoesNotAnswerForAnotherIssuer: a deployment
+// may run vc's own registry alongside an external status service, and those
+// lists are signed by different keys. An unscoped pin made the external key
+// answer for registry tokens too, so registry lists stopped verifying the
+// moment a key file was configured - which fail_open would then tolerate.
+func TestStatusListToken_PinnedKeyDoesNotAnswerForAnotherIssuer(t *testing.T) {
+	registryKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	externalKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	var token string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
+		_, _ = w.Write([]byte(token))
+	}))
+	t.Cleanup(server.Close)
+
+	checker, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](5*time.Minute)),
+		WithHTTPClient(server.Client()),
+		// The resolver knows the REGISTRY key, as it would in a deployment
+		// whose registry publishes a JWKS.
+		WithKeyResolver(testKeyResolver{key: &registryKey.PublicKey}),
+		WithFallbackIssuer("https://status.example.com"),
+		WithStatusListKey(&externalKey.PublicKey),
+	)
+	require.NoError(t, err)
+
+	uri := server.URL + "/statuslists/0"
+	statuses := make([]uint8, 8)
+	statuses[1] = tokenstatuslist.StatusInvalid
+
+	// A registry token: its own issuer, signed with the registry key.
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+		"iss":         "https://registry.example.com",
+		"sub":         uri,
+		"iat":         time.Now().Unix(),
+		"status_list": statusListClaim(t, statuses, 8),
+	})
+	tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+	token, err = tok.SignedString(registryKey)
+	require.NoError(t, err)
+
+	result, err := checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 1})
+	require.NoError(t, err, "a registry list must still verify when an external key is configured")
 	require.Equal(t, StatusInvalid, result.Status)
 }

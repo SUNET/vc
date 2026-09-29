@@ -140,14 +140,18 @@ func TestSaveCredentialSubjects_NoAllocationIsNotRecorded(t *testing.T) {
 	require.Empty(t, store.saved, "nothing was allocated, so there is nothing to record")
 }
 
-// TestSaveCredentialSubjects_NoIdentifierIsNotRecorded preserves the
-// pre-existing guard.
+// TestSaveCredentialSubjects_NoIdentifierIsNotRecorded: an issuance with
+// no identifier AND no allocated entry has nothing to record.
+//
+// This used to assert that an ALLOCATED entry was silently skipped too,
+// which was the defect - the credential carries the status reference either
+// way, so skipping the mapping mints something the revoke endpoint can
+// never find. That case is now
+// TestSaveCredentialSubjects_AllocatedWithoutIdentifierIsRefused.
 func TestSaveCredentialSubjects_NoIdentifierIsNotRecorded(t *testing.T) {
 	c, store := persistenceClient(t, nil)
 
-	require.NoError(t, c.saveCredentialSubjects(t.Context(), "", "SUNET", "pid", []statusEntry{
-		{Section: 1, Index: 1, URI: "https://registry.example.com/statuslists/1", Backend: "registry"},
-	}))
+	require.NoError(t, c.saveCredentialSubjects(t.Context(), "", "SUNET", "pid", []statusEntry{{Section: 1, Index: 1}}))
 	require.Empty(t, store.saved)
 }
 
@@ -214,4 +218,32 @@ func TestSaveCredentialSubjects_FailureReleasesEarlierEntriesToo(t *testing.T) {
 	}
 	require.True(t, released["https://registry.example.com/statuslists/4"])
 	require.True(t, released["https://status.example.com/statuslists/abc"])
+}
+
+// TestSaveCredentialSubjects_AllocatedWithoutIdentifierIsRefused: an empty
+// identifier is legitimate for assertion- and datastore-backed issuance,
+// but it is not a reason to drop an allocated entry. The credential already
+// carries the status reference, so skipping the mapping mints something
+// that looks revocable and that the revoke endpoint can never find.
+func TestSaveCredentialSubjects_AllocatedWithoutIdentifierIsRefused(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+
+	err := c.saveCredentialSubjects(t.Context(), "", "SUNET", "pid", []statusEntry{
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "could never be revoked")
+	require.Empty(t, store.saved)
+	require.Len(t, issuer.calls, 1, "the allocated entry must be released, not stranded")
+}
+
+// TestSaveCredentialSubjects_NoIdentifierAndNoAllocationIsFine keeps the
+// ordinary case: a flow that allocated nothing has nothing to record and
+// nothing to fail over.
+func TestSaveCredentialSubjects_NoIdentifierAndNoAllocationIsFine(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+
+	require.NoError(t, c.saveCredentialSubjects(t.Context(), "", "SUNET", "pid", []statusEntry{{}}))
+	require.Empty(t, store.saved)
+	require.Empty(t, issuer.calls)
 }

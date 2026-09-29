@@ -46,16 +46,21 @@ func WithFallbackIssuer(issuer string) StatusListCheckerOption {
 	}
 }
 
-// WithStatusListKey PINS the public key that verifies Status List Tokens,
-// for a service that publishes it nowhere a resolver can reach.
+// WithStatusListKey pins the public key that verifies Status List Tokens
+// from the configured status-list issuer, for a service that publishes that
+// key nowhere a resolver can reach.
 //
-// Once set it is used for every status list token, whether or not the token
-// carries an iss claim. An operator who names a key is saying which key
-// signs these lists; going to a resolver anyway could return a different
-// one. It therefore takes precedence over both the token's iss and
-// WithFallbackIssuer - an issuer identity whose JWKS does not carry the
-// status-list key resolves to nothing, which with fail_open turns a revoked
-// credential into an accepted one.
+// Scoped, not global: it answers for tokens carrying no iss, and for tokens
+// whose iss matches WithFallbackIssuer. Everything else still goes to the
+// resolver, because a deployment may run vc's own registry alongside an
+// external status service and those lists are signed by different keys - an
+// unscoped pin made the external key answer for registry tokens too, so
+// registry lists stopped verifying, which fail_open would then tolerate.
+//
+// Within that scope it does take precedence over the resolver: an issuer
+// identity whose JWKS does not carry the status-list key resolves to
+// nothing, which with fail_open turns a revoked credential into an accepted
+// one.
 func WithStatusListKey(key crypto.PublicKey) StatusListCheckerOption {
 	return func(c *StatusListChecker) {
 		c.statusListKey = key
@@ -261,13 +266,18 @@ func (c *StatusListChecker) parseStatusListToken(ctx context.Context, uri string
 // without iss is refused. Refusing is the fail-closed answer: an
 // unverifiable status list must not be treated as a readable one.
 func (c *StatusListChecker) resolveStatusListKey(ctx context.Context, issuer, uri, kid string) (any, error) {
-	if c.statusListKey != nil {
-		// Named directly, so it PINS the key - regardless of whether the
-		// token carries an iss. An operator who names a key is saying which
-		// key signs these lists; consulting a resolver anyway could return
-		// a different one, which is the opposite of what pinning means, and
-		// it made the documented precedence untrue for every token that did
-		// carry an iss.
+	// The configured key pins, but only for the issuer it was configured
+	// for. A deployment may run vc's own registry alongside an external
+	// status service - issuer.status_service documents that as supported -
+	// and those lists are signed by different keys. An unscoped pin made
+	// the external key answer for registry tokens too, so registry lists
+	// stopped verifying the moment a key file was configured, which
+	// fail_open would then tolerate.
+	//
+	// Scope: a token with no iss (there is nothing else to go on), or one
+	// whose iss is the configured status_list_issuer. Anything else goes to
+	// the resolver, which is how registry tokens keep working.
+	if c.statusListKey != nil && (issuer == "" || issuer == c.fallbackIssuer) {
 		return c.statusListKey, nil
 	}
 	if issuer == "" {

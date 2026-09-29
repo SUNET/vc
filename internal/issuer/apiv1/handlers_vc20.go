@@ -105,7 +105,12 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 	// See allocateOptionalStatus.
 	var statusSection, statusIndex int64
 	var statusURI, statusBackend string
-	statusAlloc, err := c.allocateOptionalStatus(ctx, "vc20")
+	// No allocation when the credential will carry no status. Allocating
+	// anyway consumed a slot per issuance and handed the APIGW an entry to
+	// record a revocation mapping for a credential with nothing to revoke -
+	// and made degraded_mode "fail" block a format that is deliberately
+	// non-revocable in this configuration.
+	statusAlloc, err := c.allocateVC20Status(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
 	}
@@ -198,7 +203,7 @@ func (c *Client) buildVC20CredentialJSON(
 	// verifier could have it stripped or rewritten without the signature
 	// failing. Adding the context only when there is a status keeps it out
 	// of credentials that have none.
-	if status != nil && c.vc20StatusEnabled() {
+	if status != nil {
 		cred["@context"] = []string{credential.ContextV2, contextstore.TokenStatusListContextURL}
 		cred["credentialStatus"] = map[string]any{
 			// The entry identifies itself by the list it is in and its
@@ -288,4 +293,19 @@ func (c *Client) vc20StatusEnabled() bool {
 		return false
 	}
 	return *c.cfg.Issuer.VC20StatusEnable
+}
+
+// allocateVC20Status allocates a status-list entry for a VC 2.0 issuance,
+// or nothing when the credential will not carry a status.
+//
+// Separate from the caller so the gate is testable on its own: allocating
+// for a credential that will carry no status reference consumes a slot per
+// issuance, hands the APIGW an entry to record a mapping nothing can use,
+// and makes degraded_mode "fail" block a format that is deliberately
+// non-revocable in this configuration.
+func (c *Client) allocateVC20Status(ctx context.Context) (*statusAllocation, error) {
+	if !c.vc20StatusEnabled() {
+		return nil, nil
+	}
+	return c.allocateOptionalStatus(ctx, "vc20")
 }

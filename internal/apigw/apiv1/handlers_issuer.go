@@ -715,8 +715,27 @@ type statusEntry struct {
 // an external draft-ietf-oauth-status-list service has no registry to write
 // to, and issuance must not depend on one.
 func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authenticSource, scope string, entries []statusEntry) error {
+	// An empty identifier is legitimate for assertion- and datastore-backed
+	// issuance (see requireIdentifier), but it is not a reason to drop an
+	// allocated entry: the credential already carries the status reference,
+	// so skipping the mapping mints something that LOOKS revocable and that
+	// the revoke endpoint can never find. Release what was allocated and
+	// fail, the same as a store failure - the alternative is a credential
+	// nobody can revoke.
 	if identifier == "" {
-		return nil
+		var allocated []statusEntry
+		for _, e := range entries {
+			if e.URI != "" {
+				allocated = append(allocated, e)
+			}
+		}
+		if len(allocated) == 0 {
+			return nil
+		}
+		c.log.Error(nil, "a status list entry was allocated for an issuance with no identifier; releasing it, because nothing could later find it to revoke",
+			"entries", len(allocated))
+		c.releaseAllocations(ctx, allocated)
+		return errors.New("a status list entry was allocated but the issuance has no identifier to record it under, so the credential could never be revoked")
 	}
 
 	// Entries whose mapping has been written in this loop. If a later one

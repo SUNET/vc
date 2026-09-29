@@ -1,6 +1,7 @@
 package pki
 
 import (
+	"crypto"
 	"crypto/elliptic"
 	"encoding/asn1"
 	"fmt"
@@ -157,4 +158,78 @@ func validECDSAScalars(r, s *big.Int, curve elliptic.Curve) bool {
 		}
 	}
 	return true
+}
+
+// ECDSASignatureEncoding names the wire form a signer produces for ECDSA.
+type ECDSASignatureEncoding int
+
+const (
+	// ECDSAEncodingUnknown means the signer does not say, and the encoding
+	// has to be inferred. Everything that does not implement
+	// ECDSASignatureEncodingReporter is this.
+	ECDSAEncodingUnknown ECDSASignatureEncoding = iota
+	// ECDSAEncodingP1363 is the fixed-width R||S concatenation.
+	ECDSAEncodingP1363
+	// ECDSAEncodingDER is the ASN.1 SEQUENCE of two INTEGERs.
+	ECDSAEncodingDER
+)
+
+// ECDSASignatureEncodingReporter is implemented by signers that know which
+// encoding they emit.
+//
+// Inference cannot be made exact in either direction - a DER signature can
+// be exactly 2*keySize bytes, and a raw R||S can be structurally valid DER -
+// so where the answer is actually known, it must be stated rather than
+// guessed. A PKCS#11 signer using CKM_ECDSA knows: that mechanism is defined
+// to return raw R||S.
+type ECDSASignatureEncodingReporter interface {
+	ECDSASignatureEncoding() ECDSASignatureEncoding
+}
+
+// ECDSASignatureToP1363For converts a signature to IEEE P1363, honouring an
+// encoding the signer declares and falling back to inference only when it
+// declares none.
+//
+// This is what ECDSASignatureToP1363 should be called with wherever the
+// signer is to hand. The inference in ECDSASignatureToP1363 is a best effort
+// for callers holding nothing but bytes.
+func ECDSASignatureToP1363For(signer crypto.Signer, signature []byte, curve elliptic.Curve) ([]byte, error) {
+	keySize := GetKeySizeForCurve(curve)
+	if keySize == 0 {
+		return nil, fmt.Errorf("unsupported curve: %s", curve.Params().Name)
+	}
+
+	reporter, ok := signer.(ECDSASignatureEncodingReporter)
+	if !ok {
+		return ECDSASignatureToP1363(signature, curve)
+	}
+
+	switch reporter.ECDSASignatureEncoding() {
+	case ECDSAEncodingP1363:
+		// Declared raw: never reinterpreted as DER, however its bytes
+		// happen to look. A wrong length is an error rather than something
+		// to fall back from - the signer said what it produces.
+		if len(signature) != 2*keySize {
+			return nil, fmt.Errorf("signer declares IEEE P1363 ECDSA signatures but produced %d bytes (expected %d for %s)",
+				len(signature), 2*keySize, curve.Params().Name)
+		}
+		return signature, nil
+
+	case ECDSAEncodingDER:
+		var parsed ecdsaASN1Signature
+		rest, err := asn1.Unmarshal(signature, &parsed)
+		if err != nil {
+			return nil, fmt.Errorf("signer declares ASN.1 DER ECDSA signatures but its output does not parse: %w", err)
+		}
+		if len(rest) > 0 {
+			return nil, fmt.Errorf("signer declares ASN.1 DER ECDSA signatures but left %d trailing bytes", len(rest))
+		}
+		if !validECDSAScalars(parsed.R, parsed.S, curve) {
+			return nil, fmt.Errorf("signer declares ASN.1 DER ECDSA signatures but its R/S are not valid scalars for %s", curve.Params().Name)
+		}
+		return EncodeECDSASignature(parsed.R, parsed.S, curve)
+
+	default:
+		return ECDSASignatureToP1363(signature, curve)
+	}
 }

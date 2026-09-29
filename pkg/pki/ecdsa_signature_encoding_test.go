@@ -1,11 +1,14 @@
 package pki
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/asn1"
+	"errors"
+	"io"
 	"math/big"
 	"testing"
 )
@@ -143,5 +146,102 @@ func TestECDSASignatureToP1363_OutOfRangeScalarsAreNotDER(t *testing.T) {
 	}
 	if !validECDSAScalars(big.NewInt(1), new(big.Int).Sub(n, big.NewInt(1)), elliptic.P256()) {
 		t.Fatal("the endpoints of [1, N-1] must be accepted")
+	}
+}
+
+// declaringSigner reports a fixed ECDSA encoding, the way a PKCS#11 signer
+// using CKM_ECDSA does.
+type declaringSigner struct {
+	pub      *ecdsa.PublicKey
+	encoding ECDSASignatureEncoding
+}
+
+func (d declaringSigner) Public() crypto.PublicKey { return d.pub }
+func (d declaringSigner) Sign(io.Reader, []byte, crypto.SignerOpts) ([]byte, error) {
+	return nil, errors.New("not used")
+}
+func (d declaringSigner) ECDSASignatureEncoding() ECDSASignatureEncoding { return d.encoding }
+
+// TestECDSASignatureToP1363For_DeclaredRawIsNeverReparsed is the HSM case.
+// CKM_ECDSA returns raw R||S, and a raw 64-byte signature can be
+// structurally valid DER - inference would then "convert" it into different
+// R/S values and the resulting JWS or Data Integrity proof would simply not
+// verify. A signer that knows must be believed.
+func TestECDSASignatureToP1363For_DeclaredRawIsNeverReparsed(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	signer := declaringSigner{pub: &key.PublicKey, encoding: ECDSAEncodingP1363}
+
+	// A raw signature whose bytes ALSO happen to be well-formed DER: the
+	// exact collision inference cannot resolve.
+	raw, _, _ := derOfExactly64Bytes(t)
+
+	got, err := ECDSASignatureToP1363For(signer, raw, elliptic.P256())
+	if err != nil {
+		t.Fatalf("ECDSASignatureToP1363For: %v", err)
+	}
+	if string(got) != string(raw) {
+		t.Fatalf("a declared-raw signature was reinterpreted:\n got %x\nwant %x", got, raw)
+	}
+}
+
+// TestECDSASignatureToP1363For_DeclaredRawWrongLengthIsAnError: the signer
+// said what it produces, so a mismatch is a fault to report rather than a
+// case to fall back from.
+func TestECDSASignatureToP1363For_DeclaredRawWrongLengthIsAnError(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	signer := declaringSigner{pub: &key.PublicKey, encoding: ECDSAEncodingP1363}
+
+	if _, err := ECDSASignatureToP1363For(signer, make([]byte, 70), elliptic.P256()); err == nil {
+		t.Fatal("a declared-raw signature of the wrong length must be an error")
+	}
+}
+
+// TestECDSASignatureToP1363For_UndeclaredFallsBackToInference keeps the
+// generic crypto.Signer path working - most backends say nothing.
+func TestECDSASignatureToP1363For_UndeclaredFallsBackToInference(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	digest := sha256.Sum256([]byte("payload"))
+	der, err := ecdsa.SignASN1(rand.Reader, key, digest[:])
+	if err != nil {
+		t.Fatalf("SignASN1: %v", err)
+	}
+
+	got, err := ECDSASignatureToP1363For(key, der, elliptic.P256())
+	if err != nil {
+		t.Fatalf("ECDSASignatureToP1363For: %v", err)
+	}
+	if len(got) != 64 {
+		t.Fatalf("got %d bytes, want 64", len(got))
+	}
+}
+
+// TestNormalizeHSMECDSASignature_AsksTheSigner covers the CALL SITE, not
+// just the helper: normalizeHSMECDSASignature must consult the signer's
+// declared encoding rather than inferring, or an HSM's raw output whose
+// bytes happen to parse as DER is silently converted to different R/S.
+func TestNormalizeHSMECDSASignature_AsksTheSigner(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	signer := declaringSigner{pub: &key.PublicKey, encoding: ECDSAEncodingP1363}
+
+	raw, _, _ := derOfExactly64Bytes(t)
+
+	got, err := normalizeHSMECDSASignature(signer, raw)
+	if err != nil {
+		t.Fatalf("normalizeHSMECDSASignature: %v", err)
+	}
+	if string(got) != string(raw) {
+		t.Fatalf("the HSM path reinterpreted a declared-raw signature:\n got %x\nwant %x", got, raw)
 	}
 }
