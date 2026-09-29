@@ -858,6 +858,25 @@ type RevocationConfig struct {
 	// "<list URI>/.well-known/...", which does not exist, so it failed
 	// anyway, just with a misleading error.
 	StatusListIssuer string `yaml:"status_list_issuer,omitempty" json:"status_list_issuer,omitempty" validate:"omitempty,httpurl" doc_example:"\"https://status.siros.org\""`
+	// StatusListKeyFile is a PEM file holding the PUBLIC key (or a
+	// certificate carrying it) that signs Status List Tokens, for a service
+	// that does not publish one anywhere a resolver can reach.
+	//
+	// status_list_issuer alone is not always enough. It supplies an
+	// identity to the discovery-based resolver, which then looks for a
+	// JWKS - and a status service's status-list signing key need not be
+	// published there at all. siros-status-service is one such case: it
+	// exposes its AS JWKS for access-token verification, while the
+	// status-list key is a separate signing key with no JWKS endpoint, so
+	// discovery finds nothing and every external status list fails to
+	// verify. With revocation.fail_open at its default of true, that
+	// failure is tolerated and a REVOKED credential is accepted.
+	//
+	// Configure this, or status_list_issuer, or tokens without an `iss`
+	// claim are refused outright - see WithStatusListKey in pkg/revocation.
+	// This one takes precedence, because it names the key directly instead
+	// of a place to go looking for one.
+	StatusListKeyFile string `yaml:"status_list_key_file,omitempty" json:"status_list_key_file,omitempty" validate:"omitempty,file" doc_example:"\"/etc/vc/status-list-signing.pub.pem\""`
 }
 
 // ValidateClientIDMaterial checks that the key material loaded at startup can

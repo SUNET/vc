@@ -29,6 +29,9 @@ type StatusListChecker struct {
 	// that carry no iss claim. Empty means such tokens are refused; see
 	// resolveStatusListKey.
 	fallbackIssuer string
+	// statusListKey is the signing key named directly by configuration,
+	// for a service that publishes it nowhere a resolver can follow.
+	statusListKey crypto.PublicKey
 }
 
 // StatusListCheckerOption configures a StatusListChecker.
@@ -40,6 +43,20 @@ type StatusListCheckerOption func(*StatusListChecker)
 func WithFallbackIssuer(issuer string) StatusListCheckerOption {
 	return func(c *StatusListChecker) {
 		c.fallbackIssuer = issuer
+	}
+}
+
+// WithStatusListKey sets the public key that verifies Status List Tokens
+// carrying no iss claim, for a service that publishes it nowhere a resolver
+// can reach.
+//
+// It takes precedence over WithFallbackIssuer, because it names the key
+// instead of a place to go looking for one - and an issuer identity whose
+// JWKS does not carry the status-list key resolves to nothing, which with
+// fail_open turns a revoked credential into an accepted one.
+func WithStatusListKey(key crypto.PublicKey) StatusListCheckerOption {
+	return func(c *StatusListChecker) {
+		c.statusListKey = key
 	}
 }
 
@@ -242,11 +259,16 @@ func (c *StatusListChecker) parseStatusListToken(ctx context.Context, uri string
 // without iss is refused. Refusing is the fail-closed answer: an
 // unverifiable status list must not be treated as a readable one.
 func (c *StatusListChecker) resolveStatusListKey(ctx context.Context, issuer, uri, kid string) (any, error) {
+	if issuer == "" && c.statusListKey != nil {
+		// Named directly: nothing to resolve, and nothing that could
+		// resolve to a different key later.
+		return c.statusListKey, nil
+	}
 	if issuer == "" {
 		issuer = c.fallbackIssuer
 	}
 	if issuer == "" {
-		return nil, fmt.Errorf("status list token for %q carries no iss claim and no verifier.revocation.status_list_issuer is configured, so its signing key cannot be resolved", uri)
+		return nil, fmt.Errorf("status list token for %q carries no iss claim, and neither verifier.revocation.status_list_key_file nor verifier.revocation.status_list_issuer is configured, so its signing key cannot be resolved", uri)
 	}
 	return c.keyResolver.ResolveKey(ctx, issuer, kid)
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -361,7 +362,7 @@ func TestStatusListToken_NoIssAndNoConfiguredIssuerIsRefused(t *testing.T) {
 
 	_, err = checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 1})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "no verifier.revocation.status_list_issuer is configured")
+	require.Contains(t, err.Error(), "status_list_issuer")
 }
 
 // TestStatusListToken_IssStillWins: a token that does carry iss must use it,
@@ -481,4 +482,94 @@ func TestStatusListToken_CWTTypCheckIsWiredIn(t *testing.T) {
 	err = serveCWT(t, map[int64]any{1: -7, 16: tokenstatuslist.CWTTypHeader})
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), tokenstatuslist.CWTTypHeader)
+}
+
+// TestStatusListToken_ConfiguredKeyVerifiesWithoutIss is the case a
+// fallback ISSUER cannot cover. siros-status-service publishes its AS JWKS
+// for access-token verification while signing status lists with a separate
+// key that has no JWKS endpoint, so discovery finds nothing and every
+// external status list fails to verify - which, with fail_open at its
+// default of true, means a REVOKED credential is accepted.
+//
+// Naming the key directly is the only thing that verifies such a token.
+func TestStatusListToken_ConfiguredKeyVerifiesWithoutIss(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	var token string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
+		_, _ = w.Write([]byte(token))
+	}))
+	t.Cleanup(server.Close)
+
+	// A resolver that finds nothing, which is what discovery against a
+	// service with no status-list JWKS actually does.
+	checker, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](5*time.Minute)),
+		WithHTTPClient(server.Client()),
+		WithKeyResolver(failingKeyResolver{}),
+		WithFallbackIssuer("https://status.example.com"),
+		WithStatusListKey(&key.PublicKey),
+	)
+	require.NoError(t, err)
+
+	uri := server.URL + "/statuslists/0"
+	statuses := make([]uint8, 16)
+	statuses[3] = tokenstatuslist.StatusInvalid
+
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+		"sub":         uri,
+		"iat":         time.Now().Unix(),
+		"status_list": statusListClaim(t, statuses, 8),
+	})
+	tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+	token, err = tok.SignedString(key)
+	require.NoError(t, err)
+
+	result, err := checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 3})
+	require.NoError(t, err, "a configured key must verify a token the resolver cannot resolve")
+	require.Equal(t, StatusInvalid, result.Status)
+}
+
+// TestStatusListToken_NoKeyAndNoIssuerIsStillRefused keeps the fail-closed
+// half: configuring neither must not silently accept.
+func TestStatusListToken_NoKeyAndNoIssuerIsStillRefused(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	var token string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
+		_, _ = w.Write([]byte(token))
+	}))
+	t.Cleanup(server.Close)
+
+	checker, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](5*time.Minute)),
+		WithHTTPClient(server.Client()),
+		WithKeyResolver(failingKeyResolver{}),
+	)
+	require.NoError(t, err)
+
+	uri := server.URL + "/statuslists/0"
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+		"sub":         uri,
+		"iat":         time.Now().Unix(),
+		"status_list": statusListClaim(t, []uint8{0, 1}, 8),
+	})
+	tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+	token, err = tok.SignedString(key)
+	require.NoError(t, err)
+
+	_, err = checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 1})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "status_list_key_file")
+}
+
+// failingKeyResolver stands in for discovery that finds no status-list key.
+type failingKeyResolver struct{}
+
+func (failingKeyResolver) ResolveKey(_ context.Context, issuer, _ string) (any, error) {
+	return nil, errors.New("no JWKS published for " + issuer)
 }

@@ -195,12 +195,25 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	if cfg.Verifier.Revocation != nil && cfg.Verifier.Revocation.Enabled {
 		cacheTTL := time.Duration(cfg.Verifier.Revocation.CacheTTL) * time.Second
 		statusCache := pkgcache.NewMemoryCache[[]uint8](cacheTTL)
-		statusListChecker, err := revocation.NewStatusListChecker(
+		statusListOpts := []revocation.StatusListCheckerOption{
 			revocation.WithCache(statusCache),
 			revocation.WithHTTPClient(&http.Client{Timeout: 30 * time.Second}),
 			revocation.WithKeyResolver(jwksKeyResolverAdapter{resolver: c.jwksResolver}),
 			revocation.WithFallbackIssuer(cfg.Verifier.Revocation.StatusListIssuer),
-		)
+		}
+		// Loaded at startup, not per request: a key file that is missing or
+		// malformed should stop the service rather than surface later as
+		// every external status list failing to verify - which fail_open
+		// would then tolerate, accepting revoked credentials.
+		if path := cfg.Verifier.Revocation.StatusListKeyFile; path != "" {
+			key, keyErr := revocation.LoadStatusListKeyPEM(path)
+			if keyErr != nil {
+				return nil, fmt.Errorf("verifier.revocation.status_list_key_file: %w", keyErr)
+			}
+			statusListOpts = append(statusListOpts, revocation.WithStatusListKey(key))
+			c.log.Info("status list signing key loaded from file", "path", path)
+		}
+		statusListChecker, err := revocation.NewStatusListChecker(statusListOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create status list checker: %w", err)
 		}
