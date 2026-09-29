@@ -143,3 +143,82 @@ func (s *stubCredentialSubjects) Search(context.Context, string) ([]*db.Credenti
 }
 
 func (s *stubCredentialSubjects) Add(context.Context, *db.CredentialSubjectDoc) error { return nil }
+
+// TestSearchPerson_LegacyRecordsKeepTheirUpdateControl: status_list_uri was
+// added after these records were written. Every one of them is this
+// registry's own - nothing else writes to that collection - so treating a
+// blank as "belongs to somebody else" would make every pre-existing entry
+// display as unknown and lose its update control. That is a regression in
+// the admin GUI, not a safety measure.
+func TestSearchPerson_LegacyRecordsKeepTheirUpdateControl(t *testing.T) {
+	c, adminDB := newOwnershipClient(t)
+	adminDB.found = &db.TokenStatusListDoc{Status: 2}
+
+	c.credentialSubjects = &stubCredentialSubjects{docs: []*db.CredentialSubjectDoc{
+		{Identifier: "p", Section: 4, Index: 9}, // no StatusListURI
+	}}
+
+	reply, err := c.SearchPerson(t.Context(), &SearchPersonRequest{Identifier: "p"})
+	require.NoError(t, err)
+	require.Len(t, reply.Results, 1)
+
+	got := reply.Results[0]
+	require.True(t, got.Local, "a record written before the field existed is still this registry's own")
+	require.True(t, got.StatusKnown)
+	require.Equal(t, uint8(2), got.Status)
+	require.Equal(t, "https://registry.example.com/statuslists/4", got.StatusListURI,
+		"the URL is derived so the admin form can name what it acts on")
+}
+
+// TestUpdateStatus_StillRefusesAnEmptyURI: filling legacy records in on
+// display must not make the update path lenient. The form always sends the
+// displayed URI, so a caller naming no list at all is still refused.
+func TestUpdateStatus_LegacyDerivationDoesNotWeakenUpdate(t *testing.T) {
+	c, adminDB := newOwnershipClient(t)
+
+	err := c.UpdateStatus(t.Context(), &UpdateStatusRequest{Section: 4, Index: 9, Status: 1})
+	require.Error(t, err)
+	require.Empty(t, adminDB.updates)
+}
+
+// TestSaveCredentialSubject_DerivesALegacyURI: an APIGW older than the
+// status_list_uri field sends none. Rejecting it would drop the mapping for
+// every credential issued during a rolling upgrade; the registry can derive
+// it, because every entry it stores is its own.
+func TestSaveCredentialSubject_DerivesALegacyURI(t *testing.T) {
+	c, _ := newOwnershipClient(t)
+	store := &recordingCredentialSubjects{}
+	c.credentialSubjects = store
+
+	require.NoError(t, c.SaveCredentialSubject(t.Context(), &SaveCredentialSubjectRequest{
+		Identifier: "p", Section: 4, Index: 9,
+	}))
+	require.Len(t, store.added, 1)
+	require.Equal(t, "https://registry.example.com/statuslists/4", store.added[0].StatusListURI)
+}
+
+// TestSaveCredentialSubject_RefusesAForeignList: the registry cannot act on
+// an entry it does not own, so recording one would only produce a row its
+// admin view can display and nothing can change.
+func TestSaveCredentialSubject_RefusesAForeignList(t *testing.T) {
+	c, _ := newOwnershipClient(t)
+	store := &recordingCredentialSubjects{}
+	c.credentialSubjects = store
+
+	err := c.SaveCredentialSubject(t.Context(), &SaveCredentialSubjectRequest{
+		Identifier: "p", Section: 0, Index: 17,
+		StatusListURI: "https://status.example.com/statuslists/abc",
+	})
+	require.Error(t, err)
+	require.Empty(t, store.added)
+}
+
+type recordingCredentialSubjects struct {
+	stubCredentialSubjects
+	added []*db.CredentialSubjectDoc
+}
+
+func (r *recordingCredentialSubjects) Add(_ context.Context, doc *db.CredentialSubjectDoc) error {
+	r.added = append(r.added, doc)
+	return nil
+}

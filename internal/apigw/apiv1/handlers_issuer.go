@@ -728,6 +728,18 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier string, 
 		// discarded EVERY entry allocated by an external status service,
 		// since those have no sections and always report Section 0.
 		if e.URI == "" {
+			// One case is indistinguishable from "nothing was allocated":
+			// an issuer older than the status_list_uri field, which sends
+			// an allocated section/index and no URI. The apigw cannot
+			// derive the URI - only the registry knows its own public URL
+			// - so the mapping is genuinely lost for credentials issued in
+			// that window. Say so rather than let a rolling upgrade quietly
+			// produce unrevocable credentials; issuer and apigw are meant
+			// to be upgraded together.
+			if e.Section != 0 || e.Index != 0 || e.Backend != "" {
+				c.log.Warn("issuance reply carries a status list entry with no list URI, so it cannot be recorded and the credential cannot be revoked; this is what an issuer older than the status_list_uri field looks like - upgrade issuer and apigw together",
+					"identifier", identifier, "section", e.Section, "index", e.Index, "backend", e.Backend)
+			}
 			continue
 		}
 

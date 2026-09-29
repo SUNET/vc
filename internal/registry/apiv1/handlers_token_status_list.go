@@ -148,13 +148,21 @@ type SaveCredentialSubjectRequest struct {
 	Identifier string `json:"identifier" validate:"required"`
 	Section    int64  `json:"section" validate:"gte=0"`
 	Index      int64  `json:"index" validate:"gte=0"`
-	// StatusListURI is required: it is what identifies the list an entry
-	// belongs to when the entry came from an external
-	// draft-ietf-oauth-status-list service, which has no sections. A
-	// mapping saved without it cannot be resolved back to a status list,
-	// so the credential it describes could never be revoked - failing
-	// here is better than recording something useless.
-	StatusListURI string `json:"status_list_uri" validate:"required,url"`
+	// StatusListURI identifies the list the entry belongs to.
+	//
+	// It may be omitted, and then it is DERIVED from Section. That is not
+	// laxness: every entry this registry can be asked to store is one of
+	// its own, whose URL is a pure function of the section (see
+	// model.Registry.StatusListURL), and an older APIGW that predates the
+	// field simply does not send it. Requiring it unconditionally would
+	// reject those callers during a rolling upgrade and lose the mappings
+	// for every credential issued in that window.
+	//
+	// An explicitly supplied URI that is not one of this registry's own is
+	// refused rather than stored: the registry cannot act on such an
+	// entry, so recording it would only produce rows its admin view can
+	// display and nothing can change.
+	StatusListURI string `json:"status_list_uri,omitempty" validate:"omitempty,url"`
 }
 
 // SaveCredentialSubject saves credential subject info linked to a Token Status List entry
@@ -164,11 +172,29 @@ func (c *Client) SaveCredentialSubject(ctx context.Context, req *SaveCredentialS
 		return nil
 	}
 
+	local, err := c.cfg.Registry.StatusListURL(req.Section)
+	if err != nil {
+		c.log.Error(err, "cannot construct this registry's status list URL", "section", req.Section)
+		return err
+	}
+	uri := req.StatusListURI
+	switch uri {
+	case "":
+		// Older caller, or one that left it out: derive it.
+		uri = local
+	case local:
+		// Agrees with what this registry serves.
+	default:
+		c.log.Error(nil, "refusing a credential subject for a status list this registry does not own",
+			"status_list_uri", req.StatusListURI, "section", req.Section, "index", req.Index)
+		return fmt.Errorf("status list %q is not issued by this registry, so its entries cannot be recorded here", req.StatusListURI)
+	}
+
 	doc := &db.CredentialSubjectDoc{
 		Identifier:    req.Identifier,
 		Section:       req.Section,
 		Index:         req.Index,
-		StatusListURI: req.StatusListURI,
+		StatusListURI: uri,
 	}
 
 	if err := c.credentialSubjects.Add(ctx, doc); err != nil {

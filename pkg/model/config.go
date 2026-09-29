@@ -842,6 +842,22 @@ type RevocationConfig struct {
 	// SkipScopes lists credential scopes exempt from revocation checking
 	// (e.g., short-lived credentials valid < 24 hours per ARF 3.0 §6.6.3.7).
 	SkipScopes []string `yaml:"skip_scopes,omitempty" json:"skip_scopes,omitempty"`
+	// StatusListIssuer is the issuer identity to resolve a signing key
+	// under when a Status List Token carries no `iss` claim.
+	//
+	// draft-ietf-oauth-status-list Section 5.1 does not require `iss` - the
+	// REQUIRED claims are sub, iat and status_list - and a conforming
+	// service such as siros-status-service omits it and publishes its
+	// status-list signing key separately from anything reachable under the
+	// list URL. There is therefore nothing in such a token to derive a
+	// trustworthy key from, so the deployment has to say.
+	//
+	// Left empty, a token without `iss` is REFUSED rather than guessed at.
+	// The previous behaviour - falling back to the list URI - sent the
+	// resolver looking for issuer discovery under
+	// "<list URI>/.well-known/...", which does not exist, so it failed
+	// anyway, just with a misleading error.
+	StatusListIssuer string `yaml:"status_list_issuer,omitempty" json:"status_list_issuer,omitempty" validate:"omitempty,httpurl" doc_example:"\"https://status.siros.org\""`
 }
 
 // ValidateClientIDMaterial checks that the key material loaded at startup can

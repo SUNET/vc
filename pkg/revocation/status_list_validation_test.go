@@ -1,6 +1,7 @@
 package revocation
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -12,7 +13,9 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
+
 	"github.com/SUNET/vc/pkg/vc20/contextstore"
+	"github.com/fxamacker/cbor/v2"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
@@ -45,6 +48,10 @@ func newStatusListFixture(t *testing.T) *statusListFixture {
 		WithCache(cache.NewMemoryCache[[]uint8](5*time.Minute)),
 		WithHTTPClient(server.Client()),
 		WithKeyResolver(testKeyResolver{key: &key.PublicKey}),
+		// These fixtures mint tokens without iss, which is what a
+		// conforming status service does, so the deployment has to name the
+		// issuer identity to resolve the signing key under.
+		WithFallbackIssuer("https://status.example.com"),
 	)
 	require.NoError(t, err)
 
@@ -127,7 +134,8 @@ func TestStatusListToken_TypHeaderIsEnforced(t *testing.T) {
 
 // TestStatusListToken_IssIsOptional: Section 5.1's REQUIRED claims are sub,
 // iat and status_list. vc used to refuse any token without iss, which
-// rejects conformant status services.
+// rejects conformant status services. With status_list_issuer configured
+// (the fixture sets it), such a token is accepted.
 func TestStatusListToken_IssIsOptional(t *testing.T) {
 	f := newStatusListFixture(t)
 	f.sign(t, tokenstatuslist.JWTTypHeader, jwt.MapClaims{
@@ -205,6 +213,7 @@ func TestStatusListToken_ContentTypeWithParameters(t *testing.T) {
 		WithCache(cache.NewMemoryCache[[]uint8](5*time.Minute)),
 		WithHTTPClient(server.Client()),
 		WithKeyResolver(testKeyResolver{key: &key.PublicKey}),
+		WithFallbackIssuer("https://status.example.com"),
 	)
 	require.NoError(t, err)
 
@@ -309,4 +318,167 @@ func TestVC20CredentialStatusReachesTheStatusCheck(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, StatusValid, result.Status)
+}
+
+// TestStatusListToken_NoIssAndNoConfiguredIssuerIsRefused is the other half
+// of making iss optional.
+//
+// A token without iss carries nothing to resolve a signing key from. The
+// list URI is not a substitute: a status service publishes its status-list
+// signing key separately from the list URL, so using the URI as an issuer
+// identity sends the resolver looking for discovery under
+// "<list URI>/.well-known/...", which is not there. Refusing is the
+// fail-closed answer - an unverifiable status list must not be read as a
+// verified one.
+func TestStatusListToken_NoIssAndNoConfiguredIssuerIsRefused(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	var token string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeJWT)
+		_, _ = w.Write([]byte(token))
+	}))
+	t.Cleanup(server.Close)
+
+	// No WithFallbackIssuer.
+	checker, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](5*time.Minute)),
+		WithHTTPClient(server.Client()),
+		WithKeyResolver(testKeyResolver{key: &key.PublicKey}),
+	)
+	require.NoError(t, err)
+
+	uri := server.URL + "/statuslists/0"
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+		"sub":         uri,
+		"iat":         time.Now().Unix(),
+		"status_list": statusListClaim(t, []uint8{0, 1}, 8),
+	})
+	tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+	token, err = tok.SignedString(key)
+	require.NoError(t, err)
+
+	_, err = checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 1})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no verifier.revocation.status_list_issuer is configured")
+}
+
+// TestStatusListToken_IssStillWins: a token that does carry iss must use it,
+// not the configured fallback, or a deployment with one configured would
+// resolve every issuer's tokens under the same identity.
+func TestStatusListToken_IssStillWins(t *testing.T) {
+	f := newStatusListFixture(t)
+
+	seen := &recordingKeyResolver{key: &f.key.PublicKey}
+	checker, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](5*time.Minute)),
+		WithHTTPClient(f.server.Client()),
+		WithKeyResolver(seen),
+		WithFallbackIssuer("https://fallback.example.com"),
+	)
+	require.NoError(t, err)
+
+	f.sign(t, tokenstatuslist.JWTTypHeader, jwt.MapClaims{
+		"iss":         "https://real-issuer.example.com",
+		"sub":         f.uri(),
+		"iat":         time.Now().Unix(),
+		"status_list": statusListClaim(t, []uint8{0, tokenstatuslist.StatusInvalid}, 8),
+	})
+
+	_, err = checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: f.uri(), Index: 1})
+	require.NoError(t, err)
+	require.Equal(t, "https://real-issuer.example.com", seen.issuer)
+}
+
+// recordingKeyResolver captures the issuer identity it was asked about.
+type recordingKeyResolver struct {
+	key    any
+	issuer string
+}
+
+func (r *recordingKeyResolver) ResolveKey(_ context.Context, issuer, _ string) (any, error) {
+	r.issuer = issuer
+	return r.key, nil
+}
+
+// TestStatusListToken_CWTTypHeaderIsEnforced closes the gap the JWT path
+// already covered: without checking COSE protected header 16, a different
+// COSE_Sign1 object signed by the same trusted key is accepted as a status
+// list if its claims happen to be shaped alike.
+func TestStatusListToken_CWTTypHeaderIsEnforced(t *testing.T) {
+	for name, headers := range map[string]map[int64]any{
+		"absent":       {},
+		"wrong string": {int64(16): "application/cwt"},
+		"wrong type":   {int64(16): 61},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := checkCWTTypeHeader(headers)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tokenstatuslist.CWTTypHeader)
+		})
+	}
+
+	// The real value is accepted in both encodings a COSE header can use.
+	require.NoError(t, checkCWTTypeHeader(map[int64]any{int64(16): tokenstatuslist.CWTTypHeader}))
+	require.NoError(t, checkCWTTypeHeader(map[int64]any{int64(16): []byte(tokenstatuslist.CWTTypHeader)}))
+}
+
+// serveCWT serves a hand-built COSE_Sign1 with the given protected headers
+// and checks what the status list checker makes of it.
+//
+// The signature is deliberately junk. The typ check runs before any key is
+// resolved, so a token that fails it must be refused for THAT reason - which
+// is what makes this a test of the call site rather than of the predicate.
+func serveCWT(t *testing.T, protected map[int64]any) error {
+	t.Helper()
+
+	encoder, err := mdoc.NewCBOREncoder()
+	require.NoError(t, err)
+
+	protectedBytes, err := encoder.Marshal(protected)
+	require.NoError(t, err)
+	payloadBytes, err := encoder.Marshal(map[int]any{2: "https://example.com/statuslists/0"})
+	require.NoError(t, err)
+
+	token, err := encoder.Marshal(cbor.Tag{Number: 18, Content: []any{
+		protectedBytes, map[any]any{}, payloadBytes, []byte("not-a-signature"),
+	}})
+	require.NoError(t, err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", tokenstatuslist.MediaTypeCWT)
+		_, _ = w.Write(token)
+	}))
+	t.Cleanup(server.Close)
+
+	checker, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](5*time.Minute)),
+		WithHTTPClient(server.Client()),
+		WithKeyResolver(testKeyResolver{key: struct{}{}}),
+		WithFallbackIssuer("https://status.example.com"),
+	)
+	require.NoError(t, err)
+
+	_, err = checker.CheckStatus(t.Context(), &Reference{
+		Scheme: SchemeStatusList, URI: server.URL + "/statuslists/0", Index: 0,
+	})
+	return err
+}
+
+// TestStatusListToken_CWTTypCheckIsWiredIn: the predicate above is only
+// worth anything if parseCWTStatusList actually calls it.
+func TestStatusListToken_CWTTypCheckIsWiredIn(t *testing.T) {
+	// alg=ES256, content type of something that is not a status list.
+	err := serveCWT(t, map[int64]any{1: -7, 16: "application/cwt"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), tokenstatuslist.CWTTypHeader,
+		"a CWT with the wrong content type must be refused for that reason")
+
+	// With the right content type the same token gets further - it still
+	// fails, on the junk signature, which proves the typ check is not
+	// simply rejecting everything.
+	err = serveCWT(t, map[int64]any{1: -7, 16: tokenstatuslist.CWTTypHeader})
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), tokenstatuslist.CWTTypHeader)
 }

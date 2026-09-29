@@ -199,6 +199,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 			revocation.WithCache(statusCache),
 			revocation.WithHTTPClient(&http.Client{Timeout: 30 * time.Second}),
 			revocation.WithKeyResolver(jwksKeyResolverAdapter{resolver: c.jwksResolver}),
+			revocation.WithFallbackIssuer(cfg.Verifier.Revocation.StatusListIssuer),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create status list checker: %w", err)

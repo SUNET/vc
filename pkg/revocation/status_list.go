@@ -25,10 +25,23 @@ type StatusListChecker struct {
 	httpClient  *http.Client
 	cache       cache.Cache[[]uint8]
 	keyResolver KeyResolver
+	// fallbackIssuer is the issuer identity used for Status List Tokens
+	// that carry no iss claim. Empty means such tokens are refused; see
+	// resolveStatusListKey.
+	fallbackIssuer string
 }
 
 // StatusListCheckerOption configures a StatusListChecker.
 type StatusListCheckerOption func(*StatusListChecker)
+
+// WithFallbackIssuer sets the issuer identity to resolve a signing key
+// under when a Status List Token carries no iss claim. Without it such a
+// token is refused rather than resolved against a guess.
+func WithFallbackIssuer(issuer string) StatusListCheckerOption {
+	return func(c *StatusListChecker) {
+		c.fallbackIssuer = issuer
+	}
+}
 
 // WithHTTPClient sets a custom HTTP client.
 func WithHTTPClient(client *http.Client) StatusListCheckerOption {
@@ -212,23 +225,60 @@ func (c *StatusListChecker) parseStatusListToken(ctx context.Context, uri string
 // resolveStatusListKey resolves the key a Status List Token was signed with.
 //
 // draft-ietf-oauth-status-list Section 5.1 does NOT require an iss claim -
-// the REQUIRED claims are sub, iat and status_list - so refusing a token
-// without one rejects spec-compliant status services (this is what vc did,
-// and siros-status-service is one of them). What the specification DOES
-// require is that sub equals the uri the credential pointed at, which makes
-// the uri an identifier for the list that is always present and always
-// checked. So the issuer identity used for key resolution is iss when the
-// token carries one, and the list URI otherwise.
+// the REQUIRED claims are sub, iat and status_list - so refusing every
+// token without one rejects conforming status services, which is what vc
+// used to do.
 //
-// It is never absent: an empty issuer would hand the resolver a blank
-// identity to look up, so the URI standing in keeps resolution keyed to
-// something the caller actually asked for.
+// But a missing iss leaves nothing in the token to resolve a key from. The
+// list URI is not a substitute: a service such as siros-status-service
+// publishes its status-list signing key separately from the list URL, so
+// treating the URI as an issuer identity sends the resolver looking for
+// discovery under "<list URI>/.well-known/...", which is not there. It
+// would fail anyway - just with an error describing the wrong problem, and
+// on a path that looks like it was designed to work.
+//
+// So the fallback is configuration (WithFallbackIssuer, from
+// verifier.revocation.status_list_issuer), and with none configured a token
+// without iss is refused. Refusing is the fail-closed answer: an
+// unverifiable status list must not be treated as a readable one.
 func (c *StatusListChecker) resolveStatusListKey(ctx context.Context, issuer, uri, kid string) (any, error) {
 	if issuer == "" {
-		issuer = uri
+		issuer = c.fallbackIssuer
+	}
+	if issuer == "" {
+		return nil, fmt.Errorf("status list token for %q carries no iss claim and no verifier.revocation.status_list_issuer is configured, so its signing key cannot be resolved", uri)
 	}
 	return c.keyResolver.ResolveKey(ctx, issuer, kid)
 }
+
+// checkCWTTypeHeader enforces the statuslist+cwt content type carried in
+// COSE protected header 16 (RFC 9596). The header may hold the media type
+// as a string or as a registered CoAP Content-Format integer; only the
+// string form is defined for this media type, so anything else is refused
+// rather than assumed to be equivalent.
+func checkCWTTypeHeader(headers map[int64]any) error {
+	raw, ok := headers[coseHeaderContentType]
+	if !ok {
+		return fmt.Errorf("status list CWT has no typ header, expected %q", tokenstatuslist.CWTTypHeader)
+	}
+	var typ string
+	switch v := raw.(type) {
+	case string:
+		typ = v
+	case []byte:
+		typ = string(v)
+	default:
+		return fmt.Errorf("status list CWT typ header has unexpected type %T, expected %q", raw, tokenstatuslist.CWTTypHeader)
+	}
+	if !strings.EqualFold(typ, tokenstatuslist.CWTTypHeader) {
+		return fmt.Errorf("status list CWT has typ %q, expected %q", typ, tokenstatuslist.CWTTypHeader)
+	}
+	return nil
+}
+
+// coseHeaderContentType is COSE protected header label 16, which carries
+// the payload's media type (RFC 9596 "typ").
+const coseHeaderContentType = 16
 
 // checkSubject enforces Section 8.3: "the sub claim value MUST be equal to
 // the uri claim in the status_list object of the Referenced Token".
@@ -283,6 +333,15 @@ func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, uri string, 
 	kid, _ := headers[mdoc.HeaderKeyID].(string)
 	if kidBytes, ok := headers[mdoc.HeaderKeyID].([]byte); ok {
 		kid = string(kidBytes)
+	}
+
+	// Section 6.1 makes the content type mandatory, the same way Section
+	// 5.1 does for a JWT's typ. Without this check a different COSE_Sign1
+	// object signed by the same trusted key is accepted as a status list
+	// if its claims happen to be shaped alike - which is exactly the hole
+	// the JWT path closes and this one did not.
+	if err := checkCWTTypeHeader(headers); err != nil {
+		return nil, err
 	}
 
 	// Decode CWT claims to extract issuer

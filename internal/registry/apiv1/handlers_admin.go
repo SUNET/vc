@@ -50,12 +50,18 @@ func (c *Client) SearchPerson(ctx context.Context, req *SearchPersonRequest) (*S
 	results := make([]*PersonResult, 0, len(docs))
 	for _, doc := range docs {
 		result := &PersonResult{
-			Identifier:    doc.Identifier,
-			Section:       doc.Section,
-			Index:         doc.Index,
-			StatusListURI: doc.StatusListURI,
-			Local:         c.ownsStatusList(doc.StatusListURI, doc.Section),
+			Identifier: doc.Identifier,
+			Section:    doc.Section,
+			Index:      doc.Index,
+			// Legacy records predate the field. Every one of them is this
+			// registry's own - nothing else writes here - and the URL is a
+			// pure function of the section, so it is filled in rather than
+			// shown blank and treated as foreign. Without this every
+			// pre-existing entry would display as unknown and lose its
+			// update control.
+			StatusListURI: c.displayStatusListURI(doc.StatusListURI, doc.Section),
 		}
+		result.Local = c.ownsStatusList(result.StatusListURI, doc.Section)
 
 		// Only this registry's own lists can be read from its database.
 		// Reading an external entry's section/index out of adminDB would
@@ -96,14 +102,20 @@ type UpdateStatusRequest struct {
 // sub claim are built from, so "owned" means the same thing in all three
 // places.
 func (c *Client) ownsStatusList(uri string, section int64) bool {
-	if uri == "" || c.cfg == nil {
+	if c.cfg == nil {
 		return false
 	}
 	local, err := c.cfg.Registry.StatusListURL(section)
 	if err != nil {
 		return false
 	}
-	return uri == local
+	// Deliberately strict: an empty URI is NOT accepted here. A record
+	// written before the field existed is filled in by
+	// displayStatusListURI on the way out, so the admin form always sends
+	// a URI and can still act on legacy rows - while a caller that names
+	// no list at all is still refused, and keeps having to confirm which
+	// entry it means.
+	return uri != "" && uri == local
 }
 
 // UpdateStatus updates the status of a credential in the Token Status List.
@@ -119,6 +131,8 @@ func (c *Client) UpdateStatus(ctx context.Context, req *UpdateStatusRequest) err
 		return fmt.Errorf("database not configured")
 	}
 
+	// An empty URI is accepted only because ownsStatusList derives it for
+	// legacy records; the admin form always sends the displayed one.
 	if !c.ownsStatusList(req.StatusListURI, req.Section) {
 		c.log.Error(nil, "refusing to update a status entry this registry does not own",
 			"status_list_uri", req.StatusListURI, "section", req.Section, "index", req.Index)
@@ -139,4 +153,18 @@ func (c *Client) UpdateStatus(ctx context.Context, req *UpdateStatusRequest) err
 
 	c.log.Info("Status updated", "section", req.Section, "index", req.Index, "status", req.Status)
 	return nil
+}
+
+// displayStatusListURI fills in the list URL for a record written before
+// the field existed, so the admin view shows what the entry actually points
+// at rather than a blank.
+func (c *Client) displayStatusListURI(stored string, section int64) string {
+	if stored != "" || c.cfg == nil {
+		return stored
+	}
+	local, err := c.cfg.Registry.StatusListURL(section)
+	if err != nil {
+		return ""
+	}
+	return local
 }
