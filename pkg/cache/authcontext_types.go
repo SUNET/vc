@@ -127,13 +127,23 @@ type AuthorizationContext struct {
 	PresentationSubmission any            `json:"presentation_submission,omitempty" bson:"presentation_submission,omitempty"`
 
 	// OpenID4VP fields (wallet interaction)
-	EphemeralEncryptionKeyID string                                 `json:"ephemeral_encryption_key_id,omitempty" bson:"ephemeral_encryption_key_id,omitempty" validate:"omitempty,max=128,printascii"`
-	VerifierResponseCode     string                                 `json:"verifier_response_code,omitempty" bson:"verifier_response_code,omitempty" validate:"omitempty,max=128,printascii"`
-	RequestObjectID          string                                 `json:"request_object_id,omitempty" bson:"request_object_id,omitempty" validate:"omitempty,max=128,printascii"`
-	RequestObjectNonce       string                                 `json:"request_object_nonce,omitempty" bson:"request_object_nonce,omitempty" validate:"omitempty,max=128,printascii"`
-	DCQLQuery                *openid4vp.DCQL                        `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
-	Validations              map[string][]openid4vp.ClaimValidation `json:"validations,omitempty" bson:"validations,omitempty" validate:"omitempty,dive,dive"`
-	WalletID                 string                                 `json:"wallet_id,omitempty" bson:"wallet_id,omitempty" validate:"omitempty,max=128,printascii"`
+	EphemeralEncryptionKeyID string          `json:"ephemeral_encryption_key_id,omitempty" bson:"ephemeral_encryption_key_id,omitempty" validate:"omitempty,max=128,printascii"`
+	VerifierResponseCode     string          `json:"verifier_response_code,omitempty" bson:"verifier_response_code,omitempty" validate:"omitempty,max=128,printascii"`
+	RequestObjectID          string          `json:"request_object_id,omitempty" bson:"request_object_id,omitempty" validate:"omitempty,max=128,printascii"`
+	RequestObjectNonce       string          `json:"request_object_nonce,omitempty" bson:"request_object_nonce,omitempty" validate:"omitempty,max=128,printascii"`
+	DCQLQuery                *openid4vp.DCQL `json:"dcql_query,omitempty" bson:"dcql_query,omitempty"`
+	// ScopeQueryIDs maps a requested scope to the id of the DCQL credential
+	// query that stands for it, for the scopes where the two differ.
+	//
+	// A wallet keys vp_token by query id, not by scope (OpenID4VP 1.0), and a
+	// template names its queries whatever its author chose - the shipped PID
+	// template asks for "eudi_pid" while the request uses scope "pid" - so
+	// without this the verifier reads a key the wallet never sent.
+	//
+	// Only differing pairs are stored; an absent entry looks up directly.
+	ScopeQueryIDs map[string]string                      `json:"scope_query_ids,omitempty" bson:"scope_query_ids,omitempty"`
+	Validations   map[string][]openid4vp.ClaimValidation `json:"validations,omitempty" bson:"validations,omitempty" validate:"omitempty,dive,dive"`
+	WalletID      string                                 `json:"wallet_id,omitempty" bson:"wallet_id,omitempty" validate:"omitempty,max=128,printascii"`
 }
 
 // Validate checks the AuthorizationContext against its struct validation tags.
