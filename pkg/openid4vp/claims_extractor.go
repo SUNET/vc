@@ -194,13 +194,19 @@ func extractMDocClaimsFromToken(vpToken string) (map[string]any, error) {
 	}
 
 	claims := make(map[string]any)
+	docType := ""
 	for _, doc := range deviceResponse.Documents {
-		// Surface the mdoc doctype so downstream type enforcement (e.g. the
-		// apigw presentation-scope check) has a canonical anchor. isInternalClaim
-		// filters this key out of OIDC wildcard mapping.
+		// A DeviceResponse may hold multiple documents. Since claims from
+		// every document are merged into one map, downstream doctype
+		// enforcement cannot tell which claim came from which document —
+		// so refuse a mixed-doctype response rather than silently record
+		// only the first one.
 		if doc.DocType != "" {
-			if _, present := claims["docType"]; !present {
-				claims["docType"] = doc.DocType
+			switch {
+			case docType == "":
+				docType = doc.DocType
+			case docType != doc.DocType:
+				return nil, fmt.Errorf("DeviceResponse contains mixed docTypes (%q and %q); refuse rather than merge", docType, doc.DocType)
 			}
 		}
 		for ns, items := range doc.IssuerSigned.NameSpaces {
@@ -243,6 +249,13 @@ func extractMDocClaimsFromToken(vpToken string) (map[string]any, error) {
 				}
 			}
 		}
+	}
+
+	// Surface the mdoc doctype so downstream type enforcement (e.g. the apigw
+	// presentation-scope check) has a canonical anchor. isInternalClaim
+	// filters this key out of OIDC wildcard mapping.
+	if docType != "" {
+		claims["docType"] = docType
 	}
 
 	return claims, nil

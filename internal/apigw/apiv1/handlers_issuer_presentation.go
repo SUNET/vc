@@ -42,12 +42,19 @@ func (c *Client) buildPresentationDocument(scope string, pScope model.Presentati
 	}
 
 	credMeta := c.cfg.GetCredentialMetadata(scope)
-	if credMeta == nil || credMeta.VCTM == nil {
+	if credMeta == nil {
+		return nil, fmt.Errorf("presentation scope %q has no credential_metadata entry; refusing to issue", scope)
+	}
+	// Snapshot VCTM through GetVCTM so a concurrent background refresh
+	// (guarded by CredentialMetadata.mu) cannot swap the pointer between the
+	// nil check and the filter.
+	vctm := credMeta.GetVCTM()
+	if vctm == nil {
 		// Presentation-derived issuance without a declared claim allow-list
 		// would leak every claim the presented credential carries (birthdate,
 		// assurance_level, address, …) into the derived credential body.
 		// Refuse issuance rather than emit an unfiltered document.
 		return nil, fmt.Errorf("presentation scope %q has no VCTM to filter against; refusing to issue an unfiltered document", scope)
 	}
-	return credential.FilterAgainstVCTM(doc, credMeta.VCTM), nil
+	return credential.FilterAgainstVCTM(doc, vctm), nil
 }

@@ -2,11 +2,13 @@ package apiv1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 )
 
@@ -211,6 +213,37 @@ func isSDJWTFormat(format string) bool {
 
 func isMDocFormat(format string) bool {
 	return format == "mso_mdoc"
+}
+
+// mdocClaimsFromResult flattens an MDocHandler result into the claim map
+// shape enforceMDocType and finalisePresentationVerification expect:
+// namespace-qualified keys, unqualified keys for the primary ISO namespace,
+// and a synthetic top-level `docType`. Mixed doctypes are rejected because
+// downstream enforcement compares a single expected doctype against the map.
+func mdocClaimsFromResult(result *mdoc.MDocVerificationResult) (map[string]any, error) {
+	if result == nil || len(result.Documents) == 0 {
+		return nil, errors.New("mdoc verification produced no documents")
+	}
+	if len(result.Documents) > 1 {
+		types := make([]string, 0, len(result.Documents))
+		for dt := range result.Documents {
+			types = append(types, dt)
+		}
+		return nil, fmt.Errorf("mdoc DeviceResponse contains multiple docTypes (%v); refuse rather than merge", types)
+	}
+	claims := make(map[string]any)
+	for docType, doc := range result.Documents {
+		claims["docType"] = docType
+		for ns, items := range doc.Namespaces {
+			for k, v := range items {
+				claims[fmt.Sprintf("%s.%s", ns, k)] = v
+				if ns == mdoc.Namespace {
+					claims[k] = v
+				}
+			}
+		}
+	}
+	return claims, nil
 }
 
 // claimValueMatches returns true if val (a scalar string or a list of them)

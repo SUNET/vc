@@ -13,6 +13,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -218,33 +219,55 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, fmt.Errorf("invalid response: %w", err)
 	}
 
-	// Validate VP Token using VPTokenValidator
-	validator := &openid4vp.VPTokenValidator{
-		Nonce:           authCtx.Nonce,
-		ClientID:        authCtx.ClientID,
-		ValidateFormat:  true,
-		CheckRevocation: false,
-		DCQLQuery:       authCtx.DCQLQuery,
-	}
+	// SD-JWT and mdoc need different verification paths: VPTokenValidator +
+	// EvaluateIssuerTrust both parse the token as SD-JWT (see
+	// pkg/openid4vp/validator.go and pkg/trust/jwt_verifier.go), so an
+	// mdoc VP token has to go through MDocHandler instead.
+	var credential map[string]any
+	if mdoc.IsMDocFormat(responseParams.VPToken) {
+		if c.trustEvaluator == nil {
+			return nil, errors.New("mdoc VP verification requires apigw.trust.pdp_url to be configured")
+		}
+		mdocHandler, err := mdoc.NewMDocHandler(mdoc.WithMDocTrustEvaluator(c.trustEvaluator))
+		if err != nil {
+			c.log.Error(err, "failed to create mdoc handler")
+			return nil, fmt.Errorf("mdoc handler init failed: %w", err)
+		}
+		mdocResult, err := mdocHandler.VerifyAndExtract(ctx, responseParams.VPToken)
+		if err != nil {
+			c.log.Error(err, "mdoc VP verification failed")
+			return nil, fmt.Errorf("mdoc VP verification failed: %w", err)
+		}
+		credential, err = mdocClaimsFromResult(mdocResult)
+		if err != nil {
+			return nil, err
+		}
+		c.log.Debug("mdoc VP verified", "doc_count", len(mdocResult.Documents))
+	} else {
+		validator := &openid4vp.VPTokenValidator{
+			Nonce:           authCtx.Nonce,
+			ClientID:        authCtx.ClientID,
+			ValidateFormat:  true,
+			CheckRevocation: false,
+			DCQLQuery:       authCtx.DCQLQuery,
+		}
+		if err := validator.Validate(responseParams.VPToken); err != nil {
+			c.log.Error(err, "VP Token validation failed")
+			return nil, fmt.Errorf("VP Token validation failed: %w", err)
+		}
+		c.log.Debug("VP Token validated successfully")
 
-	if err := validator.Validate(responseParams.VPToken); err != nil {
-		c.log.Error(err, "VP Token validation failed")
-		return nil, fmt.Errorf("VP Token validation failed: %w", err)
-	}
+		if err := c.jwtTrustVerifier.EvaluateIssuerTrust(ctx, vpToken, scope); err != nil {
+			c.log.Error(err, "Issuer trust evaluation failed", "scope", scope)
+			return nil, fmt.Errorf("issuer trust evaluation failed: %w", err)
+		}
 
-	c.log.Debug("VP Token validated successfully")
-
-	// Evaluate issuer trust before accepting the credential
-	if err := c.jwtTrustVerifier.EvaluateIssuerTrust(ctx, vpToken, scope); err != nil {
-		c.log.Error(err, "Issuer trust evaluation failed", "scope", scope)
-		return nil, fmt.Errorf("issuer trust evaluation failed: %w", err)
-	}
-
-	// Build credential from validated VP Token
-	credential, err := responseParams.BuildCredential()
-	if err != nil {
-		c.log.Error(err, "failed to build credential from response parameters")
-		return nil, err
+		built, err := responseParams.BuildCredential()
+		if err != nil {
+			c.log.Error(err, "failed to build credential from response parameters")
+			return nil, err
+		}
+		credential = built
 	}
 
 	c.log.Debug("Found credential metadata", "scope", scope, "vct", credMetaCfg.GetVCTURL())
