@@ -191,10 +191,31 @@ func TestTake_ReleasesAndStopsWhenEveryAllocationIsBornExpired(t *testing.T) {
 	// Take's fallback, each released. What must NOT happen is unbounded
 	// growth: before this fix the refill pushed born-expired entries, take()
 	// discarded them and signalled another refill, and the loop never ended.
+	//
+	// The refill runs in its own goroutine, so its release lands after Take
+	// has already returned. Wait for the counts to settle rather than
+	// reading them straight away - a single unsynchronised read passes or
+	// fails on timing, which is how the first version of this test passed
+	// once and failed under -count.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if atomic.LoadInt32(&releases) == atomic.LoadInt32(&allocations) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
 	gotAlloc := atomic.LoadInt32(&allocations)
 	gotRelease := atomic.LoadInt32(&releases)
-	if gotAlloc > 2 {
-		t.Fatalf("allocated %d entries; a configuration error that cannot change between attempts must not be retried into a loop", gotAlloc)
+
+	// A bound, not an exact count: the refill goroutine can be woken more
+	// than once (start-up, plus take() signalling an empty pool), so two or
+	// three allocations are both legitimate. What the fix has to guarantee
+	// is that the number does not GROW - with the hot loop this test
+	// measured 604 in one second, so any small bound separates the two.
+	const bound = 10
+	if gotAlloc > bound {
+		t.Fatalf("allocated %d entries (bound %d); a configuration error that cannot change between attempts must not be retried into a loop", gotAlloc, bound)
 	}
 	if gotRelease != gotAlloc {
 		t.Fatalf("allocated %d entries but released %d: every reserved entry that can never be issued must be handed back", gotAlloc, gotRelease)
