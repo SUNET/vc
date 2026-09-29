@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"crypto"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -236,9 +237,21 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			return nil, fmt.Errorf("compute mdoc response_uri: %w", err)
 		}
 		// SessionTranscript binds the presentation to this request's
-		// nonce/client_id/response_uri; reader-key thumbprint is nil because
-		// the apigw direct_post flow does not use response encryption here.
-		sessionTranscript, err := mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, nil)
+		// nonce/client_id/response_uri and to the ephemeral response-
+		// encryption public key advertised in ClientMetadata.JWKS. A
+		// conformant mdoc wallet includes that reader-key thumbprint in
+		// its own transcript, so we must derive the same one here or
+		// device-auth verification rejects valid encrypted direct-post
+		// presentations.
+		ephemeralPublicJWK, err := privateEphemeralJWK.PublicKey()
+		if err != nil {
+			return nil, fmt.Errorf("derive ephemeral public key: %w", err)
+		}
+		readerPubKeyThumbprint, err := ephemeralPublicJWK.Thumbprint(crypto.SHA256)
+		if err != nil {
+			return nil, fmt.Errorf("compute ephemeral JWK thumbprint: %w", err)
+		}
+		sessionTranscript, err := mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)
 		if err != nil {
 			return nil, fmt.Errorf("build mdoc session transcript: %w", err)
 		}
@@ -285,6 +298,16 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	}
 
 	c.log.Debug("Found credential metadata", "scope", scope, "vct", credMetaCfg.GetVCTURL())
+
+	// Enforce that the verified credential's type matches matchedAuthScope's
+	// credential_metadata. VPTokenValidator's validateAgainstDCQL is
+	// currently a no-op, and the mdoc branch above skips it entirely; a
+	// trusted credential of another type that happens to carry the
+	// requested claim keys must not be accepted for this auth scope.
+	if err := c.enforceScopeCredentialType(matchedAuthScope, credential); err != nil {
+		c.log.Error(err, "verified credential type does not match matched auth scope", "matched_auth_scope", matchedAuthScope, "scope", scope)
+		return nil, err
+	}
 
 	// Presentation-source scopes derive their whole document from the
 	// presented credential — there is no datastore lookup by identity.
@@ -390,13 +413,10 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
 		entry := vpAuth.AuthScopes[authScope]
 		scopeClaimQueries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims))
+		format := cfg.GetFormatForScope(authScope)
 		for _, claim := range entry.AuthClaims {
-			// AuthClaims are documented as claim paths. Split on "." so a
-			// dotted path like "address.locality" becomes the nested DCQL
-			// path ["address", "locality"] rather than a single literal
-			// segment the wallet cannot match.
 			scopeClaimQueries = append(scopeClaimQueries, openid4vp.ClaimQuery{
-				Path: openid4vp.StringPath(strings.Split(claim, ".")...),
+				Path: openid4vp.StringPath(authClaimPathSegments(format, claim)...),
 			})
 		}
 		// By format, so an mso_mdoc auth scope is constrained by its doctype
@@ -426,4 +446,23 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 			},
 		},
 	}, nil
+}
+
+// authClaimPathSegments turns an auth-scope claim into DCQL path segments.
+// For SD-JWT VC a dotted "address.locality" becomes the nested path
+// ["address", "locality"]. For mdoc DCQL requires exactly [namespace,
+// element_identifier] (OpenID4VP 1.0 §6.4.1); a bare element is resolved
+// against the primary ISO 18013-5 namespace and a "<namespace>.<element>"
+// entry is split on the LAST dot so a multi-dot namespace such as
+// "eu.europa.ec.eudi.pid.1" survives as one segment.
+func authClaimPathSegments(format, claim string) []string {
+	switch format {
+	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
+		if idx := strings.LastIndex(claim, "."); idx > 0 && idx < len(claim)-1 {
+			return []string{claim[:idx], claim[idx+1:]}
+		}
+		return []string{mdoc.Namespace, claim}
+	default:
+		return strings.Split(claim, ".")
+	}
 }

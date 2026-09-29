@@ -140,6 +140,14 @@ func (h *MDocHandler) verifyAndExtract(ctx context.Context, vpToken string, sess
 		}
 		for i := range deviceResponse.Documents {
 			doc := &deviceResponse.Documents[i]
+			// The bound path is signature-only: this API has no session
+			// encryption key to derive the MAC key from, so a MAC-based
+			// DeviceAuth cannot be verified here. Reject it explicitly
+			// rather than let VerifyDeviceAuth surface the same message
+			// as a wrapped "device auth binding failed" error.
+			if hasDeviceMac(doc) && !hasDeviceSignature(doc) {
+				return nil, fmt.Errorf("device auth binding failed for %q: MAC-based device authentication is not supported on this API; the OpenID4VP direct_post flow has no session encryption key to verify a MAC against — wallet must use a device signature", doc.DocType)
+			}
 			// VerifyDeviceAuth returns nil when a document carries neither a
 			// device signature nor a MAC. Require one to be present on the
 			// bound path so a wallet cannot omit device authentication and

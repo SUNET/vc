@@ -44,8 +44,12 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 		}
 		// Materialise dotted claim paths as nested map structures so the
 		// downstream VCTM filter (which walks nested maps) can see them
-		// under the same shape the presented credential used.
-		setClaimPath(verified, claim, val)
+		// under the same shape the presented credential used. When the
+		// presented credential stored the claim as a flat literal key —
+		// e.g. an mdoc namespace-qualified "org.iso.18013.5.1.birth_date"
+		// — preserve that literal shape rather than splitting it into
+		// nested maps.
+		setClaimPath(verified, presented, claim, val)
 	}
 	authCtx.VerifiedClaims = verified
 	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
@@ -67,14 +71,18 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 	return nil
 }
 
-// lookupClaimPath resolves a dot-delimited claim path against a nested claims
-// map (e.g. "address.locality"). Returns the value and true when the path
-// resolves fully; false when any intermediate segment is missing or is not
-// a map.
+// lookupClaimPath resolves a claim path against a nested claims map. Tries
+// a literal-key lookup first so mdoc namespace-qualified keys (stored as one
+// flat "org.iso.18013.5.1.birth_date" entry) resolve to their value, then
+// falls back to splitting on "." and walking nested maps (e.g. SD-JWT VC
+// "address.locality"). Returns the value and true when the path resolves;
+// false when any intermediate segment is missing or is not a map.
 func lookupClaimPath(claims map[string]any, path string) (any, bool) {
+	if v, ok := claims[path]; ok {
+		return v, true
+	}
 	if !strings.Contains(path, ".") {
-		v, ok := claims[path]
-		return v, ok
+		return nil, false
 	}
 	segments := strings.Split(path, ".")
 	var cur any = claims
@@ -92,12 +100,18 @@ func lookupClaimPath(claims map[string]any, path string) (any, bool) {
 	return cur, true
 }
 
-// setClaimPath writes val at a dot-delimited path in dst, creating
-// intermediate maps as needed. Existing intermediate maps are reused so
+// setClaimPath writes val at a claim path in dst, mirroring how the path
+// resolved on src: when src carries the path as a flat literal key (e.g. an
+// mdoc "org.iso.18013.5.1.birth_date") it is stored literally; otherwise the
+// path is split on "." and intermediate maps are created as needed so
 // multiple required claims sharing a prefix (e.g. "identity.given_name" and
 // "identity.family_name") produce a single nested object rather than
 // overwriting siblings.
-func setClaimPath(dst map[string]any, path string, val any) {
+func setClaimPath(dst, src map[string]any, path string, val any) {
+	if _, ok := src[path]; ok {
+		dst[path] = val
+		return
+	}
 	if !strings.Contains(path, ".") {
 		dst[path] = val
 		return
@@ -116,36 +130,43 @@ func setClaimPath(dst map[string]any, path string, val any) {
 }
 
 // enforceFromScopeType refuses a presented credential whose type does not
-// match pScope.FromScope. For SD-JWT VC the top-level `vct` claim carries
-// the canonical type identifier and is compared against the configured
-// credential metadata's vct. For mso_mdoc the doctype (surfaced as a
-// synthetic top-level `docType` claim by extractMDocClaimsFromToken) is
-// compared against the configured MDDL doctype (falling back to the
-// scope's `doctype` field).
+// match pScope.FromScope. Delegates to enforceScopeCredentialType keyed by
+// FromScope.
 func (c *Client) enforceFromScopeType(pScope model.PresentationScope, presented map[string]any) error {
-	fromMeta := c.cfg.GetCredentialMetadata(pScope.FromScope)
-	if fromMeta == nil {
+	return c.enforceScopeCredentialType(pScope.FromScope, presented)
+}
+
+// enforceScopeCredentialType refuses a presented credential whose type does
+// not match the credential_metadata for the given scope. For SD-JWT VC the
+// top-level `vct` claim carries the canonical type identifier and is
+// compared against the configured credential metadata's vct. For mso_mdoc
+// the doctype (surfaced as a synthetic top-level `docType` claim by
+// extractMDocClaimsFromToken) is compared against the configured MDDL
+// doctype (falling back to the scope's `doctype` field).
+func (c *Client) enforceScopeCredentialType(scope string, presented map[string]any) error {
+	meta := c.cfg.GetCredentialMetadata(scope)
+	if meta == nil {
 		return helpers.NewErrorDetailsWithStatus("presentation_scope_misconfigured",
-			fmt.Sprintf("from_scope %q has no credential_metadata entry", pScope.FromScope),
+			fmt.Sprintf("scope %q has no credential_metadata entry", scope),
 			500)
 	}
 	switch {
-	case isSDJWTFormat(fromMeta.Format):
-		return c.enforceSDJWTType(pScope, fromMeta, presented)
-	case isMDocFormat(fromMeta.Format):
-		return c.enforceMDocType(pScope, fromMeta, presented)
+	case isSDJWTFormat(meta.Format):
+		return c.enforceSDJWTType(scope, meta, presented)
+	case isMDocFormat(meta.Format):
+		return c.enforceMDocType(scope, meta, presented)
 	default:
 		return helpers.NewErrorDetailsWithStatus("presentation_scope_misconfigured",
-			fmt.Sprintf("from_scope %q has unsupported format %q for presentation type enforcement", pScope.FromScope, fromMeta.Format),
+			fmt.Sprintf("scope %q has unsupported format %q for presentation type enforcement", scope, meta.Format),
 			500)
 	}
 }
 
-func (c *Client) enforceSDJWTType(pScope model.PresentationScope, fromMeta *model.CredentialMetadata, presented map[string]any) error {
+func (c *Client) enforceSDJWTType(scope string, meta *model.CredentialMetadata, presented map[string]any) error {
 	vctRaw, ok := presented["vct"]
 	if !ok {
 		return helpers.NewErrorDetailsWithStatus("presentation_type_unverifiable",
-			fmt.Sprintf("presented credential carries no vct; cannot enforce from_scope %q", pScope.FromScope),
+			fmt.Sprintf("presented credential carries no vct; cannot enforce scope %q", scope),
 			400)
 	}
 	vct, ok := vctRaw.(string)
@@ -155,30 +176,30 @@ func (c *Client) enforceSDJWTType(pScope model.PresentationScope, fromMeta *mode
 			400)
 	}
 	expected := ""
-	if vctm := fromMeta.GetVCTM(); vctm != nil {
+	if vctm := meta.GetVCTM(); vctm != nil {
 		expected = vctm.VCT
 	}
 	if expected == "" {
-		expected = fromMeta.GetVCTURL()
+		expected = meta.GetVCTURL()
 	}
 	if expected == "" {
 		return helpers.NewErrorDetailsWithStatus("presentation_scope_misconfigured",
-			fmt.Sprintf("from_scope %q has no canonical vct", pScope.FromScope),
+			fmt.Sprintf("scope %q has no canonical vct", scope),
 			500)
 	}
 	if vct != expected {
 		return helpers.NewErrorDetailsWithStatus("presentation_type_mismatch",
-			fmt.Sprintf("presented credential vct %q does not match from_scope %q (expected %q)", vct, pScope.FromScope, expected),
+			fmt.Sprintf("presented credential vct %q does not match scope %q (expected %q)", vct, scope, expected),
 			403)
 	}
 	return nil
 }
 
-func (c *Client) enforceMDocType(pScope model.PresentationScope, fromMeta *model.CredentialMetadata, presented map[string]any) error {
+func (c *Client) enforceMDocType(scope string, meta *model.CredentialMetadata, presented map[string]any) error {
 	docTypeRaw, ok := presented["docType"]
 	if !ok {
 		return helpers.NewErrorDetailsWithStatus("presentation_type_unverifiable",
-			fmt.Sprintf("presented credential carries no docType; cannot enforce from_scope %q", pScope.FromScope),
+			fmt.Sprintf("presented credential carries no docType; cannot enforce scope %q", scope),
 			400)
 	}
 	docType, ok := docTypeRaw.(string)
@@ -188,20 +209,20 @@ func (c *Client) enforceMDocType(pScope model.PresentationScope, fromMeta *model
 			400)
 	}
 	expected := ""
-	if mddl := fromMeta.GetMDDL(); mddl != nil && mddl.DocType != "" {
+	if mddl := meta.GetMDDL(); mddl != nil && mddl.DocType != "" {
 		expected = mddl.DocType
 	}
 	if expected == "" {
-		expected = fromMeta.Doctype
+		expected = meta.Doctype
 	}
 	if expected == "" {
 		return helpers.NewErrorDetailsWithStatus("presentation_scope_misconfigured",
-			fmt.Sprintf("from_scope %q has no canonical doctype", pScope.FromScope),
+			fmt.Sprintf("scope %q has no canonical doctype", scope),
 			500)
 	}
 	if docType != expected {
 		return helpers.NewErrorDetailsWithStatus("presentation_type_mismatch",
-			fmt.Sprintf("presented credential docType %q does not match from_scope %q (expected %q)", docType, pScope.FromScope, expected),
+			fmt.Sprintf("presented credential docType %q does not match scope %q (expected %q)", docType, scope, expected),
 			403)
 	}
 	return nil
