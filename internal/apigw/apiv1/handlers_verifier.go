@@ -228,12 +228,26 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		if c.trustEvaluator == nil {
 			return nil, errors.New("mdoc VP verification requires apigw.trust.pdp_url to be configured")
 		}
+		if authCtx.Nonce == "" || authCtx.ClientID == "" {
+			return nil, errors.New("mdoc VP verification requires nonce and client_id on the authorization context")
+		}
+		responseURI, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/verification/direct_post")
+		if err != nil {
+			return nil, fmt.Errorf("compute mdoc response_uri: %w", err)
+		}
+		// SessionTranscript binds the presentation to this request's
+		// nonce/client_id/response_uri; reader-key thumbprint is nil because
+		// the apigw direct_post flow does not use response encryption here.
+		sessionTranscript, err := mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, nil)
+		if err != nil {
+			return nil, fmt.Errorf("build mdoc session transcript: %w", err)
+		}
 		mdocHandler, err := mdoc.NewMDocHandler(mdoc.WithMDocTrustEvaluator(c.trustEvaluator))
 		if err != nil {
 			c.log.Error(err, "failed to create mdoc handler")
 			return nil, fmt.Errorf("mdoc handler init failed: %w", err)
 		}
-		mdocResult, err := mdocHandler.VerifyAndExtract(ctx, responseParams.VPToken)
+		mdocResult, err := mdocHandler.VerifyAndExtractBound(ctx, responseParams.VPToken, sessionTranscript)
 		if err != nil {
 			c.log.Error(err, "mdoc VP verification failed")
 			return nil, fmt.Errorf("mdoc VP verification failed: %w", err)

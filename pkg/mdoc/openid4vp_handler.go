@@ -80,7 +80,28 @@ func NewMDocHandler(opts ...MDocHandlerOption) (*MDocHandler, error) {
 }
 
 // VerifyAndExtract verifies an mdoc VP token and extracts the disclosed claims.
+// It does NOT verify the DeviceAuth against a SessionTranscript — callers that
+// need request-context binding (nonce, client_id, response_uri) must use
+// VerifyAndExtractBound instead.
 func (h *MDocHandler) VerifyAndExtract(ctx context.Context, vpToken string) (*MDocVerificationResult, error) {
+	return h.verifyAndExtract(ctx, vpToken, nil)
+}
+
+// VerifyAndExtractBound is like VerifyAndExtract but also verifies each
+// document's DeviceAuth against the supplied SessionTranscript, binding the
+// presentation to the OpenID4VP request context (nonce, client_id,
+// response_uri, and optional reader-key thumbprint the caller baked into the
+// transcript via BuildOID4VPSessionTranscript / BuildOID4VPDCAPISessionTranscript).
+// An empty sessionTranscript is rejected — use VerifyAndExtract explicitly when
+// unbound verification is intended.
+func (h *MDocHandler) VerifyAndExtractBound(ctx context.Context, vpToken string, sessionTranscript []byte) (*MDocVerificationResult, error) {
+	if len(sessionTranscript) == 0 {
+		return nil, errors.New("VerifyAndExtractBound requires a non-empty sessionTranscript")
+	}
+	return h.verifyAndExtract(ctx, vpToken, sessionTranscript)
+}
+
+func (h *MDocHandler) verifyAndExtract(ctx context.Context, vpToken string, sessionTranscript []byte) (*MDocVerificationResult, error) {
 	// Decode the VP token (base64url-encoded DeviceResponse)
 	data, err := base64.RawURLEncoding.DecodeString(vpToken)
 	if err != nil {
@@ -111,6 +132,22 @@ func (h *MDocHandler) VerifyAndExtract(ctx context.Context, vpToken string) (*MD
 			errMsgs = append(errMsgs, e.Error())
 		}
 		return nil, fmt.Errorf("mdoc verification failed: %s", strings.Join(errMsgs, "; "))
+	}
+
+	if len(sessionTranscript) > 0 {
+		if len(verifyResult.Documents) != len(deviceResponse.Documents) {
+			return nil, fmt.Errorf("mdoc verification result document count %d != DeviceResponse document count %d", len(verifyResult.Documents), len(deviceResponse.Documents))
+		}
+		for i := range deviceResponse.Documents {
+			doc := &deviceResponse.Documents[i]
+			mso := verifyResult.Documents[i].MSO
+			if mso == nil {
+				return nil, fmt.Errorf("device auth binding failed for %q: verified MSO missing", doc.DocType)
+			}
+			if err := h.verifier.VerifyDeviceAuth(doc, mso, sessionTranscript); err != nil {
+				return nil, fmt.Errorf("device auth binding failed for %q: %w", doc.DocType, err)
+			}
+		}
 	}
 
 	result := &MDocVerificationResult{
