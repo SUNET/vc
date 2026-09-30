@@ -135,7 +135,7 @@ func signedEdDSACredential(t *testing.T, issuerKey ed25519.PrivateKey, raw strin
 // too, because json-gold happens to order a real VPBuilder document so that
 // the holder's proof is reached first. That is exactly why relying on the
 // ordering was wrong, and why the selection is pinned where the ambiguity
-// can be forced - common.TestFindRootProofNode_SelectsTheDocumentsOwnProof
+// can be forced - common.TestFindProofNodeInGraphs_SelectsTheRootsGraph
 // builds the graph with the ISSUER's proof first and fails without it.
 func TestVPBuilderEdDSASelectsTheHolderProof(t *testing.T) {
 	holderPub, holderKey, err := ed25519.GenerateKey(rand.Reader)

@@ -200,7 +200,7 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 	// WHICH proof, and it has to be the one the document attaches to
 	// ITSELF. ProofObject() keeps proof quads and drops the links that say
 	// whose proof is whose, so the answer is read off the document instead
-	// - see rootProofValues.
+	// - see rootProofGraphs.
 	//
 	// Taking the first proof found is not merely arbitrary here, it is
 	// forgeable. Verify removes EVERY proof when hashing, so moving a proof
@@ -216,50 +216,8 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 	if len(rootGraphs) == 0 {
 		return fmt.Errorf("the document carries no proof of its own to verify")
 	}
-	// EVERY proof the root links, not just the first. Sign appends rather
-	// than replaces, so a document signed by two keys carries two root
-	// proofs - and checking only the first fails the second signature
-	// against its own public key.
-	//
-	// Each is tried in turn and the first that verifies wins; the last
-	// failure is what gets reported, since a document whose proofs all fail
-	// is a document that did not verify.
-	var lastErr error
-	for _, graphName := range rootGraphs {
-		proofNode := common.FindProofNodeInGraphs(proofMap, ProofType, []string{graphName})
-		if proofNode == nil {
-			lastErr = fmt.Errorf("the document's own proof link names no complete proof")
-			continue
-		}
-		if err := s.verifyProofNode(cred, proofNode, key); err != nil {
-			lastErr = err
-			continue
-		}
-		return nil
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("the document's own proof link names no complete proof")
-	}
-	return lastErr
-}
 
-// verifyProofNode checks one proof node against the key, over the document
-// with every proof removed.
-func (s *Suite) verifyProofNode(cred *credential.RDFCredential, proofNode map[string]any, key ed25519.PublicKey) error {
-
-	// Get proofValue
-	proofValue, ok := proofNode["proofValue"].(string)
-	if !ok {
-		return fmt.Errorf("proofValue not found or not a string")
-	}
-
-	// 2. Decode proofValue (multibase)
-	_, signature, err := multibase.Decode(proofValue)
-	if err != nil {
-		return fmt.Errorf("failed to decode proofValue: %w", err)
-	}
-
-	// 4. Canonicalize the document the SAME way Sign does.
+	// Canonicalize the document the SAME way Sign does.
 	//
 	// Sign hashes CredentialWithoutProof() - every proof gone - of the
 	// document as given. Verify did two things differently, and each one
@@ -291,6 +249,13 @@ func (s *Suite) verifyProofNode(cred *credential.RDFCredential, proofNode map[st
 	// cover an embedded credential's issuer proof. That is pre-existing and
 	// true of ECDSA too; changing it means changing both suites' signing
 	// side as well, which is not this fix.
+	//
+	// Once, not once per proof. Every proof is checked against the SAME
+	// proof-free document - that is what "remove every proof when hashing"
+	// means - so a document with several root proofs used to repeat the
+	// most expensive step, JSON-LD canonicalization, for each of them. The
+	// proof CONFIGURATION hash stays per proof, since that is the part
+	// that differs.
 	credWithoutProof, err := cred.CredentialWithoutProof()
 	if err != nil {
 		return fmt.Errorf("failed to get credential without proof: %w", err)
@@ -300,8 +265,56 @@ func (s *Suite) verifyProofNode(cred *credential.RDFCredential, proofNode map[st
 	if err != nil {
 		return fmt.Errorf("failed to get canonical form of document: %w", err)
 	}
+	docHash := sha256.Sum256([]byte(docCanonical))
 
-	// 5. Create proof configuration (remove proofValue)
+	// EVERY proof the root links, not just the first. Sign appends rather
+	// than replaces, so a document signed by two keys carries two root
+	// proofs - and checking only the first fails the second signature
+	// against its own public key.
+	//
+	// Each is tried in turn and the first that verifies wins; the last
+	// failure is what gets reported, since a document whose proofs all fail
+	// is a document that did not verify.
+	var lastErr error
+	for _, graphName := range rootGraphs {
+		proofNode := common.FindProofNodeInGraphs(proofMap, ProofType, []string{graphName})
+		if proofNode == nil {
+			lastErr = fmt.Errorf("the document's own proof link names no complete proof")
+			continue
+		}
+		if err := s.verifyProofNode(cred, proofNode, key, docHash); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("the document's own proof link names no complete proof")
+	}
+	return lastErr
+}
+
+// verifyProofNode checks one proof node against the key, over the document
+// with every proof removed.
+//
+// docHash is that document's hash, computed once by Verify: it is the same
+// for every proof on the document, so recomputing it per proof repeats the
+// canonicalization for nothing.
+func (s *Suite) verifyProofNode(cred *credential.RDFCredential, proofNode map[string]any, key ed25519.PublicKey, docHash [sha256.Size]byte) error {
+
+	// Get proofValue
+	proofValue, ok := proofNode["proofValue"].(string)
+	if !ok {
+		return fmt.Errorf("proofValue not found or not a string")
+	}
+
+	// 2. Decode proofValue (multibase)
+	_, signature, err := multibase.Decode(proofValue)
+	if err != nil {
+		return fmt.Errorf("failed to decode proofValue: %w", err)
+	}
+
+	// Create the proof configuration (remove proofValue)
 	delete(proofNode, "proofValue")
 
 	// Ensure context
@@ -332,8 +345,7 @@ func (s *Suite) verifyProofNode(cred *credential.RDFCredential, proofNode map[st
 		return fmt.Errorf("failed to get canonical form of proof config: %w", err)
 	}
 
-	// 6. Hash
-	docHash := sha256.Sum256([]byte(docCanonical))
+	// 6. Hash. The document half arrived already hashed.
 	proofHash := sha256.Sum256([]byte(proofCanonical))
 
 	// Standard is proofHash + docHash
