@@ -433,3 +433,70 @@ func TestVerifyAndExtractAcceptsAProofLocalPrefix(t *testing.T) {
 	require.NoError(t, err, "a proof-local prefix names the same key as its expansion")
 	require.Equal(t, absoluteMethod, result.VerificationMethod)
 }
+
+// TestVerifyAndExtractHonoursTheProofsContextOrder: context processing is
+// ORDERED, and a proof's context may re-apply a URL the document already
+// carries in order to put a term back. Joining the two into one array and
+// dropping the repeat - which is what avoiding json-gold's "recursive
+// context inclusion" error by de-duplicating did - silently leaves the
+// earlier definition standing, and the method is then resolved under the
+// wrong identifier.
+//
+// Nesting the proof's context inside the document's, as the document itself
+// does, gets the order and the repeats right without this code knowing the
+// rules. (The other half of the same story, a null RESET, cannot be built
+// on the VC 2.0 context: its terms are @protected and json-gold refuses to
+// nullify them.)
+func TestVerifyAndExtractHonoursTheProofsContextOrder(t *testing.T) {
+	issuerPub, issuerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	const absoluteMethod = "https://example.org/keys#key-1"
+	const rightPrefix = "https://example.org/right-prefix"
+	const wrongPrefix = "https://example.org/wrong-prefix"
+
+	// Registered locally so expansion is offline. Both define "ex"; which
+	// one wins is decided entirely by the order they are applied in.
+	credential.GetGlobalLoader().AddContext(rightPrefix, `{"@context":{"ex":"https://example.org/keys#"}}`)
+	credential.GetGlobalLoader().AddContext(wrongPrefix, `{"@context":{"ex":"https://example.org/elsewhere#"}}`)
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": ["https://www.w3.org/ns/credentials/v2", "`+rightPrefix+`"],
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`), nil)
+	require.NoError(t, err)
+
+	signed, err := eddsaSuite.NewSuite().Sign(cred, issuerKey, &eddsaSuite.SignOptions{
+		VerificationMethod: absoluteMethod,
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(compact, &doc))
+	proof, ok := doc["proof"].(map[string]any)
+	require.True(t, ok)
+
+	// The proof applies the wrong definition and then puts the right one
+	// back. Flattened into the document's context and de-duplicated, the
+	// trailing entry is dropped as a repeat and "ex" means the wrong thing.
+	proof["@context"] = []any{"https://www.w3.org/ns/credentials/v2", wrongPrefix, rightPrefix}
+	proof["verificationMethod"] = "ex:key-1"
+
+	rewritten, err := json.Marshal(doc)
+	require.NoError(t, err)
+
+	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+		keys: map[string]crypto.PublicKey{absoluteMethod: issuerPub},
+	}))
+	require.NoError(t, err)
+
+	result, err := handler.VerifyAndExtract(t.Context(), string(rewritten))
+	require.NoError(t, err, "the proof's own context ordering decides what ex means")
+	require.Equal(t, absoluteMethod, result.VerificationMethod)
+}

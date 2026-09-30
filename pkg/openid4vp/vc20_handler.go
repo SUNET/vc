@@ -689,45 +689,50 @@ func (h *VC20Handler) verifyEdDSA2022(
 // case; a compact one ("ex:key", with ex defined in the context) becomes the
 // IRI the RDF form carries, which is what the suite reports and what a
 // resolver should be keyed on.
+//
+// The probe NESTS the proof's context inside the document's, exactly as the
+// real document does, rather than joining them into one array. Context
+// processing is ordered and a nested context may RESET the active one with
+// null - so a proof whose context is [null, someURL] means something
+// different from [someURL, null], and flattening the two into one list
+// (worse, dropping a repeated URL to avoid "recursive context inclusion")
+// silently changes which terms are defined. Letting json-gold walk the same
+// nesting the document has gets the order, the resets and the repeats right
+// without this code knowing the rules.
 func (h *VC20Handler) expandVerificationMethod(credMap map[string]any, proof map[string]any, method string) (string, error) {
-	context, ok := credMap["@context"]
-	if !ok && proof["@context"] == nil {
+	documentContext, hasDocumentContext := credMap["@context"]
+	if !hasDocumentContext && proof["@context"] == nil {
 		return method, nil
 	}
 
-	// INHERITED PLUS LOCAL, FLATTENED. A nested proof may carry its own
-	// @context that adds or overrides terms, and the method is written
-	// under THAT active context - so expanding under the document's root
-	// context alone resolves a proof-local prefix wrongly, or not at all.
-	// Later entries win in a JSON-LD context array, which is the same
-	// precedence the proof node gets when the document is expanded.
-	//
-	// One flat array, because a context array holding another array is not
-	// a context json-gold will read.
-	probe := map[string]any{
-		"@context": flattenContexts(context, proof["@context"]),
-		"https://w3id.org/security#verificationMethod": map[string]any{"@id": method},
+	const verificationMethodIRI = "https://w3id.org/security#verificationMethod"
+	const proofIRI = "https://w3id.org/security#proof"
+
+	probeProof := map[string]any{verificationMethodIRI: map[string]any{"@id": method}}
+	if local := proof["@context"]; local != nil {
+		probeProof["@context"] = local
 	}
+	probe := map[string]any{proofIRI: probeProof}
+	if hasDocumentContext {
+		// json-gold reads a context out of decoded JSON, so a []string
+		// built in Go - which this package does in one place - is not one
+		// it accepts.
+		if typed, isStrings := documentContext.([]string); isStrings {
+			entries := make([]any, 0, len(typed))
+			for _, entry := range typed {
+				entries = append(entries, entry)
+			}
+			documentContext = entries
+		}
+		probe["@context"] = documentContext
+	}
+
 	expanded, err := ld.NewJsonLdProcessor().Expand(probe, credential.NewJSONLDOptions(""))
 	if err != nil {
 		return "", fmt.Errorf("cannot expand verificationMethod %q against the document's context: %w", method, err)
 	}
-	for _, node := range expanded {
-		object, ok := node.(map[string]any)
-		if !ok {
-			continue
-		}
-		values, ok := object["https://w3id.org/security#verificationMethod"].([]any)
-		if !ok || len(values) == 0 {
-			continue
-		}
-		entry, ok := values[0].(map[string]any)
-		if !ok {
-			continue
-		}
-		if id, ok := entry["@id"].(string); ok && id != "" {
-			return id, nil
-		}
+	if id := findExpandedID(expanded, verificationMethodIRI); id != "" {
+		return id, nil
 	}
 
 	// Expansion dropped it, which means it is a relative reference no
@@ -735,45 +740,33 @@ func (h *VC20Handler) expandVerificationMethod(credMap map[string]any, proof map
 	return "", fmt.Errorf("verificationMethod %q is not an absolute IRI and the document's context does not define it", method)
 }
 
-// flattenContexts joins @context values into one flat array, in order.
-//
-// A context may be a string, an inline object, or an array of those, and a
-// []string built in Go - which this package does in one place - is not a
-// form json-gold reads out of decoded JSON. Nesting one array inside another
-// is not a context either, so they are appended rather than wrapped.
-func flattenContexts(values ...any) []any {
-	var out []any
-	seen := map[string]bool{}
-	add := func(entry any) {
-		// A URL repeated - the document and its proof both naming the VC 2.0
-		// context, which is the common case - is a "recursive context
-		// inclusion" to json-gold rather than a no-op. Identical entries
-		// cannot change the result, so the first one stands.
-		if url, isString := entry.(string); isString {
-			if seen[url] {
-				return
+// findExpandedID returns the @id expansion gave the first value of predicate.
+func findExpandedID(node any, predicate string) string {
+	switch typed := node.(type) {
+	case []any:
+		for _, entry := range typed {
+			if id := findExpandedID(entry, predicate); id != "" {
+				return id
 			}
-			seen[url] = true
 		}
-		out = append(out, entry)
-	}
-
-	for _, value := range values {
-		switch typed := value.(type) {
-		case nil:
-		case []any:
-			for _, entry := range typed {
-				add(entry)
+	case map[string]any:
+		if values, ok := typed[predicate].([]any); ok && len(values) > 0 {
+			if entry, ok := values[0].(map[string]any); ok {
+				if id, ok := entry["@id"].(string); ok && id != "" {
+					return id
+				}
 			}
-		case []string:
-			for _, entry := range typed {
-				add(entry)
+		}
+		for key, member := range typed {
+			if key == "@id" {
+				continue
 			}
-		default:
-			add(typed)
+			if id := findExpandedID(member, predicate); id != "" {
+				return id
+			}
 		}
 	}
-	return out
+	return ""
 }
 
 // buildResult builds the verification result from credential data.
