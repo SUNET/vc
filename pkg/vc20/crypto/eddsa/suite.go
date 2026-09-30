@@ -297,6 +297,20 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKe
 			lastErr = fmt.Errorf("the document's own proof link names no complete proof")
 			continue
 		}
+		// THIS suite's proofs, not any DataIntegrityProof. The type alone
+		// does not say which cryptosuite produced the signature, and the
+		// handler dispatches on the FIRST proof while this loop may verify
+		// a later one - so a proof made with the Ed25519 procedure but
+		// labelled with some other suite could be verified here and
+		// reported through the EdDSA handler as that other suite.
+		//
+		// Relabelling an existing signature does not survive this anyway,
+		// since the label is hashed into the proof configuration; the check
+		// is here so that what verified and what is REPORTED cannot differ.
+		if suite, _ := proofNode["cryptosuite"].(string); suite != Cryptosuite2022 {
+			lastErr = fmt.Errorf("the document's own proof declares cryptosuite %q, not %s", suite, Cryptosuite2022)
+			continue
+		}
 		if err := s.verifyProofNode(cred, proofNode, key, docHash); err != nil {
 			lastErr = err
 			continue

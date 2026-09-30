@@ -645,3 +645,63 @@ func TestVerifyProofReturnsAProofWithItsSignature(t *testing.T) {
 	require.Equal(t, "authentication", proof["proofPurpose"])
 	require.NotContains(t, proof, "@context", "and must not carry a context the document never wrote")
 }
+
+// TestSignAndVerifyACredentialThatIsItsOwnSubject: a credential may give
+// itself and its credentialSubject the same id. That is a self-link, not an
+// embedded document - but it made the credential the object of its own
+// credentialSubject quad, so unembedded marked it contained and Verify
+// refused a proof Sign had just produced.
+func TestSignAndVerifyACredentialThatIsItsOwnSubject(t *testing.T) {
+	const selfSubject = `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "urn:uuid:the-credential",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "urn:uuid:the-credential"}
+	}`
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(selfSubject), nil)
+	require.NoError(t, err)
+	require.Contains(t, mustNQuads(t, cred),
+		"<urn:uuid:the-credential> <https://www.w3.org/2018/credentials#credentialSubject> <urn:uuid:the-credential>",
+		"the self-link must reach the dataset, or this proves nothing")
+
+	signed, pub := signDocument(t, selfSubject, "assertionMethod")
+	require.Len(t, rootProofGraphs(signed), 1, "a self-link contains nothing")
+	require.NoError(t, NewSuite().Verify(signed, pub))
+}
+
+// TestVerifyRefusesAProofOfAnotherCryptosuite: the proof TYPE does not say
+// which cryptosuite produced the signature, and VC20Handler dispatches on
+// the first proof in the array while this suite may verify a later one - so
+// what verified and what is reported could differ on the suite label.
+func TestVerifyRefusesAProofOfAnotherCryptosuite(t *testing.T) {
+	signed, pub := signDocument(t, `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiablePresentation"],
+		"holder": "did:example:holder"
+	}`, "authentication")
+
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(compact, &doc))
+
+	proof, ok := doc["proof"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, Cryptosuite2022, proof["cryptosuite"], "the fixture must start as this suite's proof")
+	proof["cryptosuite"] = "ecdsa-rdfc-2019"
+
+	relabelled, err := json.Marshal(doc)
+	require.NoError(t, err)
+	reparsed, err := credential.NewRDFCredentialFromJSON(relabelled, nil)
+	require.NoError(t, err)
+
+	// The root still LINKS a complete typed proof - it is the suite label
+	// that disqualifies it, not the selection.
+	require.Len(t, rootProofGraphs(reparsed), 1)
+
+	err = NewSuite().Verify(reparsed, pub)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cryptosuite")
+}

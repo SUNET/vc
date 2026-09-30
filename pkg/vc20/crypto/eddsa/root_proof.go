@@ -226,6 +226,14 @@ func unembedded(defaultGraph []*ld.Quad, candidates []string) []string {
 		if !contains(containmentPredicates, quad.Predicate.GetValue()) {
 			continue
 		}
+		// A SELF-link contains nothing. A credential may legitimately give
+		// itself and its credentialSubject the same id, which makes the
+		// credential the object of its own credentialSubject quad - and
+		// marking it contained refused a proof Sign had just produced. The
+		// reference graph above ignores self-edges for the same reason.
+		if quad.Subject != nil && quad.Subject.GetValue() == quad.Object.GetValue() {
+			continue
+		}
 		embedded[quad.Object.GetValue()] = true
 	}
 

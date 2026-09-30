@@ -317,3 +317,63 @@ func TestVerifyAndExtractReportsTheProofThatVerified(t *testing.T) {
 	require.NotEqual(t, 2001, result.ProofCreated.Year(),
 		"nor its created")
 }
+
+// TestVerifyAndExtractAcceptsACompactVerificationMethod: a compact document
+// may define a prefix and write "ex:key-1" as its verificationMethod. The
+// resolver was handed that spelling while the suite reads the absolute IRI
+// off the RDF, so the check that the proof which VERIFIED names the method
+// the key was resolved from could never match - a valid credential was
+// rejected even with the right key.
+func TestVerifyAndExtractAcceptsACompactVerificationMethod(t *testing.T) {
+	issuerPub, issuerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	const absoluteMethod = "https://example.org/keys#key-1"
+	const prefixed = `{
+		"@context": ["https://www.w3.org/ns/credentials/v2",
+			{"ex": "https://example.org/keys#"}],
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(prefixed), nil)
+	require.NoError(t, err)
+	signed, err := eddsaSuite.NewSuite().Sign(cred, issuerKey, &eddsaSuite.SignOptions{
+		VerificationMethod: absoluteMethod,
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+
+	// Rewritten to the COMPACT spelling, which expands to the same IRI
+	// under this document's own context - so the RDF the signature covers
+	// is unchanged and only the JSON spelling differs. Signing with the
+	// prefix directly would not produce this document: Sign writes a v2-only
+	// @context into the proof node, under which "ex:key-1" is a relative
+	// reference and drops out of the proof's RDF entirely.
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(compact, &doc))
+	proof, ok := doc["proof"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, absoluteMethod, proof["verificationMethod"])
+	delete(proof, "@context")
+	proof["verificationMethod"] = "ex:key-1"
+
+	rewritten, err := json.Marshal(doc)
+	require.NoError(t, err)
+
+	// The resolver answers for the ABSOLUTE identifier, which is what a key
+	// belongs to and what the RDF form carries.
+	resolver := &mockVC20KeyResolverByMethod{
+		keys: map[string]crypto.PublicKey{absoluteMethod: issuerPub},
+	}
+	handler, err := NewVC20Handler(WithVC20KeyResolver(resolver))
+	require.NoError(t, err)
+
+	result, err := handler.VerifyAndExtract(t.Context(), string(rewritten))
+	require.NoError(t, err, "a compact verificationMethod names the same key as its expansion")
+	require.Equal(t, absoluteMethod, result.VerificationMethod)
+}

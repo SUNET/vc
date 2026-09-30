@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
+
 	ecdsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/ecdsa"
 	eddsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/eddsa"
+	"github.com/piprate/json-gold/ld"
 )
 
 // VC20Format identifiers per OpenID4VC spec Appendix A
@@ -234,6 +236,18 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		return nil, errors.New("proof missing verificationMethod")
 	}
 
+	// EXPANDED, because that is the identifier the key belongs to. A
+	// compact document may define a prefix and write "ex:key"; the same
+	// method read back off the RDF is the absolute IRI it stands for. The
+	// resolver was being handed whichever spelling the document happened to
+	// use, so two documents naming one key asked for two different keys -
+	// and the check that the proof which VERIFIED names the method the key
+	// was resolved from could never match for a compact one.
+	vm, err = h.expandVerificationMethod(credMap, vm)
+	if err != nil {
+		return nil, err
+	}
+
 	pubKey, err := h.keyResolver.ResolveKey(ctx, vm)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve public key: %w", err)
@@ -265,7 +279,7 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		if !ok {
 			return nil, fmt.Errorf("cryptosuite %s requires Ed25519 key, got %T", cryptosuite, pubKey)
 		}
-		return h.verifyEdDSA2022(ctx, credBytes, credMap, proof, ed25519Key)
+		return h.verifyEdDSA2022(ctx, credBytes, credMap, proof, vm, ed25519Key)
 
 	default:
 		return nil, fmt.Errorf("unsupported cryptosuite: %s", cryptosuite)
@@ -630,6 +644,7 @@ func (h *VC20Handler) verifyEdDSA2022(
 	credBytes []byte,
 	credMap map[string]any,
 	proof map[string]any,
+	verificationMethod string,
 	pubKey ed25519.PublicKey,
 ) (*VC20VerificationResult, error) {
 	// Create RDF credential
@@ -658,14 +673,67 @@ func (h *VC20Handler) verifyEdDSA2022(
 	// naming someone else's method could otherwise verify with this one and
 	// be reported under that name.
 	verifiedMethod, _ := verifiedProof["verificationMethod"].(string)
-	requestedMethod, _ := proof["verificationMethod"].(string)
-	if verifiedMethod != requestedMethod {
+	if verifiedMethod != verificationMethod {
 		return nil, fmt.Errorf("the proof that verified names verification method %q, but the key was resolved from %q",
-			verifiedMethod, requestedMethod)
+			verifiedMethod, verificationMethod)
 	}
 
 	// Build result
 	return h.buildResult(credBytes, credMap, verifiedProof, false)
+}
+
+// expandVerificationMethod turns the method as the document spells it into
+// the absolute IRI it stands for, using the document's own context.
+//
+// An absolute IRI expands to itself, so this changes nothing for the common
+// case; a compact one ("ex:key", with ex defined in the context) becomes the
+// IRI the RDF form carries, which is what the suite reports and what a
+// resolver should be keyed on.
+func (h *VC20Handler) expandVerificationMethod(credMap map[string]any, method string) (string, error) {
+	context, ok := credMap["@context"]
+	if !ok {
+		return method, nil
+	}
+
+	// json-gold reads a context out of decoded JSON, so a []string built in
+	// Go - which this package does in one place - is not one it accepts.
+	if typed, isStrings := context.([]string); isStrings {
+		entries := make([]any, 0, len(typed))
+		for _, entry := range typed {
+			entries = append(entries, entry)
+		}
+		context = entries
+	}
+
+	probe := map[string]any{
+		"@context": context,
+		"https://w3id.org/security#verificationMethod": map[string]any{"@id": method},
+	}
+	expanded, err := ld.NewJsonLdProcessor().Expand(probe, credential.NewJSONLDOptions(""))
+	if err != nil {
+		return "", fmt.Errorf("cannot expand verificationMethod %q against the document's context: %w", method, err)
+	}
+	for _, node := range expanded {
+		object, ok := node.(map[string]any)
+		if !ok {
+			continue
+		}
+		values, ok := object["https://w3id.org/security#verificationMethod"].([]any)
+		if !ok || len(values) == 0 {
+			continue
+		}
+		entry, ok := values[0].(map[string]any)
+		if !ok {
+			continue
+		}
+		if id, ok := entry["@id"].(string); ok && id != "" {
+			return id, nil
+		}
+	}
+
+	// Expansion dropped it, which means it is a relative reference no
+	// context defines - not an identifier a key can belong to.
+	return "", fmt.Errorf("verificationMethod %q is not an absolute IRI and the document's context does not define it", method)
 }
 
 // buildResult builds the verification result from credential data.
