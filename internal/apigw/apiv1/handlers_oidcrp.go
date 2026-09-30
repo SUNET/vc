@@ -13,6 +13,7 @@ import (
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/grpchelpers"
+	"github.com/SUNET/vc/pkg/issuance"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
@@ -22,6 +23,29 @@ import (
 )
 
 // OIDCRPInitiateRequest represents the request to initiate OIDC authentication
+//
+// Carries no dynamic parameters, so a scope whose oidc_request_params contain
+// a template ("{{.org_id}}") cannot be initiated through this endpoint: there
+// is no value to substitute and flow initiation fails with a template error
+// naming the missing key. That is the intended behaviour, not an oversight to
+// work around - the alternative, sending the literal "{{.org_id}}" to the OP,
+// produced an authorization request that was not bound to the value it was
+// meant to carry and said nothing about it.
+//
+// Dynamic parameters reach the OIDC request through the PAR/VCI path only:
+// PARRequest.DynamicParams -> AuthorizationContext.DynamicParams -> the
+// consent flow's InitiateAuthForVCI.
+//
+// This is a decision, not a gap left to be closed later (SUNET/vc#380):
+// templated oidc_request_params are supported on the PAR/VCI path and
+// nowhere else. Adding a dynamic-parameter field here would accept
+// caller-supplied values into an authorization request this service sends
+// to the OP, and this endpoint is reachable without authentication - the
+// /oidcrp group carries no auth middleware, unlike api/v1 with its
+// SessionOrAPIAuth and CSRF, and /oidcrp/ is deliberately exempted from the
+// CORS origin check so the IdP redirect can land. So the prerequisite for
+// such a field is authenticating this endpoint, which is a separate change;
+// the field is not the hard part and must not be added without it.
 type OIDCRPInitiateRequest struct {
 	CredentialType string `json:"credential_type" binding:"required"`
 }
@@ -74,7 +98,13 @@ func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest,
 		return nil, fmt.Errorf("OIDC RP service not available")
 	}
 
-	authReq, err := service.InitiateAuth(ctx, req.CredentialType)
+	// Look up per-scope OIDC request params
+	var oidcParams *model.OIDCRequestParams
+	if scopeCfg := c.cfg.APIGW.DataSources.LookupScopePolicyConfig(req.CredentialType, model.AuthProviderOIDC); scopeCfg != nil {
+		oidcParams = scopeCfg.OIDCRequestParams
+	}
+
+	authReq, err := service.InitiateAuth(ctx, req.CredentialType, oidcParams, nil)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -90,6 +120,13 @@ func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest,
 
 // OIDCRPCallback processes OIDC callback and issues credential
 //
+// The results are named so that the deferred session cleanup below actually
+// sees them. Every `return nil, fmt.Errorf(...)` in this function assigns the
+// named err on its way out, whereas the local error variables these branches
+// use (policyErr, lookupErr, derr, resolveErr, saveErr, ...) do not - so with
+// an unnamed result the cleanup fired for a handful of paths and silently
+// skipped the rest, including the policy denial.
+//
 //	@Summary		OIDC Provider Callback
 //	@ID				oidcrp-callback
 //	@Description	Receives and processes the authorization code from the OIDC Provider
@@ -101,7 +138,7 @@ func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest,
 //	@Success		200		{object}	OIDCRPCallbackResponse
 //	@Failure		400		{object}	helpers.ErrorResponse	"Bad Request"
 //	@Router			/oidcrp/callback [get]
-func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest, oidcrpService any) (*OIDCRPCallbackResponse, error) {
+func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest, oidcrpService any) (resp *OIDCRPCallbackResponse, err error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:OIDCRPCallback")
 	defer span.End()
 
@@ -147,7 +184,13 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, fmt.Errorf("failed to retrieve session: %w", err)
 	}
 
-	// Ensure session is cleaned up if any subsequent step fails
+	// Ensure the session is cleaned up if any subsequent step fails.
+	//
+	// This reads the named result, so it covers every error return past this
+	// point rather than only the ones that happen to assign the local `err`.
+	// The policy denial was one of the ones it missed: the request was
+	// refused, but the OIDC session stayed in the cache until its TTL, still
+	// usable.
 	defer func() {
 		if err != nil {
 			service.DeleteSession(ctx, req.State)
@@ -181,6 +224,43 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		"claims_count", len(claims),
 		"claim_keys", claimKeys,
 		"subject", authResp.IDToken.Subject)
+
+	// Evaluate issuance policy (if configured for this scope).
+	// This uses SPOCP rules to gate credential issuance on claim values.
+	// The raw OIDC claims (pre-transformation) are used for policy evaluation
+	// since the rules reference OIDC claim names, not mapped credential claim names.
+	if scopeCfg := c.cfg.APIGW.DataSources.LookupScopePolicyConfig(session.CredentialType, model.AuthProviderOIDC); scopeCfg != nil && scopeCfg.IssuancePolicy != nil {
+		policyEngine, policyErr := issuance.GetPolicyEngine(scopeCfg.IssuancePolicy)
+		if policyErr != nil {
+			span.SetStatus(codes.Error, policyErr.Error())
+			return nil, fmt.Errorf("failed to initialize issuance policy engine: %w", policyErr)
+		}
+		if policyEngine != nil {
+			// Evaluate against the OIDC-provider-asserted claims only. Do NOT
+			// fall back to session.DynamicParams here: those are supplied by
+			// the caller in the PAR request body (nominally "from the
+			// authentic source business system", but nothing here verifies
+			// that), not validated by the OP. Letting them silently satisfy a
+			// missing OIDC claim would let a caller forge any policy
+			// dimension the OP didn't actually assert, defeating the point of
+			// gating issuance on the returned token. DynamicParams are still
+			// used (legitimately) to template the outgoing OIDC request
+			// parameters in resolveOIDCRequestParams - this is a separate,
+			// later use of the same data for a security decision.
+			policyClaims := maps.Clone(authResp.Claims)
+			if policyErr := policyEngine.Evaluate(session.CredentialType, policyClaims, scopeCfg.IssuancePolicy.QueryTemplate); policyErr != nil {
+				c.log.Warn("Issuance policy denied credential",
+					"credential_type", session.CredentialType,
+					"subject", authResp.IDToken.Subject,
+					"error", policyErr)
+				span.SetStatus(codes.Error, policyErr.Error())
+				return nil, fmt.Errorf("credential issuance denied: %w", policyErr)
+			}
+			c.log.Info("Issuance policy evaluation passed",
+				"credential_type", session.CredentialType,
+				"subject", authResp.IDToken.Subject)
+		}
+	}
 
 	// VCI mode: if the OIDC session was initiated from the OpenID4VCI consent flow,
 	// store the transformed claims as a document in the VCI session cache and signal
