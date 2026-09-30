@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
@@ -328,20 +329,26 @@ func (s *Suite) verifyProofNode(cred *credential.RDFCredential, proofNode map[st
 		return fmt.Errorf("failed to decode proofValue: %w", err)
 	}
 
-	// Create the proof configuration (remove proofValue)
-	delete(proofNode, "proofValue")
+	// Create the proof configuration, on a COPY.
+	//
+	// This used to delete proofValue from the caller's map and add an
+	// @context to it. VerifyProof returns that map now, so mutating it
+	// handed the caller a proof with no signature in it and a context it
+	// never carried - an incomplete answer to "which proof verified".
+	proofConfig := maps.Clone(proofNode)
+	delete(proofConfig, "proofValue")
 
 	// Ensure context
-	if _, ok := proofNode["@context"]; !ok {
+	if _, ok := proofConfig["@context"]; !ok {
 		// Try to use context from credential if available
 		if ctx, err := cred.Context(); err == nil && ctx != nil {
-			proofNode["@context"] = ctx
+			proofConfig["@context"] = ctx
 		} else {
-			proofNode["@context"] = credential.ContextV2
+			proofConfig["@context"] = credential.ContextV2
 		}
 	}
 
-	proofConfigBytes, err := json.Marshal(proofNode)
+	proofConfigBytes, err := json.Marshal(proofConfig)
 	if err != nil {
 		return fmt.Errorf("failed to marshal proof config: %w", err)
 	}

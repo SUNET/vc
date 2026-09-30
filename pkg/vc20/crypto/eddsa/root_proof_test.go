@@ -590,3 +590,58 @@ func TestRootProofGraphsRefuseAnEmbeddedOnlyRoot(t *testing.T) {
 	require.Empty(t, rootProofGraphs(cred),
 		"a document whose only credential-typed node is one it carries does not say what it is")
 }
+
+// TestSignAndVerifyACredentialWhoseSubjectIsACredential: a credential whose
+// credentialSubject is ITSELF typed VerifiableCredential and points back at
+// the outer credential puts both nodes in one source component, and both
+// past typedRoots. Reading only verifiableCredential as containment left two
+// candidates and refused a document this package had just signed.
+func TestSignAndVerifyACredentialWhoseSubjectIsACredential(t *testing.T) {
+	const credentialAboutACredential = `{
+		"@context": ["https://www.w3.org/ns/credentials/v2",
+			{"endorses": {"@id": "https://example.org/vocab#endorses", "@type": "@id"}}],
+		"id": "urn:uuid:the-endorsement",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:endorser",
+		"credentialSubject": {
+			"id": "urn:uuid:the-endorsed",
+			"type": ["VerifiableCredential"],
+			"issuer": "did:example:issuer",
+			"endorses": "urn:uuid:the-endorsement"
+		}
+	}`
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(credentialAboutACredential), nil)
+	require.NoError(t, err)
+	nq := mustNQuads(t, cred)
+	require.Contains(t, nq, "vocab#endorses", "the back-link must survive parsing")
+	require.Contains(t, nq, "credentials#credentialSubject", "and so must the containment link")
+
+	signed, pub := signDocument(t, credentialAboutACredential, "assertionMethod")
+	require.Len(t, rootProofGraphs(signed), 1,
+		"the outer credential is the root; its subject is a credential it carries")
+	require.NoError(t, NewSuite().Verify(signed, pub),
+		"a document this package signed must verify")
+}
+
+// TestVerifyProofReturnsAProofWithItsSignature: verifyProofNode used to
+// delete proofValue from the map it was handed and add an @context to it, so
+// the proof VerifyProof returned was missing the signature it had just
+// checked - an incomplete answer to "which proof verified".
+func TestVerifyProofReturnsAProofWithItsSignature(t *testing.T) {
+	signed, pub := signDocument(t, `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiablePresentation"],
+		"holder": "did:example:holder"
+	}`, "authentication")
+
+	proof, err := NewSuite().VerifyProof(signed, pub)
+	require.NoError(t, err)
+	require.NotNil(t, proof)
+
+	value, ok := proof["proofValue"].(string)
+	require.True(t, ok, "the verified proof must still carry the signature that was checked")
+	require.NotEmpty(t, value)
+	require.Equal(t, "authentication", proof["proofPurpose"])
+	require.NotContains(t, proof, "@context", "and must not carry a context the document never wrote")
+}

@@ -186,23 +186,31 @@ func typedRoots(defaultGraph []*ld.Quad, candidates map[string]bool) []string {
 	return roots
 }
 
-// embeddingPredicates are the links by which a presentation CARRIES a
-// credential. An object of one of these is inside another document, so it is
-// not the root of this one - however the references between them run.
+// containmentPredicates are the links by which one node CARRIES another. An
+// object of one of these is inside something else, so it is not the root of
+// this document - however the references between them run.
 //
-// Unlike proofPredicates these need not match any removal set: an embedding
+// credentialSubject belongs here beside verifiableCredential, and not as a
+// nicety: a credential whose subject is ITSELF typed VerifiableCredential
+// and points back at the outer credential puts both in one source component
+// and both past typedRoots. Reading only verifiableCredential left two
+// candidates and refused a document Sign can sign.
+//
+// Unlike proofPredicates these need not match any removal set: a containment
 // link is part of the signed document, not something hashing strips. They
 // are only read to decide which typed node is the outermost.
-var embeddingPredicates = []string{
+var containmentPredicates = []string{
 	"https://www.w3.org/2018/credentials#verifiableCredential",
 	"https://www.w3.org/ns/credentials#verifiableCredential",
+	"https://www.w3.org/2018/credentials#credentialSubject",
+	"https://www.w3.org/ns/credentials#credentialSubject",
 }
 
-// unembedded drops the candidates some node in the document embeds.
+// unembedded drops the candidates some node in the document contains.
 //
 // Applied to a LONE candidate too. It looked like a harmless shortcut - a
-// bare credential parsed on its own has no embedding link, so nothing is
-// dropped - but a single candidate can be an embedded one: an UNTYPED outer
+// bare credential parsed on its own has no containment link, so nothing is
+// dropped - but a single candidate can be a contained one: an UNTYPED outer
 // node that embeds a credential which links back at it puts both in one
 // source component, and only the credential is typed. Accepting it there
 // meant a proof moved from the wrapper onto the embedded credential
@@ -215,7 +223,7 @@ func unembedded(defaultGraph []*ld.Quad, candidates []string) []string {
 		if quad == nil || quad.Predicate == nil || !isNode(quad.Object) {
 			continue
 		}
-		if !contains(embeddingPredicates, quad.Predicate.GetValue()) {
+		if !contains(containmentPredicates, quad.Predicate.GetValue()) {
 			continue
 		}
 		embedded[quad.Object.GetValue()] = true
