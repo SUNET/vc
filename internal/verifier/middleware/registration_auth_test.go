@@ -808,6 +808,46 @@ func TestJWTValidateDistinguishesKeySetOutageFromBadToken(t *testing.T) {
 		})
 	}
 
+	// go-oidc PARSES every entry whose algorithm it supports, so an entry
+	// this package would filter out can still break the whole set. A good
+	// RSA key beside a malformed `oct` entry passed a preflight that
+	// filtered by key type FIRST, while go-oidc failed the set on it and
+	// every valid token came back invalid_token.
+	t.Run("a malformed entry this verifier would ignore still breaks the set", func(t *testing.T) {
+		var set map[string]any
+		require.NoError(t, json.Unmarshal(jwksJSON, &set))
+		set["keys"] = append([]any{map[string]any{"kty": "oct", "k": "%%"}}, set["keys"].([]any)...)
+		broken, err := json.Marshal(set)
+		require.NoError(t, err)
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(broken)
+		}))
+		defer srv.Close()
+
+		assertOutage(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
+	})
+
+	// But one go-oidc SKIPS cannot: it never parses an entry whose
+	// advertised algorithm it does not support, so a malformed HS256 entry
+	// leaves the rest of the set to decide.
+	t.Run("a malformed entry go-oidc skips does not break the set", func(t *testing.T) {
+		var set map[string]any
+		require.NoError(t, json.Unmarshal(jwksJSON, &set))
+		set["keys"] = append([]any{map[string]any{"kty": "oct", "alg": "HS256", "k": "%%"}}, set["keys"].([]any)...)
+		mixed, err := json.Marshal(set)
+		require.NoError(t, err)
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(mixed)
+		}))
+		defer srv.Close()
+
+		require.NoError(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
+	})
+
 	// The contrast case: the key set arrived and the token lost on its
 	// merits, which must stay 401 invalid_token.
 	t.Run("key set fine, token rejected", func(t *testing.T) {

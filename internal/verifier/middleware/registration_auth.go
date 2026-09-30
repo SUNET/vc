@@ -555,15 +555,18 @@ func (t *jwksTransport) countUsableKeys(body []byte) error {
 			// with no key set at all - an outage, not a bad token.
 			return fmt.Errorf("%w: a key in the set could not be read: %v", errJWKSUnavailable, err)
 		}
-		if !helpers.IsAsymmetricJWKType(metadata.KTY) {
-			continue
-		}
-		// An absent alg leaves the choice to the token's header, which the
-		// verifier constrains with the same list.
-		if metadata.Alg != "" && !t.acceptableAlg(metadata.Alg) {
-			continue
-		}
 
+		// go-oidc's own two steps, in its own order and on ITS set of
+		// algorithms - which happens to be exactly the asymmetric ones. An
+		// entry it SKIPS cannot break the set however malformed it is; an
+		// entry it PARSES can, so the parse has to happen before any filter
+		// of this package's own. Filtering `oct` out first meant a key set
+		// holding a good RSA key beside a malformed `oct` entry passed this
+		// preflight while go-oidc failed the whole set on it, and every
+		// valid token was then rejected as invalid_token.
+		if metadata.Alg != "" && !helpers.IsAsymmetricJWSAlg(metadata.Alg) {
+			continue
+		}
 		var jwk jose.JSONWebKey
 		if err := json.Unmarshal(entry, &jwk); err != nil {
 			if errors.Is(err, jose.ErrUnsupportedKeyType) {
@@ -573,6 +576,18 @@ func (t *jwksTransport) countUsableKeys(body []byte) error {
 			}
 			// And this one go-oidc treats as fatal to the whole set.
 			return fmt.Errorf("%w: a key in the set could not be parsed: %v", errJWKSUnavailable, err)
+		}
+
+		// From here on the question is this package's: not "can go-oidc
+		// load it" but "could a token this verifier accepts be verified
+		// with it".
+		if !helpers.IsAsymmetricJWKType(metadata.KTY) {
+			continue
+		}
+		// An absent alg leaves the choice to the token's header, which the
+		// verifier constrains with the same list.
+		if metadata.Alg != "" && !t.acceptableAlg(metadata.Alg) {
+			continue
 		}
 		if !jwk.Valid() {
 			continue
