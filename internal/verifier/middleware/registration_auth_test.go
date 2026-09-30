@@ -1,9 +1,12 @@
 package middleware
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"math/big"
 	"net/http"
@@ -565,6 +568,17 @@ func TestJWKSFetchRefusesNonHTTPSRedirect(t *testing.T) {
 // will fail the same way, and files a local outage under what reads as
 // ordinary auth noise - so the one signal an operator would act on is the one
 // that gets lost.
+// p384X and p384Y are a real P-384 point, so the key parses and is Valid()
+// - the only thing wrong with it is the curve, which is the whole point.
+var p384X, p384Y = func() (string, string) {
+	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(key.X.FillBytes(make([]byte, 48))),
+		base64.RawURLEncoding.EncodeToString(key.Y.FillBytes(make([]byte, 48)))
+}()
+
 func TestJWTValidateDistinguishesKeySetOutageFromBadToken(t *testing.T) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
@@ -593,17 +607,44 @@ func TestJWTValidateDistinguishesKeySetOutageFromBadToken(t *testing.T) {
 		return raw
 	}
 
-	validatorFor := func(t *testing.T, jwksURL string) *jwtBearerValidator {
+	// ES256-signed, for the cases about a key set that cannot serve the
+	// verifier's configured algorithm. An RS256 token against an ES256-only
+	// verifier is refused by go-oidc on the TOKEN's algorithm before the key
+	// set is ever fetched, which is a 401 about the token and would make
+	// those subtests prove nothing about the key set.
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	signedES256 := func(t *testing.T) string {
+		t.Helper()
+		token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+			"iss": issuerExampleURL,
+			"aud": registerAudience,
+			"sub": "client-reg-admin",
+			"exp": time.Now().Add(5 * time.Minute).Unix(),
+			"iat": time.Now().Unix(),
+		})
+		token.Header["kid"] = jwtKid
+		raw, err := token.SignedString(ecKey)
+		require.NoError(t, err)
+
+		return raw
+	}
+
+	validatorForAlgs := func(t *testing.T, jwksURL string, algs []string) *jwtBearerValidator {
 		t.Helper()
 		v, err := newJWTBearerValidator(&model.DynamicRegistrationJWTAuthConfig{
 			JWKSURI:            jwksURL,
 			Issuer:             issuerExampleURL,
 			Audience:           registerAudience,
-			AllowedSigningAlgs: []string{"RS256"},
+			AllowedSigningAlgs: algs,
 		})
 		require.NoError(t, err)
 
 		return v
+	}
+	validatorFor := func(t *testing.T, jwksURL string) *jwtBearerValidator {
+		t.Helper()
+		return validatorForAlgs(t, jwksURL, []string{"RS256"})
 	}
 
 	assertOutage := func(t *testing.T, err error) {
@@ -744,6 +785,28 @@ func TestJWTValidateDistinguishesKeySetOutageFromBadToken(t *testing.T) {
 
 		require.NoError(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
 	})
+
+	// A key of the wrong TYPE for the configured algorithms is unusable too,
+	// and metadata does not say so: an RSA key that advertises nothing is
+	// offered to whichever algorithm the token header names, and with
+	// allowed_signing_algs ["ES256"] there is no such algorithm it can
+	// implement. go-oidc loads the key happily and no permitted token can
+	// verify with it.
+	for name, keys := range map[string]string{
+		"an RSA key advertising nothing": `{"keys":[{"kty":"RSA","n":"AQAB","e":"AQAB","kid":"` + jwtKid + `"}]}`,
+		"an RSA key advertising ES256":   `{"keys":[{"kty":"RSA","alg":"ES256","n":"AQAB","e":"AQAB","kid":"` + jwtKid + `"}]}`,
+		"an EC key on the wrong curve":   `{"keys":[{"kty":"EC","crv":"P-384","x":"` + p384X + `","y":"` + p384Y + `","kid":"` + jwtKid + `"}]}`,
+	} {
+		t.Run("an ES256-only verifier refuses "+name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(keys))
+			}))
+			defer srv.Close()
+
+			assertOutage(t, validatorForAlgs(t, srv.URL, []string{"ES256"}).Validate(t.Context(), signedES256(t)))
+		})
+	}
 
 	// The contrast case: the key set arrived and the token lost on its
 	// merits, which must stay 401 invalid_token.

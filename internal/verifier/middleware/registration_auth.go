@@ -3,6 +3,11 @@ package middleware
 import (
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
@@ -572,6 +577,14 @@ func (t *jwksTransport) countUsableKeys(body []byte) error {
 		if !jwk.Valid() {
 			continue
 		}
+		// And the concrete key has to be able to IMPLEMENT one of those
+		// algorithms. An RSA key cannot sign ES256 and a P-384 key cannot
+		// sign ES256 either, so with allowed_signing_algs ["ES256"] a valid
+		// RSA JWK - advertising nothing, or advertising ES256 - is loaded by
+		// go-oidc and verifies no token this service would accept.
+		if !t.keyCanVerifyAnAcceptedToken(jwk.Key, metadata.Alg) {
+			continue
+		}
 		usable++
 	}
 	if usable == 0 {
@@ -591,6 +604,60 @@ func (t *jwksTransport) acceptableAlg(alg string) bool {
 		return true
 	}
 	return slices.Contains(t.allowedAlgs, alg)
+}
+
+// keyCanVerifyAnAcceptedToken reports whether this key could verify SOME
+// token this verifier would accept.
+//
+// A key that advertises an algorithm has to be able to implement that one; a
+// key that advertises none is offered to whichever algorithm the token
+// header names, so it is usable if it can implement any configured one.
+func (t *jwksTransport) keyCanVerifyAnAcceptedToken(key crypto.PublicKey, advertised string) bool {
+	if advertised != "" {
+		return t.acceptableAlg(advertised) && keyImplementsAlg(key, advertised)
+	}
+	for _, alg := range t.acceptableAlgs() {
+		if keyImplementsAlg(key, alg) {
+			return true
+		}
+	}
+	return false
+}
+
+// acceptableAlgs is the configured list, or every asymmetric algorithm when
+// none is configured - which is the same default the validator applies.
+func (t *jwksTransport) acceptableAlgs() []string {
+	if len(t.allowedAlgs) == 0 {
+		return []string{"RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA"}
+	}
+	return t.allowedAlgs
+}
+
+// keyImplementsAlg reports whether a public key is of the type and, for
+// ECDSA, the CURVE that algorithm is defined over. RFC 7518 sections 3.3-3.5
+// and RFC 8037: ES256 is P-256 and nothing else.
+func keyImplementsAlg(key crypto.PublicKey, alg string) bool {
+	switch alg {
+	case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":
+		_, ok := key.(*rsa.PublicKey)
+		return ok
+	case "ES256":
+		return ecdsaKeyOnCurve(key, elliptic.P256())
+	case "ES384":
+		return ecdsaKeyOnCurve(key, elliptic.P384())
+	case "ES512":
+		return ecdsaKeyOnCurve(key, elliptic.P521())
+	case "EdDSA":
+		_, ok := key.(ed25519.PublicKey)
+		return ok
+	default:
+		return false
+	}
+}
+
+func ecdsaKeyOnCurve(key crypto.PublicKey, curve elliptic.Curve) bool {
+	ecKey, ok := key.(*ecdsa.PublicKey)
+	return ok && ecKey.Curve == curve
 }
 
 // refuseNonHTTPSRedirect stops a JWKS fetch from being walked off TLS.
