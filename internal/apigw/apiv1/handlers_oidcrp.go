@@ -201,26 +201,19 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	c.log.Debug("OIDCRPCallback: building claim transformer", "credential_type", session.CredentialType)
 	transformer := service.BuildTransformer()
 
-	var claims map[string]any
-	if transformer != nil {
-		c.log.Debug("OIDCRPCallback: transforming claims", "raw_claims_count", len(authResp.Claims))
-		// Transform OIDC claims to credential claims
-		claims, err = transformer.TransformClaims(authResp.Claims)
-		if err != nil {
-			span.SetStatus(codes.Error, err.Error())
-			return nil, err
-		}
-	} else {
-		// No mapping configured. Raw OIDC claims used to pass through
-		// verbatim, which put every ID-token claim into the credential -
-		// including ones the credential type never declares. Those can
-		// never be selectively disclosed, so a wallet has to present them
-		// every time, and the standard ones (iss, aud, exp, iat, nonce)
-		// collide with the envelope the issuer fills in at signing.
-		claims = c.filterClaimsByCredentialType(session.CredentialType, authResp.Claims)
+	cc, err := c.newCallbackClaims(session.CredentialType, authResp.Claims, transformer)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
 	}
 
-	// Log the resulting document data for diagnostics.
+	// The authenticated claim set. It is deliberately NOT filtered against the
+	// credential type: everything below that resolves an identity or looks up a
+	// datastore document speaks a different vocabulary (see callbackClaims).
+	// Credential content goes through cc.documentData() instead.
+	claims := cc.identity
+
+	// Log the authenticated claim set for diagnostics.
 	claimKeys := make([]string, 0, len(claims))
 	for k := range claims {
 		claimKeys = append(claimKeys, k)
@@ -296,21 +289,12 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 				return nil, fmt.Errorf("OIDC datastore lookup failed: %w", err)
 			}
 		} else {
-			// Assertion: store the transformed claims directly as a document
-			defaults, derr := c.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].ResolveDefaults(time.Now())
-			if derr != nil {
-				span.SetStatus(codes.Error, "assertion defaults resolve failed")
-				return nil, fmt.Errorf("failed to resolve assertion defaults: %w", derr)
-			}
-			if err := credential.MergeDefaults(claims, defaults); err != nil {
-				span.SetStatus(codes.Error, "assertion defaults merge failed")
-				return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
-			}
-			doc := &model.CompleteDocument{
-				Meta: &model.MetaData{
-					AuthenticSource: session.IssuerURL,
-				},
-				DocumentData: claims,
+			// Assertion: the authenticated claims are the credential's data,
+			// so they are stored directly as a document.
+			doc, docErr := c.buildOIDCDocument(cc, session.IssuerURL, true)
+			if docErr != nil {
+				span.SetStatus(codes.Error, "assertion document build failed")
+				return nil, docErr
 			}
 			docs := map[string]*model.CompleteDocument{
 				session.IssuerURL: doc,
@@ -440,20 +424,16 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 
 	// Store document data so the credential endpoint can issue the credential
 	// when the wallet redeems the offer.
-	if credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion {
-		defaults, derr := c.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].ResolveDefaults(time.Now())
-		if derr != nil {
-			span.SetStatus(codes.Error, "assertion defaults resolve failed")
-			return nil, fmt.Errorf("failed to resolve assertion defaults: %w", derr)
-		}
-		if err := credential.MergeDefaults(claims, defaults); err != nil {
-			span.SetStatus(codes.Error, "assertion defaults merge failed")
-			return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
-		}
-	}
-	doc := &model.CompleteDocument{
-		Meta:         &model.MetaData{AuthenticSource: session.IssuerURL},
-		DocumentData: claims,
+	//
+	// Note that this happens for every data source, not only assertion: a
+	// standalone-mode offer stores the callback claims as the document even for
+	// a datastore scope, and never consults the datastore. That looks like a
+	// separate defect, but it is exactly why the filtering has to apply here
+	// too - whatever lands in DocumentData can end up signed into a credential.
+	doc, docErr := c.buildOIDCDocument(cc, session.IssuerURL, credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion)
+	if docErr != nil {
+		span.SetStatus(codes.Error, "document build failed")
+		return nil, docErr
 	}
 	if err = c.StoreVCIDocuments(ctx, preAuthCode, map[string]*model.CompleteDocument{session.IssuerURL: doc}); err != nil {
 		span.SetStatus(codes.Error, "failed to store VCI documents")
@@ -524,6 +504,155 @@ func (c *Client) createCredentialViaOIDCRP(ctx context.Context, credentialType s
 	}
 
 	return reply.Credentials[0].Credential, nil
+}
+
+// callbackClaims keeps the two claim vocabularies an OIDC callback produces
+// apart. They used to share a single variable, which is issue #712: filtering
+// for one of them filtered the other, and identity resolution was left with
+// nothing to work with.
+//
+//   - Identity claims say who authenticated. They feed
+//     LookupDatastoreByIdentity, whose claim names come from the operator's
+//     auth_claims configuration, and ResolveVCIIdentifier/ResolveIdentifier,
+//     which look for authentic_source_person_id or for family_name, given_name
+//     and birth_date. Those names are chosen independently of the credential
+//     type, so whether the credential type happens to declare them is a
+//     coincidence: some do (vctm_pid, mdl.mdoc, pid_mdoc declare family_name,
+//     given_name and birth_date), many declare none of them, and
+//     authentic_source_person_id is declared by no shipped VCTM or MDDL at
+//     all. Filtering this set against the credential type therefore removes
+//     claims identity resolution needs.
+//   - Document data is what the credential will say. It ends up in
+//     CompleteDocument.DocumentData and is signed into the credential, so it
+//     must carry only what the credential type declares (issue #623).
+type callbackClaims struct {
+	c              *Client
+	credentialType string
+
+	// identity is the authenticated claim set, run through the configured
+	// attribute_mapping if there is one. It is never filtered.
+	identity map[string]any
+
+	// filter records whether documentData still has to drop undeclared claims.
+	// It is false when a transformer produced the claims: the operator has then
+	// already declared exactly which claims the credential gets, and filtering
+	// that output on top would overrule their configuration.
+	filter bool
+}
+
+// newCallbackClaims applies the configured claim transformer, if any, and
+// records whether the resulting claims still need filtering before they may
+// become credential content.
+func (c *Client) newCallbackClaims(credentialType string, raw map[string]any, transformer *oidcrp.ClaimTransformer) (*callbackClaims, error) {
+	cc := &callbackClaims{
+		c:              c,
+		credentialType: credentialType,
+		identity:       raw,
+		// No mapping configured, so the raw OIDC claims are also the
+		// credential's claims and have to be filtered before use as such.
+		filter: true,
+	}
+
+	if transformer != nil {
+		c.log.Debug("OIDCRPCallback: transforming claims", "raw_claims_count", len(raw))
+		transformed, err := transformer.TransformClaims(raw)
+		if err != nil {
+			return nil, err
+		}
+		cc.identity = transformed
+		cc.filter = false
+	}
+
+	return cc, nil
+}
+
+// documentData returns the claims that may become credential content.
+//
+// This is the one place the "does this need filtering" decision is made. Every
+// site that turns callback claims into a document goes through it, so a site
+// added later is a visible call site rather than a silent omission.
+//
+// The result is always the caller's own to mutate: a caller merging assertion
+// defaults into it must not reach the identity claims that identity resolution
+// reads afterwards, or a default named sub or authentic_source_person_id would
+// come back as an authenticated identifier. Filtering alone does not guarantee
+// that - filterClaimsByCredentialType hands its input straight back when there
+// is no metadata to filter against, and with a transformer configured there is
+// no filtering at all.
+func (cc *callbackClaims) documentData() map[string]any {
+	claims := cc.identity
+	if cc.filter {
+		// Raw OIDC claims used to pass through verbatim, which put every
+		// ID-token claim into the credential - including ones the credential
+		// type never declares. Those can never be selectively disclosed, so a
+		// wallet has to present them every time, and the standard ones (iss,
+		// aud, exp, iat, nonce) collide with the envelope the issuer fills in
+		// at signing.
+		claims = cc.c.filterClaimsByCredentialType(cc.credentialType, cc.identity)
+	}
+	return cloneClaims(claims)
+}
+
+// cloneClaims copies the map and slice spine of a claim set, so that a caller
+// mutating the copy cannot reach the original. A shallow copy is not enough:
+// assertion defaults are dot-notation paths, and MergeDefaults walks into
+// nested maps to set one, which would otherwise write straight into a nested
+// map the identity claims still share.
+//
+// Leaf values are not copied. Nothing here replaces a leaf in place, so
+// sharing them is safe and keeps this to the structure that is actually walked.
+func cloneClaims(claims map[string]any) map[string]any {
+	if claims == nil {
+		return nil
+	}
+	out := make(map[string]any, len(claims))
+	for name, value := range claims {
+		out[name] = cloneClaimValue(value)
+	}
+	return out
+}
+
+func cloneClaimValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		return cloneClaims(v)
+	case []any:
+		out := make([]any, len(v))
+		for i, element := range v {
+			out[i] = cloneClaimValue(element)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+// buildOIDCDocument builds the document an OIDC callback stores for later
+// issuance. Both the VCI and the standalone path build their document here, so
+// that the document-data rule - and only it - applies to both.
+//
+// mergeAssertionDefaults injects the scope's configured assertion defaults;
+// callers pass true only for assertion-sourced issuance, where the
+// authentication assertion itself is the credential's data.
+func (c *Client) buildOIDCDocument(cc *callbackClaims, authenticSource string, mergeAssertionDefaults bool) (*model.CompleteDocument, error) {
+	documentData := cc.documentData()
+
+	if mergeAssertionDefaults {
+		defaults, err := c.cfg.APIGW.DataSources.Assertion.Scopes[cc.credentialType].ResolveDefaults(time.Now())
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve assertion defaults: %w", err)
+		}
+		if err := credential.MergeDefaults(documentData, defaults); err != nil {
+			return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
+		}
+	}
+
+	return &model.CompleteDocument{
+		Meta: &model.MetaData{
+			AuthenticSource: authenticSource,
+		},
+		DocumentData: documentData,
+	}, nil
 }
 
 // filterClaimsByCredentialType drops claims the credential type does not
