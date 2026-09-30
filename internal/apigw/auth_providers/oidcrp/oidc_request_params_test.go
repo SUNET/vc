@@ -248,3 +248,62 @@ func TestResolveTemplate_RendersWithData(t *testing.T) {
 		t.Fatalf("got %q, want siros", got)
 	}
 }
+
+// TestResolveOIDCRequestParams_CallerSuppliesValuesNotParameters pins the
+// bound that makes dynamic parameters safe to accept from a PAR caller at
+// all: the OPERATOR decides which parameters exist and where a template may
+// appear, and the caller only fills a placeholder in.
+//
+// They are not an authentic-source assertion - PAR authenticates the
+// wallet/client, not the origin of a claim about an organisation - so what a
+// caller can reach has to stop at "which value is substituted where the
+// operator allowed one". A caller that could add a parameter, or reach one
+// the operator did not template, would be choosing what this service asks
+// the OP to assert.
+func TestResolveOIDCRequestParams_CallerSuppliesValuesNotParameters(t *testing.T) {
+	// Dynamic values for placeholders that do not exist in the config change
+	// nothing: there is no parameter to carry them.
+	params := &model.OIDCRequestParams{ACRValues: "urn:example:loa3"}
+	opts, err := resolveOIDCRequestParams(params, map[string]string{
+		"org_id":     "attacker-chosen",
+		"login_hint": "attacker@example.com",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	query := authQuery(t, opts)
+	if got := query.Get("acr_values"); got != "urn:example:loa3" {
+		t.Fatalf("acr_values = %q, want the configured literal", got)
+	}
+	for _, unexpected := range []string{"org_id", "login_hint"} {
+		if query.Has(unexpected) {
+			t.Fatalf("a dynamic value reached the request as parameter %q, which the operator never configured", unexpected)
+		}
+	}
+
+	// And a configured template IS filled from the caller's values - so the
+	// check above is about reach, not about the feature being inert.
+	params = &model.OIDCRequestParams{ACRValues: "{{.org_id}}"}
+	opts, err = resolveOIDCRequestParams(params, map[string]string{"org_id": "urn:example:org:42"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := authQuery(t, opts).Get("acr_values"); got != "urn:example:org:42" {
+		t.Fatalf("acr_values = %q, want the substituted value", got)
+	}
+}
+
+// authQuery renders the options onto an authorization URL and returns its
+// query, which is the only place the effect of an AuthCodeOption is visible.
+func authQuery(t *testing.T, opts []oauth2.AuthCodeOption) url.Values {
+	t.Helper()
+	cfg := &oauth2.Config{
+		ClientID: "test-client",
+		Endpoint: oauth2.Endpoint{AuthURL: "https://op.example.com/authorize"},
+	}
+	parsed, err := url.Parse(cfg.AuthCodeURL("test-state", opts...))
+	if err != nil {
+		t.Fatalf("failed to parse generated auth URL: %v", err)
+	}
+	return parsed.Query()
+}

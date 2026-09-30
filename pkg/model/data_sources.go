@@ -78,7 +78,9 @@ type DatastoreScope struct {
 	AuthScopes map[string]AuthScopeEntry `yaml:"auth_scopes,omitempty"`
 
 	// OIDCRequestParams configures additional parameters to include in the OIDC authorization request.
-	// Used when the authentic source needs to pass dynamic values to the OP.
+	// Used to pass per-request values to the OP - see OIDCRequestParams for
+	// where those values come from, and for why they are not a statement
+	// about the authentic source.
 	//
 	// Only meaningful when auth_provider is oidc - there is no authorization
 	// request to add parameters to otherwise - and rejected at startup on a
@@ -153,7 +155,9 @@ type AssertionScope struct {
 	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=saml oidc"`
 
 	// OIDCRequestParams configures additional parameters to include in the OIDC authorization request.
-	// Used when the authentic source needs to pass dynamic values to the OP.
+	// Used to pass per-request values to the OP - see OIDCRequestParams for
+	// where those values come from, and for why they are not a statement
+	// about the authentic source.
 	//
 	// Only meaningful when auth_provider is oidc - there is no authorization
 	// request to add parameters to otherwise - and rejected at startup on a
@@ -226,7 +230,9 @@ type ExternalAPIScope struct {
 	AttributeMapping AttributeMapping `yaml:"attribute_mapping,omitempty" doc_key:"attribute"`
 
 	// OIDCRequestParams configures additional parameters to include in the OIDC authorization request.
-	// Used when the authentic source needs to pass dynamic values to the OP.
+	// Used to pass per-request values to the OP - see OIDCRequestParams for
+	// where those values come from, and for why they are not a statement
+	// about the authentic source.
 	//
 	// Only meaningful when auth_provider is oidc - there is no authorization
 	// request to add parameters to otherwise - and rejected at startup on a
@@ -354,7 +360,29 @@ func (ds *DataSources) ResolveDataSource(credentialType, authProvider string) (C
 }
 
 // OIDCRequestParams configures additional parameters to include in the OIDC authorization request.
-// These allow the authentic source to inject dynamic values into the authentication flow.
+// These allow per-request values to be injected into the authentication flow.
+//
+// NOT AN AUTHENTIC-SOURCE ASSERTION, despite where the values nominally come
+// from. The operator decides WHICH parameters exist and where a template may
+// appear; the value substituted into one is whatever the PAR caller sent in
+// PARRequest.DynamicParams, and nothing binds that to a business system - PAR
+// authenticates the wallet/client, not the origin of a claim about an
+// organisation. So a caller authorized to make PAR requests chooses what this
+// service ASKS the OP to assert.
+//
+// That is bounded on both sides. It is bounded here because a caller can only
+// supply values for placeholders the operator wrote: they cannot add a
+// parameter, override a reserved one, or inject structure into the claims
+// JSON (resolveOIDCRequestParams escapes substitutions as JSON string content
+// and refuses an unresolved placeholder). And it is bounded downstream because
+// whether the OP honours the request is the OP's decision, and vc gates
+// issuance on the claims the OP ASSERTED, never on these values - see the
+// policy evaluation in handlers_oidcrp.go, which deliberately does not fall
+// back to them.
+//
+// The rule that follows: do not use a dynamic parameter as a security input.
+// Treat it as a hint to the OP about what to ask for, and require the answer
+// to come back in the token.
 //
 // Templated values ("{{.org_id}}") are supplied by the caller that starts the
 // flow, and only the PAR/VCI path carries them (PARRequest.DynamicParams).
