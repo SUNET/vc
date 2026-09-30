@@ -3,12 +3,14 @@ package issuance
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/sirosfoundation/go-spocp/pkg/sexp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v2"
 )
 
 func TestNewPolicyEngine_NilPolicy(t *testing.T) {
@@ -528,4 +530,61 @@ func TestEvaluateAbsentClaimIsNotAWildcard(t *testing.T) {
 			"identity": map[string]any{"given_name": "Alice"},
 		}, nestedPolicy.QueryTemplate), "dot-notation resolution must count as present")
 	})
+}
+
+// TestDocumentedPolicyExampleStarts reads the worked example out of
+// docs/CONFIGURATION.md and runs it.
+//
+// Requiring query_template made every advertised policy that showed only
+// rules unusable: NewPolicyEngine refuses exactly that configuration at
+// startup, so an operator following the documentation could not start the
+// service. Reading the doc rather than restating it is the point - a copy
+// here would stay green while the advertised one rotted.
+func TestDocumentedPolicyExampleStarts(t *testing.T) {
+	example := documentedIssuancePolicyExample(t)
+
+	var parsed struct {
+		IssuancePolicy model.IssuancePolicy `yaml:"issuance_policy"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(example), &parsed), "the advertised example must be valid YAML")
+	require.NotEmpty(t, parsed.IssuancePolicy.Rules, "the example must actually carry rules")
+	require.NotEmpty(t, parsed.IssuancePolicy.QueryTemplate, "and the query_template they are matched against")
+
+	engine, err := NewPolicyEngine(&parsed.IssuancePolicy)
+	require.NoError(t, err, "the documented example must be a configuration this service starts with")
+	require.NotNil(t, engine)
+	require.Positive(t, engine.RuleCount())
+
+	// And it has to DECIDE, not merely load: a template whose dimensions do
+	// not line up with the rule's loads fine and denies everything.
+	require.NoError(t, engine.Evaluate("org_credential", map[string]any{
+		"acr":    "urn:example:loa3",
+		"org_id": "example-org",
+	}, parsed.IssuancePolicy.QueryTemplate), "the example's own rule must admit a token that satisfies it")
+
+	require.Error(t, engine.Evaluate("org_credential", map[string]any{
+		"acr":    "urn:somewhere:else",
+		"org_id": "example-org",
+	}, parsed.IssuancePolicy.QueryTemplate), "and refuse one that does not")
+}
+
+// documentedIssuancePolicyExample returns the first fenced yaml block after
+// the issuance_policy heading in docs/CONFIGURATION.md.
+func documentedIssuancePolicyExample(t *testing.T) string {
+	t.Helper()
+	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "CONFIGURATION.md"))
+	require.NoError(t, err)
+
+	const heading = "### `issuance_policy`"
+	start := strings.Index(string(doc), heading)
+	require.GreaterOrEqual(t, start, 0, "the configuration reference must document issuance_policy")
+
+	section := string(doc)[start:]
+	open := strings.Index(section, "```yaml")
+	require.GreaterOrEqual(t, open, 0, "issuance_policy must carry a worked example, not rules on their own")
+	body := section[open+len("```yaml"):]
+	end := strings.Index(body, "```")
+	require.GreaterOrEqual(t, end, 0)
+
+	return strings.TrimSpace(body[:end])
 }

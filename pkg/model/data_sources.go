@@ -417,9 +417,39 @@ type OIDCRequestParams struct {
 // IssuancePolicy defines SPOCP rules for credential issuance authorization.
 // After OIDC authentication completes, a SPOCP query is built from the returned
 // claims and evaluated against these rules. If no rule matches, issuance is denied.
+//
+// A policy is rules PLUS a query_template. Rules alone are refused at startup:
+// SPOCP matches dimensions by POSITION, so a rule cannot be read at all without
+// knowing which dimensions the query carries and in what order. Any example
+// showing one without the other does not describe a configuration this service
+// will start with.
+//
+// A complete one, for a rule requiring an acr with a given prefix and any
+// org_id:
+//
+// ```yaml
+//
+//	issuance_policy:
+//	  query_template:
+//	    - dimension: acr
+//	      claim: acr
+//	    - dimension: org_id
+//	      claim: org_id
+//	  rules:
+//	    - "(credential (scope org_credential)(acr (* prefix urn:example:loa))(org_id))"
+//
+// ```
+//
+// The rule's dimensions after (scope ...) are acr then org_id, in the order
+// query_template lists them. "scope" is auto-populated with the credential type
+// name and is never listed in query_template. "(org_id)" with no value means
+// any value.
 type IssuancePolicy struct {
 	// Rules are inline SPOCP S-expression rules (human-readable advanced form).
 	// Example: "(credential (scope org_credential)(acr (* prefix urn:example:loa))(org_id))"
+	// -- which is only half a configuration: rules without a query_template
+	// are refused at startup, so see the worked example on issuance_policy
+	// above for the query_template that rule needs.
 	// When QueryTemplate is set, each rule is validated at load time against
 	// the "credential" tag and the ("scope", <QueryTemplate dimensions>)
 	// shape -- a rule with the wrong number/order of dimensions fails
@@ -447,7 +477,7 @@ type IssuancePolicy struct {
 	// iss, nonce, sub and usually auth_time) that fallback denied every
 	// request, so a policy written for it was a blanket deny that looked like
 	// a working configuration.
-	QueryTemplate []QueryDimension `yaml:"query_template,omitempty" validate:"omitempty,dive"`
+	QueryTemplate []QueryDimension `yaml:"query_template,omitempty" validate:"omitempty,dive" doc_example:"[{dimension: acr, claim: acr}, {dimension: org_id, claim: org_id}]"`
 }
 
 // QueryDimension maps a SPOCP dimension name to the OIDC claim whose value populates it.
