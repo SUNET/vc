@@ -12,7 +12,10 @@ import (
 
 // UpdateSessionPreferenceRequest represents a request to update session display preference
 type UpdateSessionPreferenceRequest struct {
-	SessionID             string `json:"session_id" binding:"required" validate:"required,max=128,printascii"`
+	// SessionID may arrive in the JSON body (OIDC-OP flow, which knows its
+	// session id at template render time) or be injected by the HTTP layer
+	// from the gin session cookie (standalone verifier UI, which does not).
+	SessionID             string `json:"session_id" validate:"omitempty,max=128,printascii"`
 	ShowCredentialDetails bool   `json:"show_credential_details"`
 	// WalletFollowsRedirect is optional. When non-nil it records that the
 	// user is continuing in a same-device web wallet that should follow
@@ -28,6 +31,10 @@ type UpdateSessionPreferenceResponse struct {
 
 // UpdateSessionPreference updates the session's credential display preference
 func (c *Client) UpdateSessionPreference(ctx context.Context, req *UpdateSessionPreferenceRequest) (*UpdateSessionPreferenceResponse, error) {
+	if req.SessionID == "" {
+		return nil, ErrSessionNotFound
+	}
+
 	// Get session
 	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
 	if err != nil {

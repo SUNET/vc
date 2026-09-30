@@ -79,8 +79,9 @@ func (v *VerificationDirectPostRequest) GetKID() (string, error) {
 }
 
 type VerificationDirectPostResponse struct {
-	// RedirectURI is optional - only included for same-device flows
-	// For cross-device flows, the browser is notified via SSE instead
+	// RedirectURI is present for same-device flows so the wallet can send
+	// the browser back to the verifier. Cross-device flows omit it: the
+	// still-open verifier tab is nudged over SSE instead.
 	RedirectURI string `json:"redirect_uri,omitempty"`
 }
 
@@ -630,17 +631,16 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	reply := &VerificationDirectPostResponse{}
 
-	// Check if there's an active SSE listener for this session
-	// If yes -> cross-device flow: browser is listening, notify via SSE, don't include redirect_uri
-	// If no -> same-device flow: no browser listening, include redirect_uri for wallet to follow
-	if c.notify.HasListener(authCtx.SessionID) {
-		// Cross-device flow: browser is waiting on SSE
-		c.log.Debug("Cross-device flow detected (SSE listener active)", "session_id", authCtx.SessionID)
-		// Don't include redirect_uri - wallet shows success, browser gets SSE notification
-	} else {
-		// Same-device flow: no SSE listener, wallet should redirect
-		c.log.Debug("Same-device flow detected (no SSE listener)", "session_id", authCtx.SessionID)
+	// WalletFollowsRedirect is committed by the browser tab BEFORE it leaves
+	// for the wallet (see /verification/session-preference callers), so it
+	// survives native wallets and web wallets alike; DC API responses arrive
+	// from in-tab JS, so they are same-device by construction.
+	sameDevice := authCtx.WalletFollowsRedirect || req.DCAPI
+	if sameDevice {
+		c.log.Debug("Same-device flow", "session_id", authCtx.SessionID, "wallet_follows_redirect", authCtx.WalletFollowsRedirect, "dc_api", req.DCAPI)
 		reply.RedirectURI = redirectURI
+	} else {
+		c.log.Debug("Cross-device flow", "session_id", authCtx.SessionID)
 	}
 
 	return reply, nil

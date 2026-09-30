@@ -499,11 +499,22 @@ Alpine.data("app", () => ({
     },
 
     /** 
-     * Handle click on wallet link - close SSE connection for same-device flow
-     * This allows the server to detect same-device flow and include redirect_uri
+     * Handle click on wallet link. Commit wallet_follows_redirect before
+     * navigation so direct_post can return redirect_uri — closing the SSE
+     * from the client alone raced against TCP teardown, causing the server
+     * to still see the listener and treat the flow as cross-device
+     * (SUNET/vc#718).
      */
     handleWalletClick() {
-        console.log("Wallet link clicked, closing SSE connection for same-device flow");
+        console.log("Wallet link clicked, marking same-device flow");
+        fetch(new URL("/verification/session-preference", baseUrl).toString(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet_follows_redirect: true }),
+            keepalive: true,
+        }).catch((err) => {
+            console.warn("Failed to mark same-device flow", err);
+        });
         if (this.notifyEventSource) {
             this.notifyEventSource.close();
             this.notifyEventSource = null;

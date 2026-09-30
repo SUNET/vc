@@ -6,6 +6,7 @@ import (
 
 	"github.com/SUNET/vc/internal/verifier/apiv1"
 
+	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -21,6 +22,13 @@ func (s *Service) endpointSessionPreference(ctx context.Context, c *gin.Context)
 		s.log.Error(err, "Failed to bind session preference request")
 		c.AbortWithStatus(http.StatusBadRequest)
 		return nil, nil
+	}
+
+	if request.SessionID == "" {
+		session := sessions.Default(c)
+		if sessionID, ok := session.Get("session_id").(string); ok && sessionID != "" {
+			request.SessionID = sessionID
+		}
 	}
 
 	response, err := s.apiv1.UpdateSessionPreference(ctx, request)
