@@ -166,26 +166,53 @@ func (rc *RDFCredential) rootAndGraphs(source string) (map[string]any, []map[str
 	return root, nodes, graphs, nil
 }
 
-// CheckRootSurvivesFlattening refuses a document whose root can be read now
-// and not after it has been through RDF.
+// CheckRootSurvivesFlattening refuses a document whose root changes, or
+// stops being readable, once it has been through RDF.
 //
 // MarshalJSON round-trips through N-Quads, which FLATTENS: every node with
-// properties of its own is lifted to the top level. A document whose root
-// takes part in a reference cycle - a presentation carrying a credential
-// whose subject links back at it - then has no top-level node that nothing
-// else refers to, and RootProofs cannot say which node the document is
-// about.
+// properties of its own is lifted to the top level. Two things can go wrong
+// there, and both produce a document this package would treat differently
+// in two serializations of the same RDF.
+//
+// The root can VANISH. A root taking part in a reference cycle - a
+// presentation carrying a credential whose subject links back at it - then
+// has no top-level node that nothing else refers to.
+//
+// The root can MOVE, which is worse. A disconnected node reachable only
+// through @included, pointing at the real root, is referenced by nothing
+// once flattened while the real root is referenced by it - so the flattened
+// form names the attacker's node as the document. Moving the root's proof
+// onto that node would then verify as its own, since the same proof is
+// removed from the same RDF either way. Identity is therefore compared, not
+// merely existence.
+//
+// A root with no @id cannot be compared, and does not need to be: nothing
+// can refer to it, so it is unreferenced in both forms, and rootOf refuses
+// as soon as a second unreferenced node appears.
 //
 // Signing such a document would produce something this package verifies in
-// one serialization and refuses in another. It is refused at signing
-// instead, where the operator can still change it.
+// one serialization and refuses - or worse, verifies differently - in
+// another. It is refused at signing instead, where the operator can still
+// change it.
 func (rc *RDFCredential) CheckRootSurvivesFlattening() error {
+	compactRoot, _, _, err := rc.rootAndGraphs(rc.documentSource())
+	if err != nil {
+		return err
+	}
+
 	marshalled, err := rc.MarshalJSON()
 	if err != nil {
 		return fmt.Errorf("cannot tell whether this document keeps its root: %w", err)
 	}
-	if _, _, _, err := rc.rootAndGraphs(string(marshalled)); err != nil {
+	flatRoot, _, _, err := rc.rootAndGraphs(string(marshalled))
+	if err != nil {
 		return fmt.Errorf("this document does not say which node it is about once serialized through RDF, so it would verify in one form and not another: %w", err)
+	}
+
+	compactID, _ := compactRoot["@id"].(string)
+	flatID, _ := flatRoot["@id"].(string)
+	if compactID != "" && compactID != flatID {
+		return fmt.Errorf("this document is about %q as written and %q once serialized through RDF, so a proof on one would be read as the other's", compactID, flatID)
 	}
 
 	return nil

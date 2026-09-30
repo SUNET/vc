@@ -1,8 +1,11 @@
 package eddsa
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
 
@@ -160,4 +163,89 @@ func TestVerifyRefusesARootLinkedNodeThatIsNotAProof(t *testing.T) {
 	err = NewSuite().Verify(reparsed, pub)
 	require.Error(t, err, "a node that is not a DataIntegrityProof is not a proof")
 	require.Contains(t, err.Error(), ProofType)
+}
+
+// TestSignRefusesADocumentWhoseRootMOVESWhenFlattened: a node reachable only
+// through @included is part of the document while compact and a top-level
+// node once flattened. If it points AT the root, the flattened form has the
+// root referenced and the included node referenced by nothing - so the two
+// serializations name different documents.
+//
+// Checking that a root still EXISTS after flattening is not enough: it has
+// to be the same one. Otherwise a proof moved onto the included node would
+// verify as that node's own, since the same proof is removed from the same
+// RDF either way.
+func TestSignRefusesADocumentWhoseRootMOVESWhenFlattened(t *testing.T) {
+	const switched = `{
+		"@context": ["https://www.w3.org/ns/credentials/v2",
+			{"attaches": {"@id": "https://example.org/vocab#attaches", "@type": "@id"}}],
+		"id": "urn:uuid:a",
+		"type": ["VerifiablePresentation"],
+		"holder": "did:example:holder",
+		"@included": [{
+			"id": "urn:uuid:b",
+			"type": ["VerifiablePresentation"],
+			"attaches": "urn:uuid:a"
+		}]
+	}`
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(switched), nil)
+	require.NoError(t, err)
+
+	// Compact, the document says it is about A - which is what makes this
+	// worth refusing rather than merely failing later.
+	root, _, err := cred.RootProofs()
+	require.NoError(t, err)
+	require.Empty(t, root, "unsigned, so no proofs yet")
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	_, err = NewSuite().Sign(cred, priv, &SignOptions{
+		VerificationMethod: "did:example:signer#key-1",
+		ProofPurpose:       "authentication",
+		Created:            time.Now().UTC(),
+	})
+	require.Error(t, err, "a document that names two different roots must not be signed")
+	require.Contains(t, err.Error(), "urn:uuid:a")
+	require.Contains(t, err.Error(), "urn:uuid:b")
+}
+
+// TestVerifyRefusesAProofMovedOntoAnIncludedNode is the relocation half of
+// the same shape: the document is signed WITHOUT the included node, which
+// is then added with the root's proof moved onto it.
+func TestVerifyRefusesAProofMovedOntoAnIncludedNode(t *testing.T) {
+	signed, pub := signDocument(t, `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "urn:uuid:a",
+		"type": ["VerifiablePresentation"],
+		"holder": "did:example:holder"
+	}`, "authentication")
+	require.NoError(t, NewSuite().Verify(signed, pub))
+
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(compact, &doc))
+	require.NotNil(t, doc["proof"])
+
+	// Add a node that points at the root and carries the root's proof.
+	doc["@context"] = []any{
+		"https://www.w3.org/ns/credentials/v2",
+		map[string]any{"attaches": map[string]any{"@id": "https://example.org/vocab#attaches", "@type": "@id"}},
+	}
+	doc["@included"] = []any{map[string]any{
+		"id":       "urn:uuid:b",
+		"type":     []any{"VerifiablePresentation"},
+		"attaches": "urn:uuid:a",
+		"proof":    doc["proof"],
+	}}
+	delete(doc, "proof")
+
+	moved, err := json.Marshal(doc)
+	require.NoError(t, err)
+	relocated, err := credential.NewRDFCredentialFromJSON(moved, nil)
+	require.NoError(t, err)
+
+	require.Error(t, NewSuite().Verify(relocated, pub),
+		"a proof on an included node is not the document's own")
 }
