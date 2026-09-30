@@ -232,10 +232,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		// without any such cross-check before this PR, and refusing here would
 		// take working multi-query templates away. The W3C branch does fail
 		// closed, since its constraint checking depends on the query.
-		//
-		// SUNET/vc#683 persists the scope-to-query mapping, which resolves the
-		// ambiguity properly; once it lands this can stop being conditional.
-		if requested, ok := c.requestedQuery(authCtx, scope); ok {
+		if requested, ok := c.requestedQuery(authCtx, scopeQueryIDs, scope); ok {
 			if !formatMatchesRequest(format, requested.Format) {
 				c.log.Error(nil, "returned credential format does not answer the request",
 					"scope", scope, "detected", format, "requested", requested.Format)
@@ -567,7 +564,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// default). The credential's issuer proof says it was issued; only
 			// a proof over the PRESENTATION, carrying this session's nonce and
 			// naming this verifier, says the holder is presenting it now.
-			requested, haveQuery := c.requestedQuery(authCtx, scope)
+			requested, haveQuery := c.requestedQuery(authCtx, scopeQueryIDs, scope)
 			if !haveQuery || requested.RequiresCryptographicHolderBinding() {
 				vc20Opts = append(vc20Opts, openid4vp.WithVC20PresentationBinding(authCtx.Nonce, authCtx.ClientID))
 			}
@@ -1058,7 +1055,7 @@ func detectCredentialFormat(vpToken string) CredentialFormat {
 // whose wallet had just rendered a consent screen from that very query, so the
 // persisted field alone is not a reliable source. The request object cache
 // holds the query that was signed and served to the wallet.
-func (c *Client) requestedQuery(authCtx *cache.AuthorizationContext, scope string) (openid4vp.CredentialQuery, bool) {
+func (c *Client) requestedQuery(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string, scope string) (openid4vp.CredentialQuery, bool) {
 	if authCtx == nil {
 		return openid4vp.CredentialQuery{}, false
 	}
@@ -1071,24 +1068,28 @@ func (c *Client) requestedQuery(authCtx *cache.AuthorizationContext, scope strin
 	if dcqlQuery == nil {
 		return openid4vp.CredentialQuery{}, false
 	}
+	// The session's own scope-to-query mapping decides, the same way every
+	// other lookup in this handler does. A template names its queries
+	// whatever its author chose, and the shipped ones nearly all differ from
+	// the scope that selects them - "pid" selects a query with id "eudi_pid",
+	// "ehic" one with id "eudi_ehic" - so matching the scope against query
+	// ids alone finds nothing for a template-built request.
+	//
+	// queryIDForScopeIn returns the scope itself when nothing is mapped, so
+	// this subsumes the plain id match it replaced.
+	queryID := queryIDForScopeIn(scopeQueryIDs, scope)
 	for _, q := range dcqlQuery.Credentials {
-		if q.ID == scope {
+		if q.ID == queryID {
 			return q, true
 		}
 	}
 
-	// A template names its queries whatever its author chose, and the shipped
-	// ones nearly all differ from the scope that selects them - "pid" selects
-	// a query with id "eudi_pid", "ehic" one with id "eudi_ehic". So an id
-	// lookup alone finds nothing for a template-built request.
-	//
-	// With exactly one credential query there is no ambiguity about which one
-	// the scope was requested under. With more than one there is, and this
-	// returns nothing so the caller refuses - guessing would attribute a
-	// constraint to the wrong credential.
-	//
-	// SUNET/vc#683 persists the real scope-to-query mapping; once that is in,
-	// this should consult it instead of inferring.
+	// No mapping and no matching id: a session cached before #683 persisted
+	// the mapping, and one the rebuild could not reconstruct. With exactly
+	// one credential query there is no ambiguity about which one the scope
+	// was requested under. With more than one there is, and this returns
+	// nothing so the caller refuses - guessing would attribute a constraint
+	// to the wrong credential.
 	if len(dcqlQuery.Credentials) == 1 {
 		return dcqlQuery.Credentials[0], true
 	}

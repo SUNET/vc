@@ -298,7 +298,7 @@ func TestRequestedQueryResolvesTemplateNamedQueries(t *testing.T) {
 			{ID: "eudi_pid", Format: openid4vp.FormatSDJWTVC},
 		}},
 	}
-	got, ok := client.requestedQuery(single, "pid")
+	got, ok := client.requestedQuery(single, nil, "pid")
 	require.True(t, ok, "a template's sole query answers the scope that selected it")
 	assert.Equal(t, "eudi_pid", got.ID)
 
@@ -310,7 +310,7 @@ func TestRequestedQueryResolvesTemplateNamedQueries(t *testing.T) {
 			{ID: "pid", Format: openid4vp.FormatSDJWTVC},
 		}},
 	}
-	got, ok = client.requestedQuery(named, "pid")
+	got, ok = client.requestedQuery(named, nil, "pid")
 	require.True(t, ok)
 	assert.Equal(t, "pid", got.ID)
 
@@ -323,8 +323,27 @@ func TestRequestedQueryResolvesTemplateNamedQueries(t *testing.T) {
 			{ID: "eudi_ehic", Format: openid4vp.FormatSDJWTVC},
 		}},
 	}
-	_, ok = client.requestedQuery(ambiguous, "pid")
+	_, ok = client.requestedQuery(ambiguous, nil, "pid")
 	assert.False(t, ok, "guessing between queries would attribute a constraint to the wrong credential")
+
+	// ...and with the session's own mapping there is nothing to guess about.
+	// This is the case #683 made available and this function was still
+	// inferring around: a template mapping several scopes onto differently
+	// named queries. Without it every valid presentation for such a request
+	// was refused as "no longer available".
+	mapped := map[string]string{"pid": "eudi_pid", "ehic": "eudi_ehic"}
+	got, ok = client.requestedQuery(ambiguous, mapped, "pid")
+	require.True(t, ok, "the persisted scope-to-query mapping resolves what inference cannot")
+	assert.Equal(t, "eudi_pid", got.ID)
+
+	got, ok = client.requestedQuery(ambiguous, mapped, "ehic")
+	require.True(t, ok)
+	assert.Equal(t, "eudi_ehic", got.ID, "each scope resolves to its own query, not to the first one")
+
+	// A mapping that names a query the request does not carry resolves to
+	// nothing rather than to whichever query happens to be there.
+	_, ok = client.requestedQuery(ambiguous, map[string]string{"pid": "no_such_query"}, "pid")
+	assert.False(t, ok)
 }
 
 // TestCreateDCQLQueryValidatesWhatItSends pins the request side of the same
