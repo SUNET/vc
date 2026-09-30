@@ -2,12 +2,19 @@ package apiv1
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/trust"
+	"github.com/SUNET/vc/pkg/vc20/credential"
 	"github.com/sirosfoundation/go-trust/pkg/trustapi"
 
 	"github.com/stretchr/testify/require"
@@ -249,4 +256,222 @@ func TestCheckVC20AnswersTheRequest(t *testing.T) {
 	t.Run("a scope whose query cannot be recovered is refused", func(t *testing.T) {
 		require.Error(t, client.checkVC20AnswersTheRequest(&cache.AuthorizationContext{Scopes: []string{"pid"}}, "pid", []string{pidType}))
 	})
+}
+
+// w3cOIDCFixture mints a real issuer-signed credential and gives back a
+// builder for holder presentations of it, on a client whose trust evaluator
+// can resolve both keys.
+func w3cOIDCFixture(t *testing.T) (*Client, []byte, func(t *testing.T, nonce, domain string) string) {
+	t.Helper()
+	ctx := t.Context()
+
+	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	holderKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	const degreeContext = "https://example.org/degree"
+	credential.GetGlobalLoader().AddContext(degreeContext,
+		`{"@context":{"UniversityDegreeCredential":"https://example.org/degree#UniversityDegreeCredential"}}`)
+
+	issuerHandler, err := openid4vp.NewVC20Handler(
+		openid4vp.WithVC20SignerConfig(&openid4vp.VC20SignerConfig{
+			PrivateKey:         issuerKey,
+			IssuerID:           "did:example:issuer",
+			VerificationMethod: "did:example:issuer#key-1",
+			Cryptosuite:        openid4vp.CryptosuiteECDSA2019,
+		}),
+	)
+	require.NoError(t, err)
+
+	created, err := issuerHandler.CreateCredential(ctx, &openid4vp.VC20CreateRequest{
+		Types:              []string{"UniversityDegreeCredential"},
+		AdditionalContexts: []string{degreeContext},
+		Subject:            map[string]any{"id": "did:example:subject", "degree": "Master of Science"},
+	})
+	require.NoError(t, err)
+
+	client, _ := CreateTestClientWithMock(t, nil)
+	client.trustEvaluator = &staticKeyEvaluator{keys: map[string]crypto.PublicKey{
+		"did:example:issuer#key-1": &issuerKey.PublicKey,
+		"did:example:holder#key-1": &holderKey.PublicKey,
+	}}
+
+	present := func(t *testing.T, nonce, domain string) string {
+		t.Helper()
+		vp, err := openid4vp.NewVPBuilder().BuildVC20Presentation(
+			[][]byte{created.CredentialJSON},
+			holderKey,
+			&openid4vp.VPBuildOptions{
+				HolderDID:          "did:example:holder",
+				VerificationMethod: "did:example:holder#key-1",
+				Nonce:              nonce,
+				Domain:             domain,
+				Cryptosuite:        openid4vp.CryptosuiteECDSA2019,
+			},
+		)
+		require.NoError(t, err)
+		return string(vp)
+	}
+
+	return client, created.CredentialJSON, present
+}
+
+// w3cOIDCSession is a request for one W3C credential under scope "pid",
+// asking for the type the fixture mints.
+func w3cOIDCSession(holderBinding *bool) *cache.AuthorizationContext {
+	return &cache.AuthorizationContext{
+		Nonce:              "the-clients-oidc-nonce",
+		RequestObjectNonce: "the-request-objects-nonce",
+		ClientID:           "relying-party-oauth-client-id",
+		Scopes:             []string{"openid", "pid"},
+		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+			ID:     "eudi_pid",
+			Format: openid4vp.FormatLdpVCDCQL,
+			Meta: openid4vp.MetaQuery{TypeValues: [][]string{
+				{openid4vp.BaseVCTypeIRI, "https://example.org/degree#UniversityDegreeCredential"},
+			}},
+			RequireCryptographicHolderBinding: holderBinding,
+		}}},
+		ScopeQueryIDs: map[string]string{"pid": "eudi_pid"},
+	}
+}
+
+func envelope(queryID, token string) string {
+	body, err := json.Marshal(map[string][]string{queryID: {token}})
+	if err != nil {
+		panic(err)
+	}
+	return string(body)
+}
+
+// TestVerifyVC20ForOIDCBindsToTheRequestObjectNonce: the wallet was asked to
+// put the REQUEST OBJECT's nonce in the proof - GetOIDCRequestObject
+// generates it and stores it as RequestObjectNonce. session.Nonce is the
+// relying party's optional OIDC nonce; it may be empty and it is generally
+// something else entirely. Binding against that one rejects every valid
+// presentation this path can receive.
+func TestVerifyVC20ForOIDCBindsToTheRequestObjectNonce(t *testing.T) {
+	client, _, present := w3cOIDCFixture(t)
+	domain, err := client.cfg.Verifier.VerifierClientID(client.pkiSigningCert)
+	require.NoError(t, err)
+
+	session := w3cOIDCSession(nil)
+
+	t.Run("bound to the request object's nonce", func(t *testing.T) {
+		token := present(t, session.RequestObjectNonce, domain)
+		require.NoError(t, client.verifyVC20ForOIDC(t.Context(), session, envelope("eudi_pid", token)),
+			"a presentation carrying the challenge the wallet was given must verify")
+	})
+
+	t.Run("bound to the client's OIDC nonce", func(t *testing.T) {
+		token := present(t, session.Nonce, domain)
+		err := client.verifyVC20ForOIDC(t.Context(), session, envelope("eudi_pid", token))
+		require.Error(t, err, "session.Nonce is not the challenge the wallet was asked for")
+		require.Contains(t, err.Error(), "challenge")
+	})
+
+	t.Run("a session with no request-object nonce is refused", func(t *testing.T) {
+		noNonce := w3cOIDCSession(nil)
+		noNonce.RequestObjectNonce = ""
+		token := present(t, "", domain)
+		err := client.verifyVC20ForOIDC(t.Context(), noNonce, envelope("eudi_pid", token))
+		require.Error(t, err, "binding to an empty challenge would accept anything")
+		require.Contains(t, err.Error(), "request-object nonce")
+	})
+}
+
+// TestVerifyVC20ForOIDCHonoursPerQueryHolderBinding: the UI path lets the
+// DCQL query say binding is not required, and the same query is recoverable
+// here. Requiring it unconditionally refused every response to a query that
+// set require_cryptographic_holder_binding=false.
+//
+// The fail-closed half matters just as much: a document that cannot be
+// attributed to a query carries no answer about binding, and "cannot tell"
+// must mean required.
+func TestVerifyVC20ForOIDCHonoursPerQueryHolderBinding(t *testing.T) {
+	client, bareCredential, _ := w3cOIDCFixture(t)
+	notRequired, required := false, true
+
+	t.Run("a query that does not require binding accepts a bare credential", func(t *testing.T) {
+		require.NoError(t, client.verifyVC20ForOIDC(t.Context(), w3cOIDCSession(&notRequired),
+			envelope("eudi_pid", string(bareCredential))))
+	})
+
+	for name, binding := range map[string]*bool{
+		"a query that requires binding": &required,
+		"a query that says nothing":     nil,
+	} {
+		t.Run(name+" refuses a bare credential", func(t *testing.T) {
+			err := client.verifyVC20ForOIDC(t.Context(), w3cOIDCSession(binding),
+				envelope("eudi_pid", string(bareCredential)))
+			require.Error(t, err, "an issuer-signed credential proves issuance, not that this holder is presenting it")
+		})
+	}
+
+	t.Run("a scope whose query cannot be recovered fails closed", func(t *testing.T) {
+		// The request object has aged out of the cache, so nothing says
+		// what this scope asked for - including whether it asked for
+		// binding. The OpenID4VP default is to require it, and "cannot
+		// tell" must not become "not required".
+		session := w3cOIDCSession(&notRequired)
+		session.DCQLQuery = nil
+
+		err := client.verifyVC20ForOIDC(t.Context(), session, string(bareCredential))
+		require.Error(t, err, "an unrecoverable query must not relax binding")
+		require.Contains(t, err.Error(), "W3C VC verification failed",
+			"the refusal has to be the binding check itself, not a later one")
+	})
+}
+
+// TestRefuseNonW3CAnswerToAW3CQuery: returning early when no W3C document is
+// in the response let a wallet answer an ldp_vc query with an SD-JWT. Nothing
+// else on this path compares the returned format against the requested one,
+// so the W3C constraint was simply skipped.
+func TestRefuseNonW3CAnswerToAW3CQuery(t *testing.T) {
+	client, _ := CreateTestClientWithMock(t, nil)
+	client.trustEvaluator = trust.NewAllowAllEvaluator()
+
+	const sdJWT = "eyJhbGciOiJFUzI1NiJ9.x.y~"
+
+	t.Run("an SD-JWT does not answer an ldp_vc query", func(t *testing.T) {
+		err := client.verifyVC20ForOIDC(t.Context(), w3cOIDCSession(nil), envelope("eudi_pid", sdJWT))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no W3C credential")
+	})
+
+	t.Run("a bare SD-JWT does not answer an ldp_vc query either", func(t *testing.T) {
+		err := client.verifyVC20ForOIDC(t.Context(), w3cOIDCSession(nil), sdJWT)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no W3C credential")
+	})
+
+	t.Run("an SD-JWT answers an SD-JWT query", func(t *testing.T) {
+		session := w3cOIDCSession(nil)
+		session.DCQLQuery.Credentials[0].Format = openid4vp.FormatSDJWTVC
+		session.DCQLQuery.Credentials[0].Meta = openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}}
+		require.NoError(t, client.verifyVC20ForOIDC(t.Context(), session, envelope("eudi_pid", sdJWT)))
+	})
+}
+
+// TestVerifyVC20ForOIDCSeesThroughBase64: the VC20 decoder and
+// detectCredentialFormat both accept a base64url- or standard-base64-wrapped
+// JSON-LD document, so a guard that only looked for a leading '{' was
+// side-stepped by encoding the same credential - and the claims extractor
+// then read it unverified.
+func TestVerifyVC20ForOIDCSeesThroughBase64(t *testing.T) {
+	client, _ := CreateTestClientWithMock(t, nil)
+	client.trustEvaluator = trust.NewAllowAllEvaluator()
+
+	for name, wrapped := range map[string]string{
+		"base64url": base64.RawURLEncoding.EncodeToString([]byte(unsignedW3CPresentation)),
+		"base64":    base64.StdEncoding.EncodeToString([]byte(unsignedW3CPresentation)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := client.verifyVC20ForOIDC(t.Context(), w3cOIDCSession(nil), envelope("eudi_pid", wrapped))
+			require.Error(t, err, "an encoded unsigned presentation must not walk past the guard")
+			require.NotContains(t, err.Error(), "no W3C credential",
+				"it has to be RECOGNISED as W3C, not merely refused for being absent")
+		})
+	}
 }

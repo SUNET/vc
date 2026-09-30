@@ -36,6 +36,15 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 	// documents are actually in there means a conformant DCQL response is
 	// unwrapped rather than failed as a malformed credential.
 	documents := openid4vp.W3CDocumentsIn(vpToken)
+
+	// A response carrying no W3C document still has to answer the request.
+	// Returning early here let a wallet answer an ldp_vc query with an
+	// SD-JWT or an mdoc: nothing else on this path compares the returned
+	// format against the requested one, so the W3C constraint was simply
+	// skipped.
+	if err := c.refuseNonW3CAnswerToAW3CQuery(session, documents); err != nil {
+		return err
+	}
 	if len(documents) == 0 {
 		return nil
 	}
@@ -45,31 +54,9 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 		return fmt.Errorf("W3C verification needs a key-resolving trust evaluator")
 	}
 
-	// The domain a holder proof binds to is the client id the REQUEST
-	// OBJECT carried, which is the verifier's own identifier - not
-	// session.ClientID, which is the OAuth client id of the relying party
-	// that started the flow. Binding against the wrong one rejects every
-	// valid presentation whenever the two differ.
-	verifierClientID, err := c.cfg.Verifier.VerifierClientID(c.pkiSigningCert)
-	if err != nil {
-		return fmt.Errorf("cannot determine this verifier's client id to bind against: %w", err)
-	}
-
-	// HOLDER BINDING IS ALWAYS REQUIRED. The UI path lets the DCQL query
-	// say otherwise; this one has no per-credential answer to consult for a
-	// bare document, and the OpenID4VP default is to require it, so "cannot
-	// tell" must not become "not required".
-	handler, err := openid4vp.NewVC20Handler(
-		openid4vp.WithVC20KeyResolver(resolver),
-		openid4vp.WithVC20PresentationBinding(session.Nonce, verifierClientID),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create W3C VC handler: %w", err)
-	}
-
 	for queryID, tokens := range documents {
 		for _, token := range tokens {
-			if err := c.verifyOneVC20ForOIDC(ctx, handler, session, queryID, token); err != nil {
+			if err := c.verifyOneVC20ForOIDC(ctx, resolver, session, queryID, token); err != nil {
 				return err
 			}
 		}
@@ -77,7 +64,43 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 	return nil
 }
 
-func (c *Client) verifyOneVC20ForOIDC(ctx context.Context, handler *openid4vp.VC20Handler, session *cache.AuthorizationContext, queryID, token string) error {
+// refuseNonW3CAnswerToAW3CQuery rejects a response that answers a W3C query
+// with something else.
+//
+// The format check on the other path runs per scope inside the dispatch
+// loop; this flow has no such loop, so the comparison has to be made here or
+// not at all. A scope whose query asks for a W3C format and whose answer
+// carries no W3C document is refused - "cannot tell" is not a reason to
+// accept, and the type constraint that scope carries could never be applied
+// to whatever did arrive.
+func (c *Client) refuseNonW3CAnswerToAW3CQuery(session *cache.AuthorizationContext, documents map[string][]string) error {
+	// sessionDCQL, not session.DCQLQuery: a request object may carry the
+	// query the session does not, and requestedQuery resolves it that way
+	// too. Reading only the session field left a template-driven request
+	// with no format check at all.
+	if c.sessionDCQL(session) == nil {
+		return nil
+	}
+	for _, scope := range c.credentialScopes(session, session.ScopeQueryIDs) {
+		requested, ok := c.requestedQuery(session, session.ScopeQueryIDs, scope)
+		if !ok || !openid4vp.IsW3CVCFormatIdentifier(requested.Format) {
+			continue
+		}
+		if len(documents[queryIDForScopeIn(session.ScopeQueryIDs, scope)]) > 0 {
+			continue
+		}
+		// A bare document answers a single-scope request.
+		if len(documents[""]) > 0 && len(c.credentialScopes(session, session.ScopeQueryIDs)) == 1 {
+			continue
+		}
+		return fmt.Errorf("scope %s was requested as %q but the response carries no W3C credential for it", scope, requested.Format)
+	}
+	return nil
+}
+
+func (c *Client) verifyOneVC20ForOIDC(ctx context.Context, resolver trust.KeyResolver, session *cache.AuthorizationContext, queryID, token string) error {
+	scope := c.oidcScopeFor(session, queryID)
+
 	// VerifyAndExtract verifies the FIRST embedded credential of a
 	// presentation, while the claim extraction that follows merges every
 	// one of them. A presentation carrying a valid first credential and an
@@ -97,6 +120,11 @@ func (c *Client) verifyOneVC20ForOIDC(ctx context.Context, handler *openid4vp.VC
 		return fmt.Errorf("presentation carries %d credentials; only the first is verified, so none of its claims can be trusted", count)
 	}
 
+	handler, err := c.vc20HandlerForOIDC(resolver, session, scope)
+	if err != nil {
+		return err
+	}
+
 	result, err := handler.VerifyAndExtract(ctx, token)
 	if err != nil {
 		return fmt.Errorf("W3C VC verification failed: %w", err)
@@ -107,7 +135,6 @@ func (c *Client) verifyOneVC20ForOIDC(ctx context.Context, handler *openid4vp.VC
 	if result.IssuerKey == nil {
 		return fmt.Errorf("W3C verification produced no issuer key to evaluate")
 	}
-	scope := c.oidcScopeFor(session, queryID)
 	decision, err := c.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
 		SubjectID:      result.Issuer,
 		KeyType:        trust.KeyTypeJWK,
@@ -123,6 +150,52 @@ func (c *Client) verifyOneVC20ForOIDC(ctx context.Context, handler *openid4vp.VC
 	}
 
 	return c.checkVC20AnswersTheRequest(session, scope, result.TypeIRIs)
+}
+
+// vc20HandlerForOIDC builds the handler for one returned document, with the
+// binding this session and this scope actually call for.
+//
+// The nonce is the REQUEST OBJECT's, not session.Nonce. session.Nonce is the
+// client's optional OIDC nonce - it may be empty, and it is not what the
+// wallet was asked to put in the proof. GetOIDCRequestObject generates the
+// challenge and stores it as RequestObjectNonce, and that is what a holder
+// proof binds to; binding against the other one rejected every valid
+// presentation.
+//
+// The domain is the client id the request object carried - the verifier's
+// own identifier - not session.ClientID, which is the relying party's OAuth
+// client id.
+//
+// Holder binding follows the scope's own query, the way the UI path does,
+// so a query that explicitly sets require_cryptographic_holder_binding to
+// false is honoured here too. A scope whose query cannot be recovered fails
+// closed: binding is REQUIRED, which is the OpenID4VP default.
+func (c *Client) vc20HandlerForOIDC(resolver trust.KeyResolver, session *cache.AuthorizationContext, scope string) (*openid4vp.VC20Handler, error) {
+	opts := []openid4vp.VC20HandlerOption{openid4vp.WithVC20KeyResolver(resolver)}
+
+	requireBinding := true
+	if scope != "" {
+		if requested, ok := c.requestedQuery(session, session.ScopeQueryIDs, scope); ok {
+			requireBinding = requested.RequiresCryptographicHolderBinding()
+		}
+	}
+
+	if requireBinding {
+		verifierClientID, err := c.cfg.Verifier.VerifierClientID(c.pkiSigningCert)
+		if err != nil {
+			return nil, fmt.Errorf("cannot determine this verifier's client id to bind against: %w", err)
+		}
+		if session.RequestObjectNonce == "" {
+			return nil, fmt.Errorf("holder binding is required but this session has no request-object nonce to bind to")
+		}
+		opts = append(opts, openid4vp.WithVC20PresentationBinding(session.RequestObjectNonce, verifierClientID))
+	}
+
+	handler, err := openid4vp.NewVC20Handler(opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create W3C VC handler: %w", err)
+	}
+	return handler, nil
 }
 
 // checkVC20AnswersTheRequest enforces, on what came back, the constraint the

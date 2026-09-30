@@ -114,8 +114,8 @@ func (ce *ClaimsExtractor) extractClaimsFromSingleToken(vpToken string) (map[str
 	// a JSON document rather than a dot-separated token - an object when
 	// compact, an array when expanded. Inside a DCQL response this is where
 	// each one arrives.
-	if trimmed := strings.TrimSpace(vpToken); len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
-		return extractW3CClaims(trimmed)
+	if document, ok := jsonDocumentToken(vpToken); ok {
+		return extractW3CClaims(document)
 	}
 
 	// Check if this is an mdoc format token
@@ -552,7 +552,7 @@ func W3CDocumentsIn(vpToken string) map[string][]string {
 		out := make(map[string][]string)
 		for queryID, tokens := range envelope {
 			for _, token := range tokens {
-				if inner := strings.TrimSpace(token); isJSONDocumentToken(inner) {
+				if inner, ok := jsonDocumentToken(token); ok {
 					out[queryID] = append(out[queryID], inner)
 				}
 			}
@@ -563,16 +563,51 @@ func W3CDocumentsIn(vpToken string) map[string][]string {
 		return out
 	}
 
-	if isJSONDocumentToken(trimmed) {
-		return map[string][]string{"": {trimmed}}
+	if document, ok := jsonDocumentToken(trimmed); ok {
+		return map[string][]string{"": {document}}
 	}
 	return nil
 }
 
-// isJSONDocumentToken reports whether a token is a JSON-LD document rather
-// than a dot-separated one: an object when compact, an array when expanded.
-func isJSONDocumentToken(token string) bool {
-	return len(token) > 0 && (token[0] == '{' || token[0] == '[')
+// rawJSONDocument reports whether a token is already a JSON-LD document
+// rather than a dot-separated one: an object when compact, an array when
+// expanded.
+func rawJSONDocument(token string) bool {
+	trimmed := strings.TrimSpace(token)
+	return len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[')
+}
+
+// decodeBase64Document unwraps a base64url- or standard-base64-encoded
+// token, in the same two spellings the format detector accepts.
+func decodeBase64Document(token string) (string, bool) {
+	if decoded, err := base64.RawURLEncoding.DecodeString(token); err == nil {
+		return string(decoded), true
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(token); err == nil {
+		return string(decoded), true
+	}
+	return "", false
+}
+
+// jsonDocumentToken returns the token as raw JSON, unwrapping base64 when
+// that is how it arrived. Callers that go on to PARSE the document need the
+// decoded form, not just the knowledge that one is in there.
+//
+// Base64 counts as a JSON-LD document. The VC20 decoder and
+// detectCredentialFormat both accept a base64url- or standard-base64-wrapped
+// JSON-LD document, so a guard that only looked at raw '{'/'[' could be
+// stepped around by encoding the same credential - which is the whole
+// surface it was added to cover. An mdoc cannot be mistaken for one: its
+// CBOR starts 0x80-0xbf, and '{' and '[' are 0x7b and 0x5b.
+func jsonDocumentToken(token string) (string, bool) {
+	trimmed := strings.TrimSpace(token)
+	if rawJSONDocument(trimmed) {
+		return trimmed, true
+	}
+	if decoded, ok := decodeBase64Document(trimmed); ok && rawJSONDocument(decoded) {
+		return strings.TrimSpace(decoded), true
+	}
+	return "", false
 }
 
 // isW3CDocument reports whether a JSON object is a W3C VC 2.0 credential or

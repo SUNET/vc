@@ -1,6 +1,7 @@
 package openid4vp
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
@@ -210,4 +211,48 @@ func TestEmbeddedCredentialCount(t *testing.T) {
 
 	_, err = EmbeddedCredentialCount("not json")
 	require.Error(t, err)
+}
+
+// TestW3CDocumentsInSeesThroughBase64: the VC20 decoder and
+// detectCredentialFormat both accept a base64url- or standard-base64-wrapped
+// JSON-LD document, so a detector that only looked for a leading '{' missed
+// the same credential when it arrived encoded - and the caller that refuses
+// unverified W3C claims never saw it.
+//
+// The returned document is DECODED, because callers go on to parse it.
+func TestW3CDocumentsInSeesThroughBase64(t *testing.T) {
+	for name, encode := range map[string]func([]byte) string{
+		"base64url": base64.RawURLEncoding.EncodeToString,
+		"base64":    base64.StdEncoding.EncodeToString,
+	} {
+		t.Run(name, func(t *testing.T) {
+			wrapped := encode([]byte(w3cCredential))
+
+			bare := W3CDocumentsIn(wrapped)
+			require.Len(t, bare, 1)
+			assert.JSONEq(t, w3cCredential, bare[""][0], "the caller parses this, so it has to be decoded")
+
+			envelope, err := json.Marshal(map[string][]string{"pid": {wrapped}})
+			require.NoError(t, err)
+			inEnvelope := W3CDocumentsIn(string(envelope))
+			require.Len(t, inEnvelope["pid"], 1)
+			assert.JSONEq(t, w3cCredential, inEnvelope["pid"][0])
+		})
+	}
+
+	// An mdoc must not be mistaken for one. Its CBOR starts 0x80-0xbf while
+	// '{' is 0x7b and '[' is 0x5b, so the two cannot collide - pinned here
+	// because the check is a byte comparison nothing else guards.
+	mdoc := base64.RawURLEncoding.EncodeToString([]byte{0xa1, 0x63, 'f', 'o', 'o'})
+	assert.Nil(t, W3CDocumentsIn(mdoc), "a CBOR document is not a JSON-LD one")
+}
+
+// TestExtractClaimsFromBase64W3CToken is the other half: the extractor has to
+// route an encoded document to the W3C reader rather than fall through to the
+// SD-JWT parser.
+func TestExtractClaimsFromBase64W3CToken(t *testing.T) {
+	extractor := &ClaimsExtractor{}
+	claims, err := extractor.extractClaimsFromSingleToken(base64.RawURLEncoding.EncodeToString([]byte(w3cCredential)))
+	require.NoError(t, err)
+	assert.Equal(t, "Master of Science", claims["degree"])
 }

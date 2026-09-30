@@ -21,9 +21,9 @@ func TestExpandedTypes_RejectsRelativeIRIWithAColon(t *testing.T) {
 		// "/relative:Type" is an IRI-shaped string no context defines, so
 		// expansion keeps it verbatim - relative, and carrying a colon.
 		// That is precisely the value strings.Contains(iri, ":") admits.
-		"type": []any{"VerifiableCredential", "/relative:Type"},
-		"id":       "urn:uuid:11111111-2222-3333-4444-555555555555",
-		"issuer":   "https://issuer.example.com",
+		"type":   []any{"VerifiableCredential", "/relative:Type"},
+		"id":     "urn:uuid:11111111-2222-3333-4444-555555555555",
+		"issuer": "https://issuer.example.com",
 		"credentialSubject": map[string]any{
 			"id": "did:example:holder",
 		},
