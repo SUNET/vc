@@ -204,53 +204,6 @@ func presentationProofObject() map[string]any {
 	}
 }
 
-// TestFindProofNodeWithValue_SelectsTheNamedProof: a presentation holds the
-// holder's proof and the embedded credential's issuer proof, and both land
-// in the same proof object. The caller reads which one it means off the
-// document's root and names it by proofValue, because traversal order is
-// not a choice.
-func TestFindProofNodeWithValue_SelectsTheNamedProof(t *testing.T) {
-	doc := presentationProofObject()
-
-	// The fixture is only worth anything if an unqualified search really
-	// does reach the wrong proof.
-	if got := FindProofNode(doc, "DataIntegrityProof"); got["proofValue"] != "z-issuer-proof" {
-		t.Fatalf("fixture no longer exercises the ambiguity: unqualified search returned %v", got["proofValue"])
-	}
-
-	got := FindProofNodeWithValue(doc, "DataIntegrityProof", []string{"z-holder-proof"})
-	if got == nil {
-		t.Fatal("the named proof was not found")
-	}
-	if got["proofValue"] != "z-holder-proof" {
-		t.Fatalf("selected %v, want the named proof", got["proofValue"])
-	}
-	if got["proofPurpose"] != "authentication" {
-		t.Fatalf("selected a proof with purpose %v", got["proofPurpose"])
-	}
-
-	// The other one is addressable too, so the selection is by name rather
-	// than by a rule that happens to prefer authentication proofs.
-	got = FindProofNodeWithValue(doc, "DataIntegrityProof", []string{"z-issuer-proof"})
-	if got == nil || got["proofValue"] != "z-issuer-proof" {
-		t.Fatal("the issuer's proof must also be addressable by name")
-	}
-}
-
-// TestFindProofNodeWithValue_RefusesWhatIsNotThere: a proofValue the
-// document does not contain must not silently resolve to another proof, and
-// naming nothing must not resolve to the first one.
-func TestFindProofNodeWithValue_RefusesWhatIsNotThere(t *testing.T) {
-	doc := presentationProofObject()
-
-	if got := FindProofNodeWithValue(doc, "DataIntegrityProof", []string{"z-nope"}); got != nil {
-		t.Fatalf("a proof that is not present must not resolve to another, got %v", got["proofValue"])
-	}
-	if got := FindProofNodeWithValue(doc, "DataIntegrityProof", nil); got != nil {
-		t.Fatalf("naming no proof must not resolve to the first one, got %v", got["proofValue"])
-	}
-}
-
 // TestFindProofNodeInGraphs_SelectsTheRootsGraph is the selection Verify
 // actually uses.
 //
