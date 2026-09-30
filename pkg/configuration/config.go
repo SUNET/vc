@@ -183,6 +183,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkAuthScopes(cfg); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 
@@ -206,6 +210,40 @@ func checkCredentialMetadataEntries(cfg *model.Cfg) error {
 	}
 	if len(empty) > 0 {
 		return fmt.Errorf("common.credential_metadata: no configuration under %s", strings.Join(empty, ", "))
+	}
+	return nil
+}
+
+// checkAuthScopes verifies that every openid4vp auth_scopes key names a scope
+// that common.credential_metadata actually configures.
+//
+// The struct-level validation in pkg/helpers sees only the DataSources stanza,
+// so a typo'd or stale auth scope started the server and failed at request
+// time, where the pre-issuance verifier built a query for a credential that
+// does not exist.
+//
+// Here rather than as a struct rule because it needs the whole Cfg -
+// credential_metadata under common, auth_scopes under apigw - and after the
+// service switch, so a process with no APIGW stanza has nothing to check.
+func checkAuthScopes(cfg *model.Cfg) error {
+	if cfg.APIGW == nil {
+		return nil
+	}
+
+	var problems []string
+	for _, scope := range slices.Sorted(maps.Keys(cfg.APIGW.DataSources.Datastore.Scopes)) {
+		credential := cfg.APIGW.DataSources.Datastore.Scopes[scope]
+		if credential.AuthProvider != model.AuthProviderOpenID4VP {
+			continue
+		}
+		for _, authScope := range slices.Sorted(maps.Keys(credential.AuthScopes)) {
+			if cfg.GetCredentialMetadata(authScope) == nil {
+				problems = append(problems, fmt.Sprintf("%s.auth_scopes.%s", scope, authScope))
+			}
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("apigw.data_sources.datastore.scopes: %s name no scope in common.credential_metadata, so no credential can be requested for them", strings.Join(problems, ", "))
 	}
 	return nil
 }
