@@ -784,6 +784,21 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 		if c.db == nil || c.db.CredentialStatusColl == nil {
 			return errors.New("cannot record the credential's status list entry: no credential status store configured")
 		}
+		// A URI with no routable backend is the same failure as a backend
+		// with no URI: the mapping can be written and never acted on.
+		// SetCredentialStatus refuses an unknown backend rather than
+		// guessing (guessing writes a status into the wrong list), so
+		// recording one mints a credential whose revocation call will be
+		// rejected forever. Fail here, where the allocations can still be
+		// released, instead of at revocation time when they cannot.
+		if !tokenstatuslist.ValidBackend(e.Backend) {
+			c.log.Error(errors.New("unroutable status list backend"),
+				"issuance reply names a status list backend this build cannot reach, so the entry could never be revoked",
+				"identifier", identifier, "uri", e.URI, "index", e.Index, "backend", e.Backend)
+			c.releaseAllocations(ctx, entries)
+			return fmt.Errorf("issuer returned status list entry %q/%d with backend %q, which is not a backend this build can reach", e.URI, e.Index, e.Backend)
+		}
+
 		if err := c.db.CredentialStatusColl.Save(ctx, &db.CredentialStatusEntry{
 			StatusListURI:   e.URI,
 			Index:           e.Index,

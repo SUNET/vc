@@ -154,3 +154,40 @@ func TestRegistryValidate_NullStatusIsNotSilentlyNonRevocable(t *testing.T) {
 	require.Nil(t, result)
 	require.Contains(t, err.Error(), "no registered checker could read")
 }
+
+// TestDeclaresStatus_ApplicationStatusClaimIsNotADeclaration: `status` is
+// not exclusive to revocation. `"status": "active"` is an ordinary
+// credential claim, and an mdoc data element may be named the same;
+// treating either as a revocation declaration makes every such credential
+// unverifiable rather than merely non-revocable.
+//
+// The draft's claim is an OBJECT - it holds status_list - so the shape is
+// what separates them.
+func TestDeclaresStatus_ApplicationStatusClaimIsNotADeclaration(t *testing.T) {
+	require.False(t, declaresStatus(map[string]any{"status": "active"}),
+		"a string status is somebody else's claim")
+	require.False(t, declaresStatus(map[string]any{"status": 1}))
+	require.False(t, declaresStatus(map[string]any{"status": []any{"a"}}))
+
+	require.True(t, declaresStatus(map[string]any{
+		"status": map[string]any{"status_list": map[string]any{"uri": "https://x", "idx": 1}},
+	}), "the draft's claim is an object")
+	require.True(t, declaresStatus(map[string]any{"status": map[string]any{"unknown_mechanism": 1}}),
+		"an object naming a mechanism we cannot read is declared-but-unreadable")
+
+	// credentialStatus is a VCDM term and means only this, so presence is
+	// enough whatever the value.
+	require.True(t, declaresStatus(map[string]any{"credentialStatus": "anything"}))
+}
+
+// TestRegistryValidate_ApplicationStatusClaimStillValidates proves the
+// narrowing reaches the production path: an ordinary credential carrying a
+// string `status` must come back non-revocable, not as an error that
+// fail_open=false would turn into a rejection.
+func TestRegistryValidate_ApplicationStatusClaimStillValidates(t *testing.T) {
+	registry := NewRegistry()
+
+	result, err := registry.Validate(t.Context(), map[string]any{"status": "active"})
+	require.NoError(t, err)
+	require.Nil(t, result)
+}

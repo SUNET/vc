@@ -908,11 +908,19 @@ type RevocationConfig struct {
 	// put an `iss` in them, set status_list_issuer to that value as well,
 	// or the pin will not apply and verification falls back to discovery.
 	//
-	// With a trust framework configured (the ordinary case), the fallback
-	// is NOT the generic resolver: a token the PDP cannot judge - one
-	// naming no key in its own header, or served as a CWT - verifies
-	// against this pin or is refused. Otherwise a signer could reach a
-	// status value with no policy decision by omitting a header.
+	// Within its scope the pin is ENFORCING, not a fallback: a token from
+	// that issuer verifies against this key even when it carries an x5c or
+	// jwk of its own. Otherwise a status service that rotated its signing
+	// key - or anyone who minted a token with their own jwk - would be
+	// accepted while the operator believed the pin was protecting
+	// verification.
+	//
+	// Outside its scope, and with a trust framework configured (the
+	// ordinary case), the fallback is NOT the generic resolver: a token
+	// the PDP cannot judge - one naming no key in its own header, or
+	// served as a CWT - verifies against a pin or is refused. Otherwise a
+	// signer could reach a status value with no policy decision by
+	// omitting a header.
 	//
 	// Configure this, or status_list_issuer, or tokens without an `iss`
 	// claim are refused outright - see WithStatusListKey in pkg/revocation.

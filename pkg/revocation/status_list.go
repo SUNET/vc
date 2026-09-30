@@ -319,7 +319,7 @@ func (c *StatusListChecker) resolveStatusListKey(ctx context.Context, issuer, ur
 	// Scope: a token with no iss (there is nothing else to go on), or one
 	// whose iss is the configured status_list_issuer. Anything else goes to
 	// the resolver, which is how registry tokens keep working.
-	if c.statusListKey != nil && (issuer == "" || issuer == c.fallbackIssuer) {
+	if c.pinApplies(issuer) {
 		return c.statusListKey, nil
 	}
 
@@ -349,6 +349,44 @@ func (c *StatusListChecker) resolveStatusListKey(ctx context.Context, issuer, ur
 		return nil, fmt.Errorf("status list token for %q carries no iss claim, and neither verifier.revocation.status_list_key_file nor verifier.revocation.status_list_issuer is configured, so its signing key cannot be resolved", uri)
 	}
 	return c.keyResolver.ResolveKey(ctx, issuer, kid)
+}
+
+// pinApplies reports whether the configured status_list_key_file covers a
+// token from this issuer.
+//
+// Scoped, not global: a deployment may run vc's own registry alongside an
+// external status service - issuer.status_service documents that as
+// supported - and those lists are signed by different keys. An unscoped pin
+// made the external key answer for registry tokens too, so registry lists
+// stopped verifying the moment a key file was configured, which fail_open
+// then tolerated.
+func (c *StatusListChecker) pinApplies(issuer string) bool {
+	return c.statusListKey != nil && (issuer == "" || issuer == c.fallbackIssuer)
+}
+
+// statusListTokenIssuer reads the iss claim WITHOUT verifying anything.
+//
+// Safe for the one thing it is used for: choosing which key to try. The
+// token still has to verify against whichever key that is, so naming the
+// pinned issuer only buys an attacker a signature check against a key they
+// do not hold, and naming a different one sends them to a path that
+// refuses without a PDP decision.
+func statusListTokenIssuer(tokenString string) string {
+	parts := strings.Split(tokenString, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		Issuer string `json:"iss"`
+	}
+	if err := json.Unmarshal(raw, &claims); err != nil {
+		return ""
+	}
+	return claims.Issuer
 }
 
 // jwtHeaderNamesAKey reports whether a JWS header offers key material a
@@ -570,20 +608,31 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, uri string, 
 	// comes from the token's own x5c or jwk header and go-trust decides
 	// whether that signer may speak for these credentials.
 	//
-	// Only when the token actually names a key, though. JWTTrustVerifier
-	// resolves key material from x5c, jwk, a DID, or kid + JWKS discovery;
-	// a token carrying none of those gives it nothing to resolve and
-	// nothing to evaluate, and an operator whose status service publishes
-	// no key material configures status_list_key_file precisely for that
-	// case. Sending such a token down this path anyway made the pinned key
-	// unreachable, so it failed to verify - and fail_open then accepted a
-	// revoked credential.
+	// Two things take precedence over it, for opposite reasons.
 	//
-	// The fall-through is not a weakening: with a trust verifier set,
-	// resolveStatusListKey will hand back the pinned key or refuse, never
-	// the generic resolver, so a token cannot dodge the PDP by omitting its
-	// header.
-	if c.tokenVerifier != nil && jwtHeaderNamesAKey(tokenString) {
+	// A PINNED KEY IN SCOPE WINS. status_list_key_file is an operator
+	// statement about WHICH key signs these lists; the trust path would
+	// verify against whatever key the token carries instead, so a status
+	// service that rotated its signing key - or anyone who minted a token
+	// with their own jwk - would be accepted while the operator believed
+	// the pin was enforcing something. That is worse with a permissive
+	// evaluator, but it is wrong with any of them, because the pin is not a
+	// hint.
+	//
+	// A TOKEN THAT NAMES NO KEY cannot take the trust path at all.
+	// JWTTrustVerifier resolves key material from x5c, jwk, a DID, or
+	// kid + JWKS discovery; a token carrying none of those gives it nothing
+	// to resolve and nothing to evaluate, and an operator whose status
+	// service publishes no key material configures status_list_key_file
+	// precisely for that case. Sending such a token down this path anyway
+	// made the pinned key unreachable, so it failed to verify - and
+	// fail_open then accepted a revoked credential.
+	//
+	// Neither is a weakening: with a trust verifier set, resolveStatusListKey
+	// hands back the pinned key or refuses, never the generic resolver, so a
+	// token cannot dodge the PDP by omitting its header or by claiming an
+	// issuer outside the pin's scope.
+	if c.tokenVerifier != nil && !c.pinApplies(statusListTokenIssuer(tokenString)) && jwtHeaderNamesAKey(tokenString) {
 		token, err := c.tokenVerifier.VerifyStatusListToken(ctx, tokenString, uri)
 		if err != nil {
 			return nil, err

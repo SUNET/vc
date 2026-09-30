@@ -414,3 +414,56 @@ func TestJWTHeaderNamesAKey(t *testing.T) {
 	require.False(t, jwtHeaderNamesAKey("not-a-jwt"))
 	require.False(t, jwtHeaderNamesAKey("!!!.x.y"))
 }
+
+// TestStatusList_PinnedKeyOutranksTokenCarriedKey: status_list_key_file is
+// an operator statement about WHICH key signs these lists. The trust path
+// verifies against whatever key the token carries, so a status service that
+// rotated its signing key - or anyone who minted a token with their own jwk
+// - was accepted while the operator believed the pin was enforcing
+// something.
+func TestStatusList_PinnedKeyOutranksTokenCarriedKey(t *testing.T) {
+	pinned, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	rotated, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	var body []byte
+	server := serveToken(t, tokenstatuslist.MediaTypeJWT, &body)
+	uri := server.URL + "/statuslists/0"
+
+	statuses := make([]uint8, 8)
+	statuses[2] = tokenstatuslist.StatusInvalid
+
+	// An evaluator that trusts everything - the permissive default - so the
+	// only thing that can refuse the rotated key is the pin.
+	tv := &recordingTrustVerifier{trusted: true}
+
+	newChecker := func(t *testing.T) *StatusListChecker {
+		t.Helper()
+		checker, cErr := NewStatusListChecker(
+			WithCache(cache.NewMemoryCache[[]uint8](time.Minute)),
+			WithHTTPClient(http.DefaultClient),
+			WithTokenVerifier(tv),
+			WithStatusListKey(&pinned.PublicKey),
+		)
+		require.NoError(t, cErr)
+		return checker
+	}
+
+	// The pinned key signs, and names itself in the header. Accepted, and
+	// the trust path is not what decided it.
+	body = []byte(signStatusListJWT(t, pinned, uri, "", true, statuses))
+	tv.key = &pinned.PublicKey
+	before := tv.calls
+	result, err := newChecker(t).CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 2})
+	require.NoError(t, err)
+	require.Equal(t, StatusInvalid, result.Status)
+	require.Equal(t, before, tv.calls, "a pinned list is verified against the pin, not the token's own key")
+
+	// A different key signs and embeds ITSELF, which is exactly what the
+	// trust path would happily verify. The pin must refuse it.
+	body = []byte(signStatusListJWT(t, rotated, uri, "", true, statuses))
+	tv.key = &rotated.PublicKey
+	_, err = newChecker(t).CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 2})
+	require.Error(t, err, "a key the operator did not pin must not be accepted just because the token carries it")
+}

@@ -35,6 +35,13 @@ list entry per issued credential, embeds the reference in the credential,
 and records `(status_list_uri, idx) → (identifier, authentic source, scope,
 backend)` in the apigw's own store.
 
+An entry is recorded only if it names both a list URI and a backend this
+build can reach (`registry` or `status_service`). Either half missing means
+the mapping could be written and never acted on — `SetCredentialStatus`
+refuses an unknown backend rather than guessing, because guessing writes a
+status into the wrong list — so the issuance fails and the batch's
+allocations are released.
+
 That recording is **required**, not best-effort: the entry is consumed
 either way, and a credential whose entry was not recorded can never be
 revoked. A failed recording fails the issuance and releases the allocation —
@@ -147,9 +154,21 @@ service's status-list signing key need not be published there at all.
 siros-status-service is one such case: its AS JWKS exists for access-token
 verification while the status-list key is separate with no JWKS endpoint, so
 discovery finds nothing and every external list fails to verify.
-`status_list_key_file` **pins** the key — it is used for every token, with
-or without an `iss`, because naming a key is a statement about which key
-signs these lists.
+`status_list_key_file` **pins** the key. The pin is scoped: it covers a
+token with no `iss`, and one whose `iss` is exactly `status_list_issuer`.
+If the service signing your lists does emit an `iss`, set
+`status_list_issuer` to that value too, or the pin will not apply.
+
+It is scoped rather than global because a deployment may run the registry
+alongside an external service, and those lists are signed by different keys
+— a global pin made the external key answer for registry tokens and broke
+them the moment a key file was configured.
+
+Within its scope the pin is **enforcing**, not a fallback: such a token
+verifies against the pinned key even when it carries an `x5c` or `jwk` of
+its own. Naming a key is a statement about which key signs these lists, so
+a service that rotated its key — or anyone who minted a token with their
+own `jwk` — must not be accepted on the strength of what the token carries.
 
 Configure one or the other, or tokens without an `iss` claim are refused.
 
@@ -213,7 +232,9 @@ works on JWTs. Two kinds of token give it nothing to judge:
 - a CWT, which it cannot read at all.
 
 Such a token verifies against the pinned `status_list_key_file` if one
-applies, and is **refused** otherwise. It does not fall back to the generic
+applies, and is **refused** otherwise. (A token the PDP *can* judge still
+goes through it — unless a pin covers it, in which case the pin decides; see
+above.) It does not fall back to the generic
 key resolver: that resolver answers "is this the key that identity
 publishes", never "may this party publish these statuses", so reaching it
 would let a signer get to a status value with no policy decision — by

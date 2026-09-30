@@ -308,3 +308,28 @@ func TestSaveCredentialSubjects_AllocatedWithoutURIReleasesItsSiblings(t *testin
 	require.Len(t, issuer.calls, 1)
 	require.Equal(t, "https://status.example.com/statuslists/abc", issuer.calls[0].StatusListUri)
 }
+
+// TestSaveCredentialSubjects_UnroutableBackendIsRefused: a URI with no
+// routable backend fails the same way a backend with no URI does - the
+// mapping can be written and never acted on. SetCredentialStatus refuses an
+// unknown backend rather than guessing (guessing writes a status into the
+// wrong list), so recording one mints a credential whose revocation call is
+// rejected forever.
+func TestSaveCredentialSubjects_UnroutableBackendIsRefused(t *testing.T) {
+	for name, backend := range map[string]string{
+		"empty":   "",
+		"unknown": "some_future_service",
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, store, issuer := persistenceClientWithIssuer(t, nil)
+
+			err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
+				{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: backend},
+			})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "not a backend this build can reach")
+			require.Empty(t, store.saved, "an entry nothing could revoke must not be recorded")
+			require.Len(t, issuer.calls, 1, "the allocation must be released, not stranded")
+		})
+	}
+}

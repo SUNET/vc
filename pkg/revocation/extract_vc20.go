@@ -127,15 +127,29 @@ func statusListIndex(raw any) (int64, bool) {
 // unknown, and treating the two alike lets a revoked credential through on
 // nothing more than an unrecognised type name or a malformed entry.
 func declaresStatus(claims map[string]any) bool {
-	// PRESENCE of the key, whatever its value. `"credentialStatus": null`
-	// is a credential that names a status mechanism and fails to describe
-	// it - a malformed declaration, not the absence of one - and letting a
-	// null slip past the guard is a one-character way to be reported as
-	// non-revocable.
-	for _, key := range []string{"status", "credentialStatus"} {
-		if _, ok := claims[key]; ok {
-			return true
-		}
+	// credentialStatus is a VCDM term and means one thing, so its PRESENCE
+	// is the declaration - `"credentialStatus": null` names a mechanism and
+	// fails to describe it, which is a malformed declaration rather than
+	// the absence of one, and requiring a non-nil value was a
+	// one-character way past this guard.
+	if _, ok := claims["credentialStatus"]; ok {
+		return true
 	}
-	return false
+
+	// `status` is not exclusive to revocation. The draft's claim is an
+	// OBJECT (it holds status_list), while an application claim or an mdoc
+	// data element of the same name is typically a string - `"status":
+	// "active"` is an ordinary credential claim and must not make every
+	// such credential unverifiable. So: an object declares, a null
+	// declares (nothing puts a null where an application status belongs),
+	// and a scalar is somebody else's claim.
+	v, ok := claims["status"]
+	if !ok {
+		return false
+	}
+	if v == nil {
+		return true
+	}
+	_, isObject := v.(map[string]any)
+	return isObject
 }
