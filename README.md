@@ -229,8 +229,16 @@ temporarily_unavailable` rather than `401`: no verdict on the token was
 reached, so reporting it as a bad credential would send a caller off to mint a
 new one and file a local outage as ordinary auth noise. "Cannot be retrieved"
 covers a `200` that carries nothing usable as well as a refused connection or
-an error status — a body that is not a JSON key set, and `{"keys":[]}`, both
-leave this service with nothing to judge a token against.
+an error status — a body that is not a JSON key set, `{"keys":[]}`, and a key
+set holding only keys this verifier cannot use all leave it with nothing to
+judge a token against.
+
+`allowed_signing_algs` is asymmetric-only, enforced at startup. The key set
+behind `jwks_uri` is published, so configuring `HS256` and serving an `oct`
+key would hand the signing secret to everyone who can fetch it; `none` is the
+same hole with no key at all. Unrecognised algorithms are refused rather than
+forwarded, and a fetched key set is judged the same way — an `oct` key, or one
+whose `alg` is symmetric, does not count towards "a key set arrived".
 
 In `static` mode the token file must hold a single `b64token` on one line
 (letters, digits, and `-` `.` `_` `~` `+` `/`, with optional trailing `=`).

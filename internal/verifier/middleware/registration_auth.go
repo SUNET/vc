@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -492,16 +493,42 @@ func usableKeySetResponse(resp *http.Response) (*http.Response, error) {
 		return nil, fmt.Errorf("%w: could not read the key set: %v", errJWKSUnavailable, err)
 	}
 
-	// Only the envelope is decoded. Whether an individual key is one go-oidc
-	// can use is go-oidc's question; whether a key set arrived is this one.
+	// USABLE keys, not entries. go-oidc silently drops a JWK it cannot use -
+	// an `oct` secret, or one whose `alg` is symmetric - and returns no
+	// error, so a key set of nothing but those parsed to an empty set and
+	// the verification then failed as invalid_token. That is the same "200
+	// with nothing usable" this function exists for, one level in.
+	//
+	// A published key set must not carry a shared secret anyway: anyone who
+	// can fetch it would hold the signing key. helpers answers both
+	// questions so this and the config validator cannot drift.
 	var keySet struct {
-		Keys []json.RawMessage `json:"keys"`
+		Keys []struct {
+			KTY string `json:"kty"`
+			Alg string `json:"alg"`
+		} `json:"keys"`
 	}
 	if err := json.Unmarshal(body, &keySet); err != nil {
 		return nil, fmt.Errorf("%w: response was not a JSON key set: %v", errJWKSUnavailable, err)
 	}
 	if len(keySet.Keys) == 0 {
 		return nil, fmt.Errorf("%w: the key set is empty, so no token could be verified against it", errJWKSUnavailable)
+	}
+
+	usable := 0
+	for _, key := range keySet.Keys {
+		if !helpers.IsAsymmetricJWKType(key.KTY) {
+			continue
+		}
+		// An absent alg leaves the choice to the token's header, which is
+		// constrained separately by allowed_signing_algs.
+		if key.Alg != "" && !helpers.IsAsymmetricJWSAlg(key.Alg) {
+			continue
+		}
+		usable++
+	}
+	if usable == 0 {
+		return nil, fmt.Errorf("%w: the key set holds %d key(s), none of them one this verifier can use", errJWKSUnavailable, len(keySet.Keys))
 	}
 
 	resp.Body = io.NopCloser(bytes.NewReader(body))

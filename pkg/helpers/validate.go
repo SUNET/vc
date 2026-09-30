@@ -158,6 +158,26 @@ func NewValidator() (*validator.Validate, error) {
 		return nil, err
 	}
 
+	// Register custom validation for asymmetric_jws_alg - a JWS algorithm a
+	// PUBLIC key set can legitimately carry.
+	//
+	// The key set behind jwks_uri is published: anyone who can reach it has
+	// every key in it. That is fine for a public key and fatal for a shared
+	// secret - configure HS256 and point at a JWKS holding an `oct` key, and
+	// whoever reads the key set can mint registration tokens. "none" is the
+	// same hole without even the pretence of a key.
+	//
+	// An allowlist rather than a denylist of HS*/none: an algorithm this
+	// build does not recognise is one whose key model has not been thought
+	// about, and passing it straight through to go-oidc is how the symmetric
+	// family got in in the first place.
+	err = validate.RegisterValidation("asymmetric_jws_alg", func(fl validator.FieldLevel) bool {
+		return IsAsymmetricJWSAlg(fl.Field().String())
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	// Register custom validation for redirect_uri - validates OAuth 2.0 redirect URI format.
 	// Used by OIDC dynamic client registration (RFC 7591) for redirect_uris.
 	// Per RFC 6749: must have a scheme and must not contain a fragment.
@@ -624,4 +644,35 @@ func ValidateDocumentData(ctx context.Context, completeDocument *model.CompleteD
 	}
 
 	return nil
+}
+
+// IsAsymmetricJWSAlg reports whether a JWS "alg" is one a PUBLIC key set can
+// legitimately carry - see the asymmetric_jws_alg validator above for why
+// that matters, and why this is an allowlist rather than a denylist of
+// HS*/none.
+//
+// Exported because the verifier's JWKS handling has to ask the same question
+// of a key set it just fetched, and two copies of this list would drift.
+func IsAsymmetricJWSAlg(alg string) bool {
+	switch alg {
+	case "RS256", "RS384", "RS512",
+		"PS256", "PS384", "PS512",
+		"ES256", "ES384", "ES512",
+		"EdDSA":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsAsymmetricJWKType reports whether a JWK "kty" names a key with a public
+// half. "oct" - a shared secret - does not, and is the thing that must never
+// be served from a published key set.
+func IsAsymmetricJWKType(kty string) bool {
+	switch kty {
+	case "RSA", "EC", "OKP":
+		return true
+	default:
+		return false
+	}
 }

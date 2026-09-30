@@ -686,6 +686,26 @@ func TestJWTValidateDistinguishesKeySetOutageFromBadToken(t *testing.T) {
 		assertOutage(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
 	})
 
+	// go-oidc DROPS a JWK it cannot use and returns no error, so a key set
+	// of nothing but those parses to an empty set and the verification then
+	// fails as invalid_token. Counting raw entries missed exactly that: the
+	// response has a key, and the verifier has none.
+	for name, keys := range map[string]string{
+		"only a symmetric secret":  `{"keys":[{"kty":"oct","k":"c2VjcmV0","kid":"` + jwtKid + `"}]}`,
+		"only a symmetric alg":     `{"keys":[{"kty":"oct","alg":"HS256","k":"c2VjcmV0","kid":"` + jwtKid + `"}]}`,
+		"an RSA key with alg none": `{"keys":[{"kty":"RSA","alg":"none","n":"AQAB","e":"AQAB","kid":"` + jwtKid + `"}]}`,
+	} {
+		t.Run("JWKS endpoint answers 200 with "+name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(keys))
+			}))
+			defer srv.Close()
+
+			assertOutage(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
+		})
+	}
+
 	// The contrast case: the key set arrived and the token lost on its
 	// merits, which must stay 401 invalid_token.
 	t.Run("key set fine, token rejected", func(t *testing.T) {

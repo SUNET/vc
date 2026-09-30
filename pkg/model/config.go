@@ -1112,7 +1112,15 @@ type DynamicRegistrationJWTAuthConfig struct {
 	Audience string `yaml:"audience" validate:"required"`
 
 	// AllowedSigningAlgs restricts accepted JWT signing algorithms.
-	AllowedSigningAlgs []string `yaml:"allowed_signing_algs,omitempty" default:"[\"RS256\",\"ES256\"]"`
+	//
+	// Asymmetric only, enforced at startup. The key set behind jwks_uri is
+	// PUBLISHED, so a symmetric algorithm turns it into a secret handout:
+	// configure HS256 and serve an `oct` key, and anyone who can fetch the
+	// key set can mint registration tokens for this endpoint. "none" is the
+	// same hole with no key at all. Unrecognised algorithms are refused for
+	// the same reason rather than forwarded to go-oidc, which is how the
+	// symmetric family would get in.
+	AllowedSigningAlgs []string `yaml:"allowed_signing_algs,omitempty" validate:"omitempty,dive,asymmetric_jws_alg" default:"[\"RS256\",\"ES256\"]"`
 
 	// ClockSkewSeconds is how far the token's exp may lie in the past and
 	// still be accepted, for a client whose clock runs behind ours.
