@@ -74,22 +74,18 @@ func (rc *RDFCredential) RootProofs() (proofs []any, withoutRootProof *RDFCreden
 				continue
 			}
 			id, _ := node["@id"].(string)
-			matches := graphsNamed(graphs, id)
-			switch len(matches) {
-			case 0:
-				// A link naming no graph in this document carries no
-				// proof; the caller will find it incomplete.
-				proofs = append(proofs, node)
-			case 1:
-				proofs = append(proofs, graphs[matches[0]])
-				claimed[matches[0]] = true
-			default:
-				// One graph name written across several entries. RDF
-				// merges them, so which of them the proof is cannot be
-				// answered here - and removing only one would leave part
-				// of the proof in the document it secures.
-				return nil, nil, fmt.Errorf("the document names %d separate graphs %q, so its proof cannot be told from what was added beside it", len(matches), id)
+			// One entry per name by now, holding every triple written
+			// under it - so removing the proof removes the whole named
+			// graph, which is what RDF says it is, rather than whichever
+			// part of it happened to be indexed.
+			if match := graphNamed(graphs, id); match >= 0 {
+				proofs = append(proofs, graphs[match])
+				claimed[match] = true
+				continue
 			}
+			// A link naming no graph in this document carries no proof;
+			// the caller will find it incomplete.
+			proofs = append(proofs, node)
 		}
 		delete(root, predicate)
 	}
@@ -173,12 +169,59 @@ func (rc *RDFCredential) rootAndGraphs(source string) (map[string]any, []map[str
 		nodes = append(nodes, node)
 	}
 
+	// COALESCED by @id. Expanded JSON-LD may carry a node's properties
+	// across several top-level entries, and RDF conversion merges them into
+	// one node - so treating them as separate candidates reported an
+	// ambiguous root for a document whose merged serialization reads fine.
+	// The same is true of a named graph written more than once.
+	nodes = coalesceByID(nodes)
+	graphs = coalesceByID(graphs)
+
 	root, err := rootOf(nodes)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	return root, nodes, graphs, nil
+}
+
+// coalesceByID merges top-level entries that name the same node or graph.
+//
+// Entries without an @id are each their own anonymous node and are left
+// alone. Order is preserved, and the merged entry sits where the first of
+// its parts did, so nothing about the document's shape depends on map
+// iteration.
+func coalesceByID(entries []map[string]any) []map[string]any {
+	merged := make([]map[string]any, 0, len(entries))
+	at := map[string]int{}
+
+	for _, entry := range entries {
+		id, named := entry["@id"].(string)
+		if !named || id == "" {
+			merged = append(merged, entry)
+			continue
+		}
+		index, seen := at[id]
+		if !seen {
+			at[id] = len(merged)
+			merged = append(merged, entry)
+			continue
+		}
+		into := merged[index]
+		for key, value := range entry {
+			if key == "@id" {
+				continue
+			}
+			existing, present := into[key]
+			if !present {
+				into[key] = value
+				continue
+			}
+			into[key] = append(asList(existing), asList(value)...)
+		}
+	}
+
+	return merged
 }
 
 // CheckRootSurvivesFlattening refuses a document whose root changes, or
@@ -203,11 +246,14 @@ func (rc *RDFCredential) rootAndGraphs(source string) (map[string]any, []map[str
 //
 // A root named by a BLANK NODE, or by nothing at all, cannot be compared
 // lexically: blank-node labels are serialization-local, and ToRDF relabels
-// "_:root" to whatever its identifier issuer produces. Such a root is
-// required instead to be referenced by nothing in the document as written -
-// and then it is unreferenced in the flattened form too, where rootOf
-// refuses as soon as a second unreferenced node appears, so it cannot have
-// moved.
+// "_:root" to whatever its identifier issuer produces. Three things are
+// required of such a root instead. The flattened root must be nameless too,
+// or it is plainly a different node. Nothing may point back at the root
+// through @reverse, which is the one way to be pointed at without the
+// pointing showing up as a reference to an @id. And nothing may refer to it
+// by name. Together those make it the unreferenced node in the flattened
+// form as well, where rootOf refuses as soon as a second unreferenced node
+// appears - so it cannot have moved.
 //
 // Signing such a document would produce something this package verifies in
 // one serialization and refuses - or worse, verifies differently - in
@@ -231,14 +277,28 @@ func (rc *RDFCredential) CheckRootSurvivesFlattening() error {
 	compactID, _ := compactRoot["@id"].(string)
 	flatID, _ := flatRoot["@id"].(string)
 
-	if isBlankOrAbsent(compactID) || isBlankOrAbsent(flatID) {
-		// Nothing to compare. Require instead that nothing in the document
-		// refers to the root, which is what makes it the unreferenced node
-		// in the flattened form as well.
+	if isBlankOrAbsent(compactID) {
+		// Nothing to compare the root by, so the flattened root has to be
+		// nameless too. A flattened root with a real name is a DIFFERENT
+		// node: @reverse lets a nested node point at an anonymous parent
+		// without giving it one, and after flattening the parent is the
+		// referenced node while the child is the root.
+		if !isBlankOrAbsent(flatID) {
+			return fmt.Errorf("this document is about an unnamed node as written and about %q once serialized through RDF, so a proof on one would be read as the other's", flatID)
+		}
+		// Both unnamed. Then nothing may point BACK at the root, because
+		// that is what would make some other node the unreferenced one -
+		// and with no name to compare, that swap would be invisible.
+		if reverseLinkAnywhere([][]map[string]any{compactNodes, compactGraphs}) {
+			return fmt.Errorf("this document is about an unnamed node and uses @reverse, so which node it is about would be decided differently once serialized through RDF")
+		}
 		if referencedAnywhere([][]map[string]any{compactNodes, compactGraphs}, compactID) {
 			return fmt.Errorf("this document is about a node nothing can name across serializations, and something in it refers to that node, so which node it is about would be decided differently once serialized through RDF")
 		}
 		return nil
+	}
+	if isBlankOrAbsent(flatID) {
+		return fmt.Errorf("this document is about %q as written and about an unnamed node once serialized through RDF, so a proof on one would be read as the other's", compactID)
 	}
 
 	if compactID != flatID {
@@ -252,6 +312,43 @@ func (rc *RDFCredential) CheckRootSurvivesFlattening() error {
 // serializations of the same RDF.
 func isBlankOrAbsent(id string) bool {
 	return id == "" || strings.HasPrefix(id, "_:")
+}
+
+// reverseLinkAnywhere reports whether the document uses @reverse.
+//
+// A reverse link is the one way a node can be pointed AT without the
+// pointing being visible as a reference to its @id - which is exactly the
+// signal the unnamed-root rule relies on. Rare enough that refusing it
+// outright for an unnamed root costs nothing; a NAMED root is compared by
+// identity and needs no such rule.
+func reverseLinkAnywhere(entries [][]map[string]any) bool {
+	found := false
+	var walk func(any)
+	walk = func(value any) {
+		if found {
+			return
+		}
+		switch typed := value.(type) {
+		case map[string]any:
+			if _, reverse := typed["@reverse"]; reverse {
+				found = true
+				return
+			}
+			for _, member := range typed {
+				walk(member)
+			}
+		case []any:
+			for _, member := range typed {
+				walk(member)
+			}
+		}
+	}
+	for _, group := range entries {
+		for _, entry := range group {
+			walk(entry)
+		}
+	}
+	return found
 }
 
 // referencedAnywhere reports whether anything in the document points at this
@@ -299,20 +396,18 @@ func referencedAnywhere(entries [][]map[string]any, id string) bool {
 	return found
 }
 
-// graphsNamed returns the indices of every top-level graph entry carrying
-// this name. More than one is a collision the caller has to refuse: RDF
-// merges them into one graph, so there is no "the" entry to remove.
-func graphsNamed(graphs []map[string]any, id string) []int {
+// graphNamed returns the index of the graph entry carrying this name, or -1.
+// Entries are coalesced by name before this runs, so there is at most one.
+func graphNamed(graphs []map[string]any, id string) int {
 	if id == "" {
-		return nil
+		return -1
 	}
-	var matches []int
 	for i, graph := range graphs {
 		if name, _ := graph["@id"].(string); name == id {
-			matches = append(matches, i)
+			return i
 		}
 	}
-	return matches
+	return -1
 }
 
 // rootOf picks the document node the others hang off.

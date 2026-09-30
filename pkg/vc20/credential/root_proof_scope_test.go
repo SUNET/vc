@@ -123,15 +123,54 @@ func TestABlankRootThatIsReferredToIsRefused(t *testing.T) {
 
 	err = cred.CheckRootSurvivesFlattening()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "refers to that node")
+	require.Contains(t, err.Error(), "once serialized through RDF")
 }
 
-// TestGraphNameCollisionIsRefused: two top-level entries may carry the same
-// graph name. JSON-LD expansion keeps both and RDF conversion merges their
-// triples, so keeping one per name dropped the rest from the document the
+// TestAnAnonymousRootPointedAtByReverseIsRefused: @reverse is the one way a
+// node can be pointed AT without the pointing showing up as a reference to
+// its @id - so an anonymous root can be referenced after flattening even
+// though nothing in the compact form names it. The compact form then reads
+// the anonymous node as the document and the flattened form reads the
+// referring node, and with no name to compare the swap would be invisible.
+func TestAnAnonymousRootPointedAtByReverseIsRefused(t *testing.T) {
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": ["https://www.w3.org/ns/credentials/v2",
+			{"attaches": {"@reverse": "https://example.org/vocab#attaches", "@type": "@id"}}],
+		"type": ["VerifiablePresentation"],
+		"holder": "did:example:holder",
+		"attaches": [{
+			"id": "urn:uuid:other",
+			"type": ["VerifiablePresentation"]
+		}]
+	}`), nil)
+	require.NoError(t, err)
+
+	// The switch is real, or this proves nothing: the compact form is about
+	// an unnamed node and the flattened form about urn:uuid:other.
+	compactRoot, _, _, err := cred.rootAndGraphs(cred.documentSource())
+	require.NoError(t, err)
+	require.Nil(t, compactRoot["@id"], "the root is anonymous as written")
+
+	marshalled, err := cred.MarshalJSON()
+	require.NoError(t, err)
+	flatRoot, _, _, err := cred.rootAndGraphs(string(marshalled))
+	require.NoError(t, err)
+	require.Equal(t, "urn:uuid:other", flatRoot["@id"],
+		"and the referring node is the root once flattened")
+
+	require.Error(t, cred.CheckRootSurvivesFlattening(),
+		"a document that names two different roots must not be signed")
+}
+
+// TestGraphNameWrittenTwiceIsMergedAndRemoved: two top-level entries may
+// carry the same graph name. JSON-LD expansion keeps both and RDF
+// conversion merges their triples into ONE named graph, so indexing by name
+// and keeping the last silently dropped the rest from the document the
 // signature covers while the verifier's parsed RDF still held them.
-func TestGraphNameCollisionIsRefused(t *testing.T) {
-	// Two graphs under one name, one of them the root's proof.
+//
+// Merged and removed together now: the proof link names a graph, and the
+// graph is everything written under that name.
+func TestGraphNameWrittenTwiceIsMergedAndRemoved(t *testing.T) {
 	const collided = `[
 		{
 			"@id": "urn:uuid:the-presentation",
@@ -159,7 +198,40 @@ func TestGraphNameCollisionIsRefused(t *testing.T) {
 	cred, err := NewRDFCredentialFromJSON([]byte(collided), nil)
 	require.NoError(t, err)
 
-	_, _, err = cred.RootProofs()
-	require.Error(t, err, "which entry is the proof cannot be answered, so neither is removed")
-	require.Contains(t, err.Error(), "urn:uuid:the-graph")
+	proofs, without, err := cred.RootProofs()
+	require.NoError(t, err)
+	require.Len(t, proofs, 1, "one name is one graph, however many entries write it")
+
+	form, err := without.CanonicalForm()
+	require.NoError(t, err)
+	require.NotContains(t, form, "zREAL", "the proof is removed from what it secures")
+	require.NotContains(t, form, "added beside the proof",
+		"and so is everything else written under that graph name - it is part of the same graph")
+}
+
+// TestANodeWrittenTwiceIsOneCandidate: expanded JSON-LD may carry a node's
+// properties across several top-level entries, and RDF conversion merges
+// them. Treating them as separate candidates reported an ambiguous root for
+// a document whose merged serialization reads perfectly well.
+func TestANodeWrittenTwiceIsOneCandidate(t *testing.T) {
+	const split = `[
+		{
+			"@id": "urn:uuid:the-credential",
+			"@type": ["https://www.w3.org/2018/credentials#VerifiableCredential"]
+		},
+		{
+			"@id": "urn:uuid:the-credential",
+			"https://www.w3.org/2018/credentials#issuer": [{"@id": "did:example:issuer"}]
+		}
+	]`
+
+	cred, err := NewRDFCredentialFromJSON([]byte(split), nil)
+	require.NoError(t, err)
+
+	root, nodes, _, err := cred.rootAndGraphs(cred.documentSource())
+	require.NoError(t, err, "two entries naming one node are one candidate")
+	require.Len(t, nodes, 1)
+	require.Equal(t, "urn:uuid:the-credential", root["@id"])
+	require.Contains(t, root, "https://www.w3.org/2018/credentials#issuer",
+		"and the merged node carries what both entries said")
 }
