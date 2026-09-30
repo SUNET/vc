@@ -2,11 +2,11 @@ package spocputil
 
 import (
 	"fmt"
-	"slices"
 	"sync"
 
 	spocp "github.com/sirosfoundation/go-spocp"
 	"github.com/sirosfoundation/go-spocp/pkg/sexp"
+	"github.com/sirosfoundation/go-spocp/pkg/starform"
 )
 
 // Engine wraps a SPOCP AdaptiveEngine with a mutex, safe for concurrent
@@ -41,12 +41,70 @@ func (e *Engine) RuleCount() int {
 func (e *Engine) ExportRules() []sexp.Element {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	// A copy, because the wrapped engine hands back its own backing slice.
-	// Returning that would put the rule set behind a read lock the caller
-	// does not hold once this returns - and let a caller reorder or
-	// overwrite entries in place, which is a corrupted policy rather than a
-	// visible error.
-	return slices.Clone(e.engine.ExportRules())
+	// A DEEP copy, because the wrapped engine hands back its own backing
+	// slice AND its own element trees. Returning either would put the rule
+	// set behind a read lock the caller does not hold once this returns -
+	// and let a caller reorder the slice, or reach into a *sexp.List and
+	// overwrite an element in place. That is a corrupted policy rather than
+	// a visible error, and a data race against a concurrent QueryElement
+	// besides.
+	//
+	// slices.Clone alone was the bug: it copies the top-level slice and
+	// leaves every *sexp.List, *sexp.Atom and star form shared.
+	rules := e.engine.ExportRules()
+	out := make([]sexp.Element, 0, len(rules))
+	for _, rule := range rules {
+		out = append(out, cloneElement(rule))
+	}
+	return out
+}
+
+// cloneElement deep-copies one rule element.
+//
+// Every type go-spocp can put in a rule is handled explicitly, and an
+// UNKNOWN one is returned as-is rather than silently dropped: a rule that
+// vanished from an exported set would quietly narrow the authorization a
+// caller computes from it, which is worse than sharing a value nothing in
+// this repository mutates. If go-spocp grows an element type, the
+// round-trip test names it.
+func cloneElement(element sexp.Element) sexp.Element {
+	switch v := element.(type) {
+	case nil:
+		return nil
+	case *sexp.Atom:
+		return &sexp.Atom{Value: v.Value}
+	case *sexp.List:
+		out := &sexp.List{Tag: v.Tag, Elements: make([]sexp.Element, 0, len(v.Elements))}
+		for _, child := range v.Elements {
+			out.Elements = append(out.Elements, cloneElement(child))
+		}
+		return out
+	case *starform.Wildcard:
+		return &starform.Wildcard{}
+	case *starform.Set:
+		out := &starform.Set{Elements: make([]sexp.Element, 0, len(v.Elements))}
+		for _, child := range v.Elements {
+			out.Elements = append(out.Elements, cloneElement(child))
+		}
+		return out
+	case *starform.Range:
+		out := &starform.Range{RangeType: v.RangeType}
+		if v.LowerBound != nil {
+			bound := *v.LowerBound
+			out.LowerBound = &bound
+		}
+		if v.UpperBound != nil {
+			bound := *v.UpperBound
+			out.UpperBound = &bound
+		}
+		return out
+	case *starform.Prefix:
+		return &starform.Prefix{Value: v.Value}
+	case *starform.Suffix:
+		return &starform.Suffix{Value: v.Value}
+	default:
+		return element
+	}
 }
 
 // BuildEngine parses inline rules and an optional rules file into a new
