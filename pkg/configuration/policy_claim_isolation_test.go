@@ -85,6 +85,56 @@ func TestCheckPolicyClaimsAreNotCallerTemplated(t *testing.T) {
 			"a claims template this cannot read is one it cannot vouch for")
 	})
 
+	// resolveTemplate executes the full text/template grammar, so a regexp
+	// over "{{.name}}" sees only one of the ways a caller value reaches the
+	// request. These all read the same DynamicParams map.
+	for name, claims := range map[string]string{
+		"index":             `{{index . "org_id"}}`,
+		"index with a pipe": `{{index . "org_id" | printf "%s"}}`,
+		"a field in a pipe": `{{.org_id | printf "%s"}}`,
+		"with":              `{{with .org_id}}{{.}}{{end}}`,
+		"if":                `{{if .org_id}}{{.org_id}}{{end}}`,
+		"a variable":        `{{$v := .org_id}}{{$v}}`,
+		"the whole dot":     `{{range $k, $v := .}}{{$v}}{{end}}`,
+		"an unrelated key":  `{{index . "some_other_param"}}`,
+	} {
+		t.Run("a caller value reaches the claim through "+name, func(t *testing.T) {
+			err := checkPolicyClaimsAreNotCallerTemplated(cfgWith(
+				&model.OIDCRequestParams{Claims: `{"id_token":{"org_id":{"value":"` + claims + `"}}}`},
+				policyOn("org_id")))
+			require.Error(t, err, "%s reads the caller's data", claims)
+			assert.Contains(t, err.Error(), "org_id")
+		})
+	}
+
+	// The operator's own template text, reading nothing from the caller, is
+	// not a caller value - or every configured claims parameter would be
+	// refused and the check would be a ban rather than a boundary.
+	for name, claims := range map[string]string{
+		"a constant action": `{{printf "sunet"}}`,
+		"no action at all":  `sunet`,
+	} {
+		t.Run("a policy claim written by "+name+" is allowed", func(t *testing.T) {
+			assert.NoError(t, checkPolicyClaimsAreNotCallerTemplated(cfgWith(
+				&model.OIDCRequestParams{Claims: `{"id_token":{"org_id":{"value":"` + claims + `"}}}`},
+				policyOn("org_id"))))
+		})
+	}
+
+	// An opaque read cannot be attributed to a claim, so every claim the
+	// template requests is treated as filled.
+	t.Run("an opaque read taints every claim the template requests", func(t *testing.T) {
+		require.Error(t, checkPolicyClaimsAreNotCallerTemplated(cfgWith(
+			&model.OIDCRequestParams{Claims: `{"id_token":{"org_id":null,"dept":{"value":"{{range $k, $v := .}}{{$v}}{{end}}"}}}`},
+			policyOn("org_id"))),
+			"which claim the value lands in is unknown, so org_id cannot be vouched for")
+	})
+
+	t.Run("acr_values reads the caller's data indirectly too", func(t *testing.T) {
+		require.Error(t, checkPolicyClaimsAreNotCallerTemplated(cfgWith(
+			&model.OIDCRequestParams{ACRValues: `{{index . "loa"}}`}, policyOn("acr"))))
+	})
+
 	t.Run("nothing configured is nothing to check", func(t *testing.T) {
 		assert.NoError(t, checkPolicyClaimsAreNotCallerTemplated(&model.Cfg{}))
 		assert.NoError(t, checkPolicyClaimsAreNotCallerTemplated(cfgWith(nil, policyOn("org_id"))))

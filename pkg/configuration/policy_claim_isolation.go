@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"regexp"
 	"slices"
 	"strings"
 	"text/template"
+	"text/template/parse"
 
 	"github.com/SUNET/vc/pkg/model"
 )
@@ -91,10 +91,127 @@ func checkPolicyClaimsAreNotCallerTemplated(cfg *model.Cfg) error {
 	return nil
 }
 
-// templatePlaceholder matches the dynamic values a caller supplies. Only the
-// simple ".name" form is a caller value; anything else is the operator's own
-// template text and cannot be filled from DynamicParams.
-var templatePlaceholder = regexp.MustCompile(`{{\s*\.([A-Za-z_][A-Za-z0-9_]*)\s*}}`)
+// templateAccess describes what a configured template reads from the
+// caller's data.
+//
+// Parsed, not pattern-matched. resolveTemplate executes the full
+// text/template grammar, so "{{index . \"org_id\"}}" renders the caller's
+// org_id just as "{{.org_id}}" does, and a regexp over the source text sees
+// only the second. Reading the parse tree is the only way to be looking at
+// the same language the request path executes.
+type templateAccess struct {
+	// keys are the caller-supplied names this template reads, where that
+	// could be determined.
+	keys map[string]bool
+	// opaque is true when the template reads from the caller's data in a
+	// way this cannot attribute to a name. Then every claim the template
+	// writes is treated as caller-filled: the analysis cannot say which one
+	// the value lands in, and "cannot tell" has to mean the strict answer.
+	opaque bool
+}
+
+// analyzeTemplate reads a configured template and reports what it takes from
+// the caller.
+func analyzeTemplate(tmplStr string) (templateAccess, error) {
+	access := templateAccess{keys: map[string]bool{}}
+	if tmplStr == "" {
+		return access, nil
+	}
+
+	// missingkey=error to match resolveTemplate: a template this cannot
+	// parse is one the request path cannot execute either.
+	tmpl, err := template.New("analysis").Option("missingkey=error").Parse(tmplStr)
+	if err != nil {
+		return access, fmt.Errorf("not a valid template: %w", err)
+	}
+	if tmpl.Tree == nil || tmpl.Tree.Root == nil {
+		return access, nil
+	}
+	walkTemplateNode(tmpl.Tree.Root, &access)
+
+	return access, nil
+}
+
+// walkTemplateNode records every read of the caller's data in one node.
+//
+// The two forms an operator is documented to write - "{{.name}}" and
+// "{{index . \"name\"}}" - are attributed to a name. Anything else that
+// touches the dot at all is recorded as opaque rather than ignored, because
+// what it reads is the same caller-supplied map.
+func walkTemplateNode(node parse.Node, access *templateAccess) {
+	switch typed := node.(type) {
+	case *parse.ListNode:
+		if typed == nil {
+			return
+		}
+		for _, child := range typed.Nodes {
+			walkTemplateNode(child, access)
+		}
+	case *parse.ActionNode:
+		walkPipe(typed.Pipe, access)
+	case *parse.IfNode:
+		walkBranch(&typed.BranchNode, access)
+	case *parse.RangeNode:
+		walkBranch(&typed.BranchNode, access)
+	case *parse.WithNode:
+		walkBranch(&typed.BranchNode, access)
+	case *parse.TemplateNode:
+		// A nested template is handed the same data and this does not have
+		// its body, so what it reads cannot be attributed.
+		access.opaque = true
+		walkPipe(typed.Pipe, access)
+	}
+}
+
+func walkBranch(branch *parse.BranchNode, access *templateAccess) {
+	walkPipe(branch.Pipe, access)
+	walkTemplateNode(branch.List, access)
+	walkTemplateNode(branch.ElseList, access)
+}
+
+func walkPipe(pipe *parse.PipeNode, access *templateAccess) {
+	if pipe == nil {
+		return
+	}
+	for _, cmd := range pipe.Cmds {
+		walkCommand(cmd, access)
+	}
+}
+
+func walkCommand(cmd *parse.CommandNode, access *templateAccess) {
+	if cmd == nil || len(cmd.Args) == 0 {
+		return
+	}
+
+	// "{{index . \"name\"}}" - the documented indirect form.
+	if ident, ok := cmd.Args[0].(*parse.IdentifierNode); ok && ident.Ident == "index" && len(cmd.Args) == 3 {
+		_, onDot := cmd.Args[1].(*parse.DotNode)
+		key, isString := cmd.Args[2].(*parse.StringNode)
+		if onDot && isString {
+			access.keys[key.Text] = true
+			return
+		}
+	}
+
+	for _, arg := range cmd.Args {
+		switch typed := arg.(type) {
+		case *parse.FieldNode:
+			// "{{.name}}" and "{{.a.b}}"; the caller's data is a flat map,
+			// so the first identifier is the key it reads.
+			if len(typed.Ident) > 0 {
+				access.keys[typed.Ident[0]] = true
+			}
+			if len(typed.Ident) != 1 {
+				access.opaque = true
+			}
+		case *parse.DotNode, *parse.VariableNode:
+			// The whole map, or something bound from it.
+			access.opaque = true
+		case *parse.PipeNode:
+			walkPipe(typed, access)
+		}
+	}
+}
 
 // claimsFilledByCaller reports which requested claim names carry a
 // caller-supplied value.
@@ -110,7 +227,11 @@ func claimsFilledByCaller(params *model.OIDCRequestParams) (map[string]bool, err
 
 	// acr_values does not go through the claims parameter, but it asks the
 	// OP for an authentication context and comes back as the acr claim.
-	if templatePlaceholder.MatchString(params.ACRValues) {
+	acrAccess, err := analyzeTemplate(params.ACRValues)
+	if err != nil {
+		return nil, fmt.Errorf("acr_values is not a valid template: %w", err)
+	}
+	if len(acrAccess.keys) > 0 || acrAccess.opaque {
 		filled["acr"] = true
 	}
 
@@ -118,13 +239,18 @@ func claimsFilledByCaller(params *model.OIDCRequestParams) (map[string]bool, err
 		return filled, nil
 	}
 
+	claimsAccess, err := analyzeTemplate(params.Claims)
+	if err != nil {
+		return nil, fmt.Errorf("claims is not a valid template: %w", err)
+	}
+	if len(claimsAccess.keys) == 0 && !claimsAccess.opaque {
+		return filled, nil
+	}
+
 	const sentinel = "caller-supplied-value-sentinel"
 	values := map[string]string{}
-	for _, match := range templatePlaceholder.FindAllStringSubmatch(params.Claims, -1) {
-		values[match[1]] = sentinel
-	}
-	if len(values) == 0 {
-		return filled, nil
+	for key := range claimsAccess.keys {
+		values[key] = sentinel
 	}
 
 	tmpl, err := template.New("claims").Option("missingkey=error").Parse(params.Claims)
@@ -149,7 +275,10 @@ func claimsFilledByCaller(params *model.OIDCRequestParams) (map[string]bool, err
 			continue
 		}
 		for claim, constraint := range claims {
-			if containsSentinel(constraint, sentinel) {
+			// An OPAQUE template reads the caller's data in a way this
+			// cannot attribute to a name, so which claim the value lands in
+			// is unknown and every claim it requests is treated as filled.
+			if claimsAccess.opaque || containsSentinel(constraint, sentinel) {
 				filled[claim] = true
 			}
 		}
