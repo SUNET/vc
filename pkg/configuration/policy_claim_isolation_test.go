@@ -1,6 +1,8 @@
 package configuration
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/model"
@@ -150,5 +152,148 @@ func TestCheckPolicyClaimsAreNotCallerTemplated(t *testing.T) {
 		scope.AuthProvider = "saml"
 		cfg.APIGW.DataSources.Datastore.Scopes["org_credential"] = scope
 		assert.NoError(t, checkPolicyClaimsAreNotCallerTemplated(cfg))
+	})
+}
+
+// TestClaimsTemplateMustKeepCallerValuesInStrings: resolveJSONTemplate
+// escapes each value as JSON string content and then strips the surrounding
+// quotes, because the documented form puts the placeholder inside a string.
+// Nothing restricted the configuration to that form - written without the
+// quotes, the same escaping inserts the caller's text as raw JSON, so a
+// value like `true,"essential":true` changes the members of the request and
+// still passes the json.Valid check at the end.
+func TestClaimsTemplateMustKeepCallerValuesInStrings(t *testing.T) {
+	cfgWith := func(claims string, policy *model.IssuancePolicy) *model.Cfg {
+		return &model.Cfg{APIGW: &model.APIGW{DataSources: model.DataSources{
+			Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+				"org_credential": {
+					AuthProvider:      model.AuthProviderOIDC,
+					OIDCRequestParams: &model.OIDCRequestParams{Claims: claims},
+					IssuancePolicy:    policy,
+				},
+			}},
+		}}}
+	}
+
+	t.Run("a placeholder inside a string is the documented form", func(t *testing.T) {
+		assert.NoError(t, checkPolicyClaimsAreNotCallerTemplated(
+			cfgWith(`{"id_token":{"org_id":{"value":"{{.org_id}}"}}}`, nil)))
+	})
+
+	t.Run("a placeholder outside a string is refused", func(t *testing.T) {
+		err := checkPolicyClaimsAreNotCallerTemplated(
+			cfgWith(`{"id_token":{"org_id":{"value":{{.org_id}}}}}`, nil))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "change the request's structure")
+	})
+
+	t.Run("a placeholder used as an object key is refused", func(t *testing.T) {
+		err := checkPolicyClaimsAreNotCallerTemplated(
+			cfgWith(`{"id_token":{"{{.claim_name}}":{"essential":true}}}`, nil))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "object KEY")
+	})
+
+	// Checked whether or not a policy reads the answer: the structural rule
+	// is about what a caller can do to the REQUEST.
+	t.Run("a scope with no issuance policy is checked too", func(t *testing.T) {
+		require.Error(t, checkPolicyClaimsAreNotCallerTemplated(
+			cfgWith(`{"id_token":{"org_id":{"value":{{.org_id}}}}}`, nil)))
+	})
+
+	// The concrete attack the escaping does not stop: the rendered document
+	// is valid JSON and has members the operator never wrote.
+	t.Run("the injection this refuses really does produce valid JSON", func(t *testing.T) {
+		const templated = `{"id_token":{"org_id":{"value":{{.org_id}}}}}`
+		injected := strings.ReplaceAll(templated, "{{.org_id}}", `"sunet","essential":true`)
+		require.True(t, json.Valid([]byte(injected)),
+			"a json.Valid check at the end of substitution cannot see this")
+
+		var parsed map[string]map[string]map[string]any
+		require.NoError(t, json.Unmarshal([]byte(injected), &parsed))
+		assert.Equal(t, true, parsed["id_token"]["org_id"]["essential"],
+			"the caller added a member to the request")
+	})
+}
+
+// TestTemplatedCustomParamsAreRefusedOnAPolicyScope: custom_params are
+// arbitrary by design, so this service cannot know what an OP does with one
+// - and an OP that treats a parameter as a hint about the subject can echo
+// it into any claim. There is no claim to name and so no narrow rule to
+// write.
+func TestTemplatedCustomParamsAreRefusedOnAPolicyScope(t *testing.T) {
+	cfgWith := func(custom map[string]string, policy *model.IssuancePolicy) *model.Cfg {
+		return &model.Cfg{APIGW: &model.APIGW{DataSources: model.DataSources{
+			Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+				"org_credential": {
+					AuthProvider:      model.AuthProviderOIDC,
+					OIDCRequestParams: &model.OIDCRequestParams{CustomParams: custom},
+					IssuancePolicy:    policy,
+				},
+			}},
+		}}}
+	}
+	policy := &model.IssuancePolicy{
+		Rules:         []string{"(credential (scope org_credential))"},
+		QueryTemplate: []model.QueryDimension{{Dimension: "acr", Claim: "acr"}},
+	}
+
+	t.Run("a templated custom param on a policy scope is refused", func(t *testing.T) {
+		err := checkPolicyClaimsAreNotCallerTemplated(
+			cfgWith(map[string]string{"org_id": "{{.org_id}}"}, policy))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "custom_params")
+	})
+
+	t.Run("the indirect form is refused too", func(t *testing.T) {
+		require.Error(t, checkPolicyClaimsAreNotCallerTemplated(
+			cfgWith(map[string]string{"org_id": `{{index . "org_id"}}`}, policy)))
+	})
+
+	t.Run("a fixed custom param is the operator's and is allowed", func(t *testing.T) {
+		assert.NoError(t, checkPolicyClaimsAreNotCallerTemplated(
+			cfgWith(map[string]string{"org_id": "sunet"}, policy)))
+	})
+
+	t.Run("a templated custom param without a policy is allowed", func(t *testing.T) {
+		assert.NoError(t, checkPolicyClaimsAreNotCallerTemplated(
+			cfgWith(map[string]string{"org_id": "{{.org_id}}"}, nil)))
+	})
+}
+
+// TestPolicyClaimMatchesBothSpellings: lookupClaim tries the whole dotted
+// string as a flat key BEFORE walking the path, so a policy claim
+// "identity.given_name" can be satisfied by a literal claim of that name -
+// and a check that looked only at the top-level segment accepted a template
+// requesting exactly it.
+func TestPolicyClaimMatchesBothSpellings(t *testing.T) {
+	cfgWith := func(claims string) *model.Cfg {
+		return &model.Cfg{APIGW: &model.APIGW{DataSources: model.DataSources{
+			Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+				"org_credential": {
+					AuthProvider:      model.AuthProviderOIDC,
+					OIDCRequestParams: &model.OIDCRequestParams{Claims: claims},
+					IssuancePolicy: &model.IssuancePolicy{
+						Rules:         []string{"(credential (scope org_credential))"},
+						QueryTemplate: []model.QueryDimension{{Dimension: "given_name", Claim: "identity.given_name"}},
+					},
+				},
+			}},
+		}}}
+	}
+
+	t.Run("the dotted claim requested literally", func(t *testing.T) {
+		require.Error(t, checkPolicyClaimsAreNotCallerTemplated(
+			cfgWith(`{"id_token":{"identity.given_name":{"value":"{{.name}}"}}}`)))
+	})
+
+	t.Run("the same claim requested through its top-level name", func(t *testing.T) {
+		require.Error(t, checkPolicyClaimsAreNotCallerTemplated(
+			cfgWith(`{"id_token":{"identity":{"value":"{{.name}}"}}}`)))
+	})
+
+	t.Run("an unrelated claim is still allowed", func(t *testing.T) {
+		assert.NoError(t, checkPolicyClaimsAreNotCallerTemplated(
+			cfgWith(`{"id_token":{"department":{"value":"{{.dept}}"}}}`)))
 	})
 }

@@ -405,6 +405,14 @@ type OIDCRequestParams struct {
 	// structure. The rendered result must be valid JSON or flow initiation
 	// fails, which also catches a template that was malformed as written.
 	//
+	// A placeholder must sit INSIDE a JSON string. The escaping makes a
+	// value safe within the string it is written into; written outside one
+	// - "value": {{.org_id}} - the same escaping inserts the caller's text
+	// as raw JSON, so a value like `true,"essential":true` adds members the
+	// operator never wrote and still parses. A placeholder used as an
+	// object KEY lets the caller choose which claim is requested. Both are
+	// refused at startup.
+	//
 	// DO NOT template the "value" of a claim the issuance policy reads. The
 	// value member asks the OP to assert a SPECIFIC value, and the caller
 	// that fills the template is the wallet - PAR authenticates it, not the
@@ -421,6 +429,13 @@ type OIDCRequestParams struct {
 
 	// CustomParams are arbitrary key-value pairs to add as query parameters to the authorization request.
 	// Keys are static; values support Go template syntax for dynamic substitution.
+	//
+	// A TEMPLATED custom parameter is refused on a scope that has an
+	// issuance_policy. These are arbitrary by design, so nothing here can
+	// know what an OP does with one, and an OP that treats a parameter as a
+	// hint about the subject can echo it into any claim - there is no claim
+	// to name and so no narrower rule to write. A fixed value is the
+	// operator's and stays allowed.
 	CustomParams map[string]string `yaml:"custom_params,omitempty"`
 }
 
