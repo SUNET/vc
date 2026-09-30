@@ -21,8 +21,8 @@ import (
 // service configured, nothing else in the issuance path needs the registry,
 // and the mapping used to be the one thing that did.
 type CredentialStatusEntry struct {
-	// StatusListURI is the list the entry lives in. Together with Index it
-	// identifies the entry - Section does not, see below.
+	// StatusListURI is the list the entry lives in. Together with Index and
+	// Backend it identifies the entry - Section does not, see below.
 	StatusListURI string `bson:"status_list_uri"`
 	Index         int64  `bson:"idx"`
 	// Identifier is the credential subject (authentic_source_person_id).
@@ -68,14 +68,18 @@ func (c *CredentialStatusColl) createIndexes(ctx context.Context) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:credential_status:createIndexes")
 	defer span.End()
 
-	// Unique on (status_list_uri, idx), mirroring the SQL primary key: an
-	// entry is identified by its list and its place in it. Keying on
-	// (section, idx) would collide across different external lists, since
-	// those all report section 0.
+	// Unique on (status_list_uri, idx, backend), mirroring the SQL primary
+	// key: an entry is identified by its list, its place in it, and who
+	// serves the list. Keying on (section, idx) would collide across
+	// different external lists, since those all report section 0; leaving
+	// backend out would let a reconfiguration in which two backends serve
+	// one URI have the later upsert REPLACE the earlier mapping, routing
+	// that credential's revocation to the wrong service.
 	entryUniq := mongo.IndexModel{
 		Keys: bson.D{
 			bson.E{Key: "status_list_uri", Value: 1},
 			bson.E{Key: "idx", Value: 1},
+			bson.E{Key: "backend", Value: 1},
 		},
 		Options: options.Index().SetName("credential_status_entry_uniq").SetUnique(true),
 	}
@@ -97,7 +101,9 @@ func (c *CredentialStatusColl) Save(ctx context.Context, entry *CredentialStatus
 		entry.IssuedAt = time.Now().UTC()
 	}
 
-	filter := bson.M{"status_list_uri": entry.StatusListURI, "idx": entry.Index}
+	// The filter must match the unique index exactly, or an upsert that
+	// misses selects a row the index then refuses to create.
+	filter := bson.M{"status_list_uri": entry.StatusListURI, "idx": entry.Index, "backend": entry.Backend}
 	if _, err := c.Coll.ReplaceOne(ctx, filter, entry, options.Replace().SetUpsert(true)); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return err

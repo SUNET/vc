@@ -34,8 +34,9 @@ type credentialStatusRow struct {
 }
 
 // Save records one allocated status-list entry, upserting on
-// (status_list_uri, idx) - the pair that identifies an entry. See the
-// 000010 migration for why the key is not (section, idx).
+// (status_list_uri, idx, backend) - what identifies an entry. See the
+// 000010 migration for why the key is neither (section, idx) nor
+// (status_list_uri, idx).
 func (c *SQLCredentialStatusColl) Save(ctx context.Context, entry *CredentialStatusEntry) error {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:credential_status:save")
 	defer span.End()
@@ -44,11 +45,11 @@ func (c *SQLCredentialStatusColl) Save(ctx context.Context, entry *CredentialSta
 		entry.IssuedAt = time.Now().UTC()
 	}
 
-	updateCols := []string{"identifier", "section", "backend", "authentic_source", "scope", "issued_at"}
+	updateCols := []string{"identifier", "section", "authentic_source", "scope", "issued_at"}
 	query := c.dialect.Rebind(`INSERT INTO credential_status_entries
 		(status_list_uri, idx, identifier, section, backend, authentic_source, scope, issued_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?) ` +
-		c.dialect.UpsertClause([]string{"status_list_uri", "idx"}, updateCols))
+		c.dialect.UpsertClause([]string{"status_list_uri", "idx", "backend"}, updateCols))
 
 	if _, err := c.db.ExecContext(ctx, query,
 		entry.StatusListURI, entry.Index, entry.Identifier,

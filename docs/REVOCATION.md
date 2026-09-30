@@ -35,6 +35,13 @@ list entry per issued credential, embeds the reference in the credential,
 and records `(status_list_uri, idx) → (identifier, authentic source, scope,
 backend)` in the apigw's own store.
 
+An entry is keyed on `(status_list_uri, idx, backend)`. The backend is part
+of the key because it is the routing dimension — the table records it
+precisely because the URI alone does not say who owns an entry — and two
+backends reusing one URI and index are two distinct entries, not one. It
+does not make lookups ambiguous: revocation reads by identifier and narrows
+in memory.
+
 An entry is recorded only if it names both a list URI and a backend this
 build can reach (`registry` or `status_service`). Either half missing means
 the mapping could be written and never acted on — `SetCredentialStatus`
@@ -197,7 +204,7 @@ evaluates the signer. The key the signature verified with is what goes to
 the evaluator; re-resolving could return a different key from a rotating
 resolver.
 
-The subject is the token's `iss` when it has one, and otherwise the
+The subject is the token's `iss` claim when it has one, and otherwise the
 **origin** of the list URI — Section 5.1's required claims are `sub`, `iat`
 and `status_list`, so `iss` may be absent, and a policy still has to name
 something.

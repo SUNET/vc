@@ -210,6 +210,17 @@ const StatusListSignerAction = "status-list-signer"
 // go-wallet-backend does the same two calls, in the same order.
 const StatusListIssuerFallbackAction = string(RoleCredentialIssuer)
 
+// statusListTokenIssuer returns a verified status list token's own iss
+// claim, or "" when it carries none.
+func statusListTokenIssuer(token *jwt.Token) string {
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return ""
+	}
+	issuer, _ := claims["iss"].(string)
+	return issuer
+}
+
 // statusListSubjectFromURI reduces a status list URL to the origin that
 // served it, for use as a trust subject when the token carries no iss.
 func statusListSubjectFromURI(listURI string) string {
@@ -276,7 +287,15 @@ func (v *JWTTrustVerifier) VerifyStatusListToken(ctx context.Context, tokenStrin
 	// required claims are sub, iat and status_list), and a policy still has
 	// to name something - the origin is what the deployment actually
 	// fetched from. Same rule as go-wallet-backend uses.
-	subject := keyInfo.IssuerID
+	//
+	// Read from the CLAIMS, not from keyInfo.IssuerID. For an x5c token
+	// with no iss, IssuerID is filled in from the leaf certificate's common
+	// name (see extractJWTKeyMaterial), so using it here asked the PDP
+	// about a CN while the rule above - and the deployment's policy - say
+	// the origin. A conforming status service that signs with x5c and omits
+	// iss would have been judged as whatever its certificate happened to be
+	// named.
+	subject := statusListTokenIssuer(token)
 	if subject == "" {
 		subject = statusListSubjectFromURI(listURI)
 	}

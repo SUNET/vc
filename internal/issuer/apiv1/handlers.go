@@ -71,6 +71,11 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
 	}
 
+	// Everything from here can fail, and the entry is already VALID on its
+	// backend. See releaseUnlessIssued.
+	credentialIssued := false
+	defer c.releaseUnlessIssued(ctx, alloc, &credentialIssued)
+
 	var statusSection, statusIndex int64
 	var statusURI, statusBackend string
 	if alloc != nil {
@@ -114,6 +119,7 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		TokenStatusListBackend: statusBackend,
 	}
 
+	credentialIssued = true
 	return reply, nil
 }
 
@@ -214,6 +220,12 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
 	}
+	// Everything from here can fail - the issuer, the CBOR encoder, the
+	// marshal - and the entry is already VALID on its backend. See
+	// releaseUnlessIssued.
+	credentialIssued := false
+	defer c.releaseUnlessIssued(ctx, alloc, &credentialIssued)
+
 	if alloc != nil {
 		// allocateOptionalStatus guarantees a non-empty URI here.
 		mdocStatusSection, mdocStatusIndex, mdocStatusURI, mdocStatusBackend = alloc.Section, alloc.Index, alloc.URI, alloc.Backend
@@ -260,5 +272,6 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		ValidUntil:        issued.ValidUntil.Format(time.RFC3339),
 	}
 
+	credentialIssued = true
 	return reply, nil
 }

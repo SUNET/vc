@@ -5,7 +5,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
+	"math/big"
 	"testing"
+	"time"
 
 	"github.com/SUNET/vc/pkg/testsupport/jwktest"
 	"github.com/golang-jwt/jwt/v5"
@@ -162,4 +167,69 @@ func TestVerifyStatusListToken_SubjectFromListURI(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"https://status.example.com"}, ev.subjects)
+}
+
+// signStatusListTokenX5C mints a status list token signed with a fresh key
+// whose certificate rides in the x5c header, with a deliberately misleading
+// common name.
+func signStatusListTokenX5C(t *testing.T, commonName, issuer string) string {
+	t.Helper()
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: commonName},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	require.NoError(t, err)
+
+	claims := jwt.MapClaims{"sub": testListURI}
+	if issuer != "" {
+		claims["iss"] = issuer
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	token.Header["x5c"] = []any{base64.StdEncoding.EncodeToString(der)}
+
+	signed, err := token.SignedString(privateKey)
+	require.NoError(t, err)
+	return signed
+}
+
+// TestVerifyStatusListToken_X5CWithoutIssUsesTheListOrigin: for an x5c
+// token, JWTKeyMaterial.IssuerID falls back to the leaf certificate's common
+// name. Using that as the trust subject asked the PDP about whatever the
+// certificate happened to be named, while this function's rule - and the
+// deployment's policy - say the list origin.
+//
+// Section 5.1 does not require iss, so a conforming status service signing
+// with x5c and omitting it is the ordinary case, not a corner.
+func TestVerifyStatusListToken_X5CWithoutIssUsesTheListOrigin(t *testing.T) {
+	ev := &actionEvaluator{trusted: map[string]bool{StatusListSignerAction: true}}
+	verifier := newTestVerifier(ev)
+
+	_, err := verifier.VerifyStatusListToken(context.Background(),
+		signStatusListTokenX5C(t, "some-internal-ca-name", ""), testListURI)
+
+	require.NoError(t, err)
+	require.NotEmpty(t, ev.subjects)
+	assert.Equal(t, "https://status.example.com", ev.subjects[0],
+		"a token with no iss is judged as the origin that served the list")
+	assert.NotContains(t, ev.subjects, "some-internal-ca-name",
+		"the certificate's common name is not an issuer identity")
+}
+
+// TestVerifyStatusListToken_X5CWithIssUsesIt keeps the other half: when the
+// token does say who issued it, that is the party asked about.
+func TestVerifyStatusListToken_X5CWithIssUsesIt(t *testing.T) {
+	ev := &actionEvaluator{trusted: map[string]bool{StatusListSignerAction: true}}
+	verifier := newTestVerifier(ev)
+
+	_, err := verifier.VerifyStatusListToken(context.Background(),
+		signStatusListTokenX5C(t, "some-internal-ca-name", "https://issuer.example.com"), testListURI)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://issuer.example.com"}, ev.subjects)
 }

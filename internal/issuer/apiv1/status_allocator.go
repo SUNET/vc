@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/helpers"
@@ -142,6 +143,50 @@ func (a *externalStatusAllocator) Invalidate(ctx context.Context, alloc *statusA
 			"list_id", listID, "index", alloc.Index)
 	}
 }
+
+// releaseUnlessIssued hands an allocated status entry back when issuance
+// did not finish. Called from a defer immediately after allocation, with
+// issued set to true only on the path that actually returns a credential:
+//
+//	alloc, err := c.allocateOrDegrade(ctx)
+//	...
+//	issued := false
+//	defer c.releaseUnlessIssued(ctx, alloc, &issued)
+//	...
+//	issued = true
+//	return reply, nil
+//
+// A defer rather than a call at each error site: the sites are what get
+// missed. Three handlers had allocation followed by four or five ways to
+// fail and no invalidation on any of them, and every later failure path
+// added is one more chance to forget.
+//
+// An entry left VALID with nothing referencing it is not exploitable - no
+// credential carries that index - but it is a wrong answer sitting in a
+// list whose whole job is answering that question, and it accumulates one
+// per failed request.
+//
+// Best-effort by construction: the issuance has already failed, and a
+// backend that cannot be reached to invalidate could not have been reached
+// to allocate either. Logged inside Invalidate, never returned in place of
+// the real error.
+//
+// The context is detached from the caller's. A cancelled or timed-out
+// request is one of the ways issuance fails, and inheriting that
+// cancellation would guarantee the cleanup fails exactly when it is needed.
+func (c *Client) releaseUnlessIssued(ctx context.Context, alloc *statusAllocation, issued *bool) {
+	if alloc == nil || issued == nil || *issued || c.statusAllocator == nil {
+		return
+	}
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), statusReleaseTimeout)
+	defer cancel()
+	c.statusAllocator.Invalidate(releaseCtx, alloc)
+}
+
+// statusReleaseTimeout bounds the best-effort release above. Long enough
+// for one round trip to a status backend, short enough that a hung backend
+// does not hold the failing request open.
+const statusReleaseTimeout = 5 * time.Second
 
 // allocateOrDegrade is the single place every issuance path (MakeSDJWT,
 // MakeJWP, MakeVC20) goes through to get a status-list entry.

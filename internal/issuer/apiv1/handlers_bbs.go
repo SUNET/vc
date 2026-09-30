@@ -147,21 +147,15 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	}
 
 	// The entry above (if any) is now allocated and marked VALID for a
-	// credential that does not exist yet. Every path from here that fails
-	// leaves it that way, so each one hands it back: an entry saying VALID
-	// with nothing referencing it is not exploitable - no credential
-	// carries that index - but it is a wrong answer sitting in a list
-	// whose whole job is answering that question, and it accumulates.
-	//
-	// Best-effort by construction: the issuance has already failed, and a
-	// status backend that cannot be reached to invalidate could not have
-	// been reached to allocate either. Logged, never returned in place of
-	// the real error.
+	// credential that does not exist yet, and every path from here that
+	// fails leaves it that way. One guard rather than a call at each error
+	// site: the sites are what get missed, and three sibling handlers
+	// proved it. See releaseUnlessIssued.
+	credentialIssued := false
+	defer c.releaseUnlessIssued(ctx, statusEntry, &credentialIssued)
+
 	extraHeader, err := c.bbsIssuerHeader(statusEntry)
 	if err != nil {
-		if statusEntry != nil {
-			c.statusAllocator.Invalidate(ctx, statusEntry)
-		}
 		// Building our own header cannot be anything but our fault, and its
 		// error names internal structure. Coarse code, detail to the log.
 		c.log.Error(err, "failed to build the bbs issuer header", "scope", req.Scope)
@@ -194,9 +188,6 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 		// a caller which check failed and how - and did it under whatever
 		// gRPC code the transport picked by default.
 		c.log.Error(err, "failed to issue bbs credential", "scope", req.Scope, "vct", req.VCT)
-		if statusEntry != nil {
-			c.statusAllocator.Invalidate(ctx, statusEntry)
-		}
 		switch {
 		case errors.Is(err, bbs.ErrVerification):
 			return nil, grpcstatus.Error(codes.InvalidArgument, "commitment did not verify")
@@ -218,6 +209,8 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 		reply.TokenStatusListURI = statusEntry.URI
 		reply.TokenStatusListBackend = statusEntry.Backend
 	}
+
+	credentialIssued = true
 	return reply, nil
 }
 

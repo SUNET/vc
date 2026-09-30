@@ -114,6 +114,12 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
 	}
+	// Everything from here can fail - the JSON-LD build, RDF parsing,
+	// signing, serialization - and the entry is already VALID on its
+	// backend. See releaseUnlessIssued.
+	credentialIssued := false
+	defer c.releaseUnlessIssued(ctx, statusAlloc, &credentialIssued)
+
 	if statusAlloc != nil {
 		statusSection, statusIndex, statusURI, statusBackend = statusAlloc.Section, statusAlloc.Index, statusAlloc.URI, statusAlloc.Backend
 		c.log.Debug("status list entry allocated for vc20", "section", statusSection, "index", statusIndex, "uri", statusURI)
@@ -164,6 +170,7 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 		reply.ValidUntil = validUntil.Format(time.RFC3339)
 	}
 
+	credentialIssued = true
 	return reply, nil
 }
 
