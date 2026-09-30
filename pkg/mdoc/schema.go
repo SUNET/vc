@@ -234,6 +234,14 @@ func LoadMDDLSchema(raw []byte) (*MDDLSchema, error) {
 	if len(schema.Claims) == 0 {
 		return nil, fmt.Errorf("MDDL schema for doctype %q declares no claims", schema.DocType)
 	}
+	// ZkSaltBytes reaches make([]byte, saltSize) in AddDataElement with no
+	// further checks - an unvalidated value here either issues credentials
+	// silently incompatible with Vega (anything but 32, other than unset/0)
+	// or, for a very large value, exhausts memory during issuance. 0 and 32
+	// are the only two sizes anything in this codebase understands today.
+	if schema.ZkSaltBytes != 0 && schema.ZkSaltBytes != 32 {
+		return nil, fmt.Errorf("MDDL schema for doctype %q has zk_salt_bytes %d: only 0 (default sizing) or 32 (zk-cred-vega's r12 circuit) is supported", schema.DocType, schema.ZkSaltBytes)
+	}
 
 	// addElements() (pkg/mdoc/issuer.go) looks up document_data by element
 	// identifier alone, without namespace context, since document_data is a
