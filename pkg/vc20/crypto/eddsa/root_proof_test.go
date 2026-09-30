@@ -299,3 +299,31 @@ func TestVerifyAcceptsAPresentationWhoseIDIsTheHolder(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, NewSuite().Verify(reparsed, pub))
 }
+
+// TestVerifyAcceptsAReferenceCycle: an ordinary credential can contain one -
+// the credential names its credentialSubject, and an @id-valued subject
+// property names the credential back. Then NO subject has zero incoming
+// edges, and a root rule that required that rejected a proof Sign had just
+// produced.
+func TestVerifyAcceptsAReferenceCycle(t *testing.T) {
+	signed, pub := signDocument(t, `{
+		"@context": ["https://www.w3.org/ns/credentials/v2",
+			{"relatedCredential": {"@id": "https://example.org/relatedCredential", "@type": "@id"}}],
+		"id": "urn:uuid:the-credential",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {
+			"id": "urn:uuid:the-subject",
+			"relatedCredential": "urn:uuid:the-credential"
+		}
+	}`, "assertionMethod")
+
+	require.Len(t, rootProofGraphs(signed), 1,
+		"a cycle must not hide the root")
+
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+	reparsed, err := credential.NewRDFCredentialFromJSON(compact, nil)
+	require.NoError(t, err)
+	require.NoError(t, NewSuite().Verify(reparsed, pub))
+}

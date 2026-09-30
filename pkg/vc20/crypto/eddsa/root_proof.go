@@ -61,37 +61,48 @@ func rootProofGraphs(cred *credential.RDFCredential) []string {
 		return nil
 	}
 
+	// The reference graph among the document's own subjects. A subject that
+	// nothing else points at is a root candidate - but "nothing else" has
+	// to mean nothing OUTSIDE its own cycle, because a perfectly ordinary
+	// credential can contain one: the credential names its
+	// credentialSubject, and an @id-valued subject property can name the
+	// credential back. Requiring zero incoming edges rejected those.
+	//
+	// So the candidates are the SOURCE components of the reference graph -
+	// the strongly connected components nothing outside them points at.
+	// A presentation names its embedded credential, so the credential's
+	// component has an incoming edge and only the presentation's is a
+	// source. A DETACHED node is a source of its own, which makes the
+	// document ambiguous - and more than one source is refused rather than
+	// resolved by preference.
 	subjects := make(map[string]bool)
-	referenced := make(map[string]bool)
+	edges := make(map[string]map[string]bool)
 	for _, quad := range defaultGraph {
 		if quad == nil || quad.Subject == nil {
 			continue
 		}
 		subject := quad.Subject.GetValue()
 		subjects[subject] = true
-		// A SELF-edge is not a reference from anything else. A presentation
-		// may set id to the holder DID, and holder is a node reference in
-		// the VC 2.0 context - counting that edge would leave the document
-		// with no root at all and reject a perfectly good signature.
-		if isNode(quad.Object) && quad.Object.GetValue() != subject {
-			referenced[quad.Object.GetValue()] = true
+		if edges[subject] == nil {
+			edges[subject] = make(map[string]bool)
 		}
+	}
+	for _, quad := range defaultGraph {
+		if quad == nil || quad.Subject == nil || !isNode(quad.Object) {
+			continue
+		}
+		subject, object := quad.Subject.GetValue(), quad.Object.GetValue()
+		// Only edges BETWEEN the document's subjects matter, and a
+		// self-edge says nothing about parentage - a presentation may set
+		// id to the holder DID, and holder is a node reference.
+		if subject == object || !subjects[object] {
+			continue
+		}
+		edges[subject][object] = true
 	}
 
-	// Sorted, so a document with more than one candidate is refused the
-	// same way every time rather than sometimes picking one - map order
-	// would otherwise make the refusal a coin flip.
-	var roots []string
-	for subject := range subjects {
-		if !referenced[subject] {
-			roots = append(roots, subject)
-		}
-	}
-	slices.Sort(roots)
-	// Exactly one, or the document does not say which node is its root and
-	// no proof in it can be attributed. Refusing is the only safe answer:
-	// picking one would be picking whichever an attacker arranged.
-	if len(roots) != 1 {
+	roots := sourceComponent(subjects, edges)
+	if len(roots) == 0 {
 		return nil
 	}
 
@@ -100,7 +111,7 @@ func rootProofGraphs(cred *credential.RDFCredential) []string {
 		if quad == nil || quad.Subject == nil || quad.Predicate == nil {
 			continue
 		}
-		if quad.Subject.GetValue() != roots[0] {
+		if !roots[quad.Subject.GetValue()] {
 			continue
 		}
 		if !contains(proofPredicates, quad.Predicate.GetValue()) {
@@ -112,6 +123,109 @@ func rootProofGraphs(cred *credential.RDFCredential) []string {
 	}
 	slices.Sort(graphNames)
 	return graphNames
+}
+
+// sourceComponent returns the members of the one strongly connected
+// component nothing outside it points at, or nil when there is not exactly
+// one.
+//
+// Not "the node with no incoming edges": an ordinary credential can contain
+// a reference cycle, and then no node has zero incoming edges even though
+// the document plainly has a root. Condensing the cycles first answers the
+// question the document is really being asked - which node is it about -
+// while still refusing a document with two unconnected candidates.
+func sourceComponent(subjects map[string]bool, edges map[string]map[string]bool) map[string]bool {
+	componentOf := stronglyConnectedComponents(subjects, edges)
+
+	hasIncoming := make(map[int]bool)
+	for subject, targets := range edges {
+		for target := range targets {
+			if componentOf[subject] != componentOf[target] {
+				hasIncoming[componentOf[target]] = true
+			}
+		}
+	}
+
+	var sources []int
+	seen := make(map[int]bool)
+	for _, component := range componentOf {
+		if seen[component] || hasIncoming[component] {
+			continue
+		}
+		seen[component] = true
+		sources = append(sources, component)
+	}
+	if len(sources) != 1 {
+		return nil
+	}
+
+	members := make(map[string]bool)
+	for subject, component := range componentOf {
+		if component == sources[0] {
+			members[subject] = true
+		}
+	}
+	return members
+}
+
+// stronglyConnectedComponents assigns each subject a component id, by
+// Tarjan's algorithm. Subjects are visited in sorted order so the ids are
+// stable, which keeps a refusal a refusal rather than a coin flip.
+func stronglyConnectedComponents(subjects map[string]bool, edges map[string]map[string]bool) map[string]int {
+	index := make(map[string]int)
+	low := make(map[string]int)
+	onStack := make(map[string]bool)
+	componentOf := make(map[string]int)
+	var stack []string
+	next, components := 0, 0
+
+	var strongConnect func(string)
+	strongConnect = func(v string) {
+		index[v] = next
+		low[v] = next
+		next++
+		stack = append(stack, v)
+		onStack[v] = true
+
+		targets := make([]string, 0, len(edges[v]))
+		for target := range edges[v] {
+			targets = append(targets, target)
+		}
+		slices.Sort(targets)
+		for _, w := range targets {
+			if _, visited := index[w]; !visited {
+				strongConnect(w)
+				low[v] = min(low[v], low[w])
+			} else if onStack[w] {
+				low[v] = min(low[v], index[w])
+			}
+		}
+
+		if low[v] == index[v] {
+			for {
+				w := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				onStack[w] = false
+				componentOf[w] = components
+				if w == v {
+					break
+				}
+			}
+			components++
+		}
+	}
+
+	ordered := make([]string, 0, len(subjects))
+	for subject := range subjects {
+		ordered = append(ordered, subject)
+	}
+	slices.Sort(ordered)
+	for _, subject := range ordered {
+		if _, visited := index[subject]; !visited {
+			strongConnect(subject)
+		}
+	}
+	return componentOf
 }
 
 // isNode reports whether an RDF term names something else in the graph,

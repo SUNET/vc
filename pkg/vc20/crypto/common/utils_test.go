@@ -250,3 +250,60 @@ func TestFindProofNodeWithValue_RefusesWhatIsNotThere(t *testing.T) {
 		t.Fatalf("naming no proof must not resolve to the first one, got %v", got["proofValue"])
 	}
 }
+
+// TestFindProofNodeInGraphs_SelectsTheRootsGraph is the selection Verify
+// actually uses.
+//
+// The fixture puts the ISSUER's graph first, so an unrestricted search
+// reaches the wrong proof - and the end-to-end VPBuilder test cannot show
+// this, because json-gold happens to order a real document the other way.
+// This is where the selection is pinned.
+func TestFindProofNodeInGraphs_SelectsTheRootsGraph(t *testing.T) {
+	doc := presentationProofObject()
+
+	if got := FindProofNode(doc, "DataIntegrityProof"); got["proofValue"] != "z-issuer-proof" {
+		t.Fatalf("fixture no longer exercises the ambiguity: unqualified search returned %v", got["proofValue"])
+	}
+
+	// _:b0 is the graph the presentation's own proof lives in.
+	got := FindProofNodeInGraphs(doc, "DataIntegrityProof", []string{"_:b0"})
+	if got == nil {
+		t.Fatal("the root's own proof was not found")
+	}
+	if got["proofValue"] != "z-holder-proof" {
+		t.Fatalf("selected %v, want the presentation's own proof", got["proofValue"])
+	}
+
+	// The issuer's graph is addressable too, so the selection follows the
+	// name given rather than preferring authentication proofs.
+	got = FindProofNodeInGraphs(doc, "DataIntegrityProof", []string{"_:b3"})
+	if got == nil || got["proofValue"] != "z-issuer-proof" {
+		t.Fatal("the embedded credential's graph must also be addressable")
+	}
+}
+
+// TestFindProofNodeInGraphs_RefusesWhatIsNotThere: naming no graph, or a
+// graph the proof object does not contain, must not fall back to whatever
+// proof is present - that fallback is the misplaced-proof attack.
+func TestFindProofNodeInGraphs_RefusesWhatIsNotThere(t *testing.T) {
+	doc := presentationProofObject()
+
+	if got := FindProofNodeInGraphs(doc, "DataIntegrityProof", nil); got != nil {
+		t.Fatalf("naming no graph must select nothing, got %v", got["proofValue"])
+	}
+	if got := FindProofNodeInGraphs(doc, "DataIntegrityProof", []string{"_:nope"}); got != nil {
+		t.Fatalf("an absent graph must select nothing, got %v", got["proofValue"])
+	}
+
+	// A graph holding a proofValue but no TYPED proof - the stub half of
+	// the misplaced-proof attack - selects nothing either.
+	stub := map[string]any{
+		"@graph": []any{map[string]any{
+			"id":     "_:b9",
+			"@graph": []any{map[string]any{"proofValue": "z-holder-proof"}},
+		}},
+	}
+	if got := FindProofNodeInGraphs(stub, "DataIntegrityProof", []string{"_:b9"}); got != nil {
+		t.Fatalf("a stub carrying only a value must select nothing, got %v", got["proofValue"])
+	}
+}
