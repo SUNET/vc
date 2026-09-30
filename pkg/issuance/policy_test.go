@@ -588,3 +588,39 @@ func documentedIssuancePolicyExample(t *testing.T) string {
 
 	return strings.TrimSpace(body[:end])
 }
+
+// TestAdvertisedRuleMatchesTheWorkedExample: the reference used to quote two
+// different rules - a worked example under issuance_policy and a different
+// one in the rules field's Example column, against a query_template that
+// only fits the first. Two examples that disagree are worse than one, since
+// neither reader can tell which is the configuration.
+func TestAdvertisedRuleMatchesTheWorkedExample(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "CONFIGURATION.md"))
+	require.NoError(t, err)
+
+	var parsed struct {
+		IssuancePolicy model.IssuancePolicy `yaml:"issuance_policy"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(documentedIssuancePolicyExample(t)), &parsed))
+	require.Len(t, parsed.IssuancePolicy.Rules, 1)
+
+	// Scoped to the issuance_policy section: the reference documents more
+	// than one `rules` field, and the authorization one is not this.
+	section := strings.Index(string(doc), "### `issuance_policy`")
+	require.GreaterOrEqual(t, section, 0)
+	row := strings.Index(string(doc)[section:], "| `rules`")
+	require.GreaterOrEqual(t, row, 0, "the issuance policy's rules field must be documented")
+	line := string(doc)[section+row:]
+	if end := strings.IndexByte(line, '\n'); end >= 0 {
+		line = line[:end]
+	}
+	// The EXAMPLE column, not the row: the description quotes the rule too,
+	// so a whole-row Contains passes whatever the example says - which is
+	// how the first version of this test passed against the disagreement it
+	// was written to catch. Columns: "", Field, Type, Description, Example,
+	// Default, Required, "".
+	cells := strings.Split(line, "|")
+	require.GreaterOrEqual(t, len(cells), 6, "the reference table must have an Example column")
+	require.Contains(t, cells[4], parsed.IssuancePolicy.Rules[0],
+		"the rules field's example must be the rule the worked example's query_template fits")
+}

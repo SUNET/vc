@@ -455,7 +455,7 @@ type IssuancePolicy struct {
 	// shape -- a rule with the wrong number/order of dimensions fails
 	// startup instead of silently never matching at evaluation time. A
 	// dimension may be omitted (e.g. "(org_id)") to mean "any value".
-	Rules []string `yaml:"rules,omitempty" doc_example:"[\"(credential (scope my_cred)(acr urn:example:loa3)(email_verified true))\"]"`
+	Rules []string `yaml:"rules,omitempty" doc_example:"[\"(credential (scope org_credential)(acr (* prefix urn:example:loa))(org_id))\"]"`
 
 	// RulesFile is an optional path to a file containing SPOCP rules (one per line).
 	// Rules from this file are loaded in addition to the inline Rules list,
