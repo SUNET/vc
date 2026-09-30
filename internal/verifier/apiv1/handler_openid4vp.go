@@ -165,6 +165,25 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 	authCtx.VPToken = vpToken
 	authCtx.PresentationSubmission = presentationSubmission
 
+	// The same gate ProcessDirectPost applies, for the same reason: this
+	// handler stores the extracted claims and issues an authorization code
+	// without ever checking a signature. Making W3C documents readable by
+	// extractAndMapClaims made them injectable HERE too, so the guard has
+	// to sit on both doors and not only the one it was written for.
+	if err := c.verifyVC20ForOIDC(ctx, authCtx, vpToken); err != nil {
+		c.log.Error(err, "W3C VC verification failed on the direct-post path", "session_id", sessionID)
+		authCtx.Status = "error"
+		if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
+			c.log.Error(err, "Failed to update session with error status")
+		}
+		if c.vpMetrics != nil {
+			c.vpMetrics.VerificationsFailed.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("error_class", "w3c_verification"),
+			))
+		}
+		return ErrInvalidVP
+	}
+
 	// Extract claims from VP token
 	claims, err := c.extractAndMapClaims(ctx, vpToken, "")
 	if err != nil {

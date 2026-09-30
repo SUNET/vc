@@ -35,14 +35,18 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 	// tell a W3C document from the envelope around one. Asking which
 	// documents are actually in there means a conformant DCQL response is
 	// unwrapped rather than failed as a malformed credential.
-	documents := openid4vp.W3CDocumentsIn(vpToken)
+	//
+	// The other half of the partition matters as much: this gate verifies
+	// W3C documents and nothing else, so what ELSE arrived decides whether
+	// verifying the W3C half means anything.
+	documents, others := openid4vp.PartitionTokens(vpToken)
 
 	// A response carrying no W3C document still has to answer the request.
 	// Returning early here let a wallet answer an ldp_vc query with an
 	// SD-JWT or an mdoc: nothing else on this path compares the returned
 	// format against the requested one, so the W3C constraint was simply
 	// skipped.
-	if err := c.refuseNonW3CAnswerToAW3CQuery(session, documents); err != nil {
+	if err := c.refuseAResponseThisPathCannotCheck(session, documents, others); err != nil {
 		return err
 	}
 	if len(documents) == 0 {
@@ -64,27 +68,53 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 	return nil
 }
 
-// refuseNonW3CAnswerToAW3CQuery rejects a response that answers a W3C query
-// with something else.
+// refuseAResponseThisPathCannotCheck rejects a direct-post response whose
+// claims could not all be accounted for.
 //
-// The format check on the other path runs per scope inside the dispatch
-// loop; this flow has no such loop, so the comparison has to be made here or
-// not at all. A scope whose query asks for a W3C format and whose answer
-// carries no W3C document is refused - "cannot tell" is not a reason to
-// accept, and the type constraint that scope carries could never be applied
-// to whatever did arrive.
-func (c *Client) refuseNonW3CAnswerToAW3CQuery(session *cache.AuthorizationContext, documents map[string][]string) error {
+// Three refusals, all for the same reason: extractAndMapClaims runs straight
+// after this and merges EVERY token in the response into the session. What
+// this gate does not verify, nothing does.
+//
+//  1. The request cannot be recovered. createDCQLQuery builds one for every
+//     session this flow creates, so a nil query means the persisted request
+//     is gone - a replica that cannot read it, most plainly. Returning
+//     success there bypassed the gate in exactly the failure mode it exists
+//     for, since no scope could then be found to check a format against.
+//
+//  2. The response mixes a W3C document with something else. Only the W3C
+//     half is verified here, so an SD-JWT or an mdoc riding alongside one
+//     has its claims merged unverified - and the presence of a verified
+//     credential is what makes that look safe.
+//
+//  3. A scope asking for a W3C format was not answered with a W3C document.
+//     The format check on the other path runs per scope inside the dispatch
+//     loop; this flow has no such loop, so the comparison has to be made
+//     here or not at all. "Cannot tell" is not a reason to accept: the type
+//     constraint that scope carries could never be applied to whatever did
+//     arrive.
+func (c *Client) refuseAResponseThisPathCannotCheck(session *cache.AuthorizationContext, documents, others map[string][]string) error {
 	// sessionDCQL, not session.DCQLQuery: a request object may carry the
 	// query the session does not, and requestedQuery resolves it that way
 	// too. Reading only the session field left a template-driven request
 	// with no format check at all.
 	if c.sessionDCQL(session) == nil {
-		return nil
+		return fmt.Errorf("the request this response answers is no longer available, so nothing in it can be checked against what was asked for")
 	}
+
+	if len(documents) > 0 && len(others) > 0 {
+		return fmt.Errorf("the response mixes W3C credentials with %d token(s) this path does not verify, whose claims would be merged unverified", countTokens(others))
+	}
+
 	for _, scope := range c.credentialScopes(session, session.ScopeQueryIDs) {
 		requested, ok := c.requestedQuery(session, session.ScopeQueryIDs, scope)
 		if !ok || !openid4vp.IsW3CVCFormatIdentifier(requested.Format) {
 			continue
+		}
+		// A W3C format this stack cannot verify - jwt_vc_json is advertised
+		// and deliberately not requestable - is refused by its own name
+		// rather than as a missing document.
+		if err := openid4vp.ValidateCredentialQuery(requested); err != nil {
+			return fmt.Errorf("the query for scope %s cannot constrain a credential: %w", scope, err)
 		}
 		if len(documents[queryIDForScopeIn(session.ScopeQueryIDs, scope)]) > 0 {
 			continue
@@ -96,6 +126,14 @@ func (c *Client) refuseNonW3CAnswerToAW3CQuery(session *cache.AuthorizationConte
 		return fmt.Errorf("scope %s was requested as %q but the response carries no W3C credential for it", scope, requested.Format)
 	}
 	return nil
+}
+
+func countTokens(tokens map[string][]string) int {
+	total := 0
+	for _, list := range tokens {
+		total += len(list)
+	}
+	return total
 }
 
 func (c *Client) verifyOneVC20ForOIDC(ctx context.Context, resolver trust.KeyResolver, session *cache.AuthorizationContext, queryID, token string) error {

@@ -206,8 +206,15 @@ func ExpandTypes(contexts []string, types []string) ([]string, error) {
 // survives expansion unchanged, so admitting one of those lets a constraint
 // be satisfied by string coincidence.
 //
-// The rule: a colon must appear before any '/', '#' or '?', and not at
-// position zero.
+// The rule: everything before the first colon must be a SCHEME, and the
+// colon must come before any '/', '#' or '?'.
+//
+// "Nonempty" is not enough for the first half. RFC 3986 section 3.1 spells a
+// scheme ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ), so "1:Type" and
+// "foo_bar:Type" are relative references that merely contain a colon - and
+// admitting them is the exact defect this helper replaced, one character
+// narrower: a type no context defines survives expansion unchanged, and then
+// satisfies a meta.type_values constraint by string coincidence.
 func IsAbsoluteIRI(s string) bool {
 	return isAbsoluteIRI(s)
 }
@@ -215,11 +222,31 @@ func IsAbsoluteIRI(s string) bool {
 func isAbsoluteIRI(s string) bool {
 	for i := range len(s) {
 		if s[i] == ':' {
-			return i > 0
+			return i > 0 && isSchemeStart(s[0]) && isSchemeTail(s[1:i])
 		}
 		if s[i] == '/' || s[i] == '#' || s[i] == '?' {
 			return false
 		}
 	}
 	return false
+}
+
+// isSchemeStart reports whether c may begin a scheme: ALPHA only, so a
+// leading digit disqualifies.
+func isSchemeStart(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// isSchemeTail reports whether every byte may continue a scheme:
+// ALPHA / DIGIT / "+" / "-" / "." - notably NOT "_".
+func isSchemeTail(s string) bool {
+	for i := range len(s) {
+		c := s[i]
+		switch {
+		case isSchemeStart(c), c >= '0' && c <= '9', c == '+', c == '-', c == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }

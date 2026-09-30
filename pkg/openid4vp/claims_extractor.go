@@ -539,34 +539,64 @@ func EmbeddedCredentialCount(document string) (int, error) {
 // wrapper around one, and treating the wrapper as a credential fails a
 // conformant response before its contents are ever looked at.
 func W3CDocumentsIn(vpToken string) map[string][]string {
+	w3c, _ := PartitionTokens(vpToken)
+	if len(w3c) == 0 {
+		return nil
+	}
+	return w3c
+}
+
+// PartitionTokens splits a vp_token into the W3C JSON-LD documents it
+// carries and everything else, keyed the way W3CDocumentsIn keys its result:
+// by credential query id for a DCQL response, and "" for a bare token.
+//
+// A caller that verifies only ONE of the two has to know whether the other
+// is there. Merging claims from an unverified SD-JWT that rode along beside
+// a verified W3C credential is the same injection the verification was added
+// to stop, and a map of the verified half alone cannot show it.
+//
+// The W3C documents come back decoded; the others are returned as they
+// arrived, since nothing here knows what they are.
+func PartitionTokens(vpToken string) (w3c, other map[string][]string) {
 	trimmed := strings.TrimSpace(vpToken)
 	if trimmed == "" {
-		return nil
+		return nil, nil
+	}
+
+	add := func(m *map[string][]string, queryID, token string) {
+		if *m == nil {
+			*m = make(map[string][]string)
+		}
+		(*m)[queryID] = append((*m)[queryID], token)
 	}
 
 	if trimmed[0] == '{' && !isW3CDocument(trimmed) {
 		var envelope map[string][]string
 		if err := json.Unmarshal([]byte(trimmed), &envelope); err != nil {
-			return nil
+			// Not an envelope this function can read. Reporting it as one
+			// unclassified token keeps "something arrived" true, which is
+			// what a caller deciding whether to refuse needs.
+			add(&other, "", trimmed)
+			return nil, other
 		}
-		out := make(map[string][]string)
 		for queryID, tokens := range envelope {
 			for _, token := range tokens {
 				if inner, ok := jsonDocumentToken(token); ok {
-					out[queryID] = append(out[queryID], inner)
+					add(&w3c, queryID, inner)
+					continue
 				}
+				add(&other, queryID, token)
 			}
 		}
-		if len(out) == 0 {
-			return nil
-		}
-		return out
+		return w3c, other
 	}
 
 	if document, ok := jsonDocumentToken(trimmed); ok {
-		return map[string][]string{"": {document}}
+		add(&w3c, "", document)
+		return w3c, nil
 	}
-	return nil
+	add(&other, "", trimmed)
+	return nil, other
 }
 
 // rawJSONDocument reports whether a token is already a JSON-LD document

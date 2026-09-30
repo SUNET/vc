@@ -69,7 +69,7 @@ func TestVerifyVC20ForOIDCNeedsAKeyResolvingEvaluator(t *testing.T) {
 	client, _ := CreateTestClientWithMock(t, nil)
 	client.trustEvaluator = evaluatorWithoutKeyResolution{}
 
-	err := client.verifyVC20ForOIDC(t.Context(), &cache.AuthorizationContext{Nonce: "n", ClientID: "c"}, unsignedW3CPresentation)
+	err := client.verifyVC20ForOIDC(t.Context(), w3cOIDCSession(nil), unsignedW3CPresentation)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "key-resolving")
 }
@@ -83,7 +83,7 @@ func TestVerifyVC20ForOIDCLetsANonW3CResponseThrough(t *testing.T) {
 	client, _ := CreateTestClientWithMock(t, nil)
 	client.trustEvaluator = trust.NewAllowAllEvaluator()
 
-	session := &cache.AuthorizationContext{Nonce: "n", ClientID: "c", Scopes: []string{"pid"}}
+	session := sdJWTSession()
 
 	for name, token := range map[string]string{
 		"a DCQL envelope of SD-JWTs": `{"pid": ["eyJhbGciOiJFUzI1NiJ9.x.y~"]}`,
@@ -129,6 +129,15 @@ func TestProcessDirectPostRefusesAnUnverifiedW3CToken(t *testing.T) {
 		Scopes:      []string{"openid", "pid"},
 		State:       sessionID,
 		Nonce:       "session-nonce",
+		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+			ID:     "pid",
+			Format: openid4vp.FormatLdpVCDCQL,
+			Meta: openid4vp.MetaQuery{TypeValues: [][]string{
+				{openid4vp.BaseVCTypeIRI},
+			}},
+		}}},
+		ScopeQueryIDs:      map[string]string{"pid": "pid"},
+		RequestObjectNonce: "the-request-objects-nonce",
 	}))
 
 	resp, err := client.ProcessDirectPost(ctx, &DirectPostRequest{
@@ -162,9 +171,7 @@ func TestVerifyVC20ForOIDCRefusesMoreThanOneCredential(t *testing.T) {
 		"verifiableCredential": [` + credential + `, ` + credential + `]
 	}`
 
-	err := client.verifyVC20ForOIDC(t.Context(), &cache.AuthorizationContext{
-		Nonce: "n", ClientID: "c", Scopes: []string{"pid"},
-	}, twoCredentials)
+	err := client.verifyVC20ForOIDC(t.Context(), w3cOIDCSession(nil), twoCredentials)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "only the first is verified")
 }
@@ -345,6 +352,24 @@ func envelope(queryID, token string) string {
 	return string(body)
 }
 
+// sdJWTSession is a request for one SD-JWT under scope "pid". The gate needs
+// a recoverable query on every response, so even a case about non-W3C
+// responses has to carry the request that was actually made.
+func sdJWTSession() *cache.AuthorizationContext {
+	return &cache.AuthorizationContext{
+		Nonce:              "the-clients-oidc-nonce",
+		RequestObjectNonce: "the-request-objects-nonce",
+		ClientID:           "relying-party-oauth-client-id",
+		Scopes:             []string{"openid", "pid"},
+		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+			ID:     "pid",
+			Format: openid4vp.FormatSDJWTVC,
+			Meta:   openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}},
+		}}},
+		ScopeQueryIDs: map[string]string{"pid": "pid"},
+	}
+}
+
 // TestVerifyVC20ForOIDCBindsToTheRequestObjectNonce: the wallet was asked to
 // put the REQUEST OBJECT's nonce in the proof - GetOIDCRequestObject
 // generates it and stores it as RequestObjectNonce. session.Nonce is the
@@ -410,12 +435,19 @@ func TestVerifyVC20ForOIDCHonoursPerQueryHolderBinding(t *testing.T) {
 	}
 
 	t.Run("a scope whose query cannot be recovered fails closed", func(t *testing.T) {
-		// The request object has aged out of the cache, so nothing says
-		// what this scope asked for - including whether it asked for
-		// binding. The OpenID4VP default is to require it, and "cannot
-		// tell" must not become "not required".
+		// The scope-to-query mapping is gone - a session cached before
+		// #683, or one a rebuild could not reconstruct - and the request
+		// carries two queries, so nothing says which one this scope was
+		// asked under. requestedQuery guesses only when there is exactly
+		// one and no ambiguity; here there is, so nothing says whether
+		// binding was required either. The OpenID4VP default is to
+		// require it, and "cannot tell" must not become "not required".
 		session := w3cOIDCSession(&notRequired)
-		session.DCQLQuery = nil
+		session.Scopes = append(session.Scopes, "ehic")
+		second := session.DCQLQuery.Credentials[0]
+		second.ID = "eudi_ehic"
+		session.DCQLQuery.Credentials = append(session.DCQLQuery.Credentials, second)
+		session.ScopeQueryIDs = nil
 
 		err := client.verifyVC20ForOIDC(t.Context(), session, string(bareCredential))
 		require.Error(t, err, "an unrecoverable query must not relax binding")
@@ -474,4 +506,89 @@ func TestVerifyVC20ForOIDCSeesThroughBase64(t *testing.T) {
 				"it has to be RECOGNISED as W3C, not merely refused for being absent")
 		})
 	}
+}
+
+// TestVerifyVC20ForOIDCFailsClosedWhenTheRequestIsGone: createDCQLQuery
+// builds a query for every session this flow creates, so a session with none
+// means the persisted request is gone - a replica that cannot read it is the
+// plain case. Returning success there bypassed the gate in exactly the
+// failure mode it exists for: no scope can be found, so no format is
+// compared, and an SD-JWT answers a W3C request unverified.
+func TestVerifyVC20ForOIDCFailsClosedWhenTheRequestIsGone(t *testing.T) {
+	client, _ := CreateTestClientWithMock(t, nil)
+	client.trustEvaluator = trust.NewAllowAllEvaluator()
+
+	session := w3cOIDCSession(nil)
+	session.DCQLQuery = nil
+
+	for name, token := range map[string]string{
+		"an SD-JWT":          "eyJhbGciOiJFUzI1NiJ9.x.y~",
+		"a DCQL envelope":    `{"eudi_pid": ["eyJhbGciOiJFUzI1NiJ9.x.y~"]}`,
+		"a W3C presentation": unsignedW3CPresentation,
+	} {
+		t.Run(name+" is refused", func(t *testing.T) {
+			err := client.verifyVC20ForOIDC(t.Context(), session, token)
+			require.Error(t, err, "a response that cannot be checked against a request must not be accepted")
+			require.Contains(t, err.Error(), "no longer available")
+		})
+	}
+}
+
+// TestVerifyVC20ForOIDCRefusesAMixedResponse: this gate verifies W3C
+// documents and nothing else, while extractAndMapClaims merges EVERY token
+// in the response. An SD-JWT or mdoc riding alongside a verified credential
+// therefore has its claims injected unverified - and the presence of the
+// verified one is what makes the response look checked.
+func TestVerifyVC20ForOIDCRefusesAMixedResponse(t *testing.T) {
+	client, _, present := w3cOIDCFixture(t)
+	domain, err := client.cfg.Verifier.VerifierClientID(client.pkiSigningCert)
+	require.NoError(t, err)
+
+	session := w3cOIDCSession(nil)
+	session.Scopes = append(session.Scopes, "ehic")
+	session.DCQLQuery.Credentials = append(session.DCQLQuery.Credentials, openid4vp.CredentialQuery{
+		ID:     "eudi_ehic",
+		Format: openid4vp.FormatSDJWTVC,
+		Meta:   openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:ehic:1"}},
+	})
+	session.ScopeQueryIDs["ehic"] = "eudi_ehic"
+
+	mixed, err := json.Marshal(map[string][]string{
+		"eudi_pid":  {present(t, session.RequestObjectNonce, domain)},
+		"eudi_ehic": {"eyJhbGciOiJFUzI1NiJ9.x.y~"},
+	})
+	require.NoError(t, err)
+
+	verifyErr := client.verifyVC20ForOIDC(t.Context(), session, string(mixed))
+	require.Error(t, verifyErr, "the unverified half must not ride in on the verified one")
+	require.Contains(t, verifyErr.Error(), "does not verify")
+}
+
+// TestHandleDirectPostRefusesAnUnverifiedW3CToken: HandleDirectPost stores
+// the extracted claims and issues an authorization code without checking a
+// signature anywhere. Making W3C documents readable by extractAndMapClaims
+// made them injectable through this door too, not only ProcessDirectPost's.
+func TestHandleDirectPostRefusesAnUnverifiedW3CToken(t *testing.T) {
+	ctx := t.Context()
+	client, _ := CreateTestClientWithMock(t, nil)
+	client.trustEvaluator = trust.NewAllowAllEvaluator()
+
+	const sessionID = "session-handle-direct-post-w3c"
+	session := w3cOIDCSession(nil)
+	session.SessionID = sessionID
+	session.Status = cache.SessionStatusPending
+	session.CreatedAt = time.Now()
+	session.ExpiresAt = time.Now().Add(10 * time.Minute).Unix()
+	session.RedirectURI = "https://client.example.com/callback"
+	session.State = sessionID
+	require.NoError(t, client.cacheService.AuthContext.Create(ctx, session))
+
+	err := client.HandleDirectPost(ctx, sessionID, unsignedW3CPresentation, nil)
+	require.Error(t, err, "an unsigned W3C presentation must not be accepted here either")
+	require.ErrorIs(t, err, ErrInvalidVP)
+
+	stored, err := client.cacheService.AuthContext.GetByID(ctx, sessionID)
+	require.NoError(t, err)
+	require.Empty(t, stored.VerifiedClaims, "nothing from an unverified document may reach the session")
+	require.Empty(t, stored.Code, "and no authorization code may be issued for it")
 }
