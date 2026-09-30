@@ -356,7 +356,7 @@ func w3cStartupChecks(cfg *model.Cfg, serviceName string, log *logger.Log) error
 		}
 	}
 	if servicesResolvingW3CContexts[serviceName] {
-		return resolveW3CContexts(cfg, log)
+		return resolveW3CContexts(cfg, serviceName, log)
 	}
 	return nil
 }
@@ -428,7 +428,7 @@ func checkIssuerContextAllowlist(cfg *model.Cfg) error {
 // The cost is the network dependency at boot, which is the deliberate
 // trade-off: a deployment configuring credential_contexts must have those
 // hosts reachable when the service starts.
-func resolveW3CContexts(cfg *model.Cfg, log *logger.Log) error {
+func resolveW3CContexts(cfg *model.Cfg, serviceName string, log *logger.Log) error {
 	loader := credential.GetGlobalLoader()
 
 	// Every context the issuer may be ASKED to dereference at request time
@@ -454,7 +454,14 @@ func resolveW3CContexts(cfg *model.Cfg, log *logger.Log) error {
 	// json-gold's own recursion. What is added here is the temporal and
 	// operational half - fetched at boot, under the operator's eye, rather
 	// than silently at request time.
-	if cfg.Issuer != nil {
+	//
+	// ISSUER ONLY. The verifier loads the same shared config file, and the
+	// switch that nils out sibling stanzas has not run yet, so a verifier
+	// was pinning every URL in an allowlist it never consults - inheriting
+	// the issuer's startup network dependency, and failing to start when an
+	// issuer-only context was unavailable. It has no MakeVC20 request to
+	// serve and dereferences nothing from this list.
+	if serviceName == "issuer" && cfg.Issuer != nil {
 		for _, contextURL := range cfg.Issuer.JSONLDContextAllowlist {
 			if err := loader.PinRemoteContext(contextURL); err != nil {
 				return fmt.Errorf("issuer.jsonld_context_allowlist: %q could not be loaded, so a request naming it could not be signed: %w", contextURL, err)

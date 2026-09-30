@@ -50,7 +50,7 @@ func TestResolveW3CContexts(t *testing.T) {
 			CredentialTypes:      []string{"DiplomaCredential"},
 			CredentialContexts:   []string{defines},
 			CredentialTypeValues: [][]string{{openid4vp.BaseVCTypeIRI, diplomaIRI}},
-		}), log))
+		}), "issuer", log))
 	})
 
 	t.Run("a context that does not define the term", func(t *testing.T) {
@@ -60,7 +60,7 @@ func TestResolveW3CContexts(t *testing.T) {
 			CredentialTypes:      []string{"DiplomaCredential"},
 			CredentialContexts:   []string{unrelated},
 			CredentialTypeValues: [][]string{{openid4vp.BaseVCTypeIRI, diplomaIRI}},
-		}), log)
+		}), "issuer", log)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "defines none of")
 	})
@@ -72,7 +72,7 @@ func TestResolveW3CContexts(t *testing.T) {
 			CredentialContexts: []string{defines},
 			// A different IRI than the context maps the term to.
 			CredentialTypeValues: [][]string{{openid4vp.BaseVCTypeIRI, "https://example.org/diploma#MastersCredential"}},
-		}), log)
+		}), "issuer", log)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no credential_type_values alternative is satisfied")
 	})
@@ -88,7 +88,7 @@ func TestResolveW3CContexts(t *testing.T) {
 				{openid4vp.BaseVCTypeIRI, "https://example.org/diploma#MastersCredential"},
 				{openid4vp.BaseVCTypeIRI, diplomaIRI},
 			},
-		}), log))
+		}), "issuer", log))
 	})
 
 	t.Run("an unreachable context fails at startup, not at issuance", func(t *testing.T) {
@@ -96,7 +96,7 @@ func TestResolveW3CContexts(t *testing.T) {
 			Format:             openid4vp.FormatLdpVCDCQL,
 			CredentialTypes:    []string{"DiplomaCredential"},
 			CredentialContexts: []string{"https://no-such-host.invalid/ctx.jsonld"},
-		}), log)
+		}), "issuer", log)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "could not be loaded")
 	})
@@ -104,10 +104,10 @@ func TestResolveW3CContexts(t *testing.T) {
 	t.Run("scopes configuring no context are untouched", func(t *testing.T) {
 		assert.NoError(t, resolveW3CContexts(cfgWith(&model.CredentialMetadata{
 			Format: openid4vp.FormatLdpVCDCQL,
-		}), log))
+		}), "issuer", log))
 		assert.NoError(t, resolveW3CContexts(cfgWith(&model.CredentialMetadata{
 			Format: openid4vp.FormatSDJWTVC,
-		}), log))
+		}), "issuer", log))
 	})
 }
 
@@ -130,21 +130,39 @@ func TestResolveW3CContextsPinsTheIssuerAllowlist(t *testing.T) {
 	t.Run("an allowlisted context is loaded at startup", func(t *testing.T) {
 		require.NoError(t, resolveW3CContexts(&model.Cfg{
 			Issuer: &model.Issuer{JSONLDContextAllowlist: []string{loadable}},
-		}, log))
+		}, "issuer", log))
 	})
 
 	t.Run("one that cannot be loaded fails the boot", func(t *testing.T) {
 		err := resolveW3CContexts(&model.Cfg{
 			Issuer: &model.Issuer{JSONLDContextAllowlist: []string{"https://ctx.invalid/never-resolves.jsonld"}},
-		}, log)
+		}, "issuer", log)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "issuer.jsonld_context_allowlist",
 			"the failure has to name the setting the operator has to fix")
 	})
 
+	// The verifier loads the same shared config file, and the switch that
+	// nils out sibling stanzas has not run yet - so it was pinning every URL
+	// in an allowlist it never consults, inheriting the issuer's startup
+	// network dependency and failing to start when an issuer-only context
+	// was unavailable. It serves no MakeVC20 request and dereferences
+	// nothing from this list.
+	t.Run("the verifier does not pin the issuer's allowlist", func(t *testing.T) {
+		unreachable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+		t.Cleanup(unreachable.Close)
+
+		cfg := &model.Cfg{Issuer: &model.Issuer{JSONLDContextAllowlist: []string{unreachable.URL}}}
+
+		require.Error(t, resolveW3CContexts(cfg, "issuer", log),
+			"the issuer does dereference this list, so an unloadable entry still fails its boot")
+		assert.NoError(t, resolveW3CContexts(cfg, "verifier", log),
+			"the verifier must not inherit a dependency it never uses")
+	})
+
 	t.Run("no allowlist is not an error", func(t *testing.T) {
-		assert.NoError(t, resolveW3CContexts(&model.Cfg{Issuer: &model.Issuer{}}, log))
-		assert.NoError(t, resolveW3CContexts(&model.Cfg{}, log))
+		assert.NoError(t, resolveW3CContexts(&model.Cfg{Issuer: &model.Issuer{}}, "issuer", log))
+		assert.NoError(t, resolveW3CContexts(&model.Cfg{}, "issuer", log))
 	})
 }
 

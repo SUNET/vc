@@ -675,3 +675,64 @@ func TestVerifyVC20ForOIDCRefusesAnUnansweredScope(t *testing.T) {
 	require.Error(t, err, "the SD-JWT scope was requested and nothing answered it")
 	require.Contains(t, err.Error(), "ehic")
 }
+
+// TestVerifyVC20ForOIDCDoesNotRelaxOnTheSingleQueryFallback: requestedQuery
+// returns the only credential query when a scope maps to none, which is
+// right for applying a CONSTRAINT and wrong for reading a RELAXATION. "The
+// mapping is gone, so take the only query's settings" turned
+// require_cryptographic_holder_binding=false and multiple=true into the
+// answer for a scope nobody established that query belongs to - so a guard
+// meant to fail closed failed open whenever a request carried exactly one
+// query.
+func TestVerifyVC20ForOIDCDoesNotRelaxOnTheSingleQueryFallback(t *testing.T) {
+	client, bareCredential, present := w3cOIDCFixture(t)
+	domain, err := client.cfg.Verifier.VerifierClientID(client.pkiSigningCert)
+	require.NoError(t, err)
+	notRequired := false
+
+	// One credential query, and a scope that names no query: the mapping is
+	// empty and the query's id is not the scope.
+	unmapped := func() *cache.AuthorizationContext {
+		session := w3cOIDCSession(&notRequired)
+		session.DCQLQuery.Credentials[0].ID = "a_query_id_no_scope_names"
+		session.ScopeQueryIDs = nil
+		return session
+	}
+
+	t.Run("holder binding stays required", func(t *testing.T) {
+		err := client.verifyVC20ForOIDC(t.Context(), unmapped(), string(bareCredential))
+		require.Error(t, err, "binding must not be switched off by a query the fallback guessed")
+		require.Contains(t, err.Error(), "W3C VC verification failed")
+	})
+
+	t.Run("multiple credentials stay refused", func(t *testing.T) {
+		session := unmapped()
+		session.DCQLQuery.Credentials[0].Multiple = true
+
+		// Keyed by "" so the response still COVERS the one credential
+		// scope - otherwise the coverage check refuses it first and this
+		// subtest proves nothing about the fallback.
+		token := present(t, session.RequestObjectNonce, domain)
+		two, err := json.Marshal(map[string][]string{"": {token, token}})
+		require.NoError(t, err)
+
+		err = client.verifyVC20ForOIDC(t.Context(), session, string(two))
+		require.Error(t, err, "permission for several credentials must not come from a guessed query")
+		require.Contains(t, err.Error(), "did not permit")
+	})
+
+	// The constraint half still uses the fallback, and must: with one query
+	// there is no ambiguity about which credential was asked for, and
+	// applying its type_values narrows rather than widens. A credential of
+	// the wrong type is still refused for an unmapped scope.
+	t.Run("the type constraint still applies", func(t *testing.T) {
+		session := unmapped()
+		session.DCQLQuery.Credentials[0].Meta.TypeValues = [][]string{
+			{openid4vp.BaseVCTypeIRI, "https://example.org/degree#DoctoralDegreeCredential"},
+		}
+
+		err := client.verifyVC20ForOIDC(t.Context(), session, present(t, session.RequestObjectNonce, domain))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "does not have a type the request asked for")
+	})
+}

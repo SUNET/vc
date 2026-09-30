@@ -1094,6 +1094,32 @@ func (c *Client) sessionDCQL(authCtx *cache.AuthorizationContext) *openid4vp.DCQ
 	return nil
 }
 
+// requestedQueryExact is requestedQuery WITHOUT the single-query fallback:
+// the query has to be named by this scope, through the session's mapping or
+// its own id.
+//
+// The fallback is right for applying a CONSTRAINT - with one credential
+// query there is no ambiguity about which credential was asked for, and
+// using its type_values narrows rather than widens. It is wrong for reading
+// a RELAXATION off the same query. "The mapping is gone, so take the only
+// query's settings" turns require_cryptographic_holder_binding=false or
+// multiple=true into the answer for a scope nobody established that query
+// belongs to, and a guard that is meant to fail closed then fails open
+// whenever a request happens to carry exactly one query.
+func (c *Client) requestedQueryExact(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string, scope string) (openid4vp.CredentialQuery, bool) {
+	dcqlQuery := c.sessionDCQL(authCtx)
+	if dcqlQuery == nil || scope == "" {
+		return openid4vp.CredentialQuery{}, false
+	}
+	queryID := queryIDForScopeIn(scopeQueryIDs, scope)
+	for _, q := range dcqlQuery.Credentials {
+		if q.ID == queryID {
+			return q, true
+		}
+	}
+	return openid4vp.CredentialQuery{}, false
+}
+
 func (c *Client) requestedQuery(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string, scope string) (openid4vp.CredentialQuery, bool) {
 	if authCtx == nil {
 		return openid4vp.CredentialQuery{}, false

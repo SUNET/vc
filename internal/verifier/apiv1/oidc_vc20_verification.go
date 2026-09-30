@@ -67,8 +67,11 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 		// permitted more than one. Each of them verifies; that is not the
 		// question.
 		if len(tokens) > 1 {
+			// requestedQueryExact, not requestedQuery: permission to
+			// return several credentials is a relaxation, and must not be
+			// read off a query the single-query fallback guessed at.
 			scope := c.oidcScopeFor(session, queryID)
-			requested, ok := c.requestedQuery(session, session.ScopeQueryIDs, scope)
+			requested, ok := c.requestedQueryExact(session, session.ScopeQueryIDs, scope)
 			if !ok || !requested.Multiple {
 				return fmt.Errorf("the response carries %d credentials for one query, which the request did not permit; their claims would be merged", len(tokens))
 			}
@@ -241,11 +244,14 @@ func (c *Client) verifyOneVC20ForOIDC(ctx context.Context, resolver trust.KeyRes
 func (c *Client) vc20HandlerForOIDC(resolver trust.KeyResolver, session *cache.AuthorizationContext, scope string) (*openid4vp.VC20Handler, error) {
 	opts := []openid4vp.VC20HandlerOption{openid4vp.WithVC20KeyResolver(resolver)}
 
+	// requestedQueryExact, not requestedQuery. Turning binding OFF is a
+	// relaxation, so the query has to be one this scope actually names -
+	// the single-query fallback would otherwise hand a scope nobody mapped
+	// the settings of whichever query happened to be the only one, and
+	// this guard is meant to fail closed.
 	requireBinding := true
-	if scope != "" {
-		if requested, ok := c.requestedQuery(session, session.ScopeQueryIDs, scope); ok {
-			requireBinding = requested.RequiresCryptographicHolderBinding()
-		}
+	if requested, ok := c.requestedQueryExact(session, session.ScopeQueryIDs, scope); ok {
+		requireBinding = requested.RequiresCryptographicHolderBinding()
 	}
 
 	if requireBinding {
