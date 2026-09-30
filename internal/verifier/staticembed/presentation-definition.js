@@ -198,6 +198,11 @@ const dcqlQuerySchema = v.object({
 
 /** @typedef {v.InferOutput<typeof presentationDefinitionSchema>} PresentationDefinition */
 const presentationDefinitionSchema = v.object({
+    // Server-generated id for this authorization context. Included in
+    // subsequent POSTs (e.g. session-preference) so a fresh tab does not
+    // silently overwrite the shared per-origin cookie session and steer the
+    // flag onto the wrong request.
+    session_id: v.string(),
     qr_code: v.string(),
     // The request_uri channel: QR code, same-device link, polyfill redirect.
     // response_mode direct_post.jwt.
@@ -506,9 +511,18 @@ Alpine.data("app", () => ({
      * only guarantees the request goes out, not that the server has
      * persisted it before direct_post reads the auth context. Await it.
      *
-     * On failure, open the wallet in a new tab. The current tab (and its
-     * live SSE) survives to deliver the response through the cross-device
-     * channel instead.
+     * The POST carries the session_id returned by /ui/interaction so the
+     * flag lands on this presentation's authorization context. The server's
+     * cookie fallback is per-origin and shared across tabs: without an
+     * explicit id, a second tab that opened /ui/interaction after this one
+     * would silently claim the cookie and this click would mark the wrong
+     * session.
+     *
+     * On failure, hand the wallet URL to a tab that was opened synchronously
+     * from the click, so the popup blocker still sees a live user gesture
+     * (transient activation would already be gone after the awaited fetch).
+     * The current tab (and its live SSE) survives to deliver the response
+     * through the cross-device channel instead.
      *
      * Do NOT close the SSE here: a same-tab navigation tears it down on its
      * own, and a custom-scheme launch leaves the tab open and still needing
@@ -520,19 +534,34 @@ Alpine.data("app", () => ({
         }
         event.preventDefault();
         const url = event.currentTarget.href;
+        // Opened inside the click so a popup blocker still allows it; only
+        // used if the awaited POST fails, otherwise closed before we
+        // navigate the current tab.
+        const fallbackWindow = globalThis.open("", "_blank", "noopener");
         try {
             const res = await fetch(new URL("/verification/session-preference", baseUrl).toString(), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ wallet_follows_redirect: true }),
+                body: JSON.stringify({
+                    session_id: this.presentationDefinition?.session_id ?? "",
+                    wallet_follows_redirect: true,
+                }),
             });
             if (!res.ok) {
                 throw new Error(`session-preference returned ${res.status}`);
             }
+            if (fallbackWindow && !fallbackWindow.closed) {
+                fallbackWindow.close();
+            }
             globalThis.location.href = url;
         } catch (err) {
             console.error("Failed to mark same-device flow, opening wallet in a new tab so this page can still redirect", err);
-            globalThis.open(url, "_blank", "noopener");
+            if (fallbackWindow && !fallbackWindow.closed) {
+                fallbackWindow.location.href = url;
+            } else {
+                // Popup blocker denied the pre-opened tab; last-resort try.
+                globalThis.open(url, "_blank", "noopener");
+            }
         }
     },
 

@@ -404,6 +404,12 @@ type UIInteractionRequest struct {
 }
 
 type UIInteractionReply struct {
+	// SessionID identifies the authorization context this reply belongs to.
+	// Returned so the browser can address later POSTs (e.g. session-preference)
+	// to the exact request it was created for, rather than relying on the
+	// shared per-origin cookie session that any other tab can overwrite.
+	SessionID string `json:"session_id"`
+
 	// AuthorizationRequest is the request reached through request_uri: the QR
 	// code, the same-device link, and the polyfill's redirect fallback. Its
 	// response_mode is direct_post.jwt, because a wallet arriving this way
@@ -561,7 +567,9 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 
 	c.openid4vp.RequestObjectCache.Set(authorizationContext.RequestObjectID, requestObject)
 
-	reply := &UIInteractionReply{}
+	reply := &UIInteractionReply{
+		SessionID: sessionID,
+	}
 
 	reply.AuthorizationRequest, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, requestObjectID)
 	if err != nil {

@@ -25,6 +25,11 @@ func (s *Service) endpointSessionPreference(ctx context.Context, c *gin.Context)
 	}
 
 	if request.SessionID == "" {
+		// Compatibility fallback for callers that predate session_id in the
+		// body (e.g. credential_display.html). The cookie is per-origin and
+		// shared across tabs, so it can steer the flag onto the wrong
+		// authorization context if two tabs are open at once - callers that
+		// know their session_id must send it explicitly.
 		session := sessions.Default(c)
 		if sessionID, ok := session.Get("session_id").(string); ok && sessionID != "" {
 			request.SessionID = sessionID
