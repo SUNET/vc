@@ -277,6 +277,17 @@ func ListIDFromURL(listURL string) (string, error) {
 		return "", fmt.Errorf("list URL %q uses scheme %q: a status list must be fetchable over http or https", listURL, u.Scheme)
 	}
 
+	// A fragment is never sent in an HTTP request, so a list_url carrying
+	// one names a different string than the one that will be fetched. The
+	// credential would carry - and bind its status token's sub to -
+	// ".../list#anything" while every verifier fetches ".../list", so the
+	// Section 8.3 subject check fails and the reference is unusable. There
+	// is no reading under which a fragment belongs in a status list URL,
+	// so it is refused rather than stripped.
+	if u.Fragment != "" || strings.Contains(listURL, "#") {
+		return "", fmt.Errorf("list URL %q carries a fragment, which is never sent in the request that fetches it", listURL)
+	}
+
 	// A trailing slash has to be rejected rather than trimmed: path.Base
 	// turns "/lists/" into "lists", so a malformed list_url would silently
 	// yield the collection name as a list ID and SetStatus would go on to

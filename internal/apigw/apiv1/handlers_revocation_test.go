@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/SUNET/vc/internal/apigw/db"
@@ -40,6 +41,14 @@ type stubStatusStore struct {
 	// the next - so a partial failure part-way through a batch can be
 	// exercised.
 	failAfter int
+	// deleted records rollback of mappings written earlier in a batch that
+	// then failed, keyed the way the store keys them.
+	deleted []string
+}
+
+func (s *stubStatusStore) Delete(_ context.Context, uri string, index int64, backend string) error {
+	s.deleted = append(s.deleted, fmt.Sprintf("%s|%d|%s", uri, index, backend))
+	return nil
 }
 
 func (s *stubStatusStore) Save(_ context.Context, e *db.CredentialStatusEntry) error {

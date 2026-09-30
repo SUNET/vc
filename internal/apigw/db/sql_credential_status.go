@@ -61,6 +61,21 @@ func (c *SQLCredentialStatusColl) Save(ctx context.Context, entry *CredentialSta
 	return nil
 }
 
+// Delete removes one recorded mapping, addressed by the same three columns
+// the primary key uses.
+func (c *SQLCredentialStatusColl) Delete(ctx context.Context, statusListURI string, index int64, backend string) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:credential_status:delete")
+	defer span.End()
+
+	query := c.dialect.Rebind(`DELETE FROM credential_status_entries
+		WHERE status_list_uri = ? AND idx = ? AND backend = ?`)
+	if _, err := c.db.ExecContext(ctx, query, statusListURI, index, backend); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+	return nil
+}
+
 // SearchByIdentifier returns every status entry recorded for a subject.
 func (c *SQLCredentialStatusColl) SearchByIdentifier(ctx context.Context, identifier string) ([]*CredentialStatusEntry, error) {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:credential_status:search")

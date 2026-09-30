@@ -111,6 +111,20 @@ func (c *CredentialStatusColl) Save(ctx context.Context, entry *CredentialStatus
 	return nil
 }
 
+// Delete removes one recorded mapping, addressed by the same three columns
+// the unique index uses.
+func (c *CredentialStatusColl) Delete(ctx context.Context, statusListURI string, index int64, backend string) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:credential_status:delete")
+	defer span.End()
+
+	filter := bson.M{"status_list_uri": statusListURI, "idx": index, "backend": backend}
+	if _, err := c.Coll.DeleteOne(ctx, filter); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+	return nil
+}
+
 // SearchByIdentifier returns every status entry recorded for a subject.
 func (c *CredentialStatusColl) SearchByIdentifier(ctx context.Context, identifier string) ([]*CredentialStatusEntry, error) {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:credential_status:search")

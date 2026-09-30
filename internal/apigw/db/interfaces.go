@@ -52,6 +52,12 @@ type IdentityMappingStore interface {
 type CredentialStatusStore interface {
 	Save(ctx context.Context, entry *CredentialStatusEntry) error
 	SearchByIdentifier(ctx context.Context, identifier string) ([]*CredentialStatusEntry, error)
+	// Delete removes one recorded mapping, addressed the way it is keyed.
+	// Used to roll back a partly written batch: an issuance that fails
+	// after recording some of its entries must not leave mappings for
+	// credentials nobody received, or a later revoke-by-identifier acts on
+	// them.
+	Delete(ctx context.Context, statusListURI string, index int64, backend string) error
 }
 
 // DynamicRegistrationStore defines the interface for OIDC dynamic client registration operations

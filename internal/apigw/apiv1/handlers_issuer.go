@@ -819,6 +819,14 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 			// they are simply not reached. Releasing only the prefix leaked
 			// the tail of every failed batch. releaseAllocations skips
 			// entries with no URI, so unallocated ones cost nothing.
+			//
+			// The rows already written have to go as well. The request
+			// fails as a whole and no credential is delivered for any of
+			// it, so a mapping left behind names a credential nobody has -
+			// and revoke-by-identifier would later act on it, reporting a
+			// revocation of something that was never issued while the
+			// entry itself has already been released.
+			c.discardRecordedEntries(ctx, recorded)
 			c.releaseAllocations(ctx, entries)
 			return fmt.Errorf("failed to record credential status entry: %w", err)
 		}
@@ -864,6 +872,30 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 // It goes through the issuer rather than a backend directly, because the
 // issuer is the component that knows how to reach each backend and routes
 // on the recorded Backend - see its SetCredentialStatus.
+// discardRecordedEntries removes mappings written earlier in a batch that
+// is now failing, so the store does not keep a record of a credential the
+// caller never received.
+//
+// Best-effort and logged, like releaseAllocations: the issuance has already
+// failed, and the error that is returned is the one worth reporting. A row
+// that survives is a stale mapping pointing at an entry that has just been
+// released - wrong, but pointing at something INVALID rather than at a live
+// credential.
+func (c *Client) discardRecordedEntries(ctx context.Context, recorded []statusEntry) {
+	if c.db == nil || c.db.CredentialStatusColl == nil {
+		return
+	}
+	for _, e := range recorded {
+		if e.URI == "" {
+			continue
+		}
+		if err := c.db.CredentialStatusColl.Delete(ctx, e.URI, e.Index, e.Backend); err != nil {
+			c.log.Error(err, "could not remove the status mapping of a credential that will not be issued; a revoke by identifier may report it",
+				"uri", e.URI, "index", e.Index, "backend", e.Backend)
+		}
+	}
+}
+
 func (c *Client) releaseAllocations(ctx context.Context, entries []statusEntry) {
 	for _, e := range entries {
 		if e.URI == "" || c.issuerClient == nil {

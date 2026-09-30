@@ -333,3 +333,36 @@ func TestSaveCredentialSubjects_UnroutableBackendIsRefused(t *testing.T) {
 		})
 	}
 }
+
+// TestSaveCredentialSubjects_FailureRollsBackRecordedMappings: releasing the
+// allocations is only half of undoing a failed batch. The rows already
+// written name credentials nobody received, and revoke-by-identifier would
+// later act on them - reporting a revocation of something never issued,
+// against an entry that has already been released.
+func TestSaveCredentialSubjects_FailureRollsBackRecordedMappings(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+	store.failAfter = 1
+
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
+		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+	})
+	require.Error(t, err)
+
+	require.Equal(t, []string{"https://registry.example.com/statuslists/4|5|registry"}, store.deleted,
+		"the mapping written before the failure must be removed, addressed the way it is keyed")
+	require.Len(t, issuer.calls, 2, "and both allocations are still released")
+}
+
+// TestSaveCredentialSubjects_SuccessRollsBackNothing is the other half, so
+// the rollback is not simply deleting what it just wrote.
+func TestSaveCredentialSubjects_SuccessRollsBackNothing(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+
+	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+	}))
+	require.Empty(t, store.deleted)
+	require.Empty(t, issuer.calls)
+	require.Len(t, store.saved, 1)
+}

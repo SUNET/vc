@@ -9,6 +9,7 @@ import (
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/golang-jwt/jwt/v5"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -308,4 +309,33 @@ func softwareSigner(key *ecdsa.PrivateKey) pki.Signer {
 		PrivateKey:    key,
 		SigningMethod: jwt.SigningMethodES256,
 	})
+}
+
+// TestListIDFromURL_RejectsAFragment: a fragment is never sent in an HTTP
+// request, so a list_url carrying one names a different string than the one
+// that will be fetched. The credential would carry - and bind its status
+// token's sub to - ".../list#anything" while every verifier fetches
+// ".../list", so the Section 8.3 subject check fails and the reference is
+// unusable.
+func TestListIDFromURL_RejectsAFragment(t *testing.T) {
+	for _, listURL := range []string{
+		"https://status.example.com/lists/abc#frag",
+		// An empty fragment still changes the string that would be recorded.
+		"https://status.example.com/lists/abc#",
+	} {
+		if _, err := ListIDFromURL(listURL); err == nil {
+			t.Fatalf("%s: want a refusal", listURL)
+		} else if !strings.Contains(err.Error(), "fragment") {
+			t.Fatalf("%s: got %q, want it to name the fragment", listURL, err)
+		}
+	}
+
+	// And the ordinary case still resolves.
+	id, err := ListIDFromURL("https://status.example.com/lists/abc")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != "abc" {
+		t.Fatalf("list id = %q, want abc", id)
+	}
 }
