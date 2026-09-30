@@ -76,12 +76,15 @@
     embedded credential's issuer proof and leaves the presentation's own
     proof in the document being hashed.
 
-  Verification also now selects the proof attached to the document's own
-  root node, rather than the first proof node the search reaches. A
-  presentation carries the holder's proof and the embedded credential's
-  issuer proof, and which one an unqualified search returns is an accident
-  of graph ordering — it lands on the holder's today, and nothing makes that
-  true.
+  Verification also now checks the proof the document attaches to **itself**,
+  named by the `proofValue` read off the document, instead of the first proof
+  node the search reaches. Taking the first is not merely arbitrary: because
+  verification removes every proof when hashing, a proof MOVED from the
+  presentation onto its embedded credential leaves the hash unchanged, so
+  someone holding a legitimately signed presentation could move the holder's
+  proof down, delete the presentation's own, and have the misplaced proof
+  verify with the holder's key. A document that attaches no proof to itself
+  is now refused.
 
   Measured against the old code: a presentation carrying **no** credential
   verified unless it had been re-parsed from expanded JSON; one carrying a

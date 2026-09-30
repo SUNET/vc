@@ -180,3 +180,68 @@ func TestVPBuilderEdDSASelectsTheHolderProof(t *testing.T) {
 	require.Error(t, eddsaSuite.NewSuite().Verify(reparsed, issuerPub),
 		"the embedded credential's issuer key must not verify the presentation")
 }
+
+// TestVPBuilderEdDSARefusesAMisplacedProof is the forgery this selection
+// exists to stop, and it is not theoretical.
+//
+// Verify removes EVERY proof when hashing, so moving a proof from the
+// presentation onto the embedded credential leaves the canonical form - and
+// therefore the hash - unchanged. Someone holding a legitimately signed
+// presentation can move the holder's proof down onto the credential, delete
+// the presentation's own proof, and offer a document the holder never
+// signed in that shape. "Verify whichever proof is in there" accepts it with
+// the holder's key.
+//
+// So a document that attaches no proof to ITSELF is refused, whatever it
+// carries further down.
+func TestVPBuilderEdDSARefusesAMisplacedProof(t *testing.T) {
+	holderPub, holderKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	vpBytes, err := NewVPBuilder().BuildVC20Presentation(
+		[][]byte{[]byte(`{
+			"@context": "https://www.w3.org/ns/credentials/v2",
+			"type": ["VerifiableCredential"],
+			"issuer": "did:example:issuer",
+			"credentialSubject": {"id": "did:example:subject"}
+		}`)},
+		holderKey,
+		&VPBuildOptions{
+			HolderDID:          "did:example:holder",
+			VerificationMethod: "did:example:holder#key-1",
+			Nonce:              "test-nonce",
+			Domain:             "https://verifier.example.com",
+			Cryptosuite:        CryptosuiteEdDSA2022,
+			Created:            time.Now().UTC(),
+		},
+	)
+	require.NoError(t, err)
+
+	// Sanity: as issued, it verifies.
+	asIssued, err := credential.NewRDFCredentialFromJSON(vpBytes, nil)
+	require.NoError(t, err)
+	require.NoError(t, eddsaSuite.NewSuite().Verify(asIssued, holderPub))
+
+	// Now move the holder's proof onto the embedded credential and remove
+	// the presentation's own.
+	var vp map[string]any
+	require.NoError(t, json.Unmarshal(vpBytes, &vp))
+	holderProof, ok := vp["proof"]
+	require.True(t, ok, "the presentation must start out with its own proof")
+	delete(vp, "proof")
+
+	embedded, ok := vp["verifiableCredential"].([]any)
+	require.True(t, ok)
+	require.Len(t, embedded, 1)
+	credentialNode, ok := embedded[0].(map[string]any)
+	require.True(t, ok, "the builder embeds the credential as an object")
+	credentialNode["proof"] = holderProof
+
+	moved, err := json.Marshal(vp)
+	require.NoError(t, err)
+
+	reparsed, err := credential.NewRDFCredentialFromJSON(moved, nil)
+	require.NoError(t, err)
+	require.Error(t, eddsaSuite.NewSuite().Verify(reparsed, holderPub),
+		"a proof that is not the document's own must not verify it")
+}
