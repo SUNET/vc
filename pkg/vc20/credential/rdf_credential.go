@@ -403,11 +403,17 @@ func (rc *RDFCredential) MarshalJSON() ([]byte, error) {
 		return nil, fmt.Errorf("unexpected serialization result: %T", nquads)
 	}
 
-	// Ensure options are set correctly
-	opts := rc.options
-	if opts == nil {
-		opts = ld.NewJsonLdOptions("")
-		opts.DocumentLoader = GetGlobalLoader()
+	// Ensure options are set correctly.
+	//
+	// A COPY. This used to take the credential's own options pointer and
+	// set Format on it, so every later use of that credential parsed JSON
+	// as N-Quads - "unexpected RDF data type: string" from whatever ran
+	// next. Serializing a document must not change what the document is.
+	opts := ld.NewJsonLdOptions("")
+	opts.DocumentLoader = GetGlobalLoader()
+	if rc.options != nil {
+		copied := *rc.options
+		opts = &copied
 	}
 	// Set format to n-quads so FromRDF knows how to parse the input
 	if opts.Format == "" {

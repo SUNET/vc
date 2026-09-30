@@ -265,7 +265,7 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		if !ok {
 			return nil, fmt.Errorf("cryptosuite %s requires ECDSA key, got %T", cryptosuite, pubKey)
 		}
-		return h.verifyECDSA2019(ctx, credBytes, credMap, proof, ecdsaKey)
+		return h.verifyECDSA2019(ctx, credBytes, credMap, proof, vm, ecdsaKey)
 
 	case CryptosuiteECDSASd:
 		ecdsaKey, ok := pubKey.(*ecdsa.PublicKey)
@@ -596,6 +596,7 @@ func (h *VC20Handler) verifyECDSA2019(
 	credBytes []byte,
 	credMap map[string]any,
 	proof map[string]any,
+	verificationMethod string,
 	pubKey *ecdsa.PublicKey,
 ) (*VC20VerificationResult, error) {
 	// Create RDF credential
@@ -604,14 +605,20 @@ func (h *VC20Handler) verifyECDSA2019(
 		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
 	}
 
-	// Verify using the standard suite
+	// Verify using the standard suite, and build the result from the proof
+	// that ACTUALLY verified - see verifyEdDSA2022 for the attack this
+	// closes; both suites try every proof the root carries.
 	suite := ecdsaSuite.NewSuite()
-	if err := suite.Verify(rdfCred, pubKey); err != nil {
+	verifiedProof, err := suite.VerifyProof(rdfCred, pubKey)
+	if err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
+	}
+	if err := sameVerificationMethod(verifiedProof, verificationMethod); err != nil {
+		return nil, err
 	}
 
 	// Build result
-	return h.buildResult(credBytes, credMap, proof, false)
+	return h.buildResult(credBytes, credMap, verifiedProof, false)
 }
 
 // verifyECDSASd2023 verifies a credential with ecdsa-sd-2023 cryptosuite.
@@ -668,14 +675,8 @@ func (h *VC20Handler) verifyEdDSA2022(
 		return nil, fmt.Errorf("signature verification failed: %w", err)
 	}
 
-	// And it has to be the proof whose verificationMethod this key was
-	// resolved from. The suite is handed a key, not a method, so a proof
-	// naming someone else's method could otherwise verify with this one and
-	// be reported under that name.
-	verifiedMethod, _ := verifiedProof["verificationMethod"].(string)
-	if verifiedMethod != verificationMethod {
-		return nil, fmt.Errorf("the proof that verified names verification method %q, but the key was resolved from %q",
-			verifiedMethod, verificationMethod)
+	if err := sameVerificationMethod(verifiedProof, verificationMethod); err != nil {
+		return nil, err
 	}
 
 	// Build result
@@ -767,6 +768,21 @@ func findExpandedID(node any, predicate string) string {
 		}
 	}
 	return ""
+}
+
+// sameVerificationMethod checks that the proof which verified names the
+// method the key was resolved from.
+//
+// The suites are handed a KEY, not a method, so a proof naming someone
+// else's method could otherwise verify with this one and be reported under
+// that name.
+func sameVerificationMethod(verifiedProof map[string]any, resolvedFrom string) error {
+	verifiedMethod, _ := verifiedProof["verificationMethod"].(string)
+	if verifiedMethod != resolvedFrom {
+		return fmt.Errorf("the proof that verified names verification method %q, but the key was resolved from %q",
+			verifiedMethod, resolvedFrom)
+	}
+	return nil
 }
 
 // buildResult builds the verification result from credential data.

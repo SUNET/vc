@@ -11,14 +11,15 @@ import (
 
 // TestVerifyRefusesAProofMovedOntoACustomLinkedCredential is the shape no
 // graph-shaped guess at the root could handle: a presentation that links a
-// credential through a CUSTOM property, whose subject links back. Its RDF is
-// isomorphic to a credential whose subject is itself a credential linking
-// back, so no rule over a fixed predicate list can accept one and refuse the
-// other.
+// credential through a CUSTOM property no containment list knows. The old
+// rule read only verifiableCredential and credentialSubject, so it could
+// not tell this credential was carried - and with a link back it could not
+// have told this document from a credential whose subject is itself a
+// credential, whose RDF is isomorphic.
 //
-// Reading the root off the document answers it: Sign attaches its proof to
-// the top-level node, so a proof found anywhere else is not the document's
-// own.
+// Reading the root off the document answers it without a list: Sign
+// attaches its proof to the top-level node, so a proof found anywhere else
+// is not the document's own.
 func TestVerifyRefusesAProofMovedOntoACustomLinkedCredential(t *testing.T) {
 	const presentation = `{
 		"@context": ["https://www.w3.org/ns/credentials/v2",
@@ -30,7 +31,7 @@ func TestVerifyRefusesAProofMovedOntoACustomLinkedCredential(t *testing.T) {
 			"id": "urn:uuid:b",
 			"type": ["VerifiableCredential"],
 			"issuer": "did:example:issuer",
-			"credentialSubject": {"id": "urn:uuid:a"}
+			"credentialSubject": {"id": "did:example:subject"}
 		}
 	}`
 
@@ -127,4 +128,36 @@ func TestPresentationSignatureCoversTheEmbeddedIssuerProof(t *testing.T) {
 		require.Equal(t, "authentication", proof["proofPurpose"])
 		require.Equal(t, "did:example:signer#key-1", proof["verificationMethod"])
 	})
+}
+
+// TestVerifyRefusesARootLinkedNodeThatIsNotAProof: the previous selection
+// went through FindProofNode, which filtered on the proof TYPE. Reading the
+// root's links directly would otherwise accept any node the root points at
+// that happens to declare this cryptosuite, whatever it claims to be.
+func TestVerifyRefusesARootLinkedNodeThatIsNotAProof(t *testing.T) {
+	signed, pub := signDocument(t, `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiablePresentation"],
+		"holder": "did:example:holder"
+	}`, "authentication")
+	require.NoError(t, NewSuite().Verify(signed, pub))
+
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(compact, &doc))
+
+	proof, ok := doc["proof"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, ProofType, proof["type"], "the fixture must start as a typed proof")
+	proof["type"] = "SomethingElse"
+
+	retyped, err := json.Marshal(doc)
+	require.NoError(t, err)
+	reparsed, err := credential.NewRDFCredentialFromJSON(retyped, nil)
+	require.NoError(t, err)
+
+	err = NewSuite().Verify(reparsed, pub)
+	require.Error(t, err, "a node that is not a DataIntegrityProof is not a proof")
+	require.Contains(t, err.Error(), ProofType)
 }

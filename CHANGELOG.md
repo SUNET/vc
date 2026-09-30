@@ -4,6 +4,32 @@
 
 ### Breaking Changes
 
+- **Data Integrity proofs now secure the document they are attached to.**
+  `eddsa-rdfc-2022` and `ecdsa-rdfc-2019` used to remove EVERY proof in the
+  graph when canonicalizing, where the specification removes only the proof
+  being created or verified. A presentation's signature therefore did not
+  cover the issuer proof of the credential it carried, so that proof could be
+  stripped or swapped with the presentation still verifying. Only the root's
+  own proofs are removed now, and an embedded credential's proof is part of
+  the document the presentation secures.
+
+  The proof to verify is also read off the document rather than searched for
+  or inferred from the RDF reference graph: `Sign` attaches its proof to the
+  top-level node, so a proof found anywhere else is not the document's own. A
+  proof moved onto an embedded credential no longer verifies.
+
+  **Migration:** presentations signed before this release do not verify after
+  it, for both RDF cryptosuites — re-present them. Credentials are unaffected
+  in practice: a credential carries no proof but its own, so the two removals
+  are the same operation on one. `ecdsa-sd-2023` is unchanged for that reason.
+
+  A document whose root takes part in a reference cycle — a presentation
+  carrying a credential whose subject links back at it — is now refused at
+  SIGNING. Such a document says which node it is about while compact and
+  stops saying so once serialized through RDF, so it would verify in one form
+  and not another. The error names the document rather than the
+  serialization.
+
 - **Unresolvable auth scopes now fail at startup**: every scope listed in an `auth_scopes` entry must name a configured `credential_metadata` scope. A scope that names none previously started fine and produced a DCQL query no wallet could satisfy, failing only after the user had already been sent to their wallet; it is now rejected at config load, so a deployment carrying one will stop starting.
 
   **Migration:** if APIGW fails to start with `apigw.data_sources.datastore.scopes: ... name no scope in common.credential_metadata`, either add the missing `common.credential_metadata` entry or drop the scope from `auth_scopes`. The error lists every offending `<scope>.auth_scopes.<auth_scope>` pair.
@@ -89,9 +115,12 @@
   Measured against the old code: a presentation carrying **no** credential
   verified unless it had been re-parsed from expanded JSON; one carrying a
   credential failed in every form. `Verify` now canonicalizes exactly as
-  `Sign` does, which is also what `ecdsa-rdfc-2019` has always done — that
-  is why only the EdDSA half was affected. No change to what a signature
-  covers.
+  `Sign` does.
+
+  What a signature covers **did** change in the same release — see
+  *Data Integrity proofs now secure the document they are attached to*
+  under Breaking Changes. That change is not EdDSA-only: it applies to
+  `ecdsa-rdfc-2019` as well.
 
 ### Changed
 

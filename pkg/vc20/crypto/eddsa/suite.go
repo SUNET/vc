@@ -53,6 +53,12 @@ func (s *Suite) Sign(cred *credential.RDFCredential, key ed25519.PrivateKey, opt
 	// embedded proof left where it is. Removing every proof in the graph
 	// meant a presentation's signature did not cover an embedded
 	// credential's issuer proof at all.
+	// Refuse a document that would verify in one serialization and not
+	// another before signing it. See CheckRootSurvivesFlattening.
+	if err := cred.CheckRootSurvivesFlattening(); err != nil {
+		return nil, err
+	}
+
 	_, credWithoutProof, err := cred.RootProofs()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the document the proof secures: %w", err)
@@ -237,6 +243,15 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKe
 		// Relabelling an existing signature does not survive this anyway,
 		// since the label is hashed into the proof configuration; the check
 		// is here so that what verified and what is REPORTED cannot differ.
+		// A DataIntegrityProof of THIS suite. The type says the node is a
+		// proof at all - the previous selection got that from
+		// FindProofNode's type filter, and reading the root's links
+		// directly would otherwise accept any node it points at that
+		// happens to declare the cryptosuite.
+		if proofType, _ := proofNode["type"].(string); proofType != ProofType {
+			lastErr = fmt.Errorf("the document's own proof link names a %q, not a %s", proofType, ProofType)
+			continue
+		}
 		if suite, _ := proofNode["cryptosuite"].(string); suite != Cryptosuite2022 {
 			lastErr = fmt.Errorf("the document's own proof declares cryptosuite %q, not %s", suite, Cryptosuite2022)
 			continue

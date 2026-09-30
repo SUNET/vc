@@ -162,6 +162,12 @@ func (s *Suite) SignWithSigner(ctx context.Context, cred *credential.RDFCredenti
 	// 1. Get canonical document hash - the document this proof SECURES,
 	// which is the document with the root's own proofs removed and every
 	// embedded proof left where it is. See credential.RootProofs.
+	// Refuse a document that would verify in one serialization and not
+	// another before signing it. See CheckRootSurvivesFlattening.
+	if err := cred.CheckRootSurvivesFlattening(); err != nil {
+		return nil, err
+	}
+
 	_, credWithoutProof, err := cred.RootProofs()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get the document the proof secures: %w", err)
@@ -234,13 +240,26 @@ func (s *Suite) SignWithSigner(ctx context.Context, cred *credential.RDFCredenti
 	return credential.NewRDFCredentialFromJSON(newCredBytes, ldOpts)
 }
 
-// Verify verifies a credential using ecdsa-rdfc-2019
+// Verify verifies a credential using ecdsa-rdfc-2019.
 func (s *Suite) Verify(cred *credential.RDFCredential, key *ecdsa.PublicKey) error {
+	_, err := s.VerifyProof(cred, key)
+	return err
+}
+
+// VerifyProof verifies a credential using ecdsa-rdfc-2019 and returns the
+// proof that actually verified.
+//
+// WHICH proof is not a detail the caller can infer. A document may carry
+// several root proofs and this tries each, so a caller that reads metadata
+// off "the proof" - the first one in the array, say - can report a
+// proofPurpose, a created or a verificationMethod from a proof that FAILED.
+// An attacker only has to prepend one.
+func (s *Suite) VerifyProof(cred *credential.RDFCredential, key *ecdsa.PublicKey) (map[string]any, error) {
 	if cred == nil {
-		return fmt.Errorf("credential is nil")
+		return nil, fmt.Errorf("credential is nil")
 	}
 	if key == nil {
-		return fmt.Errorf("public key is nil")
+		return nil, fmt.Errorf("public key is nil")
 	}
 
 	// The proofs the document attaches to ITSELF, and the document they
@@ -251,44 +270,50 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key *ecdsa.PublicKey) err
 	// credential.RootProofs.
 	proofs, credWithoutProof, err := cred.RootProofs()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(proofs) == 0 {
-		return fmt.Errorf("the document carries no proof of its own to verify")
+		return nil, fmt.Errorf("the document carries no proof of its own to verify")
 	}
 
 	docCanonical, err := credWithoutProof.CanonicalForm()
 	if err != nil {
-		return fmt.Errorf("failed to get canonical form of document: %w", err)
+		return nil, fmt.Errorf("failed to get canonical form of document: %w", err)
 	}
 	docHashBytes := sha256.Sum256([]byte(docCanonical))
 
 	var lastErr error
 	for _, expanded := range proofs {
-		if err := s.verifyRootProof(cred, expanded, key, docHashBytes); err != nil {
+		proofNode, err := s.verifyRootProof(cred, expanded, key, docHashBytes)
+		if err != nil {
 			lastErr = err
 			continue
 		}
-		return nil
+		return proofNode, nil
 	}
 
-	return lastErr
+	return nil, lastErr
 }
 
 // verifyRootProof checks one of the document's own proofs against the key,
 // over the document that proof secures.
-func (s *Suite) verifyRootProof(cred *credential.RDFCredential, expanded any, key *ecdsa.PublicKey, docHashBytes [sha256.Size]byte) error {
+func (s *Suite) verifyRootProof(cred *credential.RDFCredential, expanded any, key *ecdsa.PublicKey, docHashBytes [sha256.Size]byte) (map[string]any, error) {
 	proofNode, err := credential.CompactRootProof(expanded)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	// A DataIntegrityProof of THIS suite. The type says the node is a proof
+	// at all; the cryptosuite says which procedure produced the signature.
+	if proofType, _ := proofNode["type"].(string); proofType != ProofType {
+		return nil, fmt.Errorf("the document's own proof link names a %q, not a %s", proofType, ProofType)
 	}
 	if suite, _ := proofNode["cryptosuite"].(string); suite != Cryptosuite2019 {
-		return fmt.Errorf("the document's own proof declares cryptosuite %q, not %s", suite, Cryptosuite2019)
+		return nil, fmt.Errorf("the document's own proof declares cryptosuite %q, not %s", suite, Cryptosuite2019)
 	}
 
 	proofValue, ok := proofNode["proofValue"].(string)
 	if !ok {
-		return fmt.Errorf("proofValue not found or not a string")
+		return nil, fmt.Errorf("proofValue not found or not a string")
 	}
 
 	// 2. Build the proof configuration on a COPY, so the caller's proof
@@ -304,7 +329,7 @@ func (s *Suite) verifyRootProof(cred *credential.RDFCredential, expanded any, ke
 	// 3. Canonicalize proof configuration
 	proofConfigBytes, err := json.Marshal(proofConfig)
 	if err != nil {
-		return fmt.Errorf("failed to marshal proof config: %w", err)
+		return nil, fmt.Errorf("failed to marshal proof config: %w", err)
 	}
 
 	ldOpts := credential.NewJSONLDOptions("")
@@ -313,12 +338,12 @@ func (s *Suite) verifyRootProof(cred *credential.RDFCredential, expanded any, ke
 
 	proofConfigCred, err := credential.NewRDFCredentialFromJSON(proofConfigBytes, ldOpts)
 	if err != nil {
-		return fmt.Errorf("failed to create RDF credential for proof config: %w", err)
+		return nil, fmt.Errorf("failed to create RDF credential for proof config: %w", err)
 	}
 
 	proofCanonical, err := proofConfigCred.CanonicalForm()
 	if err != nil {
-		return fmt.Errorf("failed to get canonical form of proof config: %w", err)
+		return nil, fmt.Errorf("failed to get canonical form of proof config: %w", err)
 	}
 
 	// 4. Hash. The document half arrived already hashed: every proof the
@@ -333,20 +358,20 @@ func (s *Suite) verifyRootProof(cred *credential.RDFCredential, expanded any, ke
 	// 6. Verify signature
 	_, signature, err := multibase.Decode(proofValue)
 	if err != nil {
-		return fmt.Errorf("failed to decode proofValue: %w", err)
+		return nil, fmt.Errorf("failed to decode proofValue: %w", err)
 	}
 
 	keyBytes := (key.Curve.Params().BitSize + 7) / 8
 	if len(signature) != 2*keyBytes {
-		return fmt.Errorf("invalid signature length: expected %d, got %d", 2*keyBytes, len(signature))
+		return nil, fmt.Errorf("invalid signature length: expected %d, got %d", 2*keyBytes, len(signature))
 	}
 
 	rInt := new(big.Int).SetBytes(signature[:keyBytes])
 	sInt := new(big.Int).SetBytes(signature[keyBytes:])
 
 	if !ecdsa.Verify(key, digest, rInt, sInt) {
-		return fmt.Errorf("signature verification failed")
+		return nil, fmt.Errorf("signature verification failed")
 	}
 
-	return nil
+	return proofNode, nil
 }

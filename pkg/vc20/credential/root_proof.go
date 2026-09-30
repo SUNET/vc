@@ -45,46 +45,7 @@ const (
 // A document with no single top-level node does not say what it is about,
 // and is refused rather than guessed at.
 func (rc *RDFCredential) RootProofs() (proofs []any, withoutRootProof *RDFCredential, err error) {
-	source := rc.originalJSON
-	if source == "" {
-		marshalled, err := rc.MarshalJSON()
-		if err != nil {
-			return nil, nil, fmt.Errorf("no document to read a root from: %w", err)
-		}
-		source = string(marshalled)
-	}
-
-	var document any
-	if err := json.Unmarshal([]byte(source), &document); err != nil {
-		return nil, nil, fmt.Errorf("document is not JSON: %w", err)
-	}
-
-	options := NewJSONLDOptions("")
-	expanded, err := ld.NewJsonLdProcessor().Expand(document, options)
-	if err != nil {
-		return nil, nil, fmt.Errorf("document could not be expanded: %w", err)
-	}
-	// A NAMED GRAPH is not a document node. Expanding the output of
-	// MarshalJSON - which round-trips through N-Quads - lifts each proof
-	// graph out to the top level beside the document, so "exactly one
-	// top-level entry" is true of a compact document and false of the same
-	// document re-read. The graphs are set aside, and exactly one node has
-	// to remain.
-	graphs := map[string]map[string]any{}
-	var nodes []map[string]any
-	for _, entry := range expanded {
-		node, ok := entry.(map[string]any)
-		if !ok {
-			return nil, nil, fmt.Errorf("document holds a top-level entry that is not a node")
-		}
-		if _, isGraph := node["@graph"]; isGraph && len(node) <= 2 {
-			id, _ := node["@id"].(string)
-			graphs[id] = node
-			continue
-		}
-		nodes = append(nodes, node)
-	}
-	root, err := rootOf(nodes)
+	root, nodes, graphs, err := rc.rootAndGraphs(rc.documentSource())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -121,7 +82,7 @@ func (rc *RDFCredential) RootProofs() (proofs []any, withoutRootProof *RDFCreden
 		delete(root, predicate)
 	}
 
-	kept := make([]any, 0, len(expanded))
+	kept := make([]any, 0, len(nodes)+len(graphs))
 	for _, node := range nodes {
 		kept = append(kept, node)
 	}
@@ -131,9 +92,8 @@ func (rc *RDFCredential) RootProofs() (proofs []any, withoutRootProof *RDFCreden
 		}
 		kept = append(kept, graph)
 	}
-	expanded = kept
 
-	remaining, err := json.Marshal(expanded)
+	remaining, err := json.Marshal(kept)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to serialize the document the proof secures: %w", err)
 	}
@@ -143,6 +103,90 @@ func (rc *RDFCredential) RootProofs() (proofs []any, withoutRootProof *RDFCreden
 	}
 
 	return proofs, withoutRootProof, nil
+}
+
+// documentSource is the document as it was given to this credential, or as
+// it serializes when there is no original.
+func (rc *RDFCredential) documentSource() string {
+	if rc.originalJSON != "" {
+		return rc.originalJSON
+	}
+	marshalled, err := rc.MarshalJSON()
+	if err != nil {
+		return ""
+	}
+	return string(marshalled)
+}
+
+// rootAndGraphs expands a document and separates its root node, its other
+// nodes, and the named graphs its proofs live in.
+func (rc *RDFCredential) rootAndGraphs(source string) (map[string]any, []map[string]any, map[string]map[string]any, error) {
+	if source == "" {
+		return nil, nil, nil, fmt.Errorf("no document to read a root from")
+	}
+
+	var document any
+	if err := json.Unmarshal([]byte(source), &document); err != nil {
+		return nil, nil, nil, fmt.Errorf("document is not JSON: %w", err)
+	}
+
+	expanded, err := ld.NewJsonLdProcessor().Expand(document, NewJSONLDOptions(""))
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("document could not be expanded: %w", err)
+	}
+
+	// A NAMED GRAPH is not a document node. Expanding the output of
+	// MarshalJSON - which round-trips through N-Quads - lifts each proof
+	// graph out to the top level beside the document, so "exactly one
+	// top-level entry" is true of a compact document and false of the same
+	// document re-read. The graphs are set aside, and one node has to
+	// remain.
+	graphs := map[string]map[string]any{}
+	var nodes []map[string]any
+	for _, entry := range expanded {
+		node, ok := entry.(map[string]any)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("document holds a top-level entry that is not a node")
+		}
+		if _, isGraph := node["@graph"]; isGraph && len(node) <= 2 {
+			id, _ := node["@id"].(string)
+			graphs[id] = node
+			continue
+		}
+		nodes = append(nodes, node)
+	}
+
+	root, err := rootOf(nodes)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return root, nodes, graphs, nil
+}
+
+// CheckRootSurvivesFlattening refuses a document whose root can be read now
+// and not after it has been through RDF.
+//
+// MarshalJSON round-trips through N-Quads, which FLATTENS: every node with
+// properties of its own is lifted to the top level. A document whose root
+// takes part in a reference cycle - a presentation carrying a credential
+// whose subject links back at it - then has no top-level node that nothing
+// else refers to, and RootProofs cannot say which node the document is
+// about.
+//
+// Signing such a document would produce something this package verifies in
+// one serialization and refuses in another. It is refused at signing
+// instead, where the operator can still change it.
+func (rc *RDFCredential) CheckRootSurvivesFlattening() error {
+	marshalled, err := rc.MarshalJSON()
+	if err != nil {
+		return fmt.Errorf("cannot tell whether this document keeps its root: %w", err)
+	}
+	if _, _, _, err := rc.rootAndGraphs(string(marshalled)); err != nil {
+		return fmt.Errorf("this document does not say which node it is about once serialized through RDF, so it would verify in one form and not another: %w", err)
+	}
+
+	return nil
 }
 
 // rootOf picks the document node the others hang off.

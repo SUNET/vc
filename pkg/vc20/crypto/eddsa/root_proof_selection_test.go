@@ -315,101 +315,6 @@ func TestVerifyAcceptsAPresentationWhoseIDIsTheHolder(t *testing.T) {
 	require.NoError(t, NewSuite().Verify(reparsed, pub))
 }
 
-// TestVerifyAcceptsAReferenceCycle: an ordinary credential can contain one -
-// the credential names its credentialSubject, and an @id-valued subject
-// property names the credential back. Then NO subject has zero incoming
-// edges, and a root rule that required that rejected a proof Sign had just
-// produced.
-func TestVerifyAcceptsAReferenceCycle(t *testing.T) {
-	signed, pub := signDocument(t, `{
-		"@context": ["https://www.w3.org/ns/credentials/v2",
-			{"relatedCredential": {"@id": "https://example.org/relatedCredential", "@type": "@id"}}],
-		"id": "urn:uuid:the-credential",
-		"type": ["VerifiableCredential"],
-		"issuer": "did:example:issuer",
-		"credentialSubject": {
-			"id": "urn:uuid:the-subject",
-			"relatedCredential": "urn:uuid:the-credential"
-		}
-	}`, "assertionMethod")
-
-	require.Len(t, rootProofsOf(t, signed), 1,
-		"a cycle must not hide the root")
-
-	compact, err := signed.ToCompactJSON()
-	require.NoError(t, err)
-	reparsed, err := credential.NewRDFCredentialFromJSON(compact, nil)
-	require.NoError(t, err)
-	require.NoError(t, NewSuite().Verify(reparsed, pub))
-}
-
-// TestVerifyRefusesAProofMovedWithinACycle is the misplaced-proof attack
-// once more, this time INSIDE the credential ↔ credentialSubject cycle.
-//
-// Both nodes are in the same source component, so "a member of the source
-// component" was not enough: moving the credential's proof onto its subject
-// node leaves the hash unchanged - CredentialWithoutProof removes the link
-// wherever it sits - and the moved proof would verify for a credential that
-// carries none of its own.
-//
-// The root has to BE the credential, said by its rdf:type.
-func TestVerifyRefusesAProofMovedWithinACycle(t *testing.T) {
-	// Two things this fixture has to do, or it proves nothing.
-	//
-	// The ids put the SUBJECT before the credential in sort order, so a
-	// rule that picks a candidate by order rather than by what the node IS
-	// would pick the node the proof was moved to.
-	//
-	// And the proof is relocated under an ALIASED term. `proof` in the VC
-	// 2.0 context is scoped to the credential, so a plain
-	// `credentialSubject.proof` is dropped on expansion and the document
-	// loses the proof entirely - which refuses for the wrong reason. The
-	// alias puts the same `security#proof` predicate on the subject node,
-	// which survives, and which CredentialWithoutProof strips just the
-	// same, so the hash is unchanged.
-	const withAlias = `{
-		"@context": ["https://www.w3.org/ns/credentials/v2",
-			{"relatedCredential": {"@id": "https://example.org/relatedCredential", "@type": "@id"},
-			 "nodeProof": {"@id": "https://w3id.org/security#proof", "@container": "@graph"}}],
-		"id": "urn:uuid:zzz-the-credential",
-		"type": ["VerifiableCredential"],
-		"issuer": "did:example:issuer",
-		"credentialSubject": {
-			"id": "urn:uuid:aaa-the-subject",
-			"relatedCredential": "urn:uuid:zzz-the-credential"
-		}
-	}`
-
-	signed, pub := signDocument(t, withAlias, "assertionMethod")
-
-	compact, err := signed.ToCompactJSON()
-	require.NoError(t, err)
-	var doc map[string]any
-	require.NoError(t, json.Unmarshal(compact, &doc))
-
-	proof, ok := doc["proof"]
-	require.True(t, ok, "the credential must start out with its own proof")
-	subject, ok := doc["credentialSubject"].(map[string]any)
-	require.True(t, ok)
-
-	subject["nodeProof"] = proof
-	delete(doc, "proof")
-
-	moved, err := json.Marshal(doc)
-	require.NoError(t, err)
-	reparsed, err := credential.NewRDFCredentialFromJSON(moved, nil)
-	require.NoError(t, err)
-
-	// The relocated proof really is in the document, or the refusal below
-	// would be about a missing proof rather than about whose it is.
-	require.Contains(t, mustNQuads(t, reparsed), "security#proofValue",
-		"the moved proof must survive parsing")
-
-	require.Empty(t, rootProofsOf(t, reparsed),
-		"a proof on a node that is not the credential is not the credential's")
-	require.Error(t, NewSuite().Verify(reparsed, pub))
-}
-
 // TestVerifyTriesEveryRootProof: Sign APPENDS a proof rather than replacing
 // one, so a document signed by two keys carries two root proofs. Checking
 // only the first fails the second signature against its own public key -
@@ -494,61 +399,6 @@ const cyclicPresentation = `{
 	}]
 }`
 
-// TestSignAndVerifyACyclicPresentation: Sign will sign this document, so
-// Verify has to accept it. The cycle puts the presentation AND the embedded
-// credential in one source component, and both carry a credential rdf:type -
-// so narrowing candidates by type alone left two roots and refused a
-// document this very package had just signed.
-func TestSignAndVerifyACyclicPresentation(t *testing.T) {
-	cred, err := credential.NewRDFCredentialFromJSON([]byte(cyclicPresentation), nil)
-	require.NoError(t, err)
-
-	// The fixture is worthless unless the back-link actually survives into
-	// the RDF - an undefined term would be dropped and the cycle with it.
-	require.Contains(t, mustNQuads(t, cred), "vocab#presentedIn",
-		"the link back to the presentation must reach the dataset")
-
-	signed, pub := signDocument(t, cyclicPresentation, "authentication")
-	require.Len(t, rootProofsOf(t, signed), 1,
-		"the presentation is the document's root even though the credential points back at it")
-	require.NoError(t, NewSuite().Verify(signed, pub),
-		"a document this package signed must verify")
-}
-
-// TestRootProofGraphsStillRefuseAMovedProofInACycle: relaxing root selection
-// for cycles must not relax proof ownership. The embedded credential is
-// inside the source component now, so a proof moved onto it would be
-// selected if membership alone were enough.
-func TestRootProofGraphsStillRefuseAMovedProofInACycle(t *testing.T) {
-	signed, pub := signDocument(t, cyclicPresentation, "authentication")
-
-	compact, err := signed.ToCompactJSON()
-	require.NoError(t, err)
-	var doc map[string]any
-	require.NoError(t, json.Unmarshal(compact, &doc))
-
-	proof, ok := doc["proof"].(map[string]any)
-	require.True(t, ok)
-	embedded, ok := doc["verifiableCredential"].([]any)
-	require.True(t, ok)
-	require.Len(t, embedded, 1)
-	credentialNode, ok := embedded[0].(map[string]any)
-	require.True(t, ok)
-
-	// Move the presentation's proof onto the embedded credential.
-	credentialNode["proof"] = proof
-	delete(doc, "proof")
-
-	tampered, err := json.Marshal(doc)
-	require.NoError(t, err)
-	reparsed, err := credential.NewRDFCredentialFromJSON(tampered, nil)
-	require.NoError(t, err)
-
-	require.Empty(t, rootProofsOf(t, reparsed),
-		"a proof on the embedded credential is not the presentation's own")
-	require.Error(t, NewSuite().Verify(reparsed, pub))
-}
-
 // TestRootProofGraphsRefuseAnEmbeddedOnlyRoot: an UNTYPED outer node that
 // embeds a credential which links back at it puts both in one source
 // component, and only the credential is typed - so it was the lone
@@ -604,39 +454,6 @@ func TestRootProofGraphsRefuseAnEmbeddedOnlyRoot(t *testing.T) {
 
 	require.Empty(t, rootProofsOf(t, cred),
 		"a document whose only credential-typed node is one it carries does not say what it is")
-}
-
-// TestSignAndVerifyACredentialWhoseSubjectIsACredential: a credential whose
-// credentialSubject is ITSELF typed VerifiableCredential and points back at
-// the outer credential puts both nodes in one source component, and both
-// past typedRoots. Reading only verifiableCredential as containment left two
-// candidates and refused a document this package had just signed.
-func TestSignAndVerifyACredentialWhoseSubjectIsACredential(t *testing.T) {
-	const credentialAboutACredential = `{
-		"@context": ["https://www.w3.org/ns/credentials/v2",
-			{"endorses": {"@id": "https://example.org/vocab#endorses", "@type": "@id"}}],
-		"id": "urn:uuid:the-endorsement",
-		"type": ["VerifiableCredential"],
-		"issuer": "did:example:endorser",
-		"credentialSubject": {
-			"id": "urn:uuid:the-endorsed",
-			"type": ["VerifiableCredential"],
-			"issuer": "did:example:issuer",
-			"endorses": "urn:uuid:the-endorsement"
-		}
-	}`
-
-	cred, err := credential.NewRDFCredentialFromJSON([]byte(credentialAboutACredential), nil)
-	require.NoError(t, err)
-	nq := mustNQuads(t, cred)
-	require.Contains(t, nq, "vocab#endorses", "the back-link must survive parsing")
-	require.Contains(t, nq, "credentials#credentialSubject", "and so must the containment link")
-
-	signed, pub := signDocument(t, credentialAboutACredential, "assertionMethod")
-	require.Len(t, rootProofsOf(t, signed), 1,
-		"the outer credential is the root; its subject is a credential it carries")
-	require.NoError(t, NewSuite().Verify(signed, pub),
-		"a document this package signed must verify")
 }
 
 // TestVerifyProofReturnsAProofWithItsSignature: verifyProofNode used to
@@ -719,4 +536,73 @@ func TestVerifyRefusesAProofOfAnotherCryptosuite(t *testing.T) {
 	err = NewSuite().Verify(reparsed, pub)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cryptosuite")
+}
+
+// TestSignRefusesADocumentWhoseRootDoesNotSurviveFlattening: a document
+// whose root takes part in a reference cycle can be read one way and not
+// another. Compact, its nesting says which node it is about; after
+// MarshalJSON - which round-trips through N-Quads and FLATTENS - every node
+// is lifted to the top level, and with the cycle none of them is
+// unreferenced.
+//
+// Signing such a document would produce something this package verifies in
+// one serialization and refuses in another. It is refused at signing
+// instead, where the operator can still change the document. These shapes
+// used to sign and verify while compact, which is the behaviour this
+// replaces.
+func TestSignRefusesADocumentWhoseRootDoesNotSurviveFlattening(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	_ = pub
+
+	for name, doc := range map[string]string{
+		// A presentation whose embedded credential's subject links back.
+		"a presentation its credential points back at": cyclicPresentation,
+		// A credential whose subject is itself a credential, linking back.
+		"a credential whose subject is a credential": `{
+			"@context": ["https://www.w3.org/ns/credentials/v2",
+				{"endorses": {"@id": "https://example.org/vocab#endorses", "@type": "@id"}}],
+			"id": "urn:uuid:the-endorsement",
+			"type": ["VerifiableCredential"],
+			"issuer": "did:example:endorser",
+			"credentialSubject": {
+				"id": "urn:uuid:the-endorsed",
+				"type": ["VerifiableCredential"],
+				"issuer": "did:example:issuer",
+				"endorses": "urn:uuid:the-endorsement"
+			}
+		}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cred, err := credential.NewRDFCredentialFromJSON([]byte(doc), nil)
+			require.NoError(t, err)
+
+			// The document reads fine as written - it is the SERIALIZED
+			// form that loses the root, which is what makes this worth
+			// refusing rather than merely failing later.
+			_, _, err = cred.RootProofs()
+			require.NoError(t, err, "compact, the document says which node it is about")
+
+			_, err = NewSuite().Sign(cred, priv, &SignOptions{
+				VerificationMethod: "did:example:signer#key-1",
+				ProofPurpose:       "assertionMethod",
+				Created:            time.Now().UTC(),
+			})
+			require.Error(t, err, "and serialized, it does not")
+			require.Contains(t, err.Error(), "does not say which node it is about")
+		})
+	}
+
+	// The contrast: a self-link is not a cycle, and a credential that gives
+	// itself and its subject the same id still signs.
+	t.Run("a self-link is not a cycle", func(t *testing.T) {
+		signed, pub := signDocument(t, `{
+			"@context": "https://www.w3.org/ns/credentials/v2",
+			"id": "urn:uuid:the-credential",
+			"type": ["VerifiableCredential"],
+			"issuer": "did:example:issuer",
+			"credentialSubject": {"id": "urn:uuid:the-credential"}
+		}`, "assertionMethod")
+		require.NoError(t, NewSuite().Verify(signed, pub))
+	})
 }

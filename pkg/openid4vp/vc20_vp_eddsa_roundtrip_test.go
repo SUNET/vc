@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
+	ecdsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/ecdsa"
 	eddsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/eddsa"
 
 	"github.com/stretchr/testify/require"
@@ -138,8 +141,9 @@ func signedEdDSACredential(t *testing.T, issuerKey ed25519.PrivateKey, raw strin
 // too, because json-gold happens to order a real VPBuilder document so that
 // the holder's proof is reached first. That is exactly why relying on the
 // ordering was wrong, and why the selection is pinned where the ambiguity
-// can be forced - common.TestFindProofNodeInGraphs_SelectsTheRootsGraph
-// builds the graph with the ISSUER's proof first and fails without it.
+// can be forced - eddsa.TestVerifyRefusesAProofMovedOntoACustomLinkedCredential
+// moves the proof onto a credential the presentation carries and fails
+// without it.
 func TestVPBuilderEdDSASelectsTheHolderProof(t *testing.T) {
 	holderPub, holderKey, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
@@ -499,4 +503,60 @@ func TestVerifyAndExtractHonoursTheProofsContextOrder(t *testing.T) {
 	result, err := handler.VerifyAndExtract(t.Context(), string(rewritten))
 	require.NoError(t, err, "the proof's own context ordering decides what ex means")
 	require.Equal(t, absoluteMethod, result.VerificationMethod)
+}
+
+// TestVerifyAndExtractReportsTheECDSAProofThatVerified is the ECDSA half of
+// TestVerifyAndExtractReportsTheProofThatVerified: that suite tries every
+// root proof too, so the handler must build its result from the one that
+// verified rather than from extractProof's first-in-the-array.
+func TestVerifyAndExtractReportsTheECDSAProofThatVerified(t *testing.T) {
+	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`), nil)
+	require.NoError(t, err)
+
+	signed, err := ecdsaSuite.NewSuite().Sign(t.Context(), cred, issuerKey, &ecdsaSuite.SignOptions{
+		VerificationMethod: "did:example:issuer#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(compact, &doc))
+	genuine, ok := doc["proof"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "assertionMethod", genuine["proofPurpose"])
+
+	forged := map[string]any{
+		"type":               genuine["type"],
+		"cryptosuite":        genuine["cryptosuite"],
+		"proofPurpose":       "authentication",
+		"verificationMethod": genuine["verificationMethod"],
+		"created":            "2001-01-01T00:00:00Z",
+		"proofValue":         "z2DXFtnG8nHVsBv5SyJTgGBJYiFTRTpLKqWjDfMVSfdcKYjPfA6QLB7yFCJNtxYJ5aVzAAHNbLbEBL2fxPGZWKbvZ",
+	}
+	doc["proof"] = []any{forged, genuine}
+
+	tampered, err := json.Marshal(doc)
+	require.NoError(t, err)
+
+	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+		keys: map[string]crypto.PublicKey{"did:example:issuer#key-1": &issuerKey.PublicKey},
+	}))
+	require.NoError(t, err)
+
+	result, err := handler.VerifyAndExtract(t.Context(), string(tampered))
+	require.NoError(t, err, "the genuine proof is still there, so the document verifies")
+	require.Equal(t, "assertionMethod", result.ProofPurpose,
+		"the reported purpose must be the verified proof's, not the one in front of it")
+	require.NotEqual(t, 2001, result.ProofCreated.Year())
 }
