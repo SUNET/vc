@@ -25,7 +25,13 @@ func NewRegistry(checkers ...Checker) *Registry {
 // the first one that returns a non-nil Reference is used for the status check.
 //
 // Returns (nil, nil) if the credential has no revocation information.
-func (r *Registry) Validate(ctx context.Context, claims map[string]any) (*CheckResult, error) {
+//
+// shape says whether a scalar `status` could legitimately be credential
+// data in the format these claims came from. The claims map has lost that
+// by the time it arrives here, and the answer differs: SD-JWT VC and JWP
+// reserve `status` for the Token Status List reference, mdoc claims include
+// data elements that may be named anything. See StatusClaimShape.
+func (r *Registry) Validate(ctx context.Context, claims map[string]any, shape StatusClaimShape) (*CheckResult, error) {
 	for _, checker := range r.checkers {
 		if ref := checker.Extract(claims); ref != nil {
 			return checker.CheckStatus(ctx, ref)
@@ -43,7 +49,7 @@ func (r *Registry) Validate(ctx context.Context, claims map[string]any) (*CheckR
 	// it does for a status list that could not be fetched: this is the same
 	// class of answer, "unknown", and must not be silently downgraded to
 	// "fine".
-	if declaresStatus(claims) {
+	if declaresStatus(claims, shape) {
 		return nil, fmt.Errorf("credential declares revocation information that no registered checker could read")
 	}
 

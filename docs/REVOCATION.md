@@ -161,6 +161,13 @@ credential is accepted**. That is the default, so anything that makes
 verification fail silently — an unreachable list, an unresolvable key — is a
 security-relevant misconfiguration rather than a nuisance.
 
+`status_list_issuer` is also what a `kid`-only token resolves its key under.
+A status list token need not carry `iss` (Section 5.1), and JWKS discovery
+has nothing to discover from without an identity — so a conforming service
+that signs with a `kid` and omits `iss` needs this set, or its lists cannot
+be verified at all. It becomes the policy subject for such a token too:
+the operator has said whose lists these are.
+
 `status_list_issuer` alone is not always enough. It gives the
 discovery-based resolver an identity to look for a JWKS under, and a status
 service's status-list signing key need not be published there at all.

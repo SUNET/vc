@@ -100,7 +100,7 @@ func TestValidate_UnreadableStatusIsRefused(t *testing.T) {
 
 	for name, claims := range cases {
 		t.Run(name, func(t *testing.T) {
-			result, err := registry.Validate(t.Context(), claims)
+			result, err := registry.Validate(t.Context(), claims, StatusClaimMayBeData)
 			require.Error(t, err, "an unreadable status must not come back as not-revocable")
 			require.Nil(t, result)
 			require.Contains(t, err.Error(), "no registered checker could read")
@@ -118,7 +118,7 @@ func TestValidate_NoStatusIsStillNotRevocable(t *testing.T) {
 	require.NoError(t, err)
 	registry := NewRegistry(checker)
 
-	result, err := registry.Validate(t.Context(), map[string]any{"iss": "https://issuer.example.com"})
+	result, err := registry.Validate(t.Context(), map[string]any{"iss": "https://issuer.example.com"}, StatusClaimMayBeData)
 	require.NoError(t, err)
 	require.Nil(t, result)
 }
@@ -131,15 +131,15 @@ func TestValidate_NoStatusIsStillNotRevocable(t *testing.T) {
 func TestDeclaresStatus_NullCountsAsDeclared(t *testing.T) {
 	for _, key := range []string{"status", "credentialStatus"} {
 		t.Run(key+" null", func(t *testing.T) {
-			require.True(t, declaresStatus(map[string]any{key: nil}))
+			require.True(t, declaresStatus(map[string]any{key: nil}, StatusClaimMayBeData))
 		})
 		t.Run(key+" present", func(t *testing.T) {
-			require.True(t, declaresStatus(map[string]any{key: map[string]any{"type": "X"}}))
+			require.True(t, declaresStatus(map[string]any{key: map[string]any{"type": "X"}}, StatusClaimMayBeData))
 		})
 	}
 
-	require.False(t, declaresStatus(map[string]any{}))
-	require.False(t, declaresStatus(map[string]any{"vct": "urn:x"}))
+	require.False(t, declaresStatus(map[string]any{}, StatusClaimMayBeData))
+	require.False(t, declaresStatus(map[string]any{"vct": "urn:x"}, StatusClaimMayBeData))
 }
 
 // TestRegistryValidate_NullStatusIsNotSilentlyNonRevocable proves the guard
@@ -149,7 +149,7 @@ func TestDeclaresStatus_NullCountsAsDeclared(t *testing.T) {
 func TestRegistryValidate_NullStatusIsNotSilentlyNonRevocable(t *testing.T) {
 	registry := NewRegistry()
 
-	result, err := registry.Validate(t.Context(), map[string]any{"credentialStatus": nil})
+	result, err := registry.Validate(t.Context(), map[string]any{"credentialStatus": nil}, StatusClaimMayBeData)
 	require.Error(t, err, "a declared-but-unreadable status must not read as non-revocable")
 	require.Nil(t, result)
 	require.Contains(t, err.Error(), "no registered checker could read")
@@ -164,20 +164,20 @@ func TestRegistryValidate_NullStatusIsNotSilentlyNonRevocable(t *testing.T) {
 // The draft's claim is an OBJECT - it holds status_list - so the shape is
 // what separates them.
 func TestDeclaresStatus_ApplicationStatusClaimIsNotADeclaration(t *testing.T) {
-	require.False(t, declaresStatus(map[string]any{"status": "active"}),
+	require.False(t, declaresStatus(map[string]any{"status": "active"}, StatusClaimMayBeData),
 		"a string status is somebody else's claim")
-	require.False(t, declaresStatus(map[string]any{"status": 1}))
-	require.False(t, declaresStatus(map[string]any{"status": []any{"a"}}))
+	require.False(t, declaresStatus(map[string]any{"status": 1}, StatusClaimMayBeData))
+	require.False(t, declaresStatus(map[string]any{"status": []any{"a"}}, StatusClaimMayBeData))
 
 	require.True(t, declaresStatus(map[string]any{
 		"status": map[string]any{"status_list": map[string]any{"uri": "https://x", "idx": 1}},
-	}), "the draft's claim is an object")
-	require.True(t, declaresStatus(map[string]any{"status": map[string]any{"unknown_mechanism": 1}}),
+	}, StatusClaimMayBeData), "the draft's claim is an object")
+	require.True(t, declaresStatus(map[string]any{"status": map[string]any{"unknown_mechanism": 1}}, StatusClaimMayBeData),
 		"an object naming a mechanism we cannot read is declared-but-unreadable")
 
 	// credentialStatus is a VCDM term and means only this, so presence is
 	// enough whatever the value.
-	require.True(t, declaresStatus(map[string]any{"credentialStatus": "anything"}))
+	require.True(t, declaresStatus(map[string]any{"credentialStatus": "anything"}, StatusClaimMayBeData))
 }
 
 // TestRegistryValidate_ApplicationStatusClaimStillValidates proves the
@@ -187,7 +187,7 @@ func TestDeclaresStatus_ApplicationStatusClaimIsNotADeclaration(t *testing.T) {
 func TestRegistryValidate_ApplicationStatusClaimStillValidates(t *testing.T) {
 	registry := NewRegistry()
 
-	result, err := registry.Validate(t.Context(), map[string]any{"status": "active"})
+	result, err := registry.Validate(t.Context(), map[string]any{"status": "active"}, StatusClaimMayBeData)
 	require.NoError(t, err)
 	require.Nil(t, result)
 }
@@ -221,4 +221,46 @@ func TestStatusListIndex_RejectsUnsafeIntegers(t *testing.T) {
 	got, ok = statusListIndex("9007199254740993")
 	require.True(t, ok)
 	require.Equal(t, int64(9007199254740993), got)
+}
+
+// TestDeclaresStatus_ReservedFormatsRefuseAMalformedStatus: SD-JWT VC and
+// JWP reserve the `status` claim for the Token Status List reference, so a
+// scalar there is a MALFORMED reference rather than an application claim.
+// Reading it as the latter is how a credential whose revocation state is
+// unknown gets accepted as non-revocable.
+//
+// mdoc is the exception, and the reason the shape has to be told: its
+// claims include data elements, one of which may legitimately be named
+// "status".
+func TestDeclaresStatus_ReservedFormatsRefuseAMalformedStatus(t *testing.T) {
+	for name, claims := range map[string]map[string]any{
+		"a scalar":  {"status": "active"},
+		"a number":  {"status": 1},
+		"an array":  {"status": []any{"a"}},
+		"a null":    {"status": nil},
+		"an object": {"status": map[string]any{"status_list": map[string]any{}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.True(t, declaresStatus(claims, StatusClaimIsReserved),
+				"the format reserves the name, so anything under it was meant to be a reference")
+		})
+	}
+
+	// And the mdoc reading is unchanged, or every credential with a data
+	// element named status becomes unverifiable.
+	require.False(t, declaresStatus(map[string]any{"status": "active"}, StatusClaimMayBeData))
+}
+
+// TestRegistryValidate_ReservedScalarStatusIsNotSilentlyNonRevocable proves
+// it through Registry.Validate, which is where the consequence lands.
+func TestRegistryValidate_ReservedScalarStatusIsNotSilentlyNonRevocable(t *testing.T) {
+	registry := NewRegistry()
+
+	result, err := registry.Validate(t.Context(), map[string]any{"status": "active"}, StatusClaimIsReserved)
+	require.Error(t, err, "a malformed reference must read as unknown, not as non-revocable")
+	require.Nil(t, result)
+
+	result, err = registry.Validate(t.Context(), map[string]any{"status": "active"}, StatusClaimMayBeData)
+	require.NoError(t, err, "an mdoc data element named status is not a reference")
+	require.Nil(t, result)
 }

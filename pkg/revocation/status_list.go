@@ -62,7 +62,7 @@ type StatusListTokenVerifier interface {
 	// VerifyStatusListToken returns the parsed token only if its signature
 	// verified AND its signer is trusted. listURI is passed for diagnostics
 	// and policy scope.
-	VerifyStatusListToken(ctx context.Context, tokenString, listURI string) (*jwt.Token, error)
+	VerifyStatusListToken(ctx context.Context, tokenString, listURI, fallbackIssuer string) (*jwt.Token, error)
 }
 
 // WithTokenVerifier supplies trust-evaluated verification for Status List
@@ -633,7 +633,7 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, uri string, 
 	// token cannot dodge the PDP by omitting its header or by claiming an
 	// issuer outside the pin's scope.
 	if c.tokenVerifier != nil && !c.pinApplies(statusListTokenIssuer(tokenString)) && jwtHeaderNamesAKey(tokenString) {
-		token, err := c.tokenVerifier.VerifyStatusListToken(ctx, tokenString, uri)
+		token, err := c.tokenVerifier.VerifyStatusListToken(ctx, tokenString, uri, c.fallbackIssuer)
 		if err != nil {
 			return nil, err
 		}

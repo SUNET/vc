@@ -583,7 +583,15 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			}
 
 			for _, cc := range scopeCredentials[scope] {
-				result, err := c.revocationRegistry.Validate(ctx, cc.Credential)
+				// Only an mdoc's claims can legitimately hold a data
+				// element named "status"; every other format reserves the
+				// name for the status reference, so an unreadable one there
+				// is malformed rather than somebody else's claim.
+				statusShape := revocation.StatusClaimIsReserved
+				if credentialFormats[scope] == FormatMDoc {
+					statusShape = revocation.StatusClaimMayBeData
+				}
+				result, err := c.revocationRegistry.Validate(ctx, cc.Credential, statusShape)
 				if err != nil {
 					// Transient error (network, malformed token) — fail_open controls behavior
 					if c.cfg.Verifier.Revocation.FailOpen {

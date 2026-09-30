@@ -134,6 +134,26 @@ func statusListIndex(raw any) (int64, bool) {
 	}
 }
 
+// StatusClaimShape says whether a scalar `status` could legitimately be
+// credential data in the format being checked.
+//
+// It has to be told, because Registry.Validate works on a claims map that
+// has already lost its format. The same map can mean two things: for
+// SD-JWT VC and JWP the `status` claim is RESERVED for the Token Status
+// List reference, so a scalar there is a malformed reference; for mdoc the
+// claims include data elements, and one may legitimately be named "status".
+type StatusClaimShape int
+
+const (
+	// StatusClaimIsReserved: the format reserves `status`, so any shape
+	// that is not a readable reference is a malformed one - which is
+	// "cannot determine", not "not revocable".
+	StatusClaimIsReserved StatusClaimShape = iota
+	// StatusClaimMayBeData: a data element may be named `status`, so only
+	// an object (or a null where one belongs) declares revocation.
+	StatusClaimMayBeData
+)
+
 // declaresStatus reports whether a credential claims to carry revocation
 // information at all, whatever mechanism it names.
 //
@@ -142,27 +162,28 @@ func statusListIndex(raw any) (int64, bool) {
 // a normal credential; the second is a credential whose revocation state is
 // unknown, and treating the two alike lets a revoked credential through on
 // nothing more than an unrecognised type name or a malformed entry.
-func declaresStatus(claims map[string]any) bool {
+func declaresStatus(claims map[string]any, shape StatusClaimShape) bool {
 	// credentialStatus is a VCDM term and means one thing, so its PRESENCE
 	// is the declaration - `"credentialStatus": null` names a mechanism and
 	// fails to describe it, which is a malformed declaration rather than
-	// the absence of one, and requiring a non-nil value was a
-	// one-character way past this guard.
+	// the absence of one.
 	if _, ok := claims["credentialStatus"]; ok {
 		return true
 	}
 
-	// `status` is not exclusive to revocation. The draft's claim is an
-	// OBJECT (it holds status_list), while an application claim or an mdoc
-	// data element of the same name is typically a string - `"status":
-	// "active"` is an ordinary credential claim and must not make every
-	// such credential unverifiable. So: an object declares, a null
-	// declares (nothing puts a null where an application status belongs),
-	// and a scalar is somebody else's claim.
 	v, ok := claims["status"]
 	if !ok {
 		return false
 	}
+	if shape == StatusClaimIsReserved {
+		// The format reserves the name. Whatever is under it was meant to
+		// be a status reference, so an unreadable one is unreadable rather
+		// than somebody else's claim.
+		return true
+	}
+	// A data element may be named "status", so the shape decides: an object
+	// is the draft's claim, a null is a malformed one where an object
+	// belongs, and a scalar is credential data.
 	if v == nil {
 		return true
 	}

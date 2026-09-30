@@ -76,7 +76,7 @@ func TestVerifyStatusListToken_StatusListSignerFirst(t *testing.T) {
 	verifier := newTestVerifier(ev)
 
 	token, err := verifier.VerifyStatusListToken(context.Background(),
-		signStatusListToken(t, "https://status.example.com"), testListURI)
+		signStatusListToken(t, "https://status.example.com"), testListURI, "")
 
 	require.NoError(t, err)
 	require.NotNil(t, token)
@@ -92,7 +92,7 @@ func TestVerifyStatusListToken_FallsBackToCredentialIssuer(t *testing.T) {
 	verifier := newTestVerifier(ev)
 
 	token, err := verifier.VerifyStatusListToken(context.Background(),
-		signStatusListToken(t, "https://issuer.example.com"), testListURI)
+		signStatusListToken(t, "https://issuer.example.com"), testListURI, "")
 
 	require.NoError(t, err)
 	require.NotNil(t, token)
@@ -109,7 +109,7 @@ func TestVerifyStatusListToken_BothActionsRefused(t *testing.T) {
 	verifier := newTestVerifier(ev)
 
 	token, err := verifier.VerifyStatusListToken(context.Background(),
-		signStatusListToken(t, "https://issuer.example.com"), testListURI)
+		signStatusListToken(t, "https://issuer.example.com"), testListURI, "")
 
 	require.Error(t, err)
 	assert.Nil(t, token)
@@ -127,7 +127,7 @@ func TestVerifyStatusListToken_FirstActionErrors(t *testing.T) {
 	verifier := newTestVerifier(ev)
 
 	token, err := verifier.VerifyStatusListToken(context.Background(),
-		signStatusListToken(t, "https://issuer.example.com"), testListURI)
+		signStatusListToken(t, "https://issuer.example.com"), testListURI, "")
 
 	require.NoError(t, err)
 	require.NotNil(t, token)
@@ -147,7 +147,7 @@ func TestVerifyStatusListToken_BothActionsError(t *testing.T) {
 	verifier := newTestVerifier(ev)
 
 	token, err := verifier.VerifyStatusListToken(context.Background(),
-		signStatusListToken(t, "https://issuer.example.com"), testListURI)
+		signStatusListToken(t, "https://issuer.example.com"), testListURI, "")
 
 	require.Error(t, err)
 	assert.Nil(t, token)
@@ -163,7 +163,7 @@ func TestVerifyStatusListToken_SubjectFromListURI(t *testing.T) {
 	verifier := newTestVerifier(ev)
 
 	_, err := verifier.VerifyStatusListToken(context.Background(),
-		signStatusListToken(t, ""), testListURI)
+		signStatusListToken(t, ""), testListURI, "")
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"https://status.example.com"}, ev.subjects)
@@ -211,7 +211,7 @@ func TestVerifyStatusListToken_X5CWithoutIssUsesTheListOrigin(t *testing.T) {
 	verifier := newTestVerifier(ev)
 
 	_, err := verifier.VerifyStatusListToken(context.Background(),
-		signStatusListTokenX5C(t, "some-internal-ca-name", ""), testListURI)
+		signStatusListTokenX5C(t, "some-internal-ca-name", ""), testListURI, "")
 
 	require.NoError(t, err)
 	require.NotEmpty(t, ev.subjects)
@@ -228,8 +228,57 @@ func TestVerifyStatusListToken_X5CWithIssUsesIt(t *testing.T) {
 	verifier := newTestVerifier(ev)
 
 	_, err := verifier.VerifyStatusListToken(context.Background(),
-		signStatusListTokenX5C(t, "some-internal-ca-name", "https://issuer.example.com"), testListURI)
+		signStatusListTokenX5C(t, "some-internal-ca-name", "https://issuer.example.com"), testListURI, "")
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"https://issuer.example.com"}, ev.subjects)
+}
+
+// TestVerifyStatusListToken_KidWithoutIssUsesTheConfiguredIssuer: a token
+// with a kid header resolves its key through JWKS discovery under an issuer
+// identity, and Section 5.1 does not require iss - so a conforming status
+// service that omits it left discovery with nothing to discover from, while
+// the deployment had already said whose lists these are through
+// verifier.revocation.status_list_issuer. With fail_open at its default,
+// that failure reads as "not revoked".
+func TestVerifyStatusListToken_KidWithoutIssUsesTheConfiguredIssuer(t *testing.T) {
+	ev := &actionEvaluator{trusted: map[string]bool{StatusListSignerAction: true}}
+	verifier := newTestVerifier(ev)
+
+	// No jwk, no x5c, no iss - only a kid, which is the registry's and
+	// siros-status-service's shape.
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{"sub": testListURI})
+	token.Header["kid"] = "list-signing-key"
+	signed, err := token.SignedString(privateKey)
+	require.NoError(t, err)
+
+	// Without a configured issuer there is nothing to resolve under, and
+	// the refusal names that rather than succeeding on a nil key.
+	_, err = verifier.VerifyStatusListToken(context.Background(), signed, testListURI, "")
+	require.Error(t, err)
+
+	// With one, the resolution is attempted under it. The stub resolver
+	// here cannot reach a JWKS, so this still fails - but on the fetch
+	// rather than on having no identity, and the configured issuer is what
+	// the PDP would be asked about.
+	_, err = verifier.VerifyStatusListToken(context.Background(), signed, testListURI, "https://status.example.com")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "issuer ID is empty",
+		"the configured issuer must reach key resolution")
+}
+
+// TestVerifyStatusListToken_ConfiguredIssuerIsTheSubject: when the operator
+// has named whose lists these are, that is a better answer for the policy
+// than the origin that served them.
+func TestVerifyStatusListToken_ConfiguredIssuerIsTheSubject(t *testing.T) {
+	ev := &actionEvaluator{trusted: map[string]bool{StatusListSignerAction: true}}
+	verifier := newTestVerifier(ev)
+
+	_, err := verifier.VerifyStatusListToken(context.Background(),
+		signStatusListToken(t, ""), testListURI, "https://configured.example.com")
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://configured.example.com"}, ev.subjects)
 }

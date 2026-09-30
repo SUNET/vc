@@ -95,6 +95,20 @@ func NewJWTTrustVerifier(cfg JWTTrustVerifierConfig) *JWTTrustVerifier {
 // that uses the iss claim conventionally, WIAs included; vct simply stays
 // empty for non-SD-JWT-VC tokens like a WIA.
 func (v *JWTTrustVerifier) VerifyJWTSignature(ctx context.Context, tokenString, scope string) (*jwt.Token, *JWTKeyMaterial, error) {
+	return v.verifyJWTSignature(ctx, tokenString, scope, "")
+}
+
+// verifyJWTSignature is VerifyJWTSignature with an issuer to fall back on
+// when the token names none.
+//
+// Only key RESOLUTION uses it: a kid header resolves through JWKS discovery
+// under an issuer identity, and a token that carries no iss leaves that
+// discovery with nothing to discover from. draft-ietf-oauth-status-list
+// Section 5.1 does not require iss, so that is a conforming token rather
+// than a broken one, and a deployment that has configured
+// verifier.revocation.status_list_issuer has already said whose lists these
+// are.
+func (v *JWTTrustVerifier) verifyJWTSignature(ctx context.Context, tokenString, scope, fallbackIssuer string) (*jwt.Token, *JWTKeyMaterial, error) {
 	allowedSet := BuildAllowedAlgorithmSet(v.allowedAlgs)
 
 	// keyInfo is captured by the keyfunc closure and populated during jwt.Parse.
@@ -111,6 +125,9 @@ func (v *JWTTrustVerifier) VerifyJWTSignature(ctx context.Context, tokenString, 
 
 		// Extract issuer and credential type from claims
 		issuerID, credentialType := ExtractJWTClaimsInfo(token)
+		if issuerID == "" {
+			issuerID = fallbackIssuer
+		}
 
 		// Extract key material from header (x5c, jwk, DID, or kid/JWKS resolution)
 		ki, err := v.extractJWTKeyMaterial(ctx, token, issuerID, scope, credentialType)
@@ -272,12 +289,19 @@ func statusListSubjectFromURI(listURI string) string {
 // distinct from EvaluateIssuerTrust only in that a Status List Token is a
 // plain JWT rather than an SD-JWT, so there is nothing to split and no vct
 // to read.
-func (v *JWTTrustVerifier) VerifyStatusListToken(ctx context.Context, tokenString, listURI string) (*jwt.Token, error) {
+func (v *JWTTrustVerifier) VerifyStatusListToken(ctx context.Context, tokenString, listURI, fallbackIssuer string) (*jwt.Token, error) {
 	if v.trustEvaluator == nil {
 		return nil, fmt.Errorf("trust evaluator not initialized")
 	}
 
-	token, keyInfo, err := v.VerifyJWTSignature(ctx, tokenString, listURI)
+	// fallbackIssuer is verifier.revocation.status_list_issuer, and it is
+	// needed for KEY RESOLUTION: a token with a kid header resolves through
+	// JWKS discovery under an issuer identity, and Section 5.1 does not
+	// require iss - so a conforming status service that omits it left
+	// discovery with nothing to discover from, and the configured issuer
+	// could not help because this path never saw it. With fail_open at its
+	// default, that failure reads as "not revoked".
+	token, keyInfo, err := v.verifyJWTSignature(ctx, tokenString, listURI, fallbackIssuer)
 	if err != nil {
 		return nil, err
 	}
@@ -296,6 +320,12 @@ func (v *JWTTrustVerifier) VerifyStatusListToken(ctx context.Context, tokenStrin
 	// iss would have been judged as whatever its certificate happened to be
 	// named.
 	subject := statusListTokenIssuer(token)
+	if subject == "" {
+		// The operator named whose lists these are; that is a better answer
+		// than the origin, and it is the identity the key was resolved
+		// under.
+		subject = fallbackIssuer
+	}
 	if subject == "" {
 		subject = statusListSubjectFromURI(listURI)
 	}

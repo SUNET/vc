@@ -31,7 +31,7 @@ type recordingTrustVerifier struct {
 	calls     int
 }
 
-func (r *recordingTrustVerifier) VerifyStatusListToken(_ context.Context, tokenString, listURI string) (*jwt.Token, error) {
+func (r *recordingTrustVerifier) VerifyStatusListToken(_ context.Context, tokenString, listURI, fallbackIssuer string) (*jwt.Token, error) {
 	r.calls++
 	r.seenURI = listURI
 	r.seenToken = tokenString
