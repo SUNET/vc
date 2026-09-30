@@ -796,6 +796,24 @@ func (h *VC20Handler) verifyPresentationProof(ctx context.Context, vpBytes []byt
 		return "", fmt.Errorf("parsing presentation as RDF: %w", err)
 	}
 
+	// WHICH proof is verified has to be said out loud here. A presentation
+	// holds two: the holder's, checked for purpose/challenge/domain above,
+	// and the embedded credential's issuer proof, which stays in the
+	// document because the holder's signature covers it. A plain Verify
+	// takes the first proof node it finds, and map iteration made that
+	// choice at random - so the holder's key was sometimes checked against
+	// the ISSUER's proofValue and a legitimate presentation failed, on
+	// some runs and not others, for identical input.
+	//
+	// Naming it by proofValue - the signature the checks above were made
+	// against - ties the cryptographic step to the proof whose claims were
+	// validated, which is the property that was missing whether or not the
+	// selection happened to land right.
+	vpProofValue, _ := proof["proofValue"].(string)
+	if vpProofValue == "" {
+		return "", errors.New("presentation proof has no proofValue")
+	}
+
 	cryptosuite, _ := proof["cryptosuite"].(string)
 	switch cryptosuite {
 	case CryptosuiteEdDSA2022:
@@ -803,7 +821,7 @@ func (h *VC20Handler) verifyPresentationProof(ctx context.Context, vpBytes []byt
 		if !ok {
 			return "", fmt.Errorf("holder key for %s is %T, want ed25519.PublicKey", cryptosuite, holderKey)
 		}
-		if err := eddsaSuite.NewSuite().Verify(vpCred, edKey); err != nil {
+		if err := eddsaSuite.NewSuite().VerifyProof(vpCred, edKey, vpProofValue); err != nil {
 			return "", fmt.Errorf("presentation signature verification failed: %w", err)
 		}
 	case CryptosuiteECDSA2019:
@@ -811,7 +829,7 @@ func (h *VC20Handler) verifyPresentationProof(ctx context.Context, vpBytes []byt
 		if !ok {
 			return "", fmt.Errorf("holder key for %s is %T, want *ecdsa.PublicKey", cryptosuite, holderKey)
 		}
-		if err := ecdsaSuite.NewSuite().Verify(vpCred, ecKey); err != nil {
+		if err := ecdsaSuite.NewSuite().VerifyProof(vpCred, ecKey, vpProofValue); err != nil {
 			return "", fmt.Errorf("presentation signature verification failed: %w", err)
 		}
 	default:

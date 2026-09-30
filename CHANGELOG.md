@@ -63,6 +63,22 @@
   offer once plus one entry per configured wallet. This is the internal
   operator UI's own endpoint, not a wallet-facing one.
 
+### Fixed
+
+- **W3C presentation verification picked a proof by accident.** A verifiable
+  presentation holds two Data Integrity proofs - the holder's, over the
+  presentation, and the embedded credential's, from the issuer - and both
+  reach the suite through `ProofObject()`. The suite verified whichever proof
+  node it reached first, which depended on the blank-node ordering json-gold
+  happened to assign and, where a proof sat under a map key, on Go's
+  randomised map iteration. Nothing tied the signature that was checked to
+  the proof whose `proofPurpose`, challenge and domain had been validated.
+
+  The presentation path now names its own proof by `proofValue`
+  (`Suite.VerifyProof`), and `common.FindProofNode` traverses in a
+  deterministic order. Verification behaviour for a single-proof document is
+  unchanged.
+
 ### Changed
 
 - The issuer's `/offers` page now renders one credential offer three ways:
