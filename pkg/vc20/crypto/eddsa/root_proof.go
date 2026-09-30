@@ -1,160 +1,137 @@
 package eddsa
 
 import (
-	"encoding/json"
+	"slices"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
+
+	"github.com/piprate/json-gold/ld"
 )
 
-// Expanded JSON-LD predicate IRIs. A credential re-parsed from MarshalJSON
-// output names its members this way rather than by compact term.
-const (
-	expandedProofIRI                = "https://w3id.org/security#proof"
-	expandedProofValueIRI           = "https://w3id.org/security#proofValue"
-	expandedVerifiableCredentialIRI = "https://www.w3.org/2018/credentials#verifiableCredential"
-)
+// Proof predicates, in both IRI spellings the parser produces.
+var proofPredicates = []string{
+	"https://w3id.org/security#proof",
+	"http://www.w3.org/ns/credentials#proof",
+	"https://www.w3.org/ns/credentials#proof",
+}
+
+var proofValuePredicates = []string{
+	"https://w3id.org/security#proofValue",
+	"https://www.w3.org/ns/credentials#proofValue",
+}
 
 // rootProofValues returns the proofValues of the proofs the document
-// attaches to ITSELF, read from the document as the caller passed it.
+// attaches to ITSELF.
 //
-// This is what decides which proof gets verified, and it has to come from
-// the document rather than from the proof object, because the proof object
-// has lost the parentage: ProofObject() keeps proof quads and drops the
-// links that say whose proof is whose.
+// Read from the RDF DATASET, not from the JSON. The JSON is the wrong layer
+// for this question three ways over: a compact document may alias "proof"
+// and "proofValue" through its context, an expanded one need not label its
+// root, and either may carry nodes that are neither the root nor anything
+// the root names. RDF has no aliases, gives every node a label, and is the
+// form the signature is actually over.
 //
-// Without it, "the first proof found" is not merely arbitrary, it is
-// forgeable. Verify removes EVERY proof when hashing, so a proof moved from
-// the presentation onto the embedded credential leaves the hash unchanged -
-// someone holding a legitimately signed presentation could move the holder
-// proof onto the credential, delete the presentation's own proof, and have
-// the misplaced proof verify with the holder's key against a document the
-// holder never signed in that shape.
+// Why it has to be asked at all: Verify removes EVERY proof when hashing, so
+// a proof MOVED elsewhere in the document - onto an embedded credential, or
+// onto a node detached from the root - leaves the canonical form unchanged.
+// Someone holding a legitimately signed document could relocate its proof
+// and have the misplaced one verify with the original key. So the proof
+// checked has to be the one the root itself carries.
 //
-// An empty result means the document attaches no proof to itself, and the
-// caller must refuse: not "fall back to whatever is in there".
+// THE ROOT IS THE SUBJECT NOTHING ELSE POINTS AT. A presentation names its
+// embedded credential, so the credential is referenced and the presentation
+// is not; a detached node is unreferenced too, which makes the document
+// AMBIGUOUS rather than merely odd - so more than one candidate is refused
+// rather than resolved by preference. An empty result means the caller must
+// refuse.
 func rootProofValues(cred *credential.RDFCredential) []string {
-	originalJSON := cred.OriginalJSON()
-	if originalJSON == "" {
+	dataset := cred.Dataset()
+	if dataset == nil {
 		return nil
 	}
 
-	var raw any
-	if err := json.Unmarshal([]byte(originalJSON), &raw); err != nil {
+	defaultGraph := dataset.Graphs["@default"]
+	if len(defaultGraph) == 0 {
 		return nil
 	}
 
-	switch doc := raw.(type) {
-	case map[string]any:
-		return compactRootProofValues(doc)
-	case []any:
-		return expandedRootProofValues(doc)
-	default:
-		return nil
-	}
-}
-
-// compactRootProofValues reads proofValue from a compact document's own
-// "proof" member, which may be one proof or several.
-func compactRootProofValues(doc map[string]any) []string {
-	var out []string
-	for _, entry := range asSlice(doc["proof"]) {
-		proof, ok := entry.(map[string]any)
-		if !ok {
+	subjects := make(map[string]bool)
+	referenced := make(map[string]bool)
+	for _, quad := range defaultGraph {
+		if quad == nil || quad.Subject == nil {
 			continue
 		}
-		if value, ok := proof["proofValue"].(string); ok && value != "" {
-			out = append(out, value)
+		subjects[quad.Subject.GetValue()] = true
+		if isNode(quad.Object) {
+			referenced[quad.Object.GetValue()] = true
+		}
+	}
+
+	// Sorted, so a document with more than one candidate is refused the
+	// same way every time rather than sometimes picking one - map order
+	// would otherwise make the refusal a coin flip.
+	var roots []string
+	for subject := range subjects {
+		if !referenced[subject] {
+			roots = append(roots, subject)
+		}
+	}
+	slices.Sort(roots)
+	// Exactly one, or the document does not say which node is its root and
+	// no proof in it can be attributed. Refusing is the only safe answer:
+	// picking one would be picking whichever an attacker arranged.
+	if len(roots) != 1 {
+		return nil
+	}
+
+	var graphNames []string
+	for _, quad := range defaultGraph {
+		if quad == nil || quad.Subject == nil || quad.Predicate == nil {
+			continue
+		}
+		if quad.Subject.GetValue() != roots[0] {
+			continue
+		}
+		if !contains(proofPredicates, quad.Predicate.GetValue()) {
+			continue
+		}
+		if isNode(quad.Object) {
+			graphNames = append(graphNames, quad.Object.GetValue())
+		}
+	}
+
+	var out []string
+	for _, name := range graphNames {
+		for _, quad := range dataset.Graphs[name] {
+			if quad == nil || quad.Predicate == nil || quad.Object == nil {
+				continue
+			}
+			if !contains(proofValuePredicates, quad.Predicate.GetValue()) {
+				continue
+			}
+			if value := quad.Object.GetValue(); value != "" {
+				out = append(out, value)
+			}
 		}
 	}
 	return out
 }
 
-// expandedRootProofValues reads them from an expanded document, where the
-// root is a node nothing else embeds and its proof lives in a named graph.
+// isNode reports whether an RDF term names something else in the graph,
+// rather than being a literal value.
 //
-// The root is identified by ELIMINATION rather than by having an id: an
-// expanded presentation's nodes are a flat list, and an embedded credential
-// is exactly the node another node names under verifiableCredential. A
-// blank-node root is therefore still identifiable, which matters because a
-// presentation is not required to have an id.
-func expandedRootProofValues(nodes []any) []string {
-	byID := make(map[string]map[string]any)
-	embedded := make(map[string]bool)
-	for _, entry := range nodes {
-		node, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
-		if id, ok := node["@id"].(string); ok {
-			byID[id] = node
-		}
-		for _, ref := range asSlice(node[expandedVerifiableCredentialIRI]) {
-			if id := expandedID(ref); id != "" {
-				embedded[id] = true
-			}
-		}
-	}
-
-	var out []string
-	for id, node := range byID {
-		if embedded[id] {
-			continue
-		}
-		for _, ref := range asSlice(node[expandedProofIRI]) {
-			graphID := expandedID(ref)
-			if graphID == "" {
-				continue
-			}
-			graph, ok := byID[graphID]
-			if !ok {
-				continue
-			}
-			out = append(out, expandedGraphProofValues(graph)...)
-		}
-	}
-	return out
+// json-gold's helpers rather than a type switch: a term can arrive as a
+// value or a pointer, and a switch on the pointer forms alone silently
+// answers false for every term - which made every subject look unreferenced
+// and every proof link invisible.
+func isNode(term ld.Node) bool {
+	return term != nil && (ld.IsIRI(term) || ld.IsBlankNode(term))
 }
 
-// expandedGraphProofValues reads every proofValue out of a named graph.
-func expandedGraphProofValues(graph map[string]any) []string {
-	var out []string
-	for _, entry := range asSlice(graph["@graph"]) {
-		node, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
-		for _, v := range asSlice(node[expandedProofValueIRI]) {
-			value, ok := v.(map[string]any)
-			if !ok {
-				continue
-			}
-			if s, ok := value["@value"].(string); ok && s != "" {
-				out = append(out, s)
-			}
+func contains(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
 		}
 	}
-	return out
-}
-
-// expandedID reads an @id out of a JSON-LD node reference.
-func expandedID(v any) string {
-	switch ref := v.(type) {
-	case string:
-		return ref
-	case map[string]any:
-		id, _ := ref["@id"].(string)
-		return id
-	}
-	return ""
-}
-
-// asSlice normalises a JSON-LD member that may be one value or a list.
-func asSlice(v any) []any {
-	if v == nil {
-		return nil
-	}
-	if list, ok := v.([]any); ok {
-		return list
-	}
-	return []any{v}
+	return false
 }
