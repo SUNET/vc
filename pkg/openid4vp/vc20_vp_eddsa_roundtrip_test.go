@@ -377,3 +377,59 @@ func TestVerifyAndExtractAcceptsACompactVerificationMethod(t *testing.T) {
 	require.NoError(t, err, "a compact verificationMethod names the same key as its expansion")
 	require.Equal(t, absoluteMethod, result.VerificationMethod)
 }
+
+// TestVerifyAndExtractAcceptsAProofLocalPrefix: a nested proof may carry its
+// own @context that adds terms, and the method is written under THAT active
+// context. Expanding under the document's root context alone resolves a
+// proof-local prefix wrongly, or not at all, and the credential is rejected
+// even with the right key.
+func TestVerifyAndExtractAcceptsAProofLocalPrefix(t *testing.T) {
+	issuerPub, issuerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	const absoluteMethod = "https://example.org/keys#key-1"
+	const plain = `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(plain), nil)
+	require.NoError(t, err)
+	signed, err := eddsaSuite.NewSuite().Sign(cred, issuerKey, &eddsaSuite.SignOptions{
+		VerificationMethod: absoluteMethod,
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+
+	// The prefix is defined on the PROOF, not on the document - and the
+	// document's own context stays as it was, so nothing but the proof's
+	// local context can resolve "ex:key-1".
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(compact, &doc))
+	require.Equal(t, "https://www.w3.org/ns/credentials/v2", doc["@context"],
+		"the document must NOT define the prefix, or this proves nothing")
+	proof, ok := doc["proof"].(map[string]any)
+	require.True(t, ok)
+	proof["@context"] = []any{
+		"https://www.w3.org/ns/credentials/v2",
+		map[string]any{"ex": "https://example.org/keys#"},
+	}
+	proof["verificationMethod"] = "ex:key-1"
+
+	rewritten, err := json.Marshal(doc)
+	require.NoError(t, err)
+
+	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+		keys: map[string]crypto.PublicKey{absoluteMethod: issuerPub},
+	}))
+	require.NoError(t, err)
+
+	result, err := handler.VerifyAndExtract(t.Context(), string(rewritten))
+	require.NoError(t, err, "a proof-local prefix names the same key as its expansion")
+	require.Equal(t, absoluteMethod, result.VerificationMethod)
+}
