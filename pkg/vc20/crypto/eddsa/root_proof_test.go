@@ -459,3 +459,77 @@ func TestVerifyTriesEveryRootProof(t *testing.T) {
 	require.NoError(t, err)
 	require.Error(t, NewSuite().Verify(again, strangerPub))
 }
+
+// cyclicPresentation embeds a credential whose subject links back to the
+// presentation, so VP -> VC -> subject -> VP is one strongly connected
+// component and every one of those nodes is a member of the single source.
+const cyclicPresentation = `{
+	"@context": ["https://www.w3.org/ns/credentials/v2",
+		{"presentedIn": {"@id": "https://example.org/vocab#presentedIn", "@type": "@id"}}],
+	"id": "urn:uuid:the-presentation",
+	"type": ["VerifiablePresentation"],
+	"holder": "did:example:holder",
+	"verifiableCredential": [{
+		"@context": ["https://www.w3.org/ns/credentials/v2",
+			{"presentedIn": {"@id": "https://example.org/vocab#presentedIn", "@type": "@id"}}],
+		"id": "urn:uuid:the-credential",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject", "presentedIn": "urn:uuid:the-presentation"}
+	}]
+}`
+
+// TestSignAndVerifyACyclicPresentation: Sign will sign this document, so
+// Verify has to accept it. The cycle puts the presentation AND the embedded
+// credential in one source component, and both carry a credential rdf:type -
+// so narrowing candidates by type alone left two roots and refused a
+// document this very package had just signed.
+func TestSignAndVerifyACyclicPresentation(t *testing.T) {
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(cyclicPresentation), nil)
+	require.NoError(t, err)
+
+	// The fixture is worthless unless the back-link actually survives into
+	// the RDF - an undefined term would be dropped and the cycle with it.
+	require.Contains(t, mustNQuads(t, cred), "vocab#presentedIn",
+		"the link back to the presentation must reach the dataset")
+
+	signed, pub := signDocument(t, cyclicPresentation, "authentication")
+	require.Len(t, rootProofGraphs(signed), 1,
+		"the presentation is the document's root even though the credential points back at it")
+	require.NoError(t, NewSuite().Verify(signed, pub),
+		"a document this package signed must verify")
+}
+
+// TestRootProofGraphsStillRefuseAMovedProofInACycle: relaxing root selection
+// for cycles must not relax proof ownership. The embedded credential is
+// inside the source component now, so a proof moved onto it would be
+// selected if membership alone were enough.
+func TestRootProofGraphsStillRefuseAMovedProofInACycle(t *testing.T) {
+	signed, pub := signDocument(t, cyclicPresentation, "authentication")
+
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(compact, &doc))
+
+	proof, ok := doc["proof"].(map[string]any)
+	require.True(t, ok)
+	embedded, ok := doc["verifiableCredential"].([]any)
+	require.True(t, ok)
+	require.Len(t, embedded, 1)
+	credentialNode, ok := embedded[0].(map[string]any)
+	require.True(t, ok)
+
+	// Move the presentation's proof onto the embedded credential.
+	credentialNode["proof"] = proof
+	delete(doc, "proof")
+
+	tampered, err := json.Marshal(doc)
+	require.NoError(t, err)
+	reparsed, err := credential.NewRDFCredentialFromJSON(tampered, nil)
+	require.NoError(t, err)
+
+	require.Empty(t, rootProofGraphs(reparsed),
+		"a proof on the embedded credential is not the presentation's own")
+	require.Error(t, NewSuite().Verify(reparsed, pub))
+}

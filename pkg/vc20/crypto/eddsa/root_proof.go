@@ -113,9 +113,18 @@ func rootProofGraphs(cred *credential.RDFCredential) []string {
 	// unchanged and a credential with no proof of its own would verify.
 	//
 	// The root is the member that IS a credential or a presentation, said
-	// by its rdf:type. Exactly one, or ownership is not established and the
-	// document is refused.
-	roots := typedRoots(defaultGraph, candidates)
+	// by its rdf:type, and that nothing EMBEDS. Type alone is not enough: a
+	// presentation whose embedded credential links back at it - the subject
+	// naming the presentation, say - puts the presentation and the
+	// credential in one component, and both are typed. Requiring exactly
+	// one typed member then refused a document this package had just
+	// signed. Embedding breaks the tie the way the document itself does:
+	// whatever sits inside verifiableCredential is carried, not carrying.
+	//
+	// Exactly one, or ownership is not established and the document is
+	// refused. Two unembedded credential-typed nodes is the detached-node
+	// case, which stays a refusal.
+	roots := unembedded(defaultGraph, typedRoots(defaultGraph, candidates))
 	if len(roots) != 1 {
 		return nil
 	}
@@ -175,6 +184,47 @@ func typedRoots(defaultGraph []*ld.Quad, candidates map[string]bool) []string {
 	}
 	slices.Sort(roots)
 	return roots
+}
+
+// embeddingPredicates are the links by which a presentation CARRIES a
+// credential. An object of one of these is inside another document, so it is
+// not the root of this one - however the references between them run.
+//
+// Unlike proofPredicates these need not match any removal set: an embedding
+// link is part of the signed document, not something hashing strips. They
+// are only read to decide which typed node is the outermost.
+var embeddingPredicates = []string{
+	"https://www.w3.org/2018/credentials#verifiableCredential",
+	"https://www.w3.org/ns/credentials#verifiableCredential",
+}
+
+// unembedded drops the candidates some node in the document embeds.
+func unembedded(defaultGraph []*ld.Quad, candidates []string) []string {
+	if len(candidates) < 2 {
+		// Nothing to disambiguate, and a single candidate that is itself
+		// embedded is still the only thing this document is about - a
+		// bare credential parsed on its own has no embedding link at all.
+		return candidates
+	}
+
+	embedded := make(map[string]bool)
+	for _, quad := range defaultGraph {
+		if quad == nil || quad.Predicate == nil || !isNode(quad.Object) {
+			continue
+		}
+		if !contains(embeddingPredicates, quad.Predicate.GetValue()) {
+			continue
+		}
+		embedded[quad.Object.GetValue()] = true
+	}
+
+	outermost := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if !embedded[candidate] {
+			outermost = append(outermost, candidate)
+		}
+	}
+	return outermost
 }
 
 // sourceComponent returns the members of the one strongly connected
