@@ -10,12 +10,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash"
+	"maps"
 	"math/big"
 	"time"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
 	vccrypto "github.com/SUNET/vc/pkg/vc20/crypto"
-	"github.com/SUNET/vc/pkg/vc20/crypto/common"
 
 	"github.com/multiformats/go-multibase"
 	"github.com/piprate/json-gold/ld"
@@ -159,10 +159,12 @@ func (s *Suite) SignWithSigner(ctx context.Context, cred *credential.RDFCredenti
 		return nil, fmt.Errorf("sign options are nil")
 	}
 
-	// 1. Get canonical document hash (without proof)
-	credWithoutProof, err := cred.CredentialWithoutProof()
+	// 1. Get canonical document hash - the document this proof SECURES,
+	// which is the document with the root's own proofs removed and every
+	// embedded proof left where it is. See credential.RootProofs.
+	_, credWithoutProof, err := cred.RootProofs()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get credential without proof: %w", err)
+		return nil, fmt.Errorf("failed to get the document the proof secures: %w", err)
 	}
 
 	// 2. Create proof configuration using helper
@@ -241,43 +243,47 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key *ecdsa.PublicKey) err
 		return fmt.Errorf("public key is nil")
 	}
 
-	// 1. Extract proof object
-	proofCred, err := cred.ProofObject()
+	// The proofs the document attaches to ITSELF, and the document they
+	// secure. Read off the document rather than searched for anywhere in
+	// the proof object: hashing removes the root's proofs, so a proof moved
+	// onto an embedded credential leaves the secured document unchanged and
+	// an unqualified search would verify the moved one. See
+	// credential.RootProofs.
+	proofs, credWithoutProof, err := cred.RootProofs()
 	if err != nil {
-		return fmt.Errorf("failed to get proof object: %w", err)
+		return err
+	}
+	if len(proofs) == 0 {
+		return fmt.Errorf("the document carries no proof of its own to verify")
 	}
 
-	// We need to get the proofValue from the proof object
-	proofJSONBytes, err := json.Marshal(proofCred)
+	docCanonical, err := credWithoutProof.CanonicalForm()
 	if err != nil {
-		return fmt.Errorf("failed to convert proof to JSON: %w", err)
+		return fmt.Errorf("failed to get canonical form of document: %w", err)
+	}
+	docHashBytes := sha256.Sum256([]byte(docCanonical))
+
+	var lastErr error
+	for _, expanded := range proofs {
+		if err := s.verifyRootProof(cred, expanded, key, docHashBytes); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
 	}
 
-	var proofJSON any
-	if err := json.Unmarshal(proofJSONBytes, &proofJSON); err != nil {
-		return fmt.Errorf("failed to unmarshal proof JSON: %w", err)
-	}
+	return lastErr
+}
 
-	// Compact the proof JSON to ensure we have short keys (e.g. "proofValue" instead of full URI)
-	proc := ld.NewJsonLdProcessor()
-	compactOpts := credential.NewJSONLDOptions("")
-	// Use the V2 context for compaction
-	context := map[string]any{
-		"@context": credential.ContextV2,
-	}
-
-	compactedProof, err := proc.Compact(proofJSON, context, compactOpts)
+// verifyRootProof checks one of the document's own proofs against the key,
+// over the document that proof secures.
+func (s *Suite) verifyRootProof(cred *credential.RDFCredential, expanded any, key *ecdsa.PublicKey, docHashBytes [sha256.Size]byte) error {
+	proofNode, err := credential.CompactRootProof(expanded)
 	if err != nil {
-		return fmt.Errorf("failed to compact proof JSON: %w", err)
+		return err
 	}
-
-	proofMap := compactedProof
-
-	// Find proof node
-	proofNode := common.FindProofNode(proofMap, ProofType)
-
-	if proofNode == nil {
-		return fmt.Errorf("proof node not found in proof object")
+	if suite, _ := proofNode["cryptosuite"].(string); suite != Cryptosuite2019 {
+		return fmt.Errorf("the document's own proof declares cryptosuite %q, not %s", suite, Cryptosuite2019)
 	}
 
 	proofValue, ok := proofNode["proofValue"].(string)
@@ -285,16 +291,18 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key *ecdsa.PublicKey) err
 		return fmt.Errorf("proofValue not found or not a string")
 	}
 
-	// 2. Remove proofValue from proof node to create proof configuration
-	delete(proofNode, "proofValue")
+	// 2. Build the proof configuration on a COPY, so the caller's proof
+	// node keeps the signature that was checked.
+	proofConfig := maps.Clone(proofNode)
+	delete(proofConfig, "proofValue")
 
 	// Ensure context is present for correct RDF conversion
-	if _, ok := proofNode["@context"]; !ok {
-		proofNode["@context"] = credential.ContextV2
+	if _, ok := proofConfig["@context"]; !ok {
+		proofConfig["@context"] = credential.ContextV2
 	}
 
 	// 3. Canonicalize proof configuration
-	proofConfigBytes, err := json.Marshal(proofNode)
+	proofConfigBytes, err := json.Marshal(proofConfig)
 	if err != nil {
 		return fmt.Errorf("failed to marshal proof config: %w", err)
 	}
@@ -313,19 +321,8 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key *ecdsa.PublicKey) err
 		return fmt.Errorf("failed to get canonical form of proof config: %w", err)
 	}
 
-	// 4. Canonicalize document (without proof)
-	credWithoutProof, err := cred.CredentialWithoutProof()
-	if err != nil {
-		return fmt.Errorf("failed to get credential without proof: %w", err)
-	}
-
-	docCanonical, err := credWithoutProof.CanonicalForm()
-	if err != nil {
-		return fmt.Errorf("failed to get canonical form of document: %w", err)
-	}
-
-	// 5. Hash
-	docHashBytes := sha256.Sum256([]byte(docCanonical))
+	// 4. Hash. The document half arrived already hashed: every proof the
+	// root carries secures the same document.
 	proofHashBytes := sha256.Sum256([]byte(proofCanonical))
 
 	combined := append(proofHashBytes[:], docHashBytes[:]...)

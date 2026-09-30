@@ -65,6 +65,12 @@ func (s *SdSuite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, op
 	// 2. Transform document to N-Quads
 	// We use the existing RDFCredential functionality
 	// But we need to be careful about the "without proof" part.
+	// CredentialWithoutProof, not RootProofs: this suite secures a
+	// CREDENTIAL, and a credential carries no proof but its own, so
+	// removing the root's proofs and removing every proof are the same
+	// operation on every document it sees. The two are NOT the same for a
+	// presentation, which is why the rdfc suites changed - see
+	// credential.RootProofs.
 	credWithoutProof, err := cred.CredentialWithoutProof()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get credential without proof: %w", err)

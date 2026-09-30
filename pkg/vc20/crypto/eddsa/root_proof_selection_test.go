@@ -13,6 +13,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// rootProofsOf returns the proofs a document attaches to ITSELF - what
+// Verify will consider - or nothing when the document does not say which
+// node it is about.
+func rootProofsOf(t *testing.T, cred *credential.RDFCredential) []any {
+	t.Helper()
+	proofs, _, err := cred.RootProofs()
+	if err != nil {
+		t.Logf("document names no root: %v", err)
+		return nil
+	}
+	return proofs
+}
+
 func signDocument(t *testing.T, doc string, purpose string) (*credential.RDFCredential, ed25519.PublicKey) {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -48,7 +61,7 @@ func TestRootProofGraphsAcrossSerializations(t *testing.T) {
 	// serializations of the same document - so the invariant checked across
 	// forms is that each names exactly ONE proof graph and each verifies,
 	// not that the labels match.
-	require.Len(t, rootProofGraphs(signed), 1, "the signed document links exactly one proof of its own")
+	require.Len(t, rootProofsOf(t, signed), 1, "the signed document links exactly one proof of its own")
 
 	compact, err := signed.ToCompactJSON()
 	require.NoError(t, err)
@@ -81,7 +94,7 @@ func TestRootProofGraphsAcrossSerializations(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			reparsed, err := credential.NewRDFCredentialFromJSON(form, nil)
 			require.NoError(t, err)
-			require.Len(t, rootProofGraphs(reparsed), 1,
+			require.Len(t, rootProofsOf(t, reparsed), 1,
 				"every serialization of one document links exactly one proof of its own")
 			require.NoError(t, NewSuite().Verify(reparsed, pub),
 				"and every one of them verifies")
@@ -125,7 +138,7 @@ func TestRootProofGraphsIgnoreAnEmbeddedCredentialsProof(t *testing.T) {
 
 	cred, err := credential.NewRDFCredentialFromJSON([]byte(vpWithEmbeddedProofOnly), nil)
 	require.NoError(t, err)
-	require.Empty(t, rootProofGraphs(cred),
+	require.Empty(t, rootProofsOf(t, cred),
 		"a presentation with no proof of its own links none, whatever it carries")
 }
 
@@ -168,7 +181,7 @@ func TestRootProofGraphsRefuseAnAmbiguousRoot(t *testing.T) {
 	require.Contains(t, mustNQuads(t, cred), "security#proofValue",
 		"the detached node's proof must survive parsing")
 
-	require.Empty(t, rootProofGraphs(cred),
+	require.Empty(t, rootProofsOf(t, cred),
 		"two unreferenced nodes mean the document does not say which is its root")
 }
 
@@ -233,34 +246,28 @@ func TestVerifyRefusesAStubRootProof(t *testing.T) {
 	require.NoError(t, err)
 
 	// The stub really is what the root links to, or this proves nothing.
-	require.Len(t, rootProofGraphs(reparsed), 1,
+	require.Len(t, rootProofsOf(t, reparsed), 1,
 		"the root still links a proof graph - it is the CONTENT that is a stub")
 
 	require.Error(t, NewSuite().Verify(reparsed, pub),
 		"a root proof carrying only a value must not select a proof from elsewhere")
 }
 
-// TestRootProofGraphsOnlyAcceptsRemovablePredicates: the predicates this
-// accepts as a root proof link have to be exactly the ones
-// credential.CredentialWithoutProofForTypes removes.
+// TestTheProofsFoundAreTheProofsRemoved: the link this accepts as a root
+// proof and the link removed from the hashed document have to be the same
+// one. They used to be two lists in two packages, and a link accepted here
+// but not removed there leaves that proof in the hashed document - so
+// verification cannot reproduce the signature and a valid document is
+// rejected.
 //
-// A link accepted here but not removed there leaves that proof in the
-// hashed document, so verification cannot reproduce a signature computed
-// with proofs removed - and a valid document is rejected. Widening the set
-// here without widening removal is a break, not a tolerance.
-func TestRootProofGraphsOnlyAcceptsRemovablePredicates(t *testing.T) {
-	require.ElementsMatch(t, []string{
-		"https://w3id.org/security#proof",
-		"http://www.w3.org/ns/credentials#proof",
-	}, proofPredicates,
-		"keep this in step with CredentialWithoutProofForTypes in pkg/vc20/credential")
-
-	// And a document linking its proof under an IRI removal does not strip
-	// names no root proof, rather than being accepted and then failing to
-	// hash.
-	const unsupportedIRI = `{
+// credential.RootProofs now does both in one pass, so they cannot drift.
+// What is worth pinning is the consequence: a document linking its proof
+// under the VC 1.1-era spelling is found AND removed, rather than found and
+// left in.
+func TestTheProofsFoundAreTheProofsRemoved(t *testing.T) {
+	const legacySpelling = `{
 		"@context": ["https://www.w3.org/ns/credentials/v2",
-			{"sig": {"@id": "https://www.w3.org/ns/credentials#proof", "@container": "@graph"}}],
+			{"sig": {"@id": "https://www.w3.org/2018/credentials#proof", "@container": "@graph"}}],
 		"type": ["VerifiablePresentation"],
 		"holder": "did:example:holder",
 		"sig": {
@@ -272,9 +279,17 @@ func TestRootProofGraphsOnlyAcceptsRemovablePredicates(t *testing.T) {
 		}
 	}`
 
-	cred, err := credential.NewRDFCredentialFromJSON([]byte(unsupportedIRI), nil)
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(legacySpelling), nil)
 	require.NoError(t, err)
-	require.Empty(t, rootProofGraphs(cred))
+
+	proofs, without, err := cred.RootProofs()
+	require.NoError(t, err)
+	require.Len(t, proofs, 1, "the legacy spelling names a root proof")
+
+	form, err := without.CanonicalForm()
+	require.NoError(t, err)
+	require.NotContains(t, form, "security#proofValue",
+		"and the document it secures must not still contain it")
 }
 
 // TestVerifyAcceptsAPresentationWhoseIDIsTheHolder: `holder` is a node
@@ -290,7 +305,7 @@ func TestVerifyAcceptsAPresentationWhoseIDIsTheHolder(t *testing.T) {
 		"holder": "did:example:holder"
 	}`, "authentication")
 
-	require.Len(t, rootProofGraphs(signed), 1,
+	require.Len(t, rootProofsOf(t, signed), 1,
 		"a self-edge must not hide the root")
 
 	compact, err := signed.ToCompactJSON()
@@ -318,7 +333,7 @@ func TestVerifyAcceptsAReferenceCycle(t *testing.T) {
 		}
 	}`, "assertionMethod")
 
-	require.Len(t, rootProofGraphs(signed), 1,
+	require.Len(t, rootProofsOf(t, signed), 1,
 		"a cycle must not hide the root")
 
 	compact, err := signed.ToCompactJSON()
@@ -390,7 +405,7 @@ func TestVerifyRefusesAProofMovedWithinACycle(t *testing.T) {
 	require.Contains(t, mustNQuads(t, reparsed), "security#proofValue",
 		"the moved proof must survive parsing")
 
-	require.Empty(t, rootProofGraphs(reparsed),
+	require.Empty(t, rootProofsOf(t, reparsed),
 		"a proof on a node that is not the credential is not the credential's")
 	require.Error(t, NewSuite().Verify(reparsed, pub))
 }
@@ -437,7 +452,7 @@ func TestVerifyTriesEveryRootProof(t *testing.T) {
 	signedTwice, err := credential.NewRDFCredentialFromJSON(twiceJSON, nil)
 	require.NoError(t, err)
 
-	require.Len(t, rootProofGraphs(signedTwice), 2,
+	require.Len(t, rootProofsOf(t, signedTwice), 2,
 		"the document must really carry two root proofs, or this proves nothing")
 
 	for name, key := range map[string]ed25519.PublicKey{
@@ -494,7 +509,7 @@ func TestSignAndVerifyACyclicPresentation(t *testing.T) {
 		"the link back to the presentation must reach the dataset")
 
 	signed, pub := signDocument(t, cyclicPresentation, "authentication")
-	require.Len(t, rootProofGraphs(signed), 1,
+	require.Len(t, rootProofsOf(t, signed), 1,
 		"the presentation is the document's root even though the credential points back at it")
 	require.NoError(t, NewSuite().Verify(signed, pub),
 		"a document this package signed must verify")
@@ -529,7 +544,7 @@ func TestRootProofGraphsStillRefuseAMovedProofInACycle(t *testing.T) {
 	reparsed, err := credential.NewRDFCredentialFromJSON(tampered, nil)
 	require.NoError(t, err)
 
-	require.Empty(t, rootProofGraphs(reparsed),
+	require.Empty(t, rootProofsOf(t, reparsed),
 		"a proof on the embedded credential is not the presentation's own")
 	require.Error(t, NewSuite().Verify(reparsed, pub))
 }
@@ -587,7 +602,7 @@ func TestRootProofGraphsRefuseAnEmbeddedOnlyRoot(t *testing.T) {
 	require.Contains(t, nq, "credentials#verifiableCredential", "and the aliased embedding link must expand to the real predicate")
 	require.Contains(t, nq, "security#proofValue", "and so must the moved proof")
 
-	require.Empty(t, rootProofGraphs(cred),
+	require.Empty(t, rootProofsOf(t, cred),
 		"a document whose only credential-typed node is one it carries does not say what it is")
 }
 
@@ -618,7 +633,7 @@ func TestSignAndVerifyACredentialWhoseSubjectIsACredential(t *testing.T) {
 	require.Contains(t, nq, "credentials#credentialSubject", "and so must the containment link")
 
 	signed, pub := signDocument(t, credentialAboutACredential, "assertionMethod")
-	require.Len(t, rootProofGraphs(signed), 1,
+	require.Len(t, rootProofsOf(t, signed), 1,
 		"the outer credential is the root; its subject is a credential it carries")
 	require.NoError(t, NewSuite().Verify(signed, pub),
 		"a document this package signed must verify")
@@ -667,7 +682,7 @@ func TestSignAndVerifyACredentialThatIsItsOwnSubject(t *testing.T) {
 		"the self-link must reach the dataset, or this proves nothing")
 
 	signed, pub := signDocument(t, selfSubject, "assertionMethod")
-	require.Len(t, rootProofGraphs(signed), 1, "a self-link contains nothing")
+	require.Len(t, rootProofsOf(t, signed), 1, "a self-link contains nothing")
 	require.NoError(t, NewSuite().Verify(signed, pub))
 }
 
@@ -699,7 +714,7 @@ func TestVerifyRefusesAProofOfAnotherCryptosuite(t *testing.T) {
 
 	// The root still LINKS a complete typed proof - it is the suite label
 	// that disqualifies it, not the selection.
-	require.Len(t, rootProofGraphs(reparsed), 1)
+	require.Len(t, rootProofsOf(t, reparsed), 1)
 
 	err = NewSuite().Verify(reparsed, pub)
 	require.Error(t, err)

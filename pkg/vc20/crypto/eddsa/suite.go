@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
-	"github.com/SUNET/vc/pkg/vc20/crypto/common"
 
 	"github.com/multiformats/go-multibase"
 	"github.com/piprate/json-gold/ld"
@@ -49,10 +48,14 @@ func (s *Suite) Sign(cred *credential.RDFCredential, key ed25519.PrivateKey, opt
 		return nil, fmt.Errorf("sign options are nil")
 	}
 
-	// 1. Get canonical document hash (without proof)
-	credWithoutProof, err := cred.CredentialWithoutProof()
+	// 1. Get canonical document hash - the document this proof SECURES,
+	// which is the document with the root's own proofs removed and every
+	// embedded proof left where it is. Removing every proof in the graph
+	// meant a presentation's signature did not cover an embedded
+	// credential's issuer proof at all.
+	_, credWithoutProof, err := cred.RootProofs()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get credential without proof: %w", err)
+		return nil, fmt.Errorf("failed to get the document the proof secures: %w", err)
 	}
 
 	// 2. Create proof configuration
@@ -173,6 +176,16 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 // proofPurpose, a created or a verificationMethod from a proof that FAILED.
 // An attacker only has to prepend one: the suite verifies the genuine proof
 // later in the array while the caller describes the forged one in front.
+//
+// The proofs checked are the ones the document attaches to ITSELF, read off
+// the document by credential.RootProofs rather than inferred from the
+// reference graph. Verify removes the root's proofs when hashing, so a proof
+// MOVED onto an embedded credential leaves the secured document unchanged -
+// and a graph-shaped guess at which node is the root cannot separate a
+// presentation that links a credential through a custom property from a
+// credential whose subject is itself a credential linking back. The document
+// has already answered the question; Sign attaches its proof to the
+// top-level node.
 func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKey) (map[string]any, error) {
 	if cred == nil {
 		return nil, fmt.Errorf("credential is nil")
@@ -181,108 +194,25 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKe
 		return nil, fmt.Errorf("public key is nil")
 	}
 
-	// 1. Extract proof object
-	proofCred, err := cred.ProofObject()
+	proofs, credWithoutProof, err := cred.RootProofs()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get proof object: %w", err)
+		return nil, err
 	}
-
-	// Convert proof to JSON to extract values
-	proofJSONBytes, err := json.Marshal(proofCred)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert proof to JSON: %w", err)
-	}
-
-	var proofJSON any
-	if err := json.Unmarshal(proofJSONBytes, &proofJSON); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal proof JSON: %w", err)
-	}
-
-	// Compact the proof JSON to ensure we have short keys
-	proc := ld.NewJsonLdProcessor()
-	compactOpts := credential.NewJSONLDOptions("")
-	context := map[string]any{
-		"@context": credential.ContextV2,
-	}
-
-	compactedProof, err := proc.Compact(proofJSON, context, compactOpts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compact proof JSON: %w", err)
-	}
-
-	proofMap := compactedProof
-
-	// WHICH proof, and it has to be the one the document attaches to
-	// ITSELF. ProofObject() keeps proof quads and drops the links that say
-	// whose proof is whose, so the answer is read off the document instead
-	// - see rootProofGraphs.
-	//
-	// Taking the first proof found is not merely arbitrary here, it is
-	// forgeable. Verify removes EVERY proof when hashing, so moving a proof
-	// from the presentation onto the embedded credential leaves the hash
-	// unchanged: someone holding a legitimately signed presentation could
-	// move the holder proof down, delete the presentation's own proof, and
-	// have the misplaced proof verify with the holder's key against a
-	// document the holder never signed in that shape.
-	//
-	// So a document that attaches no proof to itself is REFUSED rather than
-	// checked against whatever proof it happens to contain.
-	rootGraphs := rootProofGraphs(cred)
-	if len(rootGraphs) == 0 {
+	if len(proofs) == 0 {
 		return nil, fmt.Errorf("the document carries no proof of its own to verify")
 	}
 
-	// Canonicalize the document the SAME way Sign does.
-	//
-	// Sign hashes CredentialWithoutProof() - every proof gone - of the
-	// document as given. Verify did two things differently, and each one
-	// broke a different presentation:
-	//
-	//   - It removed only proofs attached to nodes of a target type read
-	//     from OriginalJSON(). That works while OriginalJSON() is the
-	//     compact document the caller passed in. It is EXPANDED JSON-LD - a
-	//     JSON array - for a credential re-parsed from MarshalJSON output,
-	//     and then the map[string]any unmarshal fails, the error is
-	//     swallowed, and the target silently stays "VerifiableCredential".
-	//     For a presentation that removes the EMBEDDED credential's issuer
-	//     proof and leaves the presentation's own proof - the one being
-	//     verified - in the canonicalized document.
-	//
-	//   - It called NormalizeVerifiableCredentialGraph(), which Sign does
-	//     not. That rewrites the verifiableCredential graph, so any
-	//     presentation with a credential IN it canonicalized differently
-	//     here than it did when it was signed - which is every presentation
-	//     openid4vp.VPBuilder produces, in every serialization.
-	//
-	// Measured against the old code: a presentation carrying NO credential
-	// verified unless it had been re-parsed from expanded JSON; one carrying
-	// a credential failed in every form, including straight from Sign's
-	// return value. ecdsa-rdfc-2019 does neither of these things and has
-	// always worked, which is why only the EdDSA half was affected.
-	//
-	// NOTE: removing every proof means a presentation's signature does not
-	// cover an embedded credential's issuer proof. That is pre-existing and
-	// true of ECDSA too; changing it means changing both suites' signing
-	// side as well, which is not this fix.
-	//
-	// Once, not once per proof. Every proof is checked against the SAME
-	// proof-free document - that is what "remove every proof when hashing"
-	// means - so a document with several root proofs used to repeat the
-	// most expensive step, JSON-LD canonicalization, for each of them. The
-	// proof CONFIGURATION hash stays per proof, since that is the part
-	// that differs.
-	credWithoutProof, err := cred.CredentialWithoutProof()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get credential without proof: %w", err)
-	}
-
+	// Once, not once per proof. Every proof the root carries secures the
+	// SAME document - that is what a proof set means - so the expensive
+	// step, JSON-LD canonicalization, runs once. The proof CONFIGURATION
+	// hash stays per proof, since that is the part that differs.
 	docCanonical, err := credWithoutProof.CanonicalForm()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get canonical form of document: %w", err)
 	}
 	docHash := sha256.Sum256([]byte(docCanonical))
 
-	// EVERY proof the root links, not just the first. Sign appends rather
+	// EVERY proof the root carries, not just the first. Sign appends rather
 	// than replaces, so a document signed by two keys carries two root
 	// proofs - and checking only the first fails the second signature
 	// against its own public key.
@@ -291,10 +221,10 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKe
 	// failure is what gets reported, since a document whose proofs all fail
 	// is a document that did not verify.
 	var lastErr error
-	for _, graphName := range rootGraphs {
-		proofNode := common.FindProofNodeInGraphs(proofMap, ProofType, []string{graphName})
-		if proofNode == nil {
-			lastErr = fmt.Errorf("the document's own proof link names no complete proof")
+	for _, expanded := range proofs {
+		proofNode, err := credential.CompactRootProof(expanded)
+		if err != nil {
+			lastErr = err
 			continue
 		}
 		// THIS suite's proofs, not any DataIntegrityProof. The type alone
@@ -320,6 +250,7 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKe
 	if lastErr == nil {
 		lastErr = fmt.Errorf("the document's own proof link names no complete proof")
 	}
+
 	return nil, lastErr
 }
 
