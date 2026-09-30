@@ -237,6 +237,12 @@ list signers by whatever the default says rather than failing loudly.
 
 ### What happens when the PDP cannot judge a token
 
+This narrowing applies **only when `verifier.trust.pdp_url` is configured**.
+Without one the evaluator allows everything, so narrowing would buy no
+policy decision while still refusing the resolver — and vc's own registry
+issues status list tokens with no `kid`, `jwk` or `x5c`, so a default
+registry-only deployment would stop verifying its own lists.
+
 `JWTTrustVerifier` resolves key material from the token's own header and
 works on JWTs. Two kinds of token give it nothing to judge:
 

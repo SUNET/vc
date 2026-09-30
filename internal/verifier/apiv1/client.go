@@ -204,8 +204,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		// Trust-evaluated verification, and the path a deployment with a
 		// PDP takes: the key comes from the status list token's own x5c or
 		// jwk header and go-trust decides whether that signer may speak for
-		// these credentials. The options above remain for deployments
-		// running without a trust framework.
+		// these credentials.
 		//
 		// c.jwtTrustVerifier is built above and is never nil; it carries
 		// the same ParseX5C/ParseJWK and evaluator the credential paths use,
@@ -220,7 +219,21 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		// refused in that configuration, because reaching it would be a way
 		// to a status value with no policy decision at all. See
 		// resolveStatusListKey.
-		statusListOpts = append(statusListOpts, revocation.WithTokenVerifier(c.jwtTrustVerifier))
+		//
+		// ONLY WITH A PDP, and that condition is load-bearing. Without one
+		// the evaluator is AllowAllEvaluator, so the narrowing above would
+		// buy no policy decision at all while still refusing the resolver -
+		// and vc's OWN registry issues status list tokens with no kid, jwk
+		// or x5c (internal/registry/tokenstatuslistissuer), so a default
+		// registry-only deployment could no longer verify its own lists.
+		// With revocation.fail_open at its default that reads as "not
+		// revoked". Narrowing is only worth having when there is something
+		// to narrow TO.
+		if statusListTrustEvaluationEnabled(cfg) {
+			statusListOpts = append(statusListOpts, revocation.WithTokenVerifier(c.jwtTrustVerifier))
+		} else {
+			c.log.Warn("status list signer trust evaluation is DISABLED - no verifier.trust.pdp_url configured; status list tokens are verified by key resolution alone")
+		}
 		// Loaded at startup, not per request: a key file that is missing or
 		// malformed should stop the service rather than surface later as
 		// every external status list failing to verify - which fail_open
@@ -826,6 +839,21 @@ func parseScopes(scopeStr string) []string {
 		return []string{}
 	}
 	return strings.Split(scopeStr, " ")
+}
+
+// statusListTrustEvaluationEnabled reports whether a status list signer can
+// actually be judged by a policy, which is the only thing that makes the
+// trust verifier worth installing.
+//
+// Without verifier.trust.pdp_url the evaluator is AllowAllEvaluator: the
+// trust path would narrow how a token may be verified - a token naming no
+// key in its own header, or a CWT, verifies against a pinned key or not at
+// all - while producing no policy decision to show for it. vc's own
+// registry issues status list tokens with no kid, jwk or x5c, so that
+// narrowing would stop a default registry-only deployment verifying its own
+// lists, which fail_open then reads as "not revoked".
+func statusListTrustEvaluationEnabled(cfg *model.Cfg) bool {
+	return cfg != nil && cfg.Verifier != nil && cfg.Verifier.Trust.PDPURL != ""
 }
 
 // jwksKeyResolverAdapter adapts trust.JWKSKeyResolver to revocation.KeyResolver.

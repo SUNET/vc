@@ -467,3 +467,55 @@ func TestStatusList_PinnedKeyOutranksTokenCarriedKey(t *testing.T) {
 	_, err = newChecker(t).CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 2})
 	require.Error(t, err, "a key the operator did not pin must not be accepted just because the token carries it")
 }
+
+// TestStatusList_RegistryShapedTokenVerifiesWithoutATrustVerifier is the
+// deployment the PDP condition in internal/verifier/apiv1 protects.
+//
+// vc's own registry issues status list tokens with no kid, jwk or x5c
+// (internal/registry/tokenstatuslistissuer). With a trust verifier
+// configured those verify against a pinned key or not at all, which is
+// right when there is a policy to consult - and fatal when there is not,
+// because a default registry-only deployment has no pinned key and would
+// stop verifying its own lists. fail_open then reads that as "not revoked".
+//
+// Without a trust verifier the ordinary key resolver answers, as it always
+// did.
+func TestStatusList_RegistryShapedTokenVerifiesWithoutATrustVerifier(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	var body []byte
+	server := serveToken(t, tokenstatuslist.MediaTypeJWT, &body)
+	uri := server.URL + "/statuslists/0"
+
+	statuses := make([]uint8, 8)
+	statuses[2] = tokenstatuslist.StatusInvalid
+	// nameKey false: exactly the registry's shape - an iss, and nothing in
+	// the header to resolve a key from.
+	body = []byte(signStatusListJWT(t, key, uri, "https://registry.example.com", false, statuses))
+
+	checker, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](time.Minute)),
+		WithHTTPClient(http.DefaultClient),
+		WithKeyResolver(testKeyResolver{key: &key.PublicKey}),
+	)
+	require.NoError(t, err)
+
+	result, err := checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 2})
+	require.NoError(t, err, "a registry-issued list must verify in a deployment with no PDP")
+	require.Equal(t, StatusInvalid, result.Status)
+
+	// And with a trust verifier it is refused rather than silently accepted,
+	// which is why installing one without a PDP would be the bug.
+	tv := &recordingTrustVerifier{key: &key.PublicKey, trusted: true}
+	guarded, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](time.Minute)),
+		WithHTTPClient(http.DefaultClient),
+		WithKeyResolver(testKeyResolver{key: &key.PublicKey}),
+		WithTokenVerifier(tv),
+	)
+	require.NoError(t, err)
+	_, err = guarded.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 2})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot be trust-evaluated")
+}

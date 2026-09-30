@@ -191,3 +191,34 @@ func TestRegistryValidate_ApplicationStatusClaimStillValidates(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, result)
 }
+
+// TestStatusListIndex_RejectsUnsafeIntegers: a JSON number decodes to
+// float64, which stops naming an integer exactly above 2^53. Converting a
+// larger one yields a ROUNDED index, so the credential would be checked
+// against a different entry than the one it names - and could land on a
+// neighbour's VALID bit.
+func TestStatusListIndex_RejectsUnsafeIntegers(t *testing.T) {
+	const safe = float64(1<<53 - 1)
+
+	got, ok := statusListIndex(safe)
+	require.True(t, ok, "the largest exactly representable integer is still readable")
+	require.Equal(t, int64(1<<53-1), got)
+
+	for name, value := range map[string]float64{
+		"just past the safe range": float64(1 << 53),
+		"far past it":              1e30,
+		"fractional":               3.5,
+		"negative":                 -1,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, ok := statusListIndex(value)
+			require.False(t, ok, "an index that cannot be read back as written must be refused, not rounded")
+		})
+	}
+
+	// The exact forms are unaffected: a string or json.Number carries the
+	// value without passing through float64 at all.
+	got, ok = statusListIndex("9007199254740993")
+	require.True(t, ok)
+	require.Equal(t, int64(9007199254740993), got)
+}

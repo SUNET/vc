@@ -2,6 +2,7 @@ package revocation
 
 import (
 	"encoding/json"
+	"math"
 	"strconv"
 
 	"github.com/SUNET/vc/pkg/vc20/contextstore"
@@ -83,6 +84,11 @@ func hasType(entry map[string]any, want string) bool {
 // statusListIndex reads the entry's index. It is written as a string (the
 // same choice W3C's BitstringStatusListEntry makes) so that its canonical
 // RDF form cannot depend on how a JSON number round-trips, but a number is
+// maxExactJSONInteger is the largest integer a float64 represents exactly,
+// 2^53-1. A JSON number decodes to float64, so beyond this an index cannot
+// be read back as written.
+const maxExactJSONInteger = 1<<53 - 1
+
 // accepted too rather than silently treated as absent.
 func statusListIndex(raw any) (int64, bool) {
 	switch v := raw.(type) {
@@ -93,7 +99,17 @@ func statusListIndex(raw any) (int64, bool) {
 		}
 		return i, true
 	case float64:
-		if v != float64(int64(v)) || v < 0 {
+		// A JSON number decodes to float64, which stops being able to name
+		// an integer exactly above 2^53. Converting a larger one yields a
+		// ROUNDED index - so the credential would be checked against a
+		// different entry than the one it names, silently, and a revoked
+		// credential could land on a neighbour's VALID bit.
+		//
+		// Refused rather than rounded. A status list with more than 2^53
+		// entries is not a thing; a value that large is a malformed or
+		// hostile credential, and "cannot read the index" has to mean
+		// refuse, not guess.
+		if v != math.Trunc(v) || v < 0 || v > maxExactJSONInteger {
 			return 0, false
 		}
 		return int64(v), true
