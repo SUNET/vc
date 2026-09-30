@@ -161,21 +161,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		}
 	}
 
-	// Separate gate: the check above reads config, this one reaches the
-	// network. See servicesResolvingW3CContexts.
-	if servicesResolvingW3CContexts[serviceName] {
-		if err := resolveW3CContexts(cfg, log); err != nil {
-			return nil, err
-		}
-	}
-
-	// Issuer only, and before the service switch below nils out sibling
-	// stanzas: the issuer is the one service that enforces the allowlist,
-	// so it is the only one that can refuse an inconsistency in it.
-	if serviceName == "issuer" {
-		if err := checkIssuerContextAllowlist(cfg); err != nil {
-			return nil, err
-		}
+	// Before the service switch below nils out sibling stanzas, since the
+	// allowlist lives in the issuer's.
+	if err := w3cStartupChecks(cfg, serviceName, log); err != nil {
+		return nil, err
 	}
 
 	// Only services that depend on credentials need VCTM loading
@@ -347,6 +336,29 @@ func customTypes(types []string) []string {
 		}
 	}
 	return out
+}
+
+// w3cStartupChecks runs the W3C configuration gates, in the order they have
+// to run in.
+//
+// The allowlist is an OUTBOUND-FETCH BOUNDARY, so it is enforced before
+// anything dereferences a context. resolveW3CContexts pins every configured
+// credential_contexts URL, so running it first contacted a host the operator
+// had deliberately left out of the allowlist and only then refused it - by
+// which time the request had been made.
+//
+// Separate gate for the second half: the first reads config, the second
+// reaches the network. See servicesResolvingW3CContexts.
+func w3cStartupChecks(cfg *model.Cfg, serviceName string, log *logger.Log) error {
+	if serviceName == "issuer" {
+		if err := checkIssuerContextAllowlist(cfg); err != nil {
+			return err
+		}
+	}
+	if servicesResolvingW3CContexts[serviceName] {
+		return resolveW3CContexts(cfg, log)
+	}
+	return nil
 }
 
 // checkIssuerContextAllowlist refuses an issuer whose W3C scopes name

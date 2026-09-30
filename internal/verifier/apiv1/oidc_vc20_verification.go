@@ -59,6 +59,20 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 	}
 
 	for queryID, tokens := range documents {
+		// One credential per query unless the query said otherwise.
+		// CredentialQuery.Multiple defaults to false, and the claim
+		// extraction that follows MERGES every token returned under a query
+		// - so a wallet appending a second credential could overwrite the
+		// first one's claims in the session even though the request never
+		// permitted more than one. Each of them verifies; that is not the
+		// question.
+		if len(tokens) > 1 {
+			scope := c.oidcScopeFor(session, queryID)
+			requested, ok := c.requestedQuery(session, session.ScopeQueryIDs, scope)
+			if !ok || !requested.Multiple {
+				return fmt.Errorf("the response carries %d credentials for one query, which the request did not permit; their claims would be merged", len(tokens))
+			}
+		}
 		for _, token := range tokens {
 			if err := c.verifyOneVC20ForOIDC(ctx, resolver, session, queryID, token); err != nil {
 				return err
@@ -105,22 +119,38 @@ func (c *Client) refuseAResponseThisPathCannotCheck(session *cache.Authorization
 		return fmt.Errorf("the response mixes W3C credentials with %d token(s) this path does not verify, whose claims would be merged unverified", countTokens(others))
 	}
 
-	for _, scope := range c.credentialScopes(session, session.ScopeQueryIDs) {
+	credentialScopes := c.credentialScopes(session, session.ScopeQueryIDs)
+	for _, scope := range credentialScopes {
 		requested, ok := c.requestedQuery(session, session.ScopeQueryIDs, scope)
-		if !ok || !openid4vp.IsW3CVCFormatIdentifier(requested.Format) {
+		if !ok {
 			continue
 		}
+		isW3C := openid4vp.IsW3CVCFormatIdentifier(requested.Format)
+
+		// Every credential scope has to be answered once ANY W3C document
+		// is in the response, not only the W3C ones. A request for a W3C
+		// credential and an SD-JWT, answered with the W3C half alone, has
+		// no unverified token to refuse above - and the session then
+		// completes with nothing for the scope that asked for the other
+		// one. Refusing here is the only place that can see it, since
+		// nothing downstream compares the response against the request.
+		if !isW3C && len(documents) == 0 {
+			continue
+		}
+
 		// A W3C format this stack cannot verify - jwt_vc_json is advertised
 		// and deliberately not requestable - is refused by its own name
 		// rather than as a missing document.
-		if err := openid4vp.ValidateCredentialQuery(requested); err != nil {
-			return fmt.Errorf("the query for scope %s cannot constrain a credential: %w", scope, err)
+		if isW3C {
+			if err := openid4vp.ValidateCredentialQuery(requested); err != nil {
+				return fmt.Errorf("the query for scope %s cannot constrain a credential: %w", scope, err)
+			}
 		}
 		if len(documents[queryIDForScopeIn(session.ScopeQueryIDs, scope)]) > 0 {
 			continue
 		}
 		// A bare document answers a single-scope request.
-		if len(documents[""]) > 0 && len(c.credentialScopes(session, session.ScopeQueryIDs)) == 1 {
+		if len(documents[""]) > 0 && len(credentialScopes) == 1 {
 			continue
 		}
 		return fmt.Errorf("scope %s was requested as %q but the response carries no W3C credential for it", scope, requested.Format)

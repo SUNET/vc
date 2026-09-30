@@ -165,20 +165,36 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 	authCtx.VPToken = vpToken
 	authCtx.PresentationSubmission = presentationSubmission
 
-	// The same gate ProcessDirectPost applies, for the same reason: this
-	// handler stores the extracted claims and issues an authorization code
-	// without ever checking a signature. Making W3C documents readable by
-	// extractAndMapClaims made them injectable HERE too, so the guard has
-	// to sit on both doors and not only the one it was written for.
-	if err := c.verifyVC20ForOIDC(ctx, authCtx, vpToken); err != nil {
-		c.log.Error(err, "W3C VC verification failed on the direct-post path", "session_id", sessionID)
+	// A W3C document is REFUSED here, rather than verified.
+	//
+	// This handler stores the extracted claims and issues an authorization
+	// code without checking a signature anywhere, for any format. That is a
+	// pre-existing gap and a wide one, but making JSON-LD readable by
+	// extractAndMapClaims added a new way through it: an unsigned
+	// credential's credentialSubject would be mapped straight into the
+	// session.
+	//
+	// Refused rather than gated on verifyVC20ForOIDC, because that guard
+	// carries this repository's OIDC-flow assumptions - it binds to
+	// session.RequestObjectNonce, which only GetOIDCRequestObject sets, and
+	// it refuses a response mixing W3C with anything else because nothing
+	// on that path verifies the rest. Neither is true of a handler that
+	// verifies nothing at all, so applying it here would reject valid
+	// responses while still not checking a signature.
+	//
+	// The two endpoints that DO verify are the ones to use: /verification/
+	// direct_post (VerificationDirectPost, which dispatches per format) and
+	// /verification/oidc-direct_post (ProcessDirectPost). This function is
+	// registered on neither.
+	if w3c := openid4vp.W3CDocumentsIn(vpToken); len(w3c) > 0 {
+		c.log.Error(nil, "refusing a W3C credential on the unverified direct-post path", "session_id", sessionID)
 		authCtx.Status = "error"
 		if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 			c.log.Error(err, "Failed to update session with error status")
 		}
 		if c.vpMetrics != nil {
 			c.vpMetrics.VerificationsFailed.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_class", "w3c_verification"),
+				attribute.String("error_class", "w3c_unverified_path"),
 			))
 		}
 		return ErrInvalidVP

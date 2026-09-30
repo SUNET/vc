@@ -566,8 +566,14 @@ func TestVerifyVC20ForOIDCRefusesAMixedResponse(t *testing.T) {
 
 // TestHandleDirectPostRefusesAnUnverifiedW3CToken: HandleDirectPost stores
 // the extracted claims and issues an authorization code without checking a
-// signature anywhere. Making W3C documents readable by extractAndMapClaims
-// made them injectable through this door too, not only ProcessDirectPost's.
+// signature anywhere, for any format. Making W3C documents readable by
+// extractAndMapClaims added a new way through that: an unsigned
+// credential's credentialSubject would be mapped straight into the session.
+//
+// The refusal is W3C-only on purpose. This handler is registered on no
+// route - the two endpoints that verify are VerificationDirectPost and
+// ProcessDirectPost - and its non-W3C behaviour is the pre-existing, wider
+// gap, which this branch neither widens nor is the place to close.
 func TestHandleDirectPostRefusesAnUnverifiedW3CToken(t *testing.T) {
 	ctx := t.Context()
 	client, _ := CreateTestClientWithMock(t, nil)
@@ -591,4 +597,81 @@ func TestHandleDirectPostRefusesAnUnverifiedW3CToken(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, stored.VerifiedClaims, "nothing from an unverified document may reach the session")
 	require.Empty(t, stored.Code, "and no authorization code may be issued for it")
+
+	// Base64 does not get round it: the same detection the verified paths
+	// use is what decides here.
+	require.ErrorIs(t,
+		client.HandleDirectPost(ctx, sessionID, base64.RawURLEncoding.EncodeToString([]byte(unsignedW3CPresentation)), nil),
+		ErrInvalidVP)
+
+	// And a non-W3C response is untouched by this refusal, or the handler
+	// would be broken rather than guarded.
+	const otherSession = "session-handle-direct-post-sdjwt"
+	sdjwt := sdJWTSession()
+	sdjwt.SessionID = otherSession
+	sdjwt.Status = cache.SessionStatusPending
+	sdjwt.CreatedAt = time.Now()
+	sdjwt.ExpiresAt = time.Now().Add(10 * time.Minute).Unix()
+	sdjwt.RedirectURI = "https://client.example.com/callback"
+	sdjwt.State = otherSession
+	require.NoError(t, client.cacheService.AuthContext.Create(ctx, sdjwt))
+	require.NoError(t, client.HandleDirectPost(ctx, otherSession, "eyJhbGciOiJFUzI1NiJ9.x.y~", nil))
+}
+
+// TestVerifyVC20ForOIDCRefusesExtraCredentialsForOneQuery:
+// CredentialQuery.Multiple defaults to false, and the claim extraction that
+// follows MERGES every token returned under a query - so a wallet appending
+// a second credential could overwrite the first one's claims in the session
+// even though the request never permitted more than one. Both verify; that
+// is not the question.
+func TestVerifyVC20ForOIDCRefusesExtraCredentialsForOneQuery(t *testing.T) {
+	client, _, present := w3cOIDCFixture(t)
+	domain, err := client.cfg.Verifier.VerifierClientID(client.pkiSigningCert)
+	require.NoError(t, err)
+
+	session := w3cOIDCSession(nil)
+	token := present(t, session.RequestObjectNonce, domain)
+
+	two, err := json.Marshal(map[string][]string{"eudi_pid": {token, token}})
+	require.NoError(t, err)
+
+	err = client.verifyVC20ForOIDC(t.Context(), session, string(two))
+	require.Error(t, err, "a query that did not ask for multiple credentials must not be answered with two")
+	require.Contains(t, err.Error(), "did not permit")
+
+	// multiple: true is the wallet's licence to return more than one, and
+	// then it must be accepted.
+	permitted := w3cOIDCSession(nil)
+	permitted.DCQLQuery.Credentials[0].Multiple = true
+	require.NoError(t, client.verifyVC20ForOIDC(t.Context(), permitted, string(two)))
+}
+
+// TestVerifyVC20ForOIDCRefusesAnUnansweredScope: a request for a W3C
+// credential AND an SD-JWT, answered with the W3C half alone, carries no
+// unverified token to refuse - and the session then completes with nothing
+// for the scope that asked for the other one. Nothing downstream compares
+// the response against the request, so this is the only place it can be
+// seen.
+func TestVerifyVC20ForOIDCRefusesAnUnansweredScope(t *testing.T) {
+	client, _, present := w3cOIDCFixture(t)
+	domain, err := client.cfg.Verifier.VerifierClientID(client.pkiSigningCert)
+	require.NoError(t, err)
+
+	session := w3cOIDCSession(nil)
+	session.Scopes = append(session.Scopes, "ehic")
+	session.DCQLQuery.Credentials = append(session.DCQLQuery.Credentials, openid4vp.CredentialQuery{
+		ID:     "eudi_ehic",
+		Format: openid4vp.FormatSDJWTVC,
+		Meta:   openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:ehic:1"}},
+	})
+	session.ScopeQueryIDs["ehic"] = "eudi_ehic"
+
+	onlyW3C, err := json.Marshal(map[string][]string{
+		"eudi_pid": {present(t, session.RequestObjectNonce, domain)},
+	})
+	require.NoError(t, err)
+
+	err = client.verifyVC20ForOIDC(t.Context(), session, string(onlyW3C))
+	require.Error(t, err, "the SD-JWT scope was requested and nothing answered it")
+	require.Contains(t, err.Error(), "ehic")
 }

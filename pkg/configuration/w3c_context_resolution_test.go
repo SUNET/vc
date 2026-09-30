@@ -209,3 +209,58 @@ func TestCheckIssuerContextAllowlist(t *testing.T) {
 		}))
 	})
 }
+
+// TestW3CStartupChecksEnforceTheAllowlistBeforeFetching: the allowlist is an
+// outbound-fetch boundary. Running resolveW3CContexts first contacted every
+// configured context - including one the operator had deliberately left out
+// of the allowlist - and only then refused it, by which time the request had
+// been made.
+//
+// The order is only observable through a context that CANNOT be resolved: an
+// unregistered loopback URL, which the loader refuses to dial. Run
+// allowlist-first and the error names the allowlist; run resolution first
+// and it names the failed load. A resolvable context would produce the same
+// message either way, which is how the first version of this test passed
+// against the very ordering it was written to catch.
+func TestW3CStartupChecksEnforceTheAllowlistBeforeFetching(t *testing.T) {
+	log := logger.NewSimple("test")
+	const diplomaIRI = "https://example.org/diploma#DiplomaCredential"
+
+	unreachable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/ld+json")
+		_, _ = w.Write([]byte(`{"@context":{"DiplomaCredential":"` + diplomaIRI + `"}}`))
+	}))
+	t.Cleanup(unreachable.Close)
+
+	cfgWithAllowlist := func(allowlist []string) *model.Cfg {
+		return &model.Cfg{
+			Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{"diploma": {
+				Format:               openid4vp.FormatLdpVCDCQL,
+				CredentialTypes:      []string{"DiplomaCredential"},
+				CredentialContexts:   []string{unreachable.URL},
+				CredentialTypeValues: [][]string{{openid4vp.BaseVCTypeIRI, diplomaIRI}},
+			}}},
+			Issuer: &model.Issuer{JSONLDContextAllowlist: allowlist},
+		}
+	}
+
+	err := w3cStartupChecks(cfgWithAllowlist(nil), "issuer", log)
+	require.Error(t, err, "an issuer whose scope names a context its allowlist does not must not start")
+	assert.Contains(t, err.Error(), "jsonld_context_allowlist",
+		"the allowlist must refuse it before anything dereferences the context")
+	assert.NotContains(t, err.Error(), "could not be loaded",
+		"reaching the context at all is the failure - naming it afterwards is too late")
+
+	// Allowlisted, the same context is dereferenced and the fetch is what
+	// fails. That is the contrast that makes the assertion above mean
+	// something: both gates are live, and only their order decides.
+	err = w3cStartupChecks(cfgWithAllowlist([]string{unreachable.URL}), "issuer", log)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not be loaded")
+
+	// The verifier loads the same shared file and enforces no allowlist, so
+	// the allowlist must not speak for it: it gets as far as the fetch.
+	err = w3cStartupChecks(cfgWithAllowlist(nil), "verifier", log)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not be loaded")
+}

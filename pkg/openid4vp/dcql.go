@@ -605,28 +605,41 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 		// the whole constraint - so [[]] is an unconstrained request wearing
 		// a constraint's shape.
 		for i, alternative := range query.Meta.TypeValues {
-			// Base-only is the same defect as empty, one step along: every
-			// W3C credential carries VerifiableCredential, so an alternative
-			// naming only it is satisfied by all of them. The config path
+			// EVERY member has to be a fully expanded IRI, not just one.
+			// type_values are matched as expanded IRIs (OpenID4VP 1.0
+			// B.3.2), the verifier drops relative ones from the credential
+			// side for the same reason, and MatchTypeValues requires a
+			// credential to carry ALL of an alternative's types - so an
+			// alternative holding one good IRI and one compact term
+			// validates, is sent, and can never match. A query that cannot
+			// be satisfied is not a constraint, it is an outage wearing a
+			// constraint's shape. Config load refuses these too; this is
+			// the path templates and API callers arrive by.
+			for j, member := range alternative {
+				// Strict: see credential.IsAbsoluteIRI. A colon alone does
+				// not make a reference absolute.
+				if member != "" && credential.IsAbsoluteIRI(member) {
+					continue
+				}
+				return &DCQLValidationError{
+					Field:   fmt.Sprintf("meta.type_values[%d][%d]", i, j),
+					Message: fmt.Sprintf("type_values members are matched as fully expanded IRIs (OpenID4VP 1.0 B.3.2), so %q can never match a credential", member),
+				}
+			}
+			// And at least one of them has to NARROW. Base-only is the
+			// same defect as empty, one step along: every W3C credential
+			// carries VerifiableCredential, so an alternative naming only
+			// it is satisfied by all of them. The config path
 			// (CredentialMetadata.w3cTypeValues) already refuses that; an
 			// API-supplied query has to be held to the same rule, or the
 			// request over-discloses without ever looking unconstrained.
-			// Absolute, not merely different from the base. type_values are
-			// matched as fully expanded IRIs (OpenID4VP 1.0 B.3.2), so a
-			// compact term like "DiplomaCredential" narrows nothing: it
-			// cannot equal anything a credential expands to, and the verifier
-			// drops relative IRIs from the credential side for the same
-			// reason. Config load refuses these too; this is the path
-			// templates and API callers arrive by.
 			narrowing := slices.ContainsFunc(alternative, func(t string) bool {
-				// Strict: see credential.IsAbsoluteIRI. A colon alone does
-				// not make a reference absolute.
-				return t != "" && t != BaseVCTypeIRI && credential.IsAbsoluteIRI(t)
+				return t != BaseVCTypeIRI
 			})
 			if !narrowing {
 				return &DCQLValidationError{
 					Field:   fmt.Sprintf("meta.type_values[%d]", i),
-					Message: "each type_values alternative must name at least one fully expanded IRI beyond " + BaseVCTypeIRI + "; a relative term matches nothing and a base-only alternative matches every W3C credential",
+					Message: "each type_values alternative must name at least one fully expanded IRI beyond " + BaseVCTypeIRI + "; a base-only alternative matches every W3C credential",
 				}
 			}
 		}
