@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/SUNET/vc/internal/apigw/db"
 
@@ -30,6 +31,17 @@ type RevokeCredentialRequest struct {
 	// knows exactly which credential to revoke should say so.
 	StatusListURI string `json:"status_list_uri,omitempty" validate:"omitempty,url"`
 	Index         *int64 `json:"index,omitempty" validate:"omitempty,gte=0"`
+	// Backend narrows further, and is only meaningful alongside the pair
+	// above.
+	//
+	// An entry is identified by (status_list_uri, idx, backend), not by the
+	// first two: the registry and an external status service can serve the
+	// same URI and index, which is why the store keys on all three. So a
+	// pair alone can select more than one entry, and "revoke this entry"
+	// would silently act on somebody else's as well. Naming the backend
+	// says which; leaving it out when the pair is ambiguous is refused
+	// rather than resolved by guessing.
+	Backend string `json:"backend,omitempty" validate:"omitempty,oneof=registry status_service"`
 
 	// Authorize reports whether this caller may revoke an entry issued
 	// under a given (authentic source, scope). It is supplied by the HTTP
@@ -113,13 +125,31 @@ func (c *Client) RevokeCredential(ctx context.Context, req *RevokeCredentialRequ
 		return nil, fmt.Errorf("failed to look up status entries: %w", err)
 	}
 
-	reply := &RevokeCredentialReply{Identifier: req.Identifier, Revoked: []*RevokedEntry{}}
-
-	var refused int
+	// Narrowing first, so an ambiguous selection is refused before anything
+	// is acted on rather than after half of it has been.
+	selected := make([]*db.CredentialStatusEntry, 0, len(entries))
 	for _, e := range entries {
 		if req.StatusListURI != "" && (e.StatusListURI != req.StatusListURI || e.Index != *req.Index) {
 			continue
 		}
+		if req.Backend != "" && e.Backend != req.Backend {
+			continue
+		}
+		selected = append(selected, e)
+	}
+	if req.StatusListURI != "" && req.Backend == "" && len(selected) > 1 {
+		backends := make([]string, 0, len(selected))
+		for _, e := range selected {
+			backends = append(backends, e.Backend)
+		}
+		return nil, fmt.Errorf("index %d of %q is recorded under more than one backend (%s); name one in `backend` - acting on all of them would revoke a credential that was not asked about",
+			*req.Index, req.StatusListURI, strings.Join(backends, ", "))
+	}
+
+	reply := &RevokeCredentialReply{Identifier: req.Identifier, Revoked: []*RevokedEntry{}}
+
+	var refused int
+	for _, e := range selected {
 		// An entry the caller is not authorized for is skipped, not
 		// reported: telling an unauthorized caller that a subject holds a
 		// credential in some other authentic source is itself a disclosure.
@@ -169,6 +199,9 @@ func (c *Client) RevokeCredential(ctx context.Context, req *RevokeCredentialRequ
 func narrowedTo(req *RevokeCredentialRequest) string {
 	if req.StatusListURI == "" {
 		return ""
+	}
+	if req.Backend != "" {
+		return fmt.Sprintf(" at index %d of %q on backend %q", *req.Index, req.StatusListURI, req.Backend)
 	}
 	return fmt.Sprintf(" at index %d of %q", *req.Index, req.StatusListURI)
 }

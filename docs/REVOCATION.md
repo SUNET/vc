@@ -133,6 +133,12 @@ product, so `(SUNET, ehic)` would pass although it was never granted. And
 not from a generic "is authenticated" check: a rule authorizing some other
 `api/v1` path must not authorize revocation.
 
+`status_list_uri` + `index` narrow the operation to one entry. Since an
+entry is identified by all three of `(status_list_uri, idx, backend)`, that
+pair can select more than one, and a request naming only the pair when it is
+ambiguous is **refused** — `backend` says which. Acting on both would revoke
+a credential nobody asked about.
+
 Entries the caller may not act on are skipped, not named — the response
 does not tell a caller which credentials exist outside their grants. A
 request that ends up acting on nothing is an error, not an empty success.

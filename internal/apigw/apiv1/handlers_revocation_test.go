@@ -305,3 +305,74 @@ func grants(allowed ...pair) func(string, string) bool {
 }
 
 func allowAll(string, string) bool { return true }
+
+// sharedURIEntries are two entries at the SAME list URI and index under
+// different backends. That is a reconfiguration rather than a normal state,
+// but it is precisely why the store keys on all three columns, so the
+// revoke endpoint has to cope with it too.
+func sharedURIEntries() []*db.CredentialStatusEntry {
+	const uri = "https://status.example.com/statuslists/1"
+	return []*db.CredentialStatusEntry{
+		{StatusListURI: uri, Index: 7, Identifier: "person-1", Backend: "registry", Section: 3},
+		{StatusListURI: uri, Index: 7, Identifier: "person-1", Backend: "status_service"},
+	}
+}
+
+// TestRevokeCredential_AmbiguousNarrowingIsRefused: the caller asked to act
+// on ONE entry, and (status_list_uri, idx) does not identify one. Acting on
+// both would revoke a credential nobody asked about.
+func TestRevokeCredential_AmbiguousNarrowingIsRefused(t *testing.T) {
+	issuer := &recordingIssuer{}
+	c := revokeClient(t, &stubStatusStore{entries: sharedURIEntries()}, issuer)
+
+	idx := int64(7)
+	_, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{
+		Identifier:    "person-1",
+		StatusListURI: "https://status.example.com/statuslists/1",
+		Index:         &idx,
+		Authorize:     allowAll,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "more than one backend")
+	require.Empty(t, issuer.calls, "nothing may be acted on before the ambiguity is resolved")
+}
+
+// TestRevokeCredential_BackendResolvesTheAmbiguity: naming the backend
+// selects exactly one of them, and leaves the other alone.
+func TestRevokeCredential_BackendResolvesTheAmbiguity(t *testing.T) {
+	issuer := &recordingIssuer{}
+	c := revokeClient(t, &stubStatusStore{entries: sharedURIEntries()}, issuer)
+
+	idx := int64(7)
+	reply, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{
+		Identifier:    "person-1",
+		StatusListURI: "https://status.example.com/statuslists/1",
+		Index:         &idx,
+		Backend:       "status_service",
+		Authorize:     allowAll,
+	})
+	require.NoError(t, err)
+	require.Len(t, reply.Revoked, 1)
+	require.Len(t, issuer.calls, 1)
+	require.Equal(t, "status_service", issuer.calls[0].Backend)
+}
+
+// TestRevokeCredential_BackendAloneDoesNotNarrow: without the pair, a
+// backend filter would quietly revoke every entry that subject holds on
+// that backend under the banner of a narrowed request. It filters, and the
+// unnarrowed case still means "everything".
+func TestRevokeCredential_BackendNarrowsTheUnnarrowedCase(t *testing.T) {
+	issuer := &recordingIssuer{}
+	c := revokeClient(t, &stubStatusStore{entries: []*db.CredentialStatusEntry{
+		externalEntry(), registryEntry(),
+	}}, issuer)
+
+	reply, err := c.RevokeCredential(t.Context(), &RevokeCredentialRequest{
+		Identifier: "person-1",
+		Backend:    "registry",
+		Authorize:  allowAll,
+	})
+	require.NoError(t, err)
+	require.Len(t, reply.Revoked, 1)
+	require.Equal(t, "registry", issuer.calls[0].Backend)
+}
