@@ -110,3 +110,40 @@ func TestResolveW3CContexts(t *testing.T) {
 		}), log))
 	})
 }
+
+// TestResolveW3CContextsPinsTheIssuerAllowlist: issuer.jsonld_context_allowlist
+// names the URLs a MakeVC20 request may put in additional_contexts, and
+// validateAdditionalContexts matches only the literal top-level URL. Nothing
+// checked what that document then pulled in, so an allowlisted context could
+// make the issuer fetch an unlisted public endpoint per request.
+//
+// Pinning the closure at startup is what answers that: the graph is fetched
+// once, at boot, and the signing path then makes no outbound request at all.
+// Transitivity itself is pinned by
+// credential.TestPinRemoteContext_PinsReferencedContexts; what this covers is
+// that config load actually reaches PinRemoteContext for allowlist entries.
+func TestResolveW3CContextsPinsTheIssuerAllowlist(t *testing.T) {
+	log := logger.NewSimple("test")
+
+	loadable := serveContext(t, `{"@context":{"Extra":"https://example.org/extra#Extra"}}`)
+
+	t.Run("an allowlisted context is loaded at startup", func(t *testing.T) {
+		require.NoError(t, resolveW3CContexts(&model.Cfg{
+			Issuer: &model.Issuer{JSONLDContextAllowlist: []string{loadable}},
+		}, log))
+	})
+
+	t.Run("one that cannot be loaded fails the boot", func(t *testing.T) {
+		err := resolveW3CContexts(&model.Cfg{
+			Issuer: &model.Issuer{JSONLDContextAllowlist: []string{"https://ctx.invalid/never-resolves.jsonld"}},
+		}, log)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "issuer.jsonld_context_allowlist",
+			"the failure has to name the setting the operator has to fix")
+	})
+
+	t.Run("no allowlist is not an error", func(t *testing.T) {
+		assert.NoError(t, resolveW3CContexts(&model.Cfg{Issuer: &model.Issuer{}}, log))
+		assert.NoError(t, resolveW3CContexts(&model.Cfg{}, log))
+	})
+}

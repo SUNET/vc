@@ -359,10 +359,43 @@ func customTypes(types []string) []string {
 // trade-off: a deployment configuring credential_contexts must have those
 // hosts reachable when the service starts.
 func resolveW3CContexts(cfg *model.Cfg, log *logger.Log) error {
+	loader := credential.GetGlobalLoader()
+
+	// Every context the issuer may be ASKED to dereference at request time
+	// is pinned here too, transitively.
+	//
+	// issuer.jsonld_context_allowlist names the URLs a MakeVC20 request may
+	// put in additional_contexts, and validateAdditionalContexts matches the
+	// literal top-level URL against it. Nothing checked what that document
+	// then pulled in: json-gold resolves a nested "@context", an "@import"
+	// and a Link-header ContextURL through the same loader, so an
+	// allowlisted context could make the issuer fetch a public endpoint the
+	// operator never listed, per request, for as long as the TTL let it.
+	//
+	// Pinning the closure at startup answers that without turning the
+	// allowlist into a host list. What the graph reaches is fetched ONCE, at
+	// boot, from operator-named roots, and fails the boot if it cannot be -
+	// and at issuance the loader serves the pinned documents, so the signing
+	// path makes no outbound request at all. A context that changes after
+	// startup cannot affect an issued credential either.
+	//
+	// Address policy still applies to every one of those fetches: the dial
+	// hook refuses non-public addresses, and it sees redirects and
+	// json-gold's own recursion. What is added here is the temporal and
+	// operational half - fetched at boot, under the operator's eye, rather
+	// than silently at request time.
+	if cfg.Issuer != nil {
+		for _, contextURL := range cfg.Issuer.JSONLDContextAllowlist {
+			if err := loader.PinRemoteContext(contextURL); err != nil {
+				return fmt.Errorf("issuer.jsonld_context_allowlist: %q could not be loaded, so a request naming it could not be signed: %w", contextURL, err)
+			}
+			log.Info("pinned JSON-LD context from the issuer allowlist", "url", contextURL)
+		}
+	}
+
 	if cfg.Common == nil {
 		return nil
 	}
-	loader := credential.GetGlobalLoader()
 
 	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
 		cm := cfg.Common.CredentialMetadata[scope]

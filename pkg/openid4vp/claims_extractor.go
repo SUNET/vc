@@ -39,6 +39,7 @@ func NewClaimsExtractor() *ClaimsExtractor {
 // ExtractClaimsFromVPToken extracts claims from a VP token.
 // Automatically detects the format:
 //   - DCQL response: JSON object mapping credential query IDs to individual tokens
+//   - W3C VC 2.0: a JSON-LD credential or presentation
 //   - mdoc: CBOR-based mobile document
 //   - SD-JWT: dot-separated JWT with selective disclosures
 //
@@ -48,9 +49,16 @@ func (ce *ClaimsExtractor) ExtractClaimsFromVPToken(ctx context.Context, vpToken
 		return nil, fmt.Errorf("VP token is empty")
 	}
 
-	// Check if this is a DCQL response (JSON object mapping credential IDs to tokens)
+	// A leading '{' is not enough to say "DCQL response": a W3C VC 2.0
+	// credential or presentation is also a JSON object, and routing one to
+	// the DCQL parser failed it as "cannot parse as map[string][]string".
+	// That is how W3C scopes came to work on the UI direct-post path and
+	// not on the OIDC one, which extracts claims through here.
 	trimmed := strings.TrimSpace(vpToken)
 	if len(trimmed) > 0 && trimmed[0] == '{' {
+		if isW3CDocument(trimmed) {
+			return extractW3CClaims(trimmed)
+		}
 		return ce.extractClaimsFromDCQLResponse(ctx, trimmed)
 	}
 
@@ -94,8 +102,16 @@ func (ce *ClaimsExtractor) extractClaimsFromDCQLResponse(ctx context.Context, vp
 	return merged, nil
 }
 
-// extractClaimsFromSingleToken extracts claims from a single VP token (SD-JWT or mdoc).
+// extractClaimsFromSingleToken extracts claims from a single VP token
+// (W3C JSON-LD, SD-JWT or mdoc).
 func (ce *ClaimsExtractor) extractClaimsFromSingleToken(vpToken string) (map[string]any, error) {
+	// A W3C VC 2.0 credential or presentation travels as JSON-LD, so it is
+	// a JSON object rather than a dot-separated token. Inside a DCQL
+	// response this is where each one arrives.
+	if trimmed := strings.TrimSpace(vpToken); len(trimmed) > 0 && trimmed[0] == '{' {
+		return extractW3CClaims(trimmed)
+	}
+
 	// Check if this is an mdoc format token
 	if isMDocFormatToken(vpToken) {
 		return extractMDocClaimsFromToken(vpToken)
@@ -482,4 +498,107 @@ func (ce *ClaimsExtractor) ExtractAndMapClaims(
 	}
 
 	return oidcClaims, nil
+}
+
+// isW3CDocument reports whether a JSON object is a W3C VC 2.0 credential or
+// presentation rather than a DCQL vp_token map.
+//
+// Discriminated on "@context", which every W3C VC 2.0 document carries and
+// which is not a credential query id anyone would choose - a DCQL response
+// keys by query id and its values are arrays of token strings. Requiring the
+// payload member as well keeps a stray "@context" query id from routing a
+// real DCQL response into the W3C branch.
+//
+// A shape that is neither still reports the DCQL parse failure, which is the
+// more useful error for the malformed-DCQL case that produced it.
+func isW3CDocument(document string) bool {
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(document), &doc); err != nil {
+		return false
+	}
+	if _, hasContext := doc["@context"]; !hasContext {
+		return false
+	}
+	_, hasSubject := doc["credentialSubject"]
+	_, hasEmbedded := doc["verifiableCredential"]
+	return hasSubject || hasEmbedded
+}
+
+// extractW3CClaims reads the disclosed claims out of a W3C VC 2.0 document:
+// a verifiable presentation, whose credentials are unwrapped in turn, or a
+// bare credential.
+//
+// Claims come from credentialSubject, which is where a W3C credential puts
+// them - there is no selective disclosure to resolve, so what the document
+// says is what was disclosed.
+//
+// This does NOT verify anything. Neither does the SD-JWT or mdoc path
+// through this extractor: ProcessDirectPost performs no signature
+// verification for any format, which is a pre-existing gap of its own. What
+// this fixes is a W3C response failing to parse at all on that path, so a
+// configured W3C scope worked through the UI direct-post flow and nowhere
+// else.
+func extractW3CClaims(document string) (map[string]any, error) {
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(document), &doc); err != nil {
+		return nil, fmt.Errorf("failed to parse VP token as JSON: %w", err)
+	}
+
+	// A presentation: unwrap each credential it carries. Entries are
+	// either JSON objects or embedded strings, both of which the builders
+	// in this package can produce.
+	if embedded, ok := doc["verifiableCredential"]; ok {
+		merged := make(map[string]any)
+		for _, entry := range asSlice(embedded) {
+			claims, err := w3cSubjectClaims(entry)
+			if err != nil {
+				return nil, err
+			}
+			maps.Copy(merged, claims)
+		}
+		if len(merged) == 0 {
+			return nil, fmt.Errorf("W3C presentation discloses no credential subject claims")
+		}
+		return merged, nil
+	}
+
+	return w3cSubjectClaims(doc)
+}
+
+// asSlice normalises a JSON-LD member that may be a single value or a list.
+func asSlice(v any) []any {
+	if list, ok := v.([]any); ok {
+		return list
+	}
+	return []any{v}
+}
+
+// w3cSubjectClaims reads credentialSubject from one credential, which may
+// still be an embedded JSON string.
+func w3cSubjectClaims(entry any) (map[string]any, error) {
+	cred, ok := entry.(map[string]any)
+	if !ok {
+		raw, isString := entry.(string)
+		if !isString {
+			return nil, fmt.Errorf("W3C credential entry is %T, want an object or an embedded JSON string", entry)
+		}
+		if err := json.Unmarshal([]byte(raw), &cred); err != nil {
+			return nil, fmt.Errorf("failed to parse embedded W3C credential: %w", err)
+		}
+	}
+
+	subject, ok := cred["credentialSubject"]
+	if !ok {
+		return nil, fmt.Errorf("W3C credential carries no credentialSubject")
+	}
+
+	merged := make(map[string]any)
+	for _, s := range asSlice(subject) {
+		claims, ok := s.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("W3C credentialSubject is %T, want an object", s)
+		}
+		maps.Copy(merged, claims)
+	}
+	return merged, nil
 }

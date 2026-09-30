@@ -175,22 +175,34 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 // decides which contexts a CALLER may name. Empty allowlist means no
 // additional context is accepted.
 //
-// The allowlist is deliberately described as "which contexts a caller may
-// name", not "which hosts may be reached at all", because it is checked
-// here and only here, against the literal top-level URL. Canonicalization
-// dereferences the whole context graph, and a nested @context inside an
-// allowlisted document is fetched without consulting this list - so
-// allowlisting a context is also trusting what that context imports.
+// This check is against the literal top-level URL, and canonicalization
+// dereferences the whole context graph - so on its own it would leave a
+// nested @context inside an allowlisted document fetched without consulting
+// the list. Two other things close that, and it is worth being precise
+// about which does what:
 //
-// What DOES cover the whole graph is the address policy in
-// credential.contextHTTPClient: enforced at dial time, so it survives
-// redirects, nested @context/@import, json-gold's recursive self-calls and
-// DNS rebinding. That bounds where fetches can land (never a non-public
-// address); it does not bound them to this list. Making the allowlist
-// transitive is a separate decision - the loader is a process-wide
-// singleton shared with the verifier, which must canonicalize contexts a
-// wallet presents, and the only layer with full coverage sees host:port
-// rather than URLs. See the discussion on SUNET/vc#685.
+//   - Every allowlisted URL is PINNED at config load, transitively
+//     (resolveW3CContexts in pkg/configuration). The closure is fetched
+//     once, at startup, from operator-named roots, and a URL that cannot be
+//     loaded fails the boot. At request time the loader serves the pinned
+//     documents, so an accepted additional_contexts value makes no outbound
+//     request at all - and a context that changes afterwards cannot affect
+//     an issued credential.
+//
+//   - The address policy in credential.contextHTTPClient is enforced at
+//     DIAL time, so it covers those startup fetches as well as anything
+//     else: redirects, nested @context/@import, json-gold's recursive
+//     self-calls, DNS rebinding. Never a non-public address, whatever the
+//     URL said.
+//
+// So allowlisting a context is still trusting what that context imports -
+// nothing bounds the closure to the list itself - but what it imports is
+// fetched at boot under the operator's eye rather than per request, and
+// cannot reach a private address. Bounding the closure to the list would
+// need host-level enforcement in the dial hook (the only layer with full
+// coverage sees host:port, not URLs) on a loader that is a process-wide
+// singleton shared with the verifier, which must canonicalize whatever
+// contexts a wallet presents. See the discussion on SUNET/vc#685.
 func (c *Client) validateAdditionalContexts(contexts []string) error {
 	var allowed []string
 	if c.cfg != nil && c.cfg.Issuer != nil {
