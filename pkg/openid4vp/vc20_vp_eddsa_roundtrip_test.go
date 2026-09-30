@@ -631,3 +631,45 @@ func TestVerifyAndExtractHonoursATypeScopedContext(t *testing.T) {
 	require.NoError(t, err, "the proof's type is what activates the context that defines ex")
 	require.Equal(t, absoluteMethod, result.VerificationMethod)
 }
+
+// TestExpandVerificationMethodHonoursAnExplicitNullProofContext: in JSON-LD
+// an explicit "@context": null RESETS the inherited context rather than
+// leaving it in place, so a method compacted under a prefix the DOCUMENT
+// defines is not resolvable on that proof. Treating null as an absent
+// context expanded it anyway and handed the resolver an identifier the
+// proof does not name.
+//
+// The identifier the resolver is asked for is the one the PROOF names,
+// which under a reset is the compact form itself - and that is what the
+// suite reads off the RDF too, so the two still agree.
+//
+// Tested on the expansion directly rather than through VerifyAndExtract,
+// and the reason is worth recording: under the VC 2.0 context this shape
+// cannot be built at all. Its terms are @protected, so json-gold refuses
+// the reset - "invalid context nullification" - and the document fails to
+// parse whatever this code does. A test through the handler would pass
+// either way.
+func TestExpandVerificationMethodHonoursAnExplicitNullProofContext(t *testing.T) {
+	handler, err := NewVC20Handler()
+	require.NoError(t, err)
+
+	// A plain context, so the reset itself is legal - no protected terms.
+	credMap := map[string]any{
+		"@context": []any{map[string]any{"ex": "https://example.org/keys#"}},
+	}
+
+	t.Run("no context on the proof inherits the document's", func(t *testing.T) {
+		expanded, err := handler.expandVerificationMethod(credMap,
+			map[string]any{"verificationMethod": "ex:key-1"}, "ex:key-1")
+		require.NoError(t, err)
+		require.Equal(t, "https://example.org/keys#key-1", expanded)
+	})
+
+	t.Run("an explicit null resets it", func(t *testing.T) {
+		expanded, err := handler.expandVerificationMethod(credMap,
+			map[string]any{"@context": nil, "verificationMethod": "ex:key-1"}, "ex:key-1")
+		require.NoError(t, err)
+		require.Equal(t, "ex:key-1", expanded,
+			"ex is not active on a proof whose context was reset, so the method is the IRI the proof names")
+	})
+}

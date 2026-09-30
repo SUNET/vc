@@ -702,7 +702,8 @@ func (h *VC20Handler) verifyEdDSA2022(
 // without this code knowing the rules.
 func (h *VC20Handler) expandVerificationMethod(credMap map[string]any, proof map[string]any, method string) (string, error) {
 	documentContext, hasDocumentContext := credMap["@context"]
-	if !hasDocumentContext && proof["@context"] == nil {
+	localContext, hasLocalContext := proof["@context"]
+	if !hasDocumentContext && !hasLocalContext {
 		return method, nil
 	}
 
@@ -710,8 +711,14 @@ func (h *VC20Handler) expandVerificationMethod(credMap map[string]any, proof map
 	const proofIRI = "https://w3id.org/security#proof"
 
 	probeProof := map[string]any{verificationMethodIRI: map[string]any{"@id": method}}
-	if local := proof["@context"]; local != nil {
-		probeProof["@context"] = local
+	// By PRESENCE, not by non-nil. An explicit "@context": null is a
+	// context RESET in JSON-LD, not an absent context: it drops the
+	// inherited definitions, so a method compacted under a prefix the
+	// document defines is not resolvable on that proof. Treating null as
+	// absent expanded it anyway, under prefixes the real proof does not
+	// have.
+	if hasLocalContext {
+		probeProof["@context"] = localContext
 	}
 	// The proof's TYPE goes in too. A type-scoped context - a local context
 	// that hangs term definitions off a proof type - is only active on a
