@@ -101,8 +101,22 @@ func rootProofGraphs(cred *credential.RDFCredential) []string {
 		edges[subject][object] = true
 	}
 
-	roots := sourceComponent(subjects, edges)
-	if len(roots) == 0 {
+	candidates := sourceComponent(subjects, edges)
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// A source component is not a root: the credential ↔ credentialSubject
+	// cycle puts BOTH nodes in it, and accepting either one's proof link
+	// would let the proof be moved onto the subject node - which
+	// CredentialWithoutProof removes just the same, so the hash is
+	// unchanged and a credential with no proof of its own would verify.
+	//
+	// The root is the member that IS a credential or a presentation, said
+	// by its rdf:type. Exactly one, or ownership is not established and the
+	// document is refused.
+	roots := typedRoots(defaultGraph, candidates)
+	if len(roots) != 1 {
 		return nil
 	}
 
@@ -111,7 +125,7 @@ func rootProofGraphs(cred *credential.RDFCredential) []string {
 		if quad == nil || quad.Subject == nil || quad.Predicate == nil {
 			continue
 		}
-		if !roots[quad.Subject.GetValue()] {
+		if quad.Subject.GetValue() != roots[0] {
 			continue
 		}
 		if !contains(proofPredicates, quad.Predicate.GetValue()) {
@@ -123,6 +137,44 @@ func rootProofGraphs(cred *credential.RDFCredential) []string {
 	}
 	slices.Sort(graphNames)
 	return graphNames
+}
+
+// credentialTypes are the rdf:type values that say a node is the thing the
+// document is about, in the spellings the parser produces.
+var credentialTypes = []string{
+	"https://www.w3.org/2018/credentials#VerifiableCredential",
+	"https://www.w3.org/2018/credentials#VerifiablePresentation",
+	"https://www.w3.org/ns/credentials#VerifiableCredential",
+	"https://www.w3.org/ns/credentials#VerifiablePresentation",
+}
+
+const rdfTypePredicate = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+
+// typedRoots narrows root candidates to those that are actually a
+// credential or a presentation.
+func typedRoots(defaultGraph []*ld.Quad, candidates map[string]bool) []string {
+	typed := make(map[string]bool)
+	for _, quad := range defaultGraph {
+		if quad == nil || quad.Subject == nil || quad.Predicate == nil || quad.Object == nil {
+			continue
+		}
+		if quad.Predicate.GetValue() != rdfTypePredicate {
+			continue
+		}
+		if !candidates[quad.Subject.GetValue()] {
+			continue
+		}
+		if contains(credentialTypes, quad.Object.GetValue()) {
+			typed[quad.Subject.GetValue()] = true
+		}
+	}
+
+	roots := make([]string, 0, len(typed))
+	for subject := range typed {
+		roots = append(roots, subject)
+	}
+	slices.Sort(roots)
+	return roots
 }
 
 // sourceComponent returns the members of the one strongly connected

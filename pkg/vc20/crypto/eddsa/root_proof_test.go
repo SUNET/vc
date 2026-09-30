@@ -327,3 +327,70 @@ func TestVerifyAcceptsAReferenceCycle(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, NewSuite().Verify(reparsed, pub))
 }
+
+// TestVerifyRefusesAProofMovedWithinACycle is the misplaced-proof attack
+// once more, this time INSIDE the credential ↔ credentialSubject cycle.
+//
+// Both nodes are in the same source component, so "a member of the source
+// component" was not enough: moving the credential's proof onto its subject
+// node leaves the hash unchanged - CredentialWithoutProof removes the link
+// wherever it sits - and the moved proof would verify for a credential that
+// carries none of its own.
+//
+// The root has to BE the credential, said by its rdf:type.
+func TestVerifyRefusesAProofMovedWithinACycle(t *testing.T) {
+	// Two things this fixture has to do, or it proves nothing.
+	//
+	// The ids put the SUBJECT before the credential in sort order, so a
+	// rule that picks a candidate by order rather than by what the node IS
+	// would pick the node the proof was moved to.
+	//
+	// And the proof is relocated under an ALIASED term. `proof` in the VC
+	// 2.0 context is scoped to the credential, so a plain
+	// `credentialSubject.proof` is dropped on expansion and the document
+	// loses the proof entirely - which refuses for the wrong reason. The
+	// alias puts the same `security#proof` predicate on the subject node,
+	// which survives, and which CredentialWithoutProof strips just the
+	// same, so the hash is unchanged.
+	const withAlias = `{
+		"@context": ["https://www.w3.org/ns/credentials/v2",
+			{"relatedCredential": {"@id": "https://example.org/relatedCredential", "@type": "@id"},
+			 "nodeProof": {"@id": "https://w3id.org/security#proof", "@container": "@graph"}}],
+		"id": "urn:uuid:zzz-the-credential",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {
+			"id": "urn:uuid:aaa-the-subject",
+			"relatedCredential": "urn:uuid:zzz-the-credential"
+		}
+	}`
+
+	signed, pub := signDocument(t, withAlias, "assertionMethod")
+
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(compact, &doc))
+
+	proof, ok := doc["proof"]
+	require.True(t, ok, "the credential must start out with its own proof")
+	subject, ok := doc["credentialSubject"].(map[string]any)
+	require.True(t, ok)
+
+	subject["nodeProof"] = proof
+	delete(doc, "proof")
+
+	moved, err := json.Marshal(doc)
+	require.NoError(t, err)
+	reparsed, err := credential.NewRDFCredentialFromJSON(moved, nil)
+	require.NoError(t, err)
+
+	// The relocated proof really is in the document, or the refusal below
+	// would be about a missing proof rather than about whose it is.
+	require.Contains(t, mustNQuads(t, reparsed), "security#proofValue",
+		"the moved proof must survive parsing")
+
+	require.Empty(t, rootProofGraphs(reparsed),
+		"a proof on a node that is not the credential is not the credential's")
+	require.Error(t, NewSuite().Verify(reparsed, pub))
+}
