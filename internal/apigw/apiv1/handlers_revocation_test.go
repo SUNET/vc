@@ -22,11 +22,16 @@ import (
 type recordingIssuer struct {
 	apiv1_issuer.IssuerServiceClient
 	calls []*apiv1_issuer.SetCredentialStatusRequest
-	err   error
+	// ctxErrs is the ctx.Err() seen by each call, so a test can tell a
+	// cleanup that was SENT from one the caller's cancellation killed
+	// before it left.
+	ctxErrs []error
+	err     error
 }
 
-func (r *recordingIssuer) SetCredentialStatus(_ context.Context, in *apiv1_issuer.SetCredentialStatusRequest, _ ...grpc.CallOption) (*apiv1_issuer.SetCredentialStatusReply, error) {
+func (r *recordingIssuer) SetCredentialStatus(ctx context.Context, in *apiv1_issuer.SetCredentialStatusRequest, _ ...grpc.CallOption) (*apiv1_issuer.SetCredentialStatusReply, error) {
 	r.calls = append(r.calls, in)
+	r.ctxErrs = append(r.ctxErrs, ctx.Err())
 	if r.err != nil {
 		return nil, r.err
 	}
@@ -44,10 +49,13 @@ type stubStatusStore struct {
 	// deleted records rollback of mappings written earlier in a batch that
 	// then failed, keyed the way the store keys them.
 	deleted []string
+	// deleteCtxErrs mirrors recordingIssuer.ctxErrs for the rollback path.
+	deleteCtxErrs []error
 }
 
-func (s *stubStatusStore) Delete(_ context.Context, uri string, index int64, backend string) error {
+func (s *stubStatusStore) Delete(ctx context.Context, uri string, index int64, backend string) error {
 	s.deleted = append(s.deleted, fmt.Sprintf("%s|%d|%s", uri, index, backend))
+	s.deleteCtxErrs = append(s.deleteCtxErrs, ctx.Err())
 	return nil
 }
 

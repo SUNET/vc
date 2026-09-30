@@ -366,3 +366,33 @@ func TestSaveCredentialSubjects_SuccessRollsBackNothing(t *testing.T) {
 	require.Empty(t, issuer.calls)
 	require.Len(t, store.saved, 1)
 }
+
+// TestSaveCredentialSubjects_CleanupSurvivesARequestCancellation: a
+// cancelled or timed-out request is one of the COMMON ways to reach the
+// release path, and the cleanup used to inherit that context - so the
+// release RPC and the mapping rollback were cancelled before they were
+// sent, exactly when they mattered. The entries then stayed VALID and
+// unreferenced although the code had tried to release them.
+func TestSaveCredentialSubjects_CleanupSurvivesARequestCancellation(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+	store.failAfter = 1
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // the client hung up after the entries were allocated
+
+	err := c.saveCredentialSubjects(ctx, "person-1", "SUNET", "pid", []statusEntry{
+		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+	})
+	require.Error(t, err)
+
+	require.Len(t, issuer.calls, 2, "cancellation must not skip the release")
+	for i, ctxErr := range issuer.ctxErrs {
+		require.NoError(t, ctxErr, "release %d was sent on a context already cancelled by the caller", i)
+	}
+
+	require.NotEmpty(t, store.deleted, "the mapping written before the failure must be rolled back")
+	for i, ctxErr := range store.deleteCtxErrs {
+		require.NoError(t, ctxErr, "rollback %d was sent on a context already cancelled by the caller", i)
+	}
+}

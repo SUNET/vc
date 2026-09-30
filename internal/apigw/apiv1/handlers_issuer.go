@@ -860,6 +860,27 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 	return nil
 }
 
+// cleanupTimeout bounds the detached cleanup below. Long enough for a
+// round trip to a backend that is merely slow, short enough that a wedged
+// one cannot hold the handler open after the request it belonged to is
+// already over.
+const cleanupTimeout = 10 * time.Second
+
+// cleanupContext detaches cleanup from the request that is failing.
+//
+// A cancelled or timed-out request is one of the COMMON ways to reach the
+// release and rollback paths, and both used to inherit that context - so
+// the cleanup RPC and the mapping deletion were cancelled before they were
+// sent, exactly when they mattered. The entries then stayed VALID and
+// unreferenced although the surrounding code had tried to release them.
+//
+// context.WithoutCancel keeps the request's values - trace ids, logging
+// metadata, anything a backend client reads off it - and drops only the
+// cancellation. The timeout is then the cleanup's own.
+func cleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+}
+
 // releaseAllocations marks status-list entries INVALID because the
 // credentials they were allocated for will not be issued.
 //
@@ -885,6 +906,8 @@ func (c *Client) discardRecordedEntries(ctx context.Context, recorded []statusEn
 	if c.db == nil || c.db.CredentialStatusColl == nil {
 		return
 	}
+	ctx, cancel := cleanupContext(ctx)
+	defer cancel()
 	for _, e := range recorded {
 		if e.URI == "" {
 			continue
@@ -897,6 +920,8 @@ func (c *Client) discardRecordedEntries(ctx context.Context, recorded []statusEn
 }
 
 func (c *Client) releaseAllocations(ctx context.Context, entries []statusEntry) {
+	ctx, cancel := cleanupContext(ctx)
+	defer cancel()
 	for _, e := range entries {
 		if e.URI == "" || c.issuerClient == nil {
 			continue
