@@ -134,6 +134,15 @@ func (b *MSOBuilder) WithSaltBytes(n int) *MSOBuilder {
 
 // AddDataElement adds a data element to the MSO.
 func (b *MSOBuilder) AddDataElement(namespace, elementID string, value any) error {
+	// LoadMDDLSchema validates ZkSaltBytes on the JSON-loading path, but
+	// MSOBuilder and MDDLSchema are both exported and Issuer.Issue accepts
+	// a schema constructed directly in Go, bypassing that check entirely -
+	// enforce the same invariant here too, at the actual point of use,
+	// rather than trust every caller to have gone through LoadMDDLSchema.
+	if b.saltBytes != 0 && b.saltBytes != 32 {
+		return fmt.Errorf("unsupported salt size %d: only 0 (default sizing) or 32 (zk-cred-vega's r12 circuit) is supported", b.saltBytes)
+	}
+
 	// Use 8-byte random for pseudonym_seed to keep item within 128-byte circuit limit
 	// Use 16 bytes for all other elements
 	saltSize := 16

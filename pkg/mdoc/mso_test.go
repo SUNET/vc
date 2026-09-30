@@ -168,6 +168,21 @@ func TestMSOBuilder_WithSaltBytes_OverridesEvenPseudonymSeed(t *testing.T) {
 	}
 }
 
+// TestMSOBuilder_WithSaltBytes_RejectsUnsupportedValue guards the
+// point-of-use validation in AddDataElement: MSOBuilder is exported and
+// Issuer.Issue accepts a schema constructed directly in Go, bypassing
+// LoadMDDLSchema's own validation entirely - a caller going through
+// WithSaltBytes directly must still be rejected before the make([]byte,
+// saltSize) allocation, not just at the JSON-loading boundary.
+func TestMSOBuilder_WithSaltBytes_RejectsUnsupportedValue(t *testing.T) {
+	builder := NewMSOBuilder(DocType).WithSaltBytes(16)
+
+	err := builder.AddDataElement(Namespace, "family_name", "Doe")
+	if err == nil {
+		t.Fatal("expected an error for an unsupported salt size, got none")
+	}
+}
+
 func TestMSOBuilder_WithSaltBytes_ZeroKeepsDefaultSizing(t *testing.T) {
 	builder := NewMSOBuilder(DocType).WithSaltBytes(0)
 
