@@ -169,6 +169,15 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		}
 	}
 
+	// Issuer only, and before the service switch below nils out sibling
+	// stanzas: the issuer is the one service that enforces the allowlist,
+	// so it is the only one that can refuse an inconsistency in it.
+	if serviceName == "issuer" {
+		if err := checkIssuerContextAllowlist(cfg); err != nil {
+			return nil, err
+		}
+	}
+
 	// Only services that depend on credentials need VCTM loading
 	// and the requirement check. Other services (registry) share
 	// the same config file but do not use credential constructors at all.
@@ -338,6 +347,55 @@ func customTypes(types []string) []string {
 		}
 	}
 	return out
+}
+
+// checkIssuerContextAllowlist refuses an issuer whose W3C scopes name
+// contexts its own allowlist does not.
+//
+// The apigw forwards common.credential_metadata.<scope>.credential_contexts
+// VERBATIM as additional_contexts on every MakeVC20 request, and
+// validateAdditionalContexts matches those literally against
+// issuer.jsonld_context_allowlist. A scope whose context is missing from the
+// allowlist therefore starts cleanly and fails EVERY issuance of that
+// credential - at the point the user has already reached their wallet.
+//
+// Refused at startup, for the same reason resolveW3CContexts refuses an
+// unreachable context there: the failure is certain, and a boot failure is
+// under the operator's eye while an issuance failure is not.
+//
+// Not silently widened into the allowlist instead. Both lists are the
+// operator's, but that one says which URLs a REQUEST may name, and quietly
+// adding to it would answer a question the operator thought they had
+// answered.
+//
+// Issuer-only on purpose: the verifier and the apigw load the same shared
+// config file, neither enforces this allowlist, and the apigw is
+// deliberately not even in servicesResolvingW3CContexts - failing them here
+// would refuse a valid deployment.
+func checkIssuerContextAllowlist(cfg *model.Cfg) error {
+	if cfg.Issuer == nil || cfg.Common == nil {
+		return nil
+	}
+
+	var problems []string
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		cm := cfg.Common.CredentialMetadata[scope]
+		if cm == nil || !openid4vp.IsW3CVCFormatIdentifier(cm.Format) {
+			continue
+		}
+		for _, contextURL := range cm.CredentialContexts {
+			if slices.Contains(cfg.Issuer.JSONLDContextAllowlist, contextURL) {
+				continue
+			}
+			problems = append(problems, fmt.Sprintf(
+				"common.credential_metadata.%s: credential_contexts %q is not in issuer.jsonld_context_allowlist, so every issuance of this credential would be refused - add it there",
+				scope, contextURL))
+		}
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
 }
 
 // resolveW3CContexts pins every configured JSON-LD context and checks that the

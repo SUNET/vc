@@ -147,3 +147,65 @@ func TestResolveW3CContextsPinsTheIssuerAllowlist(t *testing.T) {
 		assert.NoError(t, resolveW3CContexts(&model.Cfg{}, log))
 	})
 }
+
+// TestCheckIssuerContextAllowlist: the apigw forwards a scope's
+// credential_contexts verbatim as additional_contexts, and the issuer's
+// validateAdditionalContexts matches those literally against
+// issuer.jsonld_context_allowlist. A scope whose context is absent from the
+// allowlist therefore started cleanly and failed EVERY issuance of that
+// credential, after the user had already reached their wallet.
+func TestCheckIssuerContextAllowlist(t *testing.T) {
+	const contextURL = "https://example.org/diploma"
+
+	w3cScope := func() map[string]*model.CredentialMetadata {
+		return map[string]*model.CredentialMetadata{"diploma": {
+			Format:             openid4vp.FormatLdpVCDCQL,
+			CredentialTypes:    []string{"DiplomaCredential"},
+			CredentialContexts: []string{contextURL},
+		}}
+	}
+
+	t.Run("a context the allowlist names is fine", func(t *testing.T) {
+		assert.NoError(t, checkIssuerContextAllowlist(&model.Cfg{
+			Common: &model.Common{CredentialMetadata: w3cScope()},
+			Issuer: &model.Issuer{JSONLDContextAllowlist: []string{contextURL}},
+		}))
+	})
+
+	t.Run("a context the allowlist omits is refused at startup", func(t *testing.T) {
+		err := checkIssuerContextAllowlist(&model.Cfg{
+			Common: &model.Common{CredentialMetadata: w3cScope()},
+			Issuer: &model.Issuer{JSONLDContextAllowlist: []string{"https://example.org/something-else"}},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "jsonld_context_allowlist")
+		assert.Contains(t, err.Error(), contextURL)
+	})
+
+	t.Run("an empty allowlist with a W3C scope is refused too", func(t *testing.T) {
+		require.Error(t, checkIssuerContextAllowlist(&model.Cfg{
+			Common: &model.Common{CredentialMetadata: w3cScope()},
+			Issuer: &model.Issuer{},
+		}))
+	})
+
+	t.Run("a non-W3C scope is not this check's business", func(t *testing.T) {
+		assert.NoError(t, checkIssuerContextAllowlist(&model.Cfg{
+			Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{"pid": {
+				Format:             openid4vp.FormatSDJWTVC,
+				CredentialContexts: []string{contextURL},
+			}}},
+			Issuer: &model.Issuer{},
+		}))
+	})
+
+	// The verifier and the apigw load the same shared config file, neither
+	// enforces this allowlist, and the apigw has no Issuer stanza of its own
+	// by the time it is checked. Failing them here would refuse a valid
+	// deployment, so the check is gated on the service and on the stanza.
+	t.Run("a config with no issuer stanza is not checked", func(t *testing.T) {
+		assert.NoError(t, checkIssuerContextAllowlist(&model.Cfg{
+			Common: &model.Common{CredentialMetadata: w3cScope()},
+		}))
+	})
+}
