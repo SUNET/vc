@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/vc20/credential"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -90,4 +92,54 @@ func TestIsW3CDocument(t *testing.T) {
 func jsonString(s string) (string, error) {
 	b, err := json.Marshal(s)
 	return string(b), err
+}
+
+// TestExtractClaims_W3CExpanded: detectCredentialFormat accepts a leading
+// "[" as a W3C credential, so the extractor has to as well - otherwise the
+// verifier accepts a presentation and then claim extraction cannot read a
+// claim out of the same bytes.
+//
+// Expanded JSON-LD is what json-gold's MarshalJSON emits, so this is the
+// form anything re-serialized from an RDFCredential arrives in.
+func TestExtractClaims_W3CExpanded(t *testing.T) {
+	ce := NewClaimsExtractor()
+
+	// Claims the VC 2.0 context defines, because expansion DROPS a term no
+	// context defines - "degree" would not survive the round trip, and a
+	// test asserting it did would be testing the fixture rather than the
+	// extractor.
+	const contextDefined = `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject", "name": "Alice"}
+	}`
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(contextDefined), nil)
+	require.NoError(t, err)
+
+	expanded, err := json.Marshal(cred)
+	require.NoError(t, err)
+	require.Equal(t, byte('['), expanded[0], "the fixture must really be expanded, or this proves nothing")
+
+	claims, err := ce.ExtractClaimsFromVPToken(t.Context(), string(expanded))
+	require.NoError(t, err)
+	assert.Equal(t, "did:example:subject", claims["id"])
+	assert.Equal(t, "Alice", claims["name"])
+
+	// And inside a DCQL response, which is how a wallet would send it.
+	embedded, err := jsonString(string(expanded))
+	require.NoError(t, err)
+	claims, err = ce.ExtractClaimsFromVPToken(t.Context(), `{"pid": [`+embedded+`]}`)
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", claims["name"])
+}
+
+// TestIsExpandedNode keeps the compaction from firing on a compact document,
+// which would be wasted work and a needless dependency on context loading.
+func TestIsExpandedNode(t *testing.T) {
+	assert.False(t, isExpandedNode(map[string]any{"@context": "x", "credentialSubject": map[string]any{}}))
+	assert.False(t, isExpandedNode(map[string]any{"credentialSubject": map[string]any{}}),
+		"compact terms carry no scheme")
+	assert.True(t, isExpandedNode(map[string]any{"https://www.w3.org/2018/credentials#credentialSubject": []any{}}))
 }

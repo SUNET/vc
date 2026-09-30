@@ -1129,3 +1129,68 @@ func TestVerifyPresentationProof_FailsClosedOnEmptyChallenge(t *testing.T) {
 		})
 	}
 }
+
+// TestCheckPresentationBindingDomain: the challenge says the presentation
+// was made for THIS session; the domain says it was made for THIS verifier,
+// which is what stops one relying party replaying a presentation at
+// another.
+//
+// An empty expected domain used to skip the check entirely, so a proof
+// naming no domain - or naming somebody else's - was accepted as bound here
+// on the strength of the nonce alone. That is the same fail-open the empty
+// challenge case already refused.
+func TestCheckPresentationBindingDomain(t *testing.T) {
+	const (
+		nonce  = "session-nonce"
+		domain = "x509_san_dns:verifier.example.com"
+	)
+
+	base := func(proofDomain any) map[string]any {
+		proof := map[string]any{"proofPurpose": "authentication", "challenge": nonce}
+		if proofDomain != nil {
+			proof["domain"] = proofDomain
+		}
+		return proof
+	}
+
+	t.Run("the matching domain is accepted", func(t *testing.T) {
+		h := &VC20Handler{requireHolderBinding: true, expectedChallenge: nonce, expectedDomain: domain}
+		if err := h.checkPresentationBinding(base(domain)); err != nil {
+			t.Fatalf("want acceptance, got %v", err)
+		}
+	})
+
+	for name, tc := range map[string]struct {
+		expectedDomain string
+		proofDomain    any
+		wantErr        string
+	}{
+		"another verifier's domain": {
+			expectedDomain: domain, proofDomain: "x509_san_dns:someone-else.example.com",
+			wantErr: "does not name this verifier",
+		},
+		"no domain in the proof": {
+			expectedDomain: domain, proofDomain: nil,
+			wantErr: "does not name this verifier",
+		},
+		"the session has no verifier identity": {
+			expectedDomain: "", proofDomain: domain,
+			wantErr: "no verifier identity to bind to",
+		},
+		"neither side names a domain": {
+			expectedDomain: "", proofDomain: nil,
+			wantErr: "no verifier identity to bind to",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := &VC20Handler{requireHolderBinding: true, expectedChallenge: nonce, expectedDomain: tc.expectedDomain}
+			err := h.checkPresentationBinding(base(tc.proofDomain))
+			if err == nil {
+				t.Fatal("want a refusal")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("got %q, want it to mention %q", err, tc.wantErr)
+			}
+		})
+	}
+}

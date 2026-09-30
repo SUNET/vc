@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/vc20/credential"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/piprate/json-gold/ld"
 )
 
 // ClaimsExtractor extracts and maps claims from VP tokens to OIDC claims
@@ -54,6 +56,9 @@ func (ce *ClaimsExtractor) ExtractClaimsFromVPToken(ctx context.Context, vpToken
 	// the DCQL parser failed it as "cannot parse as map[string][]string".
 	// That is how W3C scopes came to work on the UI direct-post path and
 	// not on the OIDC one, which extracts claims through here.
+	// A leading '[' is expanded JSON-LD, which detectCredentialFormat
+	// accepts as a W3C credential - it falls through to
+	// extractClaimsFromSingleToken below, which handles both JSON shapes.
 	trimmed := strings.TrimSpace(vpToken)
 	if len(trimmed) > 0 && trimmed[0] == '{' {
 		if isW3CDocument(trimmed) {
@@ -106,9 +111,10 @@ func (ce *ClaimsExtractor) extractClaimsFromDCQLResponse(ctx context.Context, vp
 // (W3C JSON-LD, SD-JWT or mdoc).
 func (ce *ClaimsExtractor) extractClaimsFromSingleToken(vpToken string) (map[string]any, error) {
 	// A W3C VC 2.0 credential or presentation travels as JSON-LD, so it is
-	// a JSON object rather than a dot-separated token. Inside a DCQL
-	// response this is where each one arrives.
-	if trimmed := strings.TrimSpace(vpToken); len(trimmed) > 0 && trimmed[0] == '{' {
+	// a JSON document rather than a dot-separated token - an object when
+	// compact, an array when expanded. Inside a DCQL response this is where
+	// each one arrives.
+	if trimmed := strings.TrimSpace(vpToken); len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
 		return extractW3CClaims(trimmed)
 	}
 
@@ -539,9 +545,14 @@ func isW3CDocument(document string) bool {
 // configured W3C scope worked through the UI direct-post flow and nowhere
 // else.
 func extractW3CClaims(document string) (map[string]any, error) {
-	var doc map[string]any
-	if err := json.Unmarshal([]byte(document), &doc); err != nil {
+	var raw any
+	if err := json.Unmarshal([]byte(document), &raw); err != nil {
 		return nil, fmt.Errorf("failed to parse VP token as JSON: %w", err)
+	}
+
+	doc, byID, err := compactW3CDocument(raw)
+	if err != nil {
+		return nil, err
 	}
 
 	// A presentation: unwrap each credential it carries. Entries are
@@ -550,7 +561,7 @@ func extractW3CClaims(document string) (map[string]any, error) {
 	if embedded, ok := doc["verifiableCredential"]; ok {
 		merged := make(map[string]any)
 		for _, entry := range asSlice(embedded) {
-			claims, err := w3cSubjectClaims(entry)
+			claims, err := w3cSubjectClaims(entry, byID)
 			if err != nil {
 				return nil, err
 			}
@@ -562,7 +573,7 @@ func extractW3CClaims(document string) (map[string]any, error) {
 		return merged, nil
 	}
 
-	return w3cSubjectClaims(doc)
+	return w3cSubjectClaims(doc, byID)
 }
 
 // asSlice normalises a JSON-LD member that may be a single value or a list.
@@ -574,15 +585,18 @@ func asSlice(v any) []any {
 }
 
 // w3cSubjectClaims reads credentialSubject from one credential, which may
-// still be an embedded JSON string.
-func w3cSubjectClaims(entry any) (map[string]any, error) {
+// still be an embedded JSON string, and whose subject may be a NODE
+// REFERENCE rather than an inline object - byID resolves those.
+func w3cSubjectClaims(entry any, byID map[string]map[string]any) (map[string]any, error) {
 	cred, ok := entry.(map[string]any)
 	if !ok {
 		raw, isString := entry.(string)
 		if !isString {
 			return nil, fmt.Errorf("W3C credential entry is %T, want an object or an embedded JSON string", entry)
 		}
-		if err := json.Unmarshal([]byte(raw), &cred); err != nil {
+		if node, known := byID[raw]; known {
+			cred = node
+		} else if err := json.Unmarshal([]byte(raw), &cred); err != nil {
 			return nil, fmt.Errorf("failed to parse embedded W3C credential: %w", err)
 		}
 	}
@@ -594,11 +608,96 @@ func w3cSubjectClaims(entry any) (map[string]any, error) {
 
 	merged := make(map[string]any)
 	for _, s := range asSlice(subject) {
-		claims, ok := s.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("W3C credentialSubject is %T, want an object", s)
+		if claims, ok := s.(map[string]any); ok {
+			maps.Copy(merged, claims)
+			continue
 		}
-		maps.Copy(merged, claims)
+		// An expanded document is a FLAT graph: the credential names its
+		// subject by id and the subject's properties live in a node of
+		// their own. Compaction preserves that shape, so a reference here
+		// is normal rather than malformed.
+		ref, isRef := s.(string)
+		if !isRef {
+			return nil, fmt.Errorf("W3C credentialSubject is %T, want an object or a node reference", s)
+		}
+		node, known := byID[ref]
+		if !known {
+			return nil, fmt.Errorf("W3C credentialSubject references node %q, which the document does not contain", ref)
+		}
+		maps.Copy(merged, node)
 	}
 	return merged, nil
+}
+
+// compactW3CDocument returns the document in COMPACT form, so one extractor
+// reads both serializations.
+//
+// A W3C credential travels expanded as often as compact: json-gold's
+// MarshalJSON emits an array of nodes keyed by full IRIs, and
+// detectCredentialFormat accepts a leading "[" as a W3C credential - so the
+// verifier and the claim extraction would otherwise disagree about the same
+// bytes, accepting a presentation and then failing to read a claim out of
+// it.
+//
+// Compacting against the VC 2.0 context rather than matching expanded IRIs
+// by hand: the term definitions live in the context, the context is served
+// from the embedded bundle, and this way an expanded document reaches
+// exactly the same code path a compact one does.
+func compactW3CDocument(raw any) (map[string]any, map[string]map[string]any, error) {
+	if doc, ok := raw.(map[string]any); ok && !isExpandedNode(doc) {
+		return doc, nil, nil
+	}
+
+	compacted, err := ld.NewJsonLdProcessor().Compact(raw,
+		map[string]any{"@context": credential.ContextV2}, credential.NewJSONLDOptions(""))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to compact W3C document: %w", err)
+	}
+
+	graph, ok := compacted["@graph"]
+	if !ok {
+		return compacted, nil, nil
+	}
+
+	// Compacting an expanded document yields a @graph of FLAT nodes: the
+	// credential names its subject by id, and the subject's properties are
+	// a node of their own. So the graph is both searched for the document
+	// node and kept as a lookup, because the claims are not inside it.
+	byID := make(map[string]map[string]any)
+	var document map[string]any
+	for _, node := range asSlice(graph) {
+		entry, ok := node.(map[string]any)
+		if !ok {
+			continue
+		}
+		if id, ok := entry["id"].(string); ok {
+			byID[id] = entry
+		}
+		if document != nil {
+			continue
+		}
+		if _, isCredential := entry["credentialSubject"]; isCredential {
+			document = entry
+		} else if _, isPresentation := entry["verifiableCredential"]; isPresentation {
+			document = entry
+		}
+	}
+	if document == nil {
+		return nil, nil, fmt.Errorf("W3C document contains neither a credential nor a presentation")
+	}
+	return document, byID, nil
+}
+
+// isExpandedNode reports whether a JSON object is in expanded JSON-LD form,
+// which names its members by full IRI and carries no "@context".
+func isExpandedNode(doc map[string]any) bool {
+	if _, hasContext := doc["@context"]; hasContext {
+		return false
+	}
+	for key := range doc {
+		if strings.Contains(key, "://") {
+			return true
+		}
+	}
+	return false
 }

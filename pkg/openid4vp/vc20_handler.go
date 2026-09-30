@@ -129,10 +129,10 @@ func WithVC20AllowedSkew(skew time.Duration) VC20HandlerOption {
 //
 // Without this a credential is accepted on its issuer's signature alone, which
 // proves it was issued but not that this holder is presenting it now.
-// An empty challenge is accepted here rather than refused, because the
-// option cannot report an error - but verification refuses it. Requiring
-// binding while having no nonce to bind to is a caller bug, and the failure
-// belongs where it can be returned.
+// An empty challenge or domain is accepted here rather than refused, because
+// the option cannot report an error - but verification refuses both.
+// Requiring binding while having no nonce, or no verifier identity, to bind
+// to is a caller bug, and the failure belongs where it can be returned.
 func WithVC20PresentationBinding(challenge, domain string) VC20HandlerOption {
 	return func(h *VC20Handler) {
 		h.requireHolderBinding = true
@@ -1260,10 +1260,22 @@ func (h *VC20Handler) checkPresentationBinding(proof map[string]any) error {
 		return errors.New("presentation proof challenge does not match this session's nonce")
 	}
 
-	if h.expectedDomain != "" {
-		if domain, _ := proof["domain"].(string); domain != h.expectedDomain {
-			return errors.New("presentation proof domain does not name this verifier")
-		}
+	// Domain, checked the same way and for the same reason as the
+	// challenge. The challenge says the presentation was made for THIS
+	// session; the domain says it was made for THIS verifier, which is what
+	// stops one relying party replaying a presentation at another.
+	//
+	// An empty expected domain used to skip the check, so a proof naming no
+	// domain - or naming somebody else's - was accepted as bound here on
+	// the strength of the nonce alone. That is the same fail-open the empty
+	// challenge above refuses, and it is refused the same way: with holder
+	// binding required, a session that cannot say which verifier it is
+	// cannot conclude that a presentation was bound to it.
+	if h.expectedDomain == "" {
+		return errors.New("holder binding was required but this session has no verifier identity to bind to")
+	}
+	if domain, _ := proof["domain"].(string); domain != h.expectedDomain {
+		return errors.New("presentation proof domain does not name this verifier")
 	}
 	return nil
 }
