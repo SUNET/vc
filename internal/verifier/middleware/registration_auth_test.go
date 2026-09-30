@@ -547,7 +547,7 @@ func TestJWKSFetchRefusesNonHTTPSRedirect(t *testing.T) {
 		}))
 		defer redirector.Close()
 
-		resp, err := newJWKSHTTPClient().Get(redirector.URL)
+		resp, err := newJWKSHTTPClient(nil).Get(redirector.URL)
 		if resp != nil {
 			_ = resp.Body.Close()
 		}
@@ -705,6 +705,45 @@ func TestJWTValidateDistinguishesKeySetOutageFromBadToken(t *testing.T) {
 			assertOutage(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
 		})
 	}
+
+	// Metadata alone is not enough. go-oidc PARSES each JWK, so an entry
+	// that looks right by kty and alg and cannot actually be decoded left
+	// the verifier with no key set while the caller was told invalid_token.
+	for name, keys := range map[string]string{
+		"an RSA key with no n or e": `{"keys":[{"kty":"RSA","alg":"RS256","kid":"` + jwtKid + `"}]}`,
+		"an EC key with no curve":   `{"keys":[{"kty":"EC","alg":"ES256","kid":"` + jwtKid + `"}]}`,
+		"a key usable only for an algorithm this verifier does not accept": `{"keys":[{"kty":"RSA","alg":"PS512","n":"AQAB","e":"AQAB","kid":"` + jwtKid + `"}]}`,
+	} {
+		t.Run("JWKS endpoint answers 200 with "+name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(keys))
+			}))
+			defer srv.Close()
+
+			assertOutage(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
+		})
+	}
+
+	// And a real key alongside an ignorable one is still a key set: go-oidc
+	// skips a key whose alg it does not support rather than failing the
+	// whole set, so this verifier must not fail it either.
+	t.Run("a usable key beside an ignorable one is still a key set", func(t *testing.T) {
+		var set map[string]any
+		require.NoError(t, json.Unmarshal(jwksJSON, &set))
+		set["keys"] = append([]any{map[string]any{"kty": "oct", "k": "c2VjcmV0", "kid": "ignore-me"}},
+			set["keys"].([]any)...)
+		mixed, err := json.Marshal(set)
+		require.NoError(t, err)
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(mixed)
+		}))
+		defer srv.Close()
+
+		require.NoError(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
+	})
 
 	// The contrast case: the key set arrived and the token lost on its
 	// merits, which must stay 401 invalid_token.

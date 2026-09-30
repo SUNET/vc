@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gin-gonic/gin"
+	"github.com/go-jose/go-jose/v4"
 )
 
 const (
@@ -415,10 +417,10 @@ type jwtBearerValidator struct {
 // configuration still read as https and nothing in it looked wrong. The key
 // set is what every registration token is judged against, so whoever serves it
 // decides which signatures verify.
-func newJWKSHTTPClient() *http.Client {
+func newJWKSHTTPClient(allowedAlgs []string) *http.Client {
 	return &http.Client{
 		Timeout:       jwksFetchTimeout,
-		Transport:     &jwksTransport{base: http.DefaultTransport},
+		Transport:     &jwksTransport{base: http.DefaultTransport, allowedAlgs: allowedAlgs},
 		CheckRedirect: refuseNonHTTPSRedirect,
 	}
 }
@@ -432,6 +434,11 @@ func newJWKSHTTPClient() *http.Client {
 // answering 500 is as much an outage as one refusing the connection.
 type jwksTransport struct {
 	base http.RoundTripper
+	// allowedAlgs is the verifier's configured allowed_signing_algs. A key
+	// that can only sign with something outside it is one no token this
+	// service accepts could have been signed by, so it does not count
+	// towards "a key set arrived".
+	allowedAlgs []string
 }
 
 func (t *jwksTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -457,7 +464,7 @@ func (t *jwksTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, nil
 	}
 
-	return usableKeySetResponse(resp)
+	return t.usableKeySetResponse(resp)
 }
 
 // maxJWKSBytes caps what one JWKS response may be read into memory. A key set
@@ -468,8 +475,8 @@ const maxJWKSBytes = 1 << 20
 // usableKeySetResponse turns a 2xx that carries no usable key set into the
 // same outage errJWKSUnavailable already marks.
 //
-// Two shapes reach here as HTTP 200 and are neither a transport failure nor a
-// verdict on the token:
+// Three shapes reach here as HTTP 200 and are neither a transport failure nor
+// a verdict on the token:
 //
 //   - A body that is not a JSON key set. go-oidc reports that as its own
 //     decode error, which is not a *url.Error, so isTransportFailure said no
@@ -478,6 +485,7 @@ const maxJWKSBytes = 1 << 20
 //     verification then fails for want of a matching key, and that is
 //     indistinguishable from a token signed by a key the issuer never
 //     published - except that here the issuer published nothing.
+//   - A key set whose keys are all ones this verifier cannot use.
 //
 // Both leave this service with no key set to judge anything against, which is
 // the documented 503 temporarily_unavailable case, not a 401. Classified here
@@ -486,54 +494,103 @@ const maxJWKSBytes = 1 << 20
 //
 // The body is put back so go-oidc parses exactly what was inspected - fetching
 // twice would let a second response differ from the one that was judged.
-func usableKeySetResponse(resp *http.Response) (*http.Response, error) {
+func (t *jwksTransport) usableKeySetResponse(resp *http.Response) (*http.Response, error) {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxJWKSBytes))
 	_ = resp.Body.Close()
 	if err != nil {
 		return nil, fmt.Errorf("%w: could not read the key set: %v", errJWKSUnavailable, err)
 	}
 
-	// USABLE keys, not entries. go-oidc silently drops a JWK it cannot use -
-	// an `oct` secret, or one whose `alg` is symmetric - and returns no
-	// error, so a key set of nothing but those parsed to an empty set and
-	// the verification then failed as invalid_token. That is the same "200
-	// with nothing usable" this function exists for, one level in.
-	//
-	// A published key set must not carry a shared secret anyway: anyone who
-	// can fetch it would hold the signing key. helpers answers both
-	// questions so this and the config validator cannot drift.
-	var keySet struct {
-		Keys []struct {
-			KTY string `json:"kty"`
-			Alg string `json:"alg"`
-		} `json:"keys"`
-	}
-	if err := json.Unmarshal(body, &keySet); err != nil {
-		return nil, fmt.Errorf("%w: response was not a JSON key set: %v", errJWKSUnavailable, err)
-	}
-	if len(keySet.Keys) == 0 {
-		return nil, fmt.Errorf("%w: the key set is empty, so no token could be verified against it", errJWKSUnavailable)
-	}
-
-	usable := 0
-	for _, key := range keySet.Keys {
-		if !helpers.IsAsymmetricJWKType(key.KTY) {
-			continue
-		}
-		// An absent alg leaves the choice to the token's header, which is
-		// constrained separately by allowed_signing_algs.
-		if key.Alg != "" && !helpers.IsAsymmetricJWSAlg(key.Alg) {
-			continue
-		}
-		usable++
-	}
-	if usable == 0 {
-		return nil, fmt.Errorf("%w: the key set holds %d key(s), none of them one this verifier can use", errJWKSUnavailable, len(keySet.Keys))
+	if err := t.countUsableKeys(body); err != nil {
+		return nil, err
 	}
 
 	resp.Body = io.NopCloser(bytes.NewReader(body))
 
 	return resp, nil
+}
+
+// countUsableKeys decides whether a key set holds anything this verifier can
+// verify a token with, by the SAME rules go-oidc loads it with.
+//
+// Metadata alone is not enough, which is the lesson the shallow version
+// taught: an RSA entry carrying `alg: RS256` and no `n`/`e` looks fine by kty
+// and alg, and go-oidc then fails to decode the key set and reports an error
+// that is not a *url.Error - so the caller was told invalid_token for a key
+// set that does not exist. The key is therefore parsed with the same go-jose
+// version go-oidc uses, in the same ORDER: an unsupported alg is skipped
+// BEFORE parsing, exactly as jwkJSON.UnmarshalJSON does, so a key that is
+// both ignorable and malformed stays ignorable.
+//
+// Two rules are this package's own, on top of go-oidc's:
+//
+//   - asymmetric only, because the key set behind jwks_uri is PUBLISHED;
+//   - within allowed_signing_algs, because a key that can only sign with an
+//     algorithm this verifier does not accept cannot verify any token it
+//     would accept.
+func (t *jwksTransport) countUsableKeys(body []byte) error {
+	var raw struct {
+		Keys []json.RawMessage `json:"keys"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return fmt.Errorf("%w: response was not a JSON key set: %v", errJWKSUnavailable, err)
+	}
+	if len(raw.Keys) == 0 {
+		return fmt.Errorf("%w: the key set is empty, so no token could be verified against it", errJWKSUnavailable)
+	}
+
+	usable := 0
+	for _, entry := range raw.Keys {
+		var metadata struct {
+			KTY string `json:"kty"`
+			Alg string `json:"alg"`
+		}
+		if err := json.Unmarshal(entry, &metadata); err != nil {
+			// go-oidc fails the WHOLE set here, so this service ends up
+			// with no key set at all - an outage, not a bad token.
+			return fmt.Errorf("%w: a key in the set could not be read: %v", errJWKSUnavailable, err)
+		}
+		if !helpers.IsAsymmetricJWKType(metadata.KTY) {
+			continue
+		}
+		// An absent alg leaves the choice to the token's header, which the
+		// verifier constrains with the same list.
+		if metadata.Alg != "" && !t.acceptableAlg(metadata.Alg) {
+			continue
+		}
+
+		var jwk jose.JSONWebKey
+		if err := json.Unmarshal(entry, &jwk); err != nil {
+			if errors.Is(err, jose.ErrUnsupportedKeyType) {
+				// go-oidc skips these, so they are simply not keys - it is
+				// the REST of the set that decides.
+				continue
+			}
+			// And this one go-oidc treats as fatal to the whole set.
+			return fmt.Errorf("%w: a key in the set could not be parsed: %v", errJWKSUnavailable, err)
+		}
+		if !jwk.Valid() {
+			continue
+		}
+		usable++
+	}
+	if usable == 0 {
+		return fmt.Errorf("%w: the key set holds %d key(s), none of them one this verifier can use", errJWKSUnavailable, len(raw.Keys))
+	}
+
+	return nil
+}
+
+// acceptableAlg reports whether a key advertising this algorithm could verify
+// a token this verifier would accept.
+func (t *jwksTransport) acceptableAlg(alg string) bool {
+	if !helpers.IsAsymmetricJWSAlg(alg) {
+		return false
+	}
+	if len(t.allowedAlgs) == 0 {
+		return true
+	}
+	return slices.Contains(t.allowedAlgs, alg)
 }
 
 // refuseNonHTTPSRedirect stops a JWKS fetch from being walked off TLS.
@@ -582,7 +639,7 @@ func newJWTBearerValidator(cfg *model.DynamicRegistrationJWTAuthConfig) (*jwtBea
 	// therefore enforced on every hop, and the refusal names the
 	// destination, because a redirect nobody configured is not obvious
 	// from the setting that was.
-	keySetCtx := oidc.ClientContext(context.Background(), newJWKSHTTPClient())
+	keySetCtx := oidc.ClientContext(context.Background(), newJWKSHTTPClient(algs))
 	keySet := &classifyingKeySet{inner: oidc.NewRemoteKeySet(keySetCtx, cfg.JWKSURI)}
 	oidcCfg := &oidc.Config{
 		ClientID:             cfg.Audience,

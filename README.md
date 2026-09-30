@@ -231,7 +231,9 @@ new one and file a local outage as ordinary auth noise. "Cannot be retrieved"
 covers a `200` that carries nothing usable as well as a refused connection or
 an error status — a body that is not a JSON key set, `{"keys":[]}`, and a key
 set holding only keys this verifier cannot use all leave it with nothing to
-judge a token against.
+judge a token against. "Cannot use" is decided by PARSING each key with the
+same library the verifier loads them with, not by reading its `kty` and `alg`:
+an RSA entry with no `n` or `e` looks usable and is not.
 
 `allowed_signing_algs` is asymmetric-only, enforced at startup. The key set
 behind `jwks_uri` is published, so configuring `HS256` and serving an `oct`
