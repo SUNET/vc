@@ -648,6 +648,44 @@ func TestJWTValidateDistinguishesKeySetOutageFromBadToken(t *testing.T) {
 		assertOutage(t, validatorFor(t, redirector.URL).Validate(t.Context(), signed(t, registerAudience)))
 	})
 
+	// HTTP 200 with a body that is not a key set. go-oidc reports this as
+	// its own decode error, which is not a *url.Error - so it used to reach
+	// the caller as 401 invalid_token, telling them their token was bad when
+	// this service had nothing to judge it with.
+	t.Run("JWKS endpoint answers 200 with malformed JSON", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"keys": [`))
+		}))
+		defer srv.Close()
+
+		assertOutage(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
+	})
+
+	t.Run("JWKS endpoint answers 200 with a document that is not a key set", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<html>maintenance</html>`))
+		}))
+		defer srv.Close()
+
+		assertOutage(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
+	})
+
+	// `{"keys":[]}` produces NO error from the fetch at all. Verification
+	// then fails for want of a matching key, which is indistinguishable from
+	// a token signed by a key the issuer never published - except that here
+	// the issuer published nothing, and this service has no key set.
+	t.Run("JWKS endpoint answers 200 with an empty key set", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"keys":[]}`))
+		}))
+		defer srv.Close()
+
+		assertOutage(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
+	})
+
 	// The contrast case: the key set arrived and the token lost on its
 	// merits, which must stay 401 invalid_token.
 	t.Run("key set fine, token rejected", func(t *testing.T) {

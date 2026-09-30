@@ -227,7 +227,10 @@ rejected is `401 invalid_token`.
 If the key set itself cannot be retrieved, the answer is `503
 temporarily_unavailable` rather than `401`: no verdict on the token was
 reached, so reporting it as a bad credential would send a caller off to mint a
-new one and file a local outage as ordinary auth noise.
+new one and file a local outage as ordinary auth noise. "Cannot be retrieved"
+covers a `200` that carries nothing usable as well as a refused connection or
+an error status — a body that is not a JSON key set, and `{"keys":[]}`, both
+leave this service with nothing to judge a token against.
 
 In `static` mode the token file must hold a single `b64token` on one line
 (letters, digits, and `-` `.` `_` `~` `+` `/`, with optional trailing `=`).

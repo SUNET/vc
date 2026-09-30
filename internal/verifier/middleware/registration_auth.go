@@ -1,11 +1,14 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -446,6 +449,62 @@ func (t *jwksTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 		return nil, fmt.Errorf("%w: HTTP %s", errJWKSUnavailable, resp.Status)
 	}
+
+	// 3xx is the client's to follow; only a final 2xx carries a key set to
+	// look at.
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		return resp, nil
+	}
+
+	return usableKeySetResponse(resp)
+}
+
+// maxJWKSBytes caps what one JWKS response may be read into memory. A key set
+// is a handful of public keys; anything on this scale is not one, and reading
+// it whole is how the body gets inspected at all.
+const maxJWKSBytes = 1 << 20
+
+// usableKeySetResponse turns a 2xx that carries no usable key set into the
+// same outage errJWKSUnavailable already marks.
+//
+// Two shapes reach here as HTTP 200 and are neither a transport failure nor a
+// verdict on the token:
+//
+//   - A body that is not a JSON key set. go-oidc reports that as its own
+//     decode error, which is not a *url.Error, so isTransportFailure said no
+//     and the caller was told invalid_token.
+//   - `{"keys":[]}`, which produces NO error from the fetch at all. The
+//     verification then fails for want of a matching key, and that is
+//     indistinguishable from a token signed by a key the issuer never
+//     published - except that here the issuer published nothing.
+//
+// Both leave this service with no key set to judge anything against, which is
+// the documented 503 temporarily_unavailable case, not a 401. Classified here
+// because this is where the response is still a response: one layer up it is
+// already a string.
+//
+// The body is put back so go-oidc parses exactly what was inspected - fetching
+// twice would let a second response differ from the one that was judged.
+func usableKeySetResponse(resp *http.Response) (*http.Response, error) {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxJWKSBytes))
+	_ = resp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("%w: could not read the key set: %v", errJWKSUnavailable, err)
+	}
+
+	// Only the envelope is decoded. Whether an individual key is one go-oidc
+	// can use is go-oidc's question; whether a key set arrived is this one.
+	var keySet struct {
+		Keys []json.RawMessage `json:"keys"`
+	}
+	if err := json.Unmarshal(body, &keySet); err != nil {
+		return nil, fmt.Errorf("%w: response was not a JSON key set: %v", errJWKSUnavailable, err)
+	}
+	if len(keySet.Keys) == 0 {
+		return nil, fmt.Errorf("%w: the key set is empty, so no token could be verified against it", errJWKSUnavailable)
+	}
+
+	resp.Body = io.NopCloser(bytes.NewReader(body))
 
 	return resp, nil
 }
