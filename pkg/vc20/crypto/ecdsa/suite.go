@@ -266,10 +266,13 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key *ecdsa.PublicKey
 
 	// The proofs the document attaches to ITSELF, and the document they
 	// secure. Read off the document rather than searched for anywhere in
-	// the proof object: hashing removes the root's proofs, so a proof moved
-	// onto an embedded credential leaves the secured document unchanged and
-	// an unqualified search would verify the moved one. See
-	// credential.RootProofs.
+	// the proof object, so a proof moved onto an embedded credential is not
+	// a candidate - which is what an unqualified search used to make it.
+	//
+	// It would not verify either: hashing removes only the ROOT's proofs,
+	// so a moved proof stays in the secured document and the hash changes
+	// with it. See credential.RootProofs and
+	// TestRelocatingAProofChangesTheSecuredDocument.
 	proofs, credWithoutProof, err := cred.RootProofs()
 	if err != nil {
 		return nil, err

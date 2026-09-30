@@ -185,13 +185,18 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 //
 // The proofs checked are the ones the document attaches to ITSELF, read off
 // the document by credential.RootProofs rather than inferred from the
-// reference graph. Verify removes the root's proofs when hashing, so a proof
-// MOVED onto an embedded credential leaves the secured document unchanged -
-// and a graph-shaped guess at which node is the root cannot separate a
-// presentation that links a credential through a custom property from a
-// credential whose subject is itself a credential linking back. The document
-// has already answered the question; Sign attaches its proof to the
-// top-level node.
+// reference graph. Sign attaches its proof to the top-level node, so the
+// document has already answered which node it is about - and a graph-shaped
+// guess could not, since a presentation linking a credential through a
+// custom property and a credential whose subject is itself a credential are
+// isomorphic in RDF.
+//
+// A proof moved onto an embedded credential is therefore not a candidate at
+// all. It would not verify even if it were: hashing removes only the ROOT's
+// proofs, so a moved proof stays in the secured document and the hash
+// changes with it - see TestRelocatingAProofChangesTheSecuredDocument. That
+// was not true while every proof was removed, which is what made relocation
+// work in the first place.
 func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKey) (map[string]any, error) {
 	if cred == nil {
 		return nil, fmt.Errorf("credential is nil")

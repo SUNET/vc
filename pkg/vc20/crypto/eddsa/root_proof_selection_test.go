@@ -147,8 +147,10 @@ func TestRootProofGraphsIgnoreAnEmbeddedCredentialsProof(t *testing.T) {
 // is its root - and a proof hanging off the detached node must not be
 // mistaken for the document's own.
 //
-// This is not hypothetical: verification removes every proof when hashing,
-// so relocating a proof link leaves the signed hash unchanged.
+// A document with two unreferenced nodes is refused rather than resolved by
+// preference, because there is nothing to prefer: neither node is inside
+// the other, and picking one would make whichever proof it carried the
+// document's own.
 func TestRootProofGraphsRefuseAnAmbiguousRoot(t *testing.T) {
 	const twoUnreferencedNodes = `{
 		"@context": "https://www.w3.org/ns/credentials/v2",
