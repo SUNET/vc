@@ -246,29 +246,24 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string, oidcP
 	s.log.Debug("Initiating OIDC auth",
 		"credential_type", credentialType)
 
-	// Create session with state, nonce, and PKCE verifier
-	session, err := s.createSession(ctx, credentialType)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create session: %w", err)
-	}
-
-	// Generate PKCE code_challenge from code_verifier
-	codeChallenge := pkgoauth2.CreateCodeChallenge(pkgoauth2.CodeChallengeMethodS256, session.CodeVerifier)
-
-	// Build authorization URL with PKCE
-	authOpts := []oauth2.AuthCodeOption{
-		oauth2.SetAuthURLParam("nonce", session.Nonce),
-		oauth2.SetAuthURLParam("code_challenge", codeChallenge),
-		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
-	}
-
-	// Apply per-scope OIDC request parameters
+	// Everything that can be rejected is resolved BEFORE a session exists.
+	//
+	// resolveOIDCRequestParams reads only its arguments, so an invalid
+	// template, malformed claims JSON or reserved custom parameter is a
+	// property of the request, not of any session. Creating the session
+	// first meant a rejected request still left its state in the cache
+	// until the TTL expired, and a caller retrying a misconfigured scope
+	// accumulated one dead entry per attempt.
+	//
+	// Ordering rather than a cleanup path: nothing to forget to delete, and
+	// no window in which a state exists for a request that was never sent.
+	var extraOpts []oauth2.AuthCodeOption
 	if oidcParams != nil {
-		extraOpts, err := resolveOIDCRequestParams(oidcParams, dynamicParams)
+		resolved, err := resolveOIDCRequestParams(oidcParams, dynamicParams)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve OIDC request params: %w", err)
 		}
-		authOpts = append(authOpts, extraOpts...)
+		extraOpts = resolved
 	}
 
 	// If extra scopes are configured, create a temporary config with merged scopes
@@ -285,6 +280,23 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string, oidcP
 			Scopes:       mergedScopes,
 		}
 	}
+
+	// Create session with state, nonce, and PKCE verifier
+	session, err := s.createSession(ctx, credentialType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create session: %w", err)
+	}
+
+	// Generate PKCE code_challenge from code_verifier
+	codeChallenge := pkgoauth2.CreateCodeChallenge(pkgoauth2.CodeChallengeMethodS256, session.CodeVerifier)
+
+	// Build authorization URL with PKCE
+	authOpts := []oauth2.AuthCodeOption{
+		oauth2.SetAuthURLParam("nonce", session.Nonce),
+		oauth2.SetAuthURLParam("code_challenge", codeChallenge),
+		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
+	}
+	authOpts = append(authOpts, extraOpts...)
 
 	authURL := oauthCfg.AuthCodeURL(session.State, authOpts...)
 
