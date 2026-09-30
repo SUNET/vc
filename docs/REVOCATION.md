@@ -66,15 +66,21 @@ Letting it fall through to the generic claims check would find no status and
 read that as "not revocable", which lets a revoked credential verify —
 `formatCanCarryStatus` refuses the format instead.
 
-### Limitation: OpenID4VCI only
+### Allocation happens in the issuer; recording happens in the apigw
 
-Only the OpenID4VCI issuance path allocates and records status entries. The
-OIDC-RP flow (`internal/apigw/apiv1/handlers_oidcrp.go`) calls `MakeSDJWT`
-directly and issues credentials that carry no status reference and cannot be
-revoked. Wiring it in means threading an allocation and a release through
-that flow and deciding what identifier its entries are recorded under — the
-OIDC-RP subject is not the authentic-source person id issuance uses. That is
-its own change.
+`MakeSDJWT`, `MakeMDoc`, `MakeJWP` and `MakeVC20` each allocate a status
+entry themselves and embed the reference in what they sign. Recording the
+`(status_list_uri, idx) → subject` mapping is the **caller's** job, and only
+the OpenID4VCI path in `handlers_issuer.go` does it.
+
+That split is a trap for any new issuance entry point: calling one of those
+gRPC methods and not recording produces a credential carrying a status
+reference that nothing can ever set to INVALID, and burns a slot doing it.
+`createCredentialViaOIDCRP` in `internal/apigw/apiv1/handlers_oidcrp.go` is
+written that way, but it has no callers — the OIDC-RP callback stores
+documents and returns a credential offer, and issuance then goes through the
+ordinary OpenID4VCI path. A comment at the call site says what wiring it up
+would require.
 
 ### Limitation: W3C VC 2.0 status is off by default
 
@@ -197,12 +203,26 @@ set covers both ends of the exchange.
 unknown action name, so a deployment defining neither action judges status
 list signers by whatever the default says rather than failing loudly.
 
-### Limitation: the CWT path is not trust-evaluated
+### What happens when the PDP cannot judge a token
 
-`JWTTrustVerifier` works on JWTs. A status list served as a CWT still needs
-a configured key resolver, and says so rather than failing later — it does
-not go through the PDP. A deployment consuming CWT status lists is trusting
-its key resolver, not its trust framework.
+`JWTTrustVerifier` resolves key material from the token's own header and
+works on JWTs. Two kinds of token give it nothing to judge:
+
+- a JWT carrying no `x5c`, `jwk` or `kid`. siros-status-service publishes
+  lists like this;
+- a CWT, which it cannot read at all.
+
+Such a token verifies against the pinned `status_list_key_file` if one
+applies, and is **refused** otherwise. It does not fall back to the generic
+key resolver: that resolver answers "is this the key that identity
+publishes", never "may this party publish these statuses", so reaching it
+would let a signer get to a status value with no policy decision — by
+omitting a header, or simply by serving the same list as a CWT.
+
+So a deployment with a trust framework and CWT status lists must pin the
+signing key. That pin is an operator statement standing in for the decision
+the PDP cannot make; it is not a way around the PDP for tokens it *can*
+judge, which always go through it.
 
 ## CWT wire format
 

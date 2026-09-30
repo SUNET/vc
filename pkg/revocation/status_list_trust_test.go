@@ -12,8 +12,11 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/mdoc"
+	"github.com/SUNET/vc/pkg/testsupport/jwktest"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
 )
@@ -53,6 +56,11 @@ func serveStatusList(t *testing.T) (uri string, sign func(*testing.T, *ecdsa.Pri
 			t.Helper()
 			tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 			tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+			// A real trust-path token names its own key - that is what the
+			// trust verifier resolves and evaluates. Without one the
+			// checker has nothing to send to the PDP and takes the
+			// pinned-key path instead; see jwtHeaderNamesAKey.
+			tok.Header["jwk"] = jwktest.PublicKeyJWK(&key.PublicKey)
 			signed, err := tok.SignedString(key)
 			require.NoError(t, err)
 			token = signed
@@ -145,6 +153,7 @@ func TestStatusList_TrustPathStillChecksTypAndSub(t *testing.T) {
 		"status_list": statusListClaim(t, []uint8{0, 0, 0}, 8),
 	})
 	tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+	tok.Header["jwk"] = jwktest.PublicKeyJWK(&key.PublicKey)
 	signed, err := tok.SignedString(key)
 	require.NoError(t, err)
 	tv.key = &key.PublicKey
@@ -162,4 +171,246 @@ func TestStatusList_TrustPathStillChecksTypAndSub(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not match the requested status list URI")
 	_ = uri
+}
+
+// signStatusListJWT mints a status list token, optionally naming its own
+// key in the header. Whether it does is exactly what routes it to the trust
+// verifier or to the operator's configured key.
+func signStatusListJWT(t *testing.T, key *ecdsa.PrivateKey, uri, issuer string, nameKey bool, statuses []uint8) string {
+	t.Helper()
+	claims := jwt.MapClaims{
+		"sub": uri, "iat": time.Now().Unix(),
+		"status_list": statusListClaim(t, statuses, 8),
+	}
+	if issuer != "" {
+		claims["iss"] = issuer
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	tok.Header["typ"] = tokenstatuslist.JWTTypHeader
+	if nameKey {
+		tok.Header["jwk"] = jwktest.PublicKeyJWK(&key.PublicKey)
+	}
+	signed, err := tok.SignedString(key)
+	require.NoError(t, err)
+	return signed
+}
+
+func serveToken(t *testing.T, mediaType string, body *[]byte) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", mediaType)
+		_, _ = w.Write(*body)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// TestStatusList_PinnedKeyVerifiesTokenTheTrustPathCannotJudge: a status
+// service that publishes no key material in its tokens - siros-status-service
+// is one - gives JWTTrustVerifier nothing to resolve or evaluate. Sending
+// such a token down the trust path anyway made status_list_key_file
+// unreachable, so every list failed to verify, and fail_open then accepted
+// revoked credentials.
+func TestStatusList_PinnedKeyVerifiesTokenTheTrustPathCannotJudge(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	var body []byte
+	server := serveToken(t, tokenstatuslist.MediaTypeJWT, &body)
+	uri := server.URL + "/statuslists/0"
+
+	statuses := make([]uint8, 8)
+	statuses[2] = tokenstatuslist.StatusInvalid
+	body = []byte(signStatusListJWT(t, key, uri, "", false, statuses))
+
+	tv := &recordingTrustVerifier{key: &key.PublicKey, trusted: true}
+	checker, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](time.Minute)),
+		WithHTTPClient(http.DefaultClient),
+		WithTokenVerifier(tv),
+		WithStatusListKey(&key.PublicKey),
+	)
+	require.NoError(t, err)
+
+	result, err := checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 2})
+	require.NoError(t, err, "the pinned key must verify a token the PDP cannot judge")
+	require.Equal(t, StatusInvalid, result.Status)
+	require.Zero(t, tv.calls, "a token naming no key has nothing to send to the PDP")
+}
+
+// TestStatusList_NoKeyMaterialAndNoPinIsRefused keeps that fail-closed: a
+// token the PDP cannot judge and no operator statement about its key is not
+// a token to believe.
+func TestStatusList_NoKeyMaterialAndNoPinIsRefused(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	var body []byte
+	server := serveToken(t, tokenstatuslist.MediaTypeJWT, &body)
+	uri := server.URL + "/statuslists/0"
+	body = []byte(signStatusListJWT(t, key, uri, "", false, make([]uint8, 8)))
+
+	tv := &recordingTrustVerifier{key: &key.PublicKey, trusted: true}
+	checker, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](time.Minute)),
+		WithHTTPClient(http.DefaultClient),
+		// A resolver that WOULD answer. It must not be reached: reaching it
+		// is how a token skips the PDP just by omitting its header.
+		WithKeyResolver(testKeyResolver{key: &key.PublicKey}),
+		WithTokenVerifier(tv),
+	)
+	require.NoError(t, err)
+
+	_, err = checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 1})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot be trust-evaluated")
+}
+
+// TestStatusList_TokenOutsidePinScopeIsRefused: the pin is scoped to the
+// configured status_list_issuer, so a token from anyone else is not covered
+// by it - and with a trust verifier configured it must not fall through to
+// the generic resolver either.
+func TestStatusList_TokenOutsidePinScopeIsRefused(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	var body []byte
+	server := serveToken(t, tokenstatuslist.MediaTypeJWT, &body)
+	uri := server.URL + "/statuslists/0"
+	body = []byte(signStatusListJWT(t, key, uri, "https://someone.else.example.com", false, make([]uint8, 8)))
+
+	tv := &recordingTrustVerifier{key: &key.PublicKey, trusted: true}
+	checker, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](time.Minute)),
+		WithHTTPClient(http.DefaultClient),
+		WithKeyResolver(testKeyResolver{key: &key.PublicKey}),
+		WithTokenVerifier(tv),
+		WithStatusListKey(&key.PublicKey),
+		WithFallbackIssuer("https://status.example.com"),
+	)
+	require.NoError(t, err)
+
+	_, err = checker.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 1})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not apply to it")
+}
+
+// TestStatusList_CWTCannotSkipThePDP: JWTTrustVerifier works on JWTs, so a
+// CWT served by the same party reaches a status value with no policy
+// decision at all. With a trust verifier configured, only an
+// operator-pinned key verifies one.
+//
+// The CWT here is genuinely signed and genuinely parseable, and the key
+// resolver WOULD hand back the key that signed it - so the only thing that
+// can refuse it is the rule under test.
+func TestStatusList_CWTCannotSkipThePDP(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	var body []byte
+	server := serveToken(t, tokenstatuslist.MediaTypeCWT, &body)
+	uri := server.URL + "/statuslists/0"
+
+	statuses := make([]uint8, 16)
+	statuses[3] = tokenstatuslist.StatusInvalid
+	body = signedStatusListCWT(t, key, uri, statuses)
+
+	// Sanity: without a trust verifier the very same bytes verify and
+	// report the status, so anything the next two checks refuse is refused
+	// by the rule, not by a malformed token.
+	plain, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](time.Minute)),
+		WithHTTPClient(http.DefaultClient),
+		WithKeyResolver(testKeyResolver{key: &key.PublicKey}),
+	)
+	require.NoError(t, err)
+	result, err := plain.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 3})
+	require.NoError(t, err)
+	require.Equal(t, StatusInvalid, result.Status)
+
+	tv := &recordingTrustVerifier{key: &key.PublicKey, trusted: true}
+	guarded, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](time.Minute)),
+		WithHTTPClient(http.DefaultClient),
+		WithKeyResolver(testKeyResolver{key: &key.PublicKey}),
+		WithTokenVerifier(tv),
+	)
+	require.NoError(t, err)
+
+	_, err = guarded.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 3})
+	require.Error(t, err, "a CWT must not reach a status value without a policy decision")
+	require.Contains(t, err.Error(), "cannot be trust-evaluated")
+
+	// Pinning the key is the operator standing in for the decision the PDP
+	// cannot make, and it is the supported way to run CWT lists under a
+	// trust framework.
+	pinned, err := NewStatusListChecker(
+		WithCache(cache.NewMemoryCache[[]uint8](time.Minute)),
+		WithHTTPClient(http.DefaultClient),
+		WithTokenVerifier(tv),
+		WithStatusListKey(&key.PublicKey),
+		WithFallbackIssuer(cwtTestIssuer),
+	)
+	require.NoError(t, err)
+	result, err = pinned.CheckStatus(t.Context(), &Reference{Scheme: SchemeStatusList, URI: uri, Index: 3})
+	require.NoError(t, err)
+	require.Equal(t, StatusInvalid, result.Status)
+}
+
+const cwtTestIssuer = "https://status.example.com"
+
+// signedStatusListCWT mints a valid, signed status list CWT in the draft's
+// layout.
+func signedStatusListCWT(t *testing.T, key *ecdsa.PrivateKey, uri string, statuses []uint8) []byte {
+	t.Helper()
+
+	compressed, err := tokenstatuslist.CompressStatuses(statuses)
+	require.NoError(t, err)
+
+	encoder, err := mdoc.NewCBOREncoder()
+	require.NoError(t, err)
+
+	payload, err := encoder.Marshal(map[int]any{
+		1: cwtTestIssuer,
+		2: uri,
+		6: time.Now().Unix(),
+		tokenstatuslist.CWTClaimStatusList: map[string]any{
+			"bits": 8, "lst": compressed,
+		},
+	})
+	require.NoError(t, err)
+
+	protectedBytes, err := encoder.Marshal(map[int64]any{
+		int64(1): int64(-7), int64(16): tokenstatuslist.CWTTypHeader,
+	})
+	require.NoError(t, err)
+
+	sign1, err := signCWTWithProtected(t, protectedBytes, payload, key)
+	require.NoError(t, err)
+
+	token, err := encoder.Marshal(cbor.Tag{Number: 18, Content: []any{
+		sign1.Protected, map[any]any{}, sign1.Payload, sign1.Signature,
+	}})
+	require.NoError(t, err)
+	return token
+}
+
+// TestJWTHeaderNamesAKey pins the routing predicate itself.
+func TestJWTHeaderNamesAKey(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	require.True(t, jwtHeaderNamesAKey(signStatusListJWT(t, key, "u", "", true, make([]uint8, 8))))
+	require.False(t, jwtHeaderNamesAKey(signStatusListJWT(t, key, "u", "", false, make([]uint8, 8))))
+
+	for _, header := range []string{"x5c", "kid"} {
+		tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{"sub": "u"})
+		tok.Header[header] = "anything"
+		signed, signErr := tok.SignedString(key)
+		require.NoError(t, signErr)
+		require.True(t, jwtHeaderNamesAKey(signed), header+" names a key to resolve")
+	}
+
+	require.False(t, jwtHeaderNamesAKey("not-a-jwt"))
+	require.False(t, jwtHeaderNamesAKey("!!!.x.y"))
 }

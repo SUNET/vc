@@ -3,6 +3,7 @@ package revocation
 import (
 	"context"
 	"crypto"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -321,6 +322,26 @@ func (c *StatusListChecker) resolveStatusListKey(ctx context.Context, issuer, ur
 	if c.statusListKey != nil && (issuer == "" || issuer == c.fallbackIssuer) {
 		return c.statusListKey, nil
 	}
+
+	// With a trust verifier configured, the generic resolver is NOT an
+	// acceptable fallback. It answers "is this the key that identity
+	// publishes", never "may this party publish these statuses" - and
+	// reaching it here is how a token gets to a status value with no PDP
+	// decision at all: by carrying no x5c/jwk/kid on the JWT path, or
+	// simply by being served as a CWT, which JWTTrustVerifier cannot judge.
+	// Either way the signer would escape exactly the policy the trust
+	// evaluation was added to enforce, and with revocation.fail_open at its
+	// default the escape reads as "not revoked".
+	//
+	// So in that configuration only an operator-pinned key verifies a token
+	// the PDP cannot judge, and a token outside the pin's scope is refused.
+	if c.tokenVerifier != nil {
+		if c.statusListKey != nil {
+			return nil, fmt.Errorf("status list token for %q is issued by %q, which is not verifier.revocation.status_list_issuer, so the configured status_list_key_file does not apply to it, and its signer cannot be trust-evaluated on this path", uri, issuer)
+		}
+		return nil, fmt.Errorf("status list token for %q cannot be trust-evaluated - it names no key in its own header, or it is a CWT - and no verifier.revocation.status_list_key_file is configured to pin its signing key", uri)
+	}
+
 	if issuer == "" {
 		issuer = c.fallbackIssuer
 	}
@@ -328,6 +349,35 @@ func (c *StatusListChecker) resolveStatusListKey(ctx context.Context, issuer, ur
 		return nil, fmt.Errorf("status list token for %q carries no iss claim, and neither verifier.revocation.status_list_key_file nor verifier.revocation.status_list_issuer is configured, so its signing key cannot be resolved", uri)
 	}
 	return c.keyResolver.ResolveKey(ctx, issuer, kid)
+}
+
+// jwtHeaderNamesAKey reports whether a JWS header offers key material a
+// trust verifier can resolve and evaluate: an x5c chain, an embedded jwk,
+// or a kid to discover one under.
+//
+// The header is read WITHOUT verifying anything, which is safe because
+// nothing is trusted on the strength of it - it only chooses which
+// verification path runs, and both paths verify. A token claiming an x5c
+// it does not have is sent to the trust path and refused there.
+func jwtHeaderNamesAKey(tokenString string) bool {
+	parts := strings.Split(tokenString, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return false
+	}
+	var header map[string]any
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return false
+	}
+	for _, key := range []string{"x5c", "jwk", "kid"} {
+		if v, ok := header[key]; ok && v != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // checkCWTTypeHeader enforces the statuslist+cwt content type carried in
@@ -440,10 +490,15 @@ func (c *StatusListChecker) parseCWTStatusList(ctx context.Context, uri string, 
 	// Resolve signing key and verify signature.
 	//
 	// The CWT path has no trust-evaluated equivalent yet - JWTTrustVerifier
-	// works on JWTs - so it still needs a resolver, and says so rather than
+	// works on JWTs - so it still needs a key, and says so rather than
 	// failing later with a nil dereference.
-	if c.keyResolver == nil {
-		return nil, errors.New("status list CWT verification requires a key resolver; only the JWT path can verify through the trust framework")
+	//
+	// A deployment WITH a trust verifier gets a CWT verified only against
+	// an operator-pinned key; resolveStatusListKey refuses anything else in
+	// that configuration. Otherwise serving the same list as a CWT would be
+	// a one-line way around the PDP.
+	if c.keyResolver == nil && c.statusListKey == nil {
+		return nil, errors.New("status list CWT verification requires a key resolver or a configured status_list_key_file; only the JWT path can verify through the trust framework")
 	}
 	key, err := c.resolveStatusListKey(ctx, issuer, uri, kid)
 	if err != nil {
@@ -514,7 +569,21 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, uri string, 
 	// Trust-evaluated verification is the authority when configured: the key
 	// comes from the token's own x5c or jwk header and go-trust decides
 	// whether that signer may speak for these credentials.
-	if c.tokenVerifier != nil {
+	//
+	// Only when the token actually names a key, though. JWTTrustVerifier
+	// resolves key material from x5c, jwk, a DID, or kid + JWKS discovery;
+	// a token carrying none of those gives it nothing to resolve and
+	// nothing to evaluate, and an operator whose status service publishes
+	// no key material configures status_list_key_file precisely for that
+	// case. Sending such a token down this path anyway made the pinned key
+	// unreachable, so it failed to verify - and fail_open then accepted a
+	// revoked credential.
+	//
+	// The fall-through is not a weakening: with a trust verifier set,
+	// resolveStatusListKey will hand back the pinned key or refuse, never
+	// the generic resolver, so a token cannot dodge the PDP by omitting its
+	// header.
+	if c.tokenVerifier != nil && jwtHeaderNamesAKey(tokenString) {
 		token, err := c.tokenVerifier.VerifyStatusListToken(ctx, tokenString, uri)
 		if err != nil {
 			return nil, err
@@ -522,8 +591,11 @@ func (c *StatusListChecker) parseJWTStatusList(ctx context.Context, uri string, 
 		return c.statusesFromVerifiedJWT(token, uri)
 	}
 
-	if c.keyResolver == nil {
-		return nil, errors.New("status list JWT signature verification required but no key resolver or token verifier configured")
+	// A pinned key is enough on its own: it is the whole point of
+	// status_list_key_file that a deployment can verify lists from a
+	// service its resolver cannot discover a key for.
+	if c.keyResolver == nil && c.statusListKey == nil {
+		return nil, errors.New("status list JWT signature verification required but no key resolver, pinned key or usable token verifier configured")
 	}
 
 	// Build a jwt.Keyfunc that delegates to the generic KeyResolver. iss is

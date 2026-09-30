@@ -211,6 +211,15 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		// the same ParseX5C/ParseJWK and evaluator the credential paths use,
 		// so a status list is trusted on exactly the same terms as the
 		// credential it describes.
+		//
+		// It does not override the options above, it narrows them. A token
+		// that names a key in its own header is judged by the PDP and
+		// nothing else. A token that names none - or a CWT, which
+		// JWTTrustVerifier cannot read - falls back to the pinned key from
+		// StatusListKeyFile, and to nothing else: the generic resolver is
+		// refused in that configuration, because reaching it would be a way
+		// to a status value with no policy decision at all. See
+		// resolveStatusListKey.
 		statusListOpts = append(statusListOpts, revocation.WithTokenVerifier(c.jwtTrustVerifier))
 		// Loaded at startup, not per request: a key file that is missing or
 		// malformed should stop the service rather than surface later as

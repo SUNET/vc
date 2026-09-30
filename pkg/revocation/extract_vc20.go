@@ -127,8 +127,13 @@ func statusListIndex(raw any) (int64, bool) {
 // unknown, and treating the two alike lets a revoked credential through on
 // nothing more than an unrecognised type name or a malformed entry.
 func declaresStatus(claims map[string]any) bool {
+	// PRESENCE of the key, whatever its value. `"credentialStatus": null`
+	// is a credential that names a status mechanism and fails to describe
+	// it - a malformed declaration, not the absence of one - and letting a
+	// null slip past the guard is a one-character way to be reported as
+	// non-revocable.
 	for _, key := range []string{"status", "credentialStatus"} {
-		if v, ok := claims[key]; ok && v != nil {
+		if _, ok := claims[key]; ok {
 			return true
 		}
 	}

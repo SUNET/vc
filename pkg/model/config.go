@@ -894,10 +894,25 @@ type RevocationConfig struct {
 	// verify. With revocation.fail_open at its default of true, that
 	// failure is tolerated and a REVOKED credential is accepted.
 	//
-	// Setting this PINS the key: it is used for every Status List Token,
-	// whether or not the token carries an `iss`. Naming a key is a
-	// statement about which key signs these lists, so consulting a resolver
-	// anyway could return a different one.
+	// SCOPE. The pin covers a token with NO `iss`, and a token whose `iss`
+	// is exactly status_list_issuer. Anything else goes to the resolver.
+	//
+	// It is scoped rather than global because a deployment may run vc's own
+	// registry alongside an external status service - issuer.status_service
+	// documents that as supported - and those lists are signed by different
+	// keys. A global pin made the external key answer for registry tokens
+	// too, so registry lists stopped verifying the moment a key file was
+	// configured, which fail_open then tolerated.
+	//
+	// The practical consequence: if the service that signs your lists DOES
+	// put an `iss` in them, set status_list_issuer to that value as well,
+	// or the pin will not apply and verification falls back to discovery.
+	//
+	// With a trust framework configured (the ordinary case), the fallback
+	// is NOT the generic resolver: a token the PDP cannot judge - one
+	// naming no key in its own header, or served as a CWT - verifies
+	// against this pin or is refused. Otherwise a signer could reach a
+	// status value with no policy decision by omitting a header.
 	//
 	// Configure this, or status_list_issuer, or tokens without an `iss`
 	// claim are refused outright - see WithStatusListKey in pkg/revocation.

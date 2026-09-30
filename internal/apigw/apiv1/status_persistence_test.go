@@ -247,3 +247,64 @@ func TestSaveCredentialSubjects_NoIdentifierAndNoAllocationIsFine(t *testing.T) 
 	require.Empty(t, store.saved)
 	require.Empty(t, issuer.calls)
 }
+
+// TestSaveCredentialSubjects_FailureReleasesUnattemptedEntriesToo: the
+// entries AFTER the failing one were allocated before the loop started;
+// they are simply never reached. Releasing only the prefix leaked the tail
+// of every failed batch, and since the caller may retry, each attempt leaks
+// another.
+func TestSaveCredentialSubjects_FailureReleasesUnattemptedEntriesToo(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+	store.failAfter = 1
+
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
+		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+		{Index: 18, URI: "https://status.example.com/statuslists/def", Backend: "status_service"},
+	})
+	require.Error(t, err)
+
+	released := map[string]bool{}
+	for _, call := range issuer.calls {
+		released[call.StatusListUri] = true
+	}
+	require.Len(t, issuer.calls, 3, "every allocated entry must be released, reached or not")
+	require.True(t, released["https://registry.example.com/statuslists/4"], "recorded before the failure")
+	require.True(t, released["https://status.example.com/statuslists/abc"], "the failing entry")
+	require.True(t, released["https://status.example.com/statuslists/def"],
+		"allocated but never reached - this is the one that used to leak")
+}
+
+// TestSaveCredentialSubjects_AllocatedWithoutURIIsRefused: an issuer older
+// than the status_list_uri field returns a section and an index and no URI.
+// It has already embedded that entry in what it signed, so continuing
+// delivers a credential advertising a revocation status nothing can ever
+// set. That used to be a warning and a `continue`.
+func TestSaveCredentialSubjects_AllocatedWithoutURIIsRefused(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
+		{Section: 3, Index: 9},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no list URI")
+	require.Empty(t, store.saved)
+	// Nothing can be released either - releasing names the list URI, which
+	// is the thing that is missing - so the call is made and skips it.
+	require.Empty(t, issuer.calls)
+}
+
+// TestSaveCredentialSubjects_AllocatedWithoutURIReleasesItsSiblings: the
+// batch fails as a whole, so entries in it that DO have a URI must not be
+// left VALID and unreferenced.
+func TestSaveCredentialSubjects_AllocatedWithoutURIReleasesItsSiblings(t *testing.T) {
+	c, _, issuer := persistenceClientWithIssuer(t, nil)
+
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
+		{Section: 3, Index: 9},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+	})
+	require.Error(t, err)
+	require.Len(t, issuer.calls, 1)
+	require.Equal(t, "https://status.example.com/statuslists/abc", issuer.calls[0].StatusListUri)
+}

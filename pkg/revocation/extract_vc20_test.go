@@ -122,3 +122,35 @@ func TestValidate_NoStatusIsStillNotRevocable(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, result)
 }
+
+// TestDeclaresStatus_NullCountsAsDeclared: `"credentialStatus": null` names
+// a revocation mechanism and fails to describe it. That is a credential
+// whose revocation state is unknown, not one that is not revocable, and a
+// null used to slip past the guard because the check required a non-nil
+// value.
+func TestDeclaresStatus_NullCountsAsDeclared(t *testing.T) {
+	for _, key := range []string{"status", "credentialStatus"} {
+		t.Run(key+" null", func(t *testing.T) {
+			require.True(t, declaresStatus(map[string]any{key: nil}))
+		})
+		t.Run(key+" present", func(t *testing.T) {
+			require.True(t, declaresStatus(map[string]any{key: map[string]any{"type": "X"}}))
+		})
+	}
+
+	require.False(t, declaresStatus(map[string]any{}))
+	require.False(t, declaresStatus(map[string]any{"vct": "urn:x"}))
+}
+
+// TestRegistryValidate_NullStatusIsNotSilentlyNonRevocable proves the guard
+// is reached through the production path, not just the predicate: a
+// credential with a null credentialStatus must come back as "cannot
+// determine", which fail_open then governs.
+func TestRegistryValidate_NullStatusIsNotSilentlyNonRevocable(t *testing.T) {
+	registry := NewRegistry()
+
+	result, err := registry.Validate(t.Context(), map[string]any{"credentialStatus": nil})
+	require.Error(t, err, "a declared-but-unreadable status must not read as non-revocable")
+	require.Nil(t, result)
+	require.Contains(t, err.Error(), "no registered checker could read")
+}

@@ -761,8 +761,22 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 			// produce unrevocable credentials; issuer and apigw are meant
 			// to be upgraded together.
 			if e.Section != 0 || e.Index != 0 || e.Backend != "" {
-				c.log.Warn("issuance reply carries a status list entry with no list URI, so it cannot be recorded and the credential cannot be revoked; this is what an issuer older than the status_list_uri field looks like - upgrade issuer and apigw together",
+				// FAIL, do not continue. The issuer has already embedded
+				// this entry in what it signed, so continuing delivers a
+				// credential that advertises a revocation status nothing
+				// can ever set - the same "looks revocable and is not"
+				// failure the VC 2.0 status flag defaults off to avoid,
+				// except here it reaches a wallet.
+				//
+				// The entry cannot be released either: releasing names the
+				// list URI, which is the thing that is missing. So the slot
+				// is stranded whatever happens, and the choice is only
+				// whether an unrevocable credential is also issued.
+				c.log.Error(errors.New("status list entry has no list URI"),
+					"issuance reply carries a status list entry with no list URI, so it cannot be recorded and the credential could never be revoked; this is what an issuer older than the status_list_uri field looks like - upgrade issuer and apigw together",
 					"identifier", identifier, "section", e.Section, "index", e.Index, "backend", e.Backend)
+				c.releaseAllocations(ctx, entries)
+				return fmt.Errorf("issuer returned a status list entry with no list URI (section %d, index %d); issuer and apigw must be upgraded together", e.Section, e.Index)
 			}
 			continue
 		}
@@ -783,10 +797,14 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 			// The entries were allocated before we got here and are VALID
 			// on their backend. Failing without releasing them leaves live
 			// slots nothing points at, and since the caller may retry,
-			// every attempt would strand another set. Release this one and
-			// the ones already recorded in this loop - recorded is not
-			// issued, because this request is about to fail.
-			c.releaseAllocations(ctx, append(recorded, e))
+			// every attempt would strand another set.
+			//
+			// ALL of them, not just this one and the ones already recorded:
+			// the entries after this point in the loop were allocated too,
+			// they are simply not reached. Releasing only the prefix leaked
+			// the tail of every failed batch. releaseAllocations skips
+			// entries with no URI, so unallocated ones cost nothing.
+			c.releaseAllocations(ctx, entries)
 			return fmt.Errorf("failed to record credential status entry: %w", err)
 		}
 		recorded = append(recorded, e)

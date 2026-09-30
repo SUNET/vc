@@ -406,16 +406,24 @@ func (c *Client) createCredentialViaOIDCRP(ctx context.Context, credentialType s
 		return "", fmt.Errorf("unsupported credential type: %s", credentialType)
 	}
 
-	// NOT REVOCABLE. This path allocates no status list entry and records
-	// nothing, so a credential issued here has no credentialStatus/status
-	// claim and can never be revoked. Revocation is wired into the
-	// OpenID4VCI path only (PAR -> token -> /credential, see
-	// handlers_issuer.go) - see docs/REVOCATION.md.
+	// MakeSDJWT allocates a status list entry and embeds the reference in
+	// the credential (see internal/issuer/apiv1/handlers.go). This function
+	// does NOT record the resulting (status_list_uri, idx) -> subject
+	// mapping the way the OpenID4VCI path does, so a credential issued here
+	// would carry a status reference that nothing can ever set to INVALID -
+	// worse than carrying none, because the reference invites reliance on
+	// it, and it burns a slot besides.
 	//
-	// Adding it here means threading an allocation and a release through
-	// this flow as well, and deciding what identifier the entry is recorded
-	// under, since the OIDC-RP flow's subject is not the same thing as the
-	// authentic-source person id issuance uses. That is its own change.
+	// That is latent rather than live: this function has no callers. The
+	// OIDC-RP callback stores documents and hands back a credential offer,
+	// and issuance happens afterwards through the ordinary OpenID4VCI path,
+	// which does record. It is dead on main too, so this PR does not delete
+	// it.
+	//
+	// Whoever wires it up must call saveCredentialSubjects with the reply's
+	// TokenStatusList* fields, and decide what identifier the entry is
+	// recorded under - the OIDC-RP subject is not the authentic-source
+	// person id issuance uses. See docs/REVOCATION.md.
 	reply, err := client.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
 		Scope:        credentialType,
 		DocumentData: documentData,
