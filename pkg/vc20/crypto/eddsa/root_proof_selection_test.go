@@ -193,16 +193,18 @@ func mustNQuads(t *testing.T, cred *credential.RDFCredential) string {
 }
 
 // TestVerifyRefusesAStubRootProof is the second shape of the misplaced-proof
-// attack, and the reason selection is tied to the root's proof GRAPH rather
-// than to a proofValue.
+// attack, and the reason selection is tied to the ROOT rather than to a
+// proofValue found somewhere in the document.
 //
-// Moving the full typed proof onto the embedded credential and leaving a
-// root proof object carrying ONLY the same proofValue keeps the document
-// hashing identically - verification removes every proof - and a search by
-// value would find the moved, typed proof and verify it with the root's key.
+// The full typed proof is moved onto the embedded credential and a stub
+// carrying only the same proofValue is left at the root. A search by value
+// would find the moved, typed proof and check it against the root's key.
 //
-// Confining the search to the graph the root links to defeats it: that graph
-// holds a proofValue and no typed proof, so there is nothing to select.
+// The refusal has to be the STUB being incomplete, not a signature
+// mismatch. Root-scoped hashing retains the moved proof in the document, so
+// an unqualified selector would fail too - just later, and for the wrong
+// reason - and an assertion that merely required some error would no longer
+// tell the two apart.
 func TestVerifyRefusesAStubRootProof(t *testing.T) {
 	// Signed WITH the credential already embedded, so the attack changes
 	// nothing but where the proof sits. A test that also adds the
@@ -245,12 +247,14 @@ func TestVerifyRefusesAStubRootProof(t *testing.T) {
 	reparsed, err := credential.NewRDFCredentialFromJSON(tampered, nil)
 	require.NoError(t, err)
 
-	// The stub really is what the root links to, or this proves nothing.
+	// The stub really is what the root carries, or this proves nothing.
 	require.Len(t, rootProofsOf(t, reparsed), 1,
-		"the root still links a proof graph - it is the CONTENT that is a stub")
+		"the root still carries a proof - it is the CONTENT that is a stub")
 
-	require.Error(t, NewSuite().Verify(reparsed, pub),
-		"a root proof carrying only a value must not select a proof from elsewhere")
+	err = NewSuite().Verify(reparsed, pub)
+	require.Error(t, err, "a root proof carrying only a value must not select a proof from elsewhere")
+	require.Contains(t, err.Error(), ProofType,
+		"the stub must be refused for being no proof at all; a signature mismatch here would mean the typed proof was found elsewhere and checked")
 }
 
 // TestTheProofsFoundAreTheProofsRemoved: the link this accepts as a root

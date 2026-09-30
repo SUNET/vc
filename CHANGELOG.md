@@ -103,14 +103,19 @@
     proof in the document being hashed.
 
   Verification also now checks the proof the document attaches to **itself**,
-  found by following the root's proof link into the graph it names, instead of
-  the first proof node the search reaches. Taking the first is not merely arbitrary: because
-  verification removes every proof when hashing, a proof MOVED from the
-  presentation onto its embedded credential leaves the hash unchanged, so
-  someone holding a legitimately signed presentation could move the holder's
-  proof down, delete the presentation's own, and have the misplaced proof
-  verify with the holder's key. A document that attaches no proof to itself
-  is now refused.
+  read off the document's top-level node, instead of the first proof node a
+  search through the document reaches. Taking the first was not merely
+  arbitrary: verification USED TO remove every proof when hashing, so a proof
+  MOVED from the presentation onto its embedded credential left the hash
+  unchanged - someone holding a legitimately signed presentation could move
+  the holder's proof down, delete the presentation's own, and have the
+  misplaced proof verify with the holder's key.
+
+  Both halves of that are closed now. Hashing is scoped to the root's own
+  proofs, so a moved proof no longer leaves the document unchanged, and
+  selection is scoped to the root, so a proof the top-level node does not
+  carry is not a candidate at all. A document that attaches no proof to
+  itself is refused.
 
   Measured against the old code: a presentation carrying **no** credential
   verified unless it had been re-parsed from expanded JSON; one carrying a
