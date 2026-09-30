@@ -197,8 +197,21 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 
 	proofMap := compactedProof
 
-	// Find proof node
-	proofNode := common.FindProofNode(proofMap, ProofType)
+	// WHICH proof, when the document holds more than one. A presentation
+	// carries the holder's proof and the embedded credential's issuer
+	// proof, and both land here - so taking the first one found is an
+	// accident of graph ordering rather than a choice. Verifying the
+	// issuer's proofValue with the holder's key fails a presentation that
+	// is perfectly good.
+	//
+	// The root's proof is found by following its own link. A document with
+	// no id cannot be resolved that way - and is also a document with
+	// nothing to be ambiguous about, since the second proof arrives on an
+	// embedded credential - so that falls back.
+	proofNode := common.FindRootProofNode(proofMap, ProofType, rootDocumentID(cred))
+	if proofNode == nil {
+		proofNode = common.FindProofNode(proofMap, ProofType)
+	}
 	if proofNode == nil {
 		return fmt.Errorf("proof node not found in proof object")
 	}
@@ -300,4 +313,23 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 	}
 
 	return nil
+}
+
+// rootDocumentID returns the id the document gives itself, which is what
+// identifies its own node in the proof object's graph.
+//
+// Read from the document as the caller passed it. For expanded JSON-LD -
+// where OriginalJSON() is an array - there is no single root object to ask,
+// and the caller falls back to the unqualified search.
+func rootDocumentID(cred *credential.RDFCredential) string {
+	originalJSON := cred.OriginalJSON()
+	if originalJSON == "" {
+		return ""
+	}
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(originalJSON), &doc); err != nil {
+		return ""
+	}
+	id, _ := doc["id"].(string)
+	return id
 }

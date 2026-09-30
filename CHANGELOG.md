@@ -76,6 +76,13 @@
     embedded credential's issuer proof and leaves the presentation's own
     proof in the document being hashed.
 
+  Verification also now selects the proof attached to the document's own
+  root node, rather than the first proof node the search reaches. A
+  presentation carries the holder's proof and the embedded credential's
+  issuer proof, and which one an unqualified search returns is an accident
+  of graph ordering — it lands on the holder's today, and nothing makes that
+  true.
+
   Measured against the old code: a presentation carrying **no** credential
   verified unless it had been re-parsed from expanded JSON; one carrying a
   credential failed in every form. `Verify` now canonicalizes exactly as

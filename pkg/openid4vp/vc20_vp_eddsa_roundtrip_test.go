@@ -125,3 +125,58 @@ func signedEdDSACredential(t *testing.T, issuerKey ed25519.PrivateKey, raw strin
 	require.NoError(t, err)
 	return out
 }
+
+// TestVPBuilderEdDSASelectsTheHolderProof pins the PROPERTY end to end: a
+// presentation carrying a signed credential has two proofs, and the one
+// verified has to be the presentation's own - checked by the key that must
+// NOT work as well as the one that must.
+//
+// Honest about what it cannot do: it passes with the unqualified search
+// too, because json-gold happens to order a real VPBuilder document so that
+// the holder's proof is reached first. That is exactly why relying on the
+// ordering was wrong, and why the selection is pinned where the ambiguity
+// can be forced - common.TestFindRootProofNode_SelectsTheDocumentsOwnProof
+// builds the graph with the ISSUER's proof first and fails without it.
+func TestVPBuilderEdDSASelectsTheHolderProof(t *testing.T) {
+	holderPub, holderKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	issuerPub, issuerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	vpBytes, err := NewVPBuilder().BuildVC20Presentation(
+		[][]byte{signedEdDSACredential(t, issuerKey, `{
+			"@context": "https://www.w3.org/ns/credentials/v2",
+			"type": ["VerifiableCredential"],
+			"issuer": "did:example:issuer",
+			"credentialSubject": {"id": "did:example:subject"}
+		}`)},
+		holderKey,
+		&VPBuildOptions{
+			HolderDID:          "did:example:holder",
+			VerificationMethod: "did:example:holder#key-1",
+			Nonce:              "test-nonce",
+			Domain:             "https://verifier.example.com",
+			Cryptosuite:        CryptosuiteEdDSA2022,
+			Created:            time.Now().UTC(),
+		},
+	)
+	require.NoError(t, err)
+
+	// Both proofs really are in the document.
+	var vp map[string]any
+	require.NoError(t, json.Unmarshal(vpBytes, &vp))
+	require.Contains(t, vp, "proof", "the presentation's own proof")
+	embedded, err := json.Marshal(vp["verifiableCredential"])
+	require.NoError(t, err)
+	require.Contains(t, string(embedded), "proofValue", "and the issuer's")
+
+	reparsed, err := credential.NewRDFCredentialFromJSON(vpBytes, nil)
+	require.NoError(t, err)
+	require.NoError(t, eddsaSuite.NewSuite().Verify(reparsed, holderPub),
+		"the presentation's own proof is the one verified")
+
+	reparsed, err = credential.NewRDFCredentialFromJSON(vpBytes, nil)
+	require.NoError(t, err)
+	require.Error(t, eddsaSuite.NewSuite().Verify(reparsed, issuerPub),
+		"the embedded credential's issuer key must not verify the presentation")
+}
