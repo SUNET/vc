@@ -1,7 +1,9 @@
 package apiv1
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"sort"
@@ -399,8 +401,14 @@ type UIInteractionRequest struct {
 	DCQLQuery   *openid4vp.DCQL                        `json:"dcql_query" validate:"required"`
 	Validations map[string][]openid4vp.ClaimValidation `json:"validations,omitempty" validate:"omitempty,dive,dive"`
 
-	// SessionID from http server endpoint
-	SessionID string `json:"-"`
+	// SessionID is a reuse hint: the HTTP layer sets it from a body field
+	// or the cookie session before calling UIInteraction. When it names a
+	// still-valid, still-unclaimed authorization context created by an
+	// earlier /ui/interaction with the same DCQL query, the response
+	// returns that context's existing request_uri/QR so a browser reload
+	// mid-flow does not orphan the wallet's outstanding scan. Otherwise a
+	// fresh session id is minted and returned in the reply.
+	SessionID string `json:"session_id,omitempty" validate:"omitempty,max=128,printascii"`
 }
 
 type UIInteractionReply struct {
@@ -436,6 +444,18 @@ type UIInteractionReply struct {
 func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (*UIInteractionReply, error) {
 	c.log.Debug("uiInteraction", "dcql_query", req.DCQLQuery)
 
+	// Augment BEFORE the reuse check: the stored request object was
+	// augmented at creation, so the incoming query has to be brought to the
+	// same shape before we can compare them for equality.
+	c.augmentDCQLFromVCTM(req.DCQLQuery)
+
+	if reply, ok, err := c.tryReuseInFlightSession(ctx, req); err != nil {
+		return nil, err
+	} else if ok {
+		c.log.Debug("uiInteraction: reused in-flight session", "session_id", reply.SessionID)
+		return reply, nil
+	}
+
 	nonce := uuid.NewString()
 	state := uuid.NewString()
 	requestObjectID := uuid.NewString()
@@ -451,11 +471,6 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	for _, credential := range req.DCQLQuery.Credentials {
 		scopes = append(scopes, credential.ID)
 	}
-
-	// Augment DCQL with child paths from VCTM (array null paths and nested
-	// object sub-paths). The UI only sends top-level string paths; we expand
-	// them using the VCTM so wallets disclose nested content correctly.
-	c.augmentDCQLFromVCTM(req.DCQLQuery)
 
 	uiClientID, err := c.cfg.Verifier.VerifierClientID(c.pkiSigningCert)
 	if err != nil {
@@ -598,6 +613,103 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	}
 
 	return reply, nil
+}
+
+// tryReuseInFlightSession returns a UIInteractionReply built from the
+// authorization context named by req.SessionID when the request is a
+// reload of an already-live flow.
+//
+// "Reusable" means all of: the id resolves to a saved AuthorizationContext,
+// nothing has consumed it yet (no Token, no Code, not Forfeited, not past
+// ExpiresAt), the RequestObject the wallet is holding is still cached, and
+// the caller is asking for the same DCQL query the context was created
+// with. When any of that fails, the caller falls back to minting a fresh
+// session - which is the pre-reuse behaviour and never worse than it.
+//
+// A cross-device reload otherwise orphans the wallet: the old
+// AuthorizationContext still points at a browser session_id whose SSE
+// listener has been torn down, so the wallet's direct_post never surfaces
+// in the reloaded tab.
+func (c *Client) tryReuseInFlightSession(ctx context.Context, req *UIInteractionRequest) (*UIInteractionReply, bool, error) {
+	if req.SessionID == "" {
+		return nil, false, nil
+	}
+
+	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
+	if err != nil || authCtx == nil {
+		return nil, false, nil
+	}
+	if !isReusableAuthContext(authCtx) {
+		return nil, false, nil
+	}
+
+	requestObject, found := c.openid4vp.RequestObjectCache.Get(authCtx.RequestObjectID)
+	if !found {
+		return nil, false, nil
+	}
+	if !sameDCQLQuery(req.DCQLQuery, requestObject.DCQLQuery) {
+		return nil, false, nil
+	}
+
+	reply := &UIInteractionReply{SessionID: authCtx.SessionID}
+
+	reply.AuthorizationRequest, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, authCtx.RequestObjectID)
+	if err != nil {
+		return nil, false, err
+	}
+
+	reply.QRCode, err = openid4vp.GenerateQRV2(ctx, reply.AuthorizationRequest)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// A reload does not resume a native DC API call. Mint a new DC API
+	// request each time so the in-tab attempt has a valid request_uri; the
+	// existing entry (if any) times out on its own.
+	if c.cfg.Verifier.DigitalCredentials.Enable {
+		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
+		dcAPIRequestObjectID := uuid.NewString()
+		c.openid4vp.RequestObjectCache.Set(dcAPIRequestObjectID, dcAPIRequestObject)
+
+		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+
+	return reply, true, nil
+}
+
+// isReusableAuthContext reports whether the authorization context still
+// represents a wallet interaction that has not been claimed by a wallet.
+func isReusableAuthContext(authCtx *cache.AuthorizationContext) bool {
+	if authCtx.Forfeited || authCtx.Code != "" || authCtx.Token != nil {
+		return false
+	}
+	if authCtx.ExpiresAt != 0 && authCtx.ExpiresAt <= time.Now().Unix() {
+		return false
+	}
+	return true
+}
+
+// sameDCQLQuery reports whether two DCQL queries are equivalent for the
+// purposes of session reuse. Compared by canonical JSON: DCQL contains
+// []*string paths and interface{} values that reflect.DeepEqual would trip
+// over, and the request object serializes through the same encoder before
+// it ever reaches a wallet - so wire-shape equality is the right test.
+func sameDCQLQuery(a, b *openid4vp.DCQL) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	ja, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	jb, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(ja, jb)
 }
 
 // claimPathKey returns a string key for a claim path for use in exclusion sets.

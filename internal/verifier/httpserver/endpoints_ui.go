@@ -9,7 +9,6 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/codes"
 )
 
@@ -39,23 +38,32 @@ func (s *Service) endpointUIInteraction(ctx context.Context, c *gin.Context) (an
 	s.log.Debug("endpointUIInteraction")
 
 	session := sessions.Default(c)
-	sessionID := uuid.NewString()
-	session.Set("session_id", sessionID)
-	if err := session.Save(); err != nil {
-		s.log.Error(err, "failed to save session")
-	}
 
 	request := &apiv1.UIInteractionRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		return nil, err
 	}
 
-	// Pass session ID to apiv1
-	request.SessionID = sessionID
+	// Reuse hint priority: body wins over cookie. A body value is a client
+	// that remembers its own session (e.g. sessionStorage after a reload);
+	// the cookie is a shared per-origin fallback that a concurrent tab can
+	// silently overwrite. If neither is set, apiv1 mints a fresh id.
+	if request.SessionID == "" {
+		if cookieSessionID, ok := session.Get("session_id").(string); ok && cookieSessionID != "" {
+			request.SessionID = cookieSessionID
+		}
+	}
 
 	reply, err := s.apiv1.UIInteraction(ctx, request)
 	if err != nil {
 		return nil, err
+	}
+
+	if cookieSessionID, _ := session.Get("session_id").(string); cookieSessionID != reply.SessionID {
+		session.Set("session_id", reply.SessionID)
+		if err := session.Save(); err != nil {
+			s.log.Error(err, "failed to save session")
+		}
 	}
 
 	return reply, nil
@@ -65,10 +73,17 @@ func (s *Service) endpointUIInteraction(ctx context.Context, c *gin.Context) (an
 func (s *Service) endpointUINotify(ctx context.Context, c *gin.Context) (any, error) {
 	s.log.Debug("endpointUINotify")
 
-	session := sessions.Default(c)
-
-	sessionID, ok := session.Get("session_id").(string)
-	if !ok {
+	// A ?session_id= query param wins over the cookie so a reloaded tab
+	// can subscribe to the id it remembers even if another tab in the
+	// same origin has meanwhile overwritten the cookie.
+	sessionID := c.Query("session_id")
+	if sessionID == "" {
+		session := sessions.Default(c)
+		if cookieSessionID, ok := session.Get("session_id").(string); ok {
+			sessionID = cookieSessionID
+		}
+	}
+	if sessionID == "" {
 		s.log.Error(nil, "session_id not found in session")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id not found"})
 		return nil, nil

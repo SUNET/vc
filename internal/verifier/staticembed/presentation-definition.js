@@ -217,22 +217,69 @@ const presentationDefinitionSchema = v.object({
  * Due to bfcache some state will persist across
  * navigation events, so we 'manually' clear it.
  * @see https://developer.mozilla.org/en-US/docs/Glossary/bfcache
+ *
+ * A hard reload here would abandon any in-flight cross-device wallet scan:
+ * the QR the user's phone is still holding is bound to a session_id that
+ * would be replaced on the next /ui/interaction. Alpine re-initialises on
+ * a bfcache restore anyway (its Alpine.data init calls sendDcqlQuery
+ * again), so leaving this alone lets the reuse hint on the server side
+ * hand back the same authorization context.
  */
-window.addEventListener("pageshow", (event) => {
-    if (event.persisted) {
-        window.location.reload();
-    }
-});
 
 const baseUrl = new URL(window.location.origin);
+
+// SESSION_STORAGE_KEY names the sessionStorage entry that carries the
+// server-generated session_id across reloads. sessionStorage (not
+// localStorage) so it is tab-scoped and cleared on tab close, matching the
+// lifetime of an in-flight wallet interaction.
+const SESSION_STORAGE_KEY = "vc.verifier.session_id";
+
+/** @returns {string} */
+function loadStoredSessionID() {
+    try {
+        return window.sessionStorage.getItem(SESSION_STORAGE_KEY) ?? "";
+    } catch {
+        return "";
+    }
+}
+
+/** @param {string} id */
+function storeSessionID(id) {
+    try {
+        if (id) {
+            window.sessionStorage.setItem(SESSION_STORAGE_KEY, id);
+        }
+    } catch {
+        // sessionStorage may be blocked (private mode, disabled by policy).
+        // Reload survival degrades gracefully to the cookie-only path.
+    }
+}
+
+function clearStoredSessionID() {
+    try {
+        window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch {
+        // Same as storeSessionID.
+    }
+}
 
 /**
  * Listen for SSE notifications from the server.
  * When a response_code is received, redirect to the callback URL.
+ *
+ * The session_id is passed as a query param so the reloaded tab can rejoin
+ * an authorization context even when a concurrent tab has already
+ * overwritten the shared cookie. Absent id falls back to the cookie.
+ *
+ * @param {string} [sessionID]
  */
-function setupNotifyListener() {
+function setupNotifyListener(sessionID) {
     console.log("Setting up SSE notify listener");
-    const eventSource = new EventSource(new URL("/ui/notify", baseUrl).toString());
+    const notifyURL = new URL("/ui/notify", baseUrl);
+    if (sessionID) {
+        notifyURL.searchParams.set("session_id", sessionID);
+    }
+    const eventSource = new EventSource(notifyURL.toString());
 
     eventSource.onopen = () => {
         console.log("SSE connection opened");
@@ -249,6 +296,7 @@ function setupNotifyListener() {
                 if (parsed.redirect_uri) {
                     console.log("Redirecting to:", parsed.redirect_uri);
                     eventSource.close();
+                    clearStoredSessionID();
                     window.location.href = parsed.redirect_uri;
                 }
             } catch {
@@ -257,6 +305,7 @@ function setupNotifyListener() {
                 if (match && match[1]) {
                     console.log("Redirecting to (regex):", match[1]);
                     eventSource.close();
+                    clearStoredSessionID();
                     window.location.href = match[1];
                 }
             }
@@ -501,6 +550,7 @@ Alpine.data("app", () => ({
         this.dcqlQuery = null;
         this.presentationDefinition = null;
         this.dcApiVerified = false;
+        clearStoredSessionID();
     },
 
     /**
@@ -543,7 +593,7 @@ Alpine.data("app", () => ({
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    session_id: this.presentationDefinition?.session_id ?? "",
+                    session_id: this.presentationDefinition?.session_id ?? loadStoredSessionID(),
                     wallet_follows_redirect: true,
                 }),
             });
@@ -644,6 +694,7 @@ Alpine.data("app", () => ({
         this.dcApiVerified = false;
 
         try {
+            const storedSessionID = loadStoredSessionID();
             const res = await this.fetchData(
                 new URL("/ui/interaction", baseUrl), 
                 {
@@ -654,11 +705,13 @@ Alpine.data("app", () => ({
                     body: JSON.stringify({
                         dcql_query: this.dcqlQuery,
                         ...(this.validations ? { validations: this.validations } : {}),
+                        ...(storedSessionID ? { session_id: storedSessionID } : {}),
                     })
                 },
             );
 
             this.presentationDefinition = v.parse(presentationDefinitionSchema, res);
+            storeSessionID(this.presentationDefinition.session_id);
 
             // Configure the DC API polyfill with server-side session info
             configureDCAPI({
@@ -791,7 +844,7 @@ Alpine.data("app", () => ({
     _setupFallbackFlow() {
         if (!this.notifyEventSource) {
             console.log("Starting SSE notify listener from sendDcqlQuery");
-            this.notifyEventSource = setupNotifyListener();
+            this.notifyEventSource = setupNotifyListener(this.presentationDefinition?.session_id);
         }
 
         const presDefURI = new URL(this.presentationDefinition.authorization_request);
