@@ -35,12 +35,14 @@ const (
 // leaves one node per top-level entry.
 //
 // WHY ONLY THE ROOT'S PROOFS ARE REMOVED. A proof secures the document it is
-// attached to. Removing every proof in the graph - which is what this
-// package did - means a presentation's signature does not cover an embedded
-// credential's issuer proof at all, so that proof can be swapped or stripped
-// with the presentation's signature still verifying. Proofs of the same
-// node are all removed, which is what a proof SET requires: each of them
-// secures the same unsecured document.
+// attached to, so an embedded credential's issuer proof is CONTENT the
+// presentation's signature covers and is deliberately left in place.
+// Removing every proof in the graph - which is what this package used to do
+// - meant that signature did not cover it at all, and the issuer proof
+// could be swapped or stripped with the presentation still verifying.
+//
+// Proofs of the same node are all removed, which is what a proof SET
+// requires: each of them secures the same unsecured document.
 //
 // A document with no single top-level node does not say what it is about,
 // and is refused rather than guessed at.

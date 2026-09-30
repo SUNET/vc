@@ -50,9 +50,9 @@ func (s *Suite) Sign(cred *credential.RDFCredential, key ed25519.PrivateKey, opt
 
 	// 1. Get canonical document hash - the document this proof SECURES,
 	// which is the document with the root's own proofs removed and every
-	// embedded proof left where it is. Removing every proof in the graph
-	// meant a presentation's signature did not cover an embedded
-	// credential's issuer proof at all.
+	// embedded proof DELIBERATELY left where it is. An embedded
+	// credential's issuer proof is content this signature covers; the code
+	// that used to remove it is what let it be swapped or stripped.
 	// Refuse a document that would verify in one serialization and not
 	// another before signing it. See CheckRootSurvivesFlattening.
 	if err := cred.CheckRootSurvivesFlattening(); err != nil {
@@ -233,21 +233,21 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKe
 			lastErr = err
 			continue
 		}
-		// THIS suite's proofs, not any DataIntegrityProof. The type alone
-		// does not say which cryptosuite produced the signature, and the
-		// handler dispatches on the FIRST proof while this loop may verify
-		// a later one - so a proof made with the Ed25519 procedure but
+		// A DataIntegrityProof of THIS suite, checked in that order.
+		//
+		// The TYPE says the node is a proof at all. The previous selection
+		// got that from FindProofNode's type filter; reading the root's
+		// links directly would otherwise accept any node it points at that
+		// happens to declare the cryptosuite.
+		//
+		// The CRYPTOSUITE says which procedure produced the signature. The
+		// handler dispatches on the first proof while this loop may verify
+		// a later one, so a proof made with the Ed25519 procedure but
 		// labelled with some other suite could be verified here and
 		// reported through the EdDSA handler as that other suite.
-		//
 		// Relabelling an existing signature does not survive this anyway,
 		// since the label is hashed into the proof configuration; the check
 		// is here so that what verified and what is REPORTED cannot differ.
-		// A DataIntegrityProof of THIS suite. The type says the node is a
-		// proof at all - the previous selection got that from
-		// FindProofNode's type filter, and reading the root's links
-		// directly would otherwise accept any node it points at that
-		// happens to declare the cryptosuite.
 		if proofType, _ := proofNode["type"].(string); proofType != ProofType {
 			lastErr = fmt.Errorf("the document's own proof link names a %q, not a %s", proofType, ProofType)
 			continue
@@ -270,11 +270,15 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKe
 }
 
 // verifyProofNode checks one proof node against the key, over the document
-// with every proof removed.
+// that proof SECURES - the document with the root's own proofs removed and
+// every embedded proof left where it is. An embedded credential's issuer
+// proof is content the presentation's signature covers; removing it here
+// would reinstate the hole credential.RootProofs closed.
 //
-// docHash is that document's hash, computed once by Verify: it is the same
-// for every proof on the document, so recomputing it per proof repeats the
-// canonicalization for nothing.
+// docHash is that document's hash, computed once by VerifyProof: every proof
+// the root carries secures the same document, which is what a proof set
+// means, so recomputing it per proof repeats the canonicalization for
+// nothing.
 func (s *Suite) verifyProofNode(cred *credential.RDFCredential, proofNode map[string]any, key ed25519.PublicKey, docHash [sha256.Size]byte) error {
 
 	// Get proofValue

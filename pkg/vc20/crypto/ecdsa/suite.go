@@ -161,7 +161,9 @@ func (s *Suite) SignWithSigner(ctx context.Context, cred *credential.RDFCredenti
 
 	// 1. Get canonical document hash - the document this proof SECURES,
 	// which is the document with the root's own proofs removed and every
-	// embedded proof left where it is. See credential.RootProofs.
+	// embedded proof DELIBERATELY left where it is: an embedded
+	// credential's issuer proof is content this signature covers. See
+	// credential.RootProofs.
 	// Refuse a document that would verify in one serialization and not
 	// another before signing it. See CheckRootSurvivesFlattening.
 	if err := cred.CheckRootSurvivesFlattening(); err != nil {
