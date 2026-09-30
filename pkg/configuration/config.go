@@ -192,6 +192,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkPolicyClaimsAreNotCallerTemplated(cfg); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 

@@ -404,7 +404,17 @@ type OIDCRequestParams struct {
 	// affect the string it is written into and never the surrounding
 	// structure. The rendered result must be valid JSON or flow initiation
 	// fails, which also catches a template that was malformed as written.
-	Claims string `yaml:"claims,omitempty" doc_example:"\"{\\\"id_token\\\":{\\\"org_id\\\":{\\\"value\\\":\\\"{{.org_id}}\\\"}}}\""`
+	//
+	// DO NOT template the "value" of a claim the issuance policy reads. The
+	// value member asks the OP to assert a SPECIFIC value, and the caller
+	// that fills the template is the wallet - PAR authenticates it, not the
+	// origin of a statement about an organisation. An OP that honours the
+	// request hands the caller's own choice back in the token, where the
+	// policy reads it as the OP's word. That configuration is refused at
+	// startup; see checkPolicyClaimsAreNotCallerTemplated. Requesting the
+	// claim without a value - "org_id": null - asks the OP what it knows,
+	// which is the question worth gating on.
+	Claims string `yaml:"claims,omitempty" doc_example:"\"{\\\"id_token\\\":{\\\"org_id\\\":null}}\""`
 
 	// ExtraScopes are additional OAuth2 scopes to request beyond the default OIDC RP scopes.
 	ExtraScopes []string `yaml:"extra_scopes,omitempty" doc_example:"[\"organization\", \"address\"]"`
@@ -423,6 +433,12 @@ type OIDCRequestParams struct {
 // knowing which dimensions the query carries and in what order. Any example
 // showing one without the other does not describe a configuration this service
 // will start with.
+//
+// The claims it reads have to be ones the OP asserts of its own accord.
+// oidc_request_params may ask the OP for a claim, but templating a VALUE for
+// one this policy reads is refused at startup: the caller that fills the
+// template is the wallet, and an OP that honours the request would hand the
+// caller's own choice back as its word. See OIDCRequestParams.Claims.
 //
 // A complete one, for a rule requiring an acr with a given prefix and any
 // org_id:
