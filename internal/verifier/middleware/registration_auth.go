@@ -368,9 +368,18 @@ func newStaticBearerValidator(tokenFilePath string) (*staticBearerValidator, err
 	// invalid_request, because no Authorization header can carry that value
 	// - so the service would look enabled and be unusable. Checked here,
 	// where the message can say the file is wrong.
+	//
+	// The message names the file and the rule, and never the value. This
+	// error is returned from New and panicked by cmd/verifier, so it lands
+	// in the startup log - and the value is the registration credential
+	// itself, which would then be readable by anyone who can read logs,
+	// which is a far wider set than those who can read the secret file. Not
+	// the offending character either: naming it leaks a byte of the secret
+	// and does not help, since the fix is to look at the file.
 	if !isB64Token(token) {
-		return nil, fmt.Errorf("static bearer token file contains characters outside RFC 6750 b64token syntax "+
-			"(allowed: letters, digits, and - . _ ~ + / with optional trailing =): %q cannot be sent in an Authorization header", token)
+		return nil, fmt.Errorf("static bearer token file %q does not hold a valid RFC 6750 b64token "+
+			"(allowed: letters, digits, and - . _ ~ + / with optional trailing =); "+
+			"its contents are not echoed here because this error is logged at startup", tokenFilePath)
 	}
 
 	return &staticBearerValidator{tokenDigest: sha256.Sum256([]byte(token))}, nil

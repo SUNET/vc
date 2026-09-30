@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -481,6 +482,18 @@ func TestStaticBearerTokenFileContents(t *testing.T) {
 			}
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.wantError)
+
+			// The rejection must never quote what it rejected. This error
+			// is returned from New and panicked by cmd/verifier, so it
+			// lands in the startup log - and the value is the registration
+			// credential itself, readable by anyone who can read logs,
+			// which is a far wider set than those who can read the file.
+			// Asserted for every rejection case rather than the one that
+			// prompted it, so a future message cannot reintroduce it.
+			if trimmed := strings.TrimSpace(tc.contents); trimmed != "" {
+				assert.NotContains(t, err.Error(), trimmed,
+					"the startup error must not echo the token file's contents")
+			}
 		})
 	}
 }
