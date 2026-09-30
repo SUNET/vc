@@ -146,6 +146,47 @@ func TestMSOBuilder_AddDataElement_PseudonymSeedUsesShorterSalt(t *testing.T) {
 	}
 }
 
+// TestMSOBuilder_WithSaltBytes_OverridesEvenPseudonymSeed guards
+// WithSaltBytes: a Vega-only schema needs EVERY element's salt fixed at
+// exactly 32 bytes, including pseudonym_seed's normally-shorter 8-byte
+// salt (its whole reason to be shorter - Longfellow's item-size ceiling -
+// doesn't apply to a schema that isn't also serving Longfellow).
+func TestMSOBuilder_WithSaltBytes_OverridesEvenPseudonymSeed(t *testing.T) {
+	builder := NewMSOBuilder(DocType).WithSaltBytes(32)
+
+	if err := builder.AddDataElement(Namespace, "family_name", "Doe"); err != nil {
+		t.Fatalf("AddDataElement() error = %v", err)
+	}
+	if err := builder.AddDataElement(Namespace, "pseudonym_seed", make([]byte, 32)); err != nil {
+		t.Fatalf("AddDataElement() error = %v", err)
+	}
+
+	for _, item := range builder.namespaces[Namespace] {
+		if len(item.Random) != 32 {
+			t.Errorf("%s: Random length = %d, want 32", item.ElementID, len(item.Random))
+		}
+	}
+}
+
+func TestMSOBuilder_WithSaltBytes_ZeroKeepsDefaultSizing(t *testing.T) {
+	builder := NewMSOBuilder(DocType).WithSaltBytes(0)
+
+	if err := builder.AddDataElement(Namespace, "family_name", "Doe"); err != nil {
+		t.Fatalf("AddDataElement() error = %v", err)
+	}
+	if err := builder.AddDataElement(Namespace, "pseudonym_seed", make([]byte, 32)); err != nil {
+		t.Fatalf("AddDataElement() error = %v", err)
+	}
+
+	items := builder.namespaces[Namespace]
+	if len(items[0].Random) != 16 {
+		t.Errorf("family_name Random length = %d, want 16 (default)", len(items[0].Random))
+	}
+	if len(items[1].Random) != 8 {
+		t.Errorf("pseudonym_seed Random length = %d, want 8 (default)", len(items[1].Random))
+	}
+}
+
 func TestMSOBuilder_AddDataElementWithRandom(t *testing.T) {
 	builder := NewMSOBuilder(DocType)
 

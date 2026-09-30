@@ -15,6 +15,16 @@ type MDDLSchema struct {
 	DocType string                     `json:"doctype"`
 	Display []DisplayProperties        `json:"display,omitempty"`
 	Claims  map[string]NamespaceClaims `json:"claims,omitempty"`
+	// ZkSaltBytes, when non-zero, fixes every claim's IssuerSignedItem
+	// random salt to exactly this many bytes - see
+	// MSOBuilder.WithSaltBytes's doc for why this exists and why it must
+	// stay opt-in per schema rather than a package-wide default. Set this
+	// only on a schema that is Vega-only: zk-cred-vega's r12 circuit
+	// requires exactly 32 here, and a schema meant to also serve
+	// zk-cred-longfellow (whose own item-size ceiling a uniform 32-byte
+	// salt can violate) must leave this unset and keep the package's
+	// default per-element sizing.
+	ZkSaltBytes int `json:"zk_salt_bytes,omitempty"`
 }
 
 // DisplayProperties describes how the credential should be presented to the
