@@ -388,10 +388,8 @@ func TestVerificationDirectPost(t *testing.T) {
 
 // TestVerificationDirectPost_SameDeviceDecision covers the branch that
 // selects between same-device (return redirect_uri) and cross-device (omit
-// it). The current mechanism is the explicit WalletFollowsRedirect flag on
-// the auth context, plus an implicit same-device signal from req.DCAPI
-// (SUNET/vc#718). This replaced an SSE-listener heuristic that raced against
-// TCP teardown.
+// it): the explicit WalletFollowsRedirect flag on the auth context, plus an
+// implicit same-device signal from req.DCAPI.
 func TestVerificationDirectPost_SameDeviceDecision(t *testing.T) {
 	ctx := t.Context()
 

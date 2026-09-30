@@ -605,7 +605,7 @@ func TestMergeDefaults_OverlappingPathsRejected(t *testing.T) {
 
 func TestMergeDefaults_DeterministicOrder(t *testing.T) {
 	// Repeated runs must produce the same result regardless of map iteration.
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		claims := map[string]any{}
 		err := MergeDefaults(claims, map[string]any{
 			"a.b": "1",

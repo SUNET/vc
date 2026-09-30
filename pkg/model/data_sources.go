@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"maps"
 	"time"
 )
 
@@ -151,9 +152,7 @@ type AssertionScope struct {
 // Injecting now keeps the callers testable.
 func (a AssertionScope) ResolveDefaults(now time.Time) (map[string]any, error) {
 	out := make(map[string]any, len(a.Defaults)+2)
-	for k, v := range a.Defaults {
-		out[k] = v
-	}
+	maps.Copy(out, a.Defaults)
 	if a.ExpiryDuration != "" {
 		d, err := time.ParseDuration(a.ExpiryDuration)
 		if err != nil {

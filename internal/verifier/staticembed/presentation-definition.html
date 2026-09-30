@@ -160,7 +160,7 @@
                     </div>
                     <div class="block buttons is-centered">
                         <template x-for="[label, uri] in Object.entries(redirectUris)">
-                            <a :href="uri" class="button" x-text="label" @click="handleWalletClick"></a>
+                            <a :href="uri" class="button" x-text="label" @click="handleWalletClick($event)"></a>
                         </template>
                     </div>
                     <template x-if="dcqlQuery">

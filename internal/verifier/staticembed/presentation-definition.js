@@ -498,26 +498,41 @@ Alpine.data("app", () => ({
         this.dcApiVerified = false;
     },
 
-    /** 
-     * Handle click on wallet link. Commit wallet_follows_redirect before
-     * navigation so direct_post can return redirect_uri — closing the SSE
-     * from the client alone raced against TCP teardown, causing the server
-     * to still see the listener and treat the flow as cross-device
-     * (SUNET/vc#718).
+    /**
+     * Commit the same-device intent before the browser leaves for a web
+     * wallet or launches a native wallet via custom scheme. direct_post
+     * reads this flag to decide whether to return redirect_uri, and a
+     * fire-and-forget fetch here would race the wallet's response: keepalive
+     * only guarantees the request goes out, not that the server has
+     * persisted it before direct_post reads the auth context. Await it.
+     *
+     * On failure, open the wallet in a new tab. The current tab (and its
+     * live SSE) survives to deliver the response through the cross-device
+     * channel instead.
+     *
+     * Do NOT close the SSE here: a same-tab navigation tears it down on its
+     * own, and a custom-scheme launch leaves the tab open and still needing
+     * SSE as a fallback channel to receive the response.
      */
-    handleWalletClick() {
-        console.log("Wallet link clicked, marking same-device flow");
-        fetch(new URL("/verification/session-preference", baseUrl).toString(), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ wallet_follows_redirect: true }),
-            keepalive: true,
-        }).catch((err) => {
-            console.warn("Failed to mark same-device flow", err);
-        });
-        if (this.notifyEventSource) {
-            this.notifyEventSource.close();
-            this.notifyEventSource = null;
+    async handleWalletClick(event) {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+            return;
+        }
+        event.preventDefault();
+        const url = event.currentTarget.href;
+        try {
+            const res = await fetch(new URL("/verification/session-preference", baseUrl).toString(), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ wallet_follows_redirect: true }),
+            });
+            if (!res.ok) {
+                throw new Error(`session-preference returned ${res.status}`);
+            }
+            globalThis.location.href = url;
+        } catch (err) {
+            console.error("Failed to mark same-device flow, opening wallet in a new tab so this page can still redirect", err);
+            globalThis.open(url, "_blank", "noopener");
         }
     },
 

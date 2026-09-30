@@ -30,9 +30,7 @@ func TestEphemeralEncryptionKeyConcurrent(t *testing.T) {
 	)
 
 	for range callers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			priv, pub, err := client.ephemeralEncryptionKey(ctx, kid)
 			if err != nil {
 				mu.Lock()
@@ -45,7 +43,7 @@ func TestEphemeralEncryptionKeyConcurrent(t *testing.T) {
 			defer mu.Unlock()
 			private = append(private, privJSON)
 			public = append(public, pubJSON)
-		}()
+		})
 	}
 	wg.Wait()
 
