@@ -544,9 +544,11 @@ type Issuer struct {
 	// reach, which is the part a scheme check cannot address.
 	//
 	// Empty means no additional context may be used: a request carrying one
-	// is refused. Nothing is lost by that default, since a deployment using
-	// custom W3C types has to publish its context anyway and can name it
-	// here. Matching is exact.
+	// is refused, and an issuer configured with a W3C scope will not start,
+	// since common.credential_metadata.<scope>.credential_contexts is
+	// forwarded here on every issuance. Nothing is lost by that default,
+	// since a deployment using custom W3C types has to publish its context
+	// anyway and can name it here. Matching is exact.
 	JSONLDContextAllowlist []string `yaml:"jsonld_context_allowlist" validate:"omitempty,dive,required,url" doc_example:"\"https://example.org/diploma\""`
 
 	// SignMetadataRateLimit configures the rate limiter for the SignMetadata gRPC endpoint.
@@ -1894,7 +1896,11 @@ type CredentialMetadata struct {
 	// verification. Publish it before configuring it.
 	//
 	// The issuer also refuses to fetch a context it has not been told about -
-	// name it in issuer.jsonld_context_allowlist as well, or issuance fails.
+	// name it in issuer.jsonld_context_allowlist as well. The issuer REFUSES
+	// TO START if a W3C scope names a context its allowlist does not, because
+	// the apigw forwards this list verbatim as additional_contexts and every
+	// issuance of that credential would otherwise be rejected at request
+	// time.
 	//
 	// Resolved and PINNED at config load, which has three consequences worth
 	// knowing before configuring this. The host must be reachable when the
