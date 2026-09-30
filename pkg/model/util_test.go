@@ -496,3 +496,41 @@ func TestReplaceVCT(t *testing.T) {
 		})
 	}
 }
+
+// TestCredentialMetadataAccessorsAreNilSafe pins every accessor against a nil
+// receiver.
+//
+// A nil *CredentialMetadata is reachable without a programming error - a map
+// lookup that missed, or a present key holding nil - and every accessor took
+// c.mu.RLock() before reading anything, so either turned into a panic.
+func TestCredentialMetadataAccessorsAreNilSafe(t *testing.T) {
+	var cm *CredentialMetadata
+
+	assert.NotPanics(t, func() {
+		assert.Nil(t, cm.GetVCTM())
+		assert.Empty(t, cm.GetVCTURL())
+		assert.Nil(t, cm.GetVCTMRaw())
+		assert.Nil(t, cm.GetAttributes())
+		assert.Empty(t, cm.GetIntegrity())
+		assert.Nil(t, cm.GetMDDL())
+		assert.Nil(t, cm.GetMDDLRaw())
+		assert.False(t, cm.IsLocalVCTM())
+		assert.False(t, cm.IsLocalMDDL())
+
+		names, loaded := cm.DeclaredClaimNames()
+		assert.Nil(t, names)
+		assert.False(t, loaded)
+
+		meta, ok := cm.DCQLMetaQuery()
+		assert.False(t, ok)
+		assert.Equal(t, openid4vp.MetaQuery{}, meta)
+	})
+
+	// The shape that reaches these accessors in practice: a present key whose
+	// value is nil, which a plain "was it found" check does not catch.
+	cfg := &Cfg{Common: &Common{CredentialMetadata: map[string]*CredentialMetadata{"broken": nil}}}
+	assert.NotPanics(t, func() {
+		assert.Nil(t, cfg.GetCredentialMetadata("broken").GetVCTM())
+		assert.Empty(t, cfg.GetCredentialMetadata("nosuchscope").GetVCTURL())
+	})
+}
