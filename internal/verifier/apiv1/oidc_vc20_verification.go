@@ -78,6 +78,25 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 }
 
 func (c *Client) verifyOneVC20ForOIDC(ctx context.Context, handler *openid4vp.VC20Handler, session *cache.AuthorizationContext, queryID, token string) error {
+	// VerifyAndExtract verifies the FIRST embedded credential of a
+	// presentation, while the claim extraction that follows merges every
+	// one of them. A presentation carrying a valid first credential and an
+	// unverified second would therefore have the second's subject claims
+	// injected into the OIDC session.
+	//
+	// Refused rather than partially verified. Verifying each one needs the
+	// handler to report per-credential results, which is a change to its
+	// contract rather than to this guard - and a presentation answering one
+	// credential query with several credentials is not a shape this flow
+	// asks for.
+	count, err := openid4vp.EmbeddedCredentialCount(token)
+	if err != nil {
+		return fmt.Errorf("cannot tell how many credentials this presentation carries: %w", err)
+	}
+	if count > 1 {
+		return fmt.Errorf("presentation carries %d credentials; only the first is verified, so none of its claims can be trusted", count)
+	}
+
 	result, err := handler.VerifyAndExtract(ctx, token)
 	if err != nil {
 		return fmt.Errorf("W3C VC verification failed: %w", err)
@@ -103,14 +122,20 @@ func (c *Client) verifyOneVC20ForOIDC(ctx context.Context, handler *openid4vp.VC
 		return fmt.Errorf("W3C issuer not trusted: %s", decision.Reason)
 	}
 
-	// The type constraint the request carried, enforced on what came back.
-	// The session persists both the DCQL query and the scope-to-query
-	// mapping, so this path has the same constraint the UI path applies -
-	// without it the wallet chooses which credential answers the scope and
-	// meta.type_values is decoration.
-	//
-	// Fail closed: a scope whose query cannot be recovered is refused
-	// rather than accepted unconstrained.
+	return c.checkVC20AnswersTheRequest(session, scope, result.TypeIRIs)
+}
+
+// checkVC20AnswersTheRequest enforces, on what came back, the constraint the
+// request carried.
+//
+// The session persists both the DCQL query and the scope-to-query mapping,
+// so this path has the same constraint the UI path applies - without it the
+// wallet chooses which credential answers a scope and meta.type_values is
+// decoration.
+//
+// Fail closed throughout: a scope that cannot be named, or a query that
+// cannot be recovered, is refused rather than accepted unconstrained.
+func (c *Client) checkVC20AnswersTheRequest(session *cache.AuthorizationContext, scope string, typeIRIs []string) error {
 	if scope == "" {
 		return fmt.Errorf("cannot tell which scope this credential answers, so its type constraint cannot be checked")
 	}
@@ -118,10 +143,18 @@ func (c *Client) verifyOneVC20ForOIDC(ctx context.Context, handler *openid4vp.VC
 	if !ok {
 		return fmt.Errorf("the request for scope %s is no longer available, so the returned credential cannot be checked against it", scope)
 	}
+
+	// The query has to be ASKING for a W3C credential. MatchTypeValues is
+	// satisfied by an empty TypeValues, and an mdoc or SD-JWT query has
+	// none - so without this a signed W3C credential answers a query that
+	// asked for something else entirely and its claims are accepted.
+	if !openid4vp.IsW3CVCFormatIdentifier(requested.Format) {
+		return fmt.Errorf("scope %s was requested as %q, so a W3C credential does not answer it", scope, requested.Format)
+	}
 	if err := openid4vp.ValidateCredentialQuery(requested); err != nil {
 		return fmt.Errorf("the query for scope %s cannot constrain a credential: %w", scope, err)
 	}
-	if !openid4vp.MatchTypeValues(result.TypeIRIs, requested.Meta.TypeValues) {
+	if !openid4vp.MatchTypeValues(typeIRIs, requested.Meta.TypeValues) {
 		return fmt.Errorf("the credential returned for scope %s does not have a type the request asked for", scope)
 	}
 	return nil

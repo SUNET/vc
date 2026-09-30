@@ -181,3 +181,33 @@ func TestW3CDocumentsIn(t *testing.T) {
 	require.Empty(t, W3CDocumentsIn(""))
 	require.Empty(t, W3CDocumentsIn("not json"))
 }
+
+// TestEmbeddedCredentialCount: a caller that must not read unverified
+// claims has to know when a presentation carries more than one credential,
+// because VerifyAndExtract verifies only the first.
+func TestEmbeddedCredentialCount(t *testing.T) {
+	bare, err := EmbeddedCredentialCount(w3cCredential)
+	require.NoError(t, err)
+	require.Zero(t, bare, "a bare credential embeds none")
+
+	one := `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiablePresentation"],
+		"verifiableCredential": [` + w3cCredential + `]
+	}`
+	got, err := EmbeddedCredentialCount(one)
+	require.NoError(t, err)
+	require.Equal(t, 1, got)
+
+	two := `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiablePresentation"],
+		"verifiableCredential": [` + w3cCredential + `, ` + w3cCredential + `]
+	}`
+	got, err = EmbeddedCredentialCount(two)
+	require.NoError(t, err)
+	require.Equal(t, 2, got)
+
+	_, err = EmbeddedCredentialCount("not json")
+	require.Error(t, err)
+}

@@ -506,6 +506,29 @@ func (ce *ClaimsExtractor) ExtractAndMapClaims(
 	return oidcClaims, nil
 }
 
+// EmbeddedCredentialCount reports how many credentials a W3C presentation
+// carries. A bare credential carries none.
+//
+// Needed because VC20Handler.VerifyAndExtract verifies the first embedded
+// credential only, while claim extraction merges every one - so a caller
+// that must not read unverified claims has to know when there is more than
+// one.
+func EmbeddedCredentialCount(document string) (int, error) {
+	var raw any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(document)), &raw); err != nil {
+		return 0, fmt.Errorf("failed to parse VP token as JSON: %w", err)
+	}
+	doc, _, err := compactW3CDocument(raw)
+	if err != nil {
+		return 0, err
+	}
+	embedded, ok := doc["verifiableCredential"]
+	if !ok {
+		return 0, nil
+	}
+	return len(asSlice(embedded)), nil
+}
+
 // W3CDocumentsIn returns the W3C VC 2.0 documents carried in a vp_token,
 // whether it is one document or a DCQL response keyed by credential query
 // id. The map key is the query id for a DCQL response, and "" for a bare
