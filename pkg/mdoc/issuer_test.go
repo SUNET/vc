@@ -17,13 +17,13 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
-// issuedElementValues extracts the disclosed element identifiers and values
-// for a namespace from an issued document, unwrapping the Tag 24
-// byte-string encoding used for each IssuerSignedItem.
-func issuedElementValues(t *testing.T, doc *DocumentMdoc, namespace string) map[string]any {
+// issuedItems decodes every IssuerSignedItem for a namespace from an issued
+// document, unwrapping the Tag 24 byte-string encoding used for each one -
+// the full item (Random included), not just its disclosed value.
+func issuedItems(t *testing.T, doc *DocumentMdoc, namespace string) map[string]IssuerSignedItem {
 	t.Helper()
 
-	values := make(map[string]any)
+	items := make(map[string]IssuerSignedItem)
 	for _, anyItem := range doc.IssuerSigned.NameSpaces[namespace] {
 		var item IssuerSignedItem
 		switch v := anyItem.(type) {
@@ -42,7 +42,19 @@ func issuedElementValues(t *testing.T, doc *DocumentMdoc, namespace string) map[
 		default:
 			t.Fatalf("unexpected item type %T in NameSpaces", anyItem)
 		}
-		values[item.ElementIdentifier] = item.ElementValue
+		items[item.ElementIdentifier] = item
+	}
+	return items
+}
+
+// issuedElementValues extracts just the disclosed values from issuedItems -
+// every existing test wants only this, not the full item.
+func issuedElementValues(t *testing.T, doc *DocumentMdoc, namespace string) map[string]any {
+	t.Helper()
+
+	values := make(map[string]any)
+	for elementID, item := range issuedItems(t, doc, namespace) {
+		values[elementID] = item.ElementValue
 	}
 	return values
 }
@@ -273,36 +285,6 @@ func TestIssuer_Issue(t *testing.T) {
 	if _, ok := values["age_over_18"]; ok {
 		t.Error("age_over_18 should not be disclosed when not present in document data")
 	}
-}
-
-// issuedItems decodes every IssuerSignedItem for a namespace, keeping the
-// full item (Random included) - unlike issuedElementValues, which discards
-// Random since no existing test needed it before this one.
-func issuedItems(t *testing.T, doc *DocumentMdoc, namespace string) map[string]IssuerSignedItem {
-	t.Helper()
-
-	items := make(map[string]IssuerSignedItem)
-	for _, anyItem := range doc.IssuerSigned.NameSpaces[namespace] {
-		var item IssuerSignedItem
-		switch v := anyItem.(type) {
-		case cbor.Tag:
-			content, ok := v.Content.([]byte)
-			if !ok {
-				t.Fatalf("Tag content is not []byte")
-			}
-			if err := cbor.Unmarshal(content, &item); err != nil {
-				t.Fatalf("failed to unmarshal item from Tag: %v", err)
-			}
-		case IssuerSignedItem:
-			item = v
-		case *IssuerSignedItem:
-			item = *v
-		default:
-			t.Fatalf("unexpected item type %T in NameSpaces", anyItem)
-		}
-		items[item.ElementIdentifier] = item
-	}
-	return items
 }
 
 // TestIssuer_Issue_ZkSaltBytesAppliesToEveryClaim is the Issuer.Issue-level
