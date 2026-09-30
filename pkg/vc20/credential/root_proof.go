@@ -3,6 +3,7 @@ package credential
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/piprate/json-gold/ld"
 )
@@ -57,7 +58,7 @@ func (rc *RDFCredential) RootProofs() (proofs []any, withoutRootProof *RDFCreden
 	// a reference to a graph sitting beside the document, and removing the
 	// link without removing the graph would leave the proof in the document
 	// it is supposed to be absent from.
-	claimed := map[string]bool{}
+	claimed := map[int]bool{}
 	for _, predicate := range []string{ProofPredicate, ProofPredicateLegacy} {
 		attached, present := root[predicate]
 		if !present {
@@ -73,13 +74,22 @@ func (rc *RDFCredential) RootProofs() (proofs []any, withoutRootProof *RDFCreden
 				continue
 			}
 			id, _ := node["@id"].(string)
-			if graph, known := graphs[id]; known {
-				proofs = append(proofs, graph)
-				claimed[id] = true
-				continue
+			matches := graphsNamed(graphs, id)
+			switch len(matches) {
+			case 0:
+				// A link naming no graph in this document carries no
+				// proof; the caller will find it incomplete.
+				proofs = append(proofs, node)
+			case 1:
+				proofs = append(proofs, graphs[matches[0]])
+				claimed[matches[0]] = true
+			default:
+				// One graph name written across several entries. RDF
+				// merges them, so which of them the proof is cannot be
+				// answered here - and removing only one would leave part
+				// of the proof in the document it secures.
+				return nil, nil, fmt.Errorf("the document names %d separate graphs %q, so its proof cannot be told from what was added beside it", len(matches), id)
 			}
-			// A link naming no graph in this document carries no proof.
-			proofs = append(proofs, node)
 		}
 		delete(root, predicate)
 	}
@@ -88,8 +98,8 @@ func (rc *RDFCredential) RootProofs() (proofs []any, withoutRootProof *RDFCreden
 	for _, node := range nodes {
 		kept = append(kept, node)
 	}
-	for id, graph := range graphs {
-		if claimed[id] {
+	for i, graph := range graphs {
+		if claimed[i] {
 			continue
 		}
 		kept = append(kept, graph)
@@ -122,7 +132,7 @@ func (rc *RDFCredential) documentSource() string {
 
 // rootAndGraphs expands a document and separates its root node, its other
 // nodes, and the named graphs its proofs live in.
-func (rc *RDFCredential) rootAndGraphs(source string) (map[string]any, []map[string]any, map[string]map[string]any, error) {
+func (rc *RDFCredential) rootAndGraphs(source string) (map[string]any, []map[string]any, []map[string]any, error) {
 	if source == "" {
 		return nil, nil, nil, fmt.Errorf("no document to read a root from")
 	}
@@ -143,16 +153,21 @@ func (rc *RDFCredential) rootAndGraphs(source string) (map[string]any, []map[str
 	// top-level entry" is true of a compact document and false of the same
 	// document re-read. The graphs are set aside, and one node has to
 	// remain.
-	graphs := map[string]map[string]any{}
-	var nodes []map[string]any
+	// A SLICE, not a map keyed by @id. Two top-level entries may carry the
+	// same graph name - JSON-LD expansion keeps both and RDF conversion
+	// merges their triples - and every entry without an @id would share the
+	// empty key. Keeping one per id silently dropped the rest from the
+	// document the signature covers, while the verifier's parsed RDF still
+	// held them: an attacker could add triples under an embedded proof
+	// graph's name and have them survive parsing but not hashing.
+	var graphs, nodes []map[string]any
 	for _, entry := range expanded {
 		node, ok := entry.(map[string]any)
 		if !ok {
 			return nil, nil, nil, fmt.Errorf("document holds a top-level entry that is not a node")
 		}
 		if _, isGraph := node["@graph"]; isGraph && len(node) <= 2 {
-			id, _ := node["@id"].(string)
-			graphs[id] = node
+			graphs = append(graphs, node)
 			continue
 		}
 		nodes = append(nodes, node)
@@ -186,16 +201,20 @@ func (rc *RDFCredential) rootAndGraphs(source string) (map[string]any, []map[str
 // removed from the same RDF either way. Identity is therefore compared, not
 // merely existence.
 //
-// A root with no @id cannot be compared, and does not need to be: nothing
-// can refer to it, so it is unreferenced in both forms, and rootOf refuses
-// as soon as a second unreferenced node appears.
+// A root named by a BLANK NODE, or by nothing at all, cannot be compared
+// lexically: blank-node labels are serialization-local, and ToRDF relabels
+// "_:root" to whatever its identifier issuer produces. Such a root is
+// required instead to be referenced by nothing in the document as written -
+// and then it is unreferenced in the flattened form too, where rootOf
+// refuses as soon as a second unreferenced node appears, so it cannot have
+// moved.
 //
 // Signing such a document would produce something this package verifies in
 // one serialization and refuses - or worse, verifies differently - in
 // another. It is refused at signing instead, where the operator can still
 // change it.
 func (rc *RDFCredential) CheckRootSurvivesFlattening() error {
-	compactRoot, _, _, err := rc.rootAndGraphs(rc.documentSource())
+	compactRoot, compactNodes, compactGraphs, err := rc.rootAndGraphs(rc.documentSource())
 	if err != nil {
 		return err
 	}
@@ -211,11 +230,89 @@ func (rc *RDFCredential) CheckRootSurvivesFlattening() error {
 
 	compactID, _ := compactRoot["@id"].(string)
 	flatID, _ := flatRoot["@id"].(string)
-	if compactID != "" && compactID != flatID {
+
+	if isBlankOrAbsent(compactID) || isBlankOrAbsent(flatID) {
+		// Nothing to compare. Require instead that nothing in the document
+		// refers to the root, which is what makes it the unreferenced node
+		// in the flattened form as well.
+		if referencedAnywhere([][]map[string]any{compactNodes, compactGraphs}, compactID) {
+			return fmt.Errorf("this document is about a node nothing can name across serializations, and something in it refers to that node, so which node it is about would be decided differently once serialized through RDF")
+		}
+		return nil
+	}
+
+	if compactID != flatID {
 		return fmt.Errorf("this document is about %q as written and %q once serialized through RDF, so a proof on one would be read as the other's", compactID, flatID)
 	}
 
 	return nil
+}
+
+// isBlankOrAbsent reports whether an @id cannot be compared between two
+// serializations of the same RDF.
+func isBlankOrAbsent(id string) bool {
+	return id == "" || strings.HasPrefix(id, "_:")
+}
+
+// referencedAnywhere reports whether anything in the document points at this
+// node.
+//
+// The whole document, not only its top-level entries: a node reachable
+// through @included sits inside the root's own subtree while compact and
+// beside it once flattened, and a reference from there is exactly what makes
+// the root stop being the unreferenced node.
+//
+// In expanded JSON-LD a reference is a map holding nothing but "@id", which
+// is what separates it from the node's own definition.
+func referencedAnywhere(entries [][]map[string]any, id string) bool {
+	if id == "" {
+		return false
+	}
+	found := false
+	var walk func(any)
+	walk = func(value any) {
+		if found {
+			return
+		}
+		switch typed := value.(type) {
+		case map[string]any:
+			if len(typed) == 1 {
+				if at, ok := typed["@id"].(string); ok && at == id {
+					found = true
+					return
+				}
+			}
+			for _, member := range typed {
+				walk(member)
+			}
+		case []any:
+			for _, member := range typed {
+				walk(member)
+			}
+		}
+	}
+	for _, group := range entries {
+		for _, entry := range group {
+			walk(entry)
+		}
+	}
+	return found
+}
+
+// graphsNamed returns the indices of every top-level graph entry carrying
+// this name. More than one is a collision the caller has to refuse: RDF
+// merges them into one graph, so there is no "the" entry to remove.
+func graphsNamed(graphs []map[string]any, id string) []int {
+	if id == "" {
+		return nil
+	}
+	var matches []int
+	for i, graph := range graphs {
+		if name, _ := graph["@id"].(string); name == id {
+			matches = append(matches, i)
+		}
+	}
+	return matches
 }
 
 // rootOf picks the document node the others hang off.

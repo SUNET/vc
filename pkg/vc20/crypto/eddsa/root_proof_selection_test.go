@@ -42,13 +42,16 @@ func signDocument(t *testing.T, doc string, purpose string) (*credential.RDFCred
 	return signed, pub
 }
 
-// TestRootProofGraphsAcrossSerializations: the answer comes from the RDF
-// dataset, so it cannot depend on how the document was written down.
+// TestRootProofGraphsAcrossSerializations: the answer cannot depend on how
+// the document was written down.
 //
-// That is the point of reading it there rather than from the JSON: a
-// compact document may ALIAS "proof" and "proofValue" through its context, a
-// directly expanded one need not label its root at all, and both are the
-// same RDF. Each of those is a shape the JSON-level version got wrong.
+// RootProofs reads the root off the EXPANDED document - the document's own
+// top-level structure, not the RDF reference graph - and expansion is what
+// makes the spelling irrelevant: a compact document may ALIAS "proof" and
+// "proofValue" through its context, and a directly expanded one need not
+// label its root at all. A flattened document, where the nesting is gone,
+// falls back to reference analysis; that is the only place the graph is
+// consulted.
 func TestRootProofGraphsAcrossSerializations(t *testing.T) {
 	const vp = `{
 		"@context": "https://www.w3.org/ns/credentials/v2",
@@ -410,10 +413,12 @@ const cyclicPresentation = `{
 // component, and only the credential is typed - so it was the lone
 // candidate, and the "nothing to disambiguate" shortcut accepted it.
 //
-// That is the misplaced-proof attack again: removing every proof when
-// hashing leaves the canonical form unchanged wherever the proof sits, so a
-// proof moved from the wrapper onto the embedded credential verified with
-// the wrapper's key.
+// That was the misplaced-proof attack again, under the graph-shaped
+// selection this PR replaced: removing every proof when hashing left the
+// canonical form unchanged wherever the proof sat, so a proof moved from the
+// wrapper onto the embedded credential verified with the wrapper's key.
+// RootProofs reads the root off the document instead, and the wrapper is
+// what the document is about.
 func TestRootProofGraphsRefuseAnEmbeddedOnlyRoot(t *testing.T) {
 	// "carries" is an ALIAS for the verifiableCredential predicate, typed
 	// @id so the link lands in the DEFAULT graph the way the VCDM spelling

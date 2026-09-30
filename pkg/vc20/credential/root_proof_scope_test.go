@@ -71,3 +71,95 @@ func TestRelocatingAProofChangesTheSecuredDocument(t *testing.T) {
 	require.NotEqual(t, asSigned, relocated,
 		"so relocation changes the document the signature covers")
 }
+
+// TestABlankRootIsNotComparedLexically: blank-node labels are
+// serialization-local. ToRDF relabels "_:root" through its own identifier
+// issuer and MarshalJSON can return "_:b0", so comparing them as stable ids
+// reports that the root moved when it did not.
+func TestABlankRootIsNotComparedLexically(t *testing.T) {
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "_:root",
+		"type": ["VerifiablePresentation"],
+		"holder": "did:example:holder"
+	}`), nil)
+	require.NoError(t, err)
+
+	compactRoot, _, _, err := cred.rootAndGraphs(cred.documentSource())
+	require.NoError(t, err)
+	marshalled, err := cred.MarshalJSON()
+	require.NoError(t, err)
+	flatRoot, _, _, err := cred.rootAndGraphs(string(marshalled))
+	require.NoError(t, err)
+
+	// The fixture is only worth something if the two labels really do
+	// differ - otherwise a lexical comparison would pass anyway.
+	require.NotEqual(t, compactRoot["@id"], flatRoot["@id"],
+		"the relabelling has to happen, or this proves nothing")
+
+	require.NoError(t, cred.CheckRootSurvivesFlattening(),
+		"the same blank node under two labels is the same root")
+}
+
+// TestABlankRootThatIsReferredToIsRefused: a blank root cannot be compared
+// across serializations, so it is required to be referred to by nothing -
+// which is what makes it the unreferenced node in the flattened form too. A
+// blank root something points at could be swapped for another node there
+// without this noticing.
+func TestABlankRootThatIsReferredToIsRefused(t *testing.T) {
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": ["https://www.w3.org/ns/credentials/v2",
+			{"attaches": {"@id": "https://example.org/vocab#attaches", "@type": "@id"}}],
+		"id": "_:root",
+		"type": ["VerifiablePresentation"],
+		"holder": "did:example:holder",
+		"@included": [{
+			"id": "urn:uuid:other",
+			"type": ["VerifiablePresentation"],
+			"attaches": "_:root"
+		}]
+	}`), nil)
+	require.NoError(t, err)
+
+	err = cred.CheckRootSurvivesFlattening()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "refers to that node")
+}
+
+// TestGraphNameCollisionIsRefused: two top-level entries may carry the same
+// graph name. JSON-LD expansion keeps both and RDF conversion merges their
+// triples, so keeping one per name dropped the rest from the document the
+// signature covers while the verifier's parsed RDF still held them.
+func TestGraphNameCollisionIsRefused(t *testing.T) {
+	// Two graphs under one name, one of them the root's proof.
+	const collided = `[
+		{
+			"@id": "urn:uuid:the-presentation",
+			"@type": ["https://www.w3.org/2018/credentials#VerifiablePresentation"],
+			"https://w3id.org/security#proof": [{"@id": "urn:uuid:the-graph"}]
+		},
+		{
+			"@id": "urn:uuid:the-graph",
+			"@graph": [{
+				"@type": ["https://w3id.org/security#DataIntegrityProof"],
+				"https://w3id.org/security#proofValue": [
+					{"@type": "https://w3id.org/security#multibase", "@value": "zREAL"}
+				]
+			}]
+		},
+		{
+			"@id": "urn:uuid:the-graph",
+			"@graph": [{
+				"@id": "urn:uuid:smuggled",
+				"https://schema.org/name": [{"@value": "added beside the proof"}]
+			}]
+		}
+	]`
+
+	cred, err := NewRDFCredentialFromJSON([]byte(collided), nil)
+	require.NoError(t, err)
+
+	_, _, err = cred.RootProofs()
+	require.Error(t, err, "which entry is the proof cannot be answered, so neither is removed")
+	require.Contains(t, err.Error(), "urn:uuid:the-graph")
+}

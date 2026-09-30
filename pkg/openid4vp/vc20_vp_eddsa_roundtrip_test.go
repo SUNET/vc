@@ -191,16 +191,18 @@ func TestVPBuilderEdDSASelectsTheHolderProof(t *testing.T) {
 // TestVPBuilderEdDSARefusesAMisplacedProof is the forgery this selection
 // exists to stop, and it is not theoretical.
 //
-// Verify removes EVERY proof when hashing, so moving a proof from the
-// presentation onto the embedded credential leaves the canonical form - and
+// Verify USED TO remove every proof when hashing, so moving a proof from the
+// presentation onto the embedded credential left the canonical form - and
 // therefore the hash - unchanged. Someone holding a legitimately signed
-// presentation can move the holder's proof down onto the credential, delete
-// the presentation's own proof, and offer a document the holder never
-// signed in that shape. "Verify whichever proof is in there" accepts it with
-// the holder's key.
+// presentation could move the holder's proof down onto the credential,
+// delete the presentation's own proof, and offer a document the holder never
+// signed in that shape, which "verify whichever proof is in there" accepted
+// with the holder's key.
 //
-// So a document that attaches no proof to ITSELF is refused, whatever it
-// carries further down.
+// A document that attaches no proof to ITSELF is refused now, whatever it
+// carries further down - and the hash is scoped to the root's own proofs, so
+// a moved proof stays in the secured document and would not verify even if
+// it were selected.
 func TestVPBuilderEdDSARefusesAMisplacedProof(t *testing.T) {
 	holderPub, holderKey, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)

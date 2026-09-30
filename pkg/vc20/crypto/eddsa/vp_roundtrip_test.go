@@ -89,9 +89,10 @@ func TestVerifyRoundTrip(t *testing.T) {
 }
 
 // TestVerifyRejectsATamperedPresentation keeps the fix honest: verification
-// has to still say no. Removing every proof from the canonical form is what
-// makes signing and verification agree, and it must not also make the
-// document irrelevant to the signature.
+// has to still say no. Signing and verification agree because both remove
+// the ROOT's own proofs and nothing else - an embedded credential's proof
+// stays in the document the signature covers - and that agreement must not
+// also make the document irrelevant to the signature.
 func TestVerifyRejectsATamperedPresentation(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
