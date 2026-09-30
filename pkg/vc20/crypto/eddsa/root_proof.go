@@ -199,14 +199,17 @@ var embeddingPredicates = []string{
 }
 
 // unembedded drops the candidates some node in the document embeds.
+//
+// Applied to a LONE candidate too. It looked like a harmless shortcut - a
+// bare credential parsed on its own has no embedding link, so nothing is
+// dropped - but a single candidate can be an embedded one: an UNTYPED outer
+// node that embeds a credential which links back at it puts both in one
+// source component, and only the credential is typed. Accepting it there
+// meant a proof moved from the wrapper onto the embedded credential
+// verified, since removing every proof leaves the hash unchanged either
+// way. A document whose only credential-typed node is one it carries does
+// not say what it is, so it is refused.
 func unembedded(defaultGraph []*ld.Quad, candidates []string) []string {
-	if len(candidates) < 2 {
-		// Nothing to disambiguate, and a single candidate that is itself
-		// embedded is still the only thing this document is about - a
-		// bare credential parsed on its own has no embedding link at all.
-		return candidates
-	}
-
 	embedded := make(map[string]bool)
 	for _, quad := range defaultGraph {
 		if quad == nil || quad.Predicate == nil || !isNode(quad.Object) {

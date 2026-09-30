@@ -533,3 +533,60 @@ func TestRootProofGraphsStillRefuseAMovedProofInACycle(t *testing.T) {
 		"a proof on the embedded credential is not the presentation's own")
 	require.Error(t, NewSuite().Verify(reparsed, pub))
 }
+
+// TestRootProofGraphsRefuseAnEmbeddedOnlyRoot: an UNTYPED outer node that
+// embeds a credential which links back at it puts both in one source
+// component, and only the credential is typed - so it was the lone
+// candidate, and the "nothing to disambiguate" shortcut accepted it.
+//
+// That is the misplaced-proof attack again: removing every proof when
+// hashing leaves the canonical form unchanged wherever the proof sits, so a
+// proof moved from the wrapper onto the embedded credential verified with
+// the wrapper's key.
+func TestRootProofGraphsRefuseAnEmbeddedOnlyRoot(t *testing.T) {
+	// "carries" is an ALIAS for the verifiableCredential predicate, typed
+	// @id so the link lands in the DEFAULT graph the way the VCDM spelling
+	// does. The wrapper carries no rdf:type, so only the credential is a
+	// typed candidate; the subject's back-link puts the three in one source
+	// component.
+	const wrapperWithProofOnTheCredential = `{
+		"@context": ["https://www.w3.org/ns/credentials/v2",
+			{
+				"carries": {"@id": "https://www.w3.org/2018/credentials#verifiableCredential", "@type": "@id"},
+				"presentedIn": {"@id": "https://example.org/vocab#presentedIn", "@type": "@id"}
+			}],
+		"@graph": [
+			{
+				"id": "urn:uuid:the-wrapper",
+				"carries": "urn:uuid:the-credential"
+			},
+			{
+				"id": "urn:uuid:the-credential",
+				"type": ["VerifiableCredential"],
+				"issuer": "did:example:issuer",
+				"credentialSubject": {"id": "did:example:subject", "presentedIn": "urn:uuid:the-wrapper"},
+				"proof": {
+					"type": "DataIntegrityProof",
+					"cryptosuite": "eddsa-rdfc-2022",
+					"proofPurpose": "assertionMethod",
+					"verificationMethod": "did:example:issuer#key-1",
+					"proofValue": "z2DXFtnG8nHVsBv5SyJTgGBJYiFTRTpLKqWjDfMVSfdcKYjPfA6QLB7yFCJNtxYJ5aVzAAHNbLbEBL2fxPGZWKbvZ"
+				}
+			}
+		]
+	}`
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(wrapperWithProofOnTheCredential), nil)
+	require.NoError(t, err)
+
+	// The fixture is worth nothing unless the cycle and the proof both reach
+	// the dataset - without the back-link the credential is simply an
+	// embedded node with an incoming edge, which was never a candidate.
+	nq := mustNQuads(t, cred)
+	require.Contains(t, nq, "vocab#presentedIn", "the back-link must survive parsing")
+	require.Contains(t, nq, "credentials#verifiableCredential", "and the aliased embedding link must expand to the real predicate")
+	require.Contains(t, nq, "security#proofValue", "and so must the moved proof")
+
+	require.Empty(t, rootProofGraphs(cred),
+		"a document whose only credential-typed node is one it carries does not say what it is")
+}

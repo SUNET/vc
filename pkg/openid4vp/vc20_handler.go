@@ -638,14 +638,34 @@ func (h *VC20Handler) verifyEdDSA2022(
 		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
 	}
 
-	// Verify using the EdDSA suite
+	// Verify using the EdDSA suite, and build the result from the proof
+	// that ACTUALLY verified.
+	//
+	// A document may carry several root proofs and the suite tries each.
+	// extractProof hands back the FIRST one in the array, so describing
+	// that one let an attacker prepend an invalid proof naming the real
+	// verification method with a forged proofPurpose or created: the suite
+	// verified the genuine proof further along, and this result reported
+	// the forged one's fields as verified.
 	suite := eddsaSuite.NewSuite()
-	if err := suite.Verify(rdfCred, pubKey); err != nil {
+	verifiedProof, err := suite.VerifyProof(rdfCred, pubKey)
+	if err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
 	}
 
+	// And it has to be the proof whose verificationMethod this key was
+	// resolved from. The suite is handed a key, not a method, so a proof
+	// naming someone else's method could otherwise verify with this one and
+	// be reported under that name.
+	verifiedMethod, _ := verifiedProof["verificationMethod"].(string)
+	requestedMethod, _ := proof["verificationMethod"].(string)
+	if verifiedMethod != requestedMethod {
+		return nil, fmt.Errorf("the proof that verified names verification method %q, but the key was resolved from %q",
+			verifiedMethod, requestedMethod)
+	}
+
 	// Build result
-	return h.buildResult(credBytes, credMap, proof, false)
+	return h.buildResult(credBytes, credMap, verifiedProof, false)
 }
 
 // buildResult builds the verification result from credential data.

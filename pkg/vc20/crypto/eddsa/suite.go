@@ -157,30 +157,44 @@ func (s *Suite) Sign(cred *credential.RDFCredential, key ed25519.PrivateKey, opt
 	return credential.NewRDFCredentialFromJSON(newCredBytes, ldOpts)
 }
 
-// Verify verifies a credential using eddsa-rdfc-2022
+// Verify verifies a credential using eddsa-rdfc-2022.
 func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) error {
+	_, err := s.VerifyProof(cred, key)
+	return err
+}
+
+// VerifyProof verifies a credential using eddsa-rdfc-2022 and returns the
+// proof that actually verified.
+//
+// WHICH proof is not a detail the caller can infer. A document may carry
+// several root proofs and this tries each, so a caller that reads metadata
+// off "the proof" - the first one in the array, say - can report a
+// proofPurpose, a created or a verificationMethod from a proof that FAILED.
+// An attacker only has to prepend one: the suite verifies the genuine proof
+// later in the array while the caller describes the forged one in front.
+func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKey) (map[string]any, error) {
 	if cred == nil {
-		return fmt.Errorf("credential is nil")
+		return nil, fmt.Errorf("credential is nil")
 	}
 	if key == nil {
-		return fmt.Errorf("public key is nil")
+		return nil, fmt.Errorf("public key is nil")
 	}
 
 	// 1. Extract proof object
 	proofCred, err := cred.ProofObject()
 	if err != nil {
-		return fmt.Errorf("failed to get proof object: %w", err)
+		return nil, fmt.Errorf("failed to get proof object: %w", err)
 	}
 
 	// Convert proof to JSON to extract values
 	proofJSONBytes, err := json.Marshal(proofCred)
 	if err != nil {
-		return fmt.Errorf("failed to convert proof to JSON: %w", err)
+		return nil, fmt.Errorf("failed to convert proof to JSON: %w", err)
 	}
 
 	var proofJSON any
 	if err := json.Unmarshal(proofJSONBytes, &proofJSON); err != nil {
-		return fmt.Errorf("failed to unmarshal proof JSON: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal proof JSON: %w", err)
 	}
 
 	// Compact the proof JSON to ensure we have short keys
@@ -192,7 +206,7 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 
 	compactedProof, err := proc.Compact(proofJSON, context, compactOpts)
 	if err != nil {
-		return fmt.Errorf("failed to compact proof JSON: %w", err)
+		return nil, fmt.Errorf("failed to compact proof JSON: %w", err)
 	}
 
 	proofMap := compactedProof
@@ -214,7 +228,7 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 	// checked against whatever proof it happens to contain.
 	rootGraphs := rootProofGraphs(cred)
 	if len(rootGraphs) == 0 {
-		return fmt.Errorf("the document carries no proof of its own to verify")
+		return nil, fmt.Errorf("the document carries no proof of its own to verify")
 	}
 
 	// Canonicalize the document the SAME way Sign does.
@@ -258,12 +272,12 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 	// that differs.
 	credWithoutProof, err := cred.CredentialWithoutProof()
 	if err != nil {
-		return fmt.Errorf("failed to get credential without proof: %w", err)
+		return nil, fmt.Errorf("failed to get credential without proof: %w", err)
 	}
 
 	docCanonical, err := credWithoutProof.CanonicalForm()
 	if err != nil {
-		return fmt.Errorf("failed to get canonical form of document: %w", err)
+		return nil, fmt.Errorf("failed to get canonical form of document: %w", err)
 	}
 	docHash := sha256.Sum256([]byte(docCanonical))
 
@@ -286,12 +300,12 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 			lastErr = err
 			continue
 		}
-		return nil
+		return proofNode, nil
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("the document's own proof link names no complete proof")
 	}
-	return lastErr
+	return nil, lastErr
 }
 
 // verifyProofNode checks one proof node against the key, over the document

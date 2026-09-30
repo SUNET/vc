@@ -2,9 +2,12 @@ package openid4vp
 
 import (
 	"bytes"
+	"context"
+	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -244,4 +247,73 @@ func TestVPBuilderEdDSARefusesAMisplacedProof(t *testing.T) {
 	require.NoError(t, err)
 	require.Error(t, eddsaSuite.NewSuite().Verify(reparsed, holderPub),
 		"a proof that is not the document's own must not verify it")
+}
+
+// mockVC20KeyResolverByMethod answers per verification method, so a test can
+// say which method resolves to which key rather than returning one key for
+// everything.
+type mockVC20KeyResolverByMethod struct {
+	keys map[string]crypto.PublicKey
+}
+
+func (m *mockVC20KeyResolverByMethod) ResolveKey(_ context.Context, vm string) (crypto.PublicKey, error) {
+	key, ok := m.keys[vm]
+	if !ok {
+		return nil, fmt.Errorf("no key for %q", vm)
+	}
+	return key, nil
+}
+
+// TestVerifyAndExtractReportsTheProofThatVerified: the suite tries every
+// root proof, while extractProof hands the handler the FIRST one in the
+// array. Describing that one let an attacker prepend an invalid proof
+// naming the real verification method with a forged proofPurpose and
+// created: the suite verified the genuine proof further along, and the
+// result reported the forged one's fields as verified.
+func TestVerifyAndExtractReportsTheProofThatVerified(t *testing.T) {
+	issuerPub, issuerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	const unsignedVC = `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`
+
+	signed := signedEdDSACredential(t, issuerKey, unsignedVC)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(signed, &doc))
+	genuine, ok := doc["proof"].(map[string]any)
+	require.True(t, ok, "the fixture must carry exactly one proof to prepend in front of")
+	require.Equal(t, "assertionMethod", genuine["proofPurpose"])
+
+	// The forgery: same verificationMethod, so the handler resolves the real
+	// key off it; everything else is the attacker's, and the proofValue is
+	// not a signature at all.
+	forged := map[string]any{
+		"type":               genuine["type"],
+		"cryptosuite":        genuine["cryptosuite"],
+		"proofPurpose":       "authentication",
+		"verificationMethod": genuine["verificationMethod"],
+		"created":            "2001-01-01T00:00:00Z",
+		"proofValue":         "z2DXFtnG8nHVsBv5SyJTgGBJYiFTRTpLKqWjDfMVSfdcKYjPfA6QLB7yFCJNtxYJ5aVzAAHNbLbEBL2fxPGZWKbvZ",
+	}
+	doc["proof"] = []any{forged, genuine}
+
+	tampered, err := json.Marshal(doc)
+	require.NoError(t, err)
+
+	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+		keys: map[string]crypto.PublicKey{"did:example:issuer#key-1": issuerPub},
+	}))
+	require.NoError(t, err)
+
+	result, err := handler.VerifyAndExtract(t.Context(), string(tampered))
+	require.NoError(t, err, "the genuine proof is still there, so the document verifies")
+	require.Equal(t, "assertionMethod", result.ProofPurpose,
+		"the reported purpose must be the verified proof's, not the one in front of it")
+	require.NotEqual(t, 2001, result.ProofCreated.Year(),
+		"nor its created")
 }
