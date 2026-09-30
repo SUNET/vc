@@ -215,27 +215,39 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 		return fmt.Errorf("failed to decode proofValue: %w", err)
 	}
 
-	// 3. Fix VC graph structure if needed (workaround for json-gold bug)
-	if err := cred.NormalizeVerifiableCredentialGraph(); err != nil {
-		return fmt.Errorf("failed to normalize VC graph: %w", err)
-	}
-
-	// 4. Canonicalize document (without proof)
-	// Determine if we are verifying a VP or VC to remove the correct proof
-	targetType := "VerifiableCredential"
-
-	// Check original JSON for type
-	originalJSON := cred.OriginalJSON()
-	if originalJSON != "" {
-		var credMap map[string]any
-		if err := json.Unmarshal([]byte(originalJSON), &credMap); err == nil {
-			if common.HasType(credMap, "VerifiablePresentation") {
-				targetType = "VerifiablePresentation"
-			}
-		}
-	}
-
-	credWithoutProof, err := cred.CredentialWithoutProofForTypes(targetType)
+	// 4. Canonicalize the document the SAME way Sign does.
+	//
+	// Sign hashes CredentialWithoutProof() - every proof gone - of the
+	// document as given. Verify did two things differently, and each one
+	// broke a different presentation:
+	//
+	//   - It removed only proofs attached to nodes of a target type read
+	//     from OriginalJSON(). That works while OriginalJSON() is the
+	//     compact document the caller passed in. It is EXPANDED JSON-LD - a
+	//     JSON array - for a credential re-parsed from MarshalJSON output,
+	//     and then the map[string]any unmarshal fails, the error is
+	//     swallowed, and the target silently stays "VerifiableCredential".
+	//     For a presentation that removes the EMBEDDED credential's issuer
+	//     proof and leaves the presentation's own proof - the one being
+	//     verified - in the canonicalized document.
+	//
+	//   - It called NormalizeVerifiableCredentialGraph(), which Sign does
+	//     not. That rewrites the verifiableCredential graph, so any
+	//     presentation with a credential IN it canonicalized differently
+	//     here than it did when it was signed - which is every presentation
+	//     openid4vp.VPBuilder produces, in every serialization.
+	//
+	// Measured against the old code: a presentation carrying NO credential
+	// verified unless it had been re-parsed from expanded JSON; one carrying
+	// a credential failed in every form, including straight from Sign's
+	// return value. ecdsa-rdfc-2019 does neither of these things and has
+	// always worked, which is why only the EdDSA half was affected.
+	//
+	// NOTE: removing every proof means a presentation's signature does not
+	// cover an embedded credential's issuer proof. That is pre-existing and
+	// true of ECDSA too; changing it means changing both suites' signing
+	// side as well, which is not this fix.
+	credWithoutProof, err := cred.CredentialWithoutProof()
 	if err != nil {
 		return fmt.Errorf("failed to get credential without proof: %w", err)
 	}

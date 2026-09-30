@@ -57,6 +57,32 @@
   offer once plus one entry per configured wallet. This is the internal
   operator UI's own endpoint, not a wallet-facing one.
 
+### Fixed
+
+- **`eddsa-rdfc-2022` could not verify a verifiable presentation carrying a
+  credential** — which is every presentation `openid4vp.VPBuilder` produces.
+  `Verify` did two things `Sign` does not:
+
+  - it called `NormalizeVerifiableCredentialGraph()`, which rewrites the
+    `verifiableCredential` graph, so a presentation with a credential in it
+    canonicalized differently at verification time than at signing time —
+    in every serialization, including straight from `Sign`'s return value;
+  - it removed only the proofs attached to nodes of a target type read from
+    `OriginalJSON()`. That works while `OriginalJSON()` is the compact
+    document the caller passed in; it is expanded JSON-LD — a JSON array —
+    for a credential re-parsed from `MarshalJSON` output, and then the
+    `map[string]any` unmarshal fails, the error is swallowed, and the target
+    stays `VerifiableCredential`, which for a presentation removes an
+    embedded credential's issuer proof and leaves the presentation's own
+    proof in the document being hashed.
+
+  Measured against the old code: a presentation carrying **no** credential
+  verified unless it had been re-parsed from expanded JSON; one carrying a
+  credential failed in every form. `Verify` now canonicalizes exactly as
+  `Sign` does, which is also what `ecdsa-rdfc-2019` has always done — that
+  is why only the EdDSA half was affected. No change to what a signature
+  covers.
+
 ### Changed
 
 - The issuer's `/offers` page now renders one credential offer three ways:
