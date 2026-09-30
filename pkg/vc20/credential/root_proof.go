@@ -510,3 +510,30 @@ func CompactRootProof(expanded any) (map[string]any, error) {
 
 	return compacted, nil
 }
+
+// HasProofType reports whether a compacted proof node carries this type.
+//
+// A node may carry SEVERAL types - a document that puts a type-scoped
+// context on its own alias for DataIntegrityProof has to name both, or the
+// VC 2.0 context's own scoped definitions of cryptosuite, proofValue and the
+// rest never activate. Reading only a single string called such a proof
+// untyped.
+func HasProofType(proofNode map[string]any, want string) bool {
+	switch typed := proofNode["type"].(type) {
+	case string:
+		return typed == want
+	case []any:
+		for _, entry := range typed {
+			if name, ok := entry.(string); ok && name == want {
+				return true
+			}
+		}
+	case []string:
+		for _, name := range typed {
+			if name == want {
+				return true
+			}
+		}
+	}
+	return false
+}

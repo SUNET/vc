@@ -273,6 +273,18 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key *ecdsa.PublicKey
 	// so a moved proof stays in the secured document and the hash changes
 	// with it. See credential.RootProofs and
 	// TestRelocatingAProofChangesTheSecuredDocument.
+	// The same root-stability check Sign applies. Verification needs it
+	// MORE than signing does: a signed document can be re-rooted by the
+	// holder - the embedded credential lifted to the top level, the
+	// presentation pushed under @included, and the presentation's proof
+	// moved onto the credential - and removing the new root's proof then
+	// reproduces the original unsecured RDF, so the signature verifies as
+	// the credential's own. A document that names one root as written and
+	// another once serialized through RDF is refused.
+	if err := cred.CheckRootSurvivesFlattening(); err != nil {
+		return nil, err
+	}
+
 	proofs, credWithoutProof, err := cred.RootProofs()
 	if err != nil {
 		return nil, err
@@ -309,8 +321,8 @@ func (s *Suite) verifyRootProof(cred *credential.RDFCredential, expanded any, ke
 	}
 	// A DataIntegrityProof of THIS suite. The type says the node is a proof
 	// at all; the cryptosuite says which procedure produced the signature.
-	if proofType, _ := proofNode["type"].(string); proofType != ProofType {
-		return nil, fmt.Errorf("the document's own proof link names a %q, not a %s", proofType, ProofType)
+	if !credential.HasProofType(proofNode, ProofType) {
+		return nil, fmt.Errorf("the document's own proof link names a %v, not a %s", proofNode["type"], ProofType)
 	}
 	if suite, _ := proofNode["cryptosuite"].(string); suite != Cryptosuite2019 {
 		return nil, fmt.Errorf("the document's own proof declares cryptosuite %q, not %s", suite, Cryptosuite2019)

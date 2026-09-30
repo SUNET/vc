@@ -713,6 +713,16 @@ func (h *VC20Handler) expandVerificationMethod(credMap map[string]any, proof map
 	if local := proof["@context"]; local != nil {
 		probeProof["@context"] = local
 	}
+	// The proof's TYPE goes in too. A type-scoped context - a local context
+	// that hangs term definitions off a proof type - is only active on a
+	// node carrying that type, so a probe without it expands the method
+	// under a different active context than the document does, and resolves
+	// the wrong key or none.
+	if proofType, present := proof["type"]; present {
+		probeProof["@type"] = proofType
+	} else if proofType, present := proof["@type"]; present {
+		probeProof["@type"] = proofType
+	}
 	probe := map[string]any{proofIRI: probeProof}
 	if hasDocumentContext {
 		// json-gold reads a context out of decoded JSON, so a []string

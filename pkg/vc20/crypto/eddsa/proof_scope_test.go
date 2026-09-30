@@ -249,3 +249,65 @@ func TestVerifyRefusesAProofMovedOntoAnIncludedNode(t *testing.T) {
 	require.Error(t, NewSuite().Verify(relocated, pub),
 		"a proof on an included node is not the document's own")
 }
+
+// TestVerifyRefusesARerootedDocument is the relocation the signing-side
+// check alone could not stop, because the holder controls the document
+// after it is signed.
+//
+// A signed presentation carrying a credential is rewritten with the
+// CREDENTIAL at the top level and the presentation pushed underneath it
+// through @included, and the presentation's proof moved onto the credential.
+// Removing the new root's proof then reproduces the original unsecured RDF -
+// the same triples, the same canonical form - so the signature would verify
+// as the credential's own.
+//
+// What gives it away is that the rewritten document names one root as
+// written and another once serialized through RDF.
+func TestVerifyRefusesARerootedDocument(t *testing.T) {
+	signed, pub := signDocument(t, `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "urn:uuid:the-presentation",
+		"type": ["VerifiablePresentation"],
+		"holder": "did:example:holder",
+		"verifiableCredential": [{
+			"@context": "https://www.w3.org/ns/credentials/v2",
+			"id": "urn:uuid:the-credential",
+			"type": ["VerifiableCredential"],
+			"issuer": "did:example:issuer",
+			"credentialSubject": {"id": "did:example:subject"}
+		}]
+	}`, "authentication")
+	require.NoError(t, NewSuite().Verify(signed, pub))
+
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(compact, &doc))
+
+	embedded, ok := doc["verifiableCredential"].([]any)
+	require.True(t, ok)
+	require.Len(t, embedded, 1)
+	credentialNode, ok := embedded[0].(map[string]any)
+	require.True(t, ok)
+	proof := doc["proof"]
+	require.NotNil(t, proof)
+
+	// The credential becomes the document, and the presentation - still
+	// naming the credential, now by reference rather than by nesting, so
+	// the RDF is unchanged - is carried under it.
+	delete(doc, "proof")
+	delete(doc, "@context")
+	doc["verifiableCredential"] = []any{map[string]any{"id": "urn:uuid:the-credential"}}
+	credentialNode["proof"] = proof
+	credentialNode["@context"] = "https://www.w3.org/ns/credentials/v2"
+	credentialNode["@included"] = []any{doc}
+
+	rerooted, err := json.Marshal(credentialNode)
+	require.NoError(t, err)
+	reparsed, err := credential.NewRDFCredentialFromJSON(rerooted, nil)
+	require.NoError(t, err)
+
+	err = NewSuite().Verify(reparsed, pub)
+	require.Error(t, err, "a document that names two different roots must not verify")
+	require.Contains(t, err.Error(), "once serialized through RDF")
+}

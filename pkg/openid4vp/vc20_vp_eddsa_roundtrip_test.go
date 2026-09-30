@@ -562,3 +562,72 @@ func TestVerifyAndExtractReportsTheECDSAProofThatVerified(t *testing.T) {
 		"the reported purpose must be the verified proof's, not the one in front of it")
 	require.NotEqual(t, 2001, result.ProofCreated.Year())
 }
+
+// TestVerifyAndExtractHonoursATypeScopedContext: a type-scoped context is
+// only active on a node carrying the type it is scoped to. A probe that
+// omits the proof's type therefore expands the method under a different
+// active context than the document does, and resolves the wrong key or
+// none - while the proof itself remains cryptographically valid.
+func TestVerifyAndExtractHonoursATypeScopedContext(t *testing.T) {
+	issuerPub, issuerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	const absoluteMethod = "https://example.org/keys#key-1"
+	const scoped = "https://example.org/type-scoped-context"
+
+	// "ex" is defined ONLY inside the scope of this proof type, so a node
+	// that does not carry the type cannot resolve "ex:key-1" at all.
+	//
+	// The alias is a new name rather than DataIntegrityProof itself: that
+	// term is @protected in the VC 2.0 context and json-gold refuses to
+	// redefine it. It expands to the same IRI, so the RDF - and therefore
+	// the signature - is unchanged.
+	credential.GetGlobalLoader().AddContext(scoped, `{"@context":{
+		"ProofOfMine": {
+			"@id": "https://w3id.org/security#DataIntegrityProof",
+			"@context": {"ex": "https://example.org/keys#"}
+		}
+	}}`)
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`), nil)
+	require.NoError(t, err)
+
+	signed, err := eddsaSuite.NewSuite().Sign(cred, issuerKey, &eddsaSuite.SignOptions{
+		VerificationMethod: absoluteMethod,
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(compact, &doc))
+	proof, ok := doc["proof"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "DataIntegrityProof", proof["type"])
+	proof["@context"] = []any{"https://www.w3.org/ns/credentials/v2", scoped}
+	// BOTH types. The alias carries the scoped context that defines "ex";
+	// DataIntegrityProof carries the VC 2.0 scoped context that defines
+	// cryptosuite, proofValue and the rest, and dropping it would leave the
+	// proof with nothing but a type.
+	proof["type"] = []any{"DataIntegrityProof", "ProofOfMine"}
+	proof["verificationMethod"] = "ex:key-1"
+
+	rewritten, err := json.Marshal(doc)
+	require.NoError(t, err)
+
+	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+		keys: map[string]crypto.PublicKey{absoluteMethod: issuerPub},
+	}))
+	require.NoError(t, err)
+
+	result, err := handler.VerifyAndExtract(t.Context(), string(rewritten))
+	require.NoError(t, err, "the proof's type is what activates the context that defines ex")
+	require.Equal(t, absoluteMethod, result.VerificationMethod)
+}

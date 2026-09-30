@@ -205,6 +205,18 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKe
 		return nil, fmt.Errorf("public key is nil")
 	}
 
+	// The same root-stability check Sign applies. Verification needs it
+	// MORE than signing does: a signed document can be re-rooted by the
+	// holder - the embedded credential lifted to the top level, the
+	// presentation pushed under @included, and the presentation's proof
+	// moved onto the credential - and removing the new root's proof then
+	// reproduces the original unsecured RDF, so the signature verifies as
+	// the credential's own. A document that names one root as written and
+	// another once serialized through RDF is refused.
+	if err := cred.CheckRootSurvivesFlattening(); err != nil {
+		return nil, err
+	}
+
 	proofs, credWithoutProof, err := cred.RootProofs()
 	if err != nil {
 		return nil, err
@@ -253,8 +265,8 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKe
 		// Relabelling an existing signature does not survive this anyway,
 		// since the label is hashed into the proof configuration; the check
 		// is here so that what verified and what is REPORTED cannot differ.
-		if proofType, _ := proofNode["type"].(string); proofType != ProofType {
-			lastErr = fmt.Errorf("the document's own proof link names a %q, not a %s", proofType, ProofType)
+		if !credential.HasProofType(proofNode, ProofType) {
+			lastErr = fmt.Errorf("the document's own proof link names a %v, not a %s", proofNode["type"], ProofType)
 			continue
 		}
 		if suite, _ := proofNode["cryptosuite"].(string); suite != Cryptosuite2022 {
