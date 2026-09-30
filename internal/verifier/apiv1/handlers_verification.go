@@ -225,13 +225,28 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		// The wallet does not get to choose which format answers a scope.
 		// Detection reads the token; the request said what was asked for.
 		//
-		// Conditional, deliberately, and this is the weak spot: requestedQuery
-		// cannot resolve a scope for a session with no cached query, or for a
-		// multi-credential template whose query ids differ from the scope. It
-		// is NOT failed closed because formats other than W3C were verified
-		// without any such cross-check before this PR, and refusing here would
-		// take working multi-query templates away. The W3C branch does fail
-		// closed, since its constraint checking depends on the query.
+		// The wallet does not get to choose which format answers a scope.
+		// Detection reads the token; the request said what was asked for.
+		//
+		// Conditional, and the condition now means something narrower than
+		// it used to. requestedQuery could not resolve a multi-credential
+		// template whose query ids differ from the scope - which is most of
+		// the shipped ones - so every such response took the log-and-continue
+		// path and was never checked. It consults the session's
+		// scope-to-query mapping now, so those resolve.
+		//
+		// What is left unresolvable is a session whose DCQL query is not
+		// available here at all: the persisted one comes back nil from Mongo
+		// and the request-object cache is per-process unless
+		// common.ha.enable is on, so a response landing on a replica that
+		// never saw the request is an ordinary deployment shape rather than
+		// an attack, and nothing downstream could check a constraint for it
+		// either. Refusing that is a deployment decision (it would require HA
+		// caching), not one to take inside a format check.
+		//
+		// A scope the request does NOT ask for never reaches here:
+		// vpTokensForScope refuses it above, because its key names no
+		// credential query. So this is not the gap it looks like.
 		if requested, ok := c.requestedQuery(authCtx, scopeQueryIDs, scope); ok {
 			if !formatMatchesRequest(format, requested.Format) {
 				c.log.Error(nil, "returned credential format does not answer the request",
@@ -239,7 +254,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				return nil, fmt.Errorf("scope %s was requested as %q but the response is %q", scope, requested.Format, format)
 			}
 		} else {
-			c.log.Warn("cannot check the returned format against the request: the query this scope was requested under could not be resolved",
+			c.log.Warn("cannot check the returned format against the request: this session's DCQL query is not available on this replica",
 				"scope", scope, "detected", format)
 		}
 
@@ -1055,16 +1070,35 @@ func detectCredentialFormat(vpToken string) CredentialFormat {
 // whose wallet had just rendered a consent screen from that very query, so the
 // persisted field alone is not a reliable source. The request object cache
 // holds the query that was signed and served to the wallet.
+// sessionDCQL returns the DCQL query this session's request was built from,
+// or nil when it cannot be recovered.
+//
+// The persisted DCQLQuery comes back nil from Mongo (see the field's own
+// documentation), so the request-object cache is the fallback - and with
+// common.ha.enable off that cache is per-process, so on a multi-replica
+// deployment a response can land on a replica that never saw the request.
+// Nil therefore means "this session's request is not available here", which
+// is a different thing from "the request did not ask for that".
+func (c *Client) sessionDCQL(authCtx *cache.AuthorizationContext) *openid4vp.DCQL {
+	if authCtx == nil {
+		return nil
+	}
+	if authCtx.DCQLQuery != nil {
+		return authCtx.DCQLQuery
+	}
+	if c.openid4vp != nil && c.openid4vp.RequestObjectCache != nil {
+		if requestObject, found := c.openid4vp.RequestObjectCache.Get(authCtx.RequestObjectID); found {
+			return requestObject.DCQLQuery
+		}
+	}
+	return nil
+}
+
 func (c *Client) requestedQuery(authCtx *cache.AuthorizationContext, scopeQueryIDs map[string]string, scope string) (openid4vp.CredentialQuery, bool) {
 	if authCtx == nil {
 		return openid4vp.CredentialQuery{}, false
 	}
-	dcqlQuery := authCtx.DCQLQuery
-	if dcqlQuery == nil && c.openid4vp != nil && c.openid4vp.RequestObjectCache != nil {
-		if requestObject, found := c.openid4vp.RequestObjectCache.Get(authCtx.RequestObjectID); found {
-			dcqlQuery = requestObject.DCQLQuery
-		}
-	}
+	dcqlQuery := c.sessionDCQL(authCtx)
 	if dcqlQuery == nil {
 		return openid4vp.CredentialQuery{}, false
 	}

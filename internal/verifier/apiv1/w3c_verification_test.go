@@ -379,3 +379,42 @@ func TestCreateDCQLQueryValidatesWhatItSends(t *testing.T) {
 		assert.Contains(t, err.Error(), unusable.ID, "the error names the offending query")
 	}
 }
+
+// TestScopeNotInTheRequestIsRefused: a response naming a scope the request
+// does not ask for is refused, rather than logged and waved through.
+//
+// The distinction that makes this checkable is between "the request is not
+// available here" - the persisted DCQLQuery comes back nil from Mongo and
+// the request-object cache is per-process unless HA is on - and "the request
+// is available and does not contain this scope". Only the second is a
+// statement about the response.
+func TestScopeNotInTheRequestIsRefused(t *testing.T) {
+	client, _ := CreateTestClientWithMock(t, nil)
+
+	known := &cache.AuthorizationContext{
+		Scopes: []string{"pid"},
+		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+			{ID: "eudi_pid", Format: openid4vp.FormatSDJWTVC},
+			{ID: "eudi_ehic", Format: openid4vp.FormatSDJWTVC},
+		}},
+	}
+	mapped := map[string]string{"pid": "eudi_pid"}
+
+	// The mapped scope resolves.
+	_, ok := client.requestedQuery(known, mapped, "pid")
+	require.True(t, ok)
+
+	// One the request never asked for does not - and the session's query IS
+	// available, which is what makes that a refusal rather than a shrug.
+	_, ok = client.requestedQuery(known, mapped, "address")
+	require.False(t, ok)
+	require.NotNil(t, client.sessionDCQL(known),
+		"the request is known, so an unresolvable scope is the response's fault")
+
+	// With no query and no request object, nothing is known about the
+	// request, and that is not the response's fault.
+	unknown := &cache.AuthorizationContext{Scopes: []string{"pid"}}
+	require.Nil(t, client.sessionDCQL(unknown))
+	_, ok = client.requestedQuery(unknown, mapped, "pid")
+	require.False(t, ok)
+}
