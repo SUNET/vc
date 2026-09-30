@@ -8,19 +8,20 @@ import (
 	"github.com/piprate/json-gold/ld"
 )
 
-// Proof predicates, in both IRI spellings the parser produces.
+// Proof predicates, deliberately the SAME two that
+// credential.CredentialWithoutProofForTypes removes.
+//
+// They have to match exactly. A link this accepts but removal does not
+// leaves that proof in the hashed document, so verification cannot
+// reproduce a signature computed with proofs removed - a valid document
+// would be rejected. Widening the set here without widening removal is
+// therefore not a tolerance, it is a break.
 var proofPredicates = []string{
 	"https://w3id.org/security#proof",
 	"http://www.w3.org/ns/credentials#proof",
-	"https://www.w3.org/ns/credentials#proof",
 }
 
-var proofValuePredicates = []string{
-	"https://w3id.org/security#proofValue",
-	"https://www.w3.org/ns/credentials#proofValue",
-}
-
-// rootProofValues returns the proofValues of the proofs the document
+// rootProofGraphs names the RDF graphs holding the proofs the document
 // attaches to ITSELF.
 //
 // Read from the RDF DATASET, not from the JSON. The JSON is the wrong layer
@@ -37,13 +38,19 @@ var proofValuePredicates = []string{
 // and have the misplaced one verify with the original key. So the proof
 // checked has to be the one the root itself carries.
 //
+// Graph NAMES rather than proofValues, because a value does not establish
+// attachment: a proofValue can be copied into a stub proof at the root
+// while the real, typed proof sits on an embedded credential, and matching
+// on the value alone would then select the moved one. The graph the root
+// links to is what the root actually carries.
+//
 // THE ROOT IS THE SUBJECT NOTHING ELSE POINTS AT. A presentation names its
 // embedded credential, so the credential is referenced and the presentation
 // is not; a detached node is unreferenced too, which makes the document
 // AMBIGUOUS rather than merely odd - so more than one candidate is refused
 // rather than resolved by preference. An empty result means the caller must
 // refuse.
-func rootProofValues(cred *credential.RDFCredential) []string {
+func rootProofGraphs(cred *credential.RDFCredential) []string {
 	dataset := cred.Dataset()
 	if dataset == nil {
 		return nil
@@ -60,8 +67,13 @@ func rootProofValues(cred *credential.RDFCredential) []string {
 		if quad == nil || quad.Subject == nil {
 			continue
 		}
-		subjects[quad.Subject.GetValue()] = true
-		if isNode(quad.Object) {
+		subject := quad.Subject.GetValue()
+		subjects[subject] = true
+		// A SELF-edge is not a reference from anything else. A presentation
+		// may set id to the holder DID, and holder is a node reference in
+		// the VC 2.0 context - counting that edge would leave the document
+		// with no root at all and reject a perfectly good signature.
+		if isNode(quad.Object) && quad.Object.GetValue() != subject {
 			referenced[quad.Object.GetValue()] = true
 		}
 	}
@@ -98,22 +110,8 @@ func rootProofValues(cred *credential.RDFCredential) []string {
 			graphNames = append(graphNames, quad.Object.GetValue())
 		}
 	}
-
-	var out []string
-	for _, name := range graphNames {
-		for _, quad := range dataset.Graphs[name] {
-			if quad == nil || quad.Predicate == nil || quad.Object == nil {
-				continue
-			}
-			if !contains(proofValuePredicates, quad.Predicate.GetValue()) {
-				continue
-			}
-			if value := quad.Object.GetValue(); value != "" {
-				out = append(out, value)
-			}
-		}
-	}
-	return out
+	slices.Sort(graphNames)
+	return graphNames
 }
 
 // isNode reports whether an RDF term names something else in the graph,
@@ -128,10 +126,5 @@ func isNode(term ld.Node) bool {
 }
 
 func contains(values []string, want string) bool {
-	for _, v := range values {
-		if v == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }

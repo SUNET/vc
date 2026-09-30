@@ -212,13 +212,13 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 	//
 	// So a document that attaches no proof to itself is REFUSED rather than
 	// checked against whatever proof it happens to contain.
-	rootValues := rootProofValues(cred)
-	if len(rootValues) == 0 {
+	rootGraphs := rootProofGraphs(cred)
+	if len(rootGraphs) == 0 {
 		return fmt.Errorf("the document carries no proof of its own to verify")
 	}
-	proofNode := common.FindProofNodeWithValue(proofMap, ProofType, rootValues)
+	proofNode := common.FindProofNodeInGraphs(proofMap, ProofType, rootGraphs)
 	if proofNode == nil {
-		return fmt.Errorf("the document's own proof is not present in its proof object")
+		return fmt.Errorf("the document's own proof link names no complete proof")
 	}
 
 	// Get proofValue

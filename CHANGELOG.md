@@ -77,8 +77,8 @@
     proof in the document being hashed.
 
   Verification also now checks the proof the document attaches to **itself**,
-  named by the `proofValue` read off the document, instead of the first proof
-  node the search reaches. Taking the first is not merely arbitrary: because
+  found by following the root's proof link into the graph it names, instead of
+  the first proof node the search reaches. Taking the first is not merely arbitrary: because
   verification removes every proof when hashing, a proof MOVED from the
   presentation onto its embedded credential leaves the hash unchanged, so
   someone holding a legitimately signed presentation could move the holder's
