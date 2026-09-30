@@ -216,10 +216,36 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 	if len(rootGraphs) == 0 {
 		return fmt.Errorf("the document carries no proof of its own to verify")
 	}
-	proofNode := common.FindProofNodeInGraphs(proofMap, ProofType, rootGraphs)
-	if proofNode == nil {
-		return fmt.Errorf("the document's own proof link names no complete proof")
+	// EVERY proof the root links, not just the first. Sign appends rather
+	// than replaces, so a document signed by two keys carries two root
+	// proofs - and checking only the first fails the second signature
+	// against its own public key.
+	//
+	// Each is tried in turn and the first that verifies wins; the last
+	// failure is what gets reported, since a document whose proofs all fail
+	// is a document that did not verify.
+	var lastErr error
+	for _, graphName := range rootGraphs {
+		proofNode := common.FindProofNodeInGraphs(proofMap, ProofType, []string{graphName})
+		if proofNode == nil {
+			lastErr = fmt.Errorf("the document's own proof link names no complete proof")
+			continue
+		}
+		if err := s.verifyProofNode(cred, proofNode, key); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
 	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("the document's own proof link names no complete proof")
+	}
+	return lastErr
+}
+
+// verifyProofNode checks one proof node against the key, over the document
+// with every proof removed.
+func (s *Suite) verifyProofNode(cred *credential.RDFCredential, proofNode map[string]any, key ed25519.PublicKey) error {
 
 	// Get proofValue
 	proofValue, ok := proofNode["proofValue"].(string)

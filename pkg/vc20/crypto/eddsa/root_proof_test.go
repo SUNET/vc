@@ -394,3 +394,68 @@ func TestVerifyRefusesAProofMovedWithinACycle(t *testing.T) {
 		"a proof on a node that is not the credential is not the credential's")
 	require.Error(t, NewSuite().Verify(reparsed, pub))
 }
+
+// TestVerifyTriesEveryRootProof: Sign APPENDS a proof rather than replacing
+// one, so a document signed by two keys carries two root proofs. Checking
+// only the first fails the second signature against its own public key -
+// a valid document rejected, depending on which proof happened to come
+// first.
+func TestVerifyTriesEveryRootProof(t *testing.T) {
+	const doc = `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiablePresentation"],
+		"holder": "did:example:holder"
+	}`
+
+	firstPub, firstPriv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	secondPub, secondPriv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(doc), nil)
+	require.NoError(t, err)
+	once, err := NewSuite().Sign(cred, firstPriv, &SignOptions{
+		VerificationMethod: "did:example:first#key-1",
+		ProofPurpose:       "authentication",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	onceJSON, err := once.ToCompactJSON()
+	require.NoError(t, err)
+	reparsed, err := credential.NewRDFCredentialFromJSON(onceJSON, nil)
+	require.NoError(t, err)
+	twice, err := NewSuite().Sign(reparsed, secondPriv, &SignOptions{
+		VerificationMethod: "did:example:second#key-1",
+		ProofPurpose:       "authentication",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	twiceJSON, err := twice.ToCompactJSON()
+	require.NoError(t, err)
+	signedTwice, err := credential.NewRDFCredentialFromJSON(twiceJSON, nil)
+	require.NoError(t, err)
+
+	require.Len(t, rootProofGraphs(signedTwice), 2,
+		"the document must really carry two root proofs, or this proves nothing")
+
+	for name, key := range map[string]ed25519.PublicKey{
+		"the first signer":  firstPub,
+		"the second signer": secondPub,
+	} {
+		t.Run(name, func(t *testing.T) {
+			again, parseErr := credential.NewRDFCredentialFromJSON(twiceJSON, nil)
+			require.NoError(t, parseErr)
+			require.NoError(t, NewSuite().Verify(again, key),
+				"each signer's own key must verify the document")
+		})
+	}
+
+	// And a key that signed neither still fails.
+	strangerPub, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	again, err := credential.NewRDFCredentialFromJSON(twiceJSON, nil)
+	require.NoError(t, err)
+	require.Error(t, NewSuite().Verify(again, strangerPub))
+}
