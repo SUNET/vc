@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -847,6 +848,23 @@ func TestJWTValidateDistinguishesKeySetOutageFromBadToken(t *testing.T) {
 
 		require.NoError(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
 	})
+
+	// go-oidc's updateKeys accepts 200 and nothing else, so a key set
+	// returned with any other 2xx reached it as a status error - reported
+	// as a formatted string nothing can match on, and delivered as 401
+	// invalid_token for a key set this service never got.
+	for _, status := range []int{http.StatusCreated, http.StatusNoContent, http.StatusPartialContent, http.StatusAccepted} {
+		t.Run(fmt.Sprintf("JWKS endpoint answers %d with a good key set", status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				_, _ = w.Write(jwksJSON)
+			}))
+			defer srv.Close()
+
+			assertOutage(t, validatorFor(t, srv.URL).Validate(t.Context(), signed(t, registerAudience)))
+		})
+	}
 
 	// The contrast case: the key set arrived and the token lost on its
 	// merits, which must stay 401 invalid_token.

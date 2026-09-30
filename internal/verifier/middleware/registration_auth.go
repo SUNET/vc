@@ -457,16 +457,19 @@ func (t *jwksTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// judged. Swallowing them here would turn a legitimate https redirect
 	// into an outage and, worse, take the refusal of a plaintext one out of
 	// the picture entirely.
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusBadRequest {
+	if resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode < http.StatusBadRequest {
+		return resp, nil
+	}
+
+	// EVERY other non-200 is an outage, not just 4xx and 5xx. go-oidc's
+	// updateKeys accepts 200 and nothing else, so a key set returned with
+	// 201, 204 or 206 reached it as a status error - reported as a
+	// formatted string nothing can match on, and so delivered to the caller
+	// as 401 invalid_token for a key set this service never got.
+	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
 
 		return nil, fmt.Errorf("%w: HTTP %s", errJWKSUnavailable, resp.Status)
-	}
-
-	// 3xx is the client's to follow; only a final 2xx carries a key set to
-	// look at.
-	if resp.StatusCode >= http.StatusMultipleChoices {
-		return resp, nil
 	}
 
 	return t.usableKeySetResponse(resp)
