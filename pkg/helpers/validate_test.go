@@ -754,3 +754,33 @@ func TestAllowedSigningAlgsRejectsSymmetricAtStartup(t *testing.T) {
 		assert.Error(t, validate.Struct(cfgWith(algs)), "%v must not start", algs)
 	}
 }
+
+// TestHTTPSEndpointRequiresAHostname: url.Parse leaves Host as ":443" for
+// "https://:443/jwks", so a check on Host alone passes a URL with no host in
+// it. The service then starts on an endpoint nothing can be fetched from and
+// fails per request instead - for jwks_uri, as a 503 every time.
+func TestHTTPSEndpointRequiresAHostname(t *testing.T) {
+	validate, err := NewValidator()
+	require.NoError(t, err)
+
+	cfgWith := func(jwksURI string) *model.DynamicRegistrationJWTAuthConfig {
+		return &model.DynamicRegistrationJWTAuthConfig{
+			JWKSURI:  jwksURI,
+			Issuer:   "https://issuer.example.com",
+			Audience: "https://verifier.example.com/register",
+		}
+	}
+
+	assert.NoError(t, validate.Struct(cfgWith("https://issuer.example.com/jwks")))
+	assert.NoError(t, validate.Struct(cfgWith("https://issuer.example.com:8443/jwks")))
+
+	for _, uri := range []string{
+		"https://:443/jwks",
+		"https://:8443/jwks",
+		"https:///jwks",
+		"http://issuer.example.com/jwks",
+		"issuer.example.com/jwks",
+	} {
+		assert.Error(t, validate.Struct(cfgWith(uri)), "%q names no https host", uri)
+	}
+}

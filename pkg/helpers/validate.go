@@ -152,7 +152,12 @@ func NewValidator() (*validator.Validate, error) {
 			return false
 		}
 
-		return parsedURL.Host != ""
+		// Hostname(), not Host. Host keeps the port, so "https://:443/jwks"
+		// has a non-empty Host and no host at all - the service then starts
+		// on a URL nothing can be fetched from and fails at request time
+		// instead, which for the JWKS endpoint means a 503 per request
+		// rather than a configuration that is refused.
+		return parsedURL.Hostname() != ""
 	})
 	if err != nil {
 		return nil, err
