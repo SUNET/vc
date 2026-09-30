@@ -115,7 +115,7 @@ func checkPolicyClaimsAreNotCallerTemplated(cfg *model.Cfg) error {
 				return fmt.Errorf("apigw.data_sources.%s.scopes.%s: custom_params %q could not be checked against the issuance policy: %w",
 					entry.source, strings.SplitN(key, ".", 2)[1], name, err)
 			}
-			if len(access.keys) == 0 && !access.opaque {
+			if len(access.keys) == 0 && !access.opaque && !access.controlFlow {
 				continue
 			}
 			problems = append(problems, fmt.Sprintf(
@@ -160,6 +160,15 @@ func checkClaimsTemplateIsStructural(claims string) error {
 	}
 	if len(access.keys) == 0 && !access.opaque {
 		return nil
+	}
+
+	// Control flow first: a caller value that decides which branch runs
+	// need never be EMITTED to change the request, so rendering once and
+	// looking for the value proves nothing about it. Refused rather than
+	// analysed, since what the other branch would have produced is not a
+	// question this can answer from one rendering.
+	if access.controlFlow {
+		return errors.New("lets a caller value decide which branch of the template runs, so the caller chooses what the request asks for; use a caller value only to fill a string in")
 	}
 
 	rendered, err := renderWithSentinel(claims, access.keys)
@@ -236,6 +245,12 @@ type templateAccess struct {
 	// writes is treated as caller-filled: the analysis cannot say which one
 	// the value lands in, and "cannot tell" has to mean the strict answer.
 	opaque bool
+	// controlFlow is true when a caller value decides which branch runs.
+	// Such a template need never EMIT the value to change the request:
+	// {{if .org_id}}"essential":true{{end}} lets the caller decide whether
+	// a member is there at all, and a check that renders once and looks for
+	// the value it substituted sees nothing.
+	controlFlow bool
 }
 
 // analyzeTemplate reads a configured template and reports what it takes from
@@ -278,11 +293,11 @@ func walkTemplateNode(node parse.Node, access *templateAccess) {
 	case *parse.ActionNode:
 		walkPipe(typed.Pipe, access)
 	case *parse.IfNode:
-		walkBranch(&typed.BranchNode, access)
+		walkControlFlow(&typed.BranchNode, access)
 	case *parse.RangeNode:
-		walkBranch(&typed.BranchNode, access)
+		walkControlFlow(&typed.BranchNode, access)
 	case *parse.WithNode:
-		walkBranch(&typed.BranchNode, access)
+		walkControlFlow(&typed.BranchNode, access)
 	case *parse.TemplateNode:
 		// A nested template is handed the same data and this does not have
 		// its body, so what it reads cannot be attributed.
@@ -293,6 +308,24 @@ func walkTemplateNode(node parse.Node, access *templateAccess) {
 
 func walkBranch(branch *parse.BranchNode, access *templateAccess) {
 	walkPipe(branch.Pipe, access)
+	walkTemplateNode(branch.List, access)
+	walkTemplateNode(branch.ElseList, access)
+}
+
+// walkControlFlow is walkBranch for a node whose PIPE decides which branch
+// runs. Whatever that pipe reads from the caller is control flow, so it is
+// recorded separately from a value the caller merely fills in.
+func walkControlFlow(branch *parse.BranchNode, access *templateAccess) {
+	condition := templateAccess{keys: map[string]bool{}}
+	walkPipe(branch.Pipe, &condition)
+	if len(condition.keys) > 0 || condition.opaque {
+		access.controlFlow = true
+	}
+	for key := range condition.keys {
+		access.keys[key] = true
+	}
+	access.opaque = access.opaque || condition.opaque
+
 	walkTemplateNode(branch.List, access)
 	walkTemplateNode(branch.ElseList, access)
 }
@@ -359,7 +392,7 @@ func claimsFilledByCaller(params *model.OIDCRequestParams) (map[string]bool, err
 	if err != nil {
 		return nil, fmt.Errorf("acr_values is not a valid template: %w", err)
 	}
-	if len(acrAccess.keys) > 0 || acrAccess.opaque {
+	if len(acrAccess.keys) > 0 || acrAccess.opaque || acrAccess.controlFlow {
 		filled["acr"] = true
 	}
 
@@ -371,7 +404,7 @@ func claimsFilledByCaller(params *model.OIDCRequestParams) (map[string]bool, err
 	if err != nil {
 		return nil, fmt.Errorf("claims is not a valid template: %w", err)
 	}
-	if len(claimsAccess.keys) == 0 && !claimsAccess.opaque {
+	if len(claimsAccess.keys) == 0 && !claimsAccess.opaque && !claimsAccess.controlFlow {
 		return filled, nil
 	}
 
@@ -396,7 +429,10 @@ func claimsFilledByCaller(params *model.OIDCRequestParams) (map[string]bool, err
 			// An OPAQUE template reads the caller's data in a way this
 			// cannot attribute to a name, so which claim the value lands in
 			// is unknown and every claim it requests is treated as filled.
-			if claimsAccess.opaque || containsSentinel(constraint, claimSentinel) {
+			// controlFlow taints everything for the same reason opaque
+			// does: the value need not appear in the rendering to have
+			// decided what is in it.
+			if claimsAccess.opaque || claimsAccess.controlFlow || containsSentinel(constraint, claimSentinel) {
 				filled[claim] = true
 			}
 		}

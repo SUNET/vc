@@ -405,6 +405,12 @@ type OIDCRequestParams struct {
 	// structure. The rendered result must be valid JSON or flow initiation
 	// fails, which also catches a template that was malformed as written.
 	//
+	// A caller value may FILL a string in and nothing else. It may not
+	// decide which branch of the template runs - {{if .org_id}} lets the
+	// caller choose what the request asks for without the value ever
+	// appearing in it - and it may not sit outside a string or name a
+	// member. All three are refused at startup.
+	//
 	// A placeholder must sit INSIDE a JSON string. The escaping makes a
 	// value safe within the string it is written into; written outside one
 	// - "value": {{.org_id}} - the same escaping inserts the caller's text

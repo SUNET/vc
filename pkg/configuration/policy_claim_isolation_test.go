@@ -94,10 +94,7 @@ func TestCheckPolicyClaimsAreNotCallerTemplated(t *testing.T) {
 		"index":             `{{index . "org_id"}}`,
 		"index with a pipe": `{{index . "org_id" | printf "%s"}}`,
 		"a field in a pipe": `{{.org_id | printf "%s"}}`,
-		"with":              `{{with .org_id}}{{.}}{{end}}`,
-		"if":                `{{if .org_id}}{{.org_id}}{{end}}`,
 		"a variable":        `{{$v := .org_id}}{{$v}}`,
-		"the whole dot":     `{{range $k, $v := .}}{{$v}}{{end}}`,
 		"an unrelated key":  `{{index . "some_other_param"}}`,
 	} {
 		t.Run("a caller value reaches the claim through "+name, func(t *testing.T) {
@@ -106,6 +103,23 @@ func TestCheckPolicyClaimsAreNotCallerTemplated(t *testing.T) {
 				policyOn("org_id")))
 			require.Error(t, err, "%s reads the caller's data", claims)
 			assert.Contains(t, err.Error(), "org_id")
+		})
+	}
+
+	// The forms where the caller decides which BRANCH runs are refused for
+	// their own reason, and before the claim is even attributed: such a
+	// template need never emit the value to change the request.
+	for name, claims := range map[string]string{
+		"with":          `{{with .org_id}}{{.}}{{end}}`,
+		"if":            `{{if .org_id}}{{.org_id}}{{end}}`,
+		"the whole dot": `{{range $k, $v := .}}{{$v}}{{end}}`,
+	} {
+		t.Run("a caller value drives control flow through "+name, func(t *testing.T) {
+			err := checkPolicyClaimsAreNotCallerTemplated(cfgWith(
+				&model.OIDCRequestParams{Claims: `{"id_token":{"org_id":{"value":"` + claims + `"}}}`},
+				policyOn("org_id")))
+			require.Error(t, err, "%s lets the caller choose a branch", claims)
+			assert.Contains(t, err.Error(), "which branch of the template runs")
 		})
 	}
 
@@ -213,6 +227,50 @@ func TestClaimsTemplateMustKeepCallerValuesInStrings(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(injected), &parsed))
 		assert.Equal(t, true, parsed["id_token"]["org_id"]["essential"],
 			"the caller added a member to the request")
+	})
+}
+
+// TestClaimsTemplateRefusesCallerDrivenControlFlow: a caller value used as
+// CONTROL FLOW need never be emitted to change the request. Rendering once
+// with a non-empty sentinel produces valid JSON that does not contain it, so
+// a check that looks for the substituted value sees nothing - while at
+// runtime the caller still decides whether the member is there.
+func TestClaimsTemplateRefusesCallerDrivenControlFlow(t *testing.T) {
+	cfgWith := func(claims string, policy *model.IssuancePolicy) *model.Cfg {
+		return &model.Cfg{APIGW: &model.APIGW{DataSources: model.DataSources{
+			Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+				"org_credential": {
+					AuthProvider:      model.AuthProviderOIDC,
+					OIDCRequestParams: &model.OIDCRequestParams{Claims: claims},
+					IssuancePolicy:    policy,
+				},
+			}},
+		}}}
+	}
+
+	// The exact shape that slipped through: the sentinel is never emitted,
+	// and the rendering is valid JSON with the member present.
+	const conditional = `{"id_token":{"org_id":{{if .org_id}}{"value":"anything"}{{else}}null{{end}}}}`
+
+	t.Run("the rendering really does hide it", func(t *testing.T) {
+		access, err := analyzeTemplate(conditional)
+		require.NoError(t, err)
+		rendered, err := renderWithSentinel(conditional, access.keys)
+		require.NoError(t, err)
+		assert.NotContains(t, rendered, claimSentinel,
+			"the sentinel is not emitted, which is why looking for it is not enough")
+		assert.True(t, json.Valid([]byte(rendered)), "and the result parses")
+	})
+
+	t.Run("it is refused anyway", func(t *testing.T) {
+		err := checkPolicyClaimsAreNotCallerTemplated(cfgWith(conditional, nil))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "which branch of the template runs")
+	})
+
+	t.Run("control flow that reads nothing from the caller is allowed", func(t *testing.T) {
+		assert.NoError(t, checkPolicyClaimsAreNotCallerTemplated(cfgWith(
+			`{"id_token":{"org_id":{{if true}}null{{else}}null{{end}}}}`, nil)))
 	})
 }
 
