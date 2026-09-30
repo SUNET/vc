@@ -66,6 +66,28 @@ func TestVerifyVC20ForOIDCNeedsAKeyResolvingEvaluator(t *testing.T) {
 	require.Contains(t, err.Error(), "key-resolving")
 }
 
+// TestVerifyVC20ForOIDCLetsANonW3CResponseThrough: a DCQL response is a JSON
+// object too, so a detector that only asks "does this look like JSON" calls
+// the ENVELOPE a W3C credential - and a conformant direct-post carrying
+// SD-JWTs would fail W3C verification on the wrapper without its contents
+// ever being looked at.
+func TestVerifyVC20ForOIDCLetsANonW3CResponseThrough(t *testing.T) {
+	client, _ := CreateTestClientWithMock(t, nil)
+	client.trustEvaluator = trust.NewAllowAllEvaluator()
+
+	session := &cache.AuthorizationContext{Nonce: "n", ClientID: "c", Scopes: []string{"pid"}}
+
+	for name, token := range map[string]string{
+		"a DCQL envelope of SD-JWTs": `{"pid": ["eyJhbGciOiJFUzI1NiJ9.x.y~"]}`,
+		"a bare SD-JWT":              "eyJhbGciOiJFUzI1NiJ9.x.y~",
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.NoError(t, client.verifyVC20ForOIDC(t.Context(), session, token),
+				"a response carrying no W3C document is not this guard's business")
+		})
+	}
+}
+
 // evaluatorWithoutKeyResolution is a TrustEvaluator that does NOT implement
 // trust.KeyResolver, which AllowAllEvaluator does.
 type evaluatorWithoutKeyResolution struct{}

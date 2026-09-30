@@ -506,6 +506,52 @@ func (ce *ClaimsExtractor) ExtractAndMapClaims(
 	return oidcClaims, nil
 }
 
+// W3CDocumentsIn returns the W3C VC 2.0 documents carried in a vp_token,
+// whether it is one document or a DCQL response keyed by credential query
+// id. The map key is the query id for a DCQL response, and "" for a bare
+// document.
+//
+// Callers that must VERIFY a W3C response need this: a DCQL envelope is a
+// JSON object too, so "looks like JSON" cannot tell a W3C document from the
+// wrapper around one, and treating the wrapper as a credential fails a
+// conformant response before its contents are ever looked at.
+func W3CDocumentsIn(vpToken string) map[string][]string {
+	trimmed := strings.TrimSpace(vpToken)
+	if trimmed == "" {
+		return nil
+	}
+
+	if trimmed[0] == '{' && !isW3CDocument(trimmed) {
+		var envelope map[string][]string
+		if err := json.Unmarshal([]byte(trimmed), &envelope); err != nil {
+			return nil
+		}
+		out := make(map[string][]string)
+		for queryID, tokens := range envelope {
+			for _, token := range tokens {
+				if inner := strings.TrimSpace(token); isJSONDocumentToken(inner) {
+					out[queryID] = append(out[queryID], inner)
+				}
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+
+	if isJSONDocumentToken(trimmed) {
+		return map[string][]string{"": {trimmed}}
+	}
+	return nil
+}
+
+// isJSONDocumentToken reports whether a token is a JSON-LD document rather
+// than a dot-separated one: an object when compact, an array when expanded.
+func isJSONDocumentToken(token string) bool {
+	return len(token) > 0 && (token[0] == '{' || token[0] == '[')
+}
+
 // isW3CDocument reports whether a JSON object is a W3C VC 2.0 credential or
 // presentation rather than a DCQL vp_token map.
 //

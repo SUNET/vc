@@ -143,3 +143,41 @@ func TestIsExpandedNode(t *testing.T) {
 		"compact terms carry no scheme")
 	assert.True(t, isExpandedNode(map[string]any{"https://www.w3.org/2018/credentials#credentialSubject": []any{}}))
 }
+
+// TestW3CDocumentsIn: a DCQL response is a JSON object too, so "looks like
+// JSON" cannot tell a W3C document from the envelope around one. A verifier
+// that must check W3C documents before reading them has to ask which
+// documents are actually there, or it fails a conformant DCQL response as a
+// malformed credential without ever looking inside it.
+func TestW3CDocumentsIn(t *testing.T) {
+	embedded, err := jsonString(w3cCredential)
+	require.NoError(t, err)
+
+	t.Run("a bare document", func(t *testing.T) {
+		got := W3CDocumentsIn(w3cCredential)
+		require.Len(t, got, 1)
+		require.Len(t, got[""], 1, "a bare document has no query id")
+	})
+
+	t.Run("inside a DCQL envelope", func(t *testing.T) {
+		got := W3CDocumentsIn(`{"pid": [` + embedded + `]}`)
+		require.Len(t, got, 1)
+		require.Len(t, got["pid"], 1, "keyed by the credential query id")
+	})
+
+	t.Run("a DCQL envelope of SD-JWTs carries none", func(t *testing.T) {
+		require.Empty(t, W3CDocumentsIn(`{"pid": ["eyJhbGciOiJFUzI1NiJ9.x.y~"]}`),
+			"the envelope must not be mistaken for a credential")
+	})
+
+	t.Run("a bare SD-JWT carries none", func(t *testing.T) {
+		require.Empty(t, W3CDocumentsIn("eyJhbGciOiJFUzI1NiJ9.x.y~"))
+	})
+
+	t.Run("expanded JSON-LD counts", func(t *testing.T) {
+		require.Len(t, W3CDocumentsIn(`[{"@id":"_:b0"}]`)[""], 1)
+	})
+
+	require.Empty(t, W3CDocumentsIn(""))
+	require.Empty(t, W3CDocumentsIn("not json"))
+}

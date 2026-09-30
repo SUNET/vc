@@ -3,15 +3,15 @@ package apiv1
 import (
 	"context"
 	"fmt"
-	"strings"
+	"slices"
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/trust"
 )
 
-// verifyVC20ForOIDC verifies a W3C VC 2.0 presentation arriving on the OIDC
-// direct-post path, before any claim in it is read.
+// verifyVC20ForOIDC verifies every W3C VC 2.0 document a direct-post
+// response carries, before any claim in it is read.
 //
 // ProcessDirectPost extracts claims without verifying anything, for any
 // format - a gap of its own, older and wider than W3C. That is not a licence
@@ -20,26 +20,24 @@ import (
 // mapped into an OIDC session, with nothing checking who signed it or
 // whether the holder was present.
 //
-// So W3C is verified here even though its neighbours are not. Same machinery
-// the UI direct-post path uses: the trust evaluator resolves the
-// verification method, VC20Handler checks the Data Integrity proof, and the
+// Same machinery the UI direct-post path uses: the trust evaluator resolves
+// the verification method, VC20Handler checks the Data Integrity proof, the
 // key the signature VERIFIED with goes back to the evaluator - resolving
-// again could answer differently and then the key trusted is not the key
-// that signed.
-//
-// HOLDER BINDING IS ALWAYS REQUIRED here, unlike the UI path where the DCQL
-// query may say otherwise. This flow has no query to ask, and the OpenID4VP
-// default is to require it; "no query" must not become "no binding".
-//
-// What this cannot do is the type constraint. That lives in the DCQL query
-// the request carried, and the OIDC flow has none - so a verified credential
-// of some other W3C type still answers the scope here. The scopes are
-// advertised through the same builder on both paths, so that is worth
-// knowing rather than assuming; it needs the OIDC flow to carry a query,
-// which is a larger change than verification.
+// again could answer differently, and then the key trusted is not the key
+// that signed - and the request's own type constraint is enforced on what
+// came back.
 func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.AuthorizationContext, vpToken string) error {
 	if session == nil {
 		return fmt.Errorf("no session to verify a W3C presentation against")
+	}
+
+	// A DCQL response is a JSON object too, so "looks like JSON" cannot
+	// tell a W3C document from the envelope around one. Asking which
+	// documents are actually in there means a conformant DCQL response is
+	// unwrapped rather than failed as a malformed credential.
+	documents := openid4vp.W3CDocumentsIn(vpToken)
+	if len(documents) == 0 {
+		return nil
 	}
 
 	resolver, ok := c.trustEvaluator.(trust.KeyResolver)
@@ -47,15 +45,40 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 		return fmt.Errorf("W3C verification needs a key-resolving trust evaluator")
 	}
 
+	// The domain a holder proof binds to is the client id the REQUEST
+	// OBJECT carried, which is the verifier's own identifier - not
+	// session.ClientID, which is the OAuth client id of the relying party
+	// that started the flow. Binding against the wrong one rejects every
+	// valid presentation whenever the two differ.
+	verifierClientID, err := c.cfg.Verifier.VerifierClientID(c.pkiSigningCert)
+	if err != nil {
+		return fmt.Errorf("cannot determine this verifier's client id to bind against: %w", err)
+	}
+
+	// HOLDER BINDING IS ALWAYS REQUIRED. The UI path lets the DCQL query
+	// say otherwise; this one has no per-credential answer to consult for a
+	// bare document, and the OpenID4VP default is to require it, so "cannot
+	// tell" must not become "not required".
 	handler, err := openid4vp.NewVC20Handler(
 		openid4vp.WithVC20KeyResolver(resolver),
-		openid4vp.WithVC20PresentationBinding(session.Nonce, session.ClientID),
+		openid4vp.WithVC20PresentationBinding(session.Nonce, verifierClientID),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create W3C VC handler: %w", err)
 	}
 
-	result, err := handler.VerifyAndExtract(ctx, vpToken)
+	for queryID, tokens := range documents {
+		for _, token := range tokens {
+			if err := c.verifyOneVC20ForOIDC(ctx, handler, session, queryID, token); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (c *Client) verifyOneVC20ForOIDC(ctx context.Context, handler *openid4vp.VC20Handler, session *cache.AuthorizationContext, queryID, token string) error {
+	result, err := handler.VerifyAndExtract(ctx, token)
 	if err != nil {
 		return fmt.Errorf("W3C VC verification failed: %w", err)
 	}
@@ -65,12 +88,13 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 	if result.IssuerKey == nil {
 		return fmt.Errorf("W3C verification produced no issuer key to evaluate")
 	}
+	scope := c.oidcScopeFor(session, queryID)
 	decision, err := c.trustEvaluator.Evaluate(ctx, &trust.EvaluationRequest{
 		SubjectID:      result.Issuer,
 		KeyType:        trust.KeyTypeJWK,
 		Key:            result.IssuerKey,
 		Role:           trust.RoleCredentialIssuer,
-		CredentialType: strings.Join(session.Scopes, " "),
+		CredentialType: scope,
 	})
 	if err != nil {
 		return fmt.Errorf("W3C issuer trust evaluation failed: %w", err)
@@ -78,5 +102,54 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 	if !decision.Trusted {
 		return fmt.Errorf("W3C issuer not trusted: %s", decision.Reason)
 	}
+
+	// The type constraint the request carried, enforced on what came back.
+	// The session persists both the DCQL query and the scope-to-query
+	// mapping, so this path has the same constraint the UI path applies -
+	// without it the wallet chooses which credential answers the scope and
+	// meta.type_values is decoration.
+	//
+	// Fail closed: a scope whose query cannot be recovered is refused
+	// rather than accepted unconstrained.
+	if scope == "" {
+		return fmt.Errorf("cannot tell which scope this credential answers, so its type constraint cannot be checked")
+	}
+	requested, ok := c.requestedQuery(session, session.ScopeQueryIDs, scope)
+	if !ok {
+		return fmt.Errorf("the request for scope %s is no longer available, so the returned credential cannot be checked against it", scope)
+	}
+	if err := openid4vp.ValidateCredentialQuery(requested); err != nil {
+		return fmt.Errorf("the query for scope %s cannot constrain a credential: %w", scope, err)
+	}
+	if !openid4vp.MatchTypeValues(result.TypeIRIs, requested.Meta.TypeValues) {
+		return fmt.Errorf("the credential returned for scope %s does not have a type the request asked for", scope)
+	}
 	return nil
+}
+
+// oidcScopeFor names the scope a returned document answers.
+//
+// A DCQL response keys by credential query id, so the scope is whichever one
+// maps to it. A bare document carries no key, and is only unambiguous when
+// the request asked for exactly one credential scope - otherwise this
+// returns "" and the caller refuses rather than guessing which constraint
+// applies.
+func (c *Client) oidcScopeFor(session *cache.AuthorizationContext, queryID string) string {
+	credentialScopes := c.credentialScopes(session, session.ScopeQueryIDs)
+	if queryID == "" {
+		if len(credentialScopes) == 1 {
+			return credentialScopes[0]
+		}
+		return ""
+	}
+	for _, scope := range credentialScopes {
+		if queryIDForScopeIn(session.ScopeQueryIDs, scope) == queryID {
+			return scope
+		}
+	}
+	// The key is a query id the request does not carry, or names no scope.
+	if slices.Contains(credentialScopes, queryID) {
+		return queryID
+	}
+	return ""
 }
