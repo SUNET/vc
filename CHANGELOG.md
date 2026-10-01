@@ -186,6 +186,12 @@
   RDF exists for. **Credentials signed under either option before this release
   carry a proof that does not cover what they say** and must be re-signed.
 
+  `RDFCredential.MarshalJSON` takes the same route, for the same reason: it
+  serialized the dataset to N-Quads and read it back, so a generalized-RDF
+  credential could not be serialized at all — and the root-stability check
+  every suite runs before signing and before verifying reads the root off
+  that, so such a credential was neither signable nor verifiable.
+
   **The OpenID4VP handler's `Claims["proof"]` reports the proof that
   verified.** Extraction resolves only the first proof reference, so a proof
   SET carrying a forged proof ahead of a genuine one had the claims naming the

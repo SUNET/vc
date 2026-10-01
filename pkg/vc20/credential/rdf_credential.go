@@ -468,36 +468,19 @@ func (rc *RDFCredential) MarshalJSON() ([]byte, error) {
 		return nil, fmt.Errorf("RDF dataset is nil")
 	}
 
-	// Convert RDF dataset back to JSON-LD
-	// We must serialize to N-Quads first because FromRDF expects serialized input
-	serializer := &ld.NQuadRDFSerializer{}
-	nquads, err := serializer.Serialize(rc.dataset)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize dataset to N-Quads: %w", err)
-	}
-	nquadsStr, ok := nquads.(string)
-	if !ok {
-		return nil, fmt.Errorf("unexpected serialization result: %T", nquads)
-	}
-
-	// Ensure options are set correctly.
+	// STRAIGHT FROM THE DATASET, never through N-Quads.
 	//
-	// A COPY. This used to take the credential's own options pointer and
-	// set Format on it, so every later use of that credential parsed JSON
-	// as N-Quads - "unexpected RDF data type: string" from whatever ran
-	// next. Serializing a document must not change what the document is.
-	opts := ld.NewJsonLdOptions("")
-	opts.DocumentLoader = GetGlobalLoader()
-	if rc.options != nil {
-		copied := *rc.options
-		opts = &copied
-	}
-	// Set format to n-quads so FromRDF knows how to parse the input
-	if opts.Format == "" {
-		opts.Format = "application/n-quads"
-	}
-
-	jsonLd, err := rc.processor.FromRDF(nquadsStr, opts)
+	// Serializing and re-parsing drops any quad with a blank node in
+	// predicate position - that is not valid N-Quads however the dataset was
+	// built, and json-gold's own parser refuses it. A credential parsed with
+	// ProduceGeneralizedRdf could therefore be canonicalized but not
+	// serialized, so CheckRootSurvivesFlattening - which reads the root off
+	// this - refused it outright and the credential was neither signable nor
+	// verifiable.
+	//
+	// It also drops the stale-options problem the old copy-and-set-Format
+	// dance existed for: nothing here needs a Format at all.
+	jsonLd, err := ld.NewJsonLdApi().FromRDF(rc.dataset, rc.expansionOptions())
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert RDF to JSON-LD: %w", err)
 	}
