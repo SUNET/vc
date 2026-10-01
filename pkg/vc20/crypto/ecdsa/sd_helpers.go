@@ -332,22 +332,32 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any
 			nodes = append(nodes, node)
 		}
 
-		var root map[string]any
 		if len(nodes) == 1 {
-			root = nodes[0]
-		} else {
-			selected, err := credential.RootOfCompactedNodes(nodes, context, options)
-			if err != nil {
-				return nil, err
-			}
-			root = selected
+			deleteProofKeys(nodes[0], contextFor(nodes[0], context))
+			return withoutNamedGraphs(typed, orphaned), nil
 		}
-		// The ROOT's own context, not whichever node happened to be first.
-		// A flattened compact array may give each node its own @context, and
-		// reordering top-level nodes does not change the RDF - so reading
-		// the first one let the order decide whether the root's alias was
-		// recognized.
-		deleteProofKeys(root, contextFor(root, context))
+
+		selected, err := credential.RootOfCompactedNodes(nodes, context, options)
+		if err != nil {
+			return nil, err
+		}
+
+		// EVERY fragment of the selected root. Expanded JSON-LD may split
+		// one node across several top-level entries; selection merges them
+		// to decide, and the proof may be written on any of them - so the
+		// merged copy is what says WHICH node, and the originals are what
+		// has to be edited.
+		//
+		// The ROOT's own context, not whichever node happened to be first:
+		// a flattened array may give each node its own, and reordering
+		// top-level nodes does not change the RDF.
+		rootID := credential.CompactNodeID(selected)
+		for _, node := range nodes {
+			if credential.CompactNodeID(node) != rootID {
+				continue
+			}
+			deleteProofKeys(node, contextFor(node, context))
+		}
 		return withoutNamedGraphs(typed, orphaned), nil
 	}
 	return nil, fmt.Errorf("a document is %T rather than a node or a list of nodes", data)

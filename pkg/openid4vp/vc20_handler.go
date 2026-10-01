@@ -1027,6 +1027,17 @@ func issuerControlsMethod(issuer string, verificationMethod string) error {
 	if issuer == "" {
 		return errors.New("the credential names no issuer, so no proof can be checked against it")
 	}
+	// A path that climbs back OUT is not under the issuer, whatever the
+	// prefix says: https://issuer.example/keys/../other-tenant/key starts
+	// with the issuer and resolves somewhere else entirely. Rather than
+	// try to normalize it, anything carrying a dot segment is refused -
+	// a verification method has no business containing one.
+	for _, segment := range strings.Split(verificationMethod, "/") {
+		if segment == ".." || segment == "." {
+			return fmt.Errorf("the proof's verification method %q contains a path segment that climbs out of it", verificationMethod)
+		}
+	}
+
 	if verificationMethod == issuer {
 		return nil
 	}

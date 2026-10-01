@@ -208,11 +208,58 @@ func mentionsID(value any, id string, atNodeRoot bool) bool {
 // No single such node is a REFUSAL. A document that does not say which node it
 // is about is one whose proof could be read as securing either.
 func RootOfCompactedNodes(nodes []map[string]any, context any, options *ld.JsonLdOptions) (map[string]any, error) {
-	index, err := rootIndexOfCompactedNodes(nodes, context, options)
+	// COALESCED first. Expanded JSON-LD may split one node's properties
+	// across several top-level entries, which RDF conversion merges back
+	// into one - RootProofs has always coalesced before selecting, and not
+	// doing it here rejected the same document as having several roots.
+	merged := coalesceCompactedByID(nodes)
+
+	index, err := rootIndexOfCompactedNodes(merged, context, options)
 	if err != nil {
 		return nil, err
 	}
-	return nodes[index], nil
+	return merged[index], nil
+}
+
+// CompactNodeID returns a node's identifier under either spelling, so a caller
+// holding the original entries can find every fragment of the node
+// RootOfCompactedNodes selected.
+func CompactNodeID(node map[string]any) string {
+	return compactNodeID(node)
+}
+
+// coalesceCompactedByID merges entries sharing an identifier, on COPIES - the
+// caller's document is not ours to rewrite.
+func coalesceCompactedByID(nodes []map[string]any) []map[string]any {
+	merged := make([]map[string]any, 0, len(nodes))
+	at := map[string]int{}
+
+	for _, node := range nodes {
+		id := compactNodeID(node)
+		if id == "" {
+			merged = append(merged, maps.Clone(node))
+			continue
+		}
+		index, seen := at[id]
+		if !seen {
+			at[id] = len(merged)
+			merged = append(merged, maps.Clone(node))
+			continue
+		}
+		into := merged[index]
+		for key, value := range node {
+			if key == "@id" || key == "id" {
+				continue
+			}
+			existing, present := into[key]
+			if !present {
+				into[key] = value
+				continue
+			}
+			into[key] = append(asList(existing), asList(value)...)
+		}
+	}
+	return merged
 }
 
 func rootIndexOfCompactedNodes(nodes []map[string]any, context any, options *ld.JsonLdOptions) (int, error) {

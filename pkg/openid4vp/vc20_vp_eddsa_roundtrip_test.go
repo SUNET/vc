@@ -1231,3 +1231,27 @@ func TestVerifyAndExtractAsksTheResolverToAuthorize(t *testing.T) {
 			"a signature that verifies is not an authorization")
 	})
 }
+
+// TestIssuerControlsMethodRefusesAPathThatClimbsOut: a prefix test is not
+// containment. https://issuer.example/keys/../other-tenant/key starts with the
+// issuer and resolves somewhere else entirely, so the lexical fallback would
+// have accepted a key belonging to another tenant.
+func TestIssuerControlsMethodRefusesAPathThatClimbsOut(t *testing.T) {
+	const issuer = "https://issuer.example/keys"
+
+	require.NoError(t, issuerControlsMethod(issuer, issuer+"/key-1"),
+		"a key genuinely under the issuer is fine")
+	require.NoError(t, issuerControlsMethod(issuer, issuer+"#key-1"))
+
+	for _, escaping := range []string{
+		issuer + "/../other-tenant/key",
+		issuer + "/./../other-tenant/key",
+		issuer + "/keys/../../other-tenant/key",
+	} {
+		require.Error(t, issuerControlsMethod(issuer, escaping),
+			"a method that climbs out of the issuer is not the issuer's: %s", escaping)
+	}
+
+	require.Error(t, issuerControlsMethod(issuer, "https://issuer.example.evil/keys/key-1"),
+		"and a prefix that is not a boundary is still refused")
+}

@@ -345,3 +345,47 @@ func TestRemoveRootProofIgnoresGraphWrappersAsCandidates(t *testing.T) {
 	require.Contains(t, names, "_:loosegraph", "an unrelated graph stays")
 	require.NotContains(t, remaining[0].(map[string]any), credential.ProofPredicate)
 }
+
+// TestRemoveRootProofHandlesASplitRootNode: expanded JSON-LD may split one
+// node across several top-level entries, which RDF conversion merges back into
+// one. Treating each entry as its own node reported several unreferenced roots
+// and refused the document; and once selection merges them, the proof may be
+// written on ANY fragment, so every fragment of the chosen root has to be
+// edited.
+func TestRemoveRootProofHandlesASplitRootNode(t *testing.T) {
+	document := []any{
+		map[string]any{
+			"@id":                     "https://example.org/credential",
+			credential.ProofPredicate: []any{map[string]any{"@id": "_:rootproof"}},
+		},
+		map[string]any{
+			"@id": "https://example.org/credential",
+			"https://example.org/vocab#carries": []any{
+				map[string]any{"@id": "https://example.org/inner"},
+			},
+		},
+		map[string]any{
+			"@id":                     "https://example.org/inner",
+			credential.ProofPredicate: []any{map[string]any{"@id": "_:nestedproof"}},
+		},
+		map[string]any{"@id": "_:rootproof", "@graph": []any{map[string]any{"@id": "_:p0"}}},
+		map[string]any{"@id": "_:nestedproof", "@graph": []any{map[string]any{"@id": "_:p1"}}},
+	}
+
+	stripped, err := removeRootProof(document, nil)
+	require.NoError(t, err, "two entries sharing an id are one node, not two roots")
+
+	remaining := stripped.([]any)
+	var names []string
+	for _, entry := range remaining {
+		node := entry.(map[string]any)
+		id, _ := node["@id"].(string)
+		names = append(names, id)
+		if id == "https://example.org/credential" {
+			require.NotContains(t, node, credential.ProofPredicate,
+				"the root's proof goes, on whichever fragment carries it")
+		}
+	}
+	require.NotContains(t, names, "_:rootproof", "and the graph it named")
+	require.Contains(t, names, "_:nestedproof", "while the nested credential keeps its own")
+}
