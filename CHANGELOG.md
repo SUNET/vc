@@ -93,7 +93,11 @@
   re-sign it. A document that aliases the predicate still keeps its own
   spelling, so signing twice makes one proof set.
 
-  **Rooting is refused when it would change the document's RDF.** The rewrite
+  **Rooting is refused when it would change the document's RDF**, and that
+  check now runs when fragments were merged as well as when nodes moved:
+  coalescing joins the fragments' node-local contexts, so two fragments
+  mapping the same term differently end up with one mapping applied to both
+  values — a change to the RDF with nothing having moved. The rewrite
   moves the nodes beside the root into `@included`, and the result is now
   canonicalized and compared against the original before it is returned;
   anything that does not come through unchanged is refused rather than rooted
@@ -127,6 +131,16 @@
   what it got back and expected the credential to change no longer sees any
   effect**. `NormalizeVerifiableCredentialGraph()` rewrites the dataset in
   place and clears every memo instead.
+
+  **A proof naming a node something else also references is REFUSED.** There
+  is no serialization-independent answer for that shape: written compact with
+  the proof nested under the root, deleting the proof deletes that node's own
+  statements; after an RDF round trip the node is top-level, where removing it
+  drops statements the other reference keeps and keeping it adds statements
+  the compact reading had removed. Removing breaks one serialization and
+  preserving breaks the other, so the document is refused rather than signed
+  under one reading and verified under the other — the same doctrine as the
+  root-stability check.
 
   **A proof reference is resolved against top-level NODES as well as named
   graphs.** The VC v2 context declares `proof` with `"@container": "@graph"`,

@@ -82,7 +82,14 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 	// every property the document gave it rather than whichever fragment
 	// came first. RootOfCompactedNodes has always done this; this path had
 	// not.
+	entriesBefore := len(nodes)
 	nodes = coalesceCompactedByID(nodes, compacted["@context"], options)
+	// Merging is itself a rewrite: it joins the fragments' node-local
+	// contexts, so two fragments mapping the same compact term differently
+	// end up with one mapping applied to both values. That changes the RDF
+	// without moving any node, which is why it cannot ride on the
+	// "did anything move" test below.
+	coalesced := len(nodes) != entriesBefore
 
 	rootIndex := -1
 
@@ -195,7 +202,7 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 	// carry different local contexts is a second, the processing mode is a
 	// third. Deciding by inspection which documents need checking is the
 	// assumption-that-coincides this whole change exists to remove.
-	if len(included) == 0 {
+	if len(included) == 0 && !coalesced {
 		return attach(included), nil
 	}
 

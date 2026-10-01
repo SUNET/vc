@@ -120,20 +120,34 @@ func (rc *RDFCredential) RootProofs() (proofs []any, withoutRootProof *RDFCreden
 		delete(root, predicate)
 	}
 
-	// A node the proof link named is removed only if the proof link was the
-	// ONLY thing keeping it here.
+	// A proof link naming a node that something ELSE also references is
+	// REFUSED, because what the secured document contains then depends on how
+	// the document was written down.
 	//
-	// Checked AFTER the predicate is deleted above, so what remains is every
-	// edge that is not the proof link. A node reachable by one of those is
-	// content as well as a proof: compact signing deletes the proof property
-	// and keeps the node's own quads, so a verifier that dropped the node
-	// entirely hashed less than the signer did - and the same signed document
-	// then verified before a round trip and failed after one. It stays in the
-	// document AND stays the proof the root names; those are not exclusive.
+	// Both answers are wrong, which is what forces a refusal rather than a
+	// rule. Say the root's proof names X and another property references X
+	// too:
+	//
+	//   - Written COMPACT with the proof nested under the root, X's own
+	//     properties live inside the proof value. Deleting the proof deletes
+	//     them, so X contributes nothing to the secured document.
+	//   - The SAME document after an RDF round trip has X at top level.
+	//     Removing it drops properties that the other reference keeps alive;
+	//     keeping it adds properties the compact reading had removed.
+	//
+	// So removing breaks one serialization and preserving breaks the other -
+	// measured both ways, each as a review finding. There is no answer here
+	// that holds for both, and signing one reading while a verifier reads the
+	// other is exactly what this change exists to stop.
+	//
+	// Checked AFTER the predicate is deleted above, so what it sees is every
+	// edge that is NOT the proof link. Same doctrine as
+	// CheckRootSurvivesFlattening: a document whose meaning depends on its
+	// serialization is refused rather than guessed at.
 	for index := range claimedNodes {
 		id, _ := nodes[index]["@id"].(string)
 		if referencedAnywhere([][]map[string]any{nodes, graphs}, id) {
-			delete(claimedNodes, index)
+			return nil, nil, fmt.Errorf("the proof names %q and something else in the document refers to it too, so whether its statements are part of the secured document depends on the serialization", id)
 		}
 	}
 

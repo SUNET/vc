@@ -1457,3 +1457,46 @@ func TestRewriteExcludesReadersForTheWholeMutation(t *testing.T) {
 		}
 	}
 }
+
+// TestRootCompactedDocumentRefusesConflictingFragmentContexts: coalescing
+// fragments of one node merges their node-local contexts, so two fragments
+// mapping the same compact term DIFFERENTLY end up with one mapping applied to
+// both values. That changes the RDF without moving any node - and the
+// equivalence check only ran when something moved, so the rewrite could
+// silently sign different RDF from the input.
+func TestRootCompactedDocumentRefusesConflictingFragmentContexts(t *testing.T) {
+	document := map[string]any{
+		"@context": map[string]any{"id": "@id"},
+		"@graph": []any{
+			map[string]any{
+				"@context": map[string]any{"note": "https://example.org/first#note"},
+				"id":       "https://example.org/credential",
+				"note":     "written under the first mapping",
+			},
+			map[string]any{
+				// The SAME term, a different IRI, same node.
+				"@context": map[string]any{"note": "https://example.org/second#note"},
+				"id":       "https://example.org/credential",
+				"note":     "written under the second mapping",
+			},
+		},
+	}
+
+	before, err := canonicalFormOf(document, nil)
+	require.NoError(t, err)
+	require.Contains(t, before, "first#note")
+	require.Contains(t, before, "second#note",
+		"the fixture must carry both mappings, or there is no conflict to detect")
+
+	rooted, err := RootCompactedDocument(document, "", nil)
+	if err != nil {
+		require.Contains(t, err.Error(), "would change its RDF",
+			"refusing is a fine answer; signing different RDF is not")
+		return
+	}
+
+	after, err := canonicalFormOf(rooted, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, after,
+		"if it is accepted, the merge must not have changed one quad")
+}
