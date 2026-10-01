@@ -297,8 +297,18 @@ verifier:
 puts that value in its tokens' `iss`, and the pin only covers a token whose
 `iss` matches (or that carries none). A key file on its own does not apply.
 
-A standalone verifier — one whose config names no registry — is unaffected:
-it sees only external lists, which carry their signer in the token and are
+The check runs at config load, while the `registry:` and `verifier:`
+stanzas are both still present — a moment later the loader nils out the
+sections a service does not own, and the verifier can no longer see that a
+registry exists at all.
+
+That is also its limit. It only covers a **shared** config file. A verifier
+given its own file with no `registry:` stanza cannot be checked: nothing in
+that file says a local registry is in play, so pin it by hand with the two
+settings above.
+
+A standalone verifier that really does see only external lists is
+unaffected either way: those lists carry their signer in the token and are
 judged by the PDP.
 
 A deployment running the registry *and* an external service under a PDP has

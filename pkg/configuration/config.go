@@ -155,21 +155,18 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 
 	}
 
+	// BEFORE the sections are pruned: this one needs to see verifier and
+	// registry together, and a moment later one of them is gone.
+	if err := checkStatusListTrustPin(cfg, serviceName); err != nil {
+		return nil, err
+	}
+
 	// Nil out service sections this service doesn't own so that a shared
 	// config file won't fail validation on incomplete sibling stanzas.
 	if serviceName == "apigw" {
 		cfg.SeedDashboardDefaults()
 	}
-	switch serviceName {
-	case "issuer":
-		cfg.APIGW, cfg.Verifier, cfg.Registry = nil, nil, nil
-	case "verifier":
-		cfg.APIGW, cfg.Issuer, cfg.Registry = nil, nil, nil
-	case "registry":
-		cfg.APIGW, cfg.Issuer, cfg.Verifier = nil, nil, nil
-	case "apigw":
-		cfg.Issuer, cfg.Verifier, cfg.Registry = nil, nil, nil
-	}
+	pruneForeignSections(cfg, serviceName)
 
 	if err := helpers.Check(ctx, cfg, cfg, log); err != nil {
 		return nil, err
@@ -254,6 +251,84 @@ func checkAuthScopes(cfg *model.Cfg) error {
 // Mongo is the default primary-store backend, so an unset SQL.Backend means
 // Mongo. HA caching has no relational backend yet and always uses Mongo, so
 // it pulls the requirement in regardless of the primary store.
+// pruneForeignSections nils out the service sections this service does not
+// own, so a shared config file will not fail validation on an incomplete
+// sibling stanza.
+//
+// Named rather than inline because WHEN it runs is load-bearing: any check
+// that needs to see two services at once has to run before it. See
+// checkStatusListTrustPin, whose first version ran after this and was dead
+// code.
+func pruneForeignSections(cfg *model.Cfg, serviceName string) {
+	switch serviceName {
+	case "issuer":
+		cfg.APIGW, cfg.Verifier, cfg.Registry = nil, nil, nil
+	case "verifier":
+		cfg.APIGW, cfg.Issuer, cfg.Registry = nil, nil, nil
+	case "registry":
+		cfg.APIGW, cfg.Issuer, cfg.Verifier = nil, nil, nil
+	case "apigw":
+		cfg.Issuer, cfg.Verifier, cfg.Registry = nil, nil, nil
+	}
+}
+
+// checkStatusListTrustPin refuses a verifier that has a PDP and this
+// deployment's own registry, but no pinned key for the registry's status
+// list tokens.
+//
+// Those two together are a configuration that cannot work and does not say
+// so. The registry signs its lists with no kid, jwk or x5c
+// (internal/registry/tokenstatuslistissuer), so JWTTrustVerifier has
+// nothing to resolve and the PDP is never consulted;
+// revocation.resolveStatusListKey then refuses the generic resolver,
+// because reaching it would be a route to a status value with no policy
+// decision at all. Every registry list fails to verify - and
+// verifier.revocation.fail_open defaults to TRUE, so each failure reads as
+// "not revoked". A revoked credential is accepted, permanently, with
+// nothing but a per-request log line to show for it.
+//
+// The pin is what makes it work, and it has to name the registry
+// specifically: the registry puts registry.public_url in its tokens' iss,
+// and revocation's pinApplies only covers a token whose iss is the
+// configured status_list_issuer. A key file alone does not apply.
+//
+// Deliberately not the other repair. Letting the resolver answer for
+// header-less tokens would reopen the hole the trust evaluation exists to
+// close - any token served as a CWT, or simply omitting its header key,
+// would escape the PDP.
+//
+// # Why it lives here and not in the verifier
+//
+// The first version of this check ran in verifier/apiv1.New and was dead
+// code: by then LoadConfig has set cfg.Registry = nil for the verifier
+// service, so it returned early every time. This runs before that pruning,
+// which is the only place both stanzas exist at once.
+//
+// The consequence is that it only covers a SHARED config file. A verifier
+// given its own file with no registry stanza cannot be checked this way -
+// nothing in it says a local registry exists. That deployment has to pin
+// the registry by hand; docs/REVOCATION.md says so.
+func checkStatusListTrustPin(cfg *model.Cfg, serviceName string) error {
+	if serviceName != "verifier" {
+		return nil
+	}
+	if cfg.Verifier == nil || cfg.Verifier.Trust.PDPURL == "" {
+		return nil
+	}
+	if cfg.Registry == nil || cfg.Registry.PublicURL == "" {
+		return nil
+	}
+	revocationCfg := cfg.Verifier.Revocation
+	if revocationCfg == nil || !revocationCfg.Enabled {
+		return nil
+	}
+	if revocationCfg.StatusListKeyFile != "" && revocationCfg.StatusListIssuer == cfg.Registry.PublicURL {
+		return nil
+	}
+	return fmt.Errorf("verifier.trust.pdp_url is set and this deployment runs its own registry (%s), but verifier.revocation.status_list_key_file/status_list_issuer do not pin that registry's signing key: the registry signs status list tokens with no kid, jwk or x5c, so they cannot be trust-evaluated, and every local status check would fail - which verifier.revocation.fail_open (default true) would read as \"not revoked\". Set verifier.revocation.status_list_issuer to %q and verifier.revocation.status_list_key_file to the registry's public key, or remove verifier.trust.pdp_url",
+		cfg.Registry.PublicURL, cfg.Registry.PublicURL)
+}
+
 func checkMongoRequirement(cfg *model.Cfg, serviceName string) error {
 	requirement := serviceMongoRequirement[serviceName]
 	if requirement == mongoNotRequired {

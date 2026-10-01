@@ -88,6 +88,12 @@ func TestIssueBBSPassesTheCommitmentThrough(t *testing.T) {
 	issuer := &recordingIssuerClient{
 		reply: &apiv1_issuer.MakeJWPReply{
 			Credentials: []*apiv1_issuer.Credential{{Credential: "hdr.payloads.proof"}},
+			// A current issuer always says. The zero value is
+			// UNSPECIFIED, which means "an issuer too old to carry the
+			// field", and saveCredentialSubjects refuses it whatever the
+			// other fields look like - so a fixture that leaves it out is
+			// not modelling an ordinary issuance.
+			StatusAllocation: apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE,
 		},
 	}
 	c := bbsTestClient(t, issuer)
@@ -140,7 +146,8 @@ func TestIssueBBSTakesKeyBindingFromTheCommitmentAssertion(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			issuer := &recordingIssuerClient{
 				reply: &apiv1_issuer.MakeJWPReply{
-					Credentials: []*apiv1_issuer.Credential{{Credential: "a.b.c"}},
+					Credentials:      []*apiv1_issuer.Credential{{Credential: "a.b.c"}},
+					StatusAllocation: apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE,
 				},
 			}
 			c := bbsTestClient(t, issuer)
@@ -227,7 +234,8 @@ func TestIssueBBSForwardsTheSuiteTheHolderChose(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			issuer := &recordingIssuerClient{
 				reply: &apiv1_issuer.MakeJWPReply{
-					Credentials: []*apiv1_issuer.Credential{{Credential: "a.b.c"}},
+					Credentials:      []*apiv1_issuer.Credential{{Credential: "a.b.c"}},
+					StatusAllocation: apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE,
 				},
 			}
 			c := bbsTestClient(t, issuer)

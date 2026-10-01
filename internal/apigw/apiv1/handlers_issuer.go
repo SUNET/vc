@@ -753,7 +753,109 @@ type statusEntry struct {
 // local registry is optional (see APIGW.RegistryClient): a deployment using
 // an external draft-ietf-oauth-status-list service has no registry to write
 // to, and issuance must not depend on one.
+// checkAllocationVerdicts refuses an issuance reply whose status entries
+// contradict themselves or say nothing, before any of them is acted on.
+//
+// Both sides of this gRPC call state the verdict rather than infer it, and
+// both refuse the combinations that cannot both be true. The issuer refuses
+// them because it is the side that knows what it allocated (see
+// grpcserver.statusAllocation); the apigw refuses them again because it is
+// the side that records the mapping and delivers the credential, and "the
+// other end promised" is not something a persistence path should rest on. A
+// reply that contradicts itself is a reply from an issuer this apigw does
+// not understand, whether through a partial upgrade or a bug.
+//
+// Reading the URI as the verdict - which this code used to do - cannot
+// express any of these four.
+//
+// A pass of its own, run before anything else, because the checks used to
+// sit inside the recording loop and the no-identifier shortcut reached its
+// own conclusions ahead of them.
+//
+// An exhaustive switch rather than a chain of ifs, so that a value this
+// build has never heard of lands in the default and is refused rather than
+// falling through to whichever branch happened to be last.
+func (c *Client) checkAllocationVerdicts(identifier string, entries []statusEntry) error {
+	for _, e := range entries {
+		switch e.Allocated {
+		case apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_UNSPECIFIED:
+			// An issuer that does not SAY is refused, whatever the other
+			// fields look like. This is the genuinely ambiguous case: a
+			// registry's first allocation is section 0, index 0, and an
+			// issuer older than these fields sends no URI and no backend
+			// either - so a real allocation and "nothing allocated" are
+			// byte-identical. Continuing on that guess delivered a
+			// credential carrying a status reference nothing had recorded,
+			// which revocation can never find. A loud failure during a
+			// partial upgrade is the better half of that trade.
+			c.log.Error(errors.New("issuer did not say whether a status entry was allocated"),
+				"issuance reply does not carry status_allocation, so a status entry may have been allocated and could never be recorded; this is what an issuer older than that field looks like - upgrade issuer and apigw together",
+				"identifier", identifier, "section", e.Section, "index", e.Index, "uri", e.URI)
+			return errors.New("issuer did not report whether a status list entry was allocated; issuer and apigw must be upgraded together")
+
+		case apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE:
+			if e.URI != "" {
+				// The issuer says it allocated nothing and names a list
+				// anyway. Recording it would mint a revocation mapping for
+				// an entry the issuer does not believe exists - and that
+				// list and index belong to somebody, so revoking this
+				// credential later would flip whatever is really there.
+				c.log.Error(errors.New("status allocation contradicts the entry"),
+					"issuance reply says no status entry was allocated but carries a list URI; recording it would map this credential onto an entry that belongs to something else",
+					"identifier", identifier, "uri", e.URI, "index", e.Index, "backend", e.Backend)
+				return fmt.Errorf("issuer reported no status allocation but returned list URI %q", e.URI)
+			}
+
+		case apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED:
+			if e.URI == "" {
+				// FAIL, do not continue. The issuer has already embedded
+				// this entry in what it signed, so continuing delivers a
+				// credential that advertises a revocation status nothing
+				// can ever set - the same "looks revocable and is not"
+				// failure the VC 2.0 status flag defaults off to avoid,
+				// except here it reaches a wallet.
+				//
+				// The entry cannot be released either: releasing names the
+				// list URI, which is the thing that is missing. So the
+				// slot is stranded whatever happens, and the choice is
+				// only whether an unrevocable credential is also issued.
+				c.log.Error(errors.New("status list entry has no list URI"),
+					"issuance reply reports an allocated status entry with no list URI, so it cannot be recorded and the credential could never be revoked",
+					"identifier", identifier, "section", e.Section, "index", e.Index, "backend", e.Backend)
+				return fmt.Errorf("issuer reported an allocated status list entry with no list URI (section %d, index %d)", e.Section, e.Index)
+			}
+
+		default:
+			// A value this build has no name for. protobuf keeps unknown
+			// enum values rather than erroring, so this is what a NEWER
+			// issuer looks like - the mirror of the UNSPECIFIED case
+			// above, and it has to fail the same way. Treating it as
+			// "allocated" would record a mapping under a meaning this
+			// build is guessing at; treating it as "none" would deliver a
+			// credential whose entry was never recorded.
+			c.log.Error(errors.New("unknown status allocation value"),
+				"issuance reply carries a status_allocation this build does not recognise; it cannot be acted on either way - upgrade issuer and apigw together",
+				"identifier", identifier, "allocation", int32(e.Allocated), "uri", e.URI, "index", e.Index)
+			return fmt.Errorf("issuer reported status_allocation %d, which this build does not recognise; issuer and apigw must be upgraded together", int32(e.Allocated))
+		}
+	}
+	return nil
+}
+
 func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authenticSource, scope string, entries []statusEntry) error {
+	// The issuer's verdict first, before ANY branch reads anything else
+	// off an entry - including the no-identifier shortcut below, which
+	// otherwise acted on a reply this function refuses everywhere else.
+	//
+	// Nothing has been recorded yet, so the cleanup here is the slots
+	// alone. releaseAllocations skips entries the issuer did not
+	// positively claim, which is the whole point: a disowned entry names a
+	// slot this issuance has no claim to.
+	if err := c.checkAllocationVerdicts(identifier, entries); err != nil {
+		c.releaseAllocations(ctx, entries)
+		return err
+	}
+
 	// An empty identifier is legitimate for assertion- and datastore-backed
 	// issuance (see requireIdentifier), but it is not a reason to drop an
 	// allocated entry: the credential already carries the status reference,
@@ -762,9 +864,14 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 	// fail, the same as a store failure - the alternative is a credential
 	// nobody can revoke.
 	if identifier == "" {
+		// Positively allocated, not merely "carries a URI". The two agreed
+		// only because releaseAllocations compensated for this filter, and
+		// two readings of one fact is the shape that keeps going wrong
+		// here - the verdict pass above has already refused everything
+		// else, so by now they cannot differ.
 		var allocated []statusEntry
 		for _, e := range entries {
-			if e.URI != "" {
+			if e.Allocated == apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED {
 				allocated = append(allocated, e)
 			}
 		}
@@ -783,114 +890,18 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 	var recorded []statusEntry
 
 	for _, e := range entries {
-		// The issuer's own verdict, checked before anything else is read
-		// off the entry.
+		// Verified at the top of this function, so only the one branch
+		// that is not an error survives here: nothing was allocated, so
+		// there is nothing to record. The issuance path reports this
+		// exactly when it issued a credential without a status claim -
+		// degraded_mode=proceed, or a format that carries no status in
+		// this configuration.
 		//
-		// Both sides of this gRPC call now state it rather than infer it,
-		// and both refuse the combinations that cannot both be true. The
-		// issuer refuses them because it is the side that knows what it
-		// allocated (see grpcserver.statusAllocation); the apigw refuses
-		// them again because it is the side that records the mapping and
-		// delivers the credential, and "the other end promised" is not
-		// something a persistence path should rest on. A reply that
-		// contradicts itself is a reply from an issuer this apigw does not
-		// understand, whether through a partial upgrade or a bug.
-		//
-		// Reading the URI as the verdict - which is what this loop used to
-		// do - cannot express any of these three.
-		// The issuer's own verdict, checked before anything else is read
-		// off the entry.
-		//
-		// Both sides of this gRPC call now state it rather than infer it,
-		// and both refuse the combinations that cannot both be true. The
-		// issuer refuses them because it is the side that knows what it
-		// allocated (see grpcserver.statusAllocation); the apigw refuses
-		// them again because it is the side that records the mapping and
-		// delivers the credential, and "the other end promised" is not
-		// something a persistence path should rest on. A reply that
-		// contradicts itself is a reply from an issuer this apigw does not
-		// understand, whether through a partial upgrade or a bug.
-		//
-		// Reading the URI as the verdict - which is what this loop used to
-		// do - cannot express any of these four.
-		//
-		// An exhaustive switch rather than a chain of ifs, so that a value
-		// this build has never heard of lands in the default and is
-		// refused rather than falling through to the recording path below.
-		switch e.Allocated {
-		case apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_UNSPECIFIED:
-			// An issuer that does not SAY is refused, whatever the other
-			// fields look like. This is the genuinely ambiguous case: a
-			// registry's first allocation is section 0, index 0, and an
-			// issuer older than these fields sends no URI and no backend
-			// either - so a real allocation and "nothing allocated" are
-			// byte-identical. Continuing on that guess delivered a
-			// credential carrying a status reference nothing had recorded,
-			// which revocation can never find. A loud failure during a
-			// partial upgrade is the better half of that trade.
-			c.log.Error(errors.New("issuer did not say whether a status entry was allocated"),
-				"issuance reply does not carry status_allocation, so a status entry may have been allocated and could never be recorded; this is what an issuer older than that field looks like - upgrade issuer and apigw together",
-				"identifier", identifier, "section", e.Section, "index", e.Index, "uri", e.URI)
-			c.abandonBatch(ctx, recorded, entries)
-			return errors.New("issuer did not report whether a status list entry was allocated; issuer and apigw must be upgraded together")
-
-		case apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE:
-			if e.URI != "" {
-				// The issuer says it allocated nothing and names a list
-				// anyway. Recording it would mint a revocation mapping for
-				// an entry the issuer does not believe exists - and that
-				// list and index belong to somebody, so revoking this
-				// credential later would flip whatever is really there.
-				c.log.Error(errors.New("status allocation contradicts the entry"),
-					"issuance reply says no status entry was allocated but carries a list URI; recording it would map this credential onto an entry that belongs to something else",
-					"identifier", identifier, "uri", e.URI, "index", e.Index, "backend", e.Backend)
-				c.abandonBatch(ctx, recorded, entries)
-				return fmt.Errorf("issuer reported no status allocation but returned list URI %q", e.URI)
-			}
-			// Nothing allocated, nothing to record. The issuance path
-			// reports this exactly when it issued a credential without a
-			// status claim - degraded_mode=proceed, or a format that
-			// carries no status in this configuration.
-			//
-			// This used to skip on `e.Section <= 0` instead, which
-			// silently discarded EVERY entry allocated by an external
-			// status service, since those have no sections and always
-			// report Section 0.
+		// This used to skip on `e.Section <= 0` instead, which silently
+		// discarded EVERY entry allocated by an external status service,
+		// since those have no sections and always report Section 0.
+		if e.Allocated != apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED {
 			continue
-
-		case apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED:
-			if e.URI == "" {
-				// FAIL, do not continue. The issuer has already embedded
-				// this entry in what it signed, so continuing delivers a
-				// credential that advertises a revocation status nothing
-				// can ever set - the same "looks revocable and is not"
-				// failure the VC 2.0 status flag defaults off to avoid,
-				// except here it reaches a wallet.
-				//
-				// The entry cannot be released either: releasing names the
-				// list URI, which is the thing that is missing. So the
-				// slot is stranded whatever happens, and the choice is
-				// only whether an unrevocable credential is also issued.
-				c.log.Error(errors.New("status list entry has no list URI"),
-					"issuance reply reports an allocated status entry with no list URI, so it cannot be recorded and the credential could never be revoked",
-					"identifier", identifier, "section", e.Section, "index", e.Index, "backend", e.Backend)
-				c.abandonBatch(ctx, recorded, entries)
-				return fmt.Errorf("issuer reported an allocated status list entry with no list URI (section %d, index %d)", e.Section, e.Index)
-			}
-
-		default:
-			// A value this build has no name for. protobuf keeps unknown
-			// enum values rather than erroring, so this is what a NEWER
-			// issuer looks like - the mirror of the UNSPECIFIED case
-			// above, and it has to fail the same way. Treating it as
-			// "allocated" would record a mapping under a meaning this
-			// build is guessing at; treating it as "none" would deliver a
-			// credential whose entry was never recorded.
-			c.log.Error(errors.New("unknown status allocation value"),
-				"issuance reply carries a status_allocation this build does not recognise; it cannot be acted on either way - upgrade issuer and apigw together",
-				"identifier", identifier, "allocation", int32(e.Allocated), "uri", e.URI, "index", e.Index)
-			c.abandonBatch(ctx, recorded, entries)
-			return fmt.Errorf("issuer reported status_allocation %d, which this build does not recognise; issuer and apigw must be upgraded together", int32(e.Allocated))
 		}
 
 		if c.db == nil || c.db.CredentialStatusColl == nil {

@@ -578,14 +578,70 @@ func TestSaveCredentialSubjects_MixedBatchReleasesOnlyTheAllocatedOnes(t *testin
 	})
 	require.Error(t, err)
 
-	// The first entry was recorded before the second was refused, and the
-	// request fails as a whole - so that row has to go back out too, or
-	// revoke-by-identifier would later act on a mapping for a credential
-	// nobody holds, against a slot that has already been released.
-	require.Equal(t, []string{"https://registry.example.com/statuslists/4|5|registry"}, store.deleted,
-		"the mapping written before the refusal must be rolled back, addressed the way it is keyed")
+	// Nothing is written at all: the verdict pass runs before the
+	// recording loop, so a contradictory entry anywhere in the batch stops
+	// it before the first row. Rolling a row back is strictly worse than
+	// never writing it, and the mid-loop rollback that does remain is for
+	// the failures only the loop can discover - see
+	// TestSaveCredentialSubjects_UnroutableBackendRollsBackEarlierMappings.
+	require.Empty(t, store.saved)
+	require.Empty(t, store.deleted)
 
 	require.Len(t, issuer.calls, 1, "exactly one release: the allocated entry, not the disowned one")
 	require.Equal(t, "https://registry.example.com/statuslists/4", issuer.calls[0].StatusListUri)
 	require.Equal(t, uint32(1), issuer.calls[0].Status)
+}
+
+// TestSaveCredentialSubjects_UnroutableBackendRollsBackEarlierMappings:
+// some failures can only be discovered inside the recording loop, after
+// earlier entries have already been written. An unroutable backend is one -
+// the entry is well-formed and the issuer stands behind it, but no backend
+// in this build can reach it, so its revocation call would be rejected
+// forever.
+//
+// The request fails as a whole, so the rows written before it have to go
+// back out: one left behind names a credential nobody holds, and
+// revoke-by-identifier would later act on it against a slot that has
+// already been released.
+func TestSaveCredentialSubjects_UnroutableBackendRollsBackEarlierMappings(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
+		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry", Allocated: allocated},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "carrier_pigeon", Allocated: allocated},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "carrier_pigeon")
+
+	require.Len(t, store.saved, 1, "the first entry was written before the second could be judged")
+	require.Equal(t, []string{"https://registry.example.com/statuslists/4|5|registry"}, store.deleted,
+		"and it has to be rolled back, addressed the way the store keys it")
+
+	released := map[string]bool{}
+	for _, call := range issuer.calls {
+		released[call.StatusListUri] = true
+	}
+	require.True(t, released["https://registry.example.com/statuslists/4"])
+	require.True(t, released["https://status.example.com/statuslists/abc"],
+		"both slots were allocated for a credential nobody will receive")
+}
+
+// TestSaveCredentialSubjects_NoIdentifierStillChecksTheVerdict: the
+// no-identifier shortcut used to reach its own conclusion ahead of the
+// verdict checks - it collected "entries with a URI" and released them.
+//
+// So a reply the function refuses everywhere else arrived here and had
+// INVALID written to a slot it had no claim to. The verdict pass now runs
+// first, and this branch filters on the verdict rather than on a URI.
+func TestSaveCredentialSubjects_NoIdentifierStillChecksTheVerdict(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+
+	err := c.saveCredentialSubjects(t.Context(), "", "SUNET", "pid", []statusEntry{
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: notAllocated},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no status allocation",
+		"the refusal must name the contradiction, not the missing identifier")
+	require.Empty(t, store.saved)
+	require.Empty(t, issuer.calls, "a slot this issuance has no claim to must not be marked INVALID")
 }
