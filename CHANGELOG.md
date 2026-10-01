@@ -61,12 +61,18 @@
   original root afterwards and the disclosure would choose it). Give
   credentials an `id` if they are to be used with `ecdsa-sd-2023`.
 
-  A document whose root takes part in a reference cycle — a presentation
-  carrying a credential whose subject links back at it — is now refused at
-  SIGNING. Such a document says which node it is about while compact and
-  stops saying so once serialized through RDF, so it would verify in one form
-  and not another. The error names the document rather than the
-  serialization.
+  **A document whose root takes part in a reference cycle is refused at
+  SIGNING and at VERIFICATION.** A presentation carrying a credential whose
+  subject links back at it is the shape: it says which node it is about while
+  compact and stops saying so once serialized through RDF, so it would verify
+  in one form and not another. The same check runs on both paths, which means
+  **a document of that shape signed before this release no longer verifies** —
+  re-issue or re-present it with the cycle broken, usually by giving the inner
+  credential an `id` and referring to it rather than nesting the link back.
+  The error names the document rather than the serialization.
+
+  The same applies to a signed document whose root is an unnamed node that
+  something else refers to: verification refuses it, not only signing.
 
 - **Unresolvable auth scopes now fail at startup**: every scope listed in an `auth_scopes` entry must name a configured `credential_metadata` scope. A scope that names none previously started fine and produced a DCQL query no wallet could satisfy, failing only after the user had already been sent to their wallet; it is now rejected at config load, so a deployment carrying one will stop starting.
 
