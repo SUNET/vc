@@ -313,6 +313,8 @@ func expandNodeID(context any, id string, options *ld.JsonLdOptions) string {
 // resolved through the active context instead.
 func ProofKeys(node map[string]any, context any, options *ld.JsonLdOptions) []string {
 	var keys []string
+	var unresolved []string
+
 	for key := range node {
 		if strings.HasPrefix(key, "@") {
 			continue
@@ -324,43 +326,61 @@ func ProofKeys(node map[string]any, context any, options *ld.JsonLdOptions) []st
 			keys = append(keys, key)
 			continue
 		}
-		if context == nil {
-			continue
-		}
-		if expandTerm(context, key, options) != "" {
-			keys = append(keys, key)
-		}
+		unresolved = append(unresolved, key)
+	}
+
+	if context == nil || len(unresolved) == 0 {
+		return keys
+	}
+
+	// ONE expansion, not one per member. This runs on an SD credential
+	// before its signature has been checked, so a document carrying many
+	// arbitrary properties would otherwise turn a single request into a
+	// context-processing operation per property.
+	for _, key := range proofTerms(unresolved, context, options) {
+		keys = append(keys, key)
 	}
 	return keys
 }
 
-// expandTerm resolves one member name against a context and returns the proof
-// predicate it names, or "" when it names something else or nothing at all.
-func expandTerm(context any, term string, options *ld.JsonLdOptions) string {
-	const sentinel = "https://example.invalid/a-proof-node"
+// proofTerms resolves several member names against a context in one pass and
+// returns those naming a proof.
+//
+// Each name is probed under a DISTINCT sentinel identifier, so the expanded
+// output says which original name produced which predicate - several aliases
+// of the same predicate would otherwise collapse into one entry.
+func proofTerms(terms []string, context any, options *ld.JsonLdOptions) []string {
+	const sentinelPrefix = "https://example.invalid/a-proof-node#"
 
-	probe := map[string]any{
-		"@context": context,
-		term:       map[string]any{"@id": sentinel},
+	// Each term gets its OWN node, and a plain STRING for a value.
+	//
+	// Sharing one node means a term aliasing a keyword rewrites that node
+	// instead of adding a member. Using {"@id": ...} as the value is worse:
+	// a term aliased to @id - which is what every compact VC context does
+	// with "id" - then carries an object where @id requires a string, and
+	// json-gold rejects the WHOLE probe, so every other term's answer is
+	// lost with it. A string is valid wherever it lands, and the sentinel
+	// comes back under @value or @id depending on how the term is declared.
+	entries := make([]any, 0, len(terms))
+	bySentinel := make(map[string]string, len(terms))
+	for i, term := range terms {
+		sentinel := fmt.Sprintf("%s%d", sentinelPrefix, i)
+		bySentinel[sentinel] = term
+		entries = append(entries, map[string]any{term: sentinel})
 	}
+	probe := map[string]any{"@context": context, "@graph": entries}
 	if options == nil {
 		options = NewJSONLDOptions("")
 	}
 
 	expanded, err := ld.NewJsonLdProcessor().Expand(probe, options)
-	if err != nil || len(expanded) == 0 {
-		return ""
+	if err != nil {
+		return nil
 	}
-	resolved, isNode := expanded[0].(map[string]any)
-	if !isNode {
-		return ""
-	}
-	for _, predicate := range []string{ProofPredicate, ProofPredicateLegacy} {
-		if _, present := resolved[predicate]; present {
-			return predicate
-		}
-	}
-	return ""
+
+	var found []string
+	collectProofTerms(expanded, bySentinel, &found)
+	return found
 }
 
 // IsBareGraphContainer reports whether a map is nothing but a graph: the
@@ -445,4 +465,43 @@ func isReferenced(nodes []map[string]any, skip int, id string, referenced map[st
 		return referenced[id]
 	}
 	return referencedByAnyOther(nodes, skip, id)
+}
+
+// collectProofTerms walks an expanded probe, adding the original member name
+// behind every sentinel reached through a proof predicate.
+func collectProofTerms(value any, bySentinel map[string]string, found *[]string) {
+	switch typed := value.(type) {
+	case []any:
+		for _, entry := range typed {
+			collectProofTerms(entry, bySentinel, found)
+		}
+	case map[string]any:
+		for _, predicate := range []string{ProofPredicate, ProofPredicateLegacy} {
+			values, present := typed[predicate].([]any)
+			if !present {
+				continue
+			}
+			for _, entry := range values {
+				object, isObject := entry.(map[string]any)
+				if !isObject {
+					continue
+				}
+				// Under @id when the term is declared "@type": "@id",
+				// under @value otherwise.
+				marker, _ := object["@id"].(string)
+				if marker == "" {
+					marker, _ = object["@value"].(string)
+				}
+				if term, known := bySentinel[marker]; known {
+					*found = append(*found, term)
+				}
+			}
+		}
+		for key, member := range typed {
+			if key == ProofPredicate || key == ProofPredicateLegacy {
+				continue
+			}
+			collectProofTerms(member, bySentinel, found)
+		}
+	}
 }

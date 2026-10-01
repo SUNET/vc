@@ -476,8 +476,28 @@ func (h *VC20Handler) extractCredentialFromExpanded(expanded []any) (map[string]
 		proofURI  = "https://w3id.org/security#proof"
 	)
 
-	// Find the credential node (one with VerifiableCredential type)
+	// The ROOT node, not the first credential in array order. A flattened
+	// document may hold several VerifiableCredential nodes - one nested
+	// under credentialSubject, say - and top-level array order is not
+	// signed. Taking the first meant reordering a nested credential to the
+	// front had the handler report ITS issuer and claims while
+	// rootProofCandidates verified the outer credential's proof.
+	//
+	// credential.RootOfCompactedNodes is the same rule the rest of this
+	// change uses: the node nothing else refers to, and a refusal when the
+	// document does not say which that is.
+	nodes := make([]map[string]any, 0, len(expanded))
 	for _, node := range expanded {
+		if nodeMap, isNode := node.(map[string]any); isNode {
+			nodes = append(nodes, nodeMap)
+		}
+	}
+	root, err := credential.RootOfCompactedNodes(nodes, nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("cannot tell which node an expanded document is about: %w", err)
+	}
+
+	for _, node := range []any{root} {
 		nodeMap, ok := node.(map[string]any)
 		if !ok {
 			continue
@@ -498,7 +518,7 @@ func (h *VC20Handler) extractCredentialFromExpanded(expanded []any) (map[string]
 		}
 
 		if !isVC {
-			continue
+			return nil, errors.New("the node an expanded document is about is not a VerifiableCredential")
 		}
 
 		// Found the credential node - extract and transform to compact form
@@ -598,7 +618,7 @@ func (h *VC20Handler) extractCredentialFromExpanded(expanded []any) (map[string]
 		return result, nil
 	}
 
-	return nil, errors.New("no VerifiableCredential found in expanded JSON-LD")
+	return nil, errors.New("the node an expanded document is about is not a VerifiableCredential")
 }
 
 // extractProofFromExpanded extracts proof data from expanded JSON-LD proof node.

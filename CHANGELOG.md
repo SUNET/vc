@@ -27,14 +27,18 @@
   and verifies unchanged.
 
   Most credentials are unaffected: a credential that carries no proof but its
-  own makes the two removals the same operation. A credential that NESTS a
-  secured credential — under `credentialSubject`, `evidence` or `@included` —
-  is affected under `ecdsa-sd-2023`, which used to leave that nested proof
+  own makes the two removals the same operation.
+
+  **A credential that NESTS a secured credential is affected under ALL THREE
+  cryptosuites** — under `credentialSubject`, `evidence` or `@included`. Every
+  suite used to remove that nested proof when canonicalizing, leaving it
   outside the signed quad set entirely, so it could be stripped or re-pointed
-  at another key with the base proof still verifying. The nested proof is now
-  covered, which means an `ecdsa-sd-2023` base proof issued before this
-  release over such a credential no longer verifies, and a derived proof made
-  from it no longer checks out. Re-issue those credentials.
+  at another key with the signature still verifying. It is now part of the
+  document the signature covers, which means a proof made over such a
+  credential before this release no longer verifies — `eddsa-rdfc-2022` and
+  `ecdsa-rdfc-2019` as much as `ecdsa-sd-2023`. Re-issue those credentials.
+  For `ecdsa-sd-2023` a derived proof made from such a base proof no longer
+  checks out either.
 
   **`ecdsa-sd-2023` derived credentials are affected more widely than that.**
   Deriving used to compact the flattened dataset and attach the derived proof

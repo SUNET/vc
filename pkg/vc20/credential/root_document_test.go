@@ -2,6 +2,7 @@ package credential
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/piprate/json-gold/ld"
@@ -204,4 +205,34 @@ func TestRootCompactedDocumentIgnoresCompactLiterals(t *testing.T) {
 	}, "", nil)
 	require.NoError(t, err, "a literal must not count as a reference, compact or not")
 	require.Equal(t, "https://example.org/credential", rooted["id"])
+}
+
+// TestProofKeysResolvesEveryTermInOneExpansion: this runs on an SD credential
+// BEFORE its signature has been checked, so one JSON-LD expansion per member
+// turned a single request into a context-processing operation per property.
+// One expansion now covers them all - and it has to survive a member that
+// aliases a keyword, which is what every compact VC context does with "id".
+func TestProofKeysResolvesEveryTermInOneExpansion(t *testing.T) {
+	var context any
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id": "@id",
+		"type": "@type",
+		"seal": "https://w3id.org/security#proof",
+		"note": "https://example.org/vocab#note"
+	}`), &context))
+
+	node := map[string]any{
+		"id":   "https://example.org/credential",
+		"type": "VerifiableCredential",
+		"note": "kept",
+		"seal": map[string]any{"type": "DataIntegrityProof"},
+	}
+	// Plenty of unrelated members, the shape that made per-member expansion
+	// expensive.
+	for i := range 50 {
+		node[fmt.Sprintf("https://example.org/vocab#filler%d", i)] = "x"
+	}
+
+	require.Equal(t, []string{"seal"}, ProofKeys(node, context, nil),
+		"the aliased proof term is found, and the keyword aliases do not break the probe")
 }

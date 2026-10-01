@@ -878,3 +878,72 @@ func mustJSON(t *testing.T, value any) []byte {
 	require.NoError(t, err)
 	return encoded
 }
+
+// TestVerifyAndExtractReportsTheRootOfAnExpandedDocument: a flattened document
+// may hold several VerifiableCredential nodes - one nested under
+// credentialSubject, say - and top-level array ORDER is not signed. Reporting
+// the first one in that order let a holder move a nested credential to the
+// front and have its issuer and claims reported, while the proof that actually
+// verified belonged to the outer credential.
+func TestVerifyAndExtractReportsTheRootOfAnExpandedDocument(t *testing.T) {
+	issuerPub, issuerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	const method = "did:example:issuer#key-1"
+	outer, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:outer-issuer",
+		"credentialSubject": {
+			"id": "did:example:holder",
+			"https://example.org/vocab#attachment": {
+				"type": ["VerifiableCredential"],
+				"id": "https://example.org/credentials/nested",
+				"issuer": "did:example:nested-issuer",
+				"credentialSubject": {"id": "did:example:holder"}
+			}
+		}
+	}`), nil)
+	require.NoError(t, err)
+
+	signed, err := eddsaSuite.NewSuite().Sign(outer, issuerKey, &eddsaSuite.SignOptions{
+		VerificationMethod: method,
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	flattened, err := signed.ToJSON()
+	require.NoError(t, err)
+	var asArray []any
+	require.NoError(t, json.Unmarshal(flattened, &asArray))
+
+	// Put the NESTED credential first, which array order permits and no
+	// signature covers.
+	nestedFirst := make([]any, 0, len(asArray))
+	for _, entry := range asArray {
+		if node, isNode := entry.(map[string]any); isNode {
+			if id, _ := node["@id"].(string); id == "https://example.org/credentials/nested" {
+				nestedFirst = append([]any{node}, nestedFirst...)
+				continue
+			}
+		}
+		nestedFirst = append(nestedFirst, entry)
+	}
+	require.Equal(t, "https://example.org/credentials/nested",
+		nestedFirst[0].(map[string]any)["@id"],
+		"the nested credential must really be first, or this proves nothing")
+
+	reordered, err := json.Marshal(nestedFirst)
+	require.NoError(t, err)
+
+	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+		keys: map[string]crypto.PublicKey{method: issuerPub},
+	}))
+	require.NoError(t, err)
+
+	result, err := handler.VerifyAndExtract(t.Context(), string(reordered))
+	require.NoError(t, err)
+	require.Equal(t, "did:example:outer-issuer", result.Issuer,
+		"the issuer reported must be the one whose proof verified")
+}
