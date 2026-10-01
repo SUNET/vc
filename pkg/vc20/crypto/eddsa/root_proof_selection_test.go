@@ -271,12 +271,18 @@ func TestVerifyRefusesAStubRootProof(t *testing.T) {
 //
 // credential.RootProofs now does both in one pass, so they cannot drift.
 // What is worth pinning is the consequence: a document linking its proof
-// under the VC 1.1-era spelling is found AND removed, rather than found and
-// left in.
+// under a name of its own is found AND removed, rather than found and left in.
+//
+// An ALIAS, not a second predicate. An earlier version of this test used
+// https://www.w3.org/2018/credentials#proof as a "VC 1.1-era spelling";
+// neither VC 1.1 nor VC 2.0 defines that IRI - both map "proof" to the
+// security vocabulary - so the test was pinning a predicate this package had
+// invented, and treating it as one took ordinary properties out of secured
+// documents.
 func TestTheProofsFoundAreTheProofsRemoved(t *testing.T) {
-	const legacySpelling = `{
+	const aliasedProof = `{
 		"@context": ["https://www.w3.org/ns/credentials/v2",
-			{"sig": {"@id": "https://www.w3.org/2018/credentials#proof", "@container": "@graph"}}],
+			{"sig": {"@id": "https://w3id.org/security#proof", "@container": "@graph"}}],
 		"type": ["VerifiablePresentation"],
 		"holder": "did:example:holder",
 		"sig": {
@@ -288,12 +294,12 @@ func TestTheProofsFoundAreTheProofsRemoved(t *testing.T) {
 		}
 	}`
 
-	cred, err := credential.NewRDFCredentialFromJSON([]byte(legacySpelling), nil)
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(aliasedProof), nil)
 	require.NoError(t, err)
 
 	proofs, without, err := cred.RootProofs()
 	require.NoError(t, err)
-	require.Len(t, proofs, 1, "the legacy spelling names a root proof")
+	require.Len(t, proofs, 1, "a proof named by an alias is still a root proof")
 
 	form, err := without.CanonicalForm()
 	require.NoError(t, err)

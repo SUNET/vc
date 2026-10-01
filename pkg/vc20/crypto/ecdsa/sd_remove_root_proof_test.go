@@ -131,14 +131,31 @@ func TestSdRootProofsReportsWhyEveryCandidateWasSkipped(t *testing.T) {
 // kept its root proof while RootProofs removed it. The two then disagreed
 // about which quads the signature covers.
 func TestRemoveRootProofResolvesAliasedAndLegacyProofTerms(t *testing.T) {
-	t.Run("the legacy predicate, expanded", func(t *testing.T) {
+	t.Run("the predicate, expanded", func(t *testing.T) {
 		node := map[string]any{
-			"@id":                           "https://example.org/credential",
-			credential.ProofPredicateLegacy: map[string]any{"@id": "_:proof"},
+			"@id":                     "https://example.org/credential",
+			credential.ProofPredicate: map[string]any{"@id": "_:proof"},
 		}
 		stripped, err := removeRootProof(node, nil)
 		require.NoError(t, err)
-		require.NotContains(t, stripped, credential.ProofPredicateLegacy)
+		require.NotContains(t, stripped, credential.ProofPredicate)
+	})
+
+	t.Run("an IRI that is not a proof predicate", func(t *testing.T) {
+		// https://www.w3.org/2018/credentials#proof is defined by neither
+		// VC 1.1 nor VC 2.0 - both map "proof" to the security vocabulary.
+		// Treating it as a proof took an ordinary property out of the
+		// secured document, where its value could be changed or stripped
+		// without invalidating any signature.
+		const notAProof = "https://www.w3.org/2018/credentials#proof"
+		node := map[string]any{
+			"@id":     "https://example.org/credential",
+			notAProof: map[string]any{"@value": "an ordinary property"},
+		}
+		stripped, err := removeRootProof(node, nil)
+		require.NoError(t, err)
+		require.Contains(t, stripped, notAProof,
+			"an unrelated IRI stays in the document the signature covers")
 	})
 
 	t.Run("an aliased term", func(t *testing.T) {
@@ -290,4 +307,41 @@ func TestRemoveRootProofUsesTheRootsOwnContext(t *testing.T) {
 		"the ROOT's context decides, whatever order the nodes came in")
 	require.Contains(t, inner, "seal",
 		"and a node whose own context means something else keeps its field")
+}
+
+// TestRemoveRootProofIgnoresGraphWrappersAsCandidates: RootProofs excludes
+// named graph wrappers when selecting a root, so an UNREFERENCED named graph
+// is perfectly good secured content there. Offering it as a root candidate
+// here made the same document ambiguous, and SD signing and derivation failed
+// on it.
+func TestRemoveRootProofIgnoresGraphWrappersAsCandidates(t *testing.T) {
+	document := []any{
+		map[string]any{
+			"@id":                     "https://example.org/credential",
+			credential.ProofPredicate: []any{map[string]any{"@id": "_:rootproof"}},
+		},
+		map[string]any{
+			"@id":    "_:rootproof",
+			"@graph": []any{map[string]any{"@id": "_:p0"}},
+		},
+		// Referred to by nothing, and still not a candidate.
+		map[string]any{
+			"@id":    "_:loosegraph",
+			"@graph": []any{map[string]any{"@id": "_:x", "https://example.org/vocab#n": "kept"}},
+		},
+	}
+
+	stripped, err := removeRootProof(document, nil)
+	require.NoError(t, err, "a loose named graph is content, not a second root")
+
+	remaining := stripped.([]any)
+	var names []string
+	for _, entry := range remaining {
+		node := entry.(map[string]any)
+		id, _ := node["@id"].(string)
+		names = append(names, id)
+	}
+	require.NotContains(t, names, "_:rootproof", "the root's own proof graph goes")
+	require.Contains(t, names, "_:loosegraph", "an unrelated graph stays")
+	require.NotContains(t, remaining[0].(map[string]any), credential.ProofPredicate)
 }

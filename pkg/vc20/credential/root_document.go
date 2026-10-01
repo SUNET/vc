@@ -327,7 +327,7 @@ func ProofKeys(node map[string]any, context any, options *ld.JsonLdOptions) []st
 		}
 		// Already expanded: these ARE the predicates, whatever a context
 		// might say about other names.
-		if key == ProofPredicate || key == ProofPredicateLegacy {
+		if key == ProofPredicate {
 			keys = append(keys, key)
 			continue
 		}
@@ -338,7 +338,7 @@ func ProofKeys(node map[string]any, context any, options *ld.JsonLdOptions) []st
 			// REMAPS "proof" onto an ordinary predicate keeps it, which is
 			// what RootProofs does too - deleting it here would strip a
 			// field the signature covers.
-			if definition.ID == ProofPredicate || definition.ID == ProofPredicateLegacy {
+			if definition.ID == ProofPredicate {
 				keys = append(keys, key)
 			}
 			continue

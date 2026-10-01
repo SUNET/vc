@@ -318,10 +318,15 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any
 		deleteProofKeys(typed, contextFor(typed, context))
 		return typed, nil
 	case []any:
+		// Graph WRAPPERS are not root candidates. RootProofs excludes them
+		// when it selects a root, and an unreferenced named graph is
+		// perfectly good secured content there - offering it here made the
+		// same document ambiguous and SD signing and derivation fail on it.
+		// They stay in the document; they just do not stand for it.
 		nodes := make([]map[string]any, 0, len(typed))
 		for _, entry := range typed {
 			node, isNode := entry.(map[string]any)
-			if !isNode {
+			if !isNode || ld.IsGraph(node) {
 				continue
 			}
 			nodes = append(nodes, node)

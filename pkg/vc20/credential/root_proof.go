@@ -10,12 +10,16 @@ import (
 )
 
 // ProofPredicate is the expanded IRI of the link a document uses to attach a
-// proof to itself. ProofPredicateLegacy is the VC 1.1-era spelling some
-// documents still carry.
-const (
-	ProofPredicate       = "https://w3id.org/security#proof"
-	ProofPredicateLegacy = "https://www.w3.org/2018/credentials#proof"
-)
+// proof to itself.
+//
+// There is only one. VC 1.1 and VC 2.0 both map the term "proof" to
+// https://w3id.org/security#proof - checked against their published contexts,
+// not assumed. A second "VC 1.1-era" predicate used to be listed here,
+// https://www.w3.org/2018/credentials#proof, which neither version defines:
+// treating it as a proof meant any document using that IRI as an ORDINARY
+// property had it removed from the secured document, so its value could be
+// changed or stripped without invalidating any signature.
+const ProofPredicate = "https://w3id.org/security#proof"
 
 // RootProofs returns the proofs the document attaches to ITSELF, together
 // with the document those proofs secure - which is the document with exactly
@@ -60,7 +64,7 @@ func (rc *RDFCredential) RootProofs() (proofs []any, withoutRootProof *RDFCreden
 	// link without removing the graph would leave the proof in the document
 	// it is supposed to be absent from.
 	claimed := map[int]bool{}
-	for _, predicate := range []string{ProofPredicate, ProofPredicateLegacy} {
+	for _, predicate := range []string{ProofPredicate} {
 		attached, present := root[predicate]
 		if !present {
 			continue
