@@ -360,7 +360,14 @@ func (s *SdSuite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, op
 		return nil, fmt.Errorf("failed to marshal new credential: %w", err)
 	}
 
-	return credential.NewRDFCredentialFromJSON(newCredBytes, ldOpts)
+	// The SOURCE credential's options, not fresh defaults. A credential
+	// parsed with a private document loader, an expandContext, a base or a
+	// non-default processing mode is canonicalized under them - that is what
+	// the signature covers - so returning the signed document under default
+	// options hands back a credential that is read differently from the one
+	// that was signed, and Verify fails on this library's own output. The
+	// VC-v2 options stay where they belong, on proof-configuration hashing.
+	return credential.NewRDFCredentialFromJSON(newCredBytes, cred.ExpansionOptions())
 }
 
 // Verify verifies an ecdsa-sd-2023 proof the document attaches to ITSELF.
@@ -877,9 +884,7 @@ func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.
 	if err != nil {
 		return fmt.Errorf("failed to marshal modified credential: %w", err)
 	}
-	ldOpts = ld.NewJsonLdOptions("")
-	ldOpts.Algorithm = ld.AlgorithmURDNA2015
-	modCred, err := credential.NewRDFCredentialFromJSON(modBytes, ldOpts)
+	modCred, err := credential.NewRDFCredentialFromJSON(modBytes, cred.ExpansionOptions())
 	if err != nil {
 		return fmt.Errorf("failed to create modified credential: %w", err)
 	}
@@ -1257,7 +1262,7 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 		return nil, fmt.Errorf("failed to marshal derived credential: %w", err)
 	}
 
-	derivedCred, err := credential.NewRDFCredentialFromJSON(derivedBytes, ld.NewJsonLdOptions(""))
+	derivedCred, err := credential.NewRDFCredentialFromJSON(derivedBytes, cred.ExpansionOptions())
 	if err != nil {
 		return nil, err
 	}

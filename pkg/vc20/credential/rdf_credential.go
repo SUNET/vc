@@ -180,6 +180,21 @@ func (rc *RDFCredential) CanonicalForm() (string, error) {
 	processor := ld.NewJsonLdProcessor()
 	opts := rc.canonicalizationOptions()
 
+	// json-gold's Normalize builds FRESH options for its RDF step and carries
+	// only the base, the document loader and the processing mode across - the
+	// expandContext is dropped. A document that gets its terms from one then
+	// canonicalizes to NOTHING AT ALL: no error, no quads, and a signature
+	// over the empty string. Expand here, where the option IS honoured, and
+	// normalize the expanded form, which carries no context to lose.
+	if opts.ExpandContext != nil {
+		expanded, err := processor.Expand(jsonLdDoc, rc.expansionOptions())
+		if err != nil {
+			return "", fmt.Errorf("failed to expand JSON-LD under the credential's expandContext: %w", err)
+		}
+		jsonLdDoc = expanded
+		opts.ExpandContext = nil
+	}
+
 	normalized, err := processor.Normalize(jsonLdDoc, opts)
 	if err != nil {
 		return "", fmt.Errorf("failed to normalize JSON-LD: %w", err)

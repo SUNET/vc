@@ -1,7 +1,10 @@
 package eddsa
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"testing"
+	"time"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
 
@@ -78,6 +81,49 @@ func TestSignAnExpandedDocumentUsesTheAbsolutePredicate(t *testing.T) {
 
 	require.Len(t, rootProofsOf(t, signed), 1,
 		"the signed document attaches exactly one proof to itself")
+
+	verified, err := NewSuite().VerifyProof(signed, pub)
+	require.NoError(t, err, "a document Sign produced must verify")
+	require.NotNil(t, verified)
+}
+
+// TestSignPreservesTheCredentialsOptions: a credential parsed with an
+// expandContext gets its terms from the OPTIONS, not from the document. The
+// canonical form is computed under those options - that is what the signature
+// covers - but the signed document was handed back parsed with fresh defaults,
+// where the expandContext is gone and every term in it expands to nothing. So
+// Sign returned a credential that this library could not verify, from input it
+// had just signed. The same holds for a private document loader, a base, or a
+// non-default processing mode.
+func TestSignPreservesTheCredentialsOptions(t *testing.T) {
+	options := credential.NewJSONLDOptions("")
+	options.ExpandContext = map[string]any{
+		"@context": map[string]any{
+			"id":   "@id",
+			"note": "https://example.org/vocab#note",
+		},
+	}
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"id": "https://example.org/credential",
+		"note": "a term only the expandContext defines"
+	}`), options)
+	require.NoError(t, err)
+
+	canonical, err := cred.CanonicalForm()
+	require.NoError(t, err)
+	require.Contains(t, canonical, "https://example.org/vocab#note",
+		"the expandContext is what gives this document any triples at all")
+
+	signed, err := NewSuite().Sign(cred, priv, &SignOptions{
+		VerificationMethod: "did:example:signer#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
 
 	verified, err := NewSuite().VerifyProof(signed, pub)
 	require.NoError(t, err, "a document Sign produced must verify")

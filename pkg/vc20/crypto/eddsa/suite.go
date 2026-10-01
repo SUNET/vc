@@ -133,7 +133,14 @@ func (s *Suite) Sign(cred *credential.RDFCredential, key ed25519.PrivateKey, opt
 		return nil, fmt.Errorf("failed to marshal new credential: %w", err)
 	}
 
-	return credential.NewRDFCredentialFromJSON(newCredBytes, ldOpts)
+	// The SOURCE credential's options, not fresh defaults. A credential
+	// parsed with a private document loader, an expandContext, a base or a
+	// non-default processing mode is canonicalized under them - that is what
+	// the signature covers - so returning the signed document under default
+	// options hands back a credential that is read differently from the one
+	// that was signed, and Verify fails on this library's own output. The
+	// VC-v2 options stay where they belong, on proof-configuration hashing.
+	return credential.NewRDFCredentialFromJSON(newCredBytes, cred.ExpansionOptions())
 }
 
 // Verify verifies a credential using eddsa-rdfc-2022.

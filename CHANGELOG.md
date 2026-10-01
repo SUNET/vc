@@ -115,6 +115,22 @@
   verify — re-sign them. Credentials parsed with default options are
   unaffected.
 
+  The suites now return their signed and derived output parsed with the SOURCE
+  credential's options too, rather than fresh defaults — otherwise a credential
+  is signed under one RDF interpretation and handed back under another, and
+  `Sign` output fails `Verify`. The VC-v2 options stay where they belong, on
+  proof-configuration hashing.
+
+  **A credential whose terms come from an `expandContext` is canonicalized
+  under it.** json-gold's `Normalize` builds fresh options for its RDF step and
+  carries only the base, the document loader and the processing mode across, so
+  the `expandContext` was dropped and such a document canonicalized to
+  **nothing**: no error, no quads, and a Data Integrity signature over the empty
+  string — the same signature for every document of that shape. The document is
+  now expanded first, where the option is honoured, and the expanded form
+  normalized. **Credentials signed that way before this release carry a
+  meaningless proof** and must be re-signed.
+
   **A document whose root takes part in a reference cycle is refused at
   SIGNING and at VERIFICATION.** A presentation carrying a credential whose
   subject links back at it is the shape: it says which node it is about while

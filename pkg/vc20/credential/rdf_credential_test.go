@@ -1037,3 +1037,31 @@ func TestCanonicalFormHonoursTheCredentialsOptions(t *testing.T) {
 	require.Contains(t, canonicalLegacy, "the root's own",
 		"and the rest of the document is still there")
 }
+
+// TestCanonicalFormHonoursAnExpandContext: json-gold's Normalize builds FRESH
+// options for its RDF step and carries only the base, the document loader and
+// the processing mode across, so the expandContext is dropped. A document that
+// gets its terms from one therefore canonicalized to NOTHING - no error, no
+// quads, and a Data Integrity signature over the empty string, which is the
+// same signature for every such document.
+func TestCanonicalFormHonoursAnExpandContext(t *testing.T) {
+	options := NewJSONLDOptions("")
+	options.ExpandContext = map[string]any{
+		"@context": map[string]any{
+			"id":   "@id",
+			"note": "https://example.org/vocab#note",
+		},
+	}
+
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"id": "https://example.org/credential",
+		"note": "a term only the expandContext defines"
+	}`), options)
+	require.NoError(t, err)
+
+	canonical, err := cred.CanonicalForm()
+	require.NoError(t, err)
+	require.Contains(t, canonical, "https://example.org/vocab#note",
+		"the expandContext is what gives this document any triples at all")
+	require.Contains(t, canonical, "a term only the expandContext defines")
+}
