@@ -584,10 +584,12 @@ Alpine.data("app", () => ({
         }
         event.preventDefault();
         const url = event.currentTarget.href;
-        // Opened inside the click so a popup blocker still allows it; only
-        // used if the awaited POST fails, otherwise closed before we
-        // navigate the current tab.
-        const fallbackWindow = globalThis.open("", "_blank", "noopener");
+        // Opened inside the click so the browser still counts a live user
+        // activation when the fallback runs after the awaited fetch.
+        // No `noopener`: that feature makes window.open return null and
+        // then we would not be able to close or navigate the placeholder.
+        // Severed manually below (opener = null) before any navigation.
+        const fallbackWindow = globalThis.open("", "_blank");
         try {
             const res = await fetch(new URL("/verification/session-preference", baseUrl).toString(), {
                 method: "POST",
@@ -607,9 +609,11 @@ Alpine.data("app", () => ({
         } catch (err) {
             console.error("Failed to mark same-device flow, opening wallet in a new tab so this page can still redirect", err);
             if (fallbackWindow && !fallbackWindow.closed) {
+                try { fallbackWindow.opener = null; } catch { /* cross-origin after nav */ }
                 fallbackWindow.location.href = url;
             } else {
-                // Popup blocker denied the pre-opened tab; last-resort try.
+                // Popup blocker denied the pre-opened tab; last-resort try
+                // (likely blocked too, but worth attempting).
                 globalThis.open(url, "_blank", "noopener");
             }
         }

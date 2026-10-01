@@ -44,16 +44,14 @@ func (s *Service) endpointUIInteraction(ctx context.Context, c *gin.Context) (an
 		return nil, err
 	}
 
-	// Reuse hint priority: body wins over cookie. A body value is a client
-	// that remembers its own session (e.g. sessionStorage after a reload);
-	// the cookie is a shared per-origin fallback that a concurrent tab can
-	// silently overwrite. If neither is set, apiv1 mints a fresh id.
-	if request.SessionID == "" {
-		if cookieSessionID, ok := session.Get("session_id").(string); ok && cookieSessionID != "" {
-			request.SessionID = cookieSessionID
-		}
-	}
-
+	// Only the body is a reuse hint. The gin cookie is per-origin and
+	// shared across tabs, so a brand-new tab that has no sessionStorage
+	// but inherits a sibling's cookie would silently rejoin that
+	// sibling's authorization context - two tabs subscribed to the same
+	// wallet result, or (on a changed DCQL) the sibling's context
+	// replaced by a fresh one. The reuse path must be driven by the
+	// tab-scoped channel only; the cookie keeps its original purpose
+	// (SSE listener lookup, session-preference compat).
 	reply, err := s.apiv1.UIInteraction(ctx, request)
 	if err != nil {
 		return nil, err
@@ -73,19 +71,20 @@ func (s *Service) endpointUIInteraction(ctx context.Context, c *gin.Context) (an
 func (s *Service) endpointUINotify(ctx context.Context, c *gin.Context) (any, error) {
 	s.log.Debug("endpointUINotify")
 
-	// A ?session_id= query param wins over the cookie so a reloaded tab
-	// can subscribe to the id it remembers even if another tab in the
-	// same origin has meanwhile overwritten the cookie.
-	sessionID := c.Query("session_id")
-	if sessionID == "" {
-		session := sessions.Default(c)
-		if cookieSessionID, ok := session.Get("session_id").(string); ok {
-			sessionID = cookieSessionID
-		}
-	}
+	sessionID := resolveNotifySessionID(c)
 	if sessionID == "" {
 		s.log.Error(nil, "session_id not found in session")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id not found"})
+		return nil, nil
+	}
+
+	// Refuse to open a listener for an id the verifier does not know
+	// about. notify.Service.OpenListener would otherwise create a
+	// broadcaster entry per request, which an unauthenticated caller
+	// can turn into unbounded growth of the process-wide map.
+	if !s.apiv1.IsActiveAuthSession(ctx, sessionID) {
+		s.log.Debug("endpointUINotify unknown session_id", "sessionID", sessionID)
+		c.JSON(http.StatusNotFound, gin.H{"error": "unknown session_id"})
 		return nil, nil
 	}
 	s.log.Debug("notifyEndpoint", "sessionID", sessionID)
@@ -116,4 +115,19 @@ func (s *Service) endpointUINotify(ctx context.Context, c *gin.Context) (any, er
 	})
 
 	return nil, nil
+}
+
+// resolveNotifySessionID picks the session_id for /ui/notify. A
+// ?session_id= query param wins over the gin cookie session so a reloaded
+// tab (or a second tab that remembered its id in sessionStorage) can
+// rejoin its own authorization context even after another tab in the same
+// origin overwrote the shared cookie.
+func resolveNotifySessionID(c *gin.Context) string {
+	if id := c.Query("session_id"); id != "" {
+		return id
+	}
+	if cookieSessionID, ok := sessions.Default(c).Get("session_id").(string); ok {
+		return cookieSessionID
+	}
+	return ""
 }

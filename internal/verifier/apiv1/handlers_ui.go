@@ -460,11 +460,11 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	state := uuid.NewString()
 	requestObjectID := uuid.NewString()
 
-	// Use session ID from request if provided, otherwise generate new one
-	sessionID := req.SessionID
-	if sessionID == "" {
-		sessionID = uuid.NewString()
-	}
+	// Reuse declined: the hinted SessionID either was never valid or has
+	// been retired. Mint a fresh id rather than resurrecting the hint under
+	// a new (unrelated) authorization context, which would let a client
+	// keep an old session_id alive past its forfeit/expiry/completion.
+	sessionID := uuid.NewString()
 
 	// Collect all credential IDs from DCQL query
 	scopes := make([]string, 0, len(req.DCQLQuery.Credentials))
@@ -687,6 +687,21 @@ func isReusableAuthContext(authCtx *cache.AuthorizationContext) bool {
 		return false
 	}
 	if authCtx.ExpiresAt != 0 && authCtx.ExpiresAt <= time.Now().Unix() {
+		return false
+	}
+	return true
+}
+
+// IsActiveAuthSession reports whether sessionID names an authorization
+// context the verifier currently tracks. Used by /ui/notify to refuse to
+// open an SSE listener for an unknown id, which would otherwise let any
+// unauthenticated caller inflate notify.Service's broadcaster map.
+func (c *Client) IsActiveAuthSession(ctx context.Context, sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
+	if err != nil || authCtx == nil {
 		return false
 	}
 	return true

@@ -31,9 +31,10 @@ import (
 // inferring same-vs-cross device from SSE listener liveness races against
 // TCP teardown and reverse-proxy buffering, and misdetects native wallets
 // that never carry the tab's cookies. These tests exercise the resolution
-// of session_id from the gin cookie into UpdateSessionPreference, which is
-// the only channel the standalone verifier UI has (its JS does not know
-// the session id).
+// of session_id from the gin cookie into UpdateSessionPreference. The
+// standalone UI now sends the id explicitly in the body - the cookie is
+// kept as a legacy / storage-unavailable fallback and this suite covers
+// that fallback alongside the primary body-driven path.
 
 // sessionPrefApiv1 is a minimal Apiv1 implementation used to drive
 // endpointSessionPreference end-to-end. It delegates UpdateSessionPreference
@@ -167,10 +168,11 @@ func postSessionPreference(t *testing.T, engine *gin.Engine, cookies []*http.Coo
 	return w
 }
 
-// The standalone verifier UI does not know its session_id in JS; it relies
-// on the gin cookie session set by /ui/interaction. This endpoint must be
-// mounted under middleware that reads that cookie, or cookie-only callers
-// cannot commit the flag at all.
+// Legacy / storage-unavailable fallback: a caller that cannot send
+// session_id in the body (older build, sessionStorage blocked by
+// browser policy, or a bare probe) relies on the gin cookie session
+// written by /ui/interaction. This endpoint must stay mounted under
+// that middleware, or the fallback path cannot commit the flag.
 func TestEndpointSessionPreference_CookieFallback_CommitsFlag(t *testing.T) {
 	store := pkgcache.NewMemoryStore(15 * time.Minute)
 	engine := setupSessionPreferenceEngine(t, store)
@@ -262,6 +264,9 @@ func (unimplementedApiv1) UIInteraction(ctx context.Context, req *apiv1.UIIntera
 }
 func (unimplementedApiv1) UIMetadata(ctx context.Context) (*apiv1.UIMetadataReply, error) {
 	panic("UIMetadata not implemented in test")
+}
+func (unimplementedApiv1) IsActiveAuthSession(ctx context.Context, sessionID string) bool {
+	panic("IsActiveAuthSession not implemented in test")
 }
 func (unimplementedApiv1) GetDiscoveryMetadata(ctx context.Context) (*apiv1.DiscoveryMetadata, error) {
 	panic("GetDiscoveryMetadata not implemented in test")

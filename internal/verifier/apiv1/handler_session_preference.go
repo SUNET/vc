@@ -12,9 +12,13 @@ import (
 
 // UpdateSessionPreferenceRequest represents a request to update session display preference
 type UpdateSessionPreferenceRequest struct {
-	// SessionID may arrive in the JSON body (OIDC-OP flow, which knows its
-	// session id at template render time) or be injected by the HTTP layer
-	// from the gin session cookie (standalone verifier UI, which does not).
+	// SessionID is the authorization context this call targets. Callers
+	// supply it in the JSON body: the OIDC-OP flow has it from template
+	// render time; the standalone verifier UI gets it from the reply of
+	// /ui/interaction (also persisted in sessionStorage so it survives a
+	// reload). The HTTP layer falls back to the gin cookie session only
+	// when the body is empty - a legacy / storage-blocked compatibility
+	// path, not the normal channel.
 	SessionID             string `json:"session_id" validate:"omitempty,max=128,printascii"`
 	ShowCredentialDetails bool   `json:"show_credential_details"`
 	// WalletFollowsRedirect is optional. When non-nil it records that the
