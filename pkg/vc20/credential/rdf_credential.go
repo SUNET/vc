@@ -74,15 +74,24 @@ type securedDocumentAnswer struct {
 func NewRDFCredentialFromJSON(jsonData []byte, options *ld.JsonLdOptions) (*RDFCredential, error) {
 	processor := ld.NewJsonLdProcessor()
 
+	// A COPY, never the caller's struct: this function has no business
+	// rewriting options its caller may still be using elsewhere.
+	//
+	// Format and InputFormat describe a call whose input or output is
+	// N-Quads. This one's input is JSON, always. A caller reusing one option
+	// set across both kinds of work left them set, and ToRDF then handed back
+	// a serialized string instead of a dataset, or read the JSON as N-Quads -
+	// so a credential that parses everywhere else failed to parse here.
 	if options == nil {
 		options = ld.NewJsonLdOptions("")
-		options.DocumentLoader = GetGlobalLoader()
 	} else {
-		if options.DocumentLoader == nil {
-			options.DocumentLoader = GetGlobalLoader()
-		} else if _, ok := options.DocumentLoader.(*ld.DefaultDocumentLoader); ok {
-			options.DocumentLoader = GetGlobalLoader()
-		}
+		copied := *options
+		options = &copied
+	}
+	options.Format = ""
+	options.InputFormat = ""
+	if _, isDefault := options.DocumentLoader.(*ld.DefaultDocumentLoader); options.DocumentLoader == nil || isDefault {
+		options.DocumentLoader = GetGlobalLoader()
 	}
 
 	// Parse JSON to any

@@ -407,3 +407,39 @@ func TestSdVerifyStillRefusesAnUnstableRoot(t *testing.T) {
 	require.ErrorContains(t, err, "refers to that node",
 		"the stability check must still run, wherever it lives")
 }
+
+// TestRemoveRootProofKeepsEmbeddedProofsUnderAnAliasedID: root selection
+// resolves any alias of @id, but the fragment comparison here read only the
+// spellings @id and id. A flattened document aliasing it returned "" for the
+// root AND for every other node, so every node compared equal to the root and
+// the embedded credential's proof was removed along with the root's - the
+// exact failure this change exists to remove, reached through the alias.
+func TestRemoveRootProofKeepsEmbeddedProofsUnderAnAliasedID(t *testing.T) {
+	context := map[string]any{
+		"identifier": "@id",
+		"carries":    map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+		"proof":      map[string]any{"@id": "https://w3id.org/security#proof", "@type": "@id"},
+	}
+
+	data := []any{
+		map[string]any{
+			"identifier": "https://example.org/presentation",
+			"carries":    "https://example.org/credential",
+			"proof":      map[string]any{"type": "DataIntegrityProof", "proofValue": "zROOT"},
+		},
+		map[string]any{
+			"identifier": "https://example.org/credential",
+			"proof":      map[string]any{"type": "DataIntegrityProof", "proofValue": "zEMBEDDED"},
+		},
+	}
+
+	stripped, err := removeRootProofUnder(data, context, nil)
+	require.NoError(t, err)
+
+	encoded, err := json.Marshal(stripped)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "zROOT",
+		"the root's own proof is the one removed")
+	require.Contains(t, string(encoded), "zEMBEDDED",
+		"and the embedded credential's proof is content the signature covers")
+}

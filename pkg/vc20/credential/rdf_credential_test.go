@@ -1065,3 +1065,26 @@ func TestCanonicalFormHonoursAnExpandContext(t *testing.T) {
 		"the expandContext is what gives this document any triples at all")
 	require.Contains(t, canonical, "a term only the expandContext defines")
 }
+
+// TestCanonicalFormIgnoresAStaleInputFormat: InputFormat tells the processor
+// its input is N-Quads. A caller reusing one option set across both kinds of
+// work leaves it set, and the credential - parsed from JSON, and still JSON
+// when it reaches Normalize - was then read as N-Quads. Canonicalizing under
+// the credential's own options is what exposed this; the dataset branch, whose
+// input really is N-Quads, sets it back explicitly.
+func TestCanonicalFormIgnoresAStaleInputFormat(t *testing.T) {
+	options := NewJSONLDOptions("")
+	options.InputFormat = "application/n-quads"
+	options.Format = "application/n-quads"
+
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": {"id": "@id", "note": "https://example.org/vocab#note"},
+		"id": "https://example.org/credential",
+		"note": "read as JSON-LD, not as N-Quads"
+	}`), options)
+	require.NoError(t, err)
+
+	canonical, err := cred.CanonicalForm()
+	require.NoError(t, err, "the document is JSON-LD however the options were last used")
+	require.Contains(t, canonical, "read as JSON-LD, not as N-Quads")
+}

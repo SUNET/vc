@@ -465,11 +465,18 @@ func RootOfCompactedNodes(nodes []map[string]any, context any, options *ld.JsonL
 	return merged[index], nil
 }
 
-// CompactNodeID returns a node's identifier under either spelling, so a caller
-// holding the original entries can find every fragment of the node
+// CompactNodeID returns a node's identifier as the document writes it, so a
+// caller holding the original entries can find every fragment of the node
 // RootOfCompactedNodes selected.
-func CompactNodeID(node map[string]any) string {
-	return compactNodeID(node)
+//
+// It takes the context because selection does: JSON-LD lets a context alias
+// @id to any term, and reading only the spellings @id and id returned "" for
+// every node of a document using one. A caller comparing those answers then
+// found every node equal to the root - and in SD proof removal that deleted
+// the embedded credentials' proofs along with the root's, which is the exact
+// failure this change exists to remove.
+func CompactNodeID(node map[string]any, context any, options *ld.JsonLdOptions) string {
+	return nodeIDUnder(node, composedContext(node, context, context != nil), options)
 }
 
 // coalesceCompactedByID merges entries sharing an identifier, on COPIES - the

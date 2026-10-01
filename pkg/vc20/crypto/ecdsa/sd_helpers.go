@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math/big"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -356,11 +357,41 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any
 		// The ROOT's own context, not whichever node happened to be first:
 		// a flattened array may give each node its own, and reordering
 		// top-level nodes does not change the RDF.
-		rootID := credential.CompactNodeID(selected)
+		rootID := credential.CompactNodeID(selected, context, options)
+
+		var targets []map[string]any
 		for _, node := range nodes {
-			if credential.CompactNodeID(node) != rootID {
+			id := credential.CompactNodeID(node, context, options)
+			if rootID != "" {
+				if id == rootID {
+					targets = append(targets, node)
+				}
 				continue
 			}
+			// An UNIDENTIFIED root cannot have been split across
+			// fragments - fragments are joined by identifier - so exactly
+			// one entry is it, and selection returned a clone of that one.
+			if id == "" && reflect.DeepEqual(node, selected) {
+				targets = append(targets, node)
+			}
+		}
+
+		// INVARIANT CHECKS, not reachable paths: selection refuses a
+		// document with two unidentified top-level nodes, and the node it
+		// returns is a clone of one of these. They are here so that a
+		// future change to selection cannot silently widen this removal -
+		// which, applied to the wrong node or to all of them, is exactly
+		// the embedded-proof stripping this change exists to prevent.
+		// Removing from none is no better: the signature would then cover a
+		// document the verifier does not reproduce.
+		if len(targets) == 0 {
+			return nil, fmt.Errorf("a document holds no entry for the node %q it is about", rootID)
+		}
+		if rootID == "" && len(targets) != 1 {
+			return nil, fmt.Errorf("a document holds %d unidentified nodes indistinguishable from the one it is about, so whose proof is the root's cannot be decided", len(targets))
+		}
+
+		for _, node := range targets {
 			deleteProofKeys(node, contextFor(node, context))
 		}
 		return withoutNamedGraphs(typed, orphaned), nil

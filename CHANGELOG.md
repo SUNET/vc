@@ -7,12 +7,17 @@
 - **Data Integrity proofs now secure the document they are attached to.**
   All three cryptosuites — `eddsa-rdfc-2022`, `ecdsa-rdfc-2019` and
   `ecdsa-sd-2023` — used to remove EVERY proof in the graph when
-  canonicalizing, where the specification removes only the proof being
-  created or verified. A presentation's signature therefore did not
-  cover the issuer proof of the credential it carried, so that proof could be
-  stripped or swapped with the presentation still verifying. Only the root's
-  own proofs are removed now, and an embedded credential's proof is part of
-  the document the presentation secures.
+  canonicalizing. A presentation's signature therefore did not cover the issuer
+  proof of the credential it carried, so that proof could be stripped or
+  swapped with the presentation still verifying.
+
+  What is removed now is **the root's entire proof set** — every proof the
+  document attaches to ITSELF, not only the one being created or verified.
+  That is what a proof set means: each of its proofs secures the same
+  unsecured document, so several parties can sign one document independently
+  and each signature stays valid as the others are added or removed. Proofs
+  anywhere else are left exactly where they are, so an embedded credential's
+  issuer proof is part of the document the presentation secures.
 
   The proof to verify is also read off the document rather than searched for
   or inferred from the RDF reference graph: `Sign` attaches its proof to the
@@ -103,6 +108,19 @@
   before they read as several nodes and a perfectly unambiguous document was
   refused for holding "more than one node nothing refers to". Affects
   `ecdsa-sd-2023` derivation and signing of containers only.
+
+  **`credential.CompactNodeID` takes the document context.** It read only the
+  spellings `@id` and `id` while root selection resolved any alias, so a
+  flattened document aliasing `@id` returned `""` for the root AND for every
+  other node — and `ecdsa-sd-2023` proof removal, comparing those answers,
+  found every node equal to the root and stripped the embedded credentials'
+  proofs along with the root's. The exact failure this release exists to
+  remove, reached through an alias. **Signature change:**
+  `CompactNodeID(node, context, options)`.
+
+  Canonicalization also no longer inherits a stale `Format` or `InputFormat`
+  from a reused option set — both describe a call whose input or output is
+  N-Quads, and a credential's is JSON.
 
   **An explicit `"@context": null` resets the `expandContext` too.** It is a
   RESET, and it clears everything before it — measured, the same document

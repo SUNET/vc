@@ -256,14 +256,19 @@ func (rc *RDFCredential) ExpansionOptions() *ld.JsonLdOptions {
 // parsed successfully and then expanded differently - or not at all - on
 // every Sign and Verify, with ids resolving against a different base.
 //
-// A copy, and with Format cleared: Format tells the processor its INPUT is
-// N-Quads, which is true of the call that sets it and not of this one.
+// A copy, and with Format and InputFormat cleared: both describe a call whose
+// input is N-Quads, which this one's is not. A caller reusing one option set
+// across both kinds of work left InputFormat set, and the credential - parsed
+// from JSON, and still JSON here - was then handed to Normalize to be read as
+// N-Quads. The dataset branch of CanonicalForm, whose input really is N-Quads,
+// sets it back explicitly.
 func (rc *RDFCredential) expansionOptions() *ld.JsonLdOptions {
 	if rc.options == nil {
 		return NewJSONLDOptions("")
 	}
 	copied := *rc.options
 	copied.Format = ""
+	copied.InputFormat = ""
 	if copied.DocumentLoader == nil {
 		copied.DocumentLoader = GetGlobalLoader()
 	}
