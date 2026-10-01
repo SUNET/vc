@@ -559,7 +559,39 @@ func (rc *RDFCredential) OriginalJSON() string {
 
 // Dataset returns the underlying RDF dataset
 func (rc *RDFCredential) Dataset() *ld.RDFDataset {
+	// Handing out the LIVE dataset voids every memoized answer.
+	//
+	// The proof set, the document hash and the root-scoped document are pure
+	// functions of the document, and this is the one way the document can
+	// change underneath them. A caller that mutates what it gets back would
+	// otherwise leave a cached hash in place, and a later verification would
+	// skip the root-stability check and authenticate state that is no longer
+	// what it checked.
+	//
+	// There is no way to tell a reader from a mutator from here, so this
+	// assumes the worse one. A caller that only reads pays one recomputation;
+	// the alternative is a cache this package cannot tell has gone wrong.
+	rc.invalidate()
 	return rc.dataset
+}
+
+// invalidate clears every memoized answer. Each is a pure function of the
+// document, so the only thing that can make one wrong is the document
+// changing underneath it - and the memos exist precisely so that the
+// expensive parts of verification run once, which is also what makes a stale
+// one dangerous rather than merely slow.
+func (rc *RDFCredential) invalidate() {
+	rc.securedMu.Lock()
+	rc.secured = nil
+	rc.securedMu.Unlock()
+
+	rc.compactedMu.Lock()
+	rc.compactedProofs = nil
+	rc.compactedMu.Unlock()
+
+	rc.rootScopedMu.Lock()
+	rc.rootScoped = nil
+	rc.rootScopedMu.Unlock()
 }
 
 // Context returns the @context from the original JSON
@@ -597,6 +629,11 @@ func (rc *RDFCredential) NQuads() (string, error) {
 // in the default graph instead of a named graph when @context: null is used in the definition.
 // This function moves the VC quads to a new named graph to match the expected structure.
 func (rc *RDFCredential) NormalizeVerifiableCredentialGraph() error {
+	// This REWRITES the dataset, so every memoized answer about the document
+	// is void from here on. Deferred rather than placed at the mutation, so
+	// a later edit to this function cannot return without it.
+	defer rc.invalidate()
+
 	if rc.dataset == nil {
 		return fmt.Errorf("RDF dataset is nil")
 	}

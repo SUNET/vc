@@ -109,6 +109,16 @@
   refused for holding "more than one node nothing refers to". Affects
   `ecdsa-sd-2023` derivation and signing of containers only.
 
+  **`RDFCredential.Dataset()` drops the credential's memoized answers.**
+  Verification memoizes the proof set, the document hash and the root-scoped
+  document, and those are pure functions of the document — but `Dataset()`
+  hands out the LIVE dataset and `NormalizeVerifiableCredentialGraph()`
+  rewrites it. A stale memo is not merely out of date: it leaves a cached hash
+  in place, so a later verification skips the root-stability check and
+  authenticates state that is no longer what it checked. Both now clear every
+  memo. A caller that only reads the dataset pays one recomputation, since
+  nothing here can tell a reader from a mutator.
+
   **A proof reference is resolved against top-level NODES as well as named
   graphs.** The VC v2 context declares `proof` with `"@container": "@graph"`,
   so a proof becomes a named graph once serialized through RDF. A document

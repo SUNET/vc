@@ -977,3 +977,66 @@ func TestProofKeyForHonoursANullContextReset(t *testing.T) {
 	require.Equal(t, ProofPredicate, ProofKeyFor(resetWithProof, resetWithProof["@context"], options),
 		"but a new proof goes under the predicate, not beside one that expands to nothing")
 }
+
+// memoizedCredential is a document with a proof of its own, so all three
+// memoized answers have something to compute.
+func memoizedCredential(t *testing.T) *RDFCredential {
+	t.Helper()
+
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "https://example.org/credential",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"},
+		"proof": {
+			"type": "DataIntegrityProof",
+			"cryptosuite": "eddsa-rdfc-2022",
+			"created": "2024-01-01T00:00:00Z",
+			"verificationMethod": "did:example:issuer#key-1",
+			"proofPurpose": "assertionMethod",
+			"proofValue": "z2V1"
+		}
+	}`), nil)
+	require.NoError(t, err)
+	return cred
+}
+
+// TestMemoizedAnswersAreDroppedWhenTheDatasetIsHandedOut: the memos assume
+// the document does not change, and the document CAN change - Dataset()
+// returns the live dataset and NormalizeVerifiableCredentialGraph rewrites it.
+// A stale memo is not merely out of date: it leaves a cached document hash in
+// place, so a later verification skips the root-stability check and
+// authenticates state that is no longer what it checked.
+func TestMemoizedAnswersAreDroppedWhenTheDatasetIsHandedOut(t *testing.T) {
+	t.Run("Dataset", func(t *testing.T) {
+		cred := memoizedCredential(t)
+
+		first, _, err := RootScopedDocument(cred)
+		require.NoError(t, err)
+		again, _, err := RootScopedDocument(cred)
+		require.NoError(t, err)
+		require.Same(t, first, again, "memoized while nothing has touched the document")
+
+		require.NotNil(t, cred.Dataset())
+
+		afterwards, _, err := RootScopedDocument(cred)
+		require.NoError(t, err)
+		require.NotSame(t, first, afterwards,
+			"handing out the mutable dataset voids the answer, because this cannot see what the caller does with it")
+	})
+
+	t.Run("NormalizeVerifiableCredentialGraph", func(t *testing.T) {
+		cred := memoizedCredential(t)
+
+		proofs, err := CompactedRootProofs(cred)
+		require.NoError(t, err)
+		require.Len(t, proofs, 1, "the fixture must have an answer worth caching")
+		require.NotNil(t, cred.compactedProofs, "and it must be cached, or this proves nothing")
+
+		require.NoError(t, cred.NormalizeVerifiableCredentialGraph())
+		require.Nil(t, cred.compactedProofs, "rewriting the dataset voids it")
+		require.Nil(t, cred.secured)
+		require.Nil(t, cred.rootScoped)
+	})
+}
