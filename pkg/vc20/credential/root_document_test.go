@@ -504,3 +504,45 @@ func TestRootCompactedDocumentKeepsBothContexts(t *testing.T) {
 	require.Contains(t, string(encoded), "https://example.org/vocab#note",
 		"the node's own definitions still produce their triples")
 }
+
+// TestRootCompactedDocumentIgnoresASelfLinkWithAContext: a node that names
+// ITSELF is still the node nothing ELSE refers to. Collecting references into
+// one set lost which node supplied each, so a self-link marked the root as
+// referenced and the document read as rootless - while the no-context
+// fallback, which tracks the source, got it right. Adding a context changed
+// which node the document was about, which is the one thing root selection
+// must never do.
+func TestRootCompactedDocumentIgnoresASelfLinkWithAContext(t *testing.T) {
+	var context any
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id": "@id",
+		"note": "https://example.org/vocab#note",
+		"about": {"@id": "https://example.org/vocab#about", "@type": "@id"},
+		"carries": {"@id": "https://example.org/vocab#carries", "@type": "@id"}
+	}`), &context))
+
+	graph := []any{
+		// A property of its own, or expansion drops it as free-floating and
+		// the expanded reading is never exercised at all.
+		map[string]any{"id": "https://example.org/other", "note": "kept"},
+		map[string]any{
+			"id":      "https://example.org/credential",
+			"about":   "https://example.org/credential",
+			"carries": "https://example.org/other",
+		},
+	}
+
+	withContext, err := RootCompactedDocument(map[string]any{
+		"@context": context,
+		"@graph":   graph,
+	}, "", nil)
+	require.NoError(t, err, "a self-link is not another node referring to the root")
+	require.Equal(t, "https://example.org/credential", withContext["id"])
+
+	// And the contextless reading of the same shape agrees, which is the
+	// property that matters: a context must not move the root.
+	withoutContext, err := RootCompactedDocument(map[string]any{"@graph": graph}, "", nil)
+	require.NoError(t, err)
+	require.Equal(t, withContext["id"], withoutContext["id"],
+		"both readings must choose the same node")
+}

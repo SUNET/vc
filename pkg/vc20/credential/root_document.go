@@ -228,7 +228,7 @@ func rootIndexOfCompactedNodes(nodes []map[string]any, context any, options *ld.
 	// marked a node referenced because some unrelated literal happened to
 	// equal its identifier, and the document was then refused - or a
 	// different node picked - for saying nothing of the kind.
-	referenced, resolved := referencedIDs(nodes, context, options)
+	referencedBy, resolved := referencedIDs(nodes, context, options)
 
 	// The ids to LOOK UP with. After expansion the referenced set holds
 	// absolute IRIs, while a node's own id is still spelled as the document
@@ -247,7 +247,7 @@ func rootIndexOfCompactedNodes(nodes []map[string]any, context any, options *ld.
 		id := compactNodeID(node)
 		// A node with no identifier cannot be referred to, so it is a
 		// candidate like any other unreferenced node.
-		if id != "" && isReferenced(nodes, i, lookup[i], referenced, resolved) {
+		if id != "" && isReferenced(nodes, i, lookup[i], referencedBy, resolved) {
 			continue
 		}
 		if rootIndex >= 0 {
@@ -492,7 +492,7 @@ func IsBareGraphContainer(node map[string]any) bool {
 // expansion succeeded; when it did not - no context to resolve against, or one
 // that will not load - the caller falls back to scanning strings, which is
 // imprecise but never misses a reference.
-func referencedIDs(nodes []map[string]any, context any, options *ld.JsonLdOptions) (map[string]bool, bool) {
+func referencedIDs(nodes []map[string]any, context any, options *ld.JsonLdOptions) ([]map[string]bool, bool) {
 	// Expanded when ANYTHING has a context to resolve against - the shared
 	// one, or a node's own. A top-level compact array has no shared context,
 	// but its nodes may each carry one, and returning early on the shared
@@ -529,10 +529,25 @@ func referencedIDs(nodes []map[string]any, context any, options *ld.JsonLdOption
 	if err != nil {
 		return nil, false
 	}
+	// PER SOURCE NODE, so a node naming itself is not counted as referring
+	// to itself. One combined set lost that, and the string-scan fallback
+	// did not - so adding a context to a document changed which node it was
+	// about, which is the one thing root selection must never do.
+	//
+	// The alignment has to hold for that: expanding a @graph of N nodes
+	// should give N entries back. When it does not - a node dropped as
+	// free-floating, say - there is no way to say which node supplied a
+	// reference, and the scan is the honest answer.
+	if len(expanded) != len(nodes) {
+		return nil, false
+	}
 
-	referenced := map[string]bool{}
-	collectReferencedIDs(expanded, referenced, true)
-	return referenced, true
+	referencedBy := make([]map[string]bool, len(nodes))
+	for i, entry := range expanded {
+		referencedBy[i] = map[string]bool{}
+		collectReferencedIDs(entry, referencedBy[i], true)
+	}
+	return referencedBy, true
 }
 
 // collectReferencedIDs walks expanded JSON-LD adding every @id that appears as
@@ -563,10 +578,16 @@ func collectReferencedIDs(value any, into map[string]bool, atNodeRoot bool) {
 }
 
 // isReferenced answers from the expanded reading when there was one, and from
-// the string scan otherwise.
-func isReferenced(nodes []map[string]any, skip int, id string, referenced map[string]bool, resolved bool) bool {
+// the string scan otherwise. Either way a node's OWN references do not count:
+// a node that names itself is still the node nothing ELSE refers to.
+func isReferenced(nodes []map[string]any, skip int, id string, referencedBy []map[string]bool, resolved bool) bool {
 	if resolved {
-		return referenced[id]
+		for source, references := range referencedBy {
+			if source != skip && references[id] {
+				return true
+			}
+		}
+		return false
 	}
 	return referencedByAnyOther(nodes, skip, id)
 }
