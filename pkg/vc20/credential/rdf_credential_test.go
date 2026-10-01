@@ -1173,3 +1173,102 @@ func TestToCompactJSONCarriesGeneralizedRdf(t *testing.T) {
 	require.NoError(t, err, "a generalized-RDF dataset must still compact")
 	require.Contains(t, string(compact), "a statement made through a blank node predicate")
 }
+
+// TestCanonicalFormDoesNotMutateTheCredentialsDataset: json-gold's
+// normalization is not read-only - it writes each quad's Graph field in place.
+// Canonicalizing the credential's OWN dataset therefore rewrote the document
+// while describing it, two concurrent canonicalizations raced on those writes,
+// and a credential from ProofObject - which shares its quads with the one it
+// came from - rewrote that one's quads too.
+func TestCanonicalFormDoesNotMutateTheCredentialsDataset(t *testing.T) {
+	source, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "https://example.org/credential",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"},
+		"proof": {
+			"type": "DataIntegrityProof",
+			"cryptosuite": "eddsa-rdfc-2022",
+			"created": "2024-01-01T00:00:00Z",
+			"verificationMethod": "did:example:issuer#key-1",
+			"proofPurpose": "assertionMethod",
+			"proofValue": "z2V1"
+		}
+	}`), nil)
+	require.NoError(t, err)
+
+	// The dataset path, which is the one that held the credential's own quads.
+	fromDataset := &RDFCredential{
+		dataset:   source.dataset,
+		processor: ld.NewJsonLdProcessor(),
+	}
+
+	var named int
+	before := map[*ld.Quad]string{}
+	for name, quads := range fromDataset.dataset.Graphs {
+		if name != "@default" {
+			named += len(quads)
+		}
+		for _, quad := range quads {
+			graph := ""
+			if quad.Graph != nil {
+				graph = quad.Graph.GetValue()
+			}
+			before[quad] = graph
+		}
+	}
+	require.NotZero(t, named,
+		"the fixture must have a quad in a NAMED graph, which is the only case normalization rewrites")
+
+	canonical, err := fromDataset.CanonicalForm()
+	require.NoError(t, err)
+	require.NotEmpty(t, canonical)
+
+	for quad, was := range before {
+		now := ""
+		if quad.Graph != nil {
+			now = quad.Graph.GetValue()
+		}
+		require.Equal(t, was, now, "canonicalizing a document must not rewrite it")
+	}
+}
+
+// TestCanonicalFormIsSafeConcurrently: the same defect seen from the other
+// side. Worth its own test because the mutation above is only visible when
+// something else looks at the quads, while this one is a data race whether or
+// not anybody reads the result.
+func TestCanonicalFormIsSafeConcurrently(t *testing.T) {
+	source, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "https://example.org/credential",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"proof": {"type": "DataIntegrityProof", "cryptosuite": "eddsa-rdfc-2022", "proofValue": "z2V1"}
+	}`), nil)
+	require.NoError(t, err)
+
+	fromDataset := &RDFCredential{
+		dataset:   source.dataset,
+		processor: ld.NewJsonLdProcessor(),
+	}
+
+	results := make(chan string, 8)
+	for i := 0; i < 8; i++ {
+		go func() {
+			canonical, err := fromDataset.CanonicalForm()
+			if err != nil {
+				results <- "error: " + err.Error()
+				return
+			}
+			results <- canonical
+		}()
+	}
+
+	first := <-results
+	require.NotEmpty(t, first)
+	require.NotContains(t, first, "error:")
+	for i := 1; i < 8; i++ {
+		require.Equal(t, first, <-results, "every caller sees the same canonical form")
+	}
+}

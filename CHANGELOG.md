@@ -139,6 +139,13 @@
   under their own active contexts first; blank nodes are compared as written,
   since a label is the only identity they have.
 
+  **`CanonicalForm` no longer rewrites the document it describes.** json-gold's
+  normalization writes each quad's `Graph` field in place, so canonicalizing
+  the credential's own dataset mutated it — two concurrent canonicalizations
+  raced on those writes, and a credential from `ProofObject`, which shares its
+  quads with the one it came from, rewrote that one's quads too. It now
+  normalizes a clone.
+
   **`@graph` is resolved through the context too.** JSON-LD lets a context
   alias `@graph` like any other keyword, and every "is this a graph" check
   keyed on the literal spelling — so a document aliasing it had its container

@@ -151,7 +151,14 @@ func (rc *RDFCredential) CanonicalForm() (string, error) {
 			// algorithm. Serializing to N-Quads and parsing them back
 			// dropped any quad with a blank node in predicate position,
 			// which is not valid N-Quads however the dataset was built.
-			normalized, err := ld.NewJsonLdApi().Normalize(rc.dataset, rc.canonicalizationOptions())
+			//
+			// On a CLONE, because normalization is not read-only: it writes
+			// each quad's Graph field in place. Run against the credential's
+			// own dataset it would rewrite the document while describing it,
+			// two concurrent canonicalizations would race on those writes,
+			// and a credential built by ProofObject - which shares its quads
+			// with the one it came from - would rewrite that one's too.
+			normalized, err := ld.NewJsonLdApi().Normalize(cloneDataset(rc.dataset), rc.canonicalizationOptions())
 			if err != nil {
 				return "", fmt.Errorf("failed to normalize dataset: %w", err)
 			}
@@ -199,6 +206,9 @@ func (rc *RDFCredential) CanonicalForm() (string, error) {
 		return "", fmt.Errorf("unexpected RDF conversion result: %T", rdf)
 	}
 
+	// No clone here: this dataset was just built by ToRDF above, is held by
+	// nothing else, and is discarded after. The branch above has to clone
+	// because the dataset there belongs to the credential.
 	normalized, err := ld.NewJsonLdApi().Normalize(dataset, rc.canonicalizationOptions())
 	if err != nil {
 		return "", fmt.Errorf("failed to normalize JSON-LD: %w", err)
