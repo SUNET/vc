@@ -71,8 +71,23 @@
   credential an `id` and referring to it rather than nesting the link back.
   The error names the document rather than the serialization.
 
-  The same applies to a signed document whose root is an unnamed node that
-  something else refers to: verification refuses it, not only signing.
+  Three further shapes are refused on BOTH paths for the same reason — the
+  document would be about one node while compact and another once serialized
+  through RDF, so a proof on one would be read as the other's. A document
+  whose root is an unnamed node that something else refers to; one whose root
+  is unnamed and which uses `@reverse`; and one with no single top-level node
+  that nothing refers to, which includes two such nodes as well as none. Each
+  error names the document rather than the serialization. **Documents of these
+  shapes signed before this release no longer verify.**
+
+  **A document may attach at most 32 proofs to itself.** Verification refuses
+  more before checking any signature — the list is read off the document, so
+  its length is the sender's choice, and each candidate costs a JSON-LD
+  canonicalization and a signature check on input nobody has authenticated
+  yet. Signing refuses to add the 33rd for the same reason, so the limit
+  cannot be reached by accident. A real proof set is a handful of signers; a
+  previously signed document carrying more than 32 stops verifying and has to
+  be re-issued with fewer.
 
 - **Unresolvable auth scopes now fail at startup**: every scope listed in an `auth_scopes` entry must name a configured `credential_metadata` scope. A scope that names none previously started fine and produced a DCQL query no wallet could satisfy, failing only after the user had already been sent to their wallet; it is now rejected at config load, so a deployment carrying one will stop starting.
 
