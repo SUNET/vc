@@ -514,15 +514,43 @@ func nodeContext(node map[string]any, context any, options *ld.JsonLdOptions) *l
 // activeContext parses a document's context, or returns nil when there is
 // none to parse or it will not load.
 func activeContext(context any, options *ld.JsonLdOptions) *ld.Context {
-	if context == nil {
-		return nil
-	}
 	if options == nil {
 		options = NewJSONLDOptions("")
 	}
-	active, err := ld.NewContext(nil, options).Parse(context)
-	if err != nil {
+	// Either one is enough to resolve a name against. Returning early on an
+	// absent document context skipped ExpandContext entirely, which is the
+	// case this exists for.
+	if context == nil && options.ExpandContext == nil {
 		return nil
+	}
+	// From ExpandContext first, which is what json-gold applies before a
+	// document's own. RootProofs expands under these options, so ignoring
+	// it here made term resolution disagree with the expansion it is
+	// supposed to match - and an external context aliasing "proof" would
+	// then have signing and SD proof removal act on a different member.
+	active := ld.NewContext(nil, options)
+	if options.ExpandContext != nil {
+		expandContext := options.ExpandContext
+		if outer, isMap := expandContext.(map[string]any); isMap {
+			if inner, present := outer["@context"]; present {
+				expandContext = inner
+			}
+		}
+		parsed, err := active.Parse(expandContext)
+		if err != nil {
+			return nil
+		}
+		active = parsed
+	}
+
+	// Only when there IS one: Parse(nil) is a context reset, which would
+	// throw away the expand context just applied.
+	if context != nil {
+		parsed, err := active.Parse(context)
+		if err != nil {
+			return nil
+		}
+		active = parsed
 	}
 	return active
 }

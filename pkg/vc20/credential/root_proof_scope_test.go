@@ -396,3 +396,36 @@ func TestSecuredDocumentSurvivesConcurrentVerification(t *testing.T) {
 			"every reader must see the same proof, however many read at once")
 	}
 }
+
+// TestRootProofsCountsADuplicatedGraphOnce: the same named proof graph may be
+// referenced more than once, and duplicate references produce the same RDF
+// triple. Counting each occurrence as its own proof could push a document past
+// MaxRootProofs on a serialization detail the signed RDF does not have.
+func TestRootProofsCountsADuplicatedGraphOnce(t *testing.T) {
+	document := []any{
+		map[string]any{
+			"@id": "https://example.org/credential",
+			ProofPredicate: []any{
+				map[string]any{"@id": "_:proofgraph"},
+				map[string]any{"@id": "_:proofgraph"},
+			},
+		},
+		map[string]any{
+			"@id": "_:proofgraph",
+			"@graph": []any{map[string]any{
+				"@id":   "_:p0",
+				"@type": []any{"https://w3id.org/security#DataIntegrityProof"},
+			}},
+		},
+	}
+
+	raw, err := json.Marshal(document)
+	require.NoError(t, err)
+	cred, err := NewRDFCredentialFromJSON(raw, nil)
+	require.NoError(t, err)
+
+	proofs, _, err := cred.RootProofs()
+	require.NoError(t, err)
+	require.Len(t, proofs, 1,
+		"two references to one graph are one proof, not two")
+}

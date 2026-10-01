@@ -622,3 +622,29 @@ func TestRootCompactedDocumentKeepsExistingIncluded(t *testing.T) {
 	require.Contains(t, string(encoded), "carried by the root")
 	require.Contains(t, string(encoded), "a former graph sibling")
 }
+
+// TestProofKeysHonoursExpandContext: RootProofs expands the document under the
+// credential's options, ExpandContext included. Resolving member names without
+// it made selection disagree with the expansion it is meant to match, so an
+// external context aliasing "proof" had signing and SD proof removal act on a
+// different member than the one carrying the proof.
+func TestProofKeysHonoursExpandContext(t *testing.T) {
+	var external any
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"@context":{"seal":"https://w3id.org/security#proof"}}`), &external))
+
+	options := NewJSONLDOptions("")
+	options.ExpandContext = external
+
+	node := map[string]any{
+		"id":   "https://example.org/credential",
+		"seal": map[string]any{"type": "DataIntegrityProof"},
+	}
+
+	require.Equal(t, []string{"seal"}, ProofKeys(node, nil, options),
+		"an alias from the expand context names the proof")
+
+	// Without it, the same document resolves nothing - which is the
+	// disagreement this closes.
+	require.Empty(t, ProofKeys(node, nil, NewJSONLDOptions("")))
+}

@@ -84,8 +84,15 @@ func (rc *RDFCredential) RootProofs() (proofs []any, withoutRootProof *RDFCreden
 			// graph, which is what RDF says it is, rather than whichever
 			// part of it happened to be indexed.
 			if match := graphNamed(graphs, id); match >= 0 {
-				proofs = append(proofs, graphs[match])
-				claimed[match] = true
+				// ONCE. The same named graph may be referenced more than
+				// once, and duplicate references produce the same RDF
+				// triple - so counting them as separate proofs could put a
+				// document over MaxRootProofs on the strength of a
+				// serialization detail the signed RDF does not have.
+				if !claimed[match] {
+					proofs = append(proofs, graphs[match])
+					claimed[match] = true
+				}
 				continue
 			}
 			// A link naming no graph in this document carries no proof;
@@ -435,8 +442,8 @@ func referencedAnywhere(entries [][]map[string]any, id string) bool {
 	// from there back to the root still counts - and it must, because that
 	// node sits beside the root once flattened and is exactly what makes
 	// the root stop being the unreferenced one.
-	var walk func(value any, self string) bool
-	walk = func(value any, self string) bool {
+	var walk func(value any, self string, topLevel bool) bool
+	walk = func(value any, self string, topLevel bool) bool {
 		switch typed := value.(type) {
 		case map[string]any:
 			// A VALUE object holds a literal, not a node, and nothing
@@ -449,10 +456,20 @@ func referencedAnywhere(entries [][]map[string]any, id string) bool {
 				// A bare {"@id": ...} is a reference, not a definition.
 				return at == id && self != id
 			}
+			// A nested node object is a definition AND the object of an
+			// edge from whatever contains it. Only a bare reference was
+			// counted, so {"@id": "_:root", "@type": [...]} sitting under
+			// another node pointed at the root without being seen - and
+			// flattening then made the containing node the root, a switch
+			// this check exists to refuse and, both names being blank,
+			// could not otherwise notice.
+			if !topLevel && named && at == id && self != id {
+				return true
+			}
 			// A LIST is not a node object; its members belong to whatever
 			// node encloses the list.
 			if list, isList := typed["@list"]; isList {
-				return walk(list, self)
+				return walk(list, self, topLevel)
 			}
 			// Everything else here is a NODE object, and it becomes the
 			// enclosing node for what is under it - whether or not it has a
@@ -472,13 +489,13 @@ func referencedAnywhere(entries [][]map[string]any, id string) bool {
 				if key == "@id" {
 					continue
 				}
-				if walk(member, enclosing) {
+				if walk(member, enclosing, false) {
 					return true
 				}
 			}
 		case []any:
 			for _, member := range typed {
-				if walk(member, self) {
+				if walk(member, self, topLevel) {
 					return true
 				}
 			}
@@ -488,7 +505,7 @@ func referencedAnywhere(entries [][]map[string]any, id string) bool {
 
 	for _, group := range entries {
 		for _, entry := range group {
-			if walk(entry, "") {
+			if walk(entry, "", true) {
 				return true
 			}
 		}

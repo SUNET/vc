@@ -560,3 +560,38 @@ func TestSignAttachesAProofThisLibraryCanRead(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+// TestSignRefusesABlankRootReferencedByAFullNode: a nested node object is a
+// definition AND the object of an edge from whatever contains it. Counting
+// only a bare {"@id": ...} as a reference missed a node that carries @id
+// alongside other members - and flattening then makes the containing node the
+// root, a switch that goes unnoticed when both names are blank.
+func TestSignRefusesABlankRootReferencedByAFullNode(t *testing.T) {
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"@id": "_:root",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"},
+		"@included": [
+			{
+				"https://example.org/vocab#about": {
+					"@id": "_:root",
+					"@type": ["https://example.org/vocab#Pointer"]
+				}
+			}
+		]
+	}`), nil)
+	require.NoError(t, err)
+
+	_, err = NewSuite().Sign(cred, key, &SignOptions{
+		VerificationMethod: "did:example:issuer#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.ErrorContains(t, err, "refers to that node",
+		"a node object with members is still a reference to what it names")
+}
