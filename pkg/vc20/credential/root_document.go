@@ -96,8 +96,13 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string) (map[st
 		}
 		rooted[key] = value
 	}
+	_, containerHasContext := rooted["@context"]
 	for key, value := range root {
-		if key == "@context" {
+		// The container's context wins - compaction puts it there, and two
+		// contexts applied in the wrong order mean different terms. A
+		// context on the root node is only kept when the container carries
+		// none, so promoting the node cannot silently drop it.
+		if key == "@context" && containerHasContext {
 			continue
 		}
 		rooted[key] = value
