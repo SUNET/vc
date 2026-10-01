@@ -526,7 +526,10 @@ func RootOfExpandedNodes(expanded []any) (map[string]any, error) {
 		if !isNode {
 			return nil, fmt.Errorf("document holds a top-level entry that is not a node")
 		}
-		if _, isGraph := node["@graph"]; isGraph && len(node) <= 2 {
+		// ld.IsGraph, not a key count: a graph object may carry @index
+		// beside @graph and @id, and counting keys called an indexed
+		// proof graph a document node.
+		if ld.IsGraph(node) {
 			continue
 		}
 		nodes = append(nodes, node)

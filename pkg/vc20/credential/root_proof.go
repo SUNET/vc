@@ -162,7 +162,10 @@ func (rc *RDFCredential) rootAndGraphs(source string) (map[string]any, []map[str
 		if !ok {
 			return nil, nil, nil, fmt.Errorf("document holds a top-level entry that is not a node")
 		}
-		if _, isGraph := node["@graph"]; isGraph && len(node) <= 2 {
+		// ld.IsGraph, not a key count: a graph object may carry @index
+		// beside @graph and @id, and counting keys called an indexed
+		// proof graph a document node.
+		if ld.IsGraph(node) {
 			graphs = append(graphs, node)
 			continue
 		}
@@ -431,12 +434,32 @@ func referencedAnywhere(entries [][]map[string]any, id string) bool {
 	walk = func(value any, self string) bool {
 		switch typed := value.(type) {
 		case map[string]any:
+			// A VALUE object holds a literal, not a node, and nothing
+			// inside it refers to anything.
+			if _, isValue := typed["@value"]; isValue {
+				return false
+			}
 			at, named := typed["@id"].(string)
 			if len(typed) == 1 && named {
 				// A bare {"@id": ...} is a reference, not a definition.
 				return at == id && self != id
 			}
-			enclosing := self
+			// A LIST is not a node object; its members belong to whatever
+			// node encloses the list.
+			if list, isList := typed["@list"]; isList {
+				return walk(list, self)
+			}
+			// Everything else here is a NODE object, and it becomes the
+			// enclosing node for what is under it - whether or not it has a
+			// name. An anonymous one that inherited the parent's identity
+			// made its reference back to a blank-named root look like a
+			// self-link: flattening then turns that node into a separate
+			// blank node, the original root stops being the unreferenced
+			// one, and because both names are blank the root could switch
+			// without this check noticing. A proof relocated onto the new
+			// root secures the same unsecured RDF, which is the whole
+			// attack.
+			enclosing := ""
 			if named && at != "" {
 				enclosing = at
 			}

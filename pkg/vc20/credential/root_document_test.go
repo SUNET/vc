@@ -343,3 +343,29 @@ func TestProofKeysAppliesTypeScopedContextsInOrder(t *testing.T) {
 			"the last type in sorted order decides, not the first in the document: %v", order)
 	}
 }
+
+// TestRootOfExpandedNodesIgnoresAnIndexedGraph: a JSON-LD graph object may
+// carry @index beside @graph and @id. Counting keys called an indexed proof
+// graph a document node, so a credential that has one became ambiguously
+// rooted and could not be verified at all. ld.IsGraph is the rule, and
+// json-gold vendors it.
+func TestRootOfExpandedNodesIgnoresAnIndexedGraph(t *testing.T) {
+	// The graph is UNREFERENCED, which is the shape that discriminates: as a
+	// graph it is not a candidate at all, while counted as a node it is a
+	// second node nothing refers to and the document becomes ambiguous.
+	expanded := []any{
+		map[string]any{
+			"@id":   "https://example.org/credential",
+			"@type": []any{"https://www.w3.org/2018/credentials#VerifiableCredential"},
+		},
+		map[string]any{
+			"@id":    "_:proofgraph",
+			"@index": "the third proof",
+			"@graph": []any{map[string]any{"@id": "_:p0"}},
+		},
+	}
+
+	root, err := RootOfExpandedNodes(expanded)
+	require.NoError(t, err, "an indexed graph is a graph, not a second root")
+	require.Equal(t, "https://example.org/credential", root["@id"])
+}

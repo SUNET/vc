@@ -389,7 +389,10 @@ func withoutNamedGraphs(entries []any, names []string) []any {
 	kept := make([]any, 0, len(entries))
 	for _, entry := range entries {
 		if node, isNode := entry.(map[string]any); isNode {
-			if _, isGraph := node["@graph"]; isGraph && len(node) <= 2 {
+			// ld.IsGraph, not a key count: a graph object may carry @index
+			// beside @graph and @id, and counting keys called an indexed
+			// proof graph a document node.
+			if ld.IsGraph(node) {
 				id, _ := node["@id"].(string)
 				if named[id] {
 					continue

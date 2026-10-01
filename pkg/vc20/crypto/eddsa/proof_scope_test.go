@@ -436,3 +436,38 @@ func TestSignRefusesToExceedTheProofLimit(t *testing.T) {
 	require.ErrorContains(t, err, "is the most this will verify",
 		"signing must not produce a document this library refuses")
 }
+
+// TestSignRefusesABlankRootReferencedByAnAnonymousNode: an ANONYMOUS nested
+// node is still a node. Letting it inherit the enclosing identity made its
+// reference back to a blank-named root look like a self-link - and flattening
+// then turns that node into a separate blank node, the original root stops
+// being the unreferenced one, and because both names are blank the switch
+// passes unnoticed. A proof relocated onto the new root secures the same
+// unsecured RDF, which is the attack the root-stability check exists to stop.
+func TestSignRefusesABlankRootReferencedByAnAnonymousNode(t *testing.T) {
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	// @included, so the nested node is a SIBLING once flattened rather than
+	// a reference target - which leaves the flattened form with exactly one
+	// unreferenced node, the formerly-nested one. The root has moved.
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"@id": "_:root",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"},
+		"@included": [
+			{"https://example.org/vocab#about": {"@id": "_:root"}}
+		]
+	}`), nil)
+	require.NoError(t, err)
+
+	_, err = NewSuite().Sign(cred, key, &SignOptions{
+		VerificationMethod: "did:example:issuer#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.ErrorContains(t, err, "something in it refers to that node",
+		"an anonymous node pointing at the root is another node referring to it")
+}
