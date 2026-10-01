@@ -481,21 +481,15 @@ func TestSignAttachesAProofThisLibraryCanRead(t *testing.T) {
 	pub, key, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 
-	// The key SELECTION is what this fixes, and it is what is asserted here.
 	// A document that remaps "proof" to an ordinary property must not have
-	// the signature written under it - ProofKeyFor returns the absolute
-	// predicate instead, which expands correctly under any context.
+	// the signature written under it, and what this library signs it must
+	// be able to read back. Both are asserted now.
 	//
-	// Round-tripping such a document through Sign and VerifyProof is NOT
-	// asserted: it still fails with a signature mismatch. Narrowed as far
-	// as this - the document hash is identical at signing and verification,
-	// and the proof configuration canonicalizes identically too, so the
-	// divergence is in neither of the two inputs to the signature and I did
-	// not find where it is. Under the VC 2.0
-	// context the case cannot arise at all - its type-scoped context pins
-	// "proof" to the security predicate for a VerifiableCredential node and
-	// its terms are @protected - so this is about documents that do not use
-	// v2.
+	// Under the VC 2.0 context the remap cannot take effect at all - its
+	// type-scoped context pins "proof" to the security predicate for a
+	// VerifiableCredential node and its terms are @protected - so the
+	// fixture deliberately does not use v2, or it would hold whatever the
+	// code did.
 	t.Run("a context that remaps proof", func(t *testing.T) {
 		var remapping any
 		require.NoError(t, json.Unmarshal([]byte(`{
@@ -503,15 +497,31 @@ func TestSignAttachesAProofThisLibraryCanRead(t *testing.T) {
 			"proof": "https://example.org/vocab#proofreading"
 		}`), &remapping))
 
-		node := map[string]any{"id": "https://example.org/credential"}
 		require.Equal(t, credential.ProofPredicate,
-			credential.ProofKeyFor(node, remapping, nil),
+			credential.ProofKeyFor(map[string]any{"id": "https://example.org/credential"}, remapping, nil),
 			"a remapped name must not be where a signature is written")
 
-		// And where the name does mean the predicate, it is used.
-		require.Equal(t, "proof", credential.ProofKeyFor(
-			map[string]any{"type": []any{"VerifiableCredential"}},
-			"https://www.w3.org/ns/credentials/v2", nil))
+		cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+			"@context": {
+				"id": "@id",
+				"proof": "https://example.org/vocab#proofreading",
+				"issuer": {"@id": "https://example.org/vocab#issuer", "@type": "@id"}
+			},
+			"id": "https://example.org/credential",
+			"issuer": "did:example:issuer"
+		}`), nil)
+		require.NoError(t, err)
+
+		signed, err := NewSuite().Sign(cred, key, &SignOptions{
+			VerificationMethod: "did:example:issuer#key-1",
+			ProofPurpose:       "assertionMethod",
+			Created:            time.Now().UTC(),
+		})
+		require.NoError(t, err)
+
+		_, err = NewSuite().VerifyProof(signed, pub)
+		require.NoError(t, err,
+			"what this library signs, it must be able to read back")
 	})
 
 	t.Run("a context that aliases proof", func(t *testing.T) {

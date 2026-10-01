@@ -290,14 +290,13 @@ func (s *Suite) verifyProofNode(cred *credential.RDFCredential, proofNode map[st
 	proofConfig := maps.Clone(proofNode)
 	delete(proofConfig, "proofValue")
 
-	// Ensure context
+	// THE V2 CONTEXT, which is the one Sign hashed under - not the
+	// document's. Substituting the document's context reconstructed a
+	// different proof configuration than the one that was signed whenever
+	// the two disagree about a term, so a document this library accepted
+	// from Sign could not be verified by it. The ecdsa suite had it right.
 	if _, ok := proofConfig["@context"]; !ok {
-		// Try to use context from credential if available
-		if ctx, err := cred.Context(); err == nil && ctx != nil {
-			proofConfig["@context"] = ctx
-		} else {
-			proofConfig["@context"] = credential.ContextV2
-		}
+		proofConfig["@context"] = credential.ContextV2
 	}
 
 	proofConfigBytes, err := json.Marshal(proofConfig)
