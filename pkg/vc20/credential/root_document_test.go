@@ -310,3 +310,36 @@ func TestProofKeysHonoursATypeScopedAlias(t *testing.T) {
 			"without the type, the scoped definition does not apply")
 	})
 }
+
+// TestProofKeysAppliesTypeScopedContextsInOrder: JSON-LD applies type-scoped
+// contexts in LEXICOGRAPHIC order of the type names, so when two types define
+// the same term there is a defined winner. Taking them in document order would
+// let the order they happen to be written in decide which definition applies -
+// and here, whether a member is the document's proof at all.
+func TestProofKeysAppliesTypeScopedContextsInOrder(t *testing.T) {
+	var context any
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"AaaFirst": {
+			"@id": "https://example.org/vocab#AaaFirst",
+			"@context": {"seal": "https://w3id.org/security#proof"}
+		},
+		"ZzzLast": {
+			"@id": "https://example.org/vocab#ZzzLast",
+			"@context": {"seal": "https://example.org/vocab#wax"}
+		},
+		"type": "@type",
+		"id": "@id"
+	}`), &context))
+
+	// ZzzLast sorts last, so its definition of "seal" wins - whichever
+	// order the types are written in.
+	for _, order := range [][]any{{"AaaFirst", "ZzzLast"}, {"ZzzLast", "AaaFirst"}} {
+		node := map[string]any{
+			"id":   "https://example.org/credential",
+			"type": order,
+			"seal": map[string]any{"proofValue": "z..."},
+		}
+		require.Empty(t, ProofKeys(node, context, nil),
+			"the last type in sorted order decides, not the first in the document: %v", order)
+	}
+}

@@ -2,6 +2,7 @@ package credential
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/piprate/json-gold/ld"
@@ -367,22 +368,35 @@ func nodeContext(node map[string]any, context any, options *ld.JsonLdOptions) *l
 		return nil
 	}
 
+	// LEXICOGRAPHIC order, and deduplicated. JSON-LD applies type-scoped
+	// contexts in sorted order of the type names, so two types defining the
+	// same term have a defined winner - taking them in document order would
+	// let the order they happen to be written in decide which definition
+	// applies, which is the thing this whole change is about.
+	var types []string
+	seen := map[string]bool{}
 	for _, key := range []string{"@type", "type"} {
 		for _, entry := range asList(node[key]) {
 			name, isString := entry.(string)
-			if !isString {
+			if !isString || name == "" || seen[name] {
 				continue
 			}
-			definition := active.GetTermDefinition(name)
-			if definition == nil || !definition.HasContext {
-				continue
-			}
-			scoped, err := active.Parse(definition.Context)
-			if err != nil {
-				continue
-			}
-			active = scoped
+			seen[name] = true
+			types = append(types, name)
 		}
+	}
+	sort.Strings(types)
+
+	for _, name := range types {
+		definition := active.GetTermDefinition(name)
+		if definition == nil || !definition.HasContext {
+			continue
+		}
+		scoped, err := active.Parse(definition.Context)
+		if err != nil {
+			continue
+		}
+		active = scoped
 	}
 	return active
 }
