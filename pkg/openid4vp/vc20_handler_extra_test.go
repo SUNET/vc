@@ -157,3 +157,64 @@ func TestVerifyAndExtractReturnsTheVerifyingKey(t *testing.T) {
 		"a caller re-resolving would have got this one instead")
 	assert.Equal(t, 1, resolver.calls, "and it resolved once, not twice")
 }
+
+// TestVerifyAndExtractNeedsTheSelectedProofToBeIdentifiable: extractProof
+// selects a proof and the key is resolved from ITS verificationMethod, but the
+// suites were called through Verify, whose empty selector means "the first
+// proof found" after JSON-LD compaction and traversal. Those are not
+// necessarily the same proof.
+//
+// The handler now passes the selected proof's value through, and refuses when
+// it has none - because an empty selector is exactly the ambiguity being
+// removed, so falling back to it would defeat the change.
+//
+// What this test does NOT show, stated rather than implied: that the two
+// readings now agree on a document carrying several proofs. That is not
+// observable on this branch, because such a document does not verify under
+// ANY selector here - hashing removes every proof in the graph, so a second
+// proof invalidates the first. Measured: with two proofs present, Verify(""),
+// VerifyProof(foreign) and VerifyProof(genuine) all fail. The agreement this
+// fix establishes becomes load-bearing once proof sets verify, which is
+// SUNET/vc#720's subject, not this branch's.
+func TestVerifyAndExtractNeedsTheSelectedProofToBeIdentifiable(t *testing.T) {
+	signer, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	issuer, err := NewVC20Handler(WithVC20SignerConfig(&VC20SignerConfig{
+		PrivateKey:         signer,
+		IssuerID:           "did:example:issuer",
+		VerificationMethod: "did:example:issuer#key-1",
+		Cryptosuite:        CryptosuiteECDSA2019,
+	}))
+	require.NoError(t, err)
+	created, err := issuer.CreateCredential(t.Context(), &VC20CreateRequest{
+		Types:   []string{"VerifiableCredential"},
+		Subject: map[string]any{"id": "did:example:subject"},
+	})
+	require.NoError(t, err)
+
+	h, err := NewVC20Handler(WithVC20KeyResolver(&staticResolver{key: &signer.PublicKey}))
+	require.NoError(t, err)
+
+	// Unchanged, it verifies - so the refusal below is about the edit, not
+	// about the fixture being broken.
+	_, err = h.VerifyAndExtract(t.Context(), string(created.CredentialJSON))
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(created.CredentialJSON, &doc))
+	delete(doc["proof"].(map[string]any), "proofValue")
+	stripped, err := json.Marshal(doc)
+	require.NoError(t, err)
+
+	_, err = h.VerifyAndExtract(t.Context(), string(stripped))
+	require.ErrorContains(t, err, "carries no proofValue",
+		"a proof that cannot be identified is refused by name, not left to an empty selector")
+}
+
+// staticResolver answers every verification method with one key.
+type staticResolver struct{ key crypto.PublicKey }
+
+func (r *staticResolver) ResolveKey(context.Context, string) (crypto.PublicKey, error) {
+	return r.key, nil
+}

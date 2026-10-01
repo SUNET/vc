@@ -854,9 +854,21 @@ func (h *VC20Handler) verifyECDSA2019(
 		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
 	}
 
-	// Verify using the standard suite
+	// The proof extractProof SELECTED, not whichever one the suite reaches
+	// first. The key was resolved from this proof's verificationMethod, and
+	// Verify passes an empty selector - so on a document carrying more than
+	// one proof the key from proof A could be checked against proof B, and
+	// the result then reports A's metadata for a signature that B carries.
+	//
+	// Empty is refused rather than passed through: an empty selector means
+	// "the first proof found", which is the ambiguity being removed here.
+	proofValue, _ := proof["proofValue"].(string)
+	if proofValue == "" {
+		return nil, errors.New("the selected proof carries no proofValue, so the proof whose key was resolved cannot be identified")
+	}
+
 	suite := ecdsaSuite.NewSuite()
-	if err := suite.Verify(rdfCred, pubKey); err != nil {
+	if err := suite.VerifyProof(rdfCred, pubKey, proofValue); err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
 	}
 
@@ -902,9 +914,21 @@ func (h *VC20Handler) verifyEdDSA2022(
 		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
 	}
 
-	// Verify using the EdDSA suite
+	// The proof extractProof SELECTED, not whichever one the suite reaches
+	// first. The key was resolved from this proof's verificationMethod, and
+	// Verify passes an empty selector - so on a document carrying more than
+	// one proof the key from proof A could be checked against proof B, and
+	// the result then reports A's metadata for a signature that B carries.
+	//
+	// Empty is refused rather than passed through: an empty selector means
+	// "the first proof found", which is the ambiguity being removed here.
+	proofValue, _ := proof["proofValue"].(string)
+	if proofValue == "" {
+		return nil, errors.New("the selected proof carries no proofValue, so the proof whose key was resolved cannot be identified")
+	}
+
 	suite := eddsaSuite.NewSuite()
-	if err := suite.Verify(rdfCred, pubKey); err != nil {
+	if err := suite.VerifyProof(rdfCred, pubKey, proofValue); err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
 	}
 
