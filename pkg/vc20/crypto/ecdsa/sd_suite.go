@@ -154,7 +154,9 @@ func (s *SdSuite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, op
 		}
 
 		// Remove proof from document for pointer selection
-		removeRootProof(docJSON)
+		if err := removeRootProof(docJSON); err != nil {
+			return nil, fmt.Errorf("failed to remove the document's own proof: %w", err)
+		}
 
 		// Select mandatory N-Quads based on pointers from original (non-skolemized) quads
 		mandatorySet := make(map[string]bool)
@@ -337,7 +339,20 @@ func (s *SdSuite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, op
 	return credential.NewRDFCredentialFromJSON(newCredBytes, ldOpts)
 }
 
-// Verify verifies a credential using ecdsa-sd-2023
+// Verify verifies an ecdsa-sd-2023 proof the document attaches to ITSELF.
+//
+// Selection used to be a recursive walk for the first DataIntegrityProof
+// anywhere in the graph - and the traversal crosses map-backed RDF graphs, so
+// "anywhere" meant it. The nested-proof shape this change now secures makes
+// that actively wrong: an embedded credential's own proof could be picked
+// instead of the outer one, nondeterministically, and nothing checked the
+// node it landed on was even ecdsa-sd-2023.
+//
+// The proofs are now read off the document by credential.RootProofs, filtered
+// by type and cryptosuite, and each is tried in turn - the same shape the rdfc
+// suites use. A base proof is not a proof set, but a document may carry an
+// ecdsa-sd-2023 proof beside proofs of other suites, and only this suite's own
+// are its business.
 func (s *SdSuite) Verify(cred *credential.RDFCredential, key *ecdsa.PublicKey) error {
 	if cred == nil {
 		return fmt.Errorf("credential is nil")
@@ -346,67 +361,124 @@ func (s *SdSuite) Verify(cred *credential.RDFCredential, key *ecdsa.PublicKey) e
 		return fmt.Errorf("public key is nil")
 	}
 
-	// 1. Extract proof
-	proofCred, err := cred.ProofObject()
+	// The same root-stability check signing applies. A document that names
+	// one root as written and another once serialized through RDF can be
+	// re-rooted by its holder.
+	if err := cred.CheckRootSurvivesFlattening(); err != nil {
+		return err
+	}
+
+	expanded, _, err := cred.RootProofs()
 	if err != nil {
-		return fmt.Errorf("failed to get proof object: %w", err)
+		return err
+	}
+	if len(expanded) == 0 {
+		return fmt.Errorf("the document carries no proof of its own to verify")
 	}
 
-	proofJSONBytes, err := json.Marshal(proofCred)
+	var lastErr error
+	for _, entry := range expanded {
+		proofMap, err := credential.CompactRootProof(entry)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if !credential.HasProofType(proofMap, ProofType) {
+			lastErr = fmt.Errorf("the document's own proof link names a %v, not a %s", proofMap["type"], ProofType)
+			continue
+		}
+		if suite, _ := proofMap["cryptosuite"].(string); suite != CryptosuiteSd2023 {
+			lastErr = fmt.Errorf("the document's own proof declares cryptosuite %q, not %s", suite, CryptosuiteSd2023)
+			continue
+		}
+		if err := s.verifySdRootProof(cred, key, proofMap); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("the document carries no %s proof of its own", CryptosuiteSd2023)
+	}
+	return lastErr
+}
+
+// sdRootProof returns the single ecdsa-sd-2023 proof the document attaches to
+// ITSELF, refusing anything else. Unlike the rdfc suites there is no trying
+// each in turn here: deriving is a one-proof operation, so an ambiguous
+// document must be refused rather than silently resolved.
+func sdRootProof(cred *credential.RDFCredential) (map[string]any, error) {
+	if err := cred.CheckRootSurvivesFlattening(); err != nil {
+		return nil, err
+	}
+
+	expanded, _, err := cred.RootProofs()
 	if err != nil {
-		return fmt.Errorf("failed to convert proof to JSON: %w", err)
+		return nil, err
 	}
 
-	var proofJSON any
-	if err := json.Unmarshal(proofJSONBytes, &proofJSON); err != nil {
-		return fmt.Errorf("failed to unmarshal proof JSON: %w", err)
+	var found map[string]any
+	for _, entry := range expanded {
+		proofMap, err := credential.CompactRootProof(entry)
+		if err != nil {
+			return nil, err
+		}
+		if !credential.HasProofType(proofMap, ProofType) {
+			continue
+		}
+		if suite, _ := proofMap["cryptosuite"].(string); suite != CryptosuiteSd2023 {
+			continue
+		}
+		if found != nil {
+			return nil, fmt.Errorf("the document carries more than one %s proof of its own", CryptosuiteSd2023)
+		}
+		found = proofMap
+	}
+	if found == nil {
+		return nil, fmt.Errorf("the document carries no %s proof of its own", CryptosuiteSd2023)
+	}
+	return found, nil
+}
+
+// VerifyRootProof verifies exactly the proof it is given, rather than picking
+// one itself.
+//
+// A caller that selects a proof, resolves a key from it and then asks Verify
+// to go and find a proof of its own gets two independent choices that need not
+// agree: with a forged proof in front of a genuine one sharing a verification
+// method, the suite can verify the genuine proof while the caller reports the
+// forged one's metadata. Binding the two is the whole point - the rdfc suites
+// return the proof that verified for the same reason.
+//
+// The proof must be one the DOCUMENT attaches to itself. Hashing is
+// root-scoped, so a proof from anywhere else cannot verify here anyway; this
+// refuses it with a clear error instead of an opaque signature failure.
+func (s *SdSuite) VerifyRootProof(cred *credential.RDFCredential, key *ecdsa.PublicKey, proof map[string]any) error {
+	if cred == nil {
+		return fmt.Errorf("credential is nil")
+	}
+	if key == nil {
+		return fmt.Errorf("public key is nil")
+	}
+	if proof == nil {
+		return fmt.Errorf("proof is nil")
 	}
 
-	// Compact proof
-	processor := ld.NewJsonLdProcessor()
-	compactOpts := ld.NewJsonLdOptions("")
-	compactOpts.DocumentLoader = credential.GetGlobalLoader()
-
-	var context any
-	if ctx, err := cred.Context(); err == nil {
-		var ctxList []any
-		if list, ok := ctx.([]any); ok {
-			ctxList = append(ctxList, list...)
-		} else {
-			ctxList = append(ctxList, ctx)
-		}
-
-		// Add V2 context if not present
-		hasCredentialV2 := false
-		for _, c := range ctxList {
-			if s, ok := c.(string); ok && s == "https://www.w3.org/ns/credentials/v2" {
-				hasCredentialV2 = true
-				break
-			}
-		}
-		if !hasCredentialV2 {
-			ctxList = append(ctxList, "https://www.w3.org/ns/credentials/v2")
-		}
-
-		context = map[string]any{
-			"@context": ctxList,
-		}
-	} else {
-		context = map[string]any{
-			"@context": "https://www.w3.org/ns/credentials/v2",
-		}
-	}
-
-	compactedProof, err := processor.Compact(proofJSON, context, compactOpts)
+	selected, err := sdRootProof(cred)
 	if err != nil {
-		return fmt.Errorf("failed to compact proof JSON: %w", err)
+		return err
+	}
+	if value, _ := selected["proofValue"].(string); value != proof["proofValue"] {
+		return fmt.Errorf("the proof offered is not the %s proof this document attaches to itself", CryptosuiteSd2023)
 	}
 
-	proofMap := sdFindProofNode(compactedProof)
-	if proofMap == nil {
-		return fmt.Errorf("proof node not found")
-	}
+	return s.verifySdRootProof(cred, key, selected)
+}
 
+// verifySdRootProof verifies one ecdsa-sd-2023 proof. Whether it is a base or
+// a derived proof is what the CBOR tag on its proofValue says.
+func (s *SdSuite) verifySdRootProof(cred *credential.RDFCredential, key *ecdsa.PublicKey, proofMap map[string]any) error {
 	proofValueStr, ok := proofMap["proofValue"].(string)
 	if !ok {
 		// Try full URIs
@@ -525,7 +597,9 @@ func (s *SdSuite) verifyBaseProof(cred *credential.RDFCredential, key *ecdsa.Pub
 		}
 
 		// Remove proof from document for pointer selection
-		removeRootProof(docJSON)
+		if err := removeRootProof(docJSON); err != nil {
+			return fmt.Errorf("failed to remove the document's own proof: %w", err)
+		}
 
 		// Select mandatory N-Quads based on pointers
 		mandatoryQuads := selectMandatoryNQuads(docJSON, quads, proof.MandatoryPointers)
@@ -584,7 +658,9 @@ func (s *SdSuite) verifyBaseProof(cred *credential.RDFCredential, key *ecdsa.Pub
 				return fmt.Errorf("failed to unmarshal credential JSON: %w", err)
 			}
 		}
-		removeRootProof(docJSON)
+		if err := removeRootProof(docJSON); err != nil {
+			return fmt.Errorf("failed to remove the document's own proof: %w", err)
+		}
 
 		// Find mandatory quads based on original (non-skolemized) quads
 		mandatorySet := make(map[string]bool)
@@ -752,7 +828,9 @@ func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.
 	}
 
 	// Remove the root's proof, and only the root's
-	removeRootProof(credJSON)
+	if err := removeRootProof(credJSON); err != nil {
+		return fmt.Errorf("failed to remove the document's own proof: %w", err)
+	}
 
 	// Replace labels with URNs
 	replaceLabelsWithURNs(credJSON, proof.LabelMap)
@@ -826,34 +904,19 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 		return nil, fmt.Errorf("credential is nil")
 	}
 
-	// 1. Extract Base Proof
-	proofCred, err := cred.ProofObject()
+	// 1. Extract Base Proof - the document's OWN ecdsa-sd-2023 proof. A walk
+	// of the graph for the first DataIntegrityProof could reach an embedded
+	// credential's proof instead, and derive against a base proof that does
+	// not secure this document.
+	proofMap, err := sdRootProof(cred)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get proof object: %w", err)
-	}
-	proofJSONBytes, err := json.Marshal(proofCred)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert proof to JSON: %w", err)
-	}
-	var proofJSON any
-	if err := json.Unmarshal(proofJSONBytes, &proofJSON); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal proof JSON: %w", err)
+		return nil, err
 	}
 
 	processor := ld.NewJsonLdProcessor()
 	compactOpts := ld.NewJsonLdOptions("")
 	compactOpts.DocumentLoader = credential.GetGlobalLoader()
-	context := map[string]any{
-		"@context": "https://www.w3.org/ns/credentials/v2",
-	}
-	compactedProof, err := processor.Compact(proofJSON, context, compactOpts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compact proof JSON: %w", err)
-	}
-	proofMap := sdFindProofNode(compactedProof)
-	if proofMap == nil {
-		return nil, fmt.Errorf("proof node not found")
-	}
+
 	proofValueStr, ok := proofMap["proofValue"].(string)
 	if !ok {
 		return nil, fmt.Errorf("proofValue not found")
@@ -918,7 +981,9 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 			return nil, fmt.Errorf("failed to unmarshal credential JSON: %w", err)
 		}
 	}
-	removeRootProof(docJSON)
+	if err := removeRootProof(docJSON); err != nil {
+		return nil, fmt.Errorf("failed to remove the document's own proof: %w", err)
+	}
 
 	// Identify mandatory quads based on original (non-skolemized) quads
 	mandatorySet := make(map[string]bool)
@@ -1118,7 +1183,19 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 		return nil, fmt.Errorf("failed to compact derived credential: %w", err)
 	}
 
-	m := compactedDerived
+	// Compacting a flattened dataset with several nodes comes back as a
+	// bare @graph container - a document about nothing. The proof used to be
+	// hung on that container, which is why finding it again needed a walk of
+	// the graph. Rooted at its own node instead, with the rest moved to
+	// @included: same graph, same quads, same signature.
+	knownRootID, err := cred.RootID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the node the base credential is about: %w", err)
+	}
+	m, err := credential.RootCompactedDocument(compactedDerived, knownRootID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to root the derived credential: %w", err)
+	}
 
 	// Replace URNs back to blank nodes
 	replaceURNs(m)
@@ -1128,15 +1205,7 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 	m["@context"] = newContext
 
 	// Add proof to compacted credential
-	if existingProof, ok := m["proof"]; ok {
-		if proofs, ok := existingProof.([]any); ok {
-			m["proof"] = append(proofs, newProofConfig)
-		} else {
-			m["proof"] = []any{existingProof, newProofConfig}
-		}
-	} else {
-		m["proof"] = newProofConfig
-	}
+	credential.AppendProof(m, newProofConfig)
 
 	derivedBytes, err := json.Marshal(m)
 	if err != nil {
@@ -1152,46 +1221,3 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 }
 
 // Helper functions
-
-func sdHasType(m map[string]any, expectedType string) bool {
-	t, ok := m["type"]
-	if !ok {
-		t, ok = m["@type"]
-	}
-	if !ok {
-		return false
-	}
-
-	if s, ok := t.(string); ok {
-		return s == expectedType
-	}
-	if list, ok := t.([]any); ok {
-		for _, item := range list {
-			if s, ok := item.(string); ok && s == expectedType {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func sdFindProofNode(data any) map[string]any {
-	if m, ok := data.(map[string]any); ok {
-		if sdHasType(m, ProofType) || sdHasType(m, "Proof") {
-			return m
-		}
-		// Check all values
-		for _, v := range m {
-			if found := sdFindProofNode(v); found != nil {
-				return found
-			}
-		}
-	} else if list, ok := data.([]any); ok {
-		for _, item := range list {
-			if found := sdFindProofNode(item); found != nil {
-				return found
-			}
-		}
-	}
-	return nil
-}

@@ -268,13 +268,27 @@ func (h *VC20Handler) rootProofCandidates(credBytes []byte) ([]map[string]any, e
 		return nil, errors.New("credential missing proof")
 	}
 
+	// A candidate that cannot be compacted is SKIPPED, not fatal. Every root
+	// proof is removed from the secured document, so appending a malformed
+	// graph-valued proof does not disturb a genuine signature already there -
+	// and aborting collection on it would turn that addition into a way to
+	// deny verification of the genuine proof. The failure is kept and
+	// reported only if no candidate survives.
 	candidates := make([]map[string]any, 0, len(expanded))
+	var lastErr error
 	for _, entry := range expanded {
 		proof, err := credential.CompactRootProof(entry)
 		if err != nil {
-			return nil, err
+			lastErr = err
+			continue
 		}
 		candidates = append(candidates, proof)
+	}
+	if len(candidates) == 0 {
+		if lastErr != nil {
+			return nil, lastErr
+		}
+		return nil, errors.New("credential missing proof")
 	}
 
 	return candidates, nil
@@ -692,9 +706,13 @@ func (h *VC20Handler) verifyECDSASd2023(
 		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
 	}
 
-	// Verify using the SD suite
+	// Verify THIS candidate, not whichever proof the suite would pick for
+	// itself. Verify(cred, key) selects independently, so the proof that
+	// verified and the proof whose metadata this result reports could be two
+	// different proofs - which is all an attacker needs to have a forged
+	// proof described back to the caller.
 	sdSuite := ecdsaSuite.NewSdSuite()
-	if err := sdSuite.Verify(rdfCred, pubKey); err != nil {
+	if err := sdSuite.VerifyRootProof(rdfCred, pubKey, proof); err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
 	}
 

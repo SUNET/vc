@@ -730,3 +730,65 @@ func TestVerifyAndExtractTriesEveryRootProof(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "did:example:first#key-1", result.VerificationMethod)
 }
+
+// TestVerifyAndExtractSurvivesAMalformedExtraProof: every root proof is
+// removed from the document a signature covers, so APPENDING a proof does not
+// disturb one already there. An appended proof that cannot be compacted must
+// therefore not stop the genuine proof from being tried - aborting candidate
+// collection on it turns a write anyone can make into a way to deny
+// verification outright.
+//
+// The shape needs a round trip through RDF to exist at all: proofs become
+// NAMED GRAPHS there, and a proof carrying a nested node becomes a graph
+// holding two subjects rather than one proof. A verifier is handed documents
+// in that form, so this is reachable, not theoretical.
+func TestVerifyAndExtractSurvivesAMalformedExtraProof(t *testing.T) {
+	issuerPub, issuerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	const method = "did:example:issuer#key-1"
+	doc := signedExampleDocument(t, "https://www.w3.org/ns/credentials/v2", method, issuerKey)
+	genuine := rootProofOf(t, doc)
+
+	// A proof whose graph will hold a second subject once serialized, placed
+	// FIRST so a loop that stops at the first failure never reaches the
+	// genuine one.
+	malformed := map[string]any{
+		"type":        "DataIntegrityProof",
+		"cryptosuite": "eddsa-rdfc-2022",
+		"@included": map[string]any{
+			"id":                            "https://example.org/extra",
+			"https://example.org/vocab#any": "a second subject in the proof graph",
+		},
+	}
+	doc["proof"] = []any{malformed, genuine}
+
+	compact, err := json.Marshal(doc)
+	require.NoError(t, err)
+	parsed, err := credential.NewRDFCredentialFromJSON(compact, nil)
+	require.NoError(t, err)
+	flattened, err := json.Marshal(parsed)
+	require.NoError(t, err)
+
+	// The malformed candidate really is uncompactable, or this proves nothing.
+	reparsed, err := credential.NewRDFCredentialFromJSON(flattened, nil)
+	require.NoError(t, err)
+	expanded, _, err := reparsed.RootProofs()
+	require.NoError(t, err)
+	require.Len(t, expanded, 2)
+	var uncompactable int
+	for _, entry := range expanded {
+		if _, err := credential.CompactRootProof(entry); err != nil {
+			uncompactable++
+		}
+	}
+	require.Equal(t, 1, uncompactable, "exactly one candidate must be uncompactable")
+
+	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+		keys: map[string]crypto.PublicKey{method: issuerPub},
+	}))
+	require.NoError(t, err)
+
+	_, err = handler.VerifyAndExtract(t.Context(), string(flattened))
+	require.NoError(t, err, "the genuine proof is still there, so the document verifies")
+}

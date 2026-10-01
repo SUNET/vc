@@ -129,3 +129,39 @@ func TestSDBaseProofCoversANestedProof(t *testing.T) {
 			"re-pointing the nested proof at another key must break the outer signature")
 	})
 }
+
+// TestVerifyRootProofIsBoundToTheProofItIsGiven: a caller that selects a
+// proof, resolves a key from it and then asks the suite to go and find a proof
+// of its own gets two independent choices that need not agree. The proof that
+// verified and the proof whose metadata the caller reports would then be two
+// different proofs - which is all it takes to have a forged proof described
+// back to a relying party as the one that verified.
+func TestVerifyRootProofIsBoundToTheProofItIsGiven(t *testing.T) {
+	suite, key, signed := signNestedProofCredential(t)
+
+	var document map[string]any
+	require.NoError(t, json.Unmarshal([]byte(signed.OriginalJSON()), &document))
+	genuine, ok := document["proof"].(map[string]any)
+	require.True(t, ok)
+
+	t.Run("the document's own proof verifies", func(t *testing.T) {
+		require.NoError(t, suite.VerifyRootProof(signed, &key.PublicKey, genuine))
+	})
+
+	t.Run("another proof is refused, not quietly replaced", func(t *testing.T) {
+		forged := map[string]any{}
+		for k, v := range genuine {
+			forged[k] = v
+		}
+		forged["proofValue"] = "uZm9yZ2Vk"
+		forged["proofPurpose"] = "authentication"
+
+		err := suite.VerifyRootProof(signed, &key.PublicKey, forged)
+		require.ErrorContains(t, err, "is not the ecdsa-sd-2023 proof this document attaches to itself",
+			"the suite must not verify its own pick and let the caller report this one")
+	})
+
+	t.Run("a nil proof is refused", func(t *testing.T) {
+		require.Error(t, suite.VerifyRootProof(signed, &key.PublicKey, nil))
+	})
+}

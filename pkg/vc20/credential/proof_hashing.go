@@ -136,13 +136,25 @@ func DocumentAsMap(cred *RDFCredential) (map[string]any, error) {
 // replace the first - a document can be secured by several parties, and
 // RootProofs verifies each of them.
 func AppendProof(credMap map[string]any, proofConfig map[string]any) {
+	// An explicit null is a term REMOVAL in JSON-LD, not a proof - and
+	// neither is a list entry that is null. Keeping them produced
+	// "proof": [null, {...}] in a signed document: it happened to verify,
+	// because expansion drops the null, but it is not a document a stricter
+	// verifier has to accept.
 	existing, present := credMap["proof"]
-	if !present {
+	if !present || existing == nil {
 		credMap["proof"] = proofConfig
 		return
 	}
 	if proofs, isList := existing.([]any); isList {
-		credMap["proof"] = append(proofs, proofConfig)
+		kept := make([]any, 0, len(proofs)+1)
+		for _, entry := range proofs {
+			if entry == nil {
+				continue
+			}
+			kept = append(kept, entry)
+		}
+		credMap["proof"] = append(kept, proofConfig)
 		return
 	}
 	credMap["proof"] = []any{existing, proofConfig}

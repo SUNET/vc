@@ -281,6 +281,23 @@ func (rc *RDFCredential) expansionOptions() *ld.JsonLdOptions {
 // one serialization and refuses - or worse, verifies differently - in
 // another. It is refused at signing instead, where the operator can still
 // change it.
+// RootID returns the identifier of the node this document is ABOUT, or an
+// empty string when that node carries none. Deriving a selectively-disclosed
+// credential needs it: the derived dataset is flattened, and which of its
+// nodes the derived document should be rooted at is not something to infer
+// from what survived disclosure - it is the node the BASE document was about.
+func (rc *RDFCredential) RootID() (string, error) {
+	root, _, _, err := rc.rootAndGraphs(rc.documentSource())
+	if err != nil {
+		return "", err
+	}
+	id, _ := root["@id"].(string)
+	if isBlankOrAbsent(id) {
+		return "", nil
+	}
+	return id, nil
+}
+
 func (rc *RDFCredential) CheckRootSurvivesFlattening() error {
 	compactRoot, compactNodes, compactGraphs, err := rc.rootAndGraphs(rc.documentSource())
 	if err != nil {

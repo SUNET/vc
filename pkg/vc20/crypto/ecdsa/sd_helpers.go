@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"github.com/SUNET/vc/pkg/vc20/credential"
 	"math/big"
 	"regexp"
 	"sort"
@@ -255,29 +256,58 @@ func replaceURNsInNQuads(nquads string) string {
 
 // removeRootProof deletes the proof the DOCUMENT attaches to itself, and
 // leaves every nested proof alone. A nested credential's own proof is content
-// the enclosing signature covers; removeProof, which recurses, would take it
-// out of the quad set and so out of the signature's reach.
+// the enclosing signature covers; removing it would take those quads out of
+// the signed set and so out of the signature's reach.
 //
-// Only the top level is touched. A top-level array is a JSON-LD document with
-// several root nodes, so each of its entries is a root - but nothing below
-// them is.
-func removeRootProof(data any) {
+// A top-level ARRAY is not a set of independent roots. RDFCredential's own
+// JSON marshalling goes through FromRDF, which FLATTENS - every embedded node
+// is lifted to that same array beside the document. Deleting proof keys from
+// each entry would therefore strip exactly the nested proofs this is meant to
+// preserve, and only after a round trip through RDF, so the compact path and
+// the expanded path would disagree about what is signed.
+//
+// The root is identified the way credential.RootProofs identifies it: the node
+// nothing else refers to. A document that holds no such node, or more than
+// one, does not say what it is about and is REFUSED rather than guessed at.
+func removeRootProof(data any) error {
 	deleteProofKeys := func(m map[string]any) {
 		delete(m, "proof")
 		delete(m, "https://w3id.org/security#proof")
 		delete(m, "https://www.w3.org/ns/credentials#proof")
 	}
-	if m, ok := data.(map[string]any); ok {
-		deleteProofKeys(m)
-		return
-	}
-	if list, ok := data.([]any); ok {
-		for _, item := range list {
-			if m, ok := item.(map[string]any); ok {
-				deleteProofKeys(m)
+
+	switch typed := data.(type) {
+	case map[string]any:
+		if graph, wrapped := typed["@graph"]; wrapped {
+			// A @graph container holds the nodes; the container itself is
+			// not the document's root.
+			if err := removeRootProof(graph); err != nil {
+				return err
 			}
 		}
+		deleteProofKeys(typed)
+		return nil
+	case []any:
+		nodes := make([]map[string]any, 0, len(typed))
+		for _, entry := range typed {
+			node, isNode := entry.(map[string]any)
+			if !isNode {
+				continue
+			}
+			nodes = append(nodes, node)
+		}
+		if len(nodes) == 1 {
+			deleteProofKeys(nodes[0])
+			return nil
+		}
+		root, err := credential.RootOfCompactedNodes(nodes)
+		if err != nil {
+			return err
+		}
+		deleteProofKeys(root)
+		return nil
 	}
+	return fmt.Errorf("a document is %T rather than a node or a list of nodes", data)
 }
 
 // parseJSONPointer parses a JSON pointer (RFC 6901) into path segments.

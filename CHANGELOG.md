@@ -19,8 +19,12 @@
   top-level node, so a proof found anywhere else is not the document's own. A
   proof moved onto an embedded credential no longer verifies.
 
-  **Migration:** presentations signed before this release do not verify after
-  it, for both RDF cryptosuites — re-present them.
+  **Migration:** a presentation signed before this release stops verifying if
+  it CARRIES a proof that is not its own — an embedded credential's issuer
+  proof, which is the case this change exists to secure. Those must be
+  re-presented, under both RDF cryptosuites. A presentation with nothing
+  embedded has the same unsecured RDF under the old removal and the new one
+  and verifies unchanged.
 
   Most credentials are unaffected: a credential that carries no proof but its
   own makes the two removals the same operation. A credential that NESTS a
