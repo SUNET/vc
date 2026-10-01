@@ -24,9 +24,11 @@ import (
 // work done before anything about the document has been authenticated. A real
 // proof set is a handful of signers.
 //
-// Signing is NOT capped: the limit exists to bound work on untrusted input,
-// and a signer is not that. A document signed past the limit will not verify
-// here, which is the signer's problem to see.
+// Signing is capped too. The limit exists to bound work on untrusted input,
+// and a signer is not that - but an uncapped Sign appends a 33rd proof,
+// returns success, and hands back a document this same library then refuses
+// before checking any signature. An API that produces output it cannot read
+// is worse than one that says no.
 const MaxRootProofs = 32
 
 // ProofConfigHash canonicalizes a proof configuration and hashes it. The
@@ -69,9 +71,13 @@ func UnsecuredDocumentHash(cred *RDFCredential) ([32]byte, error) {
 		return zero, err
 	}
 
-	_, withoutRootProof, err := cred.RootProofs()
+	existing, withoutRootProof, err := cred.RootProofs()
 	if err != nil {
 		return zero, fmt.Errorf("failed to get the document the proof secures: %w", err)
+	}
+	// The proof about to be added makes len(existing)+1.
+	if len(existing) >= MaxRootProofs {
+		return zero, fmt.Errorf("the document already attaches %d proofs to itself, and %d is the most this will verify", len(existing), MaxRootProofs)
 	}
 
 	return documentHash(withoutRootProof)

@@ -316,7 +316,7 @@ func ProofKeys(node map[string]any, context any, options *ld.JsonLdOptions) []st
 	// expanding a synthetic document per member was both expensive - this
 	// runs on an SD credential before its signature has been checked - and
 	// unworkable: no single probe VALUE survives every declaration.
-	active := activeContext(context, options)
+	active := nodeContext(node, context, options)
 
 	var keys []string
 	for key := range node {
@@ -351,6 +351,40 @@ func ProofKeys(node map[string]any, context any, options *ld.JsonLdOptions) []st
 		}
 	}
 	return keys
+}
+
+// nodeContext is the context ACTIVE on a node: the document's, with any
+// type-scoped context its own types name applied on top.
+//
+// JSON-LD applies a type-scoped context before expanding a node's members, so
+// a proof alias defined in that scope is one RootProofs sees - it expands the
+// whole document - and one a top-level lookup misses. The VC 2.0 context
+// itself declares proof this way, which is why a document-level lookup finds
+// nothing for the plain name.
+func nodeContext(node map[string]any, context any, options *ld.JsonLdOptions) *ld.Context {
+	active := activeContext(context, options)
+	if active == nil {
+		return nil
+	}
+
+	for _, key := range []string{"@type", "type"} {
+		for _, entry := range asList(node[key]) {
+			name, isString := entry.(string)
+			if !isString {
+				continue
+			}
+			definition := active.GetTermDefinition(name)
+			if definition == nil || !definition.HasContext {
+				continue
+			}
+			scoped, err := active.Parse(definition.Context)
+			if err != nil {
+				continue
+			}
+			active = scoped
+		}
+	}
+	return active
 }
 
 // activeContext parses a document's context, or returns nil when there is

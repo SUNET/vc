@@ -293,8 +293,8 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any
 	// proof quads no disclosed signature covers. RootProofs removes both;
 	// so does this.
 	var orphaned []string
-	deleteProofKeys := func(m map[string]any) {
-		for _, key := range credential.ProofKeys(m, context, options) {
+	deleteProofKeys := func(m map[string]any, active any) {
+		for _, key := range credential.ProofKeys(m, active, options) {
 			orphaned = append(orphaned, graphNamesIn(m[key])...)
 			delete(m, key)
 		}
@@ -315,7 +315,7 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any
 			typed["@graph"] = graph
 			return typed, nil
 		}
-		deleteProofKeys(typed)
+		deleteProofKeys(typed, contextFor(typed, context))
 		return typed, nil
 	case []any:
 		nodes := make([]map[string]any, 0, len(typed))
@@ -326,15 +326,23 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any
 			}
 			nodes = append(nodes, node)
 		}
+
+		var root map[string]any
 		if len(nodes) == 1 {
-			deleteProofKeys(nodes[0])
+			root = nodes[0]
 		} else {
-			root, err := credential.RootOfCompactedNodes(nodes, context, options)
+			selected, err := credential.RootOfCompactedNodes(nodes, context, options)
 			if err != nil {
 				return nil, err
 			}
-			deleteProofKeys(root)
+			root = selected
 		}
+		// The ROOT's own context, not whichever node happened to be first.
+		// A flattened compact array may give each node its own @context, and
+		// reordering top-level nodes does not change the RDF - so reading
+		// the first one let the order decide whether the root's alias was
+		// recognized.
+		deleteProofKeys(root, contextFor(root, context))
 		return withoutNamedGraphs(typed, orphaned), nil
 	}
 	return nil, fmt.Errorf("a document is %T rather than a node or a list of nodes", data)
@@ -393,23 +401,27 @@ func withoutNamedGraphs(entries []any, names []string) []any {
 	return kept
 }
 
-// documentContextOf reads the @context a document carries, so member names can
-// be resolved against it. An expanded document carries none, and needs none -
-// its members are already absolute IRIs.
+// documentContextOf reads the @context a document carries at its OUTERMOST
+// level, so member names can be resolved against it. An expanded document
+// carries none, and needs none - its members are already absolute IRIs.
+//
+// A top-level array has no outermost context of its own; each node may carry
+// one, and contextFor reads it from the node that matters rather than from
+// whichever came first.
 func documentContextOf(data any) any {
-	switch typed := data.(type) {
-	case map[string]any:
-		return typed["@context"]
-	case []any:
-		for _, entry := range typed {
-			if node, isNode := entry.(map[string]any); isNode {
-				if context, present := node["@context"]; present {
-					return context
-				}
-			}
-		}
+	if node, isNode := data.(map[string]any); isNode {
+		return node["@context"]
 	}
 	return nil
+}
+
+// contextFor is the context to resolve a NODE's members against: its own if it
+// has one, and the document's otherwise.
+func contextFor(node map[string]any, document any) any {
+	if own, present := node["@context"]; present {
+		return own
+	}
+	return document
 }
 
 // parseJSONPointer parses a JSON pointer (RFC 6901) into path segments.

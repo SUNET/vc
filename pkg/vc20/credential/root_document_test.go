@@ -274,3 +274,39 @@ func TestProofKeysRespectsAContextThatRemapsProof(t *testing.T) {
 		require.Equal(t, []string{"proof"}, ProofKeys(node, nil, nil))
 	})
 }
+
+// TestProofKeysHonoursATypeScopedAlias: JSON-LD applies a TYPE-SCOPED context
+// before expanding a node's members, so an alias defined in that scope is one
+// RootProofs sees - it expands the whole document - and one a document-level
+// lookup misses. The two would then disagree about which quads the signature
+// covers.
+func TestProofKeysHonoursATypeScopedAlias(t *testing.T) {
+	var context any
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"Sealed": {
+			"@id": "https://example.org/vocab#Sealed",
+			"@context": {"seal": "https://w3id.org/security#proof"}
+		},
+		"type": "@type",
+		"id": "@id"
+	}`), &context))
+
+	t.Run("in scope", func(t *testing.T) {
+		node := map[string]any{
+			"id":   "https://example.org/credential",
+			"type": "Sealed",
+			"seal": map[string]any{"proofValue": "z..."},
+		}
+		require.Equal(t, []string{"seal"}, ProofKeys(node, context, nil),
+			"the alias its own type brings into scope is a proof")
+	})
+
+	t.Run("out of scope", func(t *testing.T) {
+		node := map[string]any{
+			"id":   "https://example.org/credential",
+			"seal": map[string]any{"proofValue": "z..."},
+		}
+		require.Empty(t, ProofKeys(node, context, nil),
+			"without the type, the scoped definition does not apply")
+	})
+}

@@ -257,3 +257,37 @@ func TestRemoveRootProofDropsTheGraphTheRootProofNamed(t *testing.T) {
 		"while a nested credential's proof graph is content the signature covers")
 	require.Contains(t, names, "https://example.org/credentials/inner")
 }
+
+// TestRemoveRootProofUsesTheRootsOwnContext: a flattened compact array may
+// give each node its own @context, and reordering top-level nodes does not
+// change the RDF - so reading the FIRST context let array order decide whether
+// the root's proof alias was recognized.
+func TestRemoveRootProofUsesTheRootsOwnContext(t *testing.T) {
+	// The embedded node comes FIRST and defines "seal" as something
+	// harmless; the root defines it as the proof predicate.
+	document := []any{
+		map[string]any{
+			"@context": map[string]any{"seal": "https://example.org/vocab#wax", "id": "@id"},
+			"id":       "https://example.org/credentials/inner",
+			"seal":     "red",
+		},
+		map[string]any{
+			"@context": map[string]any{"seal": "https://w3id.org/security#proof", "carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"}, "id": "@id"},
+			"id":       "https://example.org/credentials/outer",
+			"carries":  "https://example.org/credentials/inner",
+			"seal":     map[string]any{"type": "DataIntegrityProof"},
+		},
+	}
+
+	stripped, err := removeRootProof(document, nil)
+	require.NoError(t, err)
+
+	remaining := stripped.([]any)
+	inner := remaining[0].(map[string]any)
+	outer := remaining[1].(map[string]any)
+
+	require.NotContains(t, outer, "seal",
+		"the ROOT's context decides, whatever order the nodes came in")
+	require.Contains(t, inner, "seal",
+		"and a node whose own context means something else keeps its field")
+}

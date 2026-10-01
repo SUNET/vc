@@ -399,3 +399,40 @@ func TestSignAndVerifyABlankCredentialThatIsItsOwnSubject(t *testing.T) {
 	_, err = NewSuite().VerifyProof(signed, pub)
 	require.NoError(t, err)
 }
+
+// TestSignRefusesToExceedTheProofLimit: an uncapped Sign appended a 33rd
+// proof, returned success, and handed back a document this same library then
+// refuses before checking any signature. An API that produces output it
+// cannot read is worse than one that says no.
+func TestSignRefusesToExceedTheProofLimit(t *testing.T) {
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	base, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`), nil)
+	require.NoError(t, err)
+
+	signed := base
+	for i := range credential.MaxRootProofs {
+		signed, err = NewSuite().Sign(signed, key, &SignOptions{
+			VerificationMethod: "did:example:issuer#key-1",
+			ProofPurpose:       "assertionMethod",
+			Created:            time.Now().UTC(),
+			Domain:             fmt.Sprintf("https://example.org/%d", i),
+		})
+		require.NoError(t, err, "signature %d is within the limit", i+1)
+	}
+
+	_, err = NewSuite().Sign(signed, key, &SignOptions{
+		VerificationMethod: "did:example:issuer#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+		Domain:             "https://example.org/one-too-many",
+	})
+	require.ErrorContains(t, err, "is the most this will verify",
+		"signing must not produce a document this library refuses")
+}
