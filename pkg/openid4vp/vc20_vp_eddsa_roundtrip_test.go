@@ -1146,3 +1146,88 @@ func TestVerifyAndExtractRefusesAKeyThatIsNotTheIssuers(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "did:example:trusted-issuer", result.Issuer)
 }
+
+// authorizingResolver answers both questions: which key a method names, and
+// whether an issuer may assert with it. A resolver that can do the second is
+// asked, and its answer is final.
+type authorizingResolver struct {
+	keys       map[string]crypto.PublicKey
+	authorized map[string]bool // issuer|purpose
+	asked      int
+}
+
+func (r *authorizingResolver) ResolveKey(_ context.Context, vm string) (crypto.PublicKey, error) {
+	key, ok := r.keys[vm]
+	if !ok {
+		return nil, fmt.Errorf("no key for %q", vm)
+	}
+	return key, nil
+}
+
+func (r *authorizingResolver) AuthorizeIssuerKey(_ context.Context, issuer string, _ crypto.PublicKey, purpose string) error {
+	r.asked++
+	if !r.authorized[issuer+"|"+purpose] {
+		return fmt.Errorf("%q may not assert for %q", issuer, purpose)
+	}
+	return nil
+}
+
+// TestVerifyAndExtractAsksTheResolverToAuthorize: the lexical test is a
+// fallback for a resolver that cannot answer the real question. One that CAN
+// is asked, and its answer is final - which is what lets a key delegated to an
+// identifier outside the issuer's own space be accepted, and what stops an
+// identifier under the issuer from being taken as proof of anything.
+func TestVerifyAndExtractAsksTheResolverToAuthorize(t *testing.T) {
+	delegatePub, delegateKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	// The signing key lives under a DIFFERENT identifier than the issuer,
+	// which the lexical fallback would refuse outright.
+	const issuer = "did:example:trusted-issuer"
+	const delegated = "did:example:a-delegate#key-1"
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "`+issuer+`",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`), nil)
+	require.NoError(t, err)
+
+	signed, err := eddsaSuite.NewSuite().Sign(cred, delegateKey, &eddsaSuite.SignOptions{
+		VerificationMethod: delegated,
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+
+	t.Run("authorized delegation is accepted", func(t *testing.T) {
+		resolver := &authorizingResolver{
+			keys:       map[string]crypto.PublicKey{delegated: delegatePub},
+			authorized: map[string]bool{issuer + "|assertionMethod": true},
+		}
+		handler, err := NewVC20Handler(WithVC20KeyResolver(resolver))
+		require.NoError(t, err)
+
+		result, err := handler.VerifyAndExtract(t.Context(), string(compact))
+		require.NoError(t, err,
+			"a resolver that authorizes the delegation decides, not the spelling")
+		require.Equal(t, issuer, result.Issuer)
+		require.Positive(t, resolver.asked, "and it really was asked")
+	})
+
+	t.Run("a refusal is final", func(t *testing.T) {
+		resolver := &authorizingResolver{
+			keys:       map[string]crypto.PublicKey{delegated: delegatePub},
+			authorized: map[string]bool{}, // authorizes nothing
+		}
+		handler, err := NewVC20Handler(WithVC20KeyResolver(resolver))
+		require.NoError(t, err)
+
+		_, err = handler.VerifyAndExtract(t.Context(), string(compact))
+		require.ErrorContains(t, err, "may not assert",
+			"a signature that verifies is not an authorization")
+	})
+}

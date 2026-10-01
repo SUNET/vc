@@ -46,6 +46,26 @@ type VC20KeyResolver interface {
 	ResolveKey(ctx context.Context, verificationMethod string) (crypto.PublicKey, error)
 }
 
+// VC20IssuerAuthorizer answers the question a key resolver cannot: may THIS
+// issuer assert with THIS key, for this proof purpose.
+//
+// Resolution and authorization are different questions. A resolver says the
+// trust framework knows a verification method, which in a framework holding
+// many issuers is true of all of their keys - so a credential naming issuer A
+// could be signed with issuer B's key and accepted. A resolver that also
+// implements this interface is asked, and its answer is final.
+//
+// Implement it wherever the trust decision lives. pkg/trust's TrustEvaluator
+// already asks this shape of question - subject, key, action - so an adapter
+// over it is a few lines; this interface exists so the handler does not have
+// to depend on that package.
+//
+// Without it the handler falls back to a lexical test, which is weaker in
+// both directions: see issuerControlsMethod.
+type VC20IssuerAuthorizer interface {
+	AuthorizeIssuerKey(ctx context.Context, issuer string, key crypto.PublicKey, proofPurpose string) error
+}
+
 // StaticVC20KeyResolver is a simple key resolver that returns a fixed key.
 type StaticVC20KeyResolver struct {
 	Key crypto.PublicKey
@@ -342,15 +362,28 @@ func (h *VC20Handler) verifyOneRootProof(
 	// knows that verification method, not that the issuer this credential
 	// names may sign with it - so a credential claiming an allowlisted
 	// issuer, signed with any key the resolver will hand back, was accepted
-	// and reported as that issuer's. Checked BEFORE resolution, so an
-	// unauthorized method costs no lookup.
-	if err := issuerControlsMethod(issuer, vm); err != nil {
-		return nil, err
+	// and reported as that issuer's.
+	//
+	// ASKED when the resolver can answer, and only approximated when it
+	// cannot. The lexical test runs first in that case, before resolution,
+	// so an unauthorized method costs no lookup.
+	authorizer, canAuthorize := h.keyResolver.(VC20IssuerAuthorizer)
+	if !canAuthorize {
+		if err := issuerControlsMethod(issuer, vm); err != nil {
+			return nil, err
+		}
 	}
 
 	pubKey, err := h.keyResolver.ResolveKey(ctx, vm)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve public key: %w", err)
+	}
+
+	if canAuthorize {
+		purpose, _ := proof["proofPurpose"].(string)
+		if err := authorizer.AuthorizeIssuerKey(ctx, issuer, pubKey, purpose); err != nil {
+			return nil, fmt.Errorf("the issuer %q may not assert with the key %q names: %w", issuer, vm, err)
+		}
 	}
 
 	// Determine cryptosuite and verify with appropriate key type
@@ -968,6 +1001,17 @@ const dataIntegrityProofType = "DataIntegrityProof"
 // holding many issuers is true of every one of their keys - so nothing
 // stopped a credential naming issuer A from being signed by issuer B, or by
 // anyone else resolvable, and reported as A's.
+//
+// This is the FALLBACK, used only when the resolver cannot answer the real
+// question - see VC20IssuerAuthorizer, which a resolver should implement
+// wherever the trust decision actually lives.
+//
+// It is weaker in both directions, and knowing how is the point of this
+// comment. An identifier under the issuer is not proof that the key sits in
+// that issuer's assertionMethod relationship, and a key delegated to a
+// different identifier may be perfectly well authorized. It is here because
+// the alternative, with no authorizer, is no binding at all - and no binding
+// means any resolvable key signs for any issuer.
 //
 // The test is lexical, because a resolved key arrives without its controller:
 // the method must BE the issuer, or live under it - a fragment, a path, or a
