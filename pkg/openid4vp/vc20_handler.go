@@ -292,43 +292,20 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 // rootProofCandidates lists the proofs the document attaches to itself, in
 // the short-keyed form the rest of this handler reads.
 func (h *VC20Handler) rootProofCandidates(rdfCred *credential.RDFCredential) ([]map[string]any, error) {
-	expanded, _, err := rdfCred.RootProofs()
+	// The MEMOIZED compaction. Compacting here and letting the suites
+	// compact the same set again on the way to matching a candidate doubled
+	// the JSON-LD work on unauthenticated input, and bypassed the
+	// memoization that exists to stop exactly that.
+	//
+	// Skipping a proof that will not compact, reporting why when none
+	// survive, and the proof-count cap all live in that one step now,
+	// rather than being repeated here.
+	candidates, err := credential.CompactedRootProofs(rdfCred)
 	if err != nil {
 		return nil, err
 	}
-	if len(expanded) == 0 {
-		return nil, errors.New("credential missing proof")
-	}
-	// The candidate list comes from the document, so an attacker chooses its
-	// length. Verifying each candidate costs a canonicalization and a
-	// signature check, so an unbounded list is CPU amplification on input
-	// nobody has authenticated yet. A real proof set is a handful of
-	// signers; anything past that is refused rather than worked through.
-	if len(expanded) > credential.MaxRootProofs {
-		return nil, fmt.Errorf("the document attaches %d proofs to itself, more than the %d this will verify", len(expanded), credential.MaxRootProofs)
-	}
-
-	// A candidate that cannot be compacted is SKIPPED, not fatal. Every root
-	// proof is removed from the secured document, so appending a malformed
-	// graph-valued proof does not disturb a genuine signature already there -
-	// and aborting collection on it would turn that addition into a way to
-	// deny verification of the genuine proof. The failure is kept and
-	// reported only if no candidate survives.
-	candidates := make([]map[string]any, 0, len(expanded))
-	var lastErr error
-	for _, entry := range expanded {
-		proof, err := credential.CompactRootProof(entry)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		candidates = append(candidates, proof)
-	}
-	if len(candidates) == 0 {
-		if lastErr != nil {
-			return nil, lastErr
-		}
-		return nil, errors.New("credential missing proof")
+	if len(candidates) > credential.MaxRootProofs {
+		return nil, fmt.Errorf("the document attaches %d proofs to itself, more than the %d this will verify", len(candidates), credential.MaxRootProofs)
 	}
 
 	return candidates, nil

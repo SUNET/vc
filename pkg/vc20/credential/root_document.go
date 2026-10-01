@@ -450,18 +450,37 @@ func IsBareGraphContainer(node map[string]any) bool {
 // that will not load - the caller falls back to scanning strings, which is
 // imprecise but never misses a reference.
 func referencedIDs(nodes []map[string]any, context any, options *ld.JsonLdOptions) (map[string]bool, bool) {
-	if context == nil {
+	// Expanded when ANYTHING has a context to resolve against - the shared
+	// one, or a node's own. A top-level compact array has no shared context,
+	// but its nodes may each carry one, and returning early on the shared
+	// one alone forced the string scan, which cannot tell an id-coerced
+	// value from an ordinary literal: a literal equal to another node's id
+	// made that node look referenced and a valid document read as rootless.
+	//
+	// With NO context anywhere there is nothing to expand against - every
+	// term would simply drop, leaving no references at all and every node
+	// looking like a root - so the string scan is the better reading there.
+	// It errs toward seeing a reference rather than missing one.
+	hasContext := context != nil
+	entries := make([]any, 0, len(nodes))
+	for _, node := range nodes {
+		if _, own := node["@context"]; own {
+			hasContext = true
+		}
+		entries = append(entries, node)
+	}
+	if !hasContext {
 		return nil, false
 	}
+
 	if options == nil {
 		options = NewJSONLDOptions("")
 	}
 
-	entries := make([]any, 0, len(nodes))
-	for _, node := range nodes {
-		entries = append(entries, node)
+	document := map[string]any{"@graph": entries}
+	if context != nil {
+		document["@context"] = context
 	}
-	document := map[string]any{"@context": context, "@graph": entries}
 
 	expanded, err := ld.NewJsonLdProcessor().Expand(document, options)
 	if err != nil {

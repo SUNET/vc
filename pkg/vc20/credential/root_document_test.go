@@ -369,3 +369,31 @@ func TestRootOfExpandedNodesIgnoresAnIndexedGraph(t *testing.T) {
 	require.NoError(t, err, "an indexed graph is a graph, not a second root")
 	require.Equal(t, "https://example.org/credential", root["@id"])
 }
+
+// TestRootCompactedDocumentUsesNodeLocalContexts: a top-level compact array
+// has no shared context, but its nodes may each carry one. Bailing out on the
+// shared context alone forced the string scan, which cannot tell an id-coerced
+// value from an ordinary literal - so a literal equal to another node's id
+// made that node look referenced and a valid document read as rootless.
+func TestRootCompactedDocumentUsesNodeLocalContexts(t *testing.T) {
+	rooted, err := RootCompactedDocument(map[string]any{
+		"@graph": []any{
+			map[string]any{
+				"@context": map[string]any{
+					"id":      "@id",
+					"subject": map[string]any{"@id": "https://example.org/vocab#subject", "@type": "@id"},
+				},
+				"id":      "https://example.org/credential",
+				"subject": "https://example.org/subject",
+			},
+			map[string]any{
+				"@context": map[string]any{"id": "@id", "note": "https://example.org/vocab#note"},
+				"id":       "https://example.org/subject",
+				// A LITERAL that reads like the root's identifier.
+				"note": "https://example.org/credential",
+			},
+		},
+	}, "", nil)
+	require.NoError(t, err, "node-local contexts tell a literal from a reference")
+	require.Equal(t, "https://example.org/credential", rooted["id"])
+}
