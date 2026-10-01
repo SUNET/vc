@@ -539,8 +539,6 @@ func referencedAnywhere(entries [][]map[string]any, id string) bool {
 	return false
 }
 
-// graphNamed returns the index of the graph entry carrying this name, or -1.
-// Entries are coalesced by name before this runs, so there is at most one.
 // nodeNamed finds the top-level node a proof reference points at. The ROOT is
 // never it: a document referring to itself as its own proof is naming the
 // document the signature covers, and removing it would leave nothing.
@@ -556,6 +554,8 @@ func nodeNamed(nodes []map[string]any, id string, rootID string) int {
 	return -1
 }
 
+// graphNamed returns the index of the graph entry carrying this name, or -1.
+// Entries are coalesced by name before this runs, so there is at most one.
 func graphNamed(graphs []map[string]any, id string) int {
 	if id == "" {
 		return -1

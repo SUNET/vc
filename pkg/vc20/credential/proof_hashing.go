@@ -83,7 +83,7 @@ func UnsecuredDocumentHash(cred *RDFCredential) ([32]byte, error) {
 	return documentHash(withoutRootProof)
 }
 
-// SecuredDocument returns the proofs the document attaches to ITSELF and the
+// SecuredDocumentHash returns the proofs the document attaches to ITSELF and the
 // hash of the document they secure.
 //
 // Verification needs the root-stability check MORE than signing does: a signed
