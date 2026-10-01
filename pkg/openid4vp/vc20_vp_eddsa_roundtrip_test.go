@@ -324,6 +324,70 @@ func TestVerifyAndExtractReportsTheProofThatVerified(t *testing.T) {
 		"nor its created")
 }
 
+// signedExampleDocument signs a minimal credential written against
+// documentContext with method as its verificationMethod, and returns the
+// signed document as a map ready to rewrite by hand.
+//
+// The proof is always made over the ABSOLUTE method IRI; the tests below then
+// change only the JSON SPELLING of it, so what they exercise is the handler's
+// context handling rather than a different signature.
+func signedExampleDocument(t *testing.T, documentContext any, method string, key ed25519.PrivateKey) map[string]any {
+	t.Helper()
+
+	document, err := json.Marshal(map[string]any{
+		"@context":          documentContext,
+		"type":              []any{"VerifiableCredential"},
+		"issuer":            "did:example:issuer",
+		"credentialSubject": map[string]any{"id": "did:example:subject"},
+	})
+	require.NoError(t, err)
+
+	cred, err := credential.NewRDFCredentialFromJSON(document, nil)
+	require.NoError(t, err)
+
+	signed, err := eddsaSuite.NewSuite().Sign(cred, key, &eddsaSuite.SignOptions{
+		VerificationMethod: method,
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(compact, &doc))
+	return doc
+}
+
+// rootProofOf returns the document's own proof object, failing the test if the
+// document carries anything else - a proof SET would make "the proof" unclear
+// and the rewriting these tests do meaningless.
+func rootProofOf(t *testing.T, doc map[string]any) map[string]any {
+	t.Helper()
+	proof, ok := doc["proof"].(map[string]any)
+	require.True(t, ok, "the signed document must carry exactly one root proof")
+	return proof
+}
+
+// verifyWithResolvedMethod runs VerifyAndExtract over a hand-rewritten
+// document, with a resolver that answers for exactly one verification method -
+// the absolute identifier, which is what a key belongs to and what the RDF
+// form carries.
+func verifyWithResolvedMethod(t *testing.T, doc map[string]any, method string, pub crypto.PublicKey) (*VC20VerificationResult, error) {
+	t.Helper()
+
+	rewritten, err := json.Marshal(doc)
+	require.NoError(t, err)
+
+	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+		keys: map[string]crypto.PublicKey{method: pub},
+	}))
+	require.NoError(t, err)
+
+	return handler.VerifyAndExtract(t.Context(), string(rewritten))
+}
+
 // TestVerifyAndExtractAcceptsACompactVerificationMethod: a compact document
 // may define a prefix and write "ex:key-1" as its verificationMethod. The
 // resolver was handed that spelling while the suite reads the absolute IRI
@@ -335,24 +399,11 @@ func TestVerifyAndExtractAcceptsACompactVerificationMethod(t *testing.T) {
 	require.NoError(t, err)
 
 	const absoluteMethod = "https://example.org/keys#key-1"
-	const prefixed = `{
-		"@context": ["https://www.w3.org/ns/credentials/v2",
-			{"ex": "https://example.org/keys#"}],
-		"type": ["VerifiableCredential"],
-		"issuer": "did:example:issuer",
-		"credentialSubject": {"id": "did:example:subject"}
-	}`
 
-	cred, err := credential.NewRDFCredentialFromJSON([]byte(prefixed), nil)
-	require.NoError(t, err)
-	signed, err := eddsaSuite.NewSuite().Sign(cred, issuerKey, &eddsaSuite.SignOptions{
-		VerificationMethod: absoluteMethod,
-		ProofPurpose:       "assertionMethod",
-		Created:            time.Now().UTC(),
-	})
-	require.NoError(t, err)
-	compact, err := signed.ToCompactJSON()
-	require.NoError(t, err)
+	doc := signedExampleDocument(t, []any{
+		"https://www.w3.org/ns/credentials/v2",
+		map[string]any{"ex": "https://example.org/keys#"},
+	}, absoluteMethod, issuerKey)
 
 	// Rewritten to the COMPACT spelling, which expands to the same IRI
 	// under this document's own context - so the RDF the signature covers
@@ -360,26 +411,12 @@ func TestVerifyAndExtractAcceptsACompactVerificationMethod(t *testing.T) {
 	// prefix directly would not produce this document: Sign writes a v2-only
 	// @context into the proof node, under which "ex:key-1" is a relative
 	// reference and drops out of the proof's RDF entirely.
-	var doc map[string]any
-	require.NoError(t, json.Unmarshal(compact, &doc))
-	proof, ok := doc["proof"].(map[string]any)
-	require.True(t, ok)
+	proof := rootProofOf(t, doc)
 	require.Equal(t, absoluteMethod, proof["verificationMethod"])
 	delete(proof, "@context")
 	proof["verificationMethod"] = "ex:key-1"
 
-	rewritten, err := json.Marshal(doc)
-	require.NoError(t, err)
-
-	// The resolver answers for the ABSOLUTE identifier, which is what a key
-	// belongs to and what the RDF form carries.
-	resolver := &mockVC20KeyResolverByMethod{
-		keys: map[string]crypto.PublicKey{absoluteMethod: issuerPub},
-	}
-	handler, err := NewVC20Handler(WithVC20KeyResolver(resolver))
-	require.NoError(t, err)
-
-	result, err := handler.VerifyAndExtract(t.Context(), string(rewritten))
+	result, err := verifyWithResolvedMethod(t, doc, absoluteMethod, issuerPub)
 	require.NoError(t, err, "a compact verificationMethod names the same key as its expansion")
 	require.Equal(t, absoluteMethod, result.VerificationMethod)
 }
@@ -389,53 +426,32 @@ func TestVerifyAndExtractAcceptsACompactVerificationMethod(t *testing.T) {
 // context. Expanding under the document's root context alone resolves a
 // proof-local prefix wrongly, or not at all, and the credential is rejected
 // even with the right key.
+//
+// What pins this is now the expansion rootProofCandidates does, not
+// expandVerificationMethod - reading the proof off the raw JSON instead fails
+// this test, which is the shape the handler had before root-proof selection
+// moved to the expanded document.
 func TestVerifyAndExtractAcceptsAProofLocalPrefix(t *testing.T) {
 	issuerPub, issuerKey, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 
 	const absoluteMethod = "https://example.org/keys#key-1"
-	const plain = `{
-		"@context": "https://www.w3.org/ns/credentials/v2",
-		"type": ["VerifiableCredential"],
-		"issuer": "did:example:issuer",
-		"credentialSubject": {"id": "did:example:subject"}
-	}`
 
-	cred, err := credential.NewRDFCredentialFromJSON([]byte(plain), nil)
-	require.NoError(t, err)
-	signed, err := eddsaSuite.NewSuite().Sign(cred, issuerKey, &eddsaSuite.SignOptions{
-		VerificationMethod: absoluteMethod,
-		ProofPurpose:       "assertionMethod",
-		Created:            time.Now().UTC(),
-	})
-	require.NoError(t, err)
-	compact, err := signed.ToCompactJSON()
-	require.NoError(t, err)
+	doc := signedExampleDocument(t, "https://www.w3.org/ns/credentials/v2", absoluteMethod, issuerKey)
 
 	// The prefix is defined on the PROOF, not on the document - and the
 	// document's own context stays as it was, so nothing but the proof's
 	// local context can resolve "ex:key-1".
-	var doc map[string]any
-	require.NoError(t, json.Unmarshal(compact, &doc))
 	require.Equal(t, "https://www.w3.org/ns/credentials/v2", doc["@context"],
 		"the document must NOT define the prefix, or this proves nothing")
-	proof, ok := doc["proof"].(map[string]any)
-	require.True(t, ok)
+	proof := rootProofOf(t, doc)
 	proof["@context"] = []any{
 		"https://www.w3.org/ns/credentials/v2",
 		map[string]any{"ex": "https://example.org/keys#"},
 	}
 	proof["verificationMethod"] = "ex:key-1"
 
-	rewritten, err := json.Marshal(doc)
-	require.NoError(t, err)
-
-	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
-		keys: map[string]crypto.PublicKey{absoluteMethod: issuerPub},
-	}))
-	require.NoError(t, err)
-
-	result, err := handler.VerifyAndExtract(t.Context(), string(rewritten))
+	result, err := verifyWithResolvedMethod(t, doc, absoluteMethod, issuerPub)
 	require.NoError(t, err, "a proof-local prefix names the same key as its expansion")
 	require.Equal(t, absoluteMethod, result.VerificationMethod)
 }
@@ -466,43 +482,18 @@ func TestVerifyAndExtractHonoursTheProofsContextOrder(t *testing.T) {
 	credential.GetGlobalLoader().AddContext(rightPrefix, `{"@context":{"ex":"https://example.org/keys#"}}`)
 	credential.GetGlobalLoader().AddContext(wrongPrefix, `{"@context":{"ex":"https://example.org/elsewhere#"}}`)
 
-	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
-		"@context": ["https://www.w3.org/ns/credentials/v2", "`+rightPrefix+`"],
-		"type": ["VerifiableCredential"],
-		"issuer": "did:example:issuer",
-		"credentialSubject": {"id": "did:example:subject"}
-	}`), nil)
-	require.NoError(t, err)
-
-	signed, err := eddsaSuite.NewSuite().Sign(cred, issuerKey, &eddsaSuite.SignOptions{
-		VerificationMethod: absoluteMethod,
-		ProofPurpose:       "assertionMethod",
-		Created:            time.Now().UTC(),
-	})
-	require.NoError(t, err)
-	compact, err := signed.ToCompactJSON()
-	require.NoError(t, err)
-
-	var doc map[string]any
-	require.NoError(t, json.Unmarshal(compact, &doc))
-	proof, ok := doc["proof"].(map[string]any)
-	require.True(t, ok)
+	doc := signedExampleDocument(t, []any{
+		"https://www.w3.org/ns/credentials/v2", rightPrefix,
+	}, absoluteMethod, issuerKey)
 
 	// The proof applies the wrong definition and then puts the right one
 	// back. Flattened into the document's context and de-duplicated, the
 	// trailing entry is dropped as a repeat and "ex" means the wrong thing.
+	proof := rootProofOf(t, doc)
 	proof["@context"] = []any{"https://www.w3.org/ns/credentials/v2", wrongPrefix, rightPrefix}
 	proof["verificationMethod"] = "ex:key-1"
 
-	rewritten, err := json.Marshal(doc)
-	require.NoError(t, err)
-
-	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
-		keys: map[string]crypto.PublicKey{absoluteMethod: issuerPub},
-	}))
-	require.NoError(t, err)
-
-	result, err := handler.VerifyAndExtract(t.Context(), string(rewritten))
+	result, err := verifyWithResolvedMethod(t, doc, absoluteMethod, issuerPub)
 	require.NoError(t, err, "the proof's own context ordering decides what ex means")
 	require.Equal(t, absoluteMethod, result.VerificationMethod)
 }

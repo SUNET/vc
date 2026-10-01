@@ -52,16 +52,11 @@ func (s *Suite) Sign(cred *credential.RDFCredential, key ed25519.PrivateKey, opt
 	// which is the document with the root's own proofs removed and every
 	// embedded proof DELIBERATELY left where it is. An embedded
 	// credential's issuer proof is content this signature covers; the code
-	// that used to remove it is what let it be swapped or stripped.
-	// Refuse a document that would verify in one serialization and not
-	// another before signing it. See CheckRootSurvivesFlattening.
-	if err := cred.CheckRootSurvivesFlattening(); err != nil {
-		return nil, err
-	}
-
-	_, credWithoutProof, err := cred.RootProofs()
+	// that used to remove it is what let it be swapped or stripped. See
+	// credential.UnsecuredDocumentHash.
+	docHash, err := credential.UnsecuredDocumentHash(cred)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get the document the proof secures: %w", err)
+		return nil, err
 	}
 
 	// 2. Create proof configuration
@@ -87,35 +82,15 @@ func (s *Suite) Sign(cred *credential.RDFCredential, key ed25519.PrivateKey, opt
 	}
 
 	// 3. Canonicalize and hash proof configuration
-	proofConfigBytes, err := json.Marshal(proofConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal proof config: %w", err)
-	}
-
 	ldOpts := credential.NewJSONLDOptions("")
 	ldOpts.Algorithm = ld.AlgorithmURDNA2015
 
-	proofCred, err := credential.NewRDFCredentialFromJSON(proofConfigBytes, ldOpts)
+	proofHash, err := credential.ProofConfigHash(proofConfig, ldOpts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create RDF credential for proof config: %w", err)
+		return nil, err
 	}
 
-	// 4. Get canonical forms and hash
-	docCanonical, err := credWithoutProof.CanonicalForm()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get canonical form of document: %w", err)
-	}
-
-	proofCanonical, err := proofCred.CanonicalForm()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get canonical form of proof config: %w", err)
-	}
-
-	// Hash the canonical forms
-	docHash := sha256.Sum256([]byte(docCanonical))
-	proofHash := sha256.Sum256([]byte(proofCanonical))
-
-	// Concatenate: proofHash + docHash (per spec)
+	// 4. Concatenate: proofHash + docHash (per spec)
 	combined := append(proofHash[:], docHash[:]...)
 
 	// 5. Sign with Ed25519
@@ -128,35 +103,13 @@ func (s *Suite) Sign(cred *credential.RDFCredential, key ed25519.PrivateKey, opt
 	}
 
 	// 7. Add proof to credential
-	var credMap map[string]any
-	originalJSON := cred.OriginalJSON()
-	if originalJSON != "" {
-		if err := json.Unmarshal([]byte(originalJSON), &credMap); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal original credential: %w", err)
-		}
-	} else {
-		jsonBytes, err := json.Marshal(cred)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert credential to JSON: %w", err)
-		}
-		if err := json.Unmarshal(jsonBytes, &credMap); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal converted credential: %w", err)
-		}
+	credMap, err := credential.DocumentAsMap(cred)
+	if err != nil {
+		return nil, err
 	}
 
-	// Add proofValue to proofConfig
 	proofConfig["proofValue"] = proofValue
-
-	// Add proof to credential (handle existing proofs)
-	if existingProof, ok := credMap["proof"]; ok {
-		if proofs, ok := existingProof.([]any); ok {
-			credMap["proof"] = append(proofs, proofConfig)
-		} else {
-			credMap["proof"] = []any{existingProof, proofConfig}
-		}
-	} else {
-		credMap["proof"] = proofConfig
-	}
+	credential.AppendProof(credMap, proofConfig)
 
 	// Create new RDFCredential
 	newCredBytes, err := json.Marshal(credMap)
@@ -205,35 +158,13 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKe
 		return nil, fmt.Errorf("public key is nil")
 	}
 
-	// The same root-stability check Sign applies. Verification needs it
-	// MORE than signing does: a signed document can be re-rooted by the
-	// holder - the embedded credential lifted to the top level, the
-	// presentation pushed under @included, and the presentation's proof
-	// moved onto the credential - and removing the new root's proof then
-	// reproduces the original unsecured RDF, so the signature verifies as
-	// the credential's own. A document that names one root as written and
-	// another once serialized through RDF is refused.
-	if err := cred.CheckRootSurvivesFlattening(); err != nil {
-		return nil, err
-	}
-
-	proofs, credWithoutProof, err := cred.RootProofs()
+	// The proofs the document attaches to itself and the hash of what they
+	// secure, with the same root-stability check Sign applies. See
+	// credential.SecuredDocument.
+	proofs, docHash, err := credential.SecuredDocument(cred)
 	if err != nil {
 		return nil, err
 	}
-	if len(proofs) == 0 {
-		return nil, fmt.Errorf("the document carries no proof of its own to verify")
-	}
-
-	// Once, not once per proof. Every proof the root carries secures the
-	// SAME document - that is what a proof set means - so the expensive
-	// step, JSON-LD canonicalization, runs once. The proof CONFIGURATION
-	// hash stays per proof, since that is the part that differs.
-	docCanonical, err := credWithoutProof.CanonicalForm()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get canonical form of document: %w", err)
-	}
-	docHash := sha256.Sum256([]byte(docCanonical))
 
 	// EVERY proof the root carries, not just the first. Sign appends rather
 	// than replaces, so a document signed by two keys carries two root

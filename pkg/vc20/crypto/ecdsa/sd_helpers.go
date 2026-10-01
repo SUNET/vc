@@ -253,18 +253,29 @@ func replaceURNsInNQuads(nquads string) string {
 	return re.ReplaceAllString(nquads, "_:$1")
 }
 
-func removeProof(data any) {
-	if m, ok := data.(map[string]any); ok {
+// removeRootProof deletes the proof the DOCUMENT attaches to itself, and
+// leaves every nested proof alone. A nested credential's own proof is content
+// the enclosing signature covers; removeProof, which recurses, would take it
+// out of the quad set and so out of the signature's reach.
+//
+// Only the top level is touched. A top-level array is a JSON-LD document with
+// several root nodes, so each of its entries is a root - but nothing below
+// them is.
+func removeRootProof(data any) {
+	deleteProofKeys := func(m map[string]any) {
 		delete(m, "proof")
 		delete(m, "https://w3id.org/security#proof")
 		delete(m, "https://www.w3.org/ns/credentials#proof")
-
-		for _, v := range m {
-			removeProof(v)
-		}
-	} else if list, ok := data.([]any); ok {
+	}
+	if m, ok := data.(map[string]any); ok {
+		deleteProofKeys(m)
+		return
+	}
+	if list, ok := data.([]any); ok {
 		for _, item := range list {
-			removeProof(item)
+			if m, ok := item.(map[string]any); ok {
+				deleteProofKeys(m)
+			}
 		}
 	}
 }

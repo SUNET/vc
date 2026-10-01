@@ -30,6 +30,26 @@ const (
 type SdSuite struct{}
 
 // NewSdSuite creates a new ECDSA SD cryptosuite
+// rootScopedWithoutProof returns the document an SD proof secures: this
+// document with the ROOT's own proofs removed and every nested proof left in
+// place, so a nested credential's own proof is content the signature covers.
+//
+// It applies credential.CheckRootSurvivesFlattening first, for the same
+// reason the rdfc suites do: a document that names one root as written and
+// another once serialized through RDF can be re-rooted by its holder, and
+// removing the NEW root's proof then reproduces a different unsecured
+// document than the signer meant to secure.
+func rootScopedWithoutProof(cred *credential.RDFCredential) (*credential.RDFCredential, error) {
+	if err := cred.CheckRootSurvivesFlattening(); err != nil {
+		return nil, err
+	}
+	_, withoutRootProof, err := cred.RootProofs()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get the document the proof secures: %w", err)
+	}
+	return withoutRootProof, nil
+}
+
 func NewSdSuite() *SdSuite {
 	return &SdSuite{}
 }
@@ -62,18 +82,21 @@ func (s *SdSuite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, op
 		return nil, fmt.Errorf("failed to generate HMAC key: %w", err)
 	}
 
-	// 2. Transform document to N-Quads
-	// We use the existing RDFCredential functionality
-	// But we need to be careful about the "without proof" part.
-	// CredentialWithoutProof, not RootProofs: this suite secures a
-	// CREDENTIAL, and a credential carries no proof but its own, so
-	// removing the root's proofs and removing every proof are the same
-	// operation on every document it sees. The two are NOT the same for a
-	// presentation, which is why the rdfc suites changed - see
+	// 2. Transform document to N-Quads - the document this proof SECURES,
+	// which is this document with the ROOT's own proofs removed and every
+	// nested proof deliberately left where it is.
+	//
+	// The earlier reasoning here was that a credential carries no proof but
+	// its own, so root-scoped and whole-graph removal came to the same
+	// thing. Nothing enforces that: a credentialSubject, an evidence entry
+	// or an @included node may itself be a secured credential. Removing
+	// every proof in the graph left those quads outside the base
+	// signature, so a nested proof could be stripped or swapped without
+	// invalidating it - the same scope defect the rdfc suites had. See
 	// credential.RootProofs.
-	credWithoutProof, err := cred.CredentialWithoutProof()
+	credWithoutProof, err := rootScopedWithoutProof(cred)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get credential without proof: %w", err)
+		return nil, err
 	}
 
 	// Get N-Quads (normalized)
@@ -131,7 +154,7 @@ func (s *SdSuite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, op
 		}
 
 		// Remove proof from document for pointer selection
-		removeProof(docJSON)
+		removeRootProof(docJSON)
 
 		// Select mandatory N-Quads based on pointers from original (non-skolemized) quads
 		mandatorySet := make(map[string]bool)
@@ -298,34 +321,13 @@ func (s *SdSuite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, op
 	}
 
 	// Add to credential
-	// ... (Same as before)
-	var credMap map[string]any
-	originalJSON := cred.OriginalJSON()
-	if originalJSON != "" {
-		if err := json.Unmarshal([]byte(originalJSON), &credMap); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal original credential: %w", err)
-		}
-	} else {
-		jsonBytes, err := json.Marshal(cred)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert credential to JSON: %w", err)
-		}
-		if err := json.Unmarshal(jsonBytes, &credMap); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal converted credential: %w", err)
-		}
+	credMap, err := credential.DocumentAsMap(cred)
+	if err != nil {
+		return nil, err
 	}
 
 	proofConfig["proofValue"] = proofValue
-
-	if existingProof, ok := credMap["proof"]; ok {
-		if proofs, ok := existingProof.([]any); ok {
-			credMap["proof"] = append(proofs, proofConfig)
-		} else {
-			credMap["proof"] = []any{existingProof, proofConfig}
-		}
-	} else {
-		credMap["proof"] = proofConfig
-	}
+	credential.AppendProof(credMap, proofConfig)
 
 	newCredBytes, err := json.Marshal(credMap)
 	if err != nil {
@@ -488,10 +490,11 @@ func (s *SdSuite) verifyBaseProof(cred *credential.RDFCredential, key *ecdsa.Pub
 	}
 	proofHash := sha256.Sum256([]byte(proofCanonical))
 
-	// Get the credential document for mandatory pointer selection
-	credWithoutProof, err := cred.CredentialWithoutProof()
+	// Get the credential document for mandatory pointer selection. Root
+	// scoped, exactly as Sign computed it.
+	credWithoutProof, err := rootScopedWithoutProof(cred)
 	if err != nil {
-		return fmt.Errorf("failed to get credential without proof: %w", err)
+		return err
 	}
 	nquadsStr, err := credWithoutProof.CanonicalForm()
 	if err != nil {
@@ -522,7 +525,7 @@ func (s *SdSuite) verifyBaseProof(cred *credential.RDFCredential, key *ecdsa.Pub
 		}
 
 		// Remove proof from document for pointer selection
-		removeProof(docJSON)
+		removeRootProof(docJSON)
 
 		// Select mandatory N-Quads based on pointers
 		mandatoryQuads := selectMandatoryNQuads(docJSON, quads, proof.MandatoryPointers)
@@ -581,7 +584,7 @@ func (s *SdSuite) verifyBaseProof(cred *credential.RDFCredential, key *ecdsa.Pub
 				return fmt.Errorf("failed to unmarshal credential JSON: %w", err)
 			}
 		}
-		removeProof(docJSON)
+		removeRootProof(docJSON)
 
 		// Find mandatory quads based on original (non-skolemized) quads
 		mandatorySet := make(map[string]bool)
@@ -728,8 +731,9 @@ func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.
 	// We need to apply the LabelMap BEFORE canonicalization to ensure stable IDs.
 	// We replace mapped blank nodes with URNs in the JSON-LD.
 
-	// Instead of CredentialWithoutProof, we use the original JSON and remove proof manually
-	// to preserve blank node IDs.
+	// Instead of re-expanding, we use the original JSON and remove the proof
+	// manually to preserve blank node IDs. Only the ROOT's proof, to match
+	// the quad set the base proof was made over.
 	var credJSON any
 	originalJSON := cred.OriginalJSON()
 	if originalJSON != "" {
@@ -747,8 +751,8 @@ func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.
 		}
 	}
 
-	// Remove proof
-	removeProof(credJSON)
+	// Remove the root's proof, and only the root's
+	removeRootProof(credJSON)
 
 	// Replace labels with URNs
 	replaceLabelsWithURNs(credJSON, proof.LabelMap)
@@ -874,10 +878,12 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 		return nil, fmt.Errorf("failed to unmarshal base proof: %w", err)
 	}
 
-	// 2. Get Original Quads & Skolemize
-	credWithoutProof, err := cred.CredentialWithoutProof()
+	// 2. Get Original Quads & Skolemize. Root scoped, exactly as Sign
+	// computed it - deriving from a different quad set than the base proof
+	// was made over produces a derived proof nobody can verify.
+	credWithoutProof, err := rootScopedWithoutProof(cred)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get credential without proof: %w", err)
+		return nil, err
 	}
 	nquadsStr, err := credWithoutProof.CanonicalForm()
 	if err != nil {
@@ -912,7 +918,7 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 			return nil, fmt.Errorf("failed to unmarshal credential JSON: %w", err)
 		}
 	}
-	removeProof(docJSON)
+	removeRootProof(docJSON)
 
 	// Identify mandatory quads based on original (non-skolemized) quads
 	mandatorySet := make(map[string]bool)

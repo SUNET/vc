@@ -740,6 +740,15 @@ func (h *VC20Handler) verifyEdDSA2022(
 	return h.buildResult(credBytes, credMap, verifiedProof, false)
 }
 
+// NOTE ON REACHABILITY: proofs now reach this function from
+// rootProofCandidates, which reads them off the EXPANDED document and compacts
+// each against the v2 context alone - so the method is already an absolute IRI
+// and the proof no longer carries an @context of its own by the time it gets
+// here. The proof-local context handling below is therefore inert on that
+// path; it is kept because this function must not depend on WHERE its proof
+// came from. Changing the source back to the raw JSON, which is what the
+// handler used to do, is exactly the mistake it exists to absorb.
+//
 // expandVerificationMethod turns the method as the document spells it into
 // the absolute IRI it stands for, using the document's own context.
 //
