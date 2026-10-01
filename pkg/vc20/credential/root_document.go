@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"sort"
@@ -96,7 +97,7 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 	}
 
 	root := nodes[rootIndex]
-	included := make([]any, 0, len(nodes)-1)
+	included := make([]map[string]any, 0, len(nodes)-1)
 	for i, node := range nodes {
 		if i == rootIndex {
 			continue
@@ -141,17 +142,139 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 	// those nodes from the document - and they are in the same graph, so
 	// dropping them removes their triples from the dataset this is supposed
 	// to carry through unchanged.
-	if len(included) > 0 {
-		combined := included
+	attach := func(entries []map[string]any) map[string]any {
+		if len(entries) == 0 {
+			return rooted
+		}
+		document := maps.Clone(rooted)
+		combined := make([]any, 0, len(entries)+1)
 		// Only when the root HAS one: asList of an absent member yields a
 		// list holding nil, and a nil entry in @included is not a node.
 		if existing, present := rooted["@included"]; present {
-			combined = append(asList(existing), included...)
+			combined = append(combined, asList(existing)...)
 		}
-		rooted["@included"] = combined
+		for _, entry := range entries {
+			combined = append(combined, entry)
+		}
+		document["@included"] = combined
+		return document
 	}
 
-	return rooted, nil
+	// Moving a sibling UNDER the promoted root puts it inside that root's own
+	// local context, which it never had: inside @graph every node saw the
+	// container's context alone. If the root redefines a term a sibling uses,
+	// that sibling's expanded IRIs change, and with them the RDF and any
+	// signature over it - in a helper whose whole promise is that the dataset
+	// is unchanged.
+	//
+	// So restore each moved sibling's scope, and PROVE the dataset came
+	// through rather than assume it. The restoration is a context reset,
+	// which JSON-LD refuses over protected terms, so the unscoped form is
+	// tried second - and a document neither form carries through is REFUSED,
+	// not rooted silently into a different graph.
+	if _, rootHasOwnContext := root["@context"]; !rootHasOwnContext || len(included) == 0 {
+		return attach(included), nil
+	}
+
+	want, err := canonicalFormOf(compacted, options)
+	if err != nil {
+		return nil, fmt.Errorf("failed to canonicalize the document being rooted: %w", err)
+	}
+
+	scoped := make([]map[string]any, 0, len(included))
+	for _, node := range included {
+		scoped = append(scoped, scopedToContainer(node, containerContext, containerHasContext))
+	}
+
+	for _, entries := range [][]map[string]any{scoped, included} {
+		candidate := attach(entries)
+		got, err := canonicalFormOf(candidate, options)
+		if err == nil && got == want {
+			return candidate, nil
+		}
+	}
+
+	return nil, fmt.Errorf("rooting the document at %q would change its RDF: the root's own @context does not reach the %d node(s) beside it in @graph, and moving them under it cannot be undone", compactNodeID(root), len(included))
+}
+
+// RootedCredential returns cred with its document rooted at the node the
+// document is about, re-read so every later step sees the same shape.
+//
+// A document that came back from flattening as a bare @graph container is
+// ABOUT nothing, and every signing path read it two ways at once: root-scoped
+// hashing selected the node INSIDE the container, while the proof was appended
+// to the container itself. The proof then belonged to a wrapper rather than to
+// the credential that was hashed - and under the v2 type-scoped context, where
+// `proof` is defined on credential types, it expanded away entirely. Sign
+// returned success and handed back a document this same library refuses.
+//
+// Rooting at the TOP of Sign rather than just before the append is what makes
+// the two readings one. ecdsa-sd-2023 also selects its mandatory statements by
+// JSON pointer, so a pointer like /issuer must address the same member the
+// hash covers; rooting late left those pointers resolving against the
+// container at signing time and against the credential at verification time.
+func RootedCredential(cred *RDFCredential) (*RDFCredential, error) {
+	document, err := DocumentAsMap(cred)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the credential as a document: %w", err)
+	}
+	if !IsBareGraphContainer(document) {
+		return cred, nil
+	}
+
+	rootID, err := cred.RootID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the node the credential is about: %w", err)
+	}
+
+	rooted, err := RootCompactedDocument(document, rootID, cred.ExpansionOptions())
+	if err != nil {
+		return nil, fmt.Errorf("failed to root the credential: %w", err)
+	}
+
+	encoded, err := json.Marshal(rooted)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal the rooted credential: %w", err)
+	}
+
+	return NewRDFCredentialFromJSON(encoded, cred.ExpansionOptions())
+}
+
+// scopedToContainer gives a node the context scope it had as a @graph entry:
+// the container's context and its own, and NOTHING of the node it is being
+// moved inside. The leading null is what clears that node's definitions.
+func scopedToContainer(node map[string]any, containerContext any, containerHasContext bool) map[string]any {
+	scoped := maps.Clone(node)
+
+	sequence := []any{nil}
+	if containerHasContext {
+		sequence = append(sequence, asList(containerContext)...)
+	}
+	// An explicit null of its own is a reset the node ASKED for; it stays in
+	// the sequence, after the container's, where it clears what came before.
+	if own, present := node["@context"]; present {
+		sequence = append(sequence, asList(own)...)
+	}
+	scoped["@context"] = sequence
+
+	return scoped
+}
+
+// canonicalFormOf runs a compacted document through the same pipeline a
+// signature does - expansion, flattening, RDF, URDNA2015 - so two documents
+// can be compared by the only thing a proof covers.
+func canonicalFormOf(document map[string]any, options *ld.JsonLdOptions) (string, error) {
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal the document: %w", err)
+	}
+
+	cred, err := NewRDFCredentialFromJSON(encoded, options)
+	if err != nil {
+		return "", fmt.Errorf("failed to read the document as RDF: %w", err)
+	}
+
+	return cred.CanonicalForm()
 }
 
 // compactNodeID reads a node's identifier under either spelling. A compacted

@@ -648,3 +648,113 @@ func TestProofKeysHonoursExpandContext(t *testing.T) {
 	// disagreement this closes.
 	require.Empty(t, ProofKeys(node, nil, NewJSONLDOptions("")))
 }
+
+// TestRootCompactedDocumentKeepsSiblingContextScope: inside @graph, every node
+// saw the CONTAINER's context and its own. Moving the siblings under the
+// promoted root put them inside that root's local context too - so a term the
+// root redefines changed the sibling's expanded IRI, and with it the RDF and
+// any signature over it. In a helper whose entire promise is that the dataset
+// comes through unchanged.
+func TestRootCompactedDocumentKeepsSiblingContextScope(t *testing.T) {
+	container := map[string]any{
+		"id":      "@id",
+		"note":    "https://example.org/vocab#note",
+		"carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+	}
+
+	document := map[string]any{
+		"@context": container,
+		"@graph": []any{
+			map[string]any{
+				// The root redefines the very term its sibling uses.
+				"@context": map[string]any{"note": "https://example.org/OVERRIDDEN#note"},
+				"id":       "https://example.org/credential",
+				"carries":  "https://example.org/other",
+			},
+			map[string]any{"id": "https://example.org/other", "note": "written under the container's context"},
+		},
+	}
+
+	before, err := canonicalFormOf(document, nil)
+	require.NoError(t, err)
+	require.Contains(t, before, "https://example.org/vocab#note",
+		"the sibling's note is the container's term before rooting")
+
+	rooted, err := RootCompactedDocument(document, "", nil)
+	require.NoError(t, err)
+	require.Equal(t, "https://example.org/credential", rooted["id"])
+
+	after, err := canonicalFormOf(rooted, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, after,
+		"rooting a document must not change one quad of it")
+	require.NotContains(t, after, "OVERRIDDEN",
+		"the root's own context does not reach the nodes that were beside it")
+}
+
+// TestRootCompactedDocumentFallsBackWhenTheResetIsRefused: the scope is
+// restored with a leading null, and JSON-LD REFUSES to nullify a context
+// holding @protected terms. That is why the unscoped form is tried second -
+// here the root's own context only ADDS a term, so nothing the sibling uses
+// moves and the document comes through unchanged.
+func TestRootCompactedDocumentFallsBackWhenTheResetIsRefused(t *testing.T) {
+	container := map[string]any{
+		"@protected": true,
+		"id":         "@id",
+		"note":       "https://example.org/vocab#note",
+		"carries":    map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+	}
+
+	document := map[string]any{
+		"@context": container,
+		"@graph": []any{
+			map[string]any{
+				"@context": map[string]any{"extra": "https://example.org/vocab#extra"},
+				"id":       "https://example.org/credential",
+				"carries":  "https://example.org/other",
+				"extra":    "only the root uses this",
+			},
+			map[string]any{"id": "https://example.org/other", "note": "unchanged"},
+		},
+	}
+
+	before, err := canonicalFormOf(document, nil)
+	require.NoError(t, err)
+
+	rooted, err := RootCompactedDocument(document, "", nil)
+	require.NoError(t, err, "a protected container context must not make a document unrootable")
+
+	after, err := canonicalFormOf(rooted, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "and the dataset still comes through unchanged")
+}
+
+// TestRootCompactedDocumentRefusesWhenTheDatasetWouldChange: neither form
+// works when the container's context is @protected - so the scope cannot be
+// restored - AND the root's own context defines a term a sibling uses, which
+// the container left undefined and expansion therefore dropped. Promoting the
+// root would mint a triple the signed document never carried. The helper says
+// no rather than returning a document about a different graph.
+func TestRootCompactedDocumentRefusesWhenTheDatasetWouldChange(t *testing.T) {
+	document := map[string]any{
+		"@context": map[string]any{
+			"@protected": true,
+			"id":         "@id",
+			"carries":    map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+		},
+		"@graph": []any{
+			map[string]any{
+				"@context": map[string]any{"note": "https://example.org/vocab#note"},
+				"id":       "https://example.org/credential",
+				"carries":  "https://example.org/other",
+			},
+			// "note" is undefined in the container, so this says nothing at
+			// all until the root's context reaches it.
+			map[string]any{"id": "https://example.org/other", "note": "a triple that does not exist yet"},
+		},
+	}
+
+	_, err := RootCompactedDocument(document, "", nil)
+	require.Error(t, err, "rooting must not invent a triple")
+	require.Contains(t, err.Error(), "would change its RDF")
+}

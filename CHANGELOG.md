@@ -61,6 +61,30 @@
   original root afterwards and the disclosure would choose it). Give
   credentials an `id` if they are to be used with `ecdsa-sd-2023`.
 
+  **Signing a bare `@graph` container now roots the document first, in all
+  three suites.** Such a container is a document about nothing — the shape
+  flattening produces. Root-scoped hashing selected the node inside it, but
+  the proof was appended to the container, so it belonged to a wrapper rather
+  than to the credential that was hashed; under the VC v2 context, where
+  `proof` is defined on credential types, it expanded away altogether. `Sign`
+  reported success and returned a document this library then refused. It now
+  returns the credential node with the former siblings under `@included`,
+  which is the same RDF graph. **Anything signed that way before this release
+  never verified** — re-sign it. `ecdsa-sd-2023` was affected twice over,
+  since its mandatory pointers resolved against the container while signing
+  and against the credential while verifying: a pointer such as `/issuer`
+  addressed nothing at all.
+
+  **Rooting is refused when it would change the document's RDF.** Nodes
+  beside the root inside a `@graph` container never saw the root's own local
+  `@context`; moving them under it would apply it to them, and a term the
+  root redefines would change their triples. The scope is restored where
+  JSON-LD allows it — a context reset cannot clear `@protected` terms — and
+  the resulting dataset is compared against the original; a document neither
+  form carries through unchanged is refused rather than rooted into a
+  different graph. Affects `ecdsa-sd-2023` derivation and signing of
+  containers only.
+
   **A document whose root takes part in a reference cycle is refused at
   SIGNING and at VERIFICATION.** A presentation carrying a credential whose
   subject links back at it is the shape: it says which node it is about while

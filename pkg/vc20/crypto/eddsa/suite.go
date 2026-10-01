@@ -48,6 +48,15 @@ func (s *Suite) Sign(cred *credential.RDFCredential, key ed25519.PrivateKey, opt
 		return nil, fmt.Errorf("sign options are nil")
 	}
 
+	// Rooted FIRST, so hashing, any JSON-pointer selection and the append
+	// all read the same document. A bare @graph container is ABOUT nothing;
+	// rooting it late left the proof on the wrapper rather than on the node
+	// that was hashed. See credential.RootedCredential.
+	cred, err := credential.RootedCredential(cred)
+	if err != nil {
+		return nil, err
+	}
+
 	// 1. Get canonical document hash - the document this proof SECURES,
 	// which is the document with the root's own proofs removed and every
 	// embedded proof DELIBERATELY left where it is. An embedded
