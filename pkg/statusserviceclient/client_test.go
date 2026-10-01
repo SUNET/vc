@@ -6,12 +6,13 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
-	"github.com/SUNET/vc/pkg/pki"
-	"github.com/golang-jwt/jwt/v5"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/SUNET/vc/pkg/pki"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func testKey(t *testing.T) *ecdsa.PrivateKey {
@@ -152,14 +153,20 @@ func TestPoolRefillsBelowLowWaterMark(t *testing.T) {
 }
 
 // TestTakeFallbackRetriesTransientFailures makes /allocate fail twice with
-// 500s (a real, in-flight HTTP round trip each time - not a mocked
+// 401s (a real, in-flight HTTP round trip each time - not a mocked
 // function call) before succeeding, and checks Take's synchronous fallback
 // retries through that and still returns an entry, well within
 // TakeFallbackTimeout.
+//
+// 401 rather than 503, because /allocate is not idempotent: a 401 is
+// rejected at authentication before any handler runs, so it proves no
+// index was reserved and a retry asks for the first one rather than a
+// second. A 503 proves nothing, and is pinned as NOT retried by
+// TestTakeDoesNotRetryAmbiguousAllocateFailure.
 func TestTakeFallbackRetriesTransientFailures(t *testing.T) {
 	fake := newFakeStatusService(t)
 	fake.allocateFailures.Store(2)
-	fake.allocateFailureStatus = http.StatusServiceUnavailable
+	fake.allocateFailureStatus = http.StatusUnauthorized
 
 	cfg := fastConfig(fake, testKey(t))
 	cfg.PoolSize = 1 // never satisfied by the background loop alone in time; forces Take's fallback path once drained

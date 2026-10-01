@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -35,6 +37,65 @@ func classifyResourceStatus(statusCode int, body []byte) error {
 			strings.TrimSpace(string(body)))
 	}
 	return classifyStatus(statusCode, body)
+}
+
+// classifyAllocateStatus is classifyResourceStatus for POST /allocate,
+// which is the one call in this package that is NOT idempotent.
+//
+// The service reserves and records the index before it writes the
+// response, and the request carries no idempotency key, so a retry after
+// an ambiguous outcome does not re-ask for the same slot - it asks for
+// another one. The reply that was lost named a slot nothing will ever
+// reference, and nothing on either side can reconcile it later. Repeating
+// that on every transient 5xx leaks entries without bound, which is the
+// one way this pool could actually consume a list's capacity.
+//
+// So the rule here is narrower than the generic one: retry only outcomes
+// that PROVE no index was reserved.
+//
+//   - 401 proves it: the request was rejected at authentication, before any
+//     handler ran. The cached token has just been cleared, so a retry
+//     fetches a fresh one - this is routine token expiry, not a refusal.
+//   - Other 4xx are refusals; nothing was allocated, and retrying the same
+//     request cannot help either. Permanent, as before.
+//   - 5xx and anything unexpected are AMBIGUOUS. The service may have
+//     reserved the index and then failed on the way out. Those stop the
+//     loop now, where the generic rule retried them.
+//
+// Losing one slot to an ambiguous failure is unavoidable without a
+// protocol change (an idempotency key, or a reconciliation endpoint). The
+// bound is what this restores: at most one per allocation attempt, instead
+// of one per retry.
+func classifyAllocateStatus(statusCode int, body []byte) error {
+	if statusCode == http.StatusUnauthorized {
+		return classifyResourceStatus(statusCode, body)
+	}
+	err := classifyStatus(statusCode, body)
+	if err == nil || isPermanent(err) {
+		return err
+	}
+	return permanent(fmt.Errorf("%w (not retried: POST /allocate is not idempotent and may already have reserved an index)", err))
+}
+
+// allocateDispatchIsRetryable reports whether an error from
+// http.Client.Do on the allocate POST proves the request never reached the
+// service.
+//
+// Only two shapes do, and both fail before a single byte of the request is
+// written: the name did not resolve, and the connection could not be
+// established. Everything else - a reset after the write, a read deadline,
+// a half-closed connection, a proxy giving up - is indistinguishable from
+// "the service allocated and the response was lost", so it is treated as
+// the latter. That is the direction this has to fail in: a wrong "safe to
+// retry" silently burns list capacity, while a wrong "ambiguous" costs one
+// allocation attempt that the next refill tick repeats anyway.
+func allocateDispatchIsRetryable(err error) bool {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && opErr.Op == "dial"
 }
 
 func classifyStatus(statusCode int, body []byte) error {
@@ -206,15 +267,25 @@ func (c *Client) allocateOnce(ctx context.Context) (Entry, error) {
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return Entry{}, err
+		if allocateDispatchIsRetryable(err) {
+			return Entry{}, err
+		}
+		// The request was on the wire. Whether the service reserved an
+		// index before this failed is unknowable from here, so it is
+		// assumed to have done: see classifyAllocateStatus.
+		c.log.Error(err, "allocate request failed after it was sent; a status list index may have been reserved and will stay VALID and unreferenced, and this attempt is not retried because retrying would reserve another")
+		return Entry{}, permanent(fmt.Errorf("allocate request failed after it was sent, so an index may already have been reserved: %w", err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// As in fetchToken: a truncated response is retryable, and discarding
-	// the read error would disguise it as a permanent decode failure.
+	// Unlike fetchToken, a truncated response here is NOT retryable: the
+	// service writes the response after it has committed the reservation,
+	// so a body that stops halfway is the strongest evidence there is that
+	// an index was allocated and its identity lost.
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return Entry{}, fmt.Errorf("read allocate response: %w", err)
+		c.log.Error(err, "allocate response was truncated; the reserved index is lost and will stay VALID and unreferenced")
+		return Entry{}, permanent(fmt.Errorf("read allocate response (an index was probably reserved and its identity lost): %w", err))
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		// The cached token may have been rejected (e.g. the AS restarted
@@ -225,7 +296,7 @@ func (c *Client) allocateOnce(ctx context.Context) (Entry, error) {
 		c.token = ""
 		c.tokenMu.Unlock()
 	}
-	if err := classifyResourceStatus(resp.StatusCode, respBody); err != nil {
+	if err := classifyAllocateStatus(resp.StatusCode, respBody); err != nil {
 		return Entry{}, err
 	}
 

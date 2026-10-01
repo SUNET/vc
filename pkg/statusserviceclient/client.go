@@ -52,7 +52,9 @@
 // referenced by nothing. That is wasted capacity - at most PoolSize entries
 // against a status list whose capacity is ordinarily many orders of
 // magnitude larger - never a correctness or security issue, since no
-// credential ever carries one of those indices. This mirrors this
+// credential ever carries one of those indices. An ambiguous /allocate
+// outcome strands entries the same way and is counted the same way: see
+// the retry section below for why each one costs at most a single slot. This mirrors this
 // repository's own existing tolerance for the identical shape of problem in
 // internal/issuer/apiv1/handlers_bbs.go's invalidateStatusEntry (a status
 // entry allocated for a credential that then fails to issue is left VALID
@@ -72,6 +74,25 @@
 // treated as permanent - retrying an ownership or validation failure cannot
 // make it succeed - and are returned immediately.
 //
+// POST /allocate is the exception, because it is the only call here that
+// is not idempotent: the service reserves and records the index before it
+// writes the response, and the request carries no idempotency key. A retry
+// after an outcome the client cannot interpret does not re-ask for the
+// same slot, it asks for a second one - and the slot named by the lost
+// reply is then VALID, referenced by nothing, and unreconcilable from
+// either side. So /allocate retries only outcomes that PROVE nothing was
+// reserved: a name that did not resolve, a connection that was never
+// established, and a 401 (rejected at authentication, before any handler
+// ran - routine cached-token expiry). A 5xx, a truncated response body, or
+// any transport failure after the request was written stops the attempt
+// where the generic rule retried it. See classifyAllocateStatus.
+//
+// Closing it properly needs a protocol change - an idempotency key on
+// /allocate, or an endpoint to reconcile reservations an issuer never
+// acknowledged - which is a change to the status service, not to this
+// client. What this client can do, and does, is bound the loss at one slot
+// per allocation attempt instead of one per retry.
+//
 // The background refill loop retries indefinitely (bounded only by backoff
 // growth, capped at maxBackoff) since a status-service outage is expected to
 // be temporary and there is no caller waiting on it. Take's synchronous
@@ -88,11 +109,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"fmt"
-	"github.com/SUNET/vc/pkg/pki"
 	"net/http"
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/SUNET/vc/pkg/logger"
 )
