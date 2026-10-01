@@ -29,6 +29,19 @@ const (
 // SdSuite implements the ECDSA Selective Disclosure Cryptosuite v1.0
 type SdSuite struct{}
 
+// refuseAnOverfullProofSet refuses to add a proof to a document that already
+// carries as many as verification will read.
+func refuseAnOverfullProofSet(cred *credential.RDFCredential) error {
+	existing, _, err := cred.RootProofs()
+	if err != nil {
+		return fmt.Errorf("failed to read the document's own proofs: %w", err)
+	}
+	if len(existing) >= credential.MaxRootProofs {
+		return fmt.Errorf("the document already attaches %d proofs to itself, and %d is the most this will verify", len(existing), credential.MaxRootProofs)
+	}
+	return nil
+}
+
 // rootScopedWithoutProof returns the document an SD proof secures: this
 // document with the ROOT's own proofs removed and every nested proof left in
 // place, so a nested credential's own proof is content the signature covers.
@@ -94,6 +107,15 @@ func (s *SdSuite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, op
 	// signature, so a nested proof could be stripped or swapped without
 	// invalidating it - the same scope defect the rdfc suites had. See
 	// credential.RootProofs.
+	// The same cap the rdfc suites get from UnsecuredDocumentHash, and only
+	// on the SIGNING path: verification must still accept a document that
+	// carries the full MaxRootProofs. Without it SD appends a 33rd proof,
+	// returns success, and hands back a document sdRootProofs refuses
+	// before checking any signature.
+	if err := refuseAnOverfullProofSet(cred); err != nil {
+		return nil, err
+	}
+
 	credWithoutProof, err := rootScopedWithoutProof(cred)
 	if err != nil {
 		return nil, err

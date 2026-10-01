@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -300,4 +301,74 @@ func TestVerifyRootProofMatchesTheWholeProofNotTheSignature(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, genuine["proofValue"], verified["proofValue"])
 	require.Equal(t, "assertionMethod", verified["proofPurpose"])
+}
+
+// TestSdSignRefusesToExceedTheProofLimit: the rdfc suites get this cap from
+// UnsecuredDocumentHash, which SD does not use - it does its own root-scoped
+// removal - so SD would append a 33rd proof, return success, and hand back a
+// document sdRootProofs refuses before checking any signature.
+//
+// The cap is on SIGNING only: verification must still read a document that
+// carries the full limit, or signing the 32nd proof would produce something
+// unverifiable too.
+func TestSdSignRefusesToExceedTheProofLimit(t *testing.T) {
+	suite := NewSdSuite()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	document, err := json.Marshal(map[string]any{
+		"@context":          []any{"https://www.w3.org/ns/credentials/v2"},
+		"id":                "https://example.org/credentials/full",
+		"type":              []any{"VerifiableCredential"},
+		"issuer":            "did:example:issuer",
+		"credentialSubject": map[string]any{"id": "did:example:subject"},
+	})
+	require.NoError(t, err)
+
+	// Fill the document to the limit with proofs the suite will read back.
+	var asMap map[string]any
+	require.NoError(t, json.Unmarshal(document, &asMap))
+	proofs := make([]any, 0, credential.MaxRootProofs)
+	for i := range credential.MaxRootProofs {
+		proofs = append(proofs, map[string]any{
+			"type":               "DataIntegrityProof",
+			"cryptosuite":        CryptosuiteSd2023,
+			"proofPurpose":       "assertionMethod",
+			"verificationMethod": "did:example:issuer#key-1",
+			"created":            "2024-01-01T00:00:00Z",
+			"domain":             fmt.Sprintf("https://example.org/%d", i),
+			"proofValue":         "uZmlsbGVy",
+		})
+	}
+	asMap["proof"] = proofs
+
+	full, err := json.Marshal(asMap)
+	require.NoError(t, err)
+	atLimit, err := credential.NewRDFCredentialFromJSON(full, ld.NewJsonLdOptions(""))
+	require.NoError(t, err)
+
+	carried, _, err := atLimit.RootProofs()
+	require.NoError(t, err)
+	require.Len(t, carried, credential.MaxRootProofs, "the document must really be at the limit")
+
+	_, err = suite.Sign(atLimit, key, &SdSignOptions{
+		VerificationMethod: "did:example:issuer#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	require.ErrorContains(t, err, "is the most this will verify")
+
+	// One fewer is still signable, so the cap is not simply refusing work.
+	asMap["proof"] = proofs[:credential.MaxRootProofs-1]
+	under, err := json.Marshal(asMap)
+	require.NoError(t, err)
+	below, err := credential.NewRDFCredentialFromJSON(under, ld.NewJsonLdOptions(""))
+	require.NoError(t, err)
+
+	_, err = suite.Sign(below, key, &SdSignOptions{
+		VerificationMethod: "did:example:issuer#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err, "one below the limit still signs")
 }
