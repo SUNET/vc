@@ -34,9 +34,11 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 	// NODE, and the document is about it. Treating one as a container sent
 	// root selection inside its graph and refused a perfectly good
 	// credential, or rooted it at the wrong node.
-	graph, isContainer := compacted["@graph"]
-	if isContainer && !IsBareGraphContainer(compacted) {
-		isContainer = false
+	graphKey, carriesGraph := GraphMemberName(compacted, compacted["@context"], options)
+	var graph any
+	isContainer := carriesGraph && IsBareGraphContainer(compacted, compacted["@context"], options)
+	if isContainer {
+		graph = compacted[graphKey]
 	}
 	if !isContainer {
 		// A single node still has to BE the node the caller said the
@@ -121,7 +123,7 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 
 	rooted := map[string]any{}
 	for key, value := range compacted {
-		if key == "@graph" {
+		if key == graphKey {
 			continue
 		}
 		rooted[key] = value
@@ -256,7 +258,7 @@ func RootedCredential(cred *RDFCredential) (*RDFCredential, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the credential as a document: %w", err)
 	}
-	if !IsBareGraphContainer(document) {
+	if !IsBareGraphContainer(document, document["@context"], cred.ExpansionOptions()) {
 		return cred, nil
 	}
 
@@ -907,16 +909,57 @@ func termDefinition(active *ld.Context, term string) *ld.TermDefinition {
 // named graph, and the node is still the thing the document talks about.
 // Treating one as a container reaches into its graph and removes a proof
 // from there too, which is the opposite of root-scoped.
-func IsBareGraphContainer(node map[string]any) bool {
-	if _, present := node["@graph"]; !present {
+func IsBareGraphContainer(node map[string]any, context any, options *ld.JsonLdOptions) bool {
+	graphKey, carries := GraphMemberName(node, context, options)
+	if !carries {
 		return false
 	}
 	for key := range node {
-		if key != "@graph" && key != "@context" {
+		if key != graphKey && key != "@context" {
 			return false
 		}
 	}
 	return true
+}
+
+// GraphMemberName returns the member of a node that carries its graph:
+// "@graph", or whatever term the active context aliases to it.
+//
+// JSON-LD lets a context alias @graph like any other keyword, and every check
+// in this package for "is this a graph" keyed on the literal spelling - so a
+// document aliasing it had its containers read as ordinary nodes and its
+// wrappers offered as candidates for what the document is about. Measured:
+// expandMemberName resolves such a term to "@graph" perfectly well; nothing
+// was asking it.
+//
+// Keys are taken in order, so a document defining two aliases gets one answer
+// rather than whichever the map iteration happened to yield.
+func GraphMemberName(node map[string]any, context any, options *ld.JsonLdOptions) (string, bool) {
+	if _, present := node["@graph"]; present {
+		return "@graph", true
+	}
+
+	keys := make([]string, 0, len(node))
+	for key := range node {
+		if !strings.HasPrefix(key, "@") {
+			keys = append(keys, key)
+		}
+	}
+	if len(keys) == 0 {
+		return "", false
+	}
+	sort.Strings(keys)
+
+	active := nodeContext(node, composedContext(node, context, context != nil), options)
+	if active == nil {
+		return "", false
+	}
+	for _, key := range keys {
+		if resolved, unresolvable := expandMemberName(active, key); !unresolvable && resolved == "@graph" {
+			return key, true
+		}
+	}
+	return "", false
 }
 
 // IsGraphWrapper reports whether a node in a COMPACTED document is a graph
@@ -929,13 +972,14 @@ func IsBareGraphContainer(node map[string]any) bool {
 // removal left such a graph in the supposedly proof-free document, and root
 // selection offered it as a candidate for what the document is about.
 func IsGraphWrapper(node map[string]any, context any, options *ld.JsonLdOptions) bool {
-	if _, present := node["@graph"]; !present {
+	graphKey, carries := GraphMemberName(node, context, options)
+	if !carries {
 		return false
 	}
 
 	var active *ld.Context
 	for key := range node {
-		if key == "@graph" || key == "@context" || key == "@id" || key == "@index" {
+		if key == graphKey || key == "@context" || key == "@id" || key == "@index" {
 			continue
 		}
 		if active == nil {

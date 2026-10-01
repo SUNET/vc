@@ -1143,3 +1143,60 @@ func TestDatasetCopySupportsSetNamespace(t *testing.T) {
 	require.Empty(t, cred.dataset.GetNamespace("https://example.org/other#"),
 		"and setting one on the copy does not reach the credential")
 }
+
+// TestRootCompactedDocumentReadsAnAliasedGraphMember: JSON-LD lets a context
+// alias @graph like any other keyword. Every "is this a graph" check in this
+// package keyed on the literal spelling, so a document aliasing it had its
+// container read as an ordinary node - the document was rooted at the wrapper
+// rather than at the node inside it, and SD proof removal offered that wrapper
+// as a candidate for what the document is about.
+func TestRootCompactedDocumentReadsAnAliasedGraphMember(t *testing.T) {
+	document := map[string]any{
+		"@context": map[string]any{
+			"id":      "@id",
+			"bundle":  "@graph",
+			"note":    "https://example.org/vocab#note",
+			"carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+		},
+		"bundle": []any{
+			map[string]any{
+				"id":      "https://example.org/credential",
+				"carries": "https://example.org/other",
+			},
+			map[string]any{"id": "https://example.org/other", "note": "a sibling"},
+		},
+	}
+
+	require.True(t, IsBareGraphContainer(document, document["@context"], nil),
+		"a container is a container whatever the document calls its graph member")
+
+	rooted, err := RootCompactedDocument(document, "", nil)
+	require.NoError(t, err)
+	require.Equal(t, "https://example.org/credential", rooted["id"],
+		"rooted at the node inside, not left as the wrapper")
+	require.NotContains(t, rooted, "bundle",
+		"and the aliased member goes the way @graph would")
+	require.Contains(t, rooted, "@included")
+}
+
+// TestIsGraphWrapperReadsAnAliasedGraphMember: the wrapper case of the same
+// thing - a named graph whose graph member and identifier are both written
+// through the context.
+func TestIsGraphWrapperReadsAnAliasedGraphMember(t *testing.T) {
+	context := map[string]any{"identifier": "@id", "bundle": "@graph"}
+
+	wrapper := map[string]any{
+		"identifier": "https://example.org/the-proof",
+		"bundle":     []any{map[string]any{"@id": "https://example.org/inner"}},
+	}
+	require.True(t, IsGraphWrapper(wrapper, context, nil))
+
+	// And a node that merely HAS a graph beside properties of its own is
+	// still a node, which is the distinction the whole check exists for.
+	named := map[string]any{
+		"identifier": "https://example.org/credential",
+		"bundle":     []any{map[string]any{"@id": "https://example.org/inner"}},
+		"note":       "a property of its own",
+	}
+	require.False(t, IsGraphWrapper(named, context, nil))
+}

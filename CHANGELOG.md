@@ -139,6 +139,15 @@
   under their own active contexts first; blank nodes are compared as written,
   since a label is the only identity they have.
 
+  **`@graph` is resolved through the context too.** JSON-LD lets a context
+  alias `@graph` like any other keyword, and every "is this a graph" check
+  keyed on the literal spelling — so a document aliasing it had its container
+  read as an ordinary node, was rooted at the wrapper rather than at the node
+  inside it, and had that wrapper offered as a candidate for what the document
+  is about. `credential.GraphMemberName` answers it, and
+  `IsBareGraphContainer` now takes the context: **signature change**,
+  `IsBareGraphContainer(node, context, options)`.
+
   **`credential.IsGraphWrapper` replaces `ld.IsGraph` on compacted documents.**
   `ld.IsGraph` knows only the spellings `@id` and `@index`, so a wrapper in a
   document that aliases either read as an ordinary node: `ecdsa-sd-2023` proof

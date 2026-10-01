@@ -313,12 +313,15 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any
 		// properties of its own is a named graph, and the node itself is
 		// still what the document is about - reaching into its graph would
 		// remove a proof this must not touch.
-		if credential.IsBareGraphContainer(typed) {
-			graph, err := removeRootProofUnder(typed["@graph"], contextFor(typed, context), options)
+		if credential.IsBareGraphContainer(typed, context, options) {
+			// Under the name THIS document gives the member, which a
+			// context may alias like any other keyword.
+			graphKey, _ := credential.GraphMemberName(typed, context, options)
+			graph, err := removeRootProofUnder(typed[graphKey], contextFor(typed, context), options)
 			if err != nil {
 				return nil, err
 			}
-			typed["@graph"] = graph
+			typed[graphKey] = graph
 			return typed, nil
 		}
 		deleteProofKeys(typed, contextFor(typed, context))
@@ -409,7 +412,8 @@ func graphNamesIn(value any, context any, options *ld.JsonLdOptions) []string {
 			names = append(names, graphNamesIn(entry, context, options)...)
 		}
 	case map[string]any:
-		if _, inline := typed["@graph"]; inline {
+		// A proof written INLINE carries its own graph and names none.
+		if _, inline := credential.GraphMemberName(typed, context, options); inline {
 			return nil
 		}
 		// Through the ACTIVE CONTEXT, like everything else that reads an
