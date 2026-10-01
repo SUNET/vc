@@ -535,3 +535,23 @@ func TestSaveCredentialSubjects_SilentIssuerIsRefusedEvenWithAURI(t *testing.T) 
 	require.Empty(t, store.saved)
 	require.Len(t, issuer.calls, 1, "the entry is released, since the reply named it")
 }
+
+// TestSaveCredentialSubjects_UnknownAllocationValueIsRefused: protobuf
+// keeps an enum value the receiver has no name for rather than erroring, so
+// this is what a NEWER issuer looks like - the mirror of the UNSPECIFIED
+// case, and it has to fail the same way.
+//
+// Before the switch was exhaustive it fell through to the recording path:
+// a value of 3 with a URI was persisted as a revocable mapping and the
+// credential delivered, on a meaning this build was guessing at.
+func TestSaveCredentialSubjects_UnknownAllocationValueIsRefused(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: 3},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not recognise")
+	require.Empty(t, store.saved, "a mapping must not be written under a meaning this build is guessing at")
+	require.Len(t, issuer.calls, 1, "the entry is released, since the reply named it")
+}
