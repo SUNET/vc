@@ -120,6 +120,23 @@ func (rc *RDFCredential) RootProofs() (proofs []any, withoutRootProof *RDFCreden
 		delete(root, predicate)
 	}
 
+	// A node the proof link named is removed only if the proof link was the
+	// ONLY thing keeping it here.
+	//
+	// Checked AFTER the predicate is deleted above, so what remains is every
+	// edge that is not the proof link. A node reachable by one of those is
+	// content as well as a proof: compact signing deletes the proof property
+	// and keeps the node's own quads, so a verifier that dropped the node
+	// entirely hashed less than the signer did - and the same signed document
+	// then verified before a round trip and failed after one. It stays in the
+	// document AND stays the proof the root names; those are not exclusive.
+	for index := range claimedNodes {
+		id, _ := nodes[index]["@id"].(string)
+		if referencedAnywhere([][]map[string]any{nodes, graphs}, id) {
+			delete(claimedNodes, index)
+		}
+	}
+
 	kept := make([]any, 0, len(nodes)+len(graphs))
 	for i, node := range nodes {
 		if claimedNodes[i] {

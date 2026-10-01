@@ -480,3 +480,71 @@ func TestReferencedAnywhereKnowsEveryReferenceShape(t *testing.T) {
 	require.False(t, referencedAnywhere([][]map[string]any{{self}}, root),
 		"a self-link is not another node referring to the root")
 }
+
+// TestRootProofsKeepsAProofNodeAnotherEdgeNeeds: a proof link that is not a
+// named graph names an ordinary top-level node, and that node is removed with
+// the link. But a node can be BOTH the proof and content - another property
+// may reference it too - and then removing it drops quads the signature
+// covers.
+//
+// Compact signing deletes the proof property and keeps the node's own quads,
+// so a verifier that dropped the node entirely hashed less than the signer
+// did: the same signed document verified before a round trip and failed
+// after one.
+func TestRootProofsKeepsAProofNodeAnotherEdgeNeeds(t *testing.T) {
+	const shared = "https://example.org/vocab#note"
+
+	flattened := `[
+		{
+			"@id": "https://example.org/credential",
+			"https://w3id.org/security#proof": [{"@id": "https://example.org/the-proof"}],
+			"https://example.org/vocab#mentions": [{"@id": "https://example.org/the-proof"}]
+		},
+		{
+			"@id": "https://example.org/the-proof",
+			"` + shared + `": [{"@value": "content another edge keeps"}]
+		}
+	]`
+
+	cred, err := NewRDFCredentialFromJSON([]byte(flattened), nil)
+	require.NoError(t, err)
+
+	proofs, withoutRootProof, err := cred.RootProofs()
+	require.NoError(t, err)
+	require.Len(t, proofs, 1, "the link still names the proof")
+
+	canonical, err := withoutRootProof.CanonicalForm()
+	require.NoError(t, err)
+	require.Contains(t, canonical, "content another edge keeps",
+		"the node stays: another edge reaches it, so its quads are content the signature covers")
+	require.NotContains(t, canonical, "security#proof",
+		"while the proof LINK itself is still removed")
+}
+
+// TestRootProofsRemovesAProofNodeNothingElseNeeds is the other half: with no
+// second edge, the node is only there because the proof link named it, and it
+// goes with the link. Without this the fix above could degrade into never
+// removing a referenced proof node at all.
+func TestRootProofsRemovesAProofNodeNothingElseNeeds(t *testing.T) {
+	flattened := `[
+		{
+			"@id": "https://example.org/credential",
+			"https://w3id.org/security#proof": [{"@id": "https://example.org/the-proof"}]
+		},
+		{
+			"@id": "https://example.org/the-proof",
+			"https://example.org/vocab#note": [{"@value": "only the proof link kept this"}]
+		}
+	]`
+
+	cred, err := NewRDFCredentialFromJSON([]byte(flattened), nil)
+	require.NoError(t, err)
+
+	_, withoutRootProof, err := cred.RootProofs()
+	require.NoError(t, err)
+
+	canonical, err := withoutRootProof.CanonicalForm()
+	require.NoError(t, err)
+	require.NotContains(t, canonical, "only the proof link kept this",
+		"nothing else reaches it, so it goes with the link it was")
+}
