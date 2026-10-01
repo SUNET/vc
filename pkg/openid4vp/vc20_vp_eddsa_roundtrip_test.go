@@ -1247,6 +1247,12 @@ func TestIssuerControlsMethodRefusesAPathThatClimbsOut(t *testing.T) {
 		issuer + "/../other-tenant/key",
 		issuer + "/./../other-tenant/key",
 		issuer + "/keys/../../other-tenant/key",
+		// PERCENT-ENCODED, which a resolver normalizing the URL reads as
+		// the same thing - and encoded again behind that.
+		issuer + "/%2e%2e/other-tenant/key",
+		issuer + "/%2E%2E/other-tenant/key",
+		issuer + "/%252e%252e/other-tenant/key",
+		issuer + "/%2e/%2e%2e/other-tenant/key",
 	} {
 		require.Error(t, issuerControlsMethod(issuer, escaping),
 			"a method that climbs out of the issuer is not the issuer's: %s", escaping)
@@ -1264,4 +1270,9 @@ func TestIssuerControlsMethodRefusesAPathThatClimbsOut(t *testing.T) {
 	}
 	require.Error(t, issuerControlsMethod("https://issuer.example/", "https://issuer.example.evil/k"),
 		"and trimming it must not widen what counts as the issuer")
+
+	// An ordinary percent-encoded segment is not a dot segment and must
+	// still be accepted, or this refuses far more than it should.
+	require.NoError(t, issuerControlsMethod(issuer, issuer+"/key%20one"),
+		"percent-encoding is not by itself suspicious")
 }

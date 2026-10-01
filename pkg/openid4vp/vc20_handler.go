@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -1032,10 +1033,8 @@ func issuerControlsMethod(issuer string, verificationMethod string) error {
 	// with the issuer and resolves somewhere else entirely. Rather than
 	// try to normalize it, anything carrying a dot segment is refused -
 	// a verification method has no business containing one.
-	for _, segment := range strings.Split(verificationMethod, "/") {
-		if segment == ".." || segment == "." {
-			return fmt.Errorf("the proof's verification method %q contains a path segment that climbs out of it", verificationMethod)
-		}
+	if err := refuseDotSegments(verificationMethod); err != nil {
+		return err
 	}
 
 	// The issuer's own trailing delimiter is not a boundary of its own.
@@ -1058,6 +1057,46 @@ func issuerControlsMethod(issuer string, verificationMethod string) error {
 		}
 	}
 	return fmt.Errorf("the proof's verification method %q does not belong to the issuer %q", verificationMethod, issuer)
+}
+
+// refuseDotSegments rejects an identifier carrying a path segment that climbs
+// out of where it appears to sit.
+//
+// At EVERY decoding depth, not just as written. A prefix test is not
+// containment, and https://issuer.example/keys/../other/key is the obvious
+// way past it - but so is %2e%2e, which a resolver normalizing the URL reads
+// as the same thing, and %252e%252e behind that. Decoding is repeated until
+// the identifier stops changing and every stage is checked, so the depth of
+// the encoding does not decide the answer.
+//
+// Refused rather than normalized: a verification method has no business
+// carrying a dot segment at all, and refusing is a rule one can read, while
+// canonicalizing invites the next disagreement about whose normalization is
+// right.
+func refuseDotSegments(identifier string) error {
+	const maxDecodings = 8
+
+	seen := identifier
+	for range maxDecodings {
+		for _, segment := range strings.Split(seen, "/") {
+			if segment == "." || segment == ".." {
+				return fmt.Errorf("the proof's verification method %q contains a path segment that climbs out of it", identifier)
+			}
+		}
+
+		decoded, err := url.PathUnescape(seen)
+		if err != nil {
+			// Not decodable, so nothing below this can be a dot segment
+			// either - but an identifier this library cannot read is not
+			// one it should accept as an issuer's.
+			return fmt.Errorf("the proof's verification method %q is not a readable identifier: %w", identifier, err)
+		}
+		if decoded == seen {
+			return nil
+		}
+		seen = decoded
+	}
+	return fmt.Errorf("the proof's verification method %q is encoded too deeply to check", identifier)
 }
 
 // sameVerificationMethod checks that the proof which verified names the
