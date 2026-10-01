@@ -1002,43 +1002,82 @@ func memoizedCredential(t *testing.T) *RDFCredential {
 	return cred
 }
 
-// TestMemoizedAnswersAreDroppedWhenTheDatasetIsHandedOut: the memos assume
-// the document does not change, and the document CAN change - Dataset()
-// returns the live dataset and NormalizeVerifiableCredentialGraph rewrites it.
-// A stale memo is not merely out of date: it leaves a cached document hash in
-// place, so a later verification skips the root-stability check and
-// authenticates state that is no longer what it checked.
-func TestMemoizedAnswersAreDroppedWhenTheDatasetIsHandedOut(t *testing.T) {
-	t.Run("Dataset", func(t *testing.T) {
-		cred := memoizedCredential(t)
+// TestDatasetIsACopyTheCredentialDoesNotShare: verification memoizes the proof
+// set, the document hash and the root-scoped document, and those are only
+// sound while the document cannot change underneath them. Returning the LIVE
+// dataset made that false - and invalidating the memos at hand-out time did
+// not fix it, because a caller can hold the pointer, let a verification
+// repopulate the caches, and mutate AFTERWARDS. The next verification would
+// then authenticate a document that no longer exists, skipping the
+// root-stability check on the way.
+func TestDatasetIsACopyTheCredentialDoesNotShare(t *testing.T) {
+	cred := memoizedCredential(t)
 
-		first, _, err := RootScopedDocument(cred)
-		require.NoError(t, err)
-		again, _, err := RootScopedDocument(cred)
-		require.NoError(t, err)
-		require.Same(t, first, again, "memoized while nothing has touched the document")
+	handed := cred.Dataset()
+	require.NotNil(t, handed)
+	require.NotSame(t, cred.dataset, handed, "the credential's own dataset never leaves it")
 
-		require.NotNil(t, cred.Dataset())
+	// Everything a caller could reach through it: the graph map, the quad
+	// slices, and the quads themselves.
+	handed.Graphs["@default"] = nil
+	handed.Graphs["https://example.org/injected"] = []*ld.Quad{}
+	for _, quads := range cred.dataset.Graphs {
+		for _, quad := range quads {
+			quad.Subject = ld.NewIRI("https://example.org/UNTOUCHED")
+			break
+		}
+		break
+	}
 
-		afterwards, _, err := RootScopedDocument(cred)
-		require.NoError(t, err)
-		require.NotSame(t, first, afterwards,
-			"handing out the mutable dataset voids the answer, because this cannot see what the caller does with it")
-	})
+	again := cred.Dataset()
+	require.Contains(t, again.Graphs, "@default", "a mutation of the copy does not reach the credential")
+	require.NotContains(t, again.Graphs, "https://example.org/injected")
+}
 
-	t.Run("NormalizeVerifiableCredentialGraph", func(t *testing.T) {
-		cred := memoizedCredential(t)
+// TestDatasetCopyQuadsAreNotShared: a new graph map holding the SAME quad
+// pointers is not a defensive copy - the caller can still rewrite a subject
+// or an object through them, which is a change to the document the memos
+// describe.
+func TestDatasetCopyQuadsAreNotShared(t *testing.T) {
+	cred := memoizedCredential(t)
 
-		proofs, err := CompactedRootProofs(cred)
-		require.NoError(t, err)
-		require.Len(t, proofs, 1, "the fixture must have an answer worth caching")
-		require.NotNil(t, cred.compactedProofs, "and it must be cached, or this proves nothing")
+	handed := cred.Dataset()
+	var mutated bool
+	for name, quads := range handed.Graphs {
+		for i, quad := range quads {
+			if quad == nil {
+				continue
+			}
+			original := cred.dataset.Graphs[name][i]
+			require.NotSame(t, original, quad, "each quad is its own")
+			quad.Object = ld.NewIRI("https://example.org/REWRITTEN")
+			require.NotEqual(t, "https://example.org/REWRITTEN", original.Object.GetValue(),
+				"and rewriting it does not reach the credential's")
+			mutated = true
+			break
+		}
+		if mutated {
+			break
+		}
+	}
+	require.True(t, mutated, "the fixture must have a quad to rewrite, or this proves nothing")
+}
 
-		require.NoError(t, cred.NormalizeVerifiableCredentialGraph())
-		require.Nil(t, cred.compactedProofs, "rewriting the dataset voids it")
-		require.Nil(t, cred.secured)
-		require.Nil(t, cred.rootScoped)
-	})
+// TestNormalizeVerifiableCredentialGraphDropsMemoizedAnswers: this rewrites
+// the dataset in place, which is the one mutation that remains - so it clears
+// every memo rather than leaving a cached hash describing the old document.
+func TestNormalizeVerifiableCredentialGraphDropsMemoizedAnswers(t *testing.T) {
+	cred := memoizedCredential(t)
+
+	proofs, err := CompactedRootProofs(cred)
+	require.NoError(t, err)
+	require.Len(t, proofs, 1, "the fixture must have an answer worth caching")
+	require.NotNil(t, cred.compactedProofs, "and it must be cached, or this proves nothing")
+
+	require.NoError(t, cred.NormalizeVerifiableCredentialGraph())
+	require.Nil(t, cred.compactedProofs, "rewriting the dataset voids it")
+	require.Nil(t, cred.secured)
+	require.Nil(t, cred.rootScoped)
 }
 
 // TestRootCompactedDocumentMergesSplitFragmentsUnderAnAliasedID: the merge

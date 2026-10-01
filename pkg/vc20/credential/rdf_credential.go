@@ -559,20 +559,67 @@ func (rc *RDFCredential) OriginalJSON() string {
 
 // Dataset returns the underlying RDF dataset
 func (rc *RDFCredential) Dataset() *ld.RDFDataset {
-	// Handing out the LIVE dataset voids every memoized answer.
+	// A COPY. The credential's own dataset never leaves this type.
 	//
-	// The proof set, the document hash and the root-scoped document are pure
-	// functions of the document, and this is the one way the document can
-	// change underneath them. A caller that mutates what it gets back would
-	// otherwise leave a cached hash in place, and a later verification would
-	// skip the root-stability check and authenticate state that is no longer
-	// what it checked.
+	// Invalidating the memos on the way out of here was not enough, and the
+	// reason is worth keeping: a caller can hold the pointer, let a
+	// verification repopulate the caches, and mutate afterwards - so the
+	// cached proof set and document hash would then describe a document that
+	// no longer exists, and the next verification would authenticate it
+	// while skipping the root-stability check. Invalidating at hand-out time
+	// cannot see that second mutation at all.
 	//
-	// There is no way to tell a reader from a mutator from here, so this
-	// assumes the worse one. A caller that only reads pays one recomputation;
-	// the alternative is a cache this package cannot tell has gone wrong.
-	rc.invalidate()
-	return rc.dataset
+	// The memos are only sound if nothing outside can change the document,
+	// so nothing outside gets the chance.
+	return cloneDataset(rc.dataset)
+}
+
+// cloneDataset deep-copies a dataset: new graph map, new quad slices, new
+// quads. The unexported fields json-gold keeps on a dataset are its parser's
+// business and are not reconstructed - this copy is for a caller to read, and
+// is never fed back into normalization.
+func cloneDataset(dataset *ld.RDFDataset) *ld.RDFDataset {
+	if dataset == nil {
+		return nil
+	}
+
+	graphs := make(map[string][]*ld.Quad, len(dataset.Graphs))
+	for name, quads := range dataset.Graphs {
+		copied := make([]*ld.Quad, 0, len(quads))
+		for _, quad := range quads {
+			if quad == nil {
+				copied = append(copied, nil)
+				continue
+			}
+			copied = append(copied, &ld.Quad{
+				Subject:   cloneNode(quad.Subject),
+				Predicate: cloneNode(quad.Predicate),
+				Object:    cloneNode(quad.Object),
+				Graph:     cloneNode(quad.Graph),
+			})
+		}
+		graphs[name] = copied
+	}
+
+	return &ld.RDFDataset{Graphs: graphs}
+}
+
+// cloneNode copies a node that is addressable through its interface. A node
+// stored BY VALUE - which is what json-gold's constructors return - is already
+// copied by the assignment, so only the pointer forms need this.
+func cloneNode(node ld.Node) ld.Node {
+	switch typed := node.(type) {
+	case *ld.IRI:
+		copied := *typed
+		return &copied
+	case *ld.BlankNode:
+		copied := *typed
+		return &copied
+	case *ld.Literal:
+		copied := *typed
+		return &copied
+	}
+	return node
 }
 
 // invalidate clears every memoized answer. Each is a pure function of the
