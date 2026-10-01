@@ -360,11 +360,15 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any
 		// The ROOT's own context, not whichever node happened to be first:
 		// a flattened array may give each node its own, and reordering
 		// top-level nodes does not change the RDF.
-		rootID := credential.CompactNodeID(selected, context, options)
+		// RESOLVED identifiers on both sides: a document may name one node
+		// ex:credential in one fragment and absolutely in another, and
+		// comparing the spellings found no fragment to edit at all.
+		rootID := credential.ResolvedNodeID(selected, context, options)
+		ids := credential.ResolvedNodeIDs(nodes, context, options)
 
 		var targets []map[string]any
-		for _, node := range nodes {
-			id := credential.CompactNodeID(node, context, options)
+		for index, node := range nodes {
+			id := ids[index]
 			if rootID != "" {
 				if id == rootID {
 					targets = append(targets, node)

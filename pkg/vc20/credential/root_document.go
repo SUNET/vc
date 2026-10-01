@@ -393,6 +393,62 @@ func compactNodeID(node map[string]any) string {
 	return ""
 }
 
+// ResolvedNodeIDs returns each node's identifier as an ABSOLUTE IRI wherever
+// the context resolves one, and as written where it does not.
+//
+// Batched: nodes sharing the document's context are expanded together, and
+// only a node carrying a context of its OWN needs an expansion to itself,
+// because a batch can apply one context. Resolving each node separately would
+// be an expansion per node on every rooting.
+//
+// One function because three callers need the same answer - selection,
+// fragment coalescing and SD's fragment editing - and the last two were
+// comparing lexical spellings while the first resolved them, so a document
+// naming one node as ex:credential and once absolutely read as two.
+func ResolvedNodeIDs(nodes []map[string]any, context any, options *ld.JsonLdOptions) []string {
+	ids := make([]string, len(nodes))
+	shared := make([]string, len(nodes))
+	scopes := make([]any, len(nodes))
+	ownContext := make([]bool, len(nodes))
+
+	for i, node := range nodes {
+		_, ownContext[i] = node["@context"]
+		scopes[i] = composedContext(node, context, context != nil)
+		ids[i] = nodeIDUnder(node, scopes[i], options)
+		if !ownContext[i] {
+			shared[i] = ids[i]
+		}
+	}
+
+	shared = expandNodeIDs(shared, context, options)
+	for i := range nodes {
+		// A blank node has nothing to resolve against and its label is the
+		// only identity it has.
+		if ids[i] == "" || strings.HasPrefix(ids[i], "_:") {
+			continue
+		}
+		if !ownContext[i] {
+			ids[i] = shared[i]
+			continue
+		}
+		if expanded := expandNodeID(scopes[i], ids[i], options); expanded != "" {
+			ids[i] = expanded
+		}
+	}
+
+	return ids
+}
+
+// compactNodeIDs reads each node's identifier AS WRITTEN. The fallback for a
+// document with no context to resolve anything against.
+func compactNodeIDs(nodes []map[string]any, context any, options *ld.JsonLdOptions) []string {
+	ids := make([]string, len(nodes))
+	for i, node := range nodes {
+		ids[i] = nodeIDUnder(node, composedContext(node, context, context != nil), options)
+	}
+	return ids
+}
+
 // ResolvedNodeID returns a node's identifier as an ABSOLUTE IRI wherever the
 // active context can resolve one, and as written where it cannot.
 //
@@ -512,22 +568,25 @@ func coalesceCompactedByID(nodes []map[string]any, context any, options *ld.Json
 	merged := make([]map[string]any, 0, len(nodes))
 	at := map[string]int{}
 
-	for _, node := range nodes {
-		// Read under the node's own scope and through any alias of @id, or
-		// fragments of one node spelled through a context go on looking like
-		// separate nodes - which is the refusal this merge exists to avoid.
-		id := nodeIDUnder(node, composedContext(node, context, context != nil), options)
+	// RESOLVED, not as written: fragments of one node spelled ex:credential
+	// in one entry and absolutely in another are the same node, and reading
+	// the spellings left them looking like two - which is the refusal this
+	// merge exists to avoid.
+	ids := ResolvedNodeIDs(nodes, context, options)
+
+	for index, node := range nodes {
+		id := ids[index]
 		if id == "" {
 			merged = append(merged, maps.Clone(node))
 			continue
 		}
-		index, seen := at[id]
+		at_, seen := at[id]
 		if !seen {
 			at[id] = len(merged)
 			merged = append(merged, maps.Clone(node))
 			continue
 		}
-		into := merged[index]
+		into := merged[at_]
 		identifiers := idMemberNames(node, context, options)
 		for key, value := range node {
 			// EVERY member that stands for @id, not just the two literal
@@ -595,33 +654,11 @@ func rootIndexOfCompactedNodes(nodes []map[string]any, context any, options *ld.
 	// writes it - so a compact id never matched, every node looked
 	// unreferenced, and a perfectly good document read as ambiguous.
 	// Each node read under the context it ACTUALLY has - the container's and
-	// its own - and through any alias of @id that context defines.
-	scopes := make([]any, len(nodes))
-	lookup := make([]string, len(nodes))
-	shared := make([]string, len(nodes))
-	ownContext := make([]bool, len(nodes))
-	for i, node := range nodes {
-		_, ownContext[i] = node["@context"]
-		scopes[i] = composedContext(node, context, context != nil)
-		lookup[i] = nodeIDUnder(node, scopes[i], options)
-		if !ownContext[i] {
-			shared[i] = lookup[i]
-		}
-	}
+	// its own - through any alias of @id that context defines, and as an
+	// absolute IRI where there is a context to resolve one.
+	lookup := compactNodeIDs(nodes, context, options)
 	if resolved {
-		// Batched for the nodes that share the container's context, which is
-		// almost all of them; one carrying a context of its own is expanded
-		// on its own, because a batch can only apply ONE context.
-		shared = expandNodeIDs(shared, context, options)
-		for i := range nodes {
-			if !ownContext[i] {
-				lookup[i] = shared[i]
-				continue
-			}
-			if expanded := expandNodeID(scopes[i], lookup[i], options); expanded != "" {
-				lookup[i] = expanded
-			}
-		}
+		lookup = ResolvedNodeIDs(nodes, context, options)
 	}
 
 	rootIndex := -1

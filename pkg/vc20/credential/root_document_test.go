@@ -1200,3 +1200,39 @@ func TestIsGraphWrapperReadsAnAliasedGraphMember(t *testing.T) {
 	}
 	require.False(t, IsGraphWrapper(named, context, nil))
 }
+
+// TestRootCompactedDocumentMergesFragmentsSpelledDifferently: a document may
+// name one node ex:credential in one fragment and with the equivalent
+// absolute IRI in another. They are the same RDF node; coalescing read the
+// SPELLINGS, so the two looked like separate nodes, neither referring to the
+// other, and a perfectly good document was refused for holding more than one
+// node nothing refers to.
+func TestRootCompactedDocumentMergesFragmentsSpelledDifferently(t *testing.T) {
+	document := func() map[string]any {
+		return map[string]any{
+			"@context": map[string]any{
+				"ex":      "https://example.org/",
+				"id":      "@id",
+				"note":    "https://example.org/vocab#note",
+				"carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+			},
+			"@graph": []any{
+				map[string]any{"id": "ex:credential", "carries": "https://example.org/other"},
+				map[string]any{"id": "https://example.org/credential", "note": "the second fragment"},
+				map[string]any{"id": "https://example.org/other", "note": "a sibling"},
+			},
+		}
+	}
+
+	before, err := canonicalFormOf(document(), nil)
+	require.NoError(t, err)
+
+	rooted, err := RootCompactedDocument(document(), "", nil)
+	require.NoError(t, err, "two spellings of one IRI are one node")
+	require.Equal(t, "the second fragment", rooted["note"],
+		"and the merged root carries both fragments' properties")
+
+	after, err := canonicalFormOf(rooted, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "merging fragments must not change one quad")
+}

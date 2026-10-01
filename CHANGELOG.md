@@ -130,14 +130,19 @@
   document verified straight from `Sign` and stopped verifying once serialized
   and read back.
 
-  **Proof-graph identifiers are compared as absolute IRIs.** A document may
-  link to `ex:proof` while the graph it names is written with the equivalent
-  absolute IRI, or through a prefix of its own. They are the same node, and
-  comparing the SPELLINGS left the root's proof graph in a document supposed
-  to be free of it — so a derived proof canonicalized extra proof quads and
-  the credential was rejected. `credential.ResolvedNodeID` resolves both sides
-  under their own active contexts first; blank nodes are compared as written,
-  since a label is the only identity they have.
+  **Node and proof-graph identifiers are compared as absolute IRIs.** Fragments
+  of one node spelled `ex:credential` in one entry and absolutely in another
+  are the same RDF node; comparing the spellings made them look like two, so a
+  valid document was refused for holding more than one node nothing refers to,
+  and `ecdsa-sd-2023` edited only whichever fragment matched — leaving the
+  root's proof on the other, inside the document the signature covers.
+  `credential.ResolvedNodeIDs` resolves them in one batched expansion and
+  selection, coalescing and fragment editing all use it. The same holds for a proof
+  LINK: a document may name `ex:proof` while the graph it names is written
+  absolutely, which left the root's proof graph in a document supposed to be
+  free of it, so a derived proof canonicalized extra proof quads and the
+  credential was rejected. Blank nodes are compared as written, since a label
+  is the only identity they have.
 
   **`CanonicalForm` no longer rewrites the document it describes.** json-gold's
   normalization writes each quad's `Graph` field in place, so canonicalizing

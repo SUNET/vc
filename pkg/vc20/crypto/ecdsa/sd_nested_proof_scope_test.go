@@ -520,3 +520,39 @@ func TestRemoveRootProofMatchesACompactProofLinkToAnExpandedGraph(t *testing.T) 
 		"a compact link and an absolute graph identifier name the same node")
 	require.Contains(t, string(encoded), "content the signature covers")
 }
+
+// TestRemoveRootProofEditsFragmentsSpelledDifferently: the root may be split
+// across fragments naming it ex:credential and with the equivalent absolute
+// IRI. Matching on the SPELLING edited only the fragment that happened to
+// match the selected node's, so the root's proof survived on the other one -
+// in the document the signature is supposed to cover without it.
+func TestRemoveRootProofEditsFragmentsSpelledDifferently(t *testing.T) {
+	context := map[string]any{
+		"ex":    "https://example.org/",
+		"id":    "@id",
+		"note":  "https://example.org/vocab#note",
+		"proof": map[string]any{"@id": "https://w3id.org/security#proof"},
+	}
+
+	data := []any{
+		map[string]any{
+			"id":    "ex:credential",
+			"note":  "content the signature covers",
+			"proof": map[string]any{"note": "zFIRSTFRAGMENT"},
+		},
+		map[string]any{
+			"id":    "https://example.org/credential",
+			"proof": map[string]any{"note": "zSECONDFRAGMENT"},
+		},
+	}
+
+	stripped, err := removeRootProofUnder(data, context, nil)
+	require.NoError(t, err)
+
+	encoded, err := json.Marshal(stripped)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "zFIRSTFRAGMENT")
+	require.NotContains(t, string(encoded), "zSECONDFRAGMENT",
+		"every fragment of the root is edited, however it spells its identifier")
+	require.Contains(t, string(encoded), "content the signature covers")
+}
