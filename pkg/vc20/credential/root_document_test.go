@@ -1,7 +1,10 @@
 package credential
 
 import (
+	"encoding/json"
 	"testing"
+
+	"github.com/piprate/json-gold/ld"
 
 	"github.com/stretchr/testify/require"
 )
@@ -9,7 +12,7 @@ import (
 func TestRootCompactedDocument(t *testing.T) {
 	t.Run("a single node is already rooted", func(t *testing.T) {
 		document := map[string]any{"id": "https://example.org/a", "proof": map[string]any{}}
-		rooted, err := RootCompactedDocument(document, "")
+		rooted, err := RootCompactedDocument(document, "", nil)
 		require.NoError(t, err)
 		require.Equal(t, document, rooted)
 	})
@@ -21,7 +24,7 @@ func TestRootCompactedDocument(t *testing.T) {
 				map[string]any{"id": "https://example.org/subject", "name": "a subject"},
 				map[string]any{"id": "https://example.org/credential", "credentialSubject": "https://example.org/subject"},
 			},
-		}, "https://example.org/credential")
+		}, "https://example.org/credential", nil)
 		require.NoError(t, err)
 
 		require.Equal(t, "https://example.org/credential", rooted["id"])
@@ -38,7 +41,7 @@ func TestRootCompactedDocument(t *testing.T) {
 				map[string]any{"id": "https://example.org/subject"},
 				map[string]any{"id": "https://example.org/credential", "credentialSubject": "https://example.org/subject"},
 			},
-		}, "")
+		}, "", nil)
 		require.NoError(t, err)
 		require.Equal(t, "https://example.org/credential", rooted["id"])
 	})
@@ -46,14 +49,14 @@ func TestRootCompactedDocument(t *testing.T) {
 	t.Run("a known root that is gone is refused", func(t *testing.T) {
 		_, err := RootCompactedDocument(map[string]any{
 			"@graph": []any{map[string]any{"id": "https://example.org/subject"}},
-		}, "https://example.org/credential")
+		}, "https://example.org/credential", nil)
 		require.ErrorContains(t, err, "no longer holds the node")
 
 		// And the same when disclosure left exactly one node behind, so the
 		// document is not a container at all.
 		_, err = RootCompactedDocument(map[string]any{
 			"id": "https://example.org/subject",
-		}, "https://example.org/credential")
+		}, "https://example.org/credential", nil)
 		require.ErrorContains(t, err, "no longer holds the node")
 	})
 
@@ -63,7 +66,7 @@ func TestRootCompactedDocument(t *testing.T) {
 				map[string]any{"id": "https://example.org/a"},
 				map[string]any{"id": "https://example.org/b"},
 			},
-		}, "")
+		}, "", nil)
 		require.ErrorContains(t, err, "more than one node nothing refers to")
 	})
 
@@ -72,7 +75,7 @@ func TestRootCompactedDocument(t *testing.T) {
 			"@graph": []any{
 				map[string]any{"@context": "https://www.w3.org/ns/credentials/v2", "id": "https://example.org/credential"},
 			},
-		}, "")
+		}, "", nil)
 		require.NoError(t, err)
 		require.Equal(t, "https://www.w3.org/ns/credentials/v2", rooted["@context"],
 			"promoting a node must not drop the only context the document has")
@@ -101,7 +104,7 @@ func TestRootCompactedDocumentIgnoresLiterals(t *testing.T) {
 				},
 			},
 		},
-	}, "")
+	}, "", nil)
 	require.NoError(t, err, "a literal must not count as a reference to the root")
 	require.Equal(t, "https://example.org/credential", rooted["@id"])
 }
@@ -121,7 +124,7 @@ func TestRootCompactedDocumentNormalisesTheRootID(t *testing.T) {
 				map[string]any{"@id": "https://example.org/subject"},
 				map[string]any{"@id": "ex:outer", "https://example.org/vocab#s": map[string]any{"@id": "https://example.org/subject"}},
 			},
-		}, "https://example.org/credentials/outer")
+		}, "https://example.org/credentials/outer", nil)
 		require.NoError(t, err, "a compact spelling names the same node")
 		require.Equal(t, "ex:outer", rooted["@id"])
 	})
@@ -130,7 +133,7 @@ func TestRootCompactedDocumentNormalisesTheRootID(t *testing.T) {
 		rooted, err := RootCompactedDocument(map[string]any{
 			"@context": context,
 			"@id":      "ex:outer",
-		}, "https://example.org/credentials/outer")
+		}, "https://example.org/credentials/outer", nil)
 		require.NoError(t, err)
 		require.Equal(t, "ex:outer", rooted["@id"])
 	})
@@ -139,7 +142,35 @@ func TestRootCompactedDocumentNormalisesTheRootID(t *testing.T) {
 		_, err := RootCompactedDocument(map[string]any{
 			"@context": context,
 			"@id":      "ex:someone-else",
-		}, "https://example.org/credentials/outer")
+		}, "https://example.org/credentials/outer", nil)
 		require.ErrorContains(t, err, "no longer holds the node")
 	})
+}
+
+// TestRootCompactedDocumentUsesTheGivenOptions: normalizing a compact root
+// identifier means expanding it, and that expansion has to run under the
+// options the credential was PARSED with. Under fresh defaults a context only
+// the credential's own loader knows does not resolve, the identifier does not
+// normalize, and a valid derivation is refused as if its root had vanished.
+func TestRootCompactedDocumentUsesTheGivenOptions(t *testing.T) {
+	const privateContext = "https://example.org/a-root-context-only-this-loader-has"
+
+	loader := ld.NewCachingDocumentLoader(GetGlobalLoader())
+	var context any
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"@context":{"ex":"https://example.org/credentials/"}}`), &context))
+	loader.AddDocument(privateContext, context)
+
+	options := ld.NewJsonLdOptions("")
+	options.DocumentLoader = loader
+
+	document := map[string]any{"@context": privateContext, "@id": "ex:outer"}
+
+	rooted, err := RootCompactedDocument(document, "https://example.org/credentials/outer", options)
+	require.NoError(t, err, "the credential's own loader resolves the context")
+	require.Equal(t, "ex:outer", rooted["@id"])
+
+	// And the global loader genuinely cannot, or this proves nothing.
+	_, err = RootCompactedDocument(document, "https://example.org/credentials/outer", nil)
+	require.Error(t, err, "the context must be unreachable without that loader")
 }

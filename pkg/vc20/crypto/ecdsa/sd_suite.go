@@ -1224,7 +1224,7 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 	if knownRootID == "" {
 		return nil, fmt.Errorf("cannot derive from a credential whose root carries no identifier: disclosure would decide which node the derived credential is about")
 	}
-	m, err := credential.RootCompactedDocument(compactedDerived, knownRootID)
+	m, err := credential.RootCompactedDocument(compactedDerived, knownRootID, cred.ExpansionOptions())
 	if err != nil {
 		return nil, fmt.Errorf("failed to root the derived credential: %w", err)
 	}

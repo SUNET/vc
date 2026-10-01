@@ -24,7 +24,7 @@ import (
 // A document with no single unreferenced node is REFUSED. It does not say
 // which node it is about, and guessing is how a presentation and the
 // credential it carries became indistinguishable in the first place.
-func RootCompactedDocument(compacted map[string]any, knownRootID string) (map[string]any, error) {
+func RootCompactedDocument(compacted map[string]any, knownRootID string, options *ld.JsonLdOptions) (map[string]any, error) {
 	graph, isContainer := compacted["@graph"]
 	if !isContainer {
 		// A single node still has to BE the node the caller said the
@@ -33,7 +33,7 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string) (map[st
 		// entirely - here, the credential's subject - and attaching the
 		// credential's proof to that is how a proof comes to secure a
 		// document nobody meant to sign.
-		if knownRootID != "" && !isKnownRoot(compacted, compacted["@context"], knownRootID) {
+		if knownRootID != "" && !isKnownRoot(compacted, compacted["@context"], knownRootID, options) {
 			return nil, fmt.Errorf("the document no longer holds the node %q it is about", knownRootID)
 		}
 		return compacted, nil
@@ -66,7 +66,7 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string) (map[st
 	// about.
 	if knownRootID != "" {
 		for i, node := range nodes {
-			if isKnownRoot(node, compacted["@context"], knownRootID) {
+			if isKnownRoot(node, compacted["@context"], knownRootID, options) {
 				rootIndex = i
 				break
 			}
@@ -230,7 +230,7 @@ func rootIndexOfCompactedNodes(nodes []map[string]any) (int, error) {
 // node's identifier under the document's context, which may turn it into a
 // term or a compact IRI. Comparing the strings alone rejected a perfectly
 // valid derivation purely because compaction changed the spelling of its root.
-func isKnownRoot(node map[string]any, context any, knownRootID string) bool {
+func isKnownRoot(node map[string]any, context any, knownRootID string, options *ld.JsonLdOptions) bool {
 	id := compactNodeID(node)
 	if id == "" {
 		return false
@@ -238,15 +238,17 @@ func isKnownRoot(node map[string]any, context any, knownRootID string) bool {
 	if id == knownRootID {
 		return true
 	}
-	return expandNodeID(context, id) == knownRootID
+	return expandNodeID(context, id, options) == knownRootID
 }
 
 // expandNodeID resolves an identifier as written in a compacted document to
 // the absolute IRI it stands for, or "" when it does not resolve to one.
 //
+// options are the ones the credential was parsed with; see ExpansionOptions.
+//
 // The identifier is expanded as the OBJECT of a property, because a node
 // carrying nothing but an @id is free-floating and expansion drops it.
-func expandNodeID(context any, id string) string {
+func expandNodeID(context any, id string, options *ld.JsonLdOptions) string {
 	const probeIRI = "https://w3id.org/security#proof"
 
 	probe := map[string]any{probeIRI: map[string]any{"@id": id}}
@@ -254,7 +256,14 @@ func expandNodeID(context any, id string) string {
 		probe["@context"] = context
 	}
 
-	expanded, err := ld.NewJsonLdProcessor().Expand(probe, NewJSONLDOptions(""))
+	// The options the document was PARSED with, so a context only its own
+	// loader knows still resolves here. Expanding under fresh defaults
+	// instead would fail to resolve it, the identifier would not normalize,
+	// and a valid derivation would be refused as if its root had vanished.
+	if options == nil {
+		options = NewJSONLDOptions("")
+	}
+	expanded, err := ld.NewJsonLdProcessor().Expand(probe, options)
 	if err != nil {
 		return ""
 	}
