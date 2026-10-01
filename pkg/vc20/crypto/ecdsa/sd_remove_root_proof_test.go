@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/vc20/credential"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -77,4 +79,41 @@ func TestRemoveRootProofHandlesASingleNode(t *testing.T) {
 	require.NotContains(t, node, "https://w3id.org/security#proof")
 	require.Contains(t, node["credentialSubject"].(map[string]any), "proof",
 		"a nested proof is never the document's own")
+}
+
+// TestSdRootProofsReportsWhyEveryCandidateWasSkipped: skipping a malformed
+// candidate keeps an appended proof from denying verification, but it must not
+// also turn "every proof on this document is malformed" into the message a
+// document with no SD proof at all gets. The cause is what tells the two
+// apart.
+func TestSdRootProofsReportsWhyEveryCandidateWasSkipped(t *testing.T) {
+	_, _, signed := signNestedProofCredential(t)
+
+	var document map[string]any
+	require.NoError(t, json.Unmarshal([]byte(signed.OriginalJSON()), &document))
+
+	// Replace the only root proof with one whose graph will hold a second
+	// subject once serialized, so nothing compactable is left.
+	proof, ok := document["proof"].(map[string]any)
+	require.True(t, ok)
+	proof["@included"] = map[string]any{
+		"id":                            "https://example.org/extra",
+		"https://example.org/vocab#any": "a second subject in the proof graph",
+	}
+
+	compact, err := json.Marshal(document)
+	require.NoError(t, err)
+	parsed, err := credential.NewRDFCredentialFromJSON(compact, nil)
+	require.NoError(t, err)
+	// Proofs only become named graphs once serialized through RDF.
+	flattened, err := json.Marshal(parsed)
+	require.NoError(t, err)
+	reparsed, err := credential.NewRDFCredentialFromJSON(flattened, nil)
+	require.NoError(t, err)
+
+	_, err = sdRootProofs(reparsed)
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "carries no ecdsa-sd-2023 proof of its own",
+		"a document whose every proof is malformed is not a document with no proof")
+	require.ErrorContains(t, err, "rather than one proof")
 }
