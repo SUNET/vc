@@ -16,6 +16,19 @@ import (
 // without anybody noticing - the whole subject of this change. One copy means
 // a scope fix cannot land in one suite and miss the other.
 
+// MaxRootProofs bounds how many proofs a document may attach to itself before
+// verification refuses it.
+//
+// The list is read off the document, so its length is chosen by whoever sent
+// it, and trying one costs a JSON-LD canonicalization plus a signature check -
+// work done before anything about the document has been authenticated. A real
+// proof set is a handful of signers.
+//
+// Signing is NOT capped: the limit exists to bound work on untrusted input,
+// and a signer is not that. A document signed past the limit will not verify
+// here, which is the signer's problem to see.
+const MaxRootProofs = 32
+
 // ProofConfigHash canonicalizes a proof configuration and hashes it. The
 // configuration is the proof WITHOUT its proofValue: the signature covers the
 // metadata that describes it - the verification method, the purpose, the
@@ -91,6 +104,9 @@ func SecuredDocument(cred *RDFCredential) ([]any, [32]byte, error) {
 	}
 	if len(proofs) == 0 {
 		return nil, zero, fmt.Errorf("the document carries no proof of its own to verify")
+	}
+	if len(proofs) > MaxRootProofs {
+		return nil, zero, fmt.Errorf("the document attaches %d proofs to itself, more than the %d this will verify", len(proofs), MaxRootProofs)
 	}
 
 	docHash, err := documentHash(withoutRootProof)

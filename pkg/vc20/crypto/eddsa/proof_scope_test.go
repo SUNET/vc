@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -310,4 +311,56 @@ func TestVerifyRefusesARerootedDocument(t *testing.T) {
 	err = NewSuite().Verify(reparsed, pub)
 	require.Error(t, err, "a document that names two different roots must not verify")
 	require.Contains(t, err.Error(), "once serialized through RDF")
+}
+
+// TestVerifyRefusesAnUnboundedProofSet: the cap is not the handler's alone.
+// A suite is callable directly, and the work it does per candidate - a JSON-LD
+// canonicalization plus a signature check - is paid before anything about the
+// document has been authenticated, whoever is asking.
+func TestVerifyRefusesAnUnboundedProofSet(t *testing.T) {
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	base, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`), nil)
+	require.NoError(t, err)
+
+	signed, err := NewSuite().Sign(base, key, &SignOptions{
+		VerificationMethod: "did:example:issuer#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(compact, &document))
+
+	genuine, ok := document["proof"].(map[string]any)
+	require.True(t, ok)
+
+	proofs := []any{genuine}
+	for i := 0; i < credential.MaxRootProofs; i++ {
+		filler := map[string]any{}
+		for k, v := range genuine {
+			filler[k] = v
+		}
+		filler["domain"] = fmt.Sprintf("https://example.org/%d", i)
+		proofs = append(proofs, filler)
+	}
+	document["proof"] = proofs
+
+	overfull, err := json.Marshal(document)
+	require.NoError(t, err)
+	cred, err := credential.NewRDFCredentialFromJSON(overfull, nil)
+	require.NoError(t, err)
+
+	_, err = NewSuite().VerifyProof(cred, pub)
+	require.ErrorContains(t, err, "more than the 32 this will verify",
+		"a document may not make a verifier do unbounded work, handler or not")
 }

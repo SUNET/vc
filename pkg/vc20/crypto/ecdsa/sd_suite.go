@@ -409,6 +409,9 @@ func sdRootProofs(cred *credential.RDFCredential) ([]map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(expanded) > credential.MaxRootProofs {
+		return nil, fmt.Errorf("the document attaches %d proofs to itself, more than the %d this will verify", len(expanded), credential.MaxRootProofs)
+	}
 
 	var found []map[string]any
 	var unusable error

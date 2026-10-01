@@ -809,7 +809,7 @@ func TestVerifyAndExtractRefusesAnUnboundedProofSet(t *testing.T) {
 
 	// One genuine proof, and more copies than the handler will work through.
 	proofs := []any{genuine}
-	for i := 0; i < maxRootProofs; i++ {
+	for i := 0; i < credential.MaxRootProofs; i++ {
 		filler := map[string]any{}
 		for k, v := range genuine {
 			filler[k] = v

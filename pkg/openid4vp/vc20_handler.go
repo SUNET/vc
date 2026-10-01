@@ -253,13 +253,6 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 	return nil, lastErr
 }
 
-// maxRootProofs bounds how many proofs a document may attach to itself before
-// this refuses to verify it. A proof SET is several parties signing the same
-// document - a handful in practice - and the cost of trying one is a JSON-LD
-// canonicalization plus a signature check, paid before anything about the
-// document has been authenticated.
-const maxRootProofs = 32
-
 // rootProofCandidates lists the proofs the document attaches to itself, in
 // the short-keyed form the rest of this handler reads.
 func (h *VC20Handler) rootProofCandidates(credBytes []byte) ([]map[string]any, error) {
@@ -279,8 +272,8 @@ func (h *VC20Handler) rootProofCandidates(credBytes []byte) ([]map[string]any, e
 	// signature check, so an unbounded list is CPU amplification on input
 	// nobody has authenticated yet. A real proof set is a handful of
 	// signers; anything past that is refused rather than worked through.
-	if len(expanded) > maxRootProofs {
-		return nil, fmt.Errorf("the document attaches %d proofs to itself, more than the %d this will verify", len(expanded), maxRootProofs)
+	if len(expanded) > credential.MaxRootProofs {
+		return nil, fmt.Errorf("the document attaches %d proofs to itself, more than the %d this will verify", len(expanded), credential.MaxRootProofs)
 	}
 
 	// A candidate that cannot be compacted is SKIPPED, not fatal. Every root
