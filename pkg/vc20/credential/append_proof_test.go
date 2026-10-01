@@ -144,3 +144,44 @@ func TestCompactedRootProofsIsComputedOnce(t *testing.T) {
 	require.NotEqual(t,
 		reflect.ValueOf(first[0]).Pointer(), reflect.ValueOf(third[0]).Pointer())
 }
+
+// TestCompactedRootProofsCopiesNestedValues: a shallow copy hands back the
+// top-level map and shares every slice and nested map inside it - and a
+// multi-typed proof already carries a []any, so a caller writing through that
+// slice reached the cache anyway.
+func TestCompactedRootProofsCopiesNestedValues(t *testing.T) {
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": ["https://www.w3.org/ns/credentials/v2",
+			{"Sealed": "https://example.org/vocab#Sealed"}],
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"},
+		"proof": {
+			"type": ["DataIntegrityProof", "Sealed"],
+			"cryptosuite": "eddsa-rdfc-2022",
+			"created": "2024-01-01T00:00:00Z",
+			"verificationMethod": "did:example:issuer#key-1",
+			"proofPurpose": "assertionMethod",
+			"proofValue": "z3FXQjecWufY46yg5abdVZsXqLhxhueuSoZgNSARiKBk9czhmGQWmzBYdCVSAzeVCTt6QcLnLCHKPkyVpGqu9rWY"
+		}
+	}`), nil)
+	require.NoError(t, err)
+
+	first, err := CompactedRootProofs(cred)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+
+	types, isList := first[0]["type"].([]any)
+	require.True(t, isList, "the proof must really carry a list, or this proves nothing")
+	require.Len(t, types, 2)
+
+	// Write THROUGH the slice, which a shallow copy leaves shared.
+	types[0] = "scribbled"
+
+	second, err := CompactedRootProofs(cred)
+	require.NoError(t, err)
+	again, isList := second[0]["type"].([]any)
+	require.True(t, isList)
+	require.NotContains(t, again, "scribbled",
+		"writing through a nested slice must not reach the cache either")
+}

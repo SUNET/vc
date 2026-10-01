@@ -151,9 +151,14 @@ func CompactedRootProofs(cred *RDFCredential) ([]map[string]any, error) {
 	// what they are given" is not a guarantee - it is a hope. A compacted
 	// proof is a small flat map, so copying one per call costs nothing
 	// beside the JSON-LD compaction it saves.
+	// DEEP copies. maps.Clone copies the top-level map and leaves every
+	// slice and nested map shared - and a multi-typed proof already carries
+	// a []any, so a caller writing through that slice reached the cache
+	// anyway, which is the guarantee this is supposed to give.
 	proofs := make([]map[string]any, 0, len(cred.compactedProofs.proofs))
 	for _, proof := range cred.compactedProofs.proofs {
-		proofs = append(proofs, maps.Clone(proof))
+		copied, _ := deepCopy(proof).(map[string]any)
+		proofs = append(proofs, copied)
 	}
 	return proofs, nil
 }
@@ -297,4 +302,25 @@ func withoutContext(proof map[string]any) map[string]any {
 	stripped := maps.Clone(proof)
 	delete(stripped, "@context")
 	return stripped
+}
+
+// deepCopy copies the JSON-shaped value tree a decoded document is made of:
+// maps, slices, and the scalars at the leaves, which are immutable.
+func deepCopy(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		copied := make(map[string]any, len(typed))
+		for key, member := range typed {
+			copied[key] = deepCopy(member)
+		}
+		return copied
+	case []any:
+		copied := make([]any, len(typed))
+		for i, member := range typed {
+			copied[i] = deepCopy(member)
+		}
+		return copied
+	default:
+		return value
+	}
 }

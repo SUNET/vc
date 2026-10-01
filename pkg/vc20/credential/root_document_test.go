@@ -422,3 +422,49 @@ func TestRootCompactedDocumentNormalisesIDsBeforeLookup(t *testing.T) {
 		"the compact link names the compact node, however each is spelled")
 	require.Equal(t, "ex:credential", rooted["id"])
 }
+
+// TestProofKeysRespectsAVocabulary: a context declaring @vocab and no explicit
+// "proof" term expands the name through that vocabulary, to something which is
+// not the security predicate. A term LOOKUP finds no definition, and falling
+// back to the bare name then removed an ordinary property - in SD
+// mandatory-pointer selection, letting a mandatory /proof value be dropped
+// from a derivation.
+func TestProofKeysRespectsAVocabulary(t *testing.T) {
+	var vocabulary any
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"@vocab": "https://example.org/vocab#", "id": "@id"}`), &vocabulary))
+
+	node := map[string]any{
+		"id":    "https://example.org/credential",
+		"proof": map[string]any{"type": "a reading by an editor"},
+	}
+	require.Empty(t, ProofKeys(node, vocabulary, nil),
+		"a vocabulary gives the name a meaning, and it is not the predicate")
+
+	// With the vocabulary pointing AT the security term, it is a proof again.
+	var pointed any
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"proof": "https://w3id.org/security#proof", "id": "@id"}`), &pointed))
+	require.Equal(t, []string{"proof"}, ProofKeys(node, pointed, nil))
+
+	// And with nothing to resolve against, the bare name still stands.
+	require.Equal(t, []string{"proof"}, ProofKeys(node, nil, nil))
+}
+
+// TestRootCompactedDocumentKeepsANamedGraphNode: a node carrying @graph beside
+// its own id and properties is a named-graph NODE, and the document is about
+// it. Treating any @graph as a bare container sent root selection inside that
+// graph.
+func TestRootCompactedDocumentKeepsANamedGraphNode(t *testing.T) {
+	document := map[string]any{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id":       "https://example.org/credential",
+		"type":     "VerifiableCredential",
+		"@graph":   []any{map[string]any{"id": "https://example.org/inside"}},
+	}
+
+	rooted, err := RootCompactedDocument(document, "https://example.org/credential", nil)
+	require.NoError(t, err, "the node is the root, not the graph it names")
+	require.Equal(t, "https://example.org/credential", rooted["id"])
+	require.Contains(t, rooted, "@graph", "and its graph stays where it is")
+}

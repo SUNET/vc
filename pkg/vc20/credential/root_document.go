@@ -28,7 +28,15 @@ import (
 // which node it is about, and guessing is how a presentation and the
 // credential it carries became indistinguishable in the first place.
 func RootCompactedDocument(compacted map[string]any, knownRootID string, options *ld.JsonLdOptions) (map[string]any, error) {
+	// A BARE container, by ld.IsGraph's rule and this package's own: a node
+	// carrying @graph beside its own id and properties is a named-graph
+	// NODE, and the document is about it. Treating one as a container sent
+	// root selection inside its graph and refused a perfectly good
+	// credential, or rooted it at the wrong node.
 	graph, isContainer := compacted["@graph"]
+	if isContainer && !IsBareGraphContainer(compacted) {
+		isContainer = false
+	}
 	if !isContainer {
 		// A single node still has to BE the node the caller said the
 		// document is about. Selective disclosure that drops every triple
@@ -326,10 +334,14 @@ func expandNodeID(context any, id string, options *ld.JsonLdOptions) string {
 // way has a root proof that no list of spellings will find. Each member is
 // resolved through the active context instead.
 func ProofKeys(node map[string]any, context any, options *ld.JsonLdOptions) []string {
-	// The context parsed ONCE, and every member looked up in it. Probing by
-	// expanding a synthetic document per member was both expensive - this
-	// runs on an SD credential before its signature has been checked - and
-	// unworkable: no single probe VALUE survives every declaration.
+	// The context parsed ONCE, and every member EXPANDED through it the way
+	// JSON-LD would - which is not the same as looking the term up. A
+	// context declaring @vocab and no explicit "proof" expands the name
+	// through that vocabulary, to something which is emphatically not the
+	// security predicate; a lookup finds no definition and an earlier
+	// version then fell back to the bare name and removed an ordinary
+	// property, which in SD mandatory-pointer selection would let a
+	// mandatory /proof value be dropped from a derivation.
 	active := nodeContext(node, context, options)
 
 	var keys []string
@@ -337,34 +349,47 @@ func ProofKeys(node map[string]any, context any, options *ld.JsonLdOptions) []st
 		if strings.HasPrefix(key, "@") {
 			continue
 		}
-		// Already expanded: these ARE the predicates, whatever a context
-		// might say about other names.
+		// Already expanded: this IS the predicate, whatever a context might
+		// say about other names.
 		if key == ProofPredicate {
 			keys = append(keys, key)
 			continue
 		}
 
-		definition := termDefinition(active, key)
-		if definition != nil {
-			// The context has an opinion, so it decides. A document that
-			// REMAPS "proof" onto an ordinary predicate keeps it, which is
-			// what RootProofs does too - deleting it here would strip a
-			// field the signature covers.
-			if definition.ID == ProofPredicate {
+		resolved, unresolvable := expandMemberName(active, key)
+		if !unresolvable {
+			// The context has an opinion, so it decides - an alias of the
+			// predicate is a proof, anything else is not.
+			if resolved == ProofPredicate {
 				keys = append(keys, key)
 			}
 			continue
 		}
 
-		// No opinion. "proof" is then the name it is everywhere else,
-		// including under the VC 2.0 context, which declares it inside its
-		// type-scoped contexts rather than at the top level. Failing to
-		// remove the root's own proof is the worse failure.
+		// Nothing resolves it: no context, or one that defines neither the
+		// term nor a vocabulary to read it through. "proof" is then the
+		// name it is everywhere else, and failing to remove the root's own
+		// proof is the worse failure.
 		if key == "proof" {
 			keys = append(keys, key)
 		}
 	}
 	return keys
+}
+
+// expandMemberName resolves a member name the way JSON-LD expands a property:
+// through an explicit term definition, or through @vocab when there is one.
+// unresolvable reports that the active context gives the name no meaning, so
+// the name itself is all a caller has to go on.
+func expandMemberName(active *ld.Context, key string) (resolved string, unresolvable bool) {
+	if active == nil {
+		return "", true
+	}
+	iri, err := active.ExpandIri(key, false, true, nil, nil)
+	if err != nil || iri == "" || iri == key {
+		return "", true
+	}
+	return iri, false
 }
 
 // nodeContext is the context ACTIVE on a node: the document's, with any
