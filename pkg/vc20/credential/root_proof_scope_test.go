@@ -373,12 +373,13 @@ func TestSecuredDocumentSurvivesConcurrentVerification(t *testing.T) {
 	require.NoError(t, err)
 
 	const readers = 8
+	const unreadableSentinel = "secured document unreadable"
 	results := make(chan string, readers)
 	for range readers {
 		go func() {
 			proofs, err := CompactedRootProofs(cred)
 			if err != nil || len(proofs) != 1 {
-				results <- "secured document unreadable"
+				results <- unreadableSentinel
 				return
 			}
 			value, _ := proofs[0]["proofValue"].(string)
@@ -389,10 +390,17 @@ func TestSecuredDocumentSurvivesConcurrentVerification(t *testing.T) {
 		}()
 	}
 
+	const unreadable = "secured document unreadable"
+
 	first := <-results
 	require.NotEmpty(t, first)
+	require.NotEqual(t, unreadable, first,
+		"every reader must actually read the proof")
 	for range readers - 1 {
-		require.Equal(t, first, <-results,
+		result := <-results
+		require.NotEqual(t, unreadable, result,
+			"a failure in every reader is uniform, not agreement")
+		require.Equal(t, first, result,
 			"every reader must see the same proof, however many read at once")
 	}
 }

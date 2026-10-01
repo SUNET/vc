@@ -1276,3 +1276,49 @@ func TestIssuerControlsMethodRefusesAPathThatClimbsOut(t *testing.T) {
 	require.NoError(t, issuerControlsMethod(issuer, issuer+"/key%20one"),
 		"percent-encoding is not by itself suspicious")
 }
+
+// TestVerifyAndExtractExpandsACompactIssuer: the verification method is
+// expanded to its absolute IRI before the issuer binding is checked, so the
+// issuer has to be too. A document writing "ex:issuer" under a prefix it
+// defines was compared against an absolute method IRI - and handed to an
+// authorizer as written, asking about an identifier nobody has.
+func TestVerifyAndExtractExpandsACompactIssuer(t *testing.T) {
+	issuerPub, issuerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	const absoluteIssuer = "https://example.org/issuers/one"
+	const method = absoluteIssuer + "#key-1"
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": ["https://www.w3.org/ns/credentials/v2",
+			{"ex": "https://example.org/issuers/"}],
+		"type": ["VerifiableCredential"],
+		"issuer": "ex:one",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`), nil)
+	require.NoError(t, err)
+
+	signed, err := eddsaSuite.NewSuite().Sign(cred, issuerKey, &eddsaSuite.SignOptions{
+		VerificationMethod: method,
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+
+	// The trusted-issuer list names the ABSOLUTE identifier, which is what a
+	// policy would carry.
+	handler, err := NewVC20Handler(
+		WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+			keys: map[string]crypto.PublicKey{method: issuerPub},
+		}),
+		WithVC20TrustedIssuers([]string{absoluteIssuer}),
+	)
+	require.NoError(t, err)
+
+	result, err := handler.VerifyAndExtract(t.Context(), string(compact))
+	require.NoError(t, err,
+		"a compact issuer names the same party as its expansion")
+	require.Equal(t, absoluteIssuer, result.Issuer)
+}

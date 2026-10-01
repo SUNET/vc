@@ -261,6 +261,15 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 	if err != nil {
 		return nil, err
 	}
+	// EXPANDED, like the verification method it is compared against. A
+	// compact-IRI issuer - "ex:issuer" under a document that defines the
+	// prefix - was being matched against an absolute method IRI and handed
+	// to the authorizer as written, so a valid credential was refused and
+	// authorization asked about an identifier nobody has.
+	issuer, err = h.expandDocumentIdentifier(credMap, issuer)
+	if err != nil {
+		return nil, err
+	}
 
 	// Check trusted issuers if configured
 	if len(h.trustedIssuers) > 0 && !h.trustedIssuers[issuer] {
@@ -853,6 +862,22 @@ func (h *VC20Handler) verifyEdDSA2022(
 	return h.buildResult(credBytes, credMap, verifiedProof, false)
 }
 
+// expandDocumentIdentifier turns an identifier the document spells compactly
+// into the absolute IRI it stands for, under the document's own context.
+//
+// The issuer needs this for the same reason the verification method does: an
+// absolute IRI expands to itself, so this changes nothing for the common case,
+// while "ex:issuer" under a document defining that prefix becomes the
+// identifier a key can belong to and a policy can name.
+func (h *VC20Handler) expandDocumentIdentifier(credMap map[string]any, identifier string) (string, error) {
+	if identifier == "" {
+		return identifier, nil
+	}
+	// No proof, so no proof-local context: an issuer is a member of the
+	// document, not of a proof.
+	return h.expandVerificationMethod(credMap, map[string]any{}, identifier)
+}
+
 // expandVerificationMethod turns the method as the document spells it into
 // the absolute IRI it stands for, using the document's own context.
 //
@@ -1132,8 +1157,15 @@ func (h *VC20Handler) buildResult(
 		result.ID = id
 	}
 
-	// Extract issuer
+	// Extract issuer, EXPANDED - the identifier the trust decision was made
+	// about, not the spelling the document happened to use. Reporting
+	// "ex:one" while having checked https://example.org/issuers/one against
+	// the trusted list invites a caller to compare the reported value with
+	// its own policy and get a different answer.
 	result.Issuer, _ = h.extractIssuer(credMap)
+	if expanded, err := h.expandDocumentIdentifier(credMap, result.Issuer); err == nil {
+		result.Issuer = expanded
+	}
 
 	// Extract types
 	if types, ok := credMap["type"].([]any); ok {
