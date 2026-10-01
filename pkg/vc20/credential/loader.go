@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	neturl "net/url"
@@ -240,8 +241,20 @@ func (l *CachingDocumentLoader) fetchContext(rawURL string) (*ld.RemoteDocument,
 // JSON-LD context, if the response is plain JSON. A response already served as
 // application/ld+json IS the context and needs no indirection.
 func contextLinkTarget(resp *http.Response) (string, error) {
-	contentType := resp.Header.Get("Content-Type")
-	if strings.HasPrefix(contentType, "application/ld+json") {
+	// PARSED, not prefix-matched. A media type is case-insensitive (RFC 9110
+	// 8.3.1), so Application/LD+JSON names this very type - and a prefix test
+	// accepts application/ld+jsonx, which names a different one. Both
+	// mistakes decide whether the response IS the context or merely points at
+	// one, and which context applies decides what RDF a signature covers: a
+	// server could serve the context under a differently-cased type and send
+	// a Link header to have a DIFFERENT document used in its place.
+	//
+	// mime.ParseMediaType lowercases the type and strips parameters and
+	// surrounding whitespace, so each of those spellings compares equal here.
+	// A Content-Type that is absent or unparseable is not this type, and the
+	// link is honoured as it is for any other JSON response.
+	if mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err == nil &&
+		mediaType == "application/ld+json" {
 		return "", nil
 	}
 	// Values, not Get: a response may send several Link headers, and Get

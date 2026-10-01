@@ -223,3 +223,56 @@ func TestFetchContextResolvesRelativeContextLink(t *testing.T) {
 	assert.Equal(t, srv.URL+"/schemas/real-context.jsonld", doc.ContextURL,
 		"resolved against the response URL, not treated as an absolute path")
 }
+
+// TestContextLinkTargetParsesTheMediaType: a response served as
+// application/ld+json IS the context, and a Link header naming another
+// document must be ignored. Deciding that with a case-sensitive prefix test
+// got it wrong three ways, and the consequence is not cosmetic - which context
+// applies decides what RDF a signature covers, so a server could serve the
+// context under a differently-cased type and send a Link header to have a
+// DIFFERENT document used in its place.
+func TestContextLinkTargetParsesTheMediaType(t *testing.T) {
+	const elsewhere = "https://elsewhere.example/other"
+
+	respondingWith := func(contentType string) *http.Response {
+		resp := &http.Response{Header: http.Header{}}
+		resp.Header.Set("Content-Type", contentType)
+		resp.Header.Set("Link", `<`+elsewhere+`>; rel="http://www.w3.org/ns/json-ld#context"`)
+		return resp
+	}
+
+	t.Run("this media type however it is spelled", func(t *testing.T) {
+		for _, contentType := range []string{
+			"application/ld+json",
+			"application/ld+json; charset=utf-8",
+			// Case-insensitive per RFC 9110 8.3.1.
+			"Application/LD+JSON",
+			"APPLICATION/LD+JSON; charset=UTF-8",
+			// Leading whitespace is not part of the type.
+			" application/ld+json",
+		} {
+			target, err := contextLinkTarget(respondingWith(contentType))
+			require.NoError(t, err)
+			require.Empty(t, target,
+				"%q is this type: the response IS the context and the link is not followed", contentType)
+		}
+	})
+
+	t.Run("a different media type, however similar", func(t *testing.T) {
+		for _, contentType := range []string{
+			"application/json",
+			// Not a prefix match: this names another type entirely.
+			"application/ld+jsonx",
+			"text/plain",
+			// Unparseable, so not this type; the link is honoured as for any
+			// other JSON response.
+			"",
+			"application/ld+json; =bad",
+		} {
+			target, err := contextLinkTarget(respondingWith(contentType))
+			require.NoError(t, err)
+			require.Equal(t, elsewhere, target,
+				"%q is not this type, so its context link is followed", contentType)
+		}
+	})
+}
