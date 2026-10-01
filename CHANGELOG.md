@@ -75,6 +75,19 @@
   and against the credential while verifying: a pointer such as `/issuer`
   addressed nothing at all.
 
+  **A proof is written under the absolute predicate whenever the bare term
+  `proof` is not known to mean it.** Previously the bare term was also the
+  fallback when nothing resolved it — a document already in expanded form,
+  which carries no `@context` because every name in it is an IRI, or a context
+  defining neither `proof` nor a vocabulary to read it through. A bare term no
+  context defines is a RELATIVE IRI, and expansion drops it: `Sign` reported
+  success and returned a document with no root proof at all, which this
+  library then refused to verify. Such documents now carry
+  `https://w3id.org/security#proof`, which expands to itself under any
+  context. **Anything signed that way before this release never verified** —
+  re-sign it. A document that aliases the predicate still keeps its own
+  spelling, so signing twice makes one proof set.
+
   **Rooting is refused when it would change the document's RDF.** Nodes
   beside the root inside a `@graph` container never saw the root's own local
   `@context`; moving them under it would apply it to them, and a term the

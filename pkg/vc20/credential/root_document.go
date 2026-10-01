@@ -935,19 +935,36 @@ func JoinContexts(outer any, inner any) any {
 // to something that is not a proof at all, and the library could not verify
 // what it had just signed.
 //
-// The absolute predicate is the answer when the active context gives "proof"
-// another meaning: an IRI expands to itself under any context.
+// The absolute predicate is the answer whenever the bare term is not KNOWN to
+// mean the predicate - whether the active context gives "proof" another
+// meaning, or there is no context to give it any. An IRI expands to itself
+// under any context; a bare term no context defines is a RELATIVE IRI, which
+// expansion drops.
 func ProofKeyFor(node map[string]any, context any, options *ld.JsonLdOptions) string {
+	active := nodeContext(node, context, options)
+
 	// An existing proof member keeps its name, so signing twice makes one
-	// proof set rather than two members meaning the same thing.
-	if existing := ProofKeys(node, context, options); len(existing) > 0 {
-		return existing[0]
+	// proof set rather than two members meaning the same thing - but only a
+	// name that SURVIVES expansion. ProofKeys deliberately also returns a
+	// bare, unmapped "proof" so that removing the root's own proof fails
+	// safe; writing a signature there would not.
+	for _, key := range ProofKeys(node, context, options) {
+		if key == ProofPredicate {
+			return key
+		}
+		if resolved, unresolvable := expandMemberName(active, key); !unresolvable && resolved == ProofPredicate {
+			return key
+		}
 	}
 
-	active := nodeContext(node, context, options)
-	resolved, unresolvable := expandMemberName(active, "proof")
-	if unresolvable || resolved == ProofPredicate {
+	if resolved, unresolvable := expandMemberName(active, "proof"); !unresolvable && resolved == ProofPredicate {
 		return "proof"
 	}
+
+	// Nothing maps the bare term to the predicate: no context at all - a
+	// document already in expanded form - or one defining neither "proof"
+	// nor a vocabulary to read it through. Expansion drops a member named
+	// that, so Sign would return a document with no root proof and this
+	// library would refuse to verify what it had just produced.
 	return ProofPredicate
 }

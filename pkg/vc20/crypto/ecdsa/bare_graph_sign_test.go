@@ -93,3 +93,73 @@ func TestSdSignRootsABareGraphContainer(t *testing.T) {
 	require.NoError(t, NewSdSuite().Verify(signed, &key.PublicKey),
 		"a base proof SdSuite.Sign produced must verify")
 }
+
+// expandedDocument: valid JSON-LD already in expanded form. It carries no
+// @context, because it does not need one - every name in it is an IRI.
+const expandedDocument = `{
+	"@id": "https://example.org/credential",
+	"@type": ["https://www.w3.org/2018/credentials#VerifiableCredential"],
+	"https://example.org/vocab#note": [{"@value": "hello"}]
+}`
+
+func requireProofUnderTheAbsolutePredicate(t *testing.T, signed *credential.RDFCredential) {
+	t.Helper()
+
+	document, err := credential.DocumentAsMap(signed)
+	require.NoError(t, err)
+	require.NotContains(t, document, "proof",
+		"a bare term no context defines is a relative IRI, and expansion drops it")
+	require.Contains(t, document, credential.ProofPredicate)
+}
+
+// TestSignAnExpandedDocumentUsesTheAbsolutePredicate: with no active context
+// there is nothing to map the bare term `proof` to the security predicate, so
+// writing the signature under that name produced a RELATIVE IRI - which
+// expansion drops. Sign returned success and the document carried no root
+// proof at all, so this library refused to verify what it had just produced.
+//
+// The key is chosen by credential.ProofKeyFor, which all three suites share;
+// a test per suite is what keeps one of them from drifting off it.
+func TestSignAnExpandedDocumentUsesTheAbsolutePredicate(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(expandedDocument), nil)
+	require.NoError(t, err)
+
+	signed, err := NewSuite().Sign(context.Background(), cred, key, &SignOptions{
+		VerificationMethod: "did:example:signer#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	requireProofUnderTheAbsolutePredicate(t, signed)
+
+	verified, err := NewSuite().VerifyProof(signed, &key.PublicKey)
+	require.NoError(t, err, "a document Sign produced must verify")
+	require.NotNil(t, verified)
+}
+
+// TestSdSignAnExpandedDocumentUsesTheAbsolutePredicate: the same for the SD
+// base proof, whose mandatory pointers address the expanded member names.
+func TestSdSignAnExpandedDocumentUsesTheAbsolutePredicate(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(expandedDocument), nil)
+	require.NoError(t, err)
+
+	signed, err := NewSdSuite().Sign(cred, key, &SdSignOptions{
+		VerificationMethod: "did:example:signer#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+		MandatoryPointers:  []string{"/@type"},
+	})
+	require.NoError(t, err)
+
+	requireProofUnderTheAbsolutePredicate(t, signed)
+
+	require.NoError(t, NewSdSuite().Verify(signed, &key.PublicKey),
+		"a base proof SdSuite.Sign produced must verify")
+}

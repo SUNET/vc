@@ -49,3 +49,37 @@ func TestSignRootsABareGraphContainer(t *testing.T) {
 	require.NoError(t, err, "a document Sign produced must verify")
 	require.NotNil(t, verified)
 }
+
+// expandedDocument: valid JSON-LD already in expanded form. It carries no
+// @context, because it does not need one - every name in it is an IRI.
+const expandedDocument = `{
+	"@id": "https://example.org/credential",
+	"@type": ["https://www.w3.org/2018/credentials#VerifiableCredential"],
+	"https://example.org/vocab#note": [{"@value": "hello"}]
+}`
+
+// TestSignAnExpandedDocumentUsesTheAbsolutePredicate: with no active context
+// there is nothing to map the bare term `proof` to the security predicate, so
+// writing the signature under that name produced a RELATIVE IRI - which
+// expansion drops. Sign returned success and the document carried no root
+// proof at all, so this library refused to verify what it had just produced.
+//
+// The same holds for a context that defines neither `proof` nor a vocabulary
+// to read it through; the absolute predicate is the answer in both cases,
+// because an IRI expands to itself under any context.
+func TestSignAnExpandedDocumentUsesTheAbsolutePredicate(t *testing.T) {
+	signed, pub := signDocument(t, expandedDocument, "assertionMethod")
+
+	document, err := credential.DocumentAsMap(signed)
+	require.NoError(t, err)
+	require.NotContains(t, document, "proof",
+		"a bare term no context defines is a relative IRI, and expansion drops it")
+	require.Contains(t, document, credential.ProofPredicate)
+
+	require.Len(t, rootProofsOf(t, signed), 1,
+		"the signed document attaches exactly one proof to itself")
+
+	verified, err := NewSuite().VerifyProof(signed, pub)
+	require.NoError(t, err, "a document Sign produced must verify")
+	require.NotNil(t, verified)
+}
