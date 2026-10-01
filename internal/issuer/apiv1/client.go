@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
@@ -24,6 +25,7 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/status"
+	"github.com/SUNET/vc/pkg/statusserviceclient"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"google.golang.org/grpc"
@@ -55,6 +57,21 @@ type Client struct {
 	signMetadataRL *rate.Limiter
 
 	statusAggregator *status.Aggregator
+
+	// statusServiceClient is non-nil only when Issuer.StatusService.
+	// IngestionURL is configured. Held separately from statusAllocator
+	// (below) purely so Close can stop its background pool-refill
+	// goroutine; every issuance path uses statusAllocator instead of this
+	// field directly.
+	statusServiceClient *statusserviceclient.Client
+	// statusAllocator is the single entry point every credential-issuance
+	// path uses to allocate (and, on issuance failure, invalidate)
+	// revocation-status entries, regardless of which backend is providing
+	// them - see status_allocator.go. Nil when neither a registry client
+	// nor an external status service is configured, matching this
+	// repository's pre-existing "registry client not configured" error
+	// behaviour.
+	statusAllocator statusAllocator
 
 	bbsKeys *bbsKeyPair // nil unless Issuer.BBS is configured; gates the "jwp" format
 	// bbsIssuerOverride replaces the native signer in tests.
@@ -99,6 +116,28 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 		return nil, err
 	}
 
+	// Fatal when misconfigured, unlike the registry client above: an
+	// operator who set issuer.status_service.ingestion_url asked for this
+	// feature, and a broken configuration for a feature explicitly
+	// requested should not start quietly and silently fall back to no
+	// status claims at all - the same philosophy applied to BBS below.
+	if err := c.initStatusAllocator(ctx); err != nil {
+		return nil, err
+	}
+
+	// From here on New owns a running background goroutine (the status
+	// service client's pool refill loop, which retries indefinitely), so
+	// every later failure has to hand it back. A deferred cleanup rather
+	// than a Close() before each return: this way a step added below is
+	// covered without anyone remembering to, which is how the leak this
+	// replaces came about.
+	ok := false
+	defer func() {
+		if !ok {
+			c.closeStatusServiceClient()
+		}
+	}()
+
 	// Initialize mDL issuer if certificate chain is configured
 	if err := c.initMDocIssuer(ctx); err != nil {
 		c.log.Info("mDL issuer not initialized", "error", err)
@@ -118,7 +157,18 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 
 	c.log.Info("Started")
 
+	ok = true
 	return c, nil
+}
+
+// closeStatusServiceClient stops the external status-service client's
+// background refill goroutine, if one was started. Safe to call when none
+// was: Close is idempotent (sync.Once) and the field is nil unless
+// issuer.status_service is configured.
+func (c *Client) closeStatusServiceClient() {
+	if c.statusServiceClient != nil {
+		c.statusServiceClient.Close()
+	}
 }
 
 // initSigner initializes the signing service (software or PKCS#11)
@@ -220,6 +270,119 @@ func (c *Client) initRegistryClient(ctx context.Context) error {
 	c.registryClient = apiv1_registry.NewRegistryServiceClient(conn)
 
 	c.log.Info("Registry client initialized", "addr", cfg.Addr, "tls_enabled", cfg.TLS)
+	return nil
+}
+
+// initStatusAllocator picks the statusAllocator every issuance path uses:
+// an external draft-ietf-oauth-status-list-21 service when
+// Issuer.StatusService.IngestionURL is configured (requirement: "turned on
+// when an ingestion API endpoint is provided"), falling back to vc's own
+// built-in Token Status List (the registry client) when it is not, and nil
+// when neither is configured - exactly the pre-existing behaviour ("registry
+// client not configured") when nothing at all is set up.
+//
+// Configuring both is not an error: the external service simply takes
+// priority for every new allocation. This is what "instead of (or
+// alongside)" resolves to in practice - the built-in mechanism is neither
+// removed nor required to be disabled, it is just not consulted for new
+// credentials while the external one is configured.
+func (c *Client) initStatusAllocator(ctx context.Context) error {
+	scfg := c.cfg.Issuer.StatusService
+	if scfg == nil || scfg.IngestionURL == "" {
+		c.log.Info("External status service not configured")
+		if c.registryClient != nil {
+			c.statusAllocator = &registryStatusAllocator{client: c.registryClient, log: c.log}
+		}
+		return nil
+	}
+
+	if scfg.ASURL == "" {
+		return fmt.Errorf("issuer.status_service.as_url is required when issuer.status_service.ingestion_url is set")
+	}
+
+	signer, err := c.statusServiceSigner(scfg)
+	if err != nil {
+		return fmt.Errorf("failed to resolve issuer.status_service signing key: %w", err)
+	}
+
+	issuerID := scfg.IssuerID
+	if issuerID == "" {
+		issuerID = c.cfg.Issuer.IssuerURL
+	}
+
+	client, err := statusserviceclient.New(statusserviceclient.Config{
+		IngestionURL:   scfg.IngestionURL,
+		ASURL:          scfg.ASURL,
+		IssuerID:       issuerID,
+		Signer:         signer,
+		PoolSize:       scfg.PoolSize,
+		LowWaterMark:   scfg.PoolLowWaterMark,
+		AllocateExpiry: scfg.AllocateExpiry,
+	}, c.log)
+	if err != nil {
+		return fmt.Errorf("failed to start external status service client: %w", err)
+	}
+
+	c.statusServiceClient = client
+	c.statusAllocator = &externalStatusAllocator{client: client, log: c.log}
+	c.log.Info("External status service client started",
+		"ingestion_url", scfg.IngestionURL, "as_url", scfg.ASURL, "issuer_id", issuerID,
+		"pool_size", client.PoolSize(), "pool_low_water_mark", client.LowWaterMark())
+	return nil
+}
+
+// statusServiceSigner resolves the signer used for the external status
+// service's RFC 7523 client assertions: issuer.status_service.key_config
+// when set, otherwise the issuer's own credential-signing key (requirement:
+// "default to the issuer signing key").
+//
+// An HSM-backed (PKCS#11) key works for both. The assertion proves
+// possession of the key by producing a signature with it, which is exactly
+// what a PKCS#11 device does; nothing here needs the private half, and
+// pkg/jose.MakeJWT - what everything else in this repository signs JWTs
+// with - takes a pki.Signer for precisely that reason. An earlier version
+// of this refused to default to an HSM key on the grounds that its material
+// "never leaves the device", which is true and beside the point.
+//
+// What is still required is ES256 on P-256, because that is what the status
+// service's AS verifies. A signer that cannot produce it fails startup with
+// a message naming issuer.status_service.key_config, rather than silently
+// disabling the feature the operator asked for.
+func (c *Client) statusServiceSigner(scfg *model.StatusServiceConfig) (pki.Signer, error) {
+	if scfg.KeyConfig != nil {
+		signer, _, _, err := pki.LoadSigner(scfg.KeyConfig)
+		if err != nil {
+			return nil, fmt.Errorf("issuer.status_service.key_config: %w", err)
+		}
+		if err := requireES256P256(signer); err != nil {
+			return nil, fmt.Errorf("issuer.status_service.key_config %w", err)
+		}
+		return signer, nil
+	}
+
+	if c.signer == nil {
+		return nil, fmt.Errorf("issuer.status_service.key_config is not set and the issuer has no signing key configured")
+	}
+	if err := requireES256P256(c.signer); err != nil {
+		return nil, fmt.Errorf("issuer.status_service.key_config is not set, and the issuer's own signing key %w; configure issuer.status_service.key_config explicitly", err)
+	}
+	return c.signer, nil
+}
+
+// requireES256P256 reports why signer cannot sign a status-service client
+// assertion, or nil when it can. Phrased to read as the tail of a sentence
+// naming which key was being considered.
+func requireES256P256(signer pki.Signer) error {
+	if alg := signer.Algorithm(); alg != "ES256" {
+		return fmt.Errorf("must sign ES256, got %s", alg)
+	}
+	pub, ok := signer.PublicKey().(*ecdsa.PublicKey)
+	if !ok {
+		return fmt.Errorf("must be an EC key, got %T", signer.PublicKey())
+	}
+	if pub.Curve != elliptic.P256() {
+		return fmt.Errorf("must be a P-256 key, got curve %s", pub.Curve.Params().Name)
+	}
 	return nil
 }
 
@@ -332,8 +495,10 @@ func (c *Client) GetIACAs(_ context.Context) (*apiv1_issuer.GetIACAsReply, error
 	return reply, nil
 }
 
-// Close closes all client connections
+// Close closes all client connections and stops any background goroutines
+// (the external status service client's pool refill loop, if configured).
 func (c *Client) Close() error {
+	c.closeStatusServiceClient()
 	if c.registryConn != nil {
 		return c.registryConn.Close()
 	}

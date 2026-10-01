@@ -21,6 +21,7 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
+	"github.com/SUNET/vc/pkg/tokenstatuslist"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -447,13 +448,13 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 
 	switch format {
 	case "mso_mdoc":
-		credentials, issueErr = c.issueMDoc(ctx, scope, documentData, jwks, identifier)
+		credentials, issueErr = c.issueMDoc(ctx, scope, documentData, jwks, identifier, authContext.AuthenticSource)
 	case "vc+sd-jwt", "dc+sd-jwt":
-		credentials, issueErr = c.issueSDJWT(ctx, scope, documentData, jwks, identifier)
+		credentials, issueErr = c.issueSDJWT(ctx, scope, documentData, jwks, identifier, authContext.AuthenticSource)
 	case "ldp_vc", "vc+ld+json":
-		credentials, issueErr = c.issueVC20(ctx, scope, documentData, identifier, req)
+		credentials, issueErr = c.issueVC20(ctx, scope, documentData, identifier, authContext.AuthenticSource, req)
 	case "jwp":
-		credentials, issueErr = c.issueBBS(ctx, scope, documentData, identifier, req)
+		credentials, issueErr = c.issueBBS(ctx, scope, documentData, identifier, authContext.AuthenticSource, req)
 	default:
 		c.log.Error(nil, "unsupported or missing credential format", "format", format)
 		issueErr = errors.New("unsupported or missing credential format: " + format)
@@ -493,13 +494,27 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 }
 
 // issueSDJWT issues SD-JWT credentials, one per JWK.
-func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier string) ([]openid4vci.Credential, error) {
+func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier, authenticSource string) (_ []openid4vci.Credential, err error) {
 	credMeta := c.cfg.GetCredentialMetadata(scope)
 	if credMeta == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
 	}
 
 	replies := make([]*apiv1_issuer.MakeSDJWTReply, 0, len(jwks))
+
+	// One status entry per credential already minted. A later call in this
+	// loop can fail after earlier ones have ALLOCATED, and those allocations
+	// were then never recorded and never released - so the slot stayed VALID
+	// on the status list with nothing able to revoke it, and every retry
+	// leaked another. Released on any failure before saveCredentialSubjects
+	// takes ownership of them.
+	var entries []statusEntry
+	saved := false
+	defer func() {
+		if err != nil && !saved {
+			c.releaseAllocations(ctx, entries)
+		}
+	}()
 
 	for _, jwk := range jwks {
 		reply, err := c.issuerClient.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
@@ -519,6 +534,7 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 		}
 
 		replies = append(replies, reply)
+		entries = append(entries, statusEntry{Section: reply.TokenStatusListSection, Index: reply.TokenStatusListIndex, URI: reply.TokenStatusListUri, Backend: reply.TokenStatusListBackend, Allocated: reply.StatusAllocation})
 	}
 
 	credentials := make([]openid4vci.Credential, len(replies))
@@ -533,12 +549,11 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 		}
 	}
 
-	// Save credential subject info to registry for status management
-	entries := make([]statusEntry, len(replies))
-	for i, r := range replies {
-		entries[i] = statusEntry{Section: r.TokenStatusListSection, Index: r.TokenStatusListIndex}
-	}
-	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
+	// From here the entries are saveCredentialSubjects's to release: it
+	// releases them itself on its own failure paths, so the deferred release
+	// above must not run as well.
+	saved = true
+	if err := c.saveCredentialSubjects(ctx, identifier, authenticSource, scope, entries); err != nil {
 		return nil, err
 	}
 
@@ -550,13 +565,23 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 // scope's credential metadata, so the issuer never needs a doctype-specific
 // Go struct - adding a new mdoc document type requires only a new MDDL
 // schema, never a Go change (mirrors issueSDJWT's VCTM-driven approach).
-func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier string) ([]openid4vci.Credential, error) {
+func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier, authenticSource string) (_ []openid4vci.Credential, err error) {
 	credentialMetadata := c.cfg.GetCredentialMetadata(scope)
 	if credentialMetadata == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
 	}
 
 	replies := make([]*apiv1_issuer.MakeMDocReply, 0, len(jwks))
+
+	// One status entry per credential already minted - see issueSDJWT for
+	// why a mid-loop failure leaked them.
+	var entries []statusEntry
+	saved := false
+	defer func() {
+		if err != nil && !saved {
+			c.releaseAllocations(ctx, entries)
+		}
+	}()
 
 	for _, jwk := range jwks {
 		deviceKeyBytes, err := convertJWKToCOSEKey(jwk)
@@ -582,6 +607,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 		}
 
 		replies = append(replies, reply)
+		entries = append(entries, statusEntry{Section: reply.StatusListSection, Index: reply.StatusListIndex, URI: reply.StatusListUri, Backend: reply.StatusListBackend, Allocated: reply.StatusAllocation})
 	}
 
 	credentials := make([]openid4vci.Credential, len(replies))
@@ -594,11 +620,9 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 		credentials[i] = openid4vci.Credential{Credential: base64.RawURLEncoding.EncodeToString(reply.Mdoc)}
 	}
 
-	entries := make([]statusEntry, len(replies))
-	for i, r := range replies {
-		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex}
-	}
-	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
+	// saveCredentialSubjects owns them from here; see issueSDJWT.
+	saved = true
+	if err := c.saveCredentialSubjects(ctx, identifier, authenticSource, scope, entries); err != nil {
 		return nil, err
 	}
 
@@ -607,7 +631,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 
 // issueVC20 issues W3C VC 2.0 Data Integrity credentials, one per JWT proof.
 // Caller must ensure only JWT proof types are present (singular Proof or Proofs.JWT).
-func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, identifier string, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
+func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, identifier, authenticSource string, req *openid4vci.CredentialRequest) (_ []openid4vci.Credential, err error) {
 	hasNoJWTProof := req.Proof != nil && req.Proof.ProofType != "jwt"
 	hasNoJWTProofs := req.Proofs != nil && len(req.Proofs.JWT) == 0
 	if hasNoJWTProof || hasNoJWTProofs {
@@ -648,6 +672,17 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	}
 
 	replies := make([]*apiv1_issuer.MakeVC20Reply, 0, len(subjectDIDs))
+
+	// One status entry per credential already minted - see issueSDJWT for
+	// why a mid-loop failure leaked them.
+	var entries []statusEntry
+	saved := false
+	defer func() {
+		if err != nil && !saved {
+			c.releaseAllocations(ctx, entries)
+		}
+	}()
+
 	for _, did := range subjectDIDs {
 		reply, err := c.issuerClient.MakeVC20(ctx, &apiv1_issuer.MakeVC20Request{
 			Scope:             scope,
@@ -665,6 +700,7 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 			return nil, errors.New("MakeVC20 reply is nil")
 		}
 		replies = append(replies, reply)
+		entries = append(entries, statusEntry{Section: reply.StatusListSection, Index: reply.StatusListIndex, URI: reply.StatusListUri, Backend: reply.StatusListBackend, Allocated: reply.StatusAllocation})
 	}
 
 	credentials := make([]openid4vci.Credential, len(replies))
@@ -674,44 +710,405 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	}
 
 	// Save credential subject info to registry for status management
-	entries := make([]statusEntry, len(replies))
-	for i, r := range replies {
-		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex}
-	}
-	if err := c.saveCredentialSubjects(ctx, identifier, entries); err != nil {
+	// saveCredentialSubjects owns them from here; see issueSDJWT.
+	saved = true
+	if err := c.saveCredentialSubjects(ctx, identifier, authenticSource, scope, entries); err != nil {
 		return nil, err
 	}
 
 	return credentials, nil
 }
 
+// statusEntry is one status-list slot allocated for one issued credential.
+//
+// Section is meaningful only for vc's own registry backend, which shards
+// its list into sections. An external draft-ietf-oauth-status-list service
+// has no such concept and always reports Section 0, which is why URI - not
+// Section - is what identifies the entry, and Backend - not the URI - is
+// what says which implementation owns it.
 type statusEntry struct {
 	Section int64
 	Index   int64
+	URI     string
+	Backend string
+	// Allocated is the issuer saying EXPLICITLY whether it allocated an
+	// entry. Unspecified means the issuer predates the field, and that
+	// cannot be read as "allocated nothing": a registry's first allocation
+	// is legitimately section 0, index 0 with no URI, which is identical to
+	// a reply carrying nothing at all.
+	Allocated apiv1_issuer.StatusAllocation
 }
 
-// saveCredentialSubjects saves credential subject info linked to Token Status
-// List entries, once per credential issued in a (possibly batched) request.
-func (c *Client) saveCredentialSubjects(ctx context.Context, identifier string, entries []statusEntry) error {
-	if identifier == "" {
-		return nil
-	}
-
+// saveCredentialSubjects records which status-list entry was allocated for
+// which credential subject, so revocation can find the entry again.
+//
+// The apigw's own store is authoritative and the write is REQUIRED: a
+// credential whose entry was not recorded can never be revoked, and the
+// entry is consumed either way. Failing the issuance leaves the wallet
+// without a credential and the slot unused, which is recoverable; letting
+// it through is not.
+//
+// The registry is written to as well when one is configured, because its
+// admin GUI reads from there - but only then, and only best-effort. The
+// local registry is optional (see APIGW.RegistryClient): a deployment using
+// an external draft-ietf-oauth-status-list service has no registry to write
+// to, and issuance must not depend on one.
+// checkAllocationVerdicts refuses an issuance reply whose status entries
+// contradict themselves or say nothing, before any of them is acted on.
+//
+// Both sides of this gRPC call state the verdict rather than infer it, and
+// both refuse the combinations that cannot both be true. The issuer refuses
+// them because it is the side that knows what it allocated (see
+// grpcserver.statusAllocation); the apigw refuses them again because it is
+// the side that records the mapping and delivers the credential, and "the
+// other end promised" is not something a persistence path should rest on. A
+// reply that contradicts itself is a reply from an issuer this apigw does
+// not understand, whether through a partial upgrade or a bug.
+//
+// Reading the URI as the verdict - which this code used to do - cannot
+// express any of these four.
+//
+// A pass of its own, run before anything else, because the checks used to
+// sit inside the recording loop and the no-identifier shortcut reached its
+// own conclusions ahead of them.
+//
+// An exhaustive switch rather than a chain of ifs, so that a value this
+// build has never heard of lands in the default and is refused rather than
+// falling through to whichever branch happened to be last.
+func (c *Client) checkAllocationVerdicts(identifier string, entries []statusEntry) error {
 	for _, e := range entries {
-		if e.Section <= 0 {
-			continue
-		}
-		_, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
-			Identifier: identifier,
-			Section:    e.Section,
-			Index:      e.Index,
-		})
-		if err != nil {
-			c.log.Error(err, "failed to save credential subject to registry")
-			return fmt.Errorf("failed to save credential subject: %w", err)
+		switch e.Allocated {
+		case apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_UNSPECIFIED:
+			// An issuer that does not SAY is refused, whatever the other
+			// fields look like. This is the genuinely ambiguous case: a
+			// registry's first allocation is section 0, index 0, and an
+			// issuer older than these fields sends no URI and no backend
+			// either - so a real allocation and "nothing allocated" are
+			// byte-identical. Continuing on that guess delivered a
+			// credential carrying a status reference nothing had recorded,
+			// which revocation can never find. A loud failure during a
+			// partial upgrade is the better half of that trade.
+			c.log.Error(errors.New("issuer did not say whether a status entry was allocated"),
+				"issuance reply does not carry status_allocation, so a status entry may have been allocated and could never be recorded; this is what an issuer older than that field looks like - upgrade issuer and apigw together",
+				"identifier", identifier, "section", e.Section, "index", e.Index, "uri", e.URI)
+			return errors.New("issuer did not report whether a status list entry was allocated; issuer and apigw must be upgraded together")
+
+		case apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE:
+			if e.URI != "" {
+				// The issuer says it allocated nothing and names a list
+				// anyway. Recording it would mint a revocation mapping for
+				// an entry the issuer does not believe exists - and that
+				// list and index belong to somebody, so revoking this
+				// credential later would flip whatever is really there.
+				c.log.Error(errors.New("status allocation contradicts the entry"),
+					"issuance reply says no status entry was allocated but carries a list URI; recording it would map this credential onto an entry that belongs to something else",
+					"identifier", identifier, "uri", e.URI, "index", e.Index, "backend", e.Backend)
+				return fmt.Errorf("issuer reported no status allocation but returned list URI %q", e.URI)
+			}
+
+		case apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED:
+			if e.URI == "" {
+				// FAIL, do not continue. The issuer has already embedded
+				// this entry in what it signed, so continuing delivers a
+				// credential that advertises a revocation status nothing
+				// can ever set - the same "looks revocable and is not"
+				// failure the VC 2.0 status flag defaults off to avoid,
+				// except here it reaches a wallet.
+				//
+				// The entry cannot be released either: releasing names the
+				// list URI, which is the thing that is missing. So the
+				// slot is stranded whatever happens, and the choice is
+				// only whether an unrevocable credential is also issued.
+				c.log.Error(errors.New("status list entry has no list URI"),
+					"issuance reply reports an allocated status entry with no list URI, so it cannot be recorded and the credential could never be revoked",
+					"identifier", identifier, "section", e.Section, "index", e.Index, "backend", e.Backend)
+				return fmt.Errorf("issuer reported an allocated status list entry with no list URI (section %d, index %d)", e.Section, e.Index)
+			}
+
+		default:
+			// A value this build has no name for. protobuf keeps unknown
+			// enum values rather than erroring, so this is what a NEWER
+			// issuer looks like - the mirror of the UNSPECIFIED case
+			// above, and it has to fail the same way. Treating it as
+			// "allocated" would record a mapping under a meaning this
+			// build is guessing at; treating it as "none" would deliver a
+			// credential whose entry was never recorded.
+			c.log.Error(errors.New("unknown status allocation value"),
+				"issuance reply carries a status_allocation this build does not recognise; it cannot be acted on either way - upgrade issuer and apigw together",
+				"identifier", identifier, "allocation", int32(e.Allocated), "uri", e.URI, "index", e.Index)
+			return fmt.Errorf("issuer reported status_allocation %d, which this build does not recognise; issuer and apigw must be upgraded together", int32(e.Allocated))
 		}
 	}
 	return nil
+}
+
+func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authenticSource, scope string, entries []statusEntry) error {
+	// The issuer's verdict first, before ANY branch reads anything else
+	// off an entry - including the no-identifier shortcut below, which
+	// otherwise acted on a reply this function refuses everywhere else.
+	//
+	// Nothing has been recorded yet, so the cleanup here is the slots
+	// alone. releaseAllocations skips entries the issuer did not
+	// positively claim, which is the whole point: a disowned entry names a
+	// slot this issuance has no claim to.
+	if err := c.checkAllocationVerdicts(identifier, entries); err != nil {
+		c.releaseAllocations(ctx, entries)
+		return err
+	}
+
+	// An empty identifier is legitimate for assertion- and datastore-backed
+	// issuance (see requireIdentifier), but it is not a reason to drop an
+	// allocated entry: the credential already carries the status reference,
+	// so skipping the mapping mints something that LOOKS revocable and that
+	// the revoke endpoint can never find. Release what was allocated and
+	// fail, the same as a store failure - the alternative is a credential
+	// nobody can revoke.
+	if identifier == "" {
+		// Positively allocated, not merely "carries a URI". The two agreed
+		// only because releaseAllocations compensated for this filter, and
+		// two readings of one fact is the shape that keeps going wrong
+		// here - the verdict pass above has already refused everything
+		// else, so by now they cannot differ.
+		var allocated []statusEntry
+		for _, e := range entries {
+			if e.Allocated == apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED {
+				allocated = append(allocated, e)
+			}
+		}
+		if len(allocated) == 0 {
+			return nil
+		}
+		c.log.Error(nil, "a status list entry was allocated for an issuance with no identifier; releasing it, because nothing could later find it to revoke",
+			"entries", len(allocated))
+		c.releaseAllocations(ctx, allocated)
+		return errors.New("a status list entry was allocated but the issuance has no identifier to record it under, so the credential could never be revoked")
+	}
+
+	// Entries whose mapping has been written in this loop. If a later one
+	// fails, these are stranded too: the request fails as a whole, so no
+	// credential is delivered for any of them.
+	var recorded []statusEntry
+
+	for _, e := range entries {
+		// Verified at the top of this function, so only the one branch
+		// that is not an error survives here: nothing was allocated, so
+		// there is nothing to record. The issuance path reports this
+		// exactly when it issued a credential without a status claim -
+		// degraded_mode=proceed, or a format that carries no status in
+		// this configuration.
+		//
+		// This used to skip on `e.Section <= 0` instead, which silently
+		// discarded EVERY entry allocated by an external status service,
+		// since those have no sections and always report Section 0.
+		if e.Allocated != apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED {
+			continue
+		}
+
+		if c.db == nil || c.db.CredentialStatusColl == nil {
+			// Same stranding as every other failure below, and it was the
+			// one path that did not release: the entries are already
+			// allocated and VALID on their backend, the callers set
+			// saved = true before calling this function precisely because
+			// this function owns the cleanup from here on, and a
+			// deployment with no status store runs every issuance through
+			// this branch - so the leak was not an edge case there, it was
+			// every batch.
+			//
+			// Nothing can have been recorded yet: the store is the thing
+			// that is missing, and entries with no URI skip this check
+			// altogether, so no earlier iteration reached Save. Only the
+			// allocations need undoing.
+			c.log.Error(errors.New("no credential status store configured"),
+				"a status list entry was allocated but this apigw has no store to record it in; releasing it, because nothing could later find it to revoke",
+				"identifier", identifier, "uri", e.URI, "index", e.Index, "backend", e.Backend)
+			c.abandonBatch(ctx, recorded, entries)
+			return errors.New("cannot record the credential's status list entry: no credential status store configured")
+		}
+		// A URI with no routable backend is the same failure as a backend
+		// with no URI: the mapping can be written and never acted on.
+		// SetCredentialStatus refuses an unknown backend rather than
+		// guessing (guessing writes a status into the wrong list), so
+		// recording one mints a credential whose revocation call will be
+		// rejected forever. Fail here, where the allocations can still be
+		// released, instead of at revocation time when they cannot.
+		if !tokenstatuslist.ValidBackend(e.Backend) {
+			c.log.Error(errors.New("unroutable status list backend"),
+				"issuance reply names a status list backend this build cannot reach, so the entry could never be revoked",
+				"identifier", identifier, "uri", e.URI, "index", e.Index, "backend", e.Backend)
+			c.abandonBatch(ctx, recorded, entries)
+			return fmt.Errorf("issuer returned status list entry %q/%d with backend %q, which is not a backend this build can reach", e.URI, e.Index, e.Backend)
+		}
+
+		if err := c.db.CredentialStatusColl.Save(ctx, &db.CredentialStatusEntry{
+			StatusListURI:   e.URI,
+			Index:           e.Index,
+			Identifier:      identifier,
+			Section:         e.Section,
+			Backend:         e.Backend,
+			AuthenticSource: authenticSource,
+			Scope:           scope,
+		}); err != nil {
+			c.log.Error(err, "failed to record credential status entry", "uri", e.URI, "index", e.Index)
+			// The entries were allocated before we got here and are VALID
+			// on their backend. Failing without releasing them leaves live
+			// slots nothing points at, and since the caller may retry,
+			// every attempt would strand another set.
+			//
+			// ALL of them, not just this one and the ones already recorded:
+			// the entries after this point in the loop were allocated too,
+			// they are simply not reached. Releasing only the prefix leaked
+			// the tail of every failed batch. releaseAllocations skips
+			// entries with no URI, so unallocated ones cost nothing.
+			//
+			// The rows already written have to go as well. The request
+			// fails as a whole and no credential is delivered for any of
+			// it, so a mapping left behind names a credential nobody has -
+			// and revoke-by-identifier would later act on it, reporting a
+			// revocation of something that was never issued while the
+			// entry itself has already been released.
+			c.abandonBatch(ctx, recorded, entries)
+			return fmt.Errorf("failed to record credential status entry: %w", err)
+		}
+		recorded = append(recorded, e)
+
+		// Only registry-backed entries are mirrored. The registry's
+		// credential_subjects collection has a UNIQUE index on
+		// (section, index), which is correct for its own sharded list and
+		// wrong for anything else: every entry an external status service
+		// issues reports section 0, so the second one to land at any given
+		// index collides - with another list's entry, or with the
+		// registry's own entry at (0, index). The registry also refuses to
+		// act on entries it does not own, so mirroring them would add rows
+		// it can only display.
+		if c.registryClient == nil || e.Backend != tokenstatuslist.BackendRegistry {
+			continue
+		}
+		if _, err := c.registryClient.SaveCredentialSubject(ctx, &apiv1_registry.SaveCredentialSubjectRequest{
+			Identifier:    identifier,
+			Section:       e.Section,
+			Index:         e.Index,
+			StatusListURI: e.URI,
+		}); err != nil {
+			// Best-effort: the apigw's own record above is the one
+			// revocation uses, so a registry that is down costs its admin
+			// GUI a row, not the credential its revocability.
+			c.log.Error(err, "failed to mirror credential subject to the registry admin view",
+				"uri", e.URI, "index", e.Index)
+		}
+	}
+	return nil
+}
+
+// cleanupTimeout bounds the detached cleanup below. Long enough for a
+// round trip to a backend that is merely slow, short enough that a wedged
+// one cannot hold the handler open after the request it belonged to is
+// already over.
+const cleanupTimeout = 10 * time.Second
+
+// cleanupContext detaches cleanup from the request that is failing.
+//
+// A cancelled or timed-out request is one of the COMMON ways to reach the
+// release and rollback paths, and both used to inherit that context - so
+// the cleanup RPC and the mapping deletion were cancelled before they were
+// sent, exactly when they mattered. The entries then stayed VALID and
+// unreferenced although the surrounding code had tried to release them.
+//
+// context.WithoutCancel keeps the request's values - trace ids, logging
+// metadata, anything a backend client reads off it - and drops only the
+// cancellation. The timeout is then the cleanup's own.
+func cleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+}
+
+// releaseAllocations marks status-list entries INVALID because the
+// credentials they were allocated for will not be issued.
+//
+// Best-effort: this runs on a path that is already failing, and the entries
+// are unreferenced either way - a release that does not land costs one
+// unusable slot, which is what not trying costs. What it must not do is
+// turn a mapping failure into a second error the caller sees instead of the
+// first.
+//
+// It goes through the issuer rather than a backend directly, because the
+// issuer is the component that knows how to reach each backend and routes
+// on the recorded Backend - see its SetCredentialStatus.
+// discardRecordedEntries removes mappings written earlier in a batch that
+// is now failing, so the store does not keep a record of a credential the
+// caller never received.
+//
+// Best-effort and logged, like releaseAllocations: the issuance has already
+// failed, and the error that is returned is the one worth reporting. A row
+// that survives is a stale mapping pointing at an entry that has just been
+// released - wrong, but pointing at something INVALID rather than at a live
+// credential.
+func (c *Client) discardRecordedEntries(ctx context.Context, recorded []statusEntry) {
+	if c.db == nil || c.db.CredentialStatusColl == nil {
+		return
+	}
+	ctx, cancel := cleanupContext(ctx)
+	defer cancel()
+	for _, e := range recorded {
+		if e.URI == "" {
+			continue
+		}
+		if err := c.db.CredentialStatusColl.Delete(ctx, e.URI, e.Index, e.Backend); err != nil {
+			c.log.Error(err, "could not remove the status mapping of a credential that will not be issued; a revoke by identifier may report it",
+				"uri", e.URI, "index", e.Index, "backend", e.Backend)
+		}
+	}
+}
+
+// abandonBatch undoes a partly-applied issuance: the mappings already
+// written in this loop, then the slots allocated for it.
+//
+// Both halves, always, because the request fails as a whole and no
+// credential is delivered for any of it. A mapping left behind names a
+// credential nobody holds, and revoke-by-identifier would later act on it -
+// reporting a revocation of something never issued, against an entry that
+// has already been released. A slot left behind is live capacity nothing
+// points at, and a caller that retries strands another set.
+//
+// The order matters: rows first, then slots. A row that outlives its slot
+// is a mapping onto an entry that may be reallocated to someone else.
+func (c *Client) abandonBatch(ctx context.Context, recorded, entries []statusEntry) {
+	c.discardRecordedEntries(ctx, recorded)
+	c.releaseAllocations(ctx, entries)
+}
+
+func (c *Client) releaseAllocations(ctx context.Context, entries []statusEntry) {
+	ctx, cancel := cleanupContext(ctx)
+	defer cancel()
+	for _, e := range entries {
+		// Only entries the issuer POSITIVELY reported as allocated. A URI
+		// is not enough on its own, and the difference is a credential
+		// somebody else holds.
+		//
+		// Every caller below is a refusal, and some of those refusals are
+		// refusals of the entry ITSELF - a reply saying NONE while naming
+		// a list, or carrying a status_allocation this build has no name
+		// for. Those name a (list, index) this issuance has no claim to,
+		// and that slot plausibly belongs to a credential that was issued
+		// normally. Writing INVALID there would revoke it. So an entry
+		// this apigw does not trust enough to RECORD is also one it must
+		// not WRITE to; the slot is left alone, and the batch's genuinely
+		// allocated entries are still handed back.
+		if e.Allocated != apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED {
+			continue
+		}
+		if e.URI == "" || c.issuerClient == nil {
+			continue
+		}
+		if _, err := c.issuerClient.SetCredentialStatus(ctx, &apiv1_issuer.SetCredentialStatusRequest{
+			Backend:       e.Backend,
+			StatusListUri: e.URI,
+			Section:       e.Section,
+			Index:         e.Index,
+			Status:        uint32(tokenstatuslist.StatusInvalid),
+		}); err != nil {
+			c.log.Error(err, "could not release a status entry for a credential that will not be issued; the slot stays VALID and unreferenced",
+				"uri", e.URI, "index", e.Index, "backend", e.Backend)
+		}
+	}
 }
 
 // convertJWKToCOSEKey converts a JWK to CBOR-encoded COSE_Key bytes
@@ -923,7 +1320,7 @@ func docLookupSessionID(authContext *cache.AuthorizationContext) string {
 // so the wallet gets unlinkable copies; BBS needs none, because each
 // presentation re-randomises. A second copy would need a second commitment,
 // which is a second request.
-func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte, identifier string, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
+func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte, identifier, authenticSource string, req *openid4vci.CredentialRequest) (_ []openid4vci.Credential, err error) {
 	credentialMetadata := c.cfg.GetCredentialMetadata(scope)
 	if credentialMetadata == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
@@ -991,6 +1388,42 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 		c.log.Error(err, "failed to call MakeJWP")
 		return nil, err
 	}
+
+	// From here the issuer may already have allocated a status entry and
+	// signed it into the credential, and every return below strands it as
+	// VALID and unreferenced unless something hands it back.
+	//
+	// The three loop-shaped paths (SD-JWT, mdoc, VC 2.0) carry this guard
+	// around their whole issuer call for the same reason; this one did not,
+	// so the reply-shape check below leaked on every failure. A guard
+	// rather than a release at each return: the returns are what get
+	// missed, and this function has already proved it once.
+	//
+	// saved is set before saveCredentialSubjects, which owns the entries
+	// from that point on and releases them itself on every failure.
+	var entries []statusEntry
+	saved := false
+	defer func() {
+		if err != nil && !saved {
+			c.releaseAllocations(ctx, entries)
+		}
+	}()
+	if reply != nil {
+		entries = []statusEntry{{
+			Section: reply.TokenStatusListSection,
+			Index:   reply.TokenStatusListIndex,
+			URI:     reply.TokenStatusListUri,
+			Backend: reply.TokenStatusListBackend,
+			// Carried, not defaulted. An external allocator in
+			// degraded_mode=proceed legitimately returns no URI and
+			// STATUS_ALLOCATION_NONE; leaving this UNSPECIFIED makes
+			// saveCredentialSubjects read the reply as an issuer too old to
+			// have the field and refuse the whole issuance, which is
+			// exactly the case degraded mode exists to keep working.
+			Allocated: reply.StatusAllocation,
+		}}
+	}
+
 	// Exactly one, not at least one. A BBS credential needs no unlinkable
 	// copies - each presentation re-randomises the proof afresh - so a
 	// second credential would need a second commitment and a second
@@ -1005,10 +1438,8 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 		return nil, fmt.Errorf("MakeJWP returned %d credentials, want exactly 1", count)
 	}
 
-	if err := c.saveCredentialSubjects(ctx, identifier, []statusEntry{{
-		Section: reply.TokenStatusListSection,
-		Index:   reply.TokenStatusListIndex,
-	}}); err != nil {
+	saved = true
+	if err := c.saveCredentialSubjects(ctx, identifier, authenticSource, scope, entries); err != nil {
 		return nil, err
 	}
 

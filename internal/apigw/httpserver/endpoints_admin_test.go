@@ -30,6 +30,10 @@ type adminStatusMock struct {
 	authenticSources []string // returned by ListAuthenticSources
 }
 
+func (m *adminStatusMock) RevokeCredential(_ context.Context, _ *apiv1.RevokeCredentialRequest) (*apiv1.RevokeCredentialReply, error) {
+	panic("not used by these tests")
+}
+
 func (m *adminStatusMock) ListAuthenticSources(_ context.Context) ([]string, error) {
 	return m.authenticSources, nil
 }
@@ -545,6 +549,10 @@ type e2eMock struct {
 	authenticSources []string
 	documents        []*model.CompleteDocument
 	capturedSearch   *apiv1.DatastoreSearchRequest // last search request captured
+}
+
+func (m *e2eMock) RevokeCredential(_ context.Context, _ *apiv1.RevokeCredentialRequest) (*apiv1.RevokeCredentialReply, error) {
+	panic("not used by these tests")
 }
 
 func (m *e2eMock) ListAuthenticSources(_ context.Context) ([]string, error) {

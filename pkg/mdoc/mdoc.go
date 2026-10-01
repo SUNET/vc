@@ -239,6 +239,27 @@ type MobileSecurityObject struct {
 
 	// ValidityInfo contains validity timestamps.
 	ValidityInfo ValidityInfo `json:"validityInfo" cbor:"validityInfo" validate:"required"`
+
+	// Status is the Token Status List reference for this credential, per
+	// draft-ietf-oauth-status-list Section 6.3: "ISO mdoc may utilize the
+	// Status List mechanism by introducing the status parameter in the
+	// Mobile Security Object (MSO)".
+	//
+	// It lives in the MSO rather than in a namespace because the MSO is
+	// what the issuer signs unconditionally - a data element can be
+	// withheld by the holder during selective disclosure, and a revocation
+	// pointer the holder can drop is not a revocation pointer.
+	//
+	// Absent for a credential the issuer did not make revocable.
+	Status *MSOStatus `json:"status,omitempty" cbor:"status,omitempty"`
+}
+
+// MSOStatus is the value of the MSO's status parameter. It mirrors the
+// "status" claim of a JOSE Referenced Token (Section 6.2), which is what
+// the specification means by "the same encoding as a CWT".
+type MSOStatus struct {
+	// StatusList references an entry in a Token Status List.
+	StatusList *StatusReference `json:"status_list,omitempty" cbor:"status_list,omitempty"`
 }
 
 // IssuerSignedItem represents a single signed data element.

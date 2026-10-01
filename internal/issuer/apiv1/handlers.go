@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
-	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -27,6 +26,27 @@ type CreateCredentialReply struct {
 	Data                   []*apiv1_issuer.Credential `json:"data"`
 	TokenStatusListSection int64                      `json:"token_status_list_section"`
 	TokenStatusListIndex   int64                      `json:"token_status_list_index"`
+	// TokenStatusListURI is the list the entry was allocated in. Empty when
+	// no status entry was allocated, i.e. the credential is not revocable.
+	// Section is meaningful only for vc's own registry backend; an external
+	// draft-ietf-oauth-status-list service has no sections and identifies a
+	// list by this URI alone.
+	TokenStatusListURI string `json:"token_status_list_uri,omitempty"`
+	// TokenStatusListBackend names the status-list implementation that
+	// issued the entry ("registry" or "status_service"). Recorded at
+	// issuance because the URI alone does not identify the backend, and
+	// guessing at revocation time writes into the wrong list.
+	TokenStatusListBackend string `json:"token_status_list_backend,omitempty"`
+	// StatusAllocated says whether an entry was allocated at all, so no
+	// caller has to infer it from the other four fields. A registry's
+	// first allocation is legitimately section 0, index 0, and "nothing
+	// was allocated" is also section 0, index 0 - the URI tells them apart
+	// today only because allocateOrDegrade and allocateOptionalStatus both
+	// hand the slot back when one arrives without a URI. That is an
+	// invariant in another file, and a reader derived from an invariant is
+	// a reading that drifts. This is the verdict itself, recorded where
+	// the decision is made.
+	StatusAllocated bool `json:"status_allocated"`
 }
 
 // MakeSDJWT creates a credential generically for any credential type
@@ -48,24 +68,34 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		Integrity: req.Integrity,
 	}
 
-	// Call registry to allocate a status list entry for revocation support
-	if c.registryClient == nil {
-		return nil, fmt.Errorf("registry client not configured")
-	}
-
-	grpcReply, err := c.registryClient.TokenStatusListAddStatus(ctx, &apiv1_registry.TokenStatusListAddStatusRequest{
-		Status: 0, // VALID status for new credential
-	})
+	// Allocate a status list entry for revocation support. allocateOrDegrade
+	// goes through whichever backend is configured - vc's own built-in
+	// Token Status List (registry) or an external
+	// draft-ietf-oauth-status-list-21 service - and, only for the external
+	// backend with degraded_mode=proceed, returns (nil, nil) instead of an
+	// error so the credential is still issued, just without a status
+	// claim. See status_allocator.go.
+	alloc, err := c.allocateOrDegrade(ctx)
 	if err != nil {
-		c.log.Error(err, "failed to get status list entry from registry")
+		c.log.Error(err, "failed to allocate status list entry")
 		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
 	}
 
-	opts.TokenStatusList = &sdjwtvc.TokenStatusListReference{
-		Index: grpcReply.GetIndex(),
-		URI:   grpcReply.GetStatusListUri(),
+	// Everything from here can fail, and the entry is already VALID on its
+	// backend. See releaseUnlessIssued.
+	credentialIssued := false
+	defer c.releaseUnlessIssued(ctx, alloc, &credentialIssued)
+
+	var statusSection, statusIndex int64
+	var statusURI, statusBackend string
+	if alloc != nil {
+		opts.TokenStatusList = &sdjwtvc.TokenStatusListReference{
+			Index: alloc.Index,
+			URI:   alloc.URI,
+		}
+		statusSection, statusIndex, statusURI, statusBackend = alloc.Section, alloc.Index, alloc.URI, alloc.Backend
+		c.log.Debug("status list entry allocated", "section", alloc.Section, "index", alloc.Index, "uri", alloc.URI)
 	}
-	c.log.Debug("status list entry allocated", "section", grpcReply.GetSection(), "index", grpcReply.GetIndex(), "uri", grpcReply.GetStatusListUri())
 
 	// Build SD-JWT using sdjwtvc package with the signer interface.
 	// The VCTM bytes come from the caller (APIGW); BuildCredentialWithSigner
@@ -93,10 +123,14 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 				Credential: token,
 			},
 		},
-		TokenStatusListSection: grpcReply.GetSection(),
-		TokenStatusListIndex:   grpcReply.GetIndex(),
+		TokenStatusListSection: statusSection,
+		TokenStatusListIndex:   statusIndex,
+		TokenStatusListURI:     statusURI,
+		TokenStatusListBackend: statusBackend,
+		StatusAllocated:        alloc != nil,
 	}
 
+	credentialIssued = true
 	return reply, nil
 }
 
@@ -130,11 +164,31 @@ type CreateMDocRequest struct {
 
 // CreateMDocReply is the reply for mDL credential creation
 type CreateMDocReply struct {
-	MDoc              []byte `json:"mdoc"`
-	StatusListSection int64  `json:"status_list_section"`
-	StatusListIndex   int64  `json:"status_list_index"`
-	ValidFrom         string `json:"valid_from"`
-	ValidUntil        string `json:"valid_until"`
+	MDoc []byte `json:"mdoc"`
+	// StatusListSection is meaningful only for vc's own registry backend,
+	// which shards its list into sections. An external
+	// draft-ietf-oauth-status-list service has no such concept and leaves
+	// it 0 - StatusListURI is what identifies the list in that case.
+	StatusListSection int64 `json:"status_list_section"`
+	StatusListIndex   int64 `json:"status_list_index"`
+	// StatusListURI is the list the entry was allocated in. Empty when no
+	// status entry was allocated, i.e. the credential is not revocable.
+	StatusListURI string `json:"status_list_uri,omitempty"`
+	// StatusListBackend names the backend that issued the entry; see
+	// CreateCredentialReply.TokenStatusListBackend.
+	StatusListBackend string `json:"status_list_backend,omitempty"`
+	// StatusAllocated says whether an entry was allocated at all, so no
+	// caller has to infer it from the other four fields. A registry's
+	// first allocation is legitimately section 0, index 0, and "nothing
+	// was allocated" is also section 0, index 0 - the URI tells them apart
+	// today only because allocateOrDegrade and allocateOptionalStatus both
+	// hand the slot back when one arrives without a URI. That is an
+	// invariant in another file, and a reader derived from an invariant is
+	// a reading that drifts. This is the verdict itself, recorded where
+	// the decision is made.
+	StatusAllocated bool   `json:"status_allocated"`
+	ValidFrom       string `json:"valid_from"`
+	ValidUntil      string `json:"valid_until"`
 }
 
 // MakeMDoc creates credential per ISO 18013-5
@@ -174,26 +228,41 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		return nil, fmt.Errorf("failed to load MDDL schema: %w", err)
 	}
 
-	// Allocate status list entry for revocation support (if registry is configured)
-	var statusSection, statusIndex int64
-	if c.registryClient != nil {
-		grpcReply, err := c.registryClient.TokenStatusListAddStatus(ctx, &apiv1_registry.TokenStatusListAddStatusRequest{
-			Status: 0, // VALID status for new credential
-		})
-		if err != nil {
-			c.log.Info("failed to allocate status list entry, issuing without revocation support", "error", err)
-		} else {
-			statusSection = grpcReply.GetSection()
-			statusIndex = grpcReply.GetIndex()
-			c.log.Debug("status list entry allocated for mdoc", "section", statusSection, "index", statusIndex)
-		}
+	// Allocate a status list entry for revocation support, if any allocator
+	// is configured. Best-effort for the registry backend, which is what
+	// this path has always done - mDL issuance has never required a status
+	// entry - but an external service's degraded_mode is honoured, so
+	// `fail` rejects the issuance here as it does for SD-JWT and BBS. See
+	// allocateOptionalStatus.
+	var mdocStatusSection, mdocStatusIndex int64
+	var mdocStatusURI, mdocStatusBackend string
+	var mdocStatusRef *mdoc.StatusReference
+	alloc, err := c.allocateOptionalStatus(ctx, "mdoc")
+	if err != nil {
+		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
+	}
+	// Everything from here can fail - the issuer, the CBOR encoder, the
+	// marshal - and the entry is already VALID on its backend. See
+	// releaseUnlessIssued.
+	credentialIssued := false
+	defer c.releaseUnlessIssued(ctx, alloc, &credentialIssued)
+
+	if alloc != nil {
+		// allocateOptionalStatus guarantees a non-empty URI here.
+		mdocStatusSection, mdocStatusIndex, mdocStatusURI, mdocStatusBackend = alloc.Section, alloc.Index, alloc.URI, alloc.Backend
+		mdocStatusRef = &mdoc.StatusReference{URI: mdocStatusURI, Index: mdocStatusIndex}
+		c.log.Debug("status list entry allocated for mdoc", "section", mdocStatusSection, "index", mdocStatusIndex, "uri", mdocStatusURI)
 	}
 
-	// Issue the mdoc
+	// Issue the mdoc. The status reference goes into the MSO
+	// (draft-ietf-oauth-status-list Section 6.3), which is what the issuer
+	// signs unconditionally - a data element could be withheld by the
+	// holder, and a revocation pointer the holder can drop is not one.
 	issuanceReq := &mdoc.IssuanceRequest{
 		DevicePublicKey: deviceKey,
 		DocumentData:    req.DocumentData,
 		Schema:          schema,
+		Status:          mdocStatusRef,
 	}
 
 	issued, err := c.mdocIssuer.Issue(issuanceReq)
@@ -216,11 +285,15 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 
 	reply := &CreateMDocReply{
 		MDoc:              mdocBytes,
-		StatusListSection: statusSection,
-		StatusListIndex:   statusIndex,
+		StatusListSection: mdocStatusSection,
+		StatusListIndex:   mdocStatusIndex,
+		StatusListURI:     mdocStatusURI,
+		StatusAllocated:   alloc != nil,
+		StatusListBackend: mdocStatusBackend,
 		ValidFrom:         issued.ValidFrom.Format(time.RFC3339),
 		ValidUntil:        issued.ValidUntil.Format(time.RFC3339),
 	}
 
+	credentialIssued = true
 	return reply, nil
 }

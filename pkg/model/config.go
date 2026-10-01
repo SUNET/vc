@@ -6,12 +6,14 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -544,6 +546,34 @@ type Issuer struct {
 	// BBS holds blind BBS issuance configuration. Absent disables the
 	// "jwp" credential format entirely.
 	BBS *BBSConfig `yaml:"bbs" validate:"omitempty"`
+	// VC20StatusEnable turns on the credentialStatus entry in issued W3C
+	// VC 2.0 credentials. OFF by default, and deliberately so.
+	//
+	// Two things are not true yet, and both are visible to third parties
+	// rather than to us:
+	//
+	//   - The JSON-LD context that defines TokenStatusListEntry lives under
+	//     an RFC 2606 ".invalid" namespace, which no third-party verifier
+	//     can dereference. vc resolves it from its embedded bundle, so our
+	//     own stack works and nobody else's does; a credential issued with
+	//     it cannot have its Data Integrity proof reconstructed elsewhere.
+	//   - Nothing verifies it. The verifier's revocation check covers
+	//     SD-JWT, JWP and mdoc; W3C VC verification arrives separately, so
+	//     a status emitted today is a reference no verifier fetches.
+	//
+	// Issuance is implemented and tested so that flipping this is the whole
+	// change once the namespace is chosen and verification lands. Until
+	// then, defaulting it on would mint credentials that look revocable and
+	// are not - which is worse than minting none, because the reference
+	// invites reliance on it.
+	VC20StatusEnable *bool `yaml:"vc20_status_enable,omitempty" validate:"omitempty"`
+
+	// StatusService configures using an external draft-ietf-oauth-status-
+	// list-21 service (e.g. siros-status-service) for credential revocation
+	// status, instead of (or alongside) this issuer's own built-in Token
+	// Status List (RegistryClient above). Absent (the default) is a
+	// complete no-op. See StatusServiceConfig for details.
+	StatusService *StatusServiceConfig `yaml:"status_service" validate:"omitempty"`
 }
 
 // BBSConfig holds the issuer's blind BBS key pair.
@@ -834,6 +864,67 @@ type RevocationConfig struct {
 	// SkipScopes lists credential scopes exempt from revocation checking
 	// (e.g., short-lived credentials valid < 24 hours per ARF 3.0 §6.6.3.7).
 	SkipScopes []string `yaml:"skip_scopes,omitempty" json:"skip_scopes,omitempty"`
+	// StatusListIssuer is the issuer identity to resolve a signing key
+	// under when a Status List Token carries no `iss` claim.
+	//
+	// draft-ietf-oauth-status-list Section 5.1 does not require `iss` - the
+	// REQUIRED claims are sub, iat and status_list - and a conforming
+	// service such as siros-status-service omits it and publishes its
+	// status-list signing key separately from anything reachable under the
+	// list URL. There is therefore nothing in such a token to derive a
+	// trustworthy key from, so the deployment has to say.
+	//
+	// Left empty, a token without `iss` is REFUSED rather than guessed at.
+	// The previous behaviour - falling back to the list URI - sent the
+	// resolver looking for issuer discovery under
+	// "<list URI>/.well-known/...", which does not exist, so it failed
+	// anyway, just with a misleading error.
+	StatusListIssuer string `yaml:"status_list_issuer,omitempty" json:"status_list_issuer,omitempty" validate:"omitempty,httpurl" doc_example:"\"https://status.siros.org\""`
+	// StatusListKeyFile is a PEM file holding the PUBLIC key (or a
+	// certificate carrying it) that signs Status List Tokens, for a service
+	// that does not publish one anywhere a resolver can reach.
+	//
+	// status_list_issuer alone is not always enough. It supplies an
+	// identity to the discovery-based resolver, which then looks for a
+	// JWKS - and a status service's status-list signing key need not be
+	// published there at all. siros-status-service is one such case: it
+	// exposes its AS JWKS for access-token verification, while the
+	// status-list key is a separate signing key with no JWKS endpoint, so
+	// discovery finds nothing and every external status list fails to
+	// verify. With revocation.fail_open at its default of true, that
+	// failure is tolerated and a REVOKED credential is accepted.
+	//
+	// SCOPE. The pin covers a token with NO `iss`, and a token whose `iss`
+	// is exactly status_list_issuer. Anything else goes to the resolver.
+	//
+	// It is scoped rather than global because a deployment may run vc's own
+	// registry alongside an external status service - issuer.status_service
+	// documents that as supported - and those lists are signed by different
+	// keys. A global pin made the external key answer for registry tokens
+	// too, so registry lists stopped verifying the moment a key file was
+	// configured, which fail_open then tolerated.
+	//
+	// The practical consequence: if the service that signs your lists DOES
+	// put an `iss` in them, set status_list_issuer to that value as well,
+	// or the pin will not apply and verification falls back to discovery.
+	//
+	// Within its scope the pin is ENFORCING, not a fallback: a token from
+	// that issuer verifies against this key even when it carries an x5c or
+	// jwk of its own. Otherwise a status service that rotated its signing
+	// key - or anyone who minted a token with their own jwk - would be
+	// accepted while the operator believed the pin was protecting
+	// verification.
+	//
+	// Outside its scope, and with a trust framework configured (the
+	// ordinary case), the fallback is NOT the generic resolver: a token
+	// the PDP cannot judge - one naming no key in its own header, or
+	// served as a CWT - verifies against a pin or is refused. Otherwise a
+	// signer could reach a status value with no policy decision by
+	// omitting a header.
+	//
+	// Configure this, or status_list_issuer, or tokens without an `iss`
+	// claim are refused outright - see WithStatusListKey in pkg/revocation.
+	StatusListKeyFile string `yaml:"status_list_key_file,omitempty" json:"status_list_key_file,omitempty" validate:"omitempty,file" doc_example:"\"/etc/vc/status-list-signing.pub.pem\""`
 }
 
 // ValidateClientIDMaterial checks that the key material loaded at startup can
@@ -1421,8 +1512,16 @@ type APIGW struct {
 	PublicURL string `yaml:"public_url" validate:"required,httpurl" doc_example:"\"https://issuer.sunet.se\""`
 	// IssuerClient is the gRPC client config for issuer
 	IssuerClient GRPCClientTLS `yaml:"issuer_client" validate:"required"`
-	// RegistryClient is the gRPC client config for registry
-	RegistryClient GRPCClientTLS `yaml:"registry_client" validate:"required"`
+	// RegistryClient is the gRPC client config for vc's own registry
+	// service, which hosts the built-in Token Status List.
+	//
+	// OPTIONAL: leave addr empty to run without a local registry. A
+	// deployment whose issuer uses an external
+	// draft-ietf-oauth-status-list service needs nothing from the
+	// registry - the apigw records status-list entries in its own
+	// database, and revocation goes through the issuer, which is the
+	// component configured with the backends.
+	RegistryClient GRPCClientTLS `yaml:"registry_client" validate:"omitempty"`
 	// IdentityMappingImport configures automatic import of identity mappings from JSON files at startup.
 	// When configured, APIGW reads JSON files and imports them into the
 	// identity mappings collection on first startup (skipped if data already exists).
@@ -2753,4 +2852,22 @@ func (c *CredentialMetadata) DeclaredClaimNames() (map[string]bool, bool) {
 	}
 
 	return names, loaded
+}
+
+// StatusListURL returns the URL this registry serves the Status List Token
+// for one section at. It is the value that goes into an issued credential's
+// status_list.uri, and it is therefore also how a stored status entry is
+// recognised as belonging to THIS registry rather than to an external
+// draft-ietf-oauth-status-list service.
+//
+// One construction, used by everything that needs it: the gRPC allocation
+// reply, the Status List Token's own sub claim, and the admin path that
+// decides whether it may touch a given entry. Three hand-rolled copies of
+// this join would be three chances for the sub check (Section 8.3) or the
+// ownership check to disagree with what was actually issued.
+func (r *Registry) StatusListURL(section int64) (string, error) {
+	if r == nil || r.PublicURL == "" {
+		return "", errors.New("registry public_url is not configured")
+	}
+	return url.JoinPath(r.PublicURL, "statuslists", strconv.FormatInt(section, 10))
 }

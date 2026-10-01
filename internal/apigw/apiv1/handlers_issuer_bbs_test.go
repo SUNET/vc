@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/tokenstatuslist"
 )
 
 // The issuer refuses claims with nothing in them - bbs.ValidateDocumentData
@@ -33,6 +34,14 @@ type recordingIssuerClient struct {
 	got   *apiv1_issuer.MakeJWPRequest
 	reply *apiv1_issuer.MakeJWPReply
 	err   error
+	// released records hand-backs of status entries allocated for a
+	// credential that will not be delivered.
+	released []*apiv1_issuer.SetCredentialStatusRequest
+}
+
+func (r *recordingIssuerClient) SetCredentialStatus(_ context.Context, in *apiv1_issuer.SetCredentialStatusRequest, _ ...grpc.CallOption) (*apiv1_issuer.SetCredentialStatusReply, error) {
+	r.released = append(r.released, in)
+	return &apiv1_issuer.SetCredentialStatusReply{}, nil
 }
 
 func (r *recordingIssuerClient) MakeJWP(_ context.Context, in *apiv1_issuer.MakeJWPRequest, _ ...grpc.CallOption) (*apiv1_issuer.MakeJWPReply, error) {
@@ -79,11 +88,17 @@ func TestIssueBBSPassesTheCommitmentThrough(t *testing.T) {
 	issuer := &recordingIssuerClient{
 		reply: &apiv1_issuer.MakeJWPReply{
 			Credentials: []*apiv1_issuer.Credential{{Credential: "hdr.payloads.proof"}},
+			// A current issuer always says. The zero value is
+			// UNSPECIFIED, which means "an issuer too old to carry the
+			// field", and saveCredentialSubjects refuses it whatever the
+			// other fields look like - so a fixture that leaves it out is
+			// not modelling an ordinary issuance.
+			StatusAllocation: apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE,
 		},
 	}
 	c := bbsTestClient(t, issuer)
 
-	credentials, err := c.issueBBS(context.Background(), "pid_jwp", []byte(`{"given_name":"Alice"}`), "", bbsRequest())
+	credentials, err := c.issueBBS(context.Background(), "pid_jwp", []byte(`{"given_name":"Alice"}`), "", "", bbsRequest())
 	if err != nil {
 		t.Fatalf("issueBBS: %v", err)
 	}
@@ -131,7 +146,8 @@ func TestIssueBBSTakesKeyBindingFromTheCommitmentAssertion(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			issuer := &recordingIssuerClient{
 				reply: &apiv1_issuer.MakeJWPReply{
-					Credentials: []*apiv1_issuer.Credential{{Credential: "a.b.c"}},
+					Credentials:      []*apiv1_issuer.Credential{{Credential: "a.b.c"}},
+					StatusAllocation: apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE,
 				},
 			}
 			c := bbsTestClient(t, issuer)
@@ -141,7 +157,7 @@ func TestIssueBBSTakesKeyBindingFromTheCommitmentAssertion(t *testing.T) {
 			// A proof is present in both cases, which is the point.
 			req.Proof = &openid4vci.Proof{ProofType: "jwt", JWT: "not.a.real.jwt"}
 
-			if _, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", req); err != nil {
+			if _, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", "", req); err != nil {
 				t.Fatalf("issueBBS: %v", err)
 			}
 			if issuer.got.KeyBinding != tc.asserted {
@@ -162,7 +178,7 @@ func TestIssueBBSRefusesWithoutACommitment(t *testing.T) {
 	req := bbsRequest()
 	req.BBSCommitment = ""
 
-	_, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", req)
+	_, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", "", req)
 	if err == nil {
 		t.Fatal("a jwp issuance without bbs_commitment must fail")
 	}
@@ -182,7 +198,7 @@ func TestIssueBBSRefusesAScopeWithNoVCT(t *testing.T) {
 	issuer := &recordingIssuerClient{}
 	c := bbsTestClient(t, issuer)
 
-	_, err := c.issueBBS(context.Background(), "no_vct", validBBSDocumentData, "", bbsRequest())
+	_, err := c.issueBBS(context.Background(), "no_vct", validBBSDocumentData, "", "", bbsRequest())
 	if err == nil {
 		t.Fatal("a scope with no vct must fail rather than issue an untyped credential")
 	}
@@ -195,7 +211,7 @@ func TestIssueBBSRejectsAnUnknownScope(t *testing.T) {
 	issuer := &recordingIssuerClient{}
 	c := bbsTestClient(t, issuer)
 
-	if _, err := c.issueBBS(context.Background(), "not_configured", validBBSDocumentData, "", bbsRequest()); err == nil {
+	if _, err := c.issueBBS(context.Background(), "not_configured", validBBSDocumentData, "", "", bbsRequest()); err == nil {
 		t.Fatal("an unconfigured scope must fail")
 	}
 }
@@ -218,7 +234,8 @@ func TestIssueBBSForwardsTheSuiteTheHolderChose(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			issuer := &recordingIssuerClient{
 				reply: &apiv1_issuer.MakeJWPReply{
-					Credentials: []*apiv1_issuer.Credential{{Credential: "a.b.c"}},
+					Credentials:      []*apiv1_issuer.Credential{{Credential: "a.b.c"}},
+					StatusAllocation: apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE,
 				},
 			}
 			c := bbsTestClient(t, issuer)
@@ -227,7 +244,7 @@ func TestIssueBBSForwardsTheSuiteTheHolderChose(t *testing.T) {
 			req.BBSSuite = tc.wire
 			req.BBSKeyBinding = tc.bound
 
-			if _, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", req); err != nil {
+			if _, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", "", req); err != nil {
 				t.Fatalf("issueBBS: %v", err)
 			}
 			if issuer.got.Suite != tc.want {
@@ -247,7 +264,7 @@ func TestIssueBBSRefusesAnUnknownSuite(t *testing.T) {
 	req := bbsRequest()
 	req.BBSSuite = "not-a-suite"
 
-	_, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", req)
+	_, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "", "", req)
 	if err == nil {
 		t.Fatal("an unknown suite must fail")
 	}
@@ -270,5 +287,82 @@ func TestIssueBBSRefusesAnUnknownSuite(t *testing.T) {
 	desc := fmt.Sprint(vciErr.ErrorDescription)
 	if strings.Contains(desc, "not-a-suite") || strings.Contains(desc, "bbs:") {
 		t.Fatalf("internal wording reached the wallet: %q", desc)
+	}
+}
+
+// TestIssueBBSCarriesTheIssuersAllocationVerdict: the BBS path builds its
+// statusEntry as a literal, and that literal has to carry
+// reply.StatusAllocation the way the SD-JWT, mdoc and VC 2.0 paths do.
+//
+// Leaving it at the zero value means UNSPECIFIED, which saveCredentialSubjects
+// reads as "an issuer too old to have the field" and refuses - so an
+// external allocator running degraded_mode=proceed, whose whole point is
+// to return no URI and STATUS_ALLOCATION_NONE and keep issuing, would have
+// had every BBS issuance fail instead.
+//
+// An identifier is supplied deliberately: with an empty one
+// saveCredentialSubjects returns before the verdict is ever consulted, and
+// the test would pass with the bug in place.
+func TestIssueBBSCarriesTheIssuersAllocationVerdict(t *testing.T) {
+	issuer := &recordingIssuerClient{
+		reply: &apiv1_issuer.MakeJWPReply{
+			Credentials: []*apiv1_issuer.Credential{{Credential: "hdr.payloads.proof"}},
+			// Degraded mode: the allocator was asked, could not allocate,
+			// and the issuer says so rather than staying silent.
+			StatusAllocation: apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE,
+		},
+	}
+	c := bbsTestClient(t, issuer)
+
+	credentials, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "person-1", "SUNET", bbsRequest())
+	if err != nil {
+		t.Fatalf("a credential issued without a status entry, by an issuer that said so, must still be delivered: %v", err)
+	}
+	if len(credentials) != 1 {
+		t.Fatalf("got %d credentials, want exactly 1", len(credentials))
+	}
+}
+
+// TestIssueBBSReleasesTheEntryWhenTheReplyIsUnusable: the issuer allocates
+// the status entry and signs it into the credential before the APIGW sees
+// the reply, so a reply the APIGW then refuses leaves that entry VALID on
+// the backend with nothing pointing at it - and a wallet that retries
+// strands another one each time.
+//
+// The three loop-shaped paths carry a cleanup guard around their whole
+// issuer call for exactly this; the BBS path did not, so this defensive
+// reply-shape check was a leak on every failure.
+func TestIssueBBSReleasesTheEntryWhenTheReplyIsUnusable(t *testing.T) {
+	issuer := &recordingIssuerClient{
+		reply: &apiv1_issuer.MakeJWPReply{
+			// Two, which this path refuses: a BBS credential needs no
+			// unlinkable copies, and the second would need a commitment
+			// and blinding factor the wallet never supplied.
+			Credentials: []*apiv1_issuer.Credential{
+				{Credential: "hdr.payloads.proof"},
+				{Credential: "hdr.payloads.proof2"},
+			},
+			TokenStatusListSection: 4,
+			TokenStatusListIndex:   9,
+			TokenStatusListUri:     "https://registry.example.com/statuslists/4",
+			TokenStatusListBackend: "registry",
+			StatusAllocation:       apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED,
+		},
+	}
+	c := bbsTestClient(t, issuer)
+
+	if _, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "person-1", "SUNET", bbsRequest()); err == nil {
+		t.Fatal("a reply carrying two credentials must be refused")
+	}
+
+	if len(issuer.released) != 1 {
+		t.Fatalf("got %d releases, want exactly 1 - the allocated entry must be handed back", len(issuer.released))
+	}
+	got := issuer.released[0]
+	if got.StatusListUri != "https://registry.example.com/statuslists/4" || got.Index != 9 || got.Section != 4 {
+		t.Fatalf("released the wrong entry: %+v", got)
+	}
+	if got.Status != uint32(tokenstatuslist.StatusInvalid) {
+		t.Fatalf("released entries are marked INVALID, got %d", got.Status)
 	}
 }

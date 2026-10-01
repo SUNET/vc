@@ -199,6 +199,10 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	defaultAllowed := c.defaultTokenAllowed(authCtx, scopeQueryIDs, credentialScopes)
 
 	scopeCredentials := make(map[string][]sdjwtvc.CredentialCache, len(credentialScopes))
+	// Remembered per scope because the revocation check below has to know it:
+	// a ZK mDOC presentation carries no MSO and so no status reference, which
+	// is "cannot tell" rather than "not revocable".
+	credentialFormats := make(map[string]CredentialFormat, len(credentialScopes))
 
 	for _, scope := range credentialScopes {
 		vpTokens, err := c.vpTokensForScope(authCtx, scopeQueryIDs, defaultAllowed, vpResponse, scope)
@@ -222,6 +226,10 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 		// Detect credential format and process accordingly
 		format := detectCredentialFormat(vpToken)
+		// Remembered per scope because the revocation check below has to
+		// know it: a ZK mDOC presentation carries no MSO and so no status
+		// reference, which is "cannot tell" rather than "not revocable".
+		credentialFormats[scope] = format
 		c.log.Debug("Detected credential format", "scope", scope, "format", format)
 
 		switch format {
@@ -514,6 +522,39 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				})
 			}
 
+		case FormatJWP:
+			// This verifier cannot check a JWP, and must say so rather than
+			// let one through a branch that was never written for it.
+			//
+			// Until this case existed the refusal happened anyway, but by
+			// accident: a JWP has the same three-segment, tilde-free shape
+			// as a plain JWT, so detectCredentialFormat called it
+			// "vc+sd-jwt" and the SD-JWT parser then failed to unmarshal
+			// its payload segment. That is the SD-JWT parser's strictness
+			// doing the work, not a decision - loosen it and a JWP slides
+			// into a path that would verify nothing about it.
+			//
+			// Two separate things are missing before this case can become
+			// real verification, and both are outside this package:
+			//
+			//   - proof verification. pkg/bbs.VerifyPresentation exists and
+			//     needs the cgo `bbsnative` build; nothing outside
+			//     pkg/bbs's own tests calls it yet.
+			//   - revocation. A JWP's status reference lives in its ISSUER
+			//     HEADER, not in a claim - deliberately, because a claim is
+			//     one of the signed messages and therefore selectively
+			//     disclosable, and revocation a holder can decline to
+			//     reveal is not revocation (see
+			//     internal/issuer/apiv1/handlers_bbs.go). But
+			//     revocation.StatusListChecker.Extract reads claims, and
+			//     the native crate's verification result carries only
+			//     {vct, disclosed} - the Issuer Header never crosses back.
+			//     So whoever implements this case has to surface the header
+			//     and extract the status from it, or a revoked JWP would
+			//     verify.
+			c.log.Error(nil, "JWP presentation received; this verifier has no JWP verification path", "scope", scope)
+			return nil, fmt.Errorf("credential for scope %s is a JWP, which this verifier cannot check: it has no BBS proof verification path, and a JWP's revocation status lives in its issuer header where nothing here reads it", scope)
+
 		default:
 			c.log.Error(nil, "Unknown credential format", "scope", scope, "format", format)
 			return nil, fmt.Errorf("unknown credential format for scope %s", scope)
@@ -552,8 +593,38 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				c.log.Debug("Skipping revocation check for exempt scope", "scope", scope)
 				continue
 			}
+			// A ZK mDOC presentation proves statements about claims without
+			// revealing the document, so no MSO reaches the verifier and
+			// there is no status parameter to read. That is not "this
+			// credential is not revocable" - the credential may well carry
+			// one - it is "we cannot tell", which is the same answer a
+			// status list that would not fetch gives. Letting it fall
+			// through to Validate would find no status and treat a revoked
+			// credential as valid.
+			//
+			// fail_open therefore governs it, and skip_scopes is the way to
+			// allow ZK presentations for a scope where that is acceptable.
+			if !formatCanCarryStatus(credentialFormats[scope]) && len(scopeCredentials[scope]) > 0 {
+				err := fmt.Errorf("revocation status of a ZK mDOC presentation cannot be determined: the proof carries no MSO, so it has no status reference")
+				if c.cfg.Verifier.Revocation.FailOpen {
+					c.log.Info("Revocation check indeterminate (fail-open: allowing)", "scope", scope, "err", err)
+				} else {
+					c.log.Error(err, "revocation check failed", "scope", scope)
+					return nil, fmt.Errorf("revocation check failed for scope %s: %w", scope, err)
+				}
+				continue
+			}
+
 			for _, cc := range scopeCredentials[scope] {
-				result, err := c.revocationRegistry.Validate(ctx, cc.Credential)
+				// Only an mdoc's claims can legitimately hold a data
+				// element named "status"; every other format reserves the
+				// name for the status reference, so an unreadable one there
+				// is malformed rather than somebody else's claim.
+				statusShape := revocation.StatusClaimIsReserved
+				if credentialFormats[scope] == FormatMDoc {
+					statusShape = revocation.StatusClaimMayBeData
+				}
+				result, err := c.revocationRegistry.ValidateShaped(ctx, cc.Credential, statusShape)
 				if err != nil {
 					// Transient error (network, malformed token) — fail_open controls behavior
 					if c.cfg.Verifier.Revocation.FailOpen {
@@ -852,6 +923,13 @@ const (
 	// FormatMDocZK represents a zero-knowledge-proof presentation of an
 	// ISO/IEC 18013-5 mDOC credential (mso_mdoc_zk) - see pkg/mdoc/zk*.go.
 	FormatMDocZK CredentialFormat = "mso_mdoc_zk"
+	// FormatJWP represents a BBS credential in JWP Compact Serialization
+	// (draft-ietf-jose-json-web-proof / draft-bormann-jwp-modular-bbs) -
+	// what internal/issuer/apiv1/handlers_bbs.go issues.
+	//
+	// Recognised in order to be REFUSED. See the switch in
+	// verifyCredentials for why.
+	FormatJWP CredentialFormat = "jwp"
 	// FormatUnknown represents an unrecognized format
 	FormatUnknown CredentialFormat = "unknown"
 )
@@ -873,7 +951,14 @@ func detectCredentialFormat(vpToken string) CredentialFormat {
 	if strings.Count(vpToken, ".") == 2 && !strings.Contains(vpToken, "~") {
 		// Could be a plain JWT - check if it's valid base64url
 		headerPart, _, _ := strings.Cut(vpToken, ".")
-		if _, err := base64.RawURLEncoding.DecodeString(headerPart); err == nil {
+		if header, err := base64.RawURLEncoding.DecodeString(headerPart); err == nil {
+			// A JWP in Compact Serialization has the same silhouette as a
+			// plain JWT - three base64url segments, no "~" - so it lands
+			// here, and did. It is told apart by its first segment, which
+			// is a JWP Issuer Header rather than a JOSE header.
+			if isJWPIssuerHeader(header) {
+				return FormatJWP
+			}
 			return FormatSDJWT
 		}
 	}
@@ -898,6 +983,28 @@ func detectCredentialFormat(vpToken string) CredentialFormat {
 	}
 
 	return FormatUnknown
+}
+
+// isJWPIssuerHeader reports whether a decoded first segment is a JWP Issuer
+// Header rather than a JOSE header.
+//
+// `cmap` is the discriminator: it is the authenticated map from claim name
+// to message index that draft-bormann-jwp-modular-bbs puts in the Issuer
+// Header, and it has no counterpart in JOSE. `alg` is not enough on its own
+// - both containers carry one - and matching on its VALUE would mean
+// keeping a list of proof algorithm names in step with the native crate.
+//
+// Best-effort, and safe when it is wrong in either direction: a JWP that is
+// not recognised falls through to the SD-JWT branch, which is where it
+// already went and where it already fails. Recognising it only makes the
+// refusal deliberate and legible instead of incidental.
+func isJWPIssuerHeader(header []byte) bool {
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal(header, &parsed); err != nil {
+		return false
+	}
+	_, hasClaimMap := parsed["cmap"]
+	return hasClaimMap
 }
 
 // mapToDisclosers converts a map of claims to []sdjwtvc.Discloser format.
@@ -971,4 +1078,21 @@ func claimKeys(m map[string]any) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// formatCanCarryStatus reports whether a presentation in this format can
+// carry a revocation reference at all.
+//
+// Every format but one can: SD-JWT and JWP carry the JOSE "status" claim,
+// and a plain mso_mdoc presentation carries the issuer-signed MSO, whose
+// status parameter MDocDocumentClaims surfaces in the same shape. A ZK
+// mDOC presentation proves statements about claims WITHOUT revealing the
+// document, so no MSO reaches the verifier and there is nothing to read.
+//
+// That absence must not be read as "this credential is not revocable" - the
+// credential may well be - so callers treat it as an indeterminate result
+// and let fail_open decide, exactly as they do for a status list that
+// would not fetch.
+func formatCanCarryStatus(format CredentialFormat) bool {
+	return format != FormatMDocZK
 }

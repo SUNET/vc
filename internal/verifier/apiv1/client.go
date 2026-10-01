@@ -195,11 +195,65 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 	if cfg.Verifier.Revocation != nil && cfg.Verifier.Revocation.Enabled {
 		cacheTTL := time.Duration(cfg.Verifier.Revocation.CacheTTL) * time.Second
 		statusCache := pkgcache.NewMemoryCache[[]uint8](cacheTTL)
-		statusListChecker, err := revocation.NewStatusListChecker(
+		statusListOpts := []revocation.StatusListCheckerOption{
 			revocation.WithCache(statusCache),
 			revocation.WithHTTPClient(&http.Client{Timeout: 30 * time.Second}),
 			revocation.WithKeyResolver(jwksKeyResolverAdapter{resolver: c.jwksResolver}),
-		)
+			revocation.WithFallbackIssuer(cfg.Verifier.Revocation.StatusListIssuer),
+		}
+		// Trust-evaluated verification, and the path a deployment with a
+		// PDP takes: the key comes from the status list token's own x5c or
+		// jwk header and go-trust decides whether that signer may speak for
+		// these credentials.
+		//
+		// c.jwtTrustVerifier is built above and is never nil; it carries
+		// the same ParseX5C/ParseJWK and evaluator the credential paths use,
+		// so a status list is trusted on exactly the same terms as the
+		// credential it describes.
+		//
+		// It does not override the options above, it narrows them. A token
+		// that names a key in its own header is judged by the PDP and
+		// nothing else. A token that names none - or a CWT, which
+		// JWTTrustVerifier cannot read - falls back to the pinned key from
+		// StatusListKeyFile, and to nothing else: the generic resolver is
+		// refused in that configuration, because reaching it would be a way
+		// to a status value with no policy decision at all. See
+		// resolveStatusListKey.
+		//
+		// ONLY WITH A PDP, and that condition is load-bearing. Without one
+		// the evaluator is AllowAllEvaluator, so the narrowing above would
+		// buy no policy decision at all while still refusing the resolver -
+		// and vc's OWN registry issues status list tokens with no kid, jwk
+		// or x5c (internal/registry/tokenstatuslistissuer), so a default
+		// registry-only deployment could no longer verify its own lists.
+		// With revocation.fail_open at its default that reads as "not
+		// revoked". Narrowing is only worth having when there is something
+		// to narrow TO.
+		if statusListTrustEvaluationEnabled(cfg) {
+			// The narrowing has one configuration it cannot serve: this
+			// deployment's own registry, whose tokens the PDP can never
+			// judge because they name no key. That is refused at config
+			// load (configuration.checkStatusListTrustPin), not here - by
+			// the time a Cfg reaches this constructor the loader has
+			// already set cfg.Registry to nil for the verifier service, so
+			// a check here cannot see the registry at all.
+			statusListOpts = append(statusListOpts, revocation.WithTokenVerifier(c.jwtTrustVerifier))
+		} else {
+			c.log.Warn("status list signer trust evaluation is DISABLED - no verifier.trust.pdp_url configured; status list tokens are verified by key resolution alone")
+		}
+		// Loaded at startup, not per request: a key file that is missing or
+		// malformed should stop the service rather than surface later as
+		// every external status list failing to verify - which fail_open
+		// would then tolerate, accepting revoked credentials.
+		if path := cfg.Verifier.Revocation.StatusListKeyFile; path != "" {
+			key, keyErr := revocation.LoadStatusListKeyPEM(path)
+			if keyErr != nil {
+				return nil, fmt.Errorf("verifier.revocation.status_list_key_file: %w", keyErr)
+			}
+			statusListOpts = append(statusListOpts, revocation.WithStatusListKey(key))
+			c.log.Info("status list signing key loaded from file", "path", path)
+		}
+		statusListChecker, err := revocation.NewStatusListChecker(statusListOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create status list checker: %w", err)
 		}
@@ -792,6 +846,21 @@ func parseScopes(scopeStr string) []string {
 		return []string{}
 	}
 	return strings.Split(scopeStr, " ")
+}
+
+// statusListTrustEvaluationEnabled reports whether a status list signer can
+// actually be judged by a policy, which is the only thing that makes the
+// trust verifier worth installing.
+//
+// Without verifier.trust.pdp_url the evaluator is AllowAllEvaluator: the
+// trust path would narrow how a token may be verified - a token naming no
+// key in its own header, or a CWT, verifies against a pinned key or not at
+// all - while producing no policy decision to show for it. vc's own
+// registry issues status list tokens with no kid, jwk or x5c, so that
+// narrowing would stop a default registry-only deployment verifying its own
+// lists, which fail_open then reads as "not revoked".
+func statusListTrustEvaluationEnabled(cfg *model.Cfg) bool {
+	return cfg != nil && cfg.Verifier != nil && cfg.Verifier.Trust.PDPURL != ""
 }
 
 // jwksKeyResolverAdapter adapts trust.JWKSKeyResolver to revocation.KeyResolver.

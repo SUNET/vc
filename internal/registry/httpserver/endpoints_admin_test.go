@@ -24,11 +24,11 @@ import (
 
 // mockApiv1 implements the Apiv1 interface for testing
 type mockApiv1 struct {
-	searchResult      *apiv1.SearchPersonReply
-	searchErr         error
-	updateErr         error
-	statusListReply   *apiv1.TokenStatusListsResponse
-	statusListErr     error
+	searchResult    *apiv1.SearchPersonReply
+	searchErr       error
+	updateErr       error
+	statusListReply *apiv1.TokenStatusListsResponse
+	statusListErr   error
 }
 
 func (m *mockApiv1) Status(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {
@@ -255,10 +255,13 @@ func TestEndpointAdminSearch(t *testing.T) {
 			searchResult: &apiv1.SearchPersonReply{
 				Results: []*apiv1.PersonResult{
 					{
-						Identifier: "john-doe-1990",
-						Section:    0,
-						Index:      42,
-						Status:     0,
+						Identifier:    "john-doe-1990",
+						Section:       0,
+						Index:         42,
+						Status:        0,
+						StatusListURI: "https://registry.example.com/statuslists/0",
+						Local:         true,
+						StatusKnown:   true,
 					},
 				},
 			},
@@ -278,6 +281,49 @@ func TestEndpointAdminSearch(t *testing.T) {
 		html := result.(HTMLResponse)
 		assert.Contains(t, string(html), "john-doe-1990")
 		assert.Contains(t, string(html), "VALID")
+		assert.Contains(t, string(html), `name="status_list_uri" value="https://registry.example.com/statuslists/0"`,
+			"the update form must name the list it acts on")
+	})
+
+	// An entry allocated by an external draft-ietf-oauth-status-list
+	// service has no section and this registry can neither read nor change
+	// it. Offering the Update control would invite an operator to revoke
+	// whichever LOCAL credential sits at the same (section, index).
+	t.Run("externally managed entry offers no update control", func(t *testing.T) {
+		s := setupTestService(t)
+		s.apiv1 = &mockApiv1{
+			searchResult: &apiv1.SearchPersonReply{
+				Results: []*apiv1.PersonResult{
+					{
+						Identifier:    "jane-doe-1990",
+						Section:       0,
+						Index:         17,
+						StatusListURI: "https://status.example.com/statuslists/abc",
+						Local:         false,
+					},
+				},
+			},
+		}
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+
+		form := url.Values{}
+		form.Add("identifier", "jane-doe-1990")
+		c.Request = httptest.NewRequest(http.MethodPost, "/admin/search", strings.NewReader(form.Encode()))
+		c.Request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+		result, err := s.endpointAdminSearch(t.Context(), c)
+
+		assert.NoError(t, err)
+		html := string(result.(HTMLResponse))
+		assert.Contains(t, html, "jane-doe-1990")
+		assert.Contains(t, html, "https://status.example.com/statuslists/abc")
+		assert.Contains(t, html, "managed elsewhere")
+		assert.NotContains(t, html, `action="/admin/status"`,
+			"no update form may be rendered for an entry this registry does not own")
+		assert.NotContains(t, html, "VALID",
+			"an unreadable status must not be displayed as VALID")
 	})
 
 	t.Run("search not found shows error", func(t *testing.T) {

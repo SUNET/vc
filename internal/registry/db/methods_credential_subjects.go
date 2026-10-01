@@ -23,6 +23,12 @@ type CredentialSubjectDoc struct {
 	Identifier string `bson:"identifier"`
 	Section    int64  `bson:"section"`
 	Index      int64  `bson:"index"`
+	// StatusListURI identifies the list the entry lives in. For vc's own
+	// registry it is derivable from Section; for an external
+	// draft-ietf-oauth-status-list service, which has no sections, it is
+	// the ONLY thing that identifies the list, so revoking such an entry
+	// is impossible without it.
+	StatusListURI string `bson:"status_list_uri,omitempty"`
 }
 
 // NewCredentialSubjectsColl creates a new credential subjects collection
