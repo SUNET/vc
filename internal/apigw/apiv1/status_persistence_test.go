@@ -14,6 +14,18 @@ import (
 	"google.golang.org/grpc"
 )
 
+// allocated and notAllocated are the two verdicts a current issuer sends.
+//
+// saveCredentialSubjects refuses an entry that states neither: the zero
+// value is UNSPECIFIED, which on the wire means an issuer too old to carry
+// the field, and a registry's first allocation is section 0 index 0 - so
+// "allocated" and "nothing allocated" are otherwise byte-identical. Every
+// fixture below therefore says which it is, the same way a real reply does.
+const (
+	allocated    = apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED
+	notAllocated = apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE
+)
+
 // recordingRegistryClient captures SaveCredentialSubject calls. Every other
 // method panics: this test is about one call, and a silent zero value from
 // an unimplemented method would make a broken test look like a passing one.
@@ -59,7 +71,7 @@ func TestSaveCredentialSubjects_ExternalAllocationIsPersisted(t *testing.T) {
 	c, store := persistenceClient(t, nil)
 
 	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
-		{Section: 0, Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+		{Section: 0, Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: allocated},
 	})
 	require.NoError(t, err)
 
@@ -85,7 +97,7 @@ func TestSaveCredentialSubjects_NoRegistryIsFine(t *testing.T) {
 	require.Nil(t, c.registryClient)
 
 	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
-		{Index: 3, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+		{Index: 3, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: allocated},
 	}))
 	require.Len(t, store.saved, 1)
 }
@@ -99,7 +111,7 @@ func TestSaveCredentialSubjects_RegistryIsMirroredBestEffort(t *testing.T) {
 	c, store := persistenceClient(t, rec)
 
 	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-2", "SUNET", "pid", []statusEntry{
-		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
+		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry", Allocated: allocated},
 	}))
 	require.Len(t, store.saved, 1)
 	require.Len(t, rec.saved, 1)
@@ -110,7 +122,7 @@ func TestSaveCredentialSubjects_RegistryIsMirroredBestEffort(t *testing.T) {
 	failing := &recordingRegistryClient{err: errors.New("registry down")}
 	c2, store2 := persistenceClient(t, failing)
 	require.NoError(t, c2.saveCredentialSubjects(t.Context(), "person-3", "SUNET", "pid", []statusEntry{
-		{Section: 4, Index: 6, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
+		{Section: 4, Index: 6, URI: "https://registry.example.com/statuslists/4", Backend: "registry", Allocated: allocated},
 	}))
 	require.Len(t, store2.saved, 1, "the authoritative record is still written")
 }
@@ -125,7 +137,7 @@ func TestSaveCredentialSubjects_StoreFailureFailsIssuance(t *testing.T) {
 	store.err = errors.New("database unavailable")
 
 	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
-		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: allocated},
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to record credential status entry")
@@ -158,7 +170,7 @@ func TestSaveCredentialSubjects_NoAllocationIsNotRecorded(t *testing.T) {
 func TestSaveCredentialSubjects_NoIdentifierIsNotRecorded(t *testing.T) {
 	c, store := persistenceClient(t, nil)
 
-	require.NoError(t, c.saveCredentialSubjects(t.Context(), "", "SUNET", "pid", []statusEntry{{Section: 1, Index: 1}}))
+	require.NoError(t, c.saveCredentialSubjects(t.Context(), "", "SUNET", "pid", []statusEntry{{Section: 1, Index: 1, Allocated: notAllocated}}))
 	require.Empty(t, store.saved)
 }
 
@@ -175,9 +187,9 @@ func TestSaveCredentialSubjects_ExternalEntriesAreNotMirrored(t *testing.T) {
 	c, store := persistenceClient(t, rec)
 
 	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
-		{Section: 0, Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
-		{Section: 0, Index: 17, URI: "https://status.example.com/statuslists/def", Backend: "status_service"},
-		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
+		{Section: 0, Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: allocated},
+		{Section: 0, Index: 17, URI: "https://status.example.com/statuslists/def", Backend: "status_service", Allocated: allocated},
+		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry", Allocated: allocated},
 	}))
 
 	require.Len(t, store.saved, 3, "all three are recorded authoritatively")
@@ -195,7 +207,7 @@ func TestSaveCredentialSubjects_StoreFailureReleasesAllocations(t *testing.T) {
 	store.err = errors.New("database unavailable")
 
 	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
-		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: allocated},
 	})
 	require.Error(t, err)
 
@@ -213,8 +225,8 @@ func TestSaveCredentialSubjects_FailureReleasesEarlierEntriesToo(t *testing.T) {
 	store.failAfter = 1
 
 	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
-		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
-		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry", Allocated: allocated},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: allocated},
 	})
 	require.Error(t, err)
 
@@ -236,7 +248,7 @@ func TestSaveCredentialSubjects_AllocatedWithoutIdentifierIsRefused(t *testing.T
 	c, store, issuer := persistenceClientWithIssuer(t, nil)
 
 	err := c.saveCredentialSubjects(t.Context(), "", "SUNET", "pid", []statusEntry{
-		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: allocated},
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "could never be revoked")
@@ -250,7 +262,7 @@ func TestSaveCredentialSubjects_AllocatedWithoutIdentifierIsRefused(t *testing.T
 func TestSaveCredentialSubjects_NoIdentifierAndNoAllocationIsFine(t *testing.T) {
 	c, store, issuer := persistenceClientWithIssuer(t, nil)
 
-	require.NoError(t, c.saveCredentialSubjects(t.Context(), "", "SUNET", "pid", []statusEntry{{}}))
+	require.NoError(t, c.saveCredentialSubjects(t.Context(), "", "SUNET", "pid", []statusEntry{{Allocated: notAllocated}}))
 	require.Empty(t, store.saved)
 	require.Empty(t, issuer.calls)
 }
@@ -265,9 +277,9 @@ func TestSaveCredentialSubjects_FailureReleasesUnattemptedEntriesToo(t *testing.
 	store.failAfter = 1
 
 	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
-		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
-		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
-		{Index: 18, URI: "https://status.example.com/statuslists/def", Backend: "status_service"},
+		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry", Allocated: allocated},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: allocated},
+		{Index: 18, URI: "https://status.example.com/statuslists/def", Backend: "status_service", Allocated: allocated},
 	})
 	require.Error(t, err)
 
@@ -308,7 +320,7 @@ func TestSaveCredentialSubjects_AllocatedWithoutURIReleasesItsSiblings(t *testin
 
 	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
 		{Section: 3, Index: 9},
-		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: allocated},
 	})
 	require.Error(t, err)
 	require.Len(t, issuer.calls, 1)
@@ -330,7 +342,7 @@ func TestSaveCredentialSubjects_UnroutableBackendIsRefused(t *testing.T) {
 			c, store, issuer := persistenceClientWithIssuer(t, nil)
 
 			err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
-				{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: backend},
+				{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: backend, Allocated: allocated},
 			})
 			require.Error(t, err)
 			require.Contains(t, err.Error(), "not a backend this build can reach")
@@ -350,8 +362,8 @@ func TestSaveCredentialSubjects_FailureRollsBackRecordedMappings(t *testing.T) {
 	store.failAfter = 1
 
 	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
-		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
-		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry", Allocated: allocated},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: allocated},
 	})
 	require.Error(t, err)
 
@@ -366,7 +378,7 @@ func TestSaveCredentialSubjects_SuccessRollsBackNothing(t *testing.T) {
 	c, store, issuer := persistenceClientWithIssuer(t, nil)
 
 	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
-		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: allocated},
 	}))
 	require.Empty(t, store.deleted)
 	require.Empty(t, issuer.calls)
@@ -387,8 +399,8 @@ func TestSaveCredentialSubjects_CleanupSurvivesARequestCancellation(t *testing.T
 	cancel() // the client hung up after the entries were allocated
 
 	err := c.saveCredentialSubjects(ctx, "person-1", "SUNET", "pid", []statusEntry{
-		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
-		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry", Allocated: allocated},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: allocated},
 	})
 	require.Error(t, err)
 
@@ -445,8 +457,8 @@ func TestSaveCredentialSubjects_NoStoreReleasesAllocations(t *testing.T) {
 	}
 
 	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
-		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
-		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry", Allocated: allocated},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: allocated},
 	})
 	require.Error(t, err, "an entry that cannot be recorded must not be issued")
 
@@ -457,4 +469,69 @@ func TestSaveCredentialSubjects_NoStoreReleasesAllocations(t *testing.T) {
 	}
 	require.Equal(t, uint32(1), released["https://registry.example.com/statuslists/4"], "released entries are marked INVALID")
 	require.Equal(t, uint32(1), released["https://status.example.com/statuslists/abc"])
+}
+
+// The issuer and the apigw both state the allocation verdict now, and both
+// refuse the combinations that cannot both be true. The issuer refuses them
+// because it is the side that knows what it allocated; the apigw refuses
+// them again because it is the side that writes the revocation mapping and
+// hands over the credential, and "the other end promised" is not something
+// a persistence path should rest on.
+//
+// Reading the URI as the verdict - which this loop used to do - cannot
+// express any of these three.
+
+// TestSaveCredentialSubjects_AllocationDeniedButURIPresentIsRefused: the
+// issuer says it allocated nothing and names a list anyway. That list and
+// index belong to something, so recording the mapping would point this
+// credential at another credential's entry - and revoking it later would
+// flip that one instead.
+func TestSaveCredentialSubjects_AllocationDeniedButURIPresentIsRefused(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service", Allocated: notAllocated},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no status allocation")
+	require.Empty(t, store.saved, "a mapping onto somebody else's entry must not be written")
+	require.Len(t, issuer.calls, 1, "the entry is released, since the reply named it")
+}
+
+// TestSaveCredentialSubjects_AllocationClaimedWithoutURIIsRefused: the
+// issuer says it allocated and does not say where. The credential is
+// already signed with that reference, so continuing delivers something that
+// advertises a revocation status nothing can ever set. The entry cannot be
+// released either - releasing names the list URI, which is what is missing.
+//
+// The all-zero tuple deliberately: a registry's FIRST allocation is section
+// 0, index 0, with no backend recorded, which is byte-identical to "nothing
+// was allocated". The guard this replaced looked for a non-zero section,
+// index or backend, so it could not see this case at all - the verdict can.
+func TestSaveCredentialSubjects_AllocationClaimedWithoutURIIsRefused(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
+		{Section: 0, Index: 0, Allocated: allocated},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no list URI")
+	require.Empty(t, store.saved)
+	require.Empty(t, issuer.calls, "there is no URI to release it by")
+}
+
+// TestSaveCredentialSubjects_SilentIssuerIsRefusedEvenWithAURI: the
+// refusal used to live inside the empty-URI branch, so a reply that carried
+// a URI skipped it entirely and was recorded on the strength of the URI
+// alone. An issuer that does not say is refused whatever else it sends.
+func TestSaveCredentialSubjects_SilentIssuerIsRefusedEvenWithAURI(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "did not report whether")
+	require.Empty(t, store.saved)
+	require.Len(t, issuer.calls, 1, "the entry is released, since the reply named it")
 }
