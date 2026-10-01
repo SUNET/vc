@@ -275,7 +275,7 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 
 	var lastErr error
 	for _, proof := range candidates {
-		result, err := h.verifyOneRootProof(ctx, rdfCred, credBytes, credMap, proof)
+		result, err := h.verifyOneRootProof(ctx, rdfCred, credBytes, credMap, proof, issuer)
 		if err != nil {
 			lastErr = err
 			continue
@@ -319,6 +319,7 @@ func (h *VC20Handler) verifyOneRootProof(
 	credBytes []byte,
 	credMap map[string]any,
 	proof map[string]any,
+	issuer string,
 ) (*VC20VerificationResult, error) {
 	vm, _ := proof["verificationMethod"].(string)
 	if vm == "" {
@@ -334,6 +335,16 @@ func (h *VC20Handler) verifyOneRootProof(
 	// was resolved from could never match for a compact one.
 	vm, err := h.expandVerificationMethod(credMap, proof, vm)
 	if err != nil {
+		return nil, err
+	}
+
+	// The key must be the ISSUER's. Resolving it says the trust framework
+	// knows that verification method, not that the issuer this credential
+	// names may sign with it - so a credential claiming an allowlisted
+	// issuer, signed with any key the resolver will hand back, was accepted
+	// and reported as that issuer's. Checked BEFORE resolution, so an
+	// unauthorized method costs no lookup.
+	if err := issuerControlsMethod(issuer, vm); err != nil {
 		return nil, err
 	}
 
@@ -948,6 +959,41 @@ func proofTypeOf(proof map[string]any) string {
 
 // dataIntegrityProofType is the type every cryptosuite here produces.
 const dataIntegrityProofType = "DataIntegrityProof"
+
+// issuerControlsMethod refuses a proof whose verification method does not
+// belong to the issuer the credential names.
+//
+// Resolution is not authorization. The resolver answers "is this a
+// verification method the trust framework knows", which in a framework
+// holding many issuers is true of every one of their keys - so nothing
+// stopped a credential naming issuer A from being signed by issuer B, or by
+// anyone else resolvable, and reported as A's.
+//
+// The test is lexical, because a resolved key arrives without its controller:
+// the method must BE the issuer, or live under it - a fragment, a path, or a
+// query. did:example:issuer#key-1 belongs to did:example:issuer;
+// https://issuer.example/keys/1 belongs to https://issuer.example. Anything
+// else is refused rather than guessed at.
+//
+// A deployment that signs with a key outside the issuer's own identifier
+// space - delegation to a separate DID - is refused by this and needs the
+// authorization asked of the PDP instead, which the KeyResolver interface
+// cannot express today.
+func issuerControlsMethod(issuer string, verificationMethod string) error {
+	if issuer == "" {
+		return errors.New("the credential names no issuer, so no proof can be checked against it")
+	}
+	if verificationMethod == issuer {
+		return nil
+	}
+	if strings.HasPrefix(verificationMethod, issuer) {
+		switch verificationMethod[len(issuer)] {
+		case '#', '/', '?':
+			return nil
+		}
+	}
+	return fmt.Errorf("the proof's verification method %q does not belong to the issuer %q", verificationMethod, issuer)
+}
 
 // sameVerificationMethod checks that the proof which verified names the
 // method the key was resolved from.

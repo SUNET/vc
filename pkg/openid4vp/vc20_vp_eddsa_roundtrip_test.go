@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -334,10 +335,19 @@ func TestVerifyAndExtractReportsTheProofThatVerified(t *testing.T) {
 func signedExampleDocument(t *testing.T, documentContext any, method string, key ed25519.PrivateKey) map[string]any {
 	t.Helper()
 
+	// The ISSUER is the method's own identifier, minus any fragment. A
+	// verification method has to belong to the issuer that names it, so a
+	// fixture pairing an unrelated issuer with a key is not a credential
+	// any verifier should accept - which these tests are not about.
+	issuer := method
+	if at := strings.Index(issuer, "#"); at >= 0 {
+		issuer = issuer[:at]
+	}
+
 	document, err := json.Marshal(map[string]any{
 		"@context":          documentContext,
 		"type":              []any{"VerifiableCredential"},
-		"issuer":            "did:example:issuer",
+		"issuer":            issuer,
 		"credentialSubject": map[string]any{"id": "did:example:subject"},
 	})
 	require.NoError(t, err)
@@ -583,7 +593,7 @@ func TestVerifyAndExtractHonoursATypeScopedContext(t *testing.T) {
 	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
 		"@context": "https://www.w3.org/ns/credentials/v2",
 		"type": ["VerifiableCredential"],
-		"issuer": "did:example:issuer",
+		"issuer": "https://example.org/keys",
 		"credentialSubject": {"id": "did:example:subject"}
 	}`), nil)
 	require.NoError(t, err)
@@ -688,13 +698,13 @@ func TestVerifyAndExtractTriesEveryRootProof(t *testing.T) {
 	cred, err := credential.NewRDFCredentialFromJSON([]byte(unsigned), nil)
 	require.NoError(t, err)
 	once, err := eddsaSuite.NewSuite().Sign(cred, firstKey, &eddsaSuite.SignOptions{
-		VerificationMethod: "did:example:first#key-1",
+		VerificationMethod: "did:example:issuer#key-1",
 		ProofPurpose:       "assertionMethod",
 		Created:            time.Now().UTC(),
 	})
 	require.NoError(t, err)
 	twice, err := eddsaSuite.NewSuite().Sign(once, secondKey, &eddsaSuite.SignOptions{
-		VerificationMethod: "did:example:second#key-1",
+		VerificationMethod: "did:example:issuer#key-2",
 		ProofPurpose:       "assertionMethod",
 		Created:            time.Now().UTC(),
 	})
@@ -713,22 +723,22 @@ func TestVerifyAndExtractTriesEveryRootProof(t *testing.T) {
 	// A resolver that knows ONLY the second signer's key. Reaching it means
 	// the handler got past the first proof.
 	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
-		keys: map[string]crypto.PublicKey{"did:example:second#key-1": secondPub},
+		keys: map[string]crypto.PublicKey{"did:example:issuer#key-2": secondPub},
 	}))
 	require.NoError(t, err)
 
 	result, err := handler.VerifyAndExtract(t.Context(), string(compact))
 	require.NoError(t, err, "the second signer's proof is as much the document's own as the first")
-	require.Equal(t, "did:example:second#key-1", result.VerificationMethod)
+	require.Equal(t, "did:example:issuer#key-2", result.VerificationMethod)
 
 	// And the first signer's key still verifies its own proof.
 	firstOnly, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
-		keys: map[string]crypto.PublicKey{"did:example:first#key-1": firstPub},
+		keys: map[string]crypto.PublicKey{"did:example:issuer#key-1": firstPub},
 	}))
 	require.NoError(t, err)
 	result, err = firstOnly.VerifyAndExtract(t.Context(), string(compact))
 	require.NoError(t, err)
-	require.Equal(t, "did:example:first#key-1", result.VerificationMethod)
+	require.Equal(t, "did:example:issuer#key-1", result.VerificationMethod)
 }
 
 // TestVerifyAndExtractSurvivesAMalformedExtraProof: every root proof is
@@ -893,7 +903,7 @@ func TestVerifyAndExtractReportsTheRootOfAnExpandedDocument(t *testing.T) {
 	outer, err := credential.NewRDFCredentialFromJSON([]byte(`{
 		"@context": "https://www.w3.org/ns/credentials/v2",
 		"type": ["VerifiableCredential"],
-		"issuer": "did:example:outer-issuer",
+		"issuer": "did:example:issuer",
 		"credentialSubject": {
 			"id": "did:example:holder",
 			"https://example.org/vocab#attachment": {
@@ -944,7 +954,7 @@ func TestVerifyAndExtractReportsTheRootOfAnExpandedDocument(t *testing.T) {
 
 	result, err := handler.VerifyAndExtract(t.Context(), string(reordered))
 	require.NoError(t, err)
-	require.Equal(t, "did:example:outer-issuer", result.Issuer,
+	require.Equal(t, "did:example:issuer", result.Issuer,
 		"the issuer reported must be the one whose proof verified")
 }
 
@@ -1065,4 +1075,74 @@ func TestVerifyAndExtractAcceptsACredentialCarryingAPresentation(t *testing.T) {
 	result, err := handler.VerifyAndExtract(t.Context(), string(flattened))
 	require.NoError(t, err, "a credential that CARRIES a presentation is still a credential")
 	require.Equal(t, "did:example:issuer", result.Issuer)
+}
+
+// TestVerifyAndExtractRefusesAKeyThatIsNotTheIssuers: resolving a key says the
+// trust framework knows that verification method. It does not say the issuer
+// this credential NAMES may sign with it - and in a framework holding many
+// issuers, every one of their keys resolves. So a credential claiming an
+// allowlisted issuer, signed with somebody else's resolvable key, verified and
+// was reported as that issuer's.
+func TestVerifyAndExtractRefusesAKeyThatIsNotTheIssuers(t *testing.T) {
+	attackerPub, attackerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	// The credential claims a trusted issuer and is signed by a key under a
+	// quite different identifier.
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:trusted-issuer",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`), nil)
+	require.NoError(t, err)
+
+	signed, err := eddsaSuite.NewSuite().Sign(cred, attackerKey, &eddsaSuite.SignOptions{
+		VerificationMethod: "did:example:attacker#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	compact, err := signed.ToCompactJSON()
+	require.NoError(t, err)
+
+	// A resolver that WILL hand back the attacker's key, which is the
+	// situation a shared trust framework creates.
+	handler, err := NewVC20Handler(
+		WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+			keys: map[string]crypto.PublicKey{"did:example:attacker#key-1": attackerPub},
+		}),
+		WithVC20TrustedIssuers([]string{"did:example:trusted-issuer"}),
+	)
+	require.NoError(t, err)
+
+	_, err = handler.VerifyAndExtract(t.Context(), string(compact))
+	require.ErrorContains(t, err, "does not belong to the issuer",
+		"a resolvable key is not the same as the issuer's key")
+
+	// The same credential signed by the issuer's own key still verifies, so
+	// the refusal is about whose key it is and not about refusing work.
+	issuerPub, issuerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	proper, err := eddsaSuite.NewSuite().Sign(cred, issuerKey, &eddsaSuite.SignOptions{
+		VerificationMethod: "did:example:trusted-issuer#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	properJSON, err := proper.ToCompactJSON()
+	require.NoError(t, err)
+
+	handler, err = NewVC20Handler(
+		WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+			keys: map[string]crypto.PublicKey{"did:example:trusted-issuer#key-1": issuerPub},
+		}),
+		WithVC20TrustedIssuers([]string{"did:example:trusted-issuer"}),
+	)
+	require.NoError(t, err)
+
+	result, err := handler.VerifyAndExtract(t.Context(), string(properJSON))
+	require.NoError(t, err)
+	require.Equal(t, "did:example:trusted-issuer", result.Issuer)
 }
