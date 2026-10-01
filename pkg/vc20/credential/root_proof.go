@@ -224,6 +224,15 @@ func coalesceByID(entries []map[string]any) []map[string]any {
 	return merged
 }
 
+// ExpansionOptions returns the JSON-LD options this credential was parsed
+// with, ready for re-expanding it. A caller that re-expands any part of a
+// document under fresh defaults instead sees a different document than the one
+// that parsed - or, for a context only this credential's loader knows, no
+// document at all.
+func (rc *RDFCredential) ExpansionOptions() *ld.JsonLdOptions {
+	return rc.expansionOptions()
+}
+
 // expansionOptions are the options this credential was PARSED with, which
 // is what root selection has to re-expand under.
 //
@@ -234,15 +243,6 @@ func coalesceByID(entries []map[string]any) []map[string]any {
 //
 // A copy, and with Format cleared: Format tells the processor its INPUT is
 // N-Quads, which is true of the call that sets it and not of this one.
-// ExpansionOptions returns the JSON-LD options this credential was parsed
-// with, ready for re-expanding it. A caller that re-expands any part of a
-// document under fresh defaults instead sees a different document than the one
-// that parsed - or, for a context only this credential's loader knows, no
-// document at all.
-func (rc *RDFCredential) ExpansionOptions() *ld.JsonLdOptions {
-	return rc.expansionOptions()
-}
-
 func (rc *RDFCredential) expansionOptions() *ld.JsonLdOptions {
 	if rc.options == nil {
 		return NewJSONLDOptions("")
