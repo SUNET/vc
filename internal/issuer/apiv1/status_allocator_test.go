@@ -7,14 +7,15 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"fmt"
-	"github.com/SUNET/vc/pkg/pki"
-	"github.com/golang-jwt/jwt/v5"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/SUNET/vc/pkg/pki"
+	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"

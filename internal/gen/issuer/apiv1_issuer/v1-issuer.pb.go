@@ -7,13 +7,12 @@
 package apiv1_issuer
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	apiv1_status "github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (
@@ -22,6 +21,72 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
+
+// StatusAllocation says EXPLICITLY whether the issuer allocated a status-list
+// entry for a credential, so the apigw never has to infer it from zero values.
+//
+// Inferring does not work. A registry's FIRST allocation is legitimately
+// section 0, index 0, and an issuer older than status_list_uri sends no URI
+// and no backend either - which is byte-for-byte what "nothing was allocated"
+// looks like. The apigw then recorded nothing and delivered a credential
+// carrying a status reference that can never be revoked.
+//
+// UNSPECIFIED is therefore what an issuer older than this field sends, and the
+// apigw refuses it: a loud failure during a partial upgrade is better than a
+// credential that silently cannot be revoked. Issuer and apigw are meant to be
+// upgraded together.
+type StatusAllocation int32
+
+const (
+	StatusAllocation_STATUS_ALLOCATION_UNSPECIFIED StatusAllocation = 0
+	// The issuer speaks this protocol and allocated nothing - revocation is
+	// not available for this credential, deliberately.
+	StatusAllocation_STATUS_ALLOCATION_NONE StatusAllocation = 1
+	// An entry was allocated; the uri, section, index and backend fields
+	// describe it.
+	StatusAllocation_STATUS_ALLOCATION_ALLOCATED StatusAllocation = 2
+)
+
+// Enum value maps for StatusAllocation.
+var (
+	StatusAllocation_name = map[int32]string{
+		0: "STATUS_ALLOCATION_UNSPECIFIED",
+		1: "STATUS_ALLOCATION_NONE",
+		2: "STATUS_ALLOCATION_ALLOCATED",
+	}
+	StatusAllocation_value = map[string]int32{
+		"STATUS_ALLOCATION_UNSPECIFIED": 0,
+		"STATUS_ALLOCATION_NONE":        1,
+		"STATUS_ALLOCATION_ALLOCATED":   2,
+	}
+)
+
+func (x StatusAllocation) Enum() *StatusAllocation {
+	p := new(StatusAllocation)
+	*p = x
+	return p
+}
+
+func (x StatusAllocation) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (StatusAllocation) Descriptor() protoreflect.EnumDescriptor {
+	return file_v1_issuer_proto_enumTypes[0].Descriptor()
+}
+
+func (StatusAllocation) Type() protoreflect.EnumType {
+	return &file_v1_issuer_proto_enumTypes[0]
+}
+
+func (x StatusAllocation) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use StatusAllocation.Descriptor instead.
+func (StatusAllocation) EnumDescriptor() ([]byte, []int) {
+	return file_v1_issuer_proto_rawDescGZIP(), []int{0}
+}
 
 // SignMetadataRequest asks the issuer to sign metadata JSON with its own key
 // (the same key advertised in JWKS), so that signed_metadata is verifiable.
@@ -275,8 +340,10 @@ type MakeSDJWTReply struct {
 	// identify the backend, and guessing at revocation time writes the
 	// status into the wrong list.
 	TokenStatusListBackend string `protobuf:"bytes,5,opt,name=token_status_list_backend,json=tokenStatusListBackend,proto3" json:"token_status_list_backend,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Whether an entry was allocated at all. See StatusAllocation.
+	StatusAllocation StatusAllocation `protobuf:"varint,6,opt,name=status_allocation,json=statusAllocation,proto3,enum=v1.issuer.StatusAllocation" json:"status_allocation,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *MakeSDJWTReply) Reset() {
@@ -342,6 +409,13 @@ func (x *MakeSDJWTReply) GetTokenStatusListBackend() string {
 		return x.TokenStatusListBackend
 	}
 	return ""
+}
+
+func (x *MakeSDJWTReply) GetStatusAllocation() StatusAllocation {
+	if x != nil {
+		return x.StatusAllocation
+	}
+	return StatusAllocation_STATUS_ALLOCATION_UNSPECIFIED
 }
 
 // MakeJWPRequest is the request for creating a blind BBS credential in JWP
@@ -478,8 +552,10 @@ type MakeJWPReply struct {
 	// identify the backend, and guessing at revocation time writes the
 	// status into the wrong list.
 	TokenStatusListBackend string `protobuf:"bytes,5,opt,name=token_status_list_backend,json=tokenStatusListBackend,proto3" json:"token_status_list_backend,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Whether an entry was allocated at all. See StatusAllocation.
+	StatusAllocation StatusAllocation `protobuf:"varint,6,opt,name=status_allocation,json=statusAllocation,proto3,enum=v1.issuer.StatusAllocation" json:"status_allocation,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *MakeJWPReply) Reset() {
@@ -545,6 +621,13 @@ func (x *MakeJWPReply) GetTokenStatusListBackend() string {
 		return x.TokenStatusListBackend
 	}
 	return ""
+}
+
+func (x *MakeJWPReply) GetStatusAllocation() StatusAllocation {
+	if x != nil {
+		return x.StatusAllocation
+	}
+	return StatusAllocation_STATUS_ALLOCATION_UNSPECIFIED
 }
 
 // MakeMDocRequest is the request for creating an mdoc document (ISO 18013-5)
@@ -636,8 +719,10 @@ type MakeMDocReply struct {
 	StatusListUri string `protobuf:"bytes,6,opt,name=status_list_uri,json=statusListUri,proto3" json:"status_list_uri,omitempty"`
 	// See token_status_list_backend on MakeSDJWTReply.
 	StatusListBackend string `protobuf:"bytes,7,opt,name=status_list_backend,json=statusListBackend,proto3" json:"status_list_backend,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Whether an entry was allocated at all. See StatusAllocation.
+	StatusAllocation StatusAllocation `protobuf:"varint,8,opt,name=status_allocation,json=statusAllocation,proto3,enum=v1.issuer.StatusAllocation" json:"status_allocation,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *MakeMDocReply) Reset() {
@@ -717,6 +802,13 @@ func (x *MakeMDocReply) GetStatusListBackend() string {
 		return x.StatusListBackend
 	}
 	return ""
+}
+
+func (x *MakeMDocReply) GetStatusAllocation() StatusAllocation {
+	if x != nil {
+		return x.StatusAllocation
+	}
+	return StatusAllocation_STATUS_ALLOCATION_UNSPECIFIED
 }
 
 type Credential struct {
@@ -1125,8 +1217,10 @@ type MakeVC20Reply struct {
 	StatusListUri string `protobuf:"bytes,7,opt,name=status_list_uri,json=statusListUri,proto3" json:"status_list_uri,omitempty"`
 	// See token_status_list_backend on MakeSDJWTReply.
 	StatusListBackend string `protobuf:"bytes,8,opt,name=status_list_backend,json=statusListBackend,proto3" json:"status_list_backend,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Whether an entry was allocated at all. See StatusAllocation.
+	StatusAllocation StatusAllocation `protobuf:"varint,9,opt,name=status_allocation,json=statusAllocation,proto3,enum=v1.issuer.StatusAllocation" json:"status_allocation,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *MakeVC20Reply) Reset() {
@@ -1213,6 +1307,13 @@ func (x *MakeVC20Reply) GetStatusListBackend() string {
 		return x.StatusListBackend
 	}
 	return ""
+}
+
+func (x *MakeVC20Reply) GetStatusAllocation() StatusAllocation {
+	if x != nil {
+		return x.StatusAllocation
+	}
+	return StatusAllocation_STATUS_ALLOCATION_UNSPECIFIED
 }
 
 // SetCredentialStatusRequest asks for one issued credential's status-list
@@ -1352,13 +1453,14 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\fdocumentData\x18\x02 \x01(\fR\fdocumentData\x12 \n" +
 	"\x03jwk\x18\x03 \x01(\v2\x0e.v1.issuer.jwkR\x03jwk\x12\x1c\n" +
 	"\tintegrity\x18\x05 \x01(\tR\tintegrity\x12\x12\n" +
-	"\x04vctm\x18\x06 \x01(\fR\x04vctmJ\x04\b\x04\x10\x05\"\xa9\x02\n" +
+	"\x04vctm\x18\x06 \x01(\fR\x04vctmJ\x04\b\x04\x10\x05\"\xf3\x02\n" +
 	"\x0eMakeSDJWTReply\x127\n" +
 	"\vcredentials\x18\x01 \x03(\v2\x15.v1.issuer.CredentialR\vcredentials\x129\n" +
 	"\x19token_status_list_section\x18\x02 \x01(\x03R\x16tokenStatusListSection\x125\n" +
 	"\x17token_status_list_index\x18\x03 \x01(\x03R\x14tokenStatusListIndex\x121\n" +
 	"\x15token_status_list_uri\x18\x04 \x01(\tR\x12tokenStatusListUri\x129\n" +
-	"\x19token_status_list_backend\x18\x05 \x01(\tR\x16tokenStatusListBackend\"\xdd\x01\n" +
+	"\x19token_status_list_backend\x18\x05 \x01(\tR\x16tokenStatusListBackend\x12H\n" +
+	"\x11status_allocation\x18\x06 \x01(\x0e2\x1b.v1.issuer.StatusAllocationR\x10statusAllocation\"\xdd\x01\n" +
 	"\x0eMakeJWPRequest\x12\x14\n" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12#\n" +
 	"\rdocument_data\x18\x02 \x01(\fR\fdocumentData\x12\x1e\n" +
@@ -1369,19 +1471,20 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\x03vct\x18\x05 \x01(\tR\x03vct\x12\x1f\n" +
 	"\vkey_binding\x18\x06 \x01(\bR\n" +
 	"keyBinding\x12\x14\n" +
-	"\x05suite\x18\a \x01(\rR\x05suite\"\xa7\x02\n" +
+	"\x05suite\x18\a \x01(\rR\x05suite\"\xf1\x02\n" +
 	"\fMakeJWPReply\x127\n" +
 	"\vcredentials\x18\x01 \x03(\v2\x15.v1.issuer.CredentialR\vcredentials\x129\n" +
 	"\x19token_status_list_section\x18\x02 \x01(\x03R\x16tokenStatusListSection\x125\n" +
 	"\x17token_status_list_index\x18\x03 \x01(\x03R\x14tokenStatusListIndex\x121\n" +
 	"\x15token_status_list_uri\x18\x04 \x01(\tR\x12tokenStatusListUri\x129\n" +
-	"\x19token_status_list_backend\x18\x05 \x01(\tR\x16tokenStatusListBackend\"\xbe\x01\n" +
+	"\x19token_status_list_backend\x18\x05 \x01(\tR\x16tokenStatusListBackend\x12H\n" +
+	"\x11status_allocation\x18\x06 \x01(\x0e2\x1b.v1.issuer.StatusAllocationR\x10statusAllocation\"\xbe\x01\n" +
 	"\x0fMakeMDocRequest\x12\x14\n" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12#\n" +
 	"\rdocument_data\x18\x03 \x01(\fR\fdocumentData\x12*\n" +
 	"\x11device_public_key\x18\x04 \x01(\fR\x0fdevicePublicKey\x12*\n" +
 	"\x11device_key_format\x18\x05 \x01(\tR\x0fdeviceKeyFormat\x12\x12\n" +
-	"\x04mddl\x18\x06 \x01(\fR\x04mddlJ\x04\b\x02\x10\x03\"\x97\x02\n" +
+	"\x04mddl\x18\x06 \x01(\fR\x04mddlJ\x04\b\x02\x10\x03\"\xe1\x02\n" +
 	"\rMakeMDocReply\x12\x12\n" +
 	"\x04mdoc\x18\x01 \x01(\fR\x04mdoc\x12.\n" +
 	"\x13status_list_section\x18\x02 \x01(\x03R\x11statusListSection\x12*\n" +
@@ -1391,7 +1494,8 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\vvalid_until\x18\x05 \x01(\tR\n" +
 	"validUntil\x12&\n" +
 	"\x0fstatus_list_uri\x18\x06 \x01(\tR\rstatusListUri\x12.\n" +
-	"\x13status_list_backend\x18\a \x01(\tR\x11statusListBackend\",\n" +
+	"\x13status_list_backend\x18\a \x01(\tR\x11statusListBackend\x12H\n" +
+	"\x11status_allocation\x18\b \x01(\x0e2\x1b.v1.issuer.StatusAllocationR\x10statusAllocation\",\n" +
 	"\n" +
 	"Credential\x12\x1e\n" +
 	"\n" +
@@ -1424,7 +1528,7 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\vsubject_did\x18\x04 \x01(\tR\n" +
 	"subjectDid\x12 \n" +
 	"\vcryptosuite\x18\x05 \x01(\tR\vcryptosuite\x12-\n" +
-	"\x12mandatory_pointers\x18\x06 \x03(\tR\x11mandatoryPointers\"\xc8\x02\n" +
+	"\x12mandatory_pointers\x18\x06 \x03(\tR\x11mandatoryPointers\"\x92\x03\n" +
 	"\rMakeVC20Reply\x12\x1e\n" +
 	"\n" +
 	"credential\x18\x01 \x01(\fR\n" +
@@ -1437,14 +1541,19 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\vvalid_until\x18\x06 \x01(\tR\n" +
 	"validUntil\x12&\n" +
 	"\x0fstatus_list_uri\x18\a \x01(\tR\rstatusListUri\x12.\n" +
-	"\x13status_list_backend\x18\b \x01(\tR\x11statusListBackend\"\xa6\x01\n" +
+	"\x13status_list_backend\x18\b \x01(\tR\x11statusListBackend\x12H\n" +
+	"\x11status_allocation\x18\t \x01(\x0e2\x1b.v1.issuer.StatusAllocationR\x10statusAllocation\"\xa6\x01\n" +
 	"\x1aSetCredentialStatusRequest\x12\x18\n" +
 	"\abackend\x18\x01 \x01(\tR\abackend\x12&\n" +
 	"\x0fstatus_list_uri\x18\x02 \x01(\tR\rstatusListUri\x12\x18\n" +
 	"\asection\x18\x03 \x01(\x03R\asection\x12\x14\n" +
 	"\x05index\x18\x04 \x01(\x03R\x05index\x12\x16\n" +
 	"\x06status\x18\x05 \x01(\rR\x06status\"\x1a\n" +
-	"\x18SetCredentialStatusReply2\xfe\x04\n" +
+	"\x18SetCredentialStatusReply*r\n" +
+	"\x10StatusAllocation\x12!\n" +
+	"\x1dSTATUS_ALLOCATION_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16STATUS_ALLOCATION_NONE\x10\x01\x12\x1f\n" +
+	"\x1bSTATUS_ALLOCATION_ALLOCATED\x10\x022\xfe\x04\n" +
 	"\rIssuerService\x12E\n" +
 	"\tMakeSDJWT\x12\x1b.v1.issuer.MakeSDJWTRequest\x1a\x19.v1.issuer.MakeSDJWTReply\"\x00\x12B\n" +
 	"\bMakeMDoc\x12\x1a.v1.issuer.MakeMDocRequest\x1a\x18.v1.issuer.MakeMDocReply\"\x00\x12B\n" +
@@ -1468,58 +1577,64 @@ func file_v1_issuer_proto_rawDescGZIP() []byte {
 	return file_v1_issuer_proto_rawDescData
 }
 
+var file_v1_issuer_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_v1_issuer_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_v1_issuer_proto_goTypes = []any{
-	(*SignMetadataRequest)(nil),        // 0: v1.issuer.SignMetadataRequest
-	(*SignMetadataReply)(nil),          // 1: v1.issuer.SignMetadataReply
-	(*GetIACAsReply)(nil),              // 2: v1.issuer.GetIACAsReply
-	(*MakeSDJWTRequest)(nil),           // 3: v1.issuer.MakeSDJWTRequest
-	(*MakeSDJWTReply)(nil),             // 4: v1.issuer.MakeSDJWTReply
-	(*MakeJWPRequest)(nil),             // 5: v1.issuer.MakeJWPRequest
-	(*MakeJWPReply)(nil),               // 6: v1.issuer.MakeJWPReply
-	(*MakeMDocRequest)(nil),            // 7: v1.issuer.MakeMDocRequest
-	(*MakeMDocReply)(nil),              // 8: v1.issuer.MakeMDocReply
-	(*Credential)(nil),                 // 9: v1.issuer.Credential
-	(*Empty)(nil),                      // 10: v1.issuer.Empty
-	(*JwksReply)(nil),                  // 11: v1.issuer.JwksReply
-	(*Keys)(nil),                       // 12: v1.issuer.keys
-	(*Jwk)(nil),                        // 13: v1.issuer.jwk
-	(*MakeVC20Request)(nil),            // 14: v1.issuer.MakeVC20Request
-	(*MakeVC20Reply)(nil),              // 15: v1.issuer.MakeVC20Reply
-	(*SetCredentialStatusRequest)(nil), // 16: v1.issuer.SetCredentialStatusRequest
-	(*SetCredentialStatusReply)(nil),   // 17: v1.issuer.SetCredentialStatusReply
-	(*apiv1_status.StatusRequest)(nil), // 18: v1.status.StatusRequest
-	(*apiv1_status.StatusReply)(nil),   // 19: v1.status.StatusReply
+	(StatusAllocation)(0),              // 0: v1.issuer.StatusAllocation
+	(*SignMetadataRequest)(nil),        // 1: v1.issuer.SignMetadataRequest
+	(*SignMetadataReply)(nil),          // 2: v1.issuer.SignMetadataReply
+	(*GetIACAsReply)(nil),              // 3: v1.issuer.GetIACAsReply
+	(*MakeSDJWTRequest)(nil),           // 4: v1.issuer.MakeSDJWTRequest
+	(*MakeSDJWTReply)(nil),             // 5: v1.issuer.MakeSDJWTReply
+	(*MakeJWPRequest)(nil),             // 6: v1.issuer.MakeJWPRequest
+	(*MakeJWPReply)(nil),               // 7: v1.issuer.MakeJWPReply
+	(*MakeMDocRequest)(nil),            // 8: v1.issuer.MakeMDocRequest
+	(*MakeMDocReply)(nil),              // 9: v1.issuer.MakeMDocReply
+	(*Credential)(nil),                 // 10: v1.issuer.Credential
+	(*Empty)(nil),                      // 11: v1.issuer.Empty
+	(*JwksReply)(nil),                  // 12: v1.issuer.JwksReply
+	(*Keys)(nil),                       // 13: v1.issuer.keys
+	(*Jwk)(nil),                        // 14: v1.issuer.jwk
+	(*MakeVC20Request)(nil),            // 15: v1.issuer.MakeVC20Request
+	(*MakeVC20Reply)(nil),              // 16: v1.issuer.MakeVC20Reply
+	(*SetCredentialStatusRequest)(nil), // 17: v1.issuer.SetCredentialStatusRequest
+	(*SetCredentialStatusReply)(nil),   // 18: v1.issuer.SetCredentialStatusReply
+	(*apiv1_status.StatusRequest)(nil), // 19: v1.status.StatusRequest
+	(*apiv1_status.StatusReply)(nil),   // 20: v1.status.StatusReply
 }
 var file_v1_issuer_proto_depIdxs = []int32{
-	13, // 0: v1.issuer.MakeSDJWTRequest.jwk:type_name -> v1.issuer.jwk
-	9,  // 1: v1.issuer.MakeSDJWTReply.credentials:type_name -> v1.issuer.Credential
-	9,  // 2: v1.issuer.MakeJWPReply.credentials:type_name -> v1.issuer.Credential
-	12, // 3: v1.issuer.JwksReply.jwks:type_name -> v1.issuer.keys
-	13, // 4: v1.issuer.keys.keys:type_name -> v1.issuer.jwk
-	3,  // 5: v1.issuer.IssuerService.MakeSDJWT:input_type -> v1.issuer.MakeSDJWTRequest
-	7,  // 6: v1.issuer.IssuerService.MakeMDoc:input_type -> v1.issuer.MakeMDocRequest
-	14, // 7: v1.issuer.IssuerService.MakeVC20:input_type -> v1.issuer.MakeVC20Request
-	5,  // 8: v1.issuer.IssuerService.MakeJWP:input_type -> v1.issuer.MakeJWPRequest
-	10, // 9: v1.issuer.IssuerService.JWKS:input_type -> v1.issuer.Empty
-	0,  // 10: v1.issuer.IssuerService.SignMetadata:input_type -> v1.issuer.SignMetadataRequest
-	10, // 11: v1.issuer.IssuerService.GetIACAs:input_type -> v1.issuer.Empty
-	16, // 12: v1.issuer.IssuerService.SetCredentialStatus:input_type -> v1.issuer.SetCredentialStatusRequest
-	18, // 13: v1.issuer.IssuerService.Status:input_type -> v1.status.StatusRequest
-	4,  // 14: v1.issuer.IssuerService.MakeSDJWT:output_type -> v1.issuer.MakeSDJWTReply
-	8,  // 15: v1.issuer.IssuerService.MakeMDoc:output_type -> v1.issuer.MakeMDocReply
-	15, // 16: v1.issuer.IssuerService.MakeVC20:output_type -> v1.issuer.MakeVC20Reply
-	6,  // 17: v1.issuer.IssuerService.MakeJWP:output_type -> v1.issuer.MakeJWPReply
-	11, // 18: v1.issuer.IssuerService.JWKS:output_type -> v1.issuer.JwksReply
-	1,  // 19: v1.issuer.IssuerService.SignMetadata:output_type -> v1.issuer.SignMetadataReply
-	2,  // 20: v1.issuer.IssuerService.GetIACAs:output_type -> v1.issuer.GetIACAsReply
-	17, // 21: v1.issuer.IssuerService.SetCredentialStatus:output_type -> v1.issuer.SetCredentialStatusReply
-	19, // 22: v1.issuer.IssuerService.Status:output_type -> v1.status.StatusReply
-	14, // [14:23] is the sub-list for method output_type
-	5,  // [5:14] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	14, // 0: v1.issuer.MakeSDJWTRequest.jwk:type_name -> v1.issuer.jwk
+	10, // 1: v1.issuer.MakeSDJWTReply.credentials:type_name -> v1.issuer.Credential
+	0,  // 2: v1.issuer.MakeSDJWTReply.status_allocation:type_name -> v1.issuer.StatusAllocation
+	10, // 3: v1.issuer.MakeJWPReply.credentials:type_name -> v1.issuer.Credential
+	0,  // 4: v1.issuer.MakeJWPReply.status_allocation:type_name -> v1.issuer.StatusAllocation
+	0,  // 5: v1.issuer.MakeMDocReply.status_allocation:type_name -> v1.issuer.StatusAllocation
+	13, // 6: v1.issuer.JwksReply.jwks:type_name -> v1.issuer.keys
+	14, // 7: v1.issuer.keys.keys:type_name -> v1.issuer.jwk
+	0,  // 8: v1.issuer.MakeVC20Reply.status_allocation:type_name -> v1.issuer.StatusAllocation
+	4,  // 9: v1.issuer.IssuerService.MakeSDJWT:input_type -> v1.issuer.MakeSDJWTRequest
+	8,  // 10: v1.issuer.IssuerService.MakeMDoc:input_type -> v1.issuer.MakeMDocRequest
+	15, // 11: v1.issuer.IssuerService.MakeVC20:input_type -> v1.issuer.MakeVC20Request
+	6,  // 12: v1.issuer.IssuerService.MakeJWP:input_type -> v1.issuer.MakeJWPRequest
+	11, // 13: v1.issuer.IssuerService.JWKS:input_type -> v1.issuer.Empty
+	1,  // 14: v1.issuer.IssuerService.SignMetadata:input_type -> v1.issuer.SignMetadataRequest
+	11, // 15: v1.issuer.IssuerService.GetIACAs:input_type -> v1.issuer.Empty
+	17, // 16: v1.issuer.IssuerService.SetCredentialStatus:input_type -> v1.issuer.SetCredentialStatusRequest
+	19, // 17: v1.issuer.IssuerService.Status:input_type -> v1.status.StatusRequest
+	5,  // 18: v1.issuer.IssuerService.MakeSDJWT:output_type -> v1.issuer.MakeSDJWTReply
+	9,  // 19: v1.issuer.IssuerService.MakeMDoc:output_type -> v1.issuer.MakeMDocReply
+	16, // 20: v1.issuer.IssuerService.MakeVC20:output_type -> v1.issuer.MakeVC20Reply
+	7,  // 21: v1.issuer.IssuerService.MakeJWP:output_type -> v1.issuer.MakeJWPReply
+	12, // 22: v1.issuer.IssuerService.JWKS:output_type -> v1.issuer.JwksReply
+	2,  // 23: v1.issuer.IssuerService.SignMetadata:output_type -> v1.issuer.SignMetadataReply
+	3,  // 24: v1.issuer.IssuerService.GetIACAs:output_type -> v1.issuer.GetIACAsReply
+	18, // 25: v1.issuer.IssuerService.SetCredentialStatus:output_type -> v1.issuer.SetCredentialStatusReply
+	20, // 26: v1.issuer.IssuerService.Status:output_type -> v1.status.StatusReply
+	18, // [18:27] is the sub-list for method output_type
+	9,  // [9:18] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_v1_issuer_proto_init() }
@@ -1532,13 +1647,14 @@ func file_v1_issuer_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_v1_issuer_proto_rawDesc), len(file_v1_issuer_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_v1_issuer_proto_goTypes,
 		DependencyIndexes: file_v1_issuer_proto_depIdxs,
+		EnumInfos:         file_v1_issuer_proto_enumTypes,
 		MessageInfos:      file_v1_issuer_proto_msgTypes,
 	}.Build()
 	File_v1_issuer_proto = out.File

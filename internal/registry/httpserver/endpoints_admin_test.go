@@ -24,11 +24,11 @@ import (
 
 // mockApiv1 implements the Apiv1 interface for testing
 type mockApiv1 struct {
-	searchResult      *apiv1.SearchPersonReply
-	searchErr         error
-	updateErr         error
-	statusListReply   *apiv1.TokenStatusListsResponse
-	statusListErr     error
+	searchResult    *apiv1.SearchPersonReply
+	searchErr       error
+	updateErr       error
+	statusListReply *apiv1.TokenStatusListsResponse
+	statusListErr   error
 }
 
 func (m *mockApiv1) Status(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {

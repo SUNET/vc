@@ -534,7 +534,7 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 		}
 
 		replies = append(replies, reply)
-		entries = append(entries, statusEntry{Section: reply.TokenStatusListSection, Index: reply.TokenStatusListIndex, URI: reply.TokenStatusListUri, Backend: reply.TokenStatusListBackend})
+		entries = append(entries, statusEntry{Section: reply.TokenStatusListSection, Index: reply.TokenStatusListIndex, URI: reply.TokenStatusListUri, Backend: reply.TokenStatusListBackend, Allocated: reply.StatusAllocation})
 	}
 
 	credentials := make([]openid4vci.Credential, len(replies))
@@ -607,7 +607,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 		}
 
 		replies = append(replies, reply)
-		entries = append(entries, statusEntry{Section: reply.StatusListSection, Index: reply.StatusListIndex, URI: reply.StatusListUri, Backend: reply.StatusListBackend})
+		entries = append(entries, statusEntry{Section: reply.StatusListSection, Index: reply.StatusListIndex, URI: reply.StatusListUri, Backend: reply.StatusListBackend, Allocated: reply.StatusAllocation})
 	}
 
 	credentials := make([]openid4vci.Credential, len(replies))
@@ -700,7 +700,7 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 			return nil, errors.New("MakeVC20 reply is nil")
 		}
 		replies = append(replies, reply)
-		entries = append(entries, statusEntry{Section: reply.StatusListSection, Index: reply.StatusListIndex, URI: reply.StatusListUri, Backend: reply.StatusListBackend})
+		entries = append(entries, statusEntry{Section: reply.StatusListSection, Index: reply.StatusListIndex, URI: reply.StatusListUri, Backend: reply.StatusListBackend, Allocated: reply.StatusAllocation})
 	}
 
 	credentials := make([]openid4vci.Credential, len(replies))
@@ -731,6 +731,12 @@ type statusEntry struct {
 	Index   int64
 	URI     string
 	Backend string
+	// Allocated is the issuer saying EXPLICITLY whether it allocated an
+	// entry. Unspecified means the issuer predates the field, and that
+	// cannot be read as "allocated nothing": a registry's first allocation
+	// is legitimately section 0, index 0 with no URI, which is identical to
+	// a reply carrying nothing at all.
+	Allocated apiv1_issuer.StatusAllocation
 }
 
 // saveCredentialSubjects records which status-list entry was allocated for
@@ -793,6 +799,23 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 			// that window. Say so rather than let a rolling upgrade quietly
 			// produce unrevocable credentials; issuer and apigw are meant
 			// to be upgraded together.
+			// An issuer that does not SAY is refused, whatever the zero
+			// values look like. This is the ambiguous case: a registry's
+			// first allocation is section 0, index 0, and an issuer older
+			// than status_list_uri sends no URI and no backend either - so
+			// a real allocation and "nothing allocated" are byte-identical.
+			// Continuing on that guess delivered a credential carrying a
+			// status reference nothing had recorded, which revocation can
+			// never find. A loud failure during a partial upgrade is the
+			// better half of that trade.
+			if e.Allocated == apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_UNSPECIFIED {
+				c.log.Error(errors.New("issuer did not say whether a status entry was allocated"),
+					"issuance reply does not carry status_allocation, so a status entry may have been allocated and could never be recorded; this is what an issuer older than that field looks like - upgrade issuer and apigw together",
+					"identifier", identifier, "section", e.Section, "index", e.Index)
+				c.releaseAllocations(ctx, entries)
+				return errors.New("issuer did not report whether a status list entry was allocated; issuer and apigw must be upgraded together")
+			}
+
 			if e.Section != 0 || e.Index != 0 || e.Backend != "" {
 				// FAIL, do not continue. The issuer has already embedded
 				// this entry in what it signed, so continuing delivers a

@@ -28,6 +28,7 @@ func (s *Service) MakeSDJWT(ctx context.Context, in *apiv1_issuer.MakeSDJWTReque
 		TokenStatusListIndex:   reply.TokenStatusListIndex,
 		TokenStatusListUri:     reply.TokenStatusListURI,
 		TokenStatusListBackend: reply.TokenStatusListBackend,
+		StatusAllocation:       statusAllocation(reply.TokenStatusListURI),
 	}, nil
 }
 
@@ -63,6 +64,7 @@ func (s *Service) MakeMDoc(ctx context.Context, in *apiv1_issuer.MakeMDocRequest
 		StatusListIndex:   reply.StatusListIndex,
 		StatusListUri:     reply.StatusListURI,
 		StatusListBackend: reply.StatusListBackend,
+		StatusAllocation:  statusAllocation(reply.StatusListURI),
 		ValidFrom:         reply.ValidFrom,
 		ValidUntil:        reply.ValidUntil,
 	}, nil
@@ -103,4 +105,20 @@ func (s *Service) SetCredentialStatus(ctx context.Context, in *apiv1_issuer.SetC
 		return nil, err
 	}
 	return &apiv1_issuer.SetCredentialStatusReply{}, nil
+}
+
+// statusAllocation says EXPLICITLY whether an entry was allocated, so the
+// apigw never infers it from zero values - a registry's first allocation is
+// legitimately section 0, index 0, which is indistinguishable from "nothing
+// was allocated" unless somebody says which it is.
+//
+// The URI is the signal because the issuer's own invariant makes it one:
+// allocateOrDegrade and allocateOptionalStatus both hand the slot back and
+// return nothing when an allocation arrives without a URI, so a URI is
+// present exactly when an entry was allocated.
+func statusAllocation(uri string) apiv1_issuer.StatusAllocation {
+	if uri == "" {
+		return apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE
+	}
+	return apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED
 }

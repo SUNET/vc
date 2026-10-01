@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/internal/apigw/db"
+	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/logger"
 
@@ -133,10 +134,16 @@ func TestSaveCredentialSubjects_StoreFailureFailsIssuance(t *testing.T) {
 // TestSaveCredentialSubjects_NoAllocationIsNotRecorded: an entry with no URI
 // is one the issuance path never allocated, which is exactly how it reports
 // "this credential was issued without a status claim".
+//
+// The issuer has to SAY so. Section 0, index 0 and no URI is also what a
+// registry's first allocation looks like from an issuer too old to send one,
+// so the zero values alone cannot carry this meaning.
 func TestSaveCredentialSubjects_NoAllocationIsNotRecorded(t *testing.T) {
 	c, store := persistenceClient(t, nil)
 
-	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-3", "SUNET", "pid", []statusEntry{{Section: 0, Index: 0}}))
+	require.NoError(t, c.saveCredentialSubjects(t.Context(), "person-3", "SUNET", "pid", []statusEntry{
+		{Section: 0, Index: 0, Allocated: apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE},
+	}))
 	require.Empty(t, store.saved, "nothing was allocated, so there is nothing to record")
 }
 
@@ -275,16 +282,15 @@ func TestSaveCredentialSubjects_FailureReleasesUnattemptedEntriesToo(t *testing.
 		"allocated but never reached - this is the one that used to leak")
 }
 
-// TestSaveCredentialSubjects_AllocatedWithoutURIIsRefused: an issuer older
-// than the status_list_uri field returns a section and an index and no URI.
-// It has already embedded that entry in what it signed, so continuing
-// delivers a credential advertising a revocation status nothing can ever
-// set. That used to be a warning and a `continue`.
+// TestSaveCredentialSubjects_AllocatedWithoutURIIsRefused: an entry that was
+// allocated and carries no URI has already been embedded in what the issuer
+// signed, so continuing delivers a credential advertising a revocation status
+// nothing can ever set. That used to be a warning and a `continue`.
 func TestSaveCredentialSubjects_AllocatedWithoutURIIsRefused(t *testing.T) {
 	c, store, issuer := persistenceClientWithIssuer(t, nil)
 
 	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
-		{Section: 3, Index: 9},
+		{Section: 3, Index: 9, Allocated: apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED},
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no list URI")
@@ -395,4 +401,26 @@ func TestSaveCredentialSubjects_CleanupSurvivesARequestCancellation(t *testing.T
 	for i, ctxErr := range store.deleteCtxErrs {
 		require.NoError(t, ctxErr, "rollback %d was sent on a context already cancelled by the caller", i)
 	}
+}
+
+// TestSaveCredentialSubjects_SilentIssuerIsRefused: an issuer that does not
+// say whether it allocated anything cannot be read as having allocated
+// nothing. A registry's FIRST allocation is section 0, index 0, and an issuer
+// older than status_list_uri sends no URI and no backend either - byte-for-byte
+// what "nothing was allocated" looks like. The apigw used to continue on that
+// guess and deliver a credential whose status entry was never recorded, so
+// revocation could never find it.
+//
+// A loud failure during a partial upgrade is the better half of that trade,
+// and it is the only reading that does not require guessing.
+func TestSaveCredentialSubjects_SilentIssuerIsRefused(t *testing.T) {
+	c, store, issuer := persistenceClientWithIssuer(t, nil)
+
+	// Exactly the ambiguous tuple: zero section, zero index, no URI, no
+	// backend, and no statement either way.
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{{}})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "did not report whether")
+	require.Empty(t, store.saved, "nothing is recorded on a reply that cannot be trusted")
+	require.Empty(t, issuer.calls, "and there is no URI to release it by")
 }

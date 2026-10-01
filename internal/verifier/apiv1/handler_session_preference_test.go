@@ -115,6 +115,7 @@ func TestUpdateSessionPreference_WalletFollowsRedirect(t *testing.T) {
 	assert.True(t, updated.WalletFollowsRedirect, "omitting wallet_follows_redirect must leave the flag set")
 	assert.False(t, updated.ShowCredentialDetails)
 }
+
 func TestConfirmCredentialDisplay(t *testing.T) {
 	ctx := t.Context()
 

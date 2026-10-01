@@ -53,6 +53,29 @@ message MakeSDJWTRequest {
     bytes vctm = 6;              // Raw VCTM JSON bytes (provided by APIGW, avoids issuer fetching URL)
 }
 
+// StatusAllocation says EXPLICITLY whether the issuer allocated a status-list
+// entry for a credential, so the apigw never has to infer it from zero values.
+//
+// Inferring does not work. A registry's FIRST allocation is legitimately
+// section 0, index 0, and an issuer older than status_list_uri sends no URI
+// and no backend either - which is byte-for-byte what "nothing was allocated"
+// looks like. The apigw then recorded nothing and delivered a credential
+// carrying a status reference that can never be revoked.
+//
+// UNSPECIFIED is therefore what an issuer older than this field sends, and the
+// apigw refuses it: a loud failure during a partial upgrade is better than a
+// credential that silently cannot be revoked. Issuer and apigw are meant to be
+// upgraded together.
+enum StatusAllocation {
+    STATUS_ALLOCATION_UNSPECIFIED = 0;
+    // The issuer speaks this protocol and allocated nothing - revocation is
+    // not available for this credential, deliberately.
+    STATUS_ALLOCATION_NONE = 1;
+    // An entry was allocated; the uri, section, index and backend fields
+    // describe it.
+    STATUS_ALLOCATION_ALLOCATED = 2;
+}
+
 message MakeSDJWTReply {
    repeated Credential credentials = 1;
    int64 token_status_list_section = 2; // Token Status List section
@@ -68,6 +91,8 @@ message MakeSDJWTReply {
    // identify the backend, and guessing at revocation time writes the
    // status into the wrong list.
    string token_status_list_backend = 5;
+   // Whether an entry was allocated at all. See StatusAllocation.
+   StatusAllocation status_allocation = 6;
 }
 
 // MakeJWPRequest is the request for creating a blind BBS credential in JWP
@@ -121,6 +146,8 @@ message MakeJWPReply {
    // identify the backend, and guessing at revocation time writes the
    // status into the wrong list.
    string token_status_list_backend = 5;
+   // Whether an entry was allocated at all. See StatusAllocation.
+   StatusAllocation status_allocation = 6;
 }
 
 // MakeMDocRequest is the request for creating an mdoc document (ISO 18013-5)
@@ -144,6 +171,8 @@ message MakeMDocReply {
     string status_list_uri = 6;
     // See token_status_list_backend on MakeSDJWTReply.
     string status_list_backend = 7;
+    // Whether an entry was allocated at all. See StatusAllocation.
+    StatusAllocation status_allocation = 8;
 }
 
 message Credential {
@@ -199,6 +228,8 @@ message MakeVC20Reply {
     string status_list_uri = 7;
     // See token_status_list_backend on MakeSDJWTReply.
     string status_list_backend = 8;
+    // Whether an entry was allocated at all. See StatusAllocation.
+    StatusAllocation status_allocation = 9;
 }
 
 // SetCredentialStatusRequest asks for one issued credential's status-list
