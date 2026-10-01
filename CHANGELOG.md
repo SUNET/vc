@@ -190,7 +190,9 @@
   verified.** Extraction resolves only the first proof reference, so a proof
   SET carrying a forged proof ahead of a genuine one had the claims naming the
   REJECTED proof while every other field on the result described the accepted
-  one.
+  one. Extraction itself also merges a proof node split across several members
+  of its graph, instead of reporting whichever fragment came first — unsigned
+  member order decided which fields appeared.
 
   **A document whose root takes part in a reference cycle is refused at
   SIGNING and at VERIFICATION.** A presentation carrying a credential whose

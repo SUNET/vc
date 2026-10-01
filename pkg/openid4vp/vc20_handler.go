@@ -687,10 +687,24 @@ func (h *VC20Handler) proofForRef(expanded []any, proofRef string) map[string]an
 		}
 	}
 
-	for _, member := range members {
-		if node, isNode := member.(map[string]any); isNode {
-			return h.extractProofFromExpanded(node)
+	// FRAGMENTS MERGED, not the first one taken. Valid expanded JSON-LD may
+	// split one proof node across several members carrying the same @id, and
+	// the cryptosuite merges them before verifying - so taking the first here
+	// let unsigned member order decide which fields were reported, and a
+	// proof could verify while the claims omitted whatever the later
+	// fragments carried.
+	//
+	// credential.RootOfExpandedNodes is the same rule used everywhere else in
+	// this change: coalesce by identifier, exclude graph wrappers, and REFUSE
+	// when the members do not say which node they are about. A refusal
+	// reports no proof, which is the right answer - the alternative is
+	// reporting a guess.
+	if len(members) > 0 {
+		node, err := credential.RootOfExpandedNodes(members)
+		if err != nil {
+			return nil
 		}
+		return h.extractProofFromExpanded(node)
 	}
 	if direct != nil {
 		return h.extractProofFromExpanded(direct)

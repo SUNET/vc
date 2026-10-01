@@ -91,3 +91,55 @@ func TestProofGraphRefWithNoMatchReportsNothing(t *testing.T) {
 	require.NotContains(t, result, "proof",
 		"an unresolvable reference reports no proof rather than someone else's")
 }
+
+// TestProofGraphFragmentsAreMerged: valid expanded JSON-LD may split one proof
+// node across several members carrying the same @id, and the cryptosuite
+// merges them before verifying. Taking the first member here let UNSIGNED
+// member order decide which fields were reported, so a proof could verify
+// while the claims omitted whatever the later fragments carried.
+func TestProofGraphFragmentsAreMerged(t *testing.T) {
+	const proofID = "https://example.org/the-proof"
+
+	expanded := []any{
+		map[string]any{
+			"@id": "https://example.org/root-proof",
+			"@graph": []any{
+				// One node, written as two members.
+				map[string]any{
+					"@id":   proofID,
+					"@type": []any{"https://w3id.org/security#DataIntegrityProof"},
+					"https://w3id.org/security#cryptosuite": []any{
+						map[string]any{"@value": "eddsa-rdfc-2022"},
+					},
+				},
+				map[string]any{
+					"@id": proofID,
+					"https://w3id.org/security#verificationMethod": []any{
+						map[string]any{"@id": "did:example:issuer#key-1"},
+					},
+				},
+			},
+		},
+		map[string]any{
+			"@id":   "https://example.org/credential",
+			"@type": []any{"https://www.w3.org/2018/credentials#VerifiableCredential"},
+			"https://www.w3.org/2018/credentials#issuer": []any{
+				map[string]any{"@id": "did:example:issuer"},
+			},
+			"https://w3id.org/security#proof": []any{
+				map[string]any{"@id": "https://example.org/root-proof"},
+			},
+		},
+	}
+
+	handler := &VC20Handler{}
+	result, err := handler.extractCredentialFromExpanded(expanded)
+	require.NoError(t, err)
+
+	proof, isNode := result["proof"].(map[string]any)
+	require.True(t, isNode)
+	require.Equal(t, "eddsa-rdfc-2022", proof["cryptosuite"],
+		"the first fragment's fields are reported")
+	require.Equal(t, "did:example:issuer#key-1", proof["verificationMethod"],
+		"and so are the later fragment's, rather than whichever came first")
+}
