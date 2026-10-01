@@ -582,3 +582,43 @@ func TestRootCompactedDocumentKeepsANullReset(t *testing.T) {
 	require.NotContains(t, string(encoded), "vocab#note",
 		"a reset context must not leave the node inheriting definitions")
 }
+
+// TestRootCompactedDocumentKeepsExistingIncluded: the promoted root may
+// already carry @included entries. Replacing them with the former graph
+// siblings dropped those nodes - and they sit in the same graph, so dropping
+// them removes their triples from the dataset this is supposed to carry
+// through unchanged.
+func TestRootCompactedDocumentKeepsExistingIncluded(t *testing.T) {
+	rooted, err := RootCompactedDocument(map[string]any{
+		"@context": map[string]any{"id": "@id", "note": "https://example.org/vocab#note"},
+		"@graph": []any{
+			map[string]any{"id": "https://example.org/sibling", "note": "a former graph sibling"},
+			map[string]any{
+				"id":        "https://example.org/credential",
+				"note":      "the root",
+				"@included": []any{map[string]any{"id": "https://example.org/already", "note": "carried by the root"}},
+			},
+		},
+	}, "https://example.org/credential", nil)
+	require.NoError(t, err)
+
+	included, isList := rooted["@included"].([]any)
+	require.True(t, isList)
+	require.Len(t, included, 2, "the root's own @included and the former sibling")
+
+	var ids []string
+	for _, entry := range included {
+		id, _ := entry.(map[string]any)["id"].(string)
+		ids = append(ids, id)
+	}
+	require.Contains(t, ids, "https://example.org/already", "what the root already included stays")
+	require.Contains(t, ids, "https://example.org/sibling", "and the sibling joins it")
+
+	// The triples are the point: both nodes must still be in the dataset.
+	expanded, err := ld.NewJsonLdProcessor().Expand(rooted, NewJSONLDOptions(""))
+	require.NoError(t, err)
+	encoded, err := json.Marshal(expanded)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), "carried by the root")
+	require.Contains(t, string(encoded), "a former graph sibling")
+}

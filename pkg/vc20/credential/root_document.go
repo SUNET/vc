@@ -137,8 +137,18 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 		}
 		rooted[key] = value
 	}
+	// APPENDED to whatever the root already included. Replacing it dropped
+	// those nodes from the document - and they are in the same graph, so
+	// dropping them removes their triples from the dataset this is supposed
+	// to carry through unchanged.
 	if len(included) > 0 {
-		rooted["@included"] = included
+		combined := included
+		// Only when the root HAS one: asList of an absent member yields a
+		// list holding nil, and a nil entry in @included is not a node.
+		if existing, present := rooted["@included"]; present {
+			combined = append(asList(existing), included...)
+		}
+		rooted["@included"] = combined
 	}
 
 	return rooted, nil
