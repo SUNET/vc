@@ -423,10 +423,13 @@ func sdRootProof(cred *credential.RDFCredential) (map[string]any, error) {
 // malformed one does not disturb a genuine proof already there, and failing on
 // it would let that append deny verification.
 func sdRootProofs(cred *credential.RDFCredential) ([]map[string]any, error) {
-	if err := cred.CheckRootSurvivesFlattening(); err != nil {
-		return nil, err
-	}
-
+	// NO root-stability pre-check here. CompactedRootProofs reaches
+	// securedDocument, which runs that check and memoizes the result -
+	// running it first repeated a JSON-LD expansion and an RDF
+	// serialization on every call, and VerifyRootProof is called once per
+	// candidate, so a document at the proof limit paid for it 32 times
+	// before anything was authenticated.
+	//
 	// Compacted once per document, memoized with the secured-document
 	// answer, so repeating this per candidate costs nothing.
 	compacted, err := credential.CompactedRootProofs(cred)

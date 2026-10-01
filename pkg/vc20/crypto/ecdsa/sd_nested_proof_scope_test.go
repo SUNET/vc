@@ -372,3 +372,38 @@ func TestSdSignRefusesToExceedTheProofLimit(t *testing.T) {
 	})
 	require.NoError(t, err, "one below the limit still signs")
 }
+
+// TestSdVerifyStillRefusesAnUnstableRoot: the root-stability check moved out
+// of sdRootProofs, which was running it before CompactedRootProofs - the one
+// place that performs it and memoizes the answer. Removing a check because
+// something else does it is only safe if that something else really does, so
+// this says the SD path still refuses a document whose root moves.
+func TestSdVerifyStillRefusesAnUnstableRoot(t *testing.T) {
+	suite := NewSdSuite()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	// A blank root with an @included node pointing back at it: the root
+	// moves once flattened, which is what the check is for.
+	unstable, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"@id": "_:root",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"},
+		"@included": [{"https://example.org/vocab#about": {"@id": "_:root"}}],
+		"proof": {
+			"type": "DataIntegrityProof",
+			"cryptosuite": "ecdsa-sd-2023",
+			"created": "2024-01-01T00:00:00Z",
+			"verificationMethod": "did:example:issuer#key-1",
+			"proofPurpose": "assertionMethod",
+			"proofValue": "uZmFrZQ"
+		}
+	}`), ld.NewJsonLdOptions(""))
+	require.NoError(t, err)
+
+	err = suite.Verify(unstable, &key.PublicKey)
+	require.ErrorContains(t, err, "refers to that node",
+		"the stability check must still run, wherever it lives")
+}

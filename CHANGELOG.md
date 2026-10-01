@@ -80,6 +80,32 @@
   error names the document rather than the serialization. **Documents of these
   shapes signed before this release no longer verify.**
 
+  **A proof's key must belong to the credential's issuer.** The OpenID4VP
+  handler checked the (unsigned) `issuer` claim against its trusted-issuer
+  list and, separately, asked its resolver for the key the proof names.
+  Nothing joined the two, so in a trust framework holding several issuers —
+  where every issuer's key resolves — a credential claiming one issuer could
+  be signed with anybody else's resolvable key and was reported as that
+  issuer's.
+
+  A resolver may now implement `openid4vp.VC20IssuerAuthorizer` (may THIS
+  issuer assert with THIS key, for this proof purpose) and its answer is
+  final. `pkg/trust`'s `TrustEvaluator` already takes a subject, a key and an
+  action, so an adapter over it is small — **but no adapter in this
+  repository implements it yet**, so every deployment currently takes the
+  fallback below.
+
+  **Migration:** without an authorizer the handler requires the verification
+  method to BE the issuer or to sit under it — `did:example:issuer#key-1`
+  under `did:example:issuer`, `https://issuer.example/keys/1` under
+  `https://issuer.example`. **A credential signed with a key delegated to a
+  different identifier is now refused**, even where the trust framework
+  authorizes that delegation. If you rely on delegation, implement
+  `VC20IssuerAuthorizer` on your resolver; that path accepts it. The fallback
+  is a deliberate approximation, not the intended end state — an identifier
+  under the issuer is not proof the key sits in that issuer's
+  `assertionMethod` relationship either.
+
   **An expanded verifiable presentation is no longer accepted by the
   OpenID4VP handler.** It used to verify the proofs the DOCUMENT attaches to
   itself — the holder's, for a presentation — while reporting the issuer,
