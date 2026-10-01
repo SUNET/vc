@@ -738,6 +738,13 @@ func expandNodeIDs(ids []string, context any, options *ld.JsonLdOptions) []strin
 // inside another. Repeated entries are kept rather than deduplicated, because
 // re-applying a context is how a document puts back a term an earlier one
 // redefined - dropping the repeat would silently change what the terms mean.
+//
+// A nil INNER means "there is no inner context", and this returns the outer
+// one unchanged. It does NOT mean an explicit "@context": null, which is a
+// RESET and must clear the outer context instead - a caller that cannot tell
+// the two apart has to check for the key's presence itself before calling
+// here. Both callers in this package do; getting it wrong re-enables terms a
+// document deliberately switched off, and changes the RDF being signed.
 func JoinContexts(outer any, inner any) any {
 	if outer == nil {
 		return inner
