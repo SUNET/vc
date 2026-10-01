@@ -342,12 +342,11 @@ func (rc *RDFCredential) CredentialWithoutProofForTypes(targetTypes ...string) (
 	// Convert filtered dataset back to JSON-LD for canonicalization
 	// This is needed because directly serializing relative IRIs to N-Quads
 	// produces invalid N-Quads (e.g., <UniversityDegreeCredential> without scheme)
-	api := ld.NewJsonLdApi()
-	opts := ld.NewJsonLdOptions("")
-	opts.DocumentLoader = GetGlobalLoader()
-
-	// Convert RDF dataset to JSON-LD using the API directly
-	jsonLdDoc, err := api.FromRDF(filteredDataset, opts)
+	// The credential's OWN options, not fresh defaults: a private document
+	// loader, an expandContext, a base or a processing mode all change what
+	// this document says, and the result is what a signature is computed
+	// over.
+	jsonLdDoc, err := ld.NewJsonLdApi().FromRDF(filteredDataset, rc.expansionOptions())
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert filtered dataset to JSON-LD: %w", err)
 	}
@@ -515,27 +514,15 @@ func (rc *RDFCredential) ToCompactJSON() ([]byte, error) {
 		return nil, fmt.Errorf("RDF dataset is nil")
 	}
 
-	// First get the expanded JSON-LD
-	serializer := &ld.NQuadRDFSerializer{}
-	nquads, err := serializer.Serialize(rc.dataset)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize dataset to N-Quads: %w", err)
-	}
-	nquadsStr, ok := nquads.(string)
-	if !ok {
-		return nil, fmt.Errorf("unexpected serialization result: %T", nquads)
-	}
-
-	opts := rc.options
-	if opts == nil {
-		opts = ld.NewJsonLdOptions("")
-		opts.DocumentLoader = GetGlobalLoader()
-	}
-	if opts.Format == "" {
-		opts.Format = "application/n-quads"
-	}
-
-	expanded, err := rc.processor.FromRDF(nquadsStr, opts)
+	// Straight from the dataset, like MarshalJSON and CanonicalForm. Going
+	// through N-Quads drops any quad with a blank node in predicate
+	// position, which is not valid N-Quads however the dataset was built.
+	//
+	// And on the credential's OWN options rather than a copy, this used to
+	// set Format on rc.options in place - so a credential that had once been
+	// compacted parsed JSON as N-Quads ever after. expansionOptions returns
+	// a copy with both format fields cleared, which is what this needs.
+	expanded, err := ld.NewJsonLdApi().FromRDF(rc.dataset, rc.expansionOptions())
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert RDF to JSON-LD: %w", err)
 	}

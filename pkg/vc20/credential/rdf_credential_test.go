@@ -1119,3 +1119,57 @@ func TestCanonicalFormHonoursProduceGeneralizedRdf(t *testing.T) {
 	require.NotContains(t, plain, "a statement made through a blank node predicate",
 		"the quad is dropped without the option, which is what made the gap invisible")
 }
+
+// TestToCompactJSONDoesNotRewriteTheCredentialsOptions: this took the
+// credential's own options POINTER and set Format on it, so a credential that
+// had once been compacted parsed JSON as N-Quads ever after - "unexpected RDF
+// data type: string" from whatever ran next. Serializing a document must not
+// change what the document is.
+func TestToCompactJSONDoesNotRewriteTheCredentialsOptions(t *testing.T) {
+	source, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": {"id": "@id", "note": "https://example.org/vocab#note"},
+		"id": "https://example.org/credential",
+		"note": "hello"
+	}`), nil)
+	require.NoError(t, err)
+
+	// ToCompactJSON only reaches the dataset path with no original JSON to
+	// hand back, which is how a credential built from a dataset arrives.
+	options := NewJSONLDOptions("")
+	fromDataset := &RDFCredential{
+		dataset:   source.dataset,
+		processor: ld.NewJsonLdProcessor(),
+		options:   options,
+	}
+
+	_, err = fromDataset.ToCompactJSON()
+	require.NoError(t, err)
+	require.Empty(t, options.Format,
+		"compacting a document must not change what the document is")
+	require.Empty(t, options.InputFormat)
+}
+
+// TestToCompactJSONCarriesGeneralizedRdf: the dataset path serialized to
+// N-Quads and read them back, so a blank node in predicate position - not
+// valid N-Quads however the dataset was built - made the whole call fail.
+func TestToCompactJSONCarriesGeneralizedRdf(t *testing.T) {
+	options := NewJSONLDOptions("")
+	options.ProduceGeneralizedRdf = true
+
+	source, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": {"id": "@id", "rel": "_:aBlankNodePredicate"},
+		"id": "https://example.org/credential",
+		"rel": "a statement made through a blank node predicate"
+	}`), options)
+	require.NoError(t, err)
+
+	fromDataset := &RDFCredential{
+		dataset:   source.dataset,
+		processor: ld.NewJsonLdProcessor(),
+		options:   options,
+	}
+
+	compact, err := fromDataset.ToCompactJSON()
+	require.NoError(t, err, "a generalized-RDF dataset must still compact")
+	require.Contains(t, string(compact), "a statement made through a blank node predicate")
+}
