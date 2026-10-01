@@ -187,6 +187,27 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		if err2 := json.Unmarshal(credBytes, &expanded); err2 != nil {
 			return nil, fmt.Errorf("failed to parse credential JSON: %w (also tried array: %v)", err, err2)
 		}
+		// A PRESENTATION in expanded form is refused, not unwrapped.
+		//
+		// credBytes stays the whole document here, so verification below
+		// checks the proofs the DOCUMENT attaches to itself - the holder's,
+		// for a presentation. extractCredentialFromExpanded meanwhile
+		// returns the first VerifiableCredential node, which for a
+		// presentation is the credential it carries. The step 3 unwrap
+		// cannot see it either, since the map that function builds never
+		// says VerifiablePresentation. So a holder-signed presentation
+		// passed while the issuer, subject and trust decision all came from
+		// an embedded credential whose own proof was never checked.
+		//
+		// Carving that credential, and the proof graphs beside it, out of a
+		// flattened array is exactly the kind of reconstruction that goes
+		// quietly wrong, and getting it wrong here means authenticating the
+		// wrong node. The compact form is unwrapped correctly at step 3, so
+		// that is what this asks for.
+		if expandedHoldsAPresentation(expanded) {
+			return nil, errors.New("a verifiable presentation in expanded JSON-LD is not accepted: send it in compact form, where the credential it carries is what gets verified")
+		}
+
 		// Find the credential node in the expanded format for result extraction
 		// Keep original bytes for vc20 library verification
 		credMap, err = h.extractCredentialFromExpanded(expanded)
@@ -416,6 +437,33 @@ func (h *VC20Handler) extractCredentialFromVP(vp map[string]any) ([]byte, map[st
 	}
 
 	return credBytes, credMap, nil
+}
+
+// expandedHoldsAPresentation reports whether any node of an expanded document
+// is a VerifiablePresentation.
+//
+// Any node, not just the root: a document that carries a presentation
+// anywhere is one whose shape this path does not take apart safely, and
+// refusing it costs nothing a caller cannot fix by sending compact JSON-LD.
+func expandedHoldsAPresentation(expanded []any) bool {
+	const vpType = "https://www.w3.org/2018/credentials#VerifiablePresentation"
+
+	for _, node := range expanded {
+		nodeMap, isNode := node.(map[string]any)
+		if !isNode {
+			continue
+		}
+		types, hasTypes := nodeMap["@type"].([]any)
+		if !hasTypes {
+			continue
+		}
+		for _, entry := range types {
+			if name, isString := entry.(string); isString && name == vpType {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // extractCredentialFromExpanded extracts credential data from expanded JSON-LD format.

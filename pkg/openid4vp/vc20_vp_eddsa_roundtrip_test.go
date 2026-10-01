@@ -824,3 +824,57 @@ func TestVerifyAndExtractRefusesAnUnboundedProofSet(t *testing.T) {
 	require.ErrorContains(t, err, "more than the 32 this will verify",
 		"a document may not make a verifier do unbounded work")
 }
+
+// TestVerifyAndExtractRefusesAnExpandedPresentation: an expanded presentation
+// used to verify the HOLDER's proof - the one the document attaches to itself -
+// while reporting the issuer, subject and trust decision of the embedded
+// credential, whose own proof was never checked. The VP unwrap at step 3 could
+// not see it either, because the map built from the expanded form never says
+// VerifiablePresentation.
+func TestVerifyAndExtractRefusesAnExpandedPresentation(t *testing.T) {
+	holderPub, holderKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	_, issuerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	// A credential signed by the ISSUER, carried in a presentation signed by
+	// the HOLDER - and only the holder's key is resolvable.
+	credential0 := signedExampleDocument(t, "https://www.w3.org/ns/credentials/v2", "did:example:issuer#key-1", issuerKey)
+
+	presentation, err := credential.NewRDFCredentialFromJSON(mustJSON(t, map[string]any{
+		"@context":             "https://www.w3.org/ns/credentials/v2",
+		"type":                 []any{"VerifiablePresentation"},
+		"verifiableCredential": []any{credential0},
+	}), nil)
+	require.NoError(t, err)
+
+	signedVP, err := eddsaSuite.NewSuite().Sign(presentation, holderKey, &eddsaSuite.SignOptions{
+		VerificationMethod: "did:example:holder#key-1",
+		ProofPurpose:       "authentication",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	// EXPANDED form - a flattened array, which is what ToJSON produces.
+	expanded, err := signedVP.ToJSON()
+	require.NoError(t, err)
+	var asArray []any
+	require.NoError(t, json.Unmarshal(expanded, &asArray),
+		"the expanded form must really be an array, or this exercises the compact path")
+
+	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+		keys: map[string]crypto.PublicKey{"did:example:holder#key-1": holderPub},
+	}))
+	require.NoError(t, err)
+
+	_, err = handler.VerifyAndExtract(t.Context(), string(expanded))
+	require.ErrorContains(t, err, "expanded JSON-LD is not accepted",
+		"the holder's proof must not stand in for the issuer's")
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	require.NoError(t, err)
+	return encoded
+}

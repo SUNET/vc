@@ -78,7 +78,7 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 	}
 
 	if rootIndex < 0 {
-		index, err := rootIndexOfCompactedNodes(nodes)
+		index, err := rootIndexOfCompactedNodes(nodes, compacted["@context"], options)
 		if err != nil {
 			return nil, err
 		}
@@ -191,25 +191,35 @@ func mentionsID(value any, id string, atNodeRoot bool) bool {
 //
 // No single such node is a REFUSAL. A document that does not say which node it
 // is about is one whose proof could be read as securing either.
-func RootOfCompactedNodes(nodes []map[string]any) (map[string]any, error) {
-	index, err := rootIndexOfCompactedNodes(nodes)
+func RootOfCompactedNodes(nodes []map[string]any, context any, options *ld.JsonLdOptions) (map[string]any, error) {
+	index, err := rootIndexOfCompactedNodes(nodes, context, options)
 	if err != nil {
 		return nil, err
 	}
 	return nodes[index], nil
 }
 
-func rootIndexOfCompactedNodes(nodes []map[string]any) (int, error) {
+func rootIndexOfCompactedNodes(nodes []map[string]any, context any, options *ld.JsonLdOptions) (int, error) {
 	if len(nodes) == 0 {
 		return -1, fmt.Errorf("a document holds no node to be about")
 	}
+
+	// Which identifiers are REFERRED TO, decided on the expanded form where
+	// a reference is an @id object and a literal is an @value one. In
+	// compact JSON-LD the two are the same Go string: a term declared
+	// "@type": "@id" writes a reference as a bare string, and so does any
+	// ordinary string-valued property. Reading every string as a reference
+	// marked a node referenced because some unrelated literal happened to
+	// equal its identifier, and the document was then refused - or a
+	// different node picked - for saying nothing of the kind.
+	referenced, resolved := referencedIDs(nodes, context, options)
 
 	rootIndex := -1
 	for i, node := range nodes {
 		id := compactNodeID(node)
 		// A node with no identifier cannot be referred to, so it is a
 		// candidate like any other unreferenced node.
-		if id != "" && referencedByAnyOther(nodes, i, id) {
+		if id != "" && isReferenced(nodes, i, id, referenced, resolved) {
 			continue
 		}
 		if rootIndex >= 0 {
@@ -370,4 +380,69 @@ func IsBareGraphContainer(node map[string]any) bool {
 		}
 	}
 	return true
+}
+
+// referencedIDs collects the identifiers the document POINTS AT, by expanding
+// it and reading the @id of every value object. resolved reports whether that
+// expansion succeeded; when it did not - no context to resolve against, or one
+// that will not load - the caller falls back to scanning strings, which is
+// imprecise but never misses a reference.
+func referencedIDs(nodes []map[string]any, context any, options *ld.JsonLdOptions) (map[string]bool, bool) {
+	if context == nil {
+		return nil, false
+	}
+	if options == nil {
+		options = NewJSONLDOptions("")
+	}
+
+	entries := make([]any, 0, len(nodes))
+	for _, node := range nodes {
+		entries = append(entries, node)
+	}
+	document := map[string]any{"@context": context, "@graph": entries}
+
+	expanded, err := ld.NewJsonLdProcessor().Expand(document, options)
+	if err != nil {
+		return nil, false
+	}
+
+	referenced := map[string]bool{}
+	collectReferencedIDs(expanded, referenced, true)
+	return referenced, true
+}
+
+// collectReferencedIDs walks expanded JSON-LD adding every @id that appears as
+// a VALUE. A node's own @id is not a reference to itself, so the identifier at
+// the top of each node is skipped.
+func collectReferencedIDs(value any, into map[string]bool, atNodeRoot bool) {
+	switch typed := value.(type) {
+	case []any:
+		for _, entry := range typed {
+			collectReferencedIDs(entry, into, atNodeRoot)
+		}
+	case map[string]any:
+		if _, isLiteral := typed["@value"]; isLiteral {
+			return
+		}
+		if id, ok := typed["@id"].(string); ok && !atNodeRoot {
+			into[id] = true
+		}
+		for key, member := range typed {
+			if key == "@id" {
+				continue
+			}
+			// Only the entries of @graph are nodes in their own right;
+			// everything else below here is a value.
+			collectReferencedIDs(member, into, key == "@graph")
+		}
+	}
+}
+
+// isReferenced answers from the expanded reading when there was one, and from
+// the string scan otherwise.
+func isReferenced(nodes []map[string]any, skip int, id string, referenced map[string]bool, resolved bool) bool {
+	if resolved {
+		return referenced[id]
+	}
+	return referencedByAnyOther(nodes, skip, id)
 }

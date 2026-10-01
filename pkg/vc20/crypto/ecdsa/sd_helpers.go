@@ -308,7 +308,7 @@ func removeRootProof(data any, options *ld.JsonLdOptions) error {
 			deleteProofKeys(nodes[0])
 			return nil
 		}
-		root, err := credential.RootOfCompactedNodes(nodes)
+		root, err := credential.RootOfCompactedNodes(nodes, context, options)
 		if err != nil {
 			return err
 		}

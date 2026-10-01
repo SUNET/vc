@@ -174,3 +174,34 @@ func TestRootCompactedDocumentUsesTheGivenOptions(t *testing.T) {
 	_, err = RootCompactedDocument(document, "https://example.org/credentials/outer", nil)
 	require.Error(t, err, "the context must be unreachable without that loader")
 }
+
+// TestRootCompactedDocumentIgnoresCompactLiterals: in COMPACT JSON-LD a
+// reference and a literal are the same Go string - a term declared
+// "@type": "@id" writes a reference as a bare string, and so does any ordinary
+// string-valued property. Reading every string as a reference marked a node
+// referenced because some unrelated literal equalled its identifier, and the
+// document was refused for saying nothing of the kind.
+func TestRootCompactedDocumentIgnoresCompactLiterals(t *testing.T) {
+	context := map[string]any{
+		"subject": map[string]any{"@id": "https://example.org/vocab#subject", "@type": "@id"},
+		"note":    "https://example.org/vocab#note",
+		"id":      "@id",
+	}
+
+	rooted, err := RootCompactedDocument(map[string]any{
+		"@context": context,
+		"@graph": []any{
+			map[string]any{
+				"id":      "https://example.org/credential",
+				"subject": "https://example.org/subject",
+			},
+			map[string]any{
+				"id": "https://example.org/subject",
+				// A LITERAL, not a reference - "note" is not id-coerced.
+				"note": "https://example.org/credential",
+			},
+		},
+	}, "", nil)
+	require.NoError(t, err, "a literal must not count as a reference, compact or not")
+	require.Equal(t, "https://example.org/credential", rooted["id"])
+}
