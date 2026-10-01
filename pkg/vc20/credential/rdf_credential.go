@@ -575,12 +575,20 @@ func (rc *RDFCredential) Dataset() *ld.RDFDataset {
 }
 
 // cloneDataset deep-copies a dataset: new graph map, new quad slices, new
-// quads. The unexported fields json-gold keeps on a dataset are its parser's
-// business and are not reconstructed - this copy is for a caller to read, and
-// is never fed back into normalization.
+// quads, and the namespaces carried across.
+//
+// Through ld.NewRDFDataset rather than a struct literal. json-gold keeps its
+// namespace map unexported and initializes it there, so a literal leaves it
+// nil and the public SetNamespace panics on the copy - a method that works on
+// every other dataset in the library.
 func cloneDataset(dataset *ld.RDFDataset) *ld.RDFDataset {
 	if dataset == nil {
 		return nil
+	}
+
+	clone := ld.NewRDFDataset()
+	for namespace, prefix := range dataset.GetNamespaces() {
+		clone.SetNamespace(namespace, prefix)
 	}
 
 	graphs := make(map[string][]*ld.Quad, len(dataset.Graphs))
@@ -601,7 +609,9 @@ func cloneDataset(dataset *ld.RDFDataset) *ld.RDFDataset {
 		graphs[name] = copied
 	}
 
-	return &ld.RDFDataset{Graphs: graphs}
+	clone.Graphs = graphs
+
+	return clone
 }
 
 // cloneNode copies a node that is addressable through its interface. A node

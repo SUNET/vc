@@ -417,12 +417,15 @@ func graphNamesIn(value any, context any, options *ld.JsonLdOptions) []string {
 		// such as {"identifier": "_:proof"} naming nothing, so the proof's
 		// named graph stayed in the supposedly proof-free document and SD
 		// removal disagreed with RootProofs.
-		if id := credential.CompactNodeID(typed, context, options); id != "" {
+		// As an ABSOLUTE IRI, so a link written ex:proof matches the graph
+		// it names however that graph spells its own identifier.
+		if id := credential.ResolvedNodeID(typed, context, options); id != "" {
 			names = append(names, id)
 		}
 	case string:
+		// A term declared "@type": "@id" writes its link as a bare string.
 		if typed != "" {
-			names = append(names, typed)
+			names = append(names, credential.ResolvedNodeID(map[string]any{"@id": typed}, context, options))
 		}
 	}
 	return names
@@ -450,7 +453,7 @@ func withoutNamedGraphs(entries []any, names []string, context any, options *ld.
 				// Same reading as the link that named it, or a graph
 				// wrapper spelled through the context survives the removal
 				// its link did not.
-				if named[credential.CompactNodeID(node, context, options)] {
+				if named[credential.ResolvedNodeID(node, context, options)] {
 					continue
 				}
 			}

@@ -391,6 +391,31 @@ func compactNodeID(node map[string]any) string {
 	return ""
 }
 
+// ResolvedNodeID returns a node's identifier as an ABSOLUTE IRI wherever the
+// active context can resolve one, and as written where it cannot.
+//
+// CompactNodeID answers "how does this document spell it", which is the right
+// question when editing the document and the wrong one when COMPARING two
+// identifiers. A document may link to ex:proof while the graph it names is
+// written with the absolute IRI, or with a prefix of its own: the two are the
+// same node and the spellings do not match, so a comparison on them left a
+// root proof graph in a document that was supposed to be free of it.
+//
+// A blank node is returned untouched. There is nothing to resolve it against,
+// and its label is the only identity it has.
+func ResolvedNodeID(node map[string]any, context any, options *ld.JsonLdOptions) string {
+	scoped := composedContext(node, context, context != nil)
+
+	id := nodeIDUnder(node, scoped, options)
+	if id == "" || strings.HasPrefix(id, "_:") {
+		return id
+	}
+	if expanded := expandNodeID(scoped, id, options); expanded != "" {
+		return expanded
+	}
+	return id
+}
+
 // referencedByAnyOther reports whether any node but the one at skip mentions
 // id. A reference may be a nested object carrying that identifier OR a bare
 // string, since a term declared "@type": "@id" - credentialSubject among them

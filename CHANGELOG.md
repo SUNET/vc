@@ -130,6 +130,15 @@
   document verified straight from `Sign` and stopped verifying once serialized
   and read back.
 
+  **Proof-graph identifiers are compared as absolute IRIs.** A document may
+  link to `ex:proof` while the graph it names is written with the equivalent
+  absolute IRI, or through a prefix of its own. They are the same node, and
+  comparing the SPELLINGS left the root's proof graph in a document supposed
+  to be free of it — so a derived proof canonicalized extra proof quads and
+  the credential was rejected. `credential.ResolvedNodeID` resolves both sides
+  under their own active contexts first; blank nodes are compared as written,
+  since a label is the only identity they have.
+
   **`credential.IsGraphWrapper` replaces `ld.IsGraph` on compacted documents.**
   `ld.IsGraph` knows only the spellings `@id` and `@index`, so a wrapper in a
   document that aliases either read as an ordinary node: `ecdsa-sd-2023` proof

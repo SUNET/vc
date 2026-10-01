@@ -485,3 +485,38 @@ func TestRemoveRootProofDropsAnAliasedProofGraph(t *testing.T) {
 	require.Contains(t, string(encoded), "content the signature covers",
 		"while the document itself stays")
 }
+
+// TestRemoveRootProofMatchesACompactProofLinkToAnExpandedGraph: a document may
+// link to ex:proof while the graph it names is written with the absolute IRI.
+// They are the same node, and comparing the SPELLINGS left the root's proof
+// graph in a document that is supposed to be free of it - so a derived proof
+// canonicalized extra proof quads and the credential was rejected.
+func TestRemoveRootProofMatchesACompactProofLinkToAnExpandedGraph(t *testing.T) {
+	context := map[string]any{
+		"ex":    "https://example.org/",
+		"note":  "https://example.org/vocab#note",
+		"proof": map[string]any{"@id": "https://w3id.org/security#proof", "@type": "@id"},
+	}
+
+	data := []any{
+		map[string]any{
+			"@id":   "https://example.org/credential",
+			"note":  "content the signature covers",
+			"proof": map[string]any{"@id": "ex:the-proof"},
+		},
+		// The same node, spelled absolutely.
+		map[string]any{
+			"@id":    "https://example.org/the-proof",
+			"@graph": []any{map[string]any{"note": "zROOTPROOF"}},
+		},
+	}
+
+	stripped, err := removeRootProofUnder(data, context, nil)
+	require.NoError(t, err)
+
+	encoded, err := json.Marshal(stripped)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "zROOTPROOF",
+		"a compact link and an absolute graph identifier name the same node")
+	require.Contains(t, string(encoded), "content the signature covers")
+}

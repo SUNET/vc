@@ -1122,3 +1122,24 @@ func TestRootCompactedDocumentMergesSplitFragmentsUnderAnAliasedID(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, before, after, "merging fragments must not change one quad")
 }
+
+// TestDatasetCopySupportsSetNamespace: json-gold keeps its namespace map
+// unexported and initializes it in ld.NewRDFDataset, so building the copy as
+// a struct literal left it nil and the public SetNamespace panicked on the
+// value Dataset() returns - a method that works on every other dataset in the
+// library.
+func TestDatasetCopySupportsSetNamespace(t *testing.T) {
+	cred := memoizedCredential(t)
+	cred.dataset.SetNamespace("https://example.org/vocab#", "ex")
+
+	handed := cred.Dataset()
+	require.Equal(t, "ex", handed.GetNamespace("https://example.org/vocab#"),
+		"the namespaces come across with the quads")
+
+	require.NotPanics(t, func() {
+		handed.SetNamespace("https://example.org/other#", "other")
+	})
+	require.Equal(t, "other", handed.GetNamespace("https://example.org/other#"))
+	require.Empty(t, cred.dataset.GetNamespace("https://example.org/other#"),
+		"and setting one on the copy does not reach the credential")
+}
