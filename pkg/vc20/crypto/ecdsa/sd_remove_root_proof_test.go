@@ -32,10 +32,13 @@ func TestRemoveRootProofKeepsNestedProofsInAFlattenedDocument(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, removeRootProof(flattened, nil))
+	stripped, err := removeRootProof(flattened, nil)
+	require.NoError(t, err)
 
-	outer := flattened[0].(map[string]any)
-	inner := flattened[1].(map[string]any)
+	remaining, isList := stripped.([]any)
+	require.True(t, isList)
+	outer := remaining[0].(map[string]any)
+	inner := remaining[1].(map[string]any)
 	require.NotContains(t, outer, "proof", "the document's own proof is what gets removed")
 	require.Contains(t, inner, "proof",
 		"the carried credential's proof is content the outer signature covers")
@@ -49,7 +52,7 @@ func TestRemoveRootProofRefusesAnAmbiguousDocument(t *testing.T) {
 			map[string]any{"id": "https://example.org/a", "proof": map[string]any{}},
 			map[string]any{"id": "https://example.org/b", "proof": map[string]any{}},
 		}
-		err := removeRootProof(document, nil)
+		_, err := removeRootProof(document, nil)
 		require.ErrorContains(t, err, "more than one node nothing refers to")
 		require.Contains(t, document[0].(map[string]any), "proof", "nothing is removed on a refusal")
 		require.Contains(t, document[1].(map[string]any), "proof")
@@ -60,7 +63,8 @@ func TestRemoveRootProofRefusesAnAmbiguousDocument(t *testing.T) {
 			map[string]any{"id": "https://example.org/a", "rel": "https://example.org/b"},
 			map[string]any{"id": "https://example.org/b", "rel": "https://example.org/a"},
 		}
-		require.ErrorContains(t, removeRootProof(document, nil), "referred to by another")
+		_, err := removeRootProof(document, nil)
+		require.ErrorContains(t, err, "referred to by another")
 	})
 }
 
@@ -73,9 +77,10 @@ func TestRemoveRootProofHandlesASingleNode(t *testing.T) {
 		"credentialSubject": {"proof": {"type": "DataIntegrityProof"}}
 	}`), &document))
 
-	require.NoError(t, removeRootProof(document, nil))
+	stripped, err := removeRootProof(document, nil)
+	require.NoError(t, err)
 
-	node := document.(map[string]any)
+	node := stripped.(map[string]any)
 	require.NotContains(t, node, "https://w3id.org/security#proof")
 	require.Contains(t, node["credentialSubject"].(map[string]any), "proof",
 		"a nested proof is never the document's own")
@@ -131,8 +136,9 @@ func TestRemoveRootProofResolvesAliasedAndLegacyProofTerms(t *testing.T) {
 			"@id":                           "https://example.org/credential",
 			credential.ProofPredicateLegacy: map[string]any{"@id": "_:proof"},
 		}
-		require.NoError(t, removeRootProof(node, nil))
-		require.NotContains(t, node, credential.ProofPredicateLegacy)
+		stripped, err := removeRootProof(node, nil)
+		require.NoError(t, err)
+		require.NotContains(t, stripped, credential.ProofPredicateLegacy)
 	})
 
 	t.Run("an aliased term", func(t *testing.T) {
@@ -144,7 +150,8 @@ func TestRemoveRootProofResolvesAliasedAndLegacyProofTerms(t *testing.T) {
 			"seal": {"type": "DataIntegrityProof"}
 		}`), &document))
 
-		require.NoError(t, removeRootProof(document, nil))
+		document, err := removeRootProof(document, nil)
+		require.NoError(t, err)
 
 		node := document.(map[string]any)
 		require.NotContains(t, node, "seal", "an aliased proof term is still the document's proof")
@@ -166,9 +173,10 @@ func TestRemoveRootProofLeavesANamedGraphAlone(t *testing.T) {
 		]
 	}`), &document))
 
-	require.NoError(t, removeRootProof(document, nil))
+	stripped, err := removeRootProof(document, nil)
+	require.NoError(t, err)
 
-	node := document.(map[string]any)
+	node := stripped.(map[string]any)
 	require.NotContains(t, node, "proof", "the root's own proof goes")
 	carried := node["@graph"].([]any)[0].(map[string]any)
 	require.Contains(t, carried, "proof", "a proof inside its named graph stays")
@@ -188,10 +196,64 @@ func TestRemoveRootProofKeepsTheContextWhenDescending(t *testing.T) {
 		]
 	}`), &document))
 
-	require.NoError(t, removeRootProof(document, nil))
+	stripped, err := removeRootProof(document, nil)
+	require.NoError(t, err)
 
-	node := document.(map[string]any)["@graph"].([]any)[0].(map[string]any)
+	node := stripped.(map[string]any)["@graph"].([]any)[0].(map[string]any)
 	require.NotContains(t, node, "seal",
 		"the container's context must reach the node inside it")
 	require.Contains(t, node, "note")
+}
+
+// TestRemoveRootProofDropsTheGraphTheRootProofNamed: in flattened JSON-LD a
+// proof is a LINK to a named graph sitting beside the document, which is
+// exactly what RDFCredential.MarshalJSON emits. Deleting the link alone left
+// the proof's quads in a document that is supposed to be without them, so
+// verification canonicalized proof quads no disclosed signature covers and a
+// derived credential stopped verifying after a round trip.
+func TestRemoveRootProofDropsTheGraphTheRootProofNamed(t *testing.T) {
+	document := []any{
+		map[string]any{
+			"@id":                     "https://example.org/credentials/outer",
+			credential.ProofPredicate: []any{map[string]any{"@id": "_:rootproof"}},
+			"https://example.org/vocab#carries": []any{
+				map[string]any{"@id": "https://example.org/credentials/inner"},
+			},
+		},
+		map[string]any{
+			"@id":    "_:rootproof",
+			"@graph": []any{map[string]any{"@id": "_:p0", "https://w3id.org/security#proofValue": "root"}},
+		},
+		map[string]any{
+			"@id":                     "https://example.org/credentials/inner",
+			credential.ProofPredicate: []any{map[string]any{"@id": "_:nestedproof"}},
+		},
+		map[string]any{
+			"@id":    "_:nestedproof",
+			"@graph": []any{map[string]any{"@id": "_:p1", "https://w3id.org/security#proofValue": "nested"}},
+		},
+	}
+
+	stripped, err := removeRootProof(document, nil)
+	require.NoError(t, err)
+
+	remaining, isList := stripped.([]any)
+	require.True(t, isList)
+
+	var names []string
+	for _, entry := range remaining {
+		node := entry.(map[string]any)
+		id, _ := node["@id"].(string)
+		names = append(names, id)
+		if id == "https://example.org/credentials/outer" {
+			require.NotContains(t, node, credential.ProofPredicate,
+				"the root's proof LINK goes")
+		}
+	}
+
+	require.NotContains(t, names, "_:rootproof",
+		"and so does the graph it named, or its quads stay in the secured document")
+	require.Contains(t, names, "_:nestedproof",
+		"while a nested credential's proof graph is content the signature covers")
+	require.Contains(t, names, "https://example.org/credentials/inner")
 }

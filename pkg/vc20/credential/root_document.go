@@ -505,3 +505,30 @@ func collectProofTerms(value any, bySentinel map[string]string, found *[]string)
 		}
 	}
 }
+
+// RootOfExpandedNodes returns the node an EXPANDED, flattened document is
+// about, by the same rules rootAndGraphs applies before reading a root's
+// proofs.
+//
+// Two of those rules are easy to lose by writing a fresh selector. A NAMED
+// GRAPH is not a document node: round-tripping through N-Quads lifts each
+// proof graph out to the top level beside the document, and counting those as
+// candidates makes every document ambiguous. And a node's properties may be
+// split across several top-level entries, which RDF conversion merges back
+// into one node - treating them as separate candidates reported an ambiguous
+// root for a document that reads perfectly well.
+func RootOfExpandedNodes(expanded []any) (map[string]any, error) {
+	var nodes []map[string]any
+	for _, entry := range expanded {
+		node, isNode := entry.(map[string]any)
+		if !isNode {
+			return nil, fmt.Errorf("document holds a top-level entry that is not a node")
+		}
+		if _, isGraph := node["@graph"]; isGraph && len(node) <= 2 {
+			continue
+		}
+		nodes = append(nodes, node)
+	}
+
+	return rootOf(coalesceByID(nodes))
+}

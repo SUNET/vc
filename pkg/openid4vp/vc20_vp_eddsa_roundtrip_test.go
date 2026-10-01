@@ -947,3 +947,73 @@ func TestVerifyAndExtractReportsTheRootOfAnExpandedDocument(t *testing.T) {
 	require.Equal(t, "did:example:outer-issuer", result.Issuer,
 		"the issuer reported must be the one whose proof verified")
 }
+
+// TestVerifyAndExtractAcceptsASplitExpandedRoot: expanded JSON-LD may carry
+// one node's properties across SEVERAL top-level entries, which RDF conversion
+// merges back into one node. Counting those as separate candidates reported
+// more than one unreferenced node and refused a document that reads perfectly
+// well - and a named graph counted as a candidate too, which every
+// round-tripped document has.
+func TestVerifyAndExtractAcceptsASplitExpandedRoot(t *testing.T) {
+	issuerPub, issuerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	const method = "did:example:issuer#key-1"
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "https://example.org/credentials/split",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`), nil)
+	require.NoError(t, err)
+
+	signed, err := eddsaSuite.NewSuite().Sign(cred, issuerKey, &eddsaSuite.SignOptions{
+		VerificationMethod: method,
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	flattened, err := signed.ToJSON()
+	require.NoError(t, err)
+	var entries []any
+	require.NoError(t, json.Unmarshal(flattened, &entries))
+
+	// SPLIT the credential node in two, which expansion permits and RDF
+	// conversion merges back.
+	split := make([]any, 0, len(entries)+1)
+	for _, entry := range entries {
+		node, isNode := entry.(map[string]any)
+		if !isNode {
+			split = append(split, entry)
+			continue
+		}
+		id, _ := node["@id"].(string)
+		if id != "https://example.org/credentials/split" {
+			split = append(split, entry)
+			continue
+		}
+		moved := map[string]any{"@id": id}
+		for _, key := range []string{"https://www.w3.org/2018/credentials#issuer"} {
+			if value, present := node[key]; present {
+				moved[key] = value
+				delete(node, key)
+			}
+		}
+		require.Len(t, moved, 2, "a property must actually move, or nothing is split")
+		split = append(split, node, moved)
+	}
+
+	reserialized, err := json.Marshal(split)
+	require.NoError(t, err)
+
+	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+		keys: map[string]crypto.PublicKey{method: issuerPub},
+	}))
+	require.NoError(t, err)
+
+	result, err := handler.VerifyAndExtract(t.Context(), string(reserialized))
+	require.NoError(t, err, "a node split across entries is still one node")
+	require.Equal(t, "did:example:issuer", result.Issuer)
+}

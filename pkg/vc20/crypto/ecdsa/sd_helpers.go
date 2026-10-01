@@ -274,7 +274,7 @@ func replaceURNsInNQuads(nquads string) string {
 //
 // Which members ARE the proof is resolved through the document's context, not
 // matched against a list of spellings - see credential.ProofKeys.
-func removeRootProof(data any, options *ld.JsonLdOptions) error {
+func removeRootProof(data any, options *ld.JsonLdOptions) (any, error) {
 	return removeRootProofUnder(data, documentContextOf(data), options)
 }
 
@@ -284,9 +284,17 @@ func removeRootProof(data any, options *ld.JsonLdOptions) error {
 // recomputing after descending into @graph found none - and a proof written
 // through an aliased term stopped being recognized, staying in a document
 // that is supposed to be without it.
-func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) error {
+func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any, error) {
+	// The graph NAMES the removed links pointed at. In flattened JSON-LD a
+	// proof is a link to a named graph sitting beside the document, so
+	// deleting the link alone leaves the proof's quads in a document that
+	// is supposed to be without them - and verification then canonicalizes
+	// proof quads no disclosed signature covers. RootProofs removes both;
+	// so does this.
+	var orphaned []string
 	deleteProofKeys := func(m map[string]any) {
 		for _, key := range credential.ProofKeys(m, context, options) {
+			orphaned = append(orphaned, graphNamesIn(m[key])...)
 			delete(m, key)
 		}
 	}
@@ -299,10 +307,15 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) erro
 		// still what the document is about - reaching into its graph would
 		// remove a proof this must not touch.
 		if credential.IsBareGraphContainer(typed) {
-			return removeRootProofUnder(typed["@graph"], context, options)
+			graph, err := removeRootProofUnder(typed["@graph"], context, options)
+			if err != nil {
+				return nil, err
+			}
+			typed["@graph"] = graph
+			return typed, nil
 		}
 		deleteProofKeys(typed)
-		return nil
+		return typed, nil
 	case []any:
 		nodes := make([]map[string]any, 0, len(typed))
 		for _, entry := range typed {
@@ -314,16 +327,69 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) erro
 		}
 		if len(nodes) == 1 {
 			deleteProofKeys(nodes[0])
+		} else {
+			root, err := credential.RootOfCompactedNodes(nodes, context, options)
+			if err != nil {
+				return nil, err
+			}
+			deleteProofKeys(root)
+		}
+		return withoutNamedGraphs(typed, orphaned), nil
+	}
+	return nil, fmt.Errorf("a document is %T rather than a node or a list of nodes", data)
+}
+
+// graphNamesIn reads the identifiers a removed proof link pointed at. A proof
+// written INLINE names no graph and contributes none - it goes with the link.
+func graphNamesIn(value any) []string {
+	var names []string
+	switch typed := value.(type) {
+	case []any:
+		for _, entry := range typed {
+			names = append(names, graphNamesIn(entry)...)
+		}
+	case map[string]any:
+		if _, inline := typed["@graph"]; inline {
 			return nil
 		}
-		root, err := credential.RootOfCompactedNodes(nodes, context, options)
-		if err != nil {
-			return err
+		for _, key := range []string{"@id", "id"} {
+			if id, ok := typed[key].(string); ok && id != "" {
+				names = append(names, id)
+			}
 		}
-		deleteProofKeys(root)
-		return nil
+	case string:
+		if typed != "" {
+			names = append(names, typed)
+		}
 	}
-	return fmt.Errorf("a document is %T rather than a node or a list of nodes", data)
+	return names
+}
+
+// withoutNamedGraphs drops the top-level graph entries a removed root proof
+// named. Only graph WRAPPERS are candidates: an entry that merely shares an
+// identifier is a node the document still talks about.
+func withoutNamedGraphs(entries []any, names []string) []any {
+	if len(names) == 0 {
+		return entries
+	}
+	named := make(map[string]bool, len(names))
+	for _, name := range names {
+		named[name] = true
+	}
+
+	kept := make([]any, 0, len(entries))
+	for _, entry := range entries {
+		if node, isNode := entry.(map[string]any); isNode {
+			if _, isGraph := node["@graph"]; isGraph && len(node) <= 2 {
+				id, _ := node["@id"].(string)
+				if named[id] {
+					continue
+				}
+			}
+		}
+		kept = append(kept, entry)
+	}
+	return kept
 }
 
 // documentContextOf reads the @context a document carries, so member names can

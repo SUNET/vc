@@ -490,16 +490,12 @@ func (h *VC20Handler) extractCredentialFromExpanded(expanded []any) (map[string]
 	// front had the handler report ITS issuer and claims while
 	// rootProofCandidates verified the outer credential's proof.
 	//
-	// credential.RootOfCompactedNodes is the same rule the rest of this
+	// credential.RootOfExpandedNodes is the same rule the rest of this
 	// change uses: the node nothing else refers to, and a refusal when the
-	// document does not say which that is.
-	nodes := make([]map[string]any, 0, len(expanded))
-	for _, node := range expanded {
-		if nodeMap, isNode := node.(map[string]any); isNode {
-			nodes = append(nodes, nodeMap)
-		}
-	}
-	root, err := credential.RootOfCompactedNodes(nodes, nil, nil)
+	// document does not say which that is. It also knows the two things a
+	// fresh selector loses - a named graph is not a candidate, and a node
+	// split across several top-level entries is ONE node.
+	root, err := credential.RootOfExpandedNodes(expanded)
 	if err != nil {
 		return nil, fmt.Errorf("cannot tell which node an expanded document is about: %w", err)
 	}

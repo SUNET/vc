@@ -154,7 +154,7 @@ func (s *SdSuite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, op
 		}
 
 		// Remove proof from document for pointer selection
-		if err := removeRootProof(docJSON, cred.ExpansionOptions()); err != nil {
+		if docJSON, err = removeRootProof(docJSON, cred.ExpansionOptions()); err != nil {
 			return nil, fmt.Errorf("failed to remove the document's own proof: %w", err)
 		}
 
@@ -620,7 +620,7 @@ func (s *SdSuite) verifyBaseProof(cred *credential.RDFCredential, key *ecdsa.Pub
 		}
 
 		// Remove proof from document for pointer selection
-		if err := removeRootProof(docJSON, cred.ExpansionOptions()); err != nil {
+		if docJSON, err = removeRootProof(docJSON, cred.ExpansionOptions()); err != nil {
 			return fmt.Errorf("failed to remove the document's own proof: %w", err)
 		}
 
@@ -681,7 +681,7 @@ func (s *SdSuite) verifyBaseProof(cred *credential.RDFCredential, key *ecdsa.Pub
 				return fmt.Errorf("failed to unmarshal credential JSON: %w", err)
 			}
 		}
-		if err := removeRootProof(docJSON, cred.ExpansionOptions()); err != nil {
+		if docJSON, err = removeRootProof(docJSON, cred.ExpansionOptions()); err != nil {
 			return fmt.Errorf("failed to remove the document's own proof: %w", err)
 		}
 
@@ -852,7 +852,7 @@ func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.
 	}
 
 	// Remove the root's proof, and only the root's
-	if err := removeRootProof(credJSON, cred.ExpansionOptions()); err != nil {
+	if credJSON, err = removeRootProof(credJSON, cred.ExpansionOptions()); err != nil {
 		return fmt.Errorf("failed to remove the document's own proof: %w", err)
 	}
 
@@ -1005,7 +1005,7 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 			return nil, fmt.Errorf("failed to unmarshal credential JSON: %w", err)
 		}
 	}
-	if err := removeRootProof(docJSON, cred.ExpansionOptions()); err != nil {
+	if docJSON, err = removeRootProof(docJSON, cred.ExpansionOptions()); err != nil {
 		return nil, fmt.Errorf("failed to remove the document's own proof: %w", err)
 	}
 
