@@ -275,8 +275,16 @@ func replaceURNsInNQuads(nquads string) string {
 // Which members ARE the proof is resolved through the document's context, not
 // matched against a list of spellings - see credential.ProofKeys.
 func removeRootProof(data any, options *ld.JsonLdOptions) error {
-	context := documentContextOf(data)
+	return removeRootProofUnder(data, documentContextOf(data), options)
+}
 
+// removeRootProofUnder carries the context DOWN rather than recomputing it.
+//
+// A compacted graph container keeps its @context on the container alone, so
+// recomputing after descending into @graph found none - and a proof written
+// through an aliased term stopped being recognized, staying in a document
+// that is supposed to be without it.
+func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) error {
 	deleteProofKeys := func(m map[string]any) {
 		for _, key := range credential.ProofKeys(m, context, options) {
 			delete(m, key)
@@ -291,7 +299,7 @@ func removeRootProof(data any, options *ld.JsonLdOptions) error {
 		// still what the document is about - reaching into its graph would
 		// remove a proof this must not touch.
 		if credential.IsBareGraphContainer(typed) {
-			return removeRootProof(typed["@graph"], options)
+			return removeRootProofUnder(typed["@graph"], context, options)
 		}
 		deleteProofKeys(typed)
 		return nil

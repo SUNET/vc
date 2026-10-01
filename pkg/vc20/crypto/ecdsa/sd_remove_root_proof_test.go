@@ -173,3 +173,25 @@ func TestRemoveRootProofLeavesANamedGraphAlone(t *testing.T) {
 	carried := node["@graph"].([]any)[0].(map[string]any)
 	require.Contains(t, carried, "proof", "a proof inside its named graph stays")
 }
+
+// TestRemoveRootProofKeepsTheContextWhenDescending: a compacted graph
+// container keeps its @context on the CONTAINER, so recomputing the context
+// after descending into @graph found none - and a proof written through an
+// aliased term stopped being recognized, staying in a document that is
+// supposed to be without it.
+func TestRemoveRootProofKeepsTheContextWhenDescending(t *testing.T) {
+	var document any
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"@context": {"seal": "https://w3id.org/security#proof", "note": "https://example.org/vocab#note", "id": "@id"},
+		"@graph": [
+			{"id": "https://example.org/credential", "note": "kept", "seal": {"type": "DataIntegrityProof"}}
+		]
+	}`), &document))
+
+	require.NoError(t, removeRootProof(document, nil))
+
+	node := document.(map[string]any)["@graph"].([]any)[0].(map[string]any)
+	require.NotContains(t, node, "seal",
+		"the container's context must reach the node inside it")
+	require.Contains(t, node, "note")
+}

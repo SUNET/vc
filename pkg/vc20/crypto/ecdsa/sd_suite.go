@@ -29,7 +29,6 @@ const (
 // SdSuite implements the ECDSA Selective Disclosure Cryptosuite v1.0
 type SdSuite struct{}
 
-// NewSdSuite creates a new ECDSA SD cryptosuite
 // rootScopedWithoutProof returns the document an SD proof secures: this
 // document with the ROOT's own proofs removed and every nested proof left in
 // place, so a nested credential's own proof is content the signature covers.
@@ -50,6 +49,7 @@ func rootScopedWithoutProof(cred *credential.RDFCredential) (*credential.RDFCred
 	return withoutRootProof, nil
 }
 
+// NewSdSuite creates a new ECDSA SD cryptosuite
 func NewSdSuite() *SdSuite {
 	return &SdSuite{}
 }
