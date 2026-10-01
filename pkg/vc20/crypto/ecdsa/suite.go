@@ -172,7 +172,14 @@ func (s *Suite) SignWithSigner(ctx context.Context, cred *credential.RDFCredenti
 	}
 
 	proofConfig["proofValue"] = proofValue
-	credential.AppendProof(credMap, proofConfig)
+	// UNDER THE NAME THIS DOCUMENT USES for the proof predicate. "proof"
+	// is only the v2 context's name for it: a document may alias it, in
+	// which case the new proof joins the existing set under that name, or
+	// remap it, in which case writing "proof" would attach the signature to
+	// an ordinary property and this library could not verify what it had
+	// just signed.
+	credential.AppendProofUnder(credMap, proofConfig,
+		credential.ProofKeyFor(credMap, credMap["@context"], cred.ExpansionOptions()))
 
 	// Create new RDFCredential
 	newCredBytes, err := json.Marshal(credMap)

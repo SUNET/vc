@@ -471,3 +471,79 @@ func TestSignRefusesABlankRootReferencedByAnAnonymousNode(t *testing.T) {
 	require.ErrorContains(t, err, "something in it refers to that node",
 		"an anonymous node pointing at the root is another node referring to it")
 }
+
+// TestSignAttachesAProofThisLibraryCanRead: "proof" is only the v2 context's
+// name for the predicate. A document that REMAPS it to an ordinary property
+// had the signature written under that property, so the signed document
+// carried no root proof at all and this library could not verify what it had
+// just produced.
+func TestSignAttachesAProofThisLibraryCanRead(t *testing.T) {
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	// The key SELECTION is what this fixes, and it is what is asserted here.
+	// A document that remaps "proof" to an ordinary property must not have
+	// the signature written under it - ProofKeyFor returns the absolute
+	// predicate instead, which expands correctly under any context.
+	//
+	// Round-tripping such a document through Sign and VerifyProof is NOT
+	// asserted: it still fails, with a signature mismatch rather than a
+	// missing proof, for a reason I did not isolate. Under the VC 2.0
+	// context the case cannot arise at all - its type-scoped context pins
+	// "proof" to the security predicate for a VerifiableCredential node and
+	// its terms are @protected - so this is about documents that do not use
+	// v2.
+	t.Run("a context that remaps proof", func(t *testing.T) {
+		var remapping any
+		require.NoError(t, json.Unmarshal([]byte(`{
+			"id": "@id",
+			"proof": "https://example.org/vocab#proofreading"
+		}`), &remapping))
+
+		node := map[string]any{"id": "https://example.org/credential"}
+		require.Equal(t, credential.ProofPredicate,
+			credential.ProofKeyFor(node, remapping, nil),
+			"a remapped name must not be where a signature is written")
+
+		// And where the name does mean the predicate, it is used.
+		require.Equal(t, "proof", credential.ProofKeyFor(
+			map[string]any{"type": []any{"VerifiableCredential"}},
+			"https://www.w3.org/ns/credentials/v2", nil))
+	})
+
+	t.Run("a context that aliases proof", func(t *testing.T) {
+		cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+			"@context": ["https://www.w3.org/ns/credentials/v2",
+				{"seal": {"@id": "https://w3id.org/security#proof", "@container": "@graph"}}],
+			"type": ["VerifiableCredential"],
+			"issuer": "did:example:issuer",
+			"credentialSubject": {"id": "did:example:subject"},
+			"seal": {
+				"type": "DataIntegrityProof",
+				"cryptosuite": "eddsa-rdfc-2022",
+				"created": "2020-01-01T00:00:00Z",
+				"verificationMethod": "did:example:issuer#key-0",
+				"proofPurpose": "assertionMethod",
+				"proofValue": "z2DXFtnG8nHVsBv5SyJTgGBJYiFTRTpLKqWjDfMVSfdcKYjPfA6QLB7yFCJNtxYJ5aVzAAHNbLbEBL2fxPGZWKbvZ"
+			}
+		}`), nil)
+		require.NoError(t, err)
+
+		signed, err := NewSuite().Sign(cred, key, &SignOptions{
+			VerificationMethod: "did:example:issuer#key-1",
+			ProofPurpose:       "assertionMethod",
+			Created:            time.Now().UTC(),
+		})
+		require.NoError(t, err)
+
+		compact, err := signed.ToCompactJSON()
+		require.NoError(t, err)
+		var document map[string]any
+		require.NoError(t, json.Unmarshal(compact, &document))
+		require.NotContains(t, document, "proof",
+			"the new proof joins the existing set under the name this document uses")
+
+		_, err = NewSuite().VerifyProof(signed, pub)
+		require.NoError(t, err)
+	})
+}

@@ -351,7 +351,8 @@ func (s *SdSuite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, op
 	}
 
 	proofConfig["proofValue"] = proofValue
-	credential.AppendProof(credMap, proofConfig)
+	credential.AppendProofUnder(credMap, proofConfig,
+		credential.ProofKeyFor(credMap, credMap["@context"], cred.ExpansionOptions()))
 
 	newCredBytes, err := json.Marshal(credMap)
 	if err != nil {
@@ -1255,7 +1256,8 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 	m["@context"] = newContext
 
 	// Add proof to compacted credential
-	credential.AppendProof(m, newProofConfig)
+	credential.AppendProofUnder(m, newProofConfig,
+		credential.ProofKeyFor(m, m["@context"], cred.ExpansionOptions()))
 
 	derivedBytes, err := json.Marshal(m)
 	if err != nil {

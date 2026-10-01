@@ -546,3 +546,39 @@ func TestRootCompactedDocumentIgnoresASelfLinkWithAContext(t *testing.T) {
 	require.Equal(t, withContext["id"], withoutContext["id"],
 		"both readings must choose the same node")
 }
+
+// TestRootCompactedDocumentKeepsANullReset: an explicit node-local
+// "@context": null RESETS the container's context in JSON-LD. Treating it as
+// an absent context left the promoted node inheriting definitions it never
+// had - more triples than the document carried, from a helper whose promise is
+// that the graph is unchanged.
+func TestRootCompactedDocumentKeepsANullReset(t *testing.T) {
+	container := map[string]any{"note": "https://example.org/vocab#note", "id": "@id"}
+
+	rooted, err := RootCompactedDocument(map[string]any{
+		"@context": container,
+		"@graph": []any{
+			map[string]any{
+				"@context": nil,
+				"id":       "https://example.org/credential",
+				"note":     "a plain string, not a predicate",
+			},
+		},
+	}, "", nil)
+	require.NoError(t, err)
+
+	sequence, isList := rooted["@context"].([]any)
+	require.True(t, isList, "the reset is kept in the sequence")
+	require.Len(t, sequence, 2)
+	require.Equal(t, container, sequence[0])
+	require.Nil(t, sequence[1], "and it is the null that clears what came before")
+
+	// The point is the RDF: with the reset kept, "note" defines nothing and
+	// produces no triple.
+	expanded, err := ld.NewJsonLdProcessor().Expand(rooted, NewJSONLDOptions(""))
+	require.NoError(t, err)
+	encoded, err := json.Marshal(expanded)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "vocab#note",
+		"a reset context must not leave the node inheriting definitions")
+}

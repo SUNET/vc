@@ -119,10 +119,19 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 		// triples - in a helper whose whole promise is that the graph, and
 		// so the signature over it, is unchanged.
 		if key == "@context" {
-			if containerHasContext {
-				rooted["@context"] = JoinContexts(containerContext, value)
-			} else {
+			switch {
+			case !containerHasContext:
 				rooted["@context"] = value
+			case value == nil:
+				// An explicit null is a RESET. Treating it as an absent
+				// context left the promoted node inheriting the
+				// container's definitions, which it did not have - more
+				// triples than the document carried, from a helper whose
+				// promise is that the graph is unchanged. The null stays
+				// in the sequence, where it clears what came before it.
+				rooted["@context"] = []any{containerContext, nil}
+			default:
+				rooted["@context"] = JoinContexts(containerContext, value)
 			}
 			continue
 		}
@@ -746,4 +755,31 @@ func JoinContexts(outer any, inner any) any {
 		joined = append(joined, context)
 	}
 	return joined
+}
+
+// ProofKeyFor returns the member name a new proof should be written under on
+// this node.
+//
+// Not always "proof". That is the name the v2 context gives the predicate, but
+// a document may ALIAS it - in which case the new proof belongs beside the
+// existing one under the same name, as one proof set - or remap it to an
+// ordinary property, in which case writing "proof" would attach the signature
+// to something that is not a proof at all, and the library could not verify
+// what it had just signed.
+//
+// The absolute predicate is the answer when the active context gives "proof"
+// another meaning: an IRI expands to itself under any context.
+func ProofKeyFor(node map[string]any, context any, options *ld.JsonLdOptions) string {
+	// An existing proof member keeps its name, so signing twice makes one
+	// proof set rather than two members meaning the same thing.
+	if existing := ProofKeys(node, context, options); len(existing) > 0 {
+		return existing[0]
+	}
+
+	active := nodeContext(node, context, options)
+	resolved, unresolvable := expandMemberName(active, "proof")
+	if unresolvable || resolved == ProofPredicate {
+		return "proof"
+	}
+	return ProofPredicate
 }
