@@ -111,13 +111,19 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 		}
 		rooted[key] = value
 	}
-	_, containerHasContext := rooted["@context"]
+	containerContext, containerHasContext := rooted["@context"]
 	for key, value := range root {
-		// The container's context wins - compaction puts it there, and two
-		// contexts applied in the wrong order mean different terms. A
-		// context on the root node is only kept when the container carries
-		// none, so promoting the node cannot silently drop it.
-		if key == "@context" && containerHasContext {
+		// BOTH contexts, in the order JSON-LD applies them: the container's
+		// first, then the node's own. Keeping only the container's dropped
+		// definitions the root actually uses, which changes or removes
+		// triples - in a helper whose whole promise is that the graph, and
+		// so the signature over it, is unchanged.
+		if key == "@context" {
+			if containerHasContext {
+				rooted["@context"] = joinContexts(containerContext, value)
+			} else {
+				rooted["@context"] = value
+			}
 			continue
 		}
 		rooted[key] = value
@@ -646,4 +652,30 @@ func expandNodeIDs(ids []string, context any, options *ld.JsonLdOptions) []strin
 		}
 	}
 	return resolved
+}
+
+// joinContexts applies one context after another, as JSON-LD does for a graph
+// container and the node inside it.
+//
+// FLATTENED into a single array: json-gold refuses a context array nested
+// inside another. Repeated entries are kept rather than deduplicated, because
+// re-applying a context is how a document puts back a term an earlier one
+// redefined - dropping the repeat would silently change what the terms mean.
+func joinContexts(outer any, inner any) any {
+	if outer == nil {
+		return inner
+	}
+	if inner == nil {
+		return outer
+	}
+
+	joined := make([]any, 0, 2)
+	for _, context := range []any{outer, inner} {
+		if entries, isList := context.([]any); isList {
+			joined = append(joined, entries...)
+			continue
+		}
+		joined = append(joined, context)
+	}
+	return joined
 }

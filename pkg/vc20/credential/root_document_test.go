@@ -468,3 +468,39 @@ func TestRootCompactedDocumentKeepsANamedGraphNode(t *testing.T) {
 	require.Equal(t, "https://example.org/credential", rooted["id"])
 	require.Contains(t, rooted, "@graph", "and its graph stays where it is")
 }
+
+// TestRootCompactedDocumentKeepsBothContexts: JSON-LD applies a graph
+// container's context and then the node's own, and the node's may define or
+// override terms it uses. Keeping only the container's dropped those
+// definitions, which changes or removes triples - in a helper whose whole
+// promise is that the graph, and so the signature over it, is unchanged.
+func TestRootCompactedDocumentKeepsBothContexts(t *testing.T) {
+	rooted, err := RootCompactedDocument(map[string]any{
+		"@context": map[string]any{"id": "@id"},
+		"@graph": []any{
+			map[string]any{
+				"@context": map[string]any{"note": "https://example.org/vocab#note"},
+				"id":       "https://example.org/credential",
+				"note":     "defined only by the node's own context",
+			},
+		},
+	}, "", nil)
+	require.NoError(t, err)
+
+	contexts, isList := rooted["@context"].([]any)
+	require.True(t, isList, "both contexts survive, as a flat list")
+	require.Len(t, contexts, 2)
+	require.Equal(t, map[string]any{"id": "@id"}, contexts[0],
+		"the container's context is applied first")
+	require.Equal(t, map[string]any{"note": "https://example.org/vocab#note"}, contexts[1],
+		"and the node's own after it")
+
+	// The promoted document must still expand to the triple the node's
+	// context defines - which is the point, not the shape of the array.
+	expanded, err := ld.NewJsonLdProcessor().Expand(rooted, NewJSONLDOptions(""))
+	require.NoError(t, err)
+	encoded, err := json.Marshal(expanded)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), "https://example.org/vocab#note",
+		"the node's own definitions still produce their triples")
+}
