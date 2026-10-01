@@ -368,11 +368,15 @@ func TestCreateDCQLQueryValidatesWhatItSends(t *testing.T) {
 		// The empty format means dc+sd-jwt, so the same rule applies.
 		{ID: "pid", Format: ""},
 		// W3C naming only the base type matches every W3C credential.
-		{ID: "diploma", Format: openid4vp.FormatLdpVCDCQL,
-			Meta: openid4vp.MetaQuery{TypeValues: [][]string{{openid4vp.BaseVCTypeIRI}}}},
+		{
+			ID: "diploma", Format: openid4vp.FormatLdpVCDCQL,
+			Meta: openid4vp.MetaQuery{TypeValues: [][]string{{openid4vp.BaseVCTypeIRI}}},
+		},
 		// Advertised but not requestable.
-		{ID: "diploma", Format: openid4vp.FormatJwtVCJson,
-			Meta: openid4vp.MetaQuery{TypeValues: [][]string{{openid4vp.BaseVCTypeIRI, "https://example.org/d#D"}}}},
+		{
+			ID: "diploma", Format: openid4vp.FormatJwtVCJson,
+			Meta: openid4vp.MetaQuery{TypeValues: [][]string{{openid4vp.BaseVCTypeIRI, "https://example.org/d#D"}}},
+		},
 	} {
 		err := validateDCQL(&openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{unusable}})
 		require.Error(t, err, "%+v must not be sent to a wallet", unusable)

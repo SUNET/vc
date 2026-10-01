@@ -380,8 +380,10 @@ func TestInitBBSKeysAcceptsAPathOrAnInlineValue(t *testing.T) {
 	newClient := func(bbs *model.BBSConfig) *Client {
 		// An injected signer, so these exercise key decoding rather than
 		// whether this test binary was built with native BBS support.
-		return &Client{log: logger.NewSimple("test"), bbsIssuerOverride: &recordingIssuer{},
-			cfg: &model.Cfg{Issuer: &model.Issuer{BBS: bbs}}}
+		return &Client{
+			log: logger.NewSimple("test"), bbsIssuerOverride: &recordingIssuer{},
+			cfg: &model.Cfg{Issuer: &model.Issuer{BBS: bbs}},
+		}
 	}
 
 	t.Run("inline", func(t *testing.T) {

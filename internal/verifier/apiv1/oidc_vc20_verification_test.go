@@ -247,8 +247,10 @@ func TestCheckVC20AnswersTheRequest(t *testing.T) {
 		"an SD-JWT query": openid4vp.FormatSDJWTVC,
 	} {
 		t.Run(name+" is not answered by a W3C credential", func(t *testing.T) {
-			query := openid4vp.CredentialQuery{ID: "eudi_pid", Format: format,
-				Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}, DoctypeValue: "eu.europa.ec.eudi.pid.1"}}
+			query := openid4vp.CredentialQuery{
+				ID: "eudi_pid", Format: format,
+				Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}, DoctypeValue: "eu.europa.ec.eudi.pid.1"},
+			}
 			err := client.checkVC20AnswersTheRequest(sessionWith(query), "pid", []string{pidType})
 			require.Error(t, err)
 			require.Contains(t, err.Error(), "does not answer it",

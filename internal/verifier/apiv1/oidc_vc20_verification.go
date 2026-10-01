@@ -85,6 +85,26 @@ func (c *Client) verifyVC20ForOIDC(ctx context.Context, session *cache.Authoriza
 	return nil
 }
 
+// sessionCouldAskForW3C reports whether any scope this session carries is
+// CONFIGURED as a W3C format.
+//
+// Asked only when the request itself cannot be recovered, so it reads the
+// configuration - the one description of the session still available. A
+// deployment with no credential metadata to consult cannot tell, and this
+// decides whether to fail closed, so it answers yes.
+func (c *Client) sessionCouldAskForW3C(session *cache.AuthorizationContext) bool {
+	if session == nil || c.cfg == nil || c.cfg.Common == nil || len(c.cfg.Common.CredentialMetadata) == 0 {
+		return true
+	}
+	for _, scope := range c.credentialScopes(session, session.ScopeQueryIDs) {
+		cm := c.cfg.Common.CredentialMetadata[scope]
+		if cm != nil && openid4vp.IsW3CVCFormatIdentifier(cm.Format) {
+			return true
+		}
+	}
+	return false
+}
+
 // refuseAResponseThisPathCannotCheck rejects a direct-post response whose
 // claims could not all be accounted for.
 //
@@ -115,7 +135,25 @@ func (c *Client) refuseAResponseThisPathCannotCheck(session *cache.Authorization
 	// too. Reading only the session field left a template-driven request
 	// with no format check at all.
 	if c.sessionDCQL(session) == nil {
-		return fmt.Errorf("the request this response answers is no longer available, so nothing in it can be checked against what was asked for")
+		// Fail closed where it matters, and ONLY there.
+		//
+		// A missing query is a normal cross-replica condition - the
+		// persisted request is gone, or this process never had the request
+		// object - and refusing every response for it turned a cache miss
+		// into an outage for flows that need nothing from this path at all.
+		// An SD-JWT-only OIDC response carries no W3C document and asks no
+		// W3C scope; there is nothing here to check and nothing downstream
+		// relying on this having checked it.
+		//
+		// Two things still force the refusal, and either alone is enough: a
+		// W3C document actually arrived, or the session's scopes are
+		// CONFIGURED as a W3C format and so could have asked for one. The
+		// second is read from configuration rather than from the request,
+		// because this is asked exactly when the request cannot be read.
+		if len(documents) > 0 || c.sessionCouldAskForW3C(session) {
+			return fmt.Errorf("the request this response answers is no longer available, so nothing in it can be checked against what was asked for")
+		}
+		return nil
 	}
 
 	if len(documents) > 0 && len(others) > 0 {

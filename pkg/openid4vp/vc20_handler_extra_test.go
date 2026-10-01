@@ -218,3 +218,55 @@ type staticResolver struct{ key crypto.PublicKey }
 func (r *staticResolver) ResolveKey(context.Context, string) (crypto.PublicKey, error) {
 	return r.key, nil
 }
+
+// TestVerifyAndExtractRefusesAMultiProofSDCredential: the rdfc paths pass the
+// selected proof's value to the suite, so the key that was resolved is checked
+// against the proof whose metadata was selected. SdSuite has no such selector
+// - it finds the proof by traversing the proof object, which need not be the
+// one extractProof chose - so the key from one proof could be checked against
+// another while the result reports the first.
+//
+// Refusing is the honest answer until that selector exists, and it costs
+// nothing real: a document carrying a second proof does not verify on this
+// branch under any selector anyway, because hashing removes every proof in the
+// graph and the second invalidates the first. What changes is that the refusal
+// says why.
+func TestVerifyAndExtractRefusesAMultiProofSDCredential(t *testing.T) {
+	signer, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	issuer, err := NewVC20Handler(WithVC20SignerConfig(&VC20SignerConfig{
+		PrivateKey:         signer,
+		IssuerID:           "did:example:issuer",
+		VerificationMethod: "did:example:issuer#key-1",
+		Cryptosuite:        CryptosuiteECDSASd,
+	}))
+	require.NoError(t, err)
+	created, err := issuer.CreateCredential(t.Context(), &VC20CreateRequest{
+		Types:   []string{"VerifiableCredential"},
+		Subject: map[string]any{"id": "did:example:subject"},
+	})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(created.CredentialJSON, &doc))
+	proof, ok := doc["proof"].(map[string]any)
+	require.True(t, ok, "the fixture must carry one proof to duplicate")
+
+	second := map[string]any{}
+	for k, v := range proof {
+		second[k] = v
+	}
+	second["created"] = "2001-01-01T00:00:00Z"
+	doc["proof"] = []any{proof, second}
+
+	combined, err := json.Marshal(doc)
+	require.NoError(t, err)
+
+	h, err := NewVC20Handler(WithVC20KeyResolver(&staticResolver{key: &signer.PublicKey}))
+	require.NoError(t, err)
+
+	_, err = h.VerifyAndExtract(t.Context(), string(combined))
+	require.ErrorContains(t, err, "cannot say which one",
+		"the SD path refuses by name rather than verifying whichever proof it reaches")
+}

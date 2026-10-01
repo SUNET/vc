@@ -890,7 +890,23 @@ func (h *VC20Handler) verifyECDSASd2023(
 		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
 	}
 
-	// Verify using the SD suite
+	// REFUSED when the document carries more than one proof.
+	//
+	// The rdfc paths pass the selected proof's value to the suite so the key
+	// that was resolved is checked against the proof whose metadata was
+	// selected. SdSuite has no such selector: it finds the proof by
+	// traversing the proof object, which need not be the one extractProof
+	// chose - so the key from proof A could be checked against proof B while
+	// the result reports A.
+	//
+	// Refusing is the honest answer until that selector exists. It costs
+	// nothing real: a document carrying a second proof does not verify on
+	// this branch under any selector, because hashing removes every proof in
+	// the graph and the second one invalidates the first.
+	if proofs, several := credMap["proof"].([]any); several && len(proofs) > 1 {
+		return nil, fmt.Errorf("the credential carries %d proofs and %s cannot say which one a key was resolved for", len(proofs), CryptosuiteECDSASd)
+	}
+
 	sdSuite := ecdsaSuite.NewSdSuite()
 	if err := sdSuite.Verify(rdfCred, pubKey); err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
