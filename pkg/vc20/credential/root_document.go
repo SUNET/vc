@@ -120,7 +120,7 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 		// so the signature over it, is unchanged.
 		if key == "@context" {
 			if containerHasContext {
-				rooted["@context"] = joinContexts(containerContext, value)
+				rooted["@context"] = JoinContexts(containerContext, value)
 			} else {
 				rooted["@context"] = value
 			}
@@ -722,14 +722,14 @@ func expandNodeIDs(ids []string, context any, options *ld.JsonLdOptions) []strin
 	return resolved
 }
 
-// joinContexts applies one context after another, as JSON-LD does for a graph
-// container and the node inside it.
+// JoinContexts applies one context after another, as JSON-LD does for an outer
+// scope and a node inside it.
 //
 // FLATTENED into a single array: json-gold refuses a context array nested
 // inside another. Repeated entries are kept rather than deduplicated, because
 // re-applying a context is how a document puts back a term an earlier one
 // redefined - dropping the repeat would silently change what the terms mean.
-func joinContexts(outer any, inner any) any {
+func JoinContexts(outer any, inner any) any {
 	if outer == nil {
 		return inner
 	}

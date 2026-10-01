@@ -389,3 +389,54 @@ func TestRemoveRootProofHandlesASplitRootNode(t *testing.T) {
 	require.NotContains(t, names, "_:rootproof", "and the graph it named")
 	require.Contains(t, names, "_:nestedproof", "while the nested credential keeps its own")
 }
+
+// TestRemoveRootProofComposesContexts: a node-local @context is applied ON TOP
+// of the inherited one, not instead of it. Returning only the node's own
+// dropped outer definitions - an outer alias for the proof predicate among
+// them - so removeRootProof could leave a root proof that RootProofs removes,
+// and SD signing and derivation would hash different documents.
+func TestRemoveRootProofComposesContexts(t *testing.T) {
+	t.Run("an outer alias survives a node's own context", func(t *testing.T) {
+		var document any
+		require.NoError(t, json.Unmarshal([]byte(`{
+			"@context": {"seal": "https://w3id.org/security#proof", "id": "@id"},
+			"@graph": [
+				{
+					"@context": {"note": "https://example.org/vocab#note"},
+					"id": "https://example.org/credential",
+					"note": "kept",
+					"seal": {"type": "DataIntegrityProof"}
+				}
+			]
+		}`), &document))
+
+		stripped, err := removeRootProof(document, nil)
+		require.NoError(t, err)
+
+		node := stripped.(map[string]any)["@graph"].([]any)[0].(map[string]any)
+		require.NotContains(t, node, "seal",
+			"the container's alias still names the proof inside the node")
+		require.Contains(t, node, "note")
+	})
+
+	t.Run("an explicit null resets", func(t *testing.T) {
+		var document any
+		require.NoError(t, json.Unmarshal([]byte(`{
+			"@context": {"seal": "https://w3id.org/security#proof", "id": "@id"},
+			"@graph": [
+				{
+					"@context": null,
+					"id": "https://example.org/credential",
+					"seal": {"type": "DataIntegrityProof"}
+				}
+			]
+		}`), &document))
+
+		stripped, err := removeRootProof(document, nil)
+		require.NoError(t, err)
+
+		node := stripped.(map[string]any)["@graph"].([]any)[0].(map[string]any)
+		require.Contains(t, node, "seal",
+			"a null context clears what was active, so the alias means nothing here")
+	})
+}

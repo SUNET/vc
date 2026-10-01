@@ -276,7 +276,12 @@ func replaceURNsInNQuads(nquads string) string {
 // Which members ARE the proof is resolved through the document's context, not
 // matched against a list of spellings - see credential.ProofKeys.
 func removeRootProof(data any, options *ld.JsonLdOptions) (any, error) {
-	return removeRootProofUnder(data, documentContextOf(data), options)
+	// NO inherited context at the top: there is no enclosing scope, so a
+	// top-level node's own context becomes the active one exactly once.
+	// Seeding this with the document's context made that node's context
+	// both the outer and the local one, and composing a context with
+	// itself is not what JSON-LD does with it.
+	return removeRootProofUnder(data, nil, options)
 }
 
 // removeRootProofUnder carries the context DOWN rather than recomputing it.
@@ -308,7 +313,7 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any
 		// still what the document is about - reaching into its graph would
 		// remove a proof this must not touch.
 		if credential.IsBareGraphContainer(typed) {
-			graph, err := removeRootProofUnder(typed["@graph"], context, options)
+			graph, err := removeRootProofUnder(typed["@graph"], contextFor(typed, context), options)
 			if err != nil {
 				return nil, err
 			}
@@ -419,27 +424,26 @@ func withoutNamedGraphs(entries []any, names []string) []any {
 	return kept
 }
 
-// documentContextOf reads the @context a document carries at its OUTERMOST
-// level, so member names can be resolved against it. An expanded document
-// carries none, and needs none - its members are already absolute IRIs.
+// contextFor is the context to resolve a NODE's members against: the one
+// inherited from the enclosing scope, with the node's own applied on top.
 //
-// A top-level array has no outermost context of its own; each node may carry
-// one, and contextFor reads it from the node that matters rather than from
-// whichever came first.
-func documentContextOf(data any) any {
-	if node, isNode := data.(map[string]any); isNode {
-		return node["@context"]
+// APPLIED ON TOP, not instead of. A node-local context adds to and overrides
+// what is already active; returning only the node's own dropped outer
+// definitions - an outer alias for the proof predicate among them - so
+// removeRootProof could leave a root proof that RootProofs removes, and SD
+// signing and derivation would hash different documents.
+//
+// An explicit null is the exception, because in JSON-LD it is a RESET: it
+// clears what is active rather than adding to it.
+func contextFor(node map[string]any, inherited any) any {
+	own, present := node["@context"]
+	if !present {
+		return inherited
 	}
-	return nil
-}
-
-// contextFor is the context to resolve a NODE's members against: its own if it
-// has one, and the document's otherwise.
-func contextFor(node map[string]any, document any) any {
-	if own, present := node["@context"]; present {
-		return own
+	if own == nil {
+		return nil
 	}
-	return document
+	return credential.JoinContexts(inherited, own)
 }
 
 // parseJSONPointer parses a JSON pointer (RFC 6901) into path segments.
