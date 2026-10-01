@@ -361,45 +361,21 @@ func (s *SdSuite) Verify(cred *credential.RDFCredential, key *ecdsa.PublicKey) e
 		return fmt.Errorf("public key is nil")
 	}
 
-	// The same root-stability check signing applies. A document that names
-	// one root as written and another once serialized through RDF can be
-	// re-rooted by its holder.
-	if err := cred.CheckRootSurvivesFlattening(); err != nil {
-		return err
-	}
-
-	expanded, _, err := cred.RootProofs()
+	// One selector, shared with Derive and VerifyRootProof. Three copies of
+	// "which proofs are this document's own" is how selection and hashing
+	// came to disagree in the first place.
+	candidates, err := sdRootProofs(cred)
 	if err != nil {
 		return err
 	}
-	if len(expanded) == 0 {
-		return fmt.Errorf("the document carries no proof of its own to verify")
-	}
 
 	var lastErr error
-	for _, entry := range expanded {
-		proofMap, err := credential.CompactRootProof(entry)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if !credential.HasProofType(proofMap, ProofType) {
-			lastErr = fmt.Errorf("the document's own proof link names a %v, not a %s", proofMap["type"], ProofType)
-			continue
-		}
-		if suite, _ := proofMap["cryptosuite"].(string); suite != CryptosuiteSd2023 {
-			lastErr = fmt.Errorf("the document's own proof declares cryptosuite %q, not %s", suite, CryptosuiteSd2023)
-			continue
-		}
+	for _, proofMap := range candidates {
 		if err := s.verifySdRootProof(cred, key, proofMap); err != nil {
 			lastErr = err
 			continue
 		}
 		return nil
-	}
-
-	if lastErr == nil {
-		lastErr = fmt.Errorf("the document carries no %s proof of its own", CryptosuiteSd2023)
 	}
 	return lastErr
 }
@@ -409,6 +385,22 @@ func (s *SdSuite) Verify(cred *credential.RDFCredential, key *ecdsa.PublicKey) e
 // each in turn here: deriving is a one-proof operation, so an ambiguous
 // document must be refused rather than silently resolved.
 func sdRootProof(cred *credential.RDFCredential) (map[string]any, error) {
+	found, err := sdRootProofs(cred)
+	if err != nil {
+		return nil, err
+	}
+	if len(found) > 1 {
+		return nil, fmt.Errorf("the document carries more than one %s proof of its own", CryptosuiteSd2023)
+	}
+	return found[0], nil
+}
+
+// sdRootProofs returns every ecdsa-sd-2023 proof the document attaches to
+// ITSELF. A proof that will not compact is skipped rather than fatal: every
+// root proof is removed from the document a signature covers, so appending a
+// malformed one does not disturb a genuine proof already there, and failing on
+// it would let that append deny verification.
+func sdRootProofs(cred *credential.RDFCredential) ([]map[string]any, error) {
 	if err := cred.CheckRootSurvivesFlattening(); err != nil {
 		return nil, err
 	}
@@ -418,11 +410,11 @@ func sdRootProof(cred *credential.RDFCredential) (map[string]any, error) {
 		return nil, err
 	}
 
-	var found map[string]any
+	var found []map[string]any
 	for _, entry := range expanded {
 		proofMap, err := credential.CompactRootProof(entry)
 		if err != nil {
-			return nil, err
+			continue
 		}
 		if !credential.HasProofType(proofMap, ProofType) {
 			continue
@@ -430,12 +422,9 @@ func sdRootProof(cred *credential.RDFCredential) (map[string]any, error) {
 		if suite, _ := proofMap["cryptosuite"].(string); suite != CryptosuiteSd2023 {
 			continue
 		}
-		if found != nil {
-			return nil, fmt.Errorf("the document carries more than one %s proof of its own", CryptosuiteSd2023)
-		}
-		found = proofMap
+		found = append(found, proofMap)
 	}
-	if found == nil {
+	if len(found) == 0 {
 		return nil, fmt.Errorf("the document carries no %s proof of its own", CryptosuiteSd2023)
 	}
 	return found, nil
@@ -465,15 +454,22 @@ func (s *SdSuite) VerifyRootProof(cred *credential.RDFCredential, key *ecdsa.Pub
 		return fmt.Errorf("proof is nil")
 	}
 
-	selected, err := sdRootProof(cred)
+	// MATCHED among the document's own proofs, not required to be the only
+	// one. The caller has already said which proof it means - demanding
+	// uniqueness here would reject a document Verify accepts, since that
+	// tries each root proof in turn.
+	candidates, err := sdRootProofs(cred)
 	if err != nil {
 		return err
 	}
-	if value, _ := selected["proofValue"].(string); value != proof["proofValue"] {
-		return fmt.Errorf("the proof offered is not the %s proof this document attaches to itself", CryptosuiteSd2023)
+	offered, _ := proof["proofValue"].(string)
+	for _, candidate := range candidates {
+		if value, _ := candidate["proofValue"].(string); value == offered && offered != "" {
+			return s.verifySdRootProof(cred, key, candidate)
+		}
 	}
 
-	return s.verifySdRootProof(cred, key, selected)
+	return fmt.Errorf("the proof offered is not an %s proof this document attaches to itself", CryptosuiteSd2023)
 }
 
 // verifySdRootProof verifies one ecdsa-sd-2023 proof. Whether it is a base or

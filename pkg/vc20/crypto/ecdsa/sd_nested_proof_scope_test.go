@@ -157,11 +157,49 @@ func TestVerifyRootProofIsBoundToTheProofItIsGiven(t *testing.T) {
 		forged["proofPurpose"] = "authentication"
 
 		err := suite.VerifyRootProof(signed, &key.PublicKey, forged)
-		require.ErrorContains(t, err, "is not the ecdsa-sd-2023 proof this document attaches to itself",
+		require.ErrorContains(t, err, "is not an ecdsa-sd-2023 proof this document attaches to itself",
 			"the suite must not verify its own pick and let the caller report this one")
 	})
 
 	t.Run("a nil proof is refused", func(t *testing.T) {
 		require.Error(t, suite.VerifyRootProof(signed, &key.PublicKey, nil))
 	})
+}
+
+// TestVerifyRootProofAcceptsOneOfSeveralRootProofs: binding verification to
+// the proof the caller named must not also demand that it be the only one.
+// Signing appends rather than replaces, so a document secured by two parties
+// carries two root proofs - and a handler that resolved a key from the second
+// would be refused a document the suite's own Verify accepts.
+func TestVerifyRootProofAcceptsOneOfSeveralRootProofs(t *testing.T) {
+	suite, firstKey, signed := signNestedProofCredential(t)
+
+	secondKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	twice, err := suite.Sign(signed, secondKey, &SdSignOptions{
+		VerificationMethod: "did:example:second#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+
+	var document map[string]any
+	require.NoError(t, json.Unmarshal([]byte(twice.OriginalJSON()), &document))
+	proofs, ok := document["proof"].([]any)
+	require.True(t, ok, "signing twice must make a proof SET")
+	require.Len(t, proofs, 2)
+
+	first, ok := proofs[0].(map[string]any)
+	require.True(t, ok)
+	second, ok := proofs[1].(map[string]any)
+	require.True(t, ok)
+
+	require.NoError(t, suite.VerifyRootProof(twice, &firstKey.PublicKey, first),
+		"the first signer's proof verifies with the first signer's key")
+	require.NoError(t, suite.VerifyRootProof(twice, &secondKey.PublicKey, second),
+		"and the second's with the second's, without either being the only proof")
+
+	require.Error(t, suite.VerifyRootProof(twice, &firstKey.PublicKey, second),
+		"a proof is still only verified against the key that made it")
 }
