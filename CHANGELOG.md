@@ -104,6 +104,17 @@
   refused for holding "more than one node nothing refers to". Affects
   `ecdsa-sd-2023` derivation and signing of containers only.
 
+  **Root matching reads a node's own `@context` and any alias of `@id`.** A
+  `@graph` entry may declare its own prefix and use it in its identifier, and
+  JSON-LD lets a context alias `@id` to any term. `RootID` works on the
+  EXPANDED document and resolved both; root matching read entries under the
+  container's context alone and knew only the spellings `@id` and `id`, so the
+  two disagreed and **documents of either shape were refused at signing** as
+  though their root had disappeared, or as holding more than one node nothing
+  refers to. They now sign. Fragments are merged through the same reading, so a
+  node split across `@graph` entries and spelled through a context coalesces
+  like any other.
+
   **`RDFCredential.CanonicalForm` now honours the options the credential was
   parsed with.** It built fresh defaults — no caller document loader, no
   `expandContext`, no base, no processing mode — while root selection,

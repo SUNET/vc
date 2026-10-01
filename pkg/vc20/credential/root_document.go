@@ -45,7 +45,10 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 		// entirely - here, the credential's subject - and attaching the
 		// credential's proof to that is how a proof comes to secure a
 		// document nobody meant to sign.
-		if knownRootID != "" && !isKnownRoot(compacted, compacted["@context"], knownRootID, options) {
+		// No container here: the document IS the node, so its @context is
+		// the node's OWN. Passing it as a container context too composed it
+		// with itself.
+		if knownRootID != "" && !isKnownRoot(compacted, nil, knownRootID, options) {
 			return nil, fmt.Errorf("the document no longer holds the node %q it is about", knownRootID)
 		}
 		return compacted, nil
@@ -77,7 +80,7 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 	// every property the document gave it rather than whichever fragment
 	// came first. RootOfCompactedNodes has always done this; this path had
 	// not.
-	nodes = coalesceCompactedByID(nodes)
+	nodes = coalesceCompactedByID(nodes, compacted["@context"], options)
 
 	rootIndex := -1
 
@@ -312,6 +315,70 @@ func canonicalFormOf(document map[string]any, options *ld.JsonLdOptions) (string
 	return cred.CanonicalForm()
 }
 
+// composedContext returns the context a @graph ENTRY is read under: the
+// container's, then the entry's own. Nothing else - the node it may later be
+// moved inside does not reach it.
+//
+// Reading an entry under the container's context alone was enough to lose it:
+// a node declaring its own prefix and using it in its identifier resolved to
+// the compact spelling, matched no known root, and all three signing paths
+// rejected the document as though its root had disappeared.
+func composedContext(node map[string]any, containerContext any, containerHasContext bool) any {
+	own, present := node["@context"]
+	switch {
+	case !present:
+		return containerContext
+	case !containerHasContext:
+		return own
+	case own == nil:
+		// An explicit null is a RESET the node asked for. It stays in the
+		// sequence, after the container's, where it clears what came before.
+		return []any{containerContext, nil}
+	default:
+		return JoinContexts(containerContext, own)
+	}
+}
+
+// nodeIDUnder reads a node's identifier, resolving ANY alias of @id the active
+// context defines.
+//
+// JSON-LD lets a context alias @id to any term, so hard-coding the spellings
+// @id and id read no identifier at all from a document using one - RootID,
+// which works on the EXPANDED form, found it, and root matching here did not,
+// so signing failed on a document that parses perfectly well.
+//
+// Keys are taken in order, so a document defining two aliases gets one answer
+// rather than whichever the map iteration happened to yield.
+func nodeIDUnder(node map[string]any, context any, options *ld.JsonLdOptions) string {
+	if id := compactNodeID(node); id != "" {
+		return id
+	}
+
+	active := nodeContext(node, context, options)
+	if active == nil {
+		return ""
+	}
+
+	keys := make([]string, 0, len(node))
+	for key := range node {
+		if !strings.HasPrefix(key, "@") {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		text, isText := node[key].(string)
+		if !isText {
+			continue
+		}
+		if resolved, unresolvable := expandMemberName(active, key); !unresolvable && resolved == "@id" {
+			return text
+		}
+	}
+	return ""
+}
+
 // compactNodeID reads a node's identifier under either spelling. A compacted
 // document written against the v2 context aliases @id to id.
 func compactNodeID(node map[string]any) string {
@@ -389,7 +456,7 @@ func RootOfCompactedNodes(nodes []map[string]any, context any, options *ld.JsonL
 	// across several top-level entries, which RDF conversion merges back
 	// into one - RootProofs has always coalesced before selecting, and not
 	// doing it here rejected the same document as having several roots.
-	merged := coalesceCompactedByID(nodes)
+	merged := coalesceCompactedByID(nodes, context, options)
 
 	index, err := rootIndexOfCompactedNodes(merged, context, options)
 	if err != nil {
@@ -407,12 +474,15 @@ func CompactNodeID(node map[string]any) string {
 
 // coalesceCompactedByID merges entries sharing an identifier, on COPIES - the
 // caller's document is not ours to rewrite.
-func coalesceCompactedByID(nodes []map[string]any) []map[string]any {
+func coalesceCompactedByID(nodes []map[string]any, context any, options *ld.JsonLdOptions) []map[string]any {
 	merged := make([]map[string]any, 0, len(nodes))
 	at := map[string]int{}
 
 	for _, node := range nodes {
-		id := compactNodeID(node)
+		// Read under the node's own scope and through any alias of @id, or
+		// fragments of one node spelled through a context go on looking like
+		// separate nodes - which is the refusal this merge exists to avoid.
+		id := nodeIDUnder(node, composedContext(node, context, context != nil), options)
 		if id == "" {
 			merged = append(merged, maps.Clone(node))
 			continue
@@ -458,20 +528,41 @@ func rootIndexOfCompactedNodes(nodes []map[string]any, context any, options *ld.
 	// absolute IRIs, while a node's own id is still spelled as the document
 	// writes it - so a compact id never matched, every node looked
 	// unreferenced, and a perfectly good document read as ambiguous.
+	// Each node read under the context it ACTUALLY has - the container's and
+	// its own - and through any alias of @id that context defines.
+	scopes := make([]any, len(nodes))
 	lookup := make([]string, len(nodes))
+	shared := make([]string, len(nodes))
+	ownContext := make([]bool, len(nodes))
 	for i, node := range nodes {
-		lookup[i] = compactNodeID(node)
+		_, ownContext[i] = node["@context"]
+		scopes[i] = composedContext(node, context, context != nil)
+		lookup[i] = nodeIDUnder(node, scopes[i], options)
+		if !ownContext[i] {
+			shared[i] = lookup[i]
+		}
 	}
 	if resolved {
-		lookup = expandNodeIDs(lookup, context, options)
+		// Batched for the nodes that share the container's context, which is
+		// almost all of them; one carrying a context of its own is expanded
+		// on its own, because a batch can only apply ONE context.
+		shared = expandNodeIDs(shared, context, options)
+		for i := range nodes {
+			if !ownContext[i] {
+				lookup[i] = shared[i]
+				continue
+			}
+			if expanded := expandNodeID(scopes[i], lookup[i], options); expanded != "" {
+				lookup[i] = expanded
+			}
+		}
 	}
 
 	rootIndex := -1
-	for i, node := range nodes {
-		id := compactNodeID(node)
+	for i := range nodes {
 		// A node with no identifier cannot be referred to, so it is a
 		// candidate like any other unreferenced node.
-		if id != "" && isReferenced(nodes, i, lookup[i], referencedBy, resolved) {
+		if lookup[i] != "" && isReferenced(nodes, i, lookup[i], referencedBy, resolved) {
 			continue
 		}
 		if rootIndex >= 0 {
@@ -494,14 +585,21 @@ func rootIndexOfCompactedNodes(nodes []map[string]any, context any, options *ld.
 // term or a compact IRI. Comparing the strings alone rejected a perfectly
 // valid derivation purely because compaction changed the spelling of its root.
 func isKnownRoot(node map[string]any, context any, knownRootID string, options *ld.JsonLdOptions) bool {
-	id := compactNodeID(node)
+	// The context the node is actually READ under - the container's and its
+	// own. A @graph entry may declare its own prefix and use it in its
+	// identifier; resolving that against the container's context alone left
+	// the compact spelling, which matches no absolute IRI, and the document
+	// was rejected as though its root had disappeared.
+	scoped := composedContext(node, context, context != nil)
+
+	id := nodeIDUnder(node, scoped, options)
 	if id == "" {
 		return false
 	}
 	if id == knownRootID {
 		return true
 	}
-	return expandNodeID(context, id, options) == knownRootID
+	return expandNodeID(scoped, id, options) == knownRootID
 }
 
 // expandNodeID resolves an identifier as written in a compacted document to

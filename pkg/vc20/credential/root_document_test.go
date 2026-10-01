@@ -871,3 +871,69 @@ func TestRootScopedDocumentIsComputedOnce(t *testing.T) {
 	require.Same(t, first, second, "the answer is computed once, not once per candidate")
 	require.Equal(t, firstCanonical, secondCanonical)
 }
+
+// TestRootCompactedDocumentReadsANodeLocalContext: a @graph entry may declare
+// its own prefix and use it in its identifier. RootID works on the EXPANDED
+// document, so it resolves that to an absolute IRI - but root matching read
+// the entry under the CONTAINER's context alone, where the compact spelling
+// resolves to nothing. The two disagreed, and all three signing paths rejected
+// the document as though its root had disappeared.
+func TestRootCompactedDocumentReadsANodeLocalContext(t *testing.T) {
+	document := map[string]any{
+		"@context": map[string]any{
+			"id":      "@id",
+			"note":    "https://example.org/vocab#note",
+			"carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+		},
+		"@graph": []any{
+			map[string]any{
+				// The prefix the root's identifier is written with exists
+				// only here.
+				"@context": map[string]any{"ex": "https://example.org/"},
+				"id":       "ex:credential",
+				"carries":  "https://example.org/other",
+			},
+			map[string]any{"id": "https://example.org/other", "note": "a sibling"},
+		},
+	}
+
+	rooted, err := RootCompactedDocument(document, "https://example.org/credential", nil)
+	require.NoError(t, err, "the node's own context is part of how its identifier reads")
+	require.Equal(t, "ex:credential", rooted["id"],
+		"and the document keeps the spelling it was written with")
+}
+
+// TestRootCompactedDocumentReadsAnAliasedID: JSON-LD lets a context alias @id
+// to any term. Root identification was hard-coded to the spellings @id and id,
+// so a document using one read as having NO identifiers at all - every node
+// looked unreferenced and the document was refused, while RootID, which works
+// on the expanded form, found the root perfectly well.
+func TestRootCompactedDocumentReadsAnAliasedID(t *testing.T) {
+	document := func() map[string]any {
+		return map[string]any{
+			"@context": map[string]any{
+				"identifier": "@id",
+				"note":       "https://example.org/vocab#note",
+				"carries":    map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+			},
+			"@graph": []any{
+				map[string]any{
+					"identifier": "https://example.org/credential",
+					"carries":    "https://example.org/other",
+				},
+				map[string]any{"identifier": "https://example.org/other", "note": "a sibling"},
+			},
+		}
+	}
+
+	known, err := RootCompactedDocument(document(), "https://example.org/credential", nil)
+	require.NoError(t, err, "an aliased @id is still an @id")
+	require.Equal(t, "https://example.org/credential", known["identifier"])
+
+	// And the same document with nothing told to it: the root is still the
+	// node nothing refers to, which needs the alias read to see at all.
+	inferred, err := RootCompactedDocument(document(), "", nil)
+	require.NoError(t, err, "a document using an alias still says which node it is about")
+	require.Equal(t, known["identifier"], inferred["identifier"],
+		"both readings must choose the same node")
+}
