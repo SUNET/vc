@@ -54,8 +54,10 @@ type RDFCredential struct {
 	rootScoped *rootScopedDocument
 }
 
+// rootScopedDocument holds only the canonical form, never the document it
+// came from: see RootScopedCanonicalForm for why handing that out made the
+// cache externally mutable.
 type rootScopedDocument struct {
-	document  *RDFCredential
 	canonical string
 	err       error
 }

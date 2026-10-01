@@ -869,16 +869,45 @@ func TestRootScopedDocumentIsComputedOnce(t *testing.T) {
 	}`), nil)
 	require.NoError(t, err)
 
-	first, firstCanonical, err := RootScopedDocument(cred)
+	firstCanonical, err := RootScopedCanonicalForm(cred)
 	require.NoError(t, err)
 	require.NotEmpty(t, firstCanonical)
 	require.NotContains(t, firstCanonical, "#proof",
 		"the root's own proof is the one thing the secured document leaves out")
 
-	second, secondCanonical, err := RootScopedDocument(cred)
+	// Memoized, read off the credential rather than by pointer identity of a
+	// returned document - there is no returned document any more, which is
+	// the point: handing one out left the cache externally mutable.
+	memo := cred.rootScoped
+	require.NotNil(t, memo, "the answer is cached, or there is nothing to compute once")
+
+	secondCanonical, err := RootScopedCanonicalForm(cred)
 	require.NoError(t, err)
-	require.Same(t, first, second, "the answer is computed once, not once per candidate")
 	require.Equal(t, firstCanonical, secondCanonical)
+	require.Same(t, memo, cred.rootScoped,
+		"the answer is computed once, not once per candidate")
+}
+
+// TestRootScopedCanonicalFormHandsOutNoDocument: the memoized *RDFCredential
+// used to be returned alongside the canonical form, so the cache stayed
+// externally mutable after Dataset() had been made defensive - a caller could
+// rewrite that document through NormalizeVerifiableCredentialGraph, and the
+// next call returned the mutated document paired with the canonical form of
+// the one it used to be.
+//
+// No caller needed it: all three ecdsa-sd call sites discarded it. This pins
+// that the API hands back a value nobody can write through.
+func TestRootScopedCanonicalFormHandsOutNoDocument(t *testing.T) {
+	cred := memoizedCredential(t)
+
+	canonical, err := RootScopedCanonicalForm(cred)
+	require.NoError(t, err)
+	require.NotEmpty(t, canonical)
+
+	// A string is a copy; there is no handle to mutate. Asserting the type
+	// is what keeps a future change from widening the return again without
+	// thinking about the cache.
+	require.IsType(t, "", canonical)
 }
 
 // TestRootCompactedDocumentReadsANodeLocalContext: a @graph entry may declare
@@ -1323,7 +1352,7 @@ func TestMemoizedAnswersUnderConcurrentInvalidation(t *testing.T) {
 				case 0:
 					_, _ = CompactedRootProofs(cred)
 				case 1:
-					_, _, _ = RootScopedDocument(cred)
+					_, _ = RootScopedCanonicalForm(cred)
 				default:
 					_, _ = SecuredDocumentHash(cred)
 				}

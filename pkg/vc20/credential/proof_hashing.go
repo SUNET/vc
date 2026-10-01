@@ -231,11 +231,19 @@ func documentHash(cred *RDFCredential) ([32]byte, error) {
 	return sha256.Sum256([]byte(canonical)), nil
 }
 
-// RootScopedDocument returns the document a proof secures - this document with
-// the ROOT's own proofs removed and every nested proof left where it is -
-// together with its canonical N-Quads. Computed ONCE per credential.
+// RootScopedCanonicalForm returns the canonical N-Quads of the document a
+// proof secures: this document with the ROOT's own proofs removed and every
+// nested proof left where it is. Computed ONCE per credential.
 //
-// Everything in it is a pure function of the document, and it is the SAME
+// It returns the STRING and not the document. Handing back the memoized
+// *RDFCredential left the cache externally mutable after Dataset() had been
+// made defensive: a caller could rewrite that document - through
+// NormalizeVerifiableCredentialGraph, say - and the next call would return
+// the mutated document paired with the canonical form of the one it used to
+// be. No caller needed the document; all three ecdsa-sd call sites discarded
+// it. Narrowing the API removes the handle rather than copying it.
+//
+// Everything here is a pure function of the document, and it is the SAME
 // answer for every proof in a set, because that is what a proof set means.
 // ecdsa-sd-2023 checked each candidate by recomputing the root-stability
 // check, the proof removal and a full URDNA2015 run, so a 32-proof set paid
@@ -247,36 +255,36 @@ func documentHash(cred *RDFCredential) ([32]byte, error) {
 // through RDF can be re-rooted by its holder, and removing the NEW root's
 // proof then reproduces a different unsecured document than the signer meant
 // to secure.
-func RootScopedDocument(cred *RDFCredential) (*RDFCredential, string, error) {
+func RootScopedCanonicalForm(cred *RDFCredential) (string, error) {
 	cred.memoMu.Lock()
 	defer cred.memoMu.Unlock()
 
 	if cred.rootScoped == nil {
-		document, canonical, err := rootScopedDocumentOf(cred)
-		cred.rootScoped = &rootScopedDocument{document: document, canonical: canonical, err: err}
+		canonical, err := rootScopedCanonicalFormOf(cred)
+		cred.rootScoped = &rootScopedDocument{canonical: canonical, err: err}
 	}
 	if cred.rootScoped.err != nil {
-		return nil, "", cred.rootScoped.err
+		return "", cred.rootScoped.err
 	}
-	return cred.rootScoped.document, cred.rootScoped.canonical, nil
+	return cred.rootScoped.canonical, nil
 }
 
-func rootScopedDocumentOf(cred *RDFCredential) (*RDFCredential, string, error) {
+func rootScopedCanonicalFormOf(cred *RDFCredential) (string, error) {
 	if err := cred.CheckRootSurvivesFlattening(); err != nil {
-		return nil, "", err
+		return "", err
 	}
 
 	_, withoutRootProof, err := cred.RootProofs()
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to get the document the proof secures: %w", err)
+		return "", fmt.Errorf("failed to get the document the proof secures: %w", err)
 	}
 
 	canonical, err := withoutRootProof.CanonicalForm()
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to get canonical form: %w", err)
+		return "", fmt.Errorf("failed to get canonical form: %w", err)
 	}
 
-	return withoutRootProof, canonical, nil
+	return canonical, nil
 }
 
 // DocumentAsMap returns the credential as a JSON object, preferring the

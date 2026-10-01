@@ -55,8 +55,8 @@ func refuseAnOverfullProofSet(cred *credential.RDFCredential) error {
 // same answer, and recomputing it meant a full root-stability check, proof
 // removal and URDNA2015 run per candidate - up to 32 of them, before
 // anything is authenticated.
-func rootScopedWithoutProof(cred *credential.RDFCredential) (*credential.RDFCredential, string, error) {
-	return credential.RootScopedDocument(cred)
+func rootScopedWithoutProof(cred *credential.RDFCredential) (string, error) {
+	return credential.RootScopedCanonicalForm(cred)
 }
 
 // NewSdSuite creates a new ECDSA SD cryptosuite
@@ -122,7 +122,7 @@ func (s *SdSuite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, op
 		return nil, err
 	}
 
-	_, nquadsStr, err := rootScopedWithoutProof(cred)
+	nquadsStr, err := rootScopedWithoutProof(cred)
 	if err != nil {
 		return nil, err
 	}
@@ -611,7 +611,7 @@ func (s *SdSuite) verifyBaseProof(cred *credential.RDFCredential, key *ecdsa.Pub
 
 	// Get the credential document for mandatory pointer selection. Root
 	// scoped, exactly as Sign computed it.
-	_, nquadsStr, err := rootScopedWithoutProof(cred)
+	nquadsStr, err := rootScopedWithoutProof(cred)
 	if err != nil {
 		return err
 	}
@@ -986,7 +986,7 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 	// 2. Get Original Quads & Skolemize. Root scoped, exactly as Sign
 	// computed it - deriving from a different quad set than the base proof
 	// was made over produces a derived proof nobody can verify.
-	_, nquadsStr, err := rootScopedWithoutProof(cred)
+	nquadsStr, err := rootScopedWithoutProof(cred)
 	if err != nil {
 		return nil, err
 	}

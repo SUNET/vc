@@ -109,6 +109,14 @@
   refused for holding "more than one node nothing refers to". Affects
   `ecdsa-sd-2023` derivation and signing of containers only.
 
+  **`credential.RootScopedCanonicalForm` replaces `RootScopedDocument`** and
+  returns only the canonical N-Quads. Handing back the memoized
+  `*RDFCredential` left the cache externally mutable after `Dataset()` had
+  been made defensive: a caller could rewrite that document — through
+  `NormalizeVerifiableCredentialGraph`, say — and the next call returned the
+  mutated document paired with the canonical form of the one it used to be.
+  No caller needed it.
+
   **`RDFCredential.Dataset()` returns a COPY.** Verification memoizes the
   proof set, the document hash and the root-scoped document, and those are
   only sound while the document cannot change underneath them — but this
