@@ -39,7 +39,15 @@ func TestTakeDoesNotRetryAmbiguousAllocateFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	// Stop the background refill before counting anything. It allocates
+	// against the same fake, so leaving it running makes the call count a
+	// race between this test and a goroutine on a 50ms tick - which is
+	// exactly how the first version of this test failed in CI and passed
+	// locally. Close waits for the goroutine to finish, so after it returns
+	// every allocate call on the fake is one this test made. Take does not
+	// need the pool loop; it falls back to a synchronous allocation, which
+	// is the path under test.
+	c.Close()
 
 	for c.PoolLen() > 0 {
 		if _, err := c.Take(context.Background()); err != nil {
@@ -47,8 +55,6 @@ func TestTakeDoesNotRetryAmbiguousAllocateFailure(t *testing.T) {
 		}
 	}
 
-	// Arm the failure only now, so the background refill that ran during
-	// New cannot consume it.
 	fake.allocateFailures.Store(1)
 	before := fake.allocateCalls.Load()
 
