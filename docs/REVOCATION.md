@@ -61,7 +61,7 @@ Where the reference lives, per format:
 | Format | Location | Read by the verifier |
 | --- | --- | --- |
 | SD-JWT VC | `status.status_list` claim | yes |
-| mdoc | `status` in the MSO (draft Section 6.3) | yes |
+| mdoc | `status` in the MSO (draft Section 6.3) | yes — MSO only, see below |
 | ZK mdoc | — | **refused**, see below |
 | JWP (BBS) | the issuer protected header | not yet |
 | W3C VC 2.0 | `credentialStatus` with `TokenStatusListEntry` | not yet — and off by default, see below |
@@ -71,6 +71,33 @@ deliberately: a claim would be one of the signed messages and so selectively
 disclosable, and a revocation status a holder can decline to reveal is not
 revocation. The verifier's status extraction reads claims, so it does not
 find it there yet.
+
+### An mdoc `status` DATA ELEMENT is not a revocation reference
+
+Implementations that predate draft Section 6.3 put the reference in an
+issuer-signed data element called `status` rather than in the MSO. The
+verifier does not read it, and will not.
+
+A data element is selectively disclosed: the holder chooses which to
+present. So a revoked credential whose only reference lives there is simply
+presented without it, and the verifier sees a credential that is not
+revocable. Nor can the omission be detected — the MSO's `ValueDigests` name
+every issuer-signed element by digest ID, never by identifier, so a verifier
+can tell that elements were withheld but not which.
+
+A check an adversary turns off by omitting a field is not a check. It only
+ever caught a holder who chose to be caught, and leaving it in made vc's
+revocation coverage look uniform across mdoc issuers when it is not. An
+issuer that wants its mdocs revocable must put the reference in the MSO, as
+vc's own issuance always has.
+
+The element is still returned as the claim it is, under its
+namespace-qualified key. What it may not do is answer the revocation
+question: `GetClaims` reserves the bare `status` key for the MSO, because
+that key is what every other format uses for the reference.
+`mdoc.ExtractStatusReference` still reads the fallback for diagnostics
+(`developer_tools/scripts/tsl_checker`), where the operator supplies the
+document and the question is "where does this say its status lives".
 
 ### ZK mdoc presentations are refused, not passed
 

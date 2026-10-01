@@ -216,3 +216,39 @@ func assertP1363Verifies(t *testing.T, pub *ecdsa.PublicKey, digest, sig []byte)
 		t.Fatal("signature does not verify against the key's public half")
 	}
 }
+
+// TestDetermineKeyID_HSMKeysGetDistinctIDs: a certificate-less HSM key fell
+// through determineKeyID's type switch to the literal "default-key", so
+// every such key in a deployment published its JWKS entry under the same
+// kid. A consumer picking by kid then got whichever entry it saw first, and
+// rotation had the same effect - the new key arrived wearing the old one's
+// name.
+func TestDetermineKeyID_HSMKeysGetDistinctIDs(t *testing.T) {
+	first, _ := newHSMKeyMaterial(t)
+	second, _ := newHSMKeyMaterial(t)
+
+	firstID := determineKeyID(first)
+	secondID := determineKeyID(second)
+
+	if firstID == "default-key" || secondID == "default-key" {
+		t.Fatalf("an HSM key must get a derived kid, got %q and %q", firstID, secondID)
+	}
+	if firstID == secondID {
+		t.Fatalf("two different HSM keys must not share a kid (%q)", firstID)
+	}
+
+	// Derived from the public key, so the same key always answers the same
+	// way - a kid that changed per process would break every consumer that
+	// cached the JWKS.
+	if again := determineKeyID(first); again != firstID {
+		t.Fatalf("kid is not stable: %q then %q", firstID, again)
+	}
+
+	// And it is the SAME derivation a software key gets, so an operator
+	// moving a key into an HSM does not silently change its kid.
+	software := &KeyMaterial{PrivateKey: first.PrivateKey.(opaqueECDSAKey).inner, SigningMethod: first.SigningMethod}
+	if determineKeyID(software) != firstID {
+		t.Fatalf("the same key must get the same kid in software (%q) and in an HSM (%q)",
+			determineKeyID(software), firstID)
+	}
+}

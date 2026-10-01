@@ -164,13 +164,68 @@ func (sm *StatusManager) StatusList() *tokenstatuslist.StatusList {
 // is distinct from an unreadable reference, which is an error.
 var ErrNoStatusReference = errors.New("no status reference found")
 
+// ExtractMSOStatusReference extracts the status reference a VERIFIER may
+// act on: the MSO's status parameter (draft-ietf-oauth-status-list Section
+// 6.3) and nothing else.
+//
+// The MSO is issuer-signed as a whole and is not subject to selective
+// disclosure, so its presence or absence is a fact about the credential.
+// A "status" issuer-signed DATA ELEMENT is not: the holder chooses which
+// elements to present, so a revoked credential whose only reference lives
+// there is presented with the reference simply left out, and the verifier
+// sees a credential that is not revocable. The reference is authentic when
+// it does arrive - it is digest-covered by the MSO - but its ABSENCE means
+// nothing, and absence is the case an adversary controls.
+//
+// Nor can the absence be detected. The MSO's ValueDigests name every
+// issuer-signed element by digestID, so a verifier can tell that elements
+// were withheld, but not WHICH - the identifier lives inside the element it
+// cannot see. There is no check to add here.
+//
+// So the fallback is not used for verification at all. It only ever caught
+// a holder who chose to be caught, and leaving it in made vc's revocation
+// coverage look uniform across mdoc issuers when it is not. An issuer that
+// wants its mdocs revocable must put the reference in the MSO; vc's own
+// issuance always has (see mso.go).
+//
+// ExtractStatusReference keeps the fallback for diagnostic callers - see
+// its own comment.
+func ExtractMSOStatusReference(doc *DocumentMdoc) (*StatusReference, error) {
+	if doc == nil {
+		return nil, errors.New("document is nil")
+	}
+	ref, err := statusFromMSO(doc)
+	if err != nil {
+		// The MSO carries a status parameter that cannot be read. That is
+		// not the same as carrying none: the issuer signed something here,
+		// so the credential claims to be revocable and its state is
+		// unknown. Reporting "absent" would make it verify as permanently
+		// valid.
+		return nil, err
+	}
+	if ref == nil {
+		return nil, ErrNoStatusReference
+	}
+	return ref, nil
+}
+
 // ExtractStatusReference extracts the status reference from a Document.
+//
+// NOT FOR VERIFICATION. Use ExtractMSOStatusReference there, and read its
+// comment for why.
 //
 // The MSO's status parameter (draft-ietf-oauth-status-list Section 6.3) is
 // the canonical location and is checked first. A "status" issuer-signed data
 // element is accepted as a fallback because implementations that predate
 // Section 6.3 put it there - but it is strictly weaker: a data element is
-// subject to selective disclosure, so a holder can simply not present it.
+// subject to selective disclosure, so a holder can simply not present it,
+// and a verifier cannot tell that it did.
+//
+// That is tolerable for a diagnostic over documents an operator supplies -
+// developer_tools/scripts/tsl_checker, which is asking "where does this
+// document say its status lives" rather than "may I accept this
+// credential". It is not tolerable on a verification path, where the holder
+// is the one choosing what to show.
 //
 // This function does not verify anything. The caller must have verified the
 // document before trusting what comes back.

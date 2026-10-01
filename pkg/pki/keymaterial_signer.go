@@ -157,7 +157,26 @@ func determineKeyID(km *KeyMaterial) string {
 		pubKey = key.Public()
 	case *rsa.PrivateKey:
 		pubKey = key.Public()
+	case crypto.Signer:
+		// An HSM/PKCS#11 key. Its private half is unreadable by design,
+		// but the public half is exactly what crypto.Signer exposes - and
+		// without this case every certificate-less HSM key fell through to
+		// the literal "default-key", so a deployment with two of them
+		// published two JWKS entries under one kid and a consumer picked
+		// whichever it saw first. Rotation had the same effect: the new
+		// key arrived wearing the old one's name.
+		//
+		// Listed after the concrete cases on purpose: those types satisfy
+		// crypto.Signer too, and a type switch takes the first match. Same
+		// ordering as PublicKey above, for the same reason.
+		pubKey = key.Public()
 	default:
+		return "default-key"
+	}
+	// A signer that cannot produce a public key leaves nothing to hash, and
+	// hashing nil would give every such key the same digest rather than no
+	// digest.
+	if pubKey == nil {
 		return "default-key"
 	}
 
