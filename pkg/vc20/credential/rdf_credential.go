@@ -103,6 +103,14 @@ func NewRDFCredentialFromJSON(jsonData []byte, options *ld.JsonLdOptions) (*RDFC
 	}
 	options.Format = ""
 	options.InputFormat = ""
+	// OWNED, not borrowed. ExpandContext decides how every term in this
+	// document expands, so it decides the proof set, the canonical form and
+	// the document hash - all of which are then memoized. Shared with the
+	// caller it could be edited after a verification, and the next one would
+	// reuse answers computed under a different JSON-LD interpretation;
+	// editing it concurrently would race these reads outright. A copy taken
+	// here cannot be reached from outside.
+	options.ExpandContext = deepCopy(options.ExpandContext)
 	if _, isDefault := options.DocumentLoader.(*ld.DefaultDocumentLoader); options.DocumentLoader == nil || isDefault {
 		options.DocumentLoader = GetGlobalLoader()
 	}

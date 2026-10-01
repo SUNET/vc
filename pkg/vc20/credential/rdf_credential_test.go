@@ -1275,3 +1275,38 @@ func TestCanonicalFormIsSafeConcurrently(t *testing.T) {
 		require.Equal(t, first, <-results, "every caller sees the same canonical form")
 	}
 }
+
+// TestCredentialOwnsItsExpandContext: ExpandContext decides how every term in
+// the document expands, so it decides the proof set, the canonical form and
+// the document hash - all of which are then memoized. Shared with the caller
+// it could be edited after one verification, and the next would reuse answers
+// computed under a different JSON-LD interpretation.
+func TestCredentialOwnsItsExpandContext(t *testing.T) {
+	terms := map[string]any{"id": "@id", "note": "https://example.org/vocab#note"}
+	options := NewJSONLDOptions("")
+	options.ExpandContext = map[string]any{"@context": terms}
+
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"id": "https://example.org/credential",
+		"note": "a term the expandContext defines"
+	}`), options)
+	require.NoError(t, err)
+
+	before, err := cred.CanonicalForm()
+	require.NoError(t, err)
+	require.Contains(t, before, "https://example.org/vocab#note")
+
+	// The caller edits the map it passed in, and the one it gets back.
+	terms["note"] = "https://example.org/REMAPPED#note"
+	if handed, ok := cred.ExpansionOptions().ExpandContext.(map[string]any); ok {
+		if inner, ok := handed["@context"].(map[string]any); ok {
+			inner["note"] = "https://example.org/ALSO-REMAPPED#note"
+		}
+	}
+
+	after, err := cred.CanonicalForm()
+	require.NoError(t, err)
+	require.Equal(t, before, after,
+		"the credential expands under the context it was built with, whatever the caller does to its copy")
+	require.NotContains(t, after, "REMAPPED")
+}

@@ -308,6 +308,13 @@ func (rc *RDFCredential) ExpansionOptions() *ld.JsonLdOptions {
 // parsed successfully and then expanded differently - or not at all - on
 // every Sign and Verify, with ids resolving against a different base.
 //
+// The DOCUMENT LOADER is deliberately not copied and cannot be: it is an
+// interface, and the shared global cache is the point of it - a loader exists
+// to be consulted by everything. A deployment that mutates its loader between
+// verifications changes how contexts resolve, and no amount of copying here
+// would prevent that. What this does guarantee is that the OPTIONS a
+// credential expands under cannot be edited from outside after it is built.
+//
 // A copy, and with Format and InputFormat cleared: both describe a call whose
 // input is N-Quads, which this one's is not. A caller reusing one option set
 // across both kinds of work left InputFormat set, and the credential - parsed
@@ -321,6 +328,11 @@ func (rc *RDFCredential) expansionOptions() *ld.JsonLdOptions {
 	copied := *rc.options
 	copied.Format = ""
 	copied.InputFormat = ""
+	// A copy of the expansion context too, for the reason the constructor
+	// takes one: this is exported through ExpansionOptions, and a caller that
+	// edited what it got back would change how this credential expands while
+	// the memoized answers stayed as they were.
+	copied.ExpandContext = deepCopy(copied.ExpandContext)
 	if copied.DocumentLoader == nil {
 		copied.DocumentLoader = GetGlobalLoader()
 	}
