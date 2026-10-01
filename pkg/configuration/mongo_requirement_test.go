@@ -99,4 +99,5 @@ func TestCheckMongoRequirement_Satisfied(t *testing.T) {
 	t.Run("a URI satisfies every combination", func(t *testing.T) {
 		require.NoError(t, checkMongoRequirement(commonWith("mongodb://db", "", true), "apigw"))
 	})
+
 }

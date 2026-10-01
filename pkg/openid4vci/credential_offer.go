@@ -1,10 +1,10 @@
 package openid4vci
 
 import (
+	"errors"
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"time"
