@@ -429,3 +429,46 @@ func TestRootProofsCountsADuplicatedGraphOnce(t *testing.T) {
 	require.Len(t, proofs, 1,
 		"two references to one graph are one proof, not two")
 }
+
+// TestReferencedAnywhereKnowsEveryReferenceShape: this check decides whether
+// a document's root can move when it is serialized, so a shape it does not
+// recognize is a root switch it accepts. It has been too narrow twice -
+// anonymous nested nodes, then node objects carrying members - and both times
+// the gap was a shape that is a reference in JSON-LD and was not here.
+//
+// So: every shape, asserted together, rather than one more as each is found.
+func TestReferencedAnywhereKnowsEveryReferenceShape(t *testing.T) {
+	const root = "_:root"
+
+	references := map[string]any{
+		"a bare reference":           map[string]any{"@id": root},
+		"a node object with members": map[string]any{"@id": root, "@type": []any{"https://example.org/T"}},
+		"an indexed reference":       map[string]any{"@id": root, "@index": "an index"},
+		"inside @list":               map[string]any{"@list": []any{map[string]any{"@id": root}}},
+		"inside @set":                map[string]any{"@set": []any{map[string]any{"@id": root}}},
+	}
+	for name, value := range references {
+		holder := map[string]any{"@id": "_:holder", "https://example.org/p": []any{value}}
+		require.True(t, referencedAnywhere([][]map[string]any{{holder}}, root),
+			"%s refers to the root", name)
+	}
+
+	// A node inside a nested graph refers to it too.
+	nested := map[string]any{"@id": "_:holder", "@graph": []any{
+		map[string]any{"@id": "_:inner", "https://example.org/p": []any{map[string]any{"@id": root}}},
+	}}
+	require.True(t, referencedAnywhere([][]map[string]any{{nested}}, root),
+		"a node inside a nested graph refers to the root")
+
+	// A LITERAL is not a reference, however much it reads like one.
+	literal := map[string]any{"@id": "_:holder", "https://example.org/p": []any{
+		map[string]any{"@value": root},
+	}}
+	require.False(t, referencedAnywhere([][]map[string]any{{literal}}, root),
+		"a literal that spells the root's name is not a reference to it")
+
+	// And a node naming ITSELF is not another node referring to it.
+	self := map[string]any{"@id": root, "https://example.org/p": []any{map[string]any{"@id": root}}}
+	require.False(t, referencedAnywhere([][]map[string]any{{self}}, root),
+		"a self-link is not another node referring to the root")
+}
