@@ -30,15 +30,19 @@ type RDFCredential struct {
 	// in a set, because that is what a proof set means. A caller checking
 	// several candidates would otherwise pay for it once per candidate, on
 	// a document nobody has authenticated yet.
-	securedMu sync.Mutex
-	secured   *securedDocumentAnswer
+	// ONE mutex for all three. They are not independent: computing the
+	// compacted proofs reads the secured-document answer, so separate
+	// mutexes meant a reader could hold one while taking another, and an
+	// invalidation clearing them one at a time could interleave with that -
+	// leaving a cache repopulated from state the mutation had just voided.
+	memoMu  sync.Mutex
+	secured *securedDocumentAnswer
 
 	// The same answer in the form every caller actually wants. Compacting
 	// a root proof is a JSON-LD operation, and a verifier checking N
 	// candidates compacted each of them N times - once per candidate, to
 	// find the one it was asked about - so 32 proofs cost about a thousand
 	// compactions before anything was authenticated.
-	compactedMu     sync.Mutex
 	compactedProofs *compactedRootProofs
 
 	// The root-scoped document and its canonical N-Quads, computed once.
@@ -47,8 +51,7 @@ type RDFCredential struct {
 	// check, proof removal and URDNA2015 run for every candidate proof in
 	// a set. The secured-document memo above does not cover it, because
 	// that one keeps a hash.
-	rootScopedMu sync.Mutex
-	rootScoped   *rootScopedDocument
+	rootScoped *rootScopedDocument
 }
 
 type rootScopedDocument struct {
@@ -120,6 +123,33 @@ func NewRDFCredentialFromJSON(jsonData []byte, options *ld.JsonLdOptions) (*RDFC
 	}, nil
 }
 
+// refuseGeneralizedPredicates rejects a dataset carrying a blank node in
+// PREDICATE position.
+//
+// URDNA2015 as json-gold implements it does not canonicalize one: it indexes
+// and relabels only subjects, objects and graph names, and writes the
+// predicate through unchanged. A parser-local label therefore survives into
+// the "canonical" form, so two serializations of the same RDF can hash and
+// sign differently - and a canonical form that is not canonical is worse than
+// no answer, because every signature over it looks fine until someone
+// re-serializes.
+//
+// Generalized RDF still round-trips through MarshalJSON and ToCompactJSON;
+// what it cannot do is be signed or verified.
+func refuseGeneralizedPredicates(dataset *ld.RDFDataset) error {
+	for _, quads := range dataset.Graphs {
+		for _, quad := range quads {
+			if quad == nil || quad.Predicate == nil {
+				continue
+			}
+			if ld.IsBlankNode(quad.Predicate) {
+				return fmt.Errorf("this document uses a blank node as a predicate, and the canonicalization this library has does not canonicalize those - its label would be carried into the canonical form, so the same document could hash differently once re-serialized")
+			}
+		}
+	}
+	return nil
+}
+
 // canonicalizationOptions are the options this credential was PARSED with,
 // set up to produce canonical N-Quads.
 //
@@ -158,6 +188,9 @@ func (rc *RDFCredential) CanonicalForm() (string, error) {
 			// two concurrent canonicalizations would race on those writes,
 			// and a credential built by ProofObject - which shares its quads
 			// with the one it came from - would rewrite that one's too.
+			if err := refuseGeneralizedPredicates(rc.dataset); err != nil {
+				return "", err
+			}
 			normalized, err := ld.NewJsonLdApi().Normalize(cloneDataset(rc.dataset), rc.canonicalizationOptions())
 			if err != nil {
 				return "", fmt.Errorf("failed to normalize dataset: %w", err)
@@ -204,6 +237,10 @@ func (rc *RDFCredential) CanonicalForm() (string, error) {
 	dataset, isDataset := rdf.(*ld.RDFDataset)
 	if !isDataset {
 		return "", fmt.Errorf("unexpected RDF conversion result: %T", rdf)
+	}
+
+	if err := refuseGeneralizedPredicates(dataset); err != nil {
+		return "", err
 	}
 
 	// No clone here: this dataset was just built by ToRDF above, is held by
@@ -652,17 +689,15 @@ func cloneNode(node ld.Node) ld.Node {
 // expensive parts of verification run once, which is also what makes a stale
 // one dangerous rather than merely slow.
 func (rc *RDFCredential) invalidate() {
-	rc.securedMu.Lock()
+	// All three at once. Clearing them one at a time let a concurrent reader
+	// repopulate one from another that had already been voided, so the
+	// caches could end up describing two different documents.
+	rc.memoMu.Lock()
+	defer rc.memoMu.Unlock()
+
 	rc.secured = nil
-	rc.securedMu.Unlock()
-
-	rc.compactedMu.Lock()
 	rc.compactedProofs = nil
-	rc.compactedMu.Unlock()
-
-	rc.rootScopedMu.Lock()
 	rc.rootScoped = nil
-	rc.rootScopedMu.Unlock()
 }
 
 // Context returns the @context from the original JSON

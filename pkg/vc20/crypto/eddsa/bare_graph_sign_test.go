@@ -130,22 +130,20 @@ func TestSignPreservesTheCredentialsOptions(t *testing.T) {
 	require.NotNil(t, verified)
 }
 
-// TestSignAndVerifyGeneralizedRdf: a credential parsed with
-// ProduceGeneralizedRdf carries quads whose PREDICATE is a blank node. Those
-// are not valid N-Quads however the dataset was built, and json-gold's parser
-// refuses them - so every path that serialized the dataset and read it back
-// failed on such a credential. Canonicalization was one; the root-stability
-// check, which every suite runs before signing and before verifying, was the
-// other, and it refused the document outright. The credential was neither
-// signable nor verifiable.
+// TestSignRefusesABlankNodePredicate: a credential parsed with
+// ProduceGeneralizedRdf can carry a quad whose PREDICATE is a blank node, and
+// the canonicalization this library has does not canonicalize one - the
+// parser's label survives into the canonical form, so the same document hashes
+// differently once re-serialized.
 //
-// The round trip is the point: canonicalizing generalized RDF is no use if
-// nothing can sign it.
-func TestSignAndVerifyGeneralizedRdf(t *testing.T) {
+// Signing it would produce a proof that verifies today and not tomorrow, so
+// the whole path refuses. Serializing such a document still works; it is being
+// SECURED that it cannot support.
+func TestSignRefusesABlankNodePredicate(t *testing.T) {
 	options := credential.NewJSONLDOptions("")
 	options.ProduceGeneralizedRdf = true
 
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 
 	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
@@ -153,23 +151,14 @@ func TestSignAndVerifyGeneralizedRdf(t *testing.T) {
 		"id": "https://example.org/credential",
 		"rel": "a statement made through a blank node predicate"
 	}`), options)
-	require.NoError(t, err)
+	require.NoError(t, err, "the document parses; it is signing it that cannot be done")
 
-	canonical, err := cred.CanonicalForm()
-	require.NoError(t, err)
-	require.Contains(t, canonical, "a statement made through a blank node predicate",
-		"the quad is in what gets signed, or this test secures nothing")
-
-	signed, err := NewSuite().Sign(cred, priv, &SignOptions{
+	_, err = NewSuite().Sign(cred, priv, &SignOptions{
 		VerificationMethod: "did:example:signer#key-1",
 		ProofPurpose:       "assertionMethod",
 		Created:            time.Now().UTC(),
 	})
-	require.NoError(t, err, "a generalized-RDF credential must be signable")
-
-	verified, err := NewSuite().VerifyProof(signed, pub)
-	require.NoError(t, err, "and what Sign returns must verify")
-	require.NotNil(t, verified)
+	require.ErrorContains(t, err, "blank node as a predicate")
 }
 
 // TestProofAliasWithoutGraphContainerSurvivesARoundTrip: the VC v2 context

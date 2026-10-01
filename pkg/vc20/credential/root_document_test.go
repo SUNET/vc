@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/piprate/json-gold/ld"
 
@@ -1297,4 +1298,55 @@ func TestRootCompactedDocumentDoesNotAssumeIdNamesTheNode(t *testing.T) {
 		require.Equal(t, "a value, not a name", rooted["id"],
 			"an ordinary property is content, and merging must not discard it")
 	})
+}
+
+// TestMemoizedAnswersUnderConcurrentInvalidation: the three memoized answers
+// are not independent - computing the compacted proofs reads the
+// secured-document answer - so separate mutexes meant a reader held one while
+// taking another. One mutex now covers all three, and invalidation clears them
+// together.
+//
+// What this test proves and what it does not: it fails on a deadlock and, with
+// -race, on unsynchronized access. It does NOT deterministically catch the
+// interleaving where a reader repopulates one cache from another that has just
+// been voided - that is a logical ordering, not a data race, and the fix for
+// it is structural: one lock, taken once, clearing all three.
+func TestMemoizedAnswersUnderConcurrentInvalidation(t *testing.T) {
+	cred := memoizedCredential(t)
+
+	done := make(chan struct{})
+	for i := 0; i < 6; i++ {
+		go func(i int) {
+			defer func() { done <- struct{}{} }()
+			for n := 0; n < 20; n++ {
+				switch i % 3 {
+				case 0:
+					_, _ = CompactedRootProofs(cred)
+				case 1:
+					_, _, _ = RootScopedDocument(cred)
+				default:
+					_, _ = SecuredDocumentHash(cred)
+				}
+			}
+		}(i)
+	}
+	go func() {
+		defer func() { done <- struct{}{} }()
+		for n := 0; n < 20; n++ {
+			cred.invalidate()
+		}
+	}()
+
+	for i := 0; i < 7; i++ {
+		select {
+		case <-done:
+		case <-time.After(30 * time.Second):
+			t.Fatal("a reader and an invalidation deadlocked")
+		}
+	}
+
+	// And the answer is still the right one once everything has settled.
+	proofs, err := CompactedRootProofs(cred)
+	require.NoError(t, err)
+	require.Len(t, proofs, 1)
 }

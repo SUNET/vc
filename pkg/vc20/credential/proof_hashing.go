@@ -114,9 +114,16 @@ func SecuredDocumentHash(cred *RDFCredential) ([32]byte, error) {
 // nothing but a comment asking it not to. The compacted form is what callers
 // want anyway, and CompactedRootProofs copies it.
 func securedDocument(cred *RDFCredential) (*securedDocumentAnswer, error) {
-	cred.securedMu.Lock()
-	defer cred.securedMu.Unlock()
+	cred.memoMu.Lock()
+	defer cred.memoMu.Unlock()
 
+	return securedDocumentMemoized(cred)
+}
+
+// securedDocumentMemoized is securedDocument with the memo lock already held,
+// so the compacted-proof answer can read it without taking a second mutex -
+// which is what made the two orders of acquisition possible.
+func securedDocumentMemoized(cred *RDFCredential) (*securedDocumentAnswer, error) {
 	if cred.secured == nil {
 		proofs, hash, err := securedDocumentOf(cred)
 		cred.secured = &securedDocumentAnswer{proofs: proofs, hash: hash, err: err}
@@ -136,8 +143,8 @@ func securedDocument(cred *RDFCredential) (*securedDocumentAnswer, error) {
 // let that append deny verification. The error is kept and returned only when
 // nothing usable survives.
 func CompactedRootProofs(cred *RDFCredential) ([]map[string]any, error) {
-	cred.compactedMu.Lock()
-	defer cred.compactedMu.Unlock()
+	cred.memoMu.Lock()
+	defer cred.memoMu.Unlock()
 
 	if cred.compactedProofs == nil {
 		proofs, err := compactedRootProofsOf(cred)
@@ -165,7 +172,7 @@ func CompactedRootProofs(cred *RDFCredential) ([]map[string]any, error) {
 }
 
 func compactedRootProofsOf(cred *RDFCredential) ([]map[string]any, error) {
-	answer, err := securedDocument(cred)
+	answer, err := securedDocumentMemoized(cred)
 	if err != nil {
 		return nil, err
 	}
@@ -241,8 +248,8 @@ func documentHash(cred *RDFCredential) ([32]byte, error) {
 // proof then reproduces a different unsecured document than the signer meant
 // to secure.
 func RootScopedDocument(cred *RDFCredential) (*RDFCredential, string, error) {
-	cred.rootScopedMu.Lock()
-	defer cred.rootScopedMu.Unlock()
+	cred.memoMu.Lock()
+	defer cred.memoMu.Unlock()
 
 	if cred.rootScoped == nil {
 		document, canonical, err := rootScopedDocumentOf(cred)

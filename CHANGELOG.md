@@ -241,6 +241,16 @@
   `Sign` output fails `Verify`. The VC-v2 options stay where they belong, on
   proof-configuration hashing.
 
+  **A document with a blank node in PREDICATE position is refused at signing
+  and at verification.** URDNA2015 as this library implements it does not
+  canonicalize generalized RDF: it indexes and relabels only subjects, objects
+  and graph names and writes the predicate through unchanged, so a
+  parser-local label survives into the "canonical" form and two serializations
+  of the same RDF hash differently. A canonical form that is not canonical is
+  worse than no answer — every signature over it looks fine until someone
+  re-serializes. Such a document still parses and still round-trips through
+  `MarshalJSON` and `ToCompactJSON`; what it cannot be is **secured**.
+
   **Canonicalization goes through the credential's own RDF conversion.**
   json-gold's `Normalize` builds fresh options for its RDF step and carries
   only the base, the document loader and the processing mode across, so
@@ -250,7 +260,8 @@
   document of that shape. A credential parsed with `ProduceGeneralizedRdf` kept
   its blank-node-predicate quads in its dataset and left them OUT of the
   canonical form, so those quads could be added, changed or removed without
-  invalidating any signature. The document is now converted to RDF under the
+  invalidating any signature. Those documents are now refused outright, per
+  the entry above. The document is now converted to RDF under the
   credential's own options and that DATASET canonicalized directly — not a
   document and not an N-Quads string, since a blank node in predicate position
   is not valid N-Quads and the round trip drops exactly the quads generalized
