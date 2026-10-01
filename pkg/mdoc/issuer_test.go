@@ -17,13 +17,13 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
-// issuedElementValues extracts the disclosed element identifiers and values
-// for a namespace from an issued document, unwrapping the Tag 24
-// byte-string encoding used for each IssuerSignedItem.
-func issuedElementValues(t *testing.T, doc *DocumentMdoc, namespace string) map[string]any {
+// issuedItems decodes every IssuerSignedItem for a namespace from an issued
+// document, unwrapping the Tag 24 byte-string encoding used for each one -
+// the full item (Random included), not just its disclosed value.
+func issuedItems(t *testing.T, doc *DocumentMdoc, namespace string) map[string]IssuerSignedItem {
 	t.Helper()
 
-	values := make(map[string]any)
+	items := make(map[string]IssuerSignedItem)
 	for _, anyItem := range doc.IssuerSigned.NameSpaces[namespace] {
 		var item IssuerSignedItem
 		switch v := anyItem.(type) {
@@ -42,7 +42,19 @@ func issuedElementValues(t *testing.T, doc *DocumentMdoc, namespace string) map[
 		default:
 			t.Fatalf("unexpected item type %T in NameSpaces", anyItem)
 		}
-		values[item.ElementIdentifier] = item.ElementValue
+		items[item.ElementIdentifier] = item
+	}
+	return items
+}
+
+// issuedElementValues extracts just the disclosed values from issuedItems -
+// every existing test wants only this, not the full item.
+func issuedElementValues(t *testing.T, doc *DocumentMdoc, namespace string) map[string]any {
+	t.Helper()
+
+	values := make(map[string]any)
+	for elementID, item := range issuedItems(t, doc, namespace) {
+		values[elementID] = item.ElementValue
 	}
 	return values
 }
@@ -272,6 +284,80 @@ func TestIssuer_Issue(t *testing.T) {
 	values := issuedElementValues(t, &issued.DocumentMdoc.Documents[0], Namespace)
 	if _, ok := values["age_over_18"]; ok {
 		t.Error("age_over_18 should not be disclosed when not present in document data")
+	}
+}
+
+// TestIssuer_Issue_ZkSaltBytesAppliesToEveryClaim is the Issuer.Issue-level
+// regression Copilot's review on this PR asked for: MSOBuilder's own tests
+// pass even if issuer.go's "WithSaltBytes(req.Schema.ZkSaltBytes)" wiring is
+// removed, which would silently restore the production Vega failure this
+// PR fixes. Exercises the real schema-to-issuer path end to end, including
+// pseudonym_seed - the one claim whose default salt this override is most
+// likely to regress back to, since it's the only element with its own
+// special-cased default size.
+func TestIssuer_Issue_ZkSaltBytesAppliesToEveryClaim(t *testing.T) {
+	config := createTestIssuerConfig(t)
+	issuer, err := NewIssuer(config)
+	if err != nil {
+		t.Fatalf("NewIssuer() error = %v", err)
+	}
+
+	deviceKey, err := GenerateDeviceKeyPair(elliptic.P256())
+	if err != nil {
+		t.Fatalf("GenerateDeviceKeyPair() error = %v", err)
+	}
+
+	// Mirrors sirosid-dev's real mdl_zk4 schema - the credential this bug
+	// was found on - rather than testMDLSchema's full mDL claim set: 4
+	// claims, trimmed to fit VegaProofSystem's fixed 4-slot circuit.
+	schema := &MDDLSchema{
+		Format:      "mso_mdoc",
+		DocType:     "org.iso.18013.5.1.mDL",
+		ZkSaltBytes: 32,
+		Claims: map[string]NamespaceClaims{
+			"org.iso.18013.5.1": {
+				"family_name":    {Mandatory: true, ValueType: "tstr"},
+				"given_name":     {Mandatory: true, ValueType: "tstr"},
+				"age_over_18":    {ValueType: "bool"},
+				"pseudonym_seed": {ValueType: "bstr"},
+			},
+		},
+	}
+
+	data := map[string]any{
+		"family_name":    "Andersson",
+		"given_name":     "Erik",
+		"age_over_18":    true,
+		"pseudonym_seed": base64.StdEncoding.EncodeToString(make([]byte, 32)),
+	}
+	docData, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("marshal test document data: %v", err)
+	}
+
+	req := &IssuanceRequest{
+		DocumentData:    docData,
+		DevicePublicKey: &deviceKey.PublicKey,
+		Schema:          schema,
+	}
+
+	issued, err := issuer.Issue(req)
+	if err != nil {
+		t.Fatalf("Issue() error = %v", err)
+	}
+	if len(issued.DocumentMdoc.Documents) != 1 {
+		t.Fatalf("Documents = %d, want 1", len(issued.DocumentMdoc.Documents))
+	}
+
+	items := issuedItems(t, &issued.DocumentMdoc.Documents[0], Namespace)
+	for _, elementID := range []string{"family_name", "given_name", "age_over_18", "pseudonym_seed"} {
+		item, ok := items[elementID]
+		if !ok {
+			t.Fatalf("claim %q missing from issued document", elementID)
+		}
+		if len(item.Random) != 32 {
+			t.Errorf("%s: Random length = %d, want 32 (Schema.ZkSaltBytes=32 must reach every claim, including pseudonym_seed's normally-shorter default)", elementID, len(item.Random))
+		}
 	}
 }
 

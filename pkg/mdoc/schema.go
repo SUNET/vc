@@ -15,6 +15,16 @@ type MDDLSchema struct {
 	DocType string                     `json:"doctype"`
 	Display []DisplayProperties        `json:"display,omitempty"`
 	Claims  map[string]NamespaceClaims `json:"claims,omitempty"`
+	// ZkSaltBytes, when non-zero, fixes every claim's IssuerSignedItem
+	// random salt to exactly this many bytes - see
+	// MSOBuilder.WithSaltBytes's doc for why this exists and why it must
+	// stay opt-in per schema rather than a package-wide default. Set this
+	// only on a schema that is Vega-only: zk-cred-vega's r12 circuit
+	// requires exactly 32 here, and a schema meant to also serve
+	// zk-cred-longfellow (whose own item-size ceiling a uniform 32-byte
+	// salt can violate) must leave this unset and keep the package's
+	// default per-element sizing.
+	ZkSaltBytes int `json:"zk_salt_bytes,omitempty"`
 }
 
 // DisplayProperties describes how the credential should be presented to the
@@ -223,6 +233,14 @@ func LoadMDDLSchema(raw []byte) (*MDDLSchema, error) {
 	}
 	if len(schema.Claims) == 0 {
 		return nil, fmt.Errorf("MDDL schema for doctype %q declares no claims", schema.DocType)
+	}
+	// ZkSaltBytes reaches make([]byte, saltSize) in AddDataElement with no
+	// further checks - an unvalidated value here either issues credentials
+	// silently incompatible with Vega (anything but 32, other than unset/0)
+	// or, for a very large value, exhausts memory during issuance. 0 and 32
+	// are the only two sizes anything in this codebase understands today.
+	if schema.ZkSaltBytes != 0 && schema.ZkSaltBytes != 32 {
+		return nil, fmt.Errorf("MDDL schema for doctype %q has zk_salt_bytes %d: only 0 (default sizing) or 32 (zk-cred-vega's r12 circuit) is supported", schema.DocType, schema.ZkSaltBytes)
 	}
 
 	// addElements() (pkg/mdoc/issuer.go) looks up document_data by element

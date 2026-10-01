@@ -67,6 +67,9 @@ type MSOBuilder struct {
 	certChain       []*x509.Certificate
 	namespaces      map[string][]MSOIssuerSignedItem
 	digestIDCounter map[string]uint
+	// saltBytes, when non-zero, fixes EVERY element's random salt to
+	// exactly this length - see WithSaltBytes's doc.
+	saltBytes int
 }
 
 // NewMSOBuilder creates a new MSO builder.
@@ -109,13 +112,45 @@ func (b *MSOBuilder) WithSigner(key crypto.Signer, certChain []*x509.Certificate
 	return b
 }
 
+// WithSaltBytes fixes every element's random salt to exactly n bytes,
+// overriding the package's default per-element sizing below. Needed by
+// zk-cred-vega's r12 circuit specifically: its digest-ID extraction
+// hardcodes the byte offset of the digestID/elementValue/elementIdentifier
+// fields on the assumption that `random` is exactly 32 bytes - any other
+// length (including this package's own Longfellow-tuned defaults) silently
+// shifts every field out of position and fails ZK verification with
+// InvalidSumcheckProof, on every claim, for every presentation (found via
+// exactly that failure on a real device). Only set this for a schema that
+// is itself Vega-only: zk-cred-longfellow's circuit has its own, smaller
+// ~119-byte total-item ceiling (see injectPseudonymSeed's doc) that a
+// uniform 32-byte salt can violate for a claim whose value is itself
+// already large (pseudonym_seed's 32-byte seed, notably) - a schema meant
+// to serve both proof systems can't satisfy both constraints on every
+// claim at once and must stay on the default sizing.
+func (b *MSOBuilder) WithSaltBytes(n int) *MSOBuilder {
+	b.saltBytes = n
+	return b
+}
+
 // AddDataElement adds a data element to the MSO.
 func (b *MSOBuilder) AddDataElement(namespace, elementID string, value any) error {
+	// LoadMDDLSchema validates ZkSaltBytes on the JSON-loading path, but
+	// MSOBuilder and MDDLSchema are both exported and Issuer.Issue accepts
+	// a schema constructed directly in Go, bypassing that check entirely -
+	// enforce the same invariant here too, at the actual point of use,
+	// rather than trust every caller to have gone through LoadMDDLSchema.
+	if b.saltBytes != 0 && b.saltBytes != 32 {
+		return fmt.Errorf("unsupported salt size %d: only 0 (default sizing) or 32 (zk-cred-vega's r12 circuit) is supported", b.saltBytes)
+	}
+
 	// Use 8-byte random for pseudonym_seed to keep item within 128-byte circuit limit
 	// Use 16 bytes for all other elements
 	saltSize := 16
 	if elementID == "pseudonym_seed" {
 		saltSize = 8
+	}
+	if b.saltBytes > 0 {
+		saltSize = b.saltBytes
 	}
 	randomSalt := make([]byte, saltSize)
 	if _, err := rand.Read(randomSalt); err != nil {
