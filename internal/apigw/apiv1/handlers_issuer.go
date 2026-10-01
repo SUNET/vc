@@ -607,6 +607,49 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 
 // issueVC20 issues W3C VC 2.0 Data Integrity credentials, one per JWT proof.
 // Caller must ensure only JWT proof types are present (singular Proof or Proofs.JWT).
+// w3cTypesAndContexts returns the types a W3C credential is minted with, the
+// JSON-LD contexts that define them, and the cryptosuite - all read from ONE
+// scope.
+//
+// CredentialConfigurationsSupported is keyed by scope, and the configuration
+// id comes from the REQUEST while the scope comes from the token. Reading
+// types from the named configuration and contexts from the authorised scope
+// paired two different scopes: a caller authorised for A naming configuration
+// B got B's types with A's contexts - terms those contexts do not define,
+// which expand to relative IRIs and match no query a verifier builds from B's
+// credential_type_values. That is the "these three fields only work as a set"
+// failure this change exists to prevent, reached through the request rather
+// than through the configuration file.
+//
+// Resolving both from the named configuration also answers the multi-scope
+// case, where matchScope picks the first authorised scope and the caller asked
+// for another.
+//
+// The types fall back to the scope's configured credential_types rather than
+// to the bare base type: a request naming no configuration took the hardcoded
+// default, so the credential was minted as plain VerifiableCredential while a
+// verifier constrained the request by the configured types, and nothing
+// matched. W3CTypes itself defaults to the base type, so an unconfigured scope
+// behaves as before.
+func (c *Client) w3cTypesAndContexts(scope, configurationID string) (types []string, contexts []string, cryptosuite string) {
+	resolved := scope
+	if configurationID != "" && c.issuerMetadata != nil {
+		if config, ok := c.issuerMetadata.CredentialConfigurationsSupported[configurationID]; ok {
+			resolved = configurationID
+			cryptosuite = config.Cryptosuite
+			if config.CredentialDefinition != nil {
+				types = config.CredentialDefinition.Type
+			}
+		}
+	}
+
+	metadata := c.cfg.GetCredentialMetadata(resolved)
+	if len(types) == 0 {
+		types = metadata.W3CTypes()
+	}
+	return types, metadata.GetCredentialContexts(), cryptosuite
+}
+
 func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, identifier string, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
 	hasNoJWTProof := req.Proof != nil && req.Proof.ProofType != "jwt"
 	hasNoJWTProofs := req.Proofs != nil && len(req.Proofs.JWT) == 0
@@ -619,28 +662,14 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	var mandatoryPointers []string
 	var credentialTypes []string
 
-	if req.CredentialConfigurationID != "" && c.issuerMetadata != nil {
-		if config, ok := c.issuerMetadata.CredentialConfigurationsSupported[req.CredentialConfigurationID]; ok {
-			cryptosuite = config.Cryptosuite
-			if config.CredentialDefinition != nil {
-				credentialTypes = config.CredentialDefinition.Type
-			}
-		}
+	credentialTypes, additionalContexts, configuredSuite := c.w3cTypesAndContexts(scope, req.CredentialConfigurationID)
+	if configuredSuite != "" {
+		cryptosuite = configuredSuite
 	}
 
 	// Default cryptosuite if not specified
 	if cryptosuite == "" {
 		cryptosuite = "ecdsa-rdfc-2019"
-	}
-
-	// Fall back to the scope's configured credential_types, not straight to the
-	// bare base type: a request without a credential_configuration_id took the
-	// hardcoded default, so the credential was minted as plain
-	// VerifiableCredential while a verifier constrained the request by the
-	// configured types - and nothing matched. W3CTypes itself defaults to the
-	// base type, so an unconfigured scope behaves as before.
-	if len(credentialTypes) == 0 {
-		credentialTypes = c.cfg.GetCredentialMetadata(scope).W3CTypes()
 	}
 
 	var subjectDIDs []string
@@ -663,8 +692,9 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 			MandatoryPointers: mandatoryPointers,
 			// Without the context that defines them, the configured types
 			// expand to relative IRIs and no verifier can match the query
-			// built from credential_type_values.
-			AdditionalContexts: c.cfg.GetCredentialMetadata(scope).GetCredentialContexts(),
+			// built from credential_type_values. Both come from
+			// w3cTypesAndContexts, so they always describe one credential.
+			AdditionalContexts: additionalContexts,
 		})
 		if err != nil {
 			c.log.Error(err, "failed to call MakeVC20")
