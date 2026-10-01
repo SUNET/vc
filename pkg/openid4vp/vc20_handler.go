@@ -187,7 +187,7 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		if err2 := json.Unmarshal(credBytes, &expanded); err2 != nil {
 			return nil, fmt.Errorf("failed to parse credential JSON: %w (also tried array: %v)", err, err2)
 		}
-		// A PRESENTATION in expanded form is refused, not unwrapped.
+		// A presentation at the ROOT is refused, not unwrapped.
 		//
 		// credBytes stays the whole document here, so verification below
 		// checks the proofs the DOCUMENT attaches to itself - the holder's,
@@ -204,7 +204,12 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		// quietly wrong, and getting it wrong here means authenticating the
 		// wrong node. The compact form is unwrapped correctly at step 3, so
 		// that is what this asks for.
-		if expandedHoldsAPresentation(expanded) {
+		//
+		// Only the ROOT. A credential may carry a presentation as evidence,
+		// or under any other property, and refusing the whole document for
+		// that rejects something perfectly verifiable - root selection
+		// already says which node the proofs belong to.
+		if expandedRootIsAPresentation(expanded) {
 			return nil, errors.New("a verifiable presentation in expanded JSON-LD is not accepted: send it in compact form, where the credential it carries is what gets verified")
 		}
 
@@ -446,28 +451,31 @@ func (h *VC20Handler) extractCredentialFromVP(vp map[string]any) ([]byte, map[st
 	return credBytes, credMap, nil
 }
 
-// expandedHoldsAPresentation reports whether any node of an expanded document
-// is a VerifiablePresentation.
+// expandedRootIsAPresentation reports whether the node an expanded document is
+// ABOUT is a VerifiablePresentation.
 //
-// Any node, not just the root: a document that carries a presentation
-// anywhere is one whose shape this path does not take apart safely, and
-// refusing it costs nothing a caller cannot fix by sending compact JSON-LD.
-func expandedHoldsAPresentation(expanded []any) bool {
+// The root, not any node. An earlier version refused a document that carried a
+// presentation anywhere, on the grounds that refusing cost a caller nothing -
+// but a credential may carry one as evidence or under any other property, and
+// that refused something perfectly verifiable. Root selection says which node
+// the proofs belong to, so that is the node to ask about.
+//
+// A document whose root cannot be identified is left to the extraction below
+// to refuse, with the error that says why.
+func expandedRootIsAPresentation(expanded []any) bool {
 	const vpType = "https://www.w3.org/2018/credentials#VerifiablePresentation"
 
-	for _, node := range expanded {
-		nodeMap, isNode := node.(map[string]any)
-		if !isNode {
-			continue
-		}
-		types, hasTypes := nodeMap["@type"].([]any)
-		if !hasTypes {
-			continue
-		}
-		for _, entry := range types {
-			if name, isString := entry.(string); isString && name == vpType {
-				return true
-			}
+	root, err := credential.RootOfExpandedNodes(expanded)
+	if err != nil {
+		return false
+	}
+	types, hasTypes := root["@type"].([]any)
+	if !hasTypes {
+		return false
+	}
+	for _, entry := range types {
+		if name, isString := entry.(string); isString && name == vpType {
+			return true
 		}
 	}
 	return false

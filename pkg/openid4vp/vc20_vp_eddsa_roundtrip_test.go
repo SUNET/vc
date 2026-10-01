@@ -1017,3 +1017,52 @@ func TestVerifyAndExtractAcceptsASplitExpandedRoot(t *testing.T) {
 	require.NoError(t, err, "a node split across entries is still one node")
 	require.Equal(t, "did:example:issuer", result.Issuer)
 }
+
+// TestVerifyAndExtractAcceptsACredentialCarryingAPresentation: refusing an
+// expanded document because SOMETHING in it is a presentation rejects a
+// credential that carries one as evidence - a perfectly verifiable document
+// whose own proof is the issuer's. Root selection says which node the proofs
+// belong to, so the root is the node to ask about.
+func TestVerifyAndExtractAcceptsACredentialCarryingAPresentation(t *testing.T) {
+	issuerPub, issuerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	const method = "did:example:issuer#key-1"
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "https://example.org/credentials/outer",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {
+			"id": "did:example:subject",
+			"https://example.org/vocab#evidence": {
+				"id": "https://example.org/presentations/carried",
+				"type": ["VerifiablePresentation"],
+				"holder": "did:example:holder"
+			}
+		}
+	}`), nil)
+	require.NoError(t, err)
+
+	signed, err := eddsaSuite.NewSuite().Sign(cred, issuerKey, &eddsaSuite.SignOptions{
+		VerificationMethod: method,
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	flattened, err := signed.ToJSON()
+	require.NoError(t, err)
+	var asArray []any
+	require.NoError(t, json.Unmarshal(flattened, &asArray),
+		"the expanded form must be an array, or this exercises the compact path")
+
+	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+		keys: map[string]crypto.PublicKey{method: issuerPub},
+	}))
+	require.NoError(t, err)
+
+	result, err := handler.VerifyAndExtract(t.Context(), string(flattened))
+	require.NoError(t, err, "a credential that CARRIES a presentation is still a credential")
+	require.Equal(t, "did:example:issuer", result.Issuer)
+}
