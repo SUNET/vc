@@ -35,6 +35,10 @@ func (f *failingAfterFirst) MakeSDJWT(_ context.Context, _ *apiv1_issuer.MakeSDJ
 		TokenStatusListIndex:   42,
 		TokenStatusListUri:     "https://status.example.org/list/7",
 		TokenStatusListBackend: "status_service",
+		// It allocated, so it says so. Release only acts on entries
+		// positively reported as allocated - an entry this apigw does not
+		// trust is one whose slot may belong to somebody else.
+		StatusAllocation: apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED,
 	}, nil
 }
 

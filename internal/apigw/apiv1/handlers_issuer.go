@@ -831,7 +831,7 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 			c.log.Error(errors.New("issuer did not say whether a status entry was allocated"),
 				"issuance reply does not carry status_allocation, so a status entry may have been allocated and could never be recorded; this is what an issuer older than that field looks like - upgrade issuer and apigw together",
 				"identifier", identifier, "section", e.Section, "index", e.Index, "uri", e.URI)
-			c.releaseAllocations(ctx, entries)
+			c.abandonBatch(ctx, recorded, entries)
 			return errors.New("issuer did not report whether a status list entry was allocated; issuer and apigw must be upgraded together")
 
 		case apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE:
@@ -844,7 +844,7 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 				c.log.Error(errors.New("status allocation contradicts the entry"),
 					"issuance reply says no status entry was allocated but carries a list URI; recording it would map this credential onto an entry that belongs to something else",
 					"identifier", identifier, "uri", e.URI, "index", e.Index, "backend", e.Backend)
-				c.releaseAllocations(ctx, entries)
+				c.abandonBatch(ctx, recorded, entries)
 				return fmt.Errorf("issuer reported no status allocation but returned list URI %q", e.URI)
 			}
 			// Nothing allocated, nothing to record. The issuance path
@@ -874,7 +874,7 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 				c.log.Error(errors.New("status list entry has no list URI"),
 					"issuance reply reports an allocated status entry with no list URI, so it cannot be recorded and the credential could never be revoked",
 					"identifier", identifier, "section", e.Section, "index", e.Index, "backend", e.Backend)
-				c.releaseAllocations(ctx, entries)
+				c.abandonBatch(ctx, recorded, entries)
 				return fmt.Errorf("issuer reported an allocated status list entry with no list URI (section %d, index %d)", e.Section, e.Index)
 			}
 
@@ -889,7 +889,7 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 			c.log.Error(errors.New("unknown status allocation value"),
 				"issuance reply carries a status_allocation this build does not recognise; it cannot be acted on either way - upgrade issuer and apigw together",
 				"identifier", identifier, "allocation", int32(e.Allocated), "uri", e.URI, "index", e.Index)
-			c.releaseAllocations(ctx, entries)
+			c.abandonBatch(ctx, recorded, entries)
 			return fmt.Errorf("issuer reported status_allocation %d, which this build does not recognise; issuer and apigw must be upgraded together", int32(e.Allocated))
 		}
 
@@ -910,7 +910,7 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 			c.log.Error(errors.New("no credential status store configured"),
 				"a status list entry was allocated but this apigw has no store to record it in; releasing it, because nothing could later find it to revoke",
 				"identifier", identifier, "uri", e.URI, "index", e.Index, "backend", e.Backend)
-			c.releaseAllocations(ctx, entries)
+			c.abandonBatch(ctx, recorded, entries)
 			return errors.New("cannot record the credential's status list entry: no credential status store configured")
 		}
 		// A URI with no routable backend is the same failure as a backend
@@ -924,7 +924,7 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 			c.log.Error(errors.New("unroutable status list backend"),
 				"issuance reply names a status list backend this build cannot reach, so the entry could never be revoked",
 				"identifier", identifier, "uri", e.URI, "index", e.Index, "backend", e.Backend)
-			c.releaseAllocations(ctx, entries)
+			c.abandonBatch(ctx, recorded, entries)
 			return fmt.Errorf("issuer returned status list entry %q/%d with backend %q, which is not a backend this build can reach", e.URI, e.Index, e.Backend)
 		}
 
@@ -955,8 +955,7 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 			// and revoke-by-identifier would later act on it, reporting a
 			// revocation of something that was never issued while the
 			// entry itself has already been released.
-			c.discardRecordedEntries(ctx, recorded)
-			c.releaseAllocations(ctx, entries)
+			c.abandonBatch(ctx, recorded, entries)
 			return fmt.Errorf("failed to record credential status entry: %w", err)
 		}
 		recorded = append(recorded, e)
@@ -1048,10 +1047,43 @@ func (c *Client) discardRecordedEntries(ctx context.Context, recorded []statusEn
 	}
 }
 
+// abandonBatch undoes a partly-applied issuance: the mappings already
+// written in this loop, then the slots allocated for it.
+//
+// Both halves, always, because the request fails as a whole and no
+// credential is delivered for any of it. A mapping left behind names a
+// credential nobody holds, and revoke-by-identifier would later act on it -
+// reporting a revocation of something never issued, against an entry that
+// has already been released. A slot left behind is live capacity nothing
+// points at, and a caller that retries strands another set.
+//
+// The order matters: rows first, then slots. A row that outlives its slot
+// is a mapping onto an entry that may be reallocated to someone else.
+func (c *Client) abandonBatch(ctx context.Context, recorded, entries []statusEntry) {
+	c.discardRecordedEntries(ctx, recorded)
+	c.releaseAllocations(ctx, entries)
+}
+
 func (c *Client) releaseAllocations(ctx context.Context, entries []statusEntry) {
 	ctx, cancel := cleanupContext(ctx)
 	defer cancel()
 	for _, e := range entries {
+		// Only entries the issuer POSITIVELY reported as allocated. A URI
+		// is not enough on its own, and the difference is a credential
+		// somebody else holds.
+		//
+		// Every caller below is a refusal, and some of those refusals are
+		// refusals of the entry ITSELF - a reply saying NONE while naming
+		// a list, or carrying a status_allocation this build has no name
+		// for. Those name a (list, index) this issuance has no claim to,
+		// and that slot plausibly belongs to a credential that was issued
+		// normally. Writing INVALID there would revoke it. So an entry
+		// this apigw does not trust enough to RECORD is also one it must
+		// not WRITE to; the slot is left alone, and the batch's genuinely
+		// allocated entries are still handed back.
+		if e.Allocated != apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED {
+			continue
+		}
 		if e.URI == "" || c.issuerClient == nil {
 			continue
 		}

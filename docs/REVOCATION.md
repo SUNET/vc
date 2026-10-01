@@ -271,6 +271,41 @@ signing key. That pin is an operator statement standing in for the decision
 the PDP cannot make; it is not a way around the PDP for tokens it *can*
 judge, which always go through it.
 
+### A PDP plus vc's own registry: the verifier refuses to start without a pin
+
+The registry is the case where this bites hardest, because its tokens can
+*never* be judged — it signs them with no `kid`, `jwk` or `x5c`. So a
+verifier configured with both `verifier.trust.pdp_url` and a local
+`registry.public_url` fails every local status check, and `fail_open`
+defaults to **true**, which reads each failure as "not revoked". A revoked
+credential is accepted, permanently, with nothing but a per-request log
+line.
+
+The verifier therefore **refuses to start** in that configuration unless
+the registry is pinned:
+
+```yaml
+verifier:
+  trust:
+    pdp_url: https://pdp.example.com
+  revocation:
+    status_list_issuer: https://registry.example.com   # == registry.public_url
+    status_list_key_file: /etc/vc/registry-status.pub.pem
+```
+
+`status_list_issuer` must equal `registry.public_url` exactly: the registry
+puts that value in its tokens' `iss`, and the pin only covers a token whose
+`iss` matches (or that carries none). A key file on its own does not apply.
+
+A standalone verifier — one whose config names no registry — is unaffected:
+it sees only external lists, which carry their signer in the token and are
+judged by the PDP.
+
+A deployment running the registry *and* an external service under a PDP has
+one pin to give, and it must go to the registry: those tokens have no other
+route. The external service's lists then need `x5c` or `jwk` in their
+tokens so the PDP can judge them.
+
 ## CWT wire format
 
 vc's CWT output diverged from the draft in four places at once, and each

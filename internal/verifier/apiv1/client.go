@@ -230,6 +230,13 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		// revoked". Narrowing is only worth having when there is something
 		// to narrow TO.
 		if statusListTrustEvaluationEnabled(cfg) {
+			// And the narrowing has a configuration it cannot serve: this
+			// deployment's own registry, whose tokens the PDP can never
+			// judge. Refuse to start rather than fail every local list at
+			// request time, where fail_open reads it as "not revoked".
+			if err := requireLocalRegistryStatusListPin(cfg); err != nil {
+				return nil, err
+			}
 			statusListOpts = append(statusListOpts, revocation.WithTokenVerifier(c.jwtTrustVerifier))
 		} else {
 			c.log.Warn("status list signer trust evaluation is DISABLED - no verifier.trust.pdp_url configured; status list tokens are verified by key resolution alone")
@@ -854,6 +861,52 @@ func parseScopes(scopeStr string) []string {
 // lists, which fail_open then reads as "not revoked".
 func statusListTrustEvaluationEnabled(cfg *model.Cfg) bool {
 	return cfg != nil && cfg.Verifier != nil && cfg.Verifier.Trust.PDPURL != ""
+}
+
+// requireLocalRegistryStatusListPin refuses to start a verifier that has a
+// PDP and this deployment's own registry, but no pinned key for the
+// registry's status list tokens.
+//
+// Those two together are a configuration that cannot work and does not say
+// so. The registry signs its lists with no kid, jwk or x5c
+// (internal/registry/tokenstatuslistissuer), so JWTTrustVerifier has
+// nothing to resolve and the PDP is never consulted; resolveStatusListKey
+// then refuses the generic resolver, because reaching it would be a way to
+// a status value with no policy decision at all. Every registry list fails
+// to verify - and revocation.fail_open defaults to TRUE, so each failure
+// reads as "not revoked". A revoked credential is accepted, permanently,
+// with nothing but a per-request log line to show for it.
+//
+// The pin is what makes it work, and it has to name the registry
+// specifically: the registry's tokens carry iss = registry.public_url (see
+// tokenstatuslistissuer), and pinApplies only covers a token whose iss is
+// the configured status_list_issuer. A key file alone is not enough.
+//
+// Deliberately not the other repair. Letting the resolver answer for
+// header-less tokens would reopen the hole the trust evaluation exists to
+// close - any token served as a CWT, or simply omitting its header key,
+// would escape the PDP.
+//
+// Scoped to a config that actually names a registry, so a standalone
+// verifier that only ever sees external lists is unaffected. Those lists
+// carry their signer in the token and are judged by the PDP, which is the
+// path that needs no pin.
+func requireLocalRegistryStatusListPin(cfg *model.Cfg) error {
+	if !statusListTrustEvaluationEnabled(cfg) {
+		return nil
+	}
+	if cfg.Registry == nil || cfg.Registry.PublicURL == "" {
+		return nil
+	}
+	revocationCfg := cfg.Verifier.Revocation
+	if revocationCfg == nil {
+		return nil
+	}
+	if revocationCfg.StatusListKeyFile != "" && revocationCfg.StatusListIssuer == cfg.Registry.PublicURL {
+		return nil
+	}
+	return fmt.Errorf("verifier.trust.pdp_url is set and this deployment runs its own registry (%s), but verifier.revocation.status_list_key_file/status_list_issuer do not pin that registry's signing key: the registry signs status list tokens with no kid, jwk or x5c, so they cannot be trust-evaluated, and every local status check would fail - which revocation.fail_open (default true) would read as 'not revoked'. Set verifier.revocation.status_list_issuer to %q and verifier.revocation.status_list_key_file to the registry's public key, or remove verifier.trust.pdp_url",
+		cfg.Registry.PublicURL, cfg.Registry.PublicURL)
 }
 
 // jwksKeyResolverAdapter adapts trust.JWKSKeyResolver to revocation.KeyResolver.
