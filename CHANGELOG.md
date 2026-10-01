@@ -88,15 +88,32 @@
   re-sign it. A document that aliases the predicate still keeps its own
   spelling, so signing twice makes one proof set.
 
-  **Rooting is refused when it would change the document's RDF.** Nodes
-  beside the root inside a `@graph` container never saw the root's own local
-  `@context`; moving them under it would apply it to them, and a term the
-  root redefines would change their triples. The scope is restored where
-  JSON-LD allows it — a context reset cannot clear `@protected` terms — and
-  the resulting dataset is compared against the original; a document neither
-  form carries through unchanged is refused rather than rooted into a
-  different graph. Affects `ecdsa-sd-2023` derivation and signing of
-  containers only.
+  **Rooting is refused when it would change the document's RDF.** The rewrite
+  moves the nodes beside the root into `@included`, and the result is now
+  canonicalized and compared against the original before it is returned;
+  anything that does not come through unchanged is refused rather than rooted
+  into a different graph. Three ways it can fail are known. Nodes beside the
+  root never saw the root's own local `@context`, so a term the root redefines
+  would change their triples — the scope is restored where JSON-LD allows it,
+  which a context holding `@protected` terms does not. `@included` is a
+  JSON-LD **1.1** keyword, so a document parsed with
+  `ProcessingMode: json-ld-1.0` cannot be rooted at all while anything has to
+  move; that one is refused by name. And fragments of one node split across
+  several `@graph` entries are now merged before the root is chosen, where
+  before they read as several nodes and a perfectly unambiguous document was
+  refused for holding "more than one node nothing refers to". Affects
+  `ecdsa-sd-2023` derivation and signing of containers only.
+
+  **`RDFCredential.CanonicalForm` now honours the options the credential was
+  parsed with.** It built fresh defaults — no caller document loader, no
+  `expandContext`, no base, no processing mode — while root selection,
+  proof-key selection and proof-scope removal all re-expanded under the
+  credential's own options. A credential was therefore READ one way and
+  SIGNED another, and the canonical form is the only thing a Data Integrity
+  signature covers. **A credential parsed with non-default options produces a
+  different document hash than before**, so proofs made over one no longer
+  verify — re-sign them. Credentials parsed with default options are
+  unaffected.
 
   **A document whose root takes part in a reference cycle is refused at
   SIGNING and at VERIFICATION.** A presentation carrying a credential whose

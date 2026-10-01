@@ -96,6 +96,23 @@ func NewRDFCredentialFromJSON(jsonData []byte, options *ld.JsonLdOptions) (*RDFC
 	}, nil
 }
 
+// canonicalizationOptions are the options this credential was PARSED with,
+// set up to produce canonical N-Quads.
+//
+// Building fresh defaults here was a divergence of the same kind this package
+// keeps finding: root selection, proof-key selection and proof-scope removal
+// all re-expand under the credential's own options, while the canonical form
+// the signature is actually computed over ignored them. A credential parsed
+// with a custom document loader, an expandContext, a base or a processing mode
+// was therefore READ one way and SIGNED another - and a verifier doing the
+// same thing got a different document hash from the same bytes.
+func (rc *RDFCredential) canonicalizationOptions() *ld.JsonLdOptions {
+	opts := rc.expansionOptions()
+	opts.Algorithm = ld.AlgorithmURDNA2015
+	opts.Format = "application/n-quads"
+	return opts
+}
+
 // CanonicalForm returns the canonical N-Quads representation
 // This implements URDNA2015 normalization per W3C spec
 func (rc *RDFCredential) CanonicalForm() (string, error) {
@@ -120,10 +137,7 @@ func (rc *RDFCredential) CanonicalForm() (string, error) {
 			}
 
 			processor := ld.NewJsonLdProcessor()
-			opts := ld.NewJsonLdOptions("")
-			opts.DocumentLoader = GetGlobalLoader()
-			opts.Algorithm = ld.AlgorithmURDNA2015
-			opts.Format = "application/n-quads"
+			opts := rc.canonicalizationOptions()
 			opts.InputFormat = "application/n-quads"
 
 			normalized, err := processor.Normalize(nquadsStr, opts)
@@ -149,10 +163,7 @@ func (rc *RDFCredential) CanonicalForm() (string, error) {
 	// Use json-gold's Normalize function on the JSON-LD document
 	// This performs URDNA2015 normalization and returns canonical N-Quads
 	processor := ld.NewJsonLdProcessor()
-	opts := ld.NewJsonLdOptions("")
-	opts.DocumentLoader = GetGlobalLoader()
-	opts.Algorithm = ld.AlgorithmURDNA2015
-	opts.Format = "application/n-quads"
+	opts := rc.canonicalizationOptions()
 
 	normalized, err := processor.Normalize(jsonLdDoc, opts)
 	if err != nil {

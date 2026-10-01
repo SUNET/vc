@@ -68,6 +68,17 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 		return nil, fmt.Errorf("a document's @graph holds no node to root it at")
 	}
 
+	// Fragments of ONE node merged before anything is selected. Flattening
+	// may split a node across several @graph entries, and reading each as a
+	// node of its own left two entries carrying the same identifier, neither
+	// referring to the other - so a perfectly unambiguous document was
+	// refused for holding "more than one node nothing refers to". The merge
+	// is on clones, and the promoted root is the merged node, so it carries
+	// every property the document gave it rather than whichever fragment
+	// came first. RootOfCompactedNodes has always done this; this path had
+	// not.
+	nodes = coalesceCompactedByID(nodes)
+
 	rootIndex := -1
 
 	// The caller usually KNOWS which node this is, because the document it
@@ -172,8 +183,24 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 	// which JSON-LD refuses over protected terms, so the unscoped form is
 	// tried second - and a document neither form carries through is REFUSED,
 	// not rooted silently into a different graph.
-	if _, rootHasOwnContext := root["@context"]; !rootHasOwnContext || len(included) == 0 {
+	//
+	// The proof runs WHENEVER nodes move, not only when the root has a
+	// context of its own. Scoping is one way this rewrite can change the
+	// dataset and there is no list of the others: merging fragments that
+	// carry different local contexts is a second, the processing mode is a
+	// third. Deciding by inspection which documents need checking is the
+	// assumption-that-coincides this whole change exists to remove.
+	if len(included) == 0 {
 		return attach(included), nil
+	}
+
+	// @included is a JSON-LD 1.1 keyword, and 1.1 ONLY: a 1.0 processor
+	// treats it as an unknown term and skips it, so the siblings - and every
+	// triple they carry - vanish from the document. The hash would then be
+	// taken over less than the document says, and a verifier reading the
+	// same bytes under 1.1 defaults would see those triples reappear.
+	if options != nil && options.ProcessingMode == ld.JsonLd_1_0 {
+		return nil, fmt.Errorf("a document of %d nodes cannot be rooted under JSON-LD 1.0, which ignores @included and would drop the %d node(s) beside the root", len(nodes), len(included))
 	}
 
 	want, err := canonicalFormOf(compacted, options)
@@ -181,12 +208,17 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 		return nil, fmt.Errorf("failed to canonicalize the document being rooted: %w", err)
 	}
 
-	scoped := make([]map[string]any, 0, len(included))
-	for _, node := range included {
-		scoped = append(scoped, scopedToContainer(node, containerContext, containerHasContext))
+	candidates := [][]map[string]any{included}
+	if _, rootHasOwnContext := root["@context"]; rootHasOwnContext {
+		scoped := make([]map[string]any, 0, len(included))
+		for _, node := range included {
+			scoped = append(scoped, scopedToContainer(node, containerContext, containerHasContext))
+		}
+		// Preferred: it is the scope the siblings actually had.
+		candidates = [][]map[string]any{scoped, included}
 	}
 
-	for _, entries := range [][]map[string]any{scoped, included} {
+	for _, entries := range candidates {
 		candidate := attach(entries)
 		got, err := canonicalFormOf(candidate, options)
 		if err == nil && got == want {
@@ -194,7 +226,10 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 		}
 	}
 
-	return nil, fmt.Errorf("rooting the document at %q would change its RDF: the root's own @context does not reach the %d node(s) beside it in @graph, and moving them under it cannot be undone", compactNodeID(root), len(included))
+	// Deliberately not naming a cause. The check is what decides, and it
+	// covers more than the scoping it was written for - a cause in the
+	// message would be a guess that reads as a finding.
+	return nil, fmt.Errorf("rooting the document at %q would change its RDF: the %d node(s) beside it in @graph do not survive being moved under it unchanged", compactNodeID(root), len(included))
 }
 
 // RootedCredential returns cred with its document rooted at the node the

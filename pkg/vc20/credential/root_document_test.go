@@ -758,3 +758,78 @@ func TestRootCompactedDocumentRefusesWhenTheDatasetWouldChange(t *testing.T) {
 	require.Error(t, err, "rooting must not invent a triple")
 	require.Contains(t, err.Error(), "would change its RDF")
 }
+
+// splitFragmentDocument: one node written as TWO @graph entries, which is a
+// shape flattening produces. The document is unambiguous - it has exactly one
+// node nothing refers to - but reading each entry as a node of its own made it
+// look like two.
+func splitFragmentDocument() map[string]any {
+	return map[string]any{
+		"@context": map[string]any{
+			"id":      "@id",
+			"note":    "https://example.org/vocab#note",
+			"carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+		},
+		"@graph": []any{
+			map[string]any{"id": "https://example.org/credential", "carries": "https://example.org/other"},
+			map[string]any{"id": "https://example.org/credential", "note": "the second fragment"},
+			map[string]any{"id": "https://example.org/other", "note": "a sibling"},
+		},
+	}
+}
+
+// TestRootCompactedDocumentMergesSplitFragments: the fragments are one node,
+// so the document says exactly which node it is about. Reading them as two
+// refused it for holding "more than one node nothing refers to" - and the
+// promoted root would otherwise carry only whichever fragment came first.
+func TestRootCompactedDocumentMergesSplitFragments(t *testing.T) {
+	before, err := canonicalFormOf(splitFragmentDocument(), nil)
+	require.NoError(t, err)
+
+	rooted, err := RootCompactedDocument(splitFragmentDocument(), "", nil)
+	require.NoError(t, err, "fragments of one node do not make a document ambiguous")
+	require.Equal(t, "https://example.org/credential", rooted["id"])
+	require.Equal(t, "https://example.org/other", rooted["carries"],
+		"the promoted root carries the first fragment's properties")
+	require.Equal(t, "the second fragment", rooted["note"],
+		"and the second fragment's too, rather than whichever came first")
+
+	after, err := canonicalFormOf(rooted, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "merging fragments must not change one quad")
+}
+
+// TestRootCompactedDocumentRefusesUnderJSONLD10: @included is a JSON-LD 1.1
+// keyword and 1.1 ONLY. A 1.0 processor treats it as an unknown term and skips
+// it, so every sibling moved there - and every triple it carries - vanishes.
+// The hash would be taken over less than the document says, while a verifier
+// reading the same bytes under 1.1 defaults sees those triples reappear.
+func TestRootCompactedDocumentRefusesUnderJSONLD10(t *testing.T) {
+	options := NewJSONLDOptions("")
+	options.ProcessingMode = ld.JsonLd_1_0
+
+	document := map[string]any{
+		"@context": map[string]any{
+			"id":      "@id",
+			"note":    "https://example.org/vocab#note",
+			"carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+		},
+		"@graph": []any{
+			map[string]any{"id": "https://example.org/credential", "carries": "https://example.org/other"},
+			map[string]any{"id": "https://example.org/other", "note": "a sibling that must survive"},
+		},
+	}
+
+	_, err := RootCompactedDocument(document, "", options)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "JSON-LD 1.0")
+
+	// A single node needs no @included, so 1.0 is no obstacle to rooting it.
+	single := map[string]any{
+		"@context": map[string]any{"id": "@id", "note": "https://example.org/vocab#note"},
+		"@graph":   []any{map[string]any{"id": "https://example.org/credential", "note": "alone"}},
+	}
+	rooted, err := RootCompactedDocument(single, "", options)
+	require.NoError(t, err, "nothing moves, so nothing is lost")
+	require.Equal(t, "https://example.org/credential", rooted["id"])
+}

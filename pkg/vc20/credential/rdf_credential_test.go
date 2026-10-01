@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/piprate/json-gold/ld"
+	"github.com/stretchr/testify/require"
 )
 
 // TestNewRDFCredentialFromJSON tests parsing JSON-LD to RDF with basic example
@@ -997,4 +998,42 @@ func TestSignatureVerificationRoundtrip(t *testing.T) {
 		t.Errorf("Proof canonical form not deterministic.\nFirst:  %s\nSecond: %s",
 			proofCanonical1, proofCanonical2)
 	}
+}
+
+// TestCanonicalFormHonoursTheCredentialsOptions: the canonical form is the
+// only thing a Data Integrity signature covers, and it was computed under
+// FRESH DEFAULT options - no document loader of the caller's, no
+// expandContext, no base, no processing mode - while root selection, proof-key
+// selection and proof-scope removal all re-expanded under the options the
+// credential was parsed with.
+//
+// A credential was therefore READ one way and SIGNED another, and a verifier
+// configured the same way got a different document hash from the same bytes.
+// The divergence is visible with the processing mode, because @included is a
+// JSON-LD 1.1 keyword that a 1.0 processor skips.
+func TestCanonicalFormHonoursTheCredentialsOptions(t *testing.T) {
+	const document = `{
+		"@context": {"id": "@id", "note": "https://example.org/vocab#note"},
+		"id": "https://example.org/credential",
+		"note": "the root's own",
+		"@included": [{"id": "https://example.org/other", "note": "only JSON-LD 1.1 sees this"}]
+	}`
+
+	underDefaults, err := NewRDFCredentialFromJSON([]byte(document), nil)
+	require.NoError(t, err)
+	canonicalDefaults, err := underDefaults.CanonicalForm()
+	require.NoError(t, err)
+	require.Contains(t, canonicalDefaults, "only JSON-LD 1.1 sees this",
+		"1.1 is the default, and it reads @included")
+
+	legacy := NewJSONLDOptions("")
+	legacy.ProcessingMode = ld.JsonLd_1_0
+	underLegacy, err := NewRDFCredentialFromJSON([]byte(document), legacy)
+	require.NoError(t, err)
+	canonicalLegacy, err := underLegacy.CanonicalForm()
+	require.NoError(t, err)
+	require.NotContains(t, canonicalLegacy, "only JSON-LD 1.1 sees this",
+		"a credential parsed as JSON-LD 1.0 must be canonicalized as JSON-LD 1.0")
+	require.Contains(t, canonicalLegacy, "the root's own",
+		"and the rest of the document is still there")
 }
