@@ -78,3 +78,68 @@ func TestRootCompactedDocument(t *testing.T) {
 			"promoting a node must not drop the only context the document has")
 	})
 }
+
+// TestRootCompactedDocumentIgnoresLiterals: in expanded JSON-LD a value
+// object carries @value, and what it holds is a string the document SAYS -
+// not a node it points at. Reading one as a reference marks the node it
+// happens to name as referenced, and a document where some literal equals the
+// root's identifier then has no unreferenced node left and is refused outright.
+func TestRootCompactedDocumentIgnoresLiterals(t *testing.T) {
+	rooted, err := RootCompactedDocument(map[string]any{
+		"@graph": []any{
+			map[string]any{
+				"@id": "https://example.org/credential",
+				"https://example.org/vocab#subject": []any{
+					map[string]any{"@id": "https://example.org/subject"},
+				},
+			},
+			map[string]any{
+				"@id": "https://example.org/subject",
+				// A literal that happens to read like the root's identifier.
+				"https://example.org/vocab#note": []any{
+					map[string]any{"@value": "https://example.org/credential"},
+				},
+			},
+		},
+	}, "")
+	require.NoError(t, err, "a literal must not count as a reference to the root")
+	require.Equal(t, "https://example.org/credential", rooted["@id"])
+}
+
+// TestRootCompactedDocumentNormalisesTheRootID: knownRootID is read off the
+// EXPANDED document, so it is always an absolute IRI, while compaction
+// rewrites a node's identifier under the document's own context and may turn
+// it into a term or a compact IRI. Comparing the two strings literally
+// rejected a valid derivation purely because compaction changed the spelling.
+func TestRootCompactedDocumentNormalisesTheRootID(t *testing.T) {
+	context := map[string]any{"ex": "https://example.org/credentials/"}
+
+	t.Run("in a graph container", func(t *testing.T) {
+		rooted, err := RootCompactedDocument(map[string]any{
+			"@context": context,
+			"@graph": []any{
+				map[string]any{"@id": "https://example.org/subject"},
+				map[string]any{"@id": "ex:outer", "https://example.org/vocab#s": map[string]any{"@id": "https://example.org/subject"}},
+			},
+		}, "https://example.org/credentials/outer")
+		require.NoError(t, err, "a compact spelling names the same node")
+		require.Equal(t, "ex:outer", rooted["@id"])
+	})
+
+	t.Run("as a single node", func(t *testing.T) {
+		rooted, err := RootCompactedDocument(map[string]any{
+			"@context": context,
+			"@id":      "ex:outer",
+		}, "https://example.org/credentials/outer")
+		require.NoError(t, err)
+		require.Equal(t, "ex:outer", rooted["@id"])
+	})
+
+	t.Run("a genuinely different node is still refused", func(t *testing.T) {
+		_, err := RootCompactedDocument(map[string]any{
+			"@context": context,
+			"@id":      "ex:someone-else",
+		}, "https://example.org/credentials/outer")
+		require.ErrorContains(t, err, "no longer holds the node")
+	})
+}

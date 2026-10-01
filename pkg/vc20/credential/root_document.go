@@ -1,6 +1,10 @@
 package credential
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/piprate/json-gold/ld"
+)
 
 // RootCompactedDocument turns a compacted JSON-LD document that came back as a
 // bare @graph container into one rooted at its own top-level node.
@@ -29,7 +33,7 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string) (map[st
 		// entirely - here, the credential's subject - and attaching the
 		// credential's proof to that is how a proof comes to secure a
 		// document nobody meant to sign.
-		if knownRootID != "" && compactNodeID(compacted) != knownRootID {
+		if knownRootID != "" && !isKnownRoot(compacted, compacted["@context"], knownRootID) {
 			return nil, fmt.Errorf("the document no longer holds the node %q it is about", knownRootID)
 		}
 		return compacted, nil
@@ -62,7 +66,7 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string) (map[st
 	// about.
 	if knownRootID != "" {
 		for i, node := range nodes {
-			if compactNodeID(node) == knownRootID {
+			if isKnownRoot(node, compacted["@context"], knownRootID) {
 				rootIndex = i
 				break
 			}
@@ -153,6 +157,16 @@ func mentionsID(value any, id string, atNodeRoot bool) bool {
 			}
 		}
 	case map[string]any:
+		// A LITERAL is not a reference, however much it looks like one. In
+		// expanded JSON-LD a value object carries @value, and its contents
+		// are a string the document says something with - not a node it
+		// points at. Reading one as a reference marks the node it names as
+		// referenced, and a document where some literal happens to equal the
+		// root's identifier then has no unreferenced node left and is
+		// refused outright.
+		if _, isLiteral := typed["@value"]; isLiteral {
+			return false
+		}
 		for key, member := range typed {
 			// A node's OWN identifier is not a reference to itself.
 			if atNodeRoot && (key == "@id" || key == "id") {
@@ -206,4 +220,60 @@ func rootIndexOfCompactedNodes(nodes []map[string]any) (int, error) {
 		return -1, fmt.Errorf("every node in a document is referred to by another, so it says it is about none of them")
 	}
 	return rootIndex, nil
+}
+
+// isKnownRoot reports whether a node in a COMPACTED document is the node named
+// by an ABSOLUTE identifier.
+//
+// The two spellings need not match literally. knownRootID is read off the
+// expanded document, so it is always an absolute IRI; compaction rewrites a
+// node's identifier under the document's context, which may turn it into a
+// term or a compact IRI. Comparing the strings alone rejected a perfectly
+// valid derivation purely because compaction changed the spelling of its root.
+func isKnownRoot(node map[string]any, context any, knownRootID string) bool {
+	id := compactNodeID(node)
+	if id == "" {
+		return false
+	}
+	if id == knownRootID {
+		return true
+	}
+	return expandNodeID(context, id) == knownRootID
+}
+
+// expandNodeID resolves an identifier as written in a compacted document to
+// the absolute IRI it stands for, or "" when it does not resolve to one.
+//
+// The identifier is expanded as the OBJECT of a property, because a node
+// carrying nothing but an @id is free-floating and expansion drops it.
+func expandNodeID(context any, id string) string {
+	const probeIRI = "https://w3id.org/security#proof"
+
+	probe := map[string]any{probeIRI: map[string]any{"@id": id}}
+	if context != nil {
+		probe["@context"] = context
+	}
+
+	expanded, err := ld.NewJsonLdProcessor().Expand(probe, NewJSONLDOptions(""))
+	if err != nil {
+		return ""
+	}
+
+	if len(expanded) == 0 {
+		return ""
+	}
+	node, isNode := expanded[0].(map[string]any)
+	if !isNode {
+		return ""
+	}
+	values, present := node[probeIRI].([]any)
+	if !present || len(values) == 0 {
+		return ""
+	}
+	value, isNode := values[0].(map[string]any)
+	if !isNode {
+		return ""
+	}
+	resolved, _ := value["@id"].(string)
+	return resolved
 }

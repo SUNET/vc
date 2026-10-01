@@ -36,6 +36,27 @@
   release over such a credential no longer verifies, and a derived proof made
   from it no longer checks out. Re-issue those credentials.
 
+  **`ecdsa-sd-2023` derived credentials are affected more widely than that.**
+  Deriving used to compact the flattened dataset and attach the derived proof
+  to the bare `@graph` container it came back as — a document about nothing,
+  whose proof the old verifier found by walking the graph. The root-scoped
+  verifier reads a document's proofs off its root, and a container has none,
+  so **every previously issued derived credential that came out as a
+  multi-node `@graph` container stops verifying**. In practice that is any
+  derivation from a credential with nested nodes — a `credentialSubject`
+  holding an object rather than a bare identifier, say. Derivations that
+  compacted down to a single node are unaffected. Re-derive from the base
+  credential; the base proof itself is unchanged unless the credential nests a
+  secured credential, as above.
+
+  Two derivations are now refused outright rather than producing a document
+  that cannot be verified: one whose disclosure drops every triple of the
+  credential node (what is left is a document about the subject, carrying the
+  credential's proof), and one from a base credential whose root carries no
+  `id` (derivation rewrites blank node labels, so nothing identifies the
+  original root afterwards and the disclosure would choose it). Give
+  credentials an `id` if they are to be used with `ecdsa-sd-2023`.
+
   A document whose root takes part in a reference cycle — a presentation
   carrying a credential whose subject links back at it — is now refused at
   SIGNING. Such a document says which node it is about while compact and
