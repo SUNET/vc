@@ -80,6 +80,16 @@
   error names the document rather than the serialization. **Documents of these
   shapes signed before this release no longer verify.**
 
+  **An expanded verifiable presentation is no longer accepted by the
+  OpenID4VP handler.** It used to verify the proofs the DOCUMENT attaches to
+  itself — the holder's, for a presentation — while reporting the issuer,
+  subject and trust decision of the embedded credential, whose own proof was
+  never checked. Compact presentations are unaffected: they are unwrapped to
+  the credential they carry and that credential's proof is what gets verified.
+  **Migration:** send presentations in compact JSON-LD. A caller that has only
+  the expanded form should extract the credential and present that. Expanded
+  CREDENTIALS are unaffected.
+
   **A document may attach at most 32 proofs to itself.** Verification refuses
   more before checking any signature — the list is read off the document, so
   its length is the sender's choice, and each candidate costs a JSON-LD

@@ -1038,11 +1038,21 @@ func issuerControlsMethod(issuer string, verificationMethod string) error {
 		}
 	}
 
-	if verificationMethod == issuer {
+	// The issuer's own trailing delimiter is not a boundary of its own.
+	// https://issuer.example/ and https://issuer.example name the same
+	// thing, but comparing the first against https://issuer.example/keys/1
+	// found "k" where it wanted a delimiter and refused a method in the
+	// issuer's own path.
+	boundary := strings.TrimRight(issuer, "#/?")
+	if boundary == "" {
+		return fmt.Errorf("the credential's issuer %q names nothing a proof can belong to", issuer)
+	}
+
+	if verificationMethod == boundary {
 		return nil
 	}
-	if strings.HasPrefix(verificationMethod, issuer) {
-		switch verificationMethod[len(issuer)] {
+	if strings.HasPrefix(verificationMethod, boundary) {
+		switch verificationMethod[len(boundary)] {
 		case '#', '/', '?':
 			return nil
 		}

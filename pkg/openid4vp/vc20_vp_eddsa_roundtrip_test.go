@@ -1254,4 +1254,14 @@ func TestIssuerControlsMethodRefusesAPathThatClimbsOut(t *testing.T) {
 
 	require.Error(t, issuerControlsMethod(issuer, "https://issuer.example.evil/keys/key-1"),
 		"and a prefix that is not a boundary is still refused")
+
+	// An issuer written with a trailing delimiter names the same thing as
+	// one without. Comparing the first against a method in its own path
+	// found an ordinary character where it wanted a delimiter and refused.
+	for _, written := range []string{"https://issuer.example/", "https://issuer.example/#"} {
+		require.NoError(t, issuerControlsMethod(written, "https://issuer.example/keys/1"),
+			"a trailing delimiter is not a boundary of its own: %s", written)
+	}
+	require.Error(t, issuerControlsMethod("https://issuer.example/", "https://issuer.example.evil/k"),
+		"and trimming it must not widen what counts as the issuer")
 }
