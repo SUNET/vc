@@ -494,13 +494,27 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 }
 
 // issueSDJWT issues SD-JWT credentials, one per JWK.
-func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier, authenticSource string) ([]openid4vci.Credential, error) {
+func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier, authenticSource string) (_ []openid4vci.Credential, err error) {
 	credMeta := c.cfg.GetCredentialMetadata(scope)
 	if credMeta == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
 	}
 
 	replies := make([]*apiv1_issuer.MakeSDJWTReply, 0, len(jwks))
+
+	// One status entry per credential already minted. A later call in this
+	// loop can fail after earlier ones have ALLOCATED, and those allocations
+	// were then never recorded and never released - so the slot stayed VALID
+	// on the status list with nothing able to revoke it, and every retry
+	// leaked another. Released on any failure before saveCredentialSubjects
+	// takes ownership of them.
+	var entries []statusEntry
+	saved := false
+	defer func() {
+		if err != nil && !saved {
+			c.releaseAllocations(ctx, entries)
+		}
+	}()
 
 	for _, jwk := range jwks {
 		reply, err := c.issuerClient.MakeSDJWT(ctx, &apiv1_issuer.MakeSDJWTRequest{
@@ -520,6 +534,7 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 		}
 
 		replies = append(replies, reply)
+		entries = append(entries, statusEntry{Section: reply.TokenStatusListSection, Index: reply.TokenStatusListIndex, URI: reply.TokenStatusListUri, Backend: reply.TokenStatusListBackend})
 	}
 
 	credentials := make([]openid4vci.Credential, len(replies))
@@ -534,11 +549,10 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 		}
 	}
 
-	// Save credential subject info to registry for status management
-	entries := make([]statusEntry, len(replies))
-	for i, r := range replies {
-		entries[i] = statusEntry{Section: r.TokenStatusListSection, Index: r.TokenStatusListIndex, URI: r.TokenStatusListUri, Backend: r.TokenStatusListBackend}
-	}
+	// From here the entries are saveCredentialSubjects's to release: it
+	// releases them itself on its own failure paths, so the deferred release
+	// above must not run as well.
+	saved = true
 	if err := c.saveCredentialSubjects(ctx, identifier, authenticSource, scope, entries); err != nil {
 		return nil, err
 	}
@@ -551,13 +565,23 @@ func (c *Client) issueSDJWT(ctx context.Context, scope string, documentData []by
 // scope's credential metadata, so the issuer never needs a doctype-specific
 // Go struct - adding a new mdoc document type requires only a new MDDL
 // schema, never a Go change (mirrors issueSDJWT's VCTM-driven approach).
-func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier, authenticSource string) ([]openid4vci.Credential, error) {
+func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byte, jwks []*apiv1_issuer.Jwk, identifier, authenticSource string) (_ []openid4vci.Credential, err error) {
 	credentialMetadata := c.cfg.GetCredentialMetadata(scope)
 	if credentialMetadata == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
 	}
 
 	replies := make([]*apiv1_issuer.MakeMDocReply, 0, len(jwks))
+
+	// One status entry per credential already minted - see issueSDJWT for
+	// why a mid-loop failure leaked them.
+	var entries []statusEntry
+	saved := false
+	defer func() {
+		if err != nil && !saved {
+			c.releaseAllocations(ctx, entries)
+		}
+	}()
 
 	for _, jwk := range jwks {
 		deviceKeyBytes, err := convertJWKToCOSEKey(jwk)
@@ -583,6 +607,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 		}
 
 		replies = append(replies, reply)
+		entries = append(entries, statusEntry{Section: reply.StatusListSection, Index: reply.StatusListIndex, URI: reply.StatusListUri, Backend: reply.StatusListBackend})
 	}
 
 	credentials := make([]openid4vci.Credential, len(replies))
@@ -595,10 +620,8 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 		credentials[i] = openid4vci.Credential{Credential: base64.RawURLEncoding.EncodeToString(reply.Mdoc)}
 	}
 
-	entries := make([]statusEntry, len(replies))
-	for i, r := range replies {
-		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex, URI: r.StatusListUri, Backend: r.StatusListBackend}
-	}
+	// saveCredentialSubjects owns them from here; see issueSDJWT.
+	saved = true
 	if err := c.saveCredentialSubjects(ctx, identifier, authenticSource, scope, entries); err != nil {
 		return nil, err
 	}
@@ -608,7 +631,7 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 
 // issueVC20 issues W3C VC 2.0 Data Integrity credentials, one per JWT proof.
 // Caller must ensure only JWT proof types are present (singular Proof or Proofs.JWT).
-func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, identifier, authenticSource string, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
+func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, identifier, authenticSource string, req *openid4vci.CredentialRequest) (_ []openid4vci.Credential, err error) {
 	hasNoJWTProof := req.Proof != nil && req.Proof.ProofType != "jwt"
 	hasNoJWTProofs := req.Proofs != nil && len(req.Proofs.JWT) == 0
 	if hasNoJWTProof || hasNoJWTProofs {
@@ -649,6 +672,17 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	}
 
 	replies := make([]*apiv1_issuer.MakeVC20Reply, 0, len(subjectDIDs))
+
+	// One status entry per credential already minted - see issueSDJWT for
+	// why a mid-loop failure leaked them.
+	var entries []statusEntry
+	saved := false
+	defer func() {
+		if err != nil && !saved {
+			c.releaseAllocations(ctx, entries)
+		}
+	}()
+
 	for _, did := range subjectDIDs {
 		reply, err := c.issuerClient.MakeVC20(ctx, &apiv1_issuer.MakeVC20Request{
 			Scope:             scope,
@@ -666,6 +700,7 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 			return nil, errors.New("MakeVC20 reply is nil")
 		}
 		replies = append(replies, reply)
+		entries = append(entries, statusEntry{Section: reply.StatusListSection, Index: reply.StatusListIndex, URI: reply.StatusListUri, Backend: reply.StatusListBackend})
 	}
 
 	credentials := make([]openid4vci.Credential, len(replies))
@@ -675,10 +710,8 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	}
 
 	// Save credential subject info to registry for status management
-	entries := make([]statusEntry, len(replies))
-	for i, r := range replies {
-		entries[i] = statusEntry{Section: r.StatusListSection, Index: r.StatusListIndex, URI: r.StatusListUri, Backend: r.StatusListBackend}
-	}
+	// saveCredentialSubjects owns them from here; see issueSDJWT.
+	saved = true
 	if err := c.saveCredentialSubjects(ctx, identifier, authenticSource, scope, entries); err != nil {
 		return nil, err
 	}
