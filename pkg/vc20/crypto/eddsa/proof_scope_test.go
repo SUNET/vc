@@ -487,8 +487,11 @@ func TestSignAttachesAProofThisLibraryCanRead(t *testing.T) {
 	// predicate instead, which expands correctly under any context.
 	//
 	// Round-tripping such a document through Sign and VerifyProof is NOT
-	// asserted: it still fails, with a signature mismatch rather than a
-	// missing proof, for a reason I did not isolate. Under the VC 2.0
+	// asserted: it still fails with a signature mismatch. Narrowed as far
+	// as this - the document hash is identical at signing and verification,
+	// and the proof configuration canonicalizes identically too, so the
+	// divergence is in neither of the two inputs to the signature and I did
+	// not find where it is. Under the VC 2.0
 	// context the case cannot arise at all - its type-scoped context pins
 	// "proof" to the security predicate for a VerifiableCredential node and
 	// its terms are @protected - so this is about documents that do not use
