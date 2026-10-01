@@ -350,3 +350,51 @@ func TestCompactRootProofDoesNotMutateItsInput(t *testing.T) {
 		require.Len(t, values, 1, "no duplicate values accumulate across passes")
 	}
 }
+
+// TestSecuredDocumentSurvivesConcurrentVerification: the memoized root proofs
+// are shared by every caller, and verification compacts them. Two
+// verifications of one credential at once must therefore not write to the same
+// maps - run under -race, this is the check that says so.
+func TestSecuredDocumentSurvivesConcurrentVerification(t *testing.T) {
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"},
+		"proof": {
+			"type": "DataIntegrityProof",
+			"cryptosuite": "eddsa-rdfc-2022",
+			"created": "2024-01-01T00:00:00Z",
+			"verificationMethod": "did:example:issuer#key-1",
+			"proofPurpose": "assertionMethod",
+			"proofValue": "z3FXQjecWufY46yg5abdVZsXqLhxhueuSoZgNSARiKBk9czhmGQWmzBYdCVSAzeVCTt6QcLnLCHKPkyVpGqu9rWY"
+		}
+	}`), nil)
+	require.NoError(t, err)
+
+	const readers = 8
+	results := make(chan string, readers)
+	for range readers {
+		go func() {
+			proofs, _, err := SecuredDocument(cred)
+			if err != nil || len(proofs) != 1 {
+				results <- "secured document unreadable"
+				return
+			}
+			proof, err := CompactRootProof(proofs[0])
+			if err != nil {
+				results <- err.Error()
+				return
+			}
+			value, _ := proof["proofValue"].(string)
+			results <- value
+		}()
+	}
+
+	first := <-results
+	require.NotEmpty(t, first)
+	for range readers - 1 {
+		require.Equal(t, first, <-results,
+			"every reader must see the same proof, however many read at once")
+	}
+}

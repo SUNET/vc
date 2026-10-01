@@ -582,10 +582,16 @@ func asList(value any) []any {
 // that is the form in which aliases are already resolved. A proof attached
 // through a graph container arrives wrapped in one, which is unwrapped here.
 func CompactRootProof(expanded any) (map[string]any, error) {
-	node, ok := expanded.(map[string]any)
+	shared, ok := expanded.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("a root proof is not a node")
 	}
+	// A COPY from the start. The node may be one SecuredDocument memoized
+	// and hands to every caller, and what happens to it below is not all
+	// ours: json-gold's Compact takes the node as input, and this must not
+	// depend on whether that leaves it alone.
+	node := maps.Clone(shared)
+
 	if graph, wrapped := node["@graph"]; wrapped {
 		entries, isList := graph.([]any)
 		if !isList {
