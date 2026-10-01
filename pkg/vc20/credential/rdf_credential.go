@@ -612,6 +612,12 @@ func (rc *RDFCredential) OriginalJSON() string {
 // credential, which is a breaking change from the version that handed out the
 // live dataset. The reason is below.
 func (rc *RDFCredential) Dataset() *ld.RDFDataset {
+	// Under memoMu, which guards the dataset against the in-place rewrite as
+	// well as guarding the memos: cloning while NormalizeVerifiableCredentialGraph
+	// rewrote the graphs would read a half-rewritten document.
+	rc.memoMu.Lock()
+	defer rc.memoMu.Unlock()
+
 	// A COPY. The credential's own dataset never leaves this type.
 	//
 	// Invalidating the memos on the way out of here was not enough, and the
@@ -697,6 +703,14 @@ func (rc *RDFCredential) invalidate() {
 	rc.memoMu.Lock()
 	defer rc.memoMu.Unlock()
 
+	rc.invalidateLocked()
+}
+
+// invalidateLocked clears the memos with memoMu already held, for a caller
+// that must hold it across more than the clearing - the in-place dataset
+// rewrite, which has to exclude readers for the whole mutation and not just
+// at the end of it.
+func (rc *RDFCredential) invalidateLocked() {
 	rc.secured = nil
 	rc.compactedProofs = nil
 	rc.rootScoped = nil
@@ -737,10 +751,21 @@ func (rc *RDFCredential) NQuads() (string, error) {
 // in the default graph instead of a named graph when @context: null is used in the definition.
 // This function moves the VC quads to a new named graph to match the expected structure.
 func (rc *RDFCredential) NormalizeVerifiableCredentialGraph() error {
-	// This REWRITES the dataset, so every memoized answer about the document
-	// is void from here on. Deferred rather than placed at the mutation, so
-	// a later edit to this function cannot return without it.
-	defer rc.invalidate()
+	// The lock is held for the WHOLE rewrite, not just the invalidation.
+	//
+	// Clearing the memos afterwards does not synchronize anything: a verifier
+	// holding memoMu could be canonicalizing while this rewrote rc.dataset
+	// underneath it - a data race, and one whose result is a hash taken over
+	// a half-rewritten document. Excluding readers for the duration is the
+	// only version of this that is safe, and the memos are cleared before the
+	// lock is released so nobody sees the old answers against the new
+	// dataset.
+	//
+	// Nothing in here calls a memoized accessor, so taking memoMu cannot
+	// re-enter; invalidateLocked exists for exactly that reason.
+	rc.memoMu.Lock()
+	defer rc.memoMu.Unlock()
+	defer rc.invalidateLocked()
 
 	if rc.dataset == nil {
 		return fmt.Errorf("RDF dataset is nil")

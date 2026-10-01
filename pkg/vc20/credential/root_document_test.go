@@ -1379,3 +1379,64 @@ func TestMemoizedAnswersUnderConcurrentInvalidation(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, proofs, 1)
 }
+
+// TestRewriteExcludesReadersForTheWholeMutation: clearing the memos after the
+// rewrite does not synchronize anything. A verifier holding memoMu could be
+// canonicalizing while NormalizeVerifiableCredentialGraph rewrote rc.dataset
+// underneath it - a data race, and one whose result is a document hash taken
+// over a half-rewritten document, which is the worst thing to be wrong about
+// on a verification path.
+//
+// The fixture is a PRESENTATION carrying a credential, because that is the
+// only shape this rewrite actually changes: a plain credential leaves it with
+// nothing to move, so a plain fixture exercises no mutation at all and the
+// race window never opens. A first version of this test used one and passed
+// against the unsynchronized code.
+//
+// A fresh credential per round, because the rewrite is idempotent - once the
+// graph has moved there is nothing left to race with.
+func TestRewriteExcludesReadersForTheWholeMutation(t *testing.T) {
+	const presentation = `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiablePresentation"],
+		"holder": "did:example:holder",
+		"verifiableCredential": [{
+			"@context": "https://www.w3.org/ns/credentials/v2",
+			"id": "https://example.org/inner",
+			"type": ["VerifiableCredential"],
+			"issuer": "did:example:issuer",
+			"credentialSubject": {"id": "did:example:subject"}
+		}]
+	}`
+
+	for round := 0; round < 15; round++ {
+		cred, err := NewRDFCredentialFromJSON([]byte(presentation), nil)
+		require.NoError(t, err)
+
+		done := make(chan struct{})
+		for i := 0; i < 3; i++ {
+			go func() {
+				defer func() { done <- struct{}{} }()
+				_, _ = RootScopedCanonicalForm(cred)
+				_, _ = CompactedRootProofs(cred)
+				_, _ = cred.CanonicalForm()
+			}()
+		}
+		go func() {
+			defer func() { done <- struct{}{} }()
+			_ = cred.NormalizeVerifiableCredentialGraph()
+		}()
+		go func() {
+			defer func() { done <- struct{}{} }()
+			_ = cred.Dataset()
+		}()
+
+		for i := 0; i < 5; i++ {
+			select {
+			case <-done:
+			case <-time.After(60 * time.Second):
+				t.Fatal("a reader and the rewrite deadlocked")
+			}
+		}
+	}
+}
