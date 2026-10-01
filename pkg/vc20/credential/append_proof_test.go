@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -42,4 +43,56 @@ func TestAppendProofDropsANullProof(t *testing.T) {
 		AppendProof(doc, proof)
 		require.Equal(t, proof, doc["proof"])
 	})
+}
+
+// TestSecuredDocumentIsComputedOnce: reading a document's own proofs and
+// canonicalizing what they secure is the expensive half of verification -
+// JSON-LD expansion, flattening, RDF serialization, URDNA2015 - and the answer
+// is the SAME for every proof in a set, because that is what a proof set
+// means. A verifier checking several candidates used to pay for it once per
+// candidate, on a document nobody had authenticated yet.
+func TestSecuredDocumentIsComputedOnce(t *testing.T) {
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"},
+		"proof": {
+			"type": "DataIntegrityProof",
+			"cryptosuite": "eddsa-rdfc-2022",
+			"created": "2024-01-01T00:00:00Z",
+			"verificationMethod": "did:example:issuer#key-1",
+			"proofPurpose": "assertionMethod",
+			"proofValue": "z3FXQjecWufY46yg5abdVZsXqLhxhueuSoZgNSARiKBk9czhmGQWmzBYdCVSAzeVCTt6QcLnLCHKPkyVpGqu9rWY"
+		}
+	}`), nil)
+	require.NoError(t, err)
+
+	first, firstHash, err := SecuredDocument(cred)
+	require.NoError(t, err)
+	require.NotEmpty(t, first)
+
+	second, secondHash, err := SecuredDocument(cred)
+	require.NoError(t, err)
+	require.Equal(t, firstHash, secondHash)
+
+	require.Equal(t,
+		reflect.ValueOf(first).Pointer(), reflect.ValueOf(second).Pointer(),
+		"the second call must hand back the first answer, not recompute it")
+}
+
+// A document that cannot be read is not worth re-reading either.
+func TestSecuredDocumentRemembersARefusal(t *testing.T) {
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`), nil)
+	require.NoError(t, err)
+
+	_, _, first := SecuredDocument(cred)
+	require.Error(t, first, "a document with no proof of its own")
+	_, _, second := SecuredDocument(cred)
+	require.Equal(t, first, second, "and the same refusal, from the same answer")
 }

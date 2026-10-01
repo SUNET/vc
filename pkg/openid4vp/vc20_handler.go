@@ -253,14 +253,24 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 	if h.keyResolver == nil {
 		return nil, errors.New("no key resolver configured")
 	}
-	candidates, err := h.rootProofCandidates(credBytes)
+	// ONE parse, and one secured-document answer, for every candidate. Each
+	// candidate used to get its own: a reparse, a JSON-LD expansion, an RDF
+	// serialization and a URDNA2015 canonicalization, all before anything
+	// about the document had been authenticated. The answer is identical
+	// for every proof in a set - that is what a proof set means.
+	rdfCred, err := credential.NewRDFCredentialFromJSON(credBytes, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
+	}
+
+	candidates, err := h.rootProofCandidates(rdfCred)
 	if err != nil {
 		return nil, err
 	}
 
 	var lastErr error
 	for _, proof := range candidates {
-		result, err := h.verifyOneRootProof(ctx, credBytes, credMap, proof)
+		result, err := h.verifyOneRootProof(ctx, rdfCred, credBytes, credMap, proof)
 		if err != nil {
 			lastErr = err
 			continue
@@ -276,11 +286,7 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 
 // rootProofCandidates lists the proofs the document attaches to itself, in
 // the short-keyed form the rest of this handler reads.
-func (h *VC20Handler) rootProofCandidates(credBytes []byte) ([]map[string]any, error) {
-	rdfCred, err := credential.NewRDFCredentialFromJSON(credBytes, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
-	}
+func (h *VC20Handler) rootProofCandidates(rdfCred *credential.RDFCredential) ([]map[string]any, error) {
 	expanded, _, err := rdfCred.RootProofs()
 	if err != nil {
 		return nil, err
@@ -327,6 +333,7 @@ func (h *VC20Handler) rootProofCandidates(credBytes []byte) ([]map[string]any, e
 // cryptosuite it declares.
 func (h *VC20Handler) verifyOneRootProof(
 	ctx context.Context,
+	rdfCred *credential.RDFCredential,
 	credBytes []byte,
 	credMap map[string]any,
 	proof map[string]any,
@@ -365,21 +372,21 @@ func (h *VC20Handler) verifyOneRootProof(
 		if !ok {
 			return nil, fmt.Errorf("cryptosuite %s requires ECDSA key, got %T", cryptosuite, pubKey)
 		}
-		return h.verifyECDSA2019(ctx, credBytes, credMap, proof, vm, ecdsaKey)
+		return h.verifyECDSA2019(ctx, rdfCred, credBytes, credMap, proof, vm, ecdsaKey)
 
 	case CryptosuiteECDSASd:
 		ecdsaKey, ok := pubKey.(*ecdsa.PublicKey)
 		if !ok {
 			return nil, fmt.Errorf("cryptosuite %s requires ECDSA key, got %T", cryptosuite, pubKey)
 		}
-		return h.verifyECDSASd2023(ctx, credBytes, credMap, proof, ecdsaKey)
+		return h.verifyECDSASd2023(ctx, rdfCred, credBytes, credMap, proof, ecdsaKey)
 
 	case CryptosuiteEdDSA2022:
 		ed25519Key, ok := pubKey.(ed25519.PublicKey)
 		if !ok {
 			return nil, fmt.Errorf("cryptosuite %s requires Ed25519 key, got %T", cryptosuite, pubKey)
 		}
-		return h.verifyEdDSA2022(ctx, credBytes, credMap, proof, vm, ed25519Key)
+		return h.verifyEdDSA2022(ctx, rdfCred, credBytes, credMap, proof, vm, ed25519Key)
 
 	default:
 		return nil, fmt.Errorf("unsupported cryptosuite: %s", cryptosuite)
@@ -740,18 +747,13 @@ func (h *VC20Handler) extractProof(cred map[string]any) (map[string]any, error) 
 // verifyECDSA2019 verifies a credential with ecdsa-rdfc-2019 cryptosuite.
 func (h *VC20Handler) verifyECDSA2019(
 	ctx context.Context,
+	rdfCred *credential.RDFCredential,
 	credBytes []byte,
 	credMap map[string]any,
 	proof map[string]any,
 	verificationMethod string,
 	pubKey *ecdsa.PublicKey,
 ) (*VC20VerificationResult, error) {
-	// Create RDF credential
-	rdfCred, err := credential.NewRDFCredentialFromJSON(credBytes, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
-	}
-
 	// Verify using the standard suite, and build the result from the proof
 	// that ACTUALLY verified - see verifyEdDSA2022 for the attack this
 	// closes; both suites try every proof the root carries.
@@ -771,17 +773,12 @@ func (h *VC20Handler) verifyECDSA2019(
 // verifyECDSASd2023 verifies a credential with ecdsa-sd-2023 cryptosuite.
 func (h *VC20Handler) verifyECDSASd2023(
 	ctx context.Context,
+	rdfCred *credential.RDFCredential,
 	credBytes []byte,
 	credMap map[string]any,
 	proof map[string]any,
 	pubKey *ecdsa.PublicKey,
 ) (*VC20VerificationResult, error) {
-	// Create RDF credential
-	rdfCred, err := credential.NewRDFCredentialFromJSON(credBytes, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
-	}
-
 	// Verify THIS candidate, not whichever proof the suite would pick for
 	// itself. Verify(cred, key) selects independently, so the proof that
 	// verified and the proof whose metadata this result reports could be two
@@ -800,18 +797,13 @@ func (h *VC20Handler) verifyECDSASd2023(
 // verifyEdDSA2022 verifies a credential with eddsa-rdfc-2022 cryptosuite.
 func (h *VC20Handler) verifyEdDSA2022(
 	ctx context.Context,
+	rdfCred *credential.RDFCredential,
 	credBytes []byte,
 	credMap map[string]any,
 	proof map[string]any,
 	verificationMethod string,
 	pubKey ed25519.PublicKey,
 ) (*VC20VerificationResult, error) {
-	// Create RDF credential
-	rdfCred, err := credential.NewRDFCredentialFromJSON(credBytes, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
-	}
-
 	// Verify using the EdDSA suite, and build the result from the proof
 	// that ACTUALLY verified.
 	//

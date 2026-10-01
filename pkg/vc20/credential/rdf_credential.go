@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"sync"
 
 	"github.com/piprate/json-gold/ld"
 )
@@ -21,6 +22,24 @@ type RDFCredential struct {
 	// The processor used for RDF operations
 	processor *ld.JsonLdProcessor
 	options   *ld.JsonLdOptions
+
+	// The secured-document answer, computed once. Reading the root's
+	// proofs and canonicalizing the document they secure is the expensive
+	// part of verification - JSON-LD expansion, flattening, RDF
+	// serialization, URDNA2015 - and it is the SAME answer for every proof
+	// in a set, because that is what a proof set means. A caller checking
+	// several candidates would otherwise pay for it once per candidate, on
+	// a document nobody has authenticated yet.
+	securedMu sync.Mutex
+	secured   *securedDocument
+}
+
+// securedDocument is the memoized result of SecuredDocument, success or
+// failure alike: a document that cannot be read is not worth re-reading.
+type securedDocument struct {
+	proofs []any
+	hash   [sha256.Size]byte
+	err    error
 }
 
 // NewRDFCredentialFromJSON parses a JSON-LD credential into an RDF dataset

@@ -92,6 +92,17 @@ func UnsecuredDocumentHash(cred *RDFCredential) ([32]byte, error) {
 // expensive step, JSON-LD canonicalization, runs once; the proof
 // CONFIGURATION hash stays per proof, since that is the part that differs.
 func SecuredDocument(cred *RDFCredential) ([]any, [32]byte, error) {
+	cred.securedMu.Lock()
+	defer cred.securedMu.Unlock()
+
+	if cred.secured == nil {
+		proofs, hash, err := securedDocumentOf(cred)
+		cred.secured = &securedDocument{proofs: proofs, hash: hash, err: err}
+	}
+	return cred.secured.proofs, cred.secured.hash, cred.secured.err
+}
+
+func securedDocumentOf(cred *RDFCredential) ([]any, [32]byte, error) {
 	var zero [32]byte
 
 	if err := cred.CheckRootSurvivesFlattening(); err != nil {
