@@ -583,7 +583,7 @@ func (s *SdSuite) verifyBaseProof(cred *credential.RDFCredential, key *ecdsa.Pub
 	proofMap = maps.Clone(proofMap)
 	delete(proofMap, "proofValue")
 	if _, ok := proofMap["@context"]; !ok {
-		proofMap["@context"] = "https://www.w3.org/ns/credentials/v2"
+		proofMap["@context"] = credential.ContextV2
 	}
 	proofConfigBytes, err := json.Marshal(proofMap)
 	if err != nil {
@@ -766,7 +766,7 @@ func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.
 	delete(proofMap, "@id")
 
 	if _, ok := proofMap["@context"]; !ok {
-		proofMap["@context"] = "https://www.w3.org/ns/credentials/v2"
+		proofMap["@context"] = credential.ContextV2
 	}
 	proofConfigBytes, err := json.Marshal(proofMap)
 	if err != nil {
