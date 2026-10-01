@@ -198,6 +198,21 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key *ecdsa.PublicKey) err
 // proofPurpose, a created or a verificationMethod from a proof that FAILED.
 // An attacker only has to prepend one.
 func (s *Suite) VerifyProof(cred *credential.RDFCredential, key *ecdsa.PublicKey) (map[string]any, error) {
+	return s.verifyRootProofs(cred, key, nil)
+}
+
+// VerifyRootProof verifies exactly the proof it is given and returns the
+// candidate that verified. See the EdDSA suite's VerifyRootProof for why the
+// match is on the whole proof rather than its proofValue, and why a caller
+// holding candidates must not let the suite pick one of its own.
+func (s *Suite) VerifyRootProof(cred *credential.RDFCredential, key *ecdsa.PublicKey, proof map[string]any) (map[string]any, error) {
+	if proof == nil {
+		return nil, fmt.Errorf("proof is nil")
+	}
+	return s.verifyRootProofs(cred, key, proof)
+}
+
+func (s *Suite) verifyRootProofs(cred *credential.RDFCredential, key *ecdsa.PublicKey, want map[string]any) (map[string]any, error) {
 	if cred == nil {
 		return nil, fmt.Errorf("credential is nil")
 	}
@@ -224,6 +239,16 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key *ecdsa.PublicKey
 
 	var lastErr error
 	for _, expanded := range proofs {
+		if want != nil {
+			candidate, err := credential.CompactRootProof(expanded)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			if !credential.SameProof(candidate, want) {
+				continue
+			}
+		}
 		proofNode, err := s.verifyRootProof(cred, expanded, key, docHashBytes)
 		if err != nil {
 			lastErr = err
@@ -232,6 +257,9 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key *ecdsa.PublicKey
 		return proofNode, nil
 	}
 
+	if lastErr == nil && want != nil {
+		lastErr = fmt.Errorf("the proof offered is not one this document attaches to itself")
+	}
 	return nil, lastErr
 }
 

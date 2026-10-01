@@ -451,15 +451,15 @@ func sdRootProofs(cred *credential.RDFCredential) ([]map[string]any, error) {
 // The proof must be one the DOCUMENT attaches to itself. Hashing is
 // root-scoped, so a proof from anywhere else cannot verify here anyway; this
 // refuses it with a clear error instead of an opaque signature failure.
-func (s *SdSuite) VerifyRootProof(cred *credential.RDFCredential, key *ecdsa.PublicKey, proof map[string]any) error {
+func (s *SdSuite) VerifyRootProof(cred *credential.RDFCredential, key *ecdsa.PublicKey, proof map[string]any) (map[string]any, error) {
 	if cred == nil {
-		return fmt.Errorf("credential is nil")
+		return nil, fmt.Errorf("credential is nil")
 	}
 	if key == nil {
-		return fmt.Errorf("public key is nil")
+		return nil, fmt.Errorf("public key is nil")
 	}
 	if proof == nil {
-		return fmt.Errorf("proof is nil")
+		return nil, fmt.Errorf("proof is nil")
 	}
 
 	// MATCHED among the document's own proofs, not required to be the only
@@ -468,16 +468,28 @@ func (s *SdSuite) VerifyRootProof(cred *credential.RDFCredential, key *ecdsa.Pub
 	// tries each root proof in turn.
 	candidates, err := sdRootProofs(cred)
 	if err != nil {
-		return err
-	}
-	offered, _ := proof["proofValue"].(string)
-	for _, candidate := range candidates {
-		if value, _ := candidate["proofValue"].(string); value == offered && offered != "" {
-			return s.verifySdRootProof(cred, key, candidate)
-		}
+		return nil, err
 	}
 
-	return fmt.Errorf("the proof offered is not an %s proof this document attaches to itself", CryptosuiteSd2023)
+	// The WHOLE proof, not its proofValue. A forged proof that copies a
+	// genuine signature but changes its proofPurpose or verificationMethod
+	// is a different proof: matching on the signature bytes alone would
+	// verify the genuine candidate and answer success for the forged map,
+	// which is the exact guarantee this method exists to give.
+	//
+	// The candidate that verified is returned for the same reason - the
+	// caller reports what verified rather than what it asked about.
+	for _, candidate := range candidates {
+		if !credential.SameProof(candidate, proof) {
+			continue
+		}
+		if err := s.verifySdRootProof(cred, key, candidate); err != nil {
+			return nil, err
+		}
+		return candidate, nil
+	}
+
+	return nil, fmt.Errorf("the proof offered is not an %s proof this document attaches to itself", CryptosuiteSd2023)
 }
 
 // verifySdRootProof verifies one ecdsa-sd-2023 proof. Whether it is a base or
@@ -545,7 +557,11 @@ func (s *SdSuite) verifyBaseProof(cred *credential.RDFCredential, key *ecdsa.Pub
 	// 1. Verify Base Signature
 	// Reconstruct the signed data: hash(proofHash + ephemeralPub + mandatoryHash)
 
-	// Canonicalize Proof Config (without proofValue)
+	// Canonicalize Proof Config (without proofValue), on a COPY. The caller
+	// holds this map - VerifyRootProof hands it back as the proof that
+	// verified - so stripping the signature out of it in passing would
+	// return a proof object with no signature in it.
+	proofMap = maps.Clone(proofMap)
 	delete(proofMap, "proofValue")
 	if _, ok := proofMap["@context"]; !ok {
 		proofMap["@context"] = "https://www.w3.org/ns/credentials/v2"
@@ -721,7 +737,8 @@ func (s *SdSuite) verifyDerivedProof(cred *credential.RDFCredential, key *ecdsa.
 	// Reconstruct signed data.
 	// We need proofHash, ephemeralPub, mandatoryHash.
 
-	// Proof Hash
+	// Proof Hash, on a COPY for the same reason as verifyBaseProof.
+	proofMap = maps.Clone(proofMap)
 	delete(proofMap, "proofValue")
 	delete(proofMap, "https://w3id.org/security#proofValue")
 	delete(proofMap, "https://www.w3.org/ns/credentials#proofValue")

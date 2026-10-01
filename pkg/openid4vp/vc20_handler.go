@@ -253,6 +253,13 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 	return nil, lastErr
 }
 
+// maxRootProofs bounds how many proofs a document may attach to itself before
+// this refuses to verify it. A proof SET is several parties signing the same
+// document - a handful in practice - and the cost of trying one is a JSON-LD
+// canonicalization plus a signature check, paid before anything about the
+// document has been authenticated.
+const maxRootProofs = 32
+
 // rootProofCandidates lists the proofs the document attaches to itself, in
 // the short-keyed form the rest of this handler reads.
 func (h *VC20Handler) rootProofCandidates(credBytes []byte) ([]map[string]any, error) {
@@ -266,6 +273,14 @@ func (h *VC20Handler) rootProofCandidates(credBytes []byte) ([]map[string]any, e
 	}
 	if len(expanded) == 0 {
 		return nil, errors.New("credential missing proof")
+	}
+	// The candidate list comes from the document, so an attacker chooses its
+	// length. Verifying each candidate costs a canonicalization and a
+	// signature check, so an unbounded list is CPU amplification on input
+	// nobody has authenticated yet. A real proof set is a handful of
+	// signers; anything past that is refused rather than worked through.
+	if len(expanded) > maxRootProofs {
+		return nil, fmt.Errorf("the document attaches %d proofs to itself, more than the %d this will verify", len(expanded), maxRootProofs)
 	}
 
 	// A candidate that cannot be compacted is SKIPPED, not fatal. Every root
@@ -680,7 +695,7 @@ func (h *VC20Handler) verifyECDSA2019(
 	// that ACTUALLY verified - see verifyEdDSA2022 for the attack this
 	// closes; both suites try every proof the root carries.
 	suite := ecdsaSuite.NewSuite()
-	verifiedProof, err := suite.VerifyProof(rdfCred, pubKey)
+	verifiedProof, err := suite.VerifyRootProof(rdfCred, pubKey, proof)
 	if err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
 	}
@@ -712,12 +727,13 @@ func (h *VC20Handler) verifyECDSASd2023(
 	// different proofs - which is all an attacker needs to have a forged
 	// proof described back to the caller.
 	sdSuite := ecdsaSuite.NewSdSuite()
-	if err := sdSuite.VerifyRootProof(rdfCred, pubKey, proof); err != nil {
+	verifiedProof, err := sdSuite.VerifyRootProof(rdfCred, pubKey, proof)
+	if err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
 	}
 
-	// Build result
-	return h.buildResult(credBytes, credMap, proof, true)
+	// Build result from what VERIFIED, not from what was asked about.
+	return h.buildResult(credBytes, credMap, verifiedProof, true)
 }
 
 // verifyEdDSA2022 verifies a credential with eddsa-rdfc-2022 cryptosuite.
@@ -745,7 +761,7 @@ func (h *VC20Handler) verifyEdDSA2022(
 	// verified the genuine proof further along, and this result reported
 	// the forged one's fields as verified.
 	suite := eddsaSuite.NewSuite()
-	verifiedProof, err := suite.VerifyProof(rdfCred, pubKey)
+	verifiedProof, err := suite.VerifyRootProof(rdfCred, pubKey, proof)
 	if err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
 	}

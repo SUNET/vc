@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"reflect"
 
 	"github.com/piprate/json-gold/ld"
 )
@@ -158,4 +160,32 @@ func AppendProof(credMap map[string]any, proofConfig map[string]any) {
 		return
 	}
 	credMap["proof"] = []any{existing, proofConfig}
+}
+
+// SameProof reports whether two proof objects are the SAME proof.
+//
+// Every member is compared but @context, which is a serialization detail: a
+// proof as written carries the context Sign gave it, and the same proof read
+// back through CompactRootProof has had it removed. Everything else - the
+// verification method, the purpose, the created time, the cryptosuite, the
+// signature - must match.
+//
+// Comparing proofValue alone is not enough and is the reason this exists. A
+// forged proof that copies a genuine signature but changes its purpose or
+// verification method is a DIFFERENT proof; answering for the genuine one
+// would let a caller report the forged metadata as verified.
+func SameProof(a map[string]any, b map[string]any) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return reflect.DeepEqual(withoutContext(a), withoutContext(b))
+}
+
+func withoutContext(proof map[string]any) map[string]any {
+	if _, present := proof["@context"]; !present {
+		return proof
+	}
+	stripped := maps.Clone(proof)
+	delete(stripped, "@context")
+	return stripped
 }

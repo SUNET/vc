@@ -145,7 +145,10 @@ func TestVerifyRootProofIsBoundToTheProofItIsGiven(t *testing.T) {
 	require.True(t, ok)
 
 	t.Run("the document's own proof verifies", func(t *testing.T) {
-		require.NoError(t, suite.VerifyRootProof(signed, &key.PublicKey, genuine))
+		verified, err := suite.VerifyRootProof(signed, &key.PublicKey, genuine)
+		require.NoError(t, err)
+		require.True(t, credential.SameProof(genuine, verified),
+			"the candidate that verified is handed back")
 	})
 
 	t.Run("another proof is refused, not quietly replaced", func(t *testing.T) {
@@ -156,13 +159,14 @@ func TestVerifyRootProofIsBoundToTheProofItIsGiven(t *testing.T) {
 		forged["proofValue"] = "uZm9yZ2Vk"
 		forged["proofPurpose"] = "authentication"
 
-		err := suite.VerifyRootProof(signed, &key.PublicKey, forged)
+		_, err := suite.VerifyRootProof(signed, &key.PublicKey, forged)
 		require.ErrorContains(t, err, "is not an ecdsa-sd-2023 proof this document attaches to itself",
 			"the suite must not verify its own pick and let the caller report this one")
 	})
 
 	t.Run("a nil proof is refused", func(t *testing.T) {
-		require.Error(t, suite.VerifyRootProof(signed, &key.PublicKey, nil))
+		_, err := suite.VerifyRootProof(signed, &key.PublicKey, nil)
+		require.Error(t, err)
 	})
 }
 
@@ -195,13 +199,16 @@ func TestVerifyRootProofAcceptsOneOfSeveralRootProofs(t *testing.T) {
 	second, ok := proofs[1].(map[string]any)
 	require.True(t, ok)
 
-	require.NoError(t, suite.VerifyRootProof(twice, &firstKey.PublicKey, first),
-		"the first signer's proof verifies with the first signer's key")
-	require.NoError(t, suite.VerifyRootProof(twice, &secondKey.PublicKey, second),
-		"and the second's with the second's, without either being the only proof")
+	verifiedFirst, err := suite.VerifyRootProof(twice, &firstKey.PublicKey, first)
+	require.NoError(t, err, "the first signer's proof verifies with the first signer's key")
+	require.True(t, credential.SameProof(first, verifiedFirst))
 
-	require.Error(t, suite.VerifyRootProof(twice, &firstKey.PublicKey, second),
-		"a proof is still only verified against the key that made it")
+	verifiedSecond, err := suite.VerifyRootProof(twice, &secondKey.PublicKey, second)
+	require.NoError(t, err, "and the second's with the second's, without either being the only proof")
+	require.True(t, credential.SameProof(second, verifiedSecond))
+
+	_, err = suite.VerifyRootProof(twice, &firstKey.PublicKey, second)
+	require.Error(t, err, "a proof is still only verified against the key that made it")
 }
 
 // TestDeriveRefusesAnAnonymousRoot: which node a derived credential is about
@@ -257,4 +264,40 @@ func TestDeriveRefusesAnAnonymousRoot(t *testing.T) {
 	_, err = suite.Derive(signed, reveal, "")
 	require.ErrorContains(t, err, "root carries no identifier",
 		"deriving must refuse rather than let the disclosure pick a root")
+}
+
+// TestVerifyRootProofMatchesTheWholeProofNotTheSignature: a forged proof may
+// copy a genuine proof's signature bytes verbatim and change only its
+// metadata. Matching the offered proof by proofValue alone would find the
+// genuine candidate, verify THAT, and answer success - handing the caller
+// exactly the binding guarantee it asked for while the metadata it goes on to
+// report is the forged one's.
+func TestVerifyRootProofMatchesTheWholeProofNotTheSignature(t *testing.T) {
+	suite, key, signed := signNestedProofCredential(t)
+
+	var document map[string]any
+	require.NoError(t, json.Unmarshal([]byte(signed.OriginalJSON()), &document))
+	genuine, ok := document["proof"].(map[string]any)
+	require.True(t, ok)
+
+	forged := map[string]any{}
+	for k, v := range genuine {
+		forged[k] = v
+	}
+	// The SAME signature, different metadata.
+	forged["proofPurpose"] = "authentication"
+	forged["verificationMethod"] = "did:example:someone-else#key-1"
+	require.Equal(t, genuine["proofValue"], forged["proofValue"],
+		"the forgery must keep the genuine signature, or this proves nothing")
+
+	_, err := suite.VerifyRootProof(signed, &key.PublicKey, forged)
+	require.Error(t, err,
+		"a proof that only shares a signature is a different proof")
+
+	// And the proof handed back for the genuine one still carries its
+	// signature: verification must not strip the caller's map in passing.
+	verified, err := suite.VerifyRootProof(signed, &key.PublicKey, genuine)
+	require.NoError(t, err)
+	require.Equal(t, genuine["proofValue"], verified["proofValue"])
+	require.Equal(t, "assertionMethod", verified["proofPurpose"])
 }

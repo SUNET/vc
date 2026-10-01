@@ -792,3 +792,35 @@ func TestVerifyAndExtractSurvivesAMalformedExtraProof(t *testing.T) {
 	_, err = handler.VerifyAndExtract(t.Context(), string(flattened))
 	require.NoError(t, err, "the genuine proof is still there, so the document verifies")
 }
+
+// TestVerifyAndExtractRefusesAnUnboundedProofSet: the candidate list is read
+// off the document, so its length is the sender's choice, and trying one
+// candidate costs a JSON-LD canonicalization and a signature check - work done
+// before anything about the document has been authenticated. A document
+// claiming more proofs than any real proof set is refused rather than worked
+// through.
+func TestVerifyAndExtractRefusesAnUnboundedProofSet(t *testing.T) {
+	issuerPub, issuerKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	const method = "did:example:issuer#key-1"
+	doc := signedExampleDocument(t, "https://www.w3.org/ns/credentials/v2", method, issuerKey)
+	genuine := rootProofOf(t, doc)
+
+	// One genuine proof, and more copies than the handler will work through.
+	proofs := []any{genuine}
+	for i := 0; i < maxRootProofs; i++ {
+		filler := map[string]any{}
+		for k, v := range genuine {
+			filler[k] = v
+		}
+		filler["created"] = fmt.Sprintf("200%d-01-01T00:00:00Z", i%10)
+		filler["domain"] = fmt.Sprintf("https://example.org/%d", i)
+		proofs = append(proofs, filler)
+	}
+	doc["proof"] = proofs
+
+	_, err = verifyWithResolvedMethod(t, doc, method, issuerPub)
+	require.ErrorContains(t, err, "more than the 32 this will verify",
+		"a document may not make a verifier do unbounded work")
+}

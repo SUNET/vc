@@ -151,6 +151,30 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 // was not true while every proof was removed, which is what made relocation
 // work in the first place.
 func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKey) (map[string]any, error) {
+	return s.verifyRootProofs(cred, key, nil)
+}
+
+// VerifyRootProof verifies exactly the proof it is given and returns the
+// candidate that verified.
+//
+// A caller holding several candidates must not ask the suite to pick one of
+// its own: with a forged proof beside a genuine one, the suite can verify the
+// genuine proof while the caller reports the forged one's purpose, created or
+// verification method. It also stops the caller's loop from being quadratic -
+// N candidates each rescanning N proofs - since this checks one.
+//
+// The match is on the WHOLE proof, not its proofValue. A forged proof that
+// copies a genuine signature but changes its metadata is a different proof,
+// and answering for the genuine one would hand back exactly the guarantee
+// this is supposed to give.
+func (s *Suite) VerifyRootProof(cred *credential.RDFCredential, key ed25519.PublicKey, proof map[string]any) (map[string]any, error) {
+	if proof == nil {
+		return nil, fmt.Errorf("proof is nil")
+	}
+	return s.verifyRootProofs(cred, key, proof)
+}
+
+func (s *Suite) verifyRootProofs(cred *credential.RDFCredential, key ed25519.PublicKey, want map[string]any) (map[string]any, error) {
 	if cred == nil {
 		return nil, fmt.Errorf("credential is nil")
 	}
@@ -196,6 +220,9 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKe
 		// Relabelling an existing signature does not survive this anyway,
 		// since the label is hashed into the proof configuration; the check
 		// is here so that what verified and what is REPORTED cannot differ.
+		if want != nil && !credential.SameProof(proofNode, want) {
+			continue
+		}
 		if !credential.HasProofType(proofNode, ProofType) {
 			lastErr = fmt.Errorf("the document's own proof link names a %v, not a %s", proofNode["type"], ProofType)
 			continue
@@ -211,7 +238,11 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKe
 		return proofNode, nil
 	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("the document's own proof link names no complete proof")
+		if want != nil {
+			lastErr = fmt.Errorf("the proof offered is not one this document attaches to itself")
+		} else {
+			lastErr = fmt.Errorf("the document's own proof link names no complete proof")
+		}
 	}
 
 	return nil, lastErr
