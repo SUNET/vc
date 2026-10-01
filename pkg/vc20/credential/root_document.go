@@ -312,75 +312,68 @@ func expandNodeID(context any, id string, options *ld.JsonLdOptions) string {
 // way has a root proof that no list of spellings will find. Each member is
 // resolved through the active context instead.
 func ProofKeys(node map[string]any, context any, options *ld.JsonLdOptions) []string {
-	var keys []string
-	var unresolved []string
+	// The context parsed ONCE, and every member looked up in it. Probing by
+	// expanding a synthetic document per member was both expensive - this
+	// runs on an SD credential before its signature has been checked - and
+	// unworkable: no single probe VALUE survives every declaration.
+	active := activeContext(context, options)
 
+	var keys []string
 	for key := range node {
 		if strings.HasPrefix(key, "@") {
 			continue
 		}
-		// Already expanded, or the term the v2 context defines. The literal
-		// "proof" stays a match even with no context to resolve it against:
-		// failing to remove the root's own proof is the worse failure.
-		if key == ProofPredicate || key == ProofPredicateLegacy || key == "proof" {
+		// Already expanded: these ARE the predicates, whatever a context
+		// might say about other names.
+		if key == ProofPredicate || key == ProofPredicateLegacy {
 			keys = append(keys, key)
 			continue
 		}
-		unresolved = append(unresolved, key)
-	}
 
-	if context == nil || len(unresolved) == 0 {
-		return keys
-	}
+		definition := termDefinition(active, key)
+		if definition != nil {
+			// The context has an opinion, so it decides. A document that
+			// REMAPS "proof" onto an ordinary predicate keeps it, which is
+			// what RootProofs does too - deleting it here would strip a
+			// field the signature covers.
+			if definition.ID == ProofPredicate || definition.ID == ProofPredicateLegacy {
+				keys = append(keys, key)
+			}
+			continue
+		}
 
-	// ONE expansion, not one per member. This runs on an SD credential
-	// before its signature has been checked, so a document carrying many
-	// arbitrary properties would otherwise turn a single request into a
-	// context-processing operation per property.
-	for _, key := range proofTerms(unresolved, context, options) {
-		keys = append(keys, key)
+		// No opinion. "proof" is then the name it is everywhere else,
+		// including under the VC 2.0 context, which declares it inside its
+		// type-scoped contexts rather than at the top level. Failing to
+		// remove the root's own proof is the worse failure.
+		if key == "proof" {
+			keys = append(keys, key)
+		}
 	}
 	return keys
 }
 
-// proofTerms resolves several member names against a context in one pass and
-// returns those naming a proof.
-//
-// Each name is probed under a DISTINCT sentinel identifier, so the expanded
-// output says which original name produced which predicate - several aliases
-// of the same predicate would otherwise collapse into one entry.
-func proofTerms(terms []string, context any, options *ld.JsonLdOptions) []string {
-	const sentinelPrefix = "https://example.invalid/a-proof-node#"
-
-	// Each term gets its OWN node, and a plain STRING for a value.
-	//
-	// Sharing one node means a term aliasing a keyword rewrites that node
-	// instead of adding a member. Using {"@id": ...} as the value is worse:
-	// a term aliased to @id - which is what every compact VC context does
-	// with "id" - then carries an object where @id requires a string, and
-	// json-gold rejects the WHOLE probe, so every other term's answer is
-	// lost with it. A string is valid wherever it lands, and the sentinel
-	// comes back under @value or @id depending on how the term is declared.
-	entries := make([]any, 0, len(terms))
-	bySentinel := make(map[string]string, len(terms))
-	for i, term := range terms {
-		sentinel := fmt.Sprintf("%s%d", sentinelPrefix, i)
-		bySentinel[sentinel] = term
-		entries = append(entries, map[string]any{term: sentinel})
+// activeContext parses a document's context, or returns nil when there is
+// none to parse or it will not load.
+func activeContext(context any, options *ld.JsonLdOptions) *ld.Context {
+	if context == nil {
+		return nil
 	}
-	probe := map[string]any{"@context": context, "@graph": entries}
 	if options == nil {
 		options = NewJSONLDOptions("")
 	}
-
-	expanded, err := ld.NewJsonLdProcessor().Expand(probe, options)
+	active, err := ld.NewContext(nil, options).Parse(context)
 	if err != nil {
 		return nil
 	}
+	return active
+}
 
-	var found []string
-	collectProofTerms(expanded, bySentinel, &found)
-	return found
+func termDefinition(active *ld.Context, term string) *ld.TermDefinition {
+	if active == nil {
+		return nil
+	}
+	return active.GetTermDefinition(term)
 }
 
 // IsBareGraphContainer reports whether a map is nothing but a graph: the
@@ -465,45 +458,6 @@ func isReferenced(nodes []map[string]any, skip int, id string, referenced map[st
 		return referenced[id]
 	}
 	return referencedByAnyOther(nodes, skip, id)
-}
-
-// collectProofTerms walks an expanded probe, adding the original member name
-// behind every sentinel reached through a proof predicate.
-func collectProofTerms(value any, bySentinel map[string]string, found *[]string) {
-	switch typed := value.(type) {
-	case []any:
-		for _, entry := range typed {
-			collectProofTerms(entry, bySentinel, found)
-		}
-	case map[string]any:
-		for _, predicate := range []string{ProofPredicate, ProofPredicateLegacy} {
-			values, present := typed[predicate].([]any)
-			if !present {
-				continue
-			}
-			for _, entry := range values {
-				object, isObject := entry.(map[string]any)
-				if !isObject {
-					continue
-				}
-				// Under @id when the term is declared "@type": "@id",
-				// under @value otherwise.
-				marker, _ := object["@id"].(string)
-				if marker == "" {
-					marker, _ = object["@value"].(string)
-				}
-				if term, known := bySentinel[marker]; known {
-					*found = append(*found, term)
-				}
-			}
-		}
-		for key, member := range typed {
-			if key == ProofPredicate || key == ProofPredicateLegacy {
-				continue
-			}
-			collectProofTerms(member, bySentinel, found)
-		}
-	}
 }
 
 // RootOfExpandedNodes returns the node an EXPANDED, flattened document is

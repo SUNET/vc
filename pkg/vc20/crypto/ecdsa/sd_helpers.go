@@ -7,14 +7,15 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"github.com/SUNET/vc/pkg/vc20/credential"
-
-	"github.com/piprate/json-gold/ld"
 	"math/big"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/SUNET/vc/pkg/vc20/credential"
+
+	"github.com/piprate/json-gold/ld"
 )
 
 func parseNQuads(nquads string) []string {

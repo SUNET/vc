@@ -259,7 +259,6 @@ func (s *Suite) verifyRootProofs(cred *credential.RDFCredential, key ed25519.Pub
 // means, so recomputing it per proof repeats the canonicalization for
 // nothing.
 func (s *Suite) verifyProofNode(cred *credential.RDFCredential, proofNode map[string]any, key ed25519.PublicKey, docHash [sha256.Size]byte) error {
-
 	// Get proofValue
 	proofValue, ok := proofNode["proofValue"].(string)
 	if !ok {

@@ -207,12 +207,11 @@ func TestRootCompactedDocumentIgnoresCompactLiterals(t *testing.T) {
 	require.Equal(t, "https://example.org/credential", rooted["id"])
 }
 
-// TestProofKeysResolvesEveryTermInOneExpansion: this runs on an SD credential
-// BEFORE its signature has been checked, so one JSON-LD expansion per member
-// turned a single request into a context-processing operation per property.
-// One expansion now covers them all - and it has to survive a member that
-// aliases a keyword, which is what every compact VC context does with "id".
-func TestProofKeysResolvesEveryTermInOneExpansion(t *testing.T) {
+// TestProofKeysResolvesEveryTermFromOneParsedContext: this runs on an SD
+// credential BEFORE its signature has been checked, so resolving each member
+// separately turned a single request into a context-processing operation per
+// property. The context is parsed once and every member looked up in it.
+func TestProofKeysResolvesEveryTermFromOneParsedContext(t *testing.T) {
 	var context any
 	require.NoError(t, json.Unmarshal([]byte(`{
 		"id": "@id",
@@ -235,4 +234,43 @@ func TestProofKeysResolvesEveryTermInOneExpansion(t *testing.T) {
 
 	require.Equal(t, []string{"seal"}, ProofKeys(node, context, nil),
 		"the aliased proof term is found, and the keyword aliases do not break the probe")
+}
+
+// TestProofKeysRespectsAContextThatRemapsProof: "proof" is only the name the
+// VC 2.0 context gives the security predicate. A document whose context points
+// that name at an ordinary predicate is not carrying a proof there - RootProofs
+// resolves the context and keeps the field, so removing it here would strip
+// content the signature covers and the two would disagree about which quads
+// that is.
+func TestProofKeysRespectsAContextThatRemapsProof(t *testing.T) {
+	t.Run("remapped to something else", func(t *testing.T) {
+		var context any
+		require.NoError(t, json.Unmarshal(
+			[]byte(`{"proof": "https://example.org/vocab#proofreading"}`), &context))
+
+		node := map[string]any{"proof": "checked by an editor"}
+		require.Empty(t, ProofKeys(node, context, nil),
+			"a remapped name is not the security predicate")
+	})
+
+	t.Run("aliased onto the predicate", func(t *testing.T) {
+		var context any
+		require.NoError(t, json.Unmarshal(
+			[]byte(`{"seal": "https://w3id.org/security#proof"}`), &context))
+
+		node := map[string]any{"seal": map[string]any{"type": "DataIntegrityProof"}}
+		require.Equal(t, []string{"seal"}, ProofKeys(node, context, nil))
+	})
+
+	t.Run("the VC 2.0 context, which scopes proof by type", func(t *testing.T) {
+		node := map[string]any{"proof": map[string]any{"type": "DataIntegrityProof"}}
+		require.Equal(t, []string{"proof"},
+			ProofKeys(node, "https://www.w3.org/ns/credentials/v2", nil),
+			"no top-level definition means the ordinary meaning stands")
+	})
+
+	t.Run("no context at all", func(t *testing.T) {
+		node := map[string]any{"proof": map[string]any{"type": "DataIntegrityProof"}}
+		require.Equal(t, []string{"proof"}, ProofKeys(node, nil, nil))
+	})
 }
