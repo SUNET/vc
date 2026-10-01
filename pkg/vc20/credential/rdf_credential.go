@@ -32,6 +32,19 @@ type RDFCredential struct {
 	// a document nobody has authenticated yet.
 	securedMu sync.Mutex
 	secured   *securedDocument
+
+	// The same answer in the form every caller actually wants. Compacting
+	// a root proof is a JSON-LD operation, and a verifier checking N
+	// candidates compacted each of them N times - once per candidate, to
+	// find the one it was asked about - so 32 proofs cost about a thousand
+	// compactions before anything was authenticated.
+	compactedMu     sync.Mutex
+	compactedProofs *compactedRootProofs
+}
+
+type compactedRootProofs struct {
+	proofs []map[string]any
+	err    error
 }
 
 // securedDocument is the memoized result of SecuredDocument, success or

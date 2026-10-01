@@ -118,6 +118,57 @@ func SecuredDocument(cred *RDFCredential) ([]any, [32]byte, error) {
 	return proofs, cred.secured.hash, cred.secured.err
 }
 
+// CompactedRootProofs returns the document's own proofs in the short-keyed
+// form callers read, computed once.
+//
+// A proof that will not compact is SKIPPED rather than fatal: every root proof
+// is removed from the document a signature covers, so appending a malformed
+// one does not disturb a genuine proof already there, and failing on it would
+// let that append deny verification. The error is kept and returned only when
+// nothing usable survives.
+func CompactedRootProofs(cred *RDFCredential) ([]map[string]any, error) {
+	cred.compactedMu.Lock()
+	defer cred.compactedMu.Unlock()
+
+	if cred.compactedProofs == nil {
+		proofs, err := compactedRootProofsOf(cred)
+		cred.compactedProofs = &compactedRootProofs{proofs: proofs, err: err}
+	}
+	if cred.compactedProofs.err != nil {
+		return nil, cred.compactedProofs.err
+	}
+
+	// A fresh slice header, for the reason SecuredDocument gives.
+	proofs := make([]map[string]any, len(cred.compactedProofs.proofs))
+	copy(proofs, cred.compactedProofs.proofs)
+	return proofs, nil
+}
+
+func compactedRootProofsOf(cred *RDFCredential) ([]map[string]any, error) {
+	expanded, _, err := SecuredDocument(cred)
+	if err != nil {
+		return nil, err
+	}
+
+	var compacted []map[string]any
+	var unusable error
+	for _, entry := range expanded {
+		proof, err := CompactRootProof(entry)
+		if err != nil {
+			unusable = err
+			continue
+		}
+		compacted = append(compacted, proof)
+	}
+	if len(compacted) == 0 {
+		if unusable != nil {
+			return nil, unusable
+		}
+		return nil, fmt.Errorf("the document carries no proof of its own to verify")
+	}
+	return compacted, nil
+}
+
 func securedDocumentOf(cred *RDFCredential) ([]any, [32]byte, error) {
 	var zero [32]byte
 

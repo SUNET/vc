@@ -185,7 +185,15 @@ func (s *Suite) verifyRootProofs(cred *credential.RDFCredential, key ed25519.Pub
 	// The proofs the document attaches to itself and the hash of what they
 	// secure, with the same root-stability check Sign applies. See
 	// credential.SecuredDocument.
-	proofs, docHash, err := credential.SecuredDocument(cred)
+	_, docHash, err := credential.SecuredDocument(cred)
+	if err != nil {
+		return nil, err
+	}
+	// COMPACTED once per document, not once per candidate. Finding the
+	// proof a caller named used to recompact every candidate, so N
+	// candidates cost N*N JSON-LD compactions on input nobody had
+	// authenticated.
+	proofs, err := credential.CompactedRootProofs(cred)
 	if err != nil {
 		return nil, err
 	}
@@ -199,12 +207,7 @@ func (s *Suite) verifyRootProofs(cred *credential.RDFCredential, key ed25519.Pub
 	// failure is what gets reported, since a document whose proofs all fail
 	// is a document that did not verify.
 	var lastErr error
-	for _, expanded := range proofs {
-		proofNode, err := credential.CompactRootProof(expanded)
-		if err != nil {
-			lastErr = err
-			continue
-		}
+	for _, proofNode := range proofs {
 		// A DataIntegrityProof of THIS suite, checked in that order.
 		//
 		// The TYPE says the node is a proof at all. The previous selection

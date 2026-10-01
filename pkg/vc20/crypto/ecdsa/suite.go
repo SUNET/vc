@@ -232,24 +232,22 @@ func (s *Suite) verifyRootProofs(cred *credential.RDFCredential, key *ecdsa.Publ
 	// The proofs the document attaches to itself and the hash of what they
 	// secure, with the same root-stability check Sign applies. See
 	// credential.SecuredDocument.
-	proofs, docHashBytes, err := credential.SecuredDocument(cred)
+	_, docHashBytes, err := credential.SecuredDocument(cred)
+	if err != nil {
+		return nil, err
+	}
+	// Compacted once per document; see the EdDSA suite.
+	proofs, err := credential.CompactedRootProofs(cred)
 	if err != nil {
 		return nil, err
 	}
 
 	var lastErr error
-	for _, expanded := range proofs {
-		if want != nil {
-			candidate, err := credential.CompactRootProof(expanded)
-			if err != nil {
-				lastErr = err
-				continue
-			}
-			if !credential.SameProof(candidate, want) {
-				continue
-			}
+	for _, candidate := range proofs {
+		if want != nil && !credential.SameProof(candidate, want) {
+			continue
 		}
-		proofNode, err := s.verifyRootProof(cred, expanded, key, docHashBytes)
+		proofNode, err := s.verifyRootProof(cred, candidate, key, docHashBytes)
 		if err != nil {
 			lastErr = err
 			continue
@@ -265,11 +263,7 @@ func (s *Suite) verifyRootProofs(cred *credential.RDFCredential, key *ecdsa.Publ
 
 // verifyRootProof checks one of the document's own proofs against the key,
 // over the document that proof secures.
-func (s *Suite) verifyRootProof(cred *credential.RDFCredential, expanded any, key *ecdsa.PublicKey, docHashBytes [sha256.Size]byte) (map[string]any, error) {
-	proofNode, err := credential.CompactRootProof(expanded)
-	if err != nil {
-		return nil, err
-	}
+func (s *Suite) verifyRootProof(cred *credential.RDFCredential, proofNode map[string]any, key *ecdsa.PublicKey, docHashBytes [sha256.Size]byte) (map[string]any, error) {
 	// A DataIntegrityProof of THIS suite. The type says the node is a proof
 	// at all; the cryptosuite says which procedure produced the signature.
 	if !credential.HasProofType(proofNode, ProofType) {

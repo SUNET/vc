@@ -427,25 +427,18 @@ func sdRootProofs(cred *credential.RDFCredential) ([]map[string]any, error) {
 		return nil, err
 	}
 
-	expanded, _, err := cred.RootProofs()
+	// Compacted once per document, memoized with the secured-document
+	// answer, so repeating this per candidate costs nothing.
+	compacted, err := credential.CompactedRootProofs(cred)
 	if err != nil {
 		return nil, err
 	}
-	if len(expanded) > credential.MaxRootProofs {
-		return nil, fmt.Errorf("the document attaches %d proofs to itself, more than the %d this will verify", len(expanded), credential.MaxRootProofs)
+	if len(compacted) > credential.MaxRootProofs {
+		return nil, fmt.Errorf("the document attaches %d proofs to itself, more than the %d this will verify", len(compacted), credential.MaxRootProofs)
 	}
 
 	var found []map[string]any
-	var unusable error
-	for _, entry := range expanded {
-		proofMap, err := credential.CompactRootProof(entry)
-		if err != nil {
-			// Kept, not discarded. Skipping a malformed candidate must not
-			// turn "every proof on this document is malformed" into the
-			// same message a document with no SD proof at all gets.
-			unusable = err
-			continue
-		}
+	for _, proofMap := range compacted {
 		if !credential.HasProofType(proofMap, ProofType) {
 			continue
 		}
@@ -455,9 +448,6 @@ func sdRootProofs(cred *credential.RDFCredential) ([]map[string]any, error) {
 		found = append(found, proofMap)
 	}
 	if len(found) == 0 {
-		if unusable != nil {
-			return nil, unusable
-		}
 		return nil, fmt.Errorf("the document carries no %s proof of its own", CryptosuiteSd2023)
 	}
 	return found, nil

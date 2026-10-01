@@ -103,3 +103,40 @@ func TestSecuredDocumentRemembersARefusal(t *testing.T) {
 	_, _, second := SecuredDocument(cred)
 	require.Equal(t, first, second, "and the same refusal, from the same answer")
 }
+
+// TestCompactedRootProofsIsComputedOnce: finding the proof a caller named used
+// to recompact every candidate, so N candidates cost N*N JSON-LD compactions -
+// about a thousand for a document at the 32-proof limit, on input nobody has
+// authenticated yet. The compaction is memoized beside the secured-document
+// answer.
+func TestCompactedRootProofsIsComputedOnce(t *testing.T) {
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"},
+		"proof": {
+			"type": "DataIntegrityProof",
+			"cryptosuite": "eddsa-rdfc-2022",
+			"created": "2024-01-01T00:00:00Z",
+			"verificationMethod": "did:example:issuer#key-1",
+			"proofPurpose": "assertionMethod",
+			"proofValue": "z3FXQjecWufY46yg5abdVZsXqLhxhueuSoZgNSARiKBk9czhmGQWmzBYdCVSAzeVCTt6QcLnLCHKPkyVpGqu9rWY"
+		}
+	}`), nil)
+	require.NoError(t, err)
+
+	first, err := CompactedRootProofs(cred)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+
+	second, err := CompactedRootProofs(cred)
+	require.NoError(t, err)
+
+	require.Equal(t,
+		reflect.ValueOf(first[0]).Pointer(), reflect.ValueOf(second[0]).Pointer(),
+		"the second call must hand back the first answer, not compact again")
+	require.NotEqual(t,
+		reflect.ValueOf(first).Pointer(), reflect.ValueOf(second).Pointer(),
+		"each caller still gets its own slice header")
+}
