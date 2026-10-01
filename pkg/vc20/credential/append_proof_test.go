@@ -68,24 +68,17 @@ func TestSecuredDocumentIsComputedOnce(t *testing.T) {
 	}`), nil)
 	require.NoError(t, err)
 
-	first, firstHash, err := SecuredDocument(cred)
+	firstHash, err := SecuredDocumentHash(cred)
 	require.NoError(t, err)
-	require.NotEmpty(t, first)
 
-	second, secondHash, err := SecuredDocument(cred)
+	answer := cred.secured
+	require.NotNil(t, answer, "the answer is kept after the first call")
+
+	secondHash, err := SecuredDocumentHash(cred)
 	require.NoError(t, err)
 	require.Equal(t, firstHash, secondHash)
-
-	// The same NODES, so nothing was recomputed...
-	require.Equal(t,
-		reflect.ValueOf(first[0]).Pointer(), reflect.ValueOf(second[0]).Pointer(),
-		"the second call must hand back the first answer, not recompute it")
-
-	// ...but not the same slice, so appending to one answer cannot reach
-	// into the next caller's.
-	require.NotEqual(t,
-		reflect.ValueOf(first).Pointer(), reflect.ValueOf(second).Pointer(),
-		"each caller gets its own slice header")
+	require.Same(t, answer, cred.secured,
+		"the second call must reuse the first answer, not recompute it")
 }
 
 // A document that cannot be read is not worth re-reading either.
@@ -98,9 +91,9 @@ func TestSecuredDocumentRemembersARefusal(t *testing.T) {
 	}`), nil)
 	require.NoError(t, err)
 
-	_, _, first := SecuredDocument(cred)
+	_, first := SecuredDocumentHash(cred)
 	require.Error(t, first, "a document with no proof of its own")
-	_, _, second := SecuredDocument(cred)
+	_, second := SecuredDocumentHash(cred)
 	require.Equal(t, first, second, "and the same refusal, from the same answer")
 }
 
@@ -130,13 +123,24 @@ func TestCompactedRootProofsIsComputedOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, first, 1)
 
+	cached := cred.compactedProofs
+	require.NotNil(t, cached, "the compaction is kept after the first call")
+
 	second, err := CompactedRootProofs(cred)
 	require.NoError(t, err)
+	require.Same(t, cached, cred.compactedProofs,
+		"the second call must reuse the first compaction, not repeat it")
+	require.Equal(t, first, second, "and give the same answer")
 
-	require.Equal(t,
-		reflect.ValueOf(first[0]).Pointer(), reflect.ValueOf(second[0]).Pointer(),
-		"the second call must hand back the first answer, not compact again")
+	// Each caller gets its OWN maps, so writing to one cannot reach the
+	// cache or another caller. The alternative - sharing the cached maps
+	// behind a note asking callers not to write - is a hope, not a
+	// guarantee, on an exported function.
+	first[0]["proofPurpose"] = "scribbled"
+	third, err := CompactedRootProofs(cred)
+	require.NoError(t, err)
+	require.Equal(t, "assertionMethod", third[0]["proofPurpose"],
+		"a caller writing to its copy must not poison the next reader")
 	require.NotEqual(t,
-		reflect.ValueOf(first).Pointer(), reflect.ValueOf(second).Pointer(),
-		"each caller still gets its own slice header")
+		reflect.ValueOf(first[0]).Pointer(), reflect.ValueOf(third[0]).Pointer())
 }

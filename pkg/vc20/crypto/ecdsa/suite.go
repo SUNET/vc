@@ -232,7 +232,7 @@ func (s *Suite) verifyRootProofs(cred *credential.RDFCredential, key *ecdsa.Publ
 	// The proofs the document attaches to itself and the hash of what they
 	// secure, with the same root-stability check Sign applies. See
 	// credential.SecuredDocument.
-	_, docHashBytes, err := credential.SecuredDocument(cred)
+	docHashBytes, err := credential.SecuredDocumentHash(cred)
 	if err != nil {
 		return nil, err
 	}

@@ -97,25 +97,33 @@ func UnsecuredDocumentHash(cred *RDFCredential) ([32]byte, error) {
 // secures the SAME document - that is what a proof set means - so the
 // expensive step, JSON-LD canonicalization, runs once; the proof
 // CONFIGURATION hash stays per proof, since that is the part that differs.
-func SecuredDocument(cred *RDFCredential) ([]any, [32]byte, error) {
+func SecuredDocumentHash(cred *RDFCredential) ([32]byte, error) {
+	answer, err := securedDocument(cred)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return answer.hash, nil
+}
+
+// securedDocument computes the answer once and keeps it.
+//
+// The expanded proofs stay INSIDE this package. They are mutable maps shared
+// by every caller, and handing them out - even behind a fresh slice - meant a
+// caller could poison the next verification or race a concurrent one, with
+// nothing but a comment asking it not to. The compacted form is what callers
+// want anyway, and CompactedRootProofs copies it.
+func securedDocument(cred *RDFCredential) (*securedDocumentAnswer, error) {
 	cred.securedMu.Lock()
 	defer cred.securedMu.Unlock()
 
 	if cred.secured == nil {
 		proofs, hash, err := securedDocumentOf(cred)
-		cred.secured = &securedDocument{proofs: proofs, hash: hash, err: err}
+		cred.secured = &securedDocumentAnswer{proofs: proofs, hash: hash, err: err}
 	}
-
-	// A fresh slice header each time, so a caller appending to what it is
-	// given cannot reach into the answer the next caller gets. The NODES are
-	// shared, and callers must treat them as read-only - copying the whole
-	// expanded structure per call would give back the cost this exists to
-	// avoid. CompactRootProof, which is what every caller here does with
-	// them, reads.
-	proofs := make([]any, len(cred.secured.proofs))
-	copy(proofs, cred.secured.proofs)
-
-	return proofs, cred.secured.hash, cred.secured.err
+	if cred.secured.err != nil {
+		return nil, cred.secured.err
+	}
+	return cred.secured, nil
 }
 
 // CompactedRootProofs returns the document's own proofs in the short-keyed
@@ -138,17 +146,24 @@ func CompactedRootProofs(cred *RDFCredential) ([]map[string]any, error) {
 		return nil, cred.compactedProofs.err
 	}
 
-	// A fresh slice header, for the reason SecuredDocument gives.
-	proofs := make([]map[string]any, len(cred.compactedProofs.proofs))
-	copy(proofs, cred.compactedProofs.proofs)
+	// A COPY of each proof, not just of the slice. These are the cached
+	// maps, this is an exported function, and "callers must not write to
+	// what they are given" is not a guarantee - it is a hope. A compacted
+	// proof is a small flat map, so copying one per call costs nothing
+	// beside the JSON-LD compaction it saves.
+	proofs := make([]map[string]any, 0, len(cred.compactedProofs.proofs))
+	for _, proof := range cred.compactedProofs.proofs {
+		proofs = append(proofs, maps.Clone(proof))
+	}
 	return proofs, nil
 }
 
 func compactedRootProofsOf(cred *RDFCredential) ([]map[string]any, error) {
-	expanded, _, err := SecuredDocument(cred)
+	answer, err := securedDocument(cred)
 	if err != nil {
 		return nil, err
 	}
+	expanded := answer.proofs
 
 	var compacted []map[string]any
 	var unusable error

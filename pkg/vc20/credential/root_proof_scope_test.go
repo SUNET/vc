@@ -376,17 +376,15 @@ func TestSecuredDocumentSurvivesConcurrentVerification(t *testing.T) {
 	results := make(chan string, readers)
 	for range readers {
 		go func() {
-			proofs, _, err := SecuredDocument(cred)
+			proofs, err := CompactedRootProofs(cred)
 			if err != nil || len(proofs) != 1 {
 				results <- "secured document unreadable"
 				return
 			}
-			proof, err := CompactRootProof(proofs[0])
-			if err != nil {
-				results <- err.Error()
-				return
-			}
-			value, _ := proof["proofValue"].(string)
+			value, _ := proofs[0]["proofValue"].(string)
+			// Write to what we were given: with the cache handing out its
+			// own maps this would poison every later reader.
+			proofs[0]["proofPurpose"] = "scribbled"
 			results <- value
 		}()
 	}

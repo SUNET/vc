@@ -31,7 +31,7 @@ type RDFCredential struct {
 	// several candidates would otherwise pay for it once per candidate, on
 	// a document nobody has authenticated yet.
 	securedMu sync.Mutex
-	secured   *securedDocument
+	secured   *securedDocumentAnswer
 
 	// The same answer in the form every caller actually wants. Compacting
 	// a root proof is a JSON-LD operation, and a verifier checking N
@@ -47,9 +47,9 @@ type compactedRootProofs struct {
 	err    error
 }
 
-// securedDocument is the memoized result of SecuredDocument, success or
-// failure alike: a document that cannot be read is not worth re-reading.
-type securedDocument struct {
+// securedDocumentAnswer is the memoized result, success or failure alike: a
+// document that cannot be read is not worth re-reading.
+type securedDocumentAnswer struct {
 	proofs []any
 	hash   [sha256.Size]byte
 	err    error
