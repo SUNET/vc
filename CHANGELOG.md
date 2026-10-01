@@ -5,9 +5,10 @@
 ### Breaking Changes
 
 - **Data Integrity proofs now secure the document they are attached to.**
-  `eddsa-rdfc-2022` and `ecdsa-rdfc-2019` used to remove EVERY proof in the
-  graph when canonicalizing, where the specification removes only the proof
-  being created or verified. A presentation's signature therefore did not
+  All three cryptosuites — `eddsa-rdfc-2022`, `ecdsa-rdfc-2019` and
+  `ecdsa-sd-2023` — used to remove EVERY proof in the graph when
+  canonicalizing, where the specification removes only the proof being
+  created or verified. A presentation's signature therefore did not
   cover the issuer proof of the credential it carried, so that proof could be
   stripped or swapped with the presentation still verifying. Only the root's
   own proofs are removed now, and an embedded credential's proof is part of
@@ -19,9 +20,17 @@
   proof moved onto an embedded credential no longer verifies.
 
   **Migration:** presentations signed before this release do not verify after
-  it, for both RDF cryptosuites — re-present them. Credentials are unaffected
-  in practice: a credential carries no proof but its own, so the two removals
-  are the same operation on one. `ecdsa-sd-2023` is unchanged for that reason.
+  it, for both RDF cryptosuites — re-present them.
+
+  Most credentials are unaffected: a credential that carries no proof but its
+  own makes the two removals the same operation. A credential that NESTS a
+  secured credential — under `credentialSubject`, `evidence` or `@included` —
+  is affected under `ecdsa-sd-2023`, which used to leave that nested proof
+  outside the signed quad set entirely, so it could be stripped or re-pointed
+  at another key with the base proof still verifying. The nested proof is now
+  covered, which means an `ecdsa-sd-2023` base proof issued before this
+  release over such a credential no longer verifies, and a derived proof made
+  from it no longer checks out. Re-issue those credentials.
 
   A document whose root takes part in a reference cycle — a presentation
   carrying a credential whose subject links back at it — is now refused at
