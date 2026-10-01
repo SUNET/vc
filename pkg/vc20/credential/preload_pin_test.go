@@ -2,10 +2,13 @@ package credential
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/piprate/json-gold/ld"
+	"github.com/stretchr/testify/require"
 )
 
 // seedWithTTL puts a context in the cache the way a normal fetch would -
@@ -126,4 +129,53 @@ func TestReferencedContexts_NoBaseSkipsRelatives(t *testing.T) {
 	if len(got) != 1 || got[0] != "https://example.org/abs.jsonld" {
 		t.Fatalf("got %v, want only the absolute URL", got)
 	}
+}
+
+// TestPinRemoteContext_BoundsFanOutNotJustDepth: maxPinDepth bounds how far
+// pinning follows references and says nothing about how MANY it reaches. A
+// single document can list an unbounded number of distinct @context URLs, all
+// of them at depth 1 - so a hostile or compromised allowlisted document could
+// turn startup into a crawl of thousands of fetches without ever nesting.
+//
+// The seen set stops a URL being fetched twice. It does not stop there being
+// very many of them.
+func TestPinRemoteContext_BoundsFanOutNotJustDepth(t *testing.T) {
+	t.Run("a wide document is refused", func(t *testing.T) {
+		l := NewCachingDocumentLoader()
+
+		const root = "https://ctx.example.org/wide.jsonld"
+		refs := make([]string, 0, maxPinnedContexts+10)
+		for i := range cap(refs) {
+			leaf := fmt.Sprintf("https://ctx.example.org/leaf-%d.jsonld", i)
+			seedWithTTL(t, l, leaf, `{"@context":{"Leaf":"https://example.org/Leaf"}}`)
+			refs = append(refs, `"`+leaf+`"`)
+		}
+		seedWithTTL(t, l, root, `{"@context":[`+strings.Join(refs, ",")+`]}`)
+
+		err := l.PinRemoteContext(root)
+		require.Error(t, err, "fan-out at depth 1 must be bounded, not only nesting")
+		require.Contains(t, err.Error(), "reaches more than")
+
+		// And it stopped: the documents past the budget were never pinned.
+		last := fmt.Sprintf("https://ctx.example.org/leaf-%d.jsonld", cap(refs)-1)
+		require.False(t, pinned(t, l, last),
+			"the crawl stopped at the budget rather than finishing and then complaining")
+	})
+
+	t.Run("an ordinary closure still pins", func(t *testing.T) {
+		l := NewCachingDocumentLoader()
+
+		const root = "https://ctx.example.org/narrow.jsonld"
+		refs := make([]string, 0, 5)
+		for i := range cap(refs) {
+			leaf := fmt.Sprintf("https://ctx.example.org/narrow-leaf-%d.jsonld", i)
+			seedWithTTL(t, l, leaf, `{"@context":{"Leaf":"https://example.org/Leaf"}}`)
+			refs = append(refs, `"`+leaf+`"`)
+		}
+		seedWithTTL(t, l, root, `{"@context":[`+strings.Join(refs, ",")+`]}`)
+
+		require.NoError(t, l.PinRemoteContext(root),
+			"the budget must not refuse the closures real contexts have")
+		require.True(t, pinned(t, l, root))
+	})
 }

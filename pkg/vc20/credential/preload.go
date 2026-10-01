@@ -29,11 +29,22 @@ func (l *CachingDocumentLoader) PinRemoteContext(url string) error {
 	return l.pinContext(url, make(map[string]bool), 0)
 }
 
-// maxPinDepth bounds how far pinning follows references. Contexts nest a
-// couple of levels in practice; the bound is there so a hostile or looping
-// document cannot turn startup into an unbounded crawl. Cycles are caught by
-// the seen set, this catches depth.
-const maxPinDepth = 8
+// maxPinDepth bounds how far pinning follows references, and
+// maxPinnedContexts bounds how MANY it reaches.
+//
+// Depth alone does not bound the crawl, which the comment here used to claim.
+// A single document can list an unbounded number of distinct @context or
+// @import URLs, and every one of them sits at depth 1 - so a hostile or
+// compromised allowlisted document could turn startup into a crawl of
+// thousands of fetches without ever nesting. The seen set stops a URL being
+// fetched twice; it does not stop there being very many of them.
+//
+// Each document is already capped at maxContextBytes, so a count bound caps
+// the bytes too. Contexts reach a handful of documents in practice.
+const (
+	maxPinDepth       = 8
+	maxPinnedContexts = 64
+)
 
 // pinContext pins url and everything reaching it: the document itself, the
 // URL a Link header redirected the processor to, and any context the
@@ -53,6 +64,11 @@ func (l *CachingDocumentLoader) pinContext(url string, seen map[string]bool, dep
 	}
 	if depth > maxPinDepth {
 		return fmt.Errorf("context %q nests deeper than %d levels", url, maxPinDepth)
+	}
+	// Counted across the WHOLE closure, not per level: seen holds every
+	// distinct URL this pin has reached, so its size is the crawl so far.
+	if len(seen) >= maxPinnedContexts {
+		return fmt.Errorf("pinning reaches more than %d contexts, refusing to fetch %q", maxPinnedContexts, url)
 	}
 	seen[url] = true
 
