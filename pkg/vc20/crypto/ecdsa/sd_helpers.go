@@ -301,7 +301,7 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any
 	var orphaned []string
 	deleteProofKeys := func(m map[string]any, active any) {
 		for _, key := range credential.ProofKeys(m, active, options) {
-			orphaned = append(orphaned, graphNamesIn(m[key])...)
+			orphaned = append(orphaned, graphNamesIn(m[key], contextFor(m, context), options)...)
 			delete(m, key)
 		}
 	}
@@ -332,7 +332,7 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any
 		nodes := make([]map[string]any, 0, len(typed))
 		for _, entry := range typed {
 			node, isNode := entry.(map[string]any)
-			if !isNode || ld.IsGraph(node) {
+			if !isNode || credential.IsGraphWrapper(node, context, options) {
 				continue
 			}
 			nodes = append(nodes, node)
@@ -340,7 +340,7 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any
 
 		if len(nodes) == 1 {
 			deleteProofKeys(nodes[0], contextFor(nodes[0], context))
-			return withoutNamedGraphs(typed, orphaned), nil
+			return withoutNamedGraphs(typed, orphaned, context, options), nil
 		}
 
 		selected, err := credential.RootOfCompactedNodes(nodes, context, options)
@@ -394,28 +394,31 @@ func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any
 		for _, node := range targets {
 			deleteProofKeys(node, contextFor(node, context))
 		}
-		return withoutNamedGraphs(typed, orphaned), nil
+		return withoutNamedGraphs(typed, orphaned, context, options), nil
 	}
 	return nil, fmt.Errorf("a document is %T rather than a node or a list of nodes", data)
 }
 
 // graphNamesIn reads the identifiers a removed proof link pointed at. A proof
 // written INLINE names no graph and contributes none - it goes with the link.
-func graphNamesIn(value any) []string {
+func graphNamesIn(value any, context any, options *ld.JsonLdOptions) []string {
 	var names []string
 	switch typed := value.(type) {
 	case []any:
 		for _, entry := range typed {
-			names = append(names, graphNamesIn(entry)...)
+			names = append(names, graphNamesIn(entry, context, options)...)
 		}
 	case map[string]any:
 		if _, inline := typed["@graph"]; inline {
 			return nil
 		}
-		for _, key := range []string{"@id", "id"} {
-			if id, ok := typed[key].(string); ok && id != "" {
-				names = append(names, id)
-			}
+		// Through the ACTIVE CONTEXT, like everything else that reads an
+		// identifier here. Reading only the literal spellings left a link
+		// such as {"identifier": "_:proof"} naming nothing, so the proof's
+		// named graph stayed in the supposedly proof-free document and SD
+		// removal disagreed with RootProofs.
+		if id := credential.CompactNodeID(typed, context, options); id != "" {
+			names = append(names, id)
 		}
 	case string:
 		if typed != "" {
@@ -428,7 +431,7 @@ func graphNamesIn(value any) []string {
 // withoutNamedGraphs drops the top-level graph entries a removed root proof
 // named. Only graph WRAPPERS are candidates: an entry that merely shares an
 // identifier is a node the document still talks about.
-func withoutNamedGraphs(entries []any, names []string) []any {
+func withoutNamedGraphs(entries []any, names []string, context any, options *ld.JsonLdOptions) []any {
 	if len(names) == 0 {
 		return entries
 	}
@@ -440,12 +443,14 @@ func withoutNamedGraphs(entries []any, names []string) []any {
 	kept := make([]any, 0, len(entries))
 	for _, entry := range entries {
 		if node, isNode := entry.(map[string]any); isNode {
-			// ld.IsGraph, not a key count: a graph object may carry @index
-			// beside @graph and @id, and counting keys called an indexed
-			// proof graph a document node.
-			if ld.IsGraph(node) {
-				id, _ := node["@id"].(string)
-				if named[id] {
+			// A graph object may carry @index beside @graph and @id, so
+			// this is not a key count - and in a COMPACTED document those
+			// names may be aliased, which ld.IsGraph cannot see.
+			if credential.IsGraphWrapper(node, context, options) {
+				// Same reading as the link that named it, or a graph
+				// wrapper spelled through the context survives the removal
+				// its link did not.
+				if named[credential.CompactNodeID(node, context, options)] {
 					continue
 				}
 			}

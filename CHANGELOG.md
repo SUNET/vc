@@ -109,6 +109,24 @@
   refused for holding "more than one node nothing refers to". Affects
   `ecdsa-sd-2023` derivation and signing of containers only.
 
+  **A proof reference is resolved against top-level NODES as well as named
+  graphs.** The VC v2 context declares `proof` with `"@container": "@graph"`,
+  so a proof becomes a named graph once serialized through RDF. A document
+  that aliases the predicate WITHOUT that container does not: the round trip
+  flattens its proof into an ordinary top-level node. Resolving the reference
+  only against named graphs returned the incomplete LINK as the proof and left
+  the real proof node inside the document the signature covers, so such a
+  document verified straight from `Sign` and stopped verifying once serialized
+  and read back.
+
+  **`credential.IsGraphWrapper` replaces `ld.IsGraph` on compacted documents.**
+  `ld.IsGraph` knows only the spellings `@id` and `@index`, so a wrapper in a
+  document that aliases either read as an ordinary node: `ecdsa-sd-2023` proof
+  removal left the proof's named graph in the supposedly proof-free document,
+  and root selection offered that graph as a candidate for what the document
+  is about. The graph NAMES a proof link carries are read through the context
+  too.
+
   **`credential.CompactNodeID` takes the document context.** It read only the
   spellings `@id` and `id` while root selection resolved any alias, so a
   flattened document aliasing `@id` returned `""` for the root AND for every

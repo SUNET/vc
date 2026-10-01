@@ -862,6 +862,39 @@ func IsBareGraphContainer(node map[string]any) bool {
 	return true
 }
 
+// IsGraphWrapper reports whether a node in a COMPACTED document is a graph
+// WRAPPER - a named graph standing for nothing but the graph it carries -
+// rather than a node that happens to have a @graph member of its own.
+//
+// ld.IsGraph answers this for EXPANDED documents, where the only spellings are
+// @id and @index. In a compacted document a context may alias either to any
+// term, and ld.IsGraph then reports the wrapper as an ordinary node: SD proof
+// removal left such a graph in the supposedly proof-free document, and root
+// selection offered it as a candidate for what the document is about.
+func IsGraphWrapper(node map[string]any, context any, options *ld.JsonLdOptions) bool {
+	if _, present := node["@graph"]; !present {
+		return false
+	}
+
+	var active *ld.Context
+	for key := range node {
+		if key == "@graph" || key == "@context" || key == "@id" || key == "@index" {
+			continue
+		}
+		if active == nil {
+			active = nodeContext(node, composedContext(node, context, context != nil), options)
+			if active == nil {
+				return false
+			}
+		}
+		resolved, unresolvable := expandMemberName(active, key)
+		if unresolvable || (resolved != "@id" && resolved != "@index") {
+			return false
+		}
+	}
+	return true
+}
+
 // referencedIDs collects the identifiers the document POINTS AT, by expanding
 // it and reading the @id of every value object. resolved reports whether that
 // expansion succeeded; when it did not - no context to resolve against, or one

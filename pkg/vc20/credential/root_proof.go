@@ -64,6 +64,8 @@ func (rc *RDFCredential) RootProofs() (proofs []any, withoutRootProof *RDFCreden
 	// link without removing the graph would leave the proof in the document
 	// it is supposed to be absent from.
 	claimed := map[int]bool{}
+	claimedNodes := map[int]bool{}
+	rootID, _ := root["@id"].(string)
 	for _, predicate := range []string{ProofPredicate} {
 		attached, present := root[predicate]
 		if !present {
@@ -95,15 +97,34 @@ func (rc *RDFCredential) RootProofs() (proofs []any, withoutRootProof *RDFCreden
 				}
 				continue
 			}
-			// A link naming no graph in this document carries no proof;
-			// the caller will find it incomplete.
+			// A proof alias WITHOUT "@container": "@graph" is written
+			// INLINE while the document is compact, and an RDF round trip
+			// flattens it into an ordinary top-level node rather than a
+			// named graph. The reference is then just an @id, and resolving
+			// it only against named graphs returned the incomplete LINK as
+			// the proof while the real proof node stayed in the document
+			// the signature covers - so a document verified straight from
+			// Sign and failed once serialized and read back.
+			if match := nodeNamed(nodes, id, rootID); match >= 0 {
+				if !claimedNodes[match] {
+					proofs = append(proofs, nodes[match])
+					claimedNodes[match] = true
+				}
+				continue
+			}
+
+			// A link naming nothing in this document carries no proof; the
+			// caller will find it incomplete.
 			proofs = append(proofs, node)
 		}
 		delete(root, predicate)
 	}
 
 	kept := make([]any, 0, len(nodes)+len(graphs))
-	for _, node := range nodes {
+	for i, node := range nodes {
+		if claimedNodes[i] {
+			continue
+		}
 		kept = append(kept, node)
 	}
 	for i, graph := range graphs {
@@ -520,6 +541,21 @@ func referencedAnywhere(entries [][]map[string]any, id string) bool {
 
 // graphNamed returns the index of the graph entry carrying this name, or -1.
 // Entries are coalesced by name before this runs, so there is at most one.
+// nodeNamed finds the top-level node a proof reference points at. The ROOT is
+// never it: a document referring to itself as its own proof is naming the
+// document the signature covers, and removing it would leave nothing.
+func nodeNamed(nodes []map[string]any, id string, rootID string) int {
+	if id == "" || (rootID != "" && id == rootID) {
+		return -1
+	}
+	for i, node := range nodes {
+		if name, _ := node["@id"].(string); name == id {
+			return i
+		}
+	}
+	return -1
+}
+
 func graphNamed(graphs []map[string]any, id string) int {
 	if id == "" {
 		return -1

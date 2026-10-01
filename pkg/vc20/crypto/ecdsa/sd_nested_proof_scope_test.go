@@ -443,3 +443,45 @@ func TestRemoveRootProofKeepsEmbeddedProofsUnderAnAliasedID(t *testing.T) {
 	require.Contains(t, string(encoded), "zEMBEDDED",
 		"and the embedded credential's proof is content the signature covers")
 }
+
+// TestRemoveRootProofDropsAnAliasedProofGraph: a proof that survived a round
+// trip through RDF is a LINK to a named graph beside the document, and
+// removing the link without removing the graph leaves the proof in the
+// document it is supposed to be absent from. Both the link and the graph
+// wrapper spell their identifier through the context, and reading only the
+// literal @id and id meant neither was recognised - so SD removal disagreed
+// with RootProofs and a derived credential could not be verified.
+func TestRemoveRootProofDropsAnAliasedProofGraph(t *testing.T) {
+	context := map[string]any{
+		"identifier": "@id",
+		"note":       "https://example.org/vocab#note",
+		"proof":      map[string]any{"@id": "https://w3id.org/security#proof", "@type": "@id"},
+	}
+
+	data := []any{
+		map[string]any{
+			"identifier": "https://example.org/credential",
+			"note":       "content the signature covers",
+			"proof":      map[string]any{"identifier": "https://example.org/the-proof-graph"},
+		},
+		// The proof's named graph, keyed through the same alias.
+		map[string]any{
+			"identifier": "https://example.org/the-proof-graph",
+			"@graph": []any{
+				map[string]any{"note": "zROOTPROOF"},
+			},
+		},
+	}
+
+	stripped, err := removeRootProofUnder(data, context, nil)
+	require.NoError(t, err)
+
+	encoded, err := json.Marshal(stripped)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "zROOTPROOF",
+		"the graph the removed link named goes with it")
+	require.NotContains(t, string(encoded), "the-proof-graph",
+		"and so does the wrapper that carried it")
+	require.Contains(t, string(encoded), "content the signature covers",
+		"while the document itself stays")
+}

@@ -171,3 +171,49 @@ func TestSignAndVerifyGeneralizedRdf(t *testing.T) {
 	require.NoError(t, err, "and what Sign returns must verify")
 	require.NotNil(t, verified)
 }
+
+// TestProofAliasWithoutGraphContainerSurvivesARoundTrip: the VC v2 context
+// declares `proof` with "@container": "@graph", so a proof becomes a NAMED
+// GRAPH once serialized through RDF. A document that aliases the predicate
+// WITHOUT that container does not: the round trip flattens its proof into an
+// ordinary top-level node, and the root is left holding a bare reference.
+//
+// Resolving that reference only against named graphs returned the incomplete
+// LINK as the proof, and left the real proof node inside the document the
+// signature covers - so the document verified straight from Sign and stopped
+// verifying once serialized and read back. A signature whose validity depends
+// on which serialization the verifier sees is the defect this whole change
+// exists to remove.
+func TestProofAliasWithoutGraphContainerSurvivesARoundTrip(t *testing.T) {
+	const document = `{
+		"@context": {
+			"id": "@id",
+			"note": "https://example.org/vocab#note",
+			"proof": {"@id": "https://w3id.org/security#proof"}
+		},
+		"id": "https://example.org/credential",
+		"note": "secured without a graph container"
+	}`
+
+	signed, pub := signDocument(t, document, "assertionMethod")
+	require.Len(t, rootProofsOf(t, signed), 1,
+		"the document attaches one proof to itself as written")
+
+	direct, err := NewSuite().VerifyProof(signed, pub)
+	require.NoError(t, err, "it verifies as Sign returned it")
+	require.NotNil(t, direct)
+
+	// THROUGH RDF and back, which is what a verifier on the other side of a
+	// wire does.
+	marshalled, err := signed.MarshalJSON()
+	require.NoError(t, err)
+	reparsed, err := credential.NewRDFCredentialFromJSON(marshalled, nil)
+	require.NoError(t, err)
+
+	require.Len(t, rootProofsOf(t, reparsed), 1,
+		"and it still attaches exactly one proof to itself afterwards")
+
+	roundTripped, err := NewSuite().VerifyProof(reparsed, pub)
+	require.NoError(t, err, "a signature must not depend on which serialization the verifier sees")
+	require.NotNil(t, roundTripped)
+}
