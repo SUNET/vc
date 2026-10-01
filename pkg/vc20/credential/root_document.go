@@ -2,6 +2,7 @@ package credential
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/piprate/json-gold/ld"
 )
@@ -285,4 +286,88 @@ func expandNodeID(context any, id string, options *ld.JsonLdOptions) string {
 	}
 	resolved, _ := value["@id"].(string)
 	return resolved
+}
+
+// ProofKeys returns the members of a node that name a Data Integrity proof
+// under the given context.
+//
+// Matching raw spellings is not enough, and got it wrong twice over: the
+// legacy predicate was written as https://www.w3.org/ns/credentials#proof,
+// which is not a proof predicate at all, so a document using the real one
+// kept its root proof - while RootProofs, which uses the constants, removed
+// it. The two then disagreed about which quads a signature covers.
+//
+// A proof term may also be ALIASED. "proof" is only the name the v2 context
+// happens to give it; a document may define its own, and a node written that
+// way has a root proof that no list of spellings will find. Each member is
+// resolved through the active context instead.
+func ProofKeys(node map[string]any, context any, options *ld.JsonLdOptions) []string {
+	var keys []string
+	for key := range node {
+		if strings.HasPrefix(key, "@") {
+			continue
+		}
+		// Already expanded, or the term the v2 context defines. The literal
+		// "proof" stays a match even with no context to resolve it against:
+		// failing to remove the root's own proof is the worse failure.
+		if key == ProofPredicate || key == ProofPredicateLegacy || key == "proof" {
+			keys = append(keys, key)
+			continue
+		}
+		if context == nil {
+			continue
+		}
+		if expandTerm(context, key, options) != "" {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+// expandTerm resolves one member name against a context and returns the proof
+// predicate it names, or "" when it names something else or nothing at all.
+func expandTerm(context any, term string, options *ld.JsonLdOptions) string {
+	const sentinel = "https://example.invalid/a-proof-node"
+
+	probe := map[string]any{
+		"@context": context,
+		term:       map[string]any{"@id": sentinel},
+	}
+	if options == nil {
+		options = NewJSONLDOptions("")
+	}
+
+	expanded, err := ld.NewJsonLdProcessor().Expand(probe, options)
+	if err != nil || len(expanded) == 0 {
+		return ""
+	}
+	resolved, isNode := expanded[0].(map[string]any)
+	if !isNode {
+		return ""
+	}
+	for _, predicate := range []string{ProofPredicate, ProofPredicateLegacy} {
+		if _, present := resolved[predicate]; present {
+			return predicate
+		}
+	}
+	return ""
+}
+
+// IsBareGraphContainer reports whether a map is nothing but a graph: the
+// shape compacting a flattened dataset returns, which is ABOUT no node.
+//
+// A node may also carry @graph alongside properties of its own - that is a
+// named graph, and the node is still the thing the document talks about.
+// Treating one as a container reaches into its graph and removes a proof
+// from there too, which is the opposite of root-scoped.
+func IsBareGraphContainer(node map[string]any) bool {
+	if _, present := node["@graph"]; !present {
+		return false
+	}
+	for key := range node {
+		if key != "@graph" && key != "@context" {
+			return false
+		}
+	}
+	return true
 }

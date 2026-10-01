@@ -32,7 +32,7 @@ func TestRemoveRootProofKeepsNestedProofsInAFlattenedDocument(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, removeRootProof(flattened))
+	require.NoError(t, removeRootProof(flattened, nil))
 
 	outer := flattened[0].(map[string]any)
 	inner := flattened[1].(map[string]any)
@@ -49,7 +49,7 @@ func TestRemoveRootProofRefusesAnAmbiguousDocument(t *testing.T) {
 			map[string]any{"id": "https://example.org/a", "proof": map[string]any{}},
 			map[string]any{"id": "https://example.org/b", "proof": map[string]any{}},
 		}
-		err := removeRootProof(document)
+		err := removeRootProof(document, nil)
 		require.ErrorContains(t, err, "more than one node nothing refers to")
 		require.Contains(t, document[0].(map[string]any), "proof", "nothing is removed on a refusal")
 		require.Contains(t, document[1].(map[string]any), "proof")
@@ -60,7 +60,7 @@ func TestRemoveRootProofRefusesAnAmbiguousDocument(t *testing.T) {
 			map[string]any{"id": "https://example.org/a", "rel": "https://example.org/b"},
 			map[string]any{"id": "https://example.org/b", "rel": "https://example.org/a"},
 		}
-		require.ErrorContains(t, removeRootProof(document), "referred to by another")
+		require.ErrorContains(t, removeRootProof(document, nil), "referred to by another")
 	})
 }
 
@@ -73,7 +73,7 @@ func TestRemoveRootProofHandlesASingleNode(t *testing.T) {
 		"credentialSubject": {"proof": {"type": "DataIntegrityProof"}}
 	}`), &document))
 
-	require.NoError(t, removeRootProof(document))
+	require.NoError(t, removeRootProof(document, nil))
 
 	node := document.(map[string]any)
 	require.NotContains(t, node, "https://w3id.org/security#proof")
@@ -116,4 +116,60 @@ func TestSdRootProofsReportsWhyEveryCandidateWasSkipped(t *testing.T) {
 	require.NotContains(t, err.Error(), "carries no ecdsa-sd-2023 proof of its own",
 		"a document whose every proof is malformed is not a document with no proof")
 	require.ErrorContains(t, err, "rather than one proof")
+}
+
+// TestRemoveRootProofResolvesAliasedAndLegacyProofTerms: "proof" is only the
+// name the v2 context happens to give the term, and the legacy predicate has
+// its own IRI. Matching raw spellings missed both - and the spelling the code
+// DID carry for the legacy case, https://www.w3.org/ns/credentials#proof, is
+// not a proof predicate at all, so an expanded document using the real one
+// kept its root proof while RootProofs removed it. The two then disagreed
+// about which quads the signature covers.
+func TestRemoveRootProofResolvesAliasedAndLegacyProofTerms(t *testing.T) {
+	t.Run("the legacy predicate, expanded", func(t *testing.T) {
+		node := map[string]any{
+			"@id":                           "https://example.org/credential",
+			credential.ProofPredicateLegacy: map[string]any{"@id": "_:proof"},
+		}
+		require.NoError(t, removeRootProof(node, nil))
+		require.NotContains(t, node, credential.ProofPredicateLegacy)
+	})
+
+	t.Run("an aliased term", func(t *testing.T) {
+		var document any
+		require.NoError(t, json.Unmarshal([]byte(`{
+			"@context": {"seal": "https://w3id.org/security#proof", "note": "https://example.org/vocab#note"},
+			"id": "https://example.org/credential",
+			"note": "kept",
+			"seal": {"type": "DataIntegrityProof"}
+		}`), &document))
+
+		require.NoError(t, removeRootProof(document, nil))
+
+		node := document.(map[string]any)
+		require.NotContains(t, node, "seal", "an aliased proof term is still the document's proof")
+		require.Contains(t, node, "note", "and nothing else is touched")
+	})
+}
+
+// TestRemoveRootProofLeavesANamedGraphAlone: a node may carry @graph beside
+// properties of its own. That is a named graph, and the node is still what the
+// document is about - reaching into it removes a proof that is not the root's.
+func TestRemoveRootProofLeavesANamedGraphAlone(t *testing.T) {
+	var document any
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "https://example.org/credential",
+		"proof": {"type": "DataIntegrityProof", "proofValue": "root"},
+		"@graph": [
+			{"id": "https://example.org/carried", "proof": {"type": "DataIntegrityProof", "proofValue": "carried"}}
+		]
+	}`), &document))
+
+	require.NoError(t, removeRootProof(document, nil))
+
+	node := document.(map[string]any)
+	require.NotContains(t, node, "proof", "the root's own proof goes")
+	carried := node["@graph"].([]any)[0].(map[string]any)
+	require.Contains(t, carried, "proof", "a proof inside its named graph stays")
 }

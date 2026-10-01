@@ -8,6 +8,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"github.com/SUNET/vc/pkg/vc20/credential"
+
+	"github.com/piprate/json-gold/ld"
 	"math/big"
 	"regexp"
 	"sort"
@@ -269,21 +271,27 @@ func replaceURNsInNQuads(nquads string) string {
 // The root is identified the way credential.RootProofs identifies it: the node
 // nothing else refers to. A document that holds no such node, or more than
 // one, does not say what it is about and is REFUSED rather than guessed at.
-func removeRootProof(data any) error {
+//
+// Which members ARE the proof is resolved through the document's context, not
+// matched against a list of spellings - see credential.ProofKeys.
+func removeRootProof(data any, options *ld.JsonLdOptions) error {
+	context := documentContextOf(data)
+
 	deleteProofKeys := func(m map[string]any) {
-		delete(m, "proof")
-		delete(m, "https://w3id.org/security#proof")
-		delete(m, "https://www.w3.org/ns/credentials#proof")
+		for _, key := range credential.ProofKeys(m, context, options) {
+			delete(m, key)
+		}
 	}
 
 	switch typed := data.(type) {
 	case map[string]any:
-		if graph, wrapped := typed["@graph"]; wrapped {
-			// A @graph container holds the nodes; the container itself is
-			// not the document's root.
-			if err := removeRootProof(graph); err != nil {
-				return err
-			}
+		// A BARE container holds the nodes and is about none of them, so
+		// the root is inside. A node that merely carries @graph beside
+		// properties of its own is a named graph, and the node itself is
+		// still what the document is about - reaching into its graph would
+		// remove a proof this must not touch.
+		if credential.IsBareGraphContainer(typed) {
+			return removeRootProof(typed["@graph"], options)
 		}
 		deleteProofKeys(typed)
 		return nil
@@ -308,6 +316,25 @@ func removeRootProof(data any) error {
 		return nil
 	}
 	return fmt.Errorf("a document is %T rather than a node or a list of nodes", data)
+}
+
+// documentContextOf reads the @context a document carries, so member names can
+// be resolved against it. An expanded document carries none, and needs none -
+// its members are already absolute IRIs.
+func documentContextOf(data any) any {
+	switch typed := data.(type) {
+	case map[string]any:
+		return typed["@context"]
+	case []any:
+		for _, entry := range typed {
+			if node, isNode := entry.(map[string]any); isNode {
+				if context, present := node["@context"]; present {
+					return context
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // parseJSONPointer parses a JSON pointer (RFC 6901) into path segments.
