@@ -348,13 +348,27 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 		// rather than sent out with a vct_values no mdoc credential carries.
 		// An auth scope naming no configured credential resolves to a nil
 		// entry here, which DCQLMetaQuery reports rather than dereferences.
+		// Issuance auth is answered by THIS package's VerificationDirectPost,
+		// which validates the response as an SD-JWT and has no format
+		// dispatch. A W3C scope would produce a query a wallet can satisfy
+		// and this flow then cannot read, so refuse to build it rather than
+		// advertise a request that fails after the user has already been
+		// sent to their wallet.
+		//
+		// The verifier service verifies W3C properly; issuance auth is a
+		// separate flow in a separate service and has not been taught to.
+		format := cfg.GetFormatForScope(authScope)
+		if openid4vp.IsW3CVCFormatIdentifier(format) {
+			return nil, fmt.Errorf("auth scope %q is format %q, which issuance auth cannot verify; use an SD-JWT or mdoc credential for authentication", authScope, format)
+		}
+
 		meta, ok := cfg.GetCredentialMetadata(authScope).DCQLMetaQuery()
 		if !ok {
-			return nil, fmt.Errorf("auth scope %q has no usable DCQL meta constraint (format %q); check credential_metadata", authScope, cfg.GetFormatForScope(authScope))
+			return nil, fmt.Errorf("auth scope %q has no usable DCQL meta constraint (format %q); check credential_metadata", authScope, format)
 		}
 		credentialQueries = append(credentialQueries, openid4vp.CredentialQuery{
 			ID:                                authScope,
-			Format:                            cfg.GetFormatForScope(authScope),
+			Format:                            format,
 			Multiple:                          false,
 			Meta:                              meta,
 			RequireCryptographicHolderBinding: new(false),

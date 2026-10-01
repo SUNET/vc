@@ -31,7 +31,18 @@ type UICredentialInfo struct {
 	// omitempty: mso_mdoc scopes get no list (they're identified by doctype,
 	// not vct), so this drops the field entirely for them rather than
 	// emitting a meaningless "vct_values": null.
-	VCTValues  []string                        `json:"vct_values,omitempty"`
+	VCTValues []string `json:"vct_values,omitempty"`
+	// TypeValues is the W3C equivalent: the type alternatives a wallet matches
+	// an ldp_vc or vc+ld+json credential by, as expanded IRIs.
+	//
+	// Not jwt_vc_json: DCQLMetaQuery, constraintFamily and the JS builder all
+	// refuse it, because nothing issues it and a compact JWT-VC reads as
+	// SD-JWT here - so such a scope is dropped and never reaches this struct.
+	//
+	// From credential_type_values, not credential_types. Empty for other
+	// formats and for a W3C scope whose configured alternatives narrow
+	// nothing - see DCQLMetaQuery for why those are refused, not sent.
+	TypeValues [][]string                      `json:"type_values,omitempty"`
 	Attributes map[string]map[string][]*string `json:"attributes"`
 }
 
@@ -71,6 +82,9 @@ type UIPresetMeta struct {
 	// DoctypeValue is set for mdoc/ZK-mdoc scopes (openid4vp.MetaQuery's
 	// mdoc-format field) - mirrors UICredentialInfo.VCT's mdoc branch.
 	DoctypeValue string `json:"doctype_value,omitempty"`
+	// TypeValues is the W3C formats' constraint, from credential_type_values
+	// (expanded IRIs) - not the credential_types the issuer metadata uses.
+	TypeValues [][]string `json:"type_values,omitempty"`
 	// ZKSystemType is set when the preset's VerificationPresetScope
 	// overrides it - see that type's own doc comment.
 	ZKSystemType []openid4vp.ZKSystemTypeSpec `json:"zk_system_type,omitempty"`
@@ -129,9 +143,10 @@ func constraintFamily(format string) string {
 	switch format {
 	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
 		return "doctype"
-	// "vc+ld+json" as a literal: this repo issues it but has no constant for
-	// it on this branch.
-	case openid4vp.FormatLdpVCDCQL, "vc+ld+json", openid4vp.FormatJwtVCJson:
+	// Not jwt_vc_json: DCQLMetaQuery refuses it, so calling it family-
+	// compatible here would approve an override the query builder then drops.
+	// The two have to agree on what is requestable.
+	case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON:
 		return "types"
 	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
 		return "vct"
@@ -198,10 +213,10 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		} else if mddl := constructor.GetMDDL(); mddl != nil {
 			info.VCT = mddl.DocType
 		}
-		// Format-aware, like the DCQL builders: the JS turns VCTValues straight
-		// into meta.vct_values, so publishing one for a credential constrained
-		// another way puts an unmatchable query on the wire. An unconstrainable
-		// scope is left out of the picker.
+		// Format-aware, like the DCQL builders: vct_values for SD-JWT,
+		// doctype_value for mdoc, type_values for a W3C scope that configures
+		// credential_type_values. An unconstrainable scope is left out of the
+		// picker rather than offered and then refused.
 		mq, ok := constructor.DCQLMetaQuery()
 		if !ok {
 			c.log.Error(nil, "credential omitted from the verifier UI: no usable DCQL meta constraint for scope",
@@ -211,6 +226,7 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 		// Empty for mdoc, which is constrained by its doctype instead;
 		// omitempty then drops the field.
 		info.VCTValues = mq.VCTValues
+		info.TypeValues = mq.TypeValues
 		// The JS sends info.VCT as meta.doctype_value, so it must match what
 		// the server-side builders use. The chain above never reads the
 		// configured Doctype, leaving a registry-backed scope empty.
@@ -280,12 +296,9 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					ID: scope,
 				}
 
-				// Resolve format and the type constraint from
-				// credential_metadata, by FORMAT rather than by which
-				// metadata document is loaded: keying off "has an MDDL" gave
-				// a registry-backed mdoc scope (doctype configured, no MDDL)
-				// an empty vct_values and no doctype, which matches nothing
-				// in any wallet.
+				// By FORMAT, not by which document is loaded: keying off "has
+				// an MDDL" gave a registry-backed mdoc scope an empty
+				// vct_values and no doctype, matching nothing.
 				if meta != nil {
 					uiCred.Format = meta.Format
 					mq, ok := meta.DCQLMetaQuery()
@@ -298,16 +311,17 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					}
 					uiCred.Meta.DoctypeValue = mq.DoctypeValue
 					uiCred.Meta.VCTValues = mq.VCTValues
+					uiCred.Meta.TypeValues = mq.TypeValues
 				}
 
 				// A preset's Format/ZKSystemType override lets a plain
 				// mso_mdoc scope be requested as mso_mdoc_zk instead.
 				//
 				// The override must keep the credential's constraint family -
-				// mdoc matches on doctype_value, SD-JWT on vct_values - since
-				// the meta above was derived from the CONFIGURED format.
-				// Crossing families pairs a format with a constraint it does
-				// not use, which no wallet can match.
+				// mdoc matches on doctype_value, SD-JWT on vct_values, W3C on
+				// type_values - since the meta above was resolved from the
+				// configured format. Crossing families pairs a format with a
+				// constraint it does not use, which no wallet can match.
 				if scopeCfg != nil && scopeCfg.Format != "" {
 					if !sameConstraintFamily(meta.Format, scopeCfg.Format) {
 						c.log.Error(nil, "credential omitted from a verifier UI preset: format override changes the DCQL constraint",
@@ -440,6 +454,18 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		sessionID = uuid.NewString()
 	}
 
+	// The DCQL arrives from the caller with only validate:"required" behind
+	// it, so nothing checked that its credential queries carry the constraint
+	// their format needs. An empty meta is not a narrow request, it is no
+	// request at all - DCQL reads it as matching every credential of that
+	// format - and the verifier would happily sign and serve it.
+	for _, credential := range req.DCQLQuery.Credentials {
+		if err := openid4vp.ValidateCredentialQuery(credential); err != nil {
+			c.log.Error(err, "rejected an invalid credential query from the UI interaction request", "credential_id", credential.ID, "format", credential.Format)
+			return nil, fmt.Errorf("credential query %q is invalid: %w", credential.ID, err)
+		}
+	}
+
 	// Collect all credential IDs from DCQL query
 	scopes := make([]string, 0, len(req.DCQLQuery.Credentials))
 	for _, credential := range req.DCQLQuery.Credentials {
@@ -457,8 +483,15 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	}
 
 	authorizationContext := &cache.AuthorizationContext{
-		SessionID:           sessionID,
-		Scopes:              scopes,
+		SessionID: sessionID,
+		Scopes:    scopes,
+		// The query this session was built from, AFTER validation and VCTM
+		// augmentation - the one actually sent to the wallet. Verification
+		// compares the response against it: which format answers each scope,
+		// which types were asked for, whether holder binding was required.
+		// Without it here the request object cache is the only copy, and the
+		// verification path cannot see what it is checking against.
+		DCQLQuery:           req.DCQLQuery,
 		Code:                "",
 		RequestURI:          "",
 		WalletURI:           "",

@@ -157,8 +157,19 @@ func (s *Suite) Sign(cred *credential.RDFCredential, key ed25519.PrivateKey, opt
 	return credential.NewRDFCredentialFromJSON(newCredBytes, ldOpts)
 }
 
-// Verify verifies a credential using eddsa-rdfc-2022
+// Verify verifies a credential using eddsa-rdfc-2022.
+//
+// The document's only proof, whichever it is. Use VerifyProof when the
+// document can hold more than one - a verifiable presentation carries the
+// holder's proof and the embedded credential's issuer proof, and picking
+// between them by traversal order is not a decision this can make.
 func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) error {
+	return s.VerifyProof(cred, key, "")
+}
+
+// VerifyProof verifies the proof carrying exactly proofValue, or the first
+// proof found when proofValue is empty.
+func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKey, wantProofValue string) error {
 	if cred == nil {
 		return fmt.Errorf("credential is nil")
 	}
@@ -198,8 +209,18 @@ func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) er
 	proofMap := compactedProof
 
 	// Find proof node
-	proofNode := common.FindProofNode(proofMap, ProofType)
+	// Which proof, when the document holds several. Named by its
+	// proofValue: the signature identifies the node unambiguously, without
+	// depending on traversal order or on which RDF graph it landed in.
+	var selector func(map[string]any) bool
+	if wantProofValue != "" {
+		selector = common.MatchProofValue(wantProofValue)
+	}
+	proofNode := common.FindProofNodeFunc(proofMap, ProofType, selector)
 	if proofNode == nil {
+		if wantProofValue != "" {
+			return fmt.Errorf("the proof asked for is not present in the document's proof object")
+		}
 		return fmt.Errorf("proof node not found in proof object")
 	}
 
