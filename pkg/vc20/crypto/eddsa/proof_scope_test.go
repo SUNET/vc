@@ -364,3 +364,38 @@ func TestVerifyRefusesAnUnboundedProofSet(t *testing.T) {
 	require.ErrorContains(t, err, "more than the 32 this will verify",
 		"a document may not make a verifier do unbounded work, handler or not")
 }
+
+// TestSignAndVerifyABlankCredentialThatIsItsOwnSubject: a node that names
+// ITSELF is still the node nothing else refers to, before and after
+// flattening alike - rootOf has never counted a self-link, and the
+// root-stability check must not either. It did, so the blank-node form of a
+// credential whose subject is the credential could not be signed at all.
+func TestSignAndVerifyABlankCredentialThatIsItsOwnSubject(t *testing.T) {
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	// No "id" on the credential, and a subject that points back at it by
+	// blank node label.
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"@id": "_:root",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"@id": "_:root"}
+	}`), nil)
+	require.NoError(t, err)
+
+	rootID, err := cred.RootID()
+	require.NoError(t, err)
+	require.Empty(t, rootID, "the root must really be blank, or this proves nothing")
+
+	signed, err := NewSuite().Sign(cred, key, &SignOptions{
+		VerificationMethod: "did:example:issuer#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err, "a self-link is not another node referring to the root")
+
+	_, err = NewSuite().VerifyProof(signed, pub)
+	require.NoError(t, err)
+}

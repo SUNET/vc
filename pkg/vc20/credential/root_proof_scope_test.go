@@ -274,3 +274,42 @@ func TestRootProofsUsesTheCredentialsOptions(t *testing.T) {
 	_, _, err = cred.RootProofs()
 	require.NoError(t, err, "root selection must re-expand under the same options")
 }
+
+// TestCompactRootProofMergesASplitProofNode: expanded JSON-LD may carry one
+// proof node's properties across several entries of its graph - two wrappers
+// with the same name have their graphs concatenated - and RDF conversion
+// merges them into one node. Counting entries without merging refused a proof
+// that is single by every measure that matters.
+func TestCompactRootProofMergesASplitProofNode(t *testing.T) {
+	split := map[string]any{
+		"@graph": []any{
+			map[string]any{
+				"@id":   "_:proof",
+				"@type": []any{"https://w3id.org/security#DataIntegrityProof"},
+			},
+			map[string]any{
+				"@id": "_:proof",
+				"https://w3id.org/security#proofValue": []any{
+					map[string]any{"@value": "zSignature"},
+				},
+			},
+		},
+	}
+
+	proof, err := CompactRootProof(split)
+	require.NoError(t, err, "a node split across graph entries is still one proof")
+	require.True(t, HasProofType(proof, ProofTypeDataIntegrity),
+		"the type from the first entry survives the merge")
+	require.Equal(t, "zSignature", proof["https://w3id.org/security#proofValue"],
+		"and so does the signature from the second")
+
+	// Two genuinely different proof nodes are still refused.
+	two := map[string]any{
+		"@graph": []any{
+			map[string]any{"@id": "_:a", "@type": []any{"https://w3id.org/security#DataIntegrityProof"}},
+			map[string]any{"@id": "_:b", "@type": []any{"https://w3id.org/security#DataIntegrityProof"}},
+		},
+	}
+	_, err = CompactRootProof(two)
+	require.ErrorContains(t, err, "rather than one")
+}

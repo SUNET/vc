@@ -120,7 +120,7 @@ func TestSdRootProofsReportsWhyEveryCandidateWasSkipped(t *testing.T) {
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "carries no ecdsa-sd-2023 proof of its own",
 		"a document whose every proof is malformed is not a document with no proof")
-	require.ErrorContains(t, err, "rather than one proof")
+	require.ErrorContains(t, err, "rather than one")
 }
 
 // TestRemoveRootProofResolvesAliasedAndLegacyProofTerms: "proof" is only the

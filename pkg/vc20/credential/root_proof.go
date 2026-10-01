@@ -413,35 +413,59 @@ func referencedAnywhere(entries [][]map[string]any, id string) bool {
 	if id == "" {
 		return false
 	}
-	found := false
-	var walk func(any)
-	walk = func(value any) {
-		if found {
-			return
-		}
+
+	// SELF-links do not count, the same way rootOf does not count them: a
+	// node that names itself - a credential whose credentialSubject is the
+	// credential - is still the node nothing ELSE refers to, before and
+	// after flattening alike. Counting them refused a document that
+	// flattens perfectly well.
+	//
+	// What identifies a self-link is the nearest ENCLOSING node, which is
+	// why this tracks it while walking rather than taking the top-level
+	// entry's id. A node reached through @included carries its own @id and
+	// becomes the enclosing node for everything under it, so a reference
+	// from there back to the root still counts - and it must, because that
+	// node sits beside the root once flattened and is exactly what makes
+	// the root stop being the unreferenced one.
+	var walk func(value any, self string) bool
+	walk = func(value any, self string) bool {
 		switch typed := value.(type) {
 		case map[string]any:
-			if len(typed) == 1 {
-				if at, ok := typed["@id"].(string); ok && at == id {
-					found = true
-					return
-				}
+			at, named := typed["@id"].(string)
+			if len(typed) == 1 && named {
+				// A bare {"@id": ...} is a reference, not a definition.
+				return at == id && self != id
 			}
-			for _, member := range typed {
-				walk(member)
+			enclosing := self
+			if named && at != "" {
+				enclosing = at
+			}
+			for key, member := range typed {
+				if key == "@id" {
+					continue
+				}
+				if walk(member, enclosing) {
+					return true
+				}
 			}
 		case []any:
 			for _, member := range typed {
-				walk(member)
+				if walk(member, self) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	for _, group := range entries {
+		for _, entry := range group {
+			if walk(entry, "") {
+				return true
 			}
 		}
 	}
-	for _, group := range entries {
-		for _, entry := range group {
-			walk(entry)
-		}
-	}
-	return found
+	return false
 }
 
 // graphNamed returns the index of the graph entry carrying this name, or -1.
@@ -540,13 +564,28 @@ func CompactRootProof(expanded any) (map[string]any, error) {
 	}
 	if graph, wrapped := node["@graph"]; wrapped {
 		entries, isList := graph.([]any)
-		if !isList || len(entries) != 1 {
+		if !isList {
 			return nil, fmt.Errorf("a root proof names %T rather than one proof", graph)
 		}
-		node, ok = entries[0].(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("a root proof's graph does not hold a node")
+		// COALESCED first. Expanded JSON-LD may carry one proof node's
+		// properties across several entries of its graph - two wrappers
+		// with the same name have their graphs concatenated here - and RDF
+		// conversion merges them into one node. Counting the entries
+		// without merging refused a proof that is single by every measure
+		// that matters.
+		nodes := make([]map[string]any, 0, len(entries))
+		for _, entry := range entries {
+			member, isNode := entry.(map[string]any)
+			if !isNode {
+				return nil, fmt.Errorf("a root proof's graph does not hold a node")
+			}
+			nodes = append(nodes, member)
 		}
+		merged := coalesceByID(nodes)
+		if len(merged) != 1 {
+			return nil, fmt.Errorf("a root proof names %d proofs rather than one", len(merged))
+		}
+		node = merged[0]
 	}
 
 	context := map[string]any{"@context": ContextV2}
