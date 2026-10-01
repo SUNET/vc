@@ -130,6 +130,18 @@
   document verified straight from `Sign` and stopped verifying once serialized
   and read back.
 
+  **`id` is no longer assumed to name a node.** Only the keyword `@id` is read
+  directly; every other spelling is a term, resolved through the active
+  context like any other. JSON-LD may map `id` to an ordinary property while
+  naming nodes with `@id`, and reading it as an identifier regardless took a
+  LITERAL for a node name — which made an unnamed node look referenced, so a
+  document with two nodes nothing refers to was rooted confidently at the
+  wrong one, and fragment merging discarded an ordinary `id` member as though
+  it were an identifier. The VC 2.0 context aliases `@id` to `id`, so
+  credentials written against it are unaffected; **a document that uses `id`
+  with no context defining it now has no identifier**, which is what JSON-LD
+  says it has.
+
   **Node and proof-graph identifiers are compared as absolute IRIs.** Fragments
   of one node spelled `ex:credential` in one entry and absolutely in another
   are the same RDF node; comparing the spellings made them look like two, so a

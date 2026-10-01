@@ -234,7 +234,7 @@ func RootCompactedDocument(compacted map[string]any, knownRootID string, options
 	// Deliberately not naming a cause. The check is what decides, and it
 	// covers more than the scoping it was written for - a cause in the
 	// message would be a guess that reads as a finding.
-	return nil, fmt.Errorf("rooting the document at %q would change its RDF: the %d node(s) beside it in @graph do not survive being moved under it unchanged", compactNodeID(root), len(included))
+	return nil, fmt.Errorf("rooting the document at %q would change its RDF: the %d node(s) beside it in @graph do not survive being moved under it unchanged", nodeIDUnder(root, composedContext(root, compacted["@context"], compacted["@context"] != nil), options), len(included))
 }
 
 // RootedCredential returns cred with its document rooted at the node the
@@ -352,7 +352,14 @@ func composedContext(node map[string]any, containerContext any, containerHasCont
 // Keys are taken in order, so a document defining two aliases gets one answer
 // rather than whichever the map iteration happened to yield.
 func nodeIDUnder(node map[string]any, context any, options *ld.JsonLdOptions) string {
-	if id := compactNodeID(node); id != "" {
+	// Only the literal KEYWORD bypasses the context. JSON-LD may map "id" to
+	// an ordinary property while naming the node with @id or an alias of its
+	// own, and treating "id" as an identifier regardless then coalesced or
+	// selected the wrong node - so proof removal and proof attachment
+	// targeted it. The v2 context does alias @id to id, which is why this
+	// went unnoticed: it is a definition the context supplies, not a
+	// spelling this package may assume.
+	if id, ok := node["@id"].(string); ok {
 		return id
 	}
 
@@ -381,16 +388,12 @@ func nodeIDUnder(node map[string]any, context any, options *ld.JsonLdOptions) st
 	return ""
 }
 
-// compactNodeID reads a node's identifier under either spelling. A compacted
-// document written against the v2 context aliases @id to id.
+// compactNodeID reads a node's identifier by the keyword itself. Any other
+// spelling is a term the active context defines, so reading it needs that
+// context - see nodeIDUnder.
 func compactNodeID(node map[string]any) string {
-	if id, ok := node["@id"].(string); ok {
-		return id
-	}
-	if id, ok := node["id"].(string); ok {
-		return id
-	}
-	return ""
+	id, _ := node["@id"].(string)
+	return id
 }
 
 // ResolvedNodeIDs returns each node's identifier as an ABSOLUTE IRI wherever
@@ -614,7 +617,11 @@ func coalesceCompactedByID(nodes []map[string]any, context any, options *ld.Json
 // spellings this package reads directly, and any alias the active context
 // defines for the keyword.
 func idMemberNames(node map[string]any, context any, options *ld.JsonLdOptions) map[string]bool {
-	names := map[string]bool{"@id": true, "id": true}
+	// The KEYWORD alone is unconditional. "id" is resolved like any other
+	// member, because a context may define it as an ordinary property - and
+	// the merge has to skip exactly what the reader treats as an identifier,
+	// or it loses a member the document meant to keep.
+	names := map[string]bool{"@id": true}
 
 	var active *ld.Context
 	for key := range node {

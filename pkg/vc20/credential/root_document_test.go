@@ -37,19 +37,22 @@ func TestRootCompactedDocument(t *testing.T) {
 	})
 
 	t.Run("without a known root the unreferenced node wins", func(t *testing.T) {
+		// @id, because this document carries no context to define "id" as
+		// anything - a term no context defines is a relative IRI that
+		// expansion drops, so it is not an identifier at all.
 		rooted, err := RootCompactedDocument(map[string]any{
 			"@graph": []any{
-				map[string]any{"id": "https://example.org/subject"},
-				map[string]any{"id": "https://example.org/credential", "credentialSubject": "https://example.org/subject"},
+				map[string]any{"@id": "https://example.org/subject"},
+				map[string]any{"@id": "https://example.org/credential", "credentialSubject": "https://example.org/subject"},
 			},
 		}, "", nil)
 		require.NoError(t, err)
-		require.Equal(t, "https://example.org/credential", rooted["id"])
+		require.Equal(t, "https://example.org/credential", rooted["@id"])
 	})
 
 	t.Run("a known root that is gone is refused", func(t *testing.T) {
 		_, err := RootCompactedDocument(map[string]any{
-			"@graph": []any{map[string]any{"id": "https://example.org/subject"}},
+			"@graph": []any{map[string]any{"@id": "https://example.org/subject"}},
 		}, "https://example.org/credential", nil)
 		require.ErrorContains(t, err, "no longer holds the node")
 
@@ -521,12 +524,17 @@ func TestRootCompactedDocumentIgnoresASelfLinkWithAContext(t *testing.T) {
 		"carries": {"@id": "https://example.org/vocab#carries", "@type": "@id"}
 	}`), &context))
 
+	// @id in the DATA, so both readings below see the same identifiers and
+	// the only difference between them is whether the reference terms
+	// resolve - which is what this test is comparing. Spelling the ids
+	// through a term the contextless reading cannot define would compare two
+	// different documents.
 	graph := []any{
 		// A property of its own, or expansion drops it as free-floating and
 		// the expanded reading is never exercised at all.
-		map[string]any{"id": "https://example.org/other", "note": "kept"},
+		map[string]any{"@id": "https://example.org/other", "note": "kept"},
 		map[string]any{
-			"id":      "https://example.org/credential",
+			"@id":     "https://example.org/credential",
 			"about":   "https://example.org/credential",
 			"carries": "https://example.org/other",
 		},
@@ -537,13 +545,13 @@ func TestRootCompactedDocumentIgnoresASelfLinkWithAContext(t *testing.T) {
 		"@graph":   graph,
 	}, "", nil)
 	require.NoError(t, err, "a self-link is not another node referring to the root")
-	require.Equal(t, "https://example.org/credential", withContext["id"])
+	require.Equal(t, "https://example.org/credential", withContext["@id"])
 
 	// And the contextless reading of the same shape agrees, which is the
 	// property that matters: a context must not move the root.
 	withoutContext, err := RootCompactedDocument(map[string]any{"@graph": graph}, "", nil)
 	require.NoError(t, err)
-	require.Equal(t, withContext["id"], withoutContext["id"],
+	require.Equal(t, withContext["@id"], withoutContext["@id"],
 		"both readings must choose the same node")
 }
 
@@ -1235,4 +1243,58 @@ func TestRootCompactedDocumentMergesFragmentsSpelledDifferently(t *testing.T) {
 	after, err := canonicalFormOf(rooted, nil)
 	require.NoError(t, err)
 	require.Equal(t, before, after, "merging fragments must not change one quad")
+}
+
+// TestRootCompactedDocumentDoesNotAssumeIdNamesTheNode: JSON-LD may map "id"
+// to an ordinary property while naming nodes with @id. Treating "id" as an
+// identifier regardless read a LITERAL as a node name.
+//
+// The difference only shows where @id is absent, since @id short-circuits
+// either way - a first attempt at this test put @id on every node and passed
+// against the bug.
+//
+// The VC v2 context does alias @id to id, which is why this went unnoticed.
+// That is a definition the context supplies, not a spelling to assume.
+func TestRootCompactedDocumentDoesNotAssumeIdNamesTheNode(t *testing.T) {
+	context := map[string]any{
+		// An ORDINARY property that happens to be spelled "id".
+		"id":      "https://example.org/vocab#id",
+		"note":    "https://example.org/vocab#note",
+		"carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+	}
+
+	t.Run("a literal does not make a node referenced", func(t *testing.T) {
+		// The second entry is an unnamed node carrying a literal that looks
+		// like the identifier the first entry points at. Reading that literal
+		// as its name made it the referenced node, leaving exactly one
+		// candidate and a confident, wrong answer. It is a blank node: the
+		// document has TWO nodes nothing refers to and does not say which it
+		// is about.
+		_, err := RootCompactedDocument(map[string]any{
+			"@context": context,
+			"@graph": []any{
+				map[string]any{"@id": "https://example.org/credential", "carries": "https://example.org/other"},
+				map[string]any{"id": "https://example.org/other", "note": "unnamed"},
+			},
+		}, "", nil)
+		require.ErrorContains(t, err, "more than one node nothing refers to")
+	})
+
+	t.Run("an ordinary member survives the merge", func(t *testing.T) {
+		// Fragments of one node, one of them carrying that ordinary member.
+		// The merge skips what the reader treats as an identifier, so
+		// skipping "id" unconditionally dropped a member the document meant
+		// to keep.
+		rooted, err := RootCompactedDocument(map[string]any{
+			"@context": context,
+			"@graph": []any{
+				map[string]any{"@id": "https://example.org/credential", "note": "the first fragment"},
+				map[string]any{"@id": "https://example.org/credential", "id": "a value, not a name"},
+			},
+		}, "", nil)
+		require.NoError(t, err)
+		require.Equal(t, "https://example.org/credential", rooted["@id"])
+		require.Equal(t, "a value, not a name", rooted["id"],
+			"an ordinary property is content, and merging must not discard it")
+	})
 }

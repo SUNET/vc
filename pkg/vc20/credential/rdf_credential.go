@@ -567,7 +567,11 @@ func (rc *RDFCredential) OriginalJSON() string {
 	return rc.originalJSON
 }
 
-// Dataset returns the underlying RDF dataset
+// Dataset returns a COPY of the credential's RDF dataset.
+//
+// Not the underlying one: mutating what this returns does not change the
+// credential, which is a breaking change from the version that handed out the
+// live dataset. The reason is below.
 func (rc *RDFCredential) Dataset() *ld.RDFDataset {
 	// A COPY. The credential's own dataset never leaves this type.
 	//

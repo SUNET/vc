@@ -17,16 +17,18 @@ import (
 // the quads root-scoped hashing exists to keep.
 func TestRemoveRootProofKeepsNestedProofsInAFlattenedDocument(t *testing.T) {
 	// The shape FromRDF produces: the outer credential and the credential it
-	// carries, side by side, linked only by an id reference.
+	// carries, side by side, linked only by an id reference. EXPANDED, which
+	// is what FromRDF emits - so @id, not a term some context would have to
+	// define.
 	flattened := []any{
 		map[string]any{
-			"id":                "https://example.org/credentials/outer",
+			"@id":               "https://example.org/credentials/outer",
 			"type":              "VerifiableCredential",
 			"credentialSubject": "https://example.org/credentials/inner",
 			"proof":             map[string]any{"type": "DataIntegrityProof", "proofValue": "outer"},
 		},
 		map[string]any{
-			"id":    "https://example.org/credentials/inner",
+			"@id":   "https://example.org/credentials/inner",
 			"type":  "VerifiableCredential",
 			"proof": map[string]any{"type": "DataIntegrityProof", "proofValue": "inner"},
 		},
@@ -49,8 +51,8 @@ func TestRemoveRootProofKeepsNestedProofsInAFlattenedDocument(t *testing.T) {
 func TestRemoveRootProofRefusesAnAmbiguousDocument(t *testing.T) {
 	t.Run("two unreferenced nodes", func(t *testing.T) {
 		document := []any{
-			map[string]any{"id": "https://example.org/a", "proof": map[string]any{}},
-			map[string]any{"id": "https://example.org/b", "proof": map[string]any{}},
+			map[string]any{"@id": "https://example.org/a", "proof": map[string]any{}},
+			map[string]any{"@id": "https://example.org/b", "proof": map[string]any{}},
 		}
 		_, err := removeRootProof(document, nil)
 		require.ErrorContains(t, err, "more than one node nothing refers to")
@@ -60,8 +62,8 @@ func TestRemoveRootProofRefusesAnAmbiguousDocument(t *testing.T) {
 
 	t.Run("a reference cycle", func(t *testing.T) {
 		document := []any{
-			map[string]any{"id": "https://example.org/a", "rel": "https://example.org/b"},
-			map[string]any{"id": "https://example.org/b", "rel": "https://example.org/a"},
+			map[string]any{"@id": "https://example.org/a", "rel": "https://example.org/b"},
+			map[string]any{"@id": "https://example.org/b", "rel": "https://example.org/a"},
 		}
 		_, err := removeRootProof(document, nil)
 		require.ErrorContains(t, err, "referred to by another")
@@ -72,7 +74,7 @@ func TestRemoveRootProofRefusesAnAmbiguousDocument(t *testing.T) {
 func TestRemoveRootProofHandlesASingleNode(t *testing.T) {
 	var document any
 	require.NoError(t, json.Unmarshal([]byte(`{
-		"id": "https://example.org/credentials/outer",
+		"@id": "https://example.org/credentials/outer",
 		"https://w3id.org/security#proof": {"type": "DataIntegrityProof"},
 		"credentialSubject": {"proof": {"type": "DataIntegrityProof"}}
 	}`), &document))
