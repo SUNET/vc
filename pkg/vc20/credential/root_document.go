@@ -216,12 +216,24 @@ func rootIndexOfCompactedNodes(nodes []map[string]any, context any, options *ld.
 	// different node picked - for saying nothing of the kind.
 	referenced, resolved := referencedIDs(nodes, context, options)
 
+	// The ids to LOOK UP with. After expansion the referenced set holds
+	// absolute IRIs, while a node's own id is still spelled as the document
+	// writes it - so a compact id never matched, every node looked
+	// unreferenced, and a perfectly good document read as ambiguous.
+	lookup := make([]string, len(nodes))
+	for i, node := range nodes {
+		lookup[i] = compactNodeID(node)
+	}
+	if resolved {
+		lookup = expandNodeIDs(lookup, context, options)
+	}
+
 	rootIndex := -1
 	for i, node := range nodes {
 		id := compactNodeID(node)
 		// A node with no identifier cannot be referred to, so it is a
 		// candidate like any other unreferenced node.
-		if id != "" && isReferenced(nodes, i, id, referenced, resolved) {
+		if id != "" && isReferenced(nodes, i, lookup[i], referenced, resolved) {
 			continue
 		}
 		if rootIndex >= 0 {
@@ -559,4 +571,54 @@ func RootOfExpandedNodes(expanded []any) (map[string]any, error) {
 	}
 
 	return rootOf(coalesceByID(nodes))
+}
+
+// expandNodeIDs resolves several identifiers to the absolute IRIs they stand
+// for, in ONE expansion, keeping the position of each. An identifier that does
+// not resolve keeps its original spelling, which is the right answer for a
+// blank node label and a safe one for anything else.
+func expandNodeIDs(ids []string, context any, options *ld.JsonLdOptions) []string {
+	resolved := make([]string, len(ids))
+	copy(resolved, ids)
+
+	entries := make([]any, 0, len(ids))
+	positions := make([]int, 0, len(ids))
+	for i, id := range ids {
+		if id == "" || strings.HasPrefix(id, "_:") {
+			continue
+		}
+		// A node carrying nothing but an identifier is free-floating and
+		// expansion drops it, so each probe gets a property to keep it.
+		entries = append(entries, map[string]any{
+			"@id":                        id,
+			"https://example.invalid/at": "probe",
+		})
+		positions = append(positions, i)
+	}
+	if len(entries) == 0 {
+		return resolved
+	}
+
+	if options == nil {
+		options = NewJSONLDOptions("")
+	}
+	document := map[string]any{"@graph": entries}
+	if context != nil {
+		document["@context"] = context
+	}
+
+	expanded, err := ld.NewJsonLdProcessor().Expand(document, options)
+	if err != nil || len(expanded) != len(entries) {
+		return resolved
+	}
+	for at, entry := range expanded {
+		node, isNode := entry.(map[string]any)
+		if !isNode {
+			continue
+		}
+		if id, ok := node["@id"].(string); ok && id != "" {
+			resolved[positions[at]] = id
+		}
+	}
+	return resolved
 }

@@ -397,3 +397,28 @@ func TestRootCompactedDocumentUsesNodeLocalContexts(t *testing.T) {
 	require.NoError(t, err, "node-local contexts tell a literal from a reference")
 	require.Equal(t, "https://example.org/credential", rooted["id"])
 }
+
+// TestRootCompactedDocumentNormalisesIDsBeforeLookup: once a document expands,
+// the references it contains are absolute IRIs, while each node's own id is
+// still spelled as the document writes it. Looking a compact id up in a set of
+// absolute ones never matched, so every node looked unreferenced and a
+// perfectly good document read as ambiguous.
+func TestRootCompactedDocumentNormalisesIDsBeforeLookup(t *testing.T) {
+	var context any
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"ex": "https://example.org/things/",
+		"id": "@id",
+		"subject": {"@id": "https://example.org/vocab#subject", "@type": "@id"}
+	}`), &context))
+
+	rooted, err := RootCompactedDocument(map[string]any{
+		"@context": context,
+		"@graph": []any{
+			map[string]any{"id": "ex:subject"},
+			map[string]any{"id": "ex:credential", "subject": "ex:subject"},
+		},
+	}, "", nil)
+	require.NoError(t, err,
+		"the compact link names the compact node, however each is spelled")
+	require.Equal(t, "ex:credential", rooted["id"])
+}
