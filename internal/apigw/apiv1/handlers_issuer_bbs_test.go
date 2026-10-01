@@ -272,3 +272,36 @@ func TestIssueBBSRefusesAnUnknownSuite(t *testing.T) {
 		t.Fatalf("internal wording reached the wallet: %q", desc)
 	}
 }
+
+// TestIssueBBSCarriesTheIssuersAllocationVerdict: the BBS path builds its
+// statusEntry as a literal, and that literal has to carry
+// reply.StatusAllocation the way the SD-JWT, mdoc and VC 2.0 paths do.
+//
+// Leaving it at the zero value means UNSPECIFIED, which saveCredentialSubjects
+// reads as "an issuer too old to have the field" and refuses - so an
+// external allocator running degraded_mode=proceed, whose whole point is
+// to return no URI and STATUS_ALLOCATION_NONE and keep issuing, would have
+// had every BBS issuance fail instead.
+//
+// An identifier is supplied deliberately: with an empty one
+// saveCredentialSubjects returns before the verdict is ever consulted, and
+// the test would pass with the bug in place.
+func TestIssueBBSCarriesTheIssuersAllocationVerdict(t *testing.T) {
+	issuer := &recordingIssuerClient{
+		reply: &apiv1_issuer.MakeJWPReply{
+			Credentials: []*apiv1_issuer.Credential{{Credential: "hdr.payloads.proof"}},
+			// Degraded mode: the allocator was asked, could not allocate,
+			// and the issuer says so rather than staying silent.
+			StatusAllocation: apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE,
+		},
+	}
+	c := bbsTestClient(t, issuer)
+
+	credentials, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "person-1", "SUNET", bbsRequest())
+	if err != nil {
+		t.Fatalf("a credential issued without a status entry, by an issuer that said so, must still be delivered: %v", err)
+	}
+	if len(credentials) != 1 {
+		t.Fatalf("got %d credentials, want exactly 1", len(credentials))
+	}
+}

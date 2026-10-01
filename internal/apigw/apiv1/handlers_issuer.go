@@ -1308,6 +1308,13 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 		Index:   reply.TokenStatusListIndex,
 		URI:     reply.TokenStatusListUri,
 		Backend: reply.TokenStatusListBackend,
+		// Carried, not defaulted. An external allocator in
+		// degraded_mode=proceed legitimately returns no URI and
+		// STATUS_ALLOCATION_NONE; leaving this UNSPECIFIED makes
+		// saveCredentialSubjects read the reply as an issuer too old to
+		// have the field and refuse the whole issuance, which is exactly
+		// the case degraded mode exists to keep working.
+		Allocated: reply.StatusAllocation,
 	}}); err != nil {
 		return nil, err
 	}
