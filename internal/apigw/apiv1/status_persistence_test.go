@@ -424,3 +424,37 @@ func TestSaveCredentialSubjects_SilentIssuerIsRefused(t *testing.T) {
 	require.Empty(t, store.saved, "nothing is recorded on a reply that cannot be trusted")
 	require.Empty(t, issuer.calls, "and there is no URI to release it by")
 }
+
+// TestSaveCredentialSubjects_NoStoreReleasesAllocations: an apigw with no
+// credential-status store still receives allocated entries from the issuer,
+// because allocation is configured on the ISSUER and the two are separate
+// deployments. The issuance fails here - correctly, the mapping is what
+// revocation looks a credential up by - but the slots were already reserved
+// and VALID, and this was the one failure path that returned without
+// releasing them.
+//
+// It matters more than the other paths rather than less: the callers set
+// saved = true before entering saveCredentialSubjects, deliberately handing
+// cleanup over to it, and in a deployment configured this way EVERY batch
+// takes this branch. The leak was the steady state, not an edge case.
+func TestSaveCredentialSubjects_NoStoreReleasesAllocations(t *testing.T) {
+	issuer := &recordingIssuer{}
+	c := &Client{
+		log:          logger.NewSimple("test"),
+		issuerClient: issuer,
+	}
+
+	err := c.saveCredentialSubjects(t.Context(), "person-1", "SUNET", "pid", []statusEntry{
+		{Section: 4, Index: 5, URI: "https://registry.example.com/statuslists/4", Backend: "registry"},
+		{Index: 17, URI: "https://status.example.com/statuslists/abc", Backend: "status_service"},
+	})
+	require.Error(t, err, "an entry that cannot be recorded must not be issued")
+
+	require.Len(t, issuer.calls, 2, "both allocated entries must be released, not just the one the loop reached")
+	released := map[string]uint32{}
+	for _, call := range issuer.calls {
+		released[call.StatusListUri] = call.Status
+	}
+	require.Equal(t, uint32(1), released["https://registry.example.com/statuslists/4"], "released entries are marked INVALID")
+	require.Equal(t, uint32(1), released["https://status.example.com/statuslists/abc"])
+}

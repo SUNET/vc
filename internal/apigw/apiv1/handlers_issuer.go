@@ -838,6 +838,23 @@ func (c *Client) saveCredentialSubjects(ctx context.Context, identifier, authent
 		}
 
 		if c.db == nil || c.db.CredentialStatusColl == nil {
+			// Same stranding as every other failure below, and it was the
+			// one path that did not release: the entries are already
+			// allocated and VALID on their backend, the callers set
+			// saved = true before calling this function precisely because
+			// this function owns the cleanup from here on, and a
+			// deployment with no status store runs every issuance through
+			// this branch - so the leak was not an edge case there, it was
+			// every batch.
+			//
+			// Nothing can have been recorded yet: the store is the thing
+			// that is missing, and entries with no URI skip this check
+			// altogether, so no earlier iteration reached Save. Only the
+			// allocations need undoing.
+			c.log.Error(errors.New("no credential status store configured"),
+				"a status list entry was allocated but this apigw has no store to record it in; releasing it, because nothing could later find it to revoke",
+				"identifier", identifier, "uri", e.URI, "index", e.Index, "backend", e.Backend)
+			c.releaseAllocations(ctx, entries)
 			return errors.New("cannot record the credential's status list entry: no credential status store configured")
 		}
 		// A URI with no routable backend is the same failure as a backend
