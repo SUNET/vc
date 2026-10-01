@@ -501,8 +501,16 @@ func coalesceCompactedByID(nodes []map[string]any, context any, options *ld.Json
 			continue
 		}
 		into := merged[index]
+		identifiers := idMemberNames(node, context, options)
 		for key, value := range node {
-			if key == "@id" || key == "id" {
+			// EVERY member that stands for @id, not just the two literal
+			// spellings. Merging a fragment's aliased identifier into the
+			// node it is a fragment OF appended it to the one already
+			// there, turning the identifier into an array - after which
+			// nothing could read it as an identifier at all, and a
+			// perfectly good split node was rejected as having lost its
+			// root.
+			if identifiers[key] {
 				continue
 			}
 			existing, present := into[key]
@@ -514,6 +522,30 @@ func coalesceCompactedByID(nodes []map[string]any, context any, options *ld.Json
 		}
 	}
 	return merged
+}
+
+// idMemberNames lists the members of a node that stand for @id: the two
+// spellings this package reads directly, and any alias the active context
+// defines for the keyword.
+func idMemberNames(node map[string]any, context any, options *ld.JsonLdOptions) map[string]bool {
+	names := map[string]bool{"@id": true, "id": true}
+
+	var active *ld.Context
+	for key := range node {
+		if names[key] || strings.HasPrefix(key, "@") {
+			continue
+		}
+		if active == nil {
+			active = nodeContext(node, composedContext(node, context, context != nil), options)
+			if active == nil {
+				break
+			}
+		}
+		if resolved, unresolvable := expandMemberName(active, key); !unresolvable && resolved == "@id" {
+			names[key] = true
+		}
+	}
+	return names
 }
 
 func rootIndexOfCompactedNodes(nodes []map[string]any, context any, options *ld.JsonLdOptions) (int, error) {

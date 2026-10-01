@@ -1040,3 +1040,46 @@ func TestMemoizedAnswersAreDroppedWhenTheDatasetIsHandedOut(t *testing.T) {
 		require.Nil(t, cred.rootScoped)
 	})
 }
+
+// TestRootCompactedDocumentMergesSplitFragmentsUnderAnAliasedID: the merge
+// skipped only the literal @id and id, so a fragment whose identifier is
+// written through an alias had that identifier APPENDED to the one already
+// there - turning it into an array, after which nothing could read it as an
+// identifier at all and a perfectly good split node was rejected as having
+// lost its root.
+func TestRootCompactedDocumentMergesSplitFragmentsUnderAnAliasedID(t *testing.T) {
+	document := func() map[string]any {
+		return map[string]any{
+			"@context": map[string]any{
+				"identifier": "@id",
+				"note":       "https://example.org/vocab#note",
+				"carries":    map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+			},
+			"@graph": []any{
+				map[string]any{
+					"identifier": "https://example.org/credential",
+					"carries":    "https://example.org/other",
+				},
+				map[string]any{
+					"identifier": "https://example.org/credential",
+					"note":       "the second fragment",
+				},
+				map[string]any{"identifier": "https://example.org/other", "note": "a sibling"},
+			},
+		}
+	}
+
+	before, err := canonicalFormOf(document(), nil)
+	require.NoError(t, err)
+
+	rooted, err := RootCompactedDocument(document(), "https://example.org/credential", nil)
+	require.NoError(t, err, "fragments spelled through an alias are still fragments of one node")
+	require.Equal(t, "https://example.org/credential", rooted["identifier"],
+		"and the identifier is still a string, not a list of itself")
+	require.Equal(t, "the second fragment", rooted["note"],
+		"with both fragments' properties on it")
+
+	after, err := canonicalFormOf(rooted, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "merging fragments must not change one quad")
+}
