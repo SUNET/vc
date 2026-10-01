@@ -1088,3 +1088,34 @@ func TestCanonicalFormIgnoresAStaleInputFormat(t *testing.T) {
 	require.NoError(t, err, "the document is JSON-LD however the options were last used")
 	require.Contains(t, canonical, "read as JSON-LD, not as N-Quads")
 }
+
+// TestCanonicalFormHonoursProduceGeneralizedRdf: json-gold's Normalize builds
+// fresh options for its RDF step and copies only the base, the processing mode
+// and the loader, so ProduceGeneralizedRdf was dropped. A credential parsed
+// with it kept its blank-node-predicate quads in the dataset and left them OUT
+// of the canonical form - so those quads could be changed, added or removed
+// without invalidating any signature over the credential.
+func TestCanonicalFormHonoursProduceGeneralizedRdf(t *testing.T) {
+	const document = `{
+		"@context": {"id": "@id", "rel": "_:aBlankNodePredicate"},
+		"id": "https://example.org/credential",
+		"rel": "a statement made through a blank node predicate"
+	}`
+
+	generalized := NewJSONLDOptions("")
+	generalized.ProduceGeneralizedRdf = true
+	withQuad, err := NewRDFCredentialFromJSON([]byte(document), generalized)
+	require.NoError(t, err)
+	canonical, err := withQuad.CanonicalForm()
+	require.NoError(t, err)
+	require.Contains(t, canonical, "a statement made through a blank node predicate",
+		"a credential parsed with generalized RDF is canonicalized with it")
+
+	// And the default genuinely drops it, or this proves nothing.
+	withoutQuad, err := NewRDFCredentialFromJSON([]byte(document), nil)
+	require.NoError(t, err)
+	plain, err := withoutQuad.CanonicalForm()
+	require.NoError(t, err)
+	require.NotContains(t, plain, "a statement made through a blank node predicate",
+		"the quad is dropped without the option, which is what made the gap invisible")
+}

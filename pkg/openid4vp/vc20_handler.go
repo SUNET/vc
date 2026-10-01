@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"strings"
 	"time"
@@ -1180,8 +1181,22 @@ func (h *VC20Handler) buildResult(
 	proof map[string]any,
 	isSD bool,
 ) (*VC20VerificationResult, error) {
+	// The claims report the proof that VERIFIED, not whichever one the
+	// document happens to list first. A proof SET may carry a forged proof
+	// ahead of a genuine one, and extraction resolves only the first
+	// reference - so Claims["proof"] named the proof this package had just
+	// REJECTED while every other field on this result described the one it
+	// accepted. A COPY, because the caller's map is not ours to rewrite.
+	claims := maps.Clone(credMap)
+	if claims == nil {
+		claims = map[string]any{}
+	}
+	if proof != nil {
+		claims["proof"] = proof
+	}
+
 	result := &VC20VerificationResult{
-		Claims:                credMap,
+		Claims:                claims,
 		RawCredential:         credBytes,
 		IsSelectiveDisclosure: isSD,
 	}

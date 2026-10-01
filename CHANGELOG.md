@@ -170,15 +170,27 @@
   `Sign` output fails `Verify`. The VC-v2 options stay where they belong, on
   proof-configuration hashing.
 
-  **A credential whose terms come from an `expandContext` is canonicalized
-  under it.** json-gold's `Normalize` builds fresh options for its RDF step and
-  carries only the base, the document loader and the processing mode across, so
-  the `expandContext` was dropped and such a document canonicalized to
-  **nothing**: no error, no quads, and a Data Integrity signature over the empty
-  string — the same signature for every document of that shape. The document is
-  now expanded first, where the option is honoured, and the expanded form
-  normalized. **Credentials signed that way before this release carry a
-  meaningless proof** and must be re-signed.
+  **Canonicalization goes through the credential's own RDF conversion.**
+  json-gold's `Normalize` builds fresh options for its RDF step and carries
+  only the base, the document loader and the processing mode across, so
+  everything else was dropped. A credential whose terms come from an
+  `expandContext` canonicalized to **nothing** — no error, no quads, and a Data
+  Integrity signature over the empty string, the same signature for every
+  document of that shape. A credential parsed with `ProduceGeneralizedRdf` kept
+  its blank-node-predicate quads in its dataset and left them OUT of the
+  canonical form, so those quads could be added, changed or removed without
+  invalidating any signature. The document is now converted to RDF under the
+  credential's own options and that DATASET canonicalized directly — not a
+  document and not an N-Quads string, since a blank node in predicate position
+  is not valid N-Quads and the round trip drops exactly the quads generalized
+  RDF exists for. **Credentials signed under either option before this release
+  carry a proof that does not cover what they say** and must be re-signed.
+
+  **The OpenID4VP handler's `Claims["proof"]` reports the proof that
+  verified.** Extraction resolves only the first proof reference, so a proof
+  SET carrying a forged proof ahead of a genuine one had the claims naming the
+  REJECTED proof while every other field on the result described the accepted
+  one.
 
   **A document whose root takes part in a reference cycle is refused at
   SIGNING and at VERIFICATION.** A presentation carrying a credential whose

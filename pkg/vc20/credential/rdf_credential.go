@@ -147,28 +147,14 @@ func (rc *RDFCredential) CanonicalForm() (string, error) {
 		// or we have to convert dataset back to JSON-LD first (inefficient).
 		// However, for now, let's assume we always have originalJSON or we can reconstruct it.
 		if rc.dataset != nil {
-			// Fallback: serialize dataset to N-Quads then normalize
-			// We cannot pass *RDFDataset directly to Normalize or FromRDF as they expect serialized input
-
-			serializer := &ld.NQuadRDFSerializer{}
-			nquads, err := serializer.Serialize(rc.dataset)
+			// The SAME route as below: straight to the normalization
+			// algorithm. Serializing to N-Quads and parsing them back
+			// dropped any quad with a blank node in predicate position,
+			// which is not valid N-Quads however the dataset was built.
+			normalized, err := ld.NewJsonLdApi().Normalize(rc.dataset, rc.canonicalizationOptions())
 			if err != nil {
-				return "", fmt.Errorf("failed to serialize dataset to N-Quads: %w", err)
+				return "", fmt.Errorf("failed to normalize dataset: %w", err)
 			}
-			nquadsStr, ok := nquads.(string)
-			if !ok {
-				return "", fmt.Errorf("unexpected serialization result: %T", nquads)
-			}
-
-			processor := ld.NewJsonLdProcessor()
-			opts := rc.canonicalizationOptions()
-			opts.InputFormat = "application/n-quads"
-
-			normalized, err := processor.Normalize(nquadsStr, opts)
-			if err != nil {
-				return "", fmt.Errorf("failed to normalize N-Quads: %w", err)
-			}
-
 			normalizedStr, ok := normalized.(string)
 			if !ok {
 				return "", fmt.Errorf("unexpected normalized format: %T", normalized)
@@ -186,25 +172,34 @@ func (rc *RDFCredential) CanonicalForm() (string, error) {
 
 	// Use json-gold's Normalize function on the JSON-LD document
 	// This performs URDNA2015 normalization and returns canonical N-Quads
-	processor := ld.NewJsonLdProcessor()
-	opts := rc.canonicalizationOptions()
-
-	// json-gold's Normalize builds FRESH options for its RDF step and carries
-	// only the base, the document loader and the processing mode across - the
-	// expandContext is dropped. A document that gets its terms from one then
-	// canonicalizes to NOTHING AT ALL: no error, no quads, and a signature
-	// over the empty string. Expand here, where the option IS honoured, and
-	// normalize the expanded form, which carries no context to lose.
-	if opts.ExpandContext != nil {
-		expanded, err := processor.Expand(jsonLdDoc, rc.expansionOptions())
-		if err != nil {
-			return "", fmt.Errorf("failed to expand JSON-LD under the credential's expandContext: %w", err)
-		}
-		jsonLdDoc = expanded
-		opts.ExpandContext = nil
+	// TO RDF FIRST, under the credential's own options, and canonicalize that
+	// DATASET - never a document or a string.
+	//
+	// Handing the JSON to JsonLdProcessor.Normalize instead loses most of
+	// those options: json-gold builds FRESH options for its RDF step and
+	// carries only the base, the processing mode and the document loader
+	// across. The expandContext went, so a document that gets its terms from
+	// one canonicalized to NOTHING - no error, no quads, and a signature over
+	// the empty string, the same signature for every document of that shape.
+	// So did ProduceGeneralizedRdf, so a credential parsed with it kept its
+	// blank-node-predicate quads in the dataset and left them OUT of the
+	// canonical form, where they could then be changed without invalidating
+	// any signature.
+	//
+	// Serializing to N-Quads in between does not work either: a blank node in
+	// predicate position is not valid N-Quads, and json-gold's parser refuses
+	// it - so the round trip drops exactly the quads generalized RDF exists
+	// for. The dataset goes straight to the normalization algorithm.
+	rdf, err := ld.NewJsonLdProcessor().ToRDF(jsonLdDoc, rc.expansionOptions())
+	if err != nil {
+		return "", fmt.Errorf("failed to convert JSON-LD to RDF: %w", err)
+	}
+	dataset, isDataset := rdf.(*ld.RDFDataset)
+	if !isDataset {
+		return "", fmt.Errorf("unexpected RDF conversion result: %T", rdf)
 	}
 
-	normalized, err := processor.Normalize(jsonLdDoc, opts)
+	normalized, err := ld.NewJsonLdApi().Normalize(dataset, rc.canonicalizationOptions())
 	if err != nil {
 		return "", fmt.Errorf("failed to normalize JSON-LD: %w", err)
 	}

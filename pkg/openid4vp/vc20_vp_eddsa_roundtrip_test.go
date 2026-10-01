@@ -323,6 +323,18 @@ func TestVerifyAndExtractReportsTheProofThatVerified(t *testing.T) {
 		"the reported purpose must be the verified proof's, not the one in front of it")
 	require.NotEqual(t, 2001, result.ProofCreated.Year(),
 		"nor its created")
+
+	// And the CLAIMS have to agree with those fields. Extraction resolves
+	// only the first proof reference, so Claims["proof"] went on naming the
+	// forgery while every other field on this result described the proof
+	// that actually verified - a caller reading the claims rather than the
+	// fields got the attacker's proofPurpose back as verified.
+	claimed, isNode := result.Claims["proof"].(map[string]any)
+	require.True(t, isNode, "the claims report a single proof: the one that verified")
+	require.Equal(t, "assertionMethod", claimed["proofPurpose"],
+		"the claims report the verified proof, not whichever came first")
+	require.Equal(t, genuine["proofValue"], claimed["proofValue"])
+	require.NotEqual(t, forged["proofValue"], claimed["proofValue"])
 }
 
 // signedExampleDocument signs a minimal credential written against
