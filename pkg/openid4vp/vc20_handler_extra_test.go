@@ -52,7 +52,6 @@ func TestExpandedTypesIgnoresDecoyNodes(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, result.TypeIRIs, vcIRI, "the credential's own type is read")
 	assert.NotContains(t, result.TypeIRIs, decoy, "a sibling node's type is not the credential's")
-
 }
 
 // TestExpandedTypesDropsRelativeIRIs pins the other half: a term no context
