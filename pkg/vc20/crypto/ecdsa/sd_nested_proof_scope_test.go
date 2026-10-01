@@ -203,3 +203,58 @@ func TestVerifyRootProofAcceptsOneOfSeveralRootProofs(t *testing.T) {
 	require.Error(t, suite.VerifyRootProof(twice, &firstKey.PublicKey, second),
 		"a proof is still only verified against the key that made it")
 }
+
+// TestDeriveRefusesAnAnonymousRoot: which node a derived credential is about
+// has to come from the BASE credential. A root carrying no identifier cannot
+// say - derivation rewrites blank node labels, so nothing is left to match it
+// by - and the fallback, the node nothing refers to, is precisely what a
+// disclosure gets to choose.
+//
+// Drop every triple of an anonymous root and the subject is the only
+// unreferenced node left, so the credential's proof ends up attached to the
+// subject: the re-rooting the whole root-scoping change exists to stop.
+func TestDeriveRefusesAnAnonymousRoot(t *testing.T) {
+	suite := NewSdSuite()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	// No "id" on the credential itself.
+	anonymous, err := json.Marshal(map[string]any{
+		"@context":          []any{"https://www.w3.org/ns/credentials/v2"},
+		"type":              []any{"VerifiableCredential"},
+		"issuer":            "did:example:issuer",
+		"validFrom":         "2023-01-01T00:00:00Z",
+		"credentialSubject": map[string]any{"id": "did:example:subject"},
+	})
+	require.NoError(t, err)
+
+	cred, err := credential.NewRDFCredentialFromJSON(anonymous, ld.NewJsonLdOptions(""))
+	require.NoError(t, err)
+
+	signed, err := suite.Sign(cred, key, &SdSignOptions{
+		VerificationMethod: "did:example:issuer#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err, "signing an anonymous-root credential is still fine")
+
+	rootID, err := signed.RootID()
+	require.NoError(t, err)
+	require.Empty(t, rootID, "the root must really be anonymous, or this proves nothing")
+
+	withoutProof, err := signed.CredentialWithoutProof()
+	require.NoError(t, err)
+	canonical, err := withoutProof.CanonicalForm()
+	require.NoError(t, err)
+	quads := parseNQuads(canonical)
+	require.NotEmpty(t, quads)
+
+	reveal := make([]int, len(quads))
+	for i := range reveal {
+		reveal[i] = i
+	}
+
+	_, err = suite.Derive(signed, reveal, "")
+	require.ErrorContains(t, err, "root carries no identifier",
+		"deriving must refuse rather than let the disclosure pick a root")
+}

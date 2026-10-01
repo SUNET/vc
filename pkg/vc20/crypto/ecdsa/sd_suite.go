@@ -1184,9 +1184,20 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 	// hung on that container, which is why finding it again needed a walk of
 	// the graph. Rooted at its own node instead, with the rest moved to
 	// @included: same graph, same quads, same signature.
+	// Which node the derived document is about has to come from the BASE
+	// credential, not from whatever survived disclosure. A credential whose
+	// root carries no identifier cannot say: derivation rewrites blank node
+	// labels, so there is nothing left to match it by, and the fallback rule
+	// - the node nothing refers to - is exactly what a disclosure can choose.
+	// Drop every triple of an anonymous root and the subject becomes the only
+	// unreferenced node, so the credential's proof would be attached to the
+	// subject. That is the re-rooting this refuses.
 	knownRootID, err := cred.RootID()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the node the base credential is about: %w", err)
+	}
+	if knownRootID == "" {
+		return nil, fmt.Errorf("cannot derive from a credential whose root carries no identifier: disclosure would decide which node the derived credential is about")
 	}
 	m, err := credential.RootCompactedDocument(compactedDerived, knownRootID)
 	if err != nil {
