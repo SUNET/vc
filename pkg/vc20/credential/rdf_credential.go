@@ -35,6 +35,14 @@ type RDFCredential struct {
 	// mutexes meant a reader could hold one while taking another, and an
 	// invalidation clearing them one at a time could interleave with that -
 	// leaving a cache repopulated from state the mutation had just voided.
+	// datasetMu guards `dataset` against the in-place rewrite. SEPARATE from
+	// memoMu, and always taken after it where both are held: the memoized
+	// paths call MarshalJSON on this same credential while holding memoMu,
+	// so a single lock would deadlock the moment the dataset readers took
+	// it. The rewrite takes memoMu then datasetMu; nothing takes them the
+	// other way round.
+	datasetMu sync.RWMutex
+
 	memoMu  sync.Mutex
 	secured *securedDocumentAnswer
 
@@ -190,10 +198,23 @@ func (rc *RDFCredential) CanonicalForm() (string, error) {
 			// two concurrent canonicalizations would race on those writes,
 			// and a credential built by ProofObject - which shares its quads
 			// with the one it came from - would rewrite that one's too.
-			if err := refuseGeneralizedPredicates(rc.dataset); err != nil {
+			// SNAPSHOT under the lock, normalize after releasing it.
+			//
+			// The clone was taken unguarded, so this read could overlap
+			// NormalizeVerifiableCredentialGraph rewriting the same graph
+			// slices - and capture a half-rewritten dataset despite that
+			// rewrite now holding memoMu for its whole duration. A credential
+			// from ProofObject is dataset-backed and reaches exactly here.
+			//
+			// Only the copy is taken under the lock: normalization is the
+			// expensive part and it works on the snapshot, which nothing else
+			// can reach.
+			snapshot := rc.datasetSnapshot()
+
+			if err := refuseGeneralizedPredicates(snapshot); err != nil {
 				return "", err
 			}
-			normalized, err := ld.NewJsonLdApi().Normalize(cloneDataset(rc.dataset), rc.canonicalizationOptions())
+			normalized, err := ld.NewJsonLdApi().Normalize(snapshot, rc.canonicalizationOptions())
 			if err != nil {
 				return "", fmt.Errorf("failed to normalize dataset: %w", err)
 			}
@@ -282,13 +303,14 @@ func (rc *RDFCredential) CredentialWithoutProof() (*RDFCredential, error) {
 // CredentialWithoutProofForTypes returns the credential as RDF without the proof object
 // attached to nodes of the specified types. If no types are provided, all proofs are removed.
 func (rc *RDFCredential) CredentialWithoutProofForTypes(targetTypes ...string) (*RDFCredential, error) {
-	if rc.dataset == nil {
+	source := rc.datasetSnapshot()
+	if source == nil {
 		return nil, fmt.Errorf("RDF dataset is nil")
 	}
 
 	// Map subject -> types
 	subjectTypes := make(map[string][]string)
-	for _, quads := range rc.dataset.Graphs {
+	for _, quads := range source.Graphs {
 		for _, quad := range quads {
 			if quad.Predicate != nil && quad.Predicate.GetValue() == "http://www.w3.org/1999/02/22-rdf-syntax-ns#type" {
 				if quad.Subject != nil && quad.Object != nil {
@@ -325,7 +347,7 @@ func (rc *RDFCredential) CredentialWithoutProofForTypes(targetTypes ...string) (
 	}
 
 	// Pass 1: Find proof nodes that should be removed
-	for _, quads := range rc.dataset.Graphs {
+	for _, quads := range source.Graphs {
 		for _, quad := range quads {
 			if quad.Predicate == nil {
 				continue
@@ -350,7 +372,7 @@ func (rc *RDFCredential) CredentialWithoutProofForTypes(targetTypes ...string) (
 	// Filter out proof quads from all graphs
 	filteredGraphs := make(map[string][]*ld.Quad)
 
-	for graphName, quads := range rc.dataset.Graphs {
+	for graphName, quads := range source.Graphs {
 		filteredQuads := make([]*ld.Quad, 0)
 
 		for _, quad := range quads {
@@ -420,14 +442,15 @@ func (rc *RDFCredential) CredentialWithoutProofForTypes(targetTypes ...string) (
 
 // ProofObject extracts the proof object as separate RDF
 func (rc *RDFCredential) ProofObject() (*RDFCredential, error) {
-	if rc.dataset == nil {
+	source := rc.datasetSnapshot()
+	if source == nil {
 		return nil, fmt.Errorf("RDF dataset is nil")
 	}
 
 	// Extract only proof quads from all graphs
 	proofGraphs := make(map[string][]*ld.Quad)
 
-	for graphName, quads := range rc.dataset.Graphs {
+	for graphName, quads := range source.Graphs {
 		proofQuads := make([]*ld.Quad, 0)
 
 		for _, quad := range quads {
@@ -528,7 +551,7 @@ func (rc *RDFCredential) MarshalJSON() ([]byte, error) {
 	//
 	// It also drops the stale-options problem the old copy-and-set-Format
 	// dance existed for: nothing here needs a Format at all.
-	jsonLd, err := ld.NewJsonLdApi().FromRDF(rc.dataset, rc.expansionOptions())
+	jsonLd, err := ld.NewJsonLdApi().FromRDF(rc.datasetSnapshot(), rc.expansionOptions())
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert RDF to JSON-LD: %w", err)
 	}
@@ -571,7 +594,7 @@ func (rc *RDFCredential) ToCompactJSON() ([]byte, error) {
 	// set Format on rc.options in place - so a credential that had once been
 	// compacted parsed JSON as N-Quads ever after. expansionOptions returns
 	// a copy with both format fields cleared, which is what this needs.
-	expanded, err := ld.NewJsonLdApi().FromRDF(rc.dataset, rc.expansionOptions())
+	expanded, err := ld.NewJsonLdApi().FromRDF(rc.datasetSnapshot(), rc.expansionOptions())
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert RDF to JSON-LD: %w", err)
 	}
@@ -630,6 +653,22 @@ func (rc *RDFCredential) Dataset() *ld.RDFDataset {
 	//
 	// The memos are only sound if nothing outside can change the document,
 	// so nothing outside gets the chance.
+	return rc.datasetSnapshot()
+}
+
+// datasetSnapshot returns a copy of the dataset taken under the lock, so a
+// reader works on something the rewrite cannot be editing underneath it.
+//
+// A snapshot rather than a held read lock: these readers call one another -
+// MarshalJSON reaches this through documentSource, ProofObject builds a
+// credential whose own methods come back here - and Go's RWMutex is not
+// re-entrant, so a nested RLock deadlocks as soon as a writer is waiting.
+// Copying once and letting the caller work unlocked has no such ordering to
+// get wrong.
+func (rc *RDFCredential) datasetSnapshot() *ld.RDFDataset {
+	rc.datasetMu.RLock()
+	defer rc.datasetMu.RUnlock()
+
 	return cloneDataset(rc.dataset)
 }
 
@@ -736,7 +775,7 @@ func (rc *RDFCredential) NQuads() (string, error) {
 	}
 
 	serializer := &ld.NQuadRDFSerializer{}
-	nquads, err := serializer.Serialize(rc.dataset)
+	nquads, err := serializer.Serialize(rc.datasetSnapshot())
 	if err != nil {
 		return "", fmt.Errorf("failed to serialize dataset to N-Quads: %w", err)
 	}
@@ -766,6 +805,10 @@ func (rc *RDFCredential) NormalizeVerifiableCredentialGraph() error {
 	rc.memoMu.Lock()
 	defer rc.memoMu.Unlock()
 	defer rc.invalidateLocked()
+
+	// datasetMu AFTER memoMu, always in that order - see the field comment.
+	rc.datasetMu.Lock()
+	defer rc.datasetMu.Unlock()
 
 	if rc.dataset == nil {
 		return fmt.Errorf("RDF dataset is nil")

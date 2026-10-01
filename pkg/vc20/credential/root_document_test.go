@@ -1395,6 +1395,13 @@ func TestMemoizedAnswersUnderConcurrentInvalidation(t *testing.T) {
 //
 // A fresh credential per round, because the rewrite is idempotent - once the
 // graph has moved there is nothing left to race with.
+//
+// HONEST LIMIT: detection here is probabilistic, not guaranteed. Measured
+// against an unsynchronized build, -race reported the problem in about seven
+// runs out of ten, and raising the round count did not improve it - the
+// window is decided by scheduling rather than by iterations. So this test
+// failing means there IS a race; it passing once does not prove there is
+// none. The guarantee comes from the lock, not from this.
 func TestRewriteExcludesReadersForTheWholeMutation(t *testing.T) {
 	const presentation = `{
 		"@context": "https://www.w3.org/ns/credentials/v2",
@@ -1409,7 +1416,7 @@ func TestRewriteExcludesReadersForTheWholeMutation(t *testing.T) {
 		}]
 	}`
 
-	for round := 0; round < 15; round++ {
+	for round := 0; round < 25; round++ {
 		cred, err := NewRDFCredentialFromJSON([]byte(presentation), nil)
 		require.NoError(t, err)
 
@@ -1430,8 +1437,18 @@ func TestRewriteExcludesReadersForTheWholeMutation(t *testing.T) {
 			defer func() { done <- struct{}{} }()
 			_ = cred.Dataset()
 		}()
+		// A DATASET-BACKED credential takes the other branch of
+		// CanonicalForm, which cloned rc.dataset unguarded. The JSON-backed
+		// readers above never reach it.
+		go func() {
+			defer func() { done <- struct{}{} }()
+			if proofCred, err := cred.ProofObject(); err == nil && proofCred != nil {
+				_, _ = proofCred.CanonicalForm()
+			}
+			_, _ = cred.CanonicalForm()
+		}()
 
-		for i := 0; i < 5; i++ {
+		for i := 0; i < 6; i++ {
 			select {
 			case <-done:
 			case <-time.After(60 * time.Second):
