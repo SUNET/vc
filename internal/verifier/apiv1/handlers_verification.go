@@ -522,6 +522,39 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				})
 			}
 
+		case FormatJWP:
+			// This verifier cannot check a JWP, and must say so rather than
+			// let one through a branch that was never written for it.
+			//
+			// Until this case existed the refusal happened anyway, but by
+			// accident: a JWP has the same three-segment, tilde-free shape
+			// as a plain JWT, so detectCredentialFormat called it
+			// "vc+sd-jwt" and the SD-JWT parser then failed to unmarshal
+			// its payload segment. That is the SD-JWT parser's strictness
+			// doing the work, not a decision - loosen it and a JWP slides
+			// into a path that would verify nothing about it.
+			//
+			// Two separate things are missing before this case can become
+			// real verification, and both are outside this package:
+			//
+			//   - proof verification. pkg/bbs.VerifyPresentation exists and
+			//     needs the cgo `bbsnative` build; nothing outside
+			//     pkg/bbs's own tests calls it yet.
+			//   - revocation. A JWP's status reference lives in its ISSUER
+			//     HEADER, not in a claim - deliberately, because a claim is
+			//     one of the signed messages and therefore selectively
+			//     disclosable, and revocation a holder can decline to
+			//     reveal is not revocation (see
+			//     internal/issuer/apiv1/handlers_bbs.go). But
+			//     revocation.StatusListChecker.Extract reads claims, and
+			//     the native crate's verification result carries only
+			//     {vct, disclosed} - the Issuer Header never crosses back.
+			//     So whoever implements this case has to surface the header
+			//     and extract the status from it, or a revoked JWP would
+			//     verify.
+			c.log.Error(nil, "JWP presentation received; this verifier has no JWP verification path", "scope", scope)
+			return nil, fmt.Errorf("credential for scope %s is a JWP, which this verifier cannot check: it has no BBS proof verification path, and a JWP's revocation status lives in its issuer header where nothing here reads it", scope)
+
 		default:
 			c.log.Error(nil, "Unknown credential format", "scope", scope, "format", format)
 			return nil, fmt.Errorf("unknown credential format for scope %s", scope)
@@ -890,6 +923,13 @@ const (
 	// FormatMDocZK represents a zero-knowledge-proof presentation of an
 	// ISO/IEC 18013-5 mDOC credential (mso_mdoc_zk) - see pkg/mdoc/zk*.go.
 	FormatMDocZK CredentialFormat = "mso_mdoc_zk"
+	// FormatJWP represents a BBS credential in JWP Compact Serialization
+	// (draft-ietf-jose-json-web-proof / draft-bormann-jwp-modular-bbs) -
+	// what internal/issuer/apiv1/handlers_bbs.go issues.
+	//
+	// Recognised in order to be REFUSED. See the switch in
+	// verifyCredentials for why.
+	FormatJWP CredentialFormat = "jwp"
 	// FormatUnknown represents an unrecognized format
 	FormatUnknown CredentialFormat = "unknown"
 )
@@ -911,7 +951,14 @@ func detectCredentialFormat(vpToken string) CredentialFormat {
 	if strings.Count(vpToken, ".") == 2 && !strings.Contains(vpToken, "~") {
 		// Could be a plain JWT - check if it's valid base64url
 		headerPart, _, _ := strings.Cut(vpToken, ".")
-		if _, err := base64.RawURLEncoding.DecodeString(headerPart); err == nil {
+		if header, err := base64.RawURLEncoding.DecodeString(headerPart); err == nil {
+			// A JWP in Compact Serialization has the same silhouette as a
+			// plain JWT - three base64url segments, no "~" - so it lands
+			// here, and did. It is told apart by its first segment, which
+			// is a JWP Issuer Header rather than a JOSE header.
+			if isJWPIssuerHeader(header) {
+				return FormatJWP
+			}
 			return FormatSDJWT
 		}
 	}
@@ -936,6 +983,28 @@ func detectCredentialFormat(vpToken string) CredentialFormat {
 	}
 
 	return FormatUnknown
+}
+
+// isJWPIssuerHeader reports whether a decoded first segment is a JWP Issuer
+// Header rather than a JOSE header.
+//
+// `cmap` is the discriminator: it is the authenticated map from claim name
+// to message index that draft-bormann-jwp-modular-bbs puts in the Issuer
+// Header, and it has no counterpart in JOSE. `alg` is not enough on its own
+// - both containers carry one - and matching on its VALUE would mean
+// keeping a list of proof algorithm names in step with the native crate.
+//
+// Best-effort, and safe when it is wrong in either direction: a JWP that is
+// not recognised falls through to the SD-JWT branch, which is where it
+// already went and where it already fails. Recognising it only makes the
+// refusal deliberate and legible instead of incidental.
+func isJWPIssuerHeader(header []byte) bool {
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal(header, &parsed); err != nil {
+		return false
+	}
+	_, hasClaimMap := parsed["cmap"]
+	return hasClaimMap
 }
 
 // mapToDisclosers converts a map of claims to []sdjwtvc.Discloser format.
