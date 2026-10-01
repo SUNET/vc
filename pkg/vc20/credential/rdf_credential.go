@@ -40,6 +40,21 @@ type RDFCredential struct {
 	// compactions before anything was authenticated.
 	compactedMu     sync.Mutex
 	compactedProofs *compactedRootProofs
+
+	// The root-scoped document and its canonical N-Quads, computed once.
+	// ecdsa-sd-2023 needs the QUADS rather than a hash - it selects among
+	// them by mandatory pointer - and recomputed the whole root-stability
+	// check, proof removal and URDNA2015 run for every candidate proof in
+	// a set. The secured-document memo above does not cover it, because
+	// that one keeps a hash.
+	rootScopedMu sync.Mutex
+	rootScoped   *rootScopedDocument
+}
+
+type rootScopedDocument struct {
+	document  *RDFCredential
+	canonical string
+	err       error
 }
 
 type compactedRootProofs struct {

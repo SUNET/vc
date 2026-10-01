@@ -51,15 +51,12 @@ func refuseAnOverfullProofSet(cred *credential.RDFCredential) error {
 // another once serialized through RDF can be re-rooted by its holder, and
 // removing the NEW root's proof then reproduces a different unsecured
 // document than the signer meant to secure.
-func rootScopedWithoutProof(cred *credential.RDFCredential) (*credential.RDFCredential, error) {
-	if err := cred.CheckRootSurvivesFlattening(); err != nil {
-		return nil, err
-	}
-	_, withoutRootProof, err := cred.RootProofs()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get the document the proof secures: %w", err)
-	}
-	return withoutRootProof, nil
+// Memoized on the credential: every candidate in a proof set asks for the
+// same answer, and recomputing it meant a full root-stability check, proof
+// removal and URDNA2015 run per candidate - up to 32 of them, before
+// anything is authenticated.
+func rootScopedWithoutProof(cred *credential.RDFCredential) (*credential.RDFCredential, string, error) {
+	return credential.RootScopedDocument(cred)
 }
 
 // NewSdSuite creates a new ECDSA SD cryptosuite
@@ -125,7 +122,7 @@ func (s *SdSuite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, op
 		return nil, err
 	}
 
-	credWithoutProof, err := rootScopedWithoutProof(cred)
+	_, nquadsStr, err := rootScopedWithoutProof(cred)
 	if err != nil {
 		return nil, err
 	}
@@ -140,11 +137,6 @@ func (s *SdSuite) Sign(cred *credential.RDFCredential, key *ecdsa.PrivateKey, op
 	// If we use CanonicalForm, we get _:c14n0, _:c14n1...
 	// If we HMAC those, it's deterministic based on the content.
 	// This seems correct for "Skolemization" in this context - we want stable IDs that are blinded.
-
-	nquadsStr, err := credWithoutProof.CanonicalForm()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get canonical form: %w", err)
-	}
 
 	// Parse N-Quads
 	quads := parseNQuads(nquadsStr)
@@ -612,13 +604,9 @@ func (s *SdSuite) verifyBaseProof(cred *credential.RDFCredential, key *ecdsa.Pub
 
 	// Get the credential document for mandatory pointer selection. Root
 	// scoped, exactly as Sign computed it.
-	credWithoutProof, err := rootScopedWithoutProof(cred)
+	_, nquadsStr, err := rootScopedWithoutProof(cred)
 	if err != nil {
 		return err
-	}
-	nquadsStr, err := credWithoutProof.CanonicalForm()
-	if err != nil {
-		return fmt.Errorf("failed to get canonical form: %w", err)
 	}
 	quads := parseNQuads(nquadsStr)
 
@@ -993,13 +981,9 @@ func (s *SdSuite) Derive(cred *credential.RDFCredential, revealIndices []int, no
 	// 2. Get Original Quads & Skolemize. Root scoped, exactly as Sign
 	// computed it - deriving from a different quad set than the base proof
 	// was made over produces a derived proof nobody can verify.
-	credWithoutProof, err := rootScopedWithoutProof(cred)
+	_, nquadsStr, err := rootScopedWithoutProof(cred)
 	if err != nil {
 		return nil, err
-	}
-	nquadsStr, err := credWithoutProof.CanonicalForm()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get canonical form: %w", err)
 	}
 	quads := parseNQuads(nquadsStr)
 

@@ -833,3 +833,41 @@ func TestRootCompactedDocumentRefusesUnderJSONLD10(t *testing.T) {
 	require.NoError(t, err, "nothing moves, so nothing is lost")
 	require.Equal(t, "https://example.org/credential", rooted["id"])
 }
+
+// TestRootScopedDocumentIsComputedOnce: the root-scoped document and its
+// canonical N-Quads are a pure function of the document, and the SAME answer
+// for every proof in a set - that is what a proof set means. ecdsa-sd-2023
+// recomputed them per candidate, so a 32-proof set paid for the root-stability
+// check, the proof removal and a full URDNA2015 run 32 times over, on a
+// document nobody has authenticated yet. Measured on a 32-candidate base-proof
+// set where every candidate fails: 401ms and 32 canonicalizations before,
+// 31ms and one after.
+func TestRootScopedDocumentIsComputedOnce(t *testing.T) {
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "https://example.org/credential",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"},
+		"proof": {
+			"type": "DataIntegrityProof",
+			"cryptosuite": "eddsa-rdfc-2022",
+			"created": "2024-01-01T00:00:00Z",
+			"verificationMethod": "did:example:issuer#key-1",
+			"proofPurpose": "assertionMethod",
+			"proofValue": "z2V1"
+		}
+	}`), nil)
+	require.NoError(t, err)
+
+	first, firstCanonical, err := RootScopedDocument(cred)
+	require.NoError(t, err)
+	require.NotEmpty(t, firstCanonical)
+	require.NotContains(t, firstCanonical, "#proof",
+		"the root's own proof is the one thing the secured document leaves out")
+
+	second, secondCanonical, err := RootScopedDocument(cred)
+	require.NoError(t, err)
+	require.Same(t, first, second, "the answer is computed once, not once per candidate")
+	require.Equal(t, firstCanonical, secondCanonical)
+}
