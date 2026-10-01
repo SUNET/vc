@@ -100,7 +100,7 @@ func TestValidate_UnreadableStatusIsRefused(t *testing.T) {
 
 	for name, claims := range cases {
 		t.Run(name, func(t *testing.T) {
-			result, err := registry.Validate(t.Context(), claims, StatusClaimMayBeData)
+			result, err := registry.ValidateShaped(t.Context(), claims, StatusClaimMayBeData)
 			require.Error(t, err, "an unreadable status must not come back as not-revocable")
 			require.Nil(t, result)
 			require.Contains(t, err.Error(), "no registered checker could read")
@@ -118,7 +118,7 @@ func TestValidate_NoStatusIsStillNotRevocable(t *testing.T) {
 	require.NoError(t, err)
 	registry := NewRegistry(checker)
 
-	result, err := registry.Validate(t.Context(), map[string]any{"iss": "https://issuer.example.com"}, StatusClaimMayBeData)
+	result, err := registry.ValidateShaped(t.Context(), map[string]any{"iss": "https://issuer.example.com"}, StatusClaimMayBeData)
 	require.NoError(t, err)
 	require.Nil(t, result)
 }
@@ -149,7 +149,7 @@ func TestDeclaresStatus_NullCountsAsDeclared(t *testing.T) {
 func TestRegistryValidate_NullStatusIsNotSilentlyNonRevocable(t *testing.T) {
 	registry := NewRegistry()
 
-	result, err := registry.Validate(t.Context(), map[string]any{"credentialStatus": nil}, StatusClaimMayBeData)
+	result, err := registry.ValidateShaped(t.Context(), map[string]any{"credentialStatus": nil}, StatusClaimMayBeData)
 	require.Error(t, err, "a declared-but-unreadable status must not read as non-revocable")
 	require.Nil(t, result)
 	require.Contains(t, err.Error(), "no registered checker could read")
@@ -187,7 +187,7 @@ func TestDeclaresStatus_ApplicationStatusClaimIsNotADeclaration(t *testing.T) {
 func TestRegistryValidate_ApplicationStatusClaimStillValidates(t *testing.T) {
 	registry := NewRegistry()
 
-	result, err := registry.Validate(t.Context(), map[string]any{"status": "active"}, StatusClaimMayBeData)
+	result, err := registry.ValidateShaped(t.Context(), map[string]any{"status": "active"}, StatusClaimMayBeData)
 	require.NoError(t, err)
 	require.Nil(t, result)
 }
@@ -256,11 +256,38 @@ func TestDeclaresStatus_ReservedFormatsRefuseAMalformedStatus(t *testing.T) {
 func TestRegistryValidate_ReservedScalarStatusIsNotSilentlyNonRevocable(t *testing.T) {
 	registry := NewRegistry()
 
-	result, err := registry.Validate(t.Context(), map[string]any{"status": "active"}, StatusClaimIsReserved)
+	result, err := registry.ValidateShaped(t.Context(), map[string]any{"status": "active"}, StatusClaimIsReserved)
 	require.Error(t, err, "a malformed reference must read as unknown, not as non-revocable")
 	require.Nil(t, result)
 
-	result, err = registry.Validate(t.Context(), map[string]any{"status": "active"}, StatusClaimMayBeData)
+	result, err = registry.ValidateShaped(t.Context(), map[string]any{"status": "active"}, StatusClaimMayBeData)
 	require.NoError(t, err, "an mdoc data element named status is not a reference")
 	require.Nil(t, result)
+}
+
+// TestValidate_KeepsTheTwoArgumentShape: Validate is the signature this
+// package exported before the shape parameter existed, and it still
+// compiles and still means something specific - the strict reading, where
+// `status` is reserved for the revocation reference.
+//
+// That is the right default for a caller who never said: of the two
+// readings it is the one that refuses an unreadable `status` instead of
+// passing it off as somebody's data element. mdoc callers, who are the
+// exception, say so with ValidateShaped.
+func TestValidate_KeepsTheTwoArgumentShape(t *testing.T) {
+	registry := NewRegistry()
+
+	// An mdoc data element named `status` holding a string. Under the
+	// reserved reading this is a malformed status reference and must be
+	// refused; under StatusClaimMayBeData it is ordinary claim data.
+	claims := map[string]any{"status": "active"}
+
+	result, err := registry.Validate(t.Context(), claims)
+	require.Error(t, err, "the two-argument form must apply the strict reading, not the permissive one")
+	require.Nil(t, result)
+	require.Contains(t, err.Error(), "no registered checker could read")
+
+	shaped, shapedErr := registry.ValidateShaped(t.Context(), claims, StatusClaimMayBeData)
+	require.NoError(t, shapedErr, "and the permissive reading must still be reachable, for mdoc")
+	require.Nil(t, shaped)
 }

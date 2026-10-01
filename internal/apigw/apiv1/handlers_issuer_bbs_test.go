@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
+	"github.com/SUNET/vc/pkg/tokenstatuslist"
 )
 
 // The issuer refuses claims with nothing in them - bbs.ValidateDocumentData
@@ -33,6 +34,14 @@ type recordingIssuerClient struct {
 	got   *apiv1_issuer.MakeJWPRequest
 	reply *apiv1_issuer.MakeJWPReply
 	err   error
+	// released records hand-backs of status entries allocated for a
+	// credential that will not be delivered.
+	released []*apiv1_issuer.SetCredentialStatusRequest
+}
+
+func (r *recordingIssuerClient) SetCredentialStatus(_ context.Context, in *apiv1_issuer.SetCredentialStatusRequest, _ ...grpc.CallOption) (*apiv1_issuer.SetCredentialStatusReply, error) {
+	r.released = append(r.released, in)
+	return &apiv1_issuer.SetCredentialStatusReply{}, nil
 }
 
 func (r *recordingIssuerClient) MakeJWP(_ context.Context, in *apiv1_issuer.MakeJWPRequest, _ ...grpc.CallOption) (*apiv1_issuer.MakeJWPReply, error) {
@@ -303,5 +312,49 @@ func TestIssueBBSCarriesTheIssuersAllocationVerdict(t *testing.T) {
 	}
 	if len(credentials) != 1 {
 		t.Fatalf("got %d credentials, want exactly 1", len(credentials))
+	}
+}
+
+// TestIssueBBSReleasesTheEntryWhenTheReplyIsUnusable: the issuer allocates
+// the status entry and signs it into the credential before the APIGW sees
+// the reply, so a reply the APIGW then refuses leaves that entry VALID on
+// the backend with nothing pointing at it - and a wallet that retries
+// strands another one each time.
+//
+// The three loop-shaped paths carry a cleanup guard around their whole
+// issuer call for exactly this; the BBS path did not, so this defensive
+// reply-shape check was a leak on every failure.
+func TestIssueBBSReleasesTheEntryWhenTheReplyIsUnusable(t *testing.T) {
+	issuer := &recordingIssuerClient{
+		reply: &apiv1_issuer.MakeJWPReply{
+			// Two, which this path refuses: a BBS credential needs no
+			// unlinkable copies, and the second would need a commitment
+			// and blinding factor the wallet never supplied.
+			Credentials: []*apiv1_issuer.Credential{
+				{Credential: "hdr.payloads.proof"},
+				{Credential: "hdr.payloads.proof2"},
+			},
+			TokenStatusListSection: 4,
+			TokenStatusListIndex:   9,
+			TokenStatusListUri:     "https://registry.example.com/statuslists/4",
+			TokenStatusListBackend: "registry",
+			StatusAllocation:       apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_ALLOCATED,
+		},
+	}
+	c := bbsTestClient(t, issuer)
+
+	if _, err := c.issueBBS(context.Background(), "pid_jwp", validBBSDocumentData, "person-1", "SUNET", bbsRequest()); err == nil {
+		t.Fatal("a reply carrying two credentials must be refused")
+	}
+
+	if len(issuer.released) != 1 {
+		t.Fatalf("got %d releases, want exactly 1 - the allocated entry must be handed back", len(issuer.released))
+	}
+	got := issuer.released[0]
+	if got.StatusListUri != "https://registry.example.com/statuslists/4" || got.Index != 9 || got.Section != 4 {
+		t.Fatalf("released the wrong entry: %+v", got)
+	}
+	if got.Status != uint32(tokenstatuslist.StatusInvalid) {
+		t.Fatalf("released entries are marked INVALID, got %d", got.Status)
 	}
 }

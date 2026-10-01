@@ -78,7 +78,7 @@ func TestRegistry_CheckStatus(t *testing.T) {
 func TestRegistry_Validate(t *testing.T) {
 	t.Run("no checkers returns nil", func(t *testing.T) {
 		r := NewRegistry()
-		result, err := r.Validate(t.Context(), map[string]any{"iss": "x"}, StatusClaimMayBeData)
+		result, err := r.ValidateShaped(t.Context(), map[string]any{"iss": "x"}, StatusClaimMayBeData)
 		assert.NoError(t, err)
 		assert.Nil(t, result)
 	})
@@ -88,7 +88,7 @@ func TestRegistry_Validate(t *testing.T) {
 		checker, err := NewStatusListChecker(WithCache(statusCache), WithKeyResolver(testKeyResolver{}))
 		require.NoError(t, err)
 		r := NewRegistry(checker)
-		result, err := r.Validate(t.Context(), map[string]any{"iss": "x"}, StatusClaimMayBeData)
+		result, err := r.ValidateShaped(t.Context(), map[string]any{"iss": "x"}, StatusClaimMayBeData)
 		assert.NoError(t, err)
 		assert.Nil(t, result, "credential without status is not revocable")
 	})

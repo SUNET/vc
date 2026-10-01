@@ -20,7 +20,22 @@ func NewRegistry(checkers ...Checker) *Registry {
 	return &Registry{checkers: checkers}
 }
 
-// Validate is the opaque entry point for revocation checking.
+// Validate is the opaque entry point for revocation checking, for claims
+// from a format that RESERVES the `status` member for the Token Status List
+// reference - SD-JWT VC, JWP, W3C VC 2.0.
+//
+// mdoc does not: its claims are data elements that may be named anything,
+// including `status`. Those callers want ValidateShaped with
+// StatusClaimMayBeData, or an mdoc data element called `status` makes every
+// such credential unverifiable. The distinction cannot be recovered here -
+// the claims map has lost the format by the time it arrives - so it is a
+// parameter, and this signature is the one that was already here, kept so
+// existing callers still compile and still get the stricter reading.
+func (r *Registry) Validate(ctx context.Context, claims map[string]any) (*CheckResult, error) {
+	return r.ValidateShaped(ctx, claims, StatusClaimIsReserved)
+}
+
+// ValidateShaped is Validate with the format's `status` convention stated.
 // It tries each registered checker's Extract() against the claims;
 // the first one that returns a non-nil Reference is used for the status check.
 //
@@ -31,7 +46,7 @@ func NewRegistry(checkers ...Checker) *Registry {
 // by the time it arrives here, and the answer differs: SD-JWT VC and JWP
 // reserve `status` for the Token Status List reference, mdoc claims include
 // data elements that may be named anything. See StatusClaimShape.
-func (r *Registry) Validate(ctx context.Context, claims map[string]any, shape StatusClaimShape) (*CheckResult, error) {
+func (r *Registry) ValidateShaped(ctx context.Context, claims map[string]any, shape StatusClaimShape) (*CheckResult, error) {
 	for _, checker := range r.checkers {
 		if ref := checker.Extract(claims); ref != nil {
 			return checker.CheckStatus(ctx, ref)

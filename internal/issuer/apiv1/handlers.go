@@ -37,6 +37,16 @@ type CreateCredentialReply struct {
 	// issuance because the URI alone does not identify the backend, and
 	// guessing at revocation time writes into the wrong list.
 	TokenStatusListBackend string `json:"token_status_list_backend,omitempty"`
+	// StatusAllocated says whether an entry was allocated at all, so no
+	// caller has to infer it from the other four fields. A registry's
+	// first allocation is legitimately section 0, index 0, and "nothing
+	// was allocated" is also section 0, index 0 - the URI tells them apart
+	// today only because allocateOrDegrade and allocateOptionalStatus both
+	// hand the slot back when one arrives without a URI. That is an
+	// invariant in another file, and a reader derived from an invariant is
+	// a reading that drifts. This is the verdict itself, recorded where
+	// the decision is made.
+	StatusAllocated bool `json:"status_allocated"`
 }
 
 // MakeSDJWT creates a credential generically for any credential type
@@ -117,6 +127,7 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		TokenStatusListIndex:   statusIndex,
 		TokenStatusListURI:     statusURI,
 		TokenStatusListBackend: statusBackend,
+		StatusAllocated:        alloc != nil,
 	}
 
 	credentialIssued = true
@@ -166,8 +177,18 @@ type CreateMDocReply struct {
 	// StatusListBackend names the backend that issued the entry; see
 	// CreateCredentialReply.TokenStatusListBackend.
 	StatusListBackend string `json:"status_list_backend,omitempty"`
-	ValidFrom         string `json:"valid_from"`
-	ValidUntil        string `json:"valid_until"`
+	// StatusAllocated says whether an entry was allocated at all, so no
+	// caller has to infer it from the other four fields. A registry's
+	// first allocation is legitimately section 0, index 0, and "nothing
+	// was allocated" is also section 0, index 0 - the URI tells them apart
+	// today only because allocateOrDegrade and allocateOptionalStatus both
+	// hand the slot back when one arrives without a URI. That is an
+	// invariant in another file, and a reader derived from an invariant is
+	// a reading that drifts. This is the verdict itself, recorded where
+	// the decision is made.
+	StatusAllocated bool   `json:"status_allocated"`
+	ValidFrom       string `json:"valid_from"`
+	ValidUntil      string `json:"valid_until"`
 }
 
 // MakeMDoc creates credential per ISO 18013-5
@@ -267,6 +288,7 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		StatusListSection: mdocStatusSection,
 		StatusListIndex:   mdocStatusIndex,
 		StatusListURI:     mdocStatusURI,
+		StatusAllocated:   alloc != nil,
 		StatusListBackend: mdocStatusBackend,
 		ValidFrom:         issued.ValidFrom.Format(time.RFC3339),
 		ValidUntil:        issued.ValidUntil.Format(time.RFC3339),

@@ -624,7 +624,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				if credentialFormats[scope] == FormatMDoc {
 					statusShape = revocation.StatusClaimMayBeData
 				}
-				result, err := c.revocationRegistry.Validate(ctx, cc.Credential, statusShape)
+				result, err := c.revocationRegistry.ValidateShaped(ctx, cc.Credential, statusShape)
 				if err != nil {
 					// Transient error (network, malformed token) — fail_open controls behavior
 					if c.cfg.Verifier.Revocation.FailOpen {

@@ -308,7 +308,7 @@ func TestVC20CredentialStatusReachesTheStatusCheck(t *testing.T) {
 	}
 
 	registry := NewRegistry(f.checker)
-	result, err := registry.Validate(t.Context(), claims, StatusClaimMayBeData)
+	result, err := registry.ValidateShaped(t.Context(), claims, StatusClaimMayBeData)
 	require.NoError(t, err)
 	require.NotNil(t, result, "a VC 2.0 credentialStatus must reach the status check")
 	require.Equal(t, StatusInvalid, result.Status)
@@ -316,7 +316,7 @@ func TestVC20CredentialStatusReachesTheStatusCheck(t *testing.T) {
 	// And a valid index through the same path, so the test cannot pass by
 	// refusing everything.
 	claims["credentialStatus"].(map[string]any)["statusListIndex"] = "7"
-	result, err = registry.Validate(t.Context(), claims, StatusClaimMayBeData)
+	result, err = registry.ValidateShaped(t.Context(), claims, StatusClaimMayBeData)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, StatusValid, result.Status)

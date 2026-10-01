@@ -1221,7 +1221,7 @@ func docLookupSessionID(authContext *cache.AuthorizationContext) string {
 // so the wallet gets unlinkable copies; BBS needs none, because each
 // presentation re-randomises. A second copy would need a second commitment,
 // which is a second request.
-func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte, identifier, authenticSource string, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
+func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte, identifier, authenticSource string, req *openid4vci.CredentialRequest) (_ []openid4vci.Credential, err error) {
 	credentialMetadata := c.cfg.GetCredentialMetadata(scope)
 	if credentialMetadata == nil {
 		return nil, fmt.Errorf("unsupported scope: %s", scope)
@@ -1289,6 +1289,42 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 		c.log.Error(err, "failed to call MakeJWP")
 		return nil, err
 	}
+
+	// From here the issuer may already have allocated a status entry and
+	// signed it into the credential, and every return below strands it as
+	// VALID and unreferenced unless something hands it back.
+	//
+	// The three loop-shaped paths (SD-JWT, mdoc, VC 2.0) carry this guard
+	// around their whole issuer call for the same reason; this one did not,
+	// so the reply-shape check below leaked on every failure. A guard
+	// rather than a release at each return: the returns are what get
+	// missed, and this function has already proved it once.
+	//
+	// saved is set before saveCredentialSubjects, which owns the entries
+	// from that point on and releases them itself on every failure.
+	var entries []statusEntry
+	saved := false
+	defer func() {
+		if err != nil && !saved {
+			c.releaseAllocations(ctx, entries)
+		}
+	}()
+	if reply != nil {
+		entries = []statusEntry{{
+			Section: reply.TokenStatusListSection,
+			Index:   reply.TokenStatusListIndex,
+			URI:     reply.TokenStatusListUri,
+			Backend: reply.TokenStatusListBackend,
+			// Carried, not defaulted. An external allocator in
+			// degraded_mode=proceed legitimately returns no URI and
+			// STATUS_ALLOCATION_NONE; leaving this UNSPECIFIED makes
+			// saveCredentialSubjects read the reply as an issuer too old to
+			// have the field and refuse the whole issuance, which is
+			// exactly the case degraded mode exists to keep working.
+			Allocated: reply.StatusAllocation,
+		}}
+	}
+
 	// Exactly one, not at least one. A BBS credential needs no unlinkable
 	// copies - each presentation re-randomises the proof afresh - so a
 	// second credential would need a second commitment and a second
@@ -1303,19 +1339,8 @@ func (c *Client) issueBBS(ctx context.Context, scope string, documentData []byte
 		return nil, fmt.Errorf("MakeJWP returned %d credentials, want exactly 1", count)
 	}
 
-	if err := c.saveCredentialSubjects(ctx, identifier, authenticSource, scope, []statusEntry{{
-		Section: reply.TokenStatusListSection,
-		Index:   reply.TokenStatusListIndex,
-		URI:     reply.TokenStatusListUri,
-		Backend: reply.TokenStatusListBackend,
-		// Carried, not defaulted. An external allocator in
-		// degraded_mode=proceed legitimately returns no URI and
-		// STATUS_ALLOCATION_NONE; leaving this UNSPECIFIED makes
-		// saveCredentialSubjects read the reply as an issuer too old to
-		// have the field and refuse the whole issuance, which is exactly
-		// the case degraded mode exists to keep working.
-		Allocated: reply.StatusAllocation,
-	}}); err != nil {
+	saved = true
+	if err := c.saveCredentialSubjects(ctx, identifier, authenticSource, scope, entries); err != nil {
 		return nil, err
 	}
 

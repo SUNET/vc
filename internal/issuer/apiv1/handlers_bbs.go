@@ -50,6 +50,16 @@ type CreateJWPReply struct {
 	// issuance because the URI alone does not identify the backend, and
 	// guessing at revocation time writes into the wrong list.
 	TokenStatusListBackend string `json:"token_status_list_backend,omitempty"`
+	// StatusAllocated says whether an entry was allocated at all, so no
+	// caller has to infer it from the other four fields. A registry's
+	// first allocation is legitimately section 0, index 0, and "nothing
+	// was allocated" is also section 0, index 0 - the URI tells them apart
+	// today only because allocateOrDegrade and allocateOptionalStatus both
+	// hand the slot back when one arrives without a URI. That is an
+	// invariant in another file, and a reader derived from an invariant is
+	// a reading that drifts. This is the verdict itself, recorded where
+	// the decision is made.
+	StatusAllocated bool `json:"status_allocated"`
 }
 
 // MakeJWP verifies the holder's commitment and blind-signs a credential.
@@ -208,6 +218,7 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 		reply.TokenStatusListIndex = statusEntry.Index
 		reply.TokenStatusListURI = statusEntry.URI
 		reply.TokenStatusListBackend = statusEntry.Backend
+		reply.StatusAllocated = true
 	}
 
 	credentialIssued = true

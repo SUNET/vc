@@ -42,8 +42,18 @@ type CreateVC20Reply struct {
 	// StatusListBackend names the backend that issued the entry; see
 	// CreateCredentialReply.TokenStatusListBackend.
 	StatusListBackend string `json:"status_list_backend,omitempty"`
-	ValidFrom         string `json:"valid_from"`
-	ValidUntil        string `json:"valid_until,omitempty"`
+	// StatusAllocated says whether an entry was allocated at all, so no
+	// caller has to infer it from the other four fields. A registry's
+	// first allocation is legitimately section 0, index 0, and "nothing
+	// was allocated" is also section 0, index 0 - the URI tells them apart
+	// today only because allocateOrDegrade and allocateOptionalStatus both
+	// hand the slot back when one arrives without a URI. That is an
+	// invariant in another file, and a reader derived from an invariant is
+	// a reading that drifts. This is the verdict itself, recorded where
+	// the decision is made.
+	StatusAllocated bool   `json:"status_allocated"`
+	ValidFrom       string `json:"valid_from"`
+	ValidUntil      string `json:"valid_until,omitempty"`
 }
 
 // MakeVC20 creates a W3C VC 2.0 Data Integrity credential
@@ -163,6 +173,7 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 		StatusListIndex:   statusIndex,
 		StatusListURI:     statusURI,
 		StatusListBackend: statusBackend,
+		StatusAllocated:   statusAlloc != nil,
 		ValidFrom:         validFrom.Format(time.RFC3339),
 	}
 
