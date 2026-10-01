@@ -630,6 +630,8 @@ func TestVerifyAndExtractHonoursATypeScopedContext(t *testing.T) {
 	result, err := handler.VerifyAndExtract(t.Context(), string(rewritten))
 	require.NoError(t, err, "the proof's type is what activates the context that defines ex")
 	require.Equal(t, absoluteMethod, result.VerificationMethod)
+	require.Equal(t, "DataIntegrityProof", result.ProofType,
+		"a proof carrying several types is still reported as the one this suite produced")
 }
 
 // TestExpandVerificationMethodHonoursAnExplicitNullProofContext: in JSON-LD
@@ -672,4 +674,68 @@ func TestExpandVerificationMethodHonoursAnExplicitNullProofContext(t *testing.T)
 		require.Equal(t, "ex:key-1", expanded,
 			"ex is not active on a proof whose context was reset, so the method is the IRI the proof names")
 	})
+}
+
+// TestVerifyAndExtractTriesEveryRootProof: Sign appends rather than
+// replaces, so a document signed by two parties carries two root proofs,
+// each naming its OWN verification method. Resolving the first one's key
+// and dispatching on the first one's cryptosuite meant a valid later proof
+// was always checked with the wrong key.
+func TestVerifyAndExtractTriesEveryRootProof(t *testing.T) {
+	firstPub, firstKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	secondPub, secondKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	const unsigned = `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(unsigned), nil)
+	require.NoError(t, err)
+	once, err := eddsaSuite.NewSuite().Sign(cred, firstKey, &eddsaSuite.SignOptions{
+		VerificationMethod: "did:example:first#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	twice, err := eddsaSuite.NewSuite().Sign(once, secondKey, &eddsaSuite.SignOptions{
+		VerificationMethod: "did:example:second#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	compact, err := twice.ToCompactJSON()
+	require.NoError(t, err)
+
+	// The fixture is only worth something if BOTH proofs are really there.
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(compact, &doc))
+	proofs, ok := doc["proof"].([]any)
+	require.True(t, ok, "two signatures, two root proofs")
+	require.Len(t, proofs, 2)
+
+	// A resolver that knows ONLY the second signer's key. Reaching it means
+	// the handler got past the first proof.
+	handler, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+		keys: map[string]crypto.PublicKey{"did:example:second#key-1": secondPub},
+	}))
+	require.NoError(t, err)
+
+	result, err := handler.VerifyAndExtract(t.Context(), string(compact))
+	require.NoError(t, err, "the second signer's proof is as much the document's own as the first")
+	require.Equal(t, "did:example:second#key-1", result.VerificationMethod)
+
+	// And the first signer's key still verifies its own proof.
+	firstOnly, err := NewVC20Handler(WithVC20KeyResolver(&mockVC20KeyResolverByMethod{
+		keys: map[string]crypto.PublicKey{"did:example:first#key-1": firstPub},
+	}))
+	require.NoError(t, err)
+	result, err = firstOnly.VerifyAndExtract(t.Context(), string(compact))
+	require.NoError(t, err)
+	require.Equal(t, "did:example:first#key-1", result.VerificationMethod)
 }

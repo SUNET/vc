@@ -220,17 +220,74 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		return nil, fmt.Errorf("issuer %s is not trusted", issuer)
 	}
 
-	// 5. Extract proof
-	proof, err := h.extractProof(credMap)
+	// 5. The proofs the document attaches to ITSELF, in the order it
+	// carries them.
+	//
+	// EVERY candidate, not just the first. Sign appends rather than
+	// replaces, so a document signed by two parties carries two root
+	// proofs - and each names its own verification method and may name its
+	// own cryptosuite. Resolving the first one's key and dispatching on the
+	// first one's suite meant a valid later proof was always checked with
+	// the wrong key, and a second cryptosuite was never dispatched at all.
+	if h.keyResolver == nil {
+		return nil, errors.New("no key resolver configured")
+	}
+	candidates, err := h.rootProofCandidates(credBytes)
 	if err != nil {
 		return nil, err
 	}
 
-	// 6. Resolve verification method to public key
-	if h.keyResolver == nil {
-		return nil, errors.New("no key resolver configured")
+	var lastErr error
+	for _, proof := range candidates {
+		result, err := h.verifyOneRootProof(ctx, credBytes, credMap, proof)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return result, nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("credential missing proof")
 	}
 
+	return nil, lastErr
+}
+
+// rootProofCandidates lists the proofs the document attaches to itself, in
+// the short-keyed form the rest of this handler reads.
+func (h *VC20Handler) rootProofCandidates(credBytes []byte) ([]map[string]any, error) {
+	rdfCred, err := credential.NewRDFCredentialFromJSON(credBytes, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
+	}
+	expanded, _, err := rdfCred.RootProofs()
+	if err != nil {
+		return nil, err
+	}
+	if len(expanded) == 0 {
+		return nil, errors.New("credential missing proof")
+	}
+
+	candidates := make([]map[string]any, 0, len(expanded))
+	for _, entry := range expanded {
+		proof, err := credential.CompactRootProof(entry)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, proof)
+	}
+
+	return candidates, nil
+}
+
+// verifyOneRootProof resolves the key this proof names and dispatches on the
+// cryptosuite it declares.
+func (h *VC20Handler) verifyOneRootProof(
+	ctx context.Context,
+	credBytes []byte,
+	credMap map[string]any,
+	proof map[string]any,
+) (*VC20VerificationResult, error) {
 	vm, _ := proof["verificationMethod"].(string)
 	if vm == "" {
 		return nil, errors.New("proof missing verificationMethod")
@@ -243,7 +300,7 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 	// use, so two documents naming one key asked for two different keys -
 	// and the check that the proof which VERIFIED names the method the key
 	// was resolved from could never match for a compact one.
-	vm, err = h.expandVerificationMethod(credMap, proof, vm)
+	vm, err := h.expandVerificationMethod(credMap, proof, vm)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +310,7 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		return nil, fmt.Errorf("failed to resolve public key: %w", err)
 	}
 
-	// 7. Determine cryptosuite and verify with appropriate key type
+	// Determine cryptosuite and verify with appropriate key type
 	cryptosuite, _ := proof["cryptosuite"].(string)
 	if cryptosuite == "" {
 		return nil, errors.New("proof missing cryptosuite")
@@ -787,6 +844,34 @@ func findExpandedID(node any, predicate string) string {
 	return ""
 }
 
+// proofTypeOf names the proof's type, preferring the Data Integrity one
+// when a proof carries several.
+func proofTypeOf(proof map[string]any) string {
+	switch typed := proof["type"].(type) {
+	case string:
+		return typed
+	case []any:
+		first := ""
+		for _, entry := range typed {
+			name, ok := entry.(string)
+			if !ok {
+				continue
+			}
+			if name == dataIntegrityProofType {
+				return name
+			}
+			if first == "" {
+				first = name
+			}
+		}
+		return first
+	}
+	return ""
+}
+
+// dataIntegrityProofType is the type every cryptosuite here produces.
+const dataIntegrityProofType = "DataIntegrityProof"
+
 // sameVerificationMethod checks that the proof which verified names the
 // method the key was resolved from.
 //
@@ -864,7 +949,14 @@ func (h *VC20Handler) buildResult(
 	}
 
 	// Extract proof metadata
-	result.ProofType, _ = proof["type"].(string)
+	//
+	// The type may be a LIST. A document that hangs a type-scoped context
+	// off its own alias for DataIntegrityProof has to name both - the alias
+	// is not a replacement, since DataIntegrityProof is @protected and
+	// carries the VC 2.0 definitions of cryptosuite and proofValue - and
+	// reading only a string left the reported type empty for a proof this
+	// package had just accepted.
+	result.ProofType = proofTypeOf(proof)
 	result.Cryptosuite, _ = proof["cryptosuite"].(string)
 	result.VerificationMethod, _ = proof["verificationMethod"].(string)
 	result.ProofPurpose, _ = proof["proofPurpose"].(string)

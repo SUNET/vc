@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/piprate/json-gold/ld"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -234,4 +236,41 @@ func TestANodeWrittenTwiceIsOneCandidate(t *testing.T) {
 	require.Equal(t, "urn:uuid:the-credential", root["@id"])
 	require.Contains(t, root, "https://www.w3.org/2018/credentials#issuer",
 		"and the merged node carries what both entries said")
+}
+
+// TestRootProofsUsesTheCredentialsOptions: root selection re-expands the
+// document, and has to do it under the options this credential was PARSED
+// with. Expanding with a fresh default instead meant a credential created
+// with its own document loader, expandContext, processing mode or base
+// parsed successfully and then expanded differently - or not at all - on
+// every Sign and Verify.
+func TestRootProofsUsesTheCredentialsOptions(t *testing.T) {
+	const privateContext = "https://example.org/a-context-only-this-loader-has"
+
+	// A loader this credential carries and the global one does not.
+	loader := ld.NewCachingDocumentLoader(GetGlobalLoader())
+	var context any
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"@context":{"ex":"https://example.org/keys#"}}`), &context))
+	loader.AddDocument(privateContext, context)
+
+	options := ld.NewJsonLdOptions("")
+	options.DocumentLoader = loader
+
+	document := []byte(`{
+		"@context": ["https://www.w3.org/ns/credentials/v2", "` + privateContext + `"],
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`)
+
+	cred, err := NewRDFCredentialFromJSON(document, options)
+	require.NoError(t, err, "the credential's own loader resolves the context")
+
+	// The global loader cannot, or this would prove nothing.
+	_, err = NewRDFCredentialFromJSON(document, nil)
+	require.Error(t, err, "the context must be unreachable without that loader")
+
+	_, _, err = cred.RootProofs()
+	require.NoError(t, err, "root selection must re-expand under the same options")
 }

@@ -138,7 +138,7 @@ func (rc *RDFCredential) rootAndGraphs(source string) (map[string]any, []map[str
 		return nil, nil, nil, fmt.Errorf("document is not JSON: %w", err)
 	}
 
-	expanded, err := ld.NewJsonLdProcessor().Expand(document, NewJSONLDOptions(""))
+	expanded, err := ld.NewJsonLdProcessor().Expand(document, rc.expansionOptions())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("document could not be expanded: %w", err)
 	}
@@ -222,6 +222,28 @@ func coalesceByID(entries []map[string]any) []map[string]any {
 	}
 
 	return merged
+}
+
+// expansionOptions are the options this credential was PARSED with, which
+// is what root selection has to re-expand under.
+//
+// Expanding with a fresh default instead meant a credential created with a
+// custom document loader, an expandContext, a processing mode or a base
+// parsed successfully and then expanded differently - or not at all - on
+// every Sign and Verify, with ids resolving against a different base.
+//
+// A copy, and with Format cleared: Format tells the processor its INPUT is
+// N-Quads, which is true of the call that sets it and not of this one.
+func (rc *RDFCredential) expansionOptions() *ld.JsonLdOptions {
+	if rc.options == nil {
+		return NewJSONLDOptions("")
+	}
+	copied := *rc.options
+	copied.Format = ""
+	if copied.DocumentLoader == nil {
+		copied.DocumentLoader = GetGlobalLoader()
+	}
+	return &copied
 }
 
 // CheckRootSurvivesFlattening refuses a document whose root changes, or
