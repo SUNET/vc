@@ -313,3 +313,40 @@ func TestCompactRootProofMergesASplitProofNode(t *testing.T) {
 	_, err = CompactRootProof(two)
 	require.ErrorContains(t, err, "rather than one")
 }
+
+// TestCompactRootProofDoesNotMutateItsInput: SecuredDocument memoizes the
+// root proofs and hands the same nodes to every caller, so CompactRootProof
+// has to be read-only. Coalescing merges into the first map it sees for an id,
+// which made compacting the same candidate twice - as the ecdsa suite does,
+// once to match the offered proof and once to verify it - merge a split proof
+// into the cache twice and accumulate duplicate values.
+func TestCompactRootProofDoesNotMutateItsInput(t *testing.T) {
+	first := map[string]any{
+		"@id":   "_:proof",
+		"@type": []any{"https://w3id.org/security#DataIntegrityProof"},
+	}
+	second := map[string]any{
+		"@id": "_:proof",
+		"https://w3id.org/security#proofValue": []any{
+			map[string]any{"@value": "zSignature"},
+		},
+	}
+	split := map[string]any{"@graph": []any{first, second}}
+
+	before := len(first)
+
+	once, err := CompactRootProof(split)
+	require.NoError(t, err)
+	twice, err := CompactRootProof(split)
+	require.NoError(t, err)
+
+	require.Len(t, first, before,
+		"the input node must come back untouched, or the cache is poisoned")
+	require.Equal(t, once, twice,
+		"and compacting the same proof twice must give the same proof")
+
+	values, isList := twice["https://w3id.org/security#proofValue"].([]any)
+	if isList {
+		require.Len(t, values, 1, "no duplicate values accumulate across passes")
+	}
+}

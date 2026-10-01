@@ -2,6 +2,7 @@ package credential
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -532,7 +533,10 @@ func RootOfExpandedNodes(expanded []any) (map[string]any, error) {
 		if ld.IsGraph(node) {
 			continue
 		}
-		nodes = append(nodes, node)
+		// Cloned for the same reason CompactRootProof clones: coalescing
+		// merges into the first map for an id, and the caller's document is
+		// not ours to rewrite.
+		nodes = append(nodes, maps.Clone(node))
 	}
 
 	return rootOf(coalesceByID(nodes))

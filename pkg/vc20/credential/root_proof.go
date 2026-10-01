@@ -3,6 +3,7 @@ package credential
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/piprate/json-gold/ld"
@@ -596,13 +597,23 @@ func CompactRootProof(expanded any) (map[string]any, error) {
 		// conversion merges them into one node. Counting the entries
 		// without merging refused a proof that is single by every measure
 		// that matters.
+		// CLONED before coalescing. coalesceByID merges into the first map
+		// it sees for an id, and these members can be the shared nodes
+		// SecuredDocument hands out: compacting the same candidate twice -
+		// which the ecdsa suite does, once to match the offered proof and
+		// once to verify it - would then merge a split proof into the cache
+		// twice and accumulate duplicate values, and two verifications at
+		// once would race on the same maps.
+		//
+		// A shallow copy is enough: the merge appends to new slices and
+		// writes only top-level keys.
 		nodes := make([]map[string]any, 0, len(entries))
 		for _, entry := range entries {
 			member, isNode := entry.(map[string]any)
 			if !isNode {
 				return nil, fmt.Errorf("a root proof's graph does not hold a node")
 			}
-			nodes = append(nodes, member)
+			nodes = append(nodes, maps.Clone(member))
 		}
 		merged := coalesceByID(nodes)
 		if len(merged) != 1 {
