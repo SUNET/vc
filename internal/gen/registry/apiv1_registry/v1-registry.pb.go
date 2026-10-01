@@ -129,10 +129,17 @@ func (x *TokenStatusListAddStatusReply) GetStatusListUri() string {
 }
 
 type TokenStatusListUpdateStatusRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Section       int64                  `protobuf:"varint,1,opt,name=Section,proto3" json:"Section,omitempty"` // Section ID
-	Index         int64                  `protobuf:"varint,2,opt,name=Index,proto3" json:"Index,omitempty"`     // Index within the section
-	Status        uint32                 `protobuf:"varint,3,opt,name=Status,proto3" json:"Status,omitempty"`   // New status value (0=VALID, 1=INVALID, 2=SUSPENDED)
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Section int64                  `protobuf:"varint,1,opt,name=Section,proto3" json:"Section,omitempty"` // Section ID
+	Index   int64                  `protobuf:"varint,2,opt,name=Index,proto3" json:"Index,omitempty"`     // Index within the section
+	Status  uint32                 `protobuf:"varint,3,opt,name=Status,proto3" json:"Status,omitempty"`   // New status value (0=VALID, 1=INVALID, 2=SUSPENDED)
+	// StatusListURI is the list the caller believes the entry lives in, as
+	// recorded at issuance. It is REQUIRED: (section, index) alone are
+	// coordinates into whatever list this registry exposes right now, so a
+	// stale or forged mapping would update some other credential's entry.
+	// The registry compares it against its own canonical URL for the
+	// section and refuses a mismatch.
+	StatusListURI string `protobuf:"bytes,4,opt,name=StatusListURI,proto3" json:"StatusListURI,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -186,6 +193,13 @@ func (x *TokenStatusListUpdateStatusRequest) GetStatus() uint32 {
 		return x.Status
 	}
 	return 0
+}
+
+func (x *TokenStatusListUpdateStatusRequest) GetStatusListURI() string {
+	if x != nil {
+		return x.StatusListURI
+	}
+	return ""
 }
 
 type TokenStatusListUpdateStatusReply struct {
@@ -344,11 +358,12 @@ const file_v1_registry_proto_rawDesc = "" +
 	"\x1dTokenStatusListAddStatusReply\x12\x18\n" +
 	"\aSection\x18\x01 \x01(\x03R\aSection\x12\x14\n" +
 	"\x05Index\x18\x02 \x01(\x03R\x05Index\x12$\n" +
-	"\rStatusListUri\x18\x03 \x01(\tR\rStatusListUri\"l\n" +
+	"\rStatusListUri\x18\x03 \x01(\tR\rStatusListUri\"\x92\x01\n" +
 	"\"TokenStatusListUpdateStatusRequest\x12\x18\n" +
 	"\aSection\x18\x01 \x01(\x03R\aSection\x12\x14\n" +
 	"\x05Index\x18\x02 \x01(\x03R\x05Index\x12\x16\n" +
-	"\x06Status\x18\x03 \x01(\rR\x06Status\"\"\n" +
+	"\x06Status\x18\x03 \x01(\rR\x06Status\x12$\n" +
+	"\rStatusListURI\x18\x04 \x01(\tR\rStatusListURI\"\"\n" +
 	" TokenStatusListUpdateStatusReply\"\x94\x01\n" +
 	"\x1cSaveCredentialSubjectRequest\x12\x1e\n" +
 	"\n" +

@@ -199,6 +199,7 @@ func TestInvalidateStatusEntryHandsTheEntryBack(t *testing.T) {
 	c.statusAllocator.Invalidate(context.Background(), &statusAllocation{
 		Section: 7,
 		Index:   42,
+		URI:     "https://registry.example.com/statuslists/7",
 	})
 
 	if len(registry.updates) != 1 {
@@ -210,6 +211,14 @@ func TestInvalidateStatusEntryHandsTheEntryBack(t *testing.T) {
 	}
 	if got.GetStatus() != uint32(tokenstatuslist.StatusInvalid) {
 		t.Fatalf("want StatusInvalid (%d), got %d", tokenstatuslist.StatusInvalid, got.GetStatus())
+	}
+	// The list the registry itself named at allocation has to travel back
+	// with the hand-back. The registry refuses an update that does not name
+	// the list it serves at that section, so dropping it here turns every
+	// hand-back into a hard failure and strands the slot it was meant to
+	// return.
+	if got.GetStatusListURI() != "https://registry.example.com/statuslists/7" {
+		t.Fatalf("hand-back must name the list the entry was allocated in, got %q", got.GetStatusListURI())
 	}
 }
 

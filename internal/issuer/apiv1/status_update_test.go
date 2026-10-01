@@ -57,6 +57,12 @@ func TestSetCredentialStatus_RegistryBackend(t *testing.T) {
 	require.Equal(t, int64(4), rec.updates[0].Section)
 	require.Equal(t, int64(9), rec.updates[0].Index)
 	require.Equal(t, uint32(1), rec.updates[0].Status)
+	// The URI has to travel, not just be validated as present here. Section
+	// and index are coordinates into whichever list the registry serves at
+	// those numbers now; only the URI says which list the credential named,
+	// and only the registry can compare it against what it actually serves.
+	require.Equal(t, "https://registry.example.com/statuslists/4", rec.updates[0].StatusListURI,
+		"the list the credential names must reach the registry, so it can refuse coordinates into a list it does not serve")
 }
 
 // TestSetCredentialStatus_NeverCrossesBackends is the point of recording the

@@ -98,6 +98,10 @@ func (a *registryStatusAllocator) Invalidate(ctx context.Context, alloc *statusA
 		Section: alloc.Section,
 		Index:   alloc.Index,
 		Status:  uint32(tokenstatuslist.StatusInvalid),
+		// The list this entry was allocated in, as the registry itself
+		// named it moments ago. The registry checks it against its own
+		// URL for the section before touching anything.
+		StatusListURI: alloc.URI,
 	}); err != nil {
 		a.log.Error(err, "could not invalidate registry status entry of a failed issuance",
 			"section", alloc.Section, "index", alloc.Index)
@@ -369,12 +373,20 @@ func (c *Client) SetCredentialStatus(ctx context.Context, req *SetCredentialStat
 		if c.registryClient == nil {
 			return fmt.Errorf("cannot set the status of entry %d/%d: this issuer has no registry client configured, and the entry was issued by the registry backend", req.Section, req.Index)
 		}
+		// The URI is forwarded, not just validated as present. Section and
+		// index are coordinates into whatever list the registry exposes at
+		// those numbers now; the URI is what the credential actually names.
+		// Without it a stale or forged mapping flips an unrelated
+		// credential's entry and leaves the intended one valid - silently,
+		// in both directions. The registry compares it against its own
+		// canonical URL for the section and refuses a mismatch.
 		if _, err := c.registryClient.TokenStatusListUpdateStatus(ctx, &apiv1_registry.TokenStatusListUpdateStatusRequest{
-			Section: req.Section,
-			Index:   req.Index,
-			Status:  uint32(req.Status),
+			Section:       req.Section,
+			Index:         req.Index,
+			Status:        uint32(req.Status),
+			StatusListURI: req.StatusListURI,
 		}); err != nil {
-			return fmt.Errorf("registry status update failed for %d/%d: %w", req.Section, req.Index, err)
+			return fmt.Errorf("registry status update failed for %d/%d in %q: %w", req.Section, req.Index, req.StatusListURI, err)
 		}
 		return nil
 

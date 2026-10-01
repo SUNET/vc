@@ -31,6 +31,13 @@ message TokenStatusListUpdateStatusRequest {
     int64 Section = 1;  // Section ID
     int64 Index = 2;    // Index within the section
     uint32 Status = 3;  // New status value (0=VALID, 1=INVALID, 2=SUSPENDED)
+    // StatusListURI is the list the caller believes the entry lives in, as
+    // recorded at issuance. It is REQUIRED: (section, index) alone are
+    // coordinates into whatever list this registry exposes right now, so a
+    // stale or forged mapping would update some other credential's entry.
+    // The registry compares it against its own canonical URL for the
+    // section and refuses a mismatch.
+    string StatusListURI = 4;
 }
 
 message TokenStatusListUpdateStatusReply {

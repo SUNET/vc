@@ -36,11 +36,42 @@ func (s *Service) TokenStatusListAddStatus(ctx context.Context, req *apiv1_regis
 }
 
 // TokenStatusListUpdate updates an existing status entry in the Token Status List
+//
+// The caller must name the list it believes the entry lives in, and that
+// name must be this registry's own URL for the section. (Section, index)
+// are coordinates, not an identity: they address whatever list this
+// registry exposes at those numbers right now. A mapping recorded against
+// some other list - stale, migrated, or supplied by a caller that made it
+// up - would otherwise land on an unrelated credential's entry and flip
+// IT, leaving the intended credential valid. Both failures are silent,
+// which is why this is checked here rather than trusted at the caller.
 func (s *Service) TokenStatusListUpdateStatus(ctx context.Context, req *apiv1_registry.TokenStatusListUpdateStatusRequest) (*apiv1_registry.TokenStatusListUpdateStatusReply, error) {
 	if req.Status > 255 {
 		return nil, fmt.Errorf("status value %d exceeds uint8 range", req.Status)
 	}
-	err := s.tokenStatusListIssuer.UpdateStatus(ctx, req.Section, req.Index, uint8(req.Status))
+
+	// Same construction as TokenStatusListAddStatus hands back at
+	// allocation, as the Status List Token's sub claim, and as the admin
+	// ownership check - see model.Registry.StatusListURL. If those ever
+	// diverge, every update starts failing loudly, which is the direction
+	// this should fail in.
+	canonical, err := s.cfg.Registry.StatusListURL(req.Section)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct status list URI for section %d: %w", req.Section, err)
+	}
+	// Empty is refused rather than waved through. "The caller did not say"
+	// and "the caller named this list" are different claims, and only the
+	// second one can be checked; accepting the first restores exactly the
+	// unverified routing this field exists to close, for any caller that
+	// simply omits it.
+	if req.StatusListURI == "" {
+		return nil, fmt.Errorf("status list URI is required to update entry %d/%d: the section and index alone do not identify which list the entry was allocated in", req.Section, req.Index)
+	}
+	if req.StatusListURI != canonical {
+		return nil, fmt.Errorf("refusing to update entry %d/%d: the caller names list %q, but this registry serves %q at that section", req.Section, req.Index, req.StatusListURI, canonical)
+	}
+
+	err = s.tokenStatusListIssuer.UpdateStatus(ctx, req.Section, req.Index, uint8(req.Status))
 	if err != nil {
 		return nil, err
 	}
