@@ -937,3 +937,43 @@ func TestRootCompactedDocumentReadsAnAliasedID(t *testing.T) {
 	require.Equal(t, known["identifier"], inferred["identifier"],
 		"both readings must choose the same node")
 }
+
+// TestProofKeyForHonoursANullContextReset: an explicit top-level
+// "@context": null is a RESET, and it clears the options' expandContext along
+// with everything else - measured, the same document expands to its triples
+// with no @context member and to NOTHING with an explicit null. Term
+// resolution went on applying the expandContext either way, because a JSON
+// null and an absent member both arrive as a nil context, so ProofKeyFor
+// handed back an alias the document had just disabled. Expansion then drops
+// that member and Sign returns a document with no root proof at all.
+func TestProofKeyForHonoursANullContextReset(t *testing.T) {
+	options := NewJSONLDOptions("")
+	options.ExpandContext = map[string]any{
+		"@context": map[string]any{
+			"id":    "@id",
+			"proof": ProofPredicate,
+		},
+	}
+
+	inherited := map[string]any{"id": "https://example.org/credential"}
+	require.Equal(t, "proof", ProofKeyFor(inherited, inherited["@context"], options),
+		"the expandContext aliases proof, so a new proof belongs under that name")
+
+	reset := map[string]any{"@context": nil, "id": "https://example.org/credential"}
+	require.Equal(t, ProofPredicate, ProofKeyFor(reset, reset["@context"], options),
+		"an explicit null disables the alias, and a member named for it would be dropped")
+
+	// And a bare "proof" already sitting there is not reused. ProofKeys
+	// returns it - removing the root's own proof fails SAFE, and a member
+	// the reset turned into a relative IRI carries no triples either way -
+	// but writing a signature under it would produce one expansion drops.
+	resetWithProof := map[string]any{
+		"@context": nil,
+		"id":       "https://example.org/credential",
+		"proof":    map[string]any{"type": "DataIntegrityProof"},
+	}
+	require.Contains(t, ProofKeys(resetWithProof, resetWithProof["@context"], options), "proof",
+		"removal still takes the bare name, because missing a proof is the worse failure")
+	require.Equal(t, ProofPredicate, ProofKeyFor(resetWithProof, resetWithProof["@context"], options),
+		"but a new proof goes under the predicate, not beside one that expands to nothing")
+}

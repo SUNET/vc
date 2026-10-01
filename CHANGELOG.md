@@ -104,6 +104,26 @@
   refused for holding "more than one node nothing refers to". Affects
   `ecdsa-sd-2023` derivation and signing of containers only.
 
+  **An explicit `"@context": null` resets the `expandContext` too.** It is a
+  RESET, and it clears everything before it — measured, the same document
+  expands to its triples with no `@context` member and to **nothing** with an
+  explicit null. Term resolution went on applying the `expandContext` either
+  way, because a JSON null and an absent member both arrive as a nil context,
+  so a new proof was written under an alias the document had just disabled and
+  expansion dropped it: `Sign` succeeded and returned a document with no root
+  proof. Finding the root's own proofs still takes the bare name, because
+  missing one is the worse failure and a member the reset turned into a
+  relative IRI carries no triples either way.
+
+  **The OpenID4VP handler resolves a proof graph by the reference that names
+  it.** A root proof that survived a round trip through RDF is a reference to a
+  named graph beside the document, and an expanded credential carrying an
+  embedded secured credential has more than one. The handler accepted the
+  FIRST, so top-level array order — which is not signed — decided which proof
+  was reported: a document could be reordered until `Claims["proof"]` named the
+  nested issuer's proof while verification checked the root's. An unresolvable
+  reference now reports no proof rather than someone else's.
+
   **Root matching reads a node's own `@context` and any alias of `@id`.** A
   `@graph` entry may declare its own prefix and use it in its identifier, and
   JSON-LD lets a context alias `@id` to any term. `RootID` works on the

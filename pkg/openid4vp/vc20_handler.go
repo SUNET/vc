@@ -604,24 +604,8 @@ func (h *VC20Handler) extractCredentialFromExpanded(expanded []any) (map[string]
 			if proofNode, ok := proofData[0].(map[string]any); ok {
 				// Look up the proof in expanded array (it's often a reference)
 				if proofRef, ok := proofNode["@id"].(string); ok {
-					// Find the proof node
-					for _, pn := range expanded {
-						proofMap, ok := pn.(map[string]any)
-						if !ok {
-							continue
-						}
-						// Look for @graph which contains the actual proof
-						if graph, ok := proofMap["@graph"].([]any); ok && len(graph) > 0 {
-							if actualProof, ok := graph[0].(map[string]any); ok {
-								result["proof"] = h.extractProofFromExpanded(actualProof)
-								break
-							}
-						}
-						// Direct proof reference
-						if proofMap["@id"] == proofRef {
-							result["proof"] = h.extractProofFromExpanded(proofMap)
-							break
-						}
+					if resolved := h.proofForRef(expanded, proofRef); resolved != nil {
+						result["proof"] = resolved
 					}
 				}
 			}
@@ -661,6 +645,56 @@ func (h *VC20Handler) extractCredentialFromExpanded(expanded []any) (map[string]
 	}
 
 	return nil, errors.New("the node an expanded document is about is not a VerifiableCredential")
+}
+
+// proofForRef resolves the proof a root's proof reference NAMES, rather than
+// whichever named graph the expanded array happens to list first.
+//
+// A root proof that survived a round trip through RDF is a REFERENCE to a
+// graph sitting beside the document, and an expanded credential carrying an
+// embedded secured credential has more than one such graph. Accepting the
+// first let top-level array ORDER decide which proof was reported - and array
+// order is not signed - so a document could be reordered until the claims
+// named the NESTED issuer's proof while rootProofCandidates verified the
+// root's. Exactly the defect already fixed for the credential node itself.
+//
+// Nothing matching means no proof is reported. Reporting the wrong one is the
+// failure being removed here; saying nothing is not.
+func (h *VC20Handler) proofForRef(expanded []any, proofRef string) map[string]any {
+	// Fragments of ONE graph, gathered: flattening may split a named graph
+	// across several top-level entries, and the proof can be in any of them.
+	var members []any
+	var direct map[string]any
+
+	for _, entry := range expanded {
+		node, isNode := entry.(map[string]any)
+		if !isNode {
+			continue
+		}
+		id, isText := node["@id"].(string)
+		if !isText || id != proofRef {
+			continue
+		}
+		if graph, isGraph := node["@graph"].([]any); isGraph {
+			members = append(members, graph...)
+			continue
+		}
+		// A node bearing the reference's identifier and no graph: the proof
+		// written inline rather than as a named graph.
+		if direct == nil {
+			direct = node
+		}
+	}
+
+	for _, member := range members {
+		if node, isNode := member.(map[string]any); isNode {
+			return h.extractProofFromExpanded(node)
+		}
+	}
+	if direct != nil {
+		return h.extractProofFromExpanded(direct)
+	}
+	return nil
 }
 
 // extractProofFromExpanded extracts proof data from expanded JSON-LD proof node.

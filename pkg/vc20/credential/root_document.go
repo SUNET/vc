@@ -729,6 +729,24 @@ func expandMemberName(active *ld.Context, key string) (resolved string, unresolv
 // itself declares proof this way, which is why a document-level lookup finds
 // nothing for the plain name.
 func nodeContext(node map[string]any, context any, options *ld.JsonLdOptions) *ld.Context {
+	// An explicit "@context": null on the node is a RESET, and it clears the
+	// options' expandContext along with everything else. It arrives here as
+	// a nil context, indistinguishable from an ABSENT one, so the node is
+	// asked directly. Measured: the same document expands to its triples
+	// with no @context member and to NOTHING with an explicit null - while
+	// term resolution went on applying the expandContext either way, so
+	// ProofKeyFor handed back an alias the document had just disabled and
+	// Sign returned a document whose proof expansion drops.
+	//
+	// The null is the INNERMOST context, so it wins over anything the
+	// caller composed ahead of it.
+	if own, present := node["@context"]; present && own == nil {
+		if options == nil {
+			options = NewJSONLDOptions("")
+		}
+		return ld.NewContext(nil, options)
+	}
+
 	active := activeContext(context, options)
 	if active == nil {
 		return nil
