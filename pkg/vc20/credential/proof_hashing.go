@@ -99,7 +99,17 @@ func SecuredDocument(cred *RDFCredential) ([]any, [32]byte, error) {
 		proofs, hash, err := securedDocumentOf(cred)
 		cred.secured = &securedDocument{proofs: proofs, hash: hash, err: err}
 	}
-	return cred.secured.proofs, cred.secured.hash, cred.secured.err
+
+	// A fresh slice header each time, so a caller appending to what it is
+	// given cannot reach into the answer the next caller gets. The NODES are
+	// shared, and callers must treat them as read-only - copying the whole
+	// expanded structure per call would give back the cost this exists to
+	// avoid. CompactRootProof, which is what every caller here does with
+	// them, reads.
+	proofs := make([]any, len(cred.secured.proofs))
+	copy(proofs, cred.secured.proofs)
+
+	return proofs, cred.secured.hash, cred.secured.err
 }
 
 func securedDocumentOf(cred *RDFCredential) ([]any, [32]byte, error) {

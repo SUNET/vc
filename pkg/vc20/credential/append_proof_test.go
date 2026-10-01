@@ -76,9 +76,16 @@ func TestSecuredDocumentIsComputedOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, firstHash, secondHash)
 
+	// The same NODES, so nothing was recomputed...
 	require.Equal(t,
-		reflect.ValueOf(first).Pointer(), reflect.ValueOf(second).Pointer(),
+		reflect.ValueOf(first[0]).Pointer(), reflect.ValueOf(second[0]).Pointer(),
 		"the second call must hand back the first answer, not recompute it")
+
+	// ...but not the same slice, so appending to one answer cannot reach
+	// into the next caller's.
+	require.NotEqual(t,
+		reflect.ValueOf(first).Pointer(), reflect.ValueOf(second).Pointer(),
+		"each caller gets its own slice header")
 }
 
 // A document that cannot be read is not worth re-reading either.
