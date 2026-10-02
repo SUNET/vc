@@ -268,6 +268,12 @@ func (unimplementedApiv1) UIMetadata(ctx context.Context) (*apiv1.UIMetadataRepl
 func (unimplementedApiv1) IsActiveAuthSession(ctx context.Context, sessionID string) bool {
 	panic("IsActiveAuthSession not implemented in test")
 }
+func (unimplementedApiv1) CompletedResponseCode(ctx context.Context, sessionID string) string {
+	panic("CompletedResponseCode not implemented in test")
+}
+func (unimplementedApiv1) UIResume(ctx context.Context, sessionID string) (*apiv1.UIResumeReply, error) {
+	panic("UIResume not implemented in test")
+}
 func (unimplementedApiv1) GetDiscoveryMetadata(ctx context.Context) (*apiv1.DiscoveryMetadata, error) {
 	panic("GetDiscoveryMetadata not implemented in test")
 }

@@ -122,6 +122,35 @@ type HAConfig struct {
 	Enable bool `yaml:"enable" default:"false"`
 	// CacheDatabaseName is the MongoDB database name used for caches.
 	CacheDatabaseName string `yaml:"cache_database_name" default:"vc_cache"`
+	// Redis configures an optional RESP-protocol pub/sub backend
+	// (Redis or Valkey) used for cross-node notifications in HA mode -
+	// today just the verifier's SSE fanout. Omitted entirely in
+	// standalone deployments; when omitted in HA, notifications remain
+	// in-process and do not cross nodes.
+	Redis *RedisHAConfig `yaml:"redis,omitempty" validate:"omitempty"`
+}
+
+// RedisHAConfig configures a RESP-protocol pub/sub backend for HA
+// mode. Both Redis and Valkey speak the same wire protocol; Backend
+// selects which the deployment actually runs so logs and metrics
+// identify it correctly.
+type RedisHAConfig struct {
+	// Backend selects the RESP backend; "redis" or "valkey". Defaults
+	// to "redis" when omitted.
+	Backend string `yaml:"backend" validate:"omitempty,oneof=redis valkey" default:"redis"`
+	// Addrs lists one or more "<host>:<port>" endpoints. A single entry
+	// yields a plain client; multiple entries yield a cluster client.
+	Addrs []string `yaml:"addrs" validate:"required,min=1,dive,hostname_port" doc_example:"[\"redis:6379\"]"`
+	// Username is the ACL username (Redis 6+ / Valkey). Optional.
+	Username string `yaml:"username,omitempty"`
+	// Password is the ACL password (Redis 6+ / Valkey) or the single
+	// AUTH password on older servers. Optional.
+	Password string `yaml:"password,omitempty"`
+	// DB is the logical database number used by single-node mode
+	// (ignored in cluster mode).
+	DB int `yaml:"db" default:"0"`
+	// TLS enables TLS for the client connection, using system roots.
+	TLS bool `yaml:"tls" default:"false"`
 }
 
 // Kafka holds the Kafka message broker configuration

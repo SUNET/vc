@@ -2,101 +2,289 @@ package notify
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
-
-	"github.com/dustin/go-broadcast"
+	"github.com/SUNET/vc/pkg/pubsub"
 )
 
+// Service is the verifier's SSE fanout layer. Public shape unchanged
+// from the original per-process broadcaster:
+//
+//   - OpenListener(id) returns a channel the HTTP handler reads to
+//     deliver one SSE message to the client.
+//   - CloseListener(id, listener) tears down a single reader.
+//   - Submit(id, msg) delivers msg to every live listener on id.
+//
+// Internally the message bus is a pubsub.PubSub (MemoryPubSub by
+// default; Redis / Valkey when HA is configured). Multiple SSE
+// listeners on one node for the same session share a single backend
+// subscription via a ref-counted idGroup; a pump goroutine bridges
+// the shared subscription into each local listener channel.
 type Service struct {
-	CH  map[string]broadcast.Broadcaster
 	log *logger.Log
 	cfg *model.Cfg
-	mu  sync.Mutex
 
-	// listeners counts active listener channels per id so CloseListener
-	// can reclaim the broadcaster when the last listener for an id leaves.
-	// Without this the CH map grows for the life of the process - an
-	// unauthenticated /ui/notify?session_id=<random> can inflate it
-	// deliberately.
+	bus pubsub.PubSub
+
+	mu sync.Mutex
+	// CH indexes per-id state. Kept exported for the lifecycle tests
+	// in this package that assert reclamation behaviour.
+	CH map[string]*idGroup
+	// listeners counts active listener channels per id. Reclamation
+	// is driven off this counter: when it hits zero the group's
+	// backend subscription is closed and the entry is removed.
 	listeners map[string]int
+
+	closed bool
 }
 
+// idGroup bridges one backend subscription to the N local SSE
+// listeners currently subscribed to the same session id on this
+// node. Its own mutex serializes fan-out, listener edits, and close
+// so a Submit racing with CloseListener cannot send on a channel
+// about to be closed.
+type idGroup struct {
+	sub    pubsub.Subscription
+	done   chan struct{}
+	pumpWg sync.WaitGroup
+
+	mu        sync.Mutex
+	listeners []chan any
+	closed    bool
+}
+
+func (g *idGroup) register(ch chan any) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed {
+		return false
+	}
+	g.listeners = append(g.listeners, ch)
+	return true
+}
+
+func (g *idGroup) unregister(ch chan any) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for i, l := range g.listeners {
+		if l == ch {
+			g.listeners = append(g.listeners[:i], g.listeners[i+1:]...)
+			return
+		}
+	}
+}
+
+// deliver fans a single decoded payload out to every local listener.
+// Non-blocking: a listener that is not reading drops the message.
+func (g *idGroup) deliver(msg any) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed {
+		return
+	}
+	for _, ch := range g.listeners {
+		select {
+		case ch <- msg:
+		default:
+		}
+	}
+}
+
+// close tears down the group: stop the pump, close the backend
+// subscription. Local listener channels are closed by CloseListener
+// (so the HTTP goroutine owning that channel observes the close
+// synchronously).
+func (g *idGroup) close() {
+	g.mu.Lock()
+	if g.closed {
+		g.mu.Unlock()
+		return
+	}
+	g.closed = true
+	g.listeners = nil
+	g.mu.Unlock()
+
+	close(g.done)
+	if g.sub != nil {
+		_ = g.sub.Close()
+	}
+	g.pumpWg.Wait()
+}
+
+// New builds a Service wired to a MemoryPubSub. Standalone deployments
+// use this constructor; HA deployments should prefer NewWithBus so the
+// backend matches cfg.Common.HA.Redis.
 func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Service, error) {
-	s := &Service{
-		CH:        make(map[string]broadcast.Broadcaster),
-		listeners: make(map[string]int),
+	return NewWithBus(ctx, cfg, log, pubsub.NewMemoryPubSub())
+}
+
+// NewWithBus builds a Service around the supplied pub/sub bus. The
+// caller owns bus.Close - Service.Close only tears down its own
+// subscriptions, not the bus itself, so one bus may back multiple
+// Services if that ever becomes useful.
+func NewWithBus(_ context.Context, cfg *model.Cfg, log *logger.Log, bus pubsub.PubSub) (*Service, error) {
+	if bus == nil {
+		bus = pubsub.NewMemoryPubSub()
+	}
+	return &Service{
 		cfg:       cfg,
 		log:       log.New("notify"),
-	}
-	return s, nil
+		bus:       bus,
+		CH:        make(map[string]*idGroup),
+		listeners: make(map[string]int),
+	}, nil
 }
 
-func (s *Service) Notify(id string) broadcast.Broadcaster {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	b, ok := s.CH[id]
-	if !ok {
-		b = broadcast.NewBroadcaster(10)
-		s.CH[id] = b
-	}
-	return b
-}
-
+// OpenListener registers a new SSE listener for id. If this is the
+// first listener on this node for the id, a backend subscription is
+// opened and a pump goroutine is started that decodes backend
+// payloads into the local listener channels.
 func (s *Service) OpenListener(id string) chan any {
-	listener := make(chan any)
-	s.Notify(id).Register(listener)
+	listener := make(chan any, 1)
+
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		close(listener)
+		return listener
+	}
+
+	g := s.CH[id]
+	isNew := false
+	if g == nil {
+		sub, err := s.bus.Subscribe(context.Background(), id)
+		if err != nil {
+			s.mu.Unlock()
+			s.log.Error(err, "notify: pubsub Subscribe failed", "id", id)
+			return listener
+		}
+		g = &idGroup{sub: sub, done: make(chan struct{})}
+		s.CH[id] = g
+		isNew = true
+	}
 	s.listeners[id]++
 	s.mu.Unlock()
+
+	if isNew {
+		g.pumpWg.Add(1)
+		go s.pump(id, g)
+	}
+
+	if !g.register(listener) {
+		s.mu.Lock()
+		s.listeners[id]--
+		if s.listeners[id] <= 0 {
+			delete(s.listeners, id)
+		}
+		s.mu.Unlock()
+	}
+
 	s.log.Debug("OpenListener", "id", id)
 	return listener
 }
 
+// pump bridges g.sub.C() → every local listener on g. One goroutine
+// per idGroup, started by OpenListener when the group is created,
+// torn down by g.close() via the g.done channel.
+func (s *Service) pump(id string, g *idGroup) {
+	defer g.pumpWg.Done()
+	ch := g.sub.C()
+	for {
+		select {
+		case <-g.done:
+			return
+		case payload, ok := <-ch:
+			if !ok {
+				return
+			}
+			msg, err := decodePayload(payload)
+			if err != nil {
+				s.log.Error(err, "notify: pubsub payload decode failed", "id", id)
+				continue
+			}
+			g.deliver(msg)
+		}
+	}
+}
+
+// CloseListener removes one listener registration. The last close on
+// an id reclaims the group and its backend subscription, so a stream
+// of transient ids cannot inflate CH.
 func (s *Service) CloseListener(id string, listener chan any) {
-	s.Notify(id).Unregister(listener)
+	s.mu.Lock()
+	g, ok := s.CH[id]
+	s.mu.Unlock()
+
+	if ok {
+		g.unregister(listener)
+	}
 	close(listener)
 
 	s.mu.Lock()
 	s.listeners[id]--
 	remaining := s.listeners[id]
-	var toClose broadcast.Broadcaster
+	var toClose *idGroup
 	if remaining <= 0 {
 		delete(s.listeners, id)
-		if b, ok := s.CH[id]; ok {
-			toClose = b
+		if g2, ok2 := s.CH[id]; ok2 {
+			toClose = g2
 			delete(s.CH, id)
 		}
 	}
 	s.mu.Unlock()
 
-	// Close outside the mutex: Broadcaster.Close drains its goroutine and
-	// could in principle re-enter if a Submit were racing.
 	if toClose != nil {
-		if err := toClose.Close(); err != nil {
-			s.log.Error(err, "close broadcaster", "id", id)
-		}
+		toClose.close()
 	}
 	s.log.Debug("CloseListener", "id", id, "remaining", remaining)
 }
 
+// Submit publishes msg on the bus for id. Encoded as JSON for backend
+// transport; MemoryPubSub paths pay one marshal/unmarshal per message,
+// cheap compared to the SSE round trip and keeps backend swapping
+// transparent to callers.
 func (s *Service) Submit(id string, msg any) {
-	s.Notify(id).Submit(msg)
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		s.log.Error(err, "notify: payload marshal failed", "id", id)
+		return
+	}
+	if err := s.bus.Publish(context.Background(), id, payload); err != nil {
+		s.log.Error(err, "notify: pubsub Publish failed", "id", id)
+	}
 }
 
-func (s *Service) Close(ctx context.Context) error {
+// Close terminates every outstanding group. The bus itself is NOT
+// closed here - its lifecycle is owned by the caller that constructed
+// it (today: cmd/verifier).
+func (s *Service) Close(_ context.Context) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, b := range s.CH {
-		s.log.Debug("close broadcaster", "id", id)
-		if err := b.Close(); err != nil {
-			return err
-		}
+	if s.closed {
+		s.mu.Unlock()
+		return nil
 	}
-	s.CH = make(map[string]broadcast.Broadcaster)
+	s.closed = true
+	groups := s.CH
+	s.CH = make(map[string]*idGroup)
 	s.listeners = make(map[string]int)
+	s.mu.Unlock()
+
+	for _, g := range groups {
+		g.close()
+	}
 	return nil
+}
+
+// decodePayload reverses json.Marshal. The verifier only ever submits
+// a map[string]string today; a generic any keeps future shape changes
+// local to the caller.
+func decodePayload(b []byte) (any, error) {
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
 }

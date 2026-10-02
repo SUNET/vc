@@ -18,6 +18,7 @@ import (
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/metric"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/pubsub"
 	"github.com/SUNET/vc/pkg/trace"
 )
 
@@ -76,7 +77,12 @@ func main() {
 		panic(err)
 	}
 
-	notifyService, err := notify.New(ctx, cfg, log)
+	notifyBus, err := buildNotifyBus(cfg, log)
+	if err != nil {
+		panic(err)
+	}
+
+	notifyService, err := notify.NewWithBus(ctx, cfg, log, notifyBus)
 	services["notifyService"] = notifyService
 	if err != nil {
 		panic(err)
@@ -114,4 +120,27 @@ func main() {
 	wg.Wait() // Block here until are workers are done
 
 	mainLog.Info("Stopped")
+}
+
+// buildNotifyBus picks the notify pub/sub backend from HA config. The
+// standalone / no-Redis path returns a MemoryPubSub so operators that
+// never touch cfg.Common.HA.Redis get the same same-process fan-out
+// behaviour as before.
+func buildNotifyBus(cfg *model.Cfg, log *logger.Log) (pubsub.PubSub, error) {
+	if cfg.Common.HA.Redis == nil || len(cfg.Common.HA.Redis.Addrs) == 0 {
+		return pubsub.NewMemoryPubSub(), nil
+	}
+	client, err := pubsub.NewClient(pubsub.ClientConfig{
+		Addrs:    cfg.Common.HA.Redis.Addrs,
+		Username: cfg.Common.HA.Redis.Username,
+		Password: cfg.Common.HA.Redis.Password,
+		DB:       cfg.Common.HA.Redis.DB,
+		TLS:      cfg.Common.HA.Redis.TLS,
+	})
+	if err != nil {
+		return nil, err
+	}
+	backend := pubsub.ParseBackend(cfg.Common.HA.Redis.Backend)
+	svc := pubsub.New(backend, client, log.New("pubsub"))
+	return svc.NewPubSub("verifier_notify")
 }

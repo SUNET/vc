@@ -31,19 +31,17 @@ type VerificationRequestObjectRequest struct {
 func (c *Client) VerificationRequestObject(ctx context.Context, req *VerificationRequestObjectRequest) (string, error) {
 	c.log.Debug("Verification request object", "id", req.ID)
 
-	// Query by RequestObjectID since that's what the wallet sends via ?id= parameter
-	authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{
-		RequestObjectID: req.ID,
-	})
-	if err != nil {
-		c.log.Error(err, "failed to get authorization context")
-		return "", err
-	}
-
+	// Resolve the supplied id directly from the request object cache. A
+	// single authorization context can produce two ids (the QR / request_uri
+	// id and a separate DC API id), only the first of which is persisted on
+	// the auth context - looking up by RequestObjectID would therefore 404
+	// every DC API fetch. The cache is written only from authenticated
+	// /ui/interaction paths, so a cache hit is itself sufficient proof the
+	// id names a request we minted.
 	// TODO(masv): should requestObjectCache be using cache lib
-	requestObject, found := c.openid4vp.RequestObjectCache.Get(authorizationContext.RequestObjectID)
+	requestObject, found := c.openid4vp.RequestObjectCache.Get(req.ID)
 	if !found {
-		c.log.Error(nil, "request object not found in cache", "requestObjectID", authorizationContext.RequestObjectID)
+		c.log.Error(nil, "request object not found in cache", "requestObjectID", req.ID)
 		return "", errors.New("request object not found")
 	}
 
@@ -53,7 +51,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", err
 	}
 
-	c.log.Debug("Signed JWT created", "requestObjectID", authorizationContext.RequestObjectID)
+	c.log.Debug("Signed JWT created", "requestObjectID", req.ID)
 
 	return signedJWT, nil
 }
@@ -625,6 +623,19 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	c.cacheService.Credential.Set(ctx, responseCode, credentialCaches)
 
 	c.log.Debug("Credentials cached", "response_code", responseCode, "count", len(credentialCaches))
+
+	// Persist the completion marker BEFORE broadcasting the redirect. A tab
+	// that reloads after Submit has fired but before it was observed must
+	// mint a fresh session rather than resubscribe to this now-consumed
+	// context (otherwise isReusableAuthContext would let the reload sit on
+	// an SSE stream whose only message has already been delivered). The
+	// VerifierResponseCode is already a per-completion value and is also
+	// what identifies the cached credentials for the callback.
+	authCtx.VerifierResponseCode = responseCode
+	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
+		c.log.Error(err, "failed to persist completion marker on authorization context", "session_id", authCtx.SessionID)
+		return nil, err
+	}
 
 	// Notify AFTER credentials are cached so the browser can fetch them
 	c.notify.Submit(authCtx.SessionID, map[string]string{"redirect_uri": redirectURI})

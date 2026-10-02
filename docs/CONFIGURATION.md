@@ -175,10 +175,28 @@ drivers to want independent validation tags.
 
 > **Path:** `.common.ha`
 
-| Field                 | Type     | Description                                                                   | Example | Default    | Required |
-| --------------------- | -------- | ----------------------------------------------------------------------------- | ------- | ---------- | -------- |
-| `enable`              | `bool`   | HA mode; when true caches are backed by MongoDB instead of in-memory storage. | -       | `false`    | No       |
-| `cache_database_name` | `string` | MongoDB database name used for caches.                                        | -       | `vc_cache` | No       |
+| Field                 | Type     | Description                                                                                                                                                                                                                                                              | Example | Default    | Required |
+| --------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ---------- | -------- |
+| `enable`              | `bool`   | HA mode; when true caches are backed by MongoDB instead of in-memory storage.                                                                                                                                                                                            | -       | `false`    | No       |
+| `cache_database_name` | `string` | MongoDB database name used for caches.                                                                                                                                                                                                                                   | -       | `vc_cache` | No       |
+| `redis`               | `object` | An optional RESP-protocol pub/sub backend (Redis or Valkey) used for cross-node notifications in HA mode - today just the verifier's SSE fanout. Omitted entirely in standalone deployments; when omitted in HA, notifications remain in-process and do not cross nodes. | -       | -          | No       |
+
+### `redis`
+
+> **Path:** `.common.ha.redis`
+
+mode. Both Redis and Valkey speak the same wire protocol; Backend
+selects which the deployment actually runs so logs and metrics
+identify it correctly.
+
+| Field      | Type       | Description                                                                                                           | Example          | Default | Required |
+| ---------- | ---------- | --------------------------------------------------------------------------------------------------------------------- | ---------------- | ------- | -------- |
+| `backend`  | `string`   | Backend selects the RESP backend; "redis" or "valkey". Defaults to "redis" when omitted.                              | -                | `redis` | No       |
+| `addrs`    | `[]string` | One or more "<host>:<port>" endpoints. A single entry yields a plain client; multiple entries yield a cluster client. | `["redis:6379"]` | -       | Yes      |
+| `username` | `string`   | ACL username (Redis 6+ / Valkey). Optional.                                                                           | -                | -       | No       |
+| `password` | `string`   | ACL password (Redis 6+ / Valkey) or the single AUTH password on older servers. Optional.                              | -                | -       | No       |
+| `db`       | `int`      | Logical database number used by single-node mode (ignored in cluster mode).                                           | -                | `0`     | No       |
+| `tls`      | `bool`     | TLS for the client connection, using system roots.                                                                    | -                | `false` | No       |
 
 ### `credential_registry`
 

@@ -65,3 +65,50 @@ func TestService_SecondListenerKeepsBroadcasterAlive(t *testing.T) {
 	svc.mu.Unlock()
 	assert.False(t, present, "last listener leaving must reclaim")
 }
+
+// A Submit arriving while CloseListener is reclaiming the group must not
+// panic, deadlock, or send on a closed listener channel. This is the
+// race the previous go-broadcast backing could not survive: Submit held
+// a stale broadcaster reference whose internal goroutine had already
+// stopped.
+func TestService_SubmitRacesWithCloseListener(t *testing.T) {
+	svc := newServiceForTest(t)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			listener := svc.OpenListener("race-id")
+			// Drain in a goroutine so Submit never blocks on a buffer.
+			drained := make(chan struct{})
+			go func() {
+				for range listener {
+				}
+				close(drained)
+			}()
+			svc.Submit("race-id", "msg")
+			svc.CloseListener("race-id", listener)
+			<-drained
+		}
+	}()
+
+	for i := 0; i < 200; i++ {
+		svc.Submit("race-id", "concurrent")
+	}
+
+	<-done
+}
+
+// Submit to an id with no listeners must not create an entry in the CH
+// map. A stray wallet response for a session whose SSE already closed
+// would otherwise leak one group per missed submit.
+func TestService_SubmitWithoutListenerDoesNotLeak(t *testing.T) {
+	svc := newServiceForTest(t)
+
+	svc.Submit("ghost", "ignored")
+
+	svc.mu.Lock()
+	_, present := svc.CH["ghost"]
+	svc.mu.Unlock()
+	assert.False(t, present, "Submit with no listeners must not create a group entry")
+}

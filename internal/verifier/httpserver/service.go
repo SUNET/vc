@@ -117,6 +117,16 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		return nil, err
 	}
 
+	// Force revalidation of embedded static assets. There is no cache
+	// busting on these URLs, so a browser's heuristic cache can hold onto
+	// an old ES module across a plain reload even after a deploy.
+	s.gin.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/static/") {
+			c.Header("Cache-Control", "no-cache")
+		}
+		c.Next()
+	})
+
 	s.gin.StaticFS("/static", http.FS(webvendor.Overlay(staticembed.FS)))
 
 	tmpl := template.New("").Funcs(template.FuncMap{
@@ -226,6 +236,9 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodPost, "/interaction", http.StatusOK, s.endpointUIInteraction)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/notify", http.StatusOK, s.endpointUINotify)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/metadata", http.StatusOK, s.endpointUIMetadata)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/result", http.StatusOK, s.endpointUIResult)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/completion", http.StatusOK, s.endpointUICompletion)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/resume", http.StatusOK, s.endpointUIResume)
 
 	rgDocs := rgRoot.Group("/swagger")
 	rgDocs.GET("/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
