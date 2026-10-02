@@ -345,7 +345,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 				if err != nil {
 					return nil, err
 				}
-				maps.Copy(docData, derived)
+				credential.MergeNestedClaims(docData, derived)
 				document = &model.CompleteDocument{
 					Meta:               document.Meta,
 					IdentityMappingIDs: document.IdentityMappingIDs,

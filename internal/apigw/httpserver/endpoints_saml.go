@@ -3,7 +3,6 @@ package httpserver
 import (
 	"context"
 	"fmt"
-	"maps"
 	"net/http"
 	"time"
 
@@ -218,7 +217,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 				span.SetStatus(codes.Error, derr.Error())
 				return nil, fmt.Errorf("SAML derivations failed: %w", derr)
 			}
-			maps.Copy(claims, derived)
+			credential.MergeNestedClaims(claims, derived)
 		}
 	}
 

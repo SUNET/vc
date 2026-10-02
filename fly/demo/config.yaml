@@ -113,6 +113,11 @@ verifier:
             - rule: "age_over"
               path: ["birthdate"]
               value: 18
+    "eduID Age Over 18":
+      credentials:
+        eduid_age_verification:
+          claims:
+            - path: ["age_over_18"]
     "PID + EHIC":
       credentials:
         pid:

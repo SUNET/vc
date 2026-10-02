@@ -32,17 +32,17 @@ func ApplyDerivations(list []primitives.Derivation, claims map[string]any, now t
 		if err != nil {
 			return nil, fmt.Errorf("derivations[%d]: %w", i, err)
 		}
-		mergeNestedClaims(out, derived)
-		mergeNestedClaims(working, derived)
+		MergeNestedClaims(out, derived)
+		MergeNestedClaims(working, derived)
 	}
 	return out, nil
 }
 
-// mergeNestedClaims deep-merges src into dst. When both dst[k] and src[k]
+// MergeNestedClaims deep-merges src into dst. When both dst[k] and src[k]
 // are map[string]any, their contents are merged recursively; otherwise
 // src[k] replaces dst[k]. This preserves sibling nested claims when a
 // derivation produces only a subset of a parent map's keys.
-func mergeNestedClaims(dst, src map[string]any) {
+func MergeNestedClaims(dst, src map[string]any) {
 	for k, v := range src {
 		sm, srcIsMap := v.(map[string]any)
 		if !srcIsMap {
@@ -54,7 +54,7 @@ func mergeNestedClaims(dst, src map[string]any) {
 			dst[k] = v
 			continue
 		}
-		mergeNestedClaims(dm, sm)
+		MergeNestedClaims(dm, sm)
 	}
 }
 

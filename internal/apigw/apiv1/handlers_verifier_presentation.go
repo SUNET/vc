@@ -80,7 +80,7 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 	if err != nil {
 		return fmt.Errorf("failed to apply derivations for preview: %w", err)
 	}
-	maps.Copy(previewData, derived)
+	credential.MergeNestedClaims(previewData, derived)
 	defaults, err := pScope.ResolveDefaults(now)
 	if err != nil {
 		return fmt.Errorf("failed to resolve defaults for preview: %w", err)

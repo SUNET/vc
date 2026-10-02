@@ -189,7 +189,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 				span.SetStatus(codes.Error, derr.Error())
 				return nil, fmt.Errorf("OIDC derivations failed: %w", derr)
 			}
-			maps.Copy(cc.identity, derived)
+			credential.MergeNestedClaims(cc.identity, derived)
 		}
 	}
 
