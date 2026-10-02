@@ -153,26 +153,47 @@ func NewWithBus(_ context.Context, cfg *model.Cfg, log *logger.Log, bus pubsub.P
 //
 // The backend Subscribe handshake runs OUTSIDE s.mu so a slow or hung
 // RESP server cannot block other OpenListener / CloseListener /
-// Service.Close callers for the duration of its network timeout. If
-// a concurrent OpenListener wins the race to install the group, the
-// fresh subscription is closed before falling through to the
-// existing-group path.
+// Service.Close callers for the duration of its network timeout.
+//
+// The s.CH lookup and g.register of the fast path run under a single
+// s.mu critical section, so a last-listener CloseListener detaching g
+// from s.CH cannot interleave between them. If a concurrent
+// OpenListener wins the race to install a new group, or the group we
+// found was reclaimed before we could register, OpenListener retries
+// the whole lookup instead of attaching to a detached group.
 func (s *Service) OpenListener(id string) chan any {
-	listener := make(chan any, 1)
+	for {
+		listener := make(chan any, 1)
 
-	// Fast path: a group already exists → attach without touching the bus.
-	s.mu.Lock()
-	if s.closed {
+		// Fast path: a group already exists → attach without
+		// touching the bus. s.mu is held across both the s.CH lookup
+		// AND g.register so a concurrent last-listener CloseListener
+		// cannot detach g from s.CH between lookup and register.
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			close(listener)
+			return listener
+		}
+		if g := s.CH[id]; g != nil {
+			if !g.register(listener) {
+				// Unreachable under the current invariants: g is in
+				// s.CH only if it is not closed (both reclaim paths
+				// delete g from s.CH under s.mu before calling
+				// g.close). Treat as a lost race and retry.
+				s.mu.Unlock()
+				continue
+			}
+			s.listeners[id]++
+			s.listenerOnces[listener] = &sync.Once{}
+			s.mu.Unlock()
+			s.log.Debug("OpenListener", "id", id)
+			return listener
+		}
 		s.mu.Unlock()
-		close(listener)
-		return listener
-	}
-	g := s.CH[id]
-	s.mu.Unlock()
 
-	isNew := false
-	if g == nil {
-		// Slow path: subscribe to the backend outside the lock.
+		// Slow path: subscribe to the backend outside s.mu so a slow
+		// RESP server does not block other callers.
 		sub, err := s.bus.Subscribe(context.Background(), id)
 		if err != nil {
 			s.log.Error(err, "notify: pubsub Subscribe failed", "id", id)
@@ -187,60 +208,37 @@ func (s *Service) OpenListener(id string) chan any {
 			close(listener)
 			return listener
 		}
-		if existing := s.CH[id]; existing != nil {
-			// A concurrent OpenListener installed its group first; drop
-			// our fresh subscription and attach to the winner.
+		if s.CH[id] != nil {
+			// A concurrent OpenListener installed its group first.
+			// Drop our fresh subscription and retry the fast path on
+			// the winner.
 			s.mu.Unlock()
 			_ = sub.Close()
-			g = existing
-		} else {
-			g = &idGroup{sub: sub, done: make(chan struct{})}
-			s.CH[id] = g
-			isNew = true
-			// Fall through still holding s.mu.
+			continue
 		}
-	}
-
-	if !isNew {
-		s.mu.Lock()
-		if s.closed {
+		g := &idGroup{sub: sub, done: make(chan struct{})}
+		s.CH[id] = g
+		if !g.register(listener) {
+			// Freshly created, not yet exposed - cannot fail.
 			s.mu.Unlock()
 			close(listener)
 			return listener
 		}
-	}
-
-	// Register the listener and (for a new group) call fanOutWg.Add(1)
-	// while still holding s.mu, so Service.Close's snapshot cannot
-	// straddle this transition. g is in s.CH only if it is not closed
-	// (both reclaim paths — Service.Close and CloseListener's
-	// last-listener close — delete g from s.CH under s.mu before
-	// calling g.close), so g.register cannot fail here; the check is
-	// kept defensive.
-	if !g.register(listener) {
+		s.listeners[id]++
+		s.listenerOnces[listener] = &sync.Once{}
+		g.fanOutWg.Add(1)
 		s.mu.Unlock()
-		close(listener)
+
+		// The fan-out goroutine is started AFTER g.register, so its
+		// first g.deliver finds at least this listener registered.
+		// fanOutWg has already been incremented, so a Service.Close
+		// reaching g.close()->fanOutWg.Wait before the goroutine
+		// starts still blocks until the fan-out exits.
+		go s.fanOut(id, g)
+
+		s.log.Debug("OpenListener", "id", id)
 		return listener
 	}
-	once := &sync.Once{}
-	s.listeners[id]++
-	s.listenerOnces[listener] = once
-	if isNew {
-		g.fanOutWg.Add(1)
-	}
-	s.mu.Unlock()
-
-	// The fan-out goroutine is started AFTER g.register, so its first
-	// g.deliver finds at least this listener registered. fanOutWg has
-	// already been incremented, so a Service.Close reaching
-	// g.close()->fanOutWg.Wait before the goroutine starts still
-	// blocks until the fan-out exits.
-	if isNew {
-		go s.fanOut(id, g)
-	}
-
-	s.log.Debug("OpenListener", "id", id)
-	return listener
 }
 
 // fanOut forwards every decoded backend message to each local listener

@@ -1314,8 +1314,15 @@ Alpine.data("app", () => ({
             this.notifyEventSource = null;
         }
         this.loading = true;
-        await this.lookupCredentialsList();
-        this.loading = false;
+        try {
+            await this.lookupCredentialsList();
+        } catch (err) {
+            // Surface the failure instead of leaving the UI on an
+            // indefinite spinner with no menu controls to recover.
+            this.error = err instanceof Error ? err.message : String(err);
+        } finally {
+            this.loading = false;
+        }
     },
 
     /**
