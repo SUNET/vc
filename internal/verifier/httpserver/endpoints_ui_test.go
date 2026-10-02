@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -37,6 +38,12 @@ type uiInteractionApiv1 struct {
 	// activeSessions names ids that IsActiveAuthSession reports as live.
 	// Empty set means every call returns false.
 	activeSessions map[string]struct{}
+
+	// lookupErr, when non-nil, is returned verbatim by
+	// IsActiveAuthSession so tests can simulate an HA store failure
+	// (not the same as "unknown session"). Must take precedence over
+	// activeSessions.
+	lookupErr error
 }
 
 func (u *uiInteractionApiv1) UIInteraction(ctx context.Context, req *apiv1.UIInteractionRequest) (*apiv1.UIInteractionReply, error) {
@@ -45,9 +52,12 @@ func (u *uiInteractionApiv1) UIInteraction(ctx context.Context, req *apiv1.UIInt
 	return &apiv1.UIInteractionReply{SessionID: u.replySessionID}, nil
 }
 
-func (u *uiInteractionApiv1) IsActiveAuthSession(ctx context.Context, sessionID string) bool {
+func (u *uiInteractionApiv1) IsActiveAuthSession(ctx context.Context, sessionID string) (bool, error) {
+	if u.lookupErr != nil {
+		return false, u.lookupErr
+	}
 	_, ok := u.activeSessions[sessionID]
-	return ok
+	return ok, nil
 }
 
 func setupUIEndpointEngine(t *testing.T, apiv1Mock Apiv1) (*gin.Engine, *notify.Service) {
@@ -344,4 +354,20 @@ func TestEndpointUINotify_UnknownSessionIDRejected(t *testing.T) {
 	// helper exposed below. Simpler: assert the Service's internal state
 	// through the only public surface, which is submitting and observing
 	// no effect - not meaningful here. The 404 is the contract check.
+}
+
+// A backend lookup failure (anything that is not cache.ErrNoDocuments)
+// must surface as a retryable 5xx. Collapsing it into 404 would make a
+// transient HA store error look like an unknown session, so the browser
+// would stop reconnecting and permanently miss the completion event.
+func TestEndpointUINotify_LookupErrorIsRetryable(t *testing.T) {
+	mock := &uiInteractionApiv1{lookupErr: errors.New("mongo: transient failure")}
+	engine, notifySvc := setupUIEndpointEngine(t, mock)
+	defer func() { _ = notifySvc.Close(context.Background()) }()
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/notify?session_id=any", nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code, "backend errors must not be reported as 404")
 }

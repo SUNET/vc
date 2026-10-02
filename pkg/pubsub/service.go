@@ -85,6 +85,11 @@ func New(backend Backend, redisClient redis.UniversalClient, log Logger) *Servic
 // only by the RESP backends to namespace channel names so multiple
 // buses can share one Redis/Valkey keyspace without colliding; it is
 // ignored by MemoryPubSub.
+//
+// RESP paths route through newRESP so the prefix validation enforced
+// by the public NewRedisPubSub/NewValkeyPubSub constructors applies
+// here too; a prefix containing glob metacharacters would otherwise
+// slip past the factory and poison SUBSCRIBE pattern matching.
 func (s *Service) NewPubSub(prefix string) (PubSub, error) {
 	switch s.backend {
 	case BackendRedis, BackendValkey:
@@ -92,7 +97,7 @@ func (s *Service) NewPubSub(prefix string) (PubSub, error) {
 			s.log.Error(ErrBackendUnavailable, "pubsub: HA backend requested without a redis client, falling back to memory", "backend", s.backend.String())
 			return NewMemoryPubSub(), nil
 		}
-		return newRESPPubSub(s.redisClient, prefix, s.backend, s.log), nil
+		return newRESP(s.redisClient, prefix, s.backend, s.log)
 	default:
 		return NewMemoryPubSub(), nil
 	}

@@ -221,6 +221,19 @@ func TestNewRedisPubSub_RejectsGlobPrefix(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// The Service factory path must enforce the same prefix validation as
+// the public NewRedisPubSub/NewValkeyPubSub constructors; otherwise a
+// glob-metacharacter prefix slips past and poisons SUBSCRIBE pattern
+// matching.
+func TestService_RedisBackendRejectsGlobPrefix(t *testing.T) {
+	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:0"})
+	defer func() { _ = client.Close() }()
+
+	svc := New(BackendRedis, client, nil)
+	_, err := svc.NewPubSub("bad*prefix")
+	assert.Error(t, err)
+}
+
 // Factory selects the RESP backend when a client is supplied.
 func TestService_RedisBackendYieldsRESPPubSub(t *testing.T) {
 	client, cleanup := startRedisContainer(t)

@@ -751,15 +751,28 @@ func isReusableAuthContext(authCtx *cache.AuthorizationContext) bool {
 // context the verifier currently tracks. Used by /ui/notify to refuse to
 // open an SSE listener for an unknown id, which would otherwise let any
 // unauthenticated caller inflate notify.Service's broadcaster map.
-func (c *Client) IsActiveAuthSession(ctx context.Context, sessionID string) bool {
+//
+// (false, nil) means the lookup succeeded and the id is unknown
+// (ErrNoDocuments) or empty. A non-nil error means the authorization
+// store itself failed; the HTTP endpoint surfaces that as a retryable
+// 5xx so a transient Mongo/Redis error in HA does not get mis-reported
+// as 404 and strand the EventSource reconciliation that would run on
+// retry.
+func (c *Client) IsActiveAuthSession(ctx context.Context, sessionID string) (bool, error) {
 	if sessionID == "" {
-		return false
+		return false, nil
 	}
 	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
-	if err != nil || authCtx == nil {
-		return false
+	if err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return false, nil
+		}
+		return false, err
 	}
-	return true
+	if authCtx == nil {
+		return false, nil
+	}
+	return true, nil
 }
 
 // CompletedResponseCode returns the VerifierResponseCode set on the

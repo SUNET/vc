@@ -196,7 +196,19 @@ func (s *Service) endpointUINotify(ctx context.Context, c *gin.Context) (any, er
 	// about. notify.Service.OpenListener would otherwise create a
 	// broadcaster entry per request, which an unauthenticated caller
 	// can turn into unbounded growth of the process-wide map.
-	if !s.apiv1.IsActiveAuthSession(ctx, sessionID) {
+	//
+	// A backend lookup failure (anything other than "not found") must
+	// surface as a retryable 5xx; collapsing it into 404 would make a
+	// transient HA store error look like an unknown session, so the
+	// browser would stop reconnecting and permanently miss the
+	// completion event.
+	active, err := s.apiv1.IsActiveAuthSession(ctx, sessionID)
+	if err != nil {
+		s.log.Error(err, "endpointUINotify auth session lookup failed", "sessionID", sessionID)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "session lookup unavailable"})
+		return nil, nil
+	}
+	if !active {
 		s.log.Debug("endpointUINotify unknown session_id", "sessionID", sessionID)
 		c.JSON(http.StatusNotFound, gin.H{"error": "unknown session_id"})
 		return nil, nil

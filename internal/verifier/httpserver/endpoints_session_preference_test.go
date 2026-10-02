@@ -265,7 +265,7 @@ func (unimplementedApiv1) UIInteraction(ctx context.Context, req *apiv1.UIIntera
 func (unimplementedApiv1) UIMetadata(ctx context.Context) (*apiv1.UIMetadataReply, error) {
 	panic("UIMetadata not implemented in test")
 }
-func (unimplementedApiv1) IsActiveAuthSession(ctx context.Context, sessionID string) bool {
+func (unimplementedApiv1) IsActiveAuthSession(ctx context.Context, sessionID string) (bool, error) {
 	panic("IsActiveAuthSession not implemented in test")
 }
 func (unimplementedApiv1) CompletedResponseCode(ctx context.Context, sessionID string) (string, error) {
