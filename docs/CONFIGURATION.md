@@ -476,27 +476,29 @@ Each entry represents one acceptable credential type the wallet can present.
 
 Each list entry under a scope's `derivations` field is keyed by primitive name (e.g. `age_over_thresholds:` or `lowercase: { input: email }`). The subsections below catalog the primitives and their parameters.
 
-| Field                            | Type     | Description                                                                                                                                 | Example | Default | Required |
-| -------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `age_over_thresholds`            | `object` | AgeOverThresholds emits one boolean claim per configured threshold, named age_over_N, from an ISO YYYY-MM-DD birthdate.                     | -       | -       | No       |
-| `lowercase`                      | `object` | Lowercase applies strings.ToLower elementwise.                                                                                              | -       | -       | No       |
-| `uppercase`                      | `object` | Uppercase applies strings.ToUpper elementwise.                                                                                              | -       | -       | No       |
-| `trim`                           | `object` | Trim applies strings.TrimSpace elementwise.                                                                                                 | -       | -       | No       |
-| `country_alpha2`                 | `object` | Country names or alpha-3 codes to ISO 3166-1 alpha-2 codes elementwise. Unknown inputs pass through unchanged.                              | -       | -       | No       |
-| `country_alpha3`                 | `object` | Country names or alpha-2 codes to ISO 3166-1 alpha-3 codes elementwise. Unknown inputs pass through unchanged.                              | -       | -       | No       |
-| `yyyymmdd_to_iso`                | `object` | YYYYMMDDToISO converts a SCHAC schacDateOfBirth ("YYYYMMDD") claim to ISO full-date ("YYYY-MM-DD"). Impossible calendar dates are an error. | -       | -       | No       |
-| `swamid_highest_assurance_level` | `object` | SWAMIDHighestAssuranceLevel reduces a multi-valued eduPersonAssurance claim to the strongest recognised SWAMID Assurance Framework URI.     | -       | -       | No       |
+| Field                            | Type     | Description                                                                                                                                                                                                            | Example | Default | Required |
+| -------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `age_over_thresholds`            | `object` | AgeOverThresholds emits two boolean claims per configured threshold N from an ISO YYYY-MM-DD birthdate: age_over_N (completed years at `now`) and over_N_this_year (reaches N at some point in `now`'s calendar year). | -       | -       | No       |
+| `lowercase`                      | `object` | Lowercase applies strings.ToLower elementwise.                                                                                                                                                                         | -       | -       | No       |
+| `uppercase`                      | `object` | Uppercase applies strings.ToUpper elementwise.                                                                                                                                                                         | -       | -       | No       |
+| `trim`                           | `object` | Trim applies strings.TrimSpace elementwise.                                                                                                                                                                            | -       | -       | No       |
+| `country_alpha2`                 | `object` | Country names or alpha-3 codes to ISO 3166-1 alpha-2 codes elementwise. Unknown inputs pass through unchanged.                                                                                                         | -       | -       | No       |
+| `country_alpha3`                 | `object` | Country names or alpha-2 codes to ISO 3166-1 alpha-3 codes elementwise. Unknown inputs pass through unchanged.                                                                                                         | -       | -       | No       |
+| `yyyymmdd_to_iso`                | `object` | YYYYMMDDToISO converts a SCHAC schacDateOfBirth ("YYYYMMDD") claim to ISO full-date ("YYYY-MM-DD"). Impossible calendar dates are an error.                                                                            | -       | -       | No       |
+| `swamid_highest_assurance_level` | `object` | SWAMIDHighestAssuranceLevel reduces a multi-valued eduPersonAssurance claim to the strongest recognised SWAMID Assurance Framework URI.                                                                                | -       | -       | No       |
 
 ### `age_over_thresholds`
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].age_over_thresholds`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].age_over_thresholds`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].age_over_thresholds`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].age_over_thresholds`, `<scope>.derivations[].age_over_thresholds`
 
-Emits one boolean claim per threshold, named age_over_N.
+Emits two boolean claims per threshold: age_over_N (completed years at
+`now`) and over_N_this_year (reaches N at some point in `now`'s calendar
+year, i.e. year(now) - year(birthdate) >= N).
 
-| Field        | Type     | Description                                                                                    | Example                | Default | Required |
-| ------------ | -------- | ---------------------------------------------------------------------------------------------- | ---------------------- | ------- | -------- |
-| `input`      | `string` | Birthdate claim name (value must be ISO YYYY-MM-DD).                                           | `birthdate`            | -       | Yes      |
-| `thresholds` | `[]int`  | Ages (in years) to expose. Each N produces age_over_N (boolean). Every entry must be positive. | `[13, 15, 18, 21, 65]` | -       | Yes      |
+| Field        | Type     | Description                                                                                                          | Example                | Default | Required |
+| ------------ | -------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------- | -------- |
+| `input`      | `string` | Birthdate claim name (value must be ISO YYYY-MM-DD).                                                                 | `birthdate`            | -       | Yes      |
+| `thresholds` | `[]int`  | Ages (in years) to expose. Each N produces age_over_N and over_N_this_year (booleans). Every entry must be positive. | `[13, 15, 18, 21, 65]` | -       | Yes      |
 
 ### `lowercase`
 
@@ -504,9 +506,9 @@ Emits one boolean claim per threshold, named age_over_N.
 
 Scalar strings and []string are handled; other types are an error.
 
-| Field   | Type     | Description        | Example | Default | Required |
-| ------- | -------- | ------------------ | ------- | ------- | -------- |
-| `input` | `string` | Source claim name. | `email` | -       | Yes      |
+| Field   | Type     | Description                                                                                                                                                         | Example | Default | Required |
+| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `input` | `string` | Source claim name. Supports dot-notation claim paths (e.g. "identity.email") so this primitive can target the same nested claims that AttributeMapper materialises. | `email` | -       | Yes      |
 
 ### `uppercase`
 
@@ -1879,12 +1881,12 @@ Each list entry under a scope's `derivations` field is keyed by primitive name (
 
 > **Path:** `<scope>.derivations[].age_over_thresholds`
 
-AgeOverThresholds emits one boolean claim per configured threshold, named age_over_N, from an ISO YYYY-MM-DD birthdate.
+AgeOverThresholds emits two boolean claims per configured threshold N from an ISO YYYY-MM-DD birthdate: age_over_N (completed years at `now`) and over_N_this_year (reaches N at some point in `now`'s calendar year).
 
-| Field        | Type     | Description                                                                                    | Example                | Default | Required |
-| ------------ | -------- | ---------------------------------------------------------------------------------------------- | ---------------------- | ------- | -------- |
-| `input`      | `string` | Birthdate claim name (value must be ISO YYYY-MM-DD).                                           | `birthdate`            | -       | Yes      |
-| `thresholds` | `[]int`  | Ages (in years) to expose. Each N produces age_over_N (boolean). Every entry must be positive. | `[13, 15, 18, 21, 65]` | -       | Yes      |
+| Field        | Type     | Description                                                                                                          | Example                | Default | Required |
+| ------------ | -------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------- | -------- |
+| `input`      | `string` | Birthdate claim name (value must be ISO YYYY-MM-DD).                                                                 | `birthdate`            | -       | Yes      |
+| `thresholds` | `[]int`  | Ages (in years) to expose. Each N produces age_over_N and over_N_this_year (booleans). Every entry must be positive. | `[13, 15, 18, 21, 65]` | -       | Yes      |
 
 ### lowercase
 
@@ -1892,9 +1894,9 @@ AgeOverThresholds emits one boolean claim per configured threshold, named age_ov
 
 Lowercase applies strings.ToLower elementwise.
 
-| Field   | Type     | Description        | Example | Default | Required |
-| ------- | -------- | ------------------ | ------- | ------- | -------- |
-| `input` | `string` | Source claim name. | `email` | -       | Yes      |
+| Field   | Type     | Description                                                                                                                                                         | Example | Default | Required |
+| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `input` | `string` | Source claim name. Supports dot-notation claim paths (e.g. "identity.email") so this primitive can target the same nested claims that AttributeMapper materialises. | `email` | -       | Yes      |
 
 ### uppercase
 

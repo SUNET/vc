@@ -18,8 +18,10 @@ import (
 //
 // Each list entry under a scope's `derivations` field is keyed by primitive name (e.g. `age_over_thresholds:` or `lowercase: { input: email }`). The subsections below catalog the primitives and their parameters.
 type Derivation struct {
-	// AgeOverThresholds emits one boolean claim per configured threshold,
-	// named age_over_N, from an ISO YYYY-MM-DD birthdate.
+	// AgeOverThresholds emits two boolean claims per configured threshold
+	// N from an ISO YYYY-MM-DD birthdate: age_over_N (completed years at
+	// `now`) and over_N_this_year (reaches N at some point in `now`'s
+	// calendar year).
 	AgeOverThresholds *AgeOverThresholdsArgs `yaml:"age_over_thresholds,omitempty"`
 
 	// Lowercase applies strings.ToLower elementwise.

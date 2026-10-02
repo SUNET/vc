@@ -12,13 +12,16 @@ import (
 )
 
 // AgeOverThresholdsArgs configures the age_over_thresholds primitive.
-// Emits one boolean claim per threshold, named age_over_N.
+// Emits two boolean claims per threshold: age_over_N (completed years at
+// `now`) and over_N_this_year (reaches N at some point in `now`'s calendar
+// year, i.e. year(now) - year(birthdate) >= N).
 type AgeOverThresholdsArgs struct {
 	// Input is the birthdate claim name (value must be ISO YYYY-MM-DD).
 	Input string `yaml:"input" validate:"required" doc_example:"birthdate"`
 
 	// Thresholds are the ages (in years) to expose. Each N produces
-	// age_over_N (boolean). Every entry must be positive.
+	// age_over_N and over_N_this_year (booleans). Every entry must be
+	// positive.
 	Thresholds []int `yaml:"thresholds" validate:"required,min=1,dive,gt=0" doc_example:"[13, 15, 18, 21, 65]"`
 }
 
@@ -39,11 +42,13 @@ func (a *AgeOverThresholdsArgs) Apply(claims map[string]any, now time.Time) (map
 	return out, nil
 }
 
-// AgeOverThresholds parses birthdate (ISO YYYY-MM-DD) and returns a map from
-// claim name ("age_over_NN") to whether the subject was that many completed
-// years old at `now`. A zero `now` falls back to time.Now(). Returns an error
-// if birthdate is empty, malformed, or in the future. Callers pick which
-// thresholds are meaningful for their credential type.
+// AgeOverThresholds parses birthdate (ISO YYYY-MM-DD) and returns a map
+// containing, for every threshold N: age_over_N (true if the subject had
+// completed N years at `now`) and over_N_this_year (true if the subject
+// reaches N at some point in `now`'s calendar year, i.e.
+// `now.Year() - birthYear >= N`). A zero `now` falls back to time.Now().
+// Returns an error if birthdate is empty, malformed, or in the future.
+// Callers pick which thresholds are meaningful for their credential type.
 func AgeOverThresholds(birthdate string, now time.Time, thresholds []int) (map[string]bool, error) {
 	if birthdate == "" {
 		return nil, errors.New("birthdate is empty")
@@ -59,12 +64,14 @@ func AgeOverThresholds(birthdate string, now time.Time, thresholds []int) (map[s
 		return nil, fmt.Errorf("birthdate %q is in the future", birthdate)
 	}
 	age := now.Year() - bd.Year()
+	ageThisYear := age
 	if now.Month() < bd.Month() || (now.Month() == bd.Month() && now.Day() < bd.Day()) {
 		age--
 	}
-	out := make(map[string]bool, len(thresholds))
+	out := make(map[string]bool, 2*len(thresholds))
 	for _, t := range thresholds {
 		out[fmt.Sprintf("age_over_%d", t)] = age >= t
+		out[fmt.Sprintf("over_%d_this_year", t)] = ageThisYear >= t
 	}
 	return out, nil
 }

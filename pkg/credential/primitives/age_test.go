@@ -21,37 +21,55 @@ func TestAgeOverThresholds(t *testing.T) {
 		{
 			"adult_all_true_except_65",
 			"1996-01-30",
-			map[string]bool{"age_over_13": true, "age_over_15": true, "age_over_18": true, "age_over_21": true, "age_over_65": false},
+			map[string]bool{
+				"age_over_13": true, "age_over_15": true, "age_over_18": true, "age_over_21": true, "age_over_65": false,
+				"over_13_this_year": true, "over_15_this_year": true, "over_18_this_year": true, "over_21_this_year": true, "over_65_this_year": false,
+			},
 			false,
 		},
 		{
 			"elder_all_true",
 			"1950-01-01",
-			map[string]bool{"age_over_13": true, "age_over_15": true, "age_over_18": true, "age_over_21": true, "age_over_65": true},
+			map[string]bool{
+				"age_over_13": true, "age_over_15": true, "age_over_18": true, "age_over_21": true, "age_over_65": true,
+				"over_13_this_year": true, "over_15_this_year": true, "over_18_this_year": true, "over_21_this_year": true, "over_65_this_year": true,
+			},
 			false,
 		},
 		{
 			"child_all_false",
 			"2020-05-15",
-			map[string]bool{"age_over_13": false, "age_over_15": false, "age_over_18": false, "age_over_21": false, "age_over_65": false},
+			map[string]bool{
+				"age_over_13": false, "age_over_15": false, "age_over_18": false, "age_over_21": false, "age_over_65": false,
+				"over_13_this_year": false, "over_15_this_year": false, "over_18_this_year": false, "over_21_this_year": false, "over_65_this_year": false,
+			},
 			false,
 		},
 		{
 			"boundary_day_before_birthday",
 			"2013-09-26",
-			map[string]bool{"age_over_13": false, "age_over_15": false, "age_over_18": false, "age_over_21": false, "age_over_65": false},
+			map[string]bool{
+				"age_over_13": false, "age_over_15": false, "age_over_18": false, "age_over_21": false, "age_over_65": false,
+				"over_13_this_year": true, "over_15_this_year": false, "over_18_this_year": false, "over_21_this_year": false, "over_65_this_year": false,
+			},
 			false,
 		},
 		{
 			"boundary_on_birthday",
 			"2013-09-25",
-			map[string]bool{"age_over_13": true, "age_over_15": false, "age_over_18": false, "age_over_21": false, "age_over_65": false},
+			map[string]bool{
+				"age_over_13": true, "age_over_15": false, "age_over_18": false, "age_over_21": false, "age_over_65": false,
+				"over_13_this_year": true, "over_15_this_year": false, "over_18_this_year": false, "over_21_this_year": false, "over_65_this_year": false,
+			},
 			false,
 		},
 		{
 			"leap_year_feb29_past_birthday",
 			"2008-02-29",
-			map[string]bool{"age_over_13": true, "age_over_15": true, "age_over_18": true, "age_over_21": false, "age_over_65": false},
+			map[string]bool{
+				"age_over_13": true, "age_over_15": true, "age_over_18": true, "age_over_21": false, "age_over_65": false,
+				"over_13_this_year": true, "over_15_this_year": true, "over_18_this_year": true, "over_21_this_year": false, "over_65_this_year": false,
+			},
 			false,
 		},
 	}
@@ -87,7 +105,7 @@ func TestAgeOverThresholds_ZeroNowFallsBackToTimeNow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !got["age_over_18"] || !got["age_over_65"] {
+	if !got["age_over_18"] || !got["age_over_65"] || !got["over_18_this_year"] || !got["over_65_this_year"] {
 		t.Fatalf("expected all-true for a 1900-01-01 birthdate, got %v", got)
 	}
 }
