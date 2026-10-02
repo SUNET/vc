@@ -624,8 +624,17 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		credentialCaches = append(credentialCaches, scopeCredentials[scope]...)
 	}
 
-	// Cache validated credentials
-	c.cacheService.Credential.Set(ctx, responseCode, credentialCaches)
+	// Cache validated credentials. responseCode is a fresh UUID, so SetNX
+	// cannot lose to a collision; it exists here only to surface a Mongo /
+	// Redis write failure that Set would silently swallow - otherwise the
+	// completion marker below gets persisted, SSE fires, and /ui/result
+	// 404s the one key the browser can use to recover.
+	if ok, err := c.cacheService.Credential.SetNX(ctx, responseCode, credentialCaches); err != nil {
+		c.log.Error(err, "failed to persist credential cache", "response_code", responseCode)
+		return nil, fmt.Errorf("credential cache persist: %w", err)
+	} else if !ok {
+		return nil, fmt.Errorf("credential cache persist: unexpected id collision for %s", responseCode)
+	}
 
 	c.log.Debug("Credentials cached", "response_code", responseCode, "count", len(credentialCaches))
 

@@ -80,6 +80,12 @@ func (s *Service) endpointUICompletion(ctx context.Context, c *gin.Context) (any
 	_, span := s.tracer.Start(ctx, "httpserver:endpointUICompletion")
 	defer span.End()
 
+	// The response may carry a fresh response_code (bearer key for
+	// /ui/result); forbid browser and intermediary caching so a stale
+	// "pending" / "complete" cannot replay past the server cache window.
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+
 	sessionID := c.Query("session_id")
 	if sessionID == "" {
 		if cookieSessionID, ok := sessions.Default(c).Get("session_id").(string); ok {
@@ -115,6 +121,13 @@ func (s *Service) endpointUICompletion(ctx context.Context, c *gin.Context) (any
 func (s *Service) endpointUIResume(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointUIResume")
 	defer span.End()
+
+	// Complete-state replies carry a fresh response_code (same bearer key
+	// as /ui/completion); forbid browser and intermediary caching so no
+	// stale pending/complete / QR payload can replay past the server cache
+	// window.
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
 
 	sessionID := c.Query("session_id")
 	if sessionID == "" {

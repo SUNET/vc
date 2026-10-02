@@ -150,33 +150,64 @@ func NewWithBus(_ context.Context, cfg *model.Cfg, log *logger.Log, bus pubsub.P
 // first listener on this node for the id, a backend subscription is
 // opened and a fan-out goroutine is started that decodes backend
 // payloads and forwards them to every local listener channel.
+//
+// The backend Subscribe handshake runs OUTSIDE s.mu so a slow or hung
+// RESP server cannot block other OpenListener / CloseListener /
+// Service.Close callers for the duration of its network timeout. If
+// a concurrent OpenListener wins the race to install the group, the
+// fresh subscription is closed before falling through to the
+// existing-group path.
 func (s *Service) OpenListener(id string) chan any {
 	listener := make(chan any, 1)
 
+	// Fast path: a group already exists → attach without touching the bus.
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		close(listener)
 		return listener
 	}
-
 	g := s.CH[id]
+	s.mu.Unlock()
+
 	isNew := false
 	if g == nil {
+		// Slow path: subscribe to the backend outside the lock.
 		sub, err := s.bus.Subscribe(context.Background(), id)
 		if err != nil {
-			s.mu.Unlock()
 			s.log.Error(err, "notify: pubsub Subscribe failed", "id", id)
-			// Close so the SSE handler's receive returns ok==false and
-			// the HTTP stream terminates; otherwise the browser's
-			// EventSource holds the connection open and never retries
-			// against a recovered backend.
 			close(listener)
 			return listener
 		}
-		g = &idGroup{sub: sub, done: make(chan struct{})}
-		s.CH[id] = g
-		isNew = true
+
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			_ = sub.Close()
+			close(listener)
+			return listener
+		}
+		if existing := s.CH[id]; existing != nil {
+			// A concurrent OpenListener installed its group first; drop
+			// our fresh subscription and attach to the winner.
+			s.mu.Unlock()
+			_ = sub.Close()
+			g = existing
+		} else {
+			g = &idGroup{sub: sub, done: make(chan struct{})}
+			s.CH[id] = g
+			isNew = true
+			// Fall through still holding s.mu.
+		}
+	}
+
+	if !isNew {
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			close(listener)
+			return listener
+		}
 	}
 
 	// Register the listener and (for a new group) call fanOutWg.Add(1)

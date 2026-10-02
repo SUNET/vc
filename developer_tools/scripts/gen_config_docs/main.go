@@ -1257,6 +1257,11 @@ func recordAdditionalPath(def *StructDef, path string) {
 // already-documented struct. This ensures that when the same struct type appears
 // under multiple parents (e.g., OAuthServer under both apigw and verifier),
 // child types (e.g., Client under Clients) also get their additional paths recorded.
+//
+// Named lookups use the package-aware LookupInPkg variants so that children
+// whose simple name is ambiguous (Config, Client, ...) resolve against
+// def.PkgName instead of being silently dropped by the nil-sentinel entry
+// extractStructs installs for cross-package collisions.
 func recordChildPaths(reg *TypeRegistry, def *StructDef, parentPath string) {
 	for _, f := range def.Fields {
 		if f.Tag.YAMLName == "" || f.Tag.YAMLName == "-" {
@@ -1268,7 +1273,7 @@ func recordChildPaths(reg *TypeRegistry, def *StructDef, parentPath string) {
 		// Named struct type
 		typeName := resolveTypeName(f.TypeExpr)
 		if typeName != "" {
-			if childDef := reg.Lookup(typeName); childDef != nil {
+			if childDef := reg.LookupInPkg(typeName, def.PkgName); childDef != nil {
 				recordAdditionalPath(childDef, childPath)
 				recordChildPaths(reg, childDef, childPath)
 				recorded = true
@@ -1277,7 +1282,7 @@ func recordChildPaths(reg *TypeRegistry, def *StructDef, parentPath string) {
 
 		// Named map type alias
 		if !recorded && typeName != "" {
-			if valDef := reg.LookupMapValueType(typeName); valDef != nil {
+			if valDef := reg.LookupMapValueTypeInPkg(typeName, def.PkgName); valDef != nil {
 				keyPH := mapKeyPlaceholder(f.Tag)
 				recordAdditionalPath(valDef, childPath+"."+keyPH)
 				recordChildPaths(reg, valDef, childPath+"."+keyPH)
@@ -1290,7 +1295,7 @@ func recordChildPaths(reg *TypeRegistry, def *StructDef, parentPath string) {
 			if mt, ok := asMapType(f.TypeExpr); ok {
 				valName := resolveTypeName(mt.Value)
 				if valName != "" {
-					if valDef := reg.Lookup(valName); valDef != nil {
+					if valDef := reg.LookupInPkg(valName, def.PkgName); valDef != nil {
 						keyPH := mapKeyPlaceholder(f.Tag)
 						recordAdditionalPath(valDef, childPath+"."+keyPH)
 						recordChildPaths(reg, valDef, childPath+"."+keyPH)
@@ -1304,7 +1309,7 @@ func recordChildPaths(reg *TypeRegistry, def *StructDef, parentPath string) {
 			if at, ok := f.TypeExpr.(*ast.ArrayType); ok {
 				elemName := resolveTypeName(at.Elt)
 				if elemName != "" {
-					if elemDef := reg.Lookup(elemName); elemDef != nil {
+					if elemDef := reg.LookupInPkg(elemName, def.PkgName); elemDef != nil {
 						recordAdditionalPath(elemDef, childPath+"[]")
 						recordChildPaths(reg, elemDef, childPath+"[]")
 					}

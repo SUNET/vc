@@ -148,29 +148,33 @@ func (m *MemoryPubSub) Publish(_ context.Context, topic string, payload []byte) 
 // Subscribe returns a fresh Subscription for topic. Each call allocates
 // a new buffered channel; the Subscription owns it until Close.
 func (m *MemoryPubSub) Subscribe(_ context.Context, topic string) (Subscription, error) {
-	m.mu.Lock()
-	if m.closed {
+	for {
+		m.mu.Lock()
+		if m.closed {
+			m.mu.Unlock()
+			return nil, ErrClosed
+		}
+		g, ok := m.topics[topic]
+		if !ok {
+			g = &memoryGroup{}
+			m.topics[topic] = g
+		}
 		m.mu.Unlock()
-		return nil, ErrClosed
-	}
-	g, ok := m.topics[topic]
-	if !ok {
-		g = &memoryGroup{}
-		m.topics[topic] = g
-	}
-	m.mu.Unlock()
 
-	sub := &memorySub{
-		parent: m,
-		topic:  topic,
-		group:  g,
-		ch:     make(chan []byte, memorySubscriberBuffer),
-	}
-	if !g.addSubscriber(sub) {
+		sub := &memorySub{
+			parent: m,
+			topic:  topic,
+			group:  g,
+			ch:     make(chan []byte, memorySubscriberBuffer),
+		}
+		if g.addSubscriber(sub) {
+			return sub, nil
+		}
+		// A concurrent final Subscription.Close reaped g between the
+		// unlock above and addSubscriber. The bus itself is still open,
+		// so retry; only an actual m.closed must surface ErrClosed.
 		close(sub.ch)
-		return nil, ErrClosed
 	}
-	return sub, nil
 }
 
 // Close terminates every topic group and lets outstanding Subscriptions
