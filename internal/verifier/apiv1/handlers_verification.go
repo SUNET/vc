@@ -845,9 +845,12 @@ func knownQueryKey(authCtx *cache.AuthorizationContext, key string) bool {
 func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCallbackRequest) (*VerificationCallbackResponse, error) {
 	c.log.Debug("verificationCallback", "req", req)
 
-	credential, ok := c.cacheService.Credential.Get(ctx, req.ResponseCode)
-	if !ok {
-		return nil, fmt.Errorf("no item in credential cache matching id %s", req.ResponseCode)
+	credential, err := c.cacheService.Credential.GetErr(ctx, req.ResponseCode)
+	if err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return nil, fmt.Errorf("no item in credential cache matching id %s: %w", req.ResponseCode, err)
+		}
+		return nil, err
 	}
 
 	reply := &VerificationCallbackResponse{

@@ -2,10 +2,12 @@ package httpserver
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 
 	"github.com/SUNET/vc/internal/verifier/apiv1"
+	"github.com/SUNET/vc/pkg/cache"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -56,8 +58,14 @@ func (s *Service) endpointUIResult(ctx context.Context, c *gin.Context) (any, er
 	reply, err := s.apiv1.VerificationCallback(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
-		c.JSON(http.StatusNotFound, gin.H{"error": "result not available"})
-		return nil, nil
+		// Only a true cache miss is an authoritative "gone" (404); a
+		// backend outage must surface as 5xx so the client preserves
+		// its stored response_code and can retry on reload.
+		if errors.Is(err, cache.ErrNoDocuments) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "result not available"})
+			return nil, nil
+		}
+		return nil, err
 	}
 
 	return reply, nil

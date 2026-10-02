@@ -589,7 +589,14 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// cache - rather than the openid4vp package's own in-memory cache -
 	// lets a wallet that reaches the request_uri on a different verifier
 	// node from the one that minted it still resolve the request object.
-	c.cacheService.RequestObject.Set(ctx, authorizationContext.RequestObjectID, requestObject)
+	// SetNX (not Set) so a Mongo write failure fails the interaction loud
+	// instead of returning a QR whose request object was never persisted;
+	// the key is a fresh UUID so an unexpected collision is also an error.
+	if ok, err := c.cacheService.RequestObject.SetNX(ctx, authorizationContext.RequestObjectID, requestObject); err != nil {
+		return nil, fmt.Errorf("request_object persist: %w", err)
+	} else if !ok {
+		return nil, fmt.Errorf("request_object persist: unexpected id collision for %s", authorizationContext.RequestObjectID)
+	}
 
 	reply := &UIInteractionReply{
 		SessionID: sessionID,
@@ -613,7 +620,11 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
 
 		dcAPIRequestObjectID := uuid.NewString()
-		c.cacheService.RequestObject.Set(ctx, dcAPIRequestObjectID, dcAPIRequestObject)
+		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
+			return nil, fmt.Errorf("dc_api request_object persist: %w", err)
+		} else if !ok {
+			return nil, fmt.Errorf("dc_api request_object persist: unexpected id collision for %s", dcAPIRequestObjectID)
+		}
 
 		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
 		if err != nil {
@@ -686,7 +697,11 @@ func (c *Client) tryReuseInFlightSession(ctx context.Context, req *UIInteraction
 	if c.cfg.Verifier.DigitalCredentials.Enable {
 		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
 		dcAPIRequestObjectID := uuid.NewString()
-		c.cacheService.RequestObject.Set(ctx, dcAPIRequestObjectID, dcAPIRequestObject)
+		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
+			return nil, false, fmt.Errorf("dc_api request_object persist: %w", err)
+		} else if !ok {
+			return nil, false, fmt.Errorf("dc_api request_object persist: unexpected id collision for %s", dcAPIRequestObjectID)
+		}
 
 		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
 		if err != nil {
@@ -839,7 +854,11 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 	if c.cfg.Verifier.DigitalCredentials.Enable {
 		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
 		dcAPIRequestObjectID := uuid.NewString()
-		c.cacheService.RequestObject.Set(ctx, dcAPIRequestObjectID, dcAPIRequestObject)
+		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
+			return nil, fmt.Errorf("dc_api request_object persist: %w", err)
+		} else if !ok {
+			return nil, fmt.Errorf("dc_api request_object persist: unexpected id collision for %s", dcAPIRequestObjectID)
+		}
 		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
 		if err != nil {
 			return nil, err
