@@ -2,7 +2,6 @@ package credential
 
 import (
 	"fmt"
-	"maps"
 	"time"
 
 	"github.com/SUNET/vc/pkg/credential/primitives"
@@ -20,17 +19,56 @@ import (
 //	age_over_thresholds(birthdate -> age_over_*)
 //
 // works without a caller having to pre-merge intermediates.
+//
+// Intermediate accumulation uses a path-aware deep merge rather than
+// maps.Copy so a derivation that targets a nested path (e.g.
+// identity.email -> {"identity": {"email": "x"}}) does not replace a
+// sibling nested claim (identity.name) produced by an earlier step.
 func ApplyDerivations(list []primitives.Derivation, claims map[string]any, now time.Time) (map[string]any, error) {
 	out := make(map[string]any)
-	working := make(map[string]any, len(claims))
-	maps.Copy(working, claims)
+	working := cloneNestedClaims(claims)
 	for i, d := range list {
 		derived, err := d.Apply(working, now)
 		if err != nil {
 			return nil, fmt.Errorf("derivations[%d]: %w", i, err)
 		}
-		maps.Copy(out, derived)
-		maps.Copy(working, derived)
+		mergeNestedClaims(out, derived)
+		mergeNestedClaims(working, derived)
 	}
 	return out, nil
+}
+
+// mergeNestedClaims deep-merges src into dst. When both dst[k] and src[k]
+// are map[string]any, their contents are merged recursively; otherwise
+// src[k] replaces dst[k]. This preserves sibling nested claims when a
+// derivation produces only a subset of a parent map's keys.
+func mergeNestedClaims(dst, src map[string]any) {
+	for k, v := range src {
+		sm, srcIsMap := v.(map[string]any)
+		if !srcIsMap {
+			dst[k] = v
+			continue
+		}
+		dm, dstIsMap := dst[k].(map[string]any)
+		if !dstIsMap {
+			dst[k] = v
+			continue
+		}
+		mergeNestedClaims(dm, sm)
+	}
+}
+
+// cloneNestedClaims returns a copy of src with nested map[string]any values
+// cloned recursively so later in-place merges on the working map do not
+// mutate the caller's original claims map.
+func cloneNestedClaims(src map[string]any) map[string]any {
+	out := make(map[string]any, len(src))
+	for k, v := range src {
+		if m, ok := v.(map[string]any); ok {
+			out[k] = cloneNestedClaims(m)
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }

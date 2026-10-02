@@ -2,7 +2,11 @@ package apiv1
 
 import (
 	"testing"
+	"time"
 
+	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
+	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -157,4 +161,190 @@ func TestEnforceScopeCredentialType_UnknownScope(t *testing.T) {
 	err := c.enforceScopeCredentialType("nope", map[string]any{"vct": "x"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no credential_metadata entry")
+}
+
+// newPresentationTestClient wires a Client with the minimum state
+// finalisePresentationVerification touches: cfg with an SD-JWT eduid scope,
+// an in-memory AuthContext store, and an in-memory Document cache.
+func newPresentationTestClient(t *testing.T) *Client {
+	t.Helper()
+	return &Client{
+		log: logger.NewSimple("test"),
+		cfg: &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+			"eduid": {
+				Format: openid4vp.FormatSDJWTVC,
+				VCTM:   &sdjwtvc.VCTM{VCT: "urn:credential:eduid:1"},
+			},
+		}}},
+		cacheService: &apigwcache.Service{
+			AuthContext: apigwcache.NewTestMemoryStore(10 * time.Minute),
+			Document:    apigwcache.NewTestMemoryCache[map[string]*model.CompleteDocument](10 * time.Minute),
+		},
+	}
+}
+
+func seedAuthCtx(t *testing.T, c *Client, sessionID string) *pkgcache.AuthorizationContext {
+	t.Helper()
+	authCtx := &pkgcache.AuthorizationContext{SessionID: sessionID}
+	require.NoError(t, c.cacheService.AuthContext.Create(t.Context(), authCtx))
+	return authCtx
+}
+
+// TestFinalisePresentationVerification_Success covers the happy path: a
+// presented eduID credential carries the required birthdate and an
+// assurance_level inside the allow-list, VerifiedClaims lands on
+// authCtx, and a preview document (with derived age_over_* claims) is
+// cached under FromScope so UserLookup has something to render.
+func TestFinalisePresentationVerification_Success(t *testing.T) {
+	c := newPresentationTestClient(t)
+	authCtx := seedAuthCtx(t, c, "sess-ok")
+
+	pScope := model.PresentationScope{
+		FromScope: "eduid",
+		RequiredClaims: map[string][]string{
+			"birthdate": nil,
+			"assurance_level": {
+				"http://www.swamid.se/policy/assurance/al3",
+			},
+		},
+		Derivations: []primitives.Derivation{
+			{AgeOverThresholds: &primitives.AgeOverThresholdsArgs{
+				Input: "birthdate", Thresholds: []int{18},
+			}},
+		},
+	}
+
+	presented := map[string]any{
+		"vct":             "urn:credential:eduid:1",
+		"birthdate":       "1990-01-15",
+		"assurance_level": "http://www.swamid.se/policy/assurance/al3",
+	}
+
+	require.NoError(t, c.finalisePresentationVerification(t.Context(), authCtx, pScope, presented))
+
+	assert.Equal(t, "1990-01-15", authCtx.VerifiedClaims["birthdate"])
+	assert.Equal(t, "http://www.swamid.se/policy/assurance/al3", authCtx.VerifiedClaims["assurance_level"])
+
+	docs, ok := c.cacheService.Document.Get(t.Context(), "sess-ok")
+	require.True(t, ok, "preview document must be cached under session id")
+	preview, ok := docs["eduid"]
+	require.True(t, ok, "preview document must be keyed by FromScope")
+	require.NotNil(t, preview.Meta)
+	assert.Equal(t, "eduid", preview.Meta.AuthenticSource)
+	assert.Equal(t, true, preview.DocumentData["age_over_18"], "derivation must populate preview")
+	// Raw verified claims should also survive on the preview so UserLookup
+	// can render them before VCTM filtering happens in VCICredential.
+	assert.Equal(t, "1990-01-15", preview.DocumentData["birthdate"])
+}
+
+// TestFinalisePresentationVerification_MissingRequiredClaim rejects a
+// presentation that omits a required claim with the documented 400 /
+// missing_required_claim error and leaves VerifiedClaims unset.
+func TestFinalisePresentationVerification_MissingRequiredClaim(t *testing.T) {
+	c := newPresentationTestClient(t)
+	authCtx := seedAuthCtx(t, c, "sess-miss")
+
+	pScope := model.PresentationScope{
+		FromScope: "eduid",
+		RequiredClaims: map[string][]string{
+			"birthdate":       nil,
+			"assurance_level": nil,
+		},
+	}
+	presented := map[string]any{
+		"vct":       "urn:credential:eduid:1",
+		"birthdate": "1990-01-15",
+	}
+
+	err := c.finalisePresentationVerification(t.Context(), authCtx, pScope, presented)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "assurance_level")
+	assert.Contains(t, err.Error(), "not present")
+	assert.Nil(t, authCtx.VerifiedClaims)
+	_, cached := c.cacheService.Document.Get(t.Context(), "sess-miss")
+	assert.False(t, cached, "no preview must be cached on validation failure")
+}
+
+// TestFinalisePresentationVerification_ScalarAllowList rejects a scalar
+// claim whose value is not in the allow-list with claim_value_not_allowed.
+func TestFinalisePresentationVerification_ScalarAllowList(t *testing.T) {
+	c := newPresentationTestClient(t)
+	authCtx := seedAuthCtx(t, c, "sess-scalar")
+
+	pScope := model.PresentationScope{
+		FromScope: "eduid",
+		RequiredClaims: map[string][]string{
+			"assurance_level": {
+				"http://www.swamid.se/policy/assurance/al3",
+			},
+		},
+	}
+	presented := map[string]any{
+		"vct":             "urn:credential:eduid:1",
+		"assurance_level": "http://www.swamid.se/policy/assurance/al1",
+	}
+
+	err := c.finalisePresentationVerification(t.Context(), authCtx, pScope, presented)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not in allow-list")
+	assert.Nil(t, authCtx.VerifiedClaims)
+}
+
+// TestFinalisePresentationVerification_ArrayAllowList accepts an array
+// claim when at least one element is in the allow-list and rejects when
+// none match.
+func TestFinalisePresentationVerification_ArrayAllowList(t *testing.T) {
+	c := newPresentationTestClient(t)
+	authCtx := seedAuthCtx(t, c, "sess-array-ok")
+
+	pScope := model.PresentationScope{
+		FromScope: "eduid",
+		RequiredClaims: map[string][]string{
+			"assurance_level": {
+				"http://www.swamid.se/policy/assurance/al3",
+			},
+		},
+	}
+	presentedOK := map[string]any{
+		"vct": "urn:credential:eduid:1",
+		"assurance_level": []any{
+			"http://www.swamid.se/policy/assurance/al1",
+			"http://www.swamid.se/policy/assurance/al3",
+		},
+	}
+	require.NoError(t, c.finalisePresentationVerification(t.Context(), authCtx, pScope, presentedOK))
+
+	authCtxBad := seedAuthCtx(t, c, "sess-array-bad")
+	presentedBad := map[string]any{
+		"vct": "urn:credential:eduid:1",
+		"assurance_level": []any{
+			"http://www.swamid.se/policy/assurance/al1",
+		},
+	}
+	err := c.finalisePresentationVerification(t.Context(), authCtxBad, pScope, presentedBad)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not in allow-list")
+}
+
+// TestFinalisePresentationVerification_WrongVCT refuses a presented
+// credential whose vct does not match pScope.FromScope's canonical VCT —
+// a different trusted credential that happens to carry the required
+// claims must not be minted from.
+func TestFinalisePresentationVerification_WrongVCT(t *testing.T) {
+	c := newPresentationTestClient(t)
+	authCtx := seedAuthCtx(t, c, "sess-wrongvct")
+
+	pScope := model.PresentationScope{
+		FromScope:      "eduid",
+		RequiredClaims: map[string][]string{"birthdate": nil},
+	}
+	presented := map[string]any{
+		"vct":       "urn:credential:other:1",
+		"birthdate": "1990-01-15",
+	}
+
+	err := c.finalisePresentationVerification(t.Context(), authCtx, pScope, presented)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not match")
+	assert.Nil(t, authCtx.VerifiedClaims)
 }

@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
+	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
@@ -66,11 +69,31 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 	// Cache a preview document keyed by session so UserLookup (called by the
 	// consent flow before VCICredential runs) has something to render. The
 	// authoritative document is rebuilt from VerifiedClaims in VCICredential.
+	// Mirror buildPresentationDocument's derivation + defaults steps so the
+	// consent UI sees the same claims (e.g. age_over_*, over_*_this_year)
+	// that will actually be issued — walking the target VCTM against only
+	// the raw verified claims would otherwise render an empty preview.
+	previewData := make(map[string]any, len(verified))
+	maps.Copy(previewData, verified)
+	now := time.Now()
+	derived, err := credential.ApplyDerivations(pScope.Derivations, verified, now)
+	if err != nil {
+		return fmt.Errorf("failed to apply derivations for preview: %w", err)
+	}
+	maps.Copy(previewData, derived)
+	defaults, err := pScope.ResolveDefaults(now)
+	if err != nil {
+		return fmt.Errorf("failed to resolve defaults for preview: %w", err)
+	}
+	if err := credential.MergeDefaults(previewData, defaults); err != nil {
+		return fmt.Errorf("failed to merge defaults for preview: %w", err)
+	}
+
 	previewDoc := &model.CompleteDocument{
 		Meta: &model.MetaData{
 			AuthenticSource: pScope.FromScope,
 		},
-		DocumentData: verified,
+		DocumentData: previewData,
 	}
 	c.cacheService.Document.Set(ctx, authCtx.SessionID, map[string]*model.CompleteDocument{
 		pScope.FromScope: previewDoc,
@@ -297,8 +320,9 @@ func mdocClaimsFromResult(result *mdoc.MDocVerificationResult) (map[string]any, 
 		return nil, fmt.Errorf("mdoc DeviceResponse contains multiple docTypes (%v); refuse rather than merge", types)
 	}
 	claims := make(map[string]any)
+	var synthDocType string
 	for docType, doc := range result.Documents {
-		claims["docType"] = docType
+		synthDocType = docType
 		for ns, items := range doc.Namespaces {
 			for k, v := range items {
 				claims[fmt.Sprintf("%s.%s", ns, k)] = v
@@ -308,6 +332,10 @@ func mdocClaimsFromResult(result *mdoc.MDocVerificationResult) (map[string]any, 
 			}
 		}
 	}
+	// Assign the synthetic doctype AFTER namespace flattening so a mdoc
+	// element literally named "docType" in the primary namespace cannot
+	// overwrite the canonical document type that enforceMDocType compares.
+	claims["docType"] = synthDocType
 	return claims, nil
 }
 

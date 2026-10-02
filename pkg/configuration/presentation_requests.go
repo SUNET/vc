@@ -164,6 +164,13 @@ func LoadPresentationRequestsFromFile(ctx context.Context, filePath string) (*Pr
 		return nil, fmt.Errorf("failed to read file %s: %w", filePath, err)
 	}
 
+	// Mirror loadTemplateFile: reject configs that still carry removed
+	// transformation keys so this public single-file loader cannot silently
+	// drop them via yaml.v2's unknown-field tolerance.
+	if err := rejectRemovedTemplateKeys(filePath, fileBytes); err != nil {
+		return nil, err
+	}
+
 	var config PresentationRequestConfig
 	if err := yaml.Unmarshal(fileBytes, &config); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)

@@ -1,26 +1,31 @@
 # EUDI eduID Age Verification Presentation Request
-# Asks the wallet to present an eduID credential disclosing birthdate + assurance_level.
-# The issuer verifies the presentation, checks assurance_level against the
-# allowed-URIs list configured on data_sources.presentation.eduid_age_verification,
-# and derives age_over_NN booleans from birthdate.
+# Standalone verifier template: asks a wallet to present an already-issued
+# eduid_age_verification credential (urn:credential:eduid_age_verification:1)
+# disclosing only the age_over_18 boolean. The raw birthdate stays on the
+# source eduID credential and is never released here.
+#
+# The apigw's presentation-during-issuance flow does NOT read this file;
+# it builds its own DCQL from apigw.data_sources.presentation.scopes so a
+# wallet without an eduid_age_verification credential first obtains one via
+# that flow (which asks for birthdate+assurance_level only once, inside the
+# issuer boundary) and can then present an age boolean to any RP via this
+# template.
 templates:
   - id: "eduid_age_verification"
     name: "eduID Age Verification"
-    description: "Request eduID birthdate + assurance level for age-attestation issuance"
+    description: "Request an age_over_18 boolean from an eduid_age_verification credential"
     version: "1.0"
     oidc_scopes:
       - "eduid_age_verification"
     dcql:
       credentials:
-        - id: "eduid"
+        - id: "eduid_age_verification"
           format: "dc+sd-jwt"
           meta:
             vct_values:
-              - "urn:credential:eduid:1"
+              - "urn:credential:eduid_age_verification:1"
           claims:
-            - path: ["birthdate"]
-            - path: ["assurance_level"]
+            - path: ["age_over_18"]
     claim_mappings:
-      birthdate: "birthdate"
-      assurance_level: "assurance_level"
+      age_over_18: "age_over_18"
     enabled: true
