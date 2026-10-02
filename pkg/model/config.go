@@ -22,6 +22,7 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/openidfederation"
 	"github.com/SUNET/vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/pubsub"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/sqlstore"
 	ts11client "github.com/sirosfoundation/go-ts11client"
@@ -122,6 +123,12 @@ type HAConfig struct {
 	Enable bool `yaml:"enable" default:"false"`
 	// CacheDatabaseName is the MongoDB database name used for caches.
 	CacheDatabaseName string `yaml:"cache_database_name" default:"vc_cache"`
+	// PubSub configures the optional pub/sub backend (Redis or Valkey)
+	// used for cross-node notifications in HA mode - today just the
+	// verifier's SSE fanout. Omitted entirely in standalone deployments;
+	// when omitted in HA, notifications remain in-process and do not
+	// cross nodes.
+	PubSub *pubsub.Config `yaml:"pubsub,omitempty" validate:"omitempty"`
 }
 
 // Kafka holds the Kafka message broker configuration

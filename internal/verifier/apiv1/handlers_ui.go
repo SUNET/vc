@@ -1,7 +1,10 @@
 package apiv1
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -399,11 +402,26 @@ type UIInteractionRequest struct {
 	DCQLQuery   *openid4vp.DCQL                        `json:"dcql_query" validate:"required"`
 	Validations map[string][]openid4vp.ClaimValidation `json:"validations,omitempty" validate:"omitempty,dive,dive"`
 
-	// SessionID from http server endpoint
-	SessionID string `json:"-"`
+	// SessionID is a reuse hint sourced ONLY from the request body (which
+	// mirrors the tab-scoped sessionStorage value). The HTTP layer
+	// deliberately does NOT populate it from the shared gin cookie
+	// session, because that cookie is overwritten by any sibling tab and
+	// would otherwise let a fresh tab inherit another tab's in-flight
+	// authorization context. When this id names a still-valid,
+	// still-unclaimed context with the same DCQL / validations, the
+	// response returns that context's existing request_uri/QR so a
+	// reload mid-flow does not orphan the wallet's outstanding scan.
+	// Otherwise a fresh session id is minted and returned in the reply.
+	SessionID string `json:"session_id,omitempty" validate:"omitempty,max=128,printascii"`
 }
 
 type UIInteractionReply struct {
+	// SessionID identifies the authorization context this reply belongs to.
+	// Returned so the browser can address later POSTs (e.g. session-preference)
+	// to the exact request it was created for, rather than relying on the
+	// shared per-origin cookie session that any other tab can overwrite.
+	SessionID string `json:"session_id"`
+
 	// AuthorizationRequest is the request reached through request_uri: the QR
 	// code, the same-device link, and the polyfill's redirect fallback. Its
 	// response_mode is direct_post.jwt, because a wallet arriving this way
@@ -430,26 +448,33 @@ type UIInteractionReply struct {
 func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (*UIInteractionReply, error) {
 	c.log.Debug("uiInteraction", "dcql_query", req.DCQLQuery)
 
+	// Augment BEFORE the reuse check: the stored request object was
+	// augmented at creation, so the incoming query has to be brought to the
+	// same shape before we can compare them for equality.
+	c.augmentDCQLFromVCTM(req.DCQLQuery)
+
+	if reply, ok, err := c.tryReuseInFlightSession(ctx, req); err != nil {
+		return nil, err
+	} else if ok {
+		c.log.Debug("uiInteraction: reused in-flight session", "session_id", reply.SessionID)
+		return reply, nil
+	}
+
 	nonce := uuid.NewString()
 	state := uuid.NewString()
 	requestObjectID := uuid.NewString()
 
-	// Use session ID from request if provided, otherwise generate new one
-	sessionID := req.SessionID
-	if sessionID == "" {
-		sessionID = uuid.NewString()
-	}
+	// Reuse declined: the hinted SessionID either was never valid or has
+	// been retired. Mint a fresh id rather than resurrecting the hint under
+	// a new (unrelated) authorization context, which would let a client
+	// keep an old session_id alive past its forfeit/expiry/completion.
+	sessionID := uuid.NewString()
 
 	// Collect all credential IDs from DCQL query
 	scopes := make([]string, 0, len(req.DCQLQuery.Credentials))
 	for _, credential := range req.DCQLQuery.Credentials {
 		scopes = append(scopes, credential.ID)
 	}
-
-	// Augment DCQL with child paths from VCTM (array null paths and nested
-	// object sub-paths). The UI only sends top-level string paths; we expand
-	// them using the VCTM so wallets disclose nested content correctly.
-	c.augmentDCQLFromVCTM(req.DCQLQuery)
 
 	uiClientID, err := c.cfg.Verifier.VerifierClientID(c.pkiSigningCert)
 	if err != nil {
@@ -559,9 +584,23 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		return nil, err
 	}
 
-	c.openid4vp.RequestObjectCache.Set(authorizationContext.RequestObjectID, requestObject)
+	// cacheService.RequestObject is the HA-backed cache (Mongo-backed when
+	// Common.HA is enabled, in-memory otherwise). Writing through this
+	// cache - rather than the openid4vp package's own in-memory cache -
+	// lets a wallet that reaches the request_uri on a different verifier
+	// node from the one that minted it still resolve the request object.
+	// SetNX (not Set) so a Mongo write failure fails the interaction loud
+	// instead of returning a QR whose request object was never persisted;
+	// the key is a fresh UUID so an unexpected collision is also an error.
+	if ok, err := c.cacheService.RequestObject.SetNX(ctx, authorizationContext.RequestObjectID, requestObject); err != nil {
+		return nil, fmt.Errorf("request_object persist: %w", err)
+	} else if !ok {
+		return nil, fmt.Errorf("request_object persist: unexpected id collision for %s", authorizationContext.RequestObjectID)
+	}
 
-	reply := &UIInteractionReply{}
+	reply := &UIInteractionReply{
+		SessionID: sessionID,
+	}
 
 	reply.AuthorizationRequest, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, requestObjectID)
 	if err != nil {
@@ -581,7 +620,11 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
 
 		dcAPIRequestObjectID := uuid.NewString()
-		c.openid4vp.RequestObjectCache.Set(dcAPIRequestObjectID, dcAPIRequestObject)
+		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
+			return nil, fmt.Errorf("dc_api request_object persist: %w", err)
+		} else if !ok {
+			return nil, fmt.Errorf("dc_api request_object persist: unexpected id collision for %s", dcAPIRequestObjectID)
+		}
 
 		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
 		if err != nil {
@@ -590,6 +633,319 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	}
 
 	return reply, nil
+}
+
+// tryReuseInFlightSession returns a UIInteractionReply built from the
+// authorization context named by req.SessionID when the request is a
+// reload of an already-live flow.
+//
+// "Reusable" means all of: the id resolves to a saved AuthorizationContext,
+// nothing has consumed it yet (no Token, no Code, not Forfeited, not past
+// ExpiresAt), the RequestObject the wallet is holding is still cached, and
+// the caller is asking for the same DCQL query the context was created
+// with. When any of that fails, the caller falls back to minting a fresh
+// session - which is the pre-reuse behaviour and never worse than it.
+//
+// A cross-device reload otherwise orphans the wallet: the old
+// AuthorizationContext still points at a browser session_id whose SSE
+// listener has been torn down, so the wallet's direct_post never surfaces
+// in the reloaded tab.
+func (c *Client) tryReuseInFlightSession(ctx context.Context, req *UIInteractionRequest) (*UIInteractionReply, bool, error) {
+	if req.SessionID == "" {
+		return nil, false, nil
+	}
+
+	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
+	if err != nil {
+		// A transient store error must not silently fall through to the
+		// fresh-session branch - that would abandon the in-flight wallet
+		// interaction with no way back. Only an authoritative "not here"
+		// means "do not reuse"; anything else fails the request so the
+		// caller (and the stored hint) can retry.
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if authCtx == nil {
+		return nil, false, nil
+	}
+	if !isReusableAuthContext(authCtx) {
+		return nil, false, nil
+	}
+
+	requestObject, err := c.cacheService.RequestObject.GetErr(ctx, authCtx.RequestObjectID)
+	if err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if !sameDCQLQuery(req.DCQLQuery, requestObject.DCQLQuery) {
+		return nil, false, nil
+	}
+	// Validations are enforced per presentation (handlers_verification.go
+	// ValidateClaims), so a reload that silently keeps the old thresholds
+	// while the UI believes it set new ones is a correctness bug. Comparing
+	// by canonical JSON matches sameDCQLQuery - the stored and the incoming
+	// value both reach a wallet / verifier through the same encoder.
+	if !sameValidations(req.Validations, authCtx.Validations) {
+		return nil, false, nil
+	}
+
+	reply := &UIInteractionReply{SessionID: authCtx.SessionID}
+
+	reply.AuthorizationRequest, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, authCtx.RequestObjectID)
+	if err != nil {
+		return nil, false, err
+	}
+
+	reply.QRCode, err = openid4vp.GenerateQRV2(ctx, reply.AuthorizationRequest)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// A reload does not resume a native DC API call. Mint a new DC API
+	// request each time so the in-tab attempt has a valid request_uri; the
+	// existing entry (if any) times out on its own.
+	if c.cfg.Verifier.DigitalCredentials.Enable {
+		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
+		dcAPIRequestObjectID := uuid.NewString()
+		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
+			return nil, false, fmt.Errorf("dc_api request_object persist: %w", err)
+		} else if !ok {
+			return nil, false, fmt.Errorf("dc_api request_object persist: unexpected id collision for %s", dcAPIRequestObjectID)
+		}
+
+		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+
+	return reply, true, nil
+}
+
+// isReusableAuthContext reports whether the authorization context still
+// represents a wallet interaction that has not been claimed by a wallet.
+func isReusableAuthContext(authCtx *cache.AuthorizationContext) bool {
+	if authCtx.Forfeited || authCtx.Code != "" || authCtx.Token != nil {
+		return false
+	}
+	// VerifierResponseCode is written by VerificationDirectPost before the
+	// one-shot SSE redirect is broadcast. A tab that reloads after the
+	// broadcast is in flight would otherwise sit on a stream whose only
+	// message has already been delivered - and the next read of the
+	// cached credentials would still succeed, so the session has been
+	// consumed in every sense that matters here.
+	if authCtx.VerifierResponseCode != "" {
+		return false
+	}
+	if authCtx.ExpiresAt != 0 && authCtx.ExpiresAt <= time.Now().Unix() {
+		return false
+	}
+	return true
+}
+
+// IsActiveAuthSession reports whether sessionID names an authorization
+// context the verifier currently tracks. Used by /ui/notify to refuse to
+// open an SSE listener for an unknown id, which would otherwise let any
+// unauthenticated caller inflate notify.Service's broadcaster map.
+//
+// (false, nil) means the lookup succeeded and the id is unknown
+// (ErrNoDocuments) or empty. A non-nil error means the authorization
+// store itself failed; the HTTP endpoint surfaces that as a retryable
+// 5xx so a transient Mongo/Redis error in HA does not get mis-reported
+// as 404 and strand the EventSource reconciliation that would run on
+// retry.
+func (c *Client) IsActiveAuthSession(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, nil
+	}
+	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return false, nil
+		}
+		return false, err
+	}
+	if authCtx == nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+// CompletedResponseCode returns the VerifierResponseCode set on the
+// authorization context named by sessionID, or "" when the session is
+// unknown or still in flight. Used by /ui/resume so a verifier UI
+// reloaded after the wallet has already answered can recover the
+// response_code it never had a chance to receive over SSE.
+//
+// A nil error with "" means the lookup succeeded and the context is
+// still pending (or genuinely absent). A non-nil error means the
+// authorization store itself failed; the caller surfaces that so the
+// client can retry instead of latching onto a bogus "pending" and
+// never reconciling the lost completion.
+func (c *Client) CompletedResponseCode(ctx context.Context, sessionID string) (string, error) {
+	if sessionID == "" {
+		return "", nil
+	}
+	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return "", nil
+		}
+		return "", err
+	}
+	if authCtx == nil {
+		return "", nil
+	}
+	return authCtx.VerifierResponseCode, nil
+}
+
+// UIResumeStatus names the possible outcomes of a /ui/resume call.
+type UIResumeStatus string
+
+const (
+	// UIResumeUnknown means sessionID names no live authorization context.
+	UIResumeUnknown UIResumeStatus = "unknown"
+	// UIResumePending means the wallet has not answered yet; the reply
+	// carries the original QR code / authorization request so a reloaded
+	// verifier UI can rebuild its QR screen without starting over.
+	UIResumePending UIResumeStatus = "pending"
+	// UIResumeComplete means the wallet has already answered; the reply
+	// carries the response_code the SSE event would have delivered.
+	UIResumeComplete UIResumeStatus = "complete"
+	// UIResumeExpired means the auth context exists but its request object
+	// has been evicted, so the QR / request_uri is no longer resolvable.
+	UIResumeExpired UIResumeStatus = "expired"
+)
+
+// UIResumeReply carries one of three alternatives selected by Status:
+// pending (QR state), complete (response_code), or unknown/expired (no
+// payload). JSON omitempty leaves irrelevant fields off the wire so
+// clients can discriminate by field presence as well as Status.
+type UIResumeReply struct {
+	Status UIResumeStatus `json:"status"`
+
+	// Pending-only fields: same shape as UIInteractionReply so the client
+	// can reuse its existing render path.
+	SessionID                 string                                 `json:"session_id,omitempty"`
+	AuthorizationRequest      string                                 `json:"authorization_request,omitempty"`
+	QRCode                    string                                 `json:"qr_code,omitempty"`
+	DCAPIAuthorizationRequest string                                 `json:"dc_api_authorization_request,omitempty"`
+	DCQLQuery                 *openid4vp.DCQL                        `json:"dcql_query,omitempty"`
+	Validations               map[string][]openid4vp.ClaimValidation `json:"validations,omitempty"`
+
+	// Complete-only field.
+	ResponseCode string `json:"response_code,omitempty"`
+}
+
+// UIResume reports whether the wallet interaction named by sessionID is
+// still pending, already complete, expired, or unknown, and for pending
+// sessions returns the QR state so a reloaded UI can rebuild its page.
+// A fresh DC API request_uri is minted on each pending call for the same
+// reason tryReuseInFlightSession does: a reload cannot resume a native
+// navigator.credentials.get call, so the existing one is left to time out.
+func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply, error) {
+	if sessionID == "" {
+		return &UIResumeReply{Status: UIResumeUnknown}, nil
+	}
+	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return &UIResumeReply{Status: UIResumeUnknown}, nil
+		}
+		return nil, err
+	}
+	if authCtx == nil {
+		return &UIResumeReply{Status: UIResumeUnknown}, nil
+	}
+	if authCtx.VerifierResponseCode != "" {
+		return &UIResumeReply{
+			Status:       UIResumeComplete,
+			ResponseCode: authCtx.VerifierResponseCode,
+		}, nil
+	}
+	requestObject, err := c.cacheService.RequestObject.GetErr(ctx, authCtx.RequestObjectID)
+	if err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return &UIResumeReply{Status: UIResumeExpired}, nil
+		}
+		return nil, err
+	}
+
+	// The DCQL query lives on the request object (UIInteraction never
+	// writes it onto the AuthorizationContext), so reading authCtx here
+	// returned nil and the resumed client lost its query. Use the request
+	// object we already fetched above.
+	reply := &UIResumeReply{
+		Status:      UIResumePending,
+		SessionID:   authCtx.SessionID,
+		DCQLQuery:   requestObject.DCQLQuery,
+		Validations: authCtx.Validations,
+	}
+	reply.AuthorizationRequest, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, authCtx.RequestObjectID)
+	if err != nil {
+		return nil, err
+	}
+	reply.QRCode, err = openid4vp.GenerateQRV2(ctx, reply.AuthorizationRequest)
+	if err != nil {
+		return nil, err
+	}
+	if c.cfg.Verifier.DigitalCredentials.Enable {
+		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
+		dcAPIRequestObjectID := uuid.NewString()
+		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
+			return nil, fmt.Errorf("dc_api request_object persist: %w", err)
+		} else if !ok {
+			return nil, fmt.Errorf("dc_api request_object persist: unexpected id collision for %s", dcAPIRequestObjectID)
+		}
+		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return reply, nil
+}
+
+// sameDCQLQuery reports whether two DCQL queries are equivalent for the
+// purposes of session reuse. Compared by canonical JSON: DCQL contains
+// []*string paths and interface{} values that reflect.DeepEqual would trip
+// over, and the request object serializes through the same encoder before
+// it ever reaches a wallet - so wire-shape equality is the right test.
+func sameDCQLQuery(a, b *openid4vp.DCQL) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	ja, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	jb, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(ja, jb)
+}
+
+// sameValidations reports whether two claim-validation maps are
+// equivalent for the purposes of session reuse. Both nil / both empty are
+// equal; otherwise compared by JSON bytes - the shapes are declarative and
+// go through the same encoder on save/load.
+func sameValidations(a, b map[string][]openid4vp.ClaimValidation) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	ja, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	jb, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(ja, jb)
 }
 
 // claimPathKey returns a string key for a claim path for use in exclusion sets.

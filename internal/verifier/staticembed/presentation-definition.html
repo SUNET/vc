@@ -40,7 +40,7 @@
                     </div>
                 </div>
             </template>
-            <template x-if="!loading && credentialsList && !credentialAttributes && !presentationDefinition">
+            <template x-if="!loading && credentialsList && !credentialAttributes && !presentationDefinition && !verificationResult && !verificationExpired">
                 <div class="box container">
                     <h2 class="title is-size-6">Preconfigured presentation requests</h2>
                     <div class="buttons is-flex is-flex-direction-column">
@@ -94,11 +94,54 @@
                         <p>Presentation verified successfully.</p>
                     </div>
                     <div class="mt-5 is-flex is-justify-content-flex-start is-align-items-center">
-                        <button class="button is-small is-light" @click.prevent="handleResetCancel">Start over</button>
+                        <button class="button is-small is-light" @click.prevent="handleBackToMenu">Back to menu</button>
                     </div>
                 </div>
             </template>
-            <template x-if="!loading && credentialsList && credentialAttributes && !presentationDefinition && !dcApiVerified">
+            <template x-if="verificationResult">
+                <div class="box container">
+                    <div class="block is-flex is-justify-content-center is-align-items-center is-flex-direction-column is-fullwidth">
+                        <svg class="has-text-success mb-2" style="width:80px" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.801 10A10 10 0 1 1 17 3.335"></path><path d="m9 11 3 3L22 4"></path></svg>
+                        <p class="title is-size-4 has-text-success">Verification succeeded</p>
+                    </div>
+                    <template x-for="(cred, idx) in (verificationResult.credential_data || [])" :key="cred.scope + ':' + idx">
+                        <div class="box" style="overflow:hidden;">
+                            <h2 class="title is-size-5 mb-2">Credential claims — <span x-text="cred.scope"></span></h2>
+                            <template x-if="cred.credential">
+                                <div class="table-container">
+                                    <table class="table is-fullwidth is-hoverable">
+                                        <thead>
+                                            <tr><th>Name</th><th>Value</th></tr>
+                                        </thead>
+                                        <tbody x-html="renderClaimTree(cred.credential)"></tbody>
+                                    </table>
+                                </div>
+                            </template>
+                            <template x-if="!cred.credential">
+                                <p><em>No claims available.</em></p>
+                            </template>
+                            <details class="vc-data-block-details">
+                                <summary>Credential data</summary>
+                                <pre class="has-background-dark has-text-light p-4 has-border-radius" style="overflow-x:auto;font-size:0.85em;white-space:pre-wrap;word-break:break-all;"><code x-text="JSON.stringify(cleanCredentialForDisplay(cred.credential), null, 2)"></code></pre>
+                            </details>
+                        </div>
+                    </template>
+                    <div class="buttons is-centered mt-4">
+                        <button class="button is-outlined is-black" @click.prevent="handleBackToMenu">Back to menu</button>
+                    </div>
+                </div>
+            </template>
+            <template x-if="verificationExpired">
+                <div class="box container">
+                    <div class="notification is-warning">
+                        <p>The last verification result is no longer available (it may have expired).</p>
+                    </div>
+                    <div class="buttons is-centered mt-4">
+                        <button class="button is-outlined is-black" @click.prevent="handleBackToMenu">Back to menu</button>
+                    </div>
+                </div>
+            </template>
+            <template x-if="!loading && credentialsList && credentialAttributes && !presentationDefinition && !dcApiVerified && !verificationResult && !verificationExpired">
                 <div class="box container">
                     <form x-ref="attributesSelectionForm" @submit.prevent="handleAttributesSelectionForm">
                         <div class="field block">
@@ -150,7 +193,7 @@
                     </form>
                 </div>
             </template>
-            <template x-if="!loading && credentialsList && credentialAttributes && presentationDefinition && !dcApiVerified">
+            <template x-if="!loading && credentialsList && credentialAttributes && presentationDefinition && !dcApiVerified && !verificationResult && !verificationExpired">
                 <div class="box container">
                     <div class="block is-flex is-justify-content-center">
                         <img :src="`data:image/png;base64,${presentationDefinition.qr_code}`" alt="" />
@@ -160,7 +203,7 @@
                     </div>
                     <div class="block buttons is-centered">
                         <template x-for="[label, uri] in Object.entries(redirectUris)">
-                            <a :href="uri" class="button" x-text="label" @click="handleWalletClick"></a>
+                            <a :href="uri" class="button" x-text="label" @click="handleWalletClick($event)"></a>
                         </template>
                     </div>
                     <template x-if="dcqlQuery">
@@ -172,7 +215,7 @@
                         </div>
                     </template>
                     <div class="mt-5 is-flex is-justify-content-flex-start is-align-items-center">
-                        <button class="button is-small is-danger is-outlined" @click.prevent="handleResetCancel">Cancel</button>
+                        <button class="button is-small is-danger is-outlined" @click.prevent="handleBackToMenu">Back to menu</button>
                     </div>
                 </div>
             </template>

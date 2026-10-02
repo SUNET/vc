@@ -18,6 +18,7 @@ import (
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/metric"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/pubsub"
 	"github.com/SUNET/vc/pkg/trace"
 )
 
@@ -76,7 +77,12 @@ func main() {
 		panic(err)
 	}
 
-	notifyService, err := notify.New(ctx, cfg, log)
+	notifyBus, notifyBusCleanup, err := buildNotifyBus(cfg, log)
+	if err != nil {
+		panic(err)
+	}
+
+	notifyService, err := notify.NewWithBus(ctx, cfg, log, notifyBus)
 	services["notifyService"] = notifyService
 	if err != nil {
 		panic(err)
@@ -107,6 +113,15 @@ func main() {
 		}
 	}
 
+	// notifyService.Close only tears down its own subscriptions; the bus
+	// and the redis.UniversalClient are owned here and must be released
+	// after the service that uses them has stopped.
+	if notifyBusCleanup != nil {
+		if err := notifyBusCleanup(); err != nil {
+			mainLog.Error(err, "notify bus cleanup")
+		}
+	}
+
 	if err := meter.Shutdown(ctx); err != nil {
 		mainLog.Error(err, "Meter shutdown")
 	}
@@ -114,4 +129,49 @@ func main() {
 	wg.Wait() // Block here until are workers are done
 
 	mainLog.Info("Stopped")
+}
+
+// buildNotifyBus picks the notify pub/sub backend from HA config. The
+// standalone / no-PubSub path returns a MemoryPubSub so operators that
+// never touch cfg.Common.HA.PubSub get the same same-process fan-out
+// behaviour as before. The returned cleanup closes the bus (and, for
+// the RESP backends, the redis.UniversalClient this function
+// constructed), both of which NewWithBus/the pubsub package leave to
+// the caller.
+func buildNotifyBus(cfg *model.Cfg, log *logger.Log) (pubsub.PubSub, func() error, error) {
+	if cfg.Common.HA.PubSub == nil || len(cfg.Common.HA.PubSub.Addrs) == 0 {
+		bus := pubsub.NewMemoryPubSub()
+		return bus, bus.Close, nil
+	}
+	client, err := pubsub.NewClient(pubsub.ClientConfig{
+		Addrs:    cfg.Common.HA.PubSub.Addrs,
+		Username: cfg.Common.HA.PubSub.Username,
+		Password: cfg.Common.HA.PubSub.Password,
+		DB:       cfg.Common.HA.PubSub.DB,
+		TLS:      cfg.Common.HA.PubSub.TLS,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	backend := pubsub.ParseBackend(cfg.Common.HA.PubSub.Backend)
+	svc := pubsub.New(backend, client, log.New("pubsub"))
+	bus, err := svc.NewPubSub("verifier_notify")
+	if err != nil {
+		if client != nil {
+			_ = client.Close()
+		}
+		return nil, nil, err
+	}
+	cleanup := func() error {
+		busErr := bus.Close()
+		var clientErr error
+		if client != nil {
+			clientErr = client.Close()
+		}
+		if busErr != nil {
+			return busErr
+		}
+		return clientErr
+	}
+	return bus, cleanup, nil
 }

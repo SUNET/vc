@@ -43,6 +43,13 @@ func TestUpdateSessionPreference(t *testing.T) {
 			sessionExists: false,
 			expectError:   true,
 		},
+		{
+			name:          "empty session id rejected",
+			sessionID:     "",
+			preference:    true,
+			sessionExists: false,
+			expectError:   true,
+		},
 	}
 
 	for _, tt := range tests {
