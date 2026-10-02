@@ -38,8 +38,11 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 	// every DC API fetch. The cache is written only from authenticated
 	// /ui/interaction paths, so a cache hit is itself sufficient proof the
 	// id names a request we minted.
-	// TODO(masv): should requestObjectCache be using cache lib
-	requestObject, found := c.openid4vp.RequestObjectCache.Get(req.ID)
+	//
+	// cacheService.RequestObject is HA-backed (Mongo in HA mode), so the
+	// wallet's request_uri resolves even when it lands on a different
+	// verifier node from the one that minted it.
+	requestObject, found := c.cacheService.RequestObject.Get(ctx, req.ID)
 	if !found {
 		c.log.Error(nil, "request object not found in cache", "requestObjectID", req.ID)
 		return "", errors.New("request object not found")
@@ -365,7 +368,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// same DCQLQuery the wallet just demonstrably parsed correctly.
 			dcqlQuery := authCtx.DCQLQuery
 			if dcqlQuery == nil {
-				if requestObject, found := c.openid4vp.RequestObjectCache.Get(authCtx.RequestObjectID); found {
+				if requestObject, found := c.cacheService.RequestObject.Get(ctx, authCtx.RequestObjectID); found {
 					dcqlQuery = requestObject.DCQLQuery
 				}
 			}

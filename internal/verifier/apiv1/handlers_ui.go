@@ -580,7 +580,12 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		return nil, err
 	}
 
-	c.openid4vp.RequestObjectCache.Set(authorizationContext.RequestObjectID, requestObject)
+	// cacheService.RequestObject is the HA-backed cache (Mongo-backed when
+	// Common.HA is enabled, in-memory otherwise). Writing through this
+	// cache - rather than the openid4vp package's own in-memory cache -
+	// lets a wallet that reaches the request_uri on a different verifier
+	// node from the one that minted it still resolve the request object.
+	c.cacheService.RequestObject.Set(ctx, authorizationContext.RequestObjectID, requestObject)
 
 	reply := &UIInteractionReply{
 		SessionID: sessionID,
@@ -604,7 +609,7 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
 
 		dcAPIRequestObjectID := uuid.NewString()
-		c.openid4vp.RequestObjectCache.Set(dcAPIRequestObjectID, dcAPIRequestObject)
+		c.cacheService.RequestObject.Set(ctx, dcAPIRequestObjectID, dcAPIRequestObject)
 
 		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
 		if err != nil {
@@ -643,7 +648,7 @@ func (c *Client) tryReuseInFlightSession(ctx context.Context, req *UIInteraction
 		return nil, false, nil
 	}
 
-	requestObject, found := c.openid4vp.RequestObjectCache.Get(authCtx.RequestObjectID)
+	requestObject, found := c.cacheService.RequestObject.Get(ctx, authCtx.RequestObjectID)
 	if !found {
 		return nil, false, nil
 	}
@@ -677,7 +682,7 @@ func (c *Client) tryReuseInFlightSession(ctx context.Context, req *UIInteraction
 	if c.cfg.Verifier.DigitalCredentials.Enable {
 		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
 		dcAPIRequestObjectID := uuid.NewString()
-		c.openid4vp.RequestObjectCache.Set(dcAPIRequestObjectID, dcAPIRequestObject)
+		c.cacheService.RequestObject.Set(ctx, dcAPIRequestObjectID, dcAPIRequestObject)
 
 		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
 		if err != nil {
@@ -798,15 +803,19 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 			ResponseCode: authCtx.VerifierResponseCode,
 		}, nil
 	}
-	requestObject, found := c.openid4vp.RequestObjectCache.Get(authCtx.RequestObjectID)
+	requestObject, found := c.cacheService.RequestObject.Get(ctx, authCtx.RequestObjectID)
 	if !found {
 		return &UIResumeReply{Status: UIResumeExpired}, nil
 	}
 
+	// The DCQL query lives on the request object (UIInteraction never
+	// writes it onto the AuthorizationContext), so reading authCtx here
+	// returned nil and the resumed client lost its query. Use the request
+	// object we already fetched above.
 	reply := &UIResumeReply{
 		Status:      UIResumePending,
 		SessionID:   authCtx.SessionID,
-		DCQLQuery:   authCtx.DCQLQuery,
+		DCQLQuery:   requestObject.DCQLQuery,
 		Validations: authCtx.Validations,
 	}
 	reply.AuthorizationRequest, err = requestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, authCtx.RequestObjectID)
@@ -820,7 +829,7 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 	if c.cfg.Verifier.DigitalCredentials.Enable {
 		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
 		dcAPIRequestObjectID := uuid.NewString()
-		c.openid4vp.RequestObjectCache.Set(dcAPIRequestObjectID, dcAPIRequestObject)
+		c.cacheService.RequestObject.Set(ctx, dcAPIRequestObjectID, dcAPIRequestObject)
 		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
 		if err != nil {
 			return nil, err

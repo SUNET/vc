@@ -108,17 +108,25 @@ func (g *memoryGroup) publish(payload []byte) {
 	}
 }
 
-// close marks the group terminated so a racing publish is a no-op.
-// It does NOT close subscriber channels; the owning Subscription or
-// MemoryPubSub.Close handles that.
+// close marks the group terminated so a racing publish is a no-op, and
+// closes every subscriber channel so pending receivers on Subscription.C()
+// observe end-of-stream rather than blocking forever. Each subscriber's
+// own sync.Once guards against a double close from a concurrent
+// memorySub.Close.
 func (g *memoryGroup) close() {
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	if g.closed {
+		g.mu.Unlock()
 		return
 	}
 	g.closed = true
+	subs := g.subscribers
 	g.subscribers = nil
+	g.mu.Unlock()
+
+	for _, sub := range subs {
+		sub.once.Do(func() { close(sub.ch) })
+	}
 }
 
 // Publish fans payload out to every subscriber of topic.

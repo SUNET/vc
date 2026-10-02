@@ -1531,10 +1531,11 @@ Sections omitted from the secrets file are left untouched.
 
 > **Path:** `.common`
 
-| Field   | Type     | Description | Example | Default | Required |
-| ------- | -------- | ----------- | ------- | ------- | -------- |
-| `mongo` | `object` | Mongo       | -       | -       | No       |
-| `sql`   | `object` | SQL         | -       | -       | No       |
+| Field   | Type     | Description                                                   | Example | Default | Required |
+| ------- | -------- | ------------------------------------------------------------- | ------- | ------- | -------- |
+| `mongo` | `object` | Mongo                                                         | -       | -       | No       |
+| `sql`   | `object` | SQL                                                           | -       | -       | No       |
+| `ha`    | `object` | Credentials for the HA-mode pub/sub backend (Redis / Valkey). | -       | -       | No       |
 
 ### `mongo`
 
@@ -1568,6 +1569,23 @@ Sections omitted from the secrets file are left untouched.
 | Field      | Type     | Description                 | Example | Default | Required |
 | ---------- | -------- | --------------------------- | ------- | ------- | -------- |
 | `password` | `string` | MariaDB connection password | -       | -       | No       |
+
+### `ha`
+
+> **Path:** `.common.ha`
+
+| Field   | Type     | Description                                                                                                      | Example | Default | Required |
+| ------- | -------- | ---------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `redis` | `object` | Redis / Valkey ACL credentials used by the HA pub/sub bus. Omitted entirely when the backend is unauthenticated. | -       | -       | No       |
+
+### `redis`
+
+> **Path:** `.common.ha.redis`
+
+| Field      | Type     | Description                                                                    | Example | Default | Required |
+| ---------- | -------- | ------------------------------------------------------------------------------ | ------- | ------- | -------- |
+| `username` | `string` | ACL username (Redis 6+ / Valkey). Optional.                                    | -       | -       | No       |
+| `password` | `string` | ACL password (Redis 6+ / Valkey) or the single AUTH password on older servers. | -       | -       | No       |
 
 ### `apigw`
 
@@ -1696,6 +1714,10 @@ common:
     postgres:
       password: "change-me-in-production"
     mariadb:
+      password: "change-me-in-production"
+  ha:
+    redis:
+      username: "<secret-value>"
       password: "change-me-in-production"
 apigw:
   api_server:

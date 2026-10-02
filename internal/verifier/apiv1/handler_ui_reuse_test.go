@@ -153,7 +153,7 @@ func TestUIInteraction_NoReuseWhenRequestObjectGone(t *testing.T) {
 
 	authCtx, err := client.cacheService.AuthContext.GetByID(ctx, first.SessionID)
 	require.NoError(t, err)
-	client.openid4vp.RequestObjectCache.Delete(authCtx.RequestObjectID)
+	client.cacheService.RequestObject.Delete(ctx, authCtx.RequestObjectID)
 
 	second, err := client.UIInteraction(ctx, &UIInteractionRequest{
 		DCQLQuery: createTestDCQLForVP(t),

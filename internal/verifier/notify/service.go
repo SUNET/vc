@@ -37,6 +37,12 @@ type Service struct {
 	// is driven off this counter: when it hits zero the group's
 	// backend subscription is closed and the entry is removed.
 	listeners map[string]int
+	// listenerOnces guards each listener channel's close against
+	// duplicate CloseListener calls and a shutdown-vs-handler race:
+	// CloseListener may run after Service.Close has already closed
+	// the channel, and vice versa. Both paths resolve the sync.Once
+	// here before touching the channel.
+	listenerOnces map[chan any]*sync.Once
 
 	closed bool
 }
@@ -130,11 +136,12 @@ func NewWithBus(_ context.Context, cfg *model.Cfg, log *logger.Log, bus pubsub.P
 		bus = pubsub.NewMemoryPubSub()
 	}
 	return &Service{
-		cfg:       cfg,
-		log:       log.New("notify"),
-		bus:       bus,
-		CH:        make(map[string]*idGroup),
-		listeners: make(map[string]int),
+		cfg:           cfg,
+		log:           log.New("notify"),
+		bus:           bus,
+		CH:            make(map[string]*idGroup),
+		listeners:     make(map[string]int),
+		listenerOnces: make(map[chan any]*sync.Once),
 	}, nil
 }
 
@@ -166,6 +173,7 @@ func (s *Service) OpenListener(id string) chan any {
 		isNew = true
 	}
 	s.listeners[id]++
+	s.listenerOnces[listener] = &sync.Once{}
 	s.mu.Unlock()
 
 	if isNew {
@@ -179,6 +187,7 @@ func (s *Service) OpenListener(id string) chan any {
 		if s.listeners[id] <= 0 {
 			delete(s.listeners, id)
 		}
+		delete(s.listenerOnces, listener)
 		s.mu.Unlock()
 	}
 
@@ -212,18 +221,30 @@ func (s *Service) pump(id string, g *idGroup) {
 
 // CloseListener removes one listener registration. The last close on
 // an id reclaims the group and its backend subscription, so a stream
-// of transient ids cannot inflate CH.
+// of transient ids cannot inflate CH. Idempotent and safe to call
+// after Service.Close has already closed the listener channel: a
+// handler's deferred CloseListener runs in both the normal and the
+// shutdown-race path.
 func (s *Service) CloseListener(id string, listener chan any) {
 	s.mu.Lock()
 	g, ok := s.CH[id]
+	once := s.listenerOnces[listener]
+	delete(s.listenerOnces, listener)
 	s.mu.Unlock()
 
 	if ok {
 		g.unregister(listener)
 	}
-	close(listener)
+	if once != nil {
+		once.Do(func() { close(listener) })
+	}
 
 	s.mu.Lock()
+	if _, counted := s.listeners[id]; !counted {
+		s.mu.Unlock()
+		s.log.Debug("CloseListener", "id", id, "remaining", 0)
+		return
+	}
 	s.listeners[id]--
 	remaining := s.listeners[id]
 	var toClose *idGroup
@@ -257,9 +278,11 @@ func (s *Service) Submit(id string, msg any) {
 	}
 }
 
-// Close terminates every outstanding group. The bus itself is NOT
-// closed here - its lifecycle is owned by the caller that constructed
-// it (today: cmd/verifier).
+// Close terminates every outstanding group and closes every live
+// listener channel so handlers blocked on <-listener wake up with a
+// closed channel instead of hanging. The bus itself is NOT closed
+// here - its lifecycle is owned by the caller that constructed it
+// (today: cmd/verifier).
 func (s *Service) Close(_ context.Context) error {
 	s.mu.Lock()
 	if s.closed {
@@ -268,10 +291,15 @@ func (s *Service) Close(_ context.Context) error {
 	}
 	s.closed = true
 	groups := s.CH
+	onces := s.listenerOnces
 	s.CH = make(map[string]*idGroup)
 	s.listeners = make(map[string]int)
+	s.listenerOnces = make(map[chan any]*sync.Once)
 	s.mu.Unlock()
 
+	for ch, once := range onces {
+		once.Do(func() { close(ch) })
+	}
 	for _, g := range groups {
 		g.close()
 	}
