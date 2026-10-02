@@ -182,7 +182,14 @@ func (s *Service) endpointUINotify(ctx context.Context, c *gin.Context) (any, er
 
 	c.Stream(func(w io.Writer) bool {
 		select {
-		case msg := <-listener:
+		case msg, ok := <-listener:
+			// A closed listener (service shutdown or lifecycle reclaim)
+			// would otherwise fire this case repeatedly with a nil msg
+			// and spin until the client disconnects.
+			if !ok {
+				s.log.Debug("endpointUINotify listener closed", "sessionID", sessionID)
+				return false
+			}
 			s.log.Debug("endpointUINotify", "msg", msg)
 			c.SSEvent("message", msg)
 			return true

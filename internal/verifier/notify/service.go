@@ -227,12 +227,24 @@ func (s *Service) pump(id string, g *idGroup) {
 // shutdown-race path.
 func (s *Service) CloseListener(id string, listener chan any) {
 	s.mu.Lock()
-	g, ok := s.CH[id]
-	once := s.listenerOnces[listener]
-	delete(s.listenerOnces, listener)
+	once, firstCall := s.listenerOnces[listener]
+	if firstCall {
+		delete(s.listenerOnces, listener)
+	}
+	g, groupOk := s.CH[id]
 	s.mu.Unlock()
 
-	if ok {
+	// A second call for the same listener must not touch any shared
+	// state: the first call already decremented s.listeners[id] and
+	// closed the channel. Decrementing again would steal a slot from
+	// a sibling listener on the same id and prematurely close the
+	// group.
+	if !firstCall {
+		s.log.Debug("CloseListener (noop)", "id", id)
+		return
+	}
+
+	if groupOk {
 		g.unregister(listener)
 	}
 	if once != nil {
@@ -240,11 +252,6 @@ func (s *Service) CloseListener(id string, listener chan any) {
 	}
 
 	s.mu.Lock()
-	if _, counted := s.listeners[id]; !counted {
-		s.mu.Unlock()
-		s.log.Debug("CloseListener", "id", id, "remaining", 0)
-		return
-	}
 	s.listeners[id]--
 	remaining := s.listeners[id]
 	var toClose *idGroup
@@ -280,9 +287,12 @@ func (s *Service) Submit(id string, msg any) {
 
 // Close terminates every outstanding group and closes every live
 // listener channel so handlers blocked on <-listener wake up with a
-// closed channel instead of hanging. The bus itself is NOT closed
-// here - its lifecycle is owned by the caller that constructed it
-// (today: cmd/verifier).
+// closed channel instead of hanging. Groups are closed FIRST so each
+// pump goroutine exits and deliver is quiescent before any listener
+// channel is closed - otherwise a backend message in flight could
+// select the send branch on a channel we are about to close here and
+// panic. The bus itself is NOT closed here - its lifecycle is owned
+// by the caller that constructed it (today: cmd/verifier).
 func (s *Service) Close(_ context.Context) error {
 	s.mu.Lock()
 	if s.closed {
@@ -297,11 +307,11 @@ func (s *Service) Close(_ context.Context) error {
 	s.listenerOnces = make(map[chan any]*sync.Once)
 	s.mu.Unlock()
 
-	for ch, once := range onces {
-		once.Do(func() { close(ch) })
-	}
 	for _, g := range groups {
 		g.close()
+	}
+	for ch, once := range onces {
+		once.Do(func() { close(ch) })
 	}
 	return nil
 }

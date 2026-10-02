@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -70,7 +71,7 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 		return nil, fmt.Errorf("cache: ephemeral_keys: %w", err)
 	}
 
-	if s.RequestObject, err = pkgcache.NewGenericCache[*openid4vp.RequestObject](cs, ctx, "verifier_request_objects", 5*time.Minute); err != nil {
+	if s.RequestObject, err = pkgcache.NewGenericCache[*openid4vp.RequestObject](cs, ctx, "verifier_request_objects", 5*time.Minute, pkgcache.WithDecoder(requestObjectDecoder)); err != nil {
 		return nil, fmt.Errorf("cache: request_objects: %w", err)
 	}
 
@@ -88,4 +89,19 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 // jwkKeyDecoder parses raw JSON bytes into a jwk.Key.
 func jwkKeyDecoder(data []byte) (jwk.Key, error) {
 	return jwk.ParseKey(data)
+}
+
+// requestObjectDecoder parses raw JSON into a RequestObject. Explicit
+// so the custom UnmarshalJSON on openid4vp.Keys (which jwk.ParseKey's
+// each interface entry) runs on the Mongo round-trip too; a plain
+// json.Unmarshal on the Cache's zero value would also reach it, but
+// going through this decoder keeps parity with the EphemeralEncryptionKey
+// cache and leaves one place to extend if a nested value ever needs
+// post-processing.
+func requestObjectDecoder(data []byte) (*openid4vp.RequestObject, error) {
+	ro := &openid4vp.RequestObject{}
+	if err := json.Unmarshal(data, ro); err != nil {
+		return nil, err
+	}
+	return ro, nil
 }

@@ -112,3 +112,51 @@ func TestService_SubmitWithoutListenerDoesNotLeak(t *testing.T) {
 	svc.mu.Unlock()
 	assert.False(t, present, "Submit with no listeners must not create a group entry")
 }
+
+// A second CloseListener call for the same channel must be a no-op: it
+// must not decrement listeners[id] again or close the group while a
+// sibling listener is still alive. A gin handler whose connection races
+// Service shutdown runs its deferred CloseListener after the shutdown
+// has already closed the channel - we must not strand the other listener
+// on the same id.
+func TestService_CloseListenerIsIdempotent(t *testing.T) {
+	svc := newServiceForTest(t)
+
+	a := svc.OpenListener("sess-dup")
+	b := svc.OpenListener("sess-dup")
+
+	svc.CloseListener("sess-dup", a)
+	// Second call on the same (already-closed) channel.
+	svc.CloseListener("sess-dup", a)
+
+	svc.mu.Lock()
+	count := svc.listeners["sess-dup"]
+	_, present := svc.CH["sess-dup"]
+	svc.mu.Unlock()
+	assert.Equal(t, 1, count, "second CloseListener on the same channel must not decrement")
+	assert.True(t, present, "sibling listener must still own the broadcaster")
+
+	svc.CloseListener("sess-dup", b)
+}
+
+// Service.Close must close every live listener channel so SSE handlers
+// blocked on <-listener wake up with ok==false and return, instead of
+// hanging past shutdown.
+func TestService_CloseWakesListeners(t *testing.T) {
+	svc := newServiceForTest(t)
+
+	a := svc.OpenListener("sess-shutdown-1")
+	b := svc.OpenListener("sess-shutdown-2")
+
+	require.NoError(t, svc.Close(context.Background()))
+
+	_, aOk := <-a
+	_, bOk := <-b
+	assert.False(t, aOk, "listener a must observe closed channel")
+	assert.False(t, bOk, "listener b must observe closed channel")
+
+	// A deferred CloseListener in the handler must still be safe after
+	// Service.Close has already closed the channel.
+	svc.CloseListener("sess-shutdown-1", a)
+	svc.CloseListener("sess-shutdown-2", b)
+}
