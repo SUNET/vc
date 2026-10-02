@@ -223,5 +223,3 @@ this PR, but call it out.
 - Wallet-side resume tokens, email hand-off, out-of-band callback URLs.
 - Persistent server-side session storage. In-memory + Mongo cache TTLs are
   sufficient for the reload window we care about.
-- Redesign of the `notify` package. `broadcast.Broadcaster` keyed by id
-  is fine; we are only widening how the id is discovered.

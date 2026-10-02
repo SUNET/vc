@@ -1155,7 +1155,10 @@ Alpine.data("app", () => ({
      * Fetch the verified credential data for responseCode and show it
      * inline. A 404 means the server-side credential cache has expired (or
      * never knew this code); surface it as verificationExpired rather than
-     * dropping the user back on the preset menu with no feedback.
+     * dropping the user back on the preset menu with no feedback. A
+     * transient 5xx (or any other non-2xx) preserves the stored code so a
+     * reload can retry - the code is the only key that can bring the
+     * completed result back.
      *
      * @param {string} responseCode
      */
@@ -1172,8 +1175,12 @@ Alpine.data("app", () => ({
         }
         if (!res.ok) {
             console.log("Verification result not available (status", res.status, ")");
-            clearStoredResponseCode();
-            this.verificationExpired = true;
+            if (res.status === 404 || res.status === 410) {
+                clearStoredResponseCode();
+                this.verificationExpired = true;
+            } else {
+                this.error = `Verification result unavailable (status ${res.status})`;
+            }
             this.loading = false;
             return;
         }
@@ -1210,7 +1217,13 @@ Alpine.data("app", () => ({
         try {
             const res = await fetch(url.toString(), { credentials: "same-origin" });
             if (!res.ok) {
-                clearStoredSessionID();
+                // Only drop the stored id when the server authoritatively
+                // says it is gone. A transient 5xx keeps it so a reload
+                // can retry; the next call either succeeds or sees the
+                // id truly expire.
+                if (res.status === 404 || res.status === 410) {
+                    clearStoredSessionID();
+                }
                 return;
             }
             data = await res.json();

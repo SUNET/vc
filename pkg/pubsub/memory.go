@@ -15,9 +15,9 @@ import (
 //     create a lingering group).
 //   - A subscriber whose channel is not being drained drops messages
 //     rather than back-pressuring the publisher.
-//   - Close on either the Subscription or the PubSub is safe under
-//     concurrent Publish - a close marks the group so a racing
-//     Publish becomes a no-op before it can send on torn-down channels.
+//   - Publish after Close returns ErrClosed; the per-group close path
+//     also makes a racing in-flight Publish observe the torn-down
+//     state before it tries to send on closed subscriber channels.
 type MemoryPubSub struct {
 	mu     sync.Mutex
 	topics map[string]*memoryGroup
@@ -132,10 +132,13 @@ func (g *memoryGroup) close() {
 // Publish fans payload out to every subscriber of topic.
 func (m *MemoryPubSub) Publish(_ context.Context, topic string, payload []byte) error {
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return ErrClosed
+	}
 	g, ok := m.topics[topic]
-	closed := m.closed
 	m.mu.Unlock()
-	if closed || !ok {
+	if !ok {
 		return nil
 	}
 	g.publish(payload)

@@ -361,11 +361,13 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// just correctly rendered from the SAME original DCQL query,
 			// meaning the query itself was never lost, only this particular
 			// round-trip through AuthContext's Mongo store. Fall back to
-			// RequestObjectCache (an in-memory, non-Mongo cache keyed by
-			// RequestObjectID) - it holds the exact RequestObject that was
-			// signed and served to the wallet at /verification/request-object
-			// (see VerificationRequestObject), which necessarily carries the
-			// same DCQLQuery the wallet just demonstrably parsed correctly.
+			// RequestObjectCache (the HA-backed cache keyed by
+			// RequestObjectID; backed by Mongo when cfg.Common.HA.Enable is
+			// set, in-memory otherwise) - it holds the exact RequestObject
+			// that was signed and served to the wallet at
+			// /verification/request-object (see VerificationRequestObject),
+			// which necessarily carries the same DCQLQuery the wallet just
+			// demonstrably parsed correctly.
 			dcqlQuery := authCtx.DCQLQuery
 			if dcqlQuery == nil {
 				if requestObject, found := c.cacheService.RequestObject.Get(ctx, authCtx.RequestObjectID); found {

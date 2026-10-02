@@ -147,8 +147,8 @@ func TestMemoryPubSub_CloseIsIdempotent(t *testing.T) {
 	_, err := ps.Subscribe(t.Context(), "any")
 	assert.ErrorIs(t, err, ErrClosed, "Subscribe on closed PubSub must return ErrClosed")
 
-	assert.NoError(t, ps.Publish(t.Context(), "any", []byte("x")),
-		"Publish on closed PubSub must be a no-op, not an error")
+	assert.ErrorIs(t, ps.Publish(t.Context(), "any", []byte("x")), ErrClosed,
+		"Publish on closed PubSub must return ErrClosed")
 }
 
 func TestMemoryPubSub_SlowSubscriberDropsRatherThanBlocks(t *testing.T) {

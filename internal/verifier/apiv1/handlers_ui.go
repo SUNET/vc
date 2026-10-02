@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -797,7 +798,13 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 		return &UIResumeReply{Status: UIResumeUnknown}, nil
 	}
 	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
-	if err != nil || authCtx == nil {
+	if err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return &UIResumeReply{Status: UIResumeUnknown}, nil
+		}
+		return nil, err
+	}
+	if authCtx == nil {
 		return &UIResumeReply{Status: UIResumeUnknown}, nil
 	}
 	if authCtx.VerifierResponseCode != "" {
