@@ -856,8 +856,8 @@ github.com/sirosfoundation/go-spocp/pkg/compare
 github.com/sirosfoundation/go-spocp/pkg/persist
 github.com/sirosfoundation/go-spocp/pkg/sexp
 github.com/sirosfoundation/go-spocp/pkg/starform
-# github.com/sirosfoundation/go-trust v0.21.0
-## explicit; go 1.26.6
+# github.com/sirosfoundation/go-trust v0.21.1
+## explicit; go 1.27
 github.com/sirosfoundation/go-trust/pkg/api
 github.com/sirosfoundation/go-trust/pkg/authzen
 github.com/sirosfoundation/go-trust/pkg/authzenclient
