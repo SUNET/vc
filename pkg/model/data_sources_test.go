@@ -85,3 +85,46 @@ func TestAssertionScope_ResolveDefaults(t *testing.T) {
 		assert.Equal(t, "2020-01-01", scope.Defaults["date_of_expiry"])
 	})
 }
+
+func TestPresentationScope_ResolveDefaults(t *testing.T) {
+	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+
+	t.Run("expiry_duration and Defaults produce both date claims", func(t *testing.T) {
+		scope := PresentationScope{
+			Defaults:       map[string]any{"issuing_authority": "SUNET"},
+			ExpiryDuration: "8760h",
+		}
+		got, err := scope.ResolveDefaults(now)
+		require.NoError(t, err)
+		assert.Equal(t, "SUNET", got["issuing_authority"])
+		assert.Equal(t, "2027-09-17", got["date_of_expiry"])
+		assert.Equal(t, "2026-09-17", got["date_of_issuance"])
+	})
+
+	t.Run("invalid expiry_duration returns error", func(t *testing.T) {
+		scope := PresentationScope{ExpiryDuration: "not-a-duration"}
+		_, err := scope.ResolveDefaults(now)
+		require.Error(t, err)
+	})
+}
+
+func TestLookupCredentialSources_Presentation(t *testing.T) {
+	ds := &DataSources{
+		Presentation: PresentationConfig{
+			Scopes: map[string]PresentationScope{
+				"eduid_age_verification": {
+					FromScope:    "eduid",
+					AuthProvider: "openid4vp",
+					RequiredClaims: map[string][]string{
+						"birthdate": nil,
+					},
+				},
+			},
+		},
+	}
+	sources, err := ds.LookupCredentialSources("eduid_age_verification")
+	require.NoError(t, err)
+	require.Len(t, sources, 1)
+	assert.Equal(t, DataSourcePresentation, sources[0].DataSource)
+	assert.Equal(t, "openid4vp", sources[0].AuthProvider)
+}

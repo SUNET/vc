@@ -183,6 +183,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkPresentationScopeFromScope(cfg, serviceName); err != nil {
+		return nil, err
+	}
+
 	if err := checkAuthScopes(cfg); err != nil {
 		return nil, err
 	}
@@ -342,6 +346,40 @@ func checkCredentialOfferIssuerIdentity(cfg *model.Cfg, serviceName string) erro
 		)
 	}
 
+	return nil
+}
+
+// checkPresentationScopeFromScope rejects an apigw config whose
+// presentation-source scopes reference a from_scope that has no matching
+// common.credential_metadata entry. Without this guard, a typo (e.g.
+// from_scope: eudid instead of eduid) reaches buildIssuanceAuthDCQL /
+// enforceScopeCredentialType and either fails to build a DCQL constraint or
+// dereferences a nil CredentialMetadata mid-flow — turning a config error
+// into a runtime failure only visible on a wallet round-trip.
+func checkPresentationScopeFromScope(cfg *model.Cfg, serviceName string) error {
+	if serviceName != "apigw" || cfg.APIGW == nil {
+		return nil
+	}
+	if cfg.Common == nil {
+		return nil
+	}
+	scopes := cfg.APIGW.DataSources.Presentation.Scopes
+	if len(scopes) == 0 {
+		return nil
+	}
+	var missing []string
+	for _, scope := range slices.Sorted(maps.Keys(scopes)) {
+		fromScope := scopes[scope].FromScope
+		if fromScope == "" {
+			continue
+		}
+		if _, ok := cfg.Common.CredentialMetadata[fromScope]; !ok {
+			missing = append(missing, fmt.Sprintf("apigw.data_sources.presentation.scopes.%s.from_scope=%q", scope, fromScope))
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("presentation from_scope references unknown credential_metadata entries: %s", strings.Join(missing, ", "))
+	}
 	return nil
 }
 

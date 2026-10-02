@@ -61,8 +61,9 @@ issuer:
         credential_type: "pid"  # Maps to credential_constructor["pid"]
         credential_config_id: "urn:eudi:pid:1"  # For OpenID4VCI offers
         
-        # Attribute transformation rules
-        # Maps SAML attributes → generic claim names → VCTM claim paths
+        # Attribute mapping (rename-only)
+        # Maps SAML attributes → generic claim names → VCTM claim paths.
+        # Value transformation belongs in the target scope's derivations.
         attributes:
           # Direct mappings
           "urn:oid:2.5.4.42":  # SAML givenName
@@ -86,7 +87,8 @@ issuer:
           "urn:oid:0.9.2342.19200300.100.1.3":  # mail
             claim: "email_address"
             required: false
-            transform: "lowercase"  # Optional transformation
+            # Value transformations (e.g. lowercase) live on the target scope's
+            # derivations block — see docs/CONFIGURATION.md § Derivation Primitives.
       
       - saml_type: "diploma"
         credential_type: "diploma"
@@ -103,94 +105,19 @@ issuer:
             required: true
 ```
 
-#### 1.2 Generic Claim Transformer
+#### 1.2 Generic Claim Transformer (removed)
 
-Create `pkg/saml/transformer.go`:
-
-```go
-type ClaimTransformer struct {
-    mappings map[string]*CredentialMapping
-}
-
-type CredentialMapping struct {
-    SAMLType           string
-    CredentialType     string  // Key in credential_constructor
-    CredentialConfigID string
-    Attributes         map[string]*AttributeMapping
-}
-
-type AttributeMapping struct {
-    Claim      string   // Dot-notation path: "identity.family_name"
-    Required   bool
-    Transform  string   // Optional: "lowercase", "uppercase", "trim"
-    Default    string   // Optional default value
-}
-
-// TransformClaims converts SAML attributes to a generic document structure
-func (t *ClaimTransformer) TransformClaims(
-    samlType string,
-    attributes map[string]interface{},
-) (map[string]interface{}, error) {
-    mapping := t.mappings[samlType]
-    if mapping == nil {
-        return nil, fmt.Errorf("unknown SAML credential type: %s", samlType)
-    }
-    
-    // Build nested document structure using dot notation
-    doc := make(map[string]interface{})
-    
-    for oid, attrMapping := range mapping.Attributes {
-        value, exists := attributes[oid]
-        
-        if !exists {
-            if attrMapping.Required {
-                return nil, fmt.Errorf("missing required attribute: %s", oid)
-            }
-            if attrMapping.Default != "" {
-                value = attrMapping.Default
-            } else {
-                continue
-            }
-        }
-        
-        // Apply transformations
-        value = applyTransform(value, attrMapping.Transform)
-        
-        // Set value in document using dot-notation path
-        setNestedValue(doc, attrMapping.Claim, value)
-    }
-    
-    return doc, nil
-}
-```
-
-#### 1.3 Update SAML Endpoints
-
-Replace hardcoded transformations in `endpoints_saml.go`:
-
-```go
-// OLD (hardcoded):
-switch credentialType {
-case "urn:eudi:pid:1":
-    doc, err = s.claimsToPIDDocument(claims)
-case "urn:eudi:diploma:1":
-    doc, err = s.claimsToDiplomaDocument(claims)
-}
-
-// NEW (configurable):
-doc, err := s.samlTransformer.TransformClaims(
-    session.SAMLCredentialType,  // e.g., "pid"
-    claims,
-)
-if err != nil {
-    return nil, err
-}
-
-documentData, err := json.Marshal(doc)
-if err != nil {
-    return nil, err
-}
-```
+The original design proposed a `pkg/saml/transformer.go` package exposing a
+`ClaimTransformer` type with a `TransformClaims(samlType, attributes)`
+entry point and a per-attribute `Transform` field (`"lowercase"`,
+`"uppercase"`, `"trim"`). That package no longer exists: value
+transformations are now expressed in each scope's `derivations:` block
+(see docs/CONFIGURATION.md § Derivation Primitives) and attribute mappings
+have been reduced to pure rename, matching the YAML above. The
+pseudocode and example wiring that lived in sections 1.2 and 1.3 of this
+document described APIs (`ClaimTransformer`, `TransformClaims`,
+`AttributeConfig.Transform`) that no longer exist and have been removed
+to avoid directing operators toward dead code.
 
 ### Phase 2: Generic Credential Issuance (gRPC issuer changes)
 
@@ -385,55 +312,21 @@ No code changes required - just add config and VCTM file!
 
 ## Implementation Status
 
-### Phase 1: Generic SAML Transformer ✅ COMPLETE
+### Phase 1: Generic SAML Transformer — superseded by derivations
 
-**Implemented Files:**
-- ✅ `pkg/saml/transformer.go` - Generic claim transformer with dot-notation paths
-- ✅ `pkg/saml/transformer_test.go` - Comprehensive test suite (25 tests)
-- ✅ `pkg/model/config.go` - Enhanced SAMLAttributeMapping configuration
-- ✅ `config.saml.example.yaml` - Updated with new configuration format
-- ✅ `pkg/saml/service.go` - Added BuildTransformer() method
-- ✅ `pkg/saml/service_stub.go` - Added BuildTransformer() stub
-- ✅ `pkg/saml/session.go` - Added SAMLType field to session
-- ✅ `internal/issuer/httpserver/endpoints_saml.go` - Updated to use transformer
-- ✅ `pkg/saml/mapper.go` - Updated for compatibility, marked deprecated
+The transformer approach described above (`pkg/saml/transformer.go`,
+`ClaimTransformer`, `TransformClaims`, `AttributeConfig.Transform`) was
+implemented and then replaced. Attribute mappings are now rename-only:
+pure OID→claim-name renames with no transform step. All value
+transformations now live in a scope's `derivations:` block, which runs
+after mapping and whose primitives are documented in
+docs/CONFIGURATION.md § Derivation Primitives. The removed files include
+`pkg/saml/transformer.go` and `pkg/saml/transformer_test.go`; the
+`SAMLAttributeMapping` struct has no `Transform` field.
 
-**Features Implemented:**
-- ✅ Dot-notation path support for nested claims (`identity.given_name`)
-- ✅ Transformations: lowercase, uppercase, trim
-- ✅ Required/optional attribute validation
-- ✅ Default values for missing attributes
-- ✅ Multiple SAML credential types via config
-- ✅ No code changes needed for new credential types
-- ✅ Backward compatible with existing code
-
-**Test Results:**
-```bash
-$ go test -tags saml ./pkg/saml/...
-ok      vc/pkg/saml     4.119s
-```
-
-**Build Results:**
-```bash
-$ go build -tags saml ./cmd/issuer/
-# Success
-
-$ go build ./cmd/issuer/
-# Success (stubs work correctly)
-```
-
-**Removed Code:**
-- ❌ `claimsToPIDDocument()` - Removed (~70 lines)
-- ❌ `claimsToDiplomaDocument()` - Removed (~20 lines)
-- ❌ `claimsToEHICDocument()` - Removed (~30 lines)
-- ❌ `claimsToDocument()` - Removed (switch statement)
-- ❌ Hardcoded imports: `pkg/pid`, `pkg/education`, `pkg/socialsecurity`
-
-**Key Architecture Changes:**
-1. **Session Structure**: Added `SAMLType` field to track SAML credential type separately from credential_constructor type
-2. **Service Method**: `InitiateAuth()` now accepts `samlType` instead of `credentialType` and looks up mapping
-3. **Endpoint Flow**: Build transformer → Get mapping → Transform attributes → Marshal to JSON → Create credential
-4. **Configuration**: New structure with SAMLType, CredentialType, CredentialConfigID, and per-attribute settings
+The historical pseudocode and "lines changed" metrics for the removed
+transformer are intentionally left out of this document — refer to the
+git history on this file if the earlier design is needed.
 
 ### Phase 2: Generic Credential Client 🔜 PENDING (Separate PR)
 
@@ -451,25 +344,17 @@ Keeping Phase 2 separate allows clean PRs for SAML-specific changes (feat/saml-i
 
 ## Testing Summary
 
-### Unit Tests (25 tests, 100% pass rate)
-- Simple attribute mappings
-- Nested claim paths with dot-notation
-- Required attribute validation
-- Optional attribute handling
-- Default value application
-- String transformations (lowercase, uppercase, trim)
-- Complex real-world PID credential scenario
+The transformer-era test suite was removed together with
+`pkg/saml/transformer.go`. The behaviour it covered (dot-notation claim
+paths, required/optional attributes, defaults, and value
+transformations) is now covered by:
 
-### Build Verification
-- ✅ With SAML tags: Compiles successfully
-- ✅ Without SAML tags: Stubs work correctly
-- ✅ No performance regression
-
-### Integration Testing (TODO)
-- Test with TestShib IdP
-- Verify multiple credential types
-- Test all transformation types
-- Validate nested claim structures
+- `pkg/credential/attribute_mapping_test.go` — rename-only attribute
+  mappings and nested claim paths.
+- `pkg/credential/derivations_test.go` and
+  `pkg/credential/primitives/*_test.go` — the derivation primitives
+  that replaced the transformer's `"lowercase"` / `"uppercase"` /
+  `"trim"` steps.
 
 ---
 
@@ -481,27 +366,12 @@ Keeping Phase 2 separate allows clean PRs for SAML-specific changes (feat/saml-i
 - **Easier Testing**: Test configurations without recompilation
 
 ### For Developers
-- **Less Code**: Generic transformer replaces N hardcoded functions
+- **Less Code**: Generic mapping + derivations replace N hardcoded functions
 - **Better Separation**: SAML logic independent from credential schemas
-- **Extensibility**: Easy to add new transformations or claim types
+- **Extensibility**: Easy to add new derivation primitives or claim types
 
 ### For the System
 - **Flexibility**: Support any credential schema via VCTM
-- **Consistency**: Same transformation logic for all credential types
+- **Consistency**: Same mapping/derivation pipeline for all credential types
 - **Maintainability**: Single source of truth in configuration
 
----
-
-## Code Metrics
-
-**Lines Changed:**
-- Added: ~600 lines (transformer + tests)
-- Removed: ~120 lines (hardcoded functions)
-- Modified: ~100 lines (service, config, endpoints)
-- Net: +480 lines (mostly comprehensive tests)
-
-**Test Coverage:**
-- 25 unit tests
-- All edge cases covered
-- 100% pass rate
-- 4.1s execution time

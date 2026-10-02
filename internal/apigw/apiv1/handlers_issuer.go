@@ -14,6 +14,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/bbs"
+	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
@@ -60,11 +61,15 @@ func (c *Client) ResolveIdentifier(ctx context.Context, authenticSource string, 
 }
 
 // requireIdentifier validates that a non-empty identifier exists for data sources
-// that require it. Assertion-based and datastore-based issuance allow an empty
-// identifier because the data comes from trusted sources (IdP claims or
-// pre-uploaded documents) rather than identity-mapped lookups.
+// that require it. Assertion-based, datastore-based, and presentation-based
+// issuance allow an empty identifier because the data comes from trusted
+// sources (IdP claims, pre-uploaded documents, or a verified presented
+// credential) rather than identity-mapped lookups.
 func requireIdentifier(identifier string, dataSource model.DataSourceType) (string, error) {
-	if identifier == "" && dataSource != model.DataSourceAssertion && dataSource != model.DataSourceDatastore {
+	if identifier == "" &&
+		dataSource != model.DataSourceAssertion &&
+		dataSource != model.DataSourceDatastore &&
+		dataSource != model.DataSourcePresentation {
 		return "", errors.New("no identifier in auth context")
 	}
 	return identifier, nil
@@ -285,27 +290,68 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	docSessionID := docLookupSessionID(authContext)
 
 	c.log.Debug("VCICredential: retrieving credential data", "auth_provider", authContext.AuthProvider, "scope", scope, "session_id", authContext.SessionID, "doc_session_id", docSessionID)
-	// Retrieve credential data based on the auth provider used during authorization
-	switch authContext.AuthProvider {
-	case model.AuthProviderOpenID4VP, model.AuthProviderSAML, model.AuthProviderOIDC, model.AuthProviderDatastore:
-		// Session-based auth providers: retrieve from session cache
-		docs, ok := c.cacheService.Document.Get(ctx, docSessionID)
-		if !ok || len(docs) == 0 {
-			c.log.Error(nil, "no documents found in cache for session", "session_id", docSessionID)
-			return nil, errors.New("no documents found for session " + docSessionID)
+
+	// Presentation-source scopes derive their whole document from the
+	// presented credential's claims (already stashed on
+	// authContext.VerifiedClaims by VerificationDirectPost). No cache lookup.
+	// Also requires DataSource=="presentation" so a scope configured in
+	// multiple sources doesn't route non-presentation flows through here.
+	if pScope, ok := c.cfg.APIGW.DataSources.Presentation.Scopes[scope]; ok && authContext.DataSource == string(model.DataSourcePresentation) {
+		docData, err := c.buildPresentationDocument(scope, pScope, authContext, time.Now())
+		if err != nil {
+			return nil, err
 		}
-		if len(docs) > 1 {
-			c.log.Info("multiple documents in cache for session, using first", "session_id", docSessionID, "count", len(docs))
+		document = &model.CompleteDocument{DocumentData: docData}
+	} else {
+		// Retrieve credential data based on the auth provider used during authorization
+		switch authContext.AuthProvider {
+		case model.AuthProviderOpenID4VP, model.AuthProviderSAML, model.AuthProviderOIDC, model.AuthProviderDatastore:
+			// Session-based auth providers: retrieve from session cache
+			docs, ok := c.cacheService.Document.Get(ctx, docSessionID)
+			if !ok || len(docs) == 0 {
+				c.log.Error(nil, "no documents found in cache for session", "session_id", docSessionID)
+				return nil, errors.New("no documents found for session " + docSessionID)
+			}
+			if len(docs) > 1 {
+				c.log.Info("multiple documents in cache for session, using first", "session_id", docSessionID, "count", len(docs))
+			}
+			for _, doc := range docs {
+				document = doc
+				break
+			}
+			if document == nil || document.DocumentData == nil {
+				return nil, errors.New("cached document is empty for session " + docSessionID)
+			}
+		default:
+			return nil, fmt.Errorf("unsupported or missing auth provider: %q", authContext.AuthProvider)
 		}
-		for _, doc := range docs {
-			document = doc
-			break
+
+		// Apply the scope's configured derivations to the cached document.
+		// Presentation is handled above (its derivations run against
+		// VerifiedClaims, not against the assembled doc). Assertion sources
+		// already apply derivations in the SAML ACS / OIDC callback before
+		// caching the document, so re-running them here would double-transform
+		// values (e.g. yyyymmdd_to_iso parsing an already-ISO date).
+		if authContext.DataSource != string(model.DataSourceAssertion) {
+			if derivs := c.cfg.APIGW.DataSources.DerivationsForSource(scope, model.DataSourceType(authContext.DataSource)); len(derivs) > 0 {
+				// Deep-clone the cached document before applying/merging:
+				// MergeNestedClaims writes into existing nested maps, so a
+				// shallow maps.Clone would still share nested references
+				// (e.g. the "identity" sub-map) with the cache and let a
+				// derivation targeting a dotted path corrupt it.
+				docData := credential.CloneNestedClaims(document.DocumentData)
+				derived, err := credential.ApplyDerivations(derivs, docData, time.Now())
+				if err != nil {
+					return nil, err
+				}
+				credential.MergeNestedClaims(docData, derived)
+				document = &model.CompleteDocument{
+					Meta:               document.Meta,
+					IdentityMappingIDs: document.IdentityMappingIDs,
+					DocumentData:       docData,
+				}
+			}
 		}
-		if document == nil || document.DocumentData == nil {
-			return nil, errors.New("cached document is empty for session " + docSessionID)
-		}
-	default:
-		return nil, fmt.Errorf("unsupported or missing auth provider: %q", authContext.AuthProvider)
 	}
 
 	documentData, err := json.Marshal(document.DocumentData)

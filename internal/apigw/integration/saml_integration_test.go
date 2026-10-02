@@ -58,7 +58,7 @@ func TestSAMLIntegration_FullFlow(t *testing.T) {
 		testProcessAssertion(t, env)
 	})
 
-	t.Run("Step4_TransformClaims", func(t *testing.T) {
+	t.Run("Step4_Apply", func(t *testing.T) {
 		testClaimTransformation(t, env)
 	})
 }
@@ -308,15 +308,15 @@ func testProcessAssertion(t *testing.T, env *testEnvironment) {
 	// Create a test SAML assertion
 	assertion := createTestAssertion(t, env.idpEntityID, env.config.EntityID)
 
-	// Create transformer
-	transformer, err := env.samlSPService.BuildTransformer()
+	// Create mapper
+	mapper, err := env.samlSPService.BuildAttributeMapper()
 	require.NoError(t, err)
 
 	// Convert SAML AttributeStatements to simple map
 	attributes := samlAttributesToMap(assertion.AttributeStatements)
 
 	// Transform claims
-	claims, err := transformer.TransformClaims(attributes)
+	claims, err := mapper.Apply(attributes)
 	require.NoError(t, err)
 	require.NotNil(t, claims)
 
@@ -328,7 +328,7 @@ func testProcessAssertion(t *testing.T, env *testEnvironment) {
 
 // testClaimTransformation tests various claim transformation scenarios
 func testClaimTransformation(t *testing.T, env *testEnvironment) {
-	transformer, err := env.samlSPService.BuildTransformer()
+	mapper, err := env.samlSPService.BuildAttributeMapper()
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -382,7 +382,7 @@ func testClaimTransformation(t *testing.T, env *testEnvironment) {
 			// Convert AttributeStatements to simple map
 			attributes := samlAttributesToMap(tc.attributes)
 
-			claims, err := transformer.TransformClaims(attributes)
+			claims, err := mapper.Apply(attributes)
 
 			if tc.shouldError {
 				assert.Error(t, err)
@@ -418,7 +418,7 @@ func testInvalidIdP(t *testing.T, env *testEnvironment) {
 
 // testMissingAttributes tests handling of missing required attributes
 func testMissingAttributes(t *testing.T, env *testEnvironment) {
-	transformer, err := env.samlSPService.BuildTransformer()
+	mapper, err := env.samlSPService.BuildAttributeMapper()
 	require.NoError(t, err)
 
 	// Assertion missing required attribute
@@ -434,7 +434,7 @@ func testMissingAttributes(t *testing.T, env *testEnvironment) {
 	// Convert to map
 	attrMap := samlAttributesToMap(attributes)
 
-	_, err = transformer.TransformClaims(attrMap)
+	_, err = mapper.Apply(attrMap)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "required attribute")
 }

@@ -34,10 +34,4 @@ templates:
       institution_name: "competent_institution"
       institution_country: "issuing_country"
       expiry_date: "card_expiry"
-    claim_transforms:
-      date_of_birth:
-        type: "date_format"
-        params:
-          from: "YYYY-MM-DD"
-          to: "DD/MM/YYYY"
     enabled: true

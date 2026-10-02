@@ -154,14 +154,43 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		}
 	}()
 
-	// Build transformer from config (nil means passthrough — OIDC claims already use standard names)
-	c.log.Debug("OIDCRPCallback: building claim transformer", "credential_type", session.CredentialType)
-	transformer := service.BuildTransformer()
+	// Build mapper from config (nil means passthrough — OIDC claims already use standard names)
+	c.log.Debug("OIDCRPCallback: building attribute mapper", "credential_type", session.CredentialType)
+	mapper := service.BuildAttributeMapper()
 
-	cc, err := c.newCallbackClaims(session.CredentialType, authResp.Claims, transformer)
+	cc, err := c.newCallbackClaims(session.CredentialType, authResp.Claims, mapper)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
+	}
+
+	// Apply the credential type's derivations (from data_sources.<*>.<scope>.derivations)
+	// after the claim split and before identity resolution so downstream code sees
+	// canonicalised values. Resolve derivations against the actual OIDC-backed
+	// data source, so a scope also present in (say) datastore does not inherit
+	// its rules here. Derivations mutate cc.identity so identity resolution and
+	// (via the filter) document data both see the derived values.
+	credSourceForDerivs, dsErr := c.cfg.APIGW.DataSources.ResolveDataSource(session.CredentialType, model.AuthProviderOIDC)
+	if dsErr != nil {
+		span.SetStatus(codes.Error, dsErr.Error())
+		return nil, fmt.Errorf("OIDC data source resolution failed: %w", dsErr)
+	}
+	// Only assertion scopes derive the credential document from the ID
+	// token itself. For datastore and external_api the credential is
+	// fetched later and VCICredential runs the source's derivations against
+	// that document; applying them here against the IdQ identity can
+	// transform lookup claims prematurely or fail the callback when the
+	// IdP identity simply does not carry a source-only input (e.g. a
+	// birthdate that only the external API returns).
+	if credSourceForDerivs.DataSource == model.DataSourceAssertion {
+		if derivs := c.cfg.APIGW.DataSources.DerivationsForSource(session.CredentialType, credSourceForDerivs.DataSource); len(derivs) > 0 {
+			derived, derr := credential.ApplyDerivations(derivs, cc.identity, time.Now())
+			if derr != nil {
+				span.SetStatus(codes.Error, derr.Error())
+				return nil, fmt.Errorf("OIDC derivations failed: %w", derr)
+			}
+			credential.MergeNestedClaims(cc.identity, derived)
+		}
 	}
 
 	// The authenticated claim set. It is deliberately NOT filtered against the
@@ -454,16 +483,16 @@ type callbackClaims struct {
 	identity map[string]any
 
 	// filter records whether documentData still has to drop undeclared claims.
-	// It is false when a transformer produced the claims: the operator has then
+	// It is false when a mapper produced the claims: the operator has then
 	// already declared exactly which claims the credential gets, and filtering
 	// that output on top would overrule their configuration.
 	filter bool
 }
 
-// newCallbackClaims applies the configured claim transformer, if any, and
+// newCallbackClaims applies the configured attribute mapper, if any, and
 // records whether the resulting claims still need filtering before they may
 // become credential content.
-func (c *Client) newCallbackClaims(credentialType string, raw map[string]any, transformer *oidcrp.ClaimTransformer) (*callbackClaims, error) {
+func (c *Client) newCallbackClaims(credentialType string, raw map[string]any, mapper *oidcrp.AttributeMapper) (*callbackClaims, error) {
 	cc := &callbackClaims{
 		c:              c,
 		credentialType: credentialType,
@@ -473,13 +502,13 @@ func (c *Client) newCallbackClaims(credentialType string, raw map[string]any, tr
 		filter: true,
 	}
 
-	if transformer != nil {
-		c.log.Debug("OIDCRPCallback: transforming claims", "raw_claims_count", len(raw))
-		transformed, err := transformer.TransformClaims(raw)
+	if mapper != nil {
+		c.log.Debug("OIDCRPCallback: applying attribute mapper", "raw_claims_count", len(raw))
+		mapped, err := mapper.Apply(raw)
 		if err != nil {
 			return nil, err
 		}
-		cc.identity = transformed
+		cc.identity = mapped
 		cc.filter = false
 	}
 
@@ -497,7 +526,7 @@ func (c *Client) newCallbackClaims(credentialType string, raw map[string]any, tr
 // reads afterwards, or a default named sub or authentic_source_person_id would
 // come back as an authenticated identifier. Filtering alone does not guarantee
 // that - filterClaimsByCredentialType hands its input straight back when there
-// is no metadata to filter against, and with a transformer configured there is
+// is no metadata to filter against, and with a mapper configured there is
 // no filtering at all.
 func (cc *callbackClaims) documentData() map[string]any {
 	claims := cc.identity

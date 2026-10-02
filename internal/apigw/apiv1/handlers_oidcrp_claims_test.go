@@ -228,7 +228,7 @@ func TestBuildOIDCDocument_DoesNotMutateIdentityClaims(t *testing.T) {
 		c, _, _, _ := claimsTestClient(t)
 		setDefaults(c, "ehic")
 
-		transformer := oidcrp.NewClaimTransformer(model.AttributeMapping{"given_name": {Claim: "given_name"}})
+		transformer := oidcrp.NewAttributeMapper(model.AttributeMapping{"given_name": {Claim: "given_name"}})
 		cc, err := c.newCallbackClaims("ehic", oidcIdentityClaims(), transformer)
 		require.NoError(t, err)
 
@@ -288,7 +288,7 @@ func TestBuildOIDCDocument_DoesNotMutateIdentityClaims(t *testing.T) {
 func TestCallbackClaims_TransformerOutputNotFiltered(t *testing.T) {
 	c, _, _, _ := claimsTestClient(t)
 
-	transformer := oidcrp.NewClaimTransformer(model.AttributeMapping{
+	transformer := oidcrp.NewAttributeMapper(model.AttributeMapping{
 		"given_name": {Claim: "given_name"},
 		"email":      {Claim: "email"},
 	})
@@ -309,7 +309,7 @@ func TestCallbackClaims_TransformerOutputNotFiltered(t *testing.T) {
 func TestCallbackClaims_TransformerError(t *testing.T) {
 	c, _, _, _ := claimsTestClient(t)
 
-	transformer := oidcrp.NewClaimTransformer(model.AttributeMapping{
+	transformer := oidcrp.NewAttributeMapper(model.AttributeMapping{
 		"personal_administrative_number": {Claim: "personal_administrative_number", Required: true},
 	})
 

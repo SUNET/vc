@@ -764,21 +764,7 @@ func (c *Client) extractAndMapClaims(ctx context.Context, vpToken string, scopeS
 		return c.claimsExtractor.ExtractClaimsFromVPToken(ctx, vpToken)
 	}
 
-	// Convert ClaimTransform to ClaimTransformDef for the extractor
-	transformDefs := make(map[string]openid4vp.ClaimTransformDef)
-	if templateWithTransforms, ok := template.(interface {
-		GetClaimTransforms() map[string]configuration.ClaimTransform
-	}); ok {
-		for claimName, transform := range templateWithTransforms.GetClaimTransforms() {
-			transformDefs[claimName] = openid4vp.ClaimTransformDef{
-				Type:   transform.Type,
-				Params: transform.Params,
-			}
-		}
-	}
-
-	// Extract, map, and transform claims
-	oidcClaims, err := c.claimsExtractor.ExtractAndMapClaims(ctx, vpToken, claimMappings, transformDefs)
+	oidcClaims, err := c.claimsExtractor.ExtractAndMapClaims(ctx, vpToken, claimMappings)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract and map claims: %w", err)
 	}
