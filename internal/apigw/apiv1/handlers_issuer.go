@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"strings"
 	"time"
 
@@ -335,12 +334,12 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		// values (e.g. yyyymmdd_to_iso parsing an already-ISO date).
 		if authContext.DataSource != string(model.DataSourceAssertion) {
 			if derivs := c.cfg.APIGW.DataSources.DerivationsForSource(scope, model.DataSourceType(authContext.DataSource)); len(derivs) > 0 {
-				// The memory cache returns the stored map reference, so
-				// non-idempotent derivations (yyyymmdd_to_iso overwriting the
-				// source date) would corrupt the cached copy and fail on a
-				// second issuance. Work on a clone and replace the local
-				// document with a shallow copy so the cache stays untouched.
-				docData := maps.Clone(document.DocumentData)
+				// Deep-clone the cached document before applying/merging:
+				// MergeNestedClaims writes into existing nested maps, so a
+				// shallow maps.Clone would still share nested references
+				// (e.g. the "identity" sub-map) with the cache and let a
+				// derivation targeting a dotted path corrupt it.
+				docData := credential.CloneNestedClaims(document.DocumentData)
 				derived, err := credential.ApplyDerivations(derivs, docData, time.Now())
 				if err != nil {
 					return nil, err

@@ -3,7 +3,6 @@ package apiv1
 import (
 	"errors"
 	"fmt"
-	"maps"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
@@ -22,13 +21,17 @@ func (c *Client) buildPresentationDocument(scope string, pScope model.Presentati
 		return nil, errors.New("no verified presentation claims available for issuance")
 	}
 
-	doc := make(map[string]any, len(pScope.Defaults))
+	// Start from a deep copy of the verified presentation claims so a VCTM
+	// claim that the presented credential already carries (and that no
+	// derivation rewrites) still lands in the issued document. The VCTM
+	// filter below drops anything the target credential does not declare.
+	doc := credential.CloneNestedClaims(authCtx.VerifiedClaims)
 
 	derived, err := credential.ApplyDerivations(pScope.Derivations, authCtx.VerifiedClaims, now)
 	if err != nil {
 		return nil, err
 	}
-	maps.Copy(doc, derived)
+	credential.MergeNestedClaims(doc, derived)
 
 	defaults, err := pScope.ResolveDefaults(now)
 	if err != nil {

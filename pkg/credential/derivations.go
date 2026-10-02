@@ -26,7 +26,7 @@ import (
 // sibling nested claim (identity.name) produced by an earlier step.
 func ApplyDerivations(list []primitives.Derivation, claims map[string]any, now time.Time) (map[string]any, error) {
 	out := make(map[string]any)
-	working := cloneNestedClaims(claims)
+	working := CloneNestedClaims(claims)
 	for i, d := range list {
 		derived, err := d.Apply(working, now)
 		if err != nil {
@@ -58,14 +58,14 @@ func MergeNestedClaims(dst, src map[string]any) {
 	}
 }
 
-// cloneNestedClaims returns a copy of src with nested map[string]any values
+// CloneNestedClaims returns a copy of src with nested map[string]any values
 // cloned recursively so later in-place merges on the working map do not
 // mutate the caller's original claims map.
-func cloneNestedClaims(src map[string]any) map[string]any {
+func CloneNestedClaims(src map[string]any) map[string]any {
 	out := make(map[string]any, len(src))
 	for k, v := range src {
 		if m, ok := v.(map[string]any); ok {
-			out[k] = cloneNestedClaims(m)
+			out[k] = CloneNestedClaims(m)
 			continue
 		}
 		out[k] = v
