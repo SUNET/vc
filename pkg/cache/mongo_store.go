@@ -85,6 +85,10 @@ func NewMongoStore(ctx context.Context, client *mongo.Client, database, collecti
 }
 
 // Save stores an authorization context in MongoDB with sessionID as primary key.
+// This is upsert semantics (matching MemoryStore.Save): a Save on an existing
+// session_id replaces the stored document, so callers may use Save to persist
+// completion markers / token updates on a previously-saved context without
+// first calling Update.
 func (s *MongoStore) Save(ctx context.Context, doc *AuthorizationContext) error {
 	if doc == nil {
 		return errors.New("document cannot be nil")
@@ -101,7 +105,12 @@ func (s *MongoStore) Save(ctx context.Context, doc *AuthorizationContext) error 
 		doc.CreatedAt = time.Now()
 	}
 
-	_, err := s.coll.InsertOne(ctx, doc)
+	_, err := s.coll.ReplaceOne(
+		ctx,
+		bson.M{"session_id": doc.SessionID},
+		doc,
+		options.Replace().SetUpsert(true),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to save auth context: %w", err)
 	}

@@ -96,6 +96,32 @@ type Keys struct {
 	Keys []jwk.Key `json:"keys,omitempty" bson:"keys,omitempty" validate:"omitempty,dive"`
 }
 
+// UnmarshalJSON parses each key with jwk.ParseKey; the default json.Unmarshal
+// cannot pick a concrete type for the jwk.Key interface, so a Mongo cache
+// round-trip would otherwise return a Keys value with nil entries.
+func (k *Keys) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Keys []json.RawMessage `json:"keys,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if len(raw.Keys) == 0 {
+		k.Keys = nil
+		return nil
+	}
+	parsed := make([]jwk.Key, 0, len(raw.Keys))
+	for i, entry := range raw.Keys {
+		key, err := jwk.ParseKey(entry)
+		if err != nil {
+			return fmt.Errorf("keys[%d]: %w", i, err)
+		}
+		parsed = append(parsed, key)
+	}
+	k.Keys = parsed
+	return nil
+}
+
 type JWK struct {
 	KTY string `json:"kty,omitempty" bson:"kty,omitempty" validate:"required,oneof=RSA EC OKP"`
 	X   string `json:"x,omitempty" bson:"x,omitempty" validate:"omitempty"`
