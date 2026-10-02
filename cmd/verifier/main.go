@@ -77,7 +77,7 @@ func main() {
 		panic(err)
 	}
 
-	notifyBus, err := buildNotifyBus(cfg, log)
+	notifyBus, notifyBusCleanup, err := buildNotifyBus(cfg, log)
 	if err != nil {
 		panic(err)
 	}
@@ -113,6 +113,15 @@ func main() {
 		}
 	}
 
+	// notifyService.Close only tears down its own subscriptions; the bus
+	// and the redis.UniversalClient are owned here and must be released
+	// after the service that uses them has stopped.
+	if notifyBusCleanup != nil {
+		if err := notifyBusCleanup(); err != nil {
+			mainLog.Error(err, "notify bus cleanup")
+		}
+	}
+
 	if err := meter.Shutdown(ctx); err != nil {
 		mainLog.Error(err, "Meter shutdown")
 	}
@@ -125,10 +134,14 @@ func main() {
 // buildNotifyBus picks the notify pub/sub backend from HA config. The
 // standalone / no-PubSub path returns a MemoryPubSub so operators that
 // never touch cfg.Common.HA.PubSub get the same same-process fan-out
-// behaviour as before.
-func buildNotifyBus(cfg *model.Cfg, log *logger.Log) (pubsub.PubSub, error) {
+// behaviour as before. The returned cleanup closes the bus (and, for
+// the RESP backends, the redis.UniversalClient this function
+// constructed), both of which NewWithBus/the pubsub package leave to
+// the caller.
+func buildNotifyBus(cfg *model.Cfg, log *logger.Log) (pubsub.PubSub, func() error, error) {
 	if cfg.Common.HA.PubSub == nil || len(cfg.Common.HA.PubSub.Addrs) == 0 {
-		return pubsub.NewMemoryPubSub(), nil
+		bus := pubsub.NewMemoryPubSub()
+		return bus, bus.Close, nil
 	}
 	client, err := pubsub.NewClient(pubsub.ClientConfig{
 		Addrs:    cfg.Common.HA.PubSub.Addrs,
@@ -138,9 +151,27 @@ func buildNotifyBus(cfg *model.Cfg, log *logger.Log) (pubsub.PubSub, error) {
 		TLS:      cfg.Common.HA.PubSub.TLS,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	backend := pubsub.ParseBackend(cfg.Common.HA.PubSub.Backend)
 	svc := pubsub.New(backend, client, log.New("pubsub"))
-	return svc.NewPubSub("verifier_notify")
+	bus, err := svc.NewPubSub("verifier_notify")
+	if err != nil {
+		if client != nil {
+			_ = client.Close()
+		}
+		return nil, nil, err
+	}
+	cleanup := func() error {
+		busErr := bus.Close()
+		var clientErr error
+		if client != nil {
+			clientErr = client.Close()
+		}
+		if busErr != nil {
+			return busErr
+		}
+		return clientErr
+	}
+	return bus, cleanup, nil
 }

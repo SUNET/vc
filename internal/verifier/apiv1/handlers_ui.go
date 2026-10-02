@@ -656,16 +656,30 @@ func (c *Client) tryReuseInFlightSession(ctx context.Context, req *UIInteraction
 	}
 
 	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, req.SessionID)
-	if err != nil || authCtx == nil {
+	if err != nil {
+		// A transient store error must not silently fall through to the
+		// fresh-session branch - that would abandon the in-flight wallet
+		// interaction with no way back. Only an authoritative "not here"
+		// means "do not reuse"; anything else fails the request so the
+		// caller (and the stored hint) can retry.
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if authCtx == nil {
 		return nil, false, nil
 	}
 	if !isReusableAuthContext(authCtx) {
 		return nil, false, nil
 	}
 
-	requestObject, found := c.cacheService.RequestObject.Get(ctx, authCtx.RequestObjectID)
-	if !found {
-		return nil, false, nil
+	requestObject, err := c.cacheService.RequestObject.GetErr(ctx, authCtx.RequestObjectID)
+	if err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
 	if !sameDCQLQuery(req.DCQLQuery, requestObject.DCQLQuery) {
 		return nil, false, nil
@@ -753,15 +767,27 @@ func (c *Client) IsActiveAuthSession(ctx context.Context, sessionID string) bool
 // unknown or still in flight. Used by /ui/resume so a verifier UI
 // reloaded after the wallet has already answered can recover the
 // response_code it never had a chance to receive over SSE.
-func (c *Client) CompletedResponseCode(ctx context.Context, sessionID string) string {
+//
+// A nil error with "" means the lookup succeeded and the context is
+// still pending (or genuinely absent). A non-nil error means the
+// authorization store itself failed; the caller surfaces that so the
+// client can retry instead of latching onto a bogus "pending" and
+// never reconciling the lost completion.
+func (c *Client) CompletedResponseCode(ctx context.Context, sessionID string) (string, error) {
 	if sessionID == "" {
-		return ""
+		return "", nil
 	}
 	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
-	if err != nil || authCtx == nil {
-		return ""
+	if err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return "", nil
+		}
+		return "", err
 	}
-	return authCtx.VerifierResponseCode
+	if authCtx == nil {
+		return "", nil
+	}
+	return authCtx.VerifierResponseCode, nil
 }
 
 // UIResumeStatus names the possible outcomes of a /ui/resume call.
@@ -828,9 +854,12 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 			ResponseCode: authCtx.VerifierResponseCode,
 		}, nil
 	}
-	requestObject, found := c.cacheService.RequestObject.Get(ctx, authCtx.RequestObjectID)
-	if !found {
-		return &UIResumeReply{Status: UIResumeExpired}, nil
+	requestObject, err := c.cacheService.RequestObject.GetErr(ctx, authCtx.RequestObjectID)
+	if err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return &UIResumeReply{Status: UIResumeExpired}, nil
+		}
+		return nil, err
 	}
 
 	// The DCQL query lives on the request object (UIInteraction never

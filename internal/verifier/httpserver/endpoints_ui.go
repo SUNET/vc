@@ -91,7 +91,15 @@ func (s *Service) endpointUICompletion(ctx context.Context, c *gin.Context) (any
 		return nil, nil
 	}
 
-	responseCode := s.apiv1.CompletedResponseCode(ctx, sessionID)
+	responseCode, err := s.apiv1.CompletedResponseCode(ctx, sessionID)
+	if err != nil {
+		// A backend error (e.g. transient Mongo outage) must not be
+		// collapsed to "pending" - the browser would stop retrying and
+		// the completed session would never reconcile. Surface it so
+		// the caller sees a retryable 5xx.
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
 	if responseCode == "" {
 		c.JSON(http.StatusOK, gin.H{"status": "pending"})
 		return nil, nil
@@ -194,6 +202,13 @@ func (s *Service) endpointUINotify(ctx context.Context, c *gin.Context) (any, er
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Accel-Buffering", "no")
+
+	// gin.Context.Stream only flushes after the callback writes. Our callback
+	// blocks waiting for a message, so without this explicit flush the SSE
+	// headers never reach the browser and EventSource.onopen never fires,
+	// which strands the subscribe-before-check reconciliation triggered on
+	// that event.
+	c.Writer.Flush()
 
 	c.Stream(func(w io.Writer) bool {
 		select {

@@ -1177,6 +1177,11 @@ Alpine.data("app", () => ({
             console.log("Verification result not available (status", res.status, ")");
             if (res.status === 404 || res.status === 410) {
                 clearStoredResponseCode();
+                // bfcache can restore this component with the previously
+                // rendered claims still in verificationResult; without this
+                // reset the expiry notice and the stale credential data
+                // would be shown together.
+                this.verificationResult = null;
                 this.verificationExpired = true;
             } else {
                 this.error = `Verification result unavailable (status ${res.status})`;
