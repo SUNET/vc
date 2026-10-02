@@ -41,6 +41,13 @@ func (s *Service) endpointUIResult(ctx context.Context, c *gin.Context) (any, er
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointUIResult")
 	defer span.End()
 
+	// Verified credential claims are sensitive and expire with the server
+	// cache; forbid browser and intermediary caching on both success and
+	// error paths. Set before any write so the framework's JSON write
+	// cannot flush the response ahead of them.
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+
 	request := &apiv1.VerificationCallbackRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		return nil, err

@@ -177,13 +177,17 @@ func (r *TypeRegistry) extractStructs(file *ast.File, pkgName string) {
 				}
 				def := &StructDef{Name: ts.Name.Name, Doc: doc, PkgName: pkgName}
 				r.parseFields(st, def, pkgName)
-				// Register under the pkg-qualified key always; drop the
-				// simple-name entry on cross-package collision (e.g.
-				// pubsub.Config vs openidfederation.Config) so lookups must
-				// use the qualified form instead of silently resolving to
-				// whichever package parsed last.
-				if existing, ok := r.types[ts.Name.Name]; ok && existing != nil && existing.PkgName != pkgName {
-					delete(r.types, ts.Name.Name)
+				// Register under the pkg-qualified key always; collapse the
+				// simple-name entry to a nil sentinel on cross-package
+				// collision. A sentinel (rather than a delete) is sticky:
+				// a third package with the same identifier cannot reclaim
+				// the simple name after two prior packages collided and
+				// erased it, which would make the lookup silently resolve
+				// to that latecomer.
+				if existing, present := r.types[ts.Name.Name]; present {
+					if existing != nil && existing.PkgName != pkgName {
+						r.types[ts.Name.Name] = nil
+					}
 				} else {
 					r.types[ts.Name.Name] = def
 				}

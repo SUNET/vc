@@ -177,8 +177,11 @@ func (s *Service) OpenListener(id string) chan any {
 		s.CH[id] = g
 		isNew = true
 	}
+	// Keep a local reference so the failure path below can close through
+	// the same once Service.Close may be about to invoke on this channel.
+	once := &sync.Once{}
 	s.listeners[id]++
-	s.listenerOnces[listener] = &sync.Once{}
+	s.listenerOnces[listener] = once
 	s.mu.Unlock()
 
 	if isNew {
@@ -194,10 +197,9 @@ func (s *Service) OpenListener(id string) chan any {
 		}
 		delete(s.listenerOnces, listener)
 		s.mu.Unlock()
-		// Group was closed under us (shutdown or lifecycle reclaim)
-		// between creation and registration. Close the listener so the
-		// handler's receive observes end-of-stream.
-		close(listener)
+		// Shared once with Service.Close so a concurrent shutdown cannot
+		// double-close this channel.
+		once.Do(func() { close(listener) })
 	}
 
 	s.log.Debug("OpenListener", "id", id)

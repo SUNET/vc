@@ -1049,18 +1049,24 @@ Alpine.data("app", () => ({
     _setupFallbackFlow() {
         if (!this.notifyEventSource) {
             console.log("Starting SSE notify listener from sendDcqlQuery");
+            const sessionID = this.presentationDefinition?.session_id;
             this.notifyEventSource = setupNotifyListener(
-                this.presentationDefinition?.session_id,
+                sessionID,
                 (redirectURI) => { this.handleRedirectURI(redirectURI); },
             );
             // Close the race between /ui/resume (or sendDcqlQuery) reading
-            // "pending" and this SSE subscription becoming live. Redis
-            // pub/sub is non-durable: a redirect_uri published during that
-            // window would otherwise be lost and this tab would wait on
-            // SSE forever. /ui/completion returns the server's persisted
-            // marker and lets us converge even when the published event
-            // predates the subscribe.
-            void this._reconcileCompletion(this.presentationDefinition?.session_id);
+            // "pending" and this SSE subscription becoming live. Firing on
+            // "open" guarantees the server-side subscribe-before-check
+            // ordering: EventSource.open means the GET /ui/notify handler
+            // has already called notify.OpenListener (SSE headers are only
+            // flushed after that). A publish between /ui/resume returning
+            // "pending" and that moment would be lost by the non-durable
+            // bus, so /ui/completion covers it; a publish before SSE is
+            // live but after /ui/completion returned is still caught
+            // because reconnects also fire "open".
+            this.notifyEventSource.addEventListener("open", () => {
+                void this._reconcileCompletion(sessionID);
+            });
         }
 
         const presDefURI = new URL(this.presentationDefinition.authorization_request);
