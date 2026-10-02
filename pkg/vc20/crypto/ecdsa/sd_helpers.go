@@ -8,10 +8,15 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math/big"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/SUNET/vc/pkg/vc20/credential"
+
+	"github.com/piprate/json-gold/ld"
 )
 
 func parseNQuads(nquads string) []string {
@@ -253,20 +258,239 @@ func replaceURNsInNQuads(nquads string) string {
 	return re.ReplaceAllString(nquads, "_:$1")
 }
 
-func removeProof(data any) {
-	if m, ok := data.(map[string]any); ok {
-		delete(m, "proof")
-		delete(m, "https://w3id.org/security#proof")
-		delete(m, "https://www.w3.org/ns/credentials#proof")
+// removeRootProof deletes the proof the DOCUMENT attaches to itself, and
+// leaves every nested proof alone. A nested credential's own proof is content
+// the enclosing signature covers; removing it would take those quads out of
+// the signed set and so out of the signature's reach.
+//
+// A top-level ARRAY is not a set of independent roots. RDFCredential's own
+// JSON marshalling goes through FromRDF, which FLATTENS - every embedded node
+// is lifted to that same array beside the document. Deleting proof keys from
+// each entry would therefore strip exactly the nested proofs this is meant to
+// preserve, and only after a round trip through RDF, so the compact path and
+// the expanded path would disagree about what is signed.
+//
+// The root is identified the way credential.RootProofs identifies it: the node
+// nothing else refers to. A document that holds no such node, or more than
+// one, does not say what it is about and is REFUSED rather than guessed at.
+//
+// Which members ARE the proof is resolved through the document's context, not
+// matched against a list of spellings - see credential.ProofKeys.
+func removeRootProof(data any, options *ld.JsonLdOptions) (any, error) {
+	// NO inherited context at the top: there is no enclosing scope, so a
+	// top-level node's own context becomes the active one exactly once.
+	// Seeding this with the document's context made that node's context
+	// both the outer and the local one, and composing a context with
+	// itself is not what JSON-LD does with it.
+	return removeRootProofUnder(data, nil, options)
+}
 
-		for _, v := range m {
-			removeProof(v)
-		}
-	} else if list, ok := data.([]any); ok {
-		for _, item := range list {
-			removeProof(item)
+// removeRootProofUnder carries the context DOWN rather than recomputing it.
+//
+// A compacted graph container keeps its @context on the container alone, so
+// recomputing after descending into @graph found none - and a proof written
+// through an aliased term stopped being recognized, staying in a document
+// that is supposed to be without it.
+func removeRootProofUnder(data any, context any, options *ld.JsonLdOptions) (any, error) {
+	// The graph NAMES the removed links pointed at. In flattened JSON-LD a
+	// proof is a link to a named graph sitting beside the document, so
+	// deleting the link alone leaves the proof's quads in a document that
+	// is supposed to be without them - and verification then canonicalizes
+	// proof quads no disclosed signature covers. RootProofs removes both;
+	// so does this.
+	var orphaned []string
+	deleteProofKeys := func(m map[string]any, active any) {
+		for _, key := range credential.ProofKeys(m, active, options) {
+			orphaned = append(orphaned, graphNamesIn(m[key], contextFor(m, context), options)...)
+			delete(m, key)
 		}
 	}
+
+	switch typed := data.(type) {
+	case map[string]any:
+		// A BARE container holds the nodes and is about none of them, so
+		// the root is inside. A node that merely carries @graph beside
+		// properties of its own is a named graph, and the node itself is
+		// still what the document is about - reaching into its graph would
+		// remove a proof this must not touch.
+		if credential.IsBareGraphContainer(typed, context, options) {
+			// Under the name THIS document gives the member, which a
+			// context may alias like any other keyword.
+			graphKey, _ := credential.GraphMemberName(typed, context, options)
+			graph, err := removeRootProofUnder(typed[graphKey], contextFor(typed, context), options)
+			if err != nil {
+				return nil, err
+			}
+			typed[graphKey] = graph
+			return typed, nil
+		}
+		deleteProofKeys(typed, contextFor(typed, context))
+		return typed, nil
+	case []any:
+		// Graph WRAPPERS are not root candidates. RootProofs excludes them
+		// when it selects a root, and an unreferenced named graph is
+		// perfectly good secured content there - offering it here made the
+		// same document ambiguous and SD signing and derivation fail on it.
+		// They stay in the document; they just do not stand for it.
+		nodes := make([]map[string]any, 0, len(typed))
+		for _, entry := range typed {
+			node, isNode := entry.(map[string]any)
+			if !isNode || credential.IsGraphWrapper(node, context, options) {
+				continue
+			}
+			nodes = append(nodes, node)
+		}
+
+		if len(nodes) == 1 {
+			deleteProofKeys(nodes[0], contextFor(nodes[0], context))
+			return withoutNamedGraphs(typed, orphaned, context, options), nil
+		}
+
+		selected, err := credential.RootOfCompactedNodes(nodes, context, options)
+		if err != nil {
+			return nil, err
+		}
+
+		// EVERY fragment of the selected root. Expanded JSON-LD may split
+		// one node across several top-level entries; selection merges them
+		// to decide, and the proof may be written on any of them - so the
+		// merged copy is what says WHICH node, and the originals are what
+		// has to be edited.
+		//
+		// The ROOT's own context, not whichever node happened to be first:
+		// a flattened array may give each node its own, and reordering
+		// top-level nodes does not change the RDF.
+		// RESOLVED identifiers on both sides: a document may name one node
+		// ex:credential in one fragment and absolutely in another, and
+		// comparing the spellings found no fragment to edit at all.
+		rootID := credential.ResolvedNodeID(selected, context, options)
+		ids := credential.ResolvedNodeIDs(nodes, context, options)
+
+		var targets []map[string]any
+		for index, node := range nodes {
+			id := ids[index]
+			if rootID != "" {
+				if id == rootID {
+					targets = append(targets, node)
+				}
+				continue
+			}
+			// An UNIDENTIFIED root cannot have been split across
+			// fragments - fragments are joined by identifier - so exactly
+			// one entry is it, and selection returned a clone of that one.
+			if id == "" && reflect.DeepEqual(node, selected) {
+				targets = append(targets, node)
+			}
+		}
+
+		// INVARIANT CHECKS, not reachable paths: selection refuses a
+		// document with two unidentified top-level nodes, and the node it
+		// returns is a clone of one of these. They are here so that a
+		// future change to selection cannot silently widen this removal -
+		// which, applied to the wrong node or to all of them, is exactly
+		// the embedded-proof stripping this change exists to prevent.
+		// Removing from none is no better: the signature would then cover a
+		// document the verifier does not reproduce.
+		if len(targets) == 0 {
+			return nil, fmt.Errorf("a document holds no entry for the node %q it is about", rootID)
+		}
+		if rootID == "" && len(targets) != 1 {
+			return nil, fmt.Errorf("a document holds %d unidentified nodes indistinguishable from the one it is about, so whose proof is the root's cannot be decided", len(targets))
+		}
+
+		for _, node := range targets {
+			deleteProofKeys(node, contextFor(node, context))
+		}
+		return withoutNamedGraphs(typed, orphaned, context, options), nil
+	}
+	return nil, fmt.Errorf("a document is %T rather than a node or a list of nodes", data)
+}
+
+// graphNamesIn reads the identifiers a removed proof link pointed at. A proof
+// written INLINE names no graph and contributes none - it goes with the link.
+func graphNamesIn(value any, context any, options *ld.JsonLdOptions) []string {
+	var names []string
+	switch typed := value.(type) {
+	case []any:
+		for _, entry := range typed {
+			names = append(names, graphNamesIn(entry, context, options)...)
+		}
+	case map[string]any:
+		// A proof written INLINE carries its own graph and names none.
+		if _, inline := credential.GraphMemberName(typed, context, options); inline {
+			return nil
+		}
+		// Through the ACTIVE CONTEXT, like everything else that reads an
+		// identifier here. Reading only the literal spellings left a link
+		// such as {"identifier": "_:proof"} naming nothing, so the proof's
+		// named graph stayed in the supposedly proof-free document and SD
+		// removal disagreed with RootProofs.
+		// As an ABSOLUTE IRI, so a link written ex:proof matches the graph
+		// it names however that graph spells its own identifier.
+		if id := credential.ResolvedNodeID(typed, context, options); id != "" {
+			names = append(names, id)
+		}
+	case string:
+		// A term declared "@type": "@id" writes its link as a bare string.
+		if typed != "" {
+			names = append(names, credential.ResolvedNodeID(map[string]any{"@id": typed}, context, options))
+		}
+	}
+	return names
+}
+
+// withoutNamedGraphs drops the top-level graph entries a removed root proof
+// named. Only graph WRAPPERS are candidates: an entry that merely shares an
+// identifier is a node the document still talks about.
+func withoutNamedGraphs(entries []any, names []string, context any, options *ld.JsonLdOptions) []any {
+	if len(names) == 0 {
+		return entries
+	}
+	named := make(map[string]bool, len(names))
+	for _, name := range names {
+		named[name] = true
+	}
+
+	kept := make([]any, 0, len(entries))
+	for _, entry := range entries {
+		if node, isNode := entry.(map[string]any); isNode {
+			// A graph object may carry @index beside @graph and @id, so
+			// this is not a key count - and in a COMPACTED document those
+			// names may be aliased, which ld.IsGraph cannot see.
+			if credential.IsGraphWrapper(node, context, options) {
+				// Same reading as the link that named it, or a graph
+				// wrapper spelled through the context survives the removal
+				// its link did not.
+				if named[credential.ResolvedNodeID(node, context, options)] {
+					continue
+				}
+			}
+		}
+		kept = append(kept, entry)
+	}
+	return kept
+}
+
+// contextFor is the context to resolve a NODE's members against: the one
+// inherited from the enclosing scope, with the node's own applied on top.
+//
+// APPLIED ON TOP, not instead of. A node-local context adds to and overrides
+// what is already active; returning only the node's own dropped outer
+// definitions - an outer alias for the proof predicate among them - so
+// removeRootProof could leave a root proof that RootProofs removes, and SD
+// signing and derivation would hash different documents.
+//
+// An explicit null is the exception, because in JSON-LD it is a RESET: it
+// clears what is active rather than adding to it.
+func contextFor(node map[string]any, inherited any) any {
+	own, present := node["@context"]
+	if !present {
+		return inherited
+	}
+	if own == nil {
+		return nil
+	}
+	return credential.JoinContexts(inherited, own)
 }
 
 // parseJSONPointer parses a JSON pointer (RFC 6901) into path segments.

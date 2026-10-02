@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/piprate/json-gold/ld"
+	"github.com/stretchr/testify/require"
 )
 
 // TestNewRDFCredentialFromJSON tests parsing JSON-LD to RDF with basic example
@@ -997,4 +998,315 @@ func TestSignatureVerificationRoundtrip(t *testing.T) {
 		t.Errorf("Proof canonical form not deterministic.\nFirst:  %s\nSecond: %s",
 			proofCanonical1, proofCanonical2)
 	}
+}
+
+// TestCanonicalFormHonoursTheCredentialsOptions: the canonical form is the
+// only thing a Data Integrity signature covers, and it was computed under
+// FRESH DEFAULT options - no document loader of the caller's, no
+// expandContext, no base, no processing mode - while root selection, proof-key
+// selection and proof-scope removal all re-expanded under the options the
+// credential was parsed with.
+//
+// A credential was therefore READ one way and SIGNED another, and a verifier
+// configured the same way got a different document hash from the same bytes.
+// The divergence is visible with the processing mode, because @included is a
+// JSON-LD 1.1 keyword that a 1.0 processor skips.
+func TestCanonicalFormHonoursTheCredentialsOptions(t *testing.T) {
+	const document = `{
+		"@context": {"id": "@id", "note": "https://example.org/vocab#note"},
+		"id": "https://example.org/credential",
+		"note": "the root's own",
+		"@included": [{"id": "https://example.org/other", "note": "only JSON-LD 1.1 sees this"}]
+	}`
+
+	underDefaults, err := NewRDFCredentialFromJSON([]byte(document), nil)
+	require.NoError(t, err)
+	canonicalDefaults, err := underDefaults.CanonicalForm()
+	require.NoError(t, err)
+	require.Contains(t, canonicalDefaults, "only JSON-LD 1.1 sees this",
+		"1.1 is the default, and it reads @included")
+
+	legacy := NewJSONLDOptions("")
+	legacy.ProcessingMode = ld.JsonLd_1_0
+	underLegacy, err := NewRDFCredentialFromJSON([]byte(document), legacy)
+	require.NoError(t, err)
+	canonicalLegacy, err := underLegacy.CanonicalForm()
+	require.NoError(t, err)
+	require.NotContains(t, canonicalLegacy, "only JSON-LD 1.1 sees this",
+		"a credential parsed as JSON-LD 1.0 must be canonicalized as JSON-LD 1.0")
+	require.Contains(t, canonicalLegacy, "the root's own",
+		"and the rest of the document is still there")
+}
+
+// TestCanonicalFormHonoursAnExpandContext: json-gold's Normalize builds FRESH
+// options for its RDF step and carries only the base, the document loader and
+// the processing mode across, so the expandContext is dropped. A document that
+// gets its terms from one therefore canonicalized to NOTHING - no error, no
+// quads, and a Data Integrity signature over the empty string, which is the
+// same signature for every such document.
+func TestCanonicalFormHonoursAnExpandContext(t *testing.T) {
+	options := NewJSONLDOptions("")
+	options.ExpandContext = map[string]any{
+		"@context": map[string]any{
+			"id":   "@id",
+			"note": "https://example.org/vocab#note",
+		},
+	}
+
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"id": "https://example.org/credential",
+		"note": "a term only the expandContext defines"
+	}`), options)
+	require.NoError(t, err)
+
+	canonical, err := cred.CanonicalForm()
+	require.NoError(t, err)
+	require.Contains(t, canonical, "https://example.org/vocab#note",
+		"the expandContext is what gives this document any triples at all")
+	require.Contains(t, canonical, "a term only the expandContext defines")
+}
+
+// TestCanonicalFormIgnoresAStaleInputFormat: InputFormat tells the processor
+// its input is N-Quads. A caller reusing one option set across both kinds of
+// work leaves it set, and the credential - parsed from JSON, and still JSON
+// when it reaches Normalize - was then read as N-Quads. Canonicalizing under
+// the credential's own options is what exposed this; the dataset branch, whose
+// input really is N-Quads, sets it back explicitly.
+func TestCanonicalFormIgnoresAStaleInputFormat(t *testing.T) {
+	options := NewJSONLDOptions("")
+	options.InputFormat = "application/n-quads"
+	options.Format = "application/n-quads"
+
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": {"id": "@id", "note": "https://example.org/vocab#note"},
+		"id": "https://example.org/credential",
+		"note": "read as JSON-LD, not as N-Quads"
+	}`), options)
+	require.NoError(t, err)
+
+	canonical, err := cred.CanonicalForm()
+	require.NoError(t, err, "the document is JSON-LD however the options were last used")
+	require.Contains(t, canonical, "read as JSON-LD, not as N-Quads")
+}
+
+// TestCanonicalFormRefusesABlankNodePredicate: URDNA2015 as this library's
+// json-gold implements it does NOT canonicalize generalized RDF. It indexes
+// and relabels only subjects, objects and graph names (api_normalize.go:83,
+// 247, 599) and writes the predicate through unchanged (:339), so a
+// parser-local blank node label survives into the "canonical" form and two
+// serializations of the same RDF hash differently.
+//
+// A canonical form that is not canonical is worse than no answer: every
+// signature over it looks fine until someone re-serializes the document. So
+// this refuses rather than returning a hash it cannot stand behind.
+func TestCanonicalFormRefusesABlankNodePredicate(t *testing.T) {
+	const document = `{
+		"@context": {"id": "@id", "rel": "_:aBlankNodePredicate"},
+		"id": "https://example.org/credential",
+		"rel": "a statement made through a blank node predicate"
+	}`
+
+	generalized := NewJSONLDOptions("")
+	generalized.ProduceGeneralizedRdf = true
+	withQuad, err := NewRDFCredentialFromJSON([]byte(document), generalized)
+	require.NoError(t, err, "the document parses; it is canonicalizing it that cannot be done")
+
+	_, err = withQuad.CanonicalForm()
+	require.ErrorContains(t, err, "blank node as a predicate")
+
+	// And the default parse genuinely drops the quad, so an ordinary document
+	// is unaffected by the refusal.
+	plain, err := NewRDFCredentialFromJSON([]byte(document), nil)
+	require.NoError(t, err)
+	canonical, err := plain.CanonicalForm()
+	require.NoError(t, err, "without generalized RDF there is no such quad to refuse")
+	require.NotContains(t, canonical, "a statement made through a blank node predicate")
+}
+
+// TestToCompactJSONDoesNotRewriteTheCredentialsOptions: this took the
+// credential's own options POINTER and set Format on it, so a credential that
+// had once been compacted parsed JSON as N-Quads ever after - "unexpected RDF
+// data type: string" from whatever ran next. Serializing a document must not
+// change what the document is.
+func TestToCompactJSONDoesNotRewriteTheCredentialsOptions(t *testing.T) {
+	source, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": {"id": "@id", "note": "https://example.org/vocab#note"},
+		"id": "https://example.org/credential",
+		"note": "hello"
+	}`), nil)
+	require.NoError(t, err)
+
+	// ToCompactJSON only reaches the dataset path with no original JSON to
+	// hand back, which is how a credential built from a dataset arrives.
+	options := NewJSONLDOptions("")
+	fromDataset := &RDFCredential{
+		dataset:   source.dataset,
+		processor: ld.NewJsonLdProcessor(),
+		options:   options,
+	}
+
+	_, err = fromDataset.ToCompactJSON()
+	require.NoError(t, err)
+	require.Empty(t, options.Format,
+		"compacting a document must not change what the document is")
+	require.Empty(t, options.InputFormat)
+}
+
+// TestToCompactJSONCarriesGeneralizedRdf: the dataset path serialized to
+// N-Quads and read them back, so a blank node in predicate position - not
+// valid N-Quads however the dataset was built - made the whole call fail.
+func TestToCompactJSONCarriesGeneralizedRdf(t *testing.T) {
+	options := NewJSONLDOptions("")
+	options.ProduceGeneralizedRdf = true
+
+	source, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": {"id": "@id", "rel": "_:aBlankNodePredicate"},
+		"id": "https://example.org/credential",
+		"rel": "a statement made through a blank node predicate"
+	}`), options)
+	require.NoError(t, err)
+
+	fromDataset := &RDFCredential{
+		dataset:   source.dataset,
+		processor: ld.NewJsonLdProcessor(),
+		options:   options,
+	}
+
+	compact, err := fromDataset.ToCompactJSON()
+	require.NoError(t, err, "a generalized-RDF dataset must still compact")
+	require.Contains(t, string(compact), "a statement made through a blank node predicate")
+}
+
+// TestCanonicalFormDoesNotMutateTheCredentialsDataset: json-gold's
+// normalization is not read-only - it writes each quad's Graph field in place.
+// Canonicalizing the credential's OWN dataset therefore rewrote the document
+// while describing it, two concurrent canonicalizations raced on those writes,
+// and a credential from ProofObject - which shares its quads with the one it
+// came from - rewrote that one's quads too.
+func TestCanonicalFormDoesNotMutateTheCredentialsDataset(t *testing.T) {
+	source, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "https://example.org/credential",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"},
+		"proof": {
+			"type": "DataIntegrityProof",
+			"cryptosuite": "eddsa-rdfc-2022",
+			"created": "2024-01-01T00:00:00Z",
+			"verificationMethod": "did:example:issuer#key-1",
+			"proofPurpose": "assertionMethod",
+			"proofValue": "z2V1"
+		}
+	}`), nil)
+	require.NoError(t, err)
+
+	// The dataset path, which is the one that held the credential's own quads.
+	fromDataset := &RDFCredential{
+		dataset:   source.dataset,
+		processor: ld.NewJsonLdProcessor(),
+	}
+
+	var named int
+	before := map[*ld.Quad]string{}
+	for name, quads := range fromDataset.dataset.Graphs {
+		if name != "@default" {
+			named += len(quads)
+		}
+		for _, quad := range quads {
+			graph := ""
+			if quad.Graph != nil {
+				graph = quad.Graph.GetValue()
+			}
+			before[quad] = graph
+		}
+	}
+	require.NotZero(t, named,
+		"the fixture must have a quad in a NAMED graph, which is the only case normalization rewrites")
+
+	canonical, err := fromDataset.CanonicalForm()
+	require.NoError(t, err)
+	require.NotEmpty(t, canonical)
+
+	for quad, was := range before {
+		now := ""
+		if quad.Graph != nil {
+			now = quad.Graph.GetValue()
+		}
+		require.Equal(t, was, now, "canonicalizing a document must not rewrite it")
+	}
+}
+
+// TestCanonicalFormIsSafeConcurrently: the same defect seen from the other
+// side. Worth its own test because the mutation above is only visible when
+// something else looks at the quads, while this one is a data race whether or
+// not anybody reads the result.
+func TestCanonicalFormIsSafeConcurrently(t *testing.T) {
+	source, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "https://example.org/credential",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"proof": {"type": "DataIntegrityProof", "cryptosuite": "eddsa-rdfc-2022", "proofValue": "z2V1"}
+	}`), nil)
+	require.NoError(t, err)
+
+	fromDataset := &RDFCredential{
+		dataset:   source.dataset,
+		processor: ld.NewJsonLdProcessor(),
+	}
+
+	results := make(chan string, 8)
+	for i := 0; i < 8; i++ {
+		go func() {
+			canonical, err := fromDataset.CanonicalForm()
+			if err != nil {
+				results <- "error: " + err.Error()
+				return
+			}
+			results <- canonical
+		}()
+	}
+
+	first := <-results
+	require.NotEmpty(t, first)
+	require.NotContains(t, first, "error:")
+	for i := 1; i < 8; i++ {
+		require.Equal(t, first, <-results, "every caller sees the same canonical form")
+	}
+}
+
+// TestCredentialOwnsItsExpandContext: ExpandContext decides how every term in
+// the document expands, so it decides the proof set, the canonical form and
+// the document hash - all of which are then memoized. Shared with the caller
+// it could be edited after one verification, and the next would reuse answers
+// computed under a different JSON-LD interpretation.
+func TestCredentialOwnsItsExpandContext(t *testing.T) {
+	terms := map[string]any{"id": "@id", "note": "https://example.org/vocab#note"}
+	options := NewJSONLDOptions("")
+	options.ExpandContext = map[string]any{"@context": terms}
+
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"id": "https://example.org/credential",
+		"note": "a term the expandContext defines"
+	}`), options)
+	require.NoError(t, err)
+
+	before, err := cred.CanonicalForm()
+	require.NoError(t, err)
+	require.Contains(t, before, "https://example.org/vocab#note")
+
+	// The caller edits the map it passed in, and the one it gets back.
+	terms["note"] = "https://example.org/REMAPPED#note"
+	if handed, ok := cred.ExpansionOptions().ExpandContext.(map[string]any); ok {
+		if inner, ok := handed["@context"].(map[string]any); ok {
+			inner["note"] = "https://example.org/ALSO-REMAPPED#note"
+		}
+	}
+
+	after, err := cred.CanonicalForm()
+	require.NoError(t, err)
+	require.Equal(t, before, after,
+		"the credential expands under the context it was built with, whatever the caller does to its copy")
+	require.NotContains(t, after, "REMAPPED")
 }

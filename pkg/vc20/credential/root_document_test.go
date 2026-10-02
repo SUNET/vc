@@ -1,0 +1,1502 @@
+package credential
+
+import (
+	"encoding/json"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/piprate/json-gold/ld"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestRootCompactedDocument(t *testing.T) {
+	t.Run("a single node is already rooted", func(t *testing.T) {
+		document := map[string]any{"id": "https://example.org/a", "proof": map[string]any{}}
+		rooted, err := RootCompactedDocument(document, "", nil)
+		require.NoError(t, err)
+		require.Equal(t, document, rooted)
+	})
+
+	t.Run("the known root is promoted and the rest included", func(t *testing.T) {
+		rooted, err := RootCompactedDocument(map[string]any{
+			"@context": "https://www.w3.org/ns/credentials/v2",
+			"@graph": []any{
+				map[string]any{"id": "https://example.org/subject", "name": "a subject"},
+				map[string]any{"id": "https://example.org/credential", "credentialSubject": "https://example.org/subject"},
+			},
+		}, "https://example.org/credential", nil)
+		require.NoError(t, err)
+
+		require.Equal(t, "https://example.org/credential", rooted["id"])
+		require.Equal(t, "https://www.w3.org/ns/credentials/v2", rooted["@context"])
+		require.NotContains(t, rooted, "@graph")
+		require.Equal(t, []any{
+			map[string]any{"id": "https://example.org/subject", "name": "a subject"},
+		}, rooted["@included"], "the other nodes stay in the same graph")
+	})
+
+	t.Run("without a known root the unreferenced node wins", func(t *testing.T) {
+		// @id, because this document carries no context to define "id" as
+		// anything - a term no context defines is a relative IRI that
+		// expansion drops, so it is not an identifier at all.
+		rooted, err := RootCompactedDocument(map[string]any{
+			"@graph": []any{
+				map[string]any{"@id": "https://example.org/subject"},
+				map[string]any{"@id": "https://example.org/credential", "credentialSubject": "https://example.org/subject"},
+			},
+		}, "", nil)
+		require.NoError(t, err)
+		require.Equal(t, "https://example.org/credential", rooted["@id"])
+	})
+
+	t.Run("a known root that is gone is refused", func(t *testing.T) {
+		_, err := RootCompactedDocument(map[string]any{
+			"@graph": []any{map[string]any{"@id": "https://example.org/subject"}},
+		}, "https://example.org/credential", nil)
+		require.ErrorContains(t, err, "no longer holds the node")
+
+		// And the same when disclosure left exactly one node behind, so the
+		// document is not a container at all.
+		_, err = RootCompactedDocument(map[string]any{
+			"id": "https://example.org/subject",
+		}, "https://example.org/credential", nil)
+		require.ErrorContains(t, err, "no longer holds the node")
+	})
+
+	t.Run("an ambiguous document is refused", func(t *testing.T) {
+		_, err := RootCompactedDocument(map[string]any{
+			"@graph": []any{
+				map[string]any{"id": "https://example.org/a"},
+				map[string]any{"id": "https://example.org/b"},
+			},
+		}, "", nil)
+		require.ErrorContains(t, err, "more than one node nothing refers to")
+	})
+
+	t.Run("a context on the node survives when the container has none", func(t *testing.T) {
+		rooted, err := RootCompactedDocument(map[string]any{
+			"@graph": []any{
+				map[string]any{"@context": "https://www.w3.org/ns/credentials/v2", "id": "https://example.org/credential"},
+			},
+		}, "", nil)
+		require.NoError(t, err)
+		require.Equal(t, "https://www.w3.org/ns/credentials/v2", rooted["@context"],
+			"promoting a node must not drop the only context the document has")
+	})
+}
+
+// TestRootCompactedDocumentIgnoresLiterals: in expanded JSON-LD a value
+// object carries @value, and what it holds is a string the document SAYS -
+// not a node it points at. Reading one as a reference marks the node it
+// happens to name as referenced, and a document where some literal equals the
+// root's identifier then has no unreferenced node left and is refused outright.
+func TestRootCompactedDocumentIgnoresLiterals(t *testing.T) {
+	rooted, err := RootCompactedDocument(map[string]any{
+		"@graph": []any{
+			map[string]any{
+				"@id": "https://example.org/credential",
+				"https://example.org/vocab#subject": []any{
+					map[string]any{"@id": "https://example.org/subject"},
+				},
+			},
+			map[string]any{
+				"@id": "https://example.org/subject",
+				// A literal that happens to read like the root's identifier.
+				"https://example.org/vocab#note": []any{
+					map[string]any{"@value": "https://example.org/credential"},
+				},
+			},
+		},
+	}, "", nil)
+	require.NoError(t, err, "a literal must not count as a reference to the root")
+	require.Equal(t, "https://example.org/credential", rooted["@id"])
+}
+
+// TestRootCompactedDocumentNormalisesTheRootID: knownRootID is read off the
+// EXPANDED document, so it is always an absolute IRI, while compaction
+// rewrites a node's identifier under the document's own context and may turn
+// it into a term or a compact IRI. Comparing the two strings literally
+// rejected a valid derivation purely because compaction changed the spelling.
+func TestRootCompactedDocumentNormalisesTheRootID(t *testing.T) {
+	context := map[string]any{"ex": "https://example.org/credentials/"}
+
+	t.Run("in a graph container", func(t *testing.T) {
+		rooted, err := RootCompactedDocument(map[string]any{
+			"@context": context,
+			"@graph": []any{
+				map[string]any{"@id": "https://example.org/subject"},
+				map[string]any{"@id": "ex:outer", "https://example.org/vocab#s": map[string]any{"@id": "https://example.org/subject"}},
+			},
+		}, "https://example.org/credentials/outer", nil)
+		require.NoError(t, err, "a compact spelling names the same node")
+		require.Equal(t, "ex:outer", rooted["@id"])
+	})
+
+	t.Run("as a single node", func(t *testing.T) {
+		rooted, err := RootCompactedDocument(map[string]any{
+			"@context": context,
+			"@id":      "ex:outer",
+		}, "https://example.org/credentials/outer", nil)
+		require.NoError(t, err)
+		require.Equal(t, "ex:outer", rooted["@id"])
+	})
+
+	t.Run("a genuinely different node is still refused", func(t *testing.T) {
+		_, err := RootCompactedDocument(map[string]any{
+			"@context": context,
+			"@id":      "ex:someone-else",
+		}, "https://example.org/credentials/outer", nil)
+		require.ErrorContains(t, err, "no longer holds the node")
+	})
+}
+
+// TestRootCompactedDocumentUsesTheGivenOptions: normalizing a compact root
+// identifier means expanding it, and that expansion has to run under the
+// options the credential was PARSED with. Under fresh defaults a context only
+// the credential's own loader knows does not resolve, the identifier does not
+// normalize, and a valid derivation is refused as if its root had vanished.
+func TestRootCompactedDocumentUsesTheGivenOptions(t *testing.T) {
+	const privateContext = "https://example.org/a-root-context-only-this-loader-has"
+
+	loader := ld.NewCachingDocumentLoader(GetGlobalLoader())
+	var context any
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"@context":{"ex":"https://example.org/credentials/"}}`), &context))
+	loader.AddDocument(privateContext, context)
+
+	options := ld.NewJsonLdOptions("")
+	options.DocumentLoader = loader
+
+	document := map[string]any{"@context": privateContext, "@id": "ex:outer"}
+
+	rooted, err := RootCompactedDocument(document, "https://example.org/credentials/outer", options)
+	require.NoError(t, err, "the credential's own loader resolves the context")
+	require.Equal(t, "ex:outer", rooted["@id"])
+
+	// And the global loader genuinely cannot, or this proves nothing.
+	_, err = RootCompactedDocument(document, "https://example.org/credentials/outer", nil)
+	require.Error(t, err, "the context must be unreachable without that loader")
+}
+
+// TestRootCompactedDocumentIgnoresCompactLiterals: in COMPACT JSON-LD a
+// reference and a literal are the same Go string - a term declared
+// "@type": "@id" writes a reference as a bare string, and so does any ordinary
+// string-valued property. Reading every string as a reference marked a node
+// referenced because some unrelated literal equalled its identifier, and the
+// document was refused for saying nothing of the kind.
+func TestRootCompactedDocumentIgnoresCompactLiterals(t *testing.T) {
+	context := map[string]any{
+		"subject": map[string]any{"@id": "https://example.org/vocab#subject", "@type": "@id"},
+		"note":    "https://example.org/vocab#note",
+		"id":      "@id",
+	}
+
+	rooted, err := RootCompactedDocument(map[string]any{
+		"@context": context,
+		"@graph": []any{
+			map[string]any{
+				"id":      "https://example.org/credential",
+				"subject": "https://example.org/subject",
+			},
+			map[string]any{
+				"id": "https://example.org/subject",
+				// A LITERAL, not a reference - "note" is not id-coerced.
+				"note": "https://example.org/credential",
+			},
+		},
+	}, "", nil)
+	require.NoError(t, err, "a literal must not count as a reference, compact or not")
+	require.Equal(t, "https://example.org/credential", rooted["id"])
+}
+
+// TestProofKeysResolvesEveryTermFromOneParsedContext: this runs on an SD
+// credential BEFORE its signature has been checked, so resolving each member
+// separately turned a single request into a context-processing operation per
+// property. The context is parsed once and every member looked up in it.
+func TestProofKeysResolvesEveryTermFromOneParsedContext(t *testing.T) {
+	var context any
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id": "@id",
+		"type": "@type",
+		"seal": "https://w3id.org/security#proof",
+		"note": "https://example.org/vocab#note"
+	}`), &context))
+
+	node := map[string]any{
+		"id":   "https://example.org/credential",
+		"type": "VerifiableCredential",
+		"note": "kept",
+		"seal": map[string]any{"type": "DataIntegrityProof"},
+	}
+	// Plenty of unrelated members, the shape that made per-member expansion
+	// expensive.
+	for i := range 50 {
+		node[fmt.Sprintf("https://example.org/vocab#filler%d", i)] = "x"
+	}
+
+	require.Equal(t, []string{"seal"}, ProofKeys(node, context, nil),
+		"the aliased proof term is found, and the keyword aliases do not break the probe")
+}
+
+// TestProofKeysRespectsAContextThatRemapsProof: "proof" is only the name the
+// VC 2.0 context gives the security predicate. A document whose context points
+// that name at an ordinary predicate is not carrying a proof there - RootProofs
+// resolves the context and keeps the field, so removing it here would strip
+// content the signature covers and the two would disagree about which quads
+// that is.
+func TestProofKeysRespectsAContextThatRemapsProof(t *testing.T) {
+	t.Run("remapped to something else", func(t *testing.T) {
+		var context any
+		require.NoError(t, json.Unmarshal(
+			[]byte(`{"proof": "https://example.org/vocab#proofreading"}`), &context))
+
+		node := map[string]any{"proof": "checked by an editor"}
+		require.Empty(t, ProofKeys(node, context, nil),
+			"a remapped name is not the security predicate")
+	})
+
+	t.Run("aliased onto the predicate", func(t *testing.T) {
+		var context any
+		require.NoError(t, json.Unmarshal(
+			[]byte(`{"seal": "https://w3id.org/security#proof"}`), &context))
+
+		node := map[string]any{"seal": map[string]any{"type": "DataIntegrityProof"}}
+		require.Equal(t, []string{"seal"}, ProofKeys(node, context, nil))
+	})
+
+	t.Run("the VC 2.0 context, which scopes proof by type", func(t *testing.T) {
+		node := map[string]any{"proof": map[string]any{"type": "DataIntegrityProof"}}
+		require.Equal(t, []string{"proof"},
+			ProofKeys(node, "https://www.w3.org/ns/credentials/v2", nil),
+			"no top-level definition means the ordinary meaning stands")
+	})
+
+	t.Run("no context at all", func(t *testing.T) {
+		node := map[string]any{"proof": map[string]any{"type": "DataIntegrityProof"}}
+		require.Equal(t, []string{"proof"}, ProofKeys(node, nil, nil))
+	})
+}
+
+// TestProofKeysHonoursATypeScopedAlias: JSON-LD applies a TYPE-SCOPED context
+// before expanding a node's members, so an alias defined in that scope is one
+// RootProofs sees - it expands the whole document - and one a document-level
+// lookup misses. The two would then disagree about which quads the signature
+// covers.
+func TestProofKeysHonoursATypeScopedAlias(t *testing.T) {
+	var context any
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"Sealed": {
+			"@id": "https://example.org/vocab#Sealed",
+			"@context": {"seal": "https://w3id.org/security#proof"}
+		},
+		"type": "@type",
+		"id": "@id"
+	}`), &context))
+
+	t.Run("in scope", func(t *testing.T) {
+		node := map[string]any{
+			"id":   "https://example.org/credential",
+			"type": "Sealed",
+			"seal": map[string]any{"proofValue": "z..."},
+		}
+		require.Equal(t, []string{"seal"}, ProofKeys(node, context, nil),
+			"the alias its own type brings into scope is a proof")
+	})
+
+	t.Run("out of scope", func(t *testing.T) {
+		node := map[string]any{
+			"id":   "https://example.org/credential",
+			"seal": map[string]any{"proofValue": "z..."},
+		}
+		require.Empty(t, ProofKeys(node, context, nil),
+			"without the type, the scoped definition does not apply")
+	})
+}
+
+// TestProofKeysAppliesTypeScopedContextsInOrder: JSON-LD applies type-scoped
+// contexts in LEXICOGRAPHIC order of the type names, so when two types define
+// the same term there is a defined winner. Taking them in document order would
+// let the order they happen to be written in decide which definition applies -
+// and here, whether a member is the document's proof at all.
+func TestProofKeysAppliesTypeScopedContextsInOrder(t *testing.T) {
+	var context any
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"AaaFirst": {
+			"@id": "https://example.org/vocab#AaaFirst",
+			"@context": {"seal": "https://w3id.org/security#proof"}
+		},
+		"ZzzLast": {
+			"@id": "https://example.org/vocab#ZzzLast",
+			"@context": {"seal": "https://example.org/vocab#wax"}
+		},
+		"type": "@type",
+		"id": "@id"
+	}`), &context))
+
+	// ZzzLast sorts last, so its definition of "seal" wins - whichever
+	// order the types are written in.
+	for _, order := range [][]any{{"AaaFirst", "ZzzLast"}, {"ZzzLast", "AaaFirst"}} {
+		node := map[string]any{
+			"id":   "https://example.org/credential",
+			"type": order,
+			"seal": map[string]any{"proofValue": "z..."},
+		}
+		require.Empty(t, ProofKeys(node, context, nil),
+			"the last type in sorted order decides, not the first in the document: %v", order)
+	}
+}
+
+// TestRootOfExpandedNodesIgnoresAnIndexedGraph: a JSON-LD graph object may
+// carry @index beside @graph and @id. Counting keys called an indexed proof
+// graph a document node, so a credential that has one became ambiguously
+// rooted and could not be verified at all. ld.IsGraph is the rule, and
+// json-gold vendors it.
+func TestRootOfExpandedNodesIgnoresAnIndexedGraph(t *testing.T) {
+	// The graph is UNREFERENCED, which is the shape that discriminates: as a
+	// graph it is not a candidate at all, while counted as a node it is a
+	// second node nothing refers to and the document becomes ambiguous.
+	expanded := []any{
+		map[string]any{
+			"@id":   "https://example.org/credential",
+			"@type": []any{"https://www.w3.org/2018/credentials#VerifiableCredential"},
+		},
+		map[string]any{
+			"@id":    "_:proofgraph",
+			"@index": "the third proof",
+			"@graph": []any{map[string]any{"@id": "_:p0"}},
+		},
+	}
+
+	root, err := RootOfExpandedNodes(expanded)
+	require.NoError(t, err, "an indexed graph is a graph, not a second root")
+	require.Equal(t, "https://example.org/credential", root["@id"])
+}
+
+// TestRootCompactedDocumentUsesNodeLocalContexts: a top-level compact array
+// has no shared context, but its nodes may each carry one. Bailing out on the
+// shared context alone forced the string scan, which cannot tell an id-coerced
+// value from an ordinary literal - so a literal equal to another node's id
+// made that node look referenced and a valid document read as rootless.
+func TestRootCompactedDocumentUsesNodeLocalContexts(t *testing.T) {
+	rooted, err := RootCompactedDocument(map[string]any{
+		"@graph": []any{
+			map[string]any{
+				"@context": map[string]any{
+					"id":      "@id",
+					"subject": map[string]any{"@id": "https://example.org/vocab#subject", "@type": "@id"},
+				},
+				"id":      "https://example.org/credential",
+				"subject": "https://example.org/subject",
+			},
+			map[string]any{
+				"@context": map[string]any{"id": "@id", "note": "https://example.org/vocab#note"},
+				"id":       "https://example.org/subject",
+				// A LITERAL that reads like the root's identifier.
+				"note": "https://example.org/credential",
+			},
+		},
+	}, "", nil)
+	require.NoError(t, err, "node-local contexts tell a literal from a reference")
+	require.Equal(t, "https://example.org/credential", rooted["id"])
+}
+
+// TestRootCompactedDocumentNormalisesIDsBeforeLookup: once a document expands,
+// the references it contains are absolute IRIs, while each node's own id is
+// still spelled as the document writes it. Looking a compact id up in a set of
+// absolute ones never matched, so every node looked unreferenced and a
+// perfectly good document read as ambiguous.
+func TestRootCompactedDocumentNormalisesIDsBeforeLookup(t *testing.T) {
+	var context any
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"ex": "https://example.org/things/",
+		"id": "@id",
+		"subject": {"@id": "https://example.org/vocab#subject", "@type": "@id"}
+	}`), &context))
+
+	rooted, err := RootCompactedDocument(map[string]any{
+		"@context": context,
+		"@graph": []any{
+			map[string]any{"id": "ex:subject"},
+			map[string]any{"id": "ex:credential", "subject": "ex:subject"},
+		},
+	}, "", nil)
+	require.NoError(t, err,
+		"the compact link names the compact node, however each is spelled")
+	require.Equal(t, "ex:credential", rooted["id"])
+}
+
+// TestProofKeysRespectsAVocabulary: a context declaring @vocab and no explicit
+// "proof" term expands the name through that vocabulary, to something which is
+// not the security predicate. A term LOOKUP finds no definition, and falling
+// back to the bare name then removed an ordinary property - in SD
+// mandatory-pointer selection, letting a mandatory /proof value be dropped
+// from a derivation.
+func TestProofKeysRespectsAVocabulary(t *testing.T) {
+	var vocabulary any
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"@vocab": "https://example.org/vocab#", "id": "@id"}`), &vocabulary))
+
+	node := map[string]any{
+		"id":    "https://example.org/credential",
+		"proof": map[string]any{"type": "a reading by an editor"},
+	}
+	require.Empty(t, ProofKeys(node, vocabulary, nil),
+		"a vocabulary gives the name a meaning, and it is not the predicate")
+
+	// With the vocabulary pointing AT the security term, it is a proof again.
+	var pointed any
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"proof": "https://w3id.org/security#proof", "id": "@id"}`), &pointed))
+	require.Equal(t, []string{"proof"}, ProofKeys(node, pointed, nil))
+
+	// And with nothing to resolve against, the bare name still stands.
+	require.Equal(t, []string{"proof"}, ProofKeys(node, nil, nil))
+}
+
+// TestRootCompactedDocumentKeepsANamedGraphNode: a node carrying @graph beside
+// its own id and properties is a named-graph NODE, and the document is about
+// it. Treating any @graph as a bare container sent root selection inside that
+// graph.
+func TestRootCompactedDocumentKeepsANamedGraphNode(t *testing.T) {
+	document := map[string]any{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id":       "https://example.org/credential",
+		"type":     "VerifiableCredential",
+		"@graph":   []any{map[string]any{"id": "https://example.org/inside"}},
+	}
+
+	rooted, err := RootCompactedDocument(document, "https://example.org/credential", nil)
+	require.NoError(t, err, "the node is the root, not the graph it names")
+	require.Equal(t, "https://example.org/credential", rooted["id"])
+	require.Contains(t, rooted, "@graph", "and its graph stays where it is")
+}
+
+// TestRootCompactedDocumentKeepsBothContexts: JSON-LD applies a graph
+// container's context and then the node's own, and the node's may define or
+// override terms it uses. Keeping only the container's dropped those
+// definitions, which changes or removes triples - in a helper whose whole
+// promise is that the graph, and so the signature over it, is unchanged.
+func TestRootCompactedDocumentKeepsBothContexts(t *testing.T) {
+	rooted, err := RootCompactedDocument(map[string]any{
+		"@context": map[string]any{"id": "@id"},
+		"@graph": []any{
+			map[string]any{
+				"@context": map[string]any{"note": "https://example.org/vocab#note"},
+				"id":       "https://example.org/credential",
+				"note":     "defined only by the node's own context",
+			},
+		},
+	}, "", nil)
+	require.NoError(t, err)
+
+	contexts, isList := rooted["@context"].([]any)
+	require.True(t, isList, "both contexts survive, as a flat list")
+	require.Len(t, contexts, 2)
+	require.Equal(t, map[string]any{"id": "@id"}, contexts[0],
+		"the container's context is applied first")
+	require.Equal(t, map[string]any{"note": "https://example.org/vocab#note"}, contexts[1],
+		"and the node's own after it")
+
+	// The promoted document must still expand to the triple the node's
+	// context defines - which is the point, not the shape of the array.
+	expanded, err := ld.NewJsonLdProcessor().Expand(rooted, NewJSONLDOptions(""))
+	require.NoError(t, err)
+	encoded, err := json.Marshal(expanded)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), "https://example.org/vocab#note",
+		"the node's own definitions still produce their triples")
+}
+
+// TestRootCompactedDocumentIgnoresASelfLinkWithAContext: a node that names
+// ITSELF is still the node nothing ELSE refers to. Collecting references into
+// one set lost which node supplied each, so a self-link marked the root as
+// referenced and the document read as rootless - while the no-context
+// fallback, which tracks the source, got it right. Adding a context changed
+// which node the document was about, which is the one thing root selection
+// must never do.
+func TestRootCompactedDocumentIgnoresASelfLinkWithAContext(t *testing.T) {
+	var context any
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id": "@id",
+		"note": "https://example.org/vocab#note",
+		"about": {"@id": "https://example.org/vocab#about", "@type": "@id"},
+		"carries": {"@id": "https://example.org/vocab#carries", "@type": "@id"}
+	}`), &context))
+
+	// @id in the DATA, so both readings below see the same identifiers and
+	// the only difference between them is whether the reference terms
+	// resolve - which is what this test is comparing. Spelling the ids
+	// through a term the contextless reading cannot define would compare two
+	// different documents.
+	graph := []any{
+		// A property of its own, or expansion drops it as free-floating and
+		// the expanded reading is never exercised at all.
+		map[string]any{"@id": "https://example.org/other", "note": "kept"},
+		map[string]any{
+			"@id":     "https://example.org/credential",
+			"about":   "https://example.org/credential",
+			"carries": "https://example.org/other",
+		},
+	}
+
+	withContext, err := RootCompactedDocument(map[string]any{
+		"@context": context,
+		"@graph":   graph,
+	}, "", nil)
+	require.NoError(t, err, "a self-link is not another node referring to the root")
+	require.Equal(t, "https://example.org/credential", withContext["@id"])
+
+	// And the contextless reading of the same shape agrees, which is the
+	// property that matters: a context must not move the root.
+	withoutContext, err := RootCompactedDocument(map[string]any{"@graph": graph}, "", nil)
+	require.NoError(t, err)
+	require.Equal(t, withContext["@id"], withoutContext["@id"],
+		"both readings must choose the same node")
+}
+
+// TestRootCompactedDocumentKeepsANullReset: an explicit node-local
+// "@context": null RESETS the container's context in JSON-LD. Treating it as
+// an absent context left the promoted node inheriting definitions it never
+// had - more triples than the document carried, from a helper whose promise is
+// that the graph is unchanged.
+func TestRootCompactedDocumentKeepsANullReset(t *testing.T) {
+	container := map[string]any{"note": "https://example.org/vocab#note", "id": "@id"}
+
+	rooted, err := RootCompactedDocument(map[string]any{
+		"@context": container,
+		"@graph": []any{
+			map[string]any{
+				"@context": nil,
+				"id":       "https://example.org/credential",
+				"note":     "a plain string, not a predicate",
+			},
+		},
+	}, "", nil)
+	require.NoError(t, err)
+
+	sequence, isList := rooted["@context"].([]any)
+	require.True(t, isList, "the reset is kept in the sequence")
+	require.Len(t, sequence, 2)
+	require.Equal(t, container, sequence[0])
+	require.Nil(t, sequence[1], "and it is the null that clears what came before")
+
+	// The point is the RDF: with the reset kept, "note" defines nothing and
+	// produces no triple.
+	expanded, err := ld.NewJsonLdProcessor().Expand(rooted, NewJSONLDOptions(""))
+	require.NoError(t, err)
+	encoded, err := json.Marshal(expanded)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "vocab#note",
+		"a reset context must not leave the node inheriting definitions")
+}
+
+// TestRootCompactedDocumentKeepsExistingIncluded: the promoted root may
+// already carry @included entries. Replacing them with the former graph
+// siblings dropped those nodes - and they sit in the same graph, so dropping
+// them removes their triples from the dataset this is supposed to carry
+// through unchanged.
+func TestRootCompactedDocumentKeepsExistingIncluded(t *testing.T) {
+	rooted, err := RootCompactedDocument(map[string]any{
+		"@context": map[string]any{"id": "@id", "note": "https://example.org/vocab#note"},
+		"@graph": []any{
+			map[string]any{"id": "https://example.org/sibling", "note": "a former graph sibling"},
+			map[string]any{
+				"id":        "https://example.org/credential",
+				"note":      "the root",
+				"@included": []any{map[string]any{"id": "https://example.org/already", "note": "carried by the root"}},
+			},
+		},
+	}, "https://example.org/credential", nil)
+	require.NoError(t, err)
+
+	included, isList := rooted["@included"].([]any)
+	require.True(t, isList)
+	require.Len(t, included, 2, "the root's own @included and the former sibling")
+
+	var ids []string
+	for _, entry := range included {
+		id, _ := entry.(map[string]any)["id"].(string)
+		ids = append(ids, id)
+	}
+	require.Contains(t, ids, "https://example.org/already", "what the root already included stays")
+	require.Contains(t, ids, "https://example.org/sibling", "and the sibling joins it")
+
+	// The triples are the point: both nodes must still be in the dataset.
+	expanded, err := ld.NewJsonLdProcessor().Expand(rooted, NewJSONLDOptions(""))
+	require.NoError(t, err)
+	encoded, err := json.Marshal(expanded)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), "carried by the root")
+	require.Contains(t, string(encoded), "a former graph sibling")
+}
+
+// TestProofKeysHonoursExpandContext: RootProofs expands the document under the
+// credential's options, ExpandContext included. Resolving member names without
+// it made selection disagree with the expansion it is meant to match, so an
+// external context aliasing "proof" had signing and SD proof removal act on a
+// different member than the one carrying the proof.
+func TestProofKeysHonoursExpandContext(t *testing.T) {
+	var external any
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"@context":{"seal":"https://w3id.org/security#proof"}}`), &external))
+
+	options := NewJSONLDOptions("")
+	options.ExpandContext = external
+
+	node := map[string]any{
+		"id":   "https://example.org/credential",
+		"seal": map[string]any{"type": "DataIntegrityProof"},
+	}
+
+	require.Equal(t, []string{"seal"}, ProofKeys(node, nil, options),
+		"an alias from the expand context names the proof")
+
+	// Without it, the same document resolves nothing - which is the
+	// disagreement this closes.
+	require.Empty(t, ProofKeys(node, nil, NewJSONLDOptions("")))
+}
+
+// TestRootCompactedDocumentKeepsSiblingContextScope: inside @graph, every node
+// saw the CONTAINER's context and its own. Moving the siblings under the
+// promoted root put them inside that root's local context too - so a term the
+// root redefines changed the sibling's expanded IRI, and with it the RDF and
+// any signature over it. In a helper whose entire promise is that the dataset
+// comes through unchanged.
+func TestRootCompactedDocumentKeepsSiblingContextScope(t *testing.T) {
+	container := map[string]any{
+		"id":      "@id",
+		"note":    "https://example.org/vocab#note",
+		"carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+	}
+
+	document := map[string]any{
+		"@context": container,
+		"@graph": []any{
+			map[string]any{
+				// The root redefines the very term its sibling uses.
+				"@context": map[string]any{"note": "https://example.org/OVERRIDDEN#note"},
+				"id":       "https://example.org/credential",
+				"carries":  "https://example.org/other",
+			},
+			map[string]any{"id": "https://example.org/other", "note": "written under the container's context"},
+		},
+	}
+
+	before, err := canonicalFormOf(document, nil)
+	require.NoError(t, err)
+	require.Contains(t, before, "https://example.org/vocab#note",
+		"the sibling's note is the container's term before rooting")
+
+	rooted, err := RootCompactedDocument(document, "", nil)
+	require.NoError(t, err)
+	require.Equal(t, "https://example.org/credential", rooted["id"])
+
+	after, err := canonicalFormOf(rooted, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, after,
+		"rooting a document must not change one quad of it")
+	require.NotContains(t, after, "OVERRIDDEN",
+		"the root's own context does not reach the nodes that were beside it")
+}
+
+// TestRootCompactedDocumentFallsBackWhenTheResetIsRefused: the scope is
+// restored with a leading null, and JSON-LD REFUSES to nullify a context
+// holding @protected terms. That is why the unscoped form is tried second -
+// here the root's own context only ADDS a term, so nothing the sibling uses
+// moves and the document comes through unchanged.
+func TestRootCompactedDocumentFallsBackWhenTheResetIsRefused(t *testing.T) {
+	container := map[string]any{
+		"@protected": true,
+		"id":         "@id",
+		"note":       "https://example.org/vocab#note",
+		"carries":    map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+	}
+
+	document := map[string]any{
+		"@context": container,
+		"@graph": []any{
+			map[string]any{
+				"@context": map[string]any{"extra": "https://example.org/vocab#extra"},
+				"id":       "https://example.org/credential",
+				"carries":  "https://example.org/other",
+				"extra":    "only the root uses this",
+			},
+			map[string]any{"id": "https://example.org/other", "note": "unchanged"},
+		},
+	}
+
+	before, err := canonicalFormOf(document, nil)
+	require.NoError(t, err)
+
+	rooted, err := RootCompactedDocument(document, "", nil)
+	require.NoError(t, err, "a protected container context must not make a document unrootable")
+
+	after, err := canonicalFormOf(rooted, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "and the dataset still comes through unchanged")
+}
+
+// TestRootCompactedDocumentRefusesWhenTheDatasetWouldChange: neither form
+// works when the container's context is @protected - so the scope cannot be
+// restored - AND the root's own context defines a term a sibling uses, which
+// the container left undefined and expansion therefore dropped. Promoting the
+// root would mint a triple the signed document never carried. The helper says
+// no rather than returning a document about a different graph.
+func TestRootCompactedDocumentRefusesWhenTheDatasetWouldChange(t *testing.T) {
+	document := map[string]any{
+		"@context": map[string]any{
+			"@protected": true,
+			"id":         "@id",
+			"carries":    map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+		},
+		"@graph": []any{
+			map[string]any{
+				"@context": map[string]any{"note": "https://example.org/vocab#note"},
+				"id":       "https://example.org/credential",
+				"carries":  "https://example.org/other",
+			},
+			// "note" is undefined in the container, so this says nothing at
+			// all until the root's context reaches it.
+			map[string]any{"id": "https://example.org/other", "note": "a triple that does not exist yet"},
+		},
+	}
+
+	_, err := RootCompactedDocument(document, "", nil)
+	require.Error(t, err, "rooting must not invent a triple")
+	require.Contains(t, err.Error(), "would change its RDF")
+}
+
+// splitFragmentDocument: one node written as TWO @graph entries, which is a
+// shape flattening produces. The document is unambiguous - it has exactly one
+// node nothing refers to - but reading each entry as a node of its own made it
+// look like two.
+func splitFragmentDocument() map[string]any {
+	return map[string]any{
+		"@context": map[string]any{
+			"id":      "@id",
+			"note":    "https://example.org/vocab#note",
+			"carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+		},
+		"@graph": []any{
+			map[string]any{"id": "https://example.org/credential", "carries": "https://example.org/other"},
+			map[string]any{"id": "https://example.org/credential", "note": "the second fragment"},
+			map[string]any{"id": "https://example.org/other", "note": "a sibling"},
+		},
+	}
+}
+
+// TestRootCompactedDocumentMergesSplitFragments: the fragments are one node,
+// so the document says exactly which node it is about. Reading them as two
+// refused it for holding "more than one node nothing refers to" - and the
+// promoted root would otherwise carry only whichever fragment came first.
+func TestRootCompactedDocumentMergesSplitFragments(t *testing.T) {
+	before, err := canonicalFormOf(splitFragmentDocument(), nil)
+	require.NoError(t, err)
+
+	rooted, err := RootCompactedDocument(splitFragmentDocument(), "", nil)
+	require.NoError(t, err, "fragments of one node do not make a document ambiguous")
+	require.Equal(t, "https://example.org/credential", rooted["id"])
+	require.Equal(t, "https://example.org/other", rooted["carries"],
+		"the promoted root carries the first fragment's properties")
+	require.Equal(t, "the second fragment", rooted["note"],
+		"and the second fragment's too, rather than whichever came first")
+
+	after, err := canonicalFormOf(rooted, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "merging fragments must not change one quad")
+}
+
+// TestRootCompactedDocumentRefusesUnderJSONLD10: @included is a JSON-LD 1.1
+// keyword and 1.1 ONLY. A 1.0 processor treats it as an unknown term and skips
+// it, so every sibling moved there - and every triple it carries - vanishes.
+// The hash would be taken over less than the document says, while a verifier
+// reading the same bytes under 1.1 defaults sees those triples reappear.
+func TestRootCompactedDocumentRefusesUnderJSONLD10(t *testing.T) {
+	options := NewJSONLDOptions("")
+	options.ProcessingMode = ld.JsonLd_1_0
+
+	document := map[string]any{
+		"@context": map[string]any{
+			"id":      "@id",
+			"note":    "https://example.org/vocab#note",
+			"carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+		},
+		"@graph": []any{
+			map[string]any{"id": "https://example.org/credential", "carries": "https://example.org/other"},
+			map[string]any{"id": "https://example.org/other", "note": "a sibling that must survive"},
+		},
+	}
+
+	_, err := RootCompactedDocument(document, "", options)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "JSON-LD 1.0")
+
+	// A single node needs no @included, so 1.0 is no obstacle to rooting it.
+	single := map[string]any{
+		"@context": map[string]any{"id": "@id", "note": "https://example.org/vocab#note"},
+		"@graph":   []any{map[string]any{"id": "https://example.org/credential", "note": "alone"}},
+	}
+	rooted, err := RootCompactedDocument(single, "", options)
+	require.NoError(t, err, "nothing moves, so nothing is lost")
+	require.Equal(t, "https://example.org/credential", rooted["id"])
+}
+
+// TestRootScopedDocumentIsComputedOnce: the root-scoped document and its
+// canonical N-Quads are a pure function of the document, and the SAME answer
+// for every proof in a set - that is what a proof set means. ecdsa-sd-2023
+// recomputed them per candidate, so a 32-proof set paid for the root-stability
+// check, the proof removal and a full URDNA2015 run 32 times over, on a
+// document nobody has authenticated yet. Measured on a 32-candidate base-proof
+// set where every candidate fails: 401ms and 32 canonicalizations before,
+// 31ms and one after.
+func TestRootScopedDocumentIsComputedOnce(t *testing.T) {
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "https://example.org/credential",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"},
+		"proof": {
+			"type": "DataIntegrityProof",
+			"cryptosuite": "eddsa-rdfc-2022",
+			"created": "2024-01-01T00:00:00Z",
+			"verificationMethod": "did:example:issuer#key-1",
+			"proofPurpose": "assertionMethod",
+			"proofValue": "z2V1"
+		}
+	}`), nil)
+	require.NoError(t, err)
+
+	firstCanonical, err := RootScopedCanonicalForm(cred)
+	require.NoError(t, err)
+	require.NotEmpty(t, firstCanonical)
+	require.NotContains(t, firstCanonical, "#proof",
+		"the root's own proof is the one thing the secured document leaves out")
+
+	// Memoized, read off the credential rather than by pointer identity of a
+	// returned document - there is no returned document any more, which is
+	// the point: handing one out left the cache externally mutable.
+	memo := cred.rootScoped
+	require.NotNil(t, memo, "the answer is cached, or there is nothing to compute once")
+
+	secondCanonical, err := RootScopedCanonicalForm(cred)
+	require.NoError(t, err)
+	require.Equal(t, firstCanonical, secondCanonical)
+	require.Same(t, memo, cred.rootScoped,
+		"the answer is computed once, not once per candidate")
+}
+
+// TestRootScopedCanonicalFormHandsOutNoDocument: the memoized *RDFCredential
+// used to be returned alongside the canonical form, so the cache stayed
+// externally mutable after Dataset() had been made defensive - a caller could
+// rewrite that document through NormalizeVerifiableCredentialGraph, and the
+// next call returned the mutated document paired with the canonical form of
+// the one it used to be.
+//
+// No caller needed it: all three ecdsa-sd call sites discarded it. This pins
+// that the API hands back a value nobody can write through.
+func TestRootScopedCanonicalFormHandsOutNoDocument(t *testing.T) {
+	cred := memoizedCredential(t)
+
+	canonical, err := RootScopedCanonicalForm(cred)
+	require.NoError(t, err)
+	require.NotEmpty(t, canonical)
+
+	// A string is a copy; there is no handle to mutate. Asserting the type
+	// is what keeps a future change from widening the return again without
+	// thinking about the cache.
+	require.IsType(t, "", canonical)
+}
+
+// TestRootCompactedDocumentReadsANodeLocalContext: a @graph entry may declare
+// its own prefix and use it in its identifier. RootID works on the EXPANDED
+// document, so it resolves that to an absolute IRI - but root matching read
+// the entry under the CONTAINER's context alone, where the compact spelling
+// resolves to nothing. The two disagreed, and all three signing paths rejected
+// the document as though its root had disappeared.
+func TestRootCompactedDocumentReadsANodeLocalContext(t *testing.T) {
+	document := map[string]any{
+		"@context": map[string]any{
+			"id":      "@id",
+			"note":    "https://example.org/vocab#note",
+			"carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+		},
+		"@graph": []any{
+			map[string]any{
+				// The prefix the root's identifier is written with exists
+				// only here.
+				"@context": map[string]any{"ex": "https://example.org/"},
+				"id":       "ex:credential",
+				"carries":  "https://example.org/other",
+			},
+			map[string]any{"id": "https://example.org/other", "note": "a sibling"},
+		},
+	}
+
+	rooted, err := RootCompactedDocument(document, "https://example.org/credential", nil)
+	require.NoError(t, err, "the node's own context is part of how its identifier reads")
+	require.Equal(t, "ex:credential", rooted["id"],
+		"and the document keeps the spelling it was written with")
+}
+
+// TestRootCompactedDocumentReadsAnAliasedID: JSON-LD lets a context alias @id
+// to any term. Root identification was hard-coded to the spellings @id and id,
+// so a document using one read as having NO identifiers at all - every node
+// looked unreferenced and the document was refused, while RootID, which works
+// on the expanded form, found the root perfectly well.
+func TestRootCompactedDocumentReadsAnAliasedID(t *testing.T) {
+	document := func() map[string]any {
+		return map[string]any{
+			"@context": map[string]any{
+				"identifier": "@id",
+				"note":       "https://example.org/vocab#note",
+				"carries":    map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+			},
+			"@graph": []any{
+				map[string]any{
+					"identifier": "https://example.org/credential",
+					"carries":    "https://example.org/other",
+				},
+				map[string]any{"identifier": "https://example.org/other", "note": "a sibling"},
+			},
+		}
+	}
+
+	known, err := RootCompactedDocument(document(), "https://example.org/credential", nil)
+	require.NoError(t, err, "an aliased @id is still an @id")
+	require.Equal(t, "https://example.org/credential", known["identifier"])
+
+	// And the same document with nothing told to it: the root is still the
+	// node nothing refers to, which needs the alias read to see at all.
+	inferred, err := RootCompactedDocument(document(), "", nil)
+	require.NoError(t, err, "a document using an alias still says which node it is about")
+	require.Equal(t, known["identifier"], inferred["identifier"],
+		"both readings must choose the same node")
+}
+
+// TestProofKeyForHonoursANullContextReset: an explicit top-level
+// "@context": null is a RESET, and it clears the options' expandContext along
+// with everything else - measured, the same document expands to its triples
+// with no @context member and to NOTHING with an explicit null. Term
+// resolution went on applying the expandContext either way, because a JSON
+// null and an absent member both arrive as a nil context, so ProofKeyFor
+// handed back an alias the document had just disabled. Expansion then drops
+// that member and Sign returns a document with no root proof at all.
+func TestProofKeyForHonoursANullContextReset(t *testing.T) {
+	options := NewJSONLDOptions("")
+	options.ExpandContext = map[string]any{
+		"@context": map[string]any{
+			"id":    "@id",
+			"proof": ProofPredicate,
+		},
+	}
+
+	inherited := map[string]any{"id": "https://example.org/credential"}
+	require.Equal(t, "proof", ProofKeyFor(inherited, inherited["@context"], options),
+		"the expandContext aliases proof, so a new proof belongs under that name")
+
+	reset := map[string]any{"@context": nil, "id": "https://example.org/credential"}
+	require.Equal(t, ProofPredicate, ProofKeyFor(reset, reset["@context"], options),
+		"an explicit null disables the alias, and a member named for it would be dropped")
+
+	// And a bare "proof" already sitting there is not reused. ProofKeys
+	// returns it - removing the root's own proof fails SAFE, and a member
+	// the reset turned into a relative IRI carries no triples either way -
+	// but writing a signature under it would produce one expansion drops.
+	resetWithProof := map[string]any{
+		"@context": nil,
+		"id":       "https://example.org/credential",
+		"proof":    map[string]any{"type": "DataIntegrityProof"},
+	}
+	require.Contains(t, ProofKeys(resetWithProof, resetWithProof["@context"], options), "proof",
+		"removal still takes the bare name, because missing a proof is the worse failure")
+	require.Equal(t, ProofPredicate, ProofKeyFor(resetWithProof, resetWithProof["@context"], options),
+		"but a new proof goes under the predicate, not beside one that expands to nothing")
+}
+
+// memoizedCredential is a document with a proof of its own, so all three
+// memoized answers have something to compute.
+func memoizedCredential(t *testing.T) *RDFCredential {
+	t.Helper()
+
+	cred, err := NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"id": "https://example.org/credential",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"},
+		"proof": {
+			"type": "DataIntegrityProof",
+			"cryptosuite": "eddsa-rdfc-2022",
+			"created": "2024-01-01T00:00:00Z",
+			"verificationMethod": "did:example:issuer#key-1",
+			"proofPurpose": "assertionMethod",
+			"proofValue": "z2V1"
+		}
+	}`), nil)
+	require.NoError(t, err)
+	return cred
+}
+
+// TestDatasetIsACopyTheCredentialDoesNotShare: verification memoizes the proof
+// set, the document hash and the root-scoped document, and those are only
+// sound while the document cannot change underneath them. Returning the LIVE
+// dataset made that false - and invalidating the memos at hand-out time did
+// not fix it, because a caller can hold the pointer, let a verification
+// repopulate the caches, and mutate AFTERWARDS. The next verification would
+// then authenticate a document that no longer exists, skipping the
+// root-stability check on the way.
+func TestDatasetIsACopyTheCredentialDoesNotShare(t *testing.T) {
+	cred := memoizedCredential(t)
+
+	handed := cred.Dataset()
+	require.NotNil(t, handed)
+	require.NotSame(t, cred.dataset, handed, "the credential's own dataset never leaves it")
+
+	// Everything a caller could reach through it: the graph map, the quad
+	// slices, and the quads themselves.
+	handed.Graphs["@default"] = nil
+	handed.Graphs["https://example.org/injected"] = []*ld.Quad{}
+	for _, quads := range cred.dataset.Graphs {
+		for _, quad := range quads {
+			quad.Subject = ld.NewIRI("https://example.org/UNTOUCHED")
+			break
+		}
+		break
+	}
+
+	again := cred.Dataset()
+	require.Contains(t, again.Graphs, "@default", "a mutation of the copy does not reach the credential")
+	require.NotContains(t, again.Graphs, "https://example.org/injected")
+}
+
+// TestDatasetCopyQuadsAreNotShared: a new graph map holding the SAME quad
+// pointers is not a defensive copy - the caller can still rewrite a subject
+// or an object through them, which is a change to the document the memos
+// describe.
+func TestDatasetCopyQuadsAreNotShared(t *testing.T) {
+	cred := memoizedCredential(t)
+
+	handed := cred.Dataset()
+	var mutated bool
+	for name, quads := range handed.Graphs {
+		for i, quad := range quads {
+			if quad == nil {
+				continue
+			}
+			original := cred.dataset.Graphs[name][i]
+			require.NotSame(t, original, quad, "each quad is its own")
+			quad.Object = ld.NewIRI("https://example.org/REWRITTEN")
+			require.NotEqual(t, "https://example.org/REWRITTEN", original.Object.GetValue(),
+				"and rewriting it does not reach the credential's")
+			mutated = true
+			break
+		}
+		if mutated {
+			break
+		}
+	}
+	require.True(t, mutated, "the fixture must have a quad to rewrite, or this proves nothing")
+}
+
+// TestNormalizeVerifiableCredentialGraphDropsMemoizedAnswers: this rewrites
+// the dataset in place, which is the one mutation that remains - so it clears
+// every memo rather than leaving a cached hash describing the old document.
+func TestNormalizeVerifiableCredentialGraphDropsMemoizedAnswers(t *testing.T) {
+	cred := memoizedCredential(t)
+
+	proofs, err := CompactedRootProofs(cred)
+	require.NoError(t, err)
+	require.Len(t, proofs, 1, "the fixture must have an answer worth caching")
+	require.NotNil(t, cred.compactedProofs, "and it must be cached, or this proves nothing")
+
+	require.NoError(t, cred.NormalizeVerifiableCredentialGraph())
+	require.Nil(t, cred.compactedProofs, "rewriting the dataset voids it")
+	require.Nil(t, cred.secured)
+	require.Nil(t, cred.rootScoped)
+}
+
+// TestRootCompactedDocumentMergesSplitFragmentsUnderAnAliasedID: the merge
+// skipped only the literal @id and id, so a fragment whose identifier is
+// written through an alias had that identifier APPENDED to the one already
+// there - turning it into an array, after which nothing could read it as an
+// identifier at all and a perfectly good split node was rejected as having
+// lost its root.
+func TestRootCompactedDocumentMergesSplitFragmentsUnderAnAliasedID(t *testing.T) {
+	document := func() map[string]any {
+		return map[string]any{
+			"@context": map[string]any{
+				"identifier": "@id",
+				"note":       "https://example.org/vocab#note",
+				"carries":    map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+			},
+			"@graph": []any{
+				map[string]any{
+					"identifier": "https://example.org/credential",
+					"carries":    "https://example.org/other",
+				},
+				map[string]any{
+					"identifier": "https://example.org/credential",
+					"note":       "the second fragment",
+				},
+				map[string]any{"identifier": "https://example.org/other", "note": "a sibling"},
+			},
+		}
+	}
+
+	before, err := canonicalFormOf(document(), nil)
+	require.NoError(t, err)
+
+	rooted, err := RootCompactedDocument(document(), "https://example.org/credential", nil)
+	require.NoError(t, err, "fragments spelled through an alias are still fragments of one node")
+	require.Equal(t, "https://example.org/credential", rooted["identifier"],
+		"and the identifier is still a string, not a list of itself")
+	require.Equal(t, "the second fragment", rooted["note"],
+		"with both fragments' properties on it")
+
+	after, err := canonicalFormOf(rooted, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "merging fragments must not change one quad")
+}
+
+// TestDatasetCopySupportsSetNamespace: json-gold keeps its namespace map
+// unexported and initializes it in ld.NewRDFDataset, so building the copy as
+// a struct literal left it nil and the public SetNamespace panicked on the
+// value Dataset() returns - a method that works on every other dataset in the
+// library.
+func TestDatasetCopySupportsSetNamespace(t *testing.T) {
+	cred := memoizedCredential(t)
+	cred.dataset.SetNamespace("https://example.org/vocab#", "ex")
+
+	handed := cred.Dataset()
+	require.Equal(t, "ex", handed.GetNamespace("https://example.org/vocab#"),
+		"the namespaces come across with the quads")
+
+	require.NotPanics(t, func() {
+		handed.SetNamespace("https://example.org/other#", "other")
+	})
+	require.Equal(t, "other", handed.GetNamespace("https://example.org/other#"))
+	require.Empty(t, cred.dataset.GetNamespace("https://example.org/other#"),
+		"and setting one on the copy does not reach the credential")
+}
+
+// TestRootCompactedDocumentReadsAnAliasedGraphMember: JSON-LD lets a context
+// alias @graph like any other keyword. Every "is this a graph" check in this
+// package keyed on the literal spelling, so a document aliasing it had its
+// container read as an ordinary node - the document was rooted at the wrapper
+// rather than at the node inside it, and SD proof removal offered that wrapper
+// as a candidate for what the document is about.
+func TestRootCompactedDocumentReadsAnAliasedGraphMember(t *testing.T) {
+	document := map[string]any{
+		"@context": map[string]any{
+			"id":      "@id",
+			"bundle":  "@graph",
+			"note":    "https://example.org/vocab#note",
+			"carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+		},
+		"bundle": []any{
+			map[string]any{
+				"id":      "https://example.org/credential",
+				"carries": "https://example.org/other",
+			},
+			map[string]any{"id": "https://example.org/other", "note": "a sibling"},
+		},
+	}
+
+	require.True(t, IsBareGraphContainer(document, document["@context"], nil),
+		"a container is a container whatever the document calls its graph member")
+
+	rooted, err := RootCompactedDocument(document, "", nil)
+	require.NoError(t, err)
+	require.Equal(t, "https://example.org/credential", rooted["id"],
+		"rooted at the node inside, not left as the wrapper")
+	require.NotContains(t, rooted, "bundle",
+		"and the aliased member goes the way @graph would")
+	require.Contains(t, rooted, "@included")
+}
+
+// TestIsGraphWrapperReadsAnAliasedGraphMember: the wrapper case of the same
+// thing - a named graph whose graph member and identifier are both written
+// through the context.
+func TestIsGraphWrapperReadsAnAliasedGraphMember(t *testing.T) {
+	context := map[string]any{"identifier": "@id", "bundle": "@graph"}
+
+	wrapper := map[string]any{
+		"identifier": "https://example.org/the-proof",
+		"bundle":     []any{map[string]any{"@id": "https://example.org/inner"}},
+	}
+	require.True(t, IsGraphWrapper(wrapper, context, nil))
+
+	// And a node that merely HAS a graph beside properties of its own is
+	// still a node, which is the distinction the whole check exists for.
+	named := map[string]any{
+		"identifier": "https://example.org/credential",
+		"bundle":     []any{map[string]any{"@id": "https://example.org/inner"}},
+		"note":       "a property of its own",
+	}
+	require.False(t, IsGraphWrapper(named, context, nil))
+}
+
+// TestRootCompactedDocumentMergesFragmentsSpelledDifferently: a document may
+// name one node ex:credential in one fragment and with the equivalent
+// absolute IRI in another. They are the same RDF node; coalescing read the
+// SPELLINGS, so the two looked like separate nodes, neither referring to the
+// other, and a perfectly good document was refused for holding more than one
+// node nothing refers to.
+func TestRootCompactedDocumentMergesFragmentsSpelledDifferently(t *testing.T) {
+	document := func() map[string]any {
+		return map[string]any{
+			"@context": map[string]any{
+				"ex":      "https://example.org/",
+				"id":      "@id",
+				"note":    "https://example.org/vocab#note",
+				"carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+			},
+			"@graph": []any{
+				map[string]any{"id": "ex:credential", "carries": "https://example.org/other"},
+				map[string]any{"id": "https://example.org/credential", "note": "the second fragment"},
+				map[string]any{"id": "https://example.org/other", "note": "a sibling"},
+			},
+		}
+	}
+
+	before, err := canonicalFormOf(document(), nil)
+	require.NoError(t, err)
+
+	rooted, err := RootCompactedDocument(document(), "", nil)
+	require.NoError(t, err, "two spellings of one IRI are one node")
+	require.Equal(t, "the second fragment", rooted["note"],
+		"and the merged root carries both fragments' properties")
+
+	after, err := canonicalFormOf(rooted, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "merging fragments must not change one quad")
+}
+
+// TestRootCompactedDocumentDoesNotAssumeIdNamesTheNode: JSON-LD may map "id"
+// to an ordinary property while naming nodes with @id. Treating "id" as an
+// identifier regardless read a LITERAL as a node name.
+//
+// The difference only shows where @id is absent, since @id short-circuits
+// either way - a first attempt at this test put @id on every node and passed
+// against the bug.
+//
+// The VC v2 context does alias @id to id, which is why this went unnoticed.
+// That is a definition the context supplies, not a spelling to assume.
+func TestRootCompactedDocumentDoesNotAssumeIdNamesTheNode(t *testing.T) {
+	context := map[string]any{
+		// An ORDINARY property that happens to be spelled "id".
+		"id":      "https://example.org/vocab#id",
+		"note":    "https://example.org/vocab#note",
+		"carries": map[string]any{"@id": "https://example.org/vocab#carries", "@type": "@id"},
+	}
+
+	t.Run("a literal does not make a node referenced", func(t *testing.T) {
+		// The second entry is an unnamed node carrying a literal that looks
+		// like the identifier the first entry points at. Reading that literal
+		// as its name made it the referenced node, leaving exactly one
+		// candidate and a confident, wrong answer. It is a blank node: the
+		// document has TWO nodes nothing refers to and does not say which it
+		// is about.
+		_, err := RootCompactedDocument(map[string]any{
+			"@context": context,
+			"@graph": []any{
+				map[string]any{"@id": "https://example.org/credential", "carries": "https://example.org/other"},
+				map[string]any{"id": "https://example.org/other", "note": "unnamed"},
+			},
+		}, "", nil)
+		require.ErrorContains(t, err, "more than one node nothing refers to")
+	})
+
+	t.Run("an ordinary member survives the merge", func(t *testing.T) {
+		// Fragments of one node, one of them carrying that ordinary member.
+		// The merge skips what the reader treats as an identifier, so
+		// skipping "id" unconditionally dropped a member the document meant
+		// to keep.
+		rooted, err := RootCompactedDocument(map[string]any{
+			"@context": context,
+			"@graph": []any{
+				map[string]any{"@id": "https://example.org/credential", "note": "the first fragment"},
+				map[string]any{"@id": "https://example.org/credential", "id": "a value, not a name"},
+			},
+		}, "", nil)
+		require.NoError(t, err)
+		require.Equal(t, "https://example.org/credential", rooted["@id"])
+		require.Equal(t, "a value, not a name", rooted["id"],
+			"an ordinary property is content, and merging must not discard it")
+	})
+}
+
+// TestMemoizedAnswersUnderConcurrentInvalidation: the three memoized answers
+// are not independent - computing the compacted proofs reads the
+// secured-document answer - so separate mutexes meant a reader held one while
+// taking another. One mutex now covers all three, and invalidation clears them
+// together.
+//
+// What this test proves and what it does not: it fails on a deadlock and, with
+// -race, on unsynchronized access. It does NOT deterministically catch the
+// interleaving where a reader repopulates one cache from another that has just
+// been voided - that is a logical ordering, not a data race, and the fix for
+// it is structural: one lock, taken once, clearing all three.
+func TestMemoizedAnswersUnderConcurrentInvalidation(t *testing.T) {
+	cred := memoizedCredential(t)
+
+	done := make(chan struct{})
+	for i := 0; i < 6; i++ {
+		go func(i int) {
+			defer func() { done <- struct{}{} }()
+			for n := 0; n < 20; n++ {
+				switch i % 3 {
+				case 0:
+					_, _ = CompactedRootProofs(cred)
+				case 1:
+					_, _ = RootScopedCanonicalForm(cred)
+				default:
+					_, _ = SecuredDocumentHash(cred)
+				}
+			}
+		}(i)
+	}
+	go func() {
+		defer func() { done <- struct{}{} }()
+		for n := 0; n < 20; n++ {
+			cred.invalidate()
+		}
+	}()
+
+	for i := 0; i < 7; i++ {
+		select {
+		case <-done:
+		case <-time.After(30 * time.Second):
+			t.Fatal("a reader and an invalidation deadlocked")
+		}
+	}
+
+	// And the answer is still the right one once everything has settled.
+	proofs, err := CompactedRootProofs(cred)
+	require.NoError(t, err)
+	require.Len(t, proofs, 1)
+}
+
+// TestRewriteExcludesReadersForTheWholeMutation: clearing the memos after the
+// rewrite does not synchronize anything. A verifier holding memoMu could be
+// canonicalizing while NormalizeVerifiableCredentialGraph rewrote rc.dataset
+// underneath it - a data race, and one whose result is a document hash taken
+// over a half-rewritten document, which is the worst thing to be wrong about
+// on a verification path.
+//
+// The fixture is a PRESENTATION carrying a credential, because that is the
+// only shape this rewrite actually changes: a plain credential leaves it with
+// nothing to move, so a plain fixture exercises no mutation at all and the
+// race window never opens. A first version of this test used one and passed
+// against the unsynchronized code.
+//
+// A fresh credential per round, because the rewrite is idempotent - once the
+// graph has moved there is nothing left to race with.
+//
+// HONEST LIMIT: detection here is probabilistic, not guaranteed. Measured
+// against an unsynchronized build, -race reported the problem in about seven
+// runs out of ten, and raising the round count did not improve it - the
+// window is decided by scheduling rather than by iterations. So this test
+// failing means there IS a race; it passing once does not prove there is
+// none. The guarantee comes from the lock, not from this.
+func TestRewriteExcludesReadersForTheWholeMutation(t *testing.T) {
+	const presentation = `{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiablePresentation"],
+		"holder": "did:example:holder",
+		"verifiableCredential": [{
+			"@context": "https://www.w3.org/ns/credentials/v2",
+			"id": "https://example.org/inner",
+			"type": ["VerifiableCredential"],
+			"issuer": "did:example:issuer",
+			"credentialSubject": {"id": "did:example:subject"}
+		}]
+	}`
+
+	for round := 0; round < 25; round++ {
+		cred, err := NewRDFCredentialFromJSON([]byte(presentation), nil)
+		require.NoError(t, err)
+
+		done := make(chan struct{})
+		for i := 0; i < 3; i++ {
+			go func() {
+				defer func() { done <- struct{}{} }()
+				_, _ = RootScopedCanonicalForm(cred)
+				_, _ = CompactedRootProofs(cred)
+				_, _ = cred.CanonicalForm()
+			}()
+		}
+		go func() {
+			defer func() { done <- struct{}{} }()
+			_ = cred.NormalizeVerifiableCredentialGraph()
+		}()
+		go func() {
+			defer func() { done <- struct{}{} }()
+			_ = cred.Dataset()
+		}()
+		// A DATASET-BACKED credential takes the other branch of
+		// CanonicalForm, which cloned rc.dataset unguarded. The JSON-backed
+		// readers above never reach it.
+		go func() {
+			defer func() { done <- struct{}{} }()
+			if proofCred, err := cred.ProofObject(); err == nil && proofCred != nil {
+				_, _ = proofCred.CanonicalForm()
+			}
+			_, _ = cred.CanonicalForm()
+		}()
+
+		for i := 0; i < 6; i++ {
+			select {
+			case <-done:
+			case <-time.After(60 * time.Second):
+				t.Fatal("a reader and the rewrite deadlocked")
+			}
+		}
+	}
+}
+
+// TestRootCompactedDocumentRefusesConflictingFragmentContexts: coalescing
+// fragments of one node merges their node-local contexts, so two fragments
+// mapping the same compact term DIFFERENTLY end up with one mapping applied to
+// both values. That changes the RDF without moving any node - and the
+// equivalence check only ran when something moved, so the rewrite could
+// silently sign different RDF from the input.
+func TestRootCompactedDocumentRefusesConflictingFragmentContexts(t *testing.T) {
+	document := map[string]any{
+		"@context": map[string]any{"id": "@id"},
+		"@graph": []any{
+			map[string]any{
+				"@context": map[string]any{"note": "https://example.org/first#note"},
+				"id":       "https://example.org/credential",
+				"note":     "written under the first mapping",
+			},
+			map[string]any{
+				// The SAME term, a different IRI, same node.
+				"@context": map[string]any{"note": "https://example.org/second#note"},
+				"id":       "https://example.org/credential",
+				"note":     "written under the second mapping",
+			},
+		},
+	}
+
+	before, err := canonicalFormOf(document, nil)
+	require.NoError(t, err)
+	require.Contains(t, before, "first#note")
+	require.Contains(t, before, "second#note",
+		"the fixture must carry both mappings, or there is no conflict to detect")
+
+	rooted, err := RootCompactedDocument(document, "", nil)
+	if err != nil {
+		require.Contains(t, err.Error(), "would change its RDF",
+			"refusing is a fine answer; signing different RDF is not")
+		return
+	}
+
+	after, err := canonicalFormOf(rooted, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, after,
+		"if it is accepted, the merge must not have changed one quad")
+}

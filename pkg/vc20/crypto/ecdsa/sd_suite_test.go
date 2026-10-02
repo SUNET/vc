@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,25 +104,47 @@ func TestSdSuite_SignVerifyDerive(t *testing.T) {
 	require.NoError(t, err, "Derived Proof (Full) verification failed")
 
 	// 4. Derive (Partial Disclosure)
-	// Let's try to reveal only a subset.
-	// Note: Due to grouping, we might end up revealing more than we asked if we hit a group.
-	// Let's try revealing just index 0.
-	if len(quads) > 0 {
-		partialIndices := []int{0}
-		derivedPartial, err := suite.Derive(signedCred, partialIndices, "")
-		require.NoError(t, err)
-		require.NotNil(t, derivedPartial)
-
-		// Verify Derived Proof (Partial)
-		err = suite.Verify(derivedPartial, &key.PublicKey)
-		require.NoError(t, err, "Derived Proof (Partial) verification failed")
-
-		// Check that it is indeed partial
-		// Convert to JSON and check fields
-		jsonBytes, _ := derivedPartial.ToJSON()
-		var partialMap map[string]any
-		json.Unmarshal(jsonBytes, &partialMap) // #nosec G104
-		// We can't easily check what's missing without knowing the quad mapping,
-		// but verification success is the main test.
+	//
+	// Reveal the credential's OWN quads and withhold the degree. A derived
+	// credential has to keep the node it is about: a disclosure that drops
+	// every triple of the credential leaves a document about the subject
+	// instead, carrying the credential's proof, and a proof must not end up
+	// securing a document nobody meant to sign. That case is the subtest
+	// below.
+	const credentialIRI = "<http://example.gov/credentials/3732>"
+	var partialIndices []int
+	for i, quad := range quads {
+		if strings.HasPrefix(quad, credentialIRI) {
+			partialIndices = append(partialIndices, i)
+		}
 	}
+	require.NotEmpty(t, partialIndices, "the credential must have quads of its own to reveal")
+	require.Less(t, len(partialIndices), len(quads), "and something must be left to withhold")
+
+	derivedPartial, err := suite.Derive(signedCred, partialIndices, "")
+	require.NoError(t, err)
+	require.NotNil(t, derivedPartial)
+
+	err = suite.Verify(derivedPartial, &key.PublicKey)
+	require.NoError(t, err, "Derived Proof (Partial) verification failed")
+
+	partialJSON, err := derivedPartial.ToJSON()
+	require.NoError(t, err)
+	require.NotContains(t, string(partialJSON), "Bachelor of Science and Arts",
+		"the withheld degree must not survive the derivation")
+
+	// Dropping the credential node itself is refused rather than derived.
+	t.Run("a disclosure that drops the credential is refused", func(t *testing.T) {
+		var subjectOnly []int
+		for i, quad := range quads {
+			if !strings.HasPrefix(quad, credentialIRI) {
+				subjectOnly = append(subjectOnly, i)
+			}
+		}
+		require.NotEmpty(t, subjectOnly)
+
+		_, err := suite.Derive(signedCred, subjectOnly, "")
+		require.ErrorContains(t, err, "no longer holds the node",
+			"a derived credential must keep the node the base credential was about")
+	})
 }
