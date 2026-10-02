@@ -1,0 +1,26 @@
+# EUDI eduID Age Verification Presentation Request
+# Asks the wallet to present an eduID credential disclosing birthdate + assurance_level.
+# The issuer verifies the presentation, checks assurance_level against the
+# allowed-URIs list configured on data_sources.presentation.eduid_age_verification,
+# and derives age_over_NN booleans from birthdate.
+templates:
+  - id: "eduid_age_verification"
+    name: "eduID Age Verification"
+    description: "Request eduID birthdate + assurance level for age-attestation issuance"
+    version: "1.0"
+    oidc_scopes:
+      - "eduid_age_verification"
+    dcql:
+      credentials:
+        - id: "eduid"
+          format: "dc+sd-jwt"
+          meta:
+            vct_values:
+              - "urn:credential:eduid:1"
+          claims:
+            - path: ["birthdate"]
+            - path: ["assurance_level"]
+    claim_mappings:
+      birthdate: "birthdate"
+      assurance_level: "assurance_level"
+    enabled: true

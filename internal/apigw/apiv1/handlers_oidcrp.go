@@ -175,13 +175,22 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		span.SetStatus(codes.Error, dsErr.Error())
 		return nil, fmt.Errorf("OIDC data source resolution failed: %w", dsErr)
 	}
-	if derivs := c.cfg.APIGW.DataSources.DerivationsForSource(session.CredentialType, credSourceForDerivs.DataSource); len(derivs) > 0 {
-		derived, derr := credential.ApplyDerivations(derivs, cc.identity, time.Now())
-		if derr != nil {
-			span.SetStatus(codes.Error, derr.Error())
-			return nil, fmt.Errorf("OIDC derivations failed: %w", derr)
+	// Only assertion scopes derive the credential document from the ID
+	// token itself. For datastore and external_api the credential is
+	// fetched later and VCICredential runs the source's derivations against
+	// that document; applying them here against the IdQ identity can
+	// transform lookup claims prematurely or fail the callback when the
+	// IdP identity simply does not carry a source-only input (e.g. a
+	// birthdate that only the external API returns).
+	if credSourceForDerivs.DataSource == model.DataSourceAssertion {
+		if derivs := c.cfg.APIGW.DataSources.DerivationsForSource(session.CredentialType, credSourceForDerivs.DataSource); len(derivs) > 0 {
+			derived, derr := credential.ApplyDerivations(derivs, cc.identity, time.Now())
+			if derr != nil {
+				span.SetStatus(codes.Error, derr.Error())
+				return nil, fmt.Errorf("OIDC derivations failed: %w", derr)
+			}
+			maps.Copy(cc.identity, derived)
 		}
-		maps.Copy(cc.identity, derived)
 	}
 
 	// The authenticated claim set. It is deliberately NOT filtered against the

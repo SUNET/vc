@@ -80,25 +80,3 @@ templates:
       document_number: "document_number"
     enabled: true
 
-  - id: "eduid_age_verification"
-    name: "eduID - Age Verification"
-    description: "Request only age verification from eduID"
-    version: "1.0"
-    oidc_scopes:
-      - "eduid_age"
-    dcql:
-      credentials:
-        - id: "eduid"
-          format: "dc+sd-jwt"
-          meta:
-            vct_values:
-              - "urn:credential:eduid:1"
-          claims:
-            - path: ["age_equal_or_over", "18"]
-            - path: ["given_name"]
-            - path: ["family_name"]
-    claim_mappings:
-      age_over_18: "age_equal_or_over.18"
-      given_name: "given_name"
-      family_name: "family_name"
-    enabled: true

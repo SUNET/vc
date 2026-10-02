@@ -1,7 +1,7 @@
 {
   "vct": "urn:credential:eduid_age_verification:1",
   "name": "EduID Age Verification Credential",
-  "description": "A minimal age-attestation credential derived from an eduID credential presented via OpenID4VP during OpenID4VCI. Carries only age-threshold booleans (13, 15, 18, 21, 65) and validity dates. Assurance level is enforced at issuance time (see credential_metadata.min_assurance_level) and is not carried on the credential itself.",
+  "description": "A minimal age-attestation credential derived from an eduID credential presented via OpenID4VP during OpenID4VCI. Carries only age-threshold booleans (13, 15, 18, 21, 65) and validity dates. Assurance level is enforced at issuance time by the presentation scope's required_claims.assurance_level allow-list (see apigw.data_sources.presentation.scopes.eduid_age_verification) and is not carried on the credential itself.",
   "display": [
     {
       "locale": "en-US",

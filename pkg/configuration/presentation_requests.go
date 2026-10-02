@@ -1,11 +1,14 @@
 package configuration
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -186,6 +189,18 @@ func loadTemplateFile(filePath string) ([]*PresentationRequestTemplate, error) {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
+	// Reject configs that still carry the removed presentation-request
+	// transformation keys. gopkg.in/yaml.v2 silently ignores unknown
+	// fields, so without this check an old template with
+	// claim_transforms: would be loaded and the configured
+	// transformations would silently stop taking effect. There is no
+	// equivalent downstream pipeline for this path (data_sources
+	// derivations never run in the verifier here), so reject rather
+	// than mis-apply.
+	if err := rejectRemovedTemplateKeys(filePath, fileBytes); err != nil {
+		return nil, err
+	}
+
 	// Try loading as a config with a "templates:" list first
 	var cfg PresentationRequestConfig
 	if err := yaml.Unmarshal(fileBytes, &cfg); err == nil && len(cfg.Templates) > 0 {
@@ -228,6 +243,35 @@ func (c *PresentationRequestConfig) validateUniqueIDs() error {
 		seen[template.ID] = true
 	}
 	return nil
+}
+
+// removedTemplateKeys lists top-level/claim-level YAML keys whose
+// semantics no longer exist on a presentation-request template. Loading a
+// config that still carries one of them must fail loudly rather than
+// silently drop the field.
+var removedTemplateKeys = []string{
+	"claim_transforms",
+}
+
+// rejectRemovedTemplateKeys returns an error when the raw YAML contains a
+// removed top-level or in-template key. The scan is a line-oriented
+// best-effort check: it ignores lines inside # comments and only matches
+// the key when it appears as the first non-space token followed by ":".
+func rejectRemovedTemplateKeys(filePath string, data []byte) error {
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for lineNo := 1; scanner.Scan(); lineNo++ {
+		line := scanner.Text()
+		trimmed := strings.TrimLeft(line, " \t-")
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		for _, key := range removedTemplateKeys {
+			if strings.HasPrefix(trimmed, key+":") {
+				return fmt.Errorf("presentation request %s line %d: field %q has been removed; migrate the normalisation into a data_sources derivation or drop the entry", filePath, lineNo, key)
+			}
+		}
+	}
+	return scanner.Err()
 }
 
 // validateNoDuplicateScopes checks that no scope appears in multiple templates

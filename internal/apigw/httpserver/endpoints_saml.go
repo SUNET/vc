@@ -204,13 +204,22 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		span.SetStatus(codes.Error, dsErr.Error())
 		return nil, fmt.Errorf("SAML data source resolution failed: %w", dsErr)
 	}
-	if derivs := s.cfg.APIGW.DataSources.DerivationsForSource(session.CredentialType, credSourceForDerivs.DataSource); len(derivs) > 0 {
-		derived, derr := credential.ApplyDerivations(derivs, claims, time.Now())
-		if derr != nil {
-			span.SetStatus(codes.Error, derr.Error())
-			return nil, fmt.Errorf("SAML derivations failed: %w", derr)
+	// Only assertion scopes derive the credential document from the SAML
+	// assertion itself. For datastore and external_api the credential is
+	// fetched later and VCICredential runs the source's derivations against
+	// that document; applying them here against the SAML identity can
+	// transform lookup claims prematurely or fail the login when the
+	// assertion simply does not carry a source-only input (e.g. a birthdate
+	// that only the external API returns).
+	if credSourceForDerivs.DataSource == model.DataSourceAssertion {
+		if derivs := s.cfg.APIGW.DataSources.DerivationsForSource(session.CredentialType, credSourceForDerivs.DataSource); len(derivs) > 0 {
+			derived, derr := credential.ApplyDerivations(derivs, claims, time.Now())
+			if derr != nil {
+				span.SetStatus(codes.Error, derr.Error())
+				return nil, fmt.Errorf("SAML derivations failed: %w", derr)
+			}
+			maps.Copy(claims, derived)
 		}
-		maps.Copy(claims, derived)
 	}
 
 	claimKeys := make([]string, 0, len(claims))

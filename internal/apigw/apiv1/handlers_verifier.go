@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"crypto"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -226,11 +227,29 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	// mdoc VP token has to go through MDocHandler instead.
 	var credential map[string]any
 	if mdoc.IsMDocFormat(responseParams.VPToken) {
-		if c.trustEvaluator == nil {
+		// trust.NewTrustEvaluatorFromConfig returns a non-nil
+		// AllowAllEvaluator when pdp_url is empty, so a plain
+		// c.trustEvaluator == nil check cannot distinguish "no PDP
+		// configured" from "a real PDP wired up". Mdoc issuer trust must
+		// be a real decision, so refuse this path in allow-all mode.
+		if c.cfg.APIGW.Trust.PDPURL == "" {
 			return nil, errors.New("mdoc VP verification requires apigw.trust.pdp_url to be configured")
 		}
 		if authCtx.Nonce == "" || authCtx.ClientID == "" {
 			return nil, errors.New("mdoc VP verification requires nonce and client_id on the authorization context")
+		}
+		// mdoc.IsMDocFormat is only a base64/CBOR-shape sniff and also
+		// matches "mso_mdoc_zk" (ZK-mdoc) presentations, whose
+		// zkDocuments carry a different verification contract than
+		// plain mso_mdoc's DeviceResponse. MDocHandler.VerifyAndExtractBound
+		// only decodes DeviceResponse.Documents, so a ZK presentation
+		// would silently reach mdocClaimsFromResult with no documents
+		// and be rejected. Detect ZK responses here and refuse rather
+		// than mis-route them through the plain-mdoc verifier.
+		if rawVPToken, derr := base64.RawURLEncoding.DecodeString(responseParams.VPToken); derr == nil {
+			if isZK, perr := mdoc.PeekIsZkDeviceResponse(rawVPToken); perr == nil && isZK {
+				return nil, errors.New("ZK-mdoc (mso_mdoc_zk) VP tokens are not supported on this presentation flow; use the ZK verifier instead")
+			}
 		}
 		responseURI, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/verification/direct_post")
 		if err != nil {
@@ -317,8 +336,27 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		if err := c.finalisePresentationVerification(ctx, authCtx, pScope, credential); err != nil {
 			return nil, err
 		}
+		// The consent flow resumes through
+		// /authorization/consent/callback?response_code=... just like the
+		// datastore/assertion path below; emit the same RedirectURI so
+		// the wallet actually drives the browser back to consent rather
+		// than stranding at direct-post with only PresentationDuringIssuanceSession.
+		callbackURL, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/authorization/consent/callback/")
+		if err != nil {
+			c.log.Error(err, "failed to construct consent callback URL")
+			return nil, errors.New("failed to construct callback URL")
+		}
+		u, err := url.Parse(callbackURL)
+		if err != nil {
+			c.log.Error(err, "failed to parse consent callback URL")
+			return nil, errors.New("failed to parse callback URL")
+		}
+		q := u.Query()
+		q.Set("response_code", authCtx.VerifierResponseCode)
+		u.RawQuery = q.Encode()
 		return &VerificationDirectPostResponse{
 			PresentationDuringIssuanceSession: authCtx.SessionID,
+			RedirectURI:                       u.String(),
 		}, nil
 	}
 

@@ -81,7 +81,11 @@ func filterMap(m map[string]any, node *allowNode) (map[string]any, bool) {
 	if node == nil {
 		return nil, false
 	}
-	if node.leaf && node.children == nil {
+	// A leaf permits the whole value, even if the VCTM also declares
+	// descendants — a path such as "address" alongside "address.locality"
+	// means the whole address object is allowed; without this short-cut
+	// the sibling fields the parent permits would be silently dropped.
+	if node.leaf {
 		return m, len(m) > 0
 	}
 	out := make(map[string]any, len(node.children))
@@ -104,31 +108,48 @@ func filterValue(v any, node *allowNode) (any, bool) {
 	if node == nil {
 		return nil, false
 	}
-	if node.leaf && node.children == nil {
+	// Leaf wins: whole value allowed even if the VCTM also declares
+	// descendants under the same path (see filterMap for the parallel
+	// map-side comment).
+	if node.leaf && len(node.children) == 0 {
 		return v, true
 	}
 	switch tv := v.(type) {
 	case map[string]any:
 		return filterMap(tv, node)
 	case []any:
-		wildcard := node.children[arrayWildcardKey]
-		if wildcard == nil {
-			if node.leaf {
-				return v, true
-			}
-			return nil, false
+		return filterArray(tv, node)
+	case []string:
+		// Mapped claims (and as_array: true) commonly produce concrete
+		// slices such as []string. Normalise to []any so a VCTM path
+		// like ["nationalities", null] can filter/retain its elements
+		// instead of dropping the entire declared claim.
+		anySlice := make([]any, len(tv))
+		for i, s := range tv {
+			anySlice[i] = s
 		}
-		out := make([]any, 0, len(tv))
-		for _, e := range tv {
-			if filtered, keep := filterValue(e, wildcard); keep {
-				out = append(out, filtered)
-			}
-		}
-		return out, len(out) > 0
+		return filterArray(anySlice, node)
 	default:
 		if node.leaf {
 			return v, true
 		}
 		return nil, false
 	}
+}
+
+func filterArray(tv []any, node *allowNode) (any, bool) {
+	wildcard := node.children[arrayWildcardKey]
+	if wildcard == nil {
+		if node.leaf {
+			return tv, true
+		}
+		return nil, false
+	}
+	out := make([]any, 0, len(tv))
+	for _, e := range tv {
+		if filtered, keep := filterValue(e, wildcard); keep {
+			out = append(out, filtered)
+		}
+	}
+	return out, len(out) > 0
 }

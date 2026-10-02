@@ -328,7 +328,7 @@ apigw:
           derivations:
             - age_over_thresholds:
                 input: "birthdate"
-                thresholds: [13, 15, 18, 21, 65]
+                thresholds: [10, 13, 15, 18, 21, 65]
           expiry_duration: "8760h"
           defaults:
             issuing_authority: "SUNET"
