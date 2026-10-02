@@ -198,6 +198,11 @@ const dcqlQuerySchema = v.object({
 
 /** @typedef {v.InferOutput<typeof presentationDefinitionSchema>} PresentationDefinition */
 const presentationDefinitionSchema = v.object({
+    // Server-generated id for this authorization context. Included in
+    // subsequent POSTs (e.g. session-preference) so a fresh tab does not
+    // silently overwrite the shared per-origin cookie session and steer the
+    // flag onto the wrong request.
+    session_id: v.string(),
     qr_code: v.string(),
     // The request_uri channel: QR code, same-device link, polyfill redirect.
     // response_mode direct_post.jwt.
@@ -212,22 +217,212 @@ const presentationDefinitionSchema = v.object({
  * Due to bfcache some state will persist across
  * navigation events, so we 'manually' clear it.
  * @see https://developer.mozilla.org/en-US/docs/Glossary/bfcache
+ *
+ * A hard reload here would abandon any in-flight cross-device wallet scan:
+ * the QR the user's phone is still holding is bound to a session_id that
+ * would be replaced on the next /ui/interaction. Alpine's init() does NOT
+ * re-run on a bfcache restore, so init() installs a pageshow listener
+ * (event.persisted) that reruns the resume path - reopens SSE and calls
+ * /ui/completion - instead of recreating the authorization context from
+ * scratch here.
  */
-window.addEventListener("pageshow", (event) => {
-    if (event.persisted) {
-        window.location.reload();
-    }
-});
 
 const baseUrl = new URL(window.location.origin);
 
+// JWT_METADATA_CLAIMS lists SD-JWT infrastructure claims the inline result
+// view skips, matching the server-side callback.html renderer in
+// httpserver/service.go.
+const JWT_METADATA_CLAIMS = new Set([
+    "iss", "sub", "iat", "exp", "nbf", "jti", "cnf", "vct", "vct#integrity",
+    "status", "_sd", "_sd_alg",
+]);
+
+/** @param {string} s */
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => (
+        c === "&" ? "&amp;" :
+        c === "<" ? "&lt;" :
+        c === ">" ? "&gt;" :
+        c === '"' ? "&quot;" :
+        "&#39;"
+    ));
+}
+
+/**
+ * Append one or more <tr> rows describing name/value at the given depth.
+ * Mirrors renderNode in internal/verifier/httpserver/service.go.
+ *
+ * @param {string[]} rows
+ * @param {string} name
+ * @param {any} value
+ * @param {number} depth
+ */
+function renderClaimNode(rows, name, value, depth) {
+    const indent = depth * 24;
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+        rows.push(
+            `<tr><td style="padding-left:${indent}px;font-weight:600;">${escapeHtml(name)}</td><td></td></tr>`,
+        );
+        for (const childKey of Object.keys(value).sort()) {
+            if (JWT_METADATA_CLAIMS.has(childKey)) continue;
+            renderClaimNode(rows, childKey, value[childKey], depth + 1);
+        }
+        return;
+    }
+    if (Array.isArray(value)) {
+        const parts = [];
+        for (const elem of value) {
+            if (elem && typeof elem === "object" && !Array.isArray(elem)) {
+                const keys = Object.keys(elem);
+                if (keys.length === 1 && keys[0] === "...") continue;
+            }
+            parts.push(String(elem));
+        }
+        if (parts.length > 0) {
+            rows.push(
+                `<tr><td style="padding-left:${indent}px;">${escapeHtml(name)}</td><td><code>${escapeHtml(parts.join(", "))}</code></td></tr>`,
+            );
+        } else {
+            rows.push(
+                `<tr><td style="padding-left:${indent}px;">${escapeHtml(name)}</td><td><code>[]</code> <em>(element details not disclosed by wallet)</em></td></tr>`,
+            );
+        }
+        return;
+    }
+    const valStr = String(value);
+    if (name === "picture") {
+        rows.push(
+            `<tr><td style="padding-left:${indent}px;">${escapeHtml(name)}</td><td><img src="data:image/png;base64,${escapeHtml(valStr)}" alt="Picture" style="max-width:120px;max-height:160px;border-radius:4px;"></td></tr>`,
+        );
+    } else {
+        rows.push(
+            `<tr><td style="padding-left:${indent}px;">${escapeHtml(name)}</td><td><code>${escapeHtml(valStr)}</code></td></tr>`,
+        );
+    }
+}
+
+/**
+ * Deep-clean SD-JWT unresolved array-element markers ({"...": hash}) from
+ * credential data, matching cleanUnresolvedMarkersForDisplay in
+ * internal/verifier/httpserver/service.go. Used for the "Credential data"
+ * JSON pretty-print under the inline result view.
+ *
+ * @param {any} value
+ * @returns {any}
+ */
+function cleanUnresolvedMarkers(value) {
+    if (Array.isArray(value)) {
+        const out = [];
+        for (const elem of value) {
+            if (elem && typeof elem === "object" && !Array.isArray(elem)) {
+                const keys = Object.keys(elem);
+                if (keys.length === 1 && keys[0] === "...") continue;
+            }
+            out.push(cleanUnresolvedMarkers(elem));
+        }
+        return out;
+    }
+    if (value !== null && typeof value === "object") {
+        /** @type {Record<string, any>} */
+        const out = {};
+        for (const [k, v] of Object.entries(value)) {
+            out[k] = cleanUnresolvedMarkers(v);
+        }
+        return out;
+    }
+    return value;
+}
+
+// SESSION_STORAGE_KEY names the sessionStorage entry that carries the
+// server-generated session_id across reloads. sessionStorage (not
+// localStorage) so it is tab-scoped and cleared on tab close, matching the
+// lifetime of an in-flight wallet interaction.
+const SESSION_STORAGE_KEY = "vc.verifier.session_id";
+// RESPONSE_CODE_STORAGE_KEY carries the response_code of the last completed
+// verification across F5 reloads so the result stays on screen instead of
+// snapping back to the preset menu. The server's credential cache is the
+// authority (5m TTL); this entry is cleared when the user leaves the result.
+const RESPONSE_CODE_STORAGE_KEY = "vc.verifier.response_code";
+
+/** @returns {string} */
+function loadStoredSessionID() {
+    try {
+        return window.sessionStorage.getItem(SESSION_STORAGE_KEY) ?? "";
+    } catch {
+        return "";
+    }
+}
+
+/** @param {string} id */
+function storeSessionID(id) {
+    try {
+        if (id) {
+            window.sessionStorage.setItem(SESSION_STORAGE_KEY, id);
+        }
+    } catch {
+        // sessionStorage may be blocked (private mode, disabled by policy).
+        // Reload survival is unavailable in that case: the cookie is no
+        // longer treated as a reuse hint by /ui/interaction, so a reload
+        // mints a fresh session rather than rejoining the in-flight one.
+    }
+}
+
+function clearStoredSessionID() {
+    try {
+        window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch {
+        // Same as storeSessionID.
+    }
+}
+
+/** @returns {string} */
+function loadStoredResponseCode() {
+    try {
+        return window.sessionStorage.getItem(RESPONSE_CODE_STORAGE_KEY) ?? "";
+    } catch {
+        return "";
+    }
+}
+
+/** @param {string} code */
+function storeResponseCode(code) {
+    try {
+        if (code) {
+            window.sessionStorage.setItem(RESPONSE_CODE_STORAGE_KEY, code);
+        }
+    } catch {
+        // sessionStorage may be blocked; the result then only survives
+        // within the same page lifetime and an F5 falls back to the menu.
+    }
+}
+
+function clearStoredResponseCode() {
+    try {
+        window.sessionStorage.removeItem(RESPONSE_CODE_STORAGE_KEY);
+    } catch {
+        // Same as storeResponseCode.
+    }
+}
+
 /**
  * Listen for SSE notifications from the server.
- * When a response_code is received, redirect to the callback URL.
+ * When a response_code is received, invoke onRedirect so the caller can
+ * decide whether to render the result inline or navigate to the URL.
+ *
+ * The session_id is passed as a query param so the reloaded tab can rejoin
+ * an authorization context even when a concurrent tab has already
+ * overwritten the shared cookie. Absent id falls back to the cookie.
+ *
+ * @param {string | undefined} sessionID
+ * @param {(redirectURI: string) => void} onRedirect
  */
-function setupNotifyListener() {
+function setupNotifyListener(sessionID, onRedirect) {
     console.log("Setting up SSE notify listener");
-    const eventSource = new EventSource(new URL("/ui/notify", baseUrl).toString());
+    const notifyURL = new URL("/ui/notify", baseUrl);
+    if (sessionID) {
+        notifyURL.searchParams.set("session_id", sessionID);
+    }
+    const eventSource = new EventSource(notifyURL.toString());
 
     eventSource.onopen = () => {
         console.log("SSE connection opened");
@@ -236,26 +431,26 @@ function setupNotifyListener() {
     eventSource.onmessage = (event) => {
         const data = event.data;
         console.log("SSE message received:", data);
-        
-        // Check if the message contains a redirect_uri
-        if (data && typeof data === "string" && data.includes("redirect_uri")) {
-            try {
-                const parsed = JSON.parse(data);
-                if (parsed.redirect_uri) {
-                    console.log("Redirecting to:", parsed.redirect_uri);
-                    eventSource.close();
-                    window.location.href = parsed.redirect_uri;
-                }
-            } catch {
-                // Try to extract redirect_uri directly if not valid JSON
-                const match = data.match(/redirect_uri[=:]["']?([^"'\s]+)/);
-                if (match && match[1]) {
-                    console.log("Redirecting to (regex):", match[1]);
-                    eventSource.close();
-                    window.location.href = match[1];
-                }
+
+        if (!data || typeof data !== "string" || !data.includes("redirect_uri")) {
+            return;
+        }
+        let redirectURI = "";
+        try {
+            const parsed = JSON.parse(data);
+            if (parsed.redirect_uri) {
+                redirectURI = parsed.redirect_uri;
+            }
+        } catch {
+            const match = data.match(/redirect_uri[=:]["']?([^"'\s]+)/);
+            if (match && match[1]) {
+                redirectURI = match[1];
             }
         }
+        if (!redirectURI) return;
+        console.log("Received redirect_uri from SSE:", redirectURI);
+        eventSource.close();
+        onRedirect(redirectURI);
     };
 
     eventSource.onerror = (error) => {
@@ -328,6 +523,16 @@ Alpine.data("app", () => ({
     /** @type {boolean} Set once a native DC API presentation has been submitted and accepted. */
     dcApiVerified: false,
 
+    /** @type {{credential_data: Array<{scope: string, credential: Record<string, any>, claims: any}>} | null}
+     * The last completed verification's result, shown inline so the verifier
+     * stays on the page instead of navigating to /verification/callback and
+     * losing the result on an F5 reload. */
+    verificationResult: null,
+
+    /** @type {boolean} True when a stored response_code refers to a result
+     * the server no longer has (credential cache TTL expired). */
+    verificationExpired: false,
+
     async init() {
         await this.lookupCredentialsList();
 
@@ -339,6 +544,53 @@ Alpine.data("app", () => ({
             }
         });
 
+        // bfcache restore keeps the DOM and JS state but does NOT re-run
+        // Alpine init, so the SSE listener we had before the user navigated
+        // away is gone and a wallet completion arriving while the page was
+        // cached is lost by the non-durable pub/sub bus. On pageshow with
+        // event.persisted==true we re-run the resume path: it reconnects
+        // SSE and reconciles the server-side completion marker through
+        // /ui/completion. The listener itself lives for the document's
+        // lifetime, so no cleanup pair is needed.
+        globalThis.addEventListener("pageshow", (event) => {
+            if (!event.persisted) return;
+            void this._handleBFCacheRestore();
+        });
+
+        // Restore a previously completed result after an F5. Fetch failure
+        // (expired cache) shows the "no longer available" notice rather
+        // than silently falling back to the preset menu.
+        const storedCode = loadStoredResponseCode();
+        if (storedCode) {
+            await this.loadVerificationResult(storedCode);
+            return;
+        }
+        // Resume a mid-flow session: either the QR screen the user left
+        // behind, or the already-complete response_code if the wallet
+        // answered while we were reloading.
+        const storedSessionID = loadStoredSessionID();
+        if (storedSessionID) {
+            await this.resumeFromSessionID(storedSessionID);
+        }
+    },
+
+    /** Re-run the resume path after a bfcache restore. */
+    async _handleBFCacheRestore() {
+        const storedCode = loadStoredResponseCode();
+        if (storedCode) {
+            await this.loadVerificationResult(storedCode);
+            return;
+        }
+        const storedSessionID = loadStoredSessionID();
+        if (!storedSessionID) return;
+        // Close the SSE connection that outlived the navigation but may be
+        // in an inconsistent state; resumeFromSessionID / _setupFallbackFlow
+        // reopens one on the restored session_id.
+        if (this.notifyEventSource) {
+            this.notifyEventSource.close();
+            this.notifyEventSource = null;
+        }
+        await this.resumeFromSessionID(storedSessionID);
     },
 
     async lookupCredentialsList() {
@@ -496,17 +748,75 @@ Alpine.data("app", () => ({
         this.dcqlQuery = null;
         this.presentationDefinition = null;
         this.dcApiVerified = false;
+        this.verificationResult = null;
+        this.verificationExpired = false;
+        clearStoredSessionID();
+        clearStoredResponseCode();
     },
 
-    /** 
-     * Handle click on wallet link - close SSE connection for same-device flow
-     * This allows the server to detect same-device flow and include redirect_uri
+    /**
+     * Commit the same-device intent before the browser leaves for a web
+     * wallet or launches a native wallet via custom scheme. direct_post
+     * reads this flag to decide whether to return redirect_uri, and a
+     * fire-and-forget fetch here would race the wallet's response: keepalive
+     * only guarantees the request goes out, not that the server has
+     * persisted it before direct_post reads the auth context. Await it.
+     *
+     * The POST carries the session_id returned by /ui/interaction so the
+     * flag lands on this presentation's authorization context. The server's
+     * cookie fallback is per-origin and shared across tabs: without an
+     * explicit id, a second tab that opened /ui/interaction after this one
+     * would silently claim the cookie and this click would mark the wrong
+     * session.
+     *
+     * On failure, hand the wallet URL to a tab that was opened synchronously
+     * from the click, so the popup blocker still sees a live user gesture
+     * (transient activation would already be gone after the awaited fetch).
+     * The current tab (and its live SSE) survives to deliver the response
+     * through the cross-device channel instead.
+     *
+     * Do NOT close the SSE here: a same-tab navigation tears it down on its
+     * own, and a custom-scheme launch leaves the tab open and still needing
+     * SSE as a fallback channel to receive the response.
      */
-    handleWalletClick() {
-        console.log("Wallet link clicked, closing SSE connection for same-device flow");
-        if (this.notifyEventSource) {
-            this.notifyEventSource.close();
-            this.notifyEventSource = null;
+    async handleWalletClick(event) {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+            return;
+        }
+        event.preventDefault();
+        const url = event.currentTarget.href;
+        // Opened inside the click so the browser still counts a live user
+        // activation when the fallback runs after the awaited fetch.
+        // No `noopener`: that feature makes window.open return null and
+        // then we would not be able to close or navigate the placeholder.
+        // Severed manually below (opener = null) before any navigation.
+        const fallbackWindow = globalThis.open("", "_blank");
+        try {
+            const res = await fetch(new URL("/verification/session-preference", baseUrl).toString(), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    session_id: this.presentationDefinition?.session_id ?? loadStoredSessionID(),
+                    wallet_follows_redirect: true,
+                }),
+            });
+            if (!res.ok) {
+                throw new Error(`session-preference returned ${res.status}`);
+            }
+            if (fallbackWindow && !fallbackWindow.closed) {
+                fallbackWindow.close();
+            }
+            globalThis.location.href = url;
+        } catch (err) {
+            console.error("Failed to mark same-device flow, opening wallet in a new tab so this page can still redirect", err);
+            if (fallbackWindow && !fallbackWindow.closed) {
+                try { fallbackWindow.opener = null; } catch { /* cross-origin after nav */ }
+                fallbackWindow.location.href = url;
+            } else {
+                // Popup blocker denied the pre-opened tab; last-resort try
+                // (likely blocked too, but worth attempting).
+                globalThis.open(url, "_blank", "noopener");
+            }
         }
     },
 
@@ -589,6 +899,7 @@ Alpine.data("app", () => ({
         this.dcApiVerified = false;
 
         try {
+            const storedSessionID = loadStoredSessionID();
             const res = await this.fetchData(
                 new URL("/ui/interaction", baseUrl), 
                 {
@@ -599,11 +910,13 @@ Alpine.data("app", () => ({
                     body: JSON.stringify({
                         dcql_query: this.dcqlQuery,
                         ...(this.validations ? { validations: this.validations } : {}),
+                        ...(storedSessionID ? { session_id: storedSessionID } : {}),
                     })
                 },
             );
 
             this.presentationDefinition = v.parse(presentationDefinitionSchema, res);
+            storeSessionID(this.presentationDefinition.session_id);
 
             // Configure the DC API polyfill with server-side session info
             configureDCAPI({
@@ -669,7 +982,7 @@ Alpine.data("app", () => ({
             // verifier's backend ever learns the presentation happened.
             const submission = await this._submitDCAPIResponse(result.data);
             if (submission?.redirect_uri) {
-                globalThis.location.href = submission.redirect_uri;
+                await this.handleRedirectURI(submission.redirect_uri);
             } else {
                 this.dcApiVerified = true;
             }
@@ -736,7 +1049,24 @@ Alpine.data("app", () => ({
     _setupFallbackFlow() {
         if (!this.notifyEventSource) {
             console.log("Starting SSE notify listener from sendDcqlQuery");
-            this.notifyEventSource = setupNotifyListener();
+            const sessionID = this.presentationDefinition?.session_id;
+            this.notifyEventSource = setupNotifyListener(
+                sessionID,
+                (redirectURI) => { this.handleRedirectURI(redirectURI); },
+            );
+            // Close the race between /ui/resume (or sendDcqlQuery) reading
+            // "pending" and this SSE subscription becoming live. Firing on
+            // "open" guarantees the server-side subscribe-before-check
+            // ordering: EventSource.open means the GET /ui/notify handler
+            // has already called notify.OpenListener (SSE headers are only
+            // flushed after that). A publish between /ui/resume returning
+            // "pending" and that moment would be lost by the non-durable
+            // bus, so /ui/completion covers it; a publish before SSE is
+            // live but after /ui/completion returned is still caught
+            // because reconnects also fire "open".
+            this.notifyEventSource.addEventListener("open", () => {
+                void this._reconcileCompletion(sessionID);
+            });
         }
 
         const presDefURI = new URL(this.presentationDefinition.authorization_request);
@@ -749,6 +1079,277 @@ Alpine.data("app", () => ({
             if (!this.redirectUris) this.redirectUris = {};
             this.redirectUris[`Open with ${label}`] = uri.toString();
         }
+    },
+
+    /**
+     * Check /ui/completion for a persisted response_code and, if found,
+     * finish the flow the way the SSE redirect would have. Safe to call
+     * even when the SSE listener fires first: loadVerificationResult runs
+     * once per response_code, and the second caller sees loading flipped
+     * off and bails.
+     *
+     * @param {string | undefined} sessionID
+     */
+    async _reconcileCompletion(sessionID) {
+        if (!sessionID) return;
+        const url = new URL("/ui/completion", baseUrl);
+        url.searchParams.set("session_id", sessionID);
+        let data;
+        try {
+            const res = await fetch(url.toString(), { credentials: "same-origin" });
+            if (!res.ok) return;
+            data = await res.json();
+        } catch (err) {
+            console.error("Failed to reconcile completion", err);
+            return;
+        }
+        if (!data || data.status !== "complete") return;
+        const responseCode = typeof data.response_code === "string" ? data.response_code : "";
+        if (!responseCode) return;
+        console.log("Reconciled lost SSE completion from /ui/completion");
+        if (this.notifyEventSource) {
+            this.notifyEventSource.close();
+            this.notifyEventSource = null;
+        }
+        storeResponseCode(responseCode);
+        clearStoredSessionID();
+        await this.loadVerificationResult(responseCode);
+    },
+
+    /**
+     * React to a redirect_uri delivered by SSE or returned by a DC API
+     * submission. For the verifier's own callback URL (both the
+     * cross-device SSE flow and the same-device wallet redirect flow point
+     * here) the result is fetched and rendered inline so an F5 keeps the
+     * user on the result instead of taking them back to the preset menu.
+     * Any other URL is treated as an opaque redirect target.
+     *
+     * @param {string} redirectURI
+     */
+    async handleRedirectURI(redirectURI) {
+        let responseCode = "";
+        try {
+            // Second arg lets a relative URI (same-origin) still parse.
+            const parsed = new URL(redirectURI, baseUrl);
+            if (parsed.origin === baseUrl.origin && parsed.pathname.endsWith("/verification/callback")) {
+                responseCode = parsed.searchParams.get("response_code") ?? "";
+            }
+        } catch (err) {
+            console.error("Failed to parse redirect_uri", err);
+        }
+
+        if (responseCode) {
+            storeResponseCode(responseCode);
+            clearStoredSessionID();
+            await this.loadVerificationResult(responseCode);
+            return;
+        }
+
+        // Not our callback URL: fall back to a plain navigation so an
+        // integrator-supplied redirect target still works.
+        clearStoredSessionID();
+        globalThis.location.href = redirectURI;
+    },
+
+    /**
+     * Fetch the verified credential data for responseCode and show it
+     * inline. A 404 means the server-side credential cache has expired (or
+     * never knew this code); surface it as verificationExpired rather than
+     * dropping the user back on the preset menu with no feedback. A
+     * transient 5xx (or any other non-2xx) preserves the stored code so a
+     * reload can retry - the code is the only key that can bring the
+     * completed result back.
+     *
+     * @param {string} responseCode
+     */
+    async loadVerificationResult(responseCode) {
+        const url = new URL("/ui/result", baseUrl);
+        url.searchParams.set("response_code", responseCode);
+        let res;
+        try {
+            res = await fetch(url.toString(), { credentials: "same-origin" });
+        } catch (err) {
+            console.error("Failed to load verification result", err);
+            this.error = `Failed to load verification result: ${err}`;
+            return;
+        }
+        if (!res.ok) {
+            console.log("Verification result not available (status", res.status, ")");
+            if (res.status === 404 || res.status === 410) {
+                clearStoredResponseCode();
+                // bfcache can restore this component with the previously
+                // rendered claims still in verificationResult; without this
+                // reset the expiry notice and the stale credential data
+                // would be shown together.
+                this.verificationResult = null;
+                this.verificationExpired = true;
+            } else {
+                this.error = `Verification result unavailable (status ${res.status})`;
+            }
+            this.loading = false;
+            return;
+        }
+        try {
+            this.verificationResult = await res.json();
+        } catch (err) {
+            console.error("Failed to parse verification result", err);
+            this.error = `Failed to parse verification result: ${err}`;
+            return;
+        }
+        this.loading = false;
+        if (this.notifyEventSource) {
+            this.notifyEventSource.close();
+            this.notifyEventSource = null;
+        }
+    },
+
+    /**
+     * Rebuild the UI from the server's view of a stored session_id. The
+     * three live outcomes are: complete (fetch and show the result), pending
+     * (restore the QR screen with its original authorization_request and
+     * dcql_query so the wallet's outstanding scan still resolves), or
+     * unknown/expired (drop the stored id and fall back to the preset menu).
+     *
+     * Never throws: a network blip here must not block init from rendering
+     * the preset menu.
+     *
+     * @param {string} sessionID
+     */
+    async resumeFromSessionID(sessionID) {
+        const url = new URL("/ui/resume", baseUrl);
+        url.searchParams.set("session_id", sessionID);
+        let data;
+        try {
+            const res = await fetch(url.toString(), { credentials: "same-origin" });
+            if (!res.ok) {
+                // Only drop the stored id when the server authoritatively
+                // says it is gone. A transient 5xx keeps it so a reload
+                // can retry; the next call either succeeds or sees the
+                // id truly expire.
+                if (res.status === 404 || res.status === 410) {
+                    clearStoredSessionID();
+                }
+                return;
+            }
+            data = await res.json();
+        } catch (err) {
+            console.error("Failed to resume session", err);
+            return;
+        }
+        if (!data || typeof data !== "object") {
+            return;
+        }
+        if (data.status === "complete" && typeof data.response_code === "string" && data.response_code) {
+            storeResponseCode(data.response_code);
+            clearStoredSessionID();
+            await this.loadVerificationResult(data.response_code);
+            return;
+        }
+        if (data.status === "pending" && typeof data.authorization_request === "string" && data.authorization_request) {
+            this.restorePendingQRScreen(data);
+            return;
+        }
+        // unknown or expired: no live state to resume to, so drop the
+        // stale id and let the preset menu render.
+        clearStoredSessionID();
+    },
+
+    /**
+     * Re-materialize the QR / wallet-link screen from a /ui/resume reply.
+     * credentialsList and credentialAttributes are set to the sentinel
+     * empty objects handleSelectPredefinedPresentationDefinition uses, so
+     * the template's x-if chain picks the QR view - full menu state
+     * repopulation happens later when the user presses "Back to menu".
+     *
+     * @param {any} data
+     */
+    restorePendingQRScreen(data) {
+        this.credentialsList = {};
+        // @ts-ignore - sentinel, matches handleSelectPredefinedPresentationDefinition
+        this.credentialAttributes = {};
+        this.dcqlQuery = data.dcql_query || null;
+        this.validations = data.validations || null;
+        this.presentationDefinition = {
+            session_id: data.session_id,
+            qr_code: data.qr_code || "",
+            authorization_request: data.authorization_request,
+            dc_api_authorization_request: data.dc_api_authorization_request || "",
+        };
+        storeSessionID(data.session_id);
+        if (this.walletInstances) {
+            // Needed for a DC API submission to find its way back to this
+            // page's response_uri - mirrors sendDcqlQuery's setup. Native
+            // DC API is NOT re-attempted here: a reload cannot resume
+            // navigator.credentials.get, so we go straight to the fallback.
+            configureDCAPI({
+                baseUrl: baseUrl.toString(),
+                sseUrl: new URL("/ui/notify", baseUrl).toString(),
+                webWallets: this.walletInstances,
+            });
+        }
+        this._setupFallbackFlow();
+    },
+
+    /**
+     * Return to the preset menu after a completed (or expired) verification.
+     * Clears all flow-specific state and re-fetches metadata so the preset
+     * buttons and credential dropdown repopulate - handleSelectPredefinedPresentationDefinition
+     * clears credentialsList and the custom-credential select would otherwise
+     * come up empty.
+     */
+    async handleBackToMenu() {
+        clearStoredResponseCode();
+        clearStoredSessionID();
+        this.verificationResult = null;
+        this.verificationExpired = false;
+        this.dcApiVerified = false;
+        this.credentialAttributes = null;
+        this.dcqlQuery = null;
+        this.presentationDefinition = null;
+        this.redirectUris = null;
+        this.validations = null;
+        this.error = null;
+        if (this.notifyEventSource) {
+            this.notifyEventSource.close();
+            this.notifyEventSource = null;
+        }
+        this.loading = true;
+        try {
+            await this.lookupCredentialsList();
+        } catch (err) {
+            // Surface the failure instead of leaving the UI on an
+            // indefinite spinner with no menu controls to recover.
+            this.error = err instanceof Error ? err.message : String(err);
+        } finally {
+            this.loading = false;
+        }
+    },
+
+    /**
+     * Render a server-returned credential map as HTML table rows. Mirrors
+     * the server's renderClaimsTree (see httpserver/service.go) for the
+     * inline result view - same claim-skip list, same indentation, same
+     * picture-as-image special case.
+     *
+     * Alpine's x-html binds raw HTML into the DOM; every value interpolated
+     * here is escaped first with escapeHtml.
+     *
+     * @param {Record<string, any>} claims
+     * @returns {string}
+     */
+    renderClaimTree(claims) {
+        if (!claims || typeof claims !== "object") return "";
+        const rows = [];
+        for (const k of Object.keys(claims).sort()) {
+            if (JWT_METADATA_CLAIMS.has(k)) continue;
+            renderClaimNode(rows, k, claims[k], 0);
+        }
+        return rows.join("");
+    },
+
+    /** @param {any} value */
+    cleanCredentialForDisplay(value) {
+        return cleanUnresolvedMarkers(value);
     },
 
     /**

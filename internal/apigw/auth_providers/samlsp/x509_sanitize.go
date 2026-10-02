@@ -139,10 +139,7 @@ func wrapBase64(s string, cols int) string {
 	var out strings.Builder
 	out.Grow(len(s) + len(s)/cols)
 	for i := 0; i < len(s); i += cols {
-		end := i + cols
-		if end > len(s) {
-			end = len(s)
-		}
+		end := min(i+cols, len(s))
 		out.WriteString(s[i:end])
 		if end < len(s) {
 			out.WriteByte('\n')

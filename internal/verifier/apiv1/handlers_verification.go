@@ -31,19 +31,20 @@ type VerificationRequestObjectRequest struct {
 func (c *Client) VerificationRequestObject(ctx context.Context, req *VerificationRequestObjectRequest) (string, error) {
 	c.log.Debug("Verification request object", "id", req.ID)
 
-	// Query by RequestObjectID since that's what the wallet sends via ?id= parameter
-	authorizationContext, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{
-		RequestObjectID: req.ID,
-	})
-	if err != nil {
-		c.log.Error(err, "failed to get authorization context")
-		return "", err
-	}
-
-	// TODO(masv): should requestObjectCache be using cache lib
-	requestObject, found := c.openid4vp.RequestObjectCache.Get(authorizationContext.RequestObjectID)
+	// Resolve the supplied id directly from the request object cache. A
+	// single authorization context can produce two ids (the QR / request_uri
+	// id and a separate DC API id), only the first of which is persisted on
+	// the auth context - looking up by RequestObjectID would therefore 404
+	// every DC API fetch. The cache is written only from authenticated
+	// /ui/interaction paths, so a cache hit is itself sufficient proof the
+	// id names a request we minted.
+	//
+	// cacheService.RequestObject is HA-backed (Mongo in HA mode), so the
+	// wallet's request_uri resolves even when it lands on a different
+	// verifier node from the one that minted it.
+	requestObject, found := c.cacheService.RequestObject.Get(ctx, req.ID)
 	if !found {
-		c.log.Error(nil, "request object not found in cache", "requestObjectID", authorizationContext.RequestObjectID)
+		c.log.Error(nil, "request object not found in cache", "requestObjectID", req.ID)
 		return "", errors.New("request object not found")
 	}
 
@@ -53,7 +54,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", err
 	}
 
-	c.log.Debug("Signed JWT created", "requestObjectID", authorizationContext.RequestObjectID)
+	c.log.Debug("Signed JWT created", "requestObjectID", req.ID)
 
 	return signedJWT, nil
 }
@@ -79,8 +80,9 @@ func (v *VerificationDirectPostRequest) GetKID() (string, error) {
 }
 
 type VerificationDirectPostResponse struct {
-	// RedirectURI is optional - only included for same-device flows
-	// For cross-device flows, the browser is notified via SSE instead
+	// RedirectURI is present for same-device flows so the wallet can send
+	// the browser back to the verifier. Cross-device flows omit it: the
+	// still-open verifier tab is nudged over SSE instead.
 	RedirectURI string `json:"redirect_uri,omitempty"`
 }
 
@@ -359,14 +361,16 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// just correctly rendered from the SAME original DCQL query,
 			// meaning the query itself was never lost, only this particular
 			// round-trip through AuthContext's Mongo store. Fall back to
-			// RequestObjectCache (an in-memory, non-Mongo cache keyed by
-			// RequestObjectID) - it holds the exact RequestObject that was
-			// signed and served to the wallet at /verification/request-object
-			// (see VerificationRequestObject), which necessarily carries the
-			// same DCQLQuery the wallet just demonstrably parsed correctly.
+			// RequestObjectCache (the HA-backed cache keyed by
+			// RequestObjectID; backed by Mongo when cfg.Common.HA.Enable is
+			// set, in-memory otherwise) - it holds the exact RequestObject
+			// that was signed and served to the wallet at
+			// /verification/request-object (see VerificationRequestObject),
+			// which necessarily carries the same DCQLQuery the wallet just
+			// demonstrably parsed correctly.
 			dcqlQuery := authCtx.DCQLQuery
 			if dcqlQuery == nil {
-				if requestObject, found := c.openid4vp.RequestObjectCache.Get(authCtx.RequestObjectID); found {
+				if requestObject, found := c.cacheService.RequestObject.Get(ctx, authCtx.RequestObjectID); found {
 					dcqlQuery = requestObject.DCQLQuery
 				}
 			}
@@ -620,27 +624,48 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		credentialCaches = append(credentialCaches, scopeCredentials[scope]...)
 	}
 
-	// Cache validated credentials
-	c.cacheService.Credential.Set(ctx, responseCode, credentialCaches)
+	// Cache validated credentials. responseCode is a fresh UUID, so SetNX
+	// cannot lose to a collision; it exists here only to surface a Mongo /
+	// Redis write failure that Set would silently swallow - otherwise the
+	// completion marker below gets persisted, SSE fires, and /ui/result
+	// 404s the one key the browser can use to recover.
+	if ok, err := c.cacheService.Credential.SetNX(ctx, responseCode, credentialCaches); err != nil {
+		c.log.Error(err, "failed to persist credential cache", "response_code", responseCode)
+		return nil, fmt.Errorf("credential cache persist: %w", err)
+	} else if !ok {
+		return nil, fmt.Errorf("credential cache persist: unexpected id collision for %s", responseCode)
+	}
 
 	c.log.Debug("Credentials cached", "response_code", responseCode, "count", len(credentialCaches))
+
+	// Persist the completion marker BEFORE broadcasting the redirect. A tab
+	// that reloads after Submit has fired but before it was observed must
+	// mint a fresh session rather than resubscribe to this now-consumed
+	// context (otherwise isReusableAuthContext would let the reload sit on
+	// an SSE stream whose only message has already been delivered). The
+	// VerifierResponseCode is already a per-completion value and is also
+	// what identifies the cached credentials for the callback.
+	authCtx.VerifierResponseCode = responseCode
+	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
+		c.log.Error(err, "failed to persist completion marker on authorization context", "session_id", authCtx.SessionID)
+		return nil, err
+	}
 
 	// Notify AFTER credentials are cached so the browser can fetch them
 	c.notify.Submit(authCtx.SessionID, map[string]string{"redirect_uri": redirectURI})
 
 	reply := &VerificationDirectPostResponse{}
 
-	// Check if there's an active SSE listener for this session
-	// If yes -> cross-device flow: browser is listening, notify via SSE, don't include redirect_uri
-	// If no -> same-device flow: no browser listening, include redirect_uri for wallet to follow
-	if c.notify.HasListener(authCtx.SessionID) {
-		// Cross-device flow: browser is waiting on SSE
-		c.log.Debug("Cross-device flow detected (SSE listener active)", "session_id", authCtx.SessionID)
-		// Don't include redirect_uri - wallet shows success, browser gets SSE notification
-	} else {
-		// Same-device flow: no SSE listener, wallet should redirect
-		c.log.Debug("Same-device flow detected (no SSE listener)", "session_id", authCtx.SessionID)
+	// WalletFollowsRedirect is committed by the browser tab BEFORE it leaves
+	// for the wallet (see /verification/session-preference callers), so it
+	// survives native wallets and web wallets alike; DC API responses arrive
+	// from in-tab JS, so they are same-device by construction.
+	sameDevice := authCtx.WalletFollowsRedirect || req.DCAPI
+	if sameDevice {
+		c.log.Debug("Same-device flow", "session_id", authCtx.SessionID, "wallet_follows_redirect", authCtx.WalletFollowsRedirect, "dc_api", req.DCAPI)
 		reply.RedirectURI = redirectURI
+	} else {
+		c.log.Debug("Cross-device flow", "session_id", authCtx.SessionID)
 	}
 
 	return reply, nil
@@ -829,9 +854,12 @@ func knownQueryKey(authCtx *cache.AuthorizationContext, key string) bool {
 func (c *Client) VerificationCallback(ctx context.Context, req *VerificationCallbackRequest) (*VerificationCallbackResponse, error) {
 	c.log.Debug("verificationCallback", "req", req)
 
-	credential, ok := c.cacheService.Credential.Get(ctx, req.ResponseCode)
-	if !ok {
-		return nil, fmt.Errorf("no item in credential cache matching id %s", req.ResponseCode)
+	credential, err := c.cacheService.Credential.GetErr(ctx, req.ResponseCode)
+	if err != nil {
+		if errors.Is(err, cache.ErrNoDocuments) {
+			return nil, fmt.Errorf("no item in credential cache matching id %s: %w", req.ResponseCode, err)
+		}
+		return nil, err
 	}
 
 	reply := &VerificationCallbackResponse{

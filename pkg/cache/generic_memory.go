@@ -34,6 +34,18 @@ func (m *MemoryCache[V]) Get(_ context.Context, key string) (V, bool) {
 	return item.Value(), true
 }
 
+// GetErr retrieves a value by key and returns ErrNoDocuments on a true
+// miss. The in-memory backend has no operational failure mode, so any
+// other error is impossible here.
+func (m *MemoryCache[V]) GetErr(_ context.Context, key string) (V, error) {
+	item := m.cache.Get(key)
+	if item == nil {
+		var zero V
+		return zero, ErrNoDocuments
+	}
+	return item.Value(), nil
+}
+
 // Set stores a value with the default TTL.
 func (m *MemoryCache[V]) Set(_ context.Context, key string, value V) {
 	m.cache.Set(key, value, ttlcache.DefaultTTL)

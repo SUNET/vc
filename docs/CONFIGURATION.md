@@ -175,10 +175,29 @@ drivers to want independent validation tags.
 
 > **Path:** `.common.ha`
 
-| Field                 | Type     | Description                                                                   | Example | Default    | Required |
-| --------------------- | -------- | ----------------------------------------------------------------------------- | ------- | ---------- | -------- |
-| `enable`              | `bool`   | HA mode; when true caches are backed by MongoDB instead of in-memory storage. | -       | `false`    | No       |
-| `cache_database_name` | `string` | MongoDB database name used for caches.                                        | -       | `vc_cache` | No       |
+| Field                 | Type     | Description                                                                                                                                                                                                                                                 | Example | Default    | Required |
+| --------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ---------- | -------- |
+| `enable`              | `bool`   | HA mode; when true caches are backed by MongoDB instead of in-memory storage.                                                                                                                                                                               | -       | `false`    | No       |
+| `cache_database_name` | `string` | MongoDB database name used for caches.                                                                                                                                                                                                                      | -       | `vc_cache` | No       |
+| `pubsub`              | `object` | The optional pub/sub backend (Redis or Valkey) used for cross-node notifications in HA mode - today just the verifier's SSE fanout. Omitted entirely in standalone deployments; when omitted in HA, notifications remain in-process and do not cross nodes. | -       | -          | No       |
+
+### `pubsub`
+
+> **Path:** `.common.ha.pubsub`
+
+Supports Redis and Valkey today (both speak RESP, so the same client
+serves both; Backend only decides what logs and metrics identify it as).
+Omitted in standalone deployments; when omitted in HA, notifications
+stay in-process and do not cross nodes.
+
+| Field      | Type       | Description                                                                                                           | Example          | Default | Required |
+| ---------- | ---------- | --------------------------------------------------------------------------------------------------------------------- | ---------------- | ------- | -------- |
+| `backend`  | `string`   | Backend selects the RESP backend; "redis" or "valkey". Defaults to "redis" when omitted.                              | -                | `redis` | No       |
+| `addrs`    | `[]string` | One or more "<host>:<port>" endpoints. A single entry yields a plain client; multiple entries yield a cluster client. | `["redis:6379"]` | -       | Yes      |
+| `username` | `string`   | ACL username (Redis 6+ / Valkey). Optional.                                                                           | -                | -       | No       |
+| `password` | `string`   | ACL password (Redis 6+ / Valkey) or the single AUTH password on older servers. Optional.                              | -                | -       | No       |
+| `db`       | `int`      | Logical database number used by single-node mode (ignored in cluster mode).                                           | -                | `0`     | No       |
+| `tls`      | `bool`     | TLS for the client connection, using system roots.                                                                    | -                | `false` | No       |
 
 ### `credential_registry`
 
@@ -1513,10 +1532,11 @@ Sections omitted from the secrets file are left untouched.
 
 > **Path:** `.common`
 
-| Field   | Type     | Description | Example | Default | Required |
-| ------- | -------- | ----------- | ------- | ------- | -------- |
-| `mongo` | `object` | Mongo       | -       | -       | No       |
-| `sql`   | `object` | SQL         | -       | -       | No       |
+| Field   | Type     | Description                                                   | Example | Default | Required |
+| ------- | -------- | ------------------------------------------------------------- | ------- | ------- | -------- |
+| `mongo` | `object` | Mongo                                                         | -       | -       | No       |
+| `sql`   | `object` | SQL                                                           | -       | -       | No       |
+| `ha`    | `object` | Credentials for the HA-mode pub/sub backend (Redis / Valkey). | -       | -       | No       |
 
 ### `mongo`
 
@@ -1550,6 +1570,23 @@ Sections omitted from the secrets file are left untouched.
 | Field      | Type     | Description                 | Example | Default | Required |
 | ---------- | -------- | --------------------------- | ------- | ------- | -------- |
 | `password` | `string` | MariaDB connection password | -       | -       | No       |
+
+### `ha`
+
+> **Path:** `.common.ha`
+
+| Field    | Type     | Description                                                                                                      | Example | Default | Required |
+| -------- | -------- | ---------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `pubsub` | `object` | Redis / Valkey ACL credentials used by the HA pub/sub bus. Omitted entirely when the backend is unauthenticated. | -       | -       | No       |
+
+### `pubsub`
+
+> **Path:** `.common.ha.pubsub`
+
+| Field      | Type     | Description                                                                    | Example | Default | Required |
+| ---------- | -------- | ------------------------------------------------------------------------------ | ------- | ------- | -------- |
+| `username` | `string` | ACL username (Redis 6+ / Valkey). Optional.                                    | -       | -       | No       |
+| `password` | `string` | ACL password (Redis 6+ / Valkey) or the single AUTH password on older servers. | -       | -       | No       |
 
 ### `apigw`
 
@@ -1678,6 +1715,10 @@ common:
     postgres:
       password: "change-me-in-production"
     mariadb:
+      password: "change-me-in-production"
+  ha:
+    pubsub:
+      username: "<secret-value>"
       password: "change-me-in-production"
 apigw:
   api_server:
