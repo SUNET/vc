@@ -147,6 +147,16 @@ func (r *respPubSub) Close() error {
 	return firstErr
 }
 
+// HealthProbe PINGs the RESP backend. Returns ErrClosed if the bus has
+// been shut down; any client error (connection refused, auth failure,
+// cluster not ready) surfaces unchanged to the caller.
+func (r *respPubSub) HealthProbe(ctx context.Context) error {
+	if r.isClosed() {
+		return ErrClosed
+	}
+	return r.client.Ping(ctx).Err()
+}
+
 func (r *respPubSub) register(s *respSubscription) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

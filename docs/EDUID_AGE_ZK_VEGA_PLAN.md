@@ -38,7 +38,7 @@ Two options, both viable:
 **Recommendation:** start with `mso_mdoc_zk` for the interop win, and add a
 `vctm_eduid_age_verification.mdoc.json` MDDL schema alongside the SD-JWT
 `vctm_eduid_age_verification.json`. Fall back to `zk+vega` only if the mdoc
-route turns out to be too constrained (e.g. representing the seven boolean +
+route turns out to be too constrained (e.g. representing the five boolean +
 date claims cleanly).
 
 ## Vega claim-slot mapping

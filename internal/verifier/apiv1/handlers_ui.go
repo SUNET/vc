@@ -401,13 +401,16 @@ type UIInteractionRequest struct {
 	DCQLQuery   *openid4vp.DCQL                        `json:"dcql_query" validate:"required"`
 	Validations map[string][]openid4vp.ClaimValidation `json:"validations,omitempty" validate:"omitempty,dive,dive"`
 
-	// SessionID is a reuse hint: the HTTP layer sets it from a body field
-	// or the cookie session before calling UIInteraction. When it names a
-	// still-valid, still-unclaimed authorization context created by an
-	// earlier /ui/interaction with the same DCQL query, the response
-	// returns that context's existing request_uri/QR so a browser reload
-	// mid-flow does not orphan the wallet's outstanding scan. Otherwise a
-	// fresh session id is minted and returned in the reply.
+	// SessionID is a reuse hint sourced ONLY from the request body (which
+	// mirrors the tab-scoped sessionStorage value). The HTTP layer
+	// deliberately does NOT populate it from the shared gin cookie
+	// session, because that cookie is overwritten by any sibling tab and
+	// would otherwise let a fresh tab inherit another tab's in-flight
+	// authorization context. When this id names a still-valid,
+	// still-unclaimed context with the same DCQL / validations, the
+	// response returns that context's existing request_uri/QR so a
+	// reload mid-flow does not orphan the wallet's outstanding scan.
+	// Otherwise a fresh session id is minted and returned in the reply.
 	SessionID string `json:"session_id,omitempty" validate:"omitempty,max=128,printascii"`
 }
 

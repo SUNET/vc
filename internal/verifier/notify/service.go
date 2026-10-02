@@ -21,8 +21,9 @@ import (
 // Internally the message bus is a pubsub.PubSub (MemoryPubSub by
 // default; Redis / Valkey when HA is configured). Multiple SSE
 // listeners on one node for the same session share a single backend
-// subscription via a ref-counted idGroup; a pump goroutine bridges
-// the shared subscription into each local listener channel.
+// subscription via a ref-counted idGroup; a fan-out goroutine
+// forwards each decoded message from that subscription to every
+// local listener channel.
 type Service struct {
 	log *logger.Log
 	cfg *model.Cfg
@@ -53,9 +54,9 @@ type Service struct {
 // so a Submit racing with CloseListener cannot send on a channel
 // about to be closed.
 type idGroup struct {
-	sub    pubsub.Subscription
-	done   chan struct{}
-	pumpWg sync.WaitGroup
+	sub       pubsub.Subscription
+	done      chan struct{}
+	fanOutWg  sync.WaitGroup
 
 	mu        sync.Mutex
 	listeners []chan any
@@ -99,10 +100,10 @@ func (g *idGroup) deliver(msg any) {
 	}
 }
 
-// close tears down the group: stop the pump, close the backend
-// subscription. Local listener channels are closed by CloseListener
-// (so the HTTP goroutine owning that channel observes the close
-// synchronously).
+// close tears down the group: stop the fan-out goroutine, close the
+// backend subscription. Local listener channels are closed by
+// CloseListener (so the HTTP goroutine owning that channel observes
+// the close synchronously).
 func (g *idGroup) close() {
 	g.mu.Lock()
 	if g.closed {
@@ -117,7 +118,7 @@ func (g *idGroup) close() {
 	if g.sub != nil {
 		_ = g.sub.Close()
 	}
-	g.pumpWg.Wait()
+	g.fanOutWg.Wait()
 }
 
 // New builds a Service wired to a MemoryPubSub. Standalone deployments
@@ -147,8 +148,8 @@ func NewWithBus(_ context.Context, cfg *model.Cfg, log *logger.Log, bus pubsub.P
 
 // OpenListener registers a new SSE listener for id. If this is the
 // first listener on this node for the id, a backend subscription is
-// opened and a pump goroutine is started that decodes backend
-// payloads into the local listener channels.
+// opened and a fan-out goroutine is started that decodes backend
+// payloads and forwards them to every local listener channel.
 func (s *Service) OpenListener(id string) chan any {
 	listener := make(chan any, 1)
 
@@ -177,40 +178,45 @@ func (s *Service) OpenListener(id string) chan any {
 		s.CH[id] = g
 		isNew = true
 	}
-	// Keep a local reference so the failure path below can close through
-	// the same once Service.Close may be about to invoke on this channel.
+
+	// Register the listener and (for a new group) call fanOutWg.Add(1)
+	// while still holding s.mu, so Service.Close's snapshot cannot
+	// straddle this transition. g is in s.CH only if it is not closed
+	// (both reclaim paths — Service.Close and CloseListener's
+	// last-listener close — delete g from s.CH under s.mu before
+	// calling g.close), so g.register cannot fail here; the check is
+	// kept defensive.
+	if !g.register(listener) {
+		s.mu.Unlock()
+		close(listener)
+		return listener
+	}
 	once := &sync.Once{}
 	s.listeners[id]++
 	s.listenerOnces[listener] = once
+	if isNew {
+		g.fanOutWg.Add(1)
+	}
 	s.mu.Unlock()
 
+	// The fan-out goroutine is started AFTER g.register, so its first
+	// g.deliver finds at least this listener registered. fanOutWg has
+	// already been incremented, so a Service.Close reaching
+	// g.close()->fanOutWg.Wait before the goroutine starts still
+	// blocks until the fan-out exits.
 	if isNew {
-		g.pumpWg.Add(1)
-		go s.pump(id, g)
-	}
-
-	if !g.register(listener) {
-		s.mu.Lock()
-		s.listeners[id]--
-		if s.listeners[id] <= 0 {
-			delete(s.listeners, id)
-		}
-		delete(s.listenerOnces, listener)
-		s.mu.Unlock()
-		// Shared once with Service.Close so a concurrent shutdown cannot
-		// double-close this channel.
-		once.Do(func() { close(listener) })
+		go s.fanOut(id, g)
 	}
 
 	s.log.Debug("OpenListener", "id", id)
 	return listener
 }
 
-// pump bridges g.sub.C() → every local listener on g. One goroutine
-// per idGroup, started by OpenListener when the group is created,
-// torn down by g.close() via the g.done channel.
-func (s *Service) pump(id string, g *idGroup) {
-	defer g.pumpWg.Done()
+// fanOut forwards every decoded backend message to each local listener
+// in g. One goroutine per idGroup, started by OpenListener when the
+// group is created, torn down by g.close() via the g.done channel.
+func (s *Service) fanOut(id string, g *idGroup) {
+	defer g.fanOutWg.Done()
 	ch := g.sub.C()
 	for {
 		select {
@@ -299,7 +305,7 @@ func (s *Service) Submit(id string, msg any) {
 // Close terminates every outstanding group and closes every live
 // listener channel so handlers blocked on <-listener wake up with a
 // closed channel instead of hanging. Groups are closed FIRST so each
-// pump goroutine exits and deliver is quiescent before any listener
+// fan-out goroutine exits and deliver is quiescent before any listener
 // channel is closed - otherwise a backend message in flight could
 // select the send branch on a channel we are about to close here and
 // panic. The bus itself is NOT closed here - its lifecycle is owned
@@ -325,6 +331,14 @@ func (s *Service) Close(_ context.Context) error {
 		once.Do(func() { close(ch) })
 	}
 	return nil
+}
+
+// HealthProbe satisfies the status.Prober contract by delegating to the
+// backing bus. For MemoryPubSub this is always healthy; for the RESP
+// backends it is a PING, so a dead Redis/Valkey surfaces in /health
+// rather than only through silent cross-node delivery failures.
+func (s *Service) HealthProbe(ctx context.Context) error {
+	return s.bus.HealthProbe(ctx)
 }
 
 // decodePayload reverses json.Marshal. The verifier only ever submits

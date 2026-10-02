@@ -51,10 +51,23 @@ EventSource for the reloaded page, and on the deliberate reload that the
 
 ## Design
 
+> **Note (implementation update):** this plan originally positioned the
+> shared gin cookie as the primary reuse channel. The shipped implementation
+> deliberately does **not** treat the cookie as a reuse hint, because the
+> cookie is per-origin and any sibling tab overwrites it; a fresh tab would
+> otherwise inherit another tab's in-flight authorization context. Only the
+> tab-scoped `session_id` in the request body (persisted in
+> `sessionStorage` on the client) can trigger reuse. The sections below are
+> kept for historical context; where they say "cookie reuse" or "cookie is
+> the primary channel", read "body reuse" / "body is the primary channel".
+> The SSE `?session_id=` query param in §4 is the sole mechanism that still
+> uses the cookie, as a fallback when neither `sessionStorage` nor a
+> query-string id is available.
+
 Two mutually reinforcing changes: server reuses an existing session when the
-cookie still points at a live one, and the client remembers its session id
-across reloads as a fallback for cookie loss (cookie SameSite/partitioning
-edge cases, private windows, etc.).
+request body carries a still-live `session_id` hint, and the client
+remembers its session id across reloads so the hint survives reloads and
+cross-tab cookie overwrites.
 
 ### 1. Server: reuse an in-flight session on `/ui/interaction`
 

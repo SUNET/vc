@@ -104,7 +104,7 @@
                         <svg class="has-text-success mb-2" style="width:80px" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.801 10A10 10 0 1 1 17 3.335"></path><path d="m9 11 3 3L22 4"></path></svg>
                         <p class="title is-size-4 has-text-success">Verification succeeded</p>
                     </div>
-                    <template x-for="cred in (verificationResult.credential_data || [])" :key="cred.scope">
+                    <template x-for="(cred, idx) in (verificationResult.credential_data || [])" :key="cred.scope + ':' + idx">
                         <div class="box" style="overflow:hidden;">
                             <h2 class="title is-size-5 mb-2">Credential claims — <span x-text="cred.scope"></span></h2>
                             <template x-if="cred.credential">

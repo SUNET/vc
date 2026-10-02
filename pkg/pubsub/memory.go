@@ -189,6 +189,17 @@ func (m *MemoryPubSub) Close() error {
 	return nil
 }
 
+// HealthProbe returns ErrClosed after Close has run, nil otherwise.
+// The in-process bus has no network to probe.
+func (m *MemoryPubSub) HealthProbe(_ context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return ErrClosed
+	}
+	return nil
+}
+
 // reapIfEmpty removes the group from the parent map when it still
 // matches the one we hold and has no live subscribers. Needed so a
 // stream of transient topics (random session ids) cannot inflate the

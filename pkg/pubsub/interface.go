@@ -34,6 +34,12 @@ type PubSub interface {
 	// Close releases backend resources and closes every outstanding
 	// Subscription. Safe to call multiple times.
 	Close() error
+
+	// HealthProbe reports whether the backing bus is reachable. Returns
+	// nil when healthy; a non-nil error surfaces unchanged to the
+	// aggregator (and to the SSE path, where a dead HA bus would
+	// otherwise leave every cross-node notification silently dropped).
+	HealthProbe(ctx context.Context) error
 }
 
 // Subscription is a single subscriber's handle to a topic. Each
