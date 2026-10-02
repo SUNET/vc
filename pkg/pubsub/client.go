@@ -7,10 +7,9 @@ import (
 )
 
 // ClientConfig captures the fields needed to construct a
-// redis.UniversalClient. It mirrors the subset of model.RedisHAConfig
-// pubsub actually uses, decoupling this package from pkg/model so
-// pkg/pubsub stays usable in isolation (and in tests) without pulling
-// in the full configuration graph.
+// redis.UniversalClient. Low-level builder input; the deployment-facing
+// yaml-tagged shape lives in pubsub.Config, and cmd/verifier maps between
+// the two.
 type ClientConfig struct {
 	// Addrs lists one or more "<host>:<port>" endpoints. A single entry
 	// yields a plain client; multiple entries yield a cluster client,

@@ -122,7 +122,7 @@ func (g *idGroup) close() {
 
 // New builds a Service wired to a MemoryPubSub. Standalone deployments
 // use this constructor; HA deployments should prefer NewWithBus so the
-// backend matches cfg.Common.HA.Redis.
+// backend matches cfg.Common.HA.PubSub.
 func New(ctx context.Context, cfg *model.Cfg, log *logger.Log) (*Service, error) {
 	return NewWithBus(ctx, cfg, log, pubsub.NewMemoryPubSub())
 }
@@ -166,6 +166,11 @@ func (s *Service) OpenListener(id string) chan any {
 		if err != nil {
 			s.mu.Unlock()
 			s.log.Error(err, "notify: pubsub Subscribe failed", "id", id)
+			// Close so the SSE handler's receive returns ok==false and
+			// the HTTP stream terminates; otherwise the browser's
+			// EventSource holds the connection open and never retries
+			// against a recovered backend.
+			close(listener)
 			return listener
 		}
 		g = &idGroup{sub: sub, done: make(chan struct{})}
@@ -189,6 +194,10 @@ func (s *Service) OpenListener(id string) chan any {
 		}
 		delete(s.listenerOnces, listener)
 		s.mu.Unlock()
+		// Group was closed under us (shutdown or lifecycle reclaim)
+		// between creation and registration. Close the listener so the
+		// handler's receive observes end-of-stream.
+		close(listener)
 	}
 
 	s.log.Debug("OpenListener", "id", id)

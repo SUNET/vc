@@ -220,10 +220,11 @@ const presentationDefinitionSchema = v.object({
  *
  * A hard reload here would abandon any in-flight cross-device wallet scan:
  * the QR the user's phone is still holding is bound to a session_id that
- * would be replaced on the next /ui/interaction. Alpine re-initialises on
- * a bfcache restore anyway (its Alpine.data init calls sendDcqlQuery
- * again), so leaving this alone lets the reuse hint on the server side
- * hand back the same authorization context.
+ * would be replaced on the next /ui/interaction. Alpine's init() does NOT
+ * re-run on a bfcache restore, so init() installs a pageshow listener
+ * (event.persisted) that reruns the resume path - reopens SSE and calls
+ * /ui/completion - instead of recreating the authorization context from
+ * scratch here.
  */
 
 const baseUrl = new URL(window.location.origin);
@@ -543,6 +544,19 @@ Alpine.data("app", () => ({
             }
         });
 
+        // bfcache restore keeps the DOM and JS state but does NOT re-run
+        // Alpine init, so the SSE listener we had before the user navigated
+        // away is gone and a wallet completion arriving while the page was
+        // cached is lost by the non-durable pub/sub bus. On pageshow with
+        // event.persisted==true we re-run the resume path: it reconnects
+        // SSE and reconciles the server-side completion marker through
+        // /ui/completion. The listener itself lives for the document's
+        // lifetime, so no cleanup pair is needed.
+        globalThis.addEventListener("pageshow", (event) => {
+            if (!event.persisted) return;
+            void this._handleBFCacheRestore();
+        });
+
         // Restore a previously completed result after an F5. Fetch failure
         // (expired cache) shows the "no longer available" notice rather
         // than silently falling back to the preset menu.
@@ -558,6 +572,25 @@ Alpine.data("app", () => ({
         if (storedSessionID) {
             await this.resumeFromSessionID(storedSessionID);
         }
+    },
+
+    /** Re-run the resume path after a bfcache restore. */
+    async _handleBFCacheRestore() {
+        const storedCode = loadStoredResponseCode();
+        if (storedCode) {
+            await this.loadVerificationResult(storedCode);
+            return;
+        }
+        const storedSessionID = loadStoredSessionID();
+        if (!storedSessionID) return;
+        // Close the SSE connection that outlived the navigation but may be
+        // in an inconsistent state; resumeFromSessionID / _setupFallbackFlow
+        // reopens one on the restored session_id.
+        if (this.notifyEventSource) {
+            this.notifyEventSource.close();
+            this.notifyEventSource = null;
+        }
+        await this.resumeFromSessionID(storedSessionID);
     },
 
     async lookupCredentialsList() {
@@ -1020,6 +1053,14 @@ Alpine.data("app", () => ({
                 this.presentationDefinition?.session_id,
                 (redirectURI) => { this.handleRedirectURI(redirectURI); },
             );
+            // Close the race between /ui/resume (or sendDcqlQuery) reading
+            // "pending" and this SSE subscription becoming live. Redis
+            // pub/sub is non-durable: a redirect_uri published during that
+            // window would otherwise be lost and this tab would wait on
+            // SSE forever. /ui/completion returns the server's persisted
+            // marker and lets us converge even when the published event
+            // predates the subscribe.
+            void this._reconcileCompletion(this.presentationDefinition?.session_id);
         }
 
         const presDefURI = new URL(this.presentationDefinition.authorization_request);
@@ -1032,6 +1073,41 @@ Alpine.data("app", () => ({
             if (!this.redirectUris) this.redirectUris = {};
             this.redirectUris[`Open with ${label}`] = uri.toString();
         }
+    },
+
+    /**
+     * Check /ui/completion for a persisted response_code and, if found,
+     * finish the flow the way the SSE redirect would have. Safe to call
+     * even when the SSE listener fires first: loadVerificationResult runs
+     * once per response_code, and the second caller sees loading flipped
+     * off and bails.
+     *
+     * @param {string | undefined} sessionID
+     */
+    async _reconcileCompletion(sessionID) {
+        if (!sessionID) return;
+        const url = new URL("/ui/completion", baseUrl);
+        url.searchParams.set("session_id", sessionID);
+        let data;
+        try {
+            const res = await fetch(url.toString(), { credentials: "same-origin" });
+            if (!res.ok) return;
+            data = await res.json();
+        } catch (err) {
+            console.error("Failed to reconcile completion", err);
+            return;
+        }
+        if (!data || data.status !== "complete") return;
+        const responseCode = typeof data.response_code === "string" ? data.response_code : "";
+        if (!responseCode) return;
+        console.log("Reconciled lost SSE completion from /ui/completion");
+        if (this.notifyEventSource) {
+            this.notifyEventSource.close();
+            this.notifyEventSource = null;
+        }
+        storeResponseCode(responseCode);
+        clearStoredSessionID();
+        await this.loadVerificationResult(responseCode);
     },
 
     /**

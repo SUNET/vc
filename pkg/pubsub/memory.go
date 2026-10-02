@@ -193,6 +193,16 @@ func (m *MemoryPubSub) Close() error {
 // matches the one we hold and has no live subscribers. Needed so a
 // stream of transient topics (random session ids) cannot inflate the
 // topics map.
+//
+// The empty check, the group's "closed" flip, and the parent-map
+// delete all happen in one atomic region: m.mu is held throughout and
+// g.closed is set inside the same g.mu critical section that observed
+// empty==true. A concurrent Subscribe cannot slip g.addSubscriber in
+// between: either it reaches g.addSubscriber before this routine takes
+// g.mu (empty==false → reap aborts), or after g.closed is already true
+// (addSubscriber returns false → Subscribe returns ErrClosed and the
+// caller sees no live subscription instead of one with a channel we
+// then close under its feet).
 func (m *MemoryPubSub) reapIfEmpty(topic string, g *memoryGroup) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -201,12 +211,14 @@ func (m *MemoryPubSub) reapIfEmpty(topic string, g *memoryGroup) {
 		return
 	}
 	g.mu.Lock()
-	empty := len(g.subscribers) == 0
-	g.mu.Unlock()
-	if empty {
-		delete(m.topics, topic)
-		g.close()
+	if len(g.subscribers) != 0 {
+		g.mu.Unlock()
+		return
 	}
+	g.closed = true
+	g.subscribers = nil
+	g.mu.Unlock()
+	delete(m.topics, topic)
 }
 
 // memorySubscriberBuffer sizes each subscriber channel. A buffer of 1

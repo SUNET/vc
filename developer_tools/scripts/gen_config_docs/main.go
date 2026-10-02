@@ -177,7 +177,16 @@ func (r *TypeRegistry) extractStructs(file *ast.File, pkgName string) {
 				}
 				def := &StructDef{Name: ts.Name.Name, Doc: doc, PkgName: pkgName}
 				r.parseFields(st, def, pkgName)
-				r.types[ts.Name.Name] = def
+				// Register under the pkg-qualified key always; drop the
+				// simple-name entry on cross-package collision (e.g.
+				// pubsub.Config vs openidfederation.Config) so lookups must
+				// use the qualified form instead of silently resolving to
+				// whichever package parsed last.
+				if existing, ok := r.types[ts.Name.Name]; ok && existing != nil && existing.PkgName != pkgName {
+					delete(r.types, ts.Name.Name)
+				} else {
+					r.types[ts.Name.Name] = def
+				}
 				r.types[pkgName+"."+ts.Name.Name] = def
 				continue
 			}
@@ -369,6 +378,12 @@ func resolveTypeName(expr ast.Expr) string {
 	case *ast.StarExpr:
 		return resolveTypeName(t.X)
 	case *ast.SelectorExpr:
+		// Preserve the package qualifier (e.g. "pubsub.Config") so
+		// LookupInPkg can resolve to the correct package rather than
+		// silently fall back to a same-named type in another package.
+		if pkgIdent, ok := t.X.(*ast.Ident); ok {
+			return pkgIdent.Name + "." + t.Sel.Name
+		}
 		return t.Sel.Name
 	default:
 		return ""
@@ -921,7 +936,7 @@ func buildSecretsSection(reg *TypeRegistry) *DocSection {
 	mainSub.Title = "Secrets file structure"
 	sec.Subs = append(sec.Subs, mainSub)
 	if secrets.Name != "" {
-		documented[secrets.Name] = true
+		documented[secrets.PkgName+"."+secrets.Name] = true
 	}
 
 	// Expand all child structs
@@ -1021,7 +1036,7 @@ func buildTopLevel(reg *TypeRegistry, field *FieldDef, pkgName string) *DocSecti
 		sub.Title = fmt.Sprintf("`%s`", yamlKey)
 		sec.Subs = append(sec.Subs, sub)
 		if mapValDef.Name != "" {
-			documented[mapValDef.Name] = true
+			documented[mapValDef.PkgName+"."+mapValDef.Name] = true
 		}
 		expandChildren(reg, mapValDef, fmt.Sprintf(".%s.%s", yamlKey, keyPH), &sec.Subs)
 	} else if def != nil {
@@ -1030,7 +1045,7 @@ func buildTopLevel(reg *TypeRegistry, field *FieldDef, pkgName string) *DocSecti
 		mainSub.Title = fmt.Sprintf("`%s`", yamlKey)
 		sec.Subs = append(sec.Subs, mainSub)
 		if def.Name != "" {
-			documented[def.Name] = true
+			documented[def.PkgName+"."+def.Name] = true
 		}
 		expandChildren(reg, def, "."+yamlKey, &sec.Subs)
 	} else {
@@ -1094,12 +1109,16 @@ func buildStructSubSection(reg *TypeRegistry, def *StructDef, path string) *SubS
 		}
 	}
 
-	// Track this subsection by type name for merging additional paths
+	// Track this subsection by package-qualified type name for merging
+	// additional paths. Simple name alone collides between unrelated
+	// packages (e.g. pubsub.Config vs openidfederation.Config), which
+	// then merges their fields and paths into one section.
 	if def.Name != "" {
-		if existing, ok := subsByType[def.Name]; ok {
+		key := def.PkgName + "." + def.Name
+		if existing, ok := subsByType[key]; ok {
 			existing.AlsoPaths = append(existing.AlsoPaths, path)
 		} else {
-			subsByType[def.Name] = sub
+			subsByType[key] = sub
 		}
 	}
 
@@ -1118,15 +1137,16 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 		typeName := resolveTypeName(f.TypeExpr)
 		if typeName != "" {
 			if childDef := reg.LookupInPkg(typeName, def.PkgName); childDef != nil {
-				if !documented[childDef.Name] {
-					documented[childDef.Name] = true
+				qName := childDef.PkgName + "." + childDef.Name
+				if !documented[qName] {
+					documented[qName] = true
 					sub := buildStructSubSection(reg, childDef, childPath)
 					sub.Title = fmt.Sprintf("`%s`", f.Tag.YAMLName)
 					*subs = append(*subs, sub)
 					expandChildren(reg, childDef, childPath, subs)
 				} else {
 					// Type already documented; record this additional path
-					recordAdditionalPath(childDef.Name, childPath)
+					recordAdditionalPath(childDef, childPath)
 					recordChildPaths(reg, childDef, childPath)
 				}
 				expanded = true
@@ -1137,14 +1157,15 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 		if !expanded && typeName != "" {
 			if valDef := reg.LookupMapValueTypeInPkg(typeName, def.PkgName); valDef != nil {
 				keyPH := mapKeyPlaceholder(f.Tag)
-				if !documented[valDef.Name] {
-					documented[valDef.Name] = true
+				qName := valDef.PkgName + "." + valDef.Name
+				if !documented[qName] {
+					documented[qName] = true
 					sub := buildStructSubSection(reg, valDef, childPath+"."+keyPH)
 					sub.Title = fmt.Sprintf("`%s` entry", f.Tag.YAMLName)
 					*subs = append(*subs, sub)
 					expandChildren(reg, valDef, childPath+"."+keyPH, subs)
 				} else {
-					recordAdditionalPath(valDef.Name, childPath+"."+keyPH)
+					recordAdditionalPath(valDef, childPath+"."+keyPH)
 					recordChildPaths(reg, valDef, childPath+"."+keyPH)
 				}
 				expanded = true
@@ -1179,14 +1200,15 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 						}
 					}
 					if valDef != nil {
-						if !documented[valDef.Name] {
-							documented[valDef.Name] = true
+						qName := valDef.PkgName + "." + valDef.Name
+						if !documented[qName] {
+							documented[qName] = true
 							sub := buildStructSubSection(reg, valDef, childPath+"."+keyPH)
 							sub.Title = fmt.Sprintf("`%s` entry", f.Tag.YAMLName)
 							*subs = append(*subs, sub)
 							expandChildren(reg, valDef, childPath+"."+keyPH, subs)
 						} else {
-							recordAdditionalPath(valDef.Name, childPath+"."+keyPH)
+							recordAdditionalPath(valDef, childPath+"."+keyPH)
 							recordChildPaths(reg, valDef, childPath+"."+keyPH)
 						}
 					}
@@ -1200,14 +1222,15 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 				elemName := resolveTypeName(at.Elt)
 				if elemName != "" {
 					if elemDef := reg.LookupInPkg(elemName, def.PkgName); elemDef != nil {
-						if !documented[elemDef.Name] {
-							documented[elemDef.Name] = true
+						qName := elemDef.PkgName + "." + elemDef.Name
+						if !documented[qName] {
+							documented[qName] = true
 							sub := buildStructSubSection(reg, elemDef, childPath+"[]")
 							sub.Title = fmt.Sprintf("`%s` entry", f.Tag.YAMLName)
 							*subs = append(*subs, sub)
 							expandChildren(reg, elemDef, childPath+"[]", subs)
 						} else {
-							recordAdditionalPath(elemDef.Name, childPath+"[]")
+							recordAdditionalPath(elemDef, childPath+"[]")
 							recordChildPaths(reg, elemDef, childPath+"[]")
 						}
 					}
@@ -1217,8 +1240,11 @@ func expandChildren(reg *TypeRegistry, def *StructDef, parentPath string, subs *
 	}
 }
 
-func recordAdditionalPath(typeName, path string) {
-	if sub, ok := subsByType[typeName]; ok {
+func recordAdditionalPath(def *StructDef, path string) {
+	if def == nil {
+		return
+	}
+	if sub, ok := subsByType[def.PkgName+"."+def.Name]; ok {
 		sub.AlsoPaths = append(sub.AlsoPaths, path)
 	}
 }
@@ -1239,7 +1265,7 @@ func recordChildPaths(reg *TypeRegistry, def *StructDef, parentPath string) {
 		typeName := resolveTypeName(f.TypeExpr)
 		if typeName != "" {
 			if childDef := reg.Lookup(typeName); childDef != nil {
-				recordAdditionalPath(childDef.Name, childPath)
+				recordAdditionalPath(childDef, childPath)
 				recordChildPaths(reg, childDef, childPath)
 				recorded = true
 			}
@@ -1249,7 +1275,7 @@ func recordChildPaths(reg *TypeRegistry, def *StructDef, parentPath string) {
 		if !recorded && typeName != "" {
 			if valDef := reg.LookupMapValueType(typeName); valDef != nil {
 				keyPH := mapKeyPlaceholder(f.Tag)
-				recordAdditionalPath(valDef.Name, childPath+"."+keyPH)
+				recordAdditionalPath(valDef, childPath+"."+keyPH)
 				recordChildPaths(reg, valDef, childPath+"."+keyPH)
 				recorded = true
 			}
@@ -1262,7 +1288,7 @@ func recordChildPaths(reg *TypeRegistry, def *StructDef, parentPath string) {
 				if valName != "" {
 					if valDef := reg.Lookup(valName); valDef != nil {
 						keyPH := mapKeyPlaceholder(f.Tag)
-						recordAdditionalPath(valDef.Name, childPath+"."+keyPH)
+						recordAdditionalPath(valDef, childPath+"."+keyPH)
 						recordChildPaths(reg, valDef, childPath+"."+keyPH)
 					}
 				}
@@ -1275,7 +1301,7 @@ func recordChildPaths(reg *TypeRegistry, def *StructDef, parentPath string) {
 				elemName := resolveTypeName(at.Elt)
 				if elemName != "" {
 					if elemDef := reg.Lookup(elemName); elemDef != nil {
-						recordAdditionalPath(elemDef.Name, childPath+"[]")
+						recordAdditionalPath(elemDef, childPath+"[]")
 						recordChildPaths(reg, elemDef, childPath+"[]")
 					}
 				}
@@ -1467,6 +1493,7 @@ func main() {
 		filepath.Join(root, "pkg/openid4vp"),
 		filepath.Join(root, "pkg/openid4vci"),
 		filepath.Join(root, "pkg/openidfederation"),
+		filepath.Join(root, "pkg/pubsub"),
 		filepath.Join(root, "pkg/sqlstore"),
 	}
 	for _, d := range dirs {

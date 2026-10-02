@@ -123,24 +123,24 @@ func main() {
 }
 
 // buildNotifyBus picks the notify pub/sub backend from HA config. The
-// standalone / no-Redis path returns a MemoryPubSub so operators that
-// never touch cfg.Common.HA.Redis get the same same-process fan-out
+// standalone / no-PubSub path returns a MemoryPubSub so operators that
+// never touch cfg.Common.HA.PubSub get the same same-process fan-out
 // behaviour as before.
 func buildNotifyBus(cfg *model.Cfg, log *logger.Log) (pubsub.PubSub, error) {
-	if cfg.Common.HA.Redis == nil || len(cfg.Common.HA.Redis.Addrs) == 0 {
+	if cfg.Common.HA.PubSub == nil || len(cfg.Common.HA.PubSub.Addrs) == 0 {
 		return pubsub.NewMemoryPubSub(), nil
 	}
 	client, err := pubsub.NewClient(pubsub.ClientConfig{
-		Addrs:    cfg.Common.HA.Redis.Addrs,
-		Username: cfg.Common.HA.Redis.Username,
-		Password: cfg.Common.HA.Redis.Password,
-		DB:       cfg.Common.HA.Redis.DB,
-		TLS:      cfg.Common.HA.Redis.TLS,
+		Addrs:    cfg.Common.HA.PubSub.Addrs,
+		Username: cfg.Common.HA.PubSub.Username,
+		Password: cfg.Common.HA.PubSub.Password,
+		DB:       cfg.Common.HA.PubSub.DB,
+		TLS:      cfg.Common.HA.PubSub.TLS,
 	})
 	if err != nil {
 		return nil, err
 	}
-	backend := pubsub.ParseBackend(cfg.Common.HA.Redis.Backend)
+	backend := pubsub.ParseBackend(cfg.Common.HA.PubSub.Backend)
 	svc := pubsub.New(backend, client, log.New("pubsub"))
 	return svc.NewPubSub("verifier_notify")
 }
