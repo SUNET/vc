@@ -175,19 +175,20 @@ drivers to want independent validation tags.
 
 > **Path:** `.common.ha`
 
-| Field                 | Type     | Description                                                                                                                                                                                                                                                              | Example | Default    | Required |
-| --------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ---------- | -------- |
-| `enable`              | `bool`   | HA mode; when true caches are backed by MongoDB instead of in-memory storage.                                                                                                                                                                                            | -       | `false`    | No       |
-| `cache_database_name` | `string` | MongoDB database name used for caches.                                                                                                                                                                                                                                   | -       | `vc_cache` | No       |
-| `redis`               | `object` | An optional RESP-protocol pub/sub backend (Redis or Valkey) used for cross-node notifications in HA mode - today just the verifier's SSE fanout. Omitted entirely in standalone deployments; when omitted in HA, notifications remain in-process and do not cross nodes. | -       | -          | No       |
+| Field                 | Type     | Description                                                                                                                                                                                                                                                 | Example | Default    | Required |
+| --------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ---------- | -------- |
+| `enable`              | `bool`   | HA mode; when true caches are backed by MongoDB instead of in-memory storage.                                                                                                                                                                               | -       | `false`    | No       |
+| `cache_database_name` | `string` | MongoDB database name used for caches.                                                                                                                                                                                                                      | -       | `vc_cache` | No       |
+| `pubsub`              | `object` | The optional pub/sub backend (Redis or Valkey) used for cross-node notifications in HA mode - today just the verifier's SSE fanout. Omitted entirely in standalone deployments; when omitted in HA, notifications remain in-process and do not cross nodes. | -       | -          | No       |
 
-### `redis`
+### `pubsub`
 
-> **Path:** `.common.ha.redis`
+> **Path:** `.common.ha.pubsub`
 
-mode. Both Redis and Valkey speak the same wire protocol; Backend
-selects which the deployment actually runs so logs and metrics
-identify it correctly.
+Supports Redis and Valkey today (both speak RESP, so the same client
+serves both; Backend only decides what logs and metrics identify it as).
+Omitted in standalone deployments; when omitted in HA, notifications
+stay in-process and do not cross nodes.
 
 | Field      | Type       | Description                                                                                                           | Example          | Default | Required |
 | ---------- | ---------- | --------------------------------------------------------------------------------------------------------------------- | ---------------- | ------- | -------- |
@@ -1574,13 +1575,13 @@ Sections omitted from the secrets file are left untouched.
 
 > **Path:** `.common.ha`
 
-| Field   | Type     | Description                                                                                                      | Example | Default | Required |
-| ------- | -------- | ---------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `redis` | `object` | Redis / Valkey ACL credentials used by the HA pub/sub bus. Omitted entirely when the backend is unauthenticated. | -       | -       | No       |
+| Field    | Type     | Description                                                                                                      | Example | Default | Required |
+| -------- | -------- | ---------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `pubsub` | `object` | Redis / Valkey ACL credentials used by the HA pub/sub bus. Omitted entirely when the backend is unauthenticated. | -       | -       | No       |
 
-### `redis`
+### `pubsub`
 
-> **Path:** `.common.ha.redis`
+> **Path:** `.common.ha.pubsub`
 
 | Field      | Type     | Description                                                                    | Example | Default | Required |
 | ---------- | -------- | ------------------------------------------------------------------------------ | ------- | ------- | -------- |
@@ -1716,7 +1717,7 @@ common:
     mariadb:
       password: "change-me-in-production"
   ha:
-    redis:
+    pubsub:
       username: "<secret-value>"
       password: "change-me-in-production"
 apigw:
