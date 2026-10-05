@@ -156,6 +156,21 @@ func (c *Client) refuseAResponseThisPathCannotCheck(session *cache.Authorization
 		return nil
 	}
 
+	// A query that asks for NOTHING tells this gate as little as a missing
+	// one, and every check below is driven by the session's credential
+	// scopes - of which there are none - so each passes vacuously and the
+	// response is accepted whatever it carried.
+	//
+	// New sessions cannot reach this: UIInteraction refuses an empty
+	// dcql_query. This covers the ones already persisted, and anything that
+	// reaches the cache by another route. Refused outright rather than
+	// under the nil case's carve-out, because an empty query is not the
+	// normal cross-replica condition that carve-out exists for - no flow
+	// legitimately asks for zero credentials and then reads the answer.
+	if len(c.sessionDCQL(session).Credentials) == 0 {
+		return fmt.Errorf("the request this response answers asks for no credential, so nothing in the response can be checked against it")
+	}
+
 	if len(documents) > 0 && len(others) > 0 {
 		return fmt.Errorf("the response mixes W3C credentials with %d token(s) this path does not verify, whose claims would be merged unverified", countTokens(others))
 	}

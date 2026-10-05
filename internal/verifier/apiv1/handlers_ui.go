@@ -489,6 +489,20 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	// their format needs. An empty meta is not a narrow request, it is no
 	// request at all - DCQL reads it as matching every credential of that
 	// format - and the verifier would happily sign and serve it.
+	//
+	// The outer list first: validate:"required" on the pointer is satisfied
+	// by a non-nil DCQL whose Credentials slice is EMPTY, and the loop below
+	// then validates nothing at all. Such a session is persisted with no
+	// scopes, which makes every later "was this answered?" check vacuous -
+	// verifyVC20ForOIDC in particular iterates the session's credential
+	// scopes, finds none, and reports success for a response that answered
+	// a request asking for nothing. Refused here, where the caller can still
+	// be told what was wrong with its request.
+	if len(req.DCQLQuery.Credentials) == 0 {
+		c.log.Error(nil, "rejected a UI interaction request whose DCQL asks for no credential at all")
+		return nil, errors.New("dcql_query must request at least one credential")
+	}
+
 	for _, credential := range req.DCQLQuery.Credentials {
 		if err := openid4vp.ValidateCredentialQuery(credential); err != nil {
 			c.log.Error(err, "rejected an invalid credential query from the UI interaction request", "credential_id", credential.ID, "format", credential.Format)
