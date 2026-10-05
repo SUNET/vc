@@ -355,3 +355,78 @@ func TestPolicyClaimMatchesBothSpellings(t *testing.T) {
 			cfgWith(`{"id_token":{"department":{"value":"{{.dept}}"}}}`)))
 	})
 }
+
+// A Go template can TRANSFORM a caller value on its way to the output, and
+// both guards in this file used to decide what a template does by
+// substituting claimSentinel and then looking for it. A function consumes
+// the sentinel: the result is still entirely caller-controlled, but carries
+// no trace of the value that produced it, so "no sentinel here" stopped
+// meaning "the caller did not fill this".
+//
+// These are the exact shapes that got past it.
+func TestTransformedCallerValuesDoNotEvadeTheGuards(t *testing.T) {
+	cfgWith := func(params *model.OIDCRequestParams, policy *model.IssuancePolicy) *model.Cfg {
+		return &model.Cfg{APIGW: &model.APIGW{DataSources: model.DataSources{
+			Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+				"org_credential": {
+					AuthProvider:      model.AuthProviderOIDC,
+					OIDCRequestParams: params,
+					IssuancePolicy:    policy,
+				},
+			}},
+		}}}
+	}
+	policyOn := func(claims ...string) *model.IssuancePolicy {
+		policy := &model.IssuancePolicy{Rules: []string{"(credential (scope org_credential))"}}
+		for _, claim := range claims {
+			policy.QueryTemplate = append(policy.QueryTemplate, model.QueryDimension{Dimension: claim, Claim: claim})
+		}
+		return policy
+	}
+
+	// Value position. containsSentinel found nothing in the rendered
+	// constraint, so the claim read as operator-fixed while the caller
+	// chose what the OP was asked to assert - and the policy then read it.
+	for name, expr := range map[string]string{
+		"printf":           `{{printf "%x" .org_id}}`,
+		"len":              `{{len .org_id}}`,
+		"pipe into printf": `{{.org_id | printf "%x"}}`,
+		"nested call":      `{{printf "%s" (printf "%x" .org_id)}}`,
+	} {
+		t.Run("a transformed value still fills the claim: "+name, func(t *testing.T) {
+			err := checkPolicyClaimsAreNotCallerTemplated(cfgWith(
+				&model.OIDCRequestParams{Claims: `{"id_token":{"org_id":{"value":"` + expr + `"}}}`},
+				policyOn("org_id")))
+			require.Error(t, err, "%s is caller-controlled however it is spelled", expr)
+			assert.Contains(t, err.Error(), "org_id")
+		})
+	}
+
+	// Key position. sentinelInAnyKey looks for a literal, so a transformed
+	// key rendered to valid JSON with a caller-chosen member name and the
+	// structural guard saw nothing wrong.
+	t.Run("a transformed value may not name the claim", func(t *testing.T) {
+		err := checkPolicyClaimsAreNotCallerTemplated(cfgWith(
+			&model.OIDCRequestParams{Claims: `{"id_token":{"{{printf "%x" .claim_name}}":{"essential":true}}}`},
+			policyOn("org_id")))
+		require.Error(t, err, "the caller must not choose which claim is requested")
+	})
+
+	// acr_values is a bare string rather than JSON, and takes the same
+	// route to the acr claim.
+	t.Run("a transformed acr_values still fills acr", func(t *testing.T) {
+		require.Error(t, checkPolicyClaimsAreNotCallerTemplated(cfgWith(
+			&model.OIDCRequestParams{ACRValues: `{{printf "%s" .loa}}`}, policyOn("acr"))))
+	})
+
+	// The other direction: a function the caller's data never reaches is
+	// the operator's own text, and must still be allowed. Without this the
+	// test above would pass against a guard that simply refuses every
+	// template containing a function.
+	t.Run("a function over operator-fixed text is still allowed", func(t *testing.T) {
+		assert.NoError(t, checkPolicyClaimsAreNotCallerTemplated(cfgWith(
+			&model.OIDCRequestParams{Claims: `{"id_token":{"org_id":{"value":"{{printf "%s" "sunet"}}"}}}`},
+			policyOn("org_id"))),
+			"nothing here is the caller's")
+	})
+}

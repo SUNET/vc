@@ -176,6 +176,24 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		}
 	}
 
+	// The claims the OP actually asserted, snapshotted HERE - after the
+	// UserInfo merge, which is still the OP speaking, and before anything
+	// local rewrites them.
+	//
+	// Everything below may mutate authResp.Claims in place. With no
+	// attribute mapper configured, newCallbackClaims sets cc.identity =
+	// raw, which IS this map, and MergeNestedClaims then writes the
+	// configured derivations straight into it. A policy clone taken at the
+	// point of evaluation therefore contained derived values, and a rule
+	// meant to gate on what the OP asserted could be satisfied by a claim
+	// this deployment computed for itself.
+	//
+	// Deep, not maps.Clone: MergeNestedClaims recurses into nested
+	// map[string]any, so a shallow copy shares exactly the maps it writes
+	// through. CloneNestedClaims recurses in the same places, which is what
+	// makes it deep ENOUGH rather than merely deeper.
+	policyClaims := credential.CloneNestedClaims(authResp.Claims)
+
 	// Retrieve session to get credential type.
 	// ProcessCallback already validated the session, but we need it for credential type etc.
 	session, err := service.GetSession(ctx, req.State)
@@ -276,7 +294,8 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 			// used (legitimately) to template the outgoing OIDC request
 			// parameters in resolveOIDCRequestParams - this is a separate,
 			// later use of the same data for a security decision.
-			policyClaims := maps.Clone(authResp.Claims)
+			// policyClaims was captured before mapping and derivation; see
+			// its declaration for why it cannot be taken here.
 			if policyErr := policyEngine.Evaluate(session.CredentialType, policyClaims, scopeCfg.IssuancePolicy.QueryTemplate); policyErr != nil {
 				c.log.Warn("Issuance policy denied credential",
 					"credential_type", session.CredentialType,

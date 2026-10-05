@@ -13,6 +13,7 @@ import (
 
 	"github.com/SUNET/vc/internal/apigw/auth_providers/oidcrp"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/trace"
@@ -294,4 +295,59 @@ func newPolicyGateTestClient(t *testing.T, opAsserts map[string]any) (*Client, *
 	}
 
 	return client, service
+}
+
+// TestOIDCRPCallbackPolicyIgnoresDerivedClaims: the policy gate must read
+// what the OP ASSERTED, and derivations are computed locally afterwards.
+//
+// The two met through aliasing rather than by design. With no attribute
+// mapper configured, newCallbackClaims sets cc.identity = raw - the very
+// map authResp.Claims points at - and MergeNestedClaims then writes the
+// configured derivations into it. The policy snapshot was taken at the
+// point of evaluation, by which time those derived values were simply part
+// of the claims, indistinguishable from the OP's own.
+//
+// So a deployment could satisfy "(acr loa3)" with an acr it computed for
+// itself out of a claim the OP never vouched for - here, lowercasing a
+// loa_hint. The OP asserts no acr at all in this test; the only acr that
+// could reach the policy is the derived one.
+func TestOIDCRPCallbackPolicyIgnoresDerivedClaims(t *testing.T) {
+	client, service := newPolicyGateTestClient(t, map[string]any{"loa_hint": "LOA3"})
+
+	// An ASSERTION scope, which is the shape where the two paths actually
+	// meet: derivations run in this callback only for assertion-backed
+	// credentials (datastore and external_api derive later, against the
+	// fetched document), and LookupScopePolicyConfig reads assertion scopes
+	// too. A datastore scope never executes the derivation branch at all,
+	// so a fixture built on one tests nothing here.
+	client.cfg.APIGW.DataSources = model.DataSources{
+		Assertion: model.AssertionConfig{Scopes: map[string]model.AssertionScope{
+			"pid": {
+				AuthProvider: model.AuthProviderOIDC,
+				IssuancePolicy: &model.IssuancePolicy{
+					Rules:         []string{"(credential (scope pid)(acr loa3))"},
+					QueryTemplate: []model.QueryDimension{{Dimension: "acr", Claim: "acr"}},
+				},
+				// Manufactures exactly the claim the policy gates on.
+				Derivations: []primitives.Derivation{{
+					Lowercase: &primitives.LowercaseArgs{Input: "loa_hint", Output: "acr"},
+				}},
+			},
+		}},
+	}
+
+	ctx := t.Context()
+	authReq, err := service.InitiateAuth(ctx, "pid", nil, nil)
+	require.NoError(t, err)
+	session, err := service.GetSession(ctx, authReq.State)
+	require.NoError(t, err)
+
+	_, err = client.OIDCRPCallback(ctx, &OIDCRPCallbackRequest{
+		Code:  "policy-test-code|" + session.Nonce,
+		State: authReq.State,
+	}, service)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "credential issuance denied",
+		"a locally derived acr must not satisfy a policy that gates on the OP's acr")
 }

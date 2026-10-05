@@ -171,6 +171,23 @@ func checkClaimsTemplateIsStructural(claims string) error {
 		return errors.New("lets a caller value decide which branch of the template runs, so the caller chooses what the request asks for; use a caller value only to fill a string in")
 	}
 
+	// Transforms next, and before rendering, for the same reason: the
+	// checks below work by substituting claimSentinel and then looking for
+	// it. A function consumes the sentinel, so a transformed value in KEY
+	// position - {"id_token":{"{{printf \"%x\" .claim_name}}":{...}}} -
+	// renders to valid JSON with a caller-chosen key that sentinelInAnyKey
+	// cannot see, and a transform outside a JSON string renders to
+	// something that still parses. Both evade a check that looks for a
+	// literal.
+	//
+	// Refused rather than analysed: following a value through an arbitrary
+	// function is not something this can do from one rendering, and the
+	// documented forms need no function.
+	if access.transform {
+		return fmt.Errorf("passes a caller value through a function (such as printf or len), so where that value lands cannot be tracked and it may choose the request's structure; write the placeholder on its own, as \"value\": \"{{.name}}\" (caller values read: %s)",
+			strings.Join(sortedKeys(access.keys), ", "))
+	}
+
 	rendered, err := renderWithSentinel(claims, access.keys)
 	if err != nil {
 		return err
@@ -185,6 +202,12 @@ func checkClaimsTemplateIsStructural(claims string) error {
 	}
 
 	return nil
+}
+
+// sortedKeys names the caller parameters a template reads, in a stable
+// order so an error message does not change between runs over a map.
+func sortedKeys(keys map[string]bool) []string {
+	return slices.Sorted(maps.Keys(keys))
 }
 
 // renderWithSentinel executes a configured template with a recognisable
@@ -245,6 +268,19 @@ type templateAccess struct {
 	// writes is treated as caller-filled: the analysis cannot say which one
 	// the value lands in, and "cannot tell" has to mean the strict answer.
 	opaque bool
+	// transform is true when a caller value reaches the output through a
+	// function rather than verbatim - "{{printf \"%x\" .org_id}}",
+	// "{{len .org_id}}", "{{.org_id | printf \"%s\"}}".
+	//
+	// It matters because the per-claim attribution below works by
+	// rendering each key to claimSentinel and looking for that sentinel in
+	// the result. A transform CONSUMES the sentinel: the rendering is still
+	// caller-controlled, but contains no trace of the value that produced
+	// it, so "the sentinel is not here" stops meaning "the caller did not
+	// fill this". Tracked separately from opaque because the read IS
+	// attributable to a name - it is only the value's journey to the output
+	// that cannot be followed - and the two want different error messages.
+	transform bool
 	// controlFlow is true when a caller value decides which branch runs.
 	// Such a template need never EMIT the value to change the request:
 	// {{if .org_id}}"essential":true{{end}} lets the caller decide whether
@@ -330,18 +366,30 @@ func walkControlFlow(branch *parse.BranchNode, access *templateAccess) {
 	walkTemplateNode(branch.ElseList, access)
 }
 
-func walkPipe(pipe *parse.PipeNode, access *templateAccess) {
+// walkPipe reports whether anything in this pipe read the caller's data.
+func walkPipe(pipe *parse.PipeNode, access *templateAccess) bool {
 	if pipe == nil {
-		return
+		return false
 	}
+	reads := false
 	for _, cmd := range pipe.Cmds {
-		walkCommand(cmd, access)
+		if walkCommand(cmd, access) {
+			reads = true
+		}
 	}
+	// "{{.org_id | printf \"%x\"}}" - one command reads the value and the
+	// next consumes it, so what reaches the output is derived from it
+	// rather than equal to it.
+	if reads && len(pipe.Cmds) > 1 {
+		access.transform = true
+	}
+	return reads
 }
 
-func walkCommand(cmd *parse.CommandNode, access *templateAccess) {
+// walkCommand reports whether this command read the caller's data.
+func walkCommand(cmd *parse.CommandNode, access *templateAccess) bool {
 	if cmd == nil || len(cmd.Args) == 0 {
-		return
+		return false
 	}
 
 	// "{{index . \"name\"}}" - the documented indirect form.
@@ -350,10 +398,15 @@ func walkCommand(cmd *parse.CommandNode, access *templateAccess) {
 		key, isString := cmd.Args[2].(*parse.StringNode)
 		if onDot && isString {
 			access.keys[key.Text] = true
-			return
+			return true
 		}
 	}
 
+	// Args[0] being an identifier means a function stands between whatever
+	// the remaining arguments read and the output.
+	_, isFunctionCall := cmd.Args[0].(*parse.IdentifierNode)
+
+	reads := false
 	for _, arg := range cmd.Args {
 		switch typed := arg.(type) {
 		case *parse.FieldNode:
@@ -365,13 +418,23 @@ func walkCommand(cmd *parse.CommandNode, access *templateAccess) {
 			if len(typed.Ident) != 1 {
 				access.opaque = true
 			}
+			reads = true
 		case *parse.DotNode, *parse.VariableNode:
 			// The whole map, or something bound from it.
 			access.opaque = true
+			reads = true
 		case *parse.PipeNode:
-			walkPipe(typed, access)
+			if walkPipe(typed, access) {
+				reads = true
+			}
 		}
 	}
+	// "{{printf \"%x\" .org_id}}" - the value is an argument to a function,
+	// so the output is derived from it and carries no sentinel to find.
+	if reads && isFunctionCall {
+		access.transform = true
+	}
+	return reads
 }
 
 // claimsFilledByCaller reports which requested claim names carry a
@@ -392,7 +455,7 @@ func claimsFilledByCaller(params *model.OIDCRequestParams) (map[string]bool, err
 	if err != nil {
 		return nil, fmt.Errorf("acr_values is not a valid template: %w", err)
 	}
-	if len(acrAccess.keys) > 0 || acrAccess.opaque || acrAccess.controlFlow {
+	if len(acrAccess.keys) > 0 || acrAccess.opaque || acrAccess.controlFlow || acrAccess.transform {
 		filled["acr"] = true
 	}
 
@@ -404,7 +467,7 @@ func claimsFilledByCaller(params *model.OIDCRequestParams) (map[string]bool, err
 	if err != nil {
 		return nil, fmt.Errorf("claims is not a valid template: %w", err)
 	}
-	if len(claimsAccess.keys) == 0 && !claimsAccess.opaque && !claimsAccess.controlFlow {
+	if len(claimsAccess.keys) == 0 && !claimsAccess.opaque && !claimsAccess.controlFlow && !claimsAccess.transform {
 		return filled, nil
 	}
 
@@ -432,7 +495,16 @@ func claimsFilledByCaller(params *model.OIDCRequestParams) (map[string]bool, err
 			// controlFlow taints everything for the same reason opaque
 			// does: the value need not appear in the rendering to have
 			// decided what is in it.
-			if claimsAccess.opaque || claimsAccess.controlFlow || containsSentinel(constraint, claimSentinel) {
+			//
+			// transform taints everything because the sentinel search below
+			// is what it defeats: "{{printf \"%x\" .org_id}}" renders to a
+			// caller-controlled string containing no sentinel, so
+			// containsSentinel would report the claim as operator-fixed
+			// while the caller picks its value. Checked BEFORE the sentinel
+			// for that reason - the sentinel's absence is exactly the
+			// evidence that cannot be trusted here.
+			if claimsAccess.opaque || claimsAccess.controlFlow || claimsAccess.transform ||
+				containsSentinel(constraint, claimSentinel) {
 				filled[claim] = true
 			}
 		}
