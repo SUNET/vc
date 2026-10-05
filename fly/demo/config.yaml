@@ -10,15 +10,19 @@ common:
     pid:
       vctm_file_path: "/metadata/vctm_pid.json"
       format: "dc+sd-jwt"
+      replace_vct: true
     ehic:
       vctm_file_path: "/metadata/vctm_ehic.json"
       format: "dc+sd-jwt"
+      replace_vct: true
     eduid:
       vctm_file_path: "/metadata/vctm_eduid.json"
       format: "dc+sd-jwt"
+      replace_vct: true
     eduid_age_verification:
       vctm_file_path: "/metadata/vctm_eduid_age_verification.json"
       format: "dc+sd-jwt"
+      replace_vct: true
     #pid_mdoc:
     #  mddl_file_path: "/metadata/pid_mdoc.mdoc.json"
     #  format: "mso_mdoc"

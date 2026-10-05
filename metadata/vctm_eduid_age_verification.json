@@ -1,7 +1,7 @@
 {
   "vct": "urn:credential:eduid_age_verification:1",
   "name": "EduID Age Verification Credential",
-  "description": "A minimal age-attestation credential derived from an eduID credential presented via OpenID4VP during OpenID4VCI. Carries age-threshold booleans — age_over_N (completed years at issuance) and over_N_this_year (reaches N at some point in the issuance year) for N in {10, 13, 15, 18, 21, 65} — plus validity dates. Which thresholds are actually populated depends on the presentation scope's age_over_thresholds derivation; the metadata lists the full superset. Assurance level is enforced at issuance time by the presentation scope's required_claims.assurance_level allow-list (see apigw.data_sources.presentation.scopes.eduid_age_verification) and is not carried on the credential itself.",
+  "description": "A minimal age-attestation credential derived from an eduID credential presented via OpenID4VP during OpenID4VCI. Carries age-threshold booleans — age_over_N (completed years at issuance) and over_N_this_year (reaches N at some point in the issuance year) for N in {13, 15, 18, 21, 65} — plus validity dates. Which thresholds are actually populated depends on the presentation scope's age_over_thresholds derivation; the metadata lists the full superset. Assurance level is enforced at issuance time by the presentation scope's required_claims.assurance_level allow-list (see apigw.data_sources.presentation.scopes.eduid_age_verification) and is not carried on the credential itself.",
   "display": [
     {
       "locale": "en-US",
@@ -15,20 +15,6 @@
     }
   ],
   "claims": [
-    {
-      "path": [
-        "age_over_10"
-      ],
-      "mandatory": false,
-      "sd": "always",
-      "display": [
-        {
-          "locale": "en-US",
-          "label": "Age >= 10",
-          "description": "Indicates if the person is 10 years old or older."
-        }
-      ]
-    },
     {
       "path": [
         "age_over_13"
@@ -96,20 +82,6 @@
           "locale": "en-US",
           "label": "Age >= 65",
           "description": "Indicates if the person is 65 years old or older."
-        }
-      ]
-    },
-    {
-      "path": [
-        "over_10_this_year"
-      ],
-      "mandatory": false,
-      "sd": "always",
-      "display": [
-        {
-          "locale": "en-US",
-          "label": "Is 10 this year",
-          "description": "True if the person is at least 10 years old at some point during the current calendar year."
         }
       ]
     },

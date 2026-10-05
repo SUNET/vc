@@ -14,15 +14,23 @@ common:
     pid:
       vctm_file_path: "/metadata/vctm_pid.json"
       format: "dc+sd-jwt"
+      replace_vct: true
     ehic:
       vctm_file_path: "/metadata/vctm_ehic.json"
       format: "dc+sd-jwt"
+      replace_vct: true
     eduid:
       vctm_file_path: "/metadata/vctm_eduid.json"
       format: "dc+sd-jwt"
+      replace_vct: true
     eduid_age_verification:
       vctm_file_path: "/metadata/vctm_eduid_age_verification.json"
       format: "dc+sd-jwt"
+      replace_vct: true
+    # Disabled pending Longfellow wallet support and age-proof validation.
+    #eduid_age_verification_zk:
+    #  mddl_file_path: "/metadata/eduid_age_verification_zk.mdoc.json"
+    #  format: "mso_mdoc"
     #pid_mdoc:
     #  mddl_file_path: "/metadata/pid_mdoc.mdoc.json"
     #  format: "mso_mdoc"
@@ -50,6 +58,10 @@ issuer:
     valid_duration: 3600
     verifiable_credential_type: "https://credential.sunet.se/identity_credential"
   pseudonym_seed: true
+  #mdoc:
+  #  certificate_chain_path: "/pki/signing_ec_chain.pem"
+  #  default_validity: "8760h"
+  #  digest_algorithm: "SHA-256"
 
 verifier:
   api_server:
@@ -333,11 +345,22 @@ apigw:
           derivations:
             - age_over_thresholds:
                 input: "birthdate"
-                thresholds: [10, 13, 15, 18, 21, 65]
+                thresholds: [13, 15, 18, 21, 65]
           expiry_duration: "8760h"
           defaults:
             issuing_authority: "SUNET"
             issuing_country: "SE"
+        #eduid_age_verification_zk:
+        #  from_scope: "eduid"
+        #  required_claims:
+        #    birthdate: []
+        #    assurance_level:
+        #      - "http://www.swamid.se/policy/assurance/al2"
+        #      - "http://www.swamid.se/policy/assurance/al3"
+        #  derivations:
+        #    - age_over_thresholds:
+        #        input: "birthdate"
+        #        thresholds: [13, 15, 18, 21, 65]
   delivery:
     openid4vci:
       token_endpoint: "https://sunet-vc-apigw.fly.dev/token"
@@ -351,6 +374,7 @@ apigw:
             - "mdl"
             - "eduid"
             - "eduid_age_verification"
+            #- "eduid_age_verification_zk"
         # Interop testbed (webuild-cs01, University of the Aegean). Static
         # allowlist entry lets the headless testbed wallet pass PAR client
         # validation without going through the wallet-attestation PDP.
