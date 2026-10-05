@@ -481,6 +481,19 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
+	// And WHICH configuration, which is not the same question. With
+	// credential_identifier, req.CredentialConfigurationID is empty and the
+	// id lives in the authorization_details the token response returned -
+	// so anything downstream that reads the request field alone falls back
+	// to an authorised scope and can mint a credential the identifier did
+	// not select. Resolved here because this is the only place holding the
+	// authorization details.
+	configurationID, err := req.ResolveCredentialConfigurationID(c.issuerMetadata, authContext.AuthorizationDetails)
+	if err != nil {
+		c.log.Error(err, "failed to resolve credential configuration")
+		return nil, err
+	}
+
 	// The authenticated identifier is used for registry; for assertion-based
 	// issuance the identifier is best-effort (all data comes from trusted IdP claims).
 	identifier, err := requireIdentifier(authContext.Identifier, model.DataSourceType(authContext.DataSource))
@@ -497,7 +510,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	case "vc+sd-jwt", "dc+sd-jwt":
 		credentials, issueErr = c.issueSDJWT(ctx, scope, documentData, jwks, identifier)
 	case "ldp_vc", "vc+ld+json":
-		credentials, issueErr = c.issueVC20(ctx, scope, documentData, identifier, req)
+		credentials, issueErr = c.issueVC20(ctx, scope, documentData, identifier, configurationID, req)
 	case "jwp":
 		credentials, issueErr = c.issueBBS(ctx, scope, documentData, identifier, req)
 	default:
@@ -696,7 +709,7 @@ func (c *Client) w3cTypesAndContexts(scope, configurationID string) (types []str
 	return types, metadata.GetCredentialContexts(), cryptosuite
 }
 
-func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, identifier string, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
+func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, identifier, configurationID string, req *openid4vci.CredentialRequest) ([]openid4vci.Credential, error) {
 	hasNoJWTProof := req.Proof != nil && req.Proof.ProofType != "jwt"
 	hasNoJWTProofs := req.Proofs != nil && len(req.Proofs.JWT) == 0
 	if hasNoJWTProof || hasNoJWTProofs {
@@ -708,7 +721,9 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	var mandatoryPointers []string
 	var credentialTypes []string
 
-	credentialTypes, additionalContexts, configuredSuite := c.w3cTypesAndContexts(scope, req.CredentialConfigurationID)
+	// The RESOLVED configuration, not req.CredentialConfigurationID: the
+	// latter is empty whenever the wallet used credential_identifier.
+	credentialTypes, additionalContexts, configuredSuite := c.w3cTypesAndContexts(scope, configurationID)
 	if configuredSuite != "" {
 		cryptosuite = configuredSuite
 	}
