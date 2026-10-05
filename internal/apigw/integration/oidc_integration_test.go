@@ -47,7 +47,7 @@ func TestOIDCIntegration_FullFlow(t *testing.T) {
 		testProcessCallback(t, env)
 	})
 
-	t.Run("Step5_TransformClaims", func(t *testing.T) {
+	t.Run("Step5_Apply", func(t *testing.T) {
 		testOIDCClaimTransformation(t, env)
 	})
 }
@@ -121,10 +121,6 @@ func TestOIDCIntegration_ClaimTransformations(t *testing.T) {
 
 	t.Run("DefaultValues", func(t *testing.T) {
 		testDefaultValueTransformation(t, env)
-	})
-
-	t.Run("StringTransformations", func(t *testing.T) {
-		testStringTransformations(t, env)
 	})
 }
 
@@ -528,16 +524,13 @@ func createTestOIDCRPConfig(op *mockOIDCProvider) *model.OIDCRP {
 				Claim: "card_number",
 			},
 			"email": {
-				Claim:     "email",
-				Transform: "lowercase",
+				Claim: "email",
 			},
 			"name": {
-				Claim:     "display_name",
-				Transform: "uppercase",
+				Claim: "display_name",
 			},
 			"note": {
-				Claim:     "note",
-				Transform: "trim",
+				Claim: "note",
 			},
 			"country": {
 				Claim:   "country",
@@ -552,9 +545,9 @@ func createTestOIDCRPConfig(op *mockOIDCProvider) *model.OIDCRP {
 // testProviderDiscovery verifies that the OIDC service properly discovered the mock provider
 func testProviderDiscovery(t *testing.T, env *oidcTestEnvironment) {
 	// If the service was constructed successfully, discovery worked.
-	// Validate by building a transformer (which reads config populated at init).
-	transformer := env.oidcService.BuildTransformer()
-	require.NotNil(t, transformer)
+	// Validate by building a mapper (which reads config populated at init).
+	mapper := env.oidcService.BuildAttributeMapper()
+	require.NotNil(t, mapper)
 }
 
 // testOIDCInitiateAuth verifies auth initiation produces a valid authorization URL
@@ -624,8 +617,8 @@ func testProcessCallback(t *testing.T, env *oidcTestEnvironment) {
 
 // testOIDCClaimTransformation tests transforming OIDC claims into credential claims
 func testOIDCClaimTransformation(t *testing.T, env *oidcTestEnvironment) {
-	transformer := env.oidcService.BuildTransformer()
-	require.NotNil(t, transformer)
+	mapper := env.oidcService.BuildAttributeMapper()
+	require.NotNil(t, mapper)
 
 	testCases := []struct {
 		name     string
@@ -664,7 +657,7 @@ func testOIDCClaimTransformation(t *testing.T, env *oidcTestEnvironment) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := transformer.TransformClaims(tc.claims)
+			result, err := mapper.Apply(tc.claims)
 			require.NoError(t, err)
 			// Check expected keys are present with correct values
 			for k, v := range tc.expected {
@@ -727,10 +720,10 @@ func testExpiredSession(t *testing.T, env *oidcTestEnvironment) {
 	t.Logf("Correctly rejected expired session: %v", err)
 }
 
-// testMissingRequiredClaims tests that missing required claims cause transformer to fail
+// testMissingRequiredClaims tests that missing required claims cause mapper to fail
 func testMissingRequiredClaims(t *testing.T, env *oidcTestEnvironment) {
-	transformer := env.oidcService.BuildTransformer()
-	require.NotNil(t, transformer)
+	mapper := env.oidcService.BuildAttributeMapper()
+	require.NotNil(t, mapper)
 
 	// All claims with Required:true will fail if missing
 	incompleteClaims := map[string]any{
@@ -739,8 +732,8 @@ func testMissingRequiredClaims(t *testing.T, env *oidcTestEnvironment) {
 	}
 
 	// The flat mapping has no Required flags in the test config,
-	// so this tests that the transformer processes partial claims gracefully.
-	_, err := transformer.TransformClaims(incompleteClaims)
+	// so this tests that the mapper processes partial claims gracefully.
+	_, err := mapper.Apply(incompleteClaims)
 	assert.NoError(t, err)
 }
 
@@ -830,8 +823,8 @@ func testSessionDeletion(t *testing.T, env *oidcTestEnvironment) {
 
 // testNestedClaimTransformation tests dot-notation nested claim paths
 func testNestedClaimTransformation(t *testing.T, env *oidcTestEnvironment) {
-	transformer := env.oidcService.BuildTransformer()
-	require.NotNil(t, transformer)
+	mapper := env.oidcService.BuildAttributeMapper()
+	require.NotNil(t, mapper)
 
 	claims := map[string]any{
 		"given_name":  "Emma",
@@ -839,7 +832,7 @@ func testNestedClaimTransformation(t *testing.T, env *oidcTestEnvironment) {
 		"degree":      "Master of Arts",
 	}
 
-	result, err := transformer.TransformClaims(claims)
+	result, err := mapper.Apply(claims)
 	require.NoError(t, err)
 
 	// Flat mapping — claims are mapped directly
@@ -850,34 +843,18 @@ func testNestedClaimTransformation(t *testing.T, env *oidcTestEnvironment) {
 
 // testDefaultValueTransformation tests that default values are applied for missing optional claims
 func testDefaultValueTransformation(t *testing.T, env *oidcTestEnvironment) {
-	transformer := env.oidcService.BuildTransformer()
-	require.NotNil(t, transformer)
+	mapper := env.oidcService.BuildAttributeMapper()
+	require.NotNil(t, mapper)
 
 	// Provide no claims — optional fields should use defaults
 	claims := map[string]any{}
 
-	result, err := transformer.TransformClaims(claims)
+	result, err := mapper.Apply(claims)
 	require.NoError(t, err)
 
 	assert.Equal(t, "SE", result["country"], "default country should be SE")
 }
 
-// testStringTransformations tests lowercase, uppercase, and trim transforms
-func testStringTransformations(t *testing.T, env *oidcTestEnvironment) {
-	transformer := env.oidcService.BuildTransformer()
-	require.NotNil(t, transformer)
-
-	claims := map[string]any{
-		"email": "JOHN.DOE@EXAMPLE.COM",
-		"name":  "hello world",
-		"note":  "  spaced  ",
-	}
-
-	result, err := transformer.TransformClaims(claims)
-	require.NoError(t, err)
-
-	assert.Equal(t, "john.doe@example.com", result["email"], "email should be lowercased")
-	assert.Equal(t, "HELLO WORLD", result["display_name"], "name should be uppercased")
-	assert.Equal(t, "spaced", result["note"], "note should be trimmed")
-	assert.Equal(t, "SE", result["country"], "default country should be SE")
-}
+// testStringTransformations was removed together with the AttributeConfig
+// Transform field; equivalent per-claim value transformation now lives as
+// derivations on the target scope (see pkg/credential/derivations_test.go).

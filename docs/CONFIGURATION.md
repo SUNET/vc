@@ -14,6 +14,7 @@ Complete reference for all configuration parameters in the VC system.
 - [Verifier](#verifier-top-level)
 - [Registry](#registry-top-level)
 - [Secrets File Reference](#secrets-file-reference)
+- [Derivation Primitives](#derivation-primitives)
 
 ## Environment Variables
 
@@ -175,10 +176,29 @@ drivers to want independent validation tags.
 
 > **Path:** `.common.ha`
 
-| Field                 | Type     | Description                                                                   | Example | Default    | Required |
-| --------------------- | -------- | ----------------------------------------------------------------------------- | ------- | ---------- | -------- |
-| `enable`              | `bool`   | HA mode; when true caches are backed by MongoDB instead of in-memory storage. | -       | `false`    | No       |
-| `cache_database_name` | `string` | MongoDB database name used for caches.                                        | -       | `vc_cache` | No       |
+| Field                 | Type     | Description                                                                                                                                                                                                                                                 | Example | Default    | Required |
+| --------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ---------- | -------- |
+| `enable`              | `bool`   | HA mode; when true caches are backed by MongoDB instead of in-memory storage.                                                                                                                                                                               | -       | `false`    | No       |
+| `cache_database_name` | `string` | MongoDB database name used for caches.                                                                                                                                                                                                                      | -       | `vc_cache` | No       |
+| `pubsub`              | `object` | The optional pub/sub backend (Redis or Valkey) used for cross-node notifications in HA mode - today just the verifier's SSE fanout. Omitted entirely in standalone deployments; when omitted in HA, notifications remain in-process and do not cross nodes. | -       | -          | No       |
+
+### `pubsub`
+
+> **Path:** `.common.ha.pubsub`
+
+Supports Redis and Valkey today (both speak RESP, so the same client
+serves both; Backend only decides what logs and metrics identify it as).
+Omitted in standalone deployments; when omitted in HA, notifications
+stay in-process and do not cross nodes.
+
+| Field      | Type       | Description                                                                                                           | Example          | Default | Required |
+| ---------- | ---------- | --------------------------------------------------------------------------------------------------------------------- | ---------------- | ------- | -------- |
+| `backend`  | `string`   | Backend selects the RESP backend; "redis" or "valkey". Defaults to "redis" when omitted.                              | -                | `redis` | No       |
+| `addrs`    | `[]string` | One or more "<host>:<port>" endpoints. A single entry yields a plain client; multiple entries yield a cluster client. | `["redis:6379"]` | -       | Yes      |
+| `username` | `string`   | ACL username (Redis 6+ / Valkey). Optional.                                                                           | -                | -       | No       |
+| `password` | `string`   | ACL password (Redis 6+ / Valkey) or the single AUTH password on older servers. Optional.                              | -                | -       | No       |
+| `db`       | `int`      | Logical database number used by single-node mode (ignored in cluster mode).                                           | -                | `0`     | No       |
+| `tls`      | `bool`     | TLS for the client connection, using system roots.                                                                    | -                | `false` | No       |
 
 ### `credential_registry`
 
@@ -242,7 +262,7 @@ sets none of them is an OpenID4VP 1.0 deployment.
 | `doctype`           | `string` | Mdoc doctype value to resolve via Common.CredentialRegistry, used only when neither MDDLFilePath nor MDDLUrl is set. Requires Common.CredentialRegistry.Enable, same as VCT. Used only for mso_mdoc.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | -             | -           | Yes (if none of vctm_file_path, vctm_url, mddl_file_path, mddl_url, vct set)     |
 | `format`            | `string` | Credential format to issue                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `"dc+sd-jwt"` | `dc+sd-jwt` | No                                                                               |
 | `disclosure_policy` | `object` | The embedded disclosure policy for this credential type. Per CIR 2024/2979 Annex III and ETSI TS 119 472-3 §4.2.5. Only applicable to QEAAs and PuB-EAAs (not PIDs). Optional and off by default: when omitted, no `disclosure_policy` field is emitted in the credential issuer metadata.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | -             | -           | No                                                                               |
-| `attributes`        | `object` | Claim names to their source fields and transformation rules for credential issuance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | -             | -           | No                                                                               |
+| `attributes`        | `object` | Claim names to their source fields for credential issuance. Data sources are rename-only (attribute_mapping); value transformations belong in the target scope's derivations.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | -             | -           | No                                                                               |
 
 ### `disclosure_policy`
 
@@ -413,11 +433,12 @@ Supports both file-based and HSM-based keys with explicit control.
 
 Each key under a data source is a credential type.
 
-| Field          | Type     | Description                                                                                                   | Example | Default | Required |
-| -------------- | -------- | ------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `datastore`    | `object` | Credential types backed by a pre-loaded datastore (e.g. MongoDB)                                              | -       | -       | No       |
-| `assertion`    | `object` | Credential types backed by authentication assertions (SAML attributes or OIDC claims)                         | -       | -       | No       |
-| `external_api` | `object` | Credential types backed by an external API Each credential references a named remote defined in APIGW.Remotes | -       | -       | No       |
+| Field          | Type     | Description                                                                                                         | Example | Default | Required |
+| -------------- | -------- | ------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `datastore`    | `object` | Credential types backed by a pre-loaded datastore (e.g. MongoDB)                                                    | -       | -       | No       |
+| `assertion`    | `object` | Credential types backed by authentication assertions (SAML attributes or OIDC claims)                               | -       | -       | No       |
+| `external_api` | `object` | Credential types backed by an external API Each credential references a named remote defined in APIGW.Remotes       | -       | -       | No       |
+| `presentation` | `object` | Credential types whose data is derived from another credential the wallet presents via OpenID4VP during OpenID4VCI. | -       | -       | No       |
 
 ### `datastore`
 
@@ -439,6 +460,7 @@ Each key under a data source is a credential type.
 | `auth_scopes`         | `object`   | Credential scope keys to their per-scope authentication config. Used only for openid4vp: the wallet must present a credential matching any one of the listed scopes (OR logic). Each entry specifies which claims to extract from that particular credential type.                                                                                                                                                                                                                                                                                                                                                                             | -                                       | -       | No       |
 | `oidc_request_params` | `object`   | Additional parameters to include in the OIDC authorization request. Used to pass per-request values to the OP - see OIDCRequestParams for where those values come from, and for why they are not a statement about the authentic source. Only meaningful when auth_provider is oidc - there is no authorization request to add parameters to otherwise - and rejected at startup on a scope with any other provider. See validateOIDCOnlyScopeFields.                                                                                                                                                                                          | -                                       | -       | No       |
 | `issuance_policy`     | `object`   | SPOCP rules that must be satisfied by the OIDC claims for credential issuance. If configured, a SPOCP query is built from the returned claims and evaluated against these rules. A query that does not match any rule results in a hard deny. Evaluated in the OIDC callback and nowhere else, so it is rejected at startup on a scope whose auth_provider is not oidc. Accepting it there would be the worst outcome available for a security control: the configuration reads as a gate, validates, starts, and issues every credential through the SAML or pre-authorized path without ever consulting it. See validateOIDCOnlyScopeFields. | -                                       | -       | No       |
+| `derivations`         | `array`    | Generic post-verification steps that compute additional claims from the source data (see credential.ApplyDerivations).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | -                                       | -       | No       |
 
 ### `auth_scopes` entry
 
@@ -549,6 +571,102 @@ Ordered slices of QueryDimension ensure deterministic query construction.
 | `dimension` | `string` | SPOCP dimension name this entry populates. Required whenever the entry exists: an entry with no dimension has nothing to place the claim under, so it can only ever widen the rule shape into one no rule matches. "scope" is reserved - it is auto-populated with the credential type name. Constrained to a bare identifier (letter first, then letters, digits, underscore or hyphen). A dimension name is written into the S-expression a rule has to match by name, so anything with whitespace or punctuation in it is either unwritable in a rule or writable in more than one way - and " scope" would slip past the reserved-name and duplicate checks, which compare the string as given, while still colliding with the auto-populated scope dimension at query time. | `"acr"`                 | -       | Yes      |
 | `claim`     | `string` | OIDC claim whose value populates the dimension, in dot-notation for nested claims. Required for the same reason: a dimension with no claim renders empty in every query.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `"identity.given_name"` | -       | Yes      |
 
+### `derivations` entry
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[]`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[]`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[]`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[]`
+
+Each list entry under a scope's `derivations` field is keyed by primitive name (e.g. `age_over_thresholds:` or `lowercase: { input: email }`). The subsections below catalog the primitives and their parameters.
+
+| Field                            | Type     | Description                                                                                                                                                                                                            | Example | Default | Required |
+| -------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `age_over_thresholds`            | `object` | AgeOverThresholds emits two boolean claims per configured threshold N from an ISO YYYY-MM-DD birthdate: age_over_N (completed years at `now`) and over_N_this_year (reaches N at some point in `now`'s calendar year). | -       | -       | No       |
+| `lowercase`                      | `object` | Lowercase applies strings.ToLower elementwise.                                                                                                                                                                         | -       | -       | No       |
+| `uppercase`                      | `object` | Uppercase applies strings.ToUpper elementwise.                                                                                                                                                                         | -       | -       | No       |
+| `trim`                           | `object` | Trim applies strings.TrimSpace elementwise.                                                                                                                                                                            | -       | -       | No       |
+| `country_alpha2`                 | `object` | Country names or alpha-3 codes to ISO 3166-1 alpha-2 codes elementwise. Unknown inputs pass through unchanged.                                                                                                         | -       | -       | No       |
+| `country_alpha3`                 | `object` | Country names or alpha-2 codes to ISO 3166-1 alpha-3 codes elementwise. Unknown inputs pass through unchanged.                                                                                                         | -       | -       | No       |
+| `yyyymmdd_to_iso`                | `object` | YYYYMMDDToISO converts a SCHAC schacDateOfBirth ("YYYYMMDD") claim to ISO full-date ("YYYY-MM-DD"). Impossible calendar dates are an error.                                                                            | -       | -       | No       |
+| `swamid_highest_assurance_level` | `object` | SWAMIDHighestAssuranceLevel reduces a multi-valued eduPersonAssurance claim to the strongest recognised SWAMID Assurance Framework URI.                                                                                | -       | -       | No       |
+
+### `age_over_thresholds`
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].age_over_thresholds`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].age_over_thresholds`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].age_over_thresholds`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].age_over_thresholds`, `<scope>.derivations[].age_over_thresholds`
+
+Emits two boolean claims per threshold: age_over_N (completed years at
+`now`) and over_N_this_year (reaches N at some point in `now`'s calendar
+year, i.e. year(now) - year(birthdate) >= N).
+
+| Field        | Type     | Description                                                                                                          | Example                | Default | Required |
+| ------------ | -------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------- | -------- |
+| `input`      | `string` | Birthdate claim name (value must be ISO YYYY-MM-DD).                                                                 | `birthdate`            | -       | Yes      |
+| `thresholds` | `[]int`  | Ages (in years) to expose. Each N produces age_over_N and over_N_this_year (booleans). Every entry must be positive. | `[13, 15, 18, 21, 65]` | -       | Yes      |
+
+### `lowercase`
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].lowercase`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].lowercase`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].lowercase`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].lowercase`, `<scope>.derivations[].lowercase`
+
+Scalar strings and []string are handled; other types are an error.
+
+| Field   | Type     | Description                                                                                                                                                         | Example | Default | Required |
+| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `input` | `string` | Source claim name. Supports dot-notation claim paths (e.g. "identity.email") so this primitive can target the same nested claims that AttributeMapper materialises. | `email` | -       | Yes      |
+
+### `uppercase`
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].uppercase`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].uppercase`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].uppercase`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].uppercase`, `<scope>.derivations[].uppercase`
+
+| Field   | Type     | Description | Example   | Default | Required |
+| ------- | -------- | ----------- | --------- | ------- | -------- |
+| `input` | `string` | Input       | `country` | -       | Yes      |
+
+### `trim`
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].trim`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].trim`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].trim`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].trim`, `<scope>.derivations[].trim`
+
+| Field   | Type     | Description | Example | Default | Required |
+| ------- | -------- | ----------- | ------- | ------- | -------- |
+| `input` | `string` | Input       | `name`  | -       | Yes      |
+
+### `country_alpha2`
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].country_alpha2`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].country_alpha2`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].country_alpha2`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].country_alpha2`, `<scope>.derivations[].country_alpha2`
+
+Unknown inputs pass through unchanged; applied element-wise on []string.
+
+| Field   | Type     | Description | Example         | Default | Required |
+| ------- | -------- | ----------- | --------------- | ------- | -------- |
+| `input` | `string` | Input       | `nationalities` | -       | Yes      |
+
+### `country_alpha3`
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].country_alpha3`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].country_alpha3`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].country_alpha3`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].country_alpha3`, `<scope>.derivations[].country_alpha3`
+
+| Field   | Type     | Description | Example         | Default | Required |
+| ------- | -------- | ----------- | --------------- | ------- | -------- |
+| `input` | `string` | Input       | `nationalities` | -       | Yes      |
+
+### `yyyymmdd_to_iso`
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].yyyymmdd_to_iso`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].yyyymmdd_to_iso`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].yyyymmdd_to_iso`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].yyyymmdd_to_iso`, `<scope>.derivations[].yyyymmdd_to_iso`
+
+Impossible calendar dates surface as a hard error.
+
+| Field   | Type     | Description                                              | Example     | Default | Required |
+| ------- | -------- | -------------------------------------------------------- | ----------- | ------- | -------- |
+| `input` | `string` | Source claim name (must be a non-empty YYYYMMDD string). | `birthdate` | -       | Yes      |
+
+### `swamid_highest_assurance_level`
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].swamid_highest_assurance_level`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].swamid_highest_assurance_level`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].swamid_highest_assurance_level`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].swamid_highest_assurance_level`, `<scope>.derivations[].swamid_highest_assurance_level`
+
+swamid_highest_assurance_level primitive. Reduces a multi-valued
+eduPersonAssurance claim to the strongest recognised SWAMID URI; hard
+errors if the input is present but no SWAMID URI is recognised.
+
+| Field   | Type     | Description                               | Example           | Default | Required |
+| ------- | -------- | ----------------------------------------- | ----------------- | ------- | -------- |
+| `input` | `string` | Source claim (string or list of strings). | `assurance_level` | -       | Yes      |
+
 ### `import`
 
 > **Path:** `.apigw.data_sources.datastore.import`
@@ -579,6 +697,7 @@ The data comes directly from the SAML attributes or OIDC claims.
 | `issuance_policy`     | `object` | SPOCP rules that must be satisfied by the OIDC claims for credential issuance. If configured, a SPOCP query is built from the returned claims and evaluated against these rules. A query that does not match any rule results in a hard deny. Evaluated in the OIDC callback and nowhere else, so it is rejected at startup on a scope whose auth_provider is not oidc. Accepting it there would be the worst outcome available for a security control: the configuration reads as a gate, validates, starts, and issues every credential through the SAML or pre-authorized path without ever consulting it. See validateOIDCOnlyScopeFields. | -         | -       | No       |
 | `defaults`            | `object` | Claim values injected into the assertion document for credential-level fields the authentication assertion cannot supply (e.g. issuing_authority, issuing_country, date_of_expiry). Merged after attribute_mapping — real attributes always win.                                                                                                                                                                                                                                                                                                                                                                                               | -         | -       | No       |
 | `expiry_duration`     | `string` | ExpiryDuration, if set, computes date_of_expiry at issuance time as now+duration (formatted as ISO YYYY-MM-DD) and overrides any static date_of_expiry in Defaults. Prevents freshly issued credentials from shipping pre-expired when a static date is left un-rotated. Uses Go duration syntax; example: "8760h" for one year.                                                                                                                                                                                                                                                                                                               | `"8760h"` | -       | No       |
+| `derivations`         | `array`  | Generic post-verification steps that compute additional claims from the assertion (see credential.ApplyDerivations).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | -         | -       | No       |
 
 ### `external_api`
 
@@ -599,20 +718,47 @@ The data comes directly from the SAML attributes or OIDC claims.
 | `attribute_mapping`   | `object` | How to map API response data to credential claims                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | -       | -       | No       |
 | `oidc_request_params` | `object` | Additional parameters to include in the OIDC authorization request. Used to pass per-request values to the OP - see OIDCRequestParams for where those values come from, and for why they are not a statement about the authentic source. Only meaningful when auth_provider is oidc - there is no authorization request to add parameters to otherwise - and rejected at startup on a scope with any other provider. See validateOIDCOnlyScopeFields.                                                                                                                                                                                          | -       | -       | No       |
 | `issuance_policy`     | `object` | SPOCP rules that must be satisfied by the OIDC claims for credential issuance. If configured, a SPOCP query is built from the returned claims and evaluated against these rules. A query that does not match any rule results in a hard deny. Evaluated in the OIDC callback and nowhere else, so it is rejected at startup on a scope whose auth_provider is not oidc. Accepting it there would be the worst outcome available for a security control: the configuration reads as a gate, validates, starts, and issues every credential through the SAML or pre-authorized path without ever consulting it. See validateOIDCOnlyScopeFields. | -       | -       | No       |
+| `derivations`         | `array`  | Generic post-verification steps that compute additional claims from the API response (see credential.ApplyDerivations).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | -       | -       | No       |
 
 ### `attribute_mapping` entry
 
 > **Path:** `.apigw.data_sources.external_api.scopes.<credential scope>.attribute_mapping.<attribute>`, `.apigw.auth_providers.saml.attribute_mapping.<attribute>`, `.apigw.auth_providers.oidc.attribute_mapping.<attribute>`
 
-Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys
+Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys.
+AttributeConfig is a pure rename + presence step. Any value transformation
+(canonicalisation, case folding, date reformatting, etc.) is expressed as
+a derivation on the target scope; see the Derivation Primitives catalog
+(pkg/credential/primitives).
 
-| Field       | Type     | Description                                                                                                                                              | Example                 | Default | Required |
-| ----------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- | -------- |
-| `claim`     | `string` | Target claim name (supports dot-notation for nesting)                                                                                                    | `"identity.given_name"` | -       | Yes      |
-| `required`  | `bool`   | Required indicates if this attribute must be present in the assertion/response                                                                           | -                       | `false` | No       |
-| `transform` | `string` | Optional transformation to apply Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3", "yyyymmdd_to_iso"                      | -                       | -       | No       |
-| `default`   | `string` | Optional default value if attribute is missing                                                                                                           | -                       | -       | No       |
-| `as_array`  | `bool`   | AsArray wraps a scalar value in a single-element array before setting the claim. No-op when the value is already a slice (e.g. multi-valued OIDC claim). | -                       | -       | No       |
+| Field      | Type     | Description                                                                                                                                              | Example                 | Default | Required |
+| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- | -------- |
+| `claim`    | `string` | Target claim name (supports dot-notation for nesting)                                                                                                    | `"identity.given_name"` | -       | Yes      |
+| `required` | `bool`   | Required indicates if this attribute must be present in the assertion/response                                                                           | -                       | `false` | No       |
+| `default`  | `string` | Optional default value if attribute is missing                                                                                                           | -                       | -       | No       |
+| `as_array` | `bool`   | AsArray wraps a scalar value in a single-element array before setting the claim. No-op when the value is already a slice (e.g. multi-valued OIDC claim). | -                       | -       | No       |
+
+### `presentation`
+
+> **Path:** `.apigw.data_sources.presentation`
+
+| Field    | Type     | Description                                                 | Example | Default | Required |
+| -------- | -------- | ----------------------------------------------------------- | ------- | ------- | -------- |
+| `scopes` | `object` | Credential scope names to their presentation configuration. | -       | -       | No       |
+
+### `scopes` entry
+
+> **Path:** `.apigw.data_sources.presentation.scopes.<credential scope>`
+
+another credential presented by the wallet via OpenID4VP during OpenID4VCI.
+
+| Field             | Type     | Description                                                                                                                                                                                                                                                                                                                                                                           | Example   | Default     | Required |
+| ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ----------- | -------- |
+| `from_scope`      | `string` | FromScope names the credential scope the wallet must present (e.g. "eduid"). The presented credential is verified against the issuer trust chain before its claims are consumed.                                                                                                                                                                                                      | `"eduid"` | -           | Yes      |
+| `auth_provider`   | `string` | Fixed to "openid4vp" for now; kept as a field for symmetry with the other data sources and so future providers can be added without a config-shape change.                                                                                                                                                                                                                            | -         | `openid4vp` | No       |
+| `required_claims` | `object` | A claim path on the presented credential to an allow-list of exact-match values. Empty list = presence-only (any value passes). Populated list = the claim's value must equal one of the listed strings (or, when the claim is an array, at least one array element must match). Every key must be present on the presented credential's verified claims; missing keys fail issuance. | -         | -           | Yes      |
+| `defaults`        | `object` | Claim values injected into the derived credential document for fields the presented credential does not carry (e.g. issuing_authority, issuing_country).                                                                                                                                                                                                                              | -         | -           | No       |
+| `expiry_duration` | `string` | ExpiryDuration, if set, computes date_of_expiry at issuance time as now+duration (formatted as ISO YYYY-MM-DD). Same semantics as AssertionScope.ExpiryDuration.                                                                                                                                                                                                                      | `"8760h"` | -           | No       |
+| `derivations`     | `array`  | Generic post-verification steps that compute additional claims from the presented credential's own claims (see credential.ApplyDerivations).                                                                                                                                                                                                                                          | -         | -           | No       |
 
 ### `auth_providers`
 
@@ -1618,10 +1764,11 @@ Sections omitted from the secrets file are left untouched.
 
 > **Path:** `.common`
 
-| Field   | Type     | Description | Example | Default | Required |
-| ------- | -------- | ----------- | ------- | ------- | -------- |
-| `mongo` | `object` | Mongo       | -       | -       | No       |
-| `sql`   | `object` | SQL         | -       | -       | No       |
+| Field   | Type     | Description                                                   | Example | Default | Required |
+| ------- | -------- | ------------------------------------------------------------- | ------- | ------- | -------- |
+| `mongo` | `object` | Mongo                                                         | -       | -       | No       |
+| `sql`   | `object` | SQL                                                           | -       | -       | No       |
+| `ha`    | `object` | Credentials for the HA-mode pub/sub backend (Redis / Valkey). | -       | -       | No       |
 
 ### `mongo`
 
@@ -1655,6 +1802,23 @@ Sections omitted from the secrets file are left untouched.
 | Field      | Type     | Description                 | Example | Default | Required |
 | ---------- | -------- | --------------------------- | ------- | ------- | -------- |
 | `password` | `string` | MariaDB connection password | -       | -       | No       |
+
+### `ha`
+
+> **Path:** `.common.ha`
+
+| Field    | Type     | Description                                                                                                      | Example | Default | Required |
+| -------- | -------- | ---------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `pubsub` | `object` | Redis / Valkey ACL credentials used by the HA pub/sub bus. Omitted entirely when the backend is unauthenticated. | -       | -       | No       |
+
+### `pubsub`
+
+> **Path:** `.common.ha.pubsub`
+
+| Field      | Type     | Description                                                                    | Example | Default | Required |
+| ---------- | -------- | ------------------------------------------------------------------------------ | ------- | ------- | -------- |
+| `username` | `string` | ACL username (Redis 6+ / Valkey). Optional.                                    | -       | -       | No       |
+| `password` | `string` | ACL password (Redis 6+ / Valkey) or the single AUTH password on older servers. | -       | -       | No       |
 
 ### `apigw`
 
@@ -1784,6 +1948,10 @@ common:
       password: "change-me-in-production"
     mariadb:
       password: "change-me-in-production"
+  ha:
+    pubsub:
+      username: "<secret-value>"
+      password: "change-me-in-production"
 apigw:
   api_server:
     api_auth:
@@ -1807,4 +1975,91 @@ verifier:
         <client_id>: "<client_secret>"
 ```
 
+
+## Derivation Primitives
+
+One post-verification claim computation configured on a scope; exactly one field must be set and that field's Apply method runs.
+
+Each list entry under a scope's `derivations` field is keyed by primitive name (e.g. `age_over_thresholds:` or `lowercase: { input: email }`). The subsections below catalog the primitives and their parameters.
+
+### age_over_thresholds
+
+> **Path:** `<scope>.derivations[].age_over_thresholds`
+
+AgeOverThresholds emits two boolean claims per configured threshold N from an ISO YYYY-MM-DD birthdate: age_over_N (completed years at `now`) and over_N_this_year (reaches N at some point in `now`'s calendar year).
+
+| Field        | Type     | Description                                                                                                          | Example                | Default | Required |
+| ------------ | -------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------- | -------- |
+| `input`      | `string` | Birthdate claim name (value must be ISO YYYY-MM-DD).                                                                 | `birthdate`            | -       | Yes      |
+| `thresholds` | `[]int`  | Ages (in years) to expose. Each N produces age_over_N and over_N_this_year (booleans). Every entry must be positive. | `[13, 15, 18, 21, 65]` | -       | Yes      |
+
+### lowercase
+
+> **Path:** `<scope>.derivations[].lowercase`
+
+Lowercase applies strings.ToLower elementwise.
+
+| Field   | Type     | Description                                                                                                                                                         | Example | Default | Required |
+| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `input` | `string` | Source claim name. Supports dot-notation claim paths (e.g. "identity.email") so this primitive can target the same nested claims that AttributeMapper materialises. | `email` | -       | Yes      |
+
+### uppercase
+
+> **Path:** `<scope>.derivations[].uppercase`
+
+Uppercase applies strings.ToUpper elementwise.
+
+| Field   | Type     | Description | Example   | Default | Required |
+| ------- | -------- | ----------- | --------- | ------- | -------- |
+| `input` | `string` | Input       | `country` | -       | Yes      |
+
+### trim
+
+> **Path:** `<scope>.derivations[].trim`
+
+Trim applies strings.TrimSpace elementwise.
+
+| Field   | Type     | Description | Example | Default | Required |
+| ------- | -------- | ----------- | ------- | ------- | -------- |
+| `input` | `string` | Input       | `name`  | -       | Yes      |
+
+### country_alpha2
+
+> **Path:** `<scope>.derivations[].country_alpha2`
+
+Country names or alpha-3 codes to ISO 3166-1 alpha-2 codes elementwise. Unknown inputs pass through unchanged.
+
+| Field   | Type     | Description | Example         | Default | Required |
+| ------- | -------- | ----------- | --------------- | ------- | -------- |
+| `input` | `string` | Input       | `nationalities` | -       | Yes      |
+
+### country_alpha3
+
+> **Path:** `<scope>.derivations[].country_alpha3`
+
+Country names or alpha-2 codes to ISO 3166-1 alpha-3 codes elementwise. Unknown inputs pass through unchanged.
+
+| Field   | Type     | Description | Example         | Default | Required |
+| ------- | -------- | ----------- | --------------- | ------- | -------- |
+| `input` | `string` | Input       | `nationalities` | -       | Yes      |
+
+### yyyymmdd_to_iso
+
+> **Path:** `<scope>.derivations[].yyyymmdd_to_iso`
+
+YYYYMMDDToISO converts a SCHAC schacDateOfBirth ("YYYYMMDD") claim to ISO full-date ("YYYY-MM-DD"). Impossible calendar dates are an error.
+
+| Field   | Type     | Description                                              | Example     | Default | Required |
+| ------- | -------- | -------------------------------------------------------- | ----------- | ------- | -------- |
+| `input` | `string` | Source claim name (must be a non-empty YYYYMMDD string). | `birthdate` | -       | Yes      |
+
+### swamid_highest_assurance_level
+
+> **Path:** `<scope>.derivations[].swamid_highest_assurance_level`
+
+SWAMIDHighestAssuranceLevel reduces a multi-valued eduPersonAssurance claim to the strongest recognised SWAMID Assurance Framework URI.
+
+| Field   | Type     | Description                               | Example           | Default | Required |
+| ------- | -------- | ----------------------------------------- | ----------------- | ------- | -------- |
+| `input` | `string` | Source claim (string or list of strings). | `assurance_level` | -       | Yes      |
 

@@ -68,11 +68,11 @@ func TestWithDCAPIResponseModeNilIsNil(t *testing.T) {
 // in the constants but not the tag is worse: code sets it and validation
 // then rejects the request object it just built.
 func TestResponseModeConstantsMatchOneofTag(t *testing.T) {
-	field, ok := reflect.TypeOf(RequestObject{}).FieldByName("ResponseMode")
+	field, ok := reflect.TypeFor[RequestObject]().FieldByName("ResponseMode")
 	require.True(t, ok, "RequestObject has no ResponseMode field - this test must be updated with it")
 
 	var oneof string
-	for _, rule := range strings.Split(field.Tag.Get("validate"), ",") {
+	for rule := range strings.SplitSeq(field.Tag.Get("validate"), ",") {
 		if after, found := strings.CutPrefix(rule, "oneof="); found {
 			oneof = after
 			break

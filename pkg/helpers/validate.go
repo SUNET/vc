@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -286,6 +287,29 @@ func NewValidator() (*validator.Validate, error) {
 	if err := openid4vci.RegisterSafeKey(validate); err != nil {
 		return nil, err
 	}
+
+	// Register custom validation for derivation_entry - checks that a
+	// primitives.Derivation entry has exactly one primitive field set. The
+	// pointer fields on primitives.Derivation ARE the catalog; adding a new
+	// primitive means adding a field there and nothing here.
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		d := sl.Current()
+		count := 0
+		for _, f := range d.Fields() {
+			f := f
+			if f.Kind() == reflect.Pointer && !f.IsNil() {
+				count++
+			}
+		}
+		switch count {
+		case 0:
+			sl.ReportError(d.Interface(), "", "", "derivation_entry_empty", "")
+		case 1:
+			// ok
+		default:
+			sl.ReportError(d.Interface(), "", "", "derivation_entry_multiple", "")
+		}
+	}, primitives.Derivation{})
 
 	// The Mongo.URI requirement is deliberately NOT registered here.
 	//

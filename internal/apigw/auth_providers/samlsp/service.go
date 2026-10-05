@@ -411,9 +411,9 @@ func (s *Service) Middleware() samlsp.RequestTracker {
 	return nil
 }
 
-// BuildTransformer creates a ClaimTransformer from the service's SAML configuration
-func (s *Service) BuildTransformer() (*ClaimTransformer, error) {
-	return BuildTransformer(s.cfg)
+// BuildAttributeMapper creates a AttributeMapper from the service's SAML configuration
+func (s *Service) BuildAttributeMapper() (*AttributeMapper, error) {
+	return BuildAttributeMapper(s.cfg)
 }
 
 // GetStaticIDPEntityID returns the static IdP entityID if configured, empty string otherwise
@@ -432,8 +432,8 @@ func (s *Service) IsStaticIDPMode() bool {
 	return false
 }
 
-// BuildTransformer creates a ClaimTransformer from SAML configuration (package-level for testing)
-func BuildTransformer(cfg *model.SAMLSP) (*ClaimTransformer, error) {
+// BuildAttributeMapper creates a AttributeMapper from SAML configuration (package-level for testing)
+func BuildAttributeMapper(cfg *model.SAMLSP) (*AttributeMapper, error) {
 	if cfg == nil || !cfg.Enable {
 		return nil, fmt.Errorf("SAML not enabled")
 	}
@@ -442,5 +442,5 @@ func BuildTransformer(cfg *model.SAMLSP) (*ClaimTransformer, error) {
 		return nil, fmt.Errorf("SAML attribute_mapping is required")
 	}
 
-	return NewClaimTransformer(cfg.AttributeMapping), nil
+	return NewAttributeMapper(cfg.AttributeMapping), nil
 }

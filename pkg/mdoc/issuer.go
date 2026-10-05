@@ -185,7 +185,8 @@ func (i *Issuer) Issue(req *IssuanceRequest) (*IssuedDocumentMdoc, error) {
 		WithDigestAlgorithm(i.digestAlgorithm).
 		WithValidity(validFrom, validUntil).
 		WithDeviceKey(deviceKey).
-		WithSigner(i.signerKey, i.certChain)
+		WithSigner(i.signerKey, i.certChain).
+		WithSaltBytes(req.Schema.ZkSaltBytes)
 
 	// Add every claim declared by the schema, across all of its namespaces.
 	// This one generic pass replaces per-doctype element lists: adding a new

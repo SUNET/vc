@@ -549,14 +549,14 @@ func (s *Service) DeleteSession(ctx context.Context, state string) {
 	s.deleteSession(ctx, state)
 }
 
-// BuildTransformer creates a claim transformer from the configuration.
+// BuildAttributeMapper creates an attribute mapper from the configuration.
 // Returns nil if no attribute_mapping is configured (OIDC claims pass through as-is).
-func (s *Service) BuildTransformer() *ClaimTransformer {
+func (s *Service) BuildAttributeMapper() *AttributeMapper {
 	if s.cfg == nil || len(s.cfg.AttributeMapping) == 0 {
 		return nil
 	}
 
-	return NewClaimTransformer(s.cfg.AttributeMapping)
+	return NewAttributeMapper(s.cfg.AttributeMapping)
 }
 
 // createSession creates a new session with generated state, nonce, and PKCE code_verifier.

@@ -56,6 +56,7 @@ A verifiable credential for educational identity, based on PID ARF 1.8. Provides
 - `document_number` "Document Number" (string): Unique identifier of the eduID document [sd=always]
 - `issuing_jurisdiction` "Issuing Region" (string): Regional or local subdivision that issued the document [sd=never]
 - `trust_anchor` "Trust Anchor" (string): The trust anchor used to verify the document [sd=never]
+- `assurance_level` "Assurance Level (SWAMID URI)" (string): Strongest recognised SWAMID Assurance Framework URI from SAML attribute `eduPersonAssurance` — one of `http://www.swamid.se/policy/assurance/al1`, `.../al2`, or `.../al3`. Other assurance URIs in the same attribute (including REFEDS IAP) are ignored. [sd=always]
 
 ## Images
 

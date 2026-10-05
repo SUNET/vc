@@ -123,6 +123,24 @@ func (r *RedisCache[V]) Get(ctx context.Context, key string) (V, bool) {
 	return r.decodeValue(data, "get", key)
 }
 
+// GetErr retrieves a value by key and distinguishes "not found" (returns
+// ErrNoDocuments) from operational errors (returns the underlying error).
+func (r *RedisCache[V]) GetErr(ctx context.Context, key string) (V, error) {
+	var zero V
+	data, err := r.client.Get(ctx, r.namespacedKey(key)).Bytes()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return zero, ErrNoDocuments
+		}
+		return zero, fmt.Errorf("redis cache geterr (cache=%s): %w", r.collection, err)
+	}
+	v, ok := r.decodeValue(data, "geterr", key)
+	if !ok {
+		return zero, fmt.Errorf("redis cache geterr: decode failed (cache=%s)", r.collection)
+	}
+	return v, nil
+}
+
 // Set stores a value with the default TTL configured at creation time.
 func (r *RedisCache[V]) Set(ctx context.Context, key string, value V) {
 	r.setWithTTL(ctx, key, value, r.ttl, "set")

@@ -79,8 +79,8 @@ func TestSessionExpiration(t *testing.T) {
 	}
 }
 
-// TestClaimTransformer tests claim transformation functionality
-func TestClaimTransformer(t *testing.T) {
+// TestAttributeMapper tests attribute-mapping functionality
+func TestAttributeMapper(t *testing.T) {
 	mapping := model.AttributeMapping{
 		"given_name": {
 			Claim:    "identity.given_name",
@@ -91,9 +91,8 @@ func TestClaimTransformer(t *testing.T) {
 			Required: true,
 		},
 		"email": {
-			Claim:     "identity.email",
-			Required:  false,
-			Transform: "lowercase",
+			Claim:    "identity.email",
+			Required: false,
 		},
 		"country": {
 			Claim:    "identity.country",
@@ -102,7 +101,7 @@ func TestClaimTransformer(t *testing.T) {
 		},
 	}
 
-	transformer := NewClaimTransformer(mapping)
+	mapper := NewAttributeMapper(mapping)
 
 	// Test claims
 	inputClaims := map[string]any{
@@ -112,7 +111,7 @@ func TestClaimTransformer(t *testing.T) {
 		// country is missing, should use default
 	}
 
-	result, err := transformer.TransformClaims(inputClaims)
+	result, err := mapper.Apply(inputClaims)
 	if err != nil {
 		t.Fatalf("Failed to transform claims: %v", err)
 	}
@@ -132,9 +131,8 @@ func TestClaimTransformer(t *testing.T) {
 		t.Errorf("Expected family_name 'Doe', got %v", identity["family_name"])
 	}
 
-	// Check transformation
-	if identity["email"] != "john.doe@example.com" {
-		t.Errorf("Expected lowercase email 'john.doe@example.com', got %v", identity["email"])
+	if identity["email"] != "JOHN.DOE@EXAMPLE.COM" {
+		t.Errorf("Expected email 'JOHN.DOE@EXAMPLE.COM' (no transform), got %v", identity["email"])
 	}
 
 	// Check default value
@@ -143,8 +141,8 @@ func TestClaimTransformer(t *testing.T) {
 	}
 }
 
-// TestClaimTransformerMissingRequired tests that missing required claims fail
-func TestClaimTransformerMissingRequired(t *testing.T) {
+// TestAttributeMapperMissingRequired tests that missing required claims fail
+func TestAttributeMapperMissingRequired(t *testing.T) {
 	mapping := model.AttributeMapping{
 		"given_name": {
 			Claim:    "identity.given_name",
@@ -152,65 +150,14 @@ func TestClaimTransformerMissingRequired(t *testing.T) {
 		},
 	}
 
-	transformer := NewClaimTransformer(mapping)
+	mapper := NewAttributeMapper(mapping)
 
 	// Missing required claim
 	inputClaims := map[string]any{}
 
-	_, err := transformer.TransformClaims(inputClaims)
+	_, err := mapper.Apply(inputClaims)
 	if err == nil {
 		t.Error("Expected error for missing required claim")
-	}
-}
-
-// TestClaimTransformerTransformations tests various transformations
-func TestClaimTransformerTransformations(t *testing.T) {
-	mapping := model.AttributeMapping{
-		"lowercase_field": {
-			Claim:     "result.lowercase",
-			Required:  false,
-			Transform: "lowercase",
-		},
-		"uppercase_field": {
-			Claim:     "result.uppercase",
-			Required:  false,
-			Transform: "uppercase",
-		},
-		"trim_field": {
-			Claim:     "result.trimmed",
-			Required:  false,
-			Transform: "trim",
-		},
-	}
-
-	transformer := NewClaimTransformer(mapping)
-
-	inputClaims := map[string]any{
-		"lowercase_field": "HELLO WORLD",
-		"uppercase_field": "hello world",
-		"trim_field":      "  spaced  ",
-	}
-
-	result, err := transformer.TransformClaims(inputClaims)
-	if err != nil {
-		t.Fatalf("Failed to transform claims: %v", err)
-	}
-
-	resultMap, ok := result["result"].(map[string]any)
-	if !ok {
-		t.Fatal("Expected 'result' to be a map")
-	}
-
-	if resultMap["lowercase"] != "hello world" {
-		t.Errorf("Expected lowercase 'hello world', got %v", resultMap["lowercase"])
-	}
-
-	if resultMap["uppercase"] != "HELLO WORLD" {
-		t.Errorf("Expected uppercase 'HELLO WORLD', got %v", resultMap["uppercase"])
-	}
-
-	if resultMap["trimmed"] != "spaced" {
-		t.Errorf("Expected trimmed 'spaced', got %v", resultMap["trimmed"])
 	}
 }
 
@@ -221,15 +168,15 @@ func TestServiceInitialization(t *testing.T) {
 	t.Skip("Requires OIDC provider - see integration tests")
 }
 
-// BenchmarkClaimTransform benchmarks claim transformation
-func BenchmarkClaimTransform(b *testing.B) {
+// BenchmarkAttributeMapper_Apply benchmarks attribute mapping
+func BenchmarkAttributeMapper_Apply(b *testing.B) {
 	mapping := model.AttributeMapping{
 		"given_name":  {Claim: "identity.given_name", Required: true},
 		"family_name": {Claim: "identity.family_name", Required: true},
 		"email":       {Claim: "identity.email", Required: true},
 	}
 
-	transformer := NewClaimTransformer(mapping)
+	mapper := NewAttributeMapper(mapping)
 
 	claims := map[string]any{
 		"given_name":  "John",
@@ -239,7 +186,7 @@ func BenchmarkClaimTransform(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := transformer.TransformClaims(claims)
+		_, err := mapper.Apply(claims)
 		if err != nil {
 			b.Fatal(err)
 		}

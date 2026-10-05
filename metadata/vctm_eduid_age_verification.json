@@ -1,0 +1,187 @@
+{
+  "vct": "urn:credential:eduid_age_verification:1",
+  "name": "EduID Age Verification Credential",
+  "description": "A minimal age-attestation credential derived from an eduID credential presented via OpenID4VP during OpenID4VCI. Carries age-threshold booleans — age_over_N (completed years at issuance) and over_N_this_year (reaches N at some point in the issuance year) for N in {13, 15, 18, 21, 65} — plus validity dates. Which thresholds are actually populated depends on the presentation scope's age_over_thresholds derivation; the metadata lists the full superset. Assurance level is enforced at issuance time by the presentation scope's required_claims.assurance_level allow-list (see apigw.data_sources.presentation.scopes.eduid_age_verification) and is not carried on the credential itself.",
+  "display": [
+    {
+      "locale": "en-US",
+      "name": "EduID Age Verification",
+      "rendering": {
+        "simple": {
+          "background_color": "#ffffff",
+          "text_color": "#222222"
+        }
+      }
+    }
+  ],
+  "claims": [
+    {
+      "path": [
+        "age_over_13"
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Age >= 13",
+          "description": "Indicates if the person is 13 years old or older."
+        }
+      ]
+    },
+    {
+      "path": [
+        "age_over_15"
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Age >= 15",
+          "description": "Indicates if the person is 15 years old or older."
+        }
+      ]
+    },
+    {
+      "path": [
+        "age_over_18"
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Age >= 18",
+          "description": "Indicates if the person is 18 years old or older."
+        }
+      ]
+    },
+    {
+      "path": [
+        "age_over_21"
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Age >= 21",
+          "description": "Indicates if the person is 21 years old or older."
+        }
+      ]
+    },
+    {
+      "path": [
+        "age_over_65"
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Age >= 65",
+          "description": "Indicates if the person is 65 years old or older."
+        }
+      ]
+    },
+    {
+      "path": [
+        "over_13_this_year"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Is 13 this year",
+          "description": "True if the person is at least 13 years old at some point during the current calendar year."
+        }
+      ]
+    },
+    {
+      "path": [
+        "over_15_this_year"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Is 15 this year",
+          "description": "True if the person is at least 15 years old at some point during the current calendar year."
+        }
+      ]
+    },
+    {
+      "path": [
+        "over_18_this_year"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Is 18 this year",
+          "description": "True if the person is at least 18 years old at some point during the current calendar year."
+        }
+      ]
+    },
+    {
+      "path": [
+        "over_21_this_year"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Is 21 this year",
+          "description": "True if the person is at least 21 years old at some point during the current calendar year."
+        }
+      ]
+    },
+    {
+      "path": [
+        "over_65_this_year"
+      ],
+      "mandatory": false,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Is 65 this year",
+          "description": "True if the person is at least 65 years old at some point during the current calendar year."
+        }
+      ]
+    },
+    {
+      "path": [
+        "date_of_issuance"
+      ],
+      "mandatory": true,
+      "sd": "always",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Issue Date",
+          "description": "Start date of this credential's validity."
+        }
+      ]
+    },
+    {
+      "path": [
+        "date_of_expiry"
+      ],
+      "mandatory": true,
+      "sd": "never",
+      "display": [
+        {
+          "locale": "en-US",
+          "label": "Expiry Date",
+          "description": "End date of this credential's validity."
+        }
+      ]
+    }
+  ]
+}

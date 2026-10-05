@@ -106,7 +106,7 @@ func inferStatusFromErrorTitle(title string) int {
 		return http.StatusNotFound
 	case contains(title, "unauthorized", "authentication"):
 		return http.StatusUnauthorized
-	case contains(title, "forbidden", "revoked", "access_denied"):
+	case contains(title, "forbidden", "revoked", "access_denied", "not_allowed"):
 		return http.StatusForbidden
 	case contains(title, "invalid", "validation", "bad_request", "malformed"):
 		return http.StatusBadRequest

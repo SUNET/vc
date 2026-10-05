@@ -24,6 +24,9 @@ type Apiv1 interface {
 	// UI
 	UIInteraction(ctx context.Context, req *apiv1.UIInteractionRequest) (*apiv1.UIInteractionReply, error)
 	UIMetadata(ctx context.Context) (*apiv1.UIMetadataReply, error)
+	IsActiveAuthSession(ctx context.Context, sessionID string) (bool, error)
+	CompletedResponseCode(ctx context.Context, sessionID string) (string, error)
+	UIResume(ctx context.Context, sessionID string) (*apiv1.UIResumeReply, error)
 
 	// OIDC Provider
 	GetDiscoveryMetadata(ctx context.Context) (*apiv1.DiscoveryMetadata, error)

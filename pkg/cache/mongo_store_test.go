@@ -62,9 +62,12 @@ func TestNewMongoStore_NilClient(t *testing.T) {
 	assert.Contains(t, err.Error(), "mongo client cannot be nil")
 }
 
-// TestMongoStore_DuplicateSessionID verifies that saving two docs with the same
-// session_id fails thanks to the unique index.
-func TestMongoStore_DuplicateSessionID(t *testing.T) {
+// TestMongoStore_SaveOverwritesExistingSessionID verifies that Save on an
+// already-stored session_id replaces the document rather than failing on the
+// unique index. This matches MemoryStore.Save semantics and lets callers
+// (e.g. VerificationDirectPost persisting a completion marker) use Save as
+// an upsert on a previously-saved context.
+func TestMongoStore_SaveOverwritesExistingSessionID(t *testing.T) {
 	client, cleanup := startMongoContainer(t)
 	defer cleanup()
 
@@ -75,8 +78,11 @@ func TestMongoStore_DuplicateSessionID(t *testing.T) {
 	require.NoError(t, store.Save(ctx, doc))
 
 	dup := &AuthorizationContext{SessionID: "dup-1", Code: "c2"}
-	err := store.Save(ctx, dup)
-	assert.Error(t, err, "expected duplicate key error")
+	require.NoError(t, store.Save(ctx, dup))
+
+	result, err := store.GetByID(ctx, "dup-1")
+	require.NoError(t, err)
+	assert.Equal(t, "c2", result.Code, "second Save should overwrite")
 }
 
 // TestMongoStore_CreatedAtAutoPopulated verifies Save fills in CreatedAt.

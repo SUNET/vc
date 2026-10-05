@@ -129,6 +129,7 @@ func CreateTestClientWithMock(t testing.TB, cfg *model.Cfg) (*Client, *MockDBSer
 
 	if cfg == nil {
 		cfg = &model.Cfg{
+			Common: &model.Common{},
 			Verifier: &model.Verifier{
 				PublicURL: "https://verifier.example.com",
 				Outbound: model.VerifierOutbound{
@@ -171,7 +172,8 @@ func CreateTestClientWithMock(t testing.TB, cfg *model.Cfg) (*Client, *MockDBSer
 		// ephemeral encryption key - such as an encrypted response_mode -
 		// has nothing to generate one from.
 		openid4vp: &openid4vp.Client{
-			EphemeralKeyCache: openid4vp.NewEphemeralEncryptionKeyCache(10 * time.Minute),
+			EphemeralKeyCache:  openid4vp.NewEphemeralEncryptionKeyCache(10 * time.Minute),
+			RequestObjectCache: openid4vp.NewRequestObjectCache(5 * time.Minute),
 		},
 	}
 
