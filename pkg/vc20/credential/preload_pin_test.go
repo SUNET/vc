@@ -96,12 +96,17 @@ func TestReferencedContexts(t *testing.T) {
 			// too - skipping it made the contract a half-truth.
 			"relative.jsonld",
 			"../up/one.jsonld",
-			// Non-http after resolution is still excluded.
+			// Non-http after resolution is REPORTED, not excluded: a
+			// reference this cannot pin must fail the pin rather than
+			// vanish from the closure startup claims to have pinned.
 			"mailto:someone@example.org",
 		},
 	}
 
-	got := referencedContexts(doc, "https://example.org/deep/base.jsonld")
+	got, unsupported := referencedContexts(doc, "https://example.org/deep/base.jsonld")
+	if len(unsupported) != 1 || unsupported[0] != "mailto:someone@example.org" {
+		t.Fatalf("unsupported = %v, want the mailto reference reported rather than dropped", unsupported)
+	}
 	want := map[string]bool{
 		"https://example.org/one.jsonld":           true,
 		"https://example.org/two.jsonld":           true,
@@ -119,15 +124,22 @@ func TestReferencedContexts(t *testing.T) {
 	}
 }
 
-// TestReferencedContexts_NoBaseSkipsRelatives: with no usable base there is
-// nothing to resolve against, and guessing would pin a URL the processor
-// will never ask for.
-func TestReferencedContexts_NoBaseSkipsRelatives(t *testing.T) {
+// TestReferencedContexts_NoBaseReportsRelatives: with no usable base there
+// is nothing to resolve against, and guessing would pin a URL the processor
+// will never ask for. It is still REPORTED rather than dropped - "I cannot
+// pin this" is the honest answer, and the caller refuses on it.
+func TestReferencedContexts_NoBaseReportsRelatives(t *testing.T) {
 	doc := map[string]any{"@context": []any{"relative.jsonld", "https://example.org/abs.jsonld"}}
 
-	got := referencedContexts(doc, "")
+	got, unsupported := referencedContexts(doc, "")
 	if len(got) != 1 || got[0] != "https://example.org/abs.jsonld" {
 		t.Fatalf("got %v, want only the absolute URL", got)
+	}
+	// Reported in its RESOLVED form ("/relative.jsonld" against an empty
+	// base), which is what the processor would have asked for - the error
+	// should name what could not be pinned, not what was written.
+	if len(unsupported) != 1 || unsupported[0] != "/relative.jsonld" {
+		t.Fatalf("unsupported = %v, want the unresolvable relative reference reported", unsupported)
 	}
 }
 
@@ -177,5 +189,47 @@ func TestPinRemoteContext_BoundsFanOutNotJustDepth(t *testing.T) {
 		require.NoError(t, l.PinRemoteContext(root),
 			"the budget must not refuse the closures real contexts have")
 		require.True(t, pinned(t, l, root))
+	})
+}
+
+// TestPinRemoteContext_RefusesAnUnpinnableReference: the whole promise of
+// pinning the closure at startup is that nothing in it is fetched again
+// later. A nested reference this cannot pin used to be dropped silently, so
+// an allowlisted root passed the pin with a hole in its closure - and the
+// reference was met for the first time during issuance, where LoadDocument
+// refuses it and a credential fails to sign.
+//
+// Refused at pin time, naming the reference, so the configuration fails
+// where it can still be fixed.
+func TestPinRemoteContext_RefusesAnUnpinnableReference(t *testing.T) {
+	for name, ref := range map[string]string{
+		"file":  "file:///etc/ssl/context.jsonld",
+		"data":  "data:application/ld+json,%7B%7D",
+		"other": "mailto:someone@example.org",
+	} {
+		t.Run(name+" is refused", func(t *testing.T) {
+			l := NewCachingDocumentLoader()
+			const root = "https://ctx.example.org/root.jsonld"
+			seedWithTTL(t, l, root, `{"@context":["`+ref+`"]}`)
+
+			err := l.PinRemoteContext(root)
+			require.Error(t, err, "a reference that cannot be pinned must fail the pin")
+			require.Contains(t, err.Error(), "cannot be pinned")
+			require.Contains(t, err.Error(), ref,
+				"the error must name the reference, or an operator cannot find it")
+		})
+	}
+
+	// The control: an ordinary http reference still pins, so the test above
+	// is not passing against a function that refuses every nested reference.
+	t.Run("an http reference still pins", func(t *testing.T) {
+		l := NewCachingDocumentLoader()
+		const root = "https://ctx.example.org/ok-root.jsonld"
+		const leaf = "https://ctx.example.org/ok-leaf.jsonld"
+		seedWithTTL(t, l, leaf, `{"@context":{"Leaf":"https://example.org/Leaf"}}`)
+		seedWithTTL(t, l, root, `{"@context":["`+leaf+`"]}`)
+
+		require.NoError(t, l.PinRemoteContext(root))
+		require.True(t, pinned(t, l, leaf))
 	})
 }

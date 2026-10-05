@@ -91,7 +91,15 @@ func (l *CachingDocumentLoader) pinContext(url string, seen map[string]bool, dep
 	if base == "" {
 		base = url
 	}
-	for _, ref := range referencedContexts(doc.Document, base) {
+	references, unsupported := referencedContexts(doc.Document, base)
+	if len(unsupported) > 0 {
+		// Refused here rather than left for issuance. A pinned closure that
+		// silently excludes a reference is the failure this whole function
+		// exists to prevent - startup reports the context pinned and the
+		// first credential to need that reference fails to sign.
+		return fmt.Errorf("context %q references %q, which is not an http(s) URL and cannot be pinned", url, unsupported[0])
+	}
+	for _, ref := range references {
 		if err := l.pinContext(ref, seen, depth+1); err != nil {
 			return fmt.Errorf("context %q references %q: %w", url, ref, err)
 		}
@@ -110,8 +118,9 @@ func (l *CachingDocumentLoader) pinContext(url string, seen map[string]bool, dep
 // expiry it could change or fail while startup had reported the whole
 // closure pinned. Skipping them made the pinning contract a half-truth in
 // exactly the way pinning exists to prevent.
-func referencedContexts(document any, base string) []string {
+func referencedContexts(document any, base string) (supported, unsupported []string) {
 	var out []string
+	var rejected []string
 	// An unparsable base leaves relative references unresolvable; they are
 	// then skipped rather than guessed at.
 	baseURL, err := neturl.Parse(base)
@@ -124,7 +133,7 @@ func referencedContexts(document any, base string) []string {
 		case map[string]any:
 			for key, val := range v {
 				if key == "@context" || key == "@import" {
-					collectContextStrings(val, baseURL, &out)
+					collectContextStrings(val, baseURL, &out, &rejected)
 				}
 				walk(val)
 			}
@@ -135,32 +144,53 @@ func referencedContexts(document any, base string) []string {
 		}
 	}
 	walk(document)
-	return out
+	return out, rejected
 }
 
-func collectContextStrings(node any, base *neturl.URL, out *[]string) {
+// collectContextStrings sorts the references a document makes into the ones
+// this can pin and the ones it cannot.
+//
+// Anything that does not resolve to http(s) goes to unsupported rather than
+// being dropped. Dropping it made startup validation a half-truth in the
+// direction that matters: an allowlisted root referencing "file:" or
+// "data:" passed the pin, and the reference was then met for the first time
+// during issuance, where LoadDocument refuses it and a credential fails to
+// sign. The whole point of pinning the closure at startup is that this
+// cannot happen later.
+//
+// Reported rather than fetched. Handing a non-http reference to
+// LoadDocument to be refused would work, but it means passing a URL out of
+// a fetched document to a loader on the strength of expecting it to say no.
+func collectContextStrings(node any, base *neturl.URL, out, unsupported *[]string) {
 	switch v := node.(type) {
 	case string:
+		if v == "" {
+			return
+		}
 		if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
 			*out = append(*out, v)
 			return
 		}
 		// Relative: resolve against the document that referenced it, which
 		// is what the processor will do when it fetches this later.
-		if base == nil || v == "" {
+		if base == nil {
+			*unsupported = append(*unsupported, v)
 			return
 		}
 		ref, err := neturl.Parse(v)
 		if err != nil {
+			*unsupported = append(*unsupported, v)
 			return
 		}
 		resolved := base.ResolveReference(ref)
 		if resolved.Scheme == "http" || resolved.Scheme == "https" {
 			*out = append(*out, resolved.String())
+			return
 		}
+		*unsupported = append(*unsupported, resolved.String())
 	case []any:
 		for _, item := range v {
-			collectContextStrings(item, base, out)
+			collectContextStrings(item, base, out, unsupported)
 		}
 	}
 }
