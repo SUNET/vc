@@ -106,7 +106,7 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 			requestObject.ClientMetadata = &openid4vp.ClientMetadata{}
 		}
 		requestObject.ClientMetadata.JWKS = &openid4vp.Keys{Keys: []jwk.Key{ephemeralPublicJWK}}
-		requestObject.ClientMetadata.EncryptedResponseEncValuesSupported = []string{"A256GCM"}
+		requestObject.ClientMetadata.EncryptedResponseEncValuesSupported = []string{"A256GCM", "A128GCM"}
 		// Off unless a deployment opts in - see OpenID4VPCompat.
 		if c.cfg.SendLegacyJARMEncryptionParams() {
 			requestObject.ClientMetadata.AuthorizationEncryptedResponseALG = "ECDH-ES"

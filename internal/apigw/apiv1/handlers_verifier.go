@@ -95,7 +95,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 			// OpenID4VP 1.0 replaced authorization_encrypted_response_enc
 			// with this array and closed client_metadata to a fixed set of
 			// members, so the old pair is opt-in only - see OpenID4VPCompat.
-			EncryptedResponseEncValuesSupported: []string{"A256GCM"},
+			EncryptedResponseEncValuesSupported: []string{"A256GCM", "A128GCM"},
 		},
 		IAT: time.Now().UTC().Unix(),
 	}
