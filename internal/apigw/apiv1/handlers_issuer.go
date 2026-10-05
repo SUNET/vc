@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -276,10 +277,8 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	// Match a scope from the authorization context to a known credential constructor
-	scope, _, err := c.matchScope(authContext.Scopes)
+	scope, configurationID, err := c.selectScope(req, authContext)
 	if err != nil {
-		c.log.Error(err, "no matching scope in auth context")
 		return nil, err
 	}
 
@@ -481,19 +480,6 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	// And WHICH configuration, which is not the same question. With
-	// credential_identifier, req.CredentialConfigurationID is empty and the
-	// id lives in the authorization_details the token response returned -
-	// so anything downstream that reads the request field alone falls back
-	// to an authorised scope and can mint a credential the identifier did
-	// not select. Resolved here because this is the only place holding the
-	// authorization details.
-	configurationID, err := req.ResolveCredentialConfigurationID(c.issuerMetadata, authContext.AuthorizationDetails)
-	if err != nil {
-		c.log.Error(err, "failed to resolve credential configuration")
-		return nil, err
-	}
-
 	// The authenticated identifier is used for registry; for assertion-based
 	// issuance the identifier is best-effort (all data comes from trusted IdP claims).
 	identifier, err := requireIdentifier(authContext.Identifier, model.DataSourceType(authContext.DataSource))
@@ -666,6 +652,69 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 
 // issueVC20 issues W3C VC 2.0 Data Integrity credentials, one per JWT proof.
 // Caller must ensure only JWT proof types are present (singular Proof or Proofs.JWT).
+// selectScope decides which credential scope a request is for, and reports
+// the configuration it named.
+//
+// Two things answer that question and they can disagree. matchScope takes
+// the FIRST authorised scope that has credential metadata; the request may
+// separately NAME a configuration, either as credential_configuration_id or
+// through a credential_identifier that the token response's
+// authorization_details map to one. CredentialConfigurationsSupported is
+// keyed by scope, so a named configuration IS a scope.
+//
+// With scopes A and B both authorised and a request selecting B, matchScope
+// answers A. Everything downstream then uses A - the document that gets
+// loaded, the Scope sent to the issuer - while the W3C types and contexts
+// were read from B, producing a credential carrying B's types over A's
+// claims and labelled A. That is the "these three fields only work as a
+// set" failure this change exists to prevent, assembled out of two scopes
+// instead of one.
+//
+// So the named configuration wins, and must be AUTHORISED to: the token
+// says which scopes the wallet may have, and an identifier resolving
+// outside that set is an authorisation failure, not a preference.
+//
+// An empty configuration id is a real answer rather than a failure - a
+// format-based authorization_details entry (OID4VCI 5.1.1) names a format
+// and no configuration - and matchScope's answer stands.
+func (c *Client) selectScope(req *openid4vci.CredentialRequest, authContext *cache.AuthorizationContext) (scope, configurationID string, err error) {
+	scope, _, err = c.matchScope(authContext.Scopes)
+	if err != nil {
+		c.log.Error(err, "no matching scope in auth context")
+		return "", "", err
+	}
+
+	configurationID, err = req.ResolveCredentialConfigurationID(c.issuerMetadata, authContext.AuthorizationDetails)
+	if err != nil {
+		c.log.Error(err, "failed to resolve credential configuration")
+		return "", "", err
+	}
+	if configurationID == "" || configurationID == scope {
+		return scope, configurationID, nil
+	}
+
+	if !slices.Contains(authContext.Scopes, configurationID) {
+		c.log.Error(nil, "credential request selected a configuration outside the authorized scopes",
+			"configuration_id", configurationID, "authorized_scopes", authContext.Scopes)
+		return "", "", &openid4vci.Error{
+			Err:              openid4vci.ErrInvalidCredentialRequest,
+			ErrorDescription: fmt.Sprintf("credential configuration %q is not among the authorized scopes", configurationID),
+		}
+	}
+	if c.cfg.GetCredentialMetadata(configurationID) == nil {
+		c.log.Error(nil, "credential request selected a configuration with no credential metadata",
+			"configuration_id", configurationID)
+		return "", "", &openid4vci.Error{
+			Err:              openid4vci.ErrInvalidCredentialRequest,
+			ErrorDescription: fmt.Sprintf("credential configuration %q has no credential metadata", configurationID),
+		}
+	}
+
+	c.log.Debug("credential request selected a configuration other than the first authorized scope",
+		"configuration_id", configurationID, "first_authorized_scope", scope)
+	return configurationID, configurationID, nil
+}
+
 // w3cTypesAndContexts returns the types a W3C credential is minted with, the
 // JSON-LD contexts that define them, and the cryptosuite - all read from ONE
 // scope.
