@@ -277,7 +277,10 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	scope, configurationID, err := c.selectScope(req, authContext)
+	// Scope, configuration and format together: they are three answers to
+	// one question - which credential is this request for - and resolving
+	// them apart is how they came to disagree.
+	scope, configurationID, format, err := c.selectScope(req, authContext)
 	if err != nil {
 		return nil, err
 	}
@@ -471,13 +474,6 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		if _, ok := c.cacheService.VCINonce.GetAndDelete(ctx, expectedNonce); !ok {
 			return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidNonce, ErrorDescription: "nonce was consumed concurrently"}
 		}
-	}
-
-	// Determine credential format from credential_configuration_id or credential_identifier
-	format, err := req.ResolveCredentialFormatWithAuthDetails(c.issuerMetadata, authContext.AuthorizationDetails)
-	if err != nil {
-		c.log.Error(err, "failed to resolve credential format")
-		return nil, err
 	}
 
 	// The authenticated identifier is used for registry; for assertion-based
@@ -677,26 +673,74 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 // An empty configuration id is a real answer rather than a failure - a
 // format-based authorization_details entry (OID4VCI 5.1.1) names a format
 // and no configuration - and matchScope's answer stands.
-func (c *Client) selectScope(req *openid4vci.CredentialRequest, authContext *cache.AuthorizationContext) (scope, configurationID string, err error) {
+func (c *Client) selectScope(req *openid4vci.CredentialRequest, authContext *cache.AuthorizationContext) (scope, configurationID, format string, err error) {
 	scope, _, err = c.matchScope(authContext.Scopes)
 	if err != nil {
 		c.log.Error(err, "no matching scope in auth context")
-		return "", "", err
+		return "", "", "", err
+	}
+
+	format, err = req.ResolveCredentialFormatWithAuthDetails(c.issuerMetadata, authContext.AuthorizationDetails)
+	if err != nil {
+		c.log.Error(err, "failed to resolve credential format")
+		return "", "", "", err
 	}
 
 	configurationID, err = req.ResolveCredentialConfigurationID(c.issuerMetadata, authContext.AuthorizationDetails)
 	if err != nil {
 		c.log.Error(err, "failed to resolve credential configuration")
-		return "", "", err
+		return "", "", "", err
 	}
-	if configurationID == "" || configurationID == scope {
-		return scope, configurationID, nil
+
+	if configurationID == "" {
+		// Format-based authorization_details (OID4VCI 5.1.1): the entry
+		// names a FORMAT and no configuration, so there is no scope name to
+		// take. matchScope's answer is the first authorised scope with
+		// metadata, chosen without reference to the format - and the
+		// dispatch below routes on the format. With scopes A (sd-jwt) and
+		// B (ldp_vc) authorised and a request for ldp_vc, that issued A's
+		// document and A's configuration through the W3C path.
+		//
+		// So the scope has to be one whose configured format matches.
+		// Exactly one, or this is a request that does not identify a
+		// credential: zero means nothing authorised can answer it, and
+		// several means the format alone cannot say which - and guessing
+		// is how the mismatch above happened.
+		matching := make([]string, 0, len(authContext.Scopes))
+		for _, authorized := range authContext.Scopes {
+			cm := c.cfg.GetCredentialMetadata(authorized)
+			if cm != nil && sameCredentialFormat(cm.Format, format) {
+				matching = append(matching, authorized)
+			}
+		}
+		switch len(matching) {
+		case 1:
+			return matching[0], "", format, nil
+		case 0:
+			c.log.Error(nil, "no authorized scope is configured for the requested format",
+				"format", format, "authorized_scopes", authContext.Scopes)
+			return "", "", "", &openid4vci.Error{
+				Err:              openid4vci.ErrInvalidCredentialRequest,
+				ErrorDescription: fmt.Sprintf("no authorized scope is configured for format %q", format),
+			}
+		default:
+			c.log.Error(nil, "the requested format matches several authorized scopes, so it does not identify a credential",
+				"format", format, "matching_scopes", matching)
+			return "", "", "", &openid4vci.Error{
+				Err:              openid4vci.ErrInvalidCredentialRequest,
+				ErrorDescription: fmt.Sprintf("format %q matches several authorized scopes (%s); use credential_configuration_id or credential_identifier to say which", format, strings.Join(matching, ", ")),
+			}
+		}
+	}
+
+	if configurationID == scope {
+		return scope, configurationID, format, nil
 	}
 
 	if !slices.Contains(authContext.Scopes, configurationID) {
 		c.log.Error(nil, "credential request selected a configuration outside the authorized scopes",
 			"configuration_id", configurationID, "authorized_scopes", authContext.Scopes)
-		return "", "", &openid4vci.Error{
+		return "", "", "", &openid4vci.Error{
 			Err:              openid4vci.ErrInvalidCredentialRequest,
 			ErrorDescription: fmt.Sprintf("credential configuration %q is not among the authorized scopes", configurationID),
 		}
@@ -704,7 +748,7 @@ func (c *Client) selectScope(req *openid4vci.CredentialRequest, authContext *cac
 	if c.cfg.GetCredentialMetadata(configurationID) == nil {
 		c.log.Error(nil, "credential request selected a configuration with no credential metadata",
 			"configuration_id", configurationID)
-		return "", "", &openid4vci.Error{
+		return "", "", "", &openid4vci.Error{
 			Err:              openid4vci.ErrInvalidCredentialRequest,
 			ErrorDescription: fmt.Sprintf("credential configuration %q has no credential metadata", configurationID),
 		}
@@ -712,7 +756,29 @@ func (c *Client) selectScope(req *openid4vci.CredentialRequest, authContext *cac
 
 	c.log.Debug("credential request selected a configuration other than the first authorized scope",
 		"configuration_id", configurationID, "first_authorized_scope", scope)
-	return configurationID, configurationID, nil
+	return configurationID, configurationID, format, nil
+}
+
+// sameCredentialFormat reports whether two format identifiers name the same
+// credential format.
+//
+// Grouped exactly as VCICredential's dispatch groups them, because that is
+// what the comparison is FOR: a scope is a usable answer to a requested
+// format when both land in the same branch of that switch. Comparing the
+// strings directly would reject a "dc+sd-jwt" scope for a "vc+sd-jwt"
+// request, which are the same thing.
+func sameCredentialFormat(a, b string) bool {
+	family := func(format string) string {
+		switch format {
+		case "vc+sd-jwt", "dc+sd-jwt":
+			return "sd-jwt"
+		case "ldp_vc", "vc+ld+json":
+			return "w3c"
+		default:
+			return format
+		}
+	}
+	return a != "" && b != "" && family(a) == family(b)
 }
 
 // w3cTypesAndContexts returns the types a W3C credential is minted with, the

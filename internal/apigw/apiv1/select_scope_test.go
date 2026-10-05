@@ -48,7 +48,7 @@ func TestSelectScope(t *testing.T) {
 	}
 
 	t.Run("the selected configuration decides the scope", func(t *testing.T) {
-		scope, configID, err := client.selectScope(
+		scope, configID, _, err := client.selectScope(
 			&openid4vci.CredentialRequest{CredentialIdentifier: "licence-1"}, authCtx)
 		require.NoError(t, err)
 		require.Equal(t, "licence", scope,
@@ -57,18 +57,26 @@ func TestSelectScope(t *testing.T) {
 	})
 
 	t.Run("credential_configuration_id does the same", func(t *testing.T) {
-		scope, _, err := client.selectScope(
+		scope, _, _, err := client.selectScope(
 			&openid4vci.CredentialRequest{CredentialConfigurationID: "licence"},
 			&cache.AuthorizationContext{Scopes: []string{"diploma", "licence"}})
 		require.NoError(t, err)
 		require.Equal(t, "licence", scope)
 	})
 
-	// The control: without a named configuration, matchScope's answer
-	// stands. Without this the test above would pass against a function
-	// that always returned the last scope.
-	t.Run("no named configuration leaves matchScope's answer", func(t *testing.T) {
-		scope, configID, err := client.selectScope(
+	// A format-based authorization_details entry (OID4VCI 5.1.1) names a
+	// FORMAT and no configuration, so there is no scope name to take.
+	// matchScope's answer is the first authorised scope with metadata,
+	// chosen without reference to the format - while the dispatch routes on
+	// the format. Taking it meant issuing one scope's document and
+	// configuration through another format's path.
+	t.Run("a format-based entry picks the scope whose format matches", func(t *testing.T) {
+		// Only "licence" is ldp_vc here, and it is NOT matchScope's first
+		// answer - so this cannot pass by accident.
+		mixed := selectScopeClient()
+		mixed.cfg.Common.CredentialMetadata["diploma"] = &model.CredentialMetadata{Format: "dc+sd-jwt"}
+
+		scope, configID, format, err := mixed.selectScope(
 			&openid4vci.CredentialRequest{CredentialIdentifier: "bare-1"},
 			&cache.AuthorizationContext{
 				Scopes: []string{"diploma", "licence"},
@@ -78,8 +86,62 @@ func TestSelectScope(t *testing.T) {
 				}},
 			})
 		require.NoError(t, err)
-		require.Equal(t, "diploma", scope, "a format-based entry names no configuration to prefer")
-		require.Empty(t, configID)
+		require.Equal(t, "licence", scope, "the scope must be one configured for the requested format")
+		require.Empty(t, configID, "a format-based entry names no configuration")
+		require.Equal(t, "ldp_vc", format)
+	})
+
+	// Zero and several are both "this request does not identify a
+	// credential", and guessing between them is how the mismatch above
+	// happened.
+	t.Run("a format matching several authorized scopes is refused", func(t *testing.T) {
+		_, _, _, err := client.selectScope(
+			&openid4vci.CredentialRequest{CredentialIdentifier: "bare-1"},
+			&cache.AuthorizationContext{
+				Scopes: []string{"diploma", "licence"}, // both ldp_vc
+				AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{{
+					Format:                "ldp_vc",
+					CredentialIdentifiers: []string{"bare-1"},
+				}},
+			})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "matches several authorized scopes")
+	})
+
+	t.Run("a format matching no authorized scope is refused", func(t *testing.T) {
+		_, _, _, err := client.selectScope(
+			&openid4vci.CredentialRequest{CredentialIdentifier: "bare-1"},
+			&cache.AuthorizationContext{
+				Scopes: []string{"diploma", "licence"},
+				AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{{
+					Format:                "mso_mdoc",
+					CredentialIdentifiers: []string{"bare-1"},
+				}},
+			})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no authorized scope is configured")
+	})
+
+	// sd-jwt has two spellings and they are the same format; a scope
+	// configured as one must answer a request for the other.
+	t.Run("sd-jwt spellings are the same format", func(t *testing.T) {
+		sdjwt := selectScopeClient()
+		sdjwt.cfg.Common.CredentialMetadata["diploma"] = &model.CredentialMetadata{Format: "dc+sd-jwt"}
+		sdjwt.cfg.Common.CredentialMetadata["licence"] = &model.CredentialMetadata{Format: "mso_mdoc"}
+
+		// "licence" first, so matchScope's answer is the WRONG one: this
+		// cannot pass by the selection being skipped.
+		scope, _, _, err := sdjwt.selectScope(
+			&openid4vci.CredentialRequest{CredentialIdentifier: "bare-1"},
+			&cache.AuthorizationContext{
+				Scopes: []string{"licence", "diploma"},
+				AuthorizationDetails: []openid4vci.AuthorizationDetailsParameter{{
+					Format:                "vc+sd-jwt",
+					CredentialIdentifiers: []string{"bare-1"},
+				}},
+			})
+		require.NoError(t, err)
+		require.Equal(t, "diploma", scope, "dc+sd-jwt and vc+sd-jwt are one format")
 	})
 
 	// The token says which scopes the wallet may have. An identifier
@@ -87,7 +149,7 @@ func TestSelectScope(t *testing.T) {
 	// preference - taking it would issue a credential the token never
 	// authorised.
 	t.Run("a configuration outside the authorized scopes is refused", func(t *testing.T) {
-		_, _, err := client.selectScope(
+		_, _, _, err := client.selectScope(
 			&openid4vci.CredentialRequest{CredentialIdentifier: "licence-1"},
 			&cache.AuthorizationContext{
 				Scopes:               []string{"diploma"},
