@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"crypto/x509"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -417,9 +418,25 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 }
 
 // validateDCQL checks every credential query a request is about to carry.
+//
+// A nil query is not this function's business - the caller decides whether
+// one was required. An EMPTY one is: the loop below runs zero times and
+// reports nothing wrong, so a request asking for no credential at all used
+// to pass as valid, and so did the uncoveredScopes and
+// unclaimedRequiredQueries checks that iterate the same empty list. The
+// session then went to the wallet asking for nothing, and the direct-post
+// guards refused the response - which is the right outcome discovered at
+// the worst moment, after the user has already been sent to their wallet
+// and come back.
+//
+// UIInteraction refuses an empty dcql_query for the same reason. This is
+// the other way a request is built.
 func validateDCQL(dcql *openid4vp.DCQL) error {
 	if dcql == nil {
 		return nil
+	}
+	if len(dcql.Credentials) == 0 {
+		return errors.New("asks for no credential at all")
 	}
 	for _, credential := range dcql.Credentials {
 		if err := openid4vp.ValidateCredentialQuery(credential); err != nil {
