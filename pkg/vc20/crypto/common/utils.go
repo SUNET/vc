@@ -75,6 +75,39 @@ func FindProofNodeFunc(data any, proofType string, match func(map[string]any) bo
 	return nil
 }
 
+// CountProofNodes reports how many proof nodes of this type the document
+// holds.
+//
+// Used to tell "the document's only proof" from "the first proof found".
+// A caller that names no proof is making a claim about the document - that
+// there is exactly one, so there is nothing to choose between - and that
+// claim is checkable rather than assumable.
+//
+// Counts NESTED proofs too, by the same traversal FindProofNodeFunc uses,
+// because those are exactly the ones that make the choice ambiguous: a
+// verifiable presentation carries the holder's proof and the embedded
+// credential's issuer proof.
+func CountProofNodes(data any, proofType string) int {
+	switch v := data.(type) {
+	case map[string]any:
+		count := 0
+		if HasType(v, proofType) || HasType(v, "Proof") {
+			count++
+		}
+		for _, key := range slices.Sorted(maps.Keys(v)) {
+			count += CountProofNodes(v[key], proofType)
+		}
+		return count
+	case []any:
+		count := 0
+		for _, item := range v {
+			count += CountProofNodes(item, proofType)
+		}
+		return count
+	}
+	return 0
+}
+
 // MatchProofValue selects the proof node carrying exactly this proofValue.
 //
 // The proofValue is what identifies a proof unambiguously among several in

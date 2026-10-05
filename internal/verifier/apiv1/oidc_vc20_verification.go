@@ -102,7 +102,18 @@ func (c *Client) sessionCouldAskForW3C(session *cache.AuthorizationContext) bool
 			return true
 		}
 	}
-	return false
+
+	// Templates too, and for the same reason the loop above reads
+	// configuration: a presentation template names its credential queries
+	// with ids of its own choosing and may request ldp_vc for a scope that
+	// configures no credential_metadata at all. Such a session has no
+	// metadata entry to find, so the loop above answers "no W3C here" and
+	// the missing-query carve-out lets an SD-JWT-only response through
+	// unverified - which is the one thing that carve-out must not do.
+	//
+	// Asked of the template these SCOPES select, which is how the request
+	// was built in the first place.
+	return c.presentationBuilder.TemplateRequestsW3C(session.Scopes)
 }
 
 // refuseAResponseThisPathCannotCheck rejects a direct-post response whose

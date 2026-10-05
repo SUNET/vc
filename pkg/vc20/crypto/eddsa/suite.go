@@ -159,16 +159,20 @@ func (s *Suite) Sign(cred *credential.RDFCredential, key ed25519.PrivateKey, opt
 
 // Verify verifies a credential using eddsa-rdfc-2022.
 //
-// The document's only proof, whichever it is. Use VerifyProof when the
-// document can hold more than one - a verifiable presentation carries the
-// holder's proof and the embedded credential's issuer proof, and picking
-// between them by traversal order is not a decision this can make.
+// The document's ONLY proof. A document holding more than one is REFUSED
+// rather than resolved by traversal order - a verifiable presentation
+// carries the holder's proof and the embedded credential's issuer proof,
+// and picking between them is not a decision this can make.
+//
+// Use VerifyProof, naming the proof by its proofValue, for those.
 func (s *Suite) Verify(cred *credential.RDFCredential, key ed25519.PublicKey) error {
 	return s.VerifyProof(cred, key, "")
 }
 
-// VerifyProof verifies the proof carrying exactly proofValue, or the first
-// proof found when proofValue is empty.
+// VerifyProof verifies the proof carrying exactly proofValue.
+//
+// An empty proofValue means "this document has one proof, verify it", and
+// is refused if that turns out to be false.
 func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKey, wantProofValue string) error {
 	if cred == nil {
 		return fmt.Errorf("credential is nil")
@@ -215,6 +219,18 @@ func (s *Suite) VerifyProof(cred *credential.RDFCredential, key ed25519.PublicKe
 	var selector func(map[string]any) bool
 	if wantProofValue != "" {
 		selector = common.MatchProofValue(wantProofValue)
+	} else if found := common.CountProofNodes(proofMap, ProofType); found > 1 {
+		// No selector, and more than one proof to choose from. Verifying
+		// whichever the traversal reaches first is a decision this cannot
+		// make: for a presentation it would check the holder's key against
+		// the issuer's proof, or report the embedded credential's issuer
+		// proof as the presentation's. The traversal is deterministic, so
+		// that no longer FLAPS - it is simply wrong in a stable way, which
+		// is worse.
+		//
+		// A caller passing no proofValue is claiming the document has
+		// exactly one proof. That claim is checkable, so it is checked.
+		return fmt.Errorf("the document holds %d proofs and none was named: pass the proofValue of the one to verify (Verify is for single-proof documents)", found)
 	}
 	proofNode := common.FindProofNodeFunc(proofMap, ProofType, selector)
 	if proofNode == nil {
