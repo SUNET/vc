@@ -1,6 +1,7 @@
 package mdoc
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -39,11 +40,52 @@ func TestLoadMDDLSchema(t *testing.T) {
 				}
 			}`,
 		},
+		{
+			"unsupported zk_salt_bytes",
+			`{
+				"format": "mso_mdoc",
+				"doctype": "x",
+				"claims": {"ns": {"a": {}}},
+				"zk_salt_bytes": 16
+			}`,
+		},
+		{
+			// A schema is file-, URL-, or registry-backed - an unbounded
+			// zk_salt_bytes reaches make([]byte, saltSize) unchecked and
+			// could otherwise exhaust memory during issuance.
+			"huge zk_salt_bytes",
+			`{
+				"format": "mso_mdoc",
+				"doctype": "x",
+				"claims": {"ns": {"a": {}}},
+				"zk_salt_bytes": 1000000000
+			}`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if _, err := LoadMDDLSchema([]byte(tt.raw)); err == nil {
 				t.Error("expected an error, got none")
+			}
+		})
+	}
+}
+
+func TestLoadMDDLSchema_ZkSaltBytesAcceptsZeroAndThirtyTwo(t *testing.T) {
+	for _, saltBytes := range []int{0, 32} {
+		t.Run(fmt.Sprintf("saltBytes=%d", saltBytes), func(t *testing.T) {
+			raw := []byte(fmt.Sprintf(`{
+				"format": "mso_mdoc",
+				"doctype": "x",
+				"claims": {"ns": {"a": {}}},
+				"zk_salt_bytes": %d
+			}`, saltBytes))
+			schema, err := LoadMDDLSchema(raw)
+			if err != nil {
+				t.Fatalf("LoadMDDLSchema() error = %v", err)
+			}
+			if schema.ZkSaltBytes != saltBytes {
+				t.Errorf("ZkSaltBytes = %d, want %d", schema.ZkSaltBytes, saltBytes)
 			}
 		})
 	}

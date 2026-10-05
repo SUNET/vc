@@ -66,7 +66,7 @@ func GenerateNumericCode(digits int) (string, error) {
 	var sb strings.Builder
 	sb.Grow(digits)
 	ten := big.NewInt(10)
-	for i := 0; i < digits; i++ {
+	for range digits {
 		n, err := rand.Int(rand.Reader, ten)
 		if err != nil {
 			return "", fmt.Errorf("could not generate numeric code: %w", err)

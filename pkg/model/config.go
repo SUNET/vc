@@ -23,6 +23,7 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/openidfederation"
 	"github.com/SUNET/vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/pubsub"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/sqlstore"
 	ts11client "github.com/sirosfoundation/go-ts11client"
@@ -123,6 +124,12 @@ type HAConfig struct {
 	Enable bool `yaml:"enable" default:"false"`
 	// CacheDatabaseName is the MongoDB database name used for caches.
 	CacheDatabaseName string `yaml:"cache_database_name" default:"vc_cache"`
+	// PubSub configures the optional pub/sub backend (Redis or Valkey)
+	// used for cross-node notifications in HA mode - today just the
+	// verifier's SSE fanout. Omitted entirely in standalone deployments;
+	// when omitted in HA, notifications remain in-process and do not
+	// cross nodes.
+	PubSub *pubsub.Config `yaml:"pubsub,omitempty" validate:"omitempty"`
 }
 
 // Kafka holds the Kafka message broker configuration
@@ -496,17 +503,17 @@ type OIDCRPDynamicRegistrationConfig struct {
 type AttributeMapping map[string]AttributeConfig
 
 // AttributeConfig defines how a single external attribute maps to a credential claim
-// Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys
+// Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys.
+// AttributeConfig is a pure rename + presence step. Any value transformation
+// (canonicalisation, case folding, date reformatting, etc.) is expressed as
+// a derivation on the target scope; see the Derivation Primitives catalog
+// (pkg/credential/primitives).
 type AttributeConfig struct {
 	// Claim is the target claim name (supports dot-notation for nesting)
 	Claim string `yaml:"claim" validate:"required" doc_example:"\"identity.given_name\""`
 
 	// Required indicates if this attribute must be present in the assertion/response
 	Required bool `yaml:"required" default:"false"`
-
-	// Transform is an optional transformation to apply
-	// Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3", "yyyymmdd_to_iso"
-	Transform string `yaml:"transform,omitempty" validate:"omitempty,oneof=lowercase uppercase trim country_alpha2 country_alpha3 yyyymmdd_to_iso"`
 
 	// Default is an optional default value if attribute is missing
 	Default string `yaml:"default,omitempty"`
@@ -1679,6 +1686,10 @@ func (c *Cfg) LookupCredentialSources(scope string) ([]CredentialSource, error) 
 }
 
 // GetOpenID4VPAuth returns the OpenID4VP authentication config for a credential type, or nil if not found.
+// For a datastore scope with auth_provider=openid4vp, returns its AuthScopes as-is.
+// For a presentation scope, synthesises a single-entry AuthScopes map from the
+// scope's from_scope + required_claims: the wallet must present a credential of
+// FromScope disclosing every key of RequiredClaims.
 func (c *Cfg) GetOpenID4VPAuth(scope string) *OpenID4VPCredentialAuth {
 	if c.APIGW == nil {
 		return nil
@@ -1688,6 +1699,21 @@ func (c *Cfg) GetOpenID4VPAuth(scope string) *OpenID4VPCredentialAuth {
 			return &OpenID4VPCredentialAuth{
 				AuthScopes: cred.AuthScopes,
 			}
+		}
+	}
+	if cred, ok := c.APIGW.DataSources.Presentation.Scopes[scope]; ok {
+		if cred.AuthProvider != AuthProviderOpenID4VP {
+			return nil
+		}
+		claims := make([]string, 0, len(cred.RequiredClaims))
+		for k := range cred.RequiredClaims {
+			claims = append(claims, k)
+		}
+		sort.Strings(claims)
+		return &OpenID4VPCredentialAuth{
+			AuthScopes: map[string]AuthScopeEntry{
+				cred.FromScope: {AuthClaims: claims},
+			},
 		}
 	}
 	return nil
@@ -1924,7 +1950,9 @@ type CredentialMetadata struct {
 	// Per CIR 2024/2979 Annex III and ETSI TS 119 472-3 §4.2.5. Only applicable to QEAAs and PuB-EAAs (not PIDs).
 	// Optional and off by default: when omitted, no `disclosure_policy` field is emitted in the credential issuer metadata.
 	DisclosurePolicy *openid4vci.EmbeddedDisclosurePolicy `yaml:"disclosure_policy,omitempty" json:"-" validate:"omitempty"`
-	// Attributes maps claim names to their source fields and transformation rules for credential issuance
+	// Attributes maps claim names to their source fields for credential issuance.
+	// Data sources are rename-only (attribute_mapping); value transformations
+	// belong in the target scope's derivations.
 	Attributes map[string]map[string][]*string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 
 	// VCTMRaw holds the raw JSON bytes of the VCTM document, passed inline

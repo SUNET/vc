@@ -3,6 +3,8 @@ package model
 import (
 	"testing"
 
+	"github.com/SUNET/vc/pkg/pubsub"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -260,4 +262,58 @@ func TestApplySecrets_MongoInConfigSecretsElsewhere(t *testing.T) {
 
 	// Verifier secret should be applied from secrets file
 	assert.Equal(t, "secret-salt", cfg.Verifier.Outbound.OIDCProvider.SubjectSalt) //NOSONAR
+}
+
+// TestApplySecrets_RedisHABackfillsEmptyFields verifies that Redis / Valkey
+// ACL credentials in the secrets file are backfilled into cfg.Common.HA.PubSub
+// when the main config leaves the matching field empty (same contract as
+// Mongo.URI). Fields set in the main config stay put.
+func TestApplySecrets_RedisHABackfillsEmptyFields(t *testing.T) {
+	cfg := &Cfg{
+		Common: &Common{
+			HA: HAConfig{
+				PubSub: &pubsub.Config{
+					Addrs: []string{"redis:6379"},
+					// Username left empty - secrets backfills it.
+					// Password already present - secrets must not overwrite.
+					Password: "config-password", //NOSONAR
+				},
+			},
+		},
+	}
+	secrets := &Secrets{
+		Common: &CommonSecrets{
+			HA: HASecrets{
+				PubSub: PubSubSecrets{
+					Username: "secret-user",
+					Password: "secret-password", //NOSONAR
+				},
+			},
+		},
+	}
+
+	cfg.ApplySecrets(secrets)
+
+	assert.Equal(t, "secret-user", cfg.Common.HA.PubSub.Username)
+	assert.Equal(t, "config-password", cfg.Common.HA.PubSub.Password, //NOSONAR
+		"existing config password must survive")
+}
+
+// TestApplySecrets_RedisHANoRedisConfigured verifies that a secrets file
+// with Redis ACL creds does not panic / inject a Redis config when the main
+// config leaves HA.PubSub unset.
+func TestApplySecrets_RedisHANoRedisConfigured(t *testing.T) {
+	cfg := &Cfg{Common: &Common{}}
+	secrets := &Secrets{
+		Common: &CommonSecrets{
+			HA: HASecrets{
+				PubSub: PubSubSecrets{
+					Password: "secret-password", //NOSONAR
+				},
+			},
+		},
+	}
+
+	assert.NotPanics(t, func() { cfg.ApplySecrets(secrets) })
+	assert.Nil(t, cfg.Common.HA.PubSub, "PubSub config must not be auto-created from secrets")
 }

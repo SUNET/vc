@@ -107,7 +107,9 @@ apigw:
       #   sub:                          # OIDC claim name
       #     claim: "subject_id"         # canonical claim name (if different)
       #     required: true
-      #     transform: "lowercase"
+      #
+      # For value transformations (e.g. lowercase), attach a derivations block
+      # to the target scope; see docs/CONFIGURATION.md § Derivation Primitives.
 
   # ── Delivery ─────────────────────────────────────────────────────
   delivery:

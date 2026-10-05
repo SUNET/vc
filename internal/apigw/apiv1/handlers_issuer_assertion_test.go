@@ -192,6 +192,12 @@ func TestAssertionDataSource_CredentialIssuance_AllowsEmptyIdentifier(t *testing
 			identifier: "person-123",
 			wantErr:    false,
 		},
+		{
+			name:       "presentation_empty_identifier_allowed",
+			dataSource: model.DataSourcePresentation,
+			identifier: "",
+			wantErr:    false,
+		},
 	}
 
 	for _, tt := range tts {

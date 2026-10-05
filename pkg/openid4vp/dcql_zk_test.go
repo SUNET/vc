@@ -99,10 +99,9 @@ meta:
 // presentation request template (loaded via gopkg.in/yaml.v2 by
 // pkg/configuration.LoadPresentationRequests) could never actually set
 // num_attributes/circuit_hash/etc for a zk_system_type entry, even though
-// docs/CONFIGURATION.md documents ZK circuit configuration and MetaQuery's
-// own ZKSystemType field carries a yaml tag implying it works. This test
-// exercises the real gopkg.in/yaml.v2 package (not a hand-rolled stand-in)
-// against the same CredentialQuery type pkg/configuration actually
+// MetaQuery's own ZKSystemType field carries a yaml tag implying it works.
+// This test exercises the real gopkg.in/yaml.v2 package (not a hand-rolled
+// stand-in) against the same CredentialQuery type pkg/configuration actually
 // YAML-decodes.
 func TestZKSystemTypeSpec_UnmarshalYAML(t *testing.T) {
 	var cq CredentialQuery

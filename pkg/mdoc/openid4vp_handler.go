@@ -80,7 +80,28 @@ func NewMDocHandler(opts ...MDocHandlerOption) (*MDocHandler, error) {
 }
 
 // VerifyAndExtract verifies an mdoc VP token and extracts the disclosed claims.
+// It does NOT verify the DeviceAuth against a SessionTranscript — callers that
+// need request-context binding (nonce, client_id, response_uri) must use
+// VerifyAndExtractBound instead.
 func (h *MDocHandler) VerifyAndExtract(ctx context.Context, vpToken string) (*MDocVerificationResult, error) {
+	return h.verifyAndExtract(ctx, vpToken, nil)
+}
+
+// VerifyAndExtractBound is like VerifyAndExtract but also verifies each
+// document's DeviceAuth against the supplied SessionTranscript, binding the
+// presentation to the OpenID4VP request context (nonce, client_id,
+// response_uri, and optional reader-key thumbprint the caller baked into the
+// transcript via BuildOID4VPSessionTranscript / BuildOID4VPDCAPISessionTranscript).
+// An empty sessionTranscript is rejected — use VerifyAndExtract explicitly when
+// unbound verification is intended.
+func (h *MDocHandler) VerifyAndExtractBound(ctx context.Context, vpToken string, sessionTranscript []byte) (*MDocVerificationResult, error) {
+	if len(sessionTranscript) == 0 {
+		return nil, errors.New("VerifyAndExtractBound requires a non-empty sessionTranscript")
+	}
+	return h.verifyAndExtract(ctx, vpToken, sessionTranscript)
+}
+
+func (h *MDocHandler) verifyAndExtract(ctx context.Context, vpToken string, sessionTranscript []byte) (*MDocVerificationResult, error) {
 	// Decode the VP token (base64url-encoded DeviceResponse)
 	data, err := base64.RawURLEncoding.DecodeString(vpToken)
 	if err != nil {
@@ -113,6 +134,37 @@ func (h *MDocHandler) VerifyAndExtract(ctx context.Context, vpToken string) (*MD
 		return nil, fmt.Errorf("mdoc verification failed: %s", strings.Join(errMsgs, "; "))
 	}
 
+	if len(sessionTranscript) > 0 {
+		if len(verifyResult.Documents) != len(deviceResponse.Documents) {
+			return nil, fmt.Errorf("mdoc verification result document count %d != DeviceResponse document count %d", len(verifyResult.Documents), len(deviceResponse.Documents))
+		}
+		for i := range deviceResponse.Documents {
+			doc := &deviceResponse.Documents[i]
+			// The bound path is signature-only: this API has no session
+			// encryption key to derive the MAC key from, so a MAC-based
+			// DeviceAuth cannot be verified here. Reject it explicitly
+			// rather than let VerifyDeviceAuth surface the same message
+			// as a wrapped "device auth binding failed" error.
+			if hasDeviceMac(doc) && !hasDeviceSignature(doc) {
+				return nil, fmt.Errorf("device auth binding failed for %q: MAC-based device authentication is not supported on this API; the OpenID4VP direct_post flow has no session encryption key to verify a MAC against — wallet must use a device signature", doc.DocType)
+			}
+			// VerifyDeviceAuth returns nil when a document carries neither a
+			// device signature nor a MAC. Require one to be present on the
+			// bound path so a wallet cannot omit device authentication and
+			// still satisfy the request-binding guarantee this API promises.
+			if !hasDeviceAuth(doc) {
+				return nil, fmt.Errorf("device auth binding failed for %q: presentation carries no device signature or MAC", doc.DocType)
+			}
+			mso := verifyResult.Documents[i].MSO
+			if mso == nil {
+				return nil, fmt.Errorf("device auth binding failed for %q: verified MSO missing", doc.DocType)
+			}
+			if err := h.verifier.VerifyDeviceAuth(doc, mso, sessionTranscript); err != nil {
+				return nil, fmt.Errorf("device auth binding failed for %q: %w", doc.DocType, err)
+			}
+		}
+	}
+
 	result := &MDocVerificationResult{
 		Valid:     true,
 		Documents: make(map[string]*MDocDocumentClaims),
@@ -130,6 +182,13 @@ func (h *MDocHandler) VerifyAndExtract(ctx context.Context, vpToken string) (*MD
 			return nil, fmt.Errorf("failed to extract claims from %s: %w", doc.DocType, err)
 		}
 
+		// Reject a DeviceResponse that carries two documents with the same
+		// docType — MDocVerificationResult.Documents is a map keyed by
+		// docType, so a silent overwrite would let one document's claims
+		// mask another's downstream.
+		if _, dup := result.Documents[doc.DocType]; dup {
+			return nil, fmt.Errorf("mdoc DeviceResponse contains duplicate docType %q", doc.DocType)
+		}
 		result.Documents[doc.DocType] = claims
 	}
 

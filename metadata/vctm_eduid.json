@@ -173,30 +173,15 @@
     },
     {
       "path": [
-        "assurance"
+        "assurance_level"
       ],
       "mandatory": false,
       "sd": "always",
       "display": [
         {
           "locale": "en-US",
-          "label": "Assurance",
-          "description": "Identity assurance level URIs. Sourced from SAML attribute eduPersonAssurance."
-        }
-      ]
-    },
-    {
-      "path": [
-        "assurance",
-        null
-      ],
-      "mandatory": false,
-      "sd": "always",
-      "display": [
-        {
-          "locale": "en-US",
-          "label": "Assurance level",
-          "description": "Individual assurance level URI."
+          "label": "Assurance level (SWAMID URI)",
+          "description": "Strongest recognised SWAMID Assurance Framework URI (e.g. http://www.swamid.se/policy/assurance/al2). Derived from SAML attribute eduPersonAssurance."
         }
       ]
     },

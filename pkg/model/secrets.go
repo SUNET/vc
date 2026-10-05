@@ -18,6 +18,24 @@ type Secrets struct {
 type CommonSecrets struct {
 	Mongo MongoSecrets `yaml:"mongo,omitempty"`
 	SQL   SQLSecrets   `yaml:"sql,omitempty"`
+	// HA holds credentials for the HA-mode pub/sub backend (Redis / Valkey).
+	HA HASecrets `yaml:"ha,omitempty"`
+}
+
+// HASecrets holds secrets for the HA section of the common config.
+type HASecrets struct {
+	// PubSub holds the Redis / Valkey ACL credentials used by the HA
+	// pub/sub bus. Omitted entirely when the backend is unauthenticated.
+	PubSub PubSubSecrets `yaml:"pubsub,omitempty"`
+}
+
+// PubSubSecrets holds Redis / Valkey ACL credentials for the HA pub/sub bus.
+type PubSubSecrets struct {
+	// Username is the ACL username (Redis 6+ / Valkey). Optional.
+	Username string `yaml:"username,omitempty"`
+	// Password is the ACL password (Redis 6+ / Valkey) or the single
+	// AUTH password on older servers.
+	Password string `yaml:"password,omitempty"`
 }
 
 // MongoSecrets holds the mongo connection URI (may contain credentials)
@@ -154,6 +172,18 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 		}
 		if cfg.Common.SQL.MariaDB != nil && cfg.Common.SQL.MariaDB.Password == "" && secrets.Common.SQL.MariaDB.Password != "" {
 			cfg.Common.SQL.MariaDB.Password = secrets.Common.SQL.MariaDB.Password
+		}
+		// Redis/Valkey ACL creds for the HA pub/sub bus. Same split as
+		// Mongo.URI: only backfill when the main config leaves the field
+		// empty, so a deployment can keep the credentials in config.yaml
+		// (default) or in the separate secrets file.
+		if cfg.Common.HA.PubSub != nil {
+			if cfg.Common.HA.PubSub.Username == "" && secrets.Common.HA.PubSub.Username != "" {
+				cfg.Common.HA.PubSub.Username = secrets.Common.HA.PubSub.Username
+			}
+			if cfg.Common.HA.PubSub.Password == "" && secrets.Common.HA.PubSub.Password != "" {
+				cfg.Common.HA.PubSub.Password = secrets.Common.HA.PubSub.Password
+			}
 		}
 	}
 

@@ -444,34 +444,33 @@ credential_mappings:
   diploma:
     credential_config_id: "urn:eudi:diploma:1"
     attributes:
-      # Required claim with no transformation
+      # Required claim
       email:
         claim: "student.email"
         required: true
-      
-      # Required claim with lowercase transformation
+
+      # Required claim (value canonicalisation lives in derivations on the
+      # target scope — see docs/CONFIGURATION.md § Derivation Primitives).
       username:
         claim: "student.username"
         required: true
-        transform: "lowercase"
-      
+
       # Optional claim with default value
       university:
         claim: "diploma.university"
         required: false
         default: "Unknown University"
-      
+
       # Nested structure example
       given_name:
         claim: "student.personal_info.given_name"
         required: true
-        transform: "trim"
-      
+
       # Complex nested example
       degree_title:
         claim: "diploma.degree.title"
         required: true
-      
+
       graduation_year:
         claim: "diploma.graduation.year"
         required: true

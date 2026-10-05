@@ -2,16 +2,20 @@ package apiv1
 
 import (
 	"context"
+	"crypto"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -217,36 +221,144 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, fmt.Errorf("invalid response: %w", err)
 	}
 
-	// Validate VP Token using VPTokenValidator
-	validator := &openid4vp.VPTokenValidator{
-		Nonce:           authCtx.Nonce,
-		ClientID:        authCtx.ClientID,
-		ValidateFormat:  true,
-		CheckRevocation: false,
-		DCQLQuery:       authCtx.DCQLQuery,
-	}
+	// SD-JWT and mdoc need different verification paths: VPTokenValidator +
+	// EvaluateIssuerTrust both parse the token as SD-JWT (see
+	// pkg/openid4vp/validator.go and pkg/trust/jwt_verifier.go), so an
+	// mdoc VP token has to go through MDocHandler instead.
+	var credential map[string]any
+	if mdoc.IsMDocFormat(responseParams.VPToken) {
+		// trust.NewTrustEvaluatorFromConfig returns a non-nil
+		// AllowAllEvaluator when pdp_url is empty, so a plain
+		// c.trustEvaluator == nil check cannot distinguish "no PDP
+		// configured" from "a real PDP wired up". Mdoc issuer trust must
+		// be a real decision, so refuse this path in allow-all mode.
+		if c.cfg.APIGW.Trust.PDPURL == "" {
+			return nil, errors.New("mdoc VP verification requires apigw.trust.pdp_url to be configured")
+		}
+		if authCtx.Nonce == "" || authCtx.ClientID == "" {
+			return nil, errors.New("mdoc VP verification requires nonce and client_id on the authorization context")
+		}
+		// mdoc.IsMDocFormat is only a base64/CBOR-shape sniff and also
+		// matches "mso_mdoc_zk" (ZK-mdoc) presentations, whose
+		// zkDocuments carry a different verification contract than
+		// plain mso_mdoc's DeviceResponse. MDocHandler.VerifyAndExtractBound
+		// only decodes DeviceResponse.Documents, so a ZK presentation
+		// would silently reach mdocClaimsFromResult with no documents
+		// and be rejected. Detect ZK responses here and refuse rather
+		// than mis-route them through the plain-mdoc verifier.
+		if rawVPToken, derr := base64.RawURLEncoding.DecodeString(responseParams.VPToken); derr == nil {
+			if isZK, perr := mdoc.PeekIsZkDeviceResponse(rawVPToken); perr == nil && isZK {
+				return nil, errors.New("ZK-mdoc (mso_mdoc_zk) VP tokens are not supported on this presentation flow; use the ZK verifier instead")
+			}
+		}
+		responseURI, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/verification/direct_post")
+		if err != nil {
+			return nil, fmt.Errorf("compute mdoc response_uri: %w", err)
+		}
+		// SessionTranscript binds the presentation to this request's
+		// nonce/client_id/response_uri and to the ephemeral response-
+		// encryption public key advertised in ClientMetadata.JWKS. A
+		// conformant mdoc wallet includes that reader-key thumbprint in
+		// its own transcript, so we must derive the same one here or
+		// device-auth verification rejects valid encrypted direct-post
+		// presentations.
+		ephemeralPublicJWK, err := privateEphemeralJWK.PublicKey()
+		if err != nil {
+			return nil, fmt.Errorf("derive ephemeral public key: %w", err)
+		}
+		readerPubKeyThumbprint, err := ephemeralPublicJWK.Thumbprint(crypto.SHA256)
+		if err != nil {
+			return nil, fmt.Errorf("compute ephemeral JWK thumbprint: %w", err)
+		}
+		sessionTranscript, err := mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)
+		if err != nil {
+			return nil, fmt.Errorf("build mdoc session transcript: %w", err)
+		}
+		mdocHandler, err := mdoc.NewMDocHandler(mdoc.WithMDocTrustEvaluator(c.trustEvaluator))
+		if err != nil {
+			c.log.Error(err, "failed to create mdoc handler")
+			return nil, fmt.Errorf("mdoc handler init failed: %w", err)
+		}
+		mdocResult, err := mdocHandler.VerifyAndExtractBound(ctx, responseParams.VPToken, sessionTranscript)
+		if err != nil {
+			c.log.Error(err, "mdoc VP verification failed")
+			return nil, fmt.Errorf("mdoc VP verification failed: %w", err)
+		}
+		credential, err = mdocClaimsFromResult(mdocResult)
+		if err != nil {
+			return nil, err
+		}
+		c.log.Debug("mdoc VP verified", "doc_count", len(mdocResult.Documents))
+	} else {
+		validator := &openid4vp.VPTokenValidator{
+			Nonce:           authCtx.Nonce,
+			ClientID:        authCtx.ClientID,
+			ValidateFormat:  true,
+			CheckRevocation: false,
+			DCQLQuery:       authCtx.DCQLQuery,
+		}
+		if err := validator.Validate(responseParams.VPToken); err != nil {
+			c.log.Error(err, "VP Token validation failed")
+			return nil, fmt.Errorf("VP Token validation failed: %w", err)
+		}
+		c.log.Debug("VP Token validated successfully")
 
-	if err := validator.Validate(responseParams.VPToken); err != nil {
-		c.log.Error(err, "VP Token validation failed")
-		return nil, fmt.Errorf("VP Token validation failed: %w", err)
-	}
+		if err := c.jwtTrustVerifier.EvaluateIssuerTrust(ctx, vpToken, scope); err != nil {
+			c.log.Error(err, "Issuer trust evaluation failed", "scope", scope)
+			return nil, fmt.Errorf("issuer trust evaluation failed: %w", err)
+		}
 
-	c.log.Debug("VP Token validated successfully")
-
-	// Evaluate issuer trust before accepting the credential
-	if err := c.jwtTrustVerifier.EvaluateIssuerTrust(ctx, vpToken, scope); err != nil {
-		c.log.Error(err, "Issuer trust evaluation failed", "scope", scope)
-		return nil, fmt.Errorf("issuer trust evaluation failed: %w", err)
-	}
-
-	// Build credential from validated VP Token
-	credential, err := responseParams.BuildCredential()
-	if err != nil {
-		c.log.Error(err, "failed to build credential from response parameters")
-		return nil, err
+		built, err := responseParams.BuildCredential()
+		if err != nil {
+			c.log.Error(err, "failed to build credential from response parameters")
+			return nil, err
+		}
+		credential = built
 	}
 
 	c.log.Debug("Found credential metadata", "scope", scope, "vct", credMetaCfg.GetVCTURL())
+
+	// Enforce that the verified credential's type matches matchedAuthScope's
+	// credential_metadata. VPTokenValidator's validateAgainstDCQL is
+	// currently a no-op, and the mdoc branch above skips it entirely; a
+	// trusted credential of another type that happens to carry the
+	// requested claim keys must not be accepted for this auth scope.
+	if err := c.enforceScopeCredentialType(matchedAuthScope, credential); err != nil {
+		c.log.Error(err, "verified credential type does not match matched auth scope", "matched_auth_scope", matchedAuthScope, "scope", scope)
+		return nil, err
+	}
+
+	// Presentation-source scopes derive their whole document from the
+	// presented credential — there is no datastore lookup by identity.
+	// Guarded on DataSource so a scope shared with datastore/assertion still
+	// follows the source Selector chose.
+	if pScope, ok := c.cfg.APIGW.DataSources.Presentation.Scopes[scope]; ok && authCtx.DataSource == string(model.DataSourcePresentation) {
+		if err := c.finalisePresentationVerification(ctx, authCtx, pScope, credential); err != nil {
+			return nil, err
+		}
+		// The consent flow resumes through
+		// /authorization/consent/callback?response_code=... just like the
+		// datastore/assertion path below; emit the same RedirectURI so
+		// the wallet actually drives the browser back to consent rather
+		// than stranding at direct-post with only PresentationDuringIssuanceSession.
+		callbackURL, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/authorization/consent/callback/")
+		if err != nil {
+			c.log.Error(err, "failed to construct consent callback URL")
+			return nil, errors.New("failed to construct callback URL")
+		}
+		u, err := url.Parse(callbackURL)
+		if err != nil {
+			c.log.Error(err, "failed to parse consent callback URL")
+			return nil, errors.New("failed to parse callback URL")
+		}
+		q := u.Query()
+		q.Set("response_code", authCtx.VerifierResponseCode)
+		u.RawQuery = q.Encode()
+		return &VerificationDirectPostResponse{
+			PresentationDuringIssuanceSession: authCtx.SessionID,
+			RedirectURI:                       u.String(),
+		}, nil
+	}
 
 	// Extract identity from validated credential using the matched auth scope's claims.
 	// The vpAuth config tells us which claims to extract based on which credential was presented.
@@ -339,9 +451,10 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
 		entry := vpAuth.AuthScopes[authScope]
 		scopeClaimQueries := make([]openid4vp.ClaimQuery, 0, len(entry.AuthClaims))
+		format := cfg.GetFormatForScope(authScope)
 		for _, claim := range entry.AuthClaims {
 			scopeClaimQueries = append(scopeClaimQueries, openid4vp.ClaimQuery{
-				Path: openid4vp.StringPath(claim),
+				Path: openid4vp.StringPath(authClaimPathSegments(format, claim)...),
 			})
 		}
 		// By format, so an mso_mdoc auth scope is constrained by its doctype
@@ -357,7 +470,6 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 		//
 		// The verifier service verifies W3C properly; issuance auth is a
 		// separate flow in a separate service and has not been taught to.
-		format := cfg.GetFormatForScope(authScope)
 		if openid4vp.IsW3CVCFormatIdentifier(format) {
 			return nil, fmt.Errorf("auth scope %q is format %q, which issuance auth cannot verify; use an SD-JWT or mdoc credential for authentication", authScope, format)
 		}
@@ -385,4 +497,23 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 			},
 		},
 	}, nil
+}
+
+// authClaimPathSegments turns an auth-scope claim into DCQL path segments.
+// For SD-JWT VC a dotted "address.locality" becomes the nested path
+// ["address", "locality"]. For mdoc DCQL requires exactly [namespace,
+// element_identifier] (OpenID4VP 1.0 §6.4.1); a bare element is resolved
+// against the primary ISO 18013-5 namespace and a "<namespace>.<element>"
+// entry is split on the LAST dot so a multi-dot namespace such as
+// "eu.europa.ec.eudi.pid.1" survives as one segment.
+func authClaimPathSegments(format, claim string) []string {
+	switch format {
+	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
+		if idx := strings.LastIndex(claim, "."); idx > 0 && idx < len(claim)-1 {
+			return []string{claim[:idx], claim[idx+1:]}
+		}
+		return []string{mdoc.Namespace, claim}
+	default:
+		return strings.Split(claim, ".")
+	}
 }

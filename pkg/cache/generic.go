@@ -25,7 +25,17 @@ func (nopLogger) Error(_ error, _ string, _ ...any) {}
 type Cache[V any] interface {
 	// Get retrieves a value by key. Returns the value and true if found,
 	// or the zero value and false if not found or expired.
+	//
+	// Backend errors are logged and reported as misses. Call GetErr when
+	// the caller must distinguish a true miss from an operational failure
+	// (for example, to avoid returning a client-facing 404 on a transient
+	// Mongo outage).
 	Get(ctx context.Context, key string) (V, bool)
+
+	// GetErr retrieves a value by key and distinguishes "not found" from
+	// "backend error". Returns ErrNoDocuments on a true miss and any
+	// other error unchanged on operational failures.
+	GetErr(ctx context.Context, key string) (V, error)
 
 	// Set stores a value with the default TTL configured at creation time.
 	Set(ctx context.Context, key string, value V)

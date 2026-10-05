@@ -122,7 +122,15 @@ func TestVerificationDirectPostW3C(t *testing.T) {
 	saveSession := func(t *testing.T, holderBinding *bool) {
 		t.Helper()
 		require.NoError(t, client.cacheService.AuthContext.Save(ctx, &cache.AuthorizationContext{
-			SessionID:                "w3c-session",
+			SessionID: "w3c-session",
+			// Same-device, so the reply carries a RedirectURI to read the
+			// response code out of. main made that conditional
+			// (sameDevice := WalletFollowsRedirect || DCAPI): a
+			// cross-device flow now completes with an empty RedirectURI
+			// and notifies the browser over SSE instead, which is correct
+			// and left this test asserting on a field it had stopped
+			// populating.
+			WalletFollowsRedirect:    true,
 			State:                    state,
 			Nonce:                    "w3c-nonce",
 			ClientID:                 "x509_san_dns:verifier.example.com",
