@@ -6,14 +6,22 @@ import (
 
 // Session represents an OIDC authentication session
 type Session struct {
-	ID             string    `json:"id" bson:"id"`
-	State          string    `json:"state" bson:"state"`                     // OAuth2 state parameter (CSRF protection)
-	Nonce          string    `json:"nonce" bson:"nonce"`                     // OIDC nonce for ID token validation
-	CodeVerifier   string    `json:"code_verifier" bson:"code_verifier"`     // PKCE code_verifier
-	CredentialType string    `json:"credential_type" bson:"credential_type"` // Requested credential type
-	IssuerURL      string    `json:"issuer_url" bson:"issuer_url"`           // OIDC Provider issuer URL
-	CreatedAt      time.Time `json:"created_at" bson:"created_at"`
-	ExpiresAt      time.Time `json:"expires_at" bson:"expires_at"`
+	ID             string `json:"id" bson:"id"`
+	State          string `json:"state" bson:"state"`                     // OAuth2 state parameter (CSRF protection)
+	Nonce          string `json:"nonce" bson:"nonce"`                     // OIDC nonce for ID token validation
+	CodeVerifier   string `json:"code_verifier" bson:"code_verifier"`     // PKCE code_verifier
+	CredentialType string `json:"credential_type" bson:"credential_type"` // Requested credential type
+	IssuerURL      string `json:"issuer_url" bson:"issuer_url"`           // OIDC Provider issuer URL
+
+	// ClientID records which client registration built this flow's
+	// authorization URL. An authorization code is issued to a specific
+	// client, so a re-registration between the authorization request and
+	// the callback must not change which client redeems it. Empty on a
+	// session created before this field existed, which falls back to the
+	// current registration - the behaviour before it was recorded at all.
+	ClientID  string    `json:"client_id" bson:"client_id"`
+	CreatedAt time.Time `json:"created_at" bson:"created_at"`
+	ExpiresAt time.Time `json:"expires_at" bson:"expires_at"`
 
 	// VCI flow integration fields (set when initiated from OpenID4VCI consent)
 	VCISessionID string `json:"vci_session_id" bson:"vci_session_id"` // Links back to the VCI AuthorizationContext session

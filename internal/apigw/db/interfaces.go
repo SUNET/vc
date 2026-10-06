@@ -49,11 +49,15 @@ type IdentityMappingStore interface {
 type DynamicRegistrationStore interface {
 	Save(ctx context.Context, creds *DynamicRegistrationCredentials) error
 	Get(ctx context.Context) (*DynamicRegistrationCredentials, error)
-	// Delete removes the credentials for one client_id. Save upserts on
-	// client_id while Get reads an arbitrary row, so a re-registration that
-	// returns a NEW client_id would otherwise leave the superseded one
-	// behind for Get to pick up again.
-	Delete(ctx context.Context, clientID string) error
+	// DeleteOthers removes every stored registration except one. Save
+	// upserts on client_id, so a re-registration that returns a NEW
+	// client_id leaves the superseded row behind; this prunes it.
+	//
+	// Idempotent on purpose: the save and the prune cannot be made atomic
+	// across both backends, so a crash between them leaves extra rows and
+	// the next successful renewal clears them. Get orders by registered_at
+	// so startup does not depend on the prune having happened.
+	DeleteOthers(ctx context.Context, keepClientID string) error
 }
 
 // Ensure concrete types implement the interfaces

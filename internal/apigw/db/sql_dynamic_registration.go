@@ -59,17 +59,17 @@ func (c *SQLDynamicRegistrationColl) Save(ctx context.Context, creds *DynamicReg
 	return nil
 }
 
-// Delete removes the credentials for one client_id.
-func (c *SQLDynamicRegistrationColl) Delete(ctx context.Context, clientID string) error {
-	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:dynamic_registration:delete")
+// DeleteOthers removes every stored registration except keepClientID.
+func (c *SQLDynamicRegistrationColl) DeleteOthers(ctx context.Context, keepClientID string) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:dynamic_registration:delete_others")
 	defer span.End()
 
-	if clientID == "" {
+	if keepClientID == "" {
 		return nil
 	}
 
-	query := c.dialect.Rebind(`DELETE FROM oidc_dynamic_registration WHERE client_id = ?`)
-	if _, err := c.db.ExecContext(ctx, query, clientID); err != nil {
+	query := c.dialect.Rebind(`DELETE FROM oidc_dynamic_registration WHERE client_id <> ?`)
+	if _, err := c.db.ExecContext(ctx, query, keepClientID); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
@@ -84,7 +84,7 @@ func (c *SQLDynamicRegistrationColl) Get(ctx context.Context) (*DynamicRegistrat
 
 	query := c.dialect.Rebind(`SELECT client_id, client_secret, registration_access_token,
 		registration_client_uri, client_secret_expires_at, registered_at
-		FROM oidc_dynamic_registration LIMIT 1`)
+		FROM oidc_dynamic_registration ORDER BY registered_at DESC LIMIT 1`)
 
 	var row dynamicRegistrationRow
 	if err := c.db.GetContext(ctx, &row, query); err != nil {

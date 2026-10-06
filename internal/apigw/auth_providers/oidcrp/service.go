@@ -37,8 +37,7 @@ const (
 type Service struct {
 	cfg          *model.OIDCRP
 	provider     *oidc.Provider
-	verifier     *oidc.IDTokenVerifier
-	oauth2Config *oauth2.Config
+	creds        *credentialSet
 	sessionCache pkgcache.Cache[*Session]
 	dbService    *db.Service
 	httpClient   *http.Client
@@ -50,13 +49,10 @@ type Service struct {
 	retryAfter   time.Time
 	retryBackoff time.Duration
 
-	// Dynamic-registration credential state. clientSecretExpiresAt is zero
-	// when the secret never expires, which is what an OP signals with
-	// client_secret_expires_at: 0, and is also the preconfigured case.
-	clientID              string
-	clientSecretExpiresAt time.Time
-	credentialRetryAfter  time.Time
-	credentialBackoff     time.Duration
+	// Re-registration backoff. The credentials themselves live in creds,
+	// which has its own lock because request handlers read it.
+	credentialRetryAfter time.Time
+	credentialBackoff    time.Duration
 }
 
 // New creates a new OIDC RP service
@@ -72,6 +68,9 @@ func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Se
 		dbService:    dbService,
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
 		log:          log.New("oidcrp"),
+		// A superseded registration stays usable for as long as a flow can
+		// take, which is the session lifetime.
+		creds: newCredentialSet(time.Duration(cfg.SessionDuration) * time.Second),
 	}
 
 	// Attempt eager initialization; if the IdP is unreachable, defer to lazy retry.
@@ -182,24 +181,32 @@ func (s *Service) initialize(ctx context.Context) error {
 //
 // Callers hold s.mu for writing, or are in New before the service is shared.
 func (s *Service) applyCredentials(clientID, clientSecret string, expiresAtUnix int64) {
-	s.clientID = clientID
+	c := &credentials{
+		clientID: clientID,
+		verifier: s.provider.Verifier(&oidc.Config{ClientID: clientID}),
+		config: &oauth2.Config{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			RedirectURL:  s.cfg.RedirectURI,
+			Endpoint:     s.provider.Endpoint(),
+			Scopes:       s.cfg.Scopes,
+		},
+	}
+
 	if expiresAtUnix > 0 {
-		s.clientSecretExpiresAt = time.Unix(expiresAtUnix, 0)
-	} else {
-		s.clientSecretExpiresAt = time.Time{}
+		c.expiresAt = time.Unix(expiresAtUnix, 0)
+
+		// Do not renew again immediately. An OP handing out secrets that
+		// live for less than the renewal lead time would otherwise never
+		// produce one this service calls fresh, and every request would
+		// register another client. Half the remaining lifetime is a
+		// compromise between that and renewing in good time.
+		if remaining := time.Until(c.expiresAt); remaining < clientSecretRenewBefore*2 {
+			c.renewNotBefore = time.Now().Add(remaining / 2)
+		}
 	}
 
-	s.verifier = s.provider.Verifier(&oidc.Config{
-		ClientID: clientID,
-	})
-
-	s.oauth2Config = &oauth2.Config{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		RedirectURL:  s.cfg.RedirectURI,
-		Endpoint:     s.provider.Endpoint(),
-		Scopes:       s.cfg.Scopes,
-	}
+	s.creds.store(c)
 }
 
 // dynamicRegistrationEnabled reports whether this RP registers itself.
@@ -237,42 +244,43 @@ func (s *Service) ensureCredentials(ctx context.Context) error {
 		return nil
 	}
 
-	s.mu.RLock()
-	fresh := s.credentialsFresh()
-	s.mu.RUnlock()
-	if fresh {
+	now := time.Now()
+	current := s.creds.load()
+	if !current.needsRenewal(now) {
 		return nil
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Re-check under the write lock: concurrent requests all arrive here
-	// when the secret ages out, and only the first should register.
-	if s.credentialsFresh() {
+	// Re-check under the lock: concurrent requests all arrive here when the
+	// secret ages out, and only the first should register.
+	now = time.Now()
+	current = s.creds.load()
+	if !current.needsRenewal(now) {
 		return nil
 	}
 
-	if time.Now().Before(s.credentialRetryAfter) {
+	if now.Before(s.credentialRetryAfter) {
 		// Back off, but do not fail a request the current secret can still
 		// serve. Only once it has actually expired is refusing better than
 		// trying and getting an opaque error from the OP.
-		if time.Now().Before(s.clientSecretExpiresAt) {
+		if now.Before(current.expiresAt) {
 			return nil
 		}
 		return fmt.Errorf("OIDC client secret expired at %s and re-registration is backing off until %s",
-			s.clientSecretExpiresAt.Format(time.RFC3339), s.credentialRetryAfter.Format(time.RFC3339))
+			current.expiresAt.Format(time.RFC3339), s.credentialRetryAfter.Format(time.RFC3339))
 	}
 
 	if err := s.renewCredentials(ctx); err != nil {
 		s.credentialBackoff = min(max(s.credentialBackoff*2, oidcRPRetryBase), oidcRPRetryMax)
 		s.credentialRetryAfter = time.Now().Add(s.credentialBackoff)
 		s.log.Error(err, "oidcrp_reregistration_failed",
-			"client_id", s.clientID,
-			"expires_at", s.clientSecretExpiresAt.Format(time.RFC3339),
+			"client_id", current.clientID,
+			"expires_at", current.expiresAt.Format(time.RFC3339),
 			"next_retry_in", s.credentialBackoff.String())
 
-		if time.Now().Before(s.clientSecretExpiresAt) {
+		if time.Now().Before(current.expiresAt) {
 			// Still usable. Say so and carry on rather than taking the
 			// service down for a secret that has not run out yet.
 			return nil
@@ -284,13 +292,6 @@ func (s *Service) ensureCredentials(ctx context.Context) error {
 	s.credentialRetryAfter = time.Time{}
 
 	return nil
-}
-
-// credentialsFresh reports whether the current secret is good for a while
-// yet. A secret that never expires is always fresh. Callers hold s.mu.
-func (s *Service) credentialsFresh() bool {
-	return s.clientSecretExpiresAt.IsZero() ||
-		time.Now().Before(s.clientSecretExpiresAt.Add(-clientSecretRenewBefore))
 }
 
 // renewCredentials registers a new client and installs it. Callers hold
@@ -320,7 +321,10 @@ func (s *Service) renewCredentials(ctx context.Context) error {
 		return fmt.Errorf("dynamic client re-registration failed: %w", err)
 	}
 
-	previousClientID := s.clientID
+	previousClientID := ""
+	if current := s.creds.load(); current != nil {
+		previousClientID = current.clientID
+	}
 
 	if err := s.dbService.DynamicRegistrationColl.Save(ctx, &db.DynamicRegistrationCredentials{
 		ClientID:                regResp.ClientID,
@@ -333,12 +337,15 @@ func (s *Service) renewCredentials(ctx context.Context) error {
 		// use it; the next restart re-registers, which is wasteful but not
 		// broken. Failing here would leave the expired secret in place.
 		s.log.Error(err, "oidcrp_reregistration_not_persisted", "client_id", regResp.ClientID)
-	} else if previousClientID != "" && previousClientID != regResp.ClientID {
-		// Save upserts on client_id and Get reads an arbitrary row, so the
-		// superseded record would otherwise be there for the next startup
-		// to pick up and find expired - registering again on every boot.
-		if err := s.dbService.DynamicRegistrationColl.Delete(ctx, previousClientID); err != nil {
-			s.log.Error(err, "oidcrp_superseded_registration_not_deleted", "client_id", previousClientID)
+	} else {
+		// Save upserts on client_id, so a new client id leaves the old row
+		// behind. Prune every other row rather than just the one we know
+		// about: a crash between a previous save and its prune can have
+		// left more, and the two cannot be made atomic across both
+		// backends. Get orders by registered_at, so startup picks the
+		// newest even when this has not run.
+		if err := s.dbService.DynamicRegistrationColl.DeleteOthers(ctx, regResp.ClientID); err != nil {
+			s.log.Error(err, "oidcrp_superseded_registrations_not_pruned", "client_id", regResp.ClientID)
 		}
 	}
 
@@ -347,7 +354,7 @@ func (s *Service) renewCredentials(ctx context.Context) error {
 	s.log.Info("OIDC client re-registered before secret expiry",
 		"previous_client_id", previousClientID,
 		"client_id", regResp.ClientID,
-		"expires_at", s.clientSecretExpiresAt.Format(time.RFC3339))
+		"expires_at", s.creds.load().expiresAt.Format(time.RFC3339))
 
 	return nil
 }
@@ -455,23 +462,31 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string, oidcP
 		extraOpts = resolved
 	}
 
+	// Read the registration once. It is immutable, so the authorization URL
+	// built below and the client id recorded on the session describe the
+	// same client even if a renewal publishes a new one meanwhile.
+	creds := s.creds.load()
+	if creds == nil {
+		return nil, errors.New("OIDC RP has no client credentials")
+	}
+
 	// If extra scopes are configured, create a temporary config with merged scopes
-	oauthCfg := s.oauth2Config
+	oauthCfg := creds.config
 	if oidcParams != nil && len(oidcParams.ExtraScopes) > 0 {
-		mergedScopes := make([]string, len(s.oauth2Config.Scopes))
-		copy(mergedScopes, s.oauth2Config.Scopes)
+		mergedScopes := make([]string, len(creds.config.Scopes))
+		copy(mergedScopes, creds.config.Scopes)
 		mergedScopes = append(mergedScopes, oidcParams.ExtraScopes...)
 		oauthCfg = &oauth2.Config{
-			ClientID:     s.oauth2Config.ClientID,
-			ClientSecret: s.oauth2Config.ClientSecret,
-			RedirectURL:  s.oauth2Config.RedirectURL,
-			Endpoint:     s.oauth2Config.Endpoint,
+			ClientID:     creds.config.ClientID,
+			ClientSecret: creds.config.ClientSecret,
+			RedirectURL:  creds.config.RedirectURL,
+			Endpoint:     creds.config.Endpoint,
 			Scopes:       mergedScopes,
 		}
 	}
 
 	// Create session with state, nonce, and PKCE verifier
-	session, err := s.createSession(ctx, credentialType)
+	session, err := s.createSession(ctx, credentialType, creds.clientID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
@@ -672,9 +687,19 @@ func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*Aut
 		return nil, fmt.Errorf("invalid or expired session: %w", err)
 	}
 
+	// Finish on the client the flow started on. An authorization code is
+	// issued to a specific client, so a renewal that lands between the
+	// authorization request and this callback must not change which client
+	// redeems it - and the ID token has to be verified against the same
+	// one, since the verifier checks `aud`.
+	creds := s.creds.forClient(session.ClientID)
+	if creds == nil {
+		return nil, errors.New("OIDC RP has no client credentials")
+	}
+
 	// Exchange authorization code for tokens with PKCE
-	s.log.Debug("ProcessCallback: exchanging authorization code", "state", state)
-	oauth2Token, err := s.oauth2Config.Exchange(
+	s.log.Debug("ProcessCallback: exchanging authorization code", "state", state, "client_id", session.ClientID)
+	oauth2Token, err := creds.config.Exchange(
 		ctx,
 		code,
 		oauth2.SetAuthURLParam("code_verifier", session.CodeVerifier),
@@ -695,7 +720,7 @@ func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*Aut
 	}
 
 	s.log.Debug("ProcessCallback: verifying ID token", "state", state)
-	idToken, err := s.verifier.Verify(ctx, rawIDToken)
+	idToken, err := creds.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
 		s.log.Debug("ProcessCallback: ID token verification failed", "state", state, "error", err)
 		s.deleteSession(ctx, state)
@@ -749,7 +774,7 @@ func (s *Service) BuildAttributeMapper() *AttributeMapper {
 }
 
 // createSession creates a new session with generated state, nonce, and PKCE code_verifier.
-func (s *Service) createSession(ctx context.Context, credentialType string) (*Session, error) {
+func (s *Service) createSession(ctx context.Context, credentialType, clientID string) (*Session, error) {
 	state, err := crypto.GenerateSecureToken(0, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate state: %w", err)
@@ -773,6 +798,7 @@ func (s *Service) createSession(ctx context.Context, credentialType string) (*Se
 		CodeVerifier:   codeVerifier,
 		CredentialType: credentialType,
 		IssuerURL:      s.cfg.IssuerURL,
+		ClientID:       clientID,
 		CreatedAt:      now,
 		ExpiresAt:      now.Add(time.Duration(s.cfg.SessionDuration) * time.Second),
 	}

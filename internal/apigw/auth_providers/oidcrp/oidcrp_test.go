@@ -21,7 +21,7 @@ func TestSessionStore(t *testing.T) {
 	}
 
 	// Test session creation
-	session, err := svc.createSession(ctx, "pid")
+	session, err := svc.createSession(ctx, "pid", "vc")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestSessionExpiration(t *testing.T) {
 	}
 
 	// Create a session
-	session, err := svc.createSession(ctx, "pid")
+	session, err := svc.createSession(ctx, "pid", "vc")
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}

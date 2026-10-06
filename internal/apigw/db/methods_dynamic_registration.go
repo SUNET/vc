@@ -81,16 +81,16 @@ func (c *DynamicRegistrationColl) Save(ctx context.Context, creds *DynamicRegist
 }
 
 // Get returns the stored credentials, or nil if none exist.
-// Delete removes the credentials for one client_id.
-func (c *DynamicRegistrationColl) Delete(ctx context.Context, clientID string) error {
-	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:delete")
+// DeleteOthers removes every stored registration except keepClientID.
+func (c *DynamicRegistrationColl) DeleteOthers(ctx context.Context, keepClientID string) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:delete_others")
 	defer span.End()
 
-	if clientID == "" {
+	if keepClientID == "" {
 		return nil
 	}
 
-	if _, err := c.Coll.DeleteOne(ctx, bson.M{"client_id": clientID}); err != nil {
+	if _, err := c.Coll.DeleteMany(ctx, bson.M{"client_id": bson.M{"$ne": keepClientID}}); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
@@ -102,8 +102,13 @@ func (c *DynamicRegistrationColl) Get(ctx context.Context) (*DynamicRegistration
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:get")
 	defer span.End()
 
+	// Newest first. Save upserts on client_id, so more than one row can
+	// exist after a re-registration; picking an arbitrary one let startup
+	// find a superseded, expired record and register all over again.
+	opts := options.FindOne().SetSort(bson.D{{Key: "registered_at", Value: -1}})
+
 	var creds DynamicRegistrationCredentials
-	if err := c.Coll.FindOne(ctx, bson.M{}).Decode(&creds); err != nil {
+	if err := c.Coll.FindOne(ctx, bson.M{}, opts).Decode(&creds); err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, nil
 		}

@@ -20,10 +20,10 @@ import (
 
 // fakeRegistrationStore records what the renewal path writes and removes.
 type fakeRegistrationStore struct {
-	mu      sync.Mutex
-	saved   []*db.DynamicRegistrationCredentials
-	deleted []string
-	saveErr error
+	mu       sync.Mutex
+	saved    []*db.DynamicRegistrationCredentials
+	keptOnly []string
+	saveErr  error
 }
 
 func (f *fakeRegistrationStore) Save(_ context.Context, creds *db.DynamicRegistrationCredentials) error {
@@ -40,10 +40,10 @@ func (f *fakeRegistrationStore) Get(context.Context) (*db.DynamicRegistrationCre
 	return nil, nil
 }
 
-func (f *fakeRegistrationStore) Delete(_ context.Context, clientID string) error {
+func (f *fakeRegistrationStore) DeleteOthers(_ context.Context, keepClientID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.deleted = append(f.deleted, clientID)
+	f.keptOnly = append(f.keptOnly, keepClientID)
 	return nil
 }
 
@@ -140,23 +140,40 @@ func renewalService(t *testing.T, op *opServer, store db.DynamicRegistrationStor
 				Dynamic: &model.OIDCRPDynamicRegistrationConfig{Enable: enable},
 			},
 		},
-		provider:              provider,
-		httpClient:            op.Client(),
-		dbService:             &db.Service{DynamicRegistrationColl: store},
-		log:                   logger.NewSimple("test"),
-		ready:                 true,
-		clientID:              "client-0",
-		clientSecretExpiresAt: expiresAt,
+		provider:   provider,
+		httpClient: op.Client(),
+		dbService:  &db.Service{DynamicRegistrationColl: store},
+		log:        logger.NewSimple("test"),
+		ready:      true,
+		creds:      newCredentialSet(5 * time.Minute),
 	}
-	s.applyCredentials("client-0", "secret-0", expiresAt.Unix())
+
+	var expiresAtUnix int64
+	if !expiresAt.IsZero() {
+		expiresAtUnix = expiresAt.Unix()
+	}
+	s.applyCredentials("client-0", "secret-0", expiresAtUnix)
+
+	// applyCredentials sets renewNotBefore from the remaining lifetime, so
+	// a test that wants a renewal right now has to say so - otherwise the
+	// floor that stops a short-lived secret re-registering per request
+	// would also stop the test.
+	if !expiresAt.IsZero() {
+		current := s.creds.load()
+		s.creds.store(&credentials{
+			clientID:  current.clientID,
+			config:    current.config,
+			verifier:  current.verifier,
+			expiresAt: current.expiresAt,
+		})
+	}
+
 	return s
 }
 
 func (s *Service) currentClientID(t *testing.T) string {
 	t.Helper()
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.oauth2Config.ClientID
+	return s.creds.load().config.ClientID
 }
 
 // The bug: the secret was read once at startup and never looked at again,
@@ -179,7 +196,8 @@ func TestEnsureCredentialsRenewsBeforeExpiry(t *testing.T) {
 	// Save upserts on client_id and Get reads an arbitrary row, so the
 	// superseded record has to go or the next startup finds it expired and
 	// registers all over again.
-	assert.Equal(t, []string{"client-0"}, store.deleted)
+	assert.Equal(t, []string{"client-1"}, store.keptOnly,
+		"everything but the new registration is pruned")
 }
 
 func TestEnsureCredentialsLeavesAFreshSecretAlone(t *testing.T) {
@@ -307,7 +325,7 @@ func TestEnsureCredentialsUsesTheNewClientEvenIfPersistingFails(t *testing.T) {
 	require.NoError(t, s.ensureCredentials(t.Context()))
 
 	assert.Equal(t, "client-1", s.currentClientID(t))
-	assert.Empty(t, store.deleted, "nothing was stored, so there is nothing to supersede")
+	assert.Empty(t, store.keptOnly, "nothing was stored, so there is nothing to prune against")
 }
 
 // ensureReady is what every entry point calls - InitiateAuth,
@@ -336,4 +354,60 @@ func TestEnsureReadyLeavesAFreshSecretAlone(t *testing.T) {
 	require.NoError(t, s.ensureReady(t.Context()))
 
 	assert.Zero(t, op.count())
+}
+
+// An OP that issues secrets shorter than the renewal lead time would
+// otherwise never produce one this service calls fresh, so every request
+// would register another client.
+func TestEnsureCredentialsDoesNotRenewAShortLivedSecretPerRequest(t *testing.T) {
+	op := newOPServer(t)
+	op.secretLifetime = clientSecretRenewBefore / 2
+	store := &fakeRegistrationStore{}
+	s := renewalService(t, op, store, time.Now().Add(clientSecretRenewBefore/2))
+
+	for range 10 {
+		require.NoError(t, s.ensureCredentials(t.Context()))
+	}
+
+	assert.Equal(t, 1, op.count(), "ten requests must not produce ten registrations")
+}
+
+// Readers must never see a config from one registration with a verifier
+// from another, and must not race the writer.
+func TestEnsureCredentialsIsSafeAgainstConcurrentReaders(t *testing.T) {
+	op := newOPServer(t)
+	op.secretLifetime = 0 // the renewal yields a never-expiring secret
+	store := &fakeRegistrationStore{}
+	s := renewalService(t, op, store, time.Now().Add(clientSecretRenewBefore/2))
+
+	var wg sync.WaitGroup
+
+	// Bounded rather than "until a channel closes": readers that only stop
+	// on a signal sent after wg.Wait() never stop at all.
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 2000 {
+				creds := s.creds.load()
+				require.NotNil(t, creds)
+				// The pair has to belong together: the verifier checks
+				// `aud` against the client the config authenticates with.
+				assert.Equal(t, creds.clientID, creds.config.ClientID)
+				assert.NotNil(t, creds.verifier)
+			}
+		}()
+	}
+
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			assert.NoError(t, s.ensureCredentials(t.Context()))
+		}()
+	}
+
+	wg.Wait()
+
+	assert.Equal(t, 1, op.count(), "four writers must produce one registration")
 }
