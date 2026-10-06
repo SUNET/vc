@@ -27,8 +27,10 @@ type TokenRequest struct {
 	// did:key is short, but a did:jwk over a P-256 key is around 175
 	// characters - past the 128 this used to allow. Kept in step with
 	// cache.AuthorizationContext.WalletClientID, which is where PAR stores
-	// the wallet's own client_id; that type's ClientID holds this
-	// deployment's identifier instead.
+	// the wallet's own client_id (that type's ClientID holds this
+	// deployment's identifier instead), and with oauth2.MaxClientIDLength,
+	// which bounds the same value when private_key_jwt conveys it in the
+	// assertion's sub claim rather than in this parameter.
 	ClientID string `form:"client_id" json:"client_id" validate:"omitempty,max=512,printascii"`
 
 	// CodeVerifier OPTIONAL (required for public clients using authorization_code grant)

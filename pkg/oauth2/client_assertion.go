@@ -7,6 +7,13 @@ import (
 	"strings"
 )
 
+// MaxClientIDLength bounds a client_id wherever one is read, whether from a
+// request parameter or from the sub claim of a client assertion. 512 rather
+// than 128 because a wallet may identify itself with a DID: a did:jwk over a
+// P-256 key is around 175 characters. Kept in step with
+// openid4vci.TokenRequest.ClientID and cache.AuthorizationContext.
+const MaxClientIDLength = 512
+
 // ExtractClientIDFromAssertion extracts the "sub" claim from a client_assertion JWT
 // without verifying the signature. The sub claim contains the client_id per RFC 7523 §3.
 //
@@ -42,9 +49,13 @@ func ExtractClientIDFromAssertion(assertion string) (string, error) {
 		return "", fmt.Errorf("client assertion JWT missing 'sub' claim")
 	}
 
-	// Apply basic sanity constraints matching the client_id field (max=128, printable ASCII).
-	if len(claims.Sub) > 128 {
-		return "", fmt.Errorf("client assertion 'sub' claim exceeds maximum length (128)")
+	// The same constraints the client_id field carries: 512 characters of
+	// printable ASCII. This is a client_id by another route - private_key_jwt
+	// conveys it in sub instead of a parameter - so a bound that differs from
+	// openid4vci.TokenRequest.ClientID would refuse by the back door the DIDs
+	// the front door accepts.
+	if len(claims.Sub) > MaxClientIDLength {
+		return "", fmt.Errorf("client assertion 'sub' claim exceeds maximum length (%d)", MaxClientIDLength)
 	}
 	for _, r := range claims.Sub {
 		if r < 0x20 || r > 0x7E {
