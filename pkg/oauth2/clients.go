@@ -126,11 +126,11 @@ func (r RedirectURIs) FirstConcreteURI() string {
 // Clients maps client IDs to their OAuth2 client configuration
 type Clients map[string]*Client
 
-// Get returns the Client for the given clientID, or an error if not found.
+// Get returns the Client for the given clientID, or ErrClientNotFound.
 func (c *Clients) Get(clientID string) (*Client, error) {
 	client, ok := (*c)[clientID]
 	if !ok || client == nil {
-		return nil, errors.New("client not found in config")
+		return nil, ErrClientNotFound
 	}
 	return client, nil
 }
@@ -165,25 +165,18 @@ func ValidateRedirectURIScheme(redirectURI string) error {
 }
 
 // ErrClientNotFound reports that no statically configured client carries this
-// client_id.
-//
-// Distinguished from every other reason Allow refuses, because the caller
-// treats it completely differently: an unknown client_id is the NORMAL path
-// for a wallet authenticating by attestation, while a client that IS
-// configured and still fails has a concrete mismatch worth reporting. Both
-// used to come back as an undifferentiated error, so the second was
-// indistinguishable from the first and vanished into the attestation
-// fall-through.
+// client_id. Returned by both Get and Allow, and distinguished from every
+// other reason Allow refuses: an unknown client_id may be a wallet that
+// authenticates by attestation instead, while a configured client that still
+// fails has a concrete mismatch.
 var ErrClientNotFound = errors.New("client not found in config")
 
 // Allow validates the client request and returns the Client configuration if allowed.
 // The caller can inspect the returned Client (e.g. Type) to enforce additional constraints.
 //
-// A refusal other than ErrClientNotFound names the offending value. These
-// errors are for operators - the caller logs them and returns its own generic
-// message to the client - and an interop failure that says only "does not
-// match" leaves whoever is debugging it guessing at which of several
-// configured URIs was expected.
+// A refusal other than ErrClientNotFound names the offending value and what
+// was configured instead. These errors are for operators: the caller logs
+// them and returns its own generic message to the client.
 func (c *Clients) Allow(clientID, redirectURI, scope string) (*Client, error) {
 	client, ok := (*c)[clientID]
 	if !ok || client == nil {
