@@ -476,16 +476,17 @@ Each entry represents one acceptable credential type the wallet can present.
 
 Each list entry under a scope's `derivations` field is keyed by primitive name (e.g. `age_over_thresholds:` or `lowercase: { input: email }`). The subsections below catalog the primitives and their parameters.
 
-| Field                            | Type     | Description                                                                                                                                                                                                            | Example | Default | Required |
-| -------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `age_over_thresholds`            | `object` | AgeOverThresholds emits two boolean claims per configured threshold N from an ISO YYYY-MM-DD birthdate: age_over_N (completed years at `now`) and over_N_this_year (reaches N at some point in `now`'s calendar year). | -       | -       | No       |
-| `lowercase`                      | `object` | Lowercase applies strings.ToLower elementwise.                                                                                                                                                                         | -       | -       | No       |
-| `uppercase`                      | `object` | Uppercase applies strings.ToUpper elementwise.                                                                                                                                                                         | -       | -       | No       |
-| `trim`                           | `object` | Trim applies strings.TrimSpace elementwise.                                                                                                                                                                            | -       | -       | No       |
-| `country_alpha2`                 | `object` | Country names or alpha-3 codes to ISO 3166-1 alpha-2 codes elementwise. Unknown inputs pass through unchanged.                                                                                                         | -       | -       | No       |
-| `country_alpha3`                 | `object` | Country names or alpha-2 codes to ISO 3166-1 alpha-3 codes elementwise. Unknown inputs pass through unchanged.                                                                                                         | -       | -       | No       |
-| `yyyymmdd_to_iso`                | `object` | YYYYMMDDToISO converts a SCHAC schacDateOfBirth ("YYYYMMDD") claim to ISO full-date ("YYYY-MM-DD"). Impossible calendar dates are an error.                                                                            | -       | -       | No       |
-| `swamid_highest_assurance_level` | `object` | SWAMIDHighestAssuranceLevel reduces a multi-valued eduPersonAssurance claim to the strongest recognised SWAMID Assurance Framework URI.                                                                                | -       | -       | No       |
+| Field                            | Type     | Description                                                                                                                                                                                                                                                                             | Example | Default | Required |
+| -------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `age_over_thresholds`            | `object` | AgeOverThresholds emits two boolean claims per configured threshold N from an ISO YYYY-MM-DD birthdate: age_over_N (completed years at `now`) and over_N_this_year (reaches N at some point in `now`'s calendar year).                                                                  | -       | -       | No       |
+| `lowercase`                      | `object` | Lowercase applies strings.ToLower elementwise.                                                                                                                                                                                                                                          | -       | -       | No       |
+| `uppercase`                      | `object` | Uppercase applies strings.ToUpper elementwise.                                                                                                                                                                                                                                          | -       | -       | No       |
+| `trim`                           | `object` | Trim applies strings.TrimSpace elementwise.                                                                                                                                                                                                                                             | -       | -       | No       |
+| `country_alpha2`                 | `object` | Country names or alpha-3 codes to ISO 3166-1 alpha-2 codes elementwise. Unknown inputs pass through unchanged.                                                                                                                                                                          | -       | -       | No       |
+| `country_alpha3`                 | `object` | Country names or alpha-2 codes to ISO 3166-1 alpha-3 codes elementwise. Unknown inputs pass through unchanged.                                                                                                                                                                          | -       | -       | No       |
+| `yyyymmdd_to_iso`                | `object` | YYYYMMDDToISO converts a SCHAC schacDateOfBirth ("YYYYMMDD") claim to ISO full-date ("YYYY-MM-DD"). Impossible calendar dates are an error.                                                                                                                                             | -       | -       | No       |
+| `swamid_highest_assurance_level` | `object` | SWAMIDHighestAssuranceLevel reduces a multi-valued eduPersonAssurance claim to the strongest recognised SWAMID Assurance Framework URI.                                                                                                                                                 | -       | -       | No       |
+| `random`                         | `object` | Random writes a freshly generated random value to a claim the source data did not supply - a document identifier, typically. The only primitive here that reads nothing and is not a pure function of its input; see RandomArgs for where the value is generated and how long it lives. | -       | -       | No       |
 
 ### `age_over_thresholds`
 
@@ -565,6 +566,41 @@ errors if the input is present but no SWAMID URI is recognised.
 | Field   | Type     | Description                               | Example           | Default | Required |
 | ------- | -------- | ----------------------------------------- | ----------------- | ------- | -------- |
 | `input` | `string` | Source claim (string or list of strings). | `assurance_level` | -       | Yes      |
+
+### `random`
+
+> **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].random`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].random`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].random`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].random`, `<scope>.derivations[].random`
+
+It writes a freshly generated random value to a claim the source data did
+not supply. The use case is a claim a credential requires but
+authentication cannot provide - a document identifier that has to be
+unique across issued credentials being the one this was written for
+(SUNET/vc#736).
+
+Where the value is generated decides how long it lives, because a
+derivation runs where its data source runs it:
+
+- assertion sources (SAML, OIDC) run derivations in the ACS or callback,
+BEFORE the document is cached, so one value is generated per
+authentication and every credential issued from that session carries
+it - including each credential of a batch.
+- other sources run derivations per credential request, so each request
+mints a new value, and a re-issuance will not match the first.
+
+For an identifier meant to name a credential dataset, the first is what is
+wanted, which is also the case the issue describes.
+
+Nothing here checks that a value has not been issued before. Uniqueness
+rests on the generator: a version 4 UUID has 122 random bits, and hex and
+base64url take theirs from crypto/rand. That is the same basis every other
+identifier in this system uses, and it is a statistical claim rather than
+an enforced one.
+
+| Field       | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                     | Example | Default | Required |
+| ----------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `format`    | `string` | Format selects the shape of the value: "uuid" (the default), "hex" or "base64url".                                                                                                                                                                                                                                                                                                              | `uuid`  | -       | No       |
+| `bytes`     | `int`    | How many random bytes back a "hex" or "base64url" value, between 8 and 64. Ignored for "uuid", whose length the format fixes. Defaults to 16.                                                                                                                                                                                                                                                   | `16`    | -       | No       |
+| `overwrite` | `bool`   | Overwrite replaces a value the source data already supplied. False by default, and deliberately: this primitive exists to fill a claim authentication could not provide, and silently replacing a real identifier with a random one is a worse failure than leaving the derivation with nothing to do. Set it only where the claim is meant to be random every time regardless of what arrived. | -       | -       | No       |
 
 ### `import`
 
@@ -1957,4 +1993,16 @@ SWAMIDHighestAssuranceLevel reduces a multi-valued eduPersonAssurance claim to t
 | Field   | Type     | Description                               | Example           | Default | Required |
 | ------- | -------- | ----------------------------------------- | ----------------- | ------- | -------- |
 | `input` | `string` | Source claim (string or list of strings). | `assurance_level` | -       | Yes      |
+
+### random
+
+> **Path:** `<scope>.derivations[].random`
+
+Random writes a freshly generated random value to a claim the source data did not supply - a document identifier, typically. The only primitive here that reads nothing and is not a pure function of its input; see RandomArgs for where the value is generated and how long it lives.
+
+| Field       | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                     | Example | Default | Required |
+| ----------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `format`    | `string` | Format selects the shape of the value: "uuid" (the default), "hex" or "base64url".                                                                                                                                                                                                                                                                                                              | `uuid`  | -       | No       |
+| `bytes`     | `int`    | How many random bytes back a "hex" or "base64url" value, between 8 and 64. Ignored for "uuid", whose length the format fixes. Defaults to 16.                                                                                                                                                                                                                                                   | `16`    | -       | No       |
+| `overwrite` | `bool`   | Overwrite replaces a value the source data already supplied. False by default, and deliberately: this primitive exists to fill a claim authentication could not provide, and silently replacing a real identifier with a random one is a worse failure than leaving the derivation with nothing to do. Set it only where the claim is meant to be random every time regardless of what arrived. | -       | -       | No       |
 
