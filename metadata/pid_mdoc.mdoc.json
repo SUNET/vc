@@ -7,46 +7,124 @@
       "name": "PID",
       "description": "Person Identification Data (mdoc)",
       "background_color": "#003399",
-      "text_color": "#ffffff"
+      "text_color": "#ffffff",
+      "logo": {
+        "uri": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4MjkgNTA0IiB3aWR0aD0iODI5IiBoZWlnaHQ9IjUwNCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJQSUQgY2FyZCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImJnIiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3R5bGU9InN0b3AtY29sb3I6IzAwMzM5OSIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiMwMDFhNGQiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImNoaXAiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojZjZkMzY1Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3R5bGU9InN0b3AtY29sb3I6I2M5YTIyNyIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxjbGlwUGF0aCBpZD0iY2FyZCI+CiAgICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSI4MjkiIGhlaWdodD0iNTA0IiByeD0iMzYiIHJ5PSIzNiIvPgogICAgPC9jbGlwUGF0aD4KICA8L2RlZnM+CiAgPGcgY2xpcC1wYXRoPSJ1cmwoI2NhcmQpIj4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSI4MjkiIGhlaWdodD0iNTA0IiBmaWxsPSJ1cmwoI2JnKSIvPgogICAgPGNpcmNsZSBjeD0iNzAwIiBjeT0iLTQwIiByPSIyNDAiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuMDYiLz4KICAgIDxjaXJjbGUgY3g9IjgwIiBjeT0iNTQwIiByPSIyMDAiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuMDUiLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSI4MjkiIGhlaWdodD0iOCIgZmlsbD0iI2ZmY2MwMCIvPgogICAgPHJlY3QgeD0iNTYiIHk9IjE1MCIgd2lkdGg9Ijg2IiBoZWlnaHQ9IjY0IiByeD0iMTAiIGZpbGw9InVybCgjY2hpcCkiLz4KICAgIDxnIHN0cm9rZT0iIzAwMWE0ZCIgc3Ryb2tlLXdpZHRoPSIzIiBvcGFjaXR5PSIwLjU1Ij4KICAgICAgPGxpbmUgeDE9IjU2IiB5MT0iMTcyIiB4Mj0iMTQyIiB5Mj0iMTcyIi8+CiAgICAgIDxsaW5lIHgxPSI1NiIgeTE9IjE5MiIgeDI9IjE0MiIgeTI9IjE5MiIvPgogICAgICA8bGluZSB4MT0iODUiIHkxPSIxNTAiIHgyPSI4NSIgeTI9IjIxNCIvPgogICAgICA8bGluZSB4MT0iMTEzIiB5MT0iMTUwIiB4Mj0iMTEzIiB5Mj0iMjE0Ii8+CiAgICA8L2c+CiAgICA8dGV4dCB4PSI1NiIgeT0iMTAwIiBmb250LWZhbWlseT0iSGVsdmV0aWNhLCBBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSI3MiIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iI2ZmZmZmZiI+UElEPC90ZXh0PgogICAgPHRleHQgeD0iNTYiIHk9IjI5NiIgZm9udC1mYW1pbHk9IkhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMzAiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuOTIiPlBlcnNvbiBJZGVudGlmaWNhdGlvbiBEYXRhPC90ZXh0PgogICAgPHJlY3QgeD0iNTYiIHk9IjMzMCIgd2lkdGg9IjMyMCIgaGVpZ2h0PSIyIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjI1Ii8+CiAgICA8dGV4dCB4PSI1NiIgeT0iMzg0IiBmb250LWZhbWlseT0iSGVsdmV0aWNhLCBBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIyMiIgbGV0dGVyLXNwYWNpbmc9IjMiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuNzUiPkVVREkgV0FMTEVUPC90ZXh0PgogICAgPHRleHQgeD0iNTYiIHk9IjQzMiIgZm9udC1mYW1pbHk9IkhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjAiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuNiI+SXNzdWVkIGFzIGFuIElTTyBtZG9jPC90ZXh0PgogIDwvZz4KPC9zdmc+",
+        "alt_text": "PID card"
+      }
     }
   ],
   "claims": {
     "eu.europa.ec.eudi.pid.1": {
-      "family_name": { "mandatory": true, "value_type": "tstr" },
-      "given_name": { "mandatory": true, "value_type": "tstr" },
-      "birth_date": { "mandatory": true, "value_type": "full-date" },
-      "issuance_date": { "mandatory": true, "value_type": "full-date" },
-      "expiry_date": { "mandatory": true, "value_type": "full-date" },
-      "issuing_country": { "mandatory": true, "value_type": "tstr" },
-      "issuing_authority": { "mandatory": true, "value_type": "tstr" },
-
-      "document_number": { "value_type": "tstr" },
-      "administrative_number": { "value_type": "tstr" },
-      "issuing_jurisdiction": { "value_type": "tstr" },
-      "portrait": { "value_type": "bstr" },
-      "portrait_capture_date": { "value_type": "tdate" },
-      "family_name_birth": { "value_type": "tstr" },
-      "given_name_birth": { "value_type": "tstr" },
-      "birth_place": { "value_type": "tstr" },
-      "birth_country": { "value_type": "tstr" },
-      "birth_state": { "value_type": "tstr" },
-      "birth_city": { "value_type": "tstr" },
-      "resident_address": { "value_type": "tstr" },
-      "resident_country": { "value_type": "tstr" },
-      "resident_state": { "value_type": "tstr" },
-      "resident_city": { "value_type": "tstr" },
-      "resident_postal_code": { "value_type": "tstr" },
-      "resident_street": { "value_type": "tstr" },
-      "resident_house_number": { "value_type": "tstr" },
-      "sex": { "value_type": "uint" },
-      "nationalities": { "value_type": "array" },
-      "age_in_years": { "value_type": "uint" },
-      "age_birth_year": { "value_type": "uint" },
-      "age_over_18": { "value_type": "bool" },
-      "email_address": { "value_type": "tstr" },
-      "mobile_phone_number": { "value_type": "tstr" },
-      "trust_anchor": { "value_type": "tstr" },
-      "pseudonym_seed": { "value_type": "bstr" }
+      "family_name": {
+        "mandatory": true,
+        "value_type": "tstr"
+      },
+      "given_name": {
+        "mandatory": true,
+        "value_type": "tstr"
+      },
+      "birth_date": {
+        "mandatory": true,
+        "value_type": "full-date"
+      },
+      "issuance_date": {
+        "mandatory": true,
+        "value_type": "full-date"
+      },
+      "expiry_date": {
+        "mandatory": true,
+        "value_type": "full-date"
+      },
+      "issuing_country": {
+        "mandatory": true,
+        "value_type": "tstr"
+      },
+      "issuing_authority": {
+        "mandatory": true,
+        "value_type": "tstr"
+      },
+      "document_number": {
+        "value_type": "tstr"
+      },
+      "administrative_number": {
+        "value_type": "tstr"
+      },
+      "issuing_jurisdiction": {
+        "value_type": "tstr"
+      },
+      "portrait": {
+        "value_type": "bstr"
+      },
+      "portrait_capture_date": {
+        "value_type": "tdate"
+      },
+      "family_name_birth": {
+        "value_type": "tstr"
+      },
+      "given_name_birth": {
+        "value_type": "tstr"
+      },
+      "birth_place": {
+        "value_type": "tstr"
+      },
+      "birth_country": {
+        "value_type": "tstr"
+      },
+      "birth_state": {
+        "value_type": "tstr"
+      },
+      "birth_city": {
+        "value_type": "tstr"
+      },
+      "resident_address": {
+        "value_type": "tstr"
+      },
+      "resident_country": {
+        "value_type": "tstr"
+      },
+      "resident_state": {
+        "value_type": "tstr"
+      },
+      "resident_city": {
+        "value_type": "tstr"
+      },
+      "resident_postal_code": {
+        "value_type": "tstr"
+      },
+      "resident_street": {
+        "value_type": "tstr"
+      },
+      "resident_house_number": {
+        "value_type": "tstr"
+      },
+      "sex": {
+        "value_type": "uint"
+      },
+      "nationalities": {
+        "value_type": "array"
+      },
+      "age_in_years": {
+        "value_type": "uint"
+      },
+      "age_birth_year": {
+        "value_type": "uint"
+      },
+      "age_over_18": {
+        "value_type": "bool"
+      },
+      "email_address": {
+        "value_type": "tstr"
+      },
+      "mobile_phone_number": {
+        "value_type": "tstr"
+      },
+      "trust_anchor": {
+        "value_type": "tstr"
+      },
+      "pseudonym_seed": {
+        "value_type": "bstr"
+      }
     }
   }
 }

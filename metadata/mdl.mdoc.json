@@ -7,61 +7,152 @@
       "name": "mDL",
       "description": "Mobile Driving Licence (ISO/IEC 18013-5)",
       "background_color": "#1a365d",
-      "text_color": "#ffffff"
+      "text_color": "#ffffff",
+      "logo": {
+        "uri": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4MjkgNTA0IiB3aWR0aD0iODI5IiBoZWlnaHQ9IjUwNCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJtREwgY2FyZCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImJnIiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3R5bGU9InN0b3AtY29sb3I6IzFhMzY1ZCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiMwZDFmMzMiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImNoaXAiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojZjZkMzY1Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3R5bGU9InN0b3AtY29sb3I6I2M5YTIyNyIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxjbGlwUGF0aCBpZD0iY2FyZCI+CiAgICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSI4MjkiIGhlaWdodD0iNTA0IiByeD0iMzYiIHJ5PSIzNiIvPgogICAgPC9jbGlwUGF0aD4KICA8L2RlZnM+CiAgPGcgY2xpcC1wYXRoPSJ1cmwoI2NhcmQpIj4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSI4MjkiIGhlaWdodD0iNTA0IiBmaWxsPSJ1cmwoI2JnKSIvPgogICAgPGNpcmNsZSBjeD0iNzAwIiBjeT0iLTQwIiByPSIyNDAiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuMDYiLz4KICAgIDxjaXJjbGUgY3g9IjgwIiBjeT0iNTQwIiByPSIyMDAiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuMDUiLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSI4MjkiIGhlaWdodD0iOCIgZmlsbD0iI2Y2ZDM2NSIvPgogICAgPHJlY3QgeD0iNTYiIHk9IjE1MCIgd2lkdGg9Ijg2IiBoZWlnaHQ9IjY0IiByeD0iMTAiIGZpbGw9InVybCgjY2hpcCkiLz4KICAgIDxnIHN0cm9rZT0iIzBkMWYzMyIgc3Ryb2tlLXdpZHRoPSIzIiBvcGFjaXR5PSIwLjU1Ij4KICAgICAgPGxpbmUgeDE9IjU2IiB5MT0iMTcyIiB4Mj0iMTQyIiB5Mj0iMTcyIi8+CiAgICAgIDxsaW5lIHgxPSI1NiIgeTE9IjE5MiIgeDI9IjE0MiIgeTI9IjE5MiIvPgogICAgICA8bGluZSB4MT0iODUiIHkxPSIxNTAiIHgyPSI4NSIgeTI9IjIxNCIvPgogICAgICA8bGluZSB4MT0iMTEzIiB5MT0iMTUwIiB4Mj0iMTEzIiB5Mj0iMjE0Ii8+CiAgICA8L2c+CiAgICA8dGV4dCB4PSI1NiIgeT0iMTAwIiBmb250LWZhbWlseT0iSGVsdmV0aWNhLCBBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSI3MiIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iI2ZmZmZmZiI+bURMPC90ZXh0PgogICAgPHRleHQgeD0iNTYiIHk9IjI5NiIgZm9udC1mYW1pbHk9IkhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMzAiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuOTIiPk1vYmlsZSBEcml2aW5nIExpY2VuY2U8L3RleHQ+CiAgICA8cmVjdCB4PSI1NiIgeT0iMzMwIiB3aWR0aD0iMzIwIiBoZWlnaHQ9IjIiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuMjUiLz4KICAgIDx0ZXh0IHg9IjU2IiB5PSIzODQiIGZvbnQtZmFtaWx5PSJIZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjIyIiBsZXR0ZXItc3BhY2luZz0iMyIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC43NSI+SVNPL0lFQyAxODAxMy01PC90ZXh0PgogICAgPHRleHQgeD0iNTYiIHk9IjQzMiIgZm9udC1mYW1pbHk9IkhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjAiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuNiI+SXNzdWVkIGFzIGFuIElTTyBtZG9jPC90ZXh0PgogIDwvZz4KPC9zdmc+",
+        "alt_text": "mDL card"
+      }
     }
   ],
   "claims": {
     "org.iso.18013.5.1": {
-      "family_name": { "mandatory": true, "value_type": "tstr" },
-      "given_name": { "mandatory": true, "value_type": "tstr" },
-      "birth_date": { "mandatory": true, "value_type": "full-date" },
-      "issue_date": { "mandatory": true, "value_type": "full-date" },
-      "expiry_date": { "mandatory": true, "value_type": "full-date" },
-      "issuing_country": { "mandatory": true, "value_type": "tstr" },
-      "issuing_authority": { "mandatory": true, "value_type": "tstr" },
-      "document_number": { "mandatory": true, "value_type": "tstr" },
-      "portrait": { "mandatory": true, "value_type": "bstr" },
-      "un_distinguishing_sign": { "mandatory": true, "value_type": "tstr" },
+      "family_name": {
+        "mandatory": true,
+        "value_type": "tstr"
+      },
+      "given_name": {
+        "mandatory": true,
+        "value_type": "tstr"
+      },
+      "birth_date": {
+        "mandatory": true,
+        "value_type": "full-date"
+      },
+      "issue_date": {
+        "mandatory": true,
+        "value_type": "full-date"
+      },
+      "expiry_date": {
+        "mandatory": true,
+        "value_type": "full-date"
+      },
+      "issuing_country": {
+        "mandatory": true,
+        "value_type": "tstr"
+      },
+      "issuing_authority": {
+        "mandatory": true,
+        "value_type": "tstr"
+      },
+      "document_number": {
+        "mandatory": true,
+        "value_type": "tstr"
+      },
+      "portrait": {
+        "mandatory": true,
+        "value_type": "bstr"
+      },
+      "un_distinguishing_sign": {
+        "mandatory": true,
+        "value_type": "tstr"
+      },
       "driving_privileges": {
         "mandatory": true,
         "value_type": "array",
         "elements": {
-          "vehicle_category_code": { "mandatory": true, "value_type": "tstr" },
-          "issue_date": { "value_type": "full-date" },
-          "expiry_date": { "value_type": "full-date" },
+          "vehicle_category_code": {
+            "mandatory": true,
+            "value_type": "tstr"
+          },
+          "issue_date": {
+            "value_type": "full-date"
+          },
+          "expiry_date": {
+            "value_type": "full-date"
+          },
           "codes": {
             "value_type": "array",
             "elements": {
-              "code": { "mandatory": true, "value_type": "tstr" },
-              "sign": { "value_type": "tstr" },
-              "value": { "value_type": "tstr" }
+              "code": {
+                "mandatory": true,
+                "value_type": "tstr"
+              },
+              "sign": {
+                "value_type": "tstr"
+              },
+              "value": {
+                "value_type": "tstr"
+              }
             }
           }
         }
       },
-
-      "administrative_number": { "value_type": "tstr" },
-      "sex": { "value_type": "uint" },
-      "height": { "value_type": "uint" },
-      "weight": { "value_type": "uint" },
-      "eye_colour": { "value_type": "tstr" },
-      "hair_colour": { "value_type": "tstr" },
-      "birth_place": { "value_type": "tstr" },
-      "resident_address": { "value_type": "tstr" },
-      "portrait_capture_date": { "value_type": "tdate" },
-      "age_in_years": { "value_type": "uint" },
-      "age_birth_year": { "value_type": "uint" },
-      "age_over_18": { "value_type": "bool" },
-      "issuing_jurisdiction": { "value_type": "tstr" },
-      "nationalities": { "value_type": "array" },
-      "resident_city": { "value_type": "tstr" },
-      "resident_state": { "value_type": "tstr" },
-      "resident_postal_code": { "value_type": "tstr" },
-      "resident_country": { "value_type": "tstr" },
-      "family_name_national_character": { "value_type": "tstr" },
-      "given_name_national_character": { "value_type": "tstr" },
-      "signature_usual_mark": { "value_type": "bstr" },
-      "pseudonym_seed": { "value_type": "bstr" }
+      "administrative_number": {
+        "value_type": "tstr"
+      },
+      "sex": {
+        "value_type": "uint"
+      },
+      "height": {
+        "value_type": "uint"
+      },
+      "weight": {
+        "value_type": "uint"
+      },
+      "eye_colour": {
+        "value_type": "tstr"
+      },
+      "hair_colour": {
+        "value_type": "tstr"
+      },
+      "birth_place": {
+        "value_type": "tstr"
+      },
+      "resident_address": {
+        "value_type": "tstr"
+      },
+      "portrait_capture_date": {
+        "value_type": "tdate"
+      },
+      "age_in_years": {
+        "value_type": "uint"
+      },
+      "age_birth_year": {
+        "value_type": "uint"
+      },
+      "age_over_18": {
+        "value_type": "bool"
+      },
+      "issuing_jurisdiction": {
+        "value_type": "tstr"
+      },
+      "nationalities": {
+        "value_type": "array"
+      },
+      "resident_city": {
+        "value_type": "tstr"
+      },
+      "resident_state": {
+        "value_type": "tstr"
+      },
+      "resident_postal_code": {
+        "value_type": "tstr"
+      },
+      "resident_country": {
+        "value_type": "tstr"
+      },
+      "family_name_national_character": {
+        "value_type": "tstr"
+      },
+      "given_name_national_character": {
+        "value_type": "tstr"
+      },
+      "signature_usual_mark": {
+        "value_type": "bstr"
+      },
+      "pseudonym_seed": {
+        "value_type": "bstr"
+      }
     }
   }
 }

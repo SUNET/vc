@@ -555,7 +555,16 @@ func (s *Service) endpointOAuthAuthorizationConsentSvgTemplate(ctx context.Conte
 	}
 
 	reply, err := s.apiv1.SVGTemplateReply(ctx, svgTemplateRequest)
-	if err != nil {
+	switch {
+	case errors.Is(err, apiv1.ErrNoSVGTemplate):
+		// Not a failure: a credential type is free to have no card image,
+		// and the consent page renders its claims without one. Answering
+		// 400 made every load of such a page log an error and made a real
+		// fetch failure indistinguishable from a configuration that simply
+		// has no card (SUNET/vc#737).
+		s.log.Debug("no SVG template configured for scope; consent page will render without a card", "scope", scope)
+		reply = &vcclient.SVGTemplateReply{}
+	case err != nil:
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "getting SVG template failed")
 		c.AbortWithStatus(http.StatusBadRequest)

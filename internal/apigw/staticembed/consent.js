@@ -289,7 +289,10 @@ Alpine.data("app", () => ({
                         data.svg_template_claims,
                     );
                 } catch (_) {
-                    // VCTM has no SVG template — display claims without card image
+                    // Template could not be decoded — display claims without
+                    // a card image. An absent template is not an error and
+                    // does not reach here; applyClaimsToSvgTemplate returns
+                    // null for it.
                 }
             }
 
@@ -354,9 +357,17 @@ Alpine.data("app", () => ({
      * Apply claim values to a pre-fetched SVG template and return a data URI.
      * @param {SvgTemplateResponse} svgData - Pre-fetched SVG template response
      * @param {Record<string, { label: string; value: unknown; }>} claims
-     * @returns {string}
+     * @returns {string|null}
      */
     applyClaimsToSvgTemplate(svgData, claims) {
+        // An empty template is how the server says this credential type has
+        // no card image. Encoding it anyway would produce
+        // "data:image/svg+xml;base64," — a truthy string, so the <img> would
+        // be shown and render as a broken image rather than being hidden.
+        if (!svgData || !svgData.template) {
+            return null;
+        }
+
         // Decode the template as UTF-8 — `atob` alone returns a Latin-1 byte
         // string, which would corrupt any non-ASCII characters in the SVG
         // when re-encoded with utf8ToBase64 below.
