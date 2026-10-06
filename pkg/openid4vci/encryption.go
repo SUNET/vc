@@ -3,6 +3,9 @@ package openid4vci
 import (
 	"bytes"
 	"crypto"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"encoding/base64"
@@ -11,6 +14,7 @@ import (
 
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
+	"github.com/lestrrat-go/jwx/v3/jwe/jwebb"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 )
 
@@ -42,6 +46,15 @@ const (
 	// ZipDeflate is the only JWE compression algorithm vc performs, and only
 	// when compressing a response. See RequestEncryptionZipValuesSupported.
 	ZipDeflate = "DEF"
+
+	// a256kwKeySize is the length in bytes of the key-wrapping key the
+	// Concat KDF produces for AlgECDHESA256KW. RFC 7518 §4.6.2 feeds it to
+	// the KDF as SuppPubInfo, in bits.
+	a256kwKeySize = 32
+
+	// a256gcmKeySize is the length in bytes of the content encryption key
+	// EncA256GCM takes.
+	a256gcmKeySize = 32
 )
 
 var (
@@ -79,10 +92,14 @@ var (
 // *CredentialEncryption is a deployment with no encryption key configured.
 // Every method is nil-safe so the call sites do not each repeat that check.
 type CredentialEncryption struct {
-	// private is the key set used to decrypt requests. Each key carries a kid
-	// (its RFC 7638 thumbprint) and an alg, so a wallet can name the key it
+	// keys are the key-agreement keys used to decrypt requests, indexed by
+	// kid (their RFC 7638 thumbprints), so a wallet can name the key it
 	// encrypted to and rotation is adding a key rather than a flag day.
-	private jwk.Set
+	//
+	// A map rather than a jwk.Set because a key held in an HSM has no
+	// private JWK to put in one: what the issuer holds is the ability to
+	// perform an agreement, not the number.
+	keys map[string]KeyAgreementKey
 
 	// publicJWKS is the serialized public half, published in metadata.
 	// Rendered once: it is the same bytes on every metadata request.
@@ -95,15 +112,11 @@ type CredentialEncryption struct {
 // NewCredentialEncryption builds the encrypter from the issuer's private
 // key-agreement keys.
 //
-// Keys are ECDSA P-256 private keys, and anything else is refused here
-// rather than at the first request: the metadata would otherwise advertise a
-// capability the endpoint does not have.
-//
-// The concrete type is what jwe.Decrypt needs to call ECDH on, which is also
-// why an HSM-held key cannot be passed here - a PKCS#11 key CAN perform this
-// agreement (CKM_ECDH1_DERIVE), but reaching it means deriving Z through the
-// module and doing the Concat KDF and unwrap around it rather than handing
-// the key to jwe.Decrypt.
+// A key is either an ECDSA P-256 private key read from a file or something
+// that implements KeyAgreementKey, which is how a key held in a PKCS#11
+// token arrives. Anything else is refused here rather than at the first
+// request: the metadata would otherwise advertise a capability the endpoint
+// does not have.
 func NewCredentialEncryption(keys []crypto.PrivateKey, requestRequired, responseRequired bool) (*CredentialEncryption, error) {
 	if len(keys) == 0 {
 		if requestRequired || responseRequired {
@@ -112,47 +125,54 @@ func NewCredentialEncryption(keys []crypto.PrivateKey, requestRequired, response
 		return nil, nil
 	}
 
-	private := jwk.NewSet()
+	agreement := map[string]KeyAgreementKey{}
 	public := jwk.NewSet()
-	seen := map[string]bool{}
 
 	for i, raw := range keys {
-		ec, ok := raw.(*ecdsa.PrivateKey)
-		if !ok {
-			return nil, fmt.Errorf("credential encryption key %d: want an ECDSA P-256 private key, got %T", i, raw)
+		var (
+			key KeyAgreementKey
+			err error
+		)
+		switch typed := raw.(type) {
+		case *ecdsa.PrivateKey:
+			key, err = NewSoftwareKeyAgreementKey(typed)
+		case KeyAgreementKey:
+			key = typed
+		default:
+			return nil, fmt.Errorf("credential encryption key %d: want an ECDSA P-256 private key or a KeyAgreementKey, got %T", i, raw)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("credential encryption key %d: %w", i, err)
+		}
+
+		ec := key.PublicKey()
+		if ec == nil {
+			return nil, fmt.Errorf("credential encryption key %d: no public key", i)
 		}
 		if ec.Curve != elliptic.P256() {
 			return nil, fmt.Errorf("credential encryption key %d: want curve P-256, got %s", i, ec.Curve.Params().Name)
 		}
 
-		key, err := jwk.Import(ec)
+		pub, err := jwk.Import(ec)
 		if err != nil {
 			return nil, fmt.Errorf("credential encryption key %d: %w", i, err)
 		}
 
 		// kid is the RFC 7638 thumbprint, so it is stable across re-encodings
 		// of the same key and says nothing an operator has to keep in sync.
-		sum, err := key.Thumbprint(crypto.SHA256)
+		// Taken from the public half, which RFC 7638 §3.2 makes the same
+		// number either way: the private exponent is not one of the required
+		// members that get hashed.
+		sum, err := pub.Thumbprint(crypto.SHA256)
 		if err != nil {
 			return nil, fmt.Errorf("credential encryption key %d: thumbprint: %w", i, err)
 		}
 		kid := base64.RawURLEncoding.EncodeToString(sum)
-		if seen[kid] {
+		if _, seen := agreement[kid]; seen {
 			return nil, fmt.Errorf("credential encryption key %d is a duplicate of an earlier key (kid %s)", i, kid)
 		}
-		seen[kid] = true
+		agreement[kid] = key
 
-		if err := setKeyMetadata(key, kid); err != nil {
-			return nil, fmt.Errorf("credential encryption key %d: %w", i, err)
-		}
-		if err := private.AddKey(key); err != nil {
-			return nil, fmt.Errorf("credential encryption key %d: %w", i, err)
-		}
-
-		pub, err := key.PublicKey()
-		if err != nil {
-			return nil, fmt.Errorf("credential encryption key %d: public half: %w", i, err)
-		}
 		if err := setKeyMetadata(pub, kid); err != nil {
 			return nil, fmt.Errorf("credential encryption key %d: %w", i, err)
 		}
@@ -167,7 +187,7 @@ func NewCredentialEncryption(keys []crypto.PrivateKey, requestRequired, response
 	}
 
 	return &CredentialEncryption{
-		private:          private,
+		keys:             agreement,
 		publicJWKS:       encoded,
 		requestRequired:  requestRequired,
 		responseRequired: responseRequired,
@@ -189,7 +209,7 @@ func setKeyMetadata(key jwk.Key, kid string) error {
 }
 
 // Enabled reports whether this deployment has an encryption key at all.
-func (e *CredentialEncryption) Enabled() bool { return e != nil && e.private != nil }
+func (e *CredentialEncryption) Enabled() bool { return e != nil && len(e.keys) > 0 }
 
 // RequestEncryptionRequired reports whether a Credential Request must arrive
 // encrypted.
@@ -295,18 +315,160 @@ func (e *CredentialEncryption) DecryptRequest(body []byte) ([]byte, error) {
 		}
 	}
 
-	// WithRequireKid: the wallet must name the key it encrypted to. Every key
-	// this issuer publishes carries a kid, so a request without one was not
-	// built from this issuer's metadata.
-	plaintext, err := jwe.Decrypt(body, jwe.WithKeySet(e.private, jwe.WithRequireKid(true)))
+	plaintext, err := e.decryptECDHES(body, headers)
 	if err != nil {
-		return nil, &Error{
+		return nil, err
+	}
+
+	return plaintext, nil
+}
+
+// decryptECDHES performs the ECDH-ES+A256KW / A256GCM decryption of a
+// compact JWE, given its already-validated protected headers.
+//
+// This is jwe.Decrypt's job, and jwe.Decrypt is not used: it reaches
+// jwebb.DeriveECDHES, which needs a concrete *ecdh.PrivateKey to call ECDH
+// on, and a key in an HSM will never be one. Everything a key is asked for
+// here is reduced to KeyAgreementKey.ECDH - a shared secret Z for an
+// ephemeral public key - which a file key and a PKCS#11 token can both
+// answer. The rest (RFC 7518 §4.6.2 Concat KDF, RFC 3394 unwrap, AES-GCM)
+// is the same arithmetic in both cases, and writing it once is what keeps
+// the two from drifting.
+//
+// Only ECDH-ES+A256KW over P-256 with A256GCM; DecryptRequest has already
+// refused anything else, and this would not know what to do with it.
+//
+// Every failure below returns the same description. The caller is an
+// unauthenticated endpoint, and telling it which step failed - a kid that
+// does not resolve, an unwrap that did not authenticate, a tag that did not
+// match - hands it an oracle for free.
+func (e *CredentialEncryption) decryptECDHES(body []byte, headers jwe.Headers) ([]byte, error) {
+	refuse := func() error {
+		return &Error{
 			Err:              ErrInvalidEncryptionParameters,
 			ErrorDescription: "the request could not be decrypted with any of this Credential Issuer's keys",
 		}
 	}
 
+	// The wallet must name the key it encrypted to. Every key this issuer
+	// publishes carries a kid, so a request without one was not built from
+	// this issuer's metadata. (jwe.Decrypt spells this WithRequireKid.)
+	kid, ok := headers.KeyID()
+	if !ok || kid == "" {
+		return nil, refuse()
+	}
+	key, ok := e.keys[kid]
+	if !ok {
+		return nil, refuse()
+	}
+
+	epk, err := ephemeralPublicKey(headers)
+	if err != nil {
+		return nil, refuse()
+	}
+
+	// The five compact segments, re-split here rather than taken off the
+	// parsed message: the AAD of a compact JWE is the protected header
+	// exactly as it was transmitted, and re-serializing the parsed headers
+	// would not reliably reproduce those bytes.
+	segments := bytes.Split(body, []byte("."))
+	if len(segments) != 5 {
+		return nil, refuse()
+	}
+	aad := segments[0]
+	encryptedKey, err := base64.RawURLEncoding.DecodeString(string(segments[1]))
+	if err != nil {
+		return nil, refuse()
+	}
+	iv, err := base64.RawURLEncoding.DecodeString(string(segments[2]))
+	if err != nil {
+		return nil, refuse()
+	}
+	ciphertext, err := base64.RawURLEncoding.DecodeString(string(segments[3]))
+	if err != nil {
+		return nil, refuse()
+	}
+	tag, err := base64.RawURLEncoding.DecodeString(string(segments[4]))
+	if err != nil {
+		return nil, refuse()
+	}
+
+	apu, _ := headers.AgreementPartyUInfo()
+	apv, _ := headers.AgreementPartyVInfo()
+
+	z, err := key.ECDH(epk)
+	if err != nil {
+		return nil, refuse()
+	}
+
+	// RFC 7518 §4.6.2: for a key-wrapping variant the AlgorithmID is the
+	// "alg" value and the key length is the wrapping key's, not the content
+	// encryption key's.
+	kek := concatKDF(crypto.SHA256, z, []byte(AlgECDHESA256KW), apu, apv, a256kwKeySize)
+
+	// RFC 3394 key unwrap, which also authenticates: a KEK derived from the
+	// wrong Z fails here rather than producing a wrong CEK.
+	cek, err := jwebb.KeyDecryptAESKW(nil, encryptedKey, AlgECDHESA256KW, kek)
+	if err != nil {
+		return nil, refuse()
+	}
+	// The unwrapped key is as long as whatever was wrapped, and aes.NewCipher
+	// would accept 16 or 24 bytes as happily as 32 - decrypting with AES-128
+	// under a header that says A256GCM. The header has already been checked
+	// against EncA256GCM, so the key has to match it.
+	if len(cek) != a256gcmKeySize {
+		return nil, refuse()
+	}
+
+	block, err := aes.NewCipher(cek)
+	if err != nil {
+		return nil, refuse()
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, refuse()
+	}
+	// Checked rather than left to Open, which panics on a nonce of the wrong
+	// length - and the length here came off the wire.
+	if len(iv) != aead.NonceSize() {
+		return nil, refuse()
+	}
+
+	sealed := make([]byte, 0, len(ciphertext)+len(tag))
+	sealed = append(sealed, ciphertext...)
+	sealed = append(sealed, tag...)
+
+	plaintext, err := aead.Open(nil, iv, sealed, aad)
+	if err != nil {
+		return nil, refuse()
+	}
+
 	return plaintext, nil
+}
+
+// ephemeralPublicKey reads the epk header as a P-256 public key.
+//
+// The *ecdh.PublicKey it returns is the validation: constructing one runs
+// the on-curve check, without which an invalid-curve attack recovers the
+// issuer's private key one agreement at a time. A key-agreement
+// implementation that forwards the point to an HSM has no later chance to
+// do this, so it happens once, here, for every key type.
+func ephemeralPublicKey(headers jwe.Headers) (*ecdh.PublicKey, error) {
+	epk, ok := headers.EphemeralPublicKey()
+	if !ok || epk == nil {
+		return nil, fmt.Errorf("no epk header")
+	}
+	if _, isPrivate := epk.(jwk.ECDSAPrivateKey); isPrivate {
+		return nil, fmt.Errorf("epk is a private key")
+	}
+	var pub ecdsa.PublicKey
+	if err := jwk.Export(epk, &pub); err != nil {
+		return nil, fmt.Errorf("epk is not an EC public key: %w", err)
+	}
+	if pub.Curve != elliptic.P256() {
+		return nil, fmt.Errorf("epk is not on P-256")
+	}
+	return pub.ECDH()
 }
 
 // EncryptResponse encrypts a response body with the parameters the wallet

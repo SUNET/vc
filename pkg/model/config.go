@@ -1373,19 +1373,11 @@ type CredentialEncryption struct {
 	// kid derived as its RFC 7638 thumbprint, so rotation is adding a key,
 	// waiting for cached metadata to expire, and removing the old one.
 	//
-	// Each key must be an ECDSA P-256 private key in a PEM file. The type is
-	// deliberately narrower than pki.KeyConfig, but only because of what vc
-	// implements today, not because of anything about HSMs: PKCS#11 has
-	// CKM_ECDH1_DERIVE and the vendored module exposes it, so an HSM can
-	// perform this key agreement. What cannot is the path vc takes to get
-	// there - pki hands back a crypto.Signer, and jwe.Decrypt needs a
-	// concrete *ecdh.PrivateKey to call ECDH on.
-	//
-	// Supporting an HSM here means deriving Z through PKCS#11 and doing the
-	// Concat KDF, key unwrap and content decryption around it, instead of
-	// handing the key to jwe.Decrypt. Until that exists, an hsm setting here
-	// would advertise something this build cannot do, so there is none. See
-	// SUNET/vc#734.
+	// Each key is a P-256 key held either in a PEM file or in a PKCS#11
+	// token. The type is deliberately narrower than pki.KeyConfig: this is
+	// a key-agreement key, not a signing key, so the curve is fixed by the
+	// one algorithm pair §8.3 is implemented for here (ECDH-ES+A256KW with
+	// A256GCM).
 	Keys []CredentialEncryptionKey `yaml:"keys" validate:"omitempty,dive"`
 
 	// RequestEncryptionRequired publishes
@@ -1419,12 +1411,41 @@ type CredentialEncryption struct {
 
 // CredentialEncryptionKey is one of this issuer's key-agreement keys.
 //
-// File-backed only as things stand; see CredentialEncryption.Keys for what
-// an HSM option would take.
+// The key is held either in a PEM file or in a PKCS#11 token, and exactly
+// one of private_key_path and pkcs11 must be set. That is checked
+// when the keys are loaded rather than by a struct tag: the constraint is
+// "one of these two", which a tag states as required_without/excluded_with
+// and which the validator then reports in its own words, before the check
+// that can name both settings and say which combination was written.
 type CredentialEncryptionKey struct {
 	// PrivateKeyPath is the path to a PEM file holding an ECDSA P-256
 	// private key.
-	PrivateKeyPath string `yaml:"private_key_path" validate:"required" doc_example:"\"/etc/vc/credential-encryption.pem\""`
+	PrivateKeyPath string `yaml:"private_key_path" validate:"omitempty" doc_example:"\"/etc/vc/credential-encryption.pem\""`
+
+	// PKCS11 is an alternative to private_key_path: the key stays in an HSM,
+	// which performs the ECDH-ES key agreement with CKM_ECDH1_DERIVE. The
+	// key must be an EC P-256 private key with CKA_DERIVE set; it is found
+	// by key_label, and key_id is unused here (it names a JWT kid, and the
+	// kid of an encryption key is its RFC 7638 thumbprint).
+	//
+	// SECURITY: this keeps the long-term private key inside the token, but
+	// not the per-request shared secret. The derivation uses CKD_NULL, so
+	// the agreed secret Z is read back out of the token and the RFC 7518
+	// §4.6.2 Concat KDF, the AES key unwrap and the content decryption all
+	// run in this process. An attacker who can read this process's memory
+	// can therefore recover the content encryption key of a request being
+	// decrypted - but not the private key, and not any other request's,
+	// each of which needs its own agreement through the token. Running the
+	// whole unwrap inside the token would need CKD_SHA256_KDF_CONCATENATE
+	// with a module-specific encoding of the JWE OtherInfo, which PKCS#11
+	// v2.40 does not standardize. Weigh that against a PEM file on disk,
+	// where the long-term key is readable, before choosing either.
+	//
+	// Not every module will do this: the derived generic secret is created
+	// with CKA_EXTRACTABLE true and CKA_SENSITIVE false, and a token
+	// configured to refuse extractable keys will refuse the derivation. It
+	// fails at startup, with the module's error, rather than silently.
+	PKCS11 *pki.PKCS11Config `yaml:"pkcs11" validate:"omitempty"`
 }
 
 // Load builds the encrypter from the configured keys, or returns nil when
@@ -1452,11 +1473,28 @@ func (cfg *CredentialEncryption) load() (*openid4vci.CredentialEncryption, error
 	loader := pki.NewKeyLoader()
 	keys := make([]crypto.PrivateKey, 0, len(cfg.Keys))
 	for i, key := range cfg.Keys {
-		private, err := loader.LoadPrivateKey(key.PrivateKeyPath)
-		if err != nil {
-			return nil, fmt.Errorf("credential encryption key %d: %w", i, err)
+		switch {
+		case key.PrivateKeyPath != "" && key.PKCS11 != nil:
+			return nil, fmt.Errorf("credential encryption key %d: set either private_key_path or pkcs11, not both", i)
+		case key.PrivateKeyPath == "" && key.PKCS11 == nil:
+			return nil, fmt.Errorf("credential encryption key %d: set either private_key_path or pkcs11", i)
+		case key.PKCS11 != nil:
+			// Opened once, at config load, and kept: the session holds the
+			// login, and a credential request is not the place to discover
+			// that the token is gone. Never closed, because the process
+			// holds it for its whole life.
+			private, err := pki.NewPKCS11ECDH(key.PKCS11)
+			if err != nil {
+				return nil, fmt.Errorf("credential encryption key %d: %w", i, err)
+			}
+			keys = append(keys, private)
+		default:
+			private, err := loader.LoadPrivateKey(key.PrivateKeyPath)
+			if err != nil {
+				return nil, fmt.Errorf("credential encryption key %d: %w", i, err)
+			}
+			keys = append(keys, private)
 		}
-		keys = append(keys, private)
 	}
 
 	return openid4vci.NewCredentialEncryption(keys,

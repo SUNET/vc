@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/SUNET/vc/pkg/pki"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -67,4 +69,29 @@ func writeEncryptionKey(t *testing.T, path string) {
 	der, err := x509.MarshalPKCS8PrivateKey(key)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600))
+}
+
+// A key is held in one place. Both settings together is an operator who
+// believes one of them is in force and cannot be told which, and neither is
+// a key that does not exist; both are refused by name rather than left to
+// surface as a missing file or an ignored stanza.
+func TestCredentialEncryptionKeyNeedsExactlyOneSource(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "enc.pem")
+	writeEncryptionKey(t, path)
+
+	hsm := &pki.PKCS11Config{
+		ModulePath: "/usr/lib/softhsm/libsofthsm2.so",
+		KeyLabel:   "enc",
+	}
+
+	both := &CredentialEncryption{Keys: []CredentialEncryptionKey{{PrivateKeyPath: path, PKCS11: hsm}}}
+	_, err := both.Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not both")
+
+	neither := &CredentialEncryption{Keys: []CredentialEncryptionKey{{}}}
+	_, err = neither.Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "set either private_key_path or pkcs11")
 }
