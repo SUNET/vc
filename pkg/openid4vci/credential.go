@@ -396,10 +396,17 @@ type CredentialResponseEncryption struct {
 	// and it fixes kty/crv/x/y, which a wallet is free to vary. It is parsed
 	// by a JWK implementation in CredentialResponseEncryption.recipientKey,
 	// which is also the only place that decides whether vc can use it.
-	JWK json.RawMessage `json:"jwk" validate:"required" swaggertype:"object"`
+	//
+	// No `validate:"required"` here or on Enc, deliberately: the generic
+	// binder runs before any of this, and a required tag there would answer
+	// an empty credential_response_encryption with invalid_credential_request
+	// when §7.3.1 has a code that says exactly what is wrong -
+	// invalid_encryption_parameters. Validate below owns these fields.
+	JWK json.RawMessage `json:"jwk" swaggertype:"object"`
 
 	// Enc REQUIRED. JWE enc algorithm for encrypting Credential Responses.
-	Enc string `json:"enc" validate:"required"`
+	// Checked by Validate, not by a struct tag - see JWK above.
+	Enc string `json:"enc"`
 
 	// Zip OPTIONAL. JWE zip algorithm for compressing Credential Responses prior to encryption.
 	// If absent then compression MUST not be used.

@@ -1394,6 +1394,19 @@ type CredentialEncryption struct {
 	//
 	// False by default, for the same reason.
 	ResponseEncryptionRequired *bool `yaml:"response_encryption_required" default:"false"`
+
+	// loaded memoizes Load, so the issuer metadata and the Credential
+	// Endpoint cannot end up holding different keys. They load at different
+	// points in startup, and a secret rotated between those two moments
+	// would otherwise publish one public key while the endpoint kept the
+	// matching private half of another - every JWE a wallet built from the
+	// metadata would then be undecryptable.
+	//
+	// No lock: every caller is on the startup path, which is sequential, and
+	// a mutex here would make this struct uncopyable for no gain.
+	loaded    *openid4vci.CredentialEncryption
+	loadedErr error
+	didLoad   bool
 }
 
 // CredentialEncryptionKey is one of this issuer's key-agreement keys.
@@ -1407,14 +1420,27 @@ type CredentialEncryptionKey struct {
 }
 
 // Load builds the encrypter from the configured keys, or returns nil when
-// none are configured. The same function serves the metadata generator and
-// the Credential Endpoint, so what is advertised and what is accepted cannot
-// drift apart.
+// none are configured.
+//
+// The result is memoized, so the metadata generator and the Credential
+// Endpoint get the same instance rather than two reads of the same files:
+// what is advertised and what is accepted then cannot drift apart, not even
+// across a secret rotated between the two calls.
 func (cfg *CredentialEncryption) Load() (*openid4vci.CredentialEncryption, error) {
 	if cfg == nil {
 		return nil, nil
 	}
+	if cfg.didLoad {
+		return cfg.loaded, cfg.loadedErr
+	}
 
+	cfg.loaded, cfg.loadedErr = cfg.load()
+	cfg.didLoad = true
+
+	return cfg.loaded, cfg.loadedErr
+}
+
+func (cfg *CredentialEncryption) load() (*openid4vci.CredentialEncryption, error) {
 	loader := pki.NewKeyLoader()
 	keys := make([]crypto.PrivateKey, 0, len(cfg.Keys))
 	for i, key := range cfg.Keys {

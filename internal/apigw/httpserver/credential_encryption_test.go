@@ -586,3 +586,48 @@ func TestCredentialEncryption_WrongKeyTypeIsRefusedBeforeIssuance(t *testing.T) 
 		})
 	}
 }
+
+// §7.3.1 has a code that says exactly what is wrong with the encryption
+// parameters, and it is not invalid_credential_request. A struct-tag
+// "required" on these nested fields would answer an empty
+// credential_response_encryption from the generic binder, before any of this
+// endpoint's own checks ran.
+func TestCredentialEncryption_IncompleteParametersAreAnEncryptionError(t *testing.T) {
+	for name, params := range map[string]map[string]any{
+		"empty object": {},
+		"no jwk":       {"enc": openid4vci.EncA256GCM},
+		"no enc":       nil, // filled in below, needs the wallet key
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEncryptionSetup(t, false, false, false)
+			if params == nil {
+				params = map[string]any{"jwk": json.RawMessage(e.walletPub)}
+			}
+
+			w := e.post(t, openid4vci.MediaTypeJWT, e.encrypt(t, e.requestBody(t, params), true, false))
+
+			requireVCIError(t, w, openid4vci.ErrInvalidEncryptionParameters)
+			assert.Zero(t, e.api.calls)
+		})
+	}
+}
+
+// A private EC JWK satisfies jwk.ECDSAPublicKey structurally, so it has to be
+// ruled out by name. §8.2 asks for a single PUBLIC key, and an issuer should
+// not quietly accept and hold a wallet's private key material.
+func TestCredentialEncryption_PrivateKeyIsRefused(t *testing.T) {
+	e := newEncryptionSetup(t, false, false, false)
+
+	private, err := json.Marshal(e.walletPriv)
+	require.NoError(t, err)
+	require.Contains(t, string(private), `"d"`, "this test is pointless unless the JWK carries the private scalar")
+
+	params := e.responseParams(openid4vci.EncA256GCM, "")
+	params["jwk"] = json.RawMessage(private)
+
+	w := e.post(t, openid4vci.MediaTypeJWT, e.encrypt(t, e.requestBody(t, params), true, false))
+
+	requireVCIError(t, w, openid4vci.ErrInvalidEncryptionParameters)
+	assert.Contains(t, w.Body.String(), "public key")
+	assert.Zero(t, e.api.calls)
+}

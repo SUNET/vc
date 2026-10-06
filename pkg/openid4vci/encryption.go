@@ -363,6 +363,12 @@ func (p *CredentialResponseEncryption) Validate() error {
 	if _, _, err := p.recipientKey(); err != nil {
 		return err
 	}
+	if p.Enc == "" {
+		return &Error{
+			Err:              ErrInvalidEncryptionParameters,
+			ErrorDescription: "credential_response_encryption.enc is required",
+		}
+	}
 	if !contains(ResponseEncryptionEncValuesSupported, p.Enc) {
 		return &Error{
 			Err:              ErrInvalidEncryptionParameters,
@@ -412,6 +418,18 @@ func (p *CredentialResponseEncryption) recipientKey() (jwk.Key, jwa.KeyEncryptio
 	// jwe.Encrypt - after the credential had been issued. ECDH-ES needs an
 	// EC key on the curve this issuer performs, so that is checked here,
 	// before anything is made.
+	// A private EC JWK satisfies jwk.ECDSAPublicKey structurally - it exposes
+	// Crv, X and Y too - so it has to be ruled out by name. §8.2 asks for "a
+	// single public key"; a wallet that sent its private key would have this
+	// issuer hold key material it has no business holding, and the mistake
+	// should be told to the wallet rather than quietly worked around.
+	if _, isPrivate := key.(jwk.ECDSAPrivateKey); isPrivate {
+		return nil, empty, &Error{
+			Err:              ErrInvalidEncryptionParameters,
+			ErrorDescription: "credential_response_encryption.jwk must be a public key",
+		}
+	}
+
 	ec, ok := key.(jwk.ECDSAPublicKey)
 	if !ok {
 		return nil, empty, &Error{

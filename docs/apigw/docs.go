@@ -1950,17 +1950,13 @@ const docTemplate = `{
         },
         "openid4vci.CredentialResponseEncryption": {
             "type": "object",
-            "required": [
-                "enc",
-                "jwk"
-            ],
             "properties": {
                 "enc": {
-                    "description": "Enc REQUIRED. JWE enc algorithm for encrypting Credential Responses.",
+                    "description": "Enc REQUIRED. JWE enc algorithm for encrypting Credential Responses.\nChecked by Validate, not by a struct tag - see JWK above.",
                     "type": "string"
                 },
                 "jwk": {
-                    "description": "JWK REQUIRED. Object containing a single public key as a JWK used for\nencrypting the Credential Response.\n\nKept as raw JSON rather than as the JWK struct in this package: §8.3\nrequires this key to carry an alg, which that struct does not model,\nand it fixes kty/crv/x/y, which a wallet is free to vary. It is parsed\nby a JWK implementation in CredentialResponseEncryption.recipientKey,\nwhich is also the only place that decides whether vc can use it.",
+                    "description": "JWK REQUIRED. Object containing a single public key as a JWK used for\nencrypting the Credential Response.\n\nKept as raw JSON rather than as the JWK struct in this package: §8.3\nrequires this key to carry an alg, which that struct does not model,\nand it fixes kty/crv/x/y, which a wallet is free to vary. It is parsed\nby a JWK implementation in CredentialResponseEncryption.recipientKey,\nwhich is also the only place that decides whether vc can use it.\n\nNo ` + "`" + `validate:\"required\"` + "`" + ` here or on Enc, deliberately: the generic\nbinder runs before any of this, and a required tag there would answer\nan empty credential_response_encryption with invalid_credential_request\nwhen §7.3.1 has a code that says exactly what is wrong -\ninvalid_encryption_parameters. Validate below owns these fields.",
                     "type": "object"
                 },
                 "zip": {
