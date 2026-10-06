@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/SUNET/vc/pkg/model"
 )
@@ -49,15 +50,26 @@ type IdentityMappingStore interface {
 type DynamicRegistrationStore interface {
 	Save(ctx context.Context, creds *DynamicRegistrationCredentials) error
 	Get(ctx context.Context) (*DynamicRegistrationCredentials, error)
-	// DeleteOthers removes every stored registration except one. Save
-	// upserts on client_id, so a re-registration that returns a NEW
-	// client_id leaves the superseded row behind; this prunes it.
+	// GetByClientID returns one stored registration by client_id, or nil.
+	// An authorization code is issued to a specific client, so a callback
+	// that lands on a different HA replica than the one that started the
+	// flow has to be able to find the registration it started under.
+	GetByClientID(ctx context.Context, clientID string) (*DynamicRegistrationCredentials, error)
+
+	// PruneSuperseded removes stored registrations other than keepClientID
+	// that were registered before `before`.
+	//
+	// The age bound is what makes this safe when two HA replicas renew at
+	// once: a row saved moments ago is never old enough to prune, so
+	// neither replica can delete the other's new registration and leave the
+	// store empty. It is also what lets a callback find the registration
+	// its flow started under - pass now minus the session lifetime.
 	//
 	// Idempotent on purpose: the save and the prune cannot be made atomic
-	// across both backends, so a crash between them leaves extra rows and
-	// the next successful renewal clears them. Get orders by registered_at
-	// so startup does not depend on the prune having happened.
-	DeleteOthers(ctx context.Context, keepClientID string) error
+	// across both backends, so a crash between them leaves extra rows and a
+	// later renewal clears them. Get orders by registered_at, so startup
+	// does not depend on the prune having happened.
+	PruneSuperseded(ctx context.Context, keepClientID string, before time.Time) error
 }
 
 // Ensure concrete types implement the interfaces

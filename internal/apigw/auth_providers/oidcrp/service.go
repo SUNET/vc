@@ -181,6 +181,13 @@ func (s *Service) initialize(ctx context.Context) error {
 //
 // Callers hold s.mu for writing, or are in New before the service is shared.
 func (s *Service) applyCredentials(clientID, clientSecret string, expiresAtUnix int64) {
+	s.creds.store(s.buildCredentials(clientID, clientSecret, expiresAtUnix))
+}
+
+// buildCredentials assembles one registration. The oauth2 config and the
+// verifier are built together because they have to agree: the verifier
+// checks `aud` against the client id the config authenticates with.
+func (s *Service) buildCredentials(clientID, clientSecret string, expiresAtUnix int64) *credentials {
 	c := &credentials{
 		clientID: clientID,
 		verifier: s.provider.Verifier(&oidc.Config{ClientID: clientID}),
@@ -206,7 +213,54 @@ func (s *Service) applyCredentials(clientID, clientSecret string, expiresAtUnix 
 		}
 	}
 
-	s.creds.store(c)
+	return c
+}
+
+// credentialsForSession resolves the registration a flow started under.
+//
+// In HA the session store is shared but credentialSet is per process, so a
+// callback can land on a replica that never saw the registration its flow
+// began on - renewal happened on another one. Falling back to this
+// replica's current client would exchange the code with the wrong client
+// and fail, so the stored registration is read instead. The prune keeps
+// superseded rows for the session lifetime precisely so this lookup finds
+// something.
+func (s *Service) credentialsForSession(ctx context.Context, clientID string) (*credentials, error) {
+	if c := s.creds.forClient(clientID); c != nil && (clientID == "" || c.clientID == clientID) {
+		return c, nil
+	}
+
+	if clientID != "" && s.dbService != nil && s.dbService.DynamicRegistrationColl != nil {
+		stored, err := s.dbService.DynamicRegistrationColl.GetByClientID(ctx, clientID)
+		if err != nil {
+			s.log.Error(err, "oidcrp_session_registration_lookup_failed", "client_id", clientID)
+		} else if stored != nil {
+			s.log.Debug("resolved a session's client registration from the store",
+				"client_id", clientID)
+			c := s.buildCredentials(stored.ClientID, stored.ClientSecret, stored.ClientSecretExpiresAt)
+			s.creds.retain(c)
+			return c, nil
+		}
+	}
+
+	// Nothing knows this client. The current registration is what the
+	// service used before sessions recorded one at all: it may fail the
+	// exchange, but having no credentials certainly does.
+	if c := s.creds.load(); c != nil {
+		s.log.Debug("no registration found for a session's client; using the current one",
+			"session_client_id", clientID, "client_id", c.clientID)
+		return c, nil
+	}
+
+	return nil, errors.New("OIDC RP has no client credentials")
+}
+
+// credentialRetainFor is how long a superseded registration stays usable:
+// the longest an authorization flow can take, which is the session
+// lifetime. A floor keeps a misconfigured zero from pruning instantly.
+func (s *Service) credentialRetainFor() time.Duration {
+	retain := time.Duration(s.cfg.SessionDuration) * time.Second
+	return max(retain, time.Minute)
 }
 
 // dynamicRegistrationEnabled reports whether this RP registers itself.
@@ -340,11 +394,18 @@ func (s *Service) renewCredentials(ctx context.Context) error {
 	} else {
 		// Save upserts on client_id, so a new client id leaves the old row
 		// behind. Prune every other row rather than just the one we know
-		// about: a crash between a previous save and its prune can have
-		// left more, and the two cannot be made atomic across both
-		// backends. Get orders by registered_at, so startup picks the
-		// newest even when this has not run.
-		if err := s.dbService.DynamicRegistrationColl.DeleteOthers(ctx, regResp.ClientID); err != nil {
+		// about - a crash between an earlier save and its prune can have
+		// left more - but only rows old enough that no flow can still be
+		// using them.
+		//
+		// The age bound is what makes this safe under HA. Two replicas
+		// renewing at once would otherwise each delete the other's brand
+		// new registration and leave the store empty; a row saved moments
+		// ago is never old enough to prune. It is also what lets a callback
+		// landing on another replica find the registration its flow started
+		// under.
+		before := time.Now().Add(-s.credentialRetainFor())
+		if err := s.dbService.DynamicRegistrationColl.PruneSuperseded(ctx, regResp.ClientID, before); err != nil {
 			s.log.Error(err, "oidcrp_superseded_registrations_not_pruned", "client_id", regResp.ClientID)
 		}
 	}
@@ -692,9 +753,9 @@ func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*Aut
 	// authorization request and this callback must not change which client
 	// redeems it - and the ID token has to be verified against the same
 	// one, since the verifier checks `aud`.
-	creds := s.creds.forClient(session.ClientID)
-	if creds == nil {
-		return nil, errors.New("OIDC RP has no client credentials")
+	creds, err := s.credentialsForSession(ctx, session.ClientID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Exchange authorization code for tokens with PKCE

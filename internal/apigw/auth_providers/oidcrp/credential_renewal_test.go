@@ -20,10 +20,11 @@ import (
 
 // fakeRegistrationStore records what the renewal path writes and removes.
 type fakeRegistrationStore struct {
-	mu       sync.Mutex
-	saved    []*db.DynamicRegistrationCredentials
-	keptOnly []string
-	saveErr  error
+	mu           sync.Mutex
+	saved        []*db.DynamicRegistrationCredentials
+	keptOnly     []string
+	prunedBefore []time.Time
+	saveErr      error
 }
 
 func (f *fakeRegistrationStore) Save(_ context.Context, creds *db.DynamicRegistrationCredentials) error {
@@ -40,10 +41,22 @@ func (f *fakeRegistrationStore) Get(context.Context) (*db.DynamicRegistrationCre
 	return nil, nil
 }
 
-func (f *fakeRegistrationStore) DeleteOthers(_ context.Context, keepClientID string) error {
+func (f *fakeRegistrationStore) GetByClientID(_ context.Context, clientID string) (*db.DynamicRegistrationCredentials, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.saved {
+		if c.ClientID == clientID {
+			return c, nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *fakeRegistrationStore) PruneSuperseded(_ context.Context, keepClientID string, before time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.keptOnly = append(f.keptOnly, keepClientID)
+	f.prunedBefore = append(f.prunedBefore, before)
 	return nil
 }
 
@@ -410,4 +423,65 @@ func TestEnsureCredentialsIsSafeAgainstConcurrentReaders(t *testing.T) {
 	wg.Wait()
 
 	assert.Equal(t, 1, op.count(), "four writers must produce one registration")
+}
+
+// In HA the session store is shared but credentialSet is per process, so a
+// callback can land on a replica that never saw the registration its flow
+// began on. Falling back to this replica's current client would exchange
+// the code with the wrong one, so the stored registration is read instead.
+func TestCredentialsForSessionReadsAnotherReplicasRegistration(t *testing.T) {
+	op := newOPServer(t)
+	store := &fakeRegistrationStore{}
+	// The other replica registered this and saved it to the shared store.
+	store.saved = append(store.saved, &db.DynamicRegistrationCredentials{
+		ClientID:              "client-from-replica-a",
+		ClientSecret:          "secret-from-replica-a",
+		ClientSecretExpiresAt: time.Now().Add(time.Hour).Unix(),
+	})
+
+	// This replica knows nothing about it.
+	s := renewalService(t, op, store, time.Now().Add(24*time.Hour))
+
+	creds, err := s.credentialsForSession(t.Context(), "client-from-replica-a")
+	require.NoError(t, err)
+	assert.Equal(t, "client-from-replica-a", creds.clientID)
+	assert.Equal(t, "secret-from-replica-a", creds.config.ClientSecret)
+	assert.NotNil(t, creds.verifier)
+
+	// Retained, so a second callback for the same flow does not read it
+	// back again.
+	assert.Equal(t, "client-from-replica-a", s.creds.forClient("client-from-replica-a").clientID)
+}
+
+// A client nothing knows about falls back to the current registration,
+// which is what the service did before sessions recorded one at all.
+func TestCredentialsForSessionFallsBackToTheCurrentRegistration(t *testing.T) {
+	op := newOPServer(t)
+	store := &fakeRegistrationStore{}
+	s := renewalService(t, op, store, time.Now().Add(24*time.Hour))
+
+	creds, err := s.credentialsForSession(t.Context(), "a-client-nobody-has-heard-of")
+	require.NoError(t, err)
+	assert.Equal(t, "client-0", creds.clientID)
+
+	creds, err = s.credentialsForSession(t.Context(), "")
+	require.NoError(t, err)
+	assert.Equal(t, "client-0", creds.clientID)
+}
+
+// Two replicas renewing at once must not each delete the other's brand new
+// registration and leave the store empty. The prune is bounded by age, so
+// a row saved moments ago is never old enough to remove.
+func TestRenewalPrunesOnlyRegistrationsOldEnoughToBeIdle(t *testing.T) {
+	op := newOPServer(t)
+	store := &fakeRegistrationStore{}
+	s := renewalService(t, op, store, time.Now().Add(clientSecretRenewBefore/2))
+
+	require.NoError(t, s.ensureCredentials(t.Context()))
+
+	require.Len(t, store.prunedBefore, 1)
+	assert.True(t, store.prunedBefore[0].Before(time.Now()),
+		"the cutoff must be in the past, or a fresh registration could be pruned")
+	assert.WithinDuration(t, time.Now().Add(-s.credentialRetainFor()), store.prunedBefore[0], time.Minute,
+		"the cutoff is one flow lifetime ago")
 }

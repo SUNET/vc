@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/SUNET/vc/pkg/logger"
@@ -81,16 +82,42 @@ func (c *DynamicRegistrationColl) Save(ctx context.Context, creds *DynamicRegist
 }
 
 // Get returns the stored credentials, or nil if none exist.
-// DeleteOthers removes every stored registration except keepClientID.
-func (c *DynamicRegistrationColl) DeleteOthers(ctx context.Context, keepClientID string) error {
-	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:delete_others")
+// GetByClientID returns one stored registration by client_id, or nil.
+func (c *DynamicRegistrationColl) GetByClientID(ctx context.Context, clientID string) (*DynamicRegistrationCredentials, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:get_by_client_id")
+	defer span.End()
+
+	if clientID == "" {
+		return nil, nil
+	}
+
+	var creds DynamicRegistrationCredentials
+	if err := c.Coll.FindOne(ctx, bson.M{"client_id": clientID}).Decode(&creds); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	return &creds, nil
+}
+
+// PruneSuperseded removes registrations other than keepClientID that were
+// registered before `before`.
+func (c *DynamicRegistrationColl) PruneSuperseded(ctx context.Context, keepClientID string, before time.Time) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:prune_superseded")
 	defer span.End()
 
 	if keepClientID == "" {
 		return nil
 	}
 
-	if _, err := c.Coll.DeleteMany(ctx, bson.M{"client_id": bson.M{"$ne": keepClientID}}); err != nil {
+	filter := bson.M{
+		"client_id":     bson.M{"$ne": keepClientID},
+		"registered_at": bson.M{"$lt": before},
+	}
+	if _, err := c.Coll.DeleteMany(ctx, filter); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return err
 	}

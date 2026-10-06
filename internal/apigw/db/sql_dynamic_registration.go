@@ -59,17 +59,51 @@ func (c *SQLDynamicRegistrationColl) Save(ctx context.Context, creds *DynamicReg
 	return nil
 }
 
-// DeleteOthers removes every stored registration except keepClientID.
-func (c *SQLDynamicRegistrationColl) DeleteOthers(ctx context.Context, keepClientID string) error {
-	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:dynamic_registration:delete_others")
+// GetByClientID returns one stored registration by client_id, or nil.
+func (c *SQLDynamicRegistrationColl) GetByClientID(ctx context.Context, clientID string) (*DynamicRegistrationCredentials, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:dynamic_registration:get_by_client_id")
+	defer span.End()
+
+	if clientID == "" {
+		return nil, nil
+	}
+
+	query := c.dialect.Rebind(`SELECT client_id, client_secret, registration_access_token,
+		registration_client_uri, client_secret_expires_at, registered_at
+		FROM oidc_dynamic_registration WHERE client_id = ?`)
+
+	var row dynamicRegistrationRow
+	if err := c.db.GetContext(ctx, &row, query, clientID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	return &DynamicRegistrationCredentials{
+		ClientID:                row.ClientID,
+		ClientSecret:            row.ClientSecret,
+		RegistrationAccessToken: row.RegistrationAccessToken,
+		RegistrationClientURI:   row.RegistrationClientURI,
+		ClientSecretExpiresAt:   row.ClientSecretExpiresAt,
+		RegisteredAt:            row.RegisteredAt,
+	}, nil
+}
+
+// PruneSuperseded removes registrations other than keepClientID that were
+// registered before `before`.
+func (c *SQLDynamicRegistrationColl) PruneSuperseded(ctx context.Context, keepClientID string, before time.Time) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:dynamic_registration:prune_superseded")
 	defer span.End()
 
 	if keepClientID == "" {
 		return nil
 	}
 
-	query := c.dialect.Rebind(`DELETE FROM oidc_dynamic_registration WHERE client_id <> ?`)
-	if _, err := c.db.ExecContext(ctx, query, keepClientID); err != nil {
+	query := c.dialect.Rebind(
+		`DELETE FROM oidc_dynamic_registration WHERE client_id <> ? AND registered_at < ?`)
+	if _, err := c.db.ExecContext(ctx, query, keepClientID, before.UTC()); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return err
 	}

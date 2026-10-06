@@ -79,11 +79,11 @@ func (s *credentialSet) load() *credentials {
 	return s.current
 }
 
-// forClient returns the registration a flow started under, falling back to
-// the current one when the session predates this field or the retained copy
-// has aged out. The fallback is what the service did before sessions
-// recorded a client at all; it can fail the exchange, but failing to find a
-// bundle should not be worse than that.
+// forClient returns the registration a flow started under, or the current
+// one when the session names none. A clientID this process has never seen
+// returns the current registration too; callers that can do better - see
+// Service.credentialsForSession, which reads the shared store - check the
+// returned clientID.
 func (s *credentialSet) forClient(clientID string) *credentials {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -95,6 +95,20 @@ func (s *credentialSet) forClient(clientID string) *credentials {
 		return c
 	}
 	return s.current
+}
+
+// retain records a registration this process did not publish, so a second
+// callback for the same flow does not have to read it back again. It does
+// not become current.
+func (s *credentialSet) retain(c *credentials) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.current != nil && s.current.clientID == c.clientID {
+		return
+	}
+	s.retired[c.clientID] = c
+	s.retiredAt[c.clientID] = time.Now()
 }
 
 // store publishes a registration, retiring the one it replaces.
