@@ -9,7 +9,7 @@
       "background_color": "#1a365d",
       "text_color": "#ffffff",
       "logo": {
-        "uri": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4MjkgNTA0IiB3aWR0aD0iODI5IiBoZWlnaHQ9IjUwNCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJtREwgY2FyZCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImJnIiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3R5bGU9InN0b3AtY29sb3I6IzFhMzY1ZCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiMwZDFmMzMiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImNoaXAiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojZjZkMzY1Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3R5bGU9InN0b3AtY29sb3I6I2M5YTIyNyIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxjbGlwUGF0aCBpZD0iY2FyZCI+CiAgICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSI4MjkiIGhlaWdodD0iNTA0IiByeD0iMzYiIHJ5PSIzNiIvPgogICAgPC9jbGlwUGF0aD4KICA8L2RlZnM+CiAgPGcgY2xpcC1wYXRoPSJ1cmwoI2NhcmQpIj4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSI4MjkiIGhlaWdodD0iNTA0IiBmaWxsPSJ1cmwoI2JnKSIvPgogICAgPGNpcmNsZSBjeD0iNzAwIiBjeT0iLTQwIiByPSIyNDAiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuMDYiLz4KICAgIDxjaXJjbGUgY3g9IjgwIiBjeT0iNTQwIiByPSIyMDAiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuMDUiLz4KICAgIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSI4MjkiIGhlaWdodD0iOCIgZmlsbD0iI2Y2ZDM2NSIvPgogICAgPHJlY3QgeD0iNTYiIHk9IjE1MCIgd2lkdGg9Ijg2IiBoZWlnaHQ9IjY0IiByeD0iMTAiIGZpbGw9InVybCgjY2hpcCkiLz4KICAgIDxnIHN0cm9rZT0iIzBkMWYzMyIgc3Ryb2tlLXdpZHRoPSIzIiBvcGFjaXR5PSIwLjU1Ij4KICAgICAgPGxpbmUgeDE9IjU2IiB5MT0iMTcyIiB4Mj0iMTQyIiB5Mj0iMTcyIi8+CiAgICAgIDxsaW5lIHgxPSI1NiIgeTE9IjE5MiIgeDI9IjE0MiIgeTI9IjE5MiIvPgogICAgICA8bGluZSB4MT0iODUiIHkxPSIxNTAiIHgyPSI4NSIgeTI9IjIxNCIvPgogICAgICA8bGluZSB4MT0iMTEzIiB5MT0iMTUwIiB4Mj0iMTEzIiB5Mj0iMjE0Ii8+CiAgICA8L2c+CiAgICA8dGV4dCB4PSI1NiIgeT0iMTAwIiBmb250LWZhbWlseT0iSGVsdmV0aWNhLCBBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSI3MiIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iI2ZmZmZmZiI+bURMPC90ZXh0PgogICAgPHRleHQgeD0iNTYiIHk9IjI5NiIgZm9udC1mYW1pbHk9IkhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMzAiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuOTIiPk1vYmlsZSBEcml2aW5nIExpY2VuY2U8L3RleHQ+CiAgICA8cmVjdCB4PSI1NiIgeT0iMzMwIiB3aWR0aD0iMzIwIiBoZWlnaHQ9IjIiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuMjUiLz4KICAgIDx0ZXh0IHg9IjU2IiB5PSIzODQiIGZvbnQtZmFtaWx5PSJIZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjIyIiBsZXR0ZXItc3BhY2luZz0iMyIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC43NSI+SVNPL0lFQyAxODAxMy01PC90ZXh0PgogICAgPHRleHQgeD0iNTYiIHk9IjQzMiIgZm9udC1mYW1pbHk9IkhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjAiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuNiI+SXNzdWVkIGFzIGFuIElTTyBtZG9jPC90ZXh0PgogIDwvZz4KPC9zdmc+",
+        "uri": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4MjkgNTA0IiB3aWR0aD0iODI5IiBoZWlnaHQ9IjUwNCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJtREwgY2FyZCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImJnIiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3R5bGU9InN0b3AtY29sb3I6IzFhMzY1ZCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiMwZDFmMzMiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImNoaXAiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojZjZkMzY1Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3R5bGU9InN0b3AtY29sb3I6I2M5YTIyNyIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxjbGlwUGF0aCBpZD0iY2FyZCI+PHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjgyOSIgaGVpZ2h0PSI1MDQiIHJ4PSIzNiIgcnk9IjM2Ii8+PC9jbGlwUGF0aD4KICAgIDxjbGlwUGF0aCBpZD0icGhvdG8iPjxyZWN0IHg9IjU5NiIgeT0iMTI4IiB3aWR0aD0iMTgwIiBoZWlnaHQ9IjIyOCIgcng9IjEyIiByeT0iMTIiLz48L2NsaXBQYXRoPgogIDwvZGVmcz4KICA8ZyBjbGlwLXBhdGg9InVybCgjY2FyZCkiPgogICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjgyOSIgaGVpZ2h0PSI1MDQiIGZpbGw9InVybCgjYmcpIi8+CiAgICA8Y2lyY2xlIGN4PSI3MDAiIGN5PSItNDAiIHI9IjI0MCIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC4wNiIvPgogICAgPGNpcmNsZSBjeD0iODAiIGN5PSI1NDAiIHI9IjIwMCIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC4wNSIvPgogICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjgyOSIgaGVpZ2h0PSI4IiBmaWxsPSIjZjZkMzY1Ii8+CgogICAgPHRleHQgeD0iNTYiIHk9Ijg2IiBmb250LWZhbWlseT0iSGVsdmV0aWNhLCBBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSI1NiIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iI2ZmZmZmZiI+bURMPC90ZXh0PgogICAgPHRleHQgeD0iNTYiIHk9IjEyMiIgZm9udC1mYW1pbHk9IkhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjIiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9IjAuNzIiPk1vYmlsZSBEcml2aW5nIExpY2VuY2U8L3RleHQ+CgogICAgPHJlY3QgeD0iNTYiIHk9IjE1NiIgd2lkdGg9Ijc0IiBoZWlnaHQ9IjU2IiByeD0iOSIgZmlsbD0idXJsKCNjaGlwKSIvPgogICAgPGcgc3Ryb2tlPSIjMGQxZjMzIiBzdHJva2Utd2lkdGg9IjMiIG9wYWNpdHk9IjAuNTUiPgogICAgICA8bGluZSB4MT0iNTYiIHkxPSIxNzUiIHgyPSIxMzAiIHkyPSIxNzUiLz48bGluZSB4MT0iNTYiIHkxPSIxOTMiIHgyPSIxMzAiIHkyPSIxOTMiLz4KICAgICAgPGxpbmUgeDE9IjgxIiB5MT0iMTU2IiB4Mj0iODEiIHkyPSIyMTIiLz48bGluZSB4MT0iMTA1IiB5MT0iMTU2IiB4Mj0iMTA1IiB5Mj0iMjEyIi8+CiAgICA8L2c+CgogICAgPGcgZm9udC1mYW1pbHk9IkhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZpbGw9IiNmZmZmZmYiPgogICAgICA8dGV4dCB4PSI1NiIgeT0iMjY4IiBmb250LXNpemU9IjE3IiBsZXR0ZXItc3BhY2luZz0iMiIgb3BhY2l0eT0iMC42Ij5HSVZFTiBOQU1FPC90ZXh0PgogICAgICA8dGV4dCB4PSI1NiIgeT0iMzAwIiBmb250LXNpemU9IjMwIj57e2dpdmVuX25hbWV9fTwvdGV4dD4KICAgICAgPHRleHQgeD0iNTYiIHk9IjM0OCIgZm9udC1zaXplPSIxNyIgbGV0dGVyLXNwYWNpbmc9IjIiIG9wYWNpdHk9IjAuNiI+RkFNSUxZIE5BTUU8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjU2IiB5PSIzODAiIGZvbnQtc2l6ZT0iMzAiPnt7ZmFtaWx5X25hbWV9fTwvdGV4dD4KICAgICAgPHRleHQgeD0iNTYiIHk9IjQyOCIgZm9udC1zaXplPSIxNyIgbGV0dGVyLXNwYWNpbmc9IjIiIG9wYWNpdHk9IjAuNiI+REFURSBPRiBCSVJUSDwvdGV4dD4KICAgICAgPHRleHQgeD0iNTYiIHk9IjQ1OCIgZm9udC1zaXplPSIyNiI+e3tiaXJ0aF9kYXRlfX08L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjMzMCIgeT0iNDI4IiBmb250LXNpemU9IjE3IiBsZXR0ZXItc3BhY2luZz0iMiIgb3BhY2l0eT0iMC42Ij5FWFBJUkVTPC90ZXh0PgogICAgICA8dGV4dCB4PSIzMzAiIHk9IjQ1OCIgZm9udC1zaXplPSIyNiI+e3tleHBpcnlfZGF0ZX19PC90ZXh0PgogICAgICA8dGV4dCB4PSIzMzAiIHk9IjI2OCIgZm9udC1zaXplPSIxNyIgbGV0dGVyLXNwYWNpbmc9IjIiIG9wYWNpdHk9IjAuNiI+RE9DVU1FTlQgTlVNQkVSPC90ZXh0PgogICAgICA8dGV4dCB4PSIzMzAiIHk9IjMwMCIgZm9udC1zaXplPSIyNiI+e3tkb2N1bWVudF9udW1iZXJ9fTwvdGV4dD4KICAgICAgPHRleHQgeD0iMzMwIiB5PSIzNDgiIGZvbnQtc2l6ZT0iMTciIGxldHRlci1zcGFjaW5nPSIyIiBvcGFjaXR5PSIwLjYiPkNPVU5UUlk8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjMzMCIgeT0iMzgwIiBmb250LXNpemU9IjI2Ij57e2lzc3VpbmdfY291bnRyeX19PC90ZXh0PgogICAgPC9nPgoKICAgIDxyZWN0IHg9IjU5NiIgeT0iMTI4IiB3aWR0aD0iMTgwIiBoZWlnaHQ9IjIyOCIgcng9IjEyIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjEyIi8+CiAgICA8aW1hZ2UgY2xpcC1wYXRoPSJ1cmwoI3Bob3RvKSIgeD0iNTk2IiB5PSIxMjgiIHdpZHRoPSIxODAiIGhlaWdodD0iMjI4IiBocmVmPSJ7e3BvcnRyYWl0fX0iIHByZXNlcnZlQXNwZWN0UmF0aW89InhNaWRZTWlkIHNsaWNlIi8+CiAgICA8dGV4dCB4PSI1OTYiIHk9IjM5MiIgZm9udC1mYW1pbHk9IkhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTgiIGxldHRlci1zcGFjaW5nPSIzIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjciPklTTy9JRUMgMTgwMTMtNTwvdGV4dD4KICA8L2c+Cjwvc3ZnPg==",
         "alt_text": "mDL card"
       }
     }
@@ -18,43 +18,120 @@
     "org.iso.18013.5.1": {
       "family_name": {
         "mandatory": true,
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "family_name",
+            "label": "Last name"
+          }
+        ],
+        "svg_id": "family_name"
       },
       "given_name": {
         "mandatory": true,
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "given_name",
+            "label": "First name"
+          }
+        ],
+        "svg_id": "given_name"
       },
       "birth_date": {
         "mandatory": true,
-        "value_type": "full-date"
+        "value_type": "full-date",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "birth_date",
+            "label": "Date of birth"
+          }
+        ],
+        "svg_id": "birth_date"
       },
       "issue_date": {
         "mandatory": true,
-        "value_type": "full-date"
+        "value_type": "full-date",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "issue_date",
+            "label": "Date of issue"
+          }
+        ]
       },
       "expiry_date": {
         "mandatory": true,
-        "value_type": "full-date"
+        "value_type": "full-date",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "expiry_date",
+            "label": "Date of expiry"
+          }
+        ],
+        "svg_id": "expiry_date"
       },
       "issuing_country": {
         "mandatory": true,
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "issuing_country",
+            "label": "Issuing country"
+          }
+        ],
+        "svg_id": "issuing_country"
       },
       "issuing_authority": {
         "mandatory": true,
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "issuing_authority",
+            "label": "Issuing authority"
+          }
+        ]
       },
       "document_number": {
         "mandatory": true,
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "document_number",
+            "label": "Document number"
+          }
+        ],
+        "svg_id": "document_number"
       },
       "portrait": {
         "mandatory": true,
-        "value_type": "bstr"
+        "value_type": "bstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "portrait",
+            "label": "Portrait"
+          }
+        ],
+        "svg_id": "portrait"
       },
       "un_distinguishing_sign": {
         "mandatory": true,
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "un_distinguishing_sign",
+            "label": "Distinguishing sign"
+          }
+        ]
       },
       "driving_privileges": {
         "mandatory": true,
@@ -85,73 +162,234 @@
               }
             }
           }
-        }
+        },
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "driving_privileges",
+            "label": "Driving privileges"
+          }
+        ]
       },
       "administrative_number": {
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "administrative_number",
+            "label": "Administrative number"
+          }
+        ]
       },
       "sex": {
-        "value_type": "uint"
+        "value_type": "uint",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "sex",
+            "label": "Sex"
+          }
+        ]
       },
       "height": {
-        "value_type": "uint"
+        "value_type": "uint",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "height",
+            "label": "Height"
+          }
+        ]
       },
       "weight": {
-        "value_type": "uint"
+        "value_type": "uint",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "weight",
+            "label": "Weight"
+          }
+        ]
       },
       "eye_colour": {
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "eye_colour",
+            "label": "Eye colour"
+          }
+        ]
       },
       "hair_colour": {
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "hair_colour",
+            "label": "Hair colour"
+          }
+        ]
       },
       "birth_place": {
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "birth_place",
+            "label": "Place of birth"
+          }
+        ]
       },
       "resident_address": {
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "resident_address",
+            "label": "Resident address"
+          }
+        ]
       },
       "portrait_capture_date": {
-        "value_type": "tdate"
+        "value_type": "tdate",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "portrait_capture_date",
+            "label": "Portrait capture date"
+          }
+        ]
       },
       "age_in_years": {
-        "value_type": "uint"
+        "value_type": "uint",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "age_in_years",
+            "label": "Age"
+          }
+        ]
       },
       "age_birth_year": {
-        "value_type": "uint"
+        "value_type": "uint",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "age_birth_year",
+            "label": "Year of birth"
+          }
+        ]
       },
       "age_over_18": {
-        "value_type": "bool"
+        "value_type": "bool",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "age_over_18",
+            "label": "Age over 18"
+          }
+        ]
       },
       "issuing_jurisdiction": {
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "issuing_jurisdiction",
+            "label": "Issuing jurisdiction"
+          }
+        ]
       },
       "nationalities": {
-        "value_type": "array"
+        "value_type": "array",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "nationalities",
+            "label": "Nationality"
+          }
+        ]
       },
       "resident_city": {
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "resident_city",
+            "label": "Resident city"
+          }
+        ]
       },
       "resident_state": {
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "resident_state",
+            "label": "Resident state"
+          }
+        ]
       },
       "resident_postal_code": {
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "resident_postal_code",
+            "label": "Resident postal code"
+          }
+        ]
       },
       "resident_country": {
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "resident_country",
+            "label": "Resident country"
+          }
+        ]
       },
       "family_name_national_character": {
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "family_name_national_character",
+            "label": "Last name (national characters)"
+          }
+        ]
       },
       "given_name_national_character": {
-        "value_type": "tstr"
+        "value_type": "tstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "given_name_national_character",
+            "label": "First name (national characters)"
+          }
+        ]
       },
       "signature_usual_mark": {
-        "value_type": "bstr"
+        "value_type": "bstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "signature_usual_mark",
+            "label": "Signature"
+          }
+        ]
       },
       "pseudonym_seed": {
-        "value_type": "bstr"
+        "value_type": "bstr",
+        "display": [
+          {
+            "locale": "en-US",
+            "name": "pseudonym_seed",
+            "label": "Pseudonym seed"
+          }
+        ]
       }
     }
   }

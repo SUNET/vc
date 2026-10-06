@@ -44,7 +44,10 @@ export const SAFE_IMAGE_SUBTYPES = new Set(["png", "jpeg", "gif", "webp"]);
 // replaced with the empty string so an arbitrary URL in a claim value
 // (e.g. https://tracker.example/...) cannot cause the consent page to
 // perform an external network fetch at render time.
-export const IMAGE_PLACEHOLDERS = new Set(["picture"]);
+// "picture" is the SD-JWT VC spelling; "portrait" is the ISO 18013-5 and
+// EUDI PID element id for the same thing. Both have to be listed, or an
+// mdoc card's photo slot would take an arbitrary claim string as an href.
+export const IMAGE_PLACEHOLDERS = new Set(["picture", "portrait"]);
 
 // Common subtype aliases normalized to their canonical form before the
 // allowlist check. Upstream issuers sometimes emit `image/jpg` even though

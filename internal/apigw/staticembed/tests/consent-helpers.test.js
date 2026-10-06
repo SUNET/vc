@@ -178,6 +178,23 @@ describe("valueForSvgPlaceholder", () => {
         assert.ok(IMAGE_PLACEHOLDERS.has("picture"));
     });
 
+    // "portrait" is the ISO 18013-5 and EUDI PID element id for the same
+    // thing, and the mdoc cards use it. Without it the photo slot would
+    // take an arbitrary claim string as an href.
+    it("declares `portrait` as an image-bearing placeholder", () => {
+        assert.ok(IMAGE_PLACEHOLDERS.has("portrait"));
+    });
+
+    it("applies the same rules to `portrait` as to `picture`", () => {
+        assert.equal(
+            valueForSvgPlaceholder("portrait", tinyPngB64),
+            `data:image/png;base64,${tinyPngB64}`,
+        );
+        assert.equal(valueForSvgPlaceholder("portrait", "https://tracker.example/x"), "");
+        assert.equal(valueForSvgPlaceholder("portrait", "data:image/svg+xml,<svg onload='x'/>"), "");
+        assert.equal(valueForSvgPlaceholder("portrait", "not-an-image"), "");
+    });
+
     it("accepts a validated base64 image for an image placeholder", () => {
         const result = valueForSvgPlaceholder("picture", tinyPngB64);
         assert.equal(result, `data:image/png;base64,${tinyPngB64}`);
