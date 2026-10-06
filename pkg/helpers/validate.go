@@ -150,6 +150,66 @@ func NewValidator() (*validator.Validate, error) {
 		return nil, err
 	}
 
+	// Register custom validation for https_endpoint - a server-side endpoint,
+	// configured by the operator, that must be reached over TLS.
+	//
+	// Deliberately not httpsurl. That one is for URIs supplied by a
+	// registering client, so besides the scheme it resolves the host and
+	// refuses private/loopback addresses, to stop an outsider aiming the
+	// server at its own network. These URLs come from the deployment's own
+	// config file, where an in-cluster issuer on a private address is the
+	// normal case and not an attack, and where resolving at startup would
+	// make config validation fail whenever DNS happens to be unavailable.
+	//
+	// The scheme is what cannot be relaxed: the endpoint behind such a URL
+	// supplies the keys a token is judged against, so over plaintext anyone
+	// on the path chooses those keys and the signature check proves nothing.
+	err = validate.RegisterValidation("https_endpoint", func(fl validator.FieldLevel) bool {
+		urlStr := fl.Field().String()
+		if urlStr == "" {
+			return false
+		}
+
+		parsedURL, err := url.Parse(urlStr)
+		if err != nil {
+			return false
+		}
+
+		if !strings.EqualFold(parsedURL.Scheme, "https") {
+			return false
+		}
+
+		// Hostname(), not Host. Host keeps the port, so "https://:443/jwks"
+		// has a non-empty Host and no host at all - the service then starts
+		// on a URL nothing can be fetched from and fails at request time
+		// instead, which for the JWKS endpoint means a 503 per request
+		// rather than a configuration that is refused.
+		return parsedURL.Hostname() != ""
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for asymmetric_jws_alg - a JWS algorithm a
+	// PUBLIC key set can legitimately carry.
+	//
+	// The key set behind jwks_uri is published: anyone who can reach it has
+	// every key in it. That is fine for a public key and fatal for a shared
+	// secret - configure HS256 and point at a JWKS holding an `oct` key, and
+	// whoever reads the key set can mint registration tokens. "none" is the
+	// same hole without even the pretence of a key.
+	//
+	// An allowlist rather than a denylist of HS*/none: an algorithm this
+	// build does not recognise is one whose key model has not been thought
+	// about, and passing it straight through to go-oidc is how the symmetric
+	// family got in in the first place.
+	err = validate.RegisterValidation("asymmetric_jws_alg", func(fl validator.FieldLevel) bool {
+		return IsAsymmetricJWSAlg(fl.Field().String())
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	// Register custom validation for redirect_uri - validates OAuth 2.0 redirect URI format.
 	// Used by OIDC dynamic client registration (RFC 7591) for redirect_uris.
 	// Per RFC 6749: must have a scheme and must not contain a fragment.
@@ -527,6 +587,38 @@ func NewValidator() (*validator.Validate, error) {
 		reportOIDCOnlyScopeFields(sl, scope.AuthProvider, scope.OIDCRequestParams, scope.IssuancePolicy)
 	}, model.ExternalAPIScope{})
 
+	// Register struct-level validation for DynamicRegistrationAuthConfig:
+	// auth settings must not be paired with an open mode.
+	//
+	// required_if already covers the other direction - mode static needs a
+	// token file, mode jwt needs a jwt block. This is the direction that
+	// fails open: mode defaults to "open", and the middleware returns a
+	// pass-through for "open" or empty without ever consulting the rest of
+	// the config. So an operator who writes a jwt: block and forgets
+	// mode: "jwt" gets dynamic client registration wide open, with their
+	// auth configuration present, ignored, and silent about it.
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(model.DynamicRegistrationAuthConfig)
+		mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
+		if mode != "" && mode != "open" {
+			return
+		}
+		if cfg.JWT != nil {
+			sl.ReportError(cfg.JWT, "JWT", "JWT", "auth_config_requires_non_open_mode", mode)
+		}
+		// Not TrimSpace: the question here is whether the operator wrote
+		// the key, not whether what they wrote is usable. Trimming first
+		// made `static_bearer_token_file: " "` under the default mode look
+		// like an absent setting, so the one configuration this guard
+		// exists to catch - auth settings with no mode to activate them -
+		// slipped through and left /register open. The same value under
+		// mode: static is rejected outright, and an intent that fails one
+		// way must not pass the other.
+		if cfg.StaticBearerTokenFile != "" {
+			sl.ReportError(cfg.StaticBearerTokenFile, "StaticBearerTokenFile", "StaticBearerTokenFile", "auth_config_requires_non_open_mode", mode)
+		}
+	}, model.DynamicRegistrationAuthConfig{})
+
 	// Register struct-level validation for DataSources: openid4vp auth_scopes must not self-reference
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		ds := sl.Current().Interface().(model.DataSources)
@@ -764,5 +856,36 @@ func validateScopeProviderUniqueness(sl validator.StructLevel, ds model.DataSour
 			sl.ReportError(ds, "Scopes", "Scopes", "scope_provider_not_unique",
 				fmt.Sprintf("%s/%s in %s", scope, provider, strings.Join(sources, ", ")))
 		}
+	}
+}
+
+// IsAsymmetricJWSAlg reports whether a JWS "alg" is one a PUBLIC key set can
+// legitimately carry - see the asymmetric_jws_alg validator above for why
+// that matters, and why this is an allowlist rather than a denylist of
+// HS*/none.
+//
+// Exported because the verifier's JWKS handling has to ask the same question
+// of a key set it just fetched, and two copies of this list would drift.
+func IsAsymmetricJWSAlg(alg string) bool {
+	switch alg {
+	case "RS256", "RS384", "RS512",
+		"PS256", "PS384", "PS512",
+		"ES256", "ES384", "ES512",
+		"EdDSA":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsAsymmetricJWKType reports whether a JWK "kty" names a key with a public
+// half. "oct" - a shared secret - does not, and is the thing that must never
+// be served from a published key set.
+func IsAsymmetricJWKType(kty string) bool {
+	switch kty {
+	case "RSA", "EC", "OKP":
+		return true
+	default:
+		return false
 	}
 }
