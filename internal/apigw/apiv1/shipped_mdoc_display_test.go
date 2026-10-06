@@ -64,8 +64,9 @@ func TestShippedMDocCardPlaceholdersAreBackedByClaims(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			schema := loadShippedMDoc(t, name)
 
-			uri, _ := mddlCardURI(schema)
+			uri, fromLogo := mddlCardURI(schema)
 			require.NotEmpty(t, uri)
+			require.False(t, fromLogo, "the personalized card belongs in svg_templates, not in logo")
 			_, encoded, found := strings.Cut(uri, "base64,")
 			require.True(t, found, "the card is not a base64 data URI")
 			svg, err := base64.StdEncoding.DecodeString(encoded)
@@ -112,6 +113,30 @@ func TestShippedMDocSchemasProduceSVGValues(t *testing.T) {
 			assert.Equal(t, "Ada", values["given_name"].Value)
 			assert.Equal(t, "First name", values["given_name"].Label)
 			assert.Equal(t, "Lovelace", values["family_name"].Value)
+		})
+	}
+}
+
+// A logo is shown by a wallet as an ordinary image, with no substitution
+// step - so a logo carrying {{given_name}} would be displayed literally.
+// The personalized card goes in svg_templates; the logo is a plain one.
+func TestShippedMDocLogosCarryNoPlaceholders(t *testing.T) {
+	placeholder := regexp.MustCompile(`{{(\w+)}}`)
+
+	for _, name := range shippedMDocSchemas {
+		t.Run(name, func(t *testing.T) {
+			schema := loadShippedMDoc(t, name)
+			require.NotEmpty(t, schema.Display)
+
+			logo := schema.Display[0].Logo
+			require.NotNil(t, logo, "a wallet with no svg_templates support still wants an image")
+			_, encoded, found := strings.Cut(logo.URI, "base64,")
+			require.True(t, found)
+			svg, err := base64.StdEncoding.DecodeString(encoded)
+			require.NoError(t, err)
+
+			assert.Empty(t, placeholder.FindAllString(string(svg), -1),
+				"a logo is displayed as-is, so a placeholder in it is shown literally")
 		})
 	}
 }

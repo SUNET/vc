@@ -3,6 +3,7 @@ import * as v from "valibot";
 
 import {
     base64ToUtf8,
+    clearUnresolvedPlaceholders,
     escapeHtml,
     flattenClaims,
     renderClaimValueHtml,
@@ -387,6 +388,9 @@ Alpine.data("app", () => ({
             // [A-Za-z0-9+/=:;,/.] so escaping is a no-op for them.
             svg = svg.replaceAll(`{{${svg_id}}}`, escapeHtml(resolved));
         }
+
+        // Clear whatever is left — see clearUnresolvedPlaceholders.
+        svg = clearUnresolvedPlaceholders(svg);
 
         return `data:image/svg+xml;base64,${utf8ToBase64(svg)}`;
     },

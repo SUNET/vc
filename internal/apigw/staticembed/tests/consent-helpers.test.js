@@ -10,6 +10,7 @@ import {
     detectBase64Image,
     escapeHtml,
     flattenClaims,
+    clearUnresolvedPlaceholders,
     IMAGE_PLACEHOLDERS,
     keyToLabel,
     renderClaimValueHtml,
@@ -533,5 +534,40 @@ describe("PID end-to-end: Valibot schema + flattenClaims + renderClaimValueHtml"
         // Array of objects — indexed layout preserved.
         const objHtml = renderClaimValueHtml([{ name: "a" }]);
         assert.ok(objHtml.includes("0"), "array of objects shows index");
+    });
+});
+
+describe("clearUnresolvedPlaceholders", () => {
+    it("removes a slot no claim resolved", () => {
+        // A PID without the optional document_number: the label stays, the
+        // value slot goes, instead of drawing "{{document_number}}".
+        const svg = '<text>DOCUMENT NUMBER</text><text>{{document_number}}</text>';
+        assert.equal(
+            clearUnresolvedPlaceholders(svg),
+            "<text>DOCUMENT NUMBER</text><text></text>",
+        );
+    });
+
+    it("empties an unresolved image href rather than leaving a literal", () => {
+        const svg = '<image href="{{portrait}}"/>';
+        assert.equal(clearUnresolvedPlaceholders(svg), '<image href=""/>');
+    });
+
+    it("removes several, and leaves the rest of the markup alone", () => {
+        const svg = "<svg><a>{{given_name}}</a><b>Ada</b><c>{{portrait}}</c></svg>";
+        assert.equal(clearUnresolvedPlaceholders(svg), "<svg><a></a><b>Ada</b><c></c></svg>");
+    });
+
+    it("leaves a document with no placeholders untouched", () => {
+        const svg = "<svg><text>mDL</text></svg>";
+        assert.equal(clearUnresolvedPlaceholders(svg), svg);
+    });
+
+    // escapeHtml runs before this, so a claim value containing braces
+    // arrives as entities and cannot be eaten here. The narrow character
+    // class is the second line of defence.
+    it("does not match anything that is not placeholder-shaped", () => {
+        const svg = "<text>{{ spaced }}</text><text>{{a-b}}</text><text>{single}</text>";
+        assert.equal(clearUnresolvedPlaceholders(svg), svg);
     });
 });

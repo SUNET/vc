@@ -151,6 +151,29 @@ export function detectBase64Image(s) {
  * @param {unknown} value
  * @returns {string | null}
  */
+// Matches an SVG template placeholder. The character class is deliberately
+// narrow — it is the same shape an svg_id takes — so this cannot eat
+// unrelated markup.
+const PLACEHOLDER_RE = /{{[A-Za-z0-9_]+}}/g;
+
+/**
+ * Remove every template placeholder no claim resolved.
+ *
+ * A slot whose claim is optional and absent — a PID without
+ * `document_number`, say — would otherwise be drawn as the literal text
+ * "{{document_number}}", and an image slot would keep "{{portrait}}" as its
+ * href. Run this after substitution: a value that has been substituted is
+ * no longer a placeholder, and escapeHtml has already turned any braces
+ * inside a claim value into entities, so nothing a real value contributed
+ * can be removed here.
+ *
+ * @param {string} svg
+ * @returns {string}
+ */
+export function clearUnresolvedPlaceholders(svg) {
+    return svg.replaceAll(PLACEHOLDER_RE, "");
+}
+
 export function valueForSvgPlaceholder(svgId, value) {
     if (IMAGE_PLACEHOLDERS.has(svgId)) {
         if (typeof value !== "string") return "";
