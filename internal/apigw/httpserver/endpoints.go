@@ -144,7 +144,20 @@ func (s *Service) endpointVCINotification(ctx context.Context, c *gin.Context) (
 	return nil, nil
 }
 
+// MediaTypeJWT is the media type OpenID4VCI 1.0 §12.2.2 gives the signed form
+// of the Credential Issuer Metadata.
+const MediaTypeJWT = "application/jwt"
+
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
+//
+// OpenID4VCI 1.0 §12.2.2 returns the metadata as EITHER an unsigned JSON
+// document (application/json, which a Credential Issuer MUST support) OR a
+// signed JWT carrying the same parameters (application/jwt, which it MAY
+// support) - one or the other, chosen by the wallet's Accept header and
+// declared in Content-Type. §12.2.4 defines no signed_metadata parameter, so
+// returning the signed form as a member of the JSON document is a draft-era
+// shape; see model.IssuerMetadata.IncludeSignedMetadataInJSON for the
+// deployment that still needs it.
 func (s *Service) endpointVCIMetadata(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointMetadata")
 	defer span.End()
@@ -155,7 +168,35 @@ func (s *Service) endpointVCIMetadata(ctx context.Context, c *gin.Context) (any,
 		return nil, err
 	}
 
-	c.SetAccepted("application/json")
+	// Held aside rather than read twice: whichever branch runs below, the JSON
+	// document must not carry it unless the deployment asked for it.
+	signed := reply.SignedMetadata
+	reply.SignedMetadata = ""
+
+	// Server preference is the unsigned form, because that is the one a wallet
+	// is guaranteed to understand. Quality values are not weighted - gin
+	// negotiates on the order the wallet listed, which is what wallets send.
+	switch c.NegotiateFormat(gin.MIMEJSON, MediaTypeJWT) {
+	case MediaTypeJWT:
+		if signed != "" {
+			c.Data(http.StatusOK, MediaTypeJWT, []byte(signed))
+			return nil, nil
+		}
+		// The signed form is a MAY and can be unavailable at runtime - the
+		// issuer is unreachable, or no signing key is configured. The unsigned
+		// form is a MUST, so fall through to it rather than refuse.
+		s.log.Debug("signed metadata requested but unavailable; serving the unsigned document")
+	case "":
+		// The Accept header rules out both forms this endpoint can produce.
+		c.AbortWithStatus(http.StatusNotAcceptable)
+		return nil, nil
+	}
+
+	if s.cfg.IncludeSignedMetadataInIssuerMetadataJSON() {
+		reply.SignedMetadata = signed
+	}
+
+	c.SetAccepted(gin.MIMEJSON)
 	return reply, nil
 }
 
