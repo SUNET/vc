@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
@@ -156,6 +157,15 @@ func (s *Service) endpointVCIDeferredCredential(ctx context.Context, c *gin.Cont
 
 	reply, err := s.apiv1.VCIDeferredCredential(ctx, request)
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	if reply == nil {
+		// Deferred issuance is not implemented: VCIDeferredCredential is a
+		// stub that returns nothing. Saying so beats a 200 with an empty
+		// body, and beats an encrypted "null", which a wallet cannot tell
+		// from a credential it failed to read.
+		err := errors.New("deferred credential issuance is not implemented by this Credential Issuer")
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}

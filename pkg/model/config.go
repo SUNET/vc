@@ -1357,8 +1357,10 @@ type IssuerMetadata struct {
 	MdocIacasURI string `yaml:"mdoc_iacas_uri" validate:"omitempty,url"`
 }
 
-// CredentialEncryption configures JWE encryption of Credential and Deferred
-// Credential messages, per OpenID4VCI 1.0 §8.3 and §12.2.4.
+// CredentialEncryption configures JWE encryption of the Credential endpoints.
+//
+// Per OpenID4VCI 1.0 §8.3 and §12.2.4, for both the Credential and the
+// Deferred Credential messages.
 //
 // With no key configured, neither credential_request_encryption nor
 // credential_response_encryption appears in the issuer metadata and the
@@ -1371,11 +1373,12 @@ type CredentialEncryption struct {
 	// kid derived as its RFC 7638 thumbprint, so rotation is adding a key,
 	// waiting for cached metadata to expire, and removing the old one.
 	//
-	// Each key must be an ECDSA P-256 private key, and must come from a file:
-	// ECDH-ES needs the private scalar to derive a shared secret, while the
-	// PKCS#11 path hands back a signer that will not perform key agreement.
-	// A key that cannot do the job is refused at startup.
-	Keys []pki.KeyConfig `yaml:"keys" validate:"omitempty,dive"`
+	// Each key must be an ECDSA P-256 private key in a PEM file. The type is
+	// deliberately narrower than pki.KeyConfig: ECDH-ES needs the private
+	// scalar to derive a shared secret, and the PKCS#11 path hands back a
+	// signer that will not perform key agreement, so offering an hsm setting
+	// here would advertise something that cannot work.
+	Keys []CredentialEncryptionKey `yaml:"keys" validate:"omitempty,dive"`
 
 	// RequestEncryptionRequired publishes
 	// credential_request_encryption.encryption_required. When true, a
@@ -1393,6 +1396,16 @@ type CredentialEncryption struct {
 	ResponseEncryptionRequired *bool `yaml:"response_encryption_required" default:"false"`
 }
 
+// CredentialEncryptionKey is one of this issuer's key-agreement keys.
+//
+// File-backed only; see CredentialEncryption.Keys for why there is no HSM
+// option.
+type CredentialEncryptionKey struct {
+	// PrivateKeyPath is the path to a PEM file holding an ECDSA P-256
+	// private key.
+	PrivateKeyPath string `yaml:"private_key_path" validate:"required" doc_example:"\"/etc/vc/credential-encryption.pem\""`
+}
+
 // Load builds the encrypter from the configured keys, or returns nil when
 // none are configured. The same function serves the metadata generator and
 // the Credential Endpoint, so what is advertised and what is accepted cannot
@@ -1404,12 +1417,12 @@ func (cfg *CredentialEncryption) Load() (*openid4vci.CredentialEncryption, error
 
 	loader := pki.NewKeyLoader()
 	keys := make([]crypto.PrivateKey, 0, len(cfg.Keys))
-	for i := range cfg.Keys {
-		material, err := loader.LoadKeyMaterial(&cfg.Keys[i])
+	for i, key := range cfg.Keys {
+		private, err := loader.LoadPrivateKey(key.PrivateKeyPath)
 		if err != nil {
 			return nil, fmt.Errorf("credential encryption key %d: %w", i, err)
 		}
-		keys = append(keys, material.PrivateKey)
+		keys = append(keys, private)
 	}
 
 	return openid4vci.NewCredentialEncryption(keys,

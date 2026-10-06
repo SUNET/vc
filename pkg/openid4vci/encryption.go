@@ -1,6 +1,7 @@
 package openid4vci
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -241,6 +242,20 @@ func (e *CredentialEncryption) DecryptRequest(body []byte) ([]byte, error) {
 		}
 	}
 
+	// Compact serialization only, and checked before anything is parsed.
+	// §8.3 says the message MUST be encoded as a JWT, which is the compact
+	// form; jwe.Parse also accepts the JSON serialization, where a per-
+	// recipient header can carry parameters the protected header does not -
+	// zip among them, which would put a compressed payload past the check
+	// below and into the decrypter. Refusing the JSON form closes that
+	// whole class rather than chasing one member of it.
+	if !isCompactJWE(body) {
+		return nil, &Error{
+			Err:              ErrInvalidEncryptionParameters,
+			ErrorDescription: "the request must use JWE compact serialization",
+		}
+	}
+
 	msg, err := jwe.Parse(body)
 	if err != nil {
 		return nil, &Error{
@@ -391,6 +406,26 @@ func (p *CredentialResponseEncryption) recipientKey() (jwk.Key, jwa.KeyEncryptio
 		}
 	}
 
+	// Validate checks the key's internal structure, not whether it can do
+	// what its alg says. A well-formed RSA key carrying alg
+	// ECDH-ES+A256KW passes it, and the mismatch would then surface from
+	// jwe.Encrypt - after the credential had been issued. ECDH-ES needs an
+	// EC key on the curve this issuer performs, so that is checked here,
+	// before anything is made.
+	ec, ok := key.(jwk.ECDSAPublicKey)
+	if !ok {
+		return nil, empty, &Error{
+			Err:              ErrInvalidEncryptionParameters,
+			ErrorDescription: fmt.Sprintf("credential_response_encryption.jwk must be an EC public key for %s, got kty %q", AlgECDHESA256KW, key.KeyType()),
+		}
+	}
+	if crv, ok := ec.Crv(); !ok || crv != jwa.P256() {
+		return nil, empty, &Error{
+			Err:              ErrInvalidEncryptionParameters,
+			ErrorDescription: fmt.Sprintf("credential_response_encryption.jwk must use curve %s, got %q", jwa.P256(), crv),
+		}
+	}
+
 	alg, ok := key.Algorithm()
 	if !ok || alg.String() == "" {
 		return nil, empty, &Error{
@@ -415,4 +450,27 @@ func contains(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// isCompactJWE reports whether body is JWE compact serialization: five
+// base64url segments separated by dots. Deliberately not "does not look like
+// JSON" - a positive test cannot be talked around by whitespace or by a
+// serialization nobody has thought of yet.
+func isCompactJWE(body []byte) bool {
+	parts := bytes.Split(body, []byte("."))
+	if len(parts) != 5 {
+		return false
+	}
+	for i, part := range parts {
+		// Only the encrypted key may be empty, and that is for the direct
+		// key agreement algorithms rather than the one this accepts; allowed
+		// here so the refusal names the algorithm rather than the shape.
+		if len(part) == 0 && i != 1 {
+			return false
+		}
+		if _, err := base64.RawURLEncoding.DecodeString(string(part)); err != nil {
+			return false
+		}
+	}
+	return true
 }

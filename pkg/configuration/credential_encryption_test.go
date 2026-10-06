@@ -12,7 +12,6 @@ import (
 
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
-	"github.com/SUNET/vc/pkg/pki"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -67,7 +66,7 @@ func TestCheckCredentialEncryption_RefusesAKeyThatCannotDoECDH(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte("-----BEGIN PRIVATE KEY-----\nnope\n-----END PRIVATE KEY-----\n"), 0o600))
 
 	err := checkCredentialEncryption(encryptionCfg(model.CredentialEncryption{
-		Keys: []pki.KeyConfig{{PrivateKeyPath: path}},
+		Keys: []model.CredentialEncryptionKey{{PrivateKeyPath: path}},
 	}, nil))
 
 	require.Error(t, err)
@@ -98,13 +97,13 @@ func TestCheckCredentialEncryption_Accepts(t *testing.T) {
 
 	t.Run("a usable key", func(t *testing.T) {
 		assert.NoError(t, checkCredentialEncryption(encryptionCfg(model.CredentialEncryption{
-			Keys: []pki.KeyConfig{{PrivateKeyPath: p256KeyPath(t)}},
+			Keys: []model.CredentialEncryptionKey{{PrivateKeyPath: p256KeyPath(t)}},
 		}, nil)))
 	})
 
 	t.Run("two keys, for rotation", func(t *testing.T) {
 		assert.NoError(t, checkCredentialEncryption(encryptionCfg(model.CredentialEncryption{
-			Keys: []pki.KeyConfig{{PrivateKeyPath: p256KeyPath(t)}, {PrivateKeyPath: p256KeyPath(t)}},
+			Keys: []model.CredentialEncryptionKey{{PrivateKeyPath: p256KeyPath(t)}, {PrivateKeyPath: p256KeyPath(t)}},
 		}, nil)))
 	})
 
@@ -119,7 +118,7 @@ func TestCheckCredentialEncryption_RefusesADuplicateKey(t *testing.T) {
 	path := p256KeyPath(t)
 
 	err := checkCredentialEncryption(encryptionCfg(model.CredentialEncryption{
-		Keys: []pki.KeyConfig{{PrivateKeyPath: path}, {PrivateKeyPath: path}},
+		Keys: []model.CredentialEncryptionKey{{PrivateKeyPath: path}, {PrivateKeyPath: path}},
 	}, nil))
 
 	require.Error(t, err)

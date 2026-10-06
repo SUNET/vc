@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -19,7 +20,6 @@ import (
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
-	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/gin-gonic/gin"
@@ -37,11 +37,17 @@ type credentialAPI struct {
 	got         *openid4vci.CredentialRequest
 	gotDeferred *openid4vci.DeferredCredentialRequest
 	calls       int
+	// deferredReturnsNothing makes VCIDeferredCredential behave the way the
+	// production one does today: a stub returning (nil, nil).
+	deferredReturnsNothing bool
 }
 
 func (a *credentialAPI) VCIDeferredCredential(_ context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error) {
 	a.gotDeferred = req
 	a.calls++
+	if a.deferredReturnsNothing {
+		return nil, nil
+	}
 	return &openid4vci.CredentialResponse{
 		Credentials: []openid4vci.Credential{{Credential: "the-deferred-credential"}},
 	}, nil
@@ -81,7 +87,7 @@ func newEncryptionSetup(t *testing.T, requestRequired, responseRequired, keyless
 		ResponseEncryptionRequired: &responseRequired,
 	}
 	if !keyless {
-		encCfg.Keys = []pki.KeyConfig{{PrivateKeyPath: writeTestP256Key(t)}}
+		encCfg.Keys = []model.CredentialEncryptionKey{{PrivateKeyPath: writeTestP256Key(t)}}
 	}
 
 	cfg := &model.Cfg{
@@ -470,4 +476,113 @@ func TestCredentialEncryption_DeferredResponseKeyOnAPlaintextRequestIsRefused(t 
 
 	requireVCIError(t, w, openid4vci.ErrInvalidEncryptionParameters)
 	assert.Zero(t, e.api.calls)
+}
+
+// VCIDeferredCredential is a stub that returns (nil, nil). Encrypting that
+// would hand the wallet a 200 carrying an encrypted "null" - a success it
+// cannot tell from a credential it failed to read. The endpoint says what is
+// actually true instead, whether or not encryption was asked for.
+func TestCredentialEncryption_DeferredNilReplyIsNotAnEncryptedSuccess(t *testing.T) {
+	body, err := json.Marshal(map[string]any{"transaction_id": "txn-1"})
+	require.NoError(t, err)
+
+	t.Run("plaintext", func(t *testing.T) {
+		e := newEncryptionSetup(t, false, false, false)
+		e.api.deferredReturnsNothing = true
+
+		w := e.postTo(t, "/deferred_credential", gin.MIMEJSON, body)
+
+		assert.NotEqual(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	})
+
+	t.Run("encrypted", func(t *testing.T) {
+		e := newEncryptionSetup(t, false, false, false)
+		e.api.deferredReturnsNothing = true
+
+		encBody, err := json.Marshal(map[string]any{
+			"transaction_id":                 "txn-1",
+			"credential_response_encryption": e.responseParams(openid4vci.EncA256GCM, ""),
+		})
+		require.NoError(t, err)
+
+		w := e.postTo(t, "/deferred_credential", openid4vci.MediaTypeJWT, e.encrypt(t, encBody, true, false))
+
+		require.NotEqual(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		assert.NotEqual(t, openid4vci.MediaTypeJWT, w.Header().Get("Content-Type"),
+			"an empty answer must not come back looking like an encrypted credential")
+	})
+}
+
+// jwe.Parse accepts the JSON serialization as well as the compact one, and in
+// JSON form a per-recipient header can carry parameters the protected header
+// does not - zip among them, which would reach the decrypter and be inflated.
+// §8.3 asks for a JWT, which is the compact form, so the JSON form is refused
+// outright.
+func TestCredentialEncryption_JSONSerializationIsRefused(t *testing.T) {
+	e := newEncryptionSetup(t, false, false, false)
+
+	kid, ok := e.issuerKey.KeyID()
+	require.True(t, ok)
+	headers := jwe.NewHeaders()
+	require.NoError(t, headers.Set(jwe.KeyIDKey, kid))
+
+	// The same message the round-trip test sends, serialized as JSON and
+	// compressed in a per-recipient header rather than the protected one.
+	encrypted, err := jwe.Encrypt(e.requestBody(t, nil),
+		jwe.WithKey(jwa.ECDH_ES_A256KW(), e.issuerKey, jwe.WithPerRecipientHeaders(headers)),
+		jwe.WithContentEncryption(jwa.A256GCM()),
+		jwe.WithCompress(jwa.Deflate()),
+		jwe.WithJSON(),
+	)
+	require.NoError(t, err)
+	require.Contains(t, string(encrypted), "{", "this test is pointless unless the message is JSON-serialized")
+
+	w := e.post(t, openid4vci.MediaTypeJWT, encrypted)
+
+	requireVCIError(t, w, openid4vci.ErrInvalidEncryptionParameters)
+	assert.Zero(t, e.api.calls)
+
+	// Asserted on the reason, not just the refusal: without the
+	// serialization check this message is refused for a missing protected
+	// "alg" instead, which is incidental - the JSON form can put alg in the
+	// per-recipient header and pass that check while still carrying zip.
+	assert.Contains(t, w.Body.String(), "compact serialization")
+}
+
+// jwk.Key.Validate checks a key's internal structure, not whether it can do
+// what its alg claims. A well-formed RSA key carrying an ECDH alg used to
+// reach jwe.Encrypt - after the credential had been issued.
+func TestCredentialEncryption_WrongKeyTypeIsRefusedBeforeIssuance(t *testing.T) {
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	rsaJWK, err := jwk.Import(rsaKey.Public())
+	require.NoError(t, err)
+	require.NoError(t, rsaJWK.Set(jwk.AlgorithmKey, openid4vci.AlgECDHESA256KW))
+	rsaEncoded, err := json.Marshal(rsaJWK)
+	require.NoError(t, err)
+
+	p384Raw, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	require.NoError(t, err)
+	p384JWK, err := jwk.Import(p384Raw.Public())
+	require.NoError(t, err)
+	require.NoError(t, p384JWK.Set(jwk.AlgorithmKey, openid4vci.AlgECDHESA256KW))
+	p384Encoded, err := json.Marshal(p384JWK)
+	require.NoError(t, err)
+
+	for name, encoded := range map[string]json.RawMessage{
+		"a valid RSA key claiming an ECDH alg": rsaEncoded,
+		"a valid EC key on the wrong curve":    p384Encoded,
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEncryptionSetup(t, false, false, false)
+
+			params := e.responseParams(openid4vci.EncA256GCM, "")
+			params["jwk"] = encoded
+
+			w := e.post(t, openid4vci.MediaTypeJWT, e.encrypt(t, e.requestBody(t, params), true, false))
+
+			requireVCIError(t, w, openid4vci.ErrInvalidEncryptionParameters)
+			assert.Zero(t, e.api.calls, "the key is refused before anything is issued")
+		})
+	}
 }

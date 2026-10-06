@@ -3,9 +3,11 @@ package httpserver
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 
 	"github.com/SUNET/vc/pkg/openid4vci"
 
@@ -113,6 +115,14 @@ func (s *Service) checkResponseEncryption(params *openid4vci.CredentialResponseE
 // writes it as application/jwt. It returns (nil, nil) on success, which is
 // how a handler tells RegEndpoint that it wrote the response itself.
 func (s *Service) writeEncryptedReply(c *gin.Context, params *openid4vci.CredentialResponseEncryption, reply any) (any, error) {
+	// A nil reply would marshal to "null", encrypt cleanly, and come back as
+	// a 200 carrying nothing - a success the wallet cannot tell from a
+	// credential. Encryption must not be the thing that makes an empty
+	// answer look complete.
+	if reply == nil || reflect.ValueOf(reply).IsNil() {
+		return nil, errors.New("refusing to encrypt an empty credential response")
+	}
+
 	payload, err := json.Marshal(reply)
 	if err != nil {
 		return nil, fmt.Errorf("encoding the credential response for encryption: %w", err)

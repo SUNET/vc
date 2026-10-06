@@ -401,7 +401,7 @@ an authorization-code redirect flow so admins log in via the OIDC provider.
 
 ### `key_config`
 
-> **Path:** `.apigw.key_config`, `.apigw.issuer_metadata.credential_encryption.keys[]`, `.issuer.key_config`, `.issuer.access_certificate.key_config`, `.verifier.key_config`, `.registry.token_status_lists.key_config`
+> **Path:** `.apigw.key_config`, `.issuer.key_config`, `.issuer.access_certificate.key_config`, `.verifier.key_config`, `.registry.token_status_lists.key_config`
 
 Supports both file-based and HSM-based keys with explicit control.
 
@@ -417,7 +417,7 @@ Supports both file-based and HSM-based keys with explicit control.
 
 ### `pkcs11`
 
-> **Path:** `.apigw.key_config.pkcs11`, `.apigw.issuer_metadata.credential_encryption.keys[].pkcs11`, `.issuer.key_config.pkcs11`, `.issuer.access_certificate.key_config.pkcs11`, `.verifier.key_config.pkcs11`, `.registry.token_status_lists.key_config.pkcs11`
+> **Path:** `.apigw.key_config.pkcs11`, `.issuer.key_config.pkcs11`, `.issuer.access_certificate.key_config.pkcs11`, `.verifier.key_config.pkcs11`, `.registry.token_status_lists.key_config.pkcs11`
 
 | Field         | Type     | Description                       | Example                             | Default | Required |
 | ------------- | -------- | --------------------------------- | ----------------------------------- | ------- | -------- |
@@ -970,7 +970,8 @@ policy without any check being performed.
 
 > **Path:** `.apigw.issuer_metadata.credential_encryption`
 
-Credential messages, per OpenID4VCI 1.0 §8.3 and §12.2.4.
+Per OpenID4VCI 1.0 §8.3 and §12.2.4, for both the Credential and the
+Deferred Credential messages.
 
 With no key configured, neither credential_request_encryption nor
 credential_response_encryption appears in the issuer metadata and the
@@ -978,11 +979,22 @@ Credential Endpoint refuses an encrypted request - an issuer that cannot
 do this says so by staying silent, rather than by advertising it and
 failing later.
 
-| Field                          | Type    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Example | Default | Required |
-| ------------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
-| `keys`                         | `array` | This Credential Issuer's key-agreement keys. Their public halves are published in credential_request_encryption.jwks, each with a kid derived as its RFC 7638 thumbprint, so rotation is adding a key, waiting for cached metadata to expire, and removing the old one. Each key must be an ECDSA P-256 private key, and must come from a file: ECDH-ES needs the private scalar to derive a shared secret, while the PKCS#11 path hands back a signer that will not perform key agreement. A key that cannot do the job is refused at startup. | -       | -       | No       |
-| `request_encryption_required`  | `bool`  | RequestEncryptionRequired publishes credential_request_encryption.encryption_required. When true, a Credential Request that arrives unencrypted is refused. False by default: turning the key on should not break every wallet that does not do JWE on the same day.                                                                                                                                                                                                                                                                            | -       | `false` | No       |
-| `response_encryption_required` | `bool`  | ResponseEncryptionRequired publishes credential_response_encryption.encryption_required. When true, a Credential Request without credential_response_encryption is refused. False by default, for the same reason.                                                                                                                                                                                                                                                                                                                              | -       | `false` | No       |
+| Field                          | Type    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Example | Default | Required |
+| ------------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `keys`                         | `array` | This Credential Issuer's key-agreement keys. Their public halves are published in credential_request_encryption.jwks, each with a kid derived as its RFC 7638 thumbprint, so rotation is adding a key, waiting for cached metadata to expire, and removing the old one. Each key must be an ECDSA P-256 private key in a PEM file. The type is deliberately narrower than pki.KeyConfig: ECDH-ES needs the private scalar to derive a shared secret, and the PKCS#11 path hands back a signer that will not perform key agreement, so offering an hsm setting here would advertise something that cannot work. | -       | -       | No       |
+| `request_encryption_required`  | `bool`  | RequestEncryptionRequired publishes credential_request_encryption.encryption_required. When true, a Credential Request that arrives unencrypted is refused. False by default: turning the key on should not break every wallet that does not do JWE on the same day.                                                                                                                                                                                                                                                                                                                                           | -       | `false` | No       |
+| `response_encryption_required` | `bool`  | ResponseEncryptionRequired publishes credential_response_encryption.encryption_required. When true, a Credential Request without credential_response_encryption is refused. False by default, for the same reason.                                                                                                                                                                                                                                                                                                                                                                                             | -       | `false` | No       |
+
+### `keys` entry
+
+> **Path:** `.apigw.issuer_metadata.credential_encryption.keys[]`
+
+File-backed only; see CredentialEncryption.Keys for why there is no HSM
+option.
+
+| Field              | Type     | Description                                            | Example                               | Default | Required |
+| ------------------ | -------- | ------------------------------------------------------ | ------------------------------------- | ------- | -------- |
+| `private_key_path` | `string` | Path to a PEM file holding an ECDSA P-256 private key. | `"/etc/vc/credential-encryption.pem"` | -       | Yes      |
 
 ### `batch_credential_issuance`
 

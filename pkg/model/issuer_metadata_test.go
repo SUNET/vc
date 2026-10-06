@@ -16,7 +16,6 @@ import (
 
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vci"
-	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/stretchr/testify/assert"
@@ -421,7 +420,7 @@ func TestIssuerMetadata_Generate_CredentialEncryption(t *testing.T) {
 		required := true
 		cfg := &IssuerMetadata{
 			CredentialEncryption: CredentialEncryption{
-				Keys:                       []pki.KeyConfig{{PrivateKeyPath: writeP256Key(t)}},
+				Keys:                       []CredentialEncryptionKey{{PrivateKeyPath: writeP256Key(t)}},
 				RequestEncryptionRequired:  &required,
 				ResponseEncryptionRequired: &required,
 			},
@@ -460,7 +459,7 @@ func TestIssuerMetadata_Generate_CredentialEncryption(t *testing.T) {
 	t.Run("a key that cannot do ECDH-ES is refused", func(t *testing.T) {
 		cfg := &IssuerMetadata{
 			CredentialEncryption: CredentialEncryption{
-				Keys: []pki.KeyConfig{{PrivateKeyPath: writeRSAKey(t)}},
+				Keys: []CredentialEncryptionKey{{PrivateKeyPath: writeRSAKey(t)}},
 			},
 		}
 
