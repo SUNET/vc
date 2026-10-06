@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/internal/apigw/db"
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 
@@ -89,6 +90,7 @@ func newOPServer(t *testing.T) *opServer {
 			"authorization_endpoint":                op.URL + "/authorize",
 			"token_endpoint":                        op.URL + "/token",
 			"jwks_uri":                              op.URL + "/jwks",
+			"userinfo_endpoint":                     op.URL + "/userinfo",
 			"id_token_signing_alg_values_supported": []string{"RS256"},
 		}
 		if !op.omitRegistrationEndpoint {
@@ -96,6 +98,17 @@ func newOPServer(t *testing.T) *opServer {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(doc)
+	})
+
+	// UserInfo authenticates with the access token alone - no client
+	// credential takes part in it. It echoes the bearer token back so a
+	// test can tell a real response from a cached or fabricated one.
+	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"sub":          "user-1",
+			"presented_at": r.Header.Get("Authorization"),
+		})
 	})
 
 	mux.HandleFunc("/register", func(w http.ResponseWriter, _ *http.Request) {
@@ -533,4 +546,69 @@ func TestInitializeDoesNotPublishAnUnstorableRegistration(t *testing.T) {
 	require.Error(t, err, "an unstorable registration must fail initialization")
 	assert.Nil(t, s.creds.load(), "and must not be published")
 	assert.False(t, s.ready)
+}
+
+// backedOffService is a replica whose own registration has run out and
+// whose re-registration is in backoff: the worst state ensureCredentials
+// can be in, and the one that used to take the whole RP down with it.
+func backedOffService(t *testing.T, op *opServer) *Service {
+	t.Helper()
+	op.refuse = true
+	s := renewalService(t, op, &fakeRegistrationStore{}, time.Now().Add(-time.Hour))
+	s.sessionCache = cache.NewMemoryCache[*Session](5 * time.Minute)
+	s.credentialBackoff = time.Hour
+	s.credentialRetryAfter = time.Now().Add(time.Hour)
+	return s
+}
+
+// A callback has to be finished on the client the authorization code was
+// issued to, which credentialsForSession resolves from the session - from
+// the store, when the flow started on another replica. Going through
+// ensureReady first meant THIS replica's own expired registration refused
+// the callback before the session was even loaded, so one replica losing
+// its registration broke flows that had nothing to do with it. Renewing
+// would have been worse: it registers a NEW client, and the code cannot be
+// redeemed by one.
+func TestProcessCallbackIsNotGatedOnThisReplicasCredentials(t *testing.T) {
+	op := newOPServer(t)
+	s := backedOffService(t, op)
+
+	_, err := s.ProcessCallback(t.Context(), "the-code", "a-state-this-replica-never-saw")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid or expired session",
+		"the callback must get as far as looking the session up")
+	assert.NotContains(t, err.Error(), "OIDC RP not ready")
+	assert.NotContains(t, err.Error(), "re-registration is backing off")
+	assert.Equal(t, 0, op.count(), "a callback must never register a new client")
+}
+
+// UserInfo presents the access token and nothing else, so the state of this
+// replica's client registration cannot make it fail.
+func TestGetUserInfoIsNotGatedOnCredentials(t *testing.T) {
+	op := newOPServer(t)
+	s := backedOffService(t, op)
+
+	claims, err := s.GetUserInfo(t.Context(), "an-access-token")
+
+	require.NoError(t, err)
+	assert.Equal(t, "user-1", claims["sub"])
+	assert.Equal(t, "Bearer an-access-token", claims["presented_at"])
+	assert.Equal(t, 0, op.count(), "UserInfo must never register a client")
+}
+
+// The other half: a path that STARTS a flow does renew, so the two tests
+// above are not simply the renewal being gone.
+func TestInitiateAuthStillRenews(t *testing.T) {
+	op := newOPServer(t)
+	store := &fakeRegistrationStore{}
+	s := renewalService(t, op, store, time.Now().Add(clientSecretRenewBefore/2))
+	s.sessionCache = cache.NewMemoryCache[*Session](5 * time.Minute)
+	s.cfg.SessionDuration = 300
+
+	_, err := s.InitiateAuth(t.Context(), "pid", nil, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, op.count(), "starting a flow renews an expiring registration")
+	assert.Equal(t, "client-1", s.currentClientID(t))
 }

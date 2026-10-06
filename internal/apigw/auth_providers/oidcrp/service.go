@@ -279,6 +279,12 @@ func (s *Service) dynamicRegistrationEnabled() bool {
 
 // ensureReady makes the service usable: discovered, and holding a client
 // secret that has not run out.
+//
+// This is for paths that START a flow. Renewal replaces the client, so a
+// path that has to finish on an existing one - ProcessCallback - calls
+// ensureInitialized and resolves the session's own registration instead,
+// and a path that uses no client credentials at all - GetUserInfo - calls
+// ensureInitialized too.
 func (s *Service) ensureReady(ctx context.Context) error {
 	if err := s.ensureInitialized(ctx); err != nil {
 		return err
@@ -738,7 +744,19 @@ type AuthResponse struct {
 
 // ProcessCallback processes the OIDC provider callback
 func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*AuthResponse, error) {
-	if err := s.ensureReady(ctx); err != nil {
+	// Discovery only. A callback must NOT renew: renewal registers a brand
+	// new client, and this request has to be finished on the client the
+	// authorization code was issued to. Credentials come from
+	// credentialsForSession below, which reads the session's own client id
+	// - including from the store, when the flow started on another replica.
+	//
+	// Going through ensureReady here also made a callback fail for a reason
+	// that had nothing to do with it: if THIS replica's secret had run out
+	// and re-registration was backing off, ensureCredentials returned an
+	// error before the session was ever loaded - even though the stored
+	// registration the flow actually needs was sitting there, valid, and
+	// would have worked.
+	if err := s.ensureInitialized(ctx); err != nil {
 		return nil, fmt.Errorf("OIDC RP not ready: %w", err)
 	}
 
@@ -894,7 +912,11 @@ func (s *Service) deleteSession(ctx context.Context, state string) {
 
 // GetUserInfo fetches additional claims from the UserInfo endpoint
 func (s *Service) GetUserInfo(ctx context.Context, accessToken string) (map[string]any, error) {
-	if err := s.ensureReady(ctx); err != nil {
+	// Discovery only. The UserInfo request authenticates with the access
+	// token it is handed; no client secret takes part in it, so the state
+	// of this replica's registration is irrelevant and must not be able to
+	// fail the call.
+	if err := s.ensureInitialized(ctx); err != nil {
 		return nil, fmt.Errorf("OIDC RP not ready: %w", err)
 	}
 

@@ -15,12 +15,18 @@ import (
 
 // DynamicRegistrationCredentials holds OIDC dynamic client registration credentials.
 type DynamicRegistrationCredentials struct {
-	ClientID                string    `bson:"client_id"`
-	ClientSecret            string    `bson:"client_secret"`
-	RegistrationAccessToken string    `bson:"registration_access_token,omitempty"`
-	RegistrationClientURI   string    `bson:"registration_client_uri,omitempty"`
-	ClientSecretExpiresAt   int64     `bson:"client_secret_expires_at,omitempty"`
-	RegisteredAt            time.Time `bson:"registered_at"`
+	ClientID                string `bson:"client_id"`
+	ClientSecret            string `bson:"client_secret"`
+	RegistrationAccessToken string `bson:"registration_access_token,omitempty"`
+	RegistrationClientURI   string `bson:"registration_client_uri,omitempty"`
+	// No omitempty: 0 is a meaningful value here - RFC 7591 3.2.1 makes it
+	// "this secret never expires" - and omitting it left that case and "the
+	// field was never written" as the same document. The pruning filter's
+	// lower bound then had nothing to exclude, so a non-expiring
+	// registration survived only because MongoDB's range operators skip
+	// missing fields. Write the zero and let the predicate say what it means.
+	ClientSecretExpiresAt int64     `bson:"client_secret_expires_at"`
+	RegisteredAt          time.Time `bson:"registered_at"`
 }
 
 // DynamicRegistrationColl handles persistence of dynamic client registration credentials.
@@ -81,7 +87,6 @@ func (c *DynamicRegistrationColl) Save(ctx context.Context, creds *DynamicRegist
 	return nil
 }
 
-// Get returns the stored credentials, or nil if none exist.
 // GetByClientID returns one stored registration by client_id, or nil.
 func (c *DynamicRegistrationColl) GetByClientID(ctx context.Context, clientID string) (*DynamicRegistrationCredentials, error) {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:get_by_client_id")
