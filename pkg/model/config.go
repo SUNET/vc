@@ -2563,8 +2563,23 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		case "dc+sd-jwt":
 			// Appendix A.3: only vct is format-specific for dc+sd-jwt
 			credConfig.VCT = resolvedVCT
-		case "jwt_vc_json", "ldp_vc", "jwt_vc_json-ld":
-			// Appendix A.1: credential_definition with type array is format-specific for W3C VC formats
+		case "ldp_vc", "vc+ld+json":
+			// Appendix A.1: credential_definition with type array is format-specific for W3C VC formats.
+			//
+			// Exactly the formats issueVC20 dispatches on, and that is the
+			// point: this list and handlers_issuer.go's switch used to
+			// disagree in BOTH directions. "jwt_vc_json" and
+			// "jwt_vc_json-ld" were advertised here and reached no issuance
+			// path, so a configured scope appeared in the metadata complete
+			// with a credential_definition and could never be minted
+			// (#686); "vc+ld+json" is issued but was missing here, so it
+			// fell to the default branch and went out with no
+			// credential_definition at all - which Appendix A.1 makes
+			// REQUIRED for a W3C format.
+			//
+			// checkIssuableCredentialFormats refuses the two unissuable
+			// spellings at config load, so a deployment is told at startup
+			// rather than discovering it when a wallet asks.
 			credConfig.CredentialDefinition = &openid4vci.CredentialDefinition{
 				Type: []string{"VerifiableCredential"},
 			}
