@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -24,6 +25,12 @@ import (
 const (
 	oidcRPRetryBase = 5 * time.Second
 	oidcRPRetryMax  = 2 * time.Minute
+
+	// clientSecretRenewBefore is how long before expiry a dynamically
+	// registered client secret is replaced. Renewing exactly at expiry would
+	// race the OP's own clock, and a token exchange started just inside the
+	// window has to finish on the old secret.
+	clientSecretRenewBefore = 5 * time.Minute
 )
 
 // Service provides OIDC Relying Party functionality
@@ -42,6 +49,14 @@ type Service struct {
 	ready        bool
 	retryAfter   time.Time
 	retryBackoff time.Duration
+
+	// Dynamic-registration credential state. clientSecretExpiresAt is zero
+	// when the secret never expires, which is what an OP signals with
+	// client_secret_expires_at: 0, and is also the preconfigured case.
+	clientID              string
+	clientSecretExpiresAt time.Time
+	credentialRetryAfter  time.Time
+	credentialBackoff     time.Duration
 }
 
 // New creates a new OIDC RP service
@@ -79,7 +94,11 @@ func (s *Service) initialize(ctx context.Context) error {
 	s.provider = provider
 
 	// Resolve client credentials based on registration method
-	var clientID, clientSecret string
+	var (
+		clientID              string
+		clientSecret          string
+		clientSecretExpiresAt int64
+	)
 
 	if s.cfg.Registration.Preconfigured != nil && s.cfg.Registration.Preconfigured.Enable {
 		clientID = s.cfg.Registration.Preconfigured.ClientID
@@ -96,6 +115,7 @@ func (s *Service) initialize(ctx context.Context) error {
 			s.log.Info("Using stored dynamic registration credentials", "client_id", storedCreds.ClientID)
 			clientID = storedCreds.ClientID
 			clientSecret = storedCreds.ClientSecret
+			clientSecretExpiresAt = storedCreds.ClientSecretExpiresAt
 		} else {
 			// Perform dynamic registration
 			regReq := s.buildRegistrationRequest()
@@ -119,6 +139,7 @@ func (s *Service) initialize(ctx context.Context) error {
 
 			clientID = regResp.ClientID
 			clientSecret = regResp.ClientSecret
+			clientSecretExpiresAt = regResp.ClientSecretExpiresAt
 
 			s.log.Info("Dynamic client registration successful",
 				"client_id", clientID,
@@ -137,19 +158,7 @@ func (s *Service) initialize(ctx context.Context) error {
 		}
 	}
 
-	// Create ID token verifier
-	s.verifier = provider.Verifier(&oidc.Config{
-		ClientID: clientID,
-	})
-
-	// Configure OAuth2
-	s.oauth2Config = &oauth2.Config{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		RedirectURL:  s.cfg.RedirectURI,
-		Endpoint:     provider.Endpoint(),
-		Scopes:       s.cfg.Scopes,
-	}
+	s.applyCredentials(clientID, clientSecret, clientSecretExpiresAt)
 
 	s.ready = true
 	s.retryBackoff = 0
@@ -163,8 +172,188 @@ func (s *Service) initialize(ctx context.Context) error {
 	return nil
 }
 
-// ensureReady checks if the service is initialized and retries discovery if not.
+// applyCredentials installs a client id and secret, rebuilding both the
+// oauth2 config and the ID token verifier. The verifier is rebuilt and not
+// just the config: it checks the `aud` claim against the client id, and a
+// re-registration may return a different one.
+//
+// expiresAtUnix is the OP's client_secret_expires_at; 0 means never, which
+// RFC 7591 §3.2.1 defines and which is also the preconfigured case.
+//
+// Callers hold s.mu for writing, or are in New before the service is shared.
+func (s *Service) applyCredentials(clientID, clientSecret string, expiresAtUnix int64) {
+	s.clientID = clientID
+	if expiresAtUnix > 0 {
+		s.clientSecretExpiresAt = time.Unix(expiresAtUnix, 0)
+	} else {
+		s.clientSecretExpiresAt = time.Time{}
+	}
+
+	s.verifier = s.provider.Verifier(&oidc.Config{
+		ClientID: clientID,
+	})
+
+	s.oauth2Config = &oauth2.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		RedirectURL:  s.cfg.RedirectURI,
+		Endpoint:     s.provider.Endpoint(),
+		Scopes:       s.cfg.Scopes,
+	}
+}
+
+// dynamicRegistrationEnabled reports whether this RP registers itself.
+// cfg is immutable after New, so no lock is needed. Nil-safe down the whole
+// chain: Registration is a pointer and is only required when Enable is true,
+// so a preconfigured or directly-built Service reaches here with nils, and
+// nothing about credential renewal applies to it.
+func (s *Service) dynamicRegistrationEnabled() bool {
+	return s.cfg != nil && s.cfg.Registration != nil &&
+		s.cfg.Registration.Dynamic != nil && s.cfg.Registration.Dynamic.Enable
+}
+
+// ensureReady makes the service usable: discovered, and holding a client
+// secret that has not run out.
 func (s *Service) ensureReady(ctx context.Context) error {
+	if err := s.ensureInitialized(ctx); err != nil {
+		return err
+	}
+	return s.ensureCredentials(ctx)
+}
+
+// ensureCredentials re-registers before a dynamically registered client
+// secret expires.
+//
+// Without this the secret was read once at startup and never looked at
+// again, so a long-running instance kept presenting an expired secret and
+// every OIDC flow failed at the token exchange with an error that said
+// nothing about why - until somebody restarted the process (SUNET/vc#295).
+//
+// Renewal is lazy rather than a background ticker: it happens on the path
+// that is about to use the credential, so there is no goroutine to own and
+// an idle instance does not register clients nobody asked for.
+func (s *Service) ensureCredentials(ctx context.Context) error {
+	if !s.dynamicRegistrationEnabled() {
+		return nil
+	}
+
+	s.mu.RLock()
+	fresh := s.credentialsFresh()
+	s.mu.RUnlock()
+	if fresh {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Re-check under the write lock: concurrent requests all arrive here
+	// when the secret ages out, and only the first should register.
+	if s.credentialsFresh() {
+		return nil
+	}
+
+	if time.Now().Before(s.credentialRetryAfter) {
+		// Back off, but do not fail a request the current secret can still
+		// serve. Only once it has actually expired is refusing better than
+		// trying and getting an opaque error from the OP.
+		if time.Now().Before(s.clientSecretExpiresAt) {
+			return nil
+		}
+		return fmt.Errorf("OIDC client secret expired at %s and re-registration is backing off until %s",
+			s.clientSecretExpiresAt.Format(time.RFC3339), s.credentialRetryAfter.Format(time.RFC3339))
+	}
+
+	if err := s.renewCredentials(ctx); err != nil {
+		s.credentialBackoff = min(max(s.credentialBackoff*2, oidcRPRetryBase), oidcRPRetryMax)
+		s.credentialRetryAfter = time.Now().Add(s.credentialBackoff)
+		s.log.Error(err, "oidcrp_reregistration_failed",
+			"client_id", s.clientID,
+			"expires_at", s.clientSecretExpiresAt.Format(time.RFC3339),
+			"next_retry_in", s.credentialBackoff.String())
+
+		if time.Now().Before(s.clientSecretExpiresAt) {
+			// Still usable. Say so and carry on rather than taking the
+			// service down for a secret that has not run out yet.
+			return nil
+		}
+		return err
+	}
+
+	s.credentialBackoff = 0
+	s.credentialRetryAfter = time.Time{}
+
+	return nil
+}
+
+// credentialsFresh reports whether the current secret is good for a while
+// yet. A secret that never expires is always fresh. Callers hold s.mu.
+func (s *Service) credentialsFresh() bool {
+	return s.clientSecretExpiresAt.IsZero() ||
+		time.Now().Before(s.clientSecretExpiresAt.Add(-clientSecretRenewBefore))
+}
+
+// renewCredentials registers a new client and installs it. Callers hold
+// s.mu for writing.
+//
+// This registers afresh rather than rotating the existing client through
+// the RFC 7592 management endpoint. vc stores the registration access token
+// and client URI that would allow that, and it would avoid leaving a
+// superseded registration at the OP - but RFC 7592 support is optional and
+// uneven, while registration is the one thing an OP that got us here is
+// known to implement. The superseded local record is deleted below; the
+// one at the OP is not ours to clean up.
+func (s *Service) renewCredentials(ctx context.Context) error {
+	var providerJSON struct {
+		RegistrationEndpoint string `json:"registration_endpoint"`
+	}
+	if err := s.provider.Claims(&providerJSON); err != nil {
+		return fmt.Errorf("failed to read provider metadata: %w", err)
+	}
+	if providerJSON.RegistrationEndpoint == "" {
+		return errors.New("OIDC provider does not support dynamic client registration (no registration_endpoint in metadata)")
+	}
+
+	regResp, err := s.dynamicClientRegistration(ctx, providerJSON.RegistrationEndpoint,
+		s.buildRegistrationRequest(), s.cfg.Registration.Dynamic.InitialAccessToken)
+	if err != nil {
+		return fmt.Errorf("dynamic client re-registration failed: %w", err)
+	}
+
+	previousClientID := s.clientID
+
+	if err := s.dbService.DynamicRegistrationColl.Save(ctx, &db.DynamicRegistrationCredentials{
+		ClientID:                regResp.ClientID,
+		ClientSecret:            regResp.ClientSecret,
+		RegistrationAccessToken: regResp.RegistrationAccessToken,
+		RegistrationClientURI:   regResp.RegistrationClientURI,
+		ClientSecretExpiresAt:   regResp.ClientSecretExpiresAt,
+	}); err != nil {
+		// The new client exists at the OP whether or not we stored it, so
+		// use it; the next restart re-registers, which is wasteful but not
+		// broken. Failing here would leave the expired secret in place.
+		s.log.Error(err, "oidcrp_reregistration_not_persisted", "client_id", regResp.ClientID)
+	} else if previousClientID != "" && previousClientID != regResp.ClientID {
+		// Save upserts on client_id and Get reads an arbitrary row, so the
+		// superseded record would otherwise be there for the next startup
+		// to pick up and find expired - registering again on every boot.
+		if err := s.dbService.DynamicRegistrationColl.Delete(ctx, previousClientID); err != nil {
+			s.log.Error(err, "oidcrp_superseded_registration_not_deleted", "client_id", previousClientID)
+		}
+	}
+
+	s.applyCredentials(regResp.ClientID, regResp.ClientSecret, regResp.ClientSecretExpiresAt)
+
+	s.log.Info("OIDC client re-registered before secret expiry",
+		"previous_client_id", previousClientID,
+		"client_id", regResp.ClientID,
+		"expires_at", s.clientSecretExpiresAt.Format(time.RFC3339))
+
+	return nil
+}
+
+// ensureInitialized checks if the service is initialized and retries discovery if not.
+func (s *Service) ensureInitialized(ctx context.Context) error {
 	s.mu.RLock()
 	if s.ready {
 		s.mu.RUnlock()

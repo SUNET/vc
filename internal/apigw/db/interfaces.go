@@ -49,6 +49,11 @@ type IdentityMappingStore interface {
 type DynamicRegistrationStore interface {
 	Save(ctx context.Context, creds *DynamicRegistrationCredentials) error
 	Get(ctx context.Context) (*DynamicRegistrationCredentials, error)
+	// Delete removes the credentials for one client_id. Save upserts on
+	// client_id while Get reads an arbitrary row, so a re-registration that
+	// returns a NEW client_id would otherwise leave the superseded one
+	// behind for Get to pick up again.
+	Delete(ctx context.Context, clientID string) error
 }
 
 // Ensure concrete types implement the interfaces

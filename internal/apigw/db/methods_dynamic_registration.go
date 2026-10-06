@@ -81,6 +81,23 @@ func (c *DynamicRegistrationColl) Save(ctx context.Context, creds *DynamicRegist
 }
 
 // Get returns the stored credentials, or nil if none exist.
+// Delete removes the credentials for one client_id.
+func (c *DynamicRegistrationColl) Delete(ctx context.Context, clientID string) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:delete")
+	defer span.End()
+
+	if clientID == "" {
+		return nil
+	}
+
+	if _, err := c.Coll.DeleteOne(ctx, bson.M{"client_id": clientID}); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
+	return nil
+}
+
 func (c *DynamicRegistrationColl) Get(ctx context.Context) (*DynamicRegistrationCredentials, error) {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:get")
 	defer span.End()
