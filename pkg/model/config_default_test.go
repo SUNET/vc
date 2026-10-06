@@ -6,6 +6,7 @@ import (
 	"github.com/creasty/defaults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v2"
 )
 
 func TestAPIServerDefaults(t *testing.T) {
@@ -247,4 +248,42 @@ func TestOAuthServerDefaults(t *testing.T) {
 
 	assert.Equal(t, []string{"authorization_code", "urn:ietf:params:oauth:grant-type:pre-authorized_code"}, cfg.GrantTypes)
 	assert.Equal(t, 86400, cfg.RefreshTokenDuration)
+}
+
+// TestDynamicRegistrationJWTClockSkewExplicitZero pins the one value an
+// operator writes on purpose.
+//
+// Config loading unmarshals YAML and then runs defaults.Set, which fills any
+// field still holding its zero value. As a plain int, clock_skew_seconds: 0 -
+// written precisely to turn the tolerance off - is indistinguishable from the
+// key being absent, and silently becomes 60: the deployment that asked for no
+// skew gets a minute of it, with nothing said. A pointer keeps the two apart,
+// so the default lands only when the key really was absent.
+func TestDynamicRegistrationJWTClockSkewExplicitZero(t *testing.T) {
+	load := func(t *testing.T, yamlDoc string) *DynamicRegistrationJWTAuthConfig {
+		t.Helper()
+		cfg := &DynamicRegistrationJWTAuthConfig{}
+		require.NoError(t, yaml.Unmarshal([]byte(yamlDoc), cfg))
+		require.NoError(t, defaults.Set(cfg))
+
+		return cfg
+	}
+
+	t.Run("absent takes the default", func(t *testing.T) {
+		cfg := load(t, "jwks_uri: https://auth.example.com/jwks.json\n")
+		require.NotNil(t, cfg.ClockSkewSeconds)
+		assert.Equal(t, 60, *cfg.ClockSkewSeconds)
+	})
+
+	t.Run("explicit zero survives", func(t *testing.T) {
+		cfg := load(t, "clock_skew_seconds: 0\n")
+		require.NotNil(t, cfg.ClockSkewSeconds)
+		assert.Equal(t, 0, *cfg.ClockSkewSeconds, "an explicit zero must disable skew, not be overwritten by the default")
+	})
+
+	t.Run("explicit value survives", func(t *testing.T) {
+		cfg := load(t, "clock_skew_seconds: 5\n")
+		require.NotNil(t, cfg.ClockSkewSeconds)
+		assert.Equal(t, 5, *cfg.ClockSkewSeconds)
+	})
 }

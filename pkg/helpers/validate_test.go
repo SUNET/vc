@@ -704,3 +704,83 @@ func TestAPIAuthJWKS_SourceValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "required_if")
 	})
 }
+
+// TestAsymmetricJWSAlgValidation: the key set behind jwks_uri is PUBLISHED,
+// so a symmetric algorithm turns it into a secret handout - configure HS256,
+// serve an `oct` key, and anyone who can fetch the key set mints registration
+// tokens. An allowlist, so an algorithm nobody thought about is refused
+// rather than forwarded to go-oidc.
+func TestAsymmetricJWSAlgValidation(t *testing.T) {
+	for _, alg := range []string{"RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA"} {
+		assert.True(t, IsAsymmetricJWSAlg(alg), "%s signs with a private key", alg)
+	}
+	for _, alg := range []string{"HS256", "HS384", "HS512", "none", "", "RS255", "dir", "A128KW"} {
+		assert.False(t, IsAsymmetricJWSAlg(alg), "%s must not be accepted for a published key set", alg)
+	}
+
+	assert.True(t, IsAsymmetricJWKType("RSA"))
+	assert.True(t, IsAsymmetricJWKType("EC"))
+	assert.True(t, IsAsymmetricJWKType("OKP"))
+	assert.False(t, IsAsymmetricJWKType("oct"), "a shared secret has no public half")
+	assert.False(t, IsAsymmetricJWKType(""))
+}
+
+// TestAllowedSigningAlgsRejectsSymmetricAtStartup is the config half: the
+// allowlist above only protects anything if the struct tag applies it, and
+// the failure it prevents is a deployment that starts happily and hands its
+// signing key to everyone who can fetch its JWKS.
+func TestAllowedSigningAlgsRejectsSymmetricAtStartup(t *testing.T) {
+	validate, err := NewValidator()
+	require.NoError(t, err)
+
+	cfgWith := func(algs []string) *model.DynamicRegistrationJWTAuthConfig {
+		return &model.DynamicRegistrationJWTAuthConfig{
+			JWKSURI:            "https://issuer.example.com/jwks",
+			Issuer:             "https://issuer.example.com",
+			Audience:           "https://verifier.example.com/register",
+			AllowedSigningAlgs: algs,
+		}
+	}
+
+	assert.NoError(t, validate.Struct(cfgWith([]string{"RS256", "ES256"})))
+	assert.NoError(t, validate.Struct(cfgWith(nil)), "absent means the default applies")
+
+	for _, algs := range [][]string{
+		{"HS256"},
+		{"none"},
+		{"RS256", "HS512"},
+		{"RS256", "not-an-algorithm"},
+	} {
+		assert.Error(t, validate.Struct(cfgWith(algs)), "%v must not start", algs)
+	}
+}
+
+// TestHTTPSEndpointRequiresAHostname: url.Parse leaves Host as ":443" for
+// "https://:443/jwks", so a check on Host alone passes a URL with no host in
+// it. The service then starts on an endpoint nothing can be fetched from and
+// fails per request instead - for jwks_uri, as a 503 every time.
+func TestHTTPSEndpointRequiresAHostname(t *testing.T) {
+	validate, err := NewValidator()
+	require.NoError(t, err)
+
+	cfgWith := func(jwksURI string) *model.DynamicRegistrationJWTAuthConfig {
+		return &model.DynamicRegistrationJWTAuthConfig{
+			JWKSURI:  jwksURI,
+			Issuer:   "https://issuer.example.com",
+			Audience: "https://verifier.example.com/register",
+		}
+	}
+
+	assert.NoError(t, validate.Struct(cfgWith("https://issuer.example.com/jwks")))
+	assert.NoError(t, validate.Struct(cfgWith("https://issuer.example.com:8443/jwks")))
+
+	for _, uri := range []string{
+		"https://:443/jwks",
+		"https://:8443/jwks",
+		"https:///jwks",
+		"http://issuer.example.com/jwks",
+		"issuer.example.com/jwks",
+	} {
+		assert.Error(t, validate.Struct(cfgWith(uri)), "%q names no https host", uri)
+	}
+}
