@@ -427,7 +427,7 @@ func TestCreateRequestObject_LegacyJARMParamsAreOptIn(t *testing.T) {
 	md := cached.ClientMetadata
 	assert.Equal(t, "ECDH-ES", md.AuthorizationEncryptedResponseALG)
 	assert.Equal(t, "A256GCM", md.AuthorizationEncryptedResponseENC)
-	assert.Equal(t, []string{"A256GCM"}, md.EncryptedResponseEncValuesSupported,
+	assert.Equal(t, []string{"A256GCM", "A128GCM"}, md.EncryptedResponseEncValuesSupported,
 		"the 1.0 member stays regardless - the switch adds, it does not replace")
 }
 
@@ -454,7 +454,7 @@ func TestCreateRequestObject_EncryptedModeCarriesAKey(t *testing.T) {
 	require.NotNil(t, md.JWKS, "the wallet needs a key to encrypt to")
 	require.Len(t, md.JWKS.Keys, 1)
 
-	assert.Equal(t, []string{"A256GCM"}, md.EncryptedResponseEncValuesSupported,
+	assert.Equal(t, []string{"A256GCM", "A128GCM"}, md.EncryptedResponseEncValuesSupported,
 		"OpenID4VP 1.0 expects an array under this name")
 
 	// The draft-era pair is absent by default: OpenID4VP 1.0 closed
