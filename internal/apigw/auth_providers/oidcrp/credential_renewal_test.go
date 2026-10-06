@@ -52,11 +52,11 @@ func (f *fakeRegistrationStore) GetByClientID(_ context.Context, clientID string
 	return nil, nil
 }
 
-func (f *fakeRegistrationStore) PruneSuperseded(_ context.Context, keepClientID string, before time.Time) error {
+func (f *fakeRegistrationStore) PruneExpiredRegistrations(_ context.Context, keepClientID string, now time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.keptOnly = append(f.keptOnly, keepClientID)
-	f.prunedBefore = append(f.prunedBefore, before)
+	f.prunedBefore = append(f.prunedBefore, now)
 	return nil
 }
 
@@ -328,19 +328,6 @@ func TestEnsureCredentialsFailsWithoutARegistrationEndpoint(t *testing.T) {
 	assert.Contains(t, err.Error(), "registration_endpoint")
 }
 
-// The client exists at the OP whether or not the write succeeded, so it is
-// used either way - failing here would leave the expired secret in place.
-func TestEnsureCredentialsUsesTheNewClientEvenIfPersistingFails(t *testing.T) {
-	op := newOPServer(t)
-	store := &fakeRegistrationStore{saveErr: assert.AnError}
-	s := renewalService(t, op, store, time.Now().Add(clientSecretRenewBefore/2))
-
-	require.NoError(t, s.ensureCredentials(t.Context()))
-
-	assert.Equal(t, "client-1", s.currentClientID(t))
-	assert.Empty(t, store.keptOnly, "nothing was stored, so there is nothing to prune against")
-}
-
 // ensureReady is what every entry point calls - InitiateAuth,
 // ProcessCallback and GetUserInfo all start with it - so renewal has to
 // hang off it. A correct ensureCredentials that nothing calls is a renewal
@@ -455,16 +442,28 @@ func TestCredentialsForSessionReadsAnotherReplicasRegistration(t *testing.T) {
 
 // A client nothing knows about falls back to the current registration,
 // which is what the service did before sessions recorded one at all.
-func TestCredentialsForSessionFallsBackToTheCurrentRegistration(t *testing.T) {
+// A session that names a client nobody can resolve must NOT fall back to
+// the current one: the exchange is then guaranteed to fail, and the caller
+// deletes the session on an exchange failure, losing a flow that could
+// have been retried.
+func TestCredentialsForSessionRefusesAnUnresolvableClient(t *testing.T) {
 	op := newOPServer(t)
 	store := &fakeRegistrationStore{}
 	s := renewalService(t, op, store, time.Now().Add(24*time.Hour))
 
-	creds, err := s.credentialsForSession(t.Context(), "a-client-nobody-has-heard-of")
-	require.NoError(t, err)
-	assert.Equal(t, "client-0", creds.clientID)
+	_, err := s.credentialsForSession(t.Context(), "a-client-nobody-has-heard-of")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "a-client-nobody-has-heard-of")
+}
 
-	creds, err = s.credentialsForSession(t.Context(), "")
+// A session created before the client id was recorded names none, and must
+// still work the way it did before.
+func TestCredentialsForSessionFallsBackOnlyWhenNoClientIsNamed(t *testing.T) {
+	op := newOPServer(t)
+	store := &fakeRegistrationStore{}
+	s := renewalService(t, op, store, time.Now().Add(24*time.Hour))
+
+	creds, err := s.credentialsForSession(t.Context(), "")
 	require.NoError(t, err)
 	assert.Equal(t, "client-0", creds.clientID)
 }
@@ -472,7 +471,11 @@ func TestCredentialsForSessionFallsBackToTheCurrentRegistration(t *testing.T) {
 // Two replicas renewing at once must not each delete the other's brand new
 // registration and leave the store empty. The prune is bounded by age, so
 // a row saved moments ago is never old enough to remove.
-func TestRenewalPrunesOnlyRegistrationsOldEnoughToBeIdle(t *testing.T) {
+// Pruning is by expiry, not by age. "Registered long ago" says nothing
+// about whether a registration is in use - in HA another replica can be
+// running on an hours-old one - so the cutoff handed to the store is now,
+// and the store deletes only secrets that have already expired.
+func TestRenewalPrunesByExpiryNotAge(t *testing.T) {
 	op := newOPServer(t)
 	store := &fakeRegistrationStore{}
 	s := renewalService(t, op, store, time.Now().Add(clientSecretRenewBefore/2))
@@ -480,8 +483,23 @@ func TestRenewalPrunesOnlyRegistrationsOldEnoughToBeIdle(t *testing.T) {
 	require.NoError(t, s.ensureCredentials(t.Context()))
 
 	require.Len(t, store.prunedBefore, 1)
-	assert.True(t, store.prunedBefore[0].Before(time.Now()),
-		"the cutoff must be in the past, or a fresh registration could be pruned")
-	assert.WithinDuration(t, time.Now().Add(-s.credentialRetainFor()), store.prunedBefore[0], time.Minute,
-		"the cutoff is one flow lifetime ago")
+	assert.WithinDuration(t, time.Now(), store.prunedBefore[0], time.Minute,
+		"the cutoff is now; the store decides what has expired")
+	assert.Equal(t, []string{"client-1"}, store.keptOnly)
+}
+
+// A registration that cannot be stored is not published. In HA the shared
+// session would record a client id no other replica can resolve, so the
+// authorization code could not be redeemed at all.
+func TestRenewalDoesNotPublishAnUnstorableRegistration(t *testing.T) {
+	op := newOPServer(t)
+	store := &fakeRegistrationStore{saveErr: assert.AnError}
+	s := renewalService(t, op, store, time.Now().Add(clientSecretRenewBefore/2))
+
+	// The secret is still valid, so ensureCredentials tolerates the failure
+	// and the request proceeds - on the old client, which still works.
+	require.NoError(t, s.ensureCredentials(t.Context()))
+
+	assert.Equal(t, "client-0", s.currentClientID(t),
+		"an unstorable registration must not become the one flows start on")
 }

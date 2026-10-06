@@ -91,19 +91,21 @@ func (c *SQLDynamicRegistrationColl) GetByClientID(ctx context.Context, clientID
 	}, nil
 }
 
-// PruneSuperseded removes registrations other than keepClientID that were
-// registered before `before`.
-func (c *SQLDynamicRegistrationColl) PruneSuperseded(ctx context.Context, keepClientID string, before time.Time) error {
-	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:dynamic_registration:prune_superseded")
+// PruneExpiredRegistrations removes registrations other than keepClientID
+// whose client secret had expired at now.
+func (c *SQLDynamicRegistrationColl) PruneExpiredRegistrations(ctx context.Context, keepClientID string, now time.Time) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:dynamic_registration:prune_expired")
 	defer span.End()
 
 	if keepClientID == "" {
 		return nil
 	}
 
+	// client_secret_expires_at 0 means "never expires" (RFC 7591 §3.2.1).
 	query := c.dialect.Rebind(
-		`DELETE FROM oidc_dynamic_registration WHERE client_id <> ? AND registered_at < ?`)
-	if _, err := c.db.ExecContext(ctx, query, keepClientID, before.UTC()); err != nil {
+		`DELETE FROM oidc_dynamic_registration
+		 WHERE client_id <> ? AND client_secret_expires_at > 0 AND client_secret_expires_at < ?`)
+	if _, err := c.db.ExecContext(ctx, query, keepClientID, now.Unix()); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return err
 	}

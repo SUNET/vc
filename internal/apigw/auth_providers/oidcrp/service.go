@@ -243,12 +243,18 @@ func (s *Service) credentialsForSession(ctx context.Context, clientID string) (*
 		}
 	}
 
-	// Nothing knows this client. The current registration is what the
-	// service used before sessions recorded one at all: it may fail the
-	// exchange, but having no credentials certainly does.
+	// A session naming a client nobody can resolve must not fall back. Both
+	// lookups above have established that the current registration is a
+	// different client, so exchanging with it is guaranteed to fail - and
+	// the caller deletes the session on an exchange failure, turning a
+	// retryable situation into a lost flow. Say what is wrong instead.
+	if clientID != "" {
+		return nil, fmt.Errorf("no client registration found for %q; this flow cannot be completed", clientID)
+	}
+
+	// No client named at all: a session created before this was recorded.
+	// The current registration is what the service used then.
 	if c := s.creds.load(); c != nil {
-		s.log.Debug("no registration found for a session's client; using the current one",
-			"session_client_id", clientID, "client_id", c.clientID)
 		return c, nil
 	}
 
@@ -380,6 +386,13 @@ func (s *Service) renewCredentials(ctx context.Context) error {
 		previousClientID = current.clientID
 	}
 
+	// Persist before publishing, and fail the renewal if it cannot be
+	// persisted. A client this process uses but nobody can look up breaks
+	// HA: the shared session records the client id, and a callback landing
+	// on another replica cannot resolve credentials for it, so the code
+	// cannot be redeemed at all. The caller already tolerates a renewal
+	// error while the current secret is still valid, which is the case
+	// where carrying on was tempting.
 	if err := s.dbService.DynamicRegistrationColl.Save(ctx, &db.DynamicRegistrationCredentials{
 		ClientID:                regResp.ClientID,
 		ClientSecret:            regResp.ClientSecret,
@@ -387,27 +400,18 @@ func (s *Service) renewCredentials(ctx context.Context) error {
 		RegistrationClientURI:   regResp.RegistrationClientURI,
 		ClientSecretExpiresAt:   regResp.ClientSecretExpiresAt,
 	}); err != nil {
-		// The new client exists at the OP whether or not we stored it, so
-		// use it; the next restart re-registers, which is wasteful but not
-		// broken. Failing here would leave the expired secret in place.
-		s.log.Error(err, "oidcrp_reregistration_not_persisted", "client_id", regResp.ClientID)
-	} else {
-		// Save upserts on client_id, so a new client id leaves the old row
-		// behind. Prune every other row rather than just the one we know
-		// about - a crash between an earlier save and its prune can have
-		// left more - but only rows old enough that no flow can still be
-		// using them.
-		//
-		// The age bound is what makes this safe under HA. Two replicas
-		// renewing at once would otherwise each delete the other's brand
-		// new registration and leave the store empty; a row saved moments
-		// ago is never old enough to prune. It is also what lets a callback
-		// landing on another replica find the registration its flow started
-		// under.
-		before := time.Now().Add(-s.credentialRetainFor())
-		if err := s.dbService.DynamicRegistrationColl.PruneSuperseded(ctx, regResp.ClientID, before); err != nil {
-			s.log.Error(err, "oidcrp_superseded_registrations_not_pruned", "client_id", regResp.ClientID)
-		}
+		return fmt.Errorf("storing the new client registration: %w", err)
+	}
+
+	// Remove registrations whose secret has expired. Expiry rather than
+	// age: "registered long ago" says nothing about whether a registration
+	// is still in use, and in HA another replica can be running on an
+	// hours-old one as its current client. A secret that has expired cannot
+	// be redeemed by anyone, so its row is dead to every replica. A failure
+	// here is not worth refusing a working renewal over - the rows are
+	// inert, and a later renewal clears them.
+	if err := s.dbService.DynamicRegistrationColl.PruneExpiredRegistrations(ctx, regResp.ClientID, time.Now()); err != nil {
+		s.log.Error(err, "oidcrp_expired_registrations_not_pruned", "client_id", regResp.ClientID)
 	}
 
 	s.applyCredentials(regResp.ClientID, regResp.ClientSecret, regResp.ClientSecretExpiresAt)

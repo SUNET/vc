@@ -103,19 +103,24 @@ func (c *DynamicRegistrationColl) GetByClientID(ctx context.Context, clientID st
 	return &creds, nil
 }
 
-// PruneSuperseded removes registrations other than keepClientID that were
-// registered before `before`.
-func (c *DynamicRegistrationColl) PruneSuperseded(ctx context.Context, keepClientID string, before time.Time) error {
-	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:prune_superseded")
+// PruneExpiredRegistrations removes registrations other than keepClientID
+// whose client secret had expired at now.
+func (c *DynamicRegistrationColl) PruneExpiredRegistrations(ctx context.Context, keepClientID string, now time.Time) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:prune_expired")
 	defer span.End()
 
 	if keepClientID == "" {
 		return nil
 	}
 
+	// client_secret_expires_at 0 means "never expires" (RFC 7591 §3.2.1),
+	// so those rows are excluded by the lower bound as well as the upper.
 	filter := bson.M{
-		"client_id":     bson.M{"$ne": keepClientID},
-		"registered_at": bson.M{"$lt": before},
+		"client_id": bson.M{"$ne": keepClientID},
+		"client_secret_expires_at": bson.M{
+			"$gt": int64(0),
+			"$lt": now.Unix(),
+		},
 	}
 	if _, err := c.Coll.DeleteMany(ctx, filter); err != nil {
 		span.SetStatus(codes.Error, err.Error())

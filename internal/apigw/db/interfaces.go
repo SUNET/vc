@@ -56,20 +56,25 @@ type DynamicRegistrationStore interface {
 	// flow has to be able to find the registration it started under.
 	GetByClientID(ctx context.Context, clientID string) (*DynamicRegistrationCredentials, error)
 
-	// PruneSuperseded removes stored registrations other than keepClientID
-	// that were registered before `before`.
+	// PruneExpiredRegistrations removes stored registrations whose client
+	// secret had already expired at `now`, except keepClientID.
 	//
-	// The age bound is what makes this safe when two HA replicas renew at
-	// once: a row saved moments ago is never old enough to prune, so
-	// neither replica can delete the other's new registration and leave the
-	// store empty. It is also what lets a callback find the registration
-	// its flow started under - pass now minus the session lifetime.
+	// Expiry, not age, is the safe predicate. "Registered long ago" says
+	// nothing about whether a registration is still in use: in HA another
+	// replica can be running on an hours-old registration as its current
+	// one, and deleting it would strand every callback that lands here. A
+	// secret that has expired cannot be redeemed by anyone, so removing its
+	// row takes nothing away from any replica.
+	//
+	// Registrations whose secret never expires are never pruned, which is
+	// the price of not coordinating; they accumulate one row per renewal,
+	// and an OP issuing non-expiring secrets gives no reason to renew.
 	//
 	// Idempotent on purpose: the save and the prune cannot be made atomic
 	// across both backends, so a crash between them leaves extra rows and a
 	// later renewal clears them. Get orders by registered_at, so startup
 	// does not depend on the prune having happened.
-	PruneSuperseded(ctx context.Context, keepClientID string, before time.Time) error
+	PruneExpiredRegistrations(ctx context.Context, keepClientID string, now time.Time) error
 }
 
 // Ensure concrete types implement the interfaces
