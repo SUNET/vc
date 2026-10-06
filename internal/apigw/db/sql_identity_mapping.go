@@ -135,9 +135,7 @@ func (c *SQLIdentityMappingsColl) ResolveMapping(ctx context.Context, query *Res
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:identities:resolveMapping")
 	defer span.End()
 
-	// See the note on IdentityMappingsColl.ResolveMapping: resolving without
-	// an authentic source searches every namespace and returns somebody
-	// else's identity (SUNET/vc#507).
+	// See the note on IdentityMappingsColl.ResolveMapping.
 	if query.AuthenticSource == "" {
 		span.SetStatus(codes.Error, ErrIdentityMappingNamespaceRequired.Error())
 		return "", ErrIdentityMappingNamespaceRequired
