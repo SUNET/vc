@@ -210,9 +210,14 @@ type ProofsTypesSupported struct {
 	//
 	// It was emitted unconditionally because eudi-lib-jvm-openid4vci-kt
 	// 0.12.1+ hard-fails metadata validation without the field. That is a
-	// lagging implementation, not the specification, so it is now opt-in
-	// through Issuer.IssuerMetadata.KeyAttestationsRequired rather than the
-	// default.
+	// lagging implementation, not the specification.
+	//
+	// vc's own metadata generator now always leaves this nil, with no
+	// setting to change that: nothing on the issuance path enforces a key
+	// attestation requirement, so any value here would advertise something
+	// this build does not keep. The field stays because it is part of the
+	// wire format - metadata read FROM another issuer may carry it - and
+	// because enforcement, once written, needs somewhere to put the answer.
 	KeyAttestationsRequired *KeyAttestationRequirement `json:"key_attestations_required,omitempty" yaml:"key_attestations_required,omitempty"`
 }
 
