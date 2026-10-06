@@ -378,6 +378,32 @@ func vctmCardURI(vctm *sdjwtvc.VCTM) (uri string, fromLogo bool) {
 	return "", false
 }
 
+// checkCardContentType decides whether a fetched card may be used, given
+// what the origin said it is.
+//
+// A logo must be SVG and must SAY so: this pipeline carries no media type
+// and consent.js decodes the bytes as UTF-8 text, so raster bytes become a
+// broken image rather than no image. A response with no Content-Type at all
+// is therefore not usable either - "could not confirm" is not "SVG" - and
+// the credential is treated as having no card.
+//
+// A declared svg_template keeps the behaviour it had: a missing header is
+// tolerated, since an origin serving a template is being pointed at
+// deliberately, and a header naming something else is a configuration error
+// worth seeing rather than a silent absence.
+func checkCardContentType(contentType string, fromLogo bool) error {
+	if fromLogo {
+		if !strings.HasPrefix(contentType, "image/svg+xml") {
+			return ErrNoSVGTemplate
+		}
+		return nil
+	}
+	if contentType != "" && !strings.HasPrefix(contentType, "image/svg+xml") {
+		return fmt.Errorf("unexpected content type from SVG template origin: %s", contentType)
+	}
+	return nil
+}
+
 // isSVGDataURI reports whether a data: URI declares SVG content. A URI with
 // no media type at all defaults to text/plain per RFC 2397, which is not
 // SVG, so the absent case is correctly false.
@@ -505,15 +531,8 @@ func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) 
 			return nil, err
 		}
 
-		contentType := response.Header.Get("Content-Type")
-		if contentType != "" && !strings.HasPrefix(contentType, "image/svg+xml") {
-			// Same reasoning as the data: branch above - a logo that turns
-			// out to be raster is a credential with no SVG card, not a
-			// misconfiguration.
-			if fromLogo {
-				return nil, ErrNoSVGTemplate
-			}
-			return nil, fmt.Errorf("unexpected content type from SVG template origin: %s", contentType)
+		if err := checkCardContentType(response.Header.Get("Content-Type"), fromLogo); err != nil {
+			return nil, err
 		}
 
 		const maxSVGSize = 5 * 1024 * 1024 // 5MB

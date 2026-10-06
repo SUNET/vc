@@ -7,6 +7,7 @@ import (
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -196,6 +197,40 @@ func TestIsSVGDataURI(t *testing.T) {
 	} {
 		t.Run(uri, func(t *testing.T) {
 			assert.Equal(t, want, isSVGDataURI(uri))
+		})
+	}
+}
+
+// An origin that returns 200 with no Content-Type at all used to skip the
+// check entirely, so a PNG body would be cached and handed to the SVG-only
+// renderer. For a logo, "could not confirm" is not "SVG".
+func TestCheckCardContentType(t *testing.T) {
+	for name, tc := range map[string]struct {
+		contentType string
+		fromLogo    bool
+		wantNoCard  bool
+		wantErr     bool
+	}{
+		"logo, svg":                      {contentType: "image/svg+xml", fromLogo: true},
+		"logo, svg with charset":         {contentType: "image/svg+xml; charset=utf-8", fromLogo: true},
+		"logo, png":                      {contentType: "image/png", fromLogo: true, wantNoCard: true},
+		"logo, no header":                {contentType: "", fromLogo: true, wantNoCard: true},
+		"logo, html error page":          {contentType: "text/html", fromLogo: true, wantNoCard: true},
+		"template, svg":                  {contentType: "image/svg+xml"},
+		"template, no header is allowed": {contentType: ""},
+		"template, png is an error":      {contentType: "image/png", wantErr: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := checkCardContentType(tc.contentType, tc.fromLogo)
+			switch {
+			case tc.wantNoCard:
+				assert.ErrorIs(t, err, ErrNoSVGTemplate)
+			case tc.wantErr:
+				require.Error(t, err)
+				assert.NotErrorIs(t, err, ErrNoSVGTemplate)
+			default:
+				assert.NoError(t, err)
+			}
 		})
 	}
 }
