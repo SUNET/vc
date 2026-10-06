@@ -1374,10 +1374,18 @@ type CredentialEncryption struct {
 	// waiting for cached metadata to expire, and removing the old one.
 	//
 	// Each key must be an ECDSA P-256 private key in a PEM file. The type is
-	// deliberately narrower than pki.KeyConfig: ECDH-ES needs the private
-	// scalar to derive a shared secret, and the PKCS#11 path hands back a
-	// signer that will not perform key agreement, so offering an hsm setting
-	// here would advertise something that cannot work.
+	// deliberately narrower than pki.KeyConfig, but only because of what vc
+	// implements today, not because of anything about HSMs: PKCS#11 has
+	// CKM_ECDH1_DERIVE and the vendored module exposes it, so an HSM can
+	// perform this key agreement. What cannot is the path vc takes to get
+	// there - pki hands back a crypto.Signer, and jwe.Decrypt needs a
+	// concrete *ecdh.PrivateKey to call ECDH on.
+	//
+	// Supporting an HSM here means deriving Z through PKCS#11 and doing the
+	// Concat KDF, key unwrap and content decryption around it, instead of
+	// handing the key to jwe.Decrypt. Until that exists, an hsm setting here
+	// would advertise something this build cannot do, so there is none. See
+	// SUNET/vc#734.
 	Keys []CredentialEncryptionKey `yaml:"keys" validate:"omitempty,dive"`
 
 	// RequestEncryptionRequired publishes
@@ -1411,8 +1419,8 @@ type CredentialEncryption struct {
 
 // CredentialEncryptionKey is one of this issuer's key-agreement keys.
 //
-// File-backed only; see CredentialEncryption.Keys for why there is no HSM
-// option.
+// File-backed only as things stand; see CredentialEncryption.Keys for what
+// an HSM option would take.
 type CredentialEncryptionKey struct {
 	// PrivateKeyPath is the path to a PEM file holding an ECDSA P-256
 	// private key.

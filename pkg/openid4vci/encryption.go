@@ -93,10 +93,17 @@ type CredentialEncryption struct {
 }
 
 // NewCredentialEncryption builds the encrypter from the issuer's private
-// key-agreement keys. Keys are ECDSA P-256 private keys; anything else is
-// refused here rather than at the first request, because a key that cannot
-// perform ECDH-ES is a configuration error and the metadata would otherwise
-// advertise a capability the endpoint does not have.
+// key-agreement keys.
+//
+// Keys are ECDSA P-256 private keys, and anything else is refused here
+// rather than at the first request: the metadata would otherwise advertise a
+// capability the endpoint does not have.
+//
+// The concrete type is what jwe.Decrypt needs to call ECDH on, which is also
+// why an HSM-held key cannot be passed here - a PKCS#11 key CAN perform this
+// agreement (CKM_ECDH1_DERIVE), but reaching it means deriving Z through the
+// module and doing the Concat KDF and unwrap around it rather than handing
+// the key to jwe.Decrypt.
 func NewCredentialEncryption(keys []crypto.PrivateKey, requestRequired, responseRequired bool) (*CredentialEncryption, error) {
 	if len(keys) == 0 {
 		if requestRequired || responseRequired {
