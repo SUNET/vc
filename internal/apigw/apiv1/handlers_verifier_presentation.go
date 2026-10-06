@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"strings"
 	"time"
 
@@ -73,8 +72,14 @@ func (c *Client) finalisePresentationVerification(ctx context.Context, authCtx *
 	// consent UI sees the same claims (e.g. age_over_*, over_*_this_year)
 	// that will actually be issued — walking the target VCTM against only
 	// the raw verified claims would otherwise render an empty preview.
-	previewData := make(map[string]any, len(verified))
-	maps.Copy(previewData, verified)
+	// Deep clone, not maps.Copy: MergeNestedClaims below writes INTO an
+	// existing nested map, so a shallow copy shares e.g. the "identity"
+	// sub-map with verified - and verified is authCtx.VerifiedClaims, which
+	// was just persisted and which issuance rebuilds the real document from.
+	// A derivation targeting a dotted path would otherwise write its result
+	// into the holder's verified claims. buildPresentationDocument already
+	// clones for the same reason.
+	previewData := credential.CloneNestedClaims(verified)
 	now := time.Now()
 	derived, err := credential.ApplyDerivations(pScope.Derivations, verified, now)
 	if err != nil {

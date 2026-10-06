@@ -187,6 +187,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkRandomDerivations(cfg); err != nil {
+		return nil, err
+	}
+
 	if err := checkAuthScopes(cfg); err != nil {
 		return nil, err
 	}
@@ -215,6 +219,44 @@ func checkCredentialMetadataEntries(cfg *model.Cfg) error {
 	if len(empty) > 0 {
 		return fmt.Errorf("common.credential_metadata: no configuration under %s", strings.Join(empty, ", "))
 	}
+	return nil
+}
+
+// checkRandomDerivations refuses the random primitive on a presentation
+// source, where it would show one value at consent and issue another.
+//
+// Derivations run twice there, from the same verified claims and with
+// nothing carried between them: once in finalisePresentationVerification to
+// build the preview the consent page renders, and again in
+// buildPresentationDocument to build the credential. Every other primitive
+// is a function of its input, so both runs agree. random is not, so the
+// identifier the holder approves is not the identifier they receive - which
+// for a document identifier is worse than not having the feature.
+//
+// The other sources are fine and are where the feature is wanted
+// (SUNET/vc#736): assertion sources run derivations once, in the SAML ACS or
+// OIDC callback, before the document is cached, so one value covers consent
+// and every credential issued from that session.
+//
+// Refusing at config load rather than at issuance: the failure is otherwise
+// invisible - nothing errors, the two values simply differ.
+func checkRandomDerivations(cfg *model.Cfg) error {
+	if cfg == nil || cfg.APIGW == nil {
+		return nil
+	}
+
+	scopes := cfg.APIGW.DataSources.Presentation.Scopes
+	for _, scope := range slices.Sorted(maps.Keys(scopes)) {
+		for i, derivation := range scopes[scope].Derivations {
+			if derivation.Random != nil {
+				return fmt.Errorf("apigw.data_sources.presentation.scopes.%s.derivations[%d]: "+
+					"the random primitive is not supported on a presentation source, because derivations run "+
+					"once for the consent preview and again for issuance, so the generated value would differ "+
+					"between what the holder approves and what they receive", scope, i)
+			}
+		}
+	}
+
 	return nil
 }
 

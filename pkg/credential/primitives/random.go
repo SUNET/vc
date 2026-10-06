@@ -55,6 +55,13 @@ const (
 // For an identifier meant to name a credential dataset, the first is what is
 // wanted, which is also the case the issue describes.
 //
+// Presentation sources are refused at config load. They run derivations
+// twice from the same verified claims, with nothing carried between them -
+// once to build the consent preview and again to build the credential - so
+// a non-deterministic primitive would show the holder one identifier and
+// issue another. Every other primitive is a function of its input and so
+// agrees across both runs. See configuration.checkRandomDerivations.
+//
 // Nothing here checks that a value has not been issued before. Uniqueness
 // rests on the generator: a version 4 UUID has 122 random bits, and hex and
 // base64url take theirs from crypto/rand. That is the same basis every other
