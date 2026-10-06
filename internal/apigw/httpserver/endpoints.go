@@ -91,11 +91,26 @@ func (s *Service) endpointVCICredential(ctx context.Context, c *gin.Context) (an
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointVCICredential")
 	defer span.End()
 
+	// An encrypted request (OpenID4VCI 1.0 §8.3) arrives as application/jwt;
+	// this decrypts it in place so the binder below sees ordinary JSON.
+	encrypted, err := s.acceptEncryptedRequest(c)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "credential request decryption error")
+		return nil, err
+	}
+
 	request := &openid4vci.CredentialRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "binding error")
 		return nil, &openid4vci.Error{Err: openid4vci.ErrInvalidCredentialRequest, ErrorDescription: err.Error()}
+	}
+
+	if err := s.checkResponseEncryption(request.CredentialResponseEncryption, encrypted); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "credential response encryption error")
+		return nil, err
 	}
 
 	reply, err := s.apiv1.VCICredential(ctx, request)
@@ -104,6 +119,11 @@ func (s *Service) endpointVCICredential(ctx context.Context, c *gin.Context) (an
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+
+	if request.CredentialResponseEncryption != nil {
+		return s.writeEncryptedReply(c, request.CredentialResponseEncryption, reply)
+	}
+
 	return reply, nil
 }
 
@@ -112,16 +132,38 @@ func (s *Service) endpointVCIDeferredCredential(ctx context.Context, c *gin.Cont
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointDeferredCredential")
 	defer span.End()
 
+	encrypted, err := s.acceptEncryptedRequest(c)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "deferred credential request decryption error")
+		return nil, err
+	}
+
 	request := &openid4vci.DeferredCredentialRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+
+	// §9.1: the parameters here are the ones used, "regardless of what was
+	// sent in the initial Credential Request" - so this is read off the
+	// deferred request and never carried over from the first one.
+	if err := s.checkResponseEncryption(request.CredentialResponseEncryption, encrypted); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "deferred credential response encryption error")
+		return nil, err
+	}
+
 	reply, err := s.apiv1.VCIDeferredCredential(ctx, request)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
+
+	if request.CredentialResponseEncryption != nil {
+		return s.writeEncryptedReply(c, request.CredentialResponseEncryption, reply)
+	}
+
 	return reply, nil
 }
 

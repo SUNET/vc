@@ -187,6 +187,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkCredentialEncryption(cfg); err != nil {
+		return nil, err
+	}
+
 	if err := checkAuthScopes(cfg); err != nil {
 		return nil, err
 	}
@@ -215,6 +219,36 @@ func checkCredentialMetadataEntries(cfg *model.Cfg) error {
 	if len(empty) > 0 {
 		return fmt.Errorf("common.credential_metadata: no configuration under %s", strings.Join(empty, ", "))
 	}
+	return nil
+}
+
+// checkCredentialEncryption refuses the hand-written
+// apigw.issuer_metadata.credential_response_encryption, which used to publish
+// algorithms nothing implemented (SUNET/vc#707), and verifies that the
+// encryption keys that replace it can actually be loaded.
+//
+// Refusing rather than ignoring: an operator who wrote those algorithms down
+// meant for responses to be encrypted, and silently dropping that is the same
+// class of failure the configuration is replacing.
+func checkCredentialEncryption(cfg *model.Cfg) error {
+	if cfg == nil || cfg.APIGW == nil {
+		return nil
+	}
+
+	if cfg.APIGW.IssuerMetadata.CredentialResponseEncryption != nil {
+		return fmt.Errorf("apigw.issuer_metadata.credential_response_encryption is no longer configured by hand: " +
+			"the algorithms are now derived from the keys under apigw.issuer_metadata.credential_encryption.keys, " +
+			"so the metadata cannot advertise what the Credential Endpoint will not do. Remove this block and " +
+			"configure a key instead")
+	}
+
+	// Loading here rather than at first use: a key that cannot perform
+	// ECDH-ES must not become a 500 on a wallet's credential request, and the
+	// metadata is generated from the same call.
+	if _, err := cfg.APIGW.IssuerMetadata.CredentialEncryption.Load(); err != nil {
+		return fmt.Errorf("apigw.issuer_metadata.credential_encryption: %w", err)
+	}
+
 	return nil
 }
 

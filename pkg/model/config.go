@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"crypto"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -1330,8 +1331,22 @@ type IssuerMetadata struct {
 	CredentialSigningAlgValuesSupported []string `yaml:"credential_signing_alg_values_supported" validate:"omitempty"`
 	// ProofSigningAlgValuesSupported lists the supported proof algorithms
 	ProofSigningAlgValuesSupported []string `yaml:"proof_signing_alg_values_supported" validate:"omitempty"`
-	// CredentialResponseEncryption holds the response encryption configuration
+	// CredentialResponseEncryption is no longer written by hand.
+	//
+	// It used to let an operator state the algorithms this issuer would accept
+	// for an encrypted Credential Response - which nothing implemented, so the
+	// metadata asserted a capability the Credential Endpoint did not have.
+	// Both encryption objects are now derived from CredentialEncryption below,
+	// from keys that have actually been loaded, so the metadata and the
+	// endpoint cannot say different things.
+	//
+	// Config load refuses a deployment that still sets this, rather than
+	// ignoring it: silently dropping an operator's encryption settings is
+	// exactly the failure this replaces. See SUNET/vc#707.
 	CredentialResponseEncryption *openid4vci.MetadataCredentialResponseEncryption `yaml:"credential_response_encryption" validate:"omitempty"`
+	// CredentialEncryption configures JWE encryption of Credential and
+	// Deferred Credential messages.
+	CredentialEncryption CredentialEncryption `yaml:"credential_encryption" validate:"omitempty"`
 	// BatchCredentialIssuance holds the batch issuance configuration
 	BatchCredentialIssuance *openid4vci.BatchCredentialIssuance `yaml:"batch_credential_issuance" validate:"omitempty"`
 	// Display holds the display metadata
@@ -1340,6 +1355,66 @@ type IssuerMetadata struct {
 	// When configured, this is included in .well-known/openid-credential-issuer metadata
 	// so verifiers can dynamically discover trust anchors for ISO 18013-5 credentials.
 	MdocIacasURI string `yaml:"mdoc_iacas_uri" validate:"omitempty,url"`
+}
+
+// CredentialEncryption configures JWE encryption of Credential and Deferred
+// Credential messages, per OpenID4VCI 1.0 §8.3 and §12.2.4.
+//
+// With no key configured, neither credential_request_encryption nor
+// credential_response_encryption appears in the issuer metadata and the
+// Credential Endpoint refuses an encrypted request - an issuer that cannot
+// do this says so by staying silent, rather than by advertising it and
+// failing later.
+type CredentialEncryption struct {
+	// Keys are this Credential Issuer's key-agreement keys. Their public
+	// halves are published in credential_request_encryption.jwks, each with a
+	// kid derived as its RFC 7638 thumbprint, so rotation is adding a key,
+	// waiting for cached metadata to expire, and removing the old one.
+	//
+	// Each key must be an ECDSA P-256 private key, and must come from a file:
+	// ECDH-ES needs the private scalar to derive a shared secret, while the
+	// PKCS#11 path hands back a signer that will not perform key agreement.
+	// A key that cannot do the job is refused at startup.
+	Keys []pki.KeyConfig `yaml:"keys" validate:"omitempty,dive"`
+
+	// RequestEncryptionRequired publishes
+	// credential_request_encryption.encryption_required. When true, a
+	// Credential Request that arrives unencrypted is refused.
+	//
+	// False by default: turning the key on should not break every wallet that
+	// does not do JWE on the same day.
+	RequestEncryptionRequired *bool `yaml:"request_encryption_required" default:"false"`
+
+	// ResponseEncryptionRequired publishes
+	// credential_response_encryption.encryption_required. When true, a
+	// Credential Request without credential_response_encryption is refused.
+	//
+	// False by default, for the same reason.
+	ResponseEncryptionRequired *bool `yaml:"response_encryption_required" default:"false"`
+}
+
+// Load builds the encrypter from the configured keys, or returns nil when
+// none are configured. The same function serves the metadata generator and
+// the Credential Endpoint, so what is advertised and what is accepted cannot
+// drift apart.
+func (cfg *CredentialEncryption) Load() (*openid4vci.CredentialEncryption, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+
+	loader := pki.NewKeyLoader()
+	keys := make([]crypto.PrivateKey, 0, len(cfg.Keys))
+	for i := range cfg.Keys {
+		material, err := loader.LoadKeyMaterial(&cfg.Keys[i])
+		if err != nil {
+			return nil, fmt.Errorf("credential encryption key %d: %w", i, err)
+		}
+		keys = append(keys, material.PrivateKey)
+	}
+
+	return openid4vci.NewCredentialEncryption(keys,
+		BoolVal(cfg.RequestEncryptionRequired, false),
+		BoolVal(cfg.ResponseEncryptionRequired, false))
 }
 
 // CredentialOfferWallets holds wallet redirect configuration
@@ -2681,6 +2756,14 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		return nil, fmt.Errorf("failed to construct nonce endpoint URL: %w", err)
 	}
 
+	// Both encryption objects come from keys that have actually been loaded,
+	// so the metadata cannot advertise something the Credential Endpoint will
+	// refuse. nil when no key is configured, which omits both objects.
+	encryption, err := cfg.CredentialEncryption.Load()
+	if err != nil {
+		return nil, fmt.Errorf("credential encryption: %w", err)
+	}
+
 	metadataConfig := &openid4vci.MetadataConfig{
 		CredentialIssuer:                     publicURL,
 		CredentialEndpoint:                   credentialEndpoint,
@@ -2691,7 +2774,8 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		CryptographicBindingMethodsSupported: cfg.CryptographicBindingMethodsSupported,
 		CredentialSigningAlgValuesSupported:  cfg.CredentialSigningAlgValuesSupported,
 		ProofSigningAlgValuesSupported:       cfg.ProofSigningAlgValuesSupported,
-		CredentialResponseEncryption:         cfg.CredentialResponseEncryption,
+		CredentialRequestEncryption:          encryption.RequestMetadata(),
+		CredentialResponseEncryption:         encryption.ResponseMetadata(),
 		BatchCredentialIssuance:              cfg.BatchCredentialIssuance,
 		Display:                              cfg.Display,
 		CredentialConfigurationsSupported:    credentialConfigs,

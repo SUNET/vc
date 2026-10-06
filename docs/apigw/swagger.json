@@ -1651,6 +1651,20 @@
                     "description": "AuthorizationEndpoint URL of the authorization server's authorization endpoint [RFC6749].  This is REQUIRED unless no grant types are supported that use the authorization endpoint.",
                     "type": "string"
                 },
+                "client_attestation_pop_signing_alg_values_supported": {
+                    "description": "ClientAttestationPoPSigningALGValuesSupported lists the JWS \"alg\" values supported for the Client Attestation PoP JWT signature (draft-ietf-oauth-attestation-based-client-auth-07 §10.1). MUST be present when \"attest_jwt_client_auth\" appears in TokenEndpointAuthMethodsSupported.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "client_attestation_signing_alg_values_supported": {
+                    "description": "ClientAttestationSigningALGValuesSupported lists the JWS \"alg\" values supported for the Client Attestation JWT signature (draft-ietf-oauth-attestation-based-client-auth-07 §10.1). MUST be present when \"attest_jwt_client_auth\" appears in TokenEndpointAuthMethodsSupported.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "code_challenge_methods_supported": {
                     "description": "CodeChallengeMethodsSupported OPTIONAL. JSON array containing a list of Proof Key for Code Exchange (PKCE) [RFC7636] code challenge methods supported by this authorization server.  Code challenge method values are used in the \"code_challenge_method\" parameter defined in Section 4.3 of [RFC7636].  The valid code challenge method values are those registered in the IANA \"PKCE Code Challenge Methods\" registry [IANA.OAuth.Parameters].  If omitted, the authorization server does not support PKCE.",
                     "type": "array",
@@ -1817,6 +1831,10 @@
                         "type": "string"
                     }
                 },
+                "doctype": {
+                    "description": "Doctype is the ISO mdoc doctype identifier (Appendix A.2.2). Required\nfor format=\"mso_mdoc\"; must be absent for other formats. Enforced\nformat-specifically in ParseAuthorizationDetails.",
+                    "type": "string"
+                },
                 "format": {
                     "description": "Format REQUIRED when credential_configuration_id parameter is not present. String identifying the format of the Credential the Wallet needs. This Credential format identifier determines further claims in the authorization details object needed to identify the Credential type in the requested format. This specification defines Credential Format Profiles in Appendix A. It MUST NOT be present if credential_configuration_id parameter is present.",
                     "type": "string"
@@ -1828,7 +1846,7 @@
                     ]
                 },
                 "vct": {
-                    "description": "VCT REQUIRED. String as defined in Appendix A.3.2. This claim contains the type values the Wallet requests authorization for at the Credential Issuer. It MUST only be present if the format claim is present. It MUST not be present otherwise.",
+                    "description": "VCT is the SD-JWT VC type identifier (Appendix A.3.2). Required for\nformat=\"vc+sd-jwt\" / \"dc+sd-jwt\"; must be absent for other formats.\nEnforced format-specifically in ParseAuthorizationDetails.",
                     "type": "string"
                 }
             }
@@ -1934,12 +1952,8 @@
                     "type": "string"
                 },
                 "jwk": {
-                    "description": "JWK REQUIRED. Object containing a single public key as a JWK used for encrypting the Credential Response.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/openid4vci.JWK"
-                        }
-                    ]
+                    "description": "JWK REQUIRED. Object containing a single public key as a JWK used for\nencrypting the Credential Response.\n\nKept as raw JSON rather than as the JWK struct in this package: §8.3\nrequires this key to carry an alg, which that struct does not model,\nand it fixes kty/crv/x/y, which a wallet is free to vary. It is parsed\nby a JWK implementation in CredentialResponseEncryption.recipientKey,\nwhich is also the only place that decides whether vc can use it.",
+                    "type": "object"
                 },
                 "zip": {
                     "description": "Zip OPTIONAL. JWE zip algorithm for compressing Credential Responses prior to encryption.\nIf absent then compression MUST not be used.",
@@ -1999,33 +2013,6 @@
                 }
             }
         },
-        "openid4vci.JWK": {
-            "type": "object",
-            "required": [
-                "crv",
-                "kid",
-                "kty",
-                "x",
-                "y"
-            ],
-            "properties": {
-                "crv": {
-                    "type": "string"
-                },
-                "kid": {
-                    "type": "string"
-                },
-                "kty": {
-                    "type": "string"
-                },
-                "x": {
-                    "type": "string"
-                },
-                "y": {
-                    "type": "string"
-                }
-            }
-        },
         "openid4vci.PARRequest": {
             "type": "object",
             "required": [
@@ -2037,6 +2024,7 @@
             ],
             "properties": {
                 "authorization_details": {
+                    "description": "AuthorizationDetails carries the parsed authorization_details array. The\nform-body variant is a single JSON-array string in AuthorizationDetailsRaw,\nwhich the endpoint post-parses because gin's form binder cannot decode a\nJSON array into a []struct field.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/openid4vci.AuthorizationDetailsParameter"
