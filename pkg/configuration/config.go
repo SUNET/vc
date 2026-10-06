@@ -183,7 +183,7 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
-	if err := checkIssuableCredentialFormats(cfg); err != nil {
+	if err := checkIssuableCredentialFormats(cfg, serviceName); err != nil {
 		return nil, err
 	}
 
@@ -244,8 +244,16 @@ var unissuableFormats = map[string]string{
 
 // checkIssuableCredentialFormats refuses a credential_metadata scope whose
 // format the issuer advertises but cannot issue.
-func checkIssuableCredentialFormats(cfg *model.Cfg) error {
-	if cfg.Common == nil {
+//
+// The apigw only. common.credential_metadata is shared, but it means
+// different things to different services: the apigw ISSUES these credentials
+// and advertises them in its issuer metadata, while the verifier and the
+// registry read the same stanza to describe credentials somebody else
+// issued. A verifier asking for a jwt_vc_json credential from an external
+// issuer is exactly the case #686 means to keep working, so the check that
+// protects the issuance path must not reach it.
+func checkIssuableCredentialFormats(cfg *model.Cfg, serviceName string) error {
+	if cfg.Common == nil || serviceName != "apigw" {
 		return nil
 	}
 	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
