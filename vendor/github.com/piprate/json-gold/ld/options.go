@@ -21,9 +21,10 @@ const (
 	JsonLd_1_1       = "json-ld-1.1"              //nolint:stylecheck
 	JsonLd_1_1_Frame = "json-ld-1.1-expand-frame" //nolint:stylecheck
 
-	EmbedLast   = "@last"
-	EmbedAlways = "@always"
-	EmbedNever  = "@never"
+	EmbedLast   Embed = "@last"
+	EmbedOnce   Embed = "@once"
+	EmbedAlways Embed = "@always"
+	EmbedNever  Embed = "@never"
 )
 
 // JsonLdOptions type as specified in the JSON-LD-API specification:
@@ -43,14 +44,14 @@ type JsonLdOptions struct { //nolint:stylecheck
 	// http://www.w3.org/TR/json-ld-api/#widl-JsonLdOptions-documentLoader
 	DocumentLoader DocumentLoader
 
-	// Frame options: http://json-ld.org/spec/latest/json-ld-framing/
-
+	// Frame options: https://www.w3.org/TR/json-ld-framing/#jsonldoptions
 	Embed        Embed
 	Explicit     bool
-	RequireAll   bool
 	FrameDefault bool
 	OmitDefault  bool
 	OmitGraph    bool
+	Ordered      bool
+	RequireAll   bool
 
 	// RDF conversion options: http://www.w3.org/TR/json-ld-api/#serialize-rdf-as-json-ld-algorithm
 
@@ -66,6 +67,14 @@ type JsonLdOptions struct { //nolint:stylecheck
 	UseNamespaces bool
 	OutputForm    string
 	SafeMode      bool
+
+	// ExpandedElementHandler, when set, is called during expansion for each
+	// node object expansion keeps, with that object's JSON Pointer and the
+	// result of expanding it. See ElementHandler.
+	//
+	// Nil by default, and nil costs nothing: no pointer is built and no
+	// callback is made.
+	ExpandedElementHandler ElementHandler
 }
 
 // NewJsonLdOptions creates and returns new instance of JsonLdOptions with the given base.
@@ -75,12 +84,13 @@ func NewJsonLdOptions(base string) *JsonLdOptions { //nolint:stylecheck
 		CompactArrays:         true,
 		ProcessingMode:        JsonLd_1_1,
 		DocumentLoader:        NewDefaultDocumentLoader(nil),
-		Embed:                 EmbedLast,
+		Embed:                 EmbedOnce,
 		Explicit:              false,
 		RequireAll:            true,
 		FrameDefault:          false,
 		OmitDefault:           false,
-		OmitGraph:             false,
+		OmitGraph:             true,
+		Ordered:               false,
 		UseRdfType:            false,
 		UseNativeTypes:        false,
 		ProduceGeneralizedRdf: false,
@@ -96,25 +106,27 @@ func NewJsonLdOptions(base string) *JsonLdOptions { //nolint:stylecheck
 // Copy creates a deep copy of JsonLdOptions object.
 func (opt *JsonLdOptions) Copy() *JsonLdOptions {
 	return &JsonLdOptions{
-		Base:                  opt.Base,
-		CompactArrays:         opt.CompactArrays,
-		ExpandContext:         opt.ExpandContext,
-		ProcessingMode:        opt.ProcessingMode,
-		DocumentLoader:        opt.DocumentLoader,
-		Embed:                 opt.Embed,
-		Explicit:              opt.Explicit,
-		RequireAll:            opt.RequireAll,
-		FrameDefault:          opt.FrameDefault,
-		OmitDefault:           opt.OmitDefault,
-		OmitGraph:             opt.OmitGraph,
-		UseRdfType:            opt.UseRdfType,
-		UseNativeTypes:        opt.UseNativeTypes,
-		ProduceGeneralizedRdf: opt.ProduceGeneralizedRdf,
-		InputFormat:           opt.InputFormat,
-		Format:                opt.Format,
-		Algorithm:             opt.Algorithm,
-		UseNamespaces:         opt.UseNamespaces,
-		OutputForm:            opt.OutputForm,
-		SafeMode:              opt.SafeMode,
+		Base:                   opt.Base,
+		CompactArrays:          opt.CompactArrays,
+		ExpandContext:          opt.ExpandContext,
+		ProcessingMode:         opt.ProcessingMode,
+		DocumentLoader:         opt.DocumentLoader,
+		Embed:                  opt.Embed,
+		Explicit:               opt.Explicit,
+		RequireAll:             opt.RequireAll,
+		FrameDefault:           opt.FrameDefault,
+		OmitDefault:            opt.OmitDefault,
+		OmitGraph:              opt.OmitGraph,
+		Ordered:                opt.Ordered,
+		UseRdfType:             opt.UseRdfType,
+		UseNativeTypes:         opt.UseNativeTypes,
+		ProduceGeneralizedRdf:  opt.ProduceGeneralizedRdf,
+		InputFormat:            opt.InputFormat,
+		Format:                 opt.Format,
+		Algorithm:              opt.Algorithm,
+		UseNamespaces:          opt.UseNamespaces,
+		OutputForm:             opt.OutputForm,
+		SafeMode:               opt.SafeMode,
+		ExpandedElementHandler: opt.ExpandedElementHandler,
 	}
 }

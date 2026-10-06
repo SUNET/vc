@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -113,6 +114,14 @@ func (m *RegistryManager) Evaluate(ctx context.Context, req *authzen.EvaluationR
 		}, nil
 	}
 
+	// Strip the inbound context down to the keys a client is allowed to set,
+	// before anything else reads or writes it. request.Context is how policy
+	// constraints reach the registries, so an unsanitized one lets a client
+	// write its own policy: the action.parameters allowlist would guard one
+	// door and leave the adjacent one open. It is also how internal state such
+	// as _original_subject_id travels, which a client must not be able to forge.
+	req.Context = sanitizeRequestContext(req.Context, logger)
+
 	// Preserve the pre-normalization Subject.ID before rewriting it below.
 	// Registries that need the raw OpenID4VP client_id_scheme claim (e.g. to
 	// verify a presented certificate is actually bound to the claimed
@@ -130,6 +139,34 @@ func (m *RegistryManager) Evaluate(ctx context.Context, req *authzen.EvaluationR
 	// Resolve policy from action.name
 	policyCtx := m.resolvePolicyContext(req)
 
+	if pm := m.GetPolicyManager(); pm != nil && pm.IsUnknownAction(policyCtx.ActionName) {
+		if pm.FailClosedOnUnknownAction() {
+			if pm.firstUnknownWarning(policyCtx.ActionName) {
+				logger.Warn("Evaluate: no policy defined for action; denying (fail-closed)",
+					logging.F("action", policyCtx.ActionName))
+			}
+			return &authzen.EvaluationResponse{
+				Decision: false,
+				Context: &authzen.EvaluationResponseContext{
+					Reason: map[string]interface{}{
+						"error":  "no policy defined for action",
+						"action": policyCtx.ActionName,
+					},
+				},
+			}, nil
+		}
+		if pm.firstUnknownWarning(policyCtx.ActionName) {
+			if policyCtx.Policy != nil {
+				logger.Warn("Evaluate: no policy defined for action; using default policy",
+					logging.F("action", policyCtx.ActionName),
+					logging.F("default_policy", policyCtx.Policy.Name))
+			} else {
+				logger.Warn("Evaluate: no policy defined for action and no default policy; evaluating all registries WITHOUT policy constraints",
+					logging.F("action", policyCtx.ActionName))
+			}
+		}
+	}
+
 	if policyCtx.Policy != nil {
 		logger.Debug("Evaluate: policy resolved",
 			logging.F("policy", policyCtx.Policy.Name),
@@ -139,6 +176,23 @@ func (m *RegistryManager) Evaluate(ctx context.Context, req *authzen.EvaluationR
 	} else {
 		logger.Debug("Evaluate: no policy matched",
 			logging.F("action", policyCtx.ActionName))
+	}
+
+	// Enforce RequireKeyBinding at the entry layer: a policy that demands key
+	// binding must not be satisfiable by a resolution-only request, which
+	// returns resolved metadata without any key having been presented.
+	if policyCtx.Policy != nil && policyCtx.Policy.Constraints.RequireKeyBinding && req.IsResolutionOnlyRequest() {
+		logger.Debug("Evaluate: resolution-only request rejected by policy",
+			logging.F("policy", policyCtx.Policy.Name))
+		return &authzen.EvaluationResponse{
+			Decision: false,
+			Context: &authzen.EvaluationResponseContext{
+				Reason: map[string]interface{}{
+					"error":  "policy requires key binding; resolution-only requests are not accepted",
+					"policy": policyCtx.Policy.Name,
+				},
+			},
+		}, nil
 	}
 
 	// Enforce AllowedKeyTypes at the entry layer before routing to registries
@@ -242,23 +296,25 @@ func (m *RegistryManager) resolvePolicyContext(req *authzen.EvaluationRequest) *
 	return policyCtx
 }
 
-// applyPolicyToRequest applies policy constraints to the request context.
-// This allows registries to read policy constraints from the request.
-// Action parameters from the request are merged first, then policy constraints are applied.
-// Policy constraints take precedence over action parameters for the same key.
+// applyPolicyToRequest populates request.Context, the server-controlled channel
+// registries read policy constraints from.
+//
+// Order matters: allowlisted action.parameters are merged in first (they are
+// client-supplied data), then policy constraints, so policy wins on a collision.
+// Callers are responsible for having sanitized the inbound context first;
+// RegistryManager.Evaluate does so before it touches the request at all.
 func (m *RegistryManager) applyPolicyToRequest(req *authzen.EvaluationRequest, policyCtx *PolicyContext) {
-	// Initialize context if needed
+	// Evaluate has already stripped the inbound context to client-suppliable
+	// keys; from here on req.Context is server-controlled.
 	if req.Context == nil {
 		req.Context = make(map[string]interface{})
 	}
 
-	// Merge action.parameters into context (client-supplied constraints).
-	// Only allowlisted keys are accepted to prevent clients from injecting
-	// security-sensitive policy controls (e.g., strict_entitlement_check,
-	// allow_intermediaries, required_cert_policy_oids).
+	// Merge action.parameters into context (client-supplied data), through the
+	// same allowlist for the same reason.
 	if req.Action != nil && req.Action.Parameters != nil {
 		for k, v := range req.Action.Parameters {
-			if allowedActionParameterKey(k) {
+			if clientSuppliableContextKey(k) {
 				req.Context[k] = v
 			}
 		}
@@ -356,27 +412,160 @@ func (m *RegistryManager) applyPolicyToRequest(req *authzen.EvaluationRequest, p
 		}
 	}
 
+	// Apply eMRTD constraints. Key names are shared with the emrtd registry.
+	if policyCtx.Policy.EMRTD != nil {
+		e := policyCtx.Policy.EMRTD
+		if e.PathLenMode != "" {
+			req.Context["emrtd_path_len_mode"] = e.PathLenMode
+		}
+		if e.PathLenOverride != nil {
+			req.Context["emrtd_path_len_override"] = *e.PathLenOverride
+		}
+	}
+
 	// Store policy name in context for debugging/logging
 	req.Context["_policy"] = policyCtx.Policy.Name
 }
 
-// allowedActionParameterKeys lists context keys that may be set via
-// action.parameters. Keys not in this set are silently dropped to prevent
-// clients from injecting security-sensitive policy controls.
-var allowedActionParameterKeys = map[string]bool{
+// clientSuppliableContextKeys lists the request-context keys a client is
+// allowed to set, whether it sends them in request.Context or in
+// action.parameters. Everything else in the context namespace is a policy
+// control and may only be written server-side by applyPolicyToRequest.
+//
+// The dividing line is data versus control: these keys describe *what the RP
+// is asking for*, which only the client knows. Keys such as
+// allowed_attributes, strict_entitlement_check, allow_intermediaries,
+// required_cert_policy_oids or extract_rp_identity decide *what the server
+// permits*, and a client that could set those would be writing its own policy.
+var clientSuppliableContextKeys = map[string]bool{
 	// Data-carrying parameters (what the RP is requesting)
 	"query":                true, // DCQL query for over-request detection
 	"requested_attributes": true, // explicit attribute list
 	"credential_types":     true, // credential type identifiers
+	// Both of these are safe in a client's hands. doc_type only ever narrows:
+	// supplying it can deny, omitting it skips the VICAL docType check.
+	// intermediary_x5c is read only when the policy has set allow_intermediaries.
+	"doc_type":         true, // mdoc doctype, filters VICAL entries
+	"intermediary_x5c": true, // the intermediary's own certificate chain
+
+	// OpenID Federation request data, consumed by OIDFedRegistry. All four
+	// are data or hints, not policy: none of them decides what the server
+	// permits.
+	//
+	// trust_chain is the verifier-supplied chain from a signed request
+	// (OID4VP 5.9.3.6). Accepting it is safe because it is never taken on
+	// trust: validatePreSuppliedTrustChain caps its depth, requires the leaf
+	// to be the entity under evaluation, requires the anchor to be a
+	// CONFIGURED anchor that self-signs, checks linkage and time validity,
+	// and verifies the anchor against the configured JWKS rather than the
+	// chain's own. Without a configured JWKS it refuses and falls back to
+	// resolving from scratch. A forged chain cannot pass; supplying a real
+	// one only saves the resolution.
+	//
+	// cache_control can only ever ask for FRESHER data. GetWithMaxAge
+	// applies max-age on top of normal expiry, so a client can force
+	// revalidation but never extend a cache entry's life.
+	"trust_chain":          true, // pre-supplied federation trust chain
+	"include_trust_chain":  true, // response shaping: include the chain
+	"include_certificates": true, // response shaping: include X.509 certs
+	"cache_control":        true, // freshness hint; only ever tightens
 
 	// Informational / audit
 	"purpose": true, // presentation purpose
+
+	// signing_time is the eMRTD document signing time (RFC 3339) at which the
+	// DSC/CSCA validity is evaluated (ICAO 9303 Part 12). It is data about
+	// the document, which only the PEP knows. The emrtd registry parses it
+	// strictly (malformed => deny); omitting it means "now". It is taken on
+	// the PEP's word, which is why the PEP must derive it from the verified
+	// SOD and not from unauthenticated input.
+	"signing_time": true,
 }
 
-// allowedActionParameterKey returns true if the key may flow from
-// action.parameters into the request context.
-func allowedActionParameterKey(key string) bool {
-	return allowedActionParameterKeys[key]
+// clientSuppliableContextKey returns true if the key may flow from a client
+// request into the request context.
+func clientSuppliableContextKey(key string) bool {
+	return clientSuppliableContextKeys[key]
+}
+
+// sanitizeRequestContext returns a context containing only the keys a client
+// is permitted to set. It always returns a non-nil, freshly allocated map, so
+// the policy values written afterwards cannot alias the caller's map.
+func sanitizeRequestContext(ctx map[string]interface{}, logger logging.Logger) map[string]interface{} {
+	clean := make(map[string]interface{}, len(ctx))
+	var dropped []string
+	for k, v := range ctx {
+		if clientSuppliableContextKey(k) {
+			clean[k] = v
+			continue
+		}
+		dropped = append(dropped, k)
+	}
+	if len(dropped) > 0 && logger != nil {
+		// Key names only: the values are attacker-controlled and may be large.
+		sort.Strings(dropped)
+		logger.Debug("Evaluate: dropped non-client context keys",
+			logging.F("keys", dropped))
+	}
+	return clean
+}
+
+// GetRegistry returns the registered registry with the given Info().Name, or
+// nil if none matches.
+func (m *RegistryManager) GetRegistry(name string) TrustRegistry {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, reg := range m.registries {
+		if reg.Info().Name == name {
+			return reg
+		}
+	}
+	return nil
+}
+
+// CountRegistries returns how many registered registries carry the given
+// Info().Name. Register permits duplicates, so a name is not necessarily a
+// unique handle, and a caller that needs one must check.
+func (m *RegistryManager) CountRegistries(name string) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	count := 0
+	for _, reg := range m.registries {
+		if reg.Info().Name == name {
+			count++
+		}
+	}
+	return count
+}
+
+// Unregister removes every registry with the given Info().Name and returns
+// how many were removed.
+//
+// This exists so a CompositeRegistry can take ownership of its children: a
+// child left registered alongside its parent would also be consulted on its
+// own, and under FirstMatch could return decision=true by itself — exactly
+// the agreement an AND composite was configured to require.
+//
+// It removes all matches rather than the first because Register permits
+// duplicate names. Removing only one would leave a same-named registry
+// top-level and reintroduce exactly that bypass.
+func (m *RegistryManager) Unregister(name string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	kept := m.registries[:0]
+	removed := 0
+	for _, reg := range m.registries {
+		if reg.Info().Name == name {
+			removed++
+			continue
+		}
+		kept = append(kept, reg)
+	}
+	m.registries = kept
+	return removed
 }
 
 // SupportedResourceTypes returns the union of all resource types supported by registered registries
@@ -573,6 +762,7 @@ func (m *RegistryManager) evaluateBestMatchWithPolicy(ctx context.Context, req *
 		if matched, ok := resp.Context.Reason["registries_matched"].([]string); ok && len(matched) > 0 {
 			resp.Context.Reason["registry"] = matched[0]
 			resp.Context.Reason["strategy"] = "best_match"
+			promoteSelectedAdmin(resp.Context.Reason, matched[0])
 			delete(resp.Context.Reason, "all_results")
 		}
 	}
