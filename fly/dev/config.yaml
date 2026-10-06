@@ -27,7 +27,7 @@ common:
       vctm_file_path: "/metadata/vctm_eduid_age_verification.json"
       format: "dc+sd-jwt"
       replace_vct: true
-    MicroCredential:
+    microcredential:
       vctm_file_path: "/metadata/vctm_microcredential.json"
       format: "dc+sd-jwt"
       replace_vct: true
@@ -101,12 +101,14 @@ verifier:
           scopes:
             - "pid"
             - "ehic"
+            - "microcredential"
         "fly-wallet":
           type: "public"
           redirect_uri: "https://sunet-vc-wallet.fly.dev"
           scopes:
             - "pid"
             - "ehic"
+            - "microcredential"
       supported_credentials:
         - vct: "urn:eudi:pid:1"
           scopes:
@@ -114,6 +116,9 @@ verifier:
         - vct: "urn:eudi:ehic:1"
           scopes:
             - "ehic"
+        - vct: "VerifiableMicroCredential"
+          scopes:
+            - "microcredential"
   presets:
     "PID":
       credentials:
@@ -124,6 +129,12 @@ verifier:
     "EHIC":
       credentials:
         ehic:
+    "Micro-credential":
+      credentials:
+        microcredential:
+          exclude_claims:
+            - path: ["attestation_legal_category"]
+            - path: ["trust_anchor"]
     "PID Age Over 18":
       credentials:
         pid:
@@ -313,7 +324,7 @@ apigw:
           auth_scopes:
             pid:
               auth_claims: ["given_name", "family_name", "birthdate"]
-        MicroCredential:
+        microcredential:
           auth_provider: openid4vp
           auth_scopes:
             pid:

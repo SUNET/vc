@@ -201,7 +201,7 @@ apigw:
           auth_claims: ["given_name", "family_name", "birth_date"]
         # Example: a credential issuable only via /api/v1/datastore/preauth_offer.
         # Wallet-initiated PAR requests for this scope are rejected.
-        #MicroCredential:
+        #microcredential:
         #  auth_provider: preauth
   auth_providers:
     # preauth (data_sources scopes with auth_provider: preauth).

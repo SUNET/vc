@@ -442,7 +442,7 @@ func genMicroCredential(pids []string, input *InputFile) map[string]*vcclient.Up
 			DocumentData: dd,
 			Meta: &model.MetaData{
 				AuthenticSource: "Ladok",
-				Scope:           "MicroCredential",
+				Scope:           "microcredential",
 				DocumentID:      fmt.Sprintf("document_id_microcredential_%s", pid),
 			},
 			IdentityMappingIDs: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
