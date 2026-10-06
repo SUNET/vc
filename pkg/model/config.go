@@ -1347,27 +1347,6 @@ type IssuerMetadata struct {
 	// Set ["jwt"] for such a deployment, and remove the setting once the
 	// wallet catches up.
 	ProofTypesSupported []string `yaml:"proof_types_supported" validate:"omitempty,dive,oneof=jwt attestation"`
-	// KeyAttestationsRequired advertises that this issuer REQUIRES a key
-	// attestation in the proofs of a Credential Request, and optionally
-	// which key_storage / user_authentication values it accepts.
-	//
-	// Absent by default, and that is the specification's rule rather than a
-	// preference: OpenID4VCI 1.0 12.2.4 says of key_attestations_required
-	// that "If the Credential Issuer does not require a key attestation,
-	// this parameter MUST NOT be present in the metadata." An empty object
-	// is NOT the neutral value - the same paragraph gives it a meaning, "a
-	// key attestation is needed without additional constraints".
-	//
-	// This issuer does not require one: a plain "jwt" proof with no
-	// attestation is accepted. So emitting the parameter at all claimed a
-	// requirement that is not enforced, which is both untrue and the thing
-	// SUNET/vc#672 reported.
-	//
-	// Set it when this deployment genuinely demands a key attestation, or
-	// to satisfy a wallet library that refuses metadata without the field -
-	// eudi-lib-jvm-openid4vci-kt 0.12.1 was one. An empty object
-	// (`key_attestations_required: {}`) reproduces the old output.
-	KeyAttestationsRequired *openid4vci.KeyAttestationRequirement `yaml:"key_attestations_required" validate:"omitempty"`
 	// CredentialResponseEncryption holds the response encryption configuration
 	CredentialResponseEncryption *openid4vci.MetadataCredentialResponseEncryption `yaml:"credential_response_encryption" validate:"omitempty"`
 	// BatchCredentialIssuance holds the batch issuance configuration
@@ -2402,23 +2381,11 @@ func (cfg *IssuerMetadata) applyCommonCredentialConfig(credConfig *openid4vci.Cr
 		credConfig.CredentialSigningAlgValuesSupported = []any{"ES256", "ES384", "RS256"}
 	}
 
-	// Set proof types supported from configuration
-	// These must be explicitly configured to match what the Issuer service accepts
 	proofAlgs := cfg.ProofSigningAlgValuesSupported
 	if len(proofAlgs) == 0 {
-		// Default to common algorithms if not configured
 		proofAlgs = []string{"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}
 	}
-	// Confirmed by direct testing (lpidproto PLAN.md workstream 7): scoping
-	// 'attestation' to only the "pid" credential config breaks metadata
-	// parsing for EVERY offer, including ones that only reference "pid" --
-	// eudi-lib-jvm-openid4vci-kt validates proof_types_supported across the
-	// whole credential_configurations_supported document, not per-entry.
-	// So this must be declared uniformly for every scope, "lpid" included;
-	// it cannot be scoped away. See ARCHITECTURE.md for the resulting
-	// caveat this leaves on "lpid"'s advertised proof capabilities, and
-	// pkg/openid4vci/proof_attestation.go's Verify() for the deeper gap
-	// this uncovered (attestation proofs are never signature-verified).
+
 	// Advertise the proof types this issuer implements, narrowed by
 	// configuration when a deployment has to accommodate a wallet that
 	// cannot cope with one of them. Both are implemented: "attestation"
@@ -2441,13 +2408,23 @@ func (cfg *IssuerMetadata) applyCommonCredentialConfig(credConfig *openid4vci.Cr
 	for _, proofType := range proofTypes {
 		credConfig.ProofTypesSupported[proofType] = openid4vci.ProofsTypesSupported{
 			ProofSigningAlgValuesSupported: proofAlgs,
-			// Absent unless configured. OpenID4VCI 1.0 12.2.4: when the
-			// issuer does not require a key attestation the parameter MUST
-			// NOT be present, and an empty object is not neutral - it
-			// asserts an unconstrained requirement. This issuer accepts a
-			// plain "jwt" proof with no attestation, so the honest default
-			// is to say nothing. See IssuerMetadata.KeyAttestationsRequired.
-			KeyAttestationsRequired: cfg.KeyAttestationsRequired,
+			// Always absent, and not configurable. OpenID4VCI 1.0 12.2.4:
+			// when the issuer does not require a key attestation the
+			// parameter MUST NOT be present, and an empty object is not
+			// the neutral value - the same paragraph gives it the meaning
+			// "a key attestation is needed without additional
+			// constraints". Emitting it was SUNET/vc#672.
+			//
+			// There is deliberately no setting to turn it back on. Nothing
+			// on the issuance path enforces such a requirement: a plain
+			// "jwt" proof with no attestation is accepted
+			// (handlers_issuer.go), and the key_attestation JOSE header of
+			// a JWT proof is not read at all (openid4vci/proof_jwt.go), so
+			// key_storage and user_authentication constraints would go
+			// unchecked. A setting here would let a deployment advertise a
+			// requirement this build does not keep. Wire the enforcement in
+			// first, then give it a knob.
+			KeyAttestationsRequired: nil,
 		}
 	}
 }

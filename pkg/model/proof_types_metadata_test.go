@@ -43,50 +43,39 @@ func generateFor(t *testing.T, cfg *IssuerMetadata) openid4vci.CredentialConfigu
 // on every credential configuration. The field was emitted unconditionally
 // to satisfy eudi-lib-jvm-openid4vci-kt 0.12.1, which rejects metadata
 // without it - a lagging implementation rather than the specification.
-func TestKeyAttestationsRequiredIsAbsentUnlessConfigured(t *testing.T) {
-	t.Run("absent by default", func(t *testing.T) {
-		credConfig := generateFor(t, &IssuerMetadata{})
-		for proofType, proof := range credConfig.ProofTypesSupported {
-			require.Nil(t, proof.KeyAttestationsRequired,
-				"proof type %q must not claim a key attestation this issuer does not require", proofType)
-		}
+//
+// There is no setting to put it back, which is why this test takes no
+// configuration: nothing on the issuance path enforces a key attestation
+// requirement, so a knob here would only let a deployment make the same
+// untrue claim by hand.
+func TestKeyAttestationsRequiredIsNeverAdvertised(t *testing.T) {
+	credConfig := generateFor(t, &IssuerMetadata{})
 
-		// Asserted on the wire too: a non-pointer field with no omitempty
-		// serialized as `{}` however it was set, so the Go-level check
-		// above would have passed while the JSON still made the claim.
+	for proofType, proof := range credConfig.ProofTypesSupported {
+		require.Nil(t, proof.KeyAttestationsRequired,
+			"proof type %q must not claim a key attestation this issuer does not require", proofType)
+	}
+
+	// Asserted on the wire too: a non-pointer field with no omitempty
+	// serialized as `{}` however it was set, so the Go-level check above
+	// would have passed while the JSON still made the claim.
+	encoded, err := json.Marshal(credConfig)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "key_attestations_required",
+		"the parameter MUST NOT be present when no attestation is required")
+}
+
+// Narrowing proof_types_supported must not bring the claim back by a side
+// door: whichever types are advertised, none of them carries a requirement.
+func TestKeyAttestationsRequiredIsAbsentForEveryAdvertisedProofType(t *testing.T) {
+	for _, types := range [][]string{nil, {"jwt"}, {"attestation"}, {"jwt", "attestation"}} {
+		credConfig := generateFor(t, &IssuerMetadata{ProofTypesSupported: types})
+
 		encoded, err := json.Marshal(credConfig)
 		require.NoError(t, err)
 		require.NotContains(t, string(encoded), "key_attestations_required",
-			"the parameter MUST NOT be present when no attestation is required")
-	})
-
-	t.Run("present when a deployment configures it", func(t *testing.T) {
-		credConfig := generateFor(t, &IssuerMetadata{
-			KeyAttestationsRequired: &openid4vci.KeyAttestationRequirement{},
-		})
-		for proofType, proof := range credConfig.ProofTypesSupported {
-			require.NotNil(t, proof.KeyAttestationsRequired,
-				"proof type %q should carry the configured requirement", proofType)
-		}
-
-		encoded, err := json.Marshal(credConfig)
-		require.NoError(t, err)
-		require.Contains(t, string(encoded), `"key_attestations_required":{}`,
-			"an empty object is the spec's way of saying 'required, no constraints'")
-	})
-
-	t.Run("constraints survive", func(t *testing.T) {
-		credConfig := generateFor(t, &IssuerMetadata{
-			KeyAttestationsRequired: &openid4vci.KeyAttestationRequirement{
-				KeyStorage:         []string{"iso_18045_high"},
-				UserAuthentication: []string{"iso_18045_high"},
-			},
-		})
-		for _, proof := range credConfig.ProofTypesSupported {
-			require.NotNil(t, proof.KeyAttestationsRequired)
-			require.Equal(t, []string{"iso_18045_high"}, proof.KeyAttestationsRequired.KeyStorage)
-		}
-	})
+			"proof_types_supported %v", types)
+	}
 }
 
 // proof_types_supported is OPTIONAL in 12.2.4 and the spec never requires
