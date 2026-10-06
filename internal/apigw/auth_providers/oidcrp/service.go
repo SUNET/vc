@@ -144,7 +144,13 @@ func (s *Service) initialize(ctx context.Context) error {
 				"client_id", clientID,
 				"registration_access_token_present", regResp.RegistrationAccessToken != "")
 
-			// Persist credentials
+			// Persist before publishing, the same rule renewCredentials
+			// follows: sessions record the client id, and a callback on
+			// another HA replica resolves it through the shared store, so a
+			// registration nobody can look up cannot redeem its own codes.
+			// Failing here leaves the service unready and retrying, which
+			// is recoverable; starting flows on an unresolvable client is
+			// not.
 			if err := s.dbService.DynamicRegistrationColl.Save(ctx, &db.DynamicRegistrationCredentials{
 				ClientID:                regResp.ClientID,
 				ClientSecret:            regResp.ClientSecret,
@@ -152,7 +158,7 @@ func (s *Service) initialize(ctx context.Context) error {
 				RegistrationClientURI:   regResp.RegistrationClientURI,
 				ClientSecretExpiresAt:   regResp.ClientSecretExpiresAt,
 			}); err != nil {
-				s.log.Info("Failed to persist dynamic registration credentials", "error", err)
+				return fmt.Errorf("storing the dynamic client registration: %w", err)
 			}
 		}
 	}
@@ -222,9 +228,9 @@ func (s *Service) buildCredentials(clientID, clientSecret string, expiresAtUnix 
 // callback can land on a replica that never saw the registration its flow
 // began on - renewal happened on another one. Falling back to this
 // replica's current client would exchange the code with the wrong client
-// and fail, so the stored registration is read instead. The prune keeps
-// superseded rows for the session lifetime precisely so this lookup finds
-// something.
+// and fail, so the stored registration is read instead. The row is there
+// to be read because pruning removes only registrations whose secret has
+// expired - one that a flow can still be using never has.
 func (s *Service) credentialsForSession(ctx context.Context, clientID string) (*credentials, error) {
 	if c := s.creds.forClient(clientID); c != nil && (clientID == "" || c.clientID == clientID) {
 		return c, nil
@@ -259,14 +265,6 @@ func (s *Service) credentialsForSession(ctx context.Context, clientID string) (*
 	}
 
 	return nil, errors.New("OIDC RP has no client credentials")
-}
-
-// credentialRetainFor is how long a superseded registration stays usable:
-// the longest an authorization flow can take, which is the session
-// lifetime. A floor keeps a misconfigured zero from pruning instantly.
-func (s *Service) credentialRetainFor() time.Duration {
-	retain := time.Duration(s.cfg.SessionDuration) * time.Second
-	return max(retain, time.Minute)
 }
 
 // dynamicRegistrationEnabled reports whether this RP registers itself.

@@ -206,11 +206,11 @@ func TestEnsureCredentialsRenewsBeforeExpiry(t *testing.T) {
 	require.Len(t, store.saved, 1)
 	assert.Equal(t, "client-1", store.saved[0].ClientID)
 
-	// Save upserts on client_id and Get reads an arbitrary row, so the
-	// superseded record has to go or the next startup finds it expired and
-	// registers all over again.
+	// Get orders by registered_at, so startup picks the newest whether or
+	// not this ran; the prune exists to stop dead rows accumulating, and
+	// removes only registrations whose secret has expired.
 	assert.Equal(t, []string{"client-1"}, store.keptOnly,
-		"everything but the new registration is pruned")
+		"the new registration is the one kept")
 }
 
 func TestEnsureCredentialsLeavesAFreshSecretAlone(t *testing.T) {
@@ -440,10 +440,8 @@ func TestCredentialsForSessionReadsAnotherReplicasRegistration(t *testing.T) {
 	assert.Equal(t, "client-from-replica-a", s.creds.forClient("client-from-replica-a").clientID)
 }
 
-// A client nothing knows about falls back to the current registration,
-// which is what the service did before sessions recorded one at all.
-// A session that names a client nobody can resolve must NOT fall back to
-// the current one: the exchange is then guaranteed to fail, and the caller
+// A session naming a client nobody can resolve must NOT fall back to the
+// current one: the exchange is then guaranteed to fail, and the caller
 // deletes the session on an exchange failure, losing a flow that could
 // have been retried.
 func TestCredentialsForSessionRefusesAnUnresolvableClient(t *testing.T) {
@@ -502,4 +500,37 @@ func TestRenewalDoesNotPublishAnUnstorableRegistration(t *testing.T) {
 
 	assert.Equal(t, "client-0", s.currentClientID(t),
 		"an unstorable registration must not become the one flows start on")
+}
+
+// The same persistence-before-publication rule as renewCredentials, on the
+// startup path: a registration nobody can look up cannot redeem its own
+// authorization codes in HA, so it must not become the client flows start
+// on. Failing initialization is recoverable - the service retries.
+func TestInitializeDoesNotPublishAnUnstorableRegistration(t *testing.T) {
+	op := newOPServer(t)
+	store := &fakeRegistrationStore{saveErr: assert.AnError}
+
+	log, err := logger.New("test", "", false)
+	require.NoError(t, err)
+
+	s := &Service{
+		cfg: &model.OIDCRP{
+			IssuerURL:       op.URL,
+			RedirectURI:     "https://apigw.example.com/callback",
+			Scopes:          []string{"openid"},
+			SessionDuration: 300,
+			Registration: &model.OIDCRPRegistrationConfig{
+				Dynamic: &model.OIDCRPDynamicRegistrationConfig{Enable: true},
+			},
+		},
+		httpClient: op.Client(),
+		dbService:  &db.Service{DynamicRegistrationColl: store},
+		log:        log.New("oidcrp"),
+		creds:      newCredentialSet(5 * time.Minute),
+	}
+
+	err = s.initialize(t.Context())
+	require.Error(t, err, "an unstorable registration must fail initialization")
+	assert.Nil(t, s.creds.load(), "and must not be published")
+	assert.False(t, s.ready)
 }

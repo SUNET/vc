@@ -50,9 +50,12 @@ func (c *credentials) needsRenewal(now time.Time) bool {
 //
 // Retaining the old one matters because an authorization code is issued to
 // a specific client: a flow that began before a renewal must finish on the
-// client that began it, or the OP rejects the exchange. Sessions are short
-// (OIDCRP.SessionDuration), so a superseded registration is kept for a
-// bounded time and then dropped.
+// client that began it, or the OP rejects the exchange.
+//
+// This is a per-process cache, bounded by how long a flow can take
+// (OIDCRP.SessionDuration). It is not what keeps a registration available
+// to other replicas - that is the store, which prunes by secret expiry, and
+// which Service.credentialsForSession falls back to.
 type credentialSet struct {
 	mu        sync.RWMutex
 	current   *credentials
