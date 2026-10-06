@@ -60,6 +60,25 @@ type Error struct {
 	Title      string `json:"title"`
 	Err        any    `json:"details"`
 	HTTPStatus int    `json:"-"` // HTTP status code to return, 0 means auto-detect
+
+	// unclassified marks an Error that NewErrorFromError built from an
+	// error it recognised nothing about, by putting the raw Go error string
+	// in Err. Everything else here is a shape somebody chose to publish -
+	// a validation report, a JSON parse position, a sentinel - and is safe
+	// to return. This one is whatever wrapping happened to say, which is
+	// why the HTTP layer redacts it.
+	//
+	// Unexported so only this package can set it, and invisible to JSON.
+	unclassified bool
+}
+
+// IsUnclassified reports whether this Error carries the text of an error
+// nothing recognised, rather than a shape chosen for publication. The
+// distinction lives here rather than in a type switch at the HTTP boundary
+// so there is one list of what counts as classified - the one in
+// NewErrorFromError - instead of two that have to agree.
+func (e *Error) IsUnclassified() bool {
+	return e != nil && e.unclassified
 }
 
 func (e *Error) Error() string {
@@ -107,7 +126,7 @@ func NewErrorFromError(v any) *Error {
 
 	err, ok := v.(error)
 	if !ok {
-		return NewErrorDetails("internal_server_error", fmt.Sprintf("%+v", v))
+		return &Error{Title: "internal_server_error", Err: fmt.Sprintf("%+v", v), unclassified: true}
 	}
 
 	if pbErr, ok := err.(*Error); ok {
@@ -139,7 +158,7 @@ func NewErrorFromError(v any) *Error {
 		return wrapped
 	}
 
-	return NewErrorDetails("internal_server_error", err.Error())
+	return &Error{Title: "internal_server_error", Err: err.Error(), unclassified: true}
 }
 
 func formatValidationErrors(err validator.ValidationErrors) []map[string]any {
