@@ -1414,17 +1414,6 @@ type OpenID4VCICompat struct {
 	AcceptNonStandardAuthorizationDetailsArrays *bool `yaml:"accept_non_standard_authorization_details_arrays" default:"false"`
 }
 
-// AcceptNonStandardAuthorizationDetailsArrays reports whether the PAR and
-// authorization endpoints should accept the repeated-key and bracketed-key
-// encodings of authorization_details. Nil-safe, because the call site is an
-// HTTP handler that should not repeat the nil dance.
-func (cfg *Cfg) AcceptNonStandardAuthorizationDetailsArrays() bool {
-	if cfg == nil || cfg.APIGW == nil {
-		return false
-	}
-	return BoolVal(cfg.APIGW.Delivery.OpenID4VCICompat.AcceptNonStandardAuthorizationDetailsArrays, false)
-}
-
 // APIGWAuthProviders groups the authentication provider configurations.
 type APIGWAuthProviders struct {
 	// SAML configures the SAML SP auth provider

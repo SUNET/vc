@@ -52,7 +52,7 @@ func (s *Service) endpointOAuthPar(ctx context.Context, c *gin.Context) (any, er
 			s.log.Error(err, "form parse error")
 			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "invalid request", 400, err)
 		}
-		if err := request.ReadAuthorizationDetails(c.Request.Form, s.cfg.AcceptNonStandardAuthorizationDetailsArrays()); err != nil {
+		if err := request.ReadAuthorizationDetails(c.Request.Form, model.BoolVal(s.cfg.APIGW.Delivery.OpenID4VCICompat.AcceptNonStandardAuthorizationDetailsArrays, false)); err != nil {
 			span.SetStatus(codes.Error, err.Error())
 			s.log.Error(err, "authorization_details error")
 			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "invalid authorization_details", 400, err)
