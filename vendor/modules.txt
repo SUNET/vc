@@ -846,7 +846,7 @@ github.com/shopspring/decimal
 # github.com/sirosfoundation/g119612 v0.7.0
 ## explicit; go 1.26
 github.com/sirosfoundation/g119612/pkg/logging
-# github.com/sirosfoundation/go-cryptoutil v0.6.0
+# github.com/sirosfoundation/go-cryptoutil v0.7.1
 ## explicit; go 1.26
 github.com/sirosfoundation/go-cryptoutil
 # github.com/sirosfoundation/go-spocp v0.1.0
@@ -856,8 +856,8 @@ github.com/sirosfoundation/go-spocp/pkg/compare
 github.com/sirosfoundation/go-spocp/pkg/persist
 github.com/sirosfoundation/go-spocp/pkg/sexp
 github.com/sirosfoundation/go-spocp/pkg/starform
-# github.com/sirosfoundation/go-trust v0.21.0
-## explicit; go 1.26.6
+# github.com/sirosfoundation/go-trust v0.24.0
+## explicit; go 1.27
 github.com/sirosfoundation/go-trust/pkg/api
 github.com/sirosfoundation/go-trust/pkg/authzen
 github.com/sirosfoundation/go-trust/pkg/authzenclient

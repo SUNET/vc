@@ -2,6 +2,16 @@
 // This file defines policy types for action-based routing.
 package registry
 
+import (
+	"fmt"
+	"sync"
+)
+
+// maxWarnedUnknownActions bounds the warning-deduplication set. action.name is
+// client-controlled, so the set must not grow with attacker-chosen values; once
+// full, further unknown names are not individually warned about.
+const maxWarnedUnknownActions = 256
+
 // Policy defines a trust evaluation policy that can be selected via action.name.
 // Policies allow server-side configuration of trust requirements without
 // clients needing to know about underlying trust infrastructure.
@@ -33,6 +43,9 @@ type Policy struct {
 
 	// FIDOMDS3 contains FIDO Alliance MDS3-specific constraints
 	FIDOMDS3 *FIDOMDS3PolicyConstraints `json:"fidomds3,omitempty" yaml:"fidomds3,omitempty"`
+
+	// EMRTD contains eMRTD document-signer registry constraints
+	EMRTD *EMRTDPolicyConstraints `json:"emrtd,omitempty" yaml:"emrtd,omitempty"`
 }
 
 // PolicyConstraints contains registry-agnostic trust constraints.
@@ -40,6 +53,11 @@ type PolicyConstraints struct {
 	// AllowedKeyTypes restricts accepted resource types (e.g., ["jwk", "x5c"]).
 	// If non-empty, requests with a resource.type not in this list are rejected.
 	AllowedKeyTypes []string `json:"allowed_key_types,omitempty" yaml:"allowed_key_types,omitempty"`
+
+	// RequireKeyBinding requires that key material actually be presented and
+	// validated. When true, resolution-only requests (no resource.type or no
+	// resource.key) are rejected rather than answered with resolved metadata.
+	RequireKeyBinding bool `json:"require_key_binding,omitempty" yaml:"require_key_binding,omitempty"`
 }
 
 // OIDFedPolicyConstraints contains OpenID Federation-specific constraints.
@@ -61,6 +79,11 @@ type OIDFedPolicyConstraints struct {
 }
 
 // ETSIPolicyConstraints contains ETSI TSL-specific constraints.
+//
+// These are policy controls, not request data: they are set from server-side
+// configuration and written into request.Context by the RegistryManager for
+// registries to read. A client cannot supply them — RegistryManager.Evaluate
+// strips every non-data key from an inbound request.Context.
 type ETSIPolicyConstraints struct {
 	// ServiceTypes filters by ETSI service type URIs
 	ServiceTypes []string `json:"service_types,omitempty" yaml:"service_types,omitempty"`
@@ -81,25 +104,21 @@ type ETSIPolicyConstraints struct {
 	// in the leaf certificate's Certificate Policies extension. Used to distinguish
 	// access certificates (per ETSI TS 119 411-8) from generic TLS certificates.
 	// If non-empty, the leaf certificate must contain at least one of these OIDs.
-	// Also passable via request.Context["required_cert_policy_oids"].
 	RequiredCertPolicyOIDs []string `json:"required_cert_policy_oids,omitempty" yaml:"required_cert_policy_oids,omitempty"`
 
 	// ExtractRPIdentity controls whether RP identity information (Subject DN,
 	// SANs, serial number) is extracted from the leaf certificate and returned
 	// in response.Context.TrustMetadata["rp_identity"]. Defaults to false.
-	// Also passable via request.Context["extract_rp_identity"].
 	ExtractRPIdentity bool `json:"extract_rp_identity,omitempty" yaml:"extract_rp_identity,omitempty"`
 
 	// AllowedAttributes lists attribute names the RP is entitled to request.
 	// Used for over-request detection per TS 119 475. When both this and
 	// requested_attributes are present, the enrichment pipeline compares them
 	// and surfaces warnings (or rejects in strict mode).
-	// Also passable via request.Context["allowed_attributes"].
 	AllowedAttributes []string `json:"allowed_attributes,omitempty" yaml:"allowed_attributes,omitempty"`
 
 	// StrictEntitlementCheck controls whether over-requesting attributes results
 	// in rejection (true) or just warnings in the response (false). Defaults to false.
-	// Also passable via request.Context["strict_entitlement_check"].
 	StrictEntitlementCheck bool `json:"strict_entitlement_check,omitempty" yaml:"strict_entitlement_check,omitempty"`
 
 	// AllowIntermediaries controls whether intermediary/broker presentation
@@ -109,7 +128,6 @@ type ETSIPolicyConstraints struct {
 	// chain validation is not yet implemented — this currently controls whether
 	// intermediary requests are allowed and metadata is surfaced.
 	// Defaults to false (intermediary presentations rejected).
-	// Also passable via request.Context["allow_intermediaries"].
 	AllowIntermediaries bool `json:"allow_intermediaries,omitempty" yaml:"allow_intermediaries,omitempty"`
 }
 
@@ -145,6 +163,44 @@ type MDOCIACAPolicyConstraints struct {
 	RequireIACAEndpoint bool `json:"require_iaca_endpoint,omitempty" yaml:"require_iaca_endpoint,omitempty"`
 }
 
+// EMRTDPolicyConstraints contains eMRTD document-signer constraints.
+//
+// By default the emrtd registry ignores the basicConstraints
+// pathLenConstraint of CSCAs and link certificates (real CSCAs often carry
+// pathLen=0 yet sign link certificates for their successors). These settings
+// opt in to enforcing it. They are policy controls: clients cannot set them.
+type EMRTDPolicyConstraints struct {
+	// PathLenMode is "ignore" (default, also when empty) or "enforce".
+	PathLenMode string `json:"path_len_mode,omitempty" yaml:"path_len_mode,omitempty"`
+
+	// PathLenOverride, when set, replaces the pathLenConstraint of every
+	// issuer on the path (CSCA and link certificates, including one with none)
+	// and implies "enforce". Must be >= 0.
+	PathLenOverride *int `json:"path_len_override,omitempty" yaml:"path_len_override,omitempty"`
+}
+
+// Validate rejects unknown modes, a negative override, and an explicit
+// "ignore" combined with an override (which would be contradictory).
+func (c *EMRTDPolicyConstraints) Validate() error {
+	if c == nil {
+		return nil
+	}
+	switch c.PathLenMode {
+	case "", "ignore", "enforce":
+	default:
+		return fmt.Errorf("emrtd.path_len_mode %q is invalid: must be \"ignore\" or \"enforce\"", c.PathLenMode)
+	}
+	if c.PathLenOverride != nil {
+		if *c.PathLenOverride < 0 {
+			return fmt.Errorf("emrtd.path_len_override must be >= 0, got %d", *c.PathLenOverride)
+		}
+		if c.PathLenMode == "ignore" {
+			return fmt.Errorf("emrtd.path_len_override implies enforcement and conflicts with path_len_mode \"ignore\"")
+		}
+	}
+	return nil
+}
+
 // FIDOMDS3PolicyConstraints contains FIDO Alliance MDS3-specific constraints,
 // applied on top of (never instead of) the registry's own MDS3 status-report
 // and x5c chain verification.
@@ -171,6 +227,55 @@ type PolicyManager struct {
 	policies       map[string]*Policy
 	defaultPolicy  *Policy
 	registryFilter map[string][]string // policy name -> allowed registry names
+
+	// failClosedOnUnknownAction makes IsUnknownAction-matching requests be
+	// denied rather than judged by the default policy.
+	failClosedOnUnknownAction bool
+	// warnedUnknown records unknown action names already reported, so the
+	// warning is emitted once per name rather than once per request. Bounded
+	// by maxWarnedUnknownActions.
+	warnedMu      sync.Mutex
+	warnedUnknown map[string]struct{}
+}
+
+// SetFailClosedOnUnknownAction controls what happens when a request names an
+// action with no registered policy. When false (the default) the default
+// policy applies; when true the request is denied.
+func (pm *PolicyManager) SetFailClosedOnUnknownAction(v bool) {
+	pm.failClosedOnUnknownAction = v
+}
+
+// FailClosedOnUnknownAction reports whether unknown action names are denied.
+func (pm *PolicyManager) FailClosedOnUnknownAction() bool {
+	return pm.failClosedOnUnknownAction
+}
+
+// IsUnknownAction reports whether actionName is non-empty and has no
+// registered policy of its own, i.e. GetPolicy would fall back to the default.
+func (pm *PolicyManager) IsUnknownAction(actionName string) bool {
+	if actionName == "" {
+		return false
+	}
+	_, ok := pm.policies[actionName]
+	return !ok
+}
+
+// firstUnknownWarning returns true only the first time it is called for
+// actionName, and never once the bounded set is full.
+func (pm *PolicyManager) firstUnknownWarning(actionName string) bool {
+	pm.warnedMu.Lock()
+	defer pm.warnedMu.Unlock()
+	if _, seen := pm.warnedUnknown[actionName]; seen {
+		return false
+	}
+	if len(pm.warnedUnknown) >= maxWarnedUnknownActions {
+		return false
+	}
+	if pm.warnedUnknown == nil {
+		pm.warnedUnknown = make(map[string]struct{})
+	}
+	pm.warnedUnknown[actionName] = struct{}{}
+	return true
 }
 
 // NewPolicyManager creates a new PolicyManager.
