@@ -1068,6 +1068,89 @@ type OIDCOP struct {
 	// StaticClients is a list of pre-configured OIDC clients
 	// These clients are checked in addition to dynamically registered clients
 	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty"`
+
+	// DynamicRegistrationAuth configures authorization for POST /register (RFC 7591).
+	// Modes:
+	//   - open: no authorization required (default)
+	//   - static: require a bearer token loaded from a local file
+	//   - jwt: require a signed JWT validated against configured JWKS/issuer/audience
+	//
+	// Future option (not implemented yet): introspection via external authorization server.
+	DynamicRegistrationAuth *DynamicRegistrationAuthConfig `yaml:"dynamic_registration_auth,omitempty" validate:"omitempty"`
+}
+
+// DynamicRegistrationAuthConfig configures how the verifier authorizes dynamic client registration requests.
+type DynamicRegistrationAuthConfig struct {
+	// Mode controls registration authorization behavior.
+	// Supported values: open, static, jwt.
+	//
+	// Future option (not implemented yet): introspection, which the
+	// validator rejects until it is.
+	Mode string `yaml:"mode,omitempty" default:"open" validate:"omitempty,oneof=open static jwt"`
+
+	// StaticBearerTokenFile points to a file containing the expected bearer token (single line).
+	// Required when Mode=static.
+	StaticBearerTokenFile string `yaml:"static_bearer_token_file,omitempty" validate:"required_if=Mode static"`
+
+	// JWT config for Mode=jwt.
+	JWT *DynamicRegistrationJWTAuthConfig `yaml:"jwt,omitempty" validate:"required_if=Mode jwt"`
+}
+
+// DynamicRegistrationJWTAuthConfig configures JWT verification for registration authorization.
+type DynamicRegistrationJWTAuthConfig struct {
+	// JWKSURI is the URL to fetch signing keys from.
+	//
+	// HTTPS only. This key set is the trust root for every registration
+	// token accepted in jwt mode: whoever controls the bytes it returns
+	// decides which signatures verify. Over plaintext that is anyone on the
+	// network path, who can then mint a token this verifier accepts and
+	// register clients at will - so the signature check would be theatre,
+	// not protection.
+	JWKSURI string `yaml:"jwks_uri" validate:"required,https_endpoint"`
+
+	// Issuer is the required issuer claim (iss).
+	//
+	// HTTPS only, both because OpenID Connect Discovery requires it and
+	// because an http issuer paired with an https key set is a sign the
+	// deployment was copied from a plaintext one.
+	Issuer string `yaml:"issuer" validate:"required,https_endpoint"`
+
+	// Audience is the required audience claim (aud).
+	Audience string `yaml:"audience" validate:"required"`
+
+	// AllowedSigningAlgs restricts accepted JWT signing algorithms.
+	//
+	// Asymmetric only, enforced at startup. The key set behind jwks_uri is
+	// PUBLISHED, so a symmetric algorithm turns it into a secret handout:
+	// configure HS256 and serve an `oct` key, and anyone who can fetch the
+	// key set can mint registration tokens for this endpoint. "none" is the
+	// same hole with no key at all. Unrecognised algorithms are refused for
+	// the same reason rather than forwarded to go-oidc, which is how the
+	// symmetric family would get in.
+	AllowedSigningAlgs []string `yaml:"allowed_signing_algs,omitempty" validate:"omitempty,dive,asymmetric_jws_alg" default:"[\"RS256\",\"ES256\"]"`
+
+	// ClockSkewSeconds is how far the token's exp may lie in the past and
+	// still be accepted, for a client whose clock runs behind ours.
+	//
+	// The underlying verifier (coreos/go-oidc) has no leeway setting, so
+	// this is applied by moving the clock it reads. That clock serves two
+	// checks, and the effect on each is opposite: exp is relaxed by this
+	// much, and go-oidc's own fixed five-minute nbf leeway is reduced by
+	// the same amount. Keep it well under five minutes, or a token whose
+	// nbf is legitimately a little in the future stops being accepted. iat
+	// is not validated at all. Zero disables both effects, and the upper
+	// bound is one second short of go-oidc's nbf leeway - at or past it the
+	// leeway is gone and a token with a legitimately future nbf starts
+	// being rejected, which is the opposite of what raising a skew
+	// tolerance is meant to achieve.
+	//
+	// A pointer so that an explicit zero survives. Defaults are applied
+	// after unmarshalling and creasty/defaults fills any field still at its
+	// zero value, so as a plain int, clock_skew_seconds: 0 - the one value
+	// an operator writes on purpose, to turn the tolerance off - is
+	// indistinguishable from the key being absent and gets overwritten with
+	// 60. Unset stays nil until the default is applied; zero stays zero.
+	ClockSkewSeconds *int `yaml:"clock_skew_seconds,omitempty" default:"60" validate:"omitempty,min=0,max=299"`
 }
 
 // OpenID4VPConfig holds OpenID4VP-specific configuration

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/SUNET/vc/pkg/issuance"
 	"maps"
 	"os"
 	"path/filepath"
@@ -187,11 +188,19 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkIssuancePolicies(cfg, serviceName); err != nil {
+		return nil, err
+	}
+
 	if err := checkPresentationScopeFromScope(cfg, serviceName); err != nil {
 		return nil, err
 	}
 
 	if err := checkAuthScopes(cfg); err != nil {
+		return nil, err
+	}
+
+	if err := checkPolicyClaimsAreNotCallerTemplated(cfg); err != nil {
 		return nil, err
 	}
 
@@ -341,6 +350,81 @@ func checkMongoRequirement(cfg *model.Cfg, serviceName string) error {
 		return fmt.Errorf("common.mongo.uri is required for the %s service when common.sql.backend is %q", serviceName, backend)
 	case cfg.Common.HA.Enable:
 		return fmt.Errorf("common.mongo.uri is required for the %s service because common.ha.enable is set and HA caching has no relational backend", serviceName)
+	}
+
+	return nil
+}
+
+// checkIssuancePolicies builds every configured issuance policy at startup,
+// so a broken one is a boot error rather than a surprise on the first
+// authentication callback.
+//
+// IssuancePolicy's own documentation says a rule with the wrong number or
+// order of dimensions "fails startup instead of silently never matching at
+// evaluation time". That was not true: BuildEngine ran only from
+// GetPolicyEngine, inside the OIDC callback, so a malformed rule sat
+// undetected until someone tried to authenticate.
+//
+// It also refuses a policy that is configured but defines no rules.
+// NewPolicyEngine returns (nil, nil) for one, and a nil engine reads to
+// every caller as "no policy configured" - so `issuance_policy: {}` on a
+// scope disabled the very check it was asked for, which is the opposite of
+// the documented behaviour that an unmatched query denies issuance. An
+// operator who writes that has made a mistake worth naming at boot.
+func checkIssuancePolicies(cfg *model.Cfg, serviceName string) error {
+	if serviceName != "apigw" || cfg.APIGW == nil {
+		return nil
+	}
+
+	type scopePolicy struct {
+		kind   string
+		scope  string
+		policy *model.IssuancePolicy
+	}
+	var policies []scopePolicy
+
+	ds := cfg.APIGW.DataSources
+	for scope, sc := range ds.Datastore.Scopes {
+		policies = append(policies, scopePolicy{"datastore", scope, sc.IssuancePolicy})
+	}
+	for scope, sc := range ds.Assertion.Scopes {
+		policies = append(policies, scopePolicy{"assertion", scope, sc.IssuancePolicy})
+	}
+	for scope, sc := range ds.ExternalAPI.Scopes {
+		policies = append(policies, scopePolicy{"external_api", scope, sc.IssuancePolicy})
+	}
+
+	slices.SortFunc(policies, func(a, b scopePolicy) int {
+		if c := strings.Compare(a.kind, b.kind); c != 0 {
+			return c
+		}
+		return strings.Compare(a.scope, b.scope)
+	})
+
+	for _, p := range policies {
+		if p.policy == nil {
+			continue
+		}
+		where := fmt.Sprintf("apigw.data_sources.%s.scopes.%s.issuance_policy", p.kind, p.scope)
+
+		// GetPolicyEngine, not NewPolicyEngine: it builds through the same
+		// cache the OIDC callback reads, keyed on the policy pointer, so the
+		// engine validated here is the engine that later serves requests.
+		//
+		// Building and discarding meant the first callback parsed the rules
+		// file again, and a file edited between boot and that callback would
+		// then decide authorization without ever having been validated -
+		// either failing at request time despite a clean start, or, worse,
+		// quietly enforcing different rules than the ones this check passed.
+		// Config pointers are stable for the process lifetime, so priming
+		// the cache here also means the rules file is read exactly once.
+		//
+		// NewPolicyEngine underneath refuses every way of ending up with no
+		// rules - no source configured, and a rules_file that parses to
+		// nothing - so the only thing left to do here is name the scope.
+		if _, err := issuance.GetPolicyEngine(p.policy); err != nil {
+			return fmt.Errorf("%s: %w", where, err)
+		}
 	}
 
 	return nil
