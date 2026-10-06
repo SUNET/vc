@@ -235,7 +235,10 @@ func (k *PKCS11ECDH) derive(publicData []byte, valueLen int) ([]byte, error) {
 		return nil, fmt.Errorf("reading the derived secret: %w "+
 			"(the token may refuse to make a derived key extractable, in which case it cannot be used for ECDH-ES this way)", err)
 	}
-	if len(attrs) != 1 || len(attrs[0].Value) != valueLen {
+	if len(attrs) != 1 {
+		return nil, fmt.Errorf("the token returned %d attributes for CKA_VALUE, want 1", len(attrs))
+	}
+	if len(attrs[0].Value) != valueLen {
 		return nil, fmt.Errorf("the derived secret is %d bytes, want %d", len(attrs[0].Value), valueLen)
 	}
 
