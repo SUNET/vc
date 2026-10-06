@@ -1,36 +1,63 @@
 package importer
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/SUNET/vc/internal/apigw/db"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/vcclient"
+
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
+// gzipMagic is the two-byte header that prefixes every gzip stream (RFC 1952).
+var gzipMagic = []byte{0x1f, 0x8b}
+
+// readBootstrapFile reads a bootstrap file, transparently decompressing it when
+// the content is gzip-encoded. This lets large fixtures ship compressed (e.g.
+// to stay under Fly's inlined-file size limit) without changing callers.
+func readBootstrapFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.HasPrefix(data, gzipMagic) {
+		return data, nil
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("open gzip reader: %w", err)
+	}
+	defer zr.Close()
+	decompressed, err := io.ReadAll(zr)
+	if err != nil {
+		return nil, fmt.Errorf("decompress: %w", err)
+	}
+	return decompressed, nil
+}
+
 // RunDocuments imports JSON fixture data from the configured file paths into the datastore.
-// It skips import if the datastore already contains data.
+// Each document is imported only if one with the same natural key is not already
+// present, so adding a new fixture (or a whole new scope) to an existing
+// deployment imports just the missing documents instead of being skipped.
 func RunDocuments(ctx context.Context, cfg *model.DatastoreImport, dbService *db.Service, log *logger.Log) error {
 	log = log.New("importer")
 
-	count, err := dbService.DatastoreColl.Count(ctx)
-	if err != nil {
-		return fmt.Errorf("check datastore count: %w", err)
-	}
-	if count > 0 {
-		log.Info("Datastore already contains data, skipping import", "count", count)
-		return nil
-	}
-
 	for _, path := range cfg.FilePaths {
-		name := strings.TrimSuffix(filepath.Base(path), ".json")
+		name := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(path), ".gz"), ".json")
 
 		if err := importDocuments(ctx, path, name, cfg.Users, dbService, log); err != nil {
 			return fmt.Errorf("import documents from %s: %w", filepath.Base(path), err)
@@ -42,7 +69,7 @@ func RunDocuments(ctx context.Context, cfg *model.DatastoreImport, dbService *db
 }
 
 func importDocuments(ctx context.Context, path, name string, filterUsers []string, dbService *db.Service, log *logger.Log) error {
-	data, err := os.ReadFile(filepath.Clean(path))
+	data, err := readBootstrapFile(path)
 	if err != nil {
 		return err
 	}
@@ -65,8 +92,18 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 	}
 
 	imported := 0
+	skipped := 0
 	for id, doc := range docs {
 		if !shouldImport(id, filterUsers) {
+			continue
+		}
+
+		present, err := documentPresent(ctx, dbService.DatastoreColl, doc.Meta)
+		if err != nil {
+			return fmt.Errorf("check document %s/%s: %w", name, id, err)
+		}
+		if present {
+			skipped++
 			continue
 		}
 
@@ -76,8 +113,26 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 		imported++
 	}
 
-	log.Info("Imported documents", "file", filepath.Base(path), "scope", name, "count", imported)
+	log.Info("Imported documents", "file", filepath.Base(path), "scope", name, "imported", imported, "skipped", skipped)
 	return nil
+}
+
+// documentPresent reports whether a document with the same natural key
+// (authentic_source, scope, document_id) already exists, so a re-run only
+// inserts what is missing instead of overwriting existing (possibly edited)
+// documents.
+func documentPresent(ctx context.Context, store db.DatastoreStore, meta *model.MetaData) (bool, error) {
+	if meta == nil {
+		return false, errors.New("document has no meta")
+	}
+	_, err := store.GetByKey(ctx, meta.AuthenticSource, meta.Scope, meta.DocumentID)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, mongo.ErrNoDocuments) || errors.Is(err, helpers.ErrNoDocumentFound) {
+		return false, nil
+	}
+	return false, err
 }
 
 func shouldImport(id string, users []string) bool {
@@ -88,18 +143,10 @@ func shouldImport(id string, users []string) bool {
 }
 
 // RunIdentityMappings imports identity mapping data from the configured file paths.
-// It skips import if the identity mappings collection already contains data.
+// EnsureMapping is an insert-if-absent upsert, so re-running only adds mappings
+// that are not already present and never clobbers existing attributes.
 func RunIdentityMappings(ctx context.Context, cfg *model.IdentityMappingImport, dbService *db.Service, log *logger.Log) error {
 	log = log.New("importer")
-
-	count, err := dbService.IdentityMappingsColl.Count(ctx)
-	if err != nil {
-		return fmt.Errorf("check identity mappings count: %w", err)
-	}
-	if count > 0 {
-		log.Info("Identity mappings already contain data, skipping import", "count", count)
-		return nil
-	}
 
 	for _, path := range cfg.FilePaths {
 		if err := importIdentityMappings(ctx, path, cfg.Users, dbService, log); err != nil {
@@ -112,7 +159,7 @@ func RunIdentityMappings(ctx context.Context, cfg *model.IdentityMappingImport, 
 }
 
 func importIdentityMappings(ctx context.Context, path string, filterUsers []string, dbService *db.Service, log *logger.Log) error {
-	data, err := os.ReadFile(filepath.Clean(path))
+	data, err := readBootstrapFile(path)
 	if err != nil {
 		return err
 	}

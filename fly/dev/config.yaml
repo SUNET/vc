@@ -27,6 +27,10 @@ common:
       vctm_file_path: "/metadata/vctm_eduid_age_verification.json"
       format: "dc+sd-jwt"
       replace_vct: true
+    MicroCredential:
+      vctm_file_path: "/metadata/vctm_microcredential.json"
+      format: "dc+sd-jwt"
+      replace_vct: true
     # Disabled pending Longfellow wallet support and age-proof validation.
     #eduid_age_verification_zk:
     #  mddl_file_path: "/metadata/eduid_age_verification_zk.mdoc.json"
@@ -198,7 +202,7 @@ apigw:
       - "https://sunet-vc-apigw.fly.dev"
   identity_mapping_import:
     file_paths:
-      - "/bootstrapping/identity_mappings.json"
+      - "/bootstrapping/identity_mappings.json.gz"
     users:
       - "100"
       - "102"
@@ -290,12 +294,13 @@ apigw:
     datastore:
       import:
         file_paths:
-          - "/bootstrapping/diploma.json"
-          - "/bootstrapping/ehic.json"
-          - "/bootstrapping/pda1.json"
-          - "/bootstrapping/pid.json"
-          - "/bootstrapping/mdl.json"
-          #- "/bootstrapping/pid_mdoc.json"
+          - "/bootstrapping/diploma.json.gz"
+          - "/bootstrapping/ehic.json.gz"
+          - "/bootstrapping/pda1.json.gz"
+          - "/bootstrapping/pid.json.gz"
+          - "/bootstrapping/mdl.json.gz"
+          - "/bootstrapping/microcredential.json.gz"
+          #- "/bootstrapping/pid_mdoc.json.gz"
         users:
           - "100"
           - "102"
@@ -304,6 +309,11 @@ apigw:
           auth_provider: oidc
           auth_claims: ["given_name", "family_name", "birthdate"]
         ehic:
+          auth_provider: openid4vp
+          auth_scopes:
+            pid:
+              auth_claims: ["given_name", "family_name", "birthdate"]
+        MicroCredential:
           auth_provider: openid4vp
           auth_scopes:
             pid:
@@ -374,6 +384,7 @@ apigw:
             - "mdl"
             - "eduid"
             - "eduid_age_verification"
+            - "microcredential"
             #- "eduid_age_verification_zk"
         # Interop testbed (webuild-cs01, University of the Aegean). Static
         # allowlist entry lets the headless testbed wallet pass PAR client

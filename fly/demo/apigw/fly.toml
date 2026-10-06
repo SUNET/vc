@@ -36,10 +36,6 @@ primary_region = "arn"
   local_path = "fly/demo/bootstrapping/diploma.json"
 
 [[files]]
-  guest_path = "/bootstrapping/eduid.json"
-  local_path = "fly/demo/bootstrapping/eduid.json"
-
-[[files]]
   guest_path = "/bootstrapping/ehic.json"
   local_path = "fly/demo/bootstrapping/ehic.json"
 

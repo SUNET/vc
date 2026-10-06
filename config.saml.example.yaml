@@ -85,7 +85,7 @@ apigw:
     # SAML identifies the user; the remote API provides the credential data.
     external_api:
       scopes:
-        micro_credential:
+        MicroCredential:
           auth_provider: saml
           remote: ladok
 

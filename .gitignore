@@ -36,6 +36,9 @@ developer_tools/pki/*
 /registry
 /verifier
 
+# gen_bootstrap gzip artifacts (committed copies live under fly/dev/bootstrapping/)
+bootstrapping/*.json.gz
+
 # Working documents (not tracked in git)
 PR_STRATEGY.md
 COMMIT_PLAN.md
