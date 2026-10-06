@@ -91,6 +91,7 @@ func TestVCIMetadata_UnsignedByDefault(t *testing.T) {
 
 			require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 			assert.Contains(t, w.Header().Get("Content-Type"), "application/json")
+			assert.Equal(t, "Accept", w.Header().Get("Vary"))
 
 			var got map[string]any
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
@@ -172,4 +173,26 @@ func TestVCIMetadata_SignedMemberDoesNotChangeTheJWTResponse(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, MediaTypeJWT, w.Header().Get("Content-Type"))
 	assert.Equal(t, testSignedMetadataJWT, w.Body.String())
+}
+
+// The representation depends on the request's Accept header, so every
+// answer must name that cache key - including the ones that are not a
+// successful JSON document.
+func TestVCIMetadata_AlwaysVariesOnAccept(t *testing.T) {
+	for name, tc := range map[string]struct {
+		signed string
+		accept string
+	}{
+		"the JSON document":       {signed: testSignedMetadataJWT, accept: "application/json"},
+		"the signed JWT":          {signed: testSignedMetadataJWT, accept: MediaTypeJWT},
+		"the unsigned fallback":   {signed: "", accept: MediaTypeJWT},
+		"nothing is acceptable":   {signed: testSignedMetadataJWT, accept: "application/xml"},
+		"no Accept header at all": {signed: testSignedMetadataJWT, accept: ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := getMetadata(t, metadataTestEngine(t, tc.signed, false), tc.accept)
+
+			assert.Equal(t, "Accept", w.Header().Get("Vary"), "status %d", w.Code)
+		})
+	}
 }

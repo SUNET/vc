@@ -265,6 +265,12 @@ func (s *Service) endpointVCIMetadata(ctx context.Context, c *gin.Context) (any,
 		return nil, err
 	}
 
+	// The representation now depends on the request's Accept header, so every
+	// answer has to say so: without this a shared cache can store the JSON
+	// document and hand it to a wallet that asked for application/jwt, or the
+	// other way round. Set before any branch below, including the 406.
+	c.Header("Vary", "Accept")
+
 	// Held aside rather than read twice: whichever branch runs below, the JSON
 	// document must not carry it unless the deployment asked for it.
 	signed := reply.SignedMetadata
