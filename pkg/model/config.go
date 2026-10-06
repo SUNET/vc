@@ -1358,17 +1358,6 @@ type IssuerMetadata struct {
 	IncludeSignedMetadataInJSON *bool `yaml:"include_signed_metadata_in_json" default:"false"`
 }
 
-// IncludeSignedMetadataInIssuerMetadataJSON reports whether the unsigned
-// issuer metadata document should carry the draft-era signed_metadata member.
-// Nil-safe, because the call site is an HTTP handler that should not repeat
-// the nil dance.
-func (cfg *Cfg) IncludeSignedMetadataInIssuerMetadataJSON() bool {
-	if cfg == nil || cfg.APIGW == nil {
-		return false
-	}
-	return BoolVal(cfg.APIGW.IssuerMetadata.IncludeSignedMetadataInJSON, false)
-}
-
 // CredentialOfferWallets holds wallet redirect configuration
 type CredentialOfferWallets struct {
 	// Label is the display label for the wallet

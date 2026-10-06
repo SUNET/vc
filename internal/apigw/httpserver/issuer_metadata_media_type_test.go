@@ -135,11 +135,22 @@ func TestVCIMetadata_FallsBackToUnsignedWhenNothingIsSigned(t *testing.T) {
 	assert.NotContains(t, got, "signed_metadata")
 }
 
-// An Accept header that rules out both forms is answered honestly.
+// An Accept header that rules out both forms is answered honestly, whether
+// it does so by naming something else or by giving one of ours q=0
+// (RFC 9110 §12.4.2).
 func TestVCIMetadata_NotAcceptable(t *testing.T) {
-	w := getMetadata(t, metadataTestEngine(t, testSignedMetadataJWT, false), "application/xml")
+	for _, accept := range []string{
+		"application/xml",
+		"*/*;q=0",
+		"application/jwt;q=0, application/json;q=0",
+		"application/jwt;q=0",
+	} {
+		t.Run(accept, func(t *testing.T) {
+			w := getMetadata(t, metadataTestEngine(t, testSignedMetadataJWT, false), accept)
 
-	assert.Equal(t, http.StatusNotAcceptable, w.Code, "body: %s", w.Body.String())
+			assert.Equal(t, http.StatusNotAcceptable, w.Code, "body: %s", w.Body.String())
+		})
+	}
 }
 
 // The draft-era shape is still reachable, for a wallet that reads

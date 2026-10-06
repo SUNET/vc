@@ -3,10 +3,12 @@ package httpserver
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"go.opentelemetry.io/otel/codes"
@@ -149,21 +151,98 @@ func (s *Service) endpointVCINotification(ctx context.Context, c *gin.Context) (
 // of the Credential Issuer Metadata.
 const MediaTypeJWT = "application/jwt"
 
-// acceptedMediaTypes reduces an Accept header to its media ranges, folded to
-// lower case and with parameters dropped, in the order the client listed
-// them. Suitable for gin's NegotiateFormat, which compares byte by byte and
-// ignores quality values.
-func acceptedMediaTypes(header string) []string {
-	var accepted []string
-	for _, part := range strings.Split(header, ",") {
-		if i := strings.IndexByte(part, ';'); i >= 0 {
-			part = part[:i]
+// negotiateMediaType picks the client's most-preferred type among offered,
+// following the quality values of RFC 9110 §12.5.1. offered is in server
+// preference order, and is also the tie-break; the first entry answers an
+// absent or empty header. "" means nothing offered is acceptable.
+//
+// Written out rather than handed to gin's NegotiateFormat, which strips
+// every ";q=..." before comparing and compares case-sensitively - so
+// "Accept: application/jwt;q=0" would have been served the JWT it refused,
+// and "Application/JWT" would not have been served the JWT it asked for.
+// Media type tokens are case-insensitive (§8.3.1) and q=0 means "not
+// acceptable" (§12.4.2).
+func negotiateMediaType(header string, offered ...string) string {
+	ranges := parseAcceptHeader(header)
+	if len(ranges) == 0 {
+		return offered[0]
+	}
+
+	best, bestQ := "", 0.0
+	for _, offer := range offered {
+		// The most specific matching range sets the quality, per §12.5.1:
+		// an exact type beats "type/*", which beats "*/*".
+		q, specificity := 0.0, -1
+		for _, r := range ranges {
+			s := r.match(offer)
+			if s > specificity {
+				q, specificity = r.quality, s
+			}
 		}
-		if part = strings.ToLower(strings.TrimSpace(part)); part != "" {
-			accepted = append(accepted, part)
+		// Strictly greater, so a tie goes to the earlier - that is, to the
+		// server's own preference.
+		if specificity >= 0 && q > bestQ {
+			best, bestQ = offer, q
 		}
 	}
-	return accepted
+
+	return best
+}
+
+// mediaRange is one entry of an Accept header: a media range and its quality.
+type mediaRange struct {
+	kind    string // "type" or "*"
+	subtype string // "subtype" or "*"
+	quality float64
+}
+
+// match reports how specifically this range matches a media type: 2 exact,
+// 1 for "type/*", 0 for "*/*", -1 for no match or q=0 (RFC 9110 §12.4.2
+// gives q=0 the meaning "not acceptable", so it can never match).
+func (r mediaRange) match(mediaType string) int {
+	if r.quality <= 0 {
+		return -1
+	}
+	kind, subtype, _ := strings.Cut(mediaType, "/")
+	switch {
+	case r.kind == "*" && r.subtype == "*":
+		return 0
+	case r.kind == kind && r.subtype == "*":
+		return 1
+	case r.kind == kind && r.subtype == subtype:
+		return 2
+	default:
+		return -1
+	}
+}
+
+func parseAcceptHeader(header string) []mediaRange {
+	var ranges []mediaRange
+	for _, part := range strings.Split(header, ",") {
+		fields := strings.Split(part, ";")
+		name := strings.ToLower(strings.TrimSpace(fields[0]))
+		if name == "" {
+			continue
+		}
+		kind, subtype, ok := strings.Cut(name, "/")
+		if !ok {
+			continue
+		}
+
+		quality := 1.0
+		for _, param := range fields[1:] {
+			key, value, ok := strings.Cut(param, "=")
+			if !ok || strings.ToLower(strings.TrimSpace(key)) != "q" {
+				continue
+			}
+			if parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
+				quality = parsed
+			}
+		}
+
+		ranges = append(ranges, mediaRange{kind: kind, subtype: subtype, quality: quality})
+	}
+	return ranges
 }
 
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
@@ -192,15 +271,9 @@ func (s *Service) endpointVCIMetadata(ctx context.Context, c *gin.Context) (any,
 	reply.SignedMetadata = ""
 
 	// Server preference is the unsigned form, because that is the one a wallet
-	// is guaranteed to understand. Quality values are not weighted - gin
-	// negotiates on the order the wallet listed, which is what wallets send.
-	//
-	// c.Accepted is set rather than left for gin to parse: media type tokens
-	// are case-insensitive (RFC 9110 §8.3.1) and gin compares them byte by
-	// byte, so a conforming wallet asking for "Application/JWT" would
-	// silently get JSON.
-	c.Accepted = acceptedMediaTypes(c.GetHeader("Accept"))
-	switch c.NegotiateFormat(gin.MIMEJSON, MediaTypeJWT) {
+	// is guaranteed to understand; it is also the tie-break when the wallet
+	// gives both the same quality.
+	switch negotiateMediaType(c.GetHeader("Accept"), gin.MIMEJSON, MediaTypeJWT) {
 	case MediaTypeJWT:
 		if signed != "" {
 			c.Data(http.StatusOK, MediaTypeJWT, []byte(signed))
@@ -216,7 +289,7 @@ func (s *Service) endpointVCIMetadata(ctx context.Context, c *gin.Context) (any,
 		return nil, nil
 	}
 
-	if s.cfg.IncludeSignedMetadataInIssuerMetadataJSON() {
+	if model.BoolVal(s.cfg.APIGW.IssuerMetadata.IncludeSignedMetadataInJSON, false) {
 		reply.SignedMetadata = signed
 	}
 
