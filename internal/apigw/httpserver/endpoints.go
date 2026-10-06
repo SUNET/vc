@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
@@ -148,6 +149,23 @@ func (s *Service) endpointVCINotification(ctx context.Context, c *gin.Context) (
 // of the Credential Issuer Metadata.
 const MediaTypeJWT = "application/jwt"
 
+// acceptedMediaTypes reduces an Accept header to its media ranges, folded to
+// lower case and with parameters dropped, in the order the client listed
+// them. Suitable for gin's NegotiateFormat, which compares byte by byte and
+// ignores quality values.
+func acceptedMediaTypes(header string) []string {
+	var accepted []string
+	for _, part := range strings.Split(header, ",") {
+		if i := strings.IndexByte(part, ';'); i >= 0 {
+			part = part[:i]
+		}
+		if part = strings.ToLower(strings.TrimSpace(part)); part != "" {
+			accepted = append(accepted, part)
+		}
+	}
+	return accepted
+}
+
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-issuer-metadata-p
 //
 // OpenID4VCI 1.0 §12.2.2 returns the metadata as EITHER an unsigned JSON
@@ -176,6 +194,12 @@ func (s *Service) endpointVCIMetadata(ctx context.Context, c *gin.Context) (any,
 	// Server preference is the unsigned form, because that is the one a wallet
 	// is guaranteed to understand. Quality values are not weighted - gin
 	// negotiates on the order the wallet listed, which is what wallets send.
+	//
+	// c.Accepted is set rather than left for gin to parse: media type tokens
+	// are case-insensitive (RFC 9110 §8.3.1) and gin compares them byte by
+	// byte, so a conforming wallet asking for "Application/JWT" would
+	// silently get JSON.
+	c.Accepted = acceptedMediaTypes(c.GetHeader("Accept"))
 	switch c.NegotiateFormat(gin.MIMEJSON, MediaTypeJWT) {
 	case MediaTypeJWT:
 		if signed != "" {

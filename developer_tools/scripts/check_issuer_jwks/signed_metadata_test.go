@@ -13,11 +13,14 @@ const testJWT = "eyJ0eXAiOiJvcGVuaWR2Y2ktaXNzdWVyLW1ldGFkYXRhK2p3dCJ9.eyJzdWIiOi
 // given deployment would. signed is served as application/jwt when the
 // caller asks for it; embedded, when set, is put in the JSON document the
 // draft-era way.
-func metadataServer(t *testing.T, signed, embedded string) string {
+func metadataServer(t *testing.T, signed, embedded, jwtContentType string) string {
 	t.Helper()
+	if jwtContentType == "" {
+		jwtContentType = mediaTypeJWT
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if signed != "" && strings.Contains(r.Header.Get("Accept"), mediaTypeJWT) {
-			w.Header().Set("Content-Type", mediaTypeJWT)
+			w.Header().Set("Content-Type", jwtContentType)
 			_, _ = w.Write([]byte(signed))
 			return
 		}
@@ -34,21 +37,28 @@ func metadataServer(t *testing.T, signed, embedded string) string {
 
 // The §12.2.2 shape: the signed metadata is the whole response, typed
 // application/jwt, and reached only by asking for it.
+//
+// The spelling varies because media type tokens are case-insensitive
+// (RFC 9110 §8.3.1) and a conforming issuer may send any of these.
 func TestFetchSignedMetadata_FromTheJWTResponse(t *testing.T) {
-	got, source := fetchSignedMetadata(metadataServer(t, testJWT, ""), "")
+	for _, spelling := range []string{"application/jwt", "Application/JWT", "application/JWT; charset=utf-8"} {
+		t.Run(spelling, func(t *testing.T) {
+			got, source := fetchSignedMetadata(metadataServer(t, testJWT, "", spelling), "")
 
-	if got != testJWT {
-		t.Fatalf("got %q, want the JWT the issuer served", got)
-	}
-	if !strings.Contains(source, mediaTypeJWT) {
-		t.Fatalf("source %q should say where it came from", source)
+			if got != testJWT {
+				t.Fatalf("got %q, want the JWT the issuer served", got)
+			}
+			if !strings.Contains(source, mediaTypeJWT) {
+				t.Fatalf("source %q should say where it came from", source)
+			}
+		})
 	}
 }
 
 // The draft-era shape, which a deployment can still turn on: the JWT rides
 // in the JSON document and no application/jwt response exists.
 func TestFetchSignedMetadata_FromTheEmbeddedMember(t *testing.T) {
-	got, source := fetchSignedMetadata(metadataServer(t, "", testJWT), testJWT)
+	got, source := fetchSignedMetadata(metadataServer(t, "", testJWT, ""), testJWT)
 
 	if got != testJWT {
 		t.Fatalf("got %q, want the embedded JWT", got)
@@ -62,7 +72,7 @@ func TestFetchSignedMetadata_FromTheEmbeddedMember(t *testing.T) {
 // document, which is conformant - the signed form is a MAY. The tool says
 // so rather than reporting a JWT it does not have.
 func TestFetchSignedMetadata_NoneAvailable(t *testing.T) {
-	got, source := fetchSignedMetadata(metadataServer(t, "", ""), "")
+	got, source := fetchSignedMetadata(metadataServer(t, "", "", ""), "")
 
 	if got != "" {
 		t.Fatalf("got %q, want nothing", got)

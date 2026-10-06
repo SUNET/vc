@@ -102,12 +102,24 @@ func TestVCIMetadata_UnsignedByDefault(t *testing.T) {
 
 // A wallet that asks for the signed form gets the JWT as the whole response,
 // typed application/jwt (SUNET/vc#708).
+//
+// The spellings vary because media type tokens are case-insensitive
+// (RFC 9110 §8.3.1), and gin's own negotiation compares them byte by byte.
 func TestVCIMetadata_SignedWhenRequested(t *testing.T) {
-	w := getMetadata(t, metadataTestEngine(t, testSignedMetadataJWT, false), MediaTypeJWT)
+	for _, accept := range []string{
+		"application/jwt",
+		"Application/JWT",
+		"APPLICATION/JWT, application/json;q=0.5",
+		"application/jwt; q=1.0",
+	} {
+		t.Run(accept, func(t *testing.T) {
+			w := getMetadata(t, metadataTestEngine(t, testSignedMetadataJWT, false), accept)
 
-	require.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, MediaTypeJWT, w.Header().Get("Content-Type"))
-	assert.Equal(t, testSignedMetadataJWT, w.Body.String())
+			require.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, MediaTypeJWT, w.Header().Get("Content-Type"))
+			assert.Equal(t, testSignedMetadataJWT, w.Body.String())
+		})
+	}
 }
 
 // Signed metadata is a MAY and can be unavailable at runtime. The unsigned

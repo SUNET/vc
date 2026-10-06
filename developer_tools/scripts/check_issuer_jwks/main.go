@@ -631,7 +631,9 @@ func fetchSignedMetadata(wellKnownURL, embedded string) (string, string) {
 		return "", fmt.Sprintf("request with Accept: %s failed: %v", mediaTypeJWT, err)
 	}
 
-	if mediaType == mediaTypeJWT {
+	// Media type tokens are case-insensitive (RFC 9110 §8.3.1), so a
+	// conforming issuer may answer "Application/JWT".
+	if strings.EqualFold(mediaType, mediaTypeJWT) {
 		return strings.TrimSpace(string(body)), "application/jwt response"
 	}
 
