@@ -179,8 +179,9 @@ func negotiateMediaType(header string, offered ...string) string {
 				q, specificity = r.quality, s
 			}
 		}
-		// Strictly greater, so a tie goes to the earlier - that is, to the
-		// server's own preference.
+		// Strictly greater, which does two jobs: a tie goes to the earlier
+		// offer - the server's own preference - and a quality of zero never
+		// wins, which is how §12.4.2's "not acceptable" is enforced.
 		if specificity >= 0 && q > bestQ {
 			best, bestQ = offer, q
 		}
@@ -197,12 +198,15 @@ type mediaRange struct {
 }
 
 // match reports how specifically this range matches a media type: 2 exact,
-// 1 for "type/*", 0 for "*/*", -1 for no match or q=0 (RFC 9110 §12.4.2
-// gives q=0 the meaning "not acceptable", so it can never match).
+// 1 for "type/*", 0 for "*/*", -1 for no match.
+//
+// Quality plays no part. A q=0 range has to keep its specificity so that it
+// can do its job, which is to EXCLUDE: in
+// "application/json;q=0, application/jwt;q=0.5, */*" the exact range is what
+// rules JSON out, and letting the wildcard outrank it would select the very
+// representation the client refused. The exclusion happens in the caller,
+// where a quality of zero simply never beats the running best.
 func (r mediaRange) match(mediaType string) int {
-	if r.quality <= 0 {
-		return -1
-	}
 	kind, subtype, _ := strings.Cut(mediaType, "/")
 	switch {
 	case r.kind == "*" && r.subtype == "*":

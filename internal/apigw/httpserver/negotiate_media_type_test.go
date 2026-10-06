@@ -41,6 +41,15 @@ func TestNegotiateMediaType(t *testing.T) {
 		{accept: "application/jwt;q=0, application/json", want: json},
 		{accept: "application/json;q=0, application/jwt", want: jwt},
 
+		// A q=0 range must keep its specificity, or a wildcard behind it
+		// overrides the exclusion and selects the refused representation.
+		{accept: "application/json;q=0, application/jwt;q=0.5, */*", want: jwt},
+		{accept: "application/jwt;q=0, application/json;q=0.5, */*", want: json},
+		{accept: "application/json;q=0, */*", want: jwt},
+		{accept: "application/json;q=0, */*;q=0.9, application/jwt;q=0.1", want: jwt},
+		{accept: "application/*;q=0, application/jwt", want: jwt},
+		{accept: "application/*;q=0, */*", want: ""},
+
 		// The highest quality wins, not the order listed.
 		{accept: "application/json;q=0.5, application/jwt;q=0.9", want: jwt},
 		{accept: "application/jwt;q=0.2, application/json;q=0.8", want: json},
