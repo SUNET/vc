@@ -21,7 +21,13 @@ type TokenRequest struct {
 	// ClientID REQUIRED for authorization_code grant when not using client assertion authentication (RFC 6749 §4.1.3).
 	// When using private_key_jwt or client_secret_jwt, client_id is conveyed via the assertion's "sub" claim.
 	// OPTIONAL for pre-authorized_code grant.
-	ClientID string `form:"client_id" json:"client_id" validate:"omitempty,max=128,printascii"`
+	//
+	// The 512-character bound is deliberate: RFC 6749 puts no length limit on
+	// client_id, and wallets increasingly identify themselves with a DID. A
+	// did:key is short, but a did:jwk over a P-256 key is around 175
+	// characters - past the 128 this used to allow. Kept in step with
+	// cache.AuthorizationContext.ClientID, which stores the same value.
+	ClientID string `form:"client_id" json:"client_id" validate:"omitempty,max=512,printascii"`
 
 	// CodeVerifier OPTIONAL (required for public clients using authorization_code grant)
 	CodeVerifier string `form:"code_verifier" json:"code_verifier"`

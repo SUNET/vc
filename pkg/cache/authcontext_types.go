@@ -58,8 +58,12 @@ type AuthorizationContext struct {
 	SourceSessionID string `json:"source_session_id,omitempty" bson:"source_session_id,omitempty" validate:"omitempty,max=128,printascii"`
 
 	// Client and authorization fields
-	ClientID            string   `json:"client_id" bson:"client_id" validate:"omitempty,max=128,printascii"`
-	WalletClientID      string   `json:"wallet_client_id,omitempty" bson:"wallet_client_id,omitempty" validate:"omitempty,max=128,printascii"`
+	// ClientID and WalletClientID hold whatever identifier the wallet sent.
+	// 512 characters, not 128: a wallet may identify itself with a DID, and a
+	// did:jwk over a P-256 key is around 175 characters. Kept in step with
+	// openid4vci.TokenRequest.ClientID, which is where the same value arrives.
+	ClientID            string   `json:"client_id" bson:"client_id" validate:"omitempty,max=512,printascii"`
+	WalletClientID      string   `json:"wallet_client_id,omitempty" bson:"wallet_client_id,omitempty" validate:"omitempty,max=512,printascii"`
 	Scopes              []string `json:"scopes,omitempty" bson:"scopes,omitempty"`
 	State               string   `json:"state,omitempty" bson:"state,omitempty" validate:"omitempty,max=500,printascii"`
 	Nonce               string   `json:"nonce,omitempty" bson:"nonce,omitempty" validate:"omitempty,max=128,printascii"`
