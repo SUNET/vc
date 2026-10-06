@@ -1330,6 +1330,44 @@ type IssuerMetadata struct {
 	CredentialSigningAlgValuesSupported []string `yaml:"credential_signing_alg_values_supported" validate:"omitempty"`
 	// ProofSigningAlgValuesSupported lists the supported proof algorithms
 	ProofSigningAlgValuesSupported []string `yaml:"proof_signing_alg_values_supported" validate:"omitempty"`
+	// ProofTypesSupported narrows which key proof types this issuer
+	// advertises in credential_configurations_supported.
+	//
+	// Empty (the default) advertises every proof type this issuer actually
+	// implements: "jwt" and "attestation". Both are real - attestation
+	// proofs are signature-verified against the x5c in their own header,
+	// see openid4vci.ProofAttestation.Verify - so advertising both is a
+	// truthful statement of capability, which is what OpenID4VCI 1.0
+	// 12.2.4 asks of this parameter.
+	//
+	// Narrow it only for a wallet that cannot cope with a proof type it
+	// does not have to use. The German EUDI Wallet was one such in
+	// September 2026 (SUNET/vc#671): its own attestation support was
+	// incomplete and advertising "attestation" made issuance fail there.
+	// Set ["jwt"] for such a deployment, and remove the setting once the
+	// wallet catches up.
+	ProofTypesSupported []string `yaml:"proof_types_supported" validate:"omitempty,dive,oneof=jwt attestation"`
+	// KeyAttestationsRequired advertises that this issuer REQUIRES a key
+	// attestation in the proofs of a Credential Request, and optionally
+	// which key_storage / user_authentication values it accepts.
+	//
+	// Absent by default, and that is the specification's rule rather than a
+	// preference: OpenID4VCI 1.0 12.2.4 says of key_attestations_required
+	// that "If the Credential Issuer does not require a key attestation,
+	// this parameter MUST NOT be present in the metadata." An empty object
+	// is NOT the neutral value - the same paragraph gives it a meaning, "a
+	// key attestation is needed without additional constraints".
+	//
+	// This issuer does not require one: a plain "jwt" proof with no
+	// attestation is accepted. So emitting the parameter at all claimed a
+	// requirement that is not enforced, which is both untrue and the thing
+	// SUNET/vc#672 reported.
+	//
+	// Set it when this deployment genuinely demands a key attestation, or
+	// to satisfy a wallet library that refuses metadata without the field -
+	// eudi-lib-jvm-openid4vci-kt 0.12.1 was one. An empty object
+	// (`key_attestations_required: {}`) reproduces the old output.
+	KeyAttestationsRequired *openid4vci.KeyAttestationRequirement `yaml:"key_attestations_required" validate:"omitempty"`
 	// CredentialResponseEncryption holds the response encryption configuration
 	CredentialResponseEncryption *openid4vci.MetadataCredentialResponseEncryption `yaml:"credential_response_encryption" validate:"omitempty"`
 	// BatchCredentialIssuance holds the batch issuance configuration
@@ -2381,26 +2419,36 @@ func (cfg *IssuerMetadata) applyCommonCredentialConfig(credConfig *openid4vci.Cr
 	// caveat this leaves on "lpid"'s advertised proof capabilities, and
 	// pkg/openid4vci/proof_attestation.go's Verify() for the deeper gap
 	// this uncovered (attestation proofs are never signature-verified).
-	credConfig.ProofTypesSupported = map[string]openid4vci.ProofsTypesSupported{
-		"jwt": {
+	// Advertise the proof types this issuer implements, narrowed by
+	// configuration when a deployment has to accommodate a wallet that
+	// cannot cope with one of them. Both are implemented: "attestation"
+	// proofs are signature-verified against the x5c in their own header
+	// (openid4vci.ProofAttestation.Verify), so listing both is a truthful
+	// capability statement rather than padding.
+	//
+	// Declared uniformly for every scope, "lpid" included, and it cannot be
+	// scoped away: eudi-lib-jvm-openid4vci-kt validates
+	// proof_types_supported across the WHOLE
+	// credential_configurations_supported document, not per entry, so one
+	// scope differing breaks parsing for every offer. See ARCHITECTURE.md
+	// for the resulting caveat on "lpid"'s advertised proof capabilities.
+	proofTypes := cfg.ProofTypesSupported
+	if len(proofTypes) == 0 {
+		proofTypes = []string{"jwt", "attestation"}
+	}
+
+	credConfig.ProofTypesSupported = make(map[string]openid4vci.ProofsTypesSupported, len(proofTypes))
+	for _, proofType := range proofTypes {
+		credConfig.ProofTypesSupported[proofType] = openid4vci.ProofsTypesSupported{
 			ProofSigningAlgValuesSupported: proofAlgs,
-			KeyAttestationsRequired:        openid4vci.KeyAttestationRequirement{},
-		},
-		// "attestation": declared alongside "jwt" because
-		// eudi-lib-jvm-openid4vci-kt 0.12.1+ hard-fails issuer metadata
-		// validation unless both proof types are present ("Both JWT Proofs
-		// and Attestation Proofs must be supported"). This is a declarative
-		// capability advertisement only -- vc-apigw has no wallet-attestation
-		// verification wired up (lpidproto PLAN.md workstream 8, not started),
-		// and this project's reference-wallet client config uses
-		// ClientAuthenticationType.None rather than AttestationBased, so it
-		// won't actually submit an attestation-typed proof. Revisit alongside
-		// KeyAttestationsRequired above if WS8 ever implements real
-		// attestation verification.
-		"attestation": {
-			ProofSigningAlgValuesSupported: proofAlgs,
-			KeyAttestationsRequired:        openid4vci.KeyAttestationRequirement{},
-		},
+			// Absent unless configured. OpenID4VCI 1.0 12.2.4: when the
+			// issuer does not require a key attestation the parameter MUST
+			// NOT be present, and an empty object is not neutral - it
+			// asserts an unconstrained requirement. This issuer accepts a
+			// plain "jwt" proof with no attestation, so the honest default
+			// is to say nothing. See IssuerMetadata.KeyAttestationsRequired.
+			KeyAttestationsRequired: cfg.KeyAttestationsRequired,
+		}
 	}
 }
 
