@@ -91,7 +91,7 @@ func TestVCIMetadata_UnsignedByDefault(t *testing.T) {
 
 			require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 			assert.Contains(t, w.Header().Get("Content-Type"), "application/json")
-			assert.Equal(t, "Accept", w.Header().Get("Vary"))
+			assert.Contains(t, w.Header().Get("Vary"), "Accept")
 
 			var got map[string]any
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
@@ -192,7 +192,35 @@ func TestVCIMetadata_AlwaysVariesOnAccept(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			w := getMetadata(t, metadataTestEngine(t, tc.signed, false), tc.accept)
 
-			assert.Equal(t, "Accept", w.Header().Get("Vary"), "status %d", w.Code)
+			assert.Contains(t, w.Header().Get("Vary"), "Accept", "status %d", w.Code)
 		})
 	}
+}
+
+// The CORS middleware writes Vary: Origin before this handler runs.
+// Replacing it would let a shared cache serve one origin's CORS response to
+// another, so Accept is appended.
+func TestVCIMetadata_VaryKeepsWhatIsAlreadyThere(t *testing.T) {
+	engine := metadataTestEngine(t, testSignedMetadataJWT, false)
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/openid-credential-issuer", nil)
+	w := httptest.NewRecorder()
+	w.Header().Set("Vary", "Origin")
+	engine.ServeHTTP(w, req)
+
+	vary := w.Header().Get("Vary")
+	assert.Contains(t, vary, "Origin", "the CORS cache key must survive")
+	assert.Contains(t, vary, "Accept")
+}
+
+// ... and it is not added twice when something already named it.
+func TestVCIMetadata_VaryIsNotDuplicated(t *testing.T) {
+	engine := metadataTestEngine(t, testSignedMetadataJWT, false)
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/openid-credential-issuer", nil)
+	w := httptest.NewRecorder()
+	w.Header().Set("Vary", "accept")
+	engine.ServeHTTP(w, req)
+
+	assert.Equal(t, "accept", w.Header().Get("Vary"))
 }

@@ -190,11 +190,38 @@ func negotiateMediaType(header string, offered ...string) string {
 	return best
 }
 
+// addVary appends a field name to the response's Vary header rather than
+// replacing it. The CORS middleware has already written Vary: Origin when
+// cross-origin requests are configured, and dropping that would let a shared
+// cache serve one origin's CORS response to another.
+func addVary(c *gin.Context, field string) {
+	existing := c.Writer.Header().Get("Vary")
+	for _, present := range strings.Split(existing, ",") {
+		if strings.EqualFold(strings.TrimSpace(present), field) {
+			return
+		}
+	}
+	if existing == "" {
+		c.Header("Vary", field)
+		return
+	}
+	c.Header("Vary", existing+", "+field)
+}
+
 // mediaRange is one entry of an Accept header: a media range and its quality.
 type mediaRange struct {
 	kind    string // "type" or "*"
 	subtype string // "subtype" or "*"
 	quality float64
+	// parameterized records a media-range parameter before the "q", which
+	// RFC 9110 §12.5.1 requires to match the representation's own
+	// parameters. Both representations this endpoint offers are
+	// parameterless, so such a range matches neither - "application/json;
+	// profile=foo" asks for something this endpoint does not serve, and
+	// answering with plain JSON would be answering a different question.
+	// Parameters AFTER the q are accept extensions and say nothing about
+	// the representation.
+	parameterized bool
 }
 
 // match reports how specifically this range matches a media type: 2 exact,
@@ -207,6 +234,9 @@ type mediaRange struct {
 // representation the client refused. The exclusion happens in the caller,
 // where a quality of zero simply never beats the running best.
 func (r mediaRange) match(mediaType string) int {
+	if r.parameterized {
+		return -1
+	}
 	kind, subtype, _ := strings.Cut(mediaType, "/")
 	switch {
 	case r.kind == "*" && r.subtype == "*":
@@ -233,18 +263,26 @@ func parseAcceptHeader(header string) []mediaRange {
 			continue
 		}
 
-		quality := 1.0
+		quality, parameterized, seenQ := 1.0, false, false
 		for _, param := range fields[1:] {
 			key, value, ok := strings.Cut(param, "=")
-			if !ok || strings.ToLower(strings.TrimSpace(key)) != "q" {
+			if strings.ToLower(strings.TrimSpace(key)) == "q" {
+				seenQ = true
+				if ok {
+					if parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
+						quality = parsed
+					}
+				}
 				continue
 			}
-			if parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
-				quality = parsed
+			// Everything before the q describes the representation; after
+			// it, accept extensions, which do not.
+			if !seenQ {
+				parameterized = true
 			}
 		}
 
-		ranges = append(ranges, mediaRange{kind: kind, subtype: subtype, quality: quality})
+		ranges = append(ranges, mediaRange{kind: kind, subtype: subtype, quality: quality, parameterized: parameterized})
 	}
 	return ranges
 }
@@ -273,7 +311,7 @@ func (s *Service) endpointVCIMetadata(ctx context.Context, c *gin.Context) (any,
 	// answer has to say so: without this a shared cache can store the JSON
 	// document and hand it to a wallet that asked for application/jwt, or the
 	// other way round. Set before any branch below, including the 406.
-	c.Header("Vary", "Accept")
+	addVary(c, "Accept")
 
 	// Held aside rather than read twice: whichever branch runs below, the JSON
 	// document must not carry it unless the deployment asked for it.

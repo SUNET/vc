@@ -71,9 +71,23 @@ func TestNegotiateMediaType(t *testing.T) {
 		// A browser's header: */* at 0.8 matches json first by server order.
 		{accept: "text/html,application/xhtml+xml,*/*;q=0.8", want: json},
 
+		// RFC 9110 §12.5.1: media-range parameters must match the
+		// representation's own, and both representations here are
+		// parameterless - so a parameterized range asks for something this
+		// endpoint does not serve.
+		{accept: "application/json;profile=foo, application/jwt;q=0.5", want: jwt},
+		{accept: "application/json;profile=foo", want: ""},
+		{accept: "application/jwt;charset=utf-8", want: ""},
+		{accept: "application/json;profile=foo, */*", want: json},
+		// Parameters AFTER the q are accept extensions, and say nothing
+		// about the representation.
+		{accept: "application/jwt;q=0.9;ext=1", want: jwt},
+		{accept: "application/json;q=0.2;ext=1, application/jwt;q=0.8", want: jwt},
+
 		// Malformed entries are skipped rather than taken as a match.
 		{accept: "notamediatype, application/jwt", want: jwt},
 		{accept: "application/jwt;q=notanumber", want: jwt},
+		{accept: "application/jwt;q", want: jwt},
 	} {
 		t.Run(tc.accept, func(t *testing.T) {
 			assert.Equal(t, tc.want, negotiateMediaType(tc.accept, json, jwt))
