@@ -5,6 +5,7 @@ import {
     base64ToUtf8,
     clearUnresolvedPlaceholders,
     escapeHtml,
+    escapeSvgValue,
     flattenClaims,
     renderClaimValueHtml,
     utf8ToBase64,
@@ -384,9 +385,16 @@ Alpine.data("app", () => ({
             if (resolved === null) continue;
             // Escape for XML text/attribute contexts. Without this, a value
             // like O'Brien & Co. or "</text>..." would break SVG parsing or
-            // alter its structure. Base64 data: URLs only use characters
+            // alter its structure. escapeSvgValue also encodes braces, so a
+            // value containing "{{...}}" is not mistaken for a slot by the
+            // cleanup below. Base64 data: URLs only use characters
             // [A-Za-z0-9+/=:;,/.] so escaping is a no-op for them.
-            svg = svg.replaceAll(`{{${svg_id}}}`, escapeHtml(resolved));
+            //
+            // The replacement is a function so the string is taken
+            // literally: a value containing "$&" or "$1" would otherwise be
+            // interpreted as a replacement pattern.
+            const escaped = escapeSvgValue(resolved);
+            svg = svg.replaceAll(`{{${svg_id}}}`, () => escaped);
         }
 
         // Clear whatever is left — see clearUnresolvedPlaceholders.

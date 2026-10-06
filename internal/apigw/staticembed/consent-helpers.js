@@ -157,15 +157,33 @@ export function detectBase64Image(s) {
 const PLACEHOLDER_RE = /{{[A-Za-z0-9_]+}}/g;
 
 /**
+ * Escape a claim value for substitution into an SVG template.
+ *
+ * escapeHtml plus the braces. The braces matter because
+ * clearUnresolvedPlaceholders runs afterwards and removes anything still
+ * placeholder-shaped: a claim value of "Ada {{middle_name}}" would
+ * otherwise be substituted literally and then half-deleted, rendering as
+ * "Ada ". `&#123;` and `&#125;` are valid XML character references and draw
+ * as the braces they stand for, so the value survives intact and can never
+ * be mistaken for a slot.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+export function escapeSvgValue(s) {
+    return escapeHtml(s).replaceAll("{", "&#123;").replaceAll("}", "&#125;");
+}
+
+/**
  * Remove every template placeholder no claim resolved.
  *
  * A slot whose claim is optional and absent — a PID without
  * `document_number`, say — would otherwise be drawn as the literal text
  * "{{document_number}}", and an image slot would keep "{{portrait}}" as its
- * href. Run this after substitution: a value that has been substituted is
- * no longer a placeholder, and escapeHtml has already turned any braces
- * inside a claim value into entities, so nothing a real value contributed
- * can be removed here.
+ * href. Run this after substitution. A substituted value cannot be eaten
+ * here because escapeSvgValue encodes its braces as character references
+ * first - escapeHtml alone does NOT touch braces, so substituting with it
+ * would leave "Ada {{middle_name}}" to be half-deleted into "Ada ".
  *
  * @param {string} svg
  * @returns {string}
