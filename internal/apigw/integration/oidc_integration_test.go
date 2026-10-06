@@ -133,7 +133,7 @@ func TestOIDCIntegration_UserInfo(t *testing.T) {
 		ctx := t.Context()
 
 		// Initiate auth, get session, process callback to obtain an access token
-		authReq, err := env.oidcService.InitiateAuth(ctx, "pid")
+		authReq, err := env.oidcService.InitiateAuth(ctx, "pid", nil, nil)
 		require.NoError(t, err)
 
 		session, err := env.oidcService.GetSession(ctx, authReq.State)
@@ -184,7 +184,7 @@ func TestOIDCIntegration_UserInfo(t *testing.T) {
 
 		ctx := t.Context()
 
-		authReq, err := env.oidcService.InitiateAuth(ctx, "pid")
+		authReq, err := env.oidcService.InitiateAuth(ctx, "pid", nil, nil)
 		require.NoError(t, err)
 
 		session, err := env.oidcService.GetSession(ctx, authReq.State)
@@ -234,6 +234,11 @@ type mockOIDCProvider struct {
 
 	// tokenHandler can be overridden per-test to simulate error conditions
 	tokenHandler func(w http.ResponseWriter, r *http.Request)
+
+	// extraIDTokenClaims are merged into the default ID token, letting a test
+	// decide what the OP asserts about the user. Nil for every existing
+	// test, which leaves the default claim set exactly as it was.
+	extraIDTokenClaims map[string]any
 }
 
 func newMockOIDCProvider(t *testing.T) *mockOIDCProvider {
@@ -387,6 +392,7 @@ func (op *mockOIDCProvider) createIDToken(nonce string) string {
 	if nonce != "" {
 		claims["nonce"] = nonce
 	}
+	maps.Copy(claims, op.extraIDTokenClaims)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = op.keyID
@@ -548,7 +554,7 @@ func testProviderDiscovery(t *testing.T, env *oidcTestEnvironment) {
 func testOIDCInitiateAuth(t *testing.T, env *oidcTestEnvironment) {
 	ctx := t.Context()
 
-	authReq, err := env.oidcService.InitiateAuth(ctx, "pid")
+	authReq, err := env.oidcService.InitiateAuth(ctx, "pid", nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, authReq)
 
@@ -569,7 +575,7 @@ func testOIDCInitiateAuth(t *testing.T, env *oidcTestEnvironment) {
 func testAuthURLContainsPKCE(t *testing.T, env *oidcTestEnvironment) {
 	ctx := t.Context()
 
-	authReq, err := env.oidcService.InitiateAuth(ctx, "pid")
+	authReq, err := env.oidcService.InitiateAuth(ctx, "pid", nil, nil)
 	require.NoError(t, err)
 
 	assert.Contains(t, authReq.AuthorizationURL, "code_challenge=")
@@ -581,7 +587,7 @@ func testProcessCallback(t *testing.T, env *oidcTestEnvironment) {
 	ctx := t.Context()
 
 	// Step 1: Initiate auth to get a session
-	authReq, err := env.oidcService.InitiateAuth(ctx, "pid")
+	authReq, err := env.oidcService.InitiateAuth(ctx, "pid", nil, nil)
 	require.NoError(t, err)
 
 	// Step 2: Get the session to read the nonce
@@ -665,7 +671,7 @@ func testOIDCClaimTransformation(t *testing.T, env *oidcTestEnvironment) {
 func testOIDCCredentialTypeFlow(t *testing.T, env *oidcTestEnvironment, credentialType string) {
 	ctx := t.Context()
 
-	authReq, err := env.oidcService.InitiateAuth(ctx, credentialType)
+	authReq, err := env.oidcService.InitiateAuth(ctx, credentialType, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, authReq)
 	assert.NotEmpty(t, authReq.AuthorizationURL)
@@ -702,7 +708,7 @@ func testExpiredSession(t *testing.T, env *oidcTestEnvironment) {
 	shortService, err := oidcrp.New(ctx, shortConfig, shortCache, nil, env.log)
 	require.NoError(t, err)
 
-	authReq, err := shortService.InitiateAuth(ctx, "pid")
+	authReq, err := shortService.InitiateAuth(ctx, "pid", nil, nil)
 	require.NoError(t, err)
 
 	// Wait for cache entry to expire
@@ -736,7 +742,7 @@ func testInvalidAuthorizationCode(t *testing.T, env *oidcTestEnvironment) {
 	ctx := t.Context()
 
 	// Initiate to create a session
-	authReq, err := env.oidcService.InitiateAuth(ctx, "pid")
+	authReq, err := env.oidcService.InitiateAuth(ctx, "pid", nil, nil)
 	require.NoError(t, err)
 
 	// Use an invalid code
@@ -749,7 +755,7 @@ func testInvalidAuthorizationCode(t *testing.T, env *oidcTestEnvironment) {
 func testNonceMismatch(t *testing.T, env *oidcTestEnvironment) {
 	ctx := t.Context()
 
-	authReq, err := env.oidcService.InitiateAuth(ctx, "pid")
+	authReq, err := env.oidcService.InitiateAuth(ctx, "pid", nil, nil)
 	require.NoError(t, err)
 
 	// Use a code that encodes a wrong nonce
@@ -764,7 +770,7 @@ func testNonceMismatch(t *testing.T, env *oidcTestEnvironment) {
 func testSessionCreation(t *testing.T, env *oidcTestEnvironment) {
 	ctx := t.Context()
 
-	authReq, err := env.oidcService.InitiateAuth(ctx, "pid")
+	authReq, err := env.oidcService.InitiateAuth(ctx, "pid", nil, nil)
 	require.NoError(t, err)
 
 	session, err := env.oidcService.GetSession(ctx, authReq.State)
@@ -784,7 +790,7 @@ func testSessionCreation(t *testing.T, env *oidcTestEnvironment) {
 func testSessionRetrieval(t *testing.T, env *oidcTestEnvironment) {
 	ctx := t.Context()
 
-	authReq, err := env.oidcService.InitiateAuth(ctx, "diploma")
+	authReq, err := env.oidcService.InitiateAuth(ctx, "diploma", nil, nil)
 	require.NoError(t, err)
 
 	session, err := env.oidcService.GetSession(ctx, authReq.State)
@@ -800,7 +806,7 @@ func testSessionRetrieval(t *testing.T, env *oidcTestEnvironment) {
 func testSessionDeletion(t *testing.T, env *oidcTestEnvironment) {
 	ctx := t.Context()
 
-	authReq, err := env.oidcService.InitiateAuth(ctx, "pid")
+	authReq, err := env.oidcService.InitiateAuth(ctx, "pid", nil, nil)
 	require.NoError(t, err)
 
 	// Session should exist

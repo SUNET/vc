@@ -111,9 +111,17 @@ func (r *EvaluationRequest) Validate() error {
 
 	// For full trust evaluation requests:
 
-	// Resource.type MUST be "jwk" or "x5c"
-	if r.Resource.Type != "jwk" && r.Resource.Type != "x5c" {
-		return fmt.Errorf("resource.type must be 'jwk' or 'x5c', got '%s'", r.Resource.Type)
+	// Resource.type MUST be "jwk", "x5c" or "kid".
+	//
+	// "jwk" and "x5c" carry key material. "kid" instead carries a key
+	// identifier, which is how a DID-based client_id names the verification
+	// method that signed a request rather than inlining a key the other side
+	// can already resolve. A registry answering a "kid" request can only
+	// establish that the named method exists in the subject's document, not
+	// compare key material, so the caller remains responsible for verifying
+	// the signature against the key it resolved.
+	if r.Resource.Type != "jwk" && r.Resource.Type != "x5c" && r.Resource.Type != "kid" {
+		return fmt.Errorf("resource.type must be 'jwk', 'x5c' or 'kid', got '%s'", r.Resource.Type)
 	}
 
 	// Resource.id MUST be present and MUST match subject.id
