@@ -56,6 +56,25 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 
 	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
 	if err != nil {
+		// A client that IS configured and still fails is a mismatch
+		// somebody has to fix, and it used to disappear here: the error was
+		// discarded, the request fell through to wallet attestation, and
+		// whatever that path reported next was about attestation rather
+		// than about the redirect_uri. An operator saw "client validation
+		// failed" and no mention of the value that did not match.
+		//
+		// An unknown client_id is NOT that - it is the normal path for a
+		// wallet authenticating by attestation - so it stays at Debug and
+		// the two are told apart by ErrClientNotFound rather than by
+		// comparing error strings.
+		if !errors.Is(err, oauth2.ErrClientNotFound) {
+			c.log.Warn("configured OpenID4VCI client rejected; falling back to wallet attestation",
+				"client_id", req.ClientID, "redirect_uri", req.RedirectURI, "scope", req.Scope, "reason", err)
+		} else {
+			c.log.Debug("client_id is not statically configured; trying wallet attestation",
+				"client_id", req.ClientID)
+		}
+
 		// Client not in static map — try wallet attestation via PDP.
 		// Standard-compliant: HTTP headers per draft-ietf-oauth-attestation-based-client-auth-04 §3.1
 		// Legacy fallback: form body client_assertion (PoP not required)
