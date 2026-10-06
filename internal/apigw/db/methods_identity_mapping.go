@@ -148,11 +148,30 @@ func (c *IdentityMappingsColl) ResolveMapping(ctx context.Context, query *Resolv
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:resolveMapping")
 	defer span.End()
 
-	conditions := []bson.M{}
-	if query.AuthenticSource != "" {
-		conditions = append(conditions, bson.M{
-			"authentic_source": bson.M{"$eq": query.AuthenticSource},
-		})
+	// An identity mapping is scoped to an authentic source, and resolving
+	// without naming one searches every namespace at once and returns
+	// whichever row the store happens to reach first - that is, somebody
+	// else's identity. SUNET/vc#507 is that happening: an identity under one
+	// authentic_source matched a lookup meant for another.
+	//
+	// No caller wants this. The two API requests that reach here mark
+	// authentic_source as required, and ResolveIdentifier always passes the
+	// one it was given; an empty value there means the caller could not
+	// determine a namespace, which is a reason to refuse rather than to
+	// guess.
+	//
+	// This does not settle WHICH namespace each caller should pass - the
+	// issuance paths disagree today, passing an IdP entity ID, an OIDC
+	// issuer URL, or a credential authentic source for the same field. That
+	// is still open (#507, #389). It only removes the branch that can
+	// never return a right answer.
+	if query.AuthenticSource == "" {
+		span.SetStatus(codes.Error, ErrIdentityMappingNamespaceRequired.Error())
+		return "", ErrIdentityMappingNamespaceRequired
+	}
+
+	conditions := []bson.M{
+		{"authentic_source": bson.M{"$eq": query.AuthenticSource}},
 	}
 
 	for key, value := range query.Attributes {

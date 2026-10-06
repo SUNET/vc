@@ -125,6 +125,50 @@ func testIdentityMappingStoreContract(t *testing.T, store IdentityMappingStore) 
 
 	err = store.DeleteMapping(ctx, &DeleteMappingQuery{AuthenticSource: "SUNET", AuthenticSourcePersonID: "person-1"})
 	assert.ErrorIs(t, err, helpers.ErrNoIdentityFound)
+
+	// SUNET/vc#507: two people can share a name across namespaces, and
+	// resolving without naming one used to search all of them and return
+	// whichever the store reached first - somebody else's identity. Both
+	// identities are created here rather than reused from above, because
+	// person-1 has been deleted by this point.
+	twins := []*model.IdentityMapping{
+		{
+			AuthenticSource:         "TAX_AUTHORITY",
+			AuthenticSourcePersonID: "tax-person",
+			Attributes:              map[string]string{"family_name": "Twin", "given_name": "Sam"},
+		},
+		{
+			AuthenticSource:         "HEALTH_AUTHORITY",
+			AuthenticSourcePersonID: "health-person",
+			Attributes:              map[string]string{"family_name": "Twin", "given_name": "Sam"},
+		},
+	}
+	require.NoError(t, store.CreateMappings(ctx, twins))
+
+	_, err = store.ResolveMapping(ctx, &ResolveMappingQuery{
+		Attributes: map[string]string{"family_name": "Twin", "given_name": "Sam"},
+	})
+	assert.ErrorIs(t, err, ErrIdentityMappingNamespaceRequired,
+		"an unnamespaced resolve can only return an arbitrary one of the two")
+
+	// Naming the namespace resolves, and resolves to the right person.
+	for _, twin := range twins {
+		personID, err = store.ResolveMapping(ctx, &ResolveMappingQuery{
+			AuthenticSource: twin.AuthenticSource,
+			Attributes:      map[string]string{"family_name": "Twin", "given_name": "Sam"},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, twin.AuthenticSourcePersonID, personID,
+			"the namespace must decide which identity is returned")
+	}
+
+	// A namespace that exists with attributes that do not still finds
+	// nothing, rather than falling back to the other namespace.
+	_, err = store.ResolveMapping(ctx, &ResolveMappingQuery{
+		AuthenticSource: "TAX_AUTHORITY",
+		Attributes:      map[string]string{"family_name": "Nobody"},
+	})
+	assert.ErrorIs(t, err, helpers.ErrNoIdentityFound)
 }
 
 func TestSQLIdentityMappingsColl_Postgres(t *testing.T) {

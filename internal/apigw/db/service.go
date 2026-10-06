@@ -18,6 +18,12 @@ import (
 // ErrNoDocuments is returned when no documents are found
 var ErrNoDocuments = errors.New("no documents in result")
 
+// ErrIdentityMappingNamespaceRequired reports that an identity-mapping
+// resolution named no authentic source. Identity mappings are scoped to one,
+// and a lookup without it would search every namespace and return whichever
+// identity the store reached first. See SUNET/vc#507.
+var ErrIdentityMappingNamespaceRequired = errors.New("identity mapping resolution requires an authentic_source")
+
 // Service is the database service
 type Service struct {
 	MongoClient *mongo.Client
