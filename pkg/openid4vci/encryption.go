@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
@@ -641,6 +642,19 @@ func (p *CredentialResponseEncryption) recipientKey() (jwk.Key, jwa.KeyEncryptio
 		}
 	}
 
+	// RFC 7517 §4.3: key_ops is use at a finer grain, and is equally
+	// binding - "the operation(s) for which the key is intended to be
+	// used". It is checked separately rather than derived from use: §4.3
+	// says the two SHOULD NOT both appear, so a key is likely to carry one
+	// or the other, and a key carrying only key_ops would otherwise be
+	// unchecked.
+	if ops, ok := key.KeyOps(); ok && len(ops) > 0 && !admitsKeyAgreement(ops) {
+		return nil, empty, &Error{
+			Err:              ErrInvalidEncryptionParameters,
+			ErrorDescription: fmt.Sprintf("credential_response_encryption.jwk declares key_ops %v, none of which permit %s; it must admit one of %v, or be absent", ops, AlgECDHESA256KW, keyAgreementKeyOps),
+		}
+	}
+
 	alg, ok := key.Algorithm()
 	if !ok || alg.String() == "" {
 		return nil, empty, &Error{
@@ -656,6 +670,39 @@ func (p *CredentialResponseEncryption) recipientKey() (jwk.Key, jwa.KeyEncryptio
 	}
 
 	return key, jwa.NewKeyEncryptionAlgorithm(alg.String()), nil
+}
+
+// keyAgreementKeyOps are the key_ops values that admit what vc does with a
+// wallet's response encryption key.
+//
+// What is actually performed with this key is ECDH-ES key agreement, so
+// deriveKey is the exact answer and the one to reach for. The other three
+// are tolerated rather than required, because RFC 7517 §4.3's vocabulary
+// does not have a word for "JWE recipient key" and implementations label
+// the same role differently: wrapKey describes the AES-256 key wrap the
+// agreement feeds, encrypt is the coarse-grained version of the same
+// claim, and deriveBits is deriveKey for libraries that only expose raw
+// output. Refusing those would reject wallets that have said nothing wrong.
+//
+// What is refused is a key that admits none of them - a key_ops of
+// ["sign"], ["verify"], ["decrypt"] or ["unwrapKey"] says this key is for
+// something else, and using it anyway would hand a wallet a credential
+// encrypted to a key its own library may refuse to touch. After issuance,
+// which is the one place this package tries never to fail.
+var keyAgreementKeyOps = []jwk.KeyOperation{
+	jwk.KeyOpDeriveKey,
+	jwk.KeyOpDeriveBits,
+	jwk.KeyOpWrapKey,
+	jwk.KeyOpEncrypt,
+}
+
+func admitsKeyAgreement(ops jwk.KeyOperationList) bool {
+	for _, op := range ops {
+		if slices.Contains(keyAgreementKeyOps, op) {
+			return true
+		}
+	}
+	return false
 }
 
 func contains(haystack []string, needle string) bool {

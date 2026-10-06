@@ -371,6 +371,30 @@ func TestCredentialEncryption_MalformedJWEIsRefused(t *testing.T) {
 }
 
 // Leniency about the envelope is not leniency about the parameters inside it.
+// walletKeyWith builds response encryption parameters whose jwk is the
+// wallet's own key with these members overwritten.
+func (e *encryptionSetup) walletKeyWith(t *testing.T, members map[string]any) map[string]any {
+	t.Helper()
+
+	params := e.responseParams(openid4vci.EncA256GCM, "")
+
+	var key map[string]any
+	require.NoError(t, json.Unmarshal(e.walletPub, &key))
+	for name, value := range members {
+		if value == nil {
+			delete(key, name)
+			continue
+		}
+		key[name] = value
+	}
+
+	encoded, err := json.Marshal(key)
+	require.NoError(t, err)
+	params["jwk"] = json.RawMessage(encoded)
+
+	return params
+}
+
 func TestCredentialEncryption_BadResponseParametersAreRefused(t *testing.T) {
 	for name, params := range map[string]func(e *encryptionSetup) map[string]any{
 		"unsupported enc": func(e *encryptionSetup) map[string]any {
@@ -380,51 +404,33 @@ func TestCredentialEncryption_BadResponseParametersAreRefused(t *testing.T) {
 			return e.responseParams(openid4vci.EncA256GCM, "GZIP")
 		},
 		"jwk without alg": func(e *encryptionSetup) map[string]any {
-			p := e.responseParams(openid4vci.EncA256GCM, "")
-			var key map[string]any
-			require.NoError(t, json.Unmarshal(e.walletPub, &key))
-			delete(key, "alg")
-			encoded, err := json.Marshal(key)
-			require.NoError(t, err)
-			p["jwk"] = json.RawMessage(encoded)
-			return p
+			return e.walletKeyWith(t, map[string]any{"alg": nil})
 		},
 		"jwk with an alg this issuer does not perform": func(e *encryptionSetup) map[string]any {
-			p := e.responseParams(openid4vci.EncA256GCM, "")
-			var key map[string]any
-			require.NoError(t, json.Unmarshal(e.walletPub, &key))
-			key["alg"] = "ECDH-ES+A128KW"
-			encoded, err := json.Marshal(key)
-			require.NoError(t, err)
-			p["jwk"] = json.RawMessage(encoded)
-			return p
+			return e.walletKeyWith(t, map[string]any{"alg": "ECDH-ES+A128KW"})
 		},
 		// RFC 7517 §4.2. jwe.Encrypt takes this key explicitly and never
 		// looks at use, so a signing key would be used for encryption and
 		// the mistake would surface in the wallet, after issuance.
 		"jwk declaring use sig": func(e *encryptionSetup) map[string]any {
-			p := e.responseParams(openid4vci.EncA256GCM, "")
-			var key map[string]any
-			require.NoError(t, json.Unmarshal(e.walletPub, &key))
-			key["use"] = "sig"
-			encoded, err := json.Marshal(key)
-			require.NoError(t, err)
-			p["jwk"] = json.RawMessage(encoded)
-			return p
+			return e.walletKeyWith(t, map[string]any{"use": "sig"})
 		},
 		// Absent is allowed: use is optional and claims nothing. This case
 		// is here so the check above cannot be written as "reject unless
 		// use is enc", which would refuse most wallets.
 		"jwk declaring use enc": func(e *encryptionSetup) map[string]any {
-			p := e.responseParams(openid4vci.EncA256GCM, "")
-			var key map[string]any
-			require.NoError(t, json.Unmarshal(e.walletPub, &key))
-			key["use"] = "enc"
-			key["alg"] = "ECDH-ES+A128KW" // the thing actually refused here
-			encoded, err := json.Marshal(key)
-			require.NoError(t, err)
-			p["jwk"] = json.RawMessage(encoded)
-			return p
+			// alg is the thing actually refused here; use is fine.
+			return e.walletKeyWith(t, map[string]any{"use": "enc", "alg": "ECDH-ES+A128KW"})
+		},
+		// RFC 7517 §4.3, the finer-grained half of use. A signing key is
+		// just as wrong when it says so this way.
+		"jwk declaring key_ops sign": func(e *encryptionSetup) map[string]any {
+			return e.walletKeyWith(t, map[string]any{"key_ops": []string{"sign"}})
+		},
+		// Named operations that do not describe what an issuer does with a
+		// JWE recipient key, and so must be refused rather than ignored.
+		"jwk declaring key_ops unwrapKey": func(e *encryptionSetup) map[string]any {
+			return e.walletKeyWith(t, map[string]any{"key_ops": []string{"verify", "unwrapKey"}})
 		},
 		"jwk that is not a key": func(e *encryptionSetup) map[string]any {
 			p := e.responseParams(openid4vci.EncA256GCM, "")
@@ -439,6 +445,44 @@ func TestCredentialEncryption_BadResponseParametersAreRefused(t *testing.T) {
 
 			requireVCIError(t, w, openid4vci.ErrInvalidEncryptionParameters)
 			assert.Zero(t, e.api.calls, "nothing is issued for a request that will be refused")
+		})
+	}
+}
+
+// TestCredentialEncryption_AcceptedKeyUsageMetadata is the other side of
+// the use and key_ops cases above: keys that declare a usage and are
+// honoured, issued to and decrypted.
+//
+// It exists so neither check can be written as "refuse unless it says
+// exactly X". RFC 7517 §4.3 has no word for "JWE recipient key", and
+// implementations reach for different ones - a wallet that labels its key
+// wrapKey, or encrypt, or says nothing at all, has said nothing wrong and
+// must get its credential.
+func TestCredentialEncryption_AcceptedKeyUsageMetadata(t *testing.T) {
+	for name, members := range map[string]map[string]any{
+		"nothing declared":     {},
+		"use enc":              {"use": "enc"},
+		"key_ops deriveKey":    {"key_ops": []string{"deriveKey"}},
+		"key_ops deriveBits":   {"key_ops": []string{"deriveBits"}},
+		"key_ops wrapKey":      {"key_ops": []string{"wrapKey"}},
+		"key_ops encrypt":      {"key_ops": []string{"encrypt"}},
+		"key_ops among others": {"key_ops": []string{"verify", "deriveKey"}},
+		"use and key_ops":      {"use": "enc", "key_ops": []string{"deriveKey"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEncryptionSetup(t, false, false, false)
+
+			plaintext := e.requestBody(t, e.walletKeyWith(t, members))
+			w := e.post(t, openid4vci.MediaTypeJWT, e.encrypt(t, plaintext, true, false))
+
+			require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+			require.Equal(t, 1, e.api.calls)
+
+			reply := e.decryptReply(t, w.Body.String())
+			credentials, ok := reply["credentials"].([]any)
+			require.True(t, ok, "reply: %#v", reply)
+			require.Len(t, credentials, 1)
+			assert.Equal(t, "the-credential", credentials[0].(map[string]any)["credential"])
 		})
 	}
 }
@@ -519,7 +563,10 @@ func TestCredentialEncryption_DeferredNilReplyIsNotAnEncryptedSuccess(t *testing
 
 		w := e.postTo(t, "/deferred_credential", gin.MIMEJSON, body)
 
-		assert.NotEqual(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		// 501 exactly, because that is what this endpoint's API
+		// description promises. Left to a substring search over the error
+		// text it would be whatever the wording happened to match.
+		assert.Equal(t, http.StatusNotImplemented, w.Code, "body: %s", w.Body.String())
 	})
 
 	t.Run("encrypted", func(t *testing.T) {
@@ -534,7 +581,7 @@ func TestCredentialEncryption_DeferredNilReplyIsNotAnEncryptedSuccess(t *testing
 
 		w := e.postTo(t, "/deferred_credential", openid4vci.MediaTypeJWT, e.encrypt(t, encBody, true, false))
 
-		require.NotEqual(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		require.Equal(t, http.StatusNotImplemented, w.Code, "body: %s", w.Body.String())
 		assert.NotEqual(t, openid4vci.MediaTypeJWT, w.Header().Get("Content-Type"),
 			"an empty answer must not come back looking like an encrypted credential")
 	})

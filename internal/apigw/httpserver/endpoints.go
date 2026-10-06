@@ -2,11 +2,11 @@ package httpserver
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/internal/gen/status/apiv1_status"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"go.opentelemetry.io/otel/codes"
@@ -165,7 +165,17 @@ func (s *Service) endpointVCIDeferredCredential(ctx context.Context, c *gin.Cont
 		// stub that returns nothing. Saying so beats a 200 with an empty
 		// body, and beats an encrypted "null", which a wallet cannot tell
 		// from a credential it failed to read.
-		err := errors.New("deferred credential issuance is not implemented by this Credential Issuer")
+		//
+		// The status is stated rather than left to be inferred. A plain
+		// error gets its code from a substring search over the message
+		// text, so the 501 this endpoint's API description promises would
+		// quietly become a 500 the first time someone reworded the
+		// sentence.
+		err := helpers.NewErrorDetailsWithStatus(
+			"not_implemented",
+			"deferred credential issuance is not implemented by this Credential Issuer",
+			http.StatusNotImplemented,
+		)
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}

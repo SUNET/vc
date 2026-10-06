@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/subtle"
 	"fmt"
 	"sync"
 
@@ -96,21 +97,33 @@ func NewPKCS11ECDH(config *PKCS11Config) (*PKCS11ECDH, error) {
 	return k, nil
 }
 
-// selfTest performs one throwaway agreement, against a public key generated
-// here and discarded, and refuses the key if the token will not do it.
+// selfTest performs one throwaway agreement, against a key generated here
+// and discarded, and checks both things an issuer has to know before it
+// publishes a JWK: that the token will derive at all, and that what it
+// derives matches the public key about to be published.
 //
-// The attributes this asks for are not universally granted. The derived
+// Whether it will derive is not visible from anywhere else. The derived
 // generic secret is created with CKA_EXTRACTABLE true and CKA_SENSITIVE
 // false, because CKD_NULL means the agreed secret Z is the derived object
 // and the Concat KDF above it runs in this process; a token under a policy
 // that forbids extractable keys will refuse. The private key also needs
 // CKA_DERIVE, which keys generated for signing do not have.
 //
-// Neither is visible from the public key or from the metadata, so without
-// this the issuer would start, publish a JWK, and fail every encrypted
-// request a wallet built from it - a fault that looks like a wallet problem
-// and is discovered by a user. Doing the agreement here moves it to the
-// line in the config file that caused it.
+// Whether the pair matches is a different failure with the same symptom.
+// findKey searches for the private key and the public key separately, by
+// the same label, and takes the first of each - which is how PKCS#11 object
+// search works and how every other key path in this package does it. A
+// token holding two objects that share a label hands back a mismatched
+// pair, and nothing downstream would notice: the public half is published,
+// wallets encrypt to it, and every agreement produces a Z the issuer cannot
+// reproduce. Comparing the token's Z against the one the probe key computes
+// against k.public is what makes "these two objects belong together" a
+// checked claim rather than an assumption about object ordering.
+//
+// Either way, without this the issuer would start, publish a JWK, and fail
+// every encrypted request a wallet built from it - a fault that looks like
+// a wallet problem and is discovered by a user. Doing the agreement here
+// moves it to the line in the config file that caused it.
 func (k *PKCS11ECDH) selfTest() error {
 	probe, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
@@ -122,6 +135,23 @@ func (k *PKCS11ECDH) selfTest() error {
 		if len(z) != p256FieldSize {
 			return fmt.Errorf("key %s: the token derived %d bytes, want %d", k.keyLabel, len(z), p256FieldSize)
 		}
+
+		// The other side of the same agreement, computed here from the
+		// public key that is about to be published.
+		public, err := k.public.ECDH()
+		if err != nil {
+			return fmt.Errorf("key %s: the public key cannot perform ECDH: %w", k.keyLabel, err)
+		}
+		expected, err := probe.ECDH(public)
+		if err != nil {
+			return fmt.Errorf("key %s: computing the expected shared secret: %w", k.keyLabel, err)
+		}
+		if subtle.ConstantTimeCompare(z, expected) != 1 {
+			return fmt.Errorf("key %s: the token derived a different shared secret than its published public key does, "+
+				"so the private and public objects found under this label are not a pair "+
+				"(two objects sharing one label will do this); give them distinct labels", k.keyLabel)
+		}
+
 		return nil
 	}
 

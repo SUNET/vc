@@ -802,14 +802,22 @@ func convertJWKToCOSEKey(jwk *apiv1_issuer.Jwk) ([]byte, error) {
 // request, regardless of what the initial Credential Request sent, so a
 // client has to be able to see them here.
 //
+// The annotations describe what this endpoint does, which today is answer
+// 501: the body below is a stub, and the HTTP handler turns its nil reply
+// into a refusal rather than a 200 with nothing in it. Documenting the
+// Credential Response it will eventually return would advertise a success a
+// client cannot reach, which is the failure this whole PR is about - the
+// published contract and the endpoint saying different things. The success
+// response goes in when deferred issuance does.
+//
 //	@Summary		VCIDeferredCredential
 //	@ID				create-deferred-credential
-//	@Description	Deferred credential endpoint. Accepts a plain JSON Deferred Credential Request, or an OpenID4VCI 1.0 section 8.3 encrypted one as a JWE (application/jwt). Returns the Credential Response as JSON, or as a JWE (application/jwt) when the request supplied credential_response_encryption.
+//	@Description	Deferred credential endpoint, per OpenID4VCI 1.0 section 9. NOT IMPLEMENTED: this Credential Issuer parses and validates the request - including an OpenID4VCI 1.0 section 8.3 encrypted one sent as a JWE (application/jwt), and the credential_response_encryption parameters in it - and then answers 501. No Credential Response is returned by this endpoint today.
 //	@Tags			vc-platform
 //	@Accept			json,application/jwt
-//	@Produce		json,application/jwt
-//	@Success		200	{object}	openid4vci.CredentialResponse			"Success"
-//	@Failure		400	{object}	helpers.ErrorResponse					"Bad Request"
+//	@Produce		json
+//	@Failure		400	{object}	helpers.ErrorResponse					"Bad Request - the request, or its encryption parameters, could not be accepted"
+//	@Failure		501	{object}	helpers.ErrorResponse					"Not Implemented - deferred credential issuance is not available from this Credential Issuer"
 //	@Param			req	body		openid4vci.DeferredCredentialRequest	true	" "
 //	@Router			/deferred_credential [post]
 func (c *Client) VCIDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error) {

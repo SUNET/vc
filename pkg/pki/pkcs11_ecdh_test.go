@@ -8,6 +8,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"testing"
@@ -67,6 +68,44 @@ func useSoftHSMConf(t *testing.T, hsm *softhsmInstance) {
 	})
 }
 
+// rawSession opens a PKCS#11 session for a test that needs to poke at the
+// token directly, below pkg/pki's own types.
+//
+// It tolerates CKR_CRYPTOKI_ALREADY_INITIALIZED and
+// CKR_USER_ALREADY_LOGGED_IN, and never calls C_Finalize or C_Logout,
+// because both are library- or token-wide: pkg/pki keeps one initialized
+// module per process and a test that tore it down - or logged out of it -
+// would break every key still holding it. Which is the production rule
+// too; see pkcs11_module.go.
+func rawSession(t *testing.T, hsm *softhsmInstance, rw bool) (*pkcs11.Ctx, pkcs11.SessionHandle) {
+	t.Helper()
+
+	ctx := pkcs11.New(hsm.modulePath)
+	require.NotNil(t, ctx)
+	if err := ctx.Initialize(); err != nil {
+		var code pkcs11.Error
+		require.True(t, errors.As(err, &code) && code == pkcs11.CKR_CRYPTOKI_ALREADY_INITIALIZED,
+			"unexpected C_Initialize failure: %v", err)
+	}
+
+	flags := uint(pkcs11.CKF_SERIAL_SESSION)
+	if rw {
+		flags |= pkcs11.CKF_RW_SESSION
+	}
+	session, err := ctx.OpenSession(hsm.slotID, flags)
+	require.NoError(t, err)
+
+	if err := ctx.Login(session, pkcs11.CKU_USER, hsm.userPIN); err != nil {
+		var code pkcs11.Error
+		require.True(t, errors.As(err, &code) && code == pkcs11.CKR_USER_ALREADY_LOGGED_IN,
+			"unexpected C_Login failure: %v", err)
+	}
+
+	t.Cleanup(func() { ctx.CloseSession(session) })
+
+	return ctx, session
+}
+
 // TestPKCS11ECDH_PointEncoding measures what SoftHSM2 wants in
 // pPublicData, rather than letting the implementation's fallback hide the
 // answer.
@@ -86,16 +125,7 @@ func TestPKCS11ECDH_PointEncoding(t *testing.T) {
 	const keyLabel = "test-ecdh-encoding"
 	hsm.generateDeriveKeyPair(t, keyLabel)
 
-	ctx := pkcs11.New(hsm.modulePath)
-	require.NotNil(t, ctx)
-	require.NoError(t, ctx.Initialize())
-	defer ctx.Finalize()
-
-	session, err := ctx.OpenSession(hsm.slotID, pkcs11.CKF_SERIAL_SESSION)
-	require.NoError(t, err)
-	defer ctx.CloseSession(session)
-	require.NoError(t, ctx.Login(session, pkcs11.CKU_USER, hsm.userPIN))
-	defer ctx.Logout(session)
+	ctx, session := rawSession(t, hsm, false)
 
 	require.NoError(t, ctx.FindObjectsInit(session, []*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PRIVATE_KEY),
@@ -217,16 +247,11 @@ func TestPKCS11ECDH_RefusesANonDeriveKey(t *testing.T) {
 	useSoftHSMConf(t, hsm)
 	const keyLabel = "test-ecdh-sign-only"
 
-	ctx := pkcs11.New(hsm.modulePath)
-	require.NotNil(t, ctx)
-	require.NoError(t, ctx.Initialize())
-	session, err := ctx.OpenSession(hsm.slotID, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
-	require.NoError(t, err)
-	require.NoError(t, ctx.Login(session, pkcs11.CKU_USER, hsm.userPIN))
+	ctx, session := rawSession(t, hsm, true)
 
 	// prime256v1 as a DER-encoded OID, which is what CKA_EC_PARAMS takes.
 	prime256v1 := []byte{0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07}
-	_, _, err = ctx.GenerateKeyPair(session,
+	_, _, err := ctx.GenerateKeyPair(session,
 		[]*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_EC_KEY_PAIR_GEN, nil)},
 		[]*pkcs11.Attribute{
 			pkcs11.NewAttribute(pkcs11.CKA_EC_PARAMS, prime256v1),
@@ -242,10 +267,6 @@ func TestPKCS11ECDH_RefusesANonDeriveKey(t *testing.T) {
 			pkcs11.NewAttribute(pkcs11.CKA_DERIVE, false),
 		})
 	require.NoError(t, err)
-
-	ctx.Logout(session)
-	ctx.CloseSession(session)
-	ctx.Finalize()
 
 	key, err := pki.NewPKCS11ECDH(hsm.ecdhConfig(keyLabel))
 	if err == nil {
@@ -427,4 +448,84 @@ func TestPKCS11Module_SharedAcrossUsers(t *testing.T) {
 	// The two keys are different keys, so the JWKS a rotation publishes has
 	// two distinct entries rather than one key listed twice.
 	assert.NotEqual(t, current.PublicKey().X, next.PublicKey().X)
+}
+
+// TestPKCS11ECDH_RefusesAMismatchedPair is the other half of the startup
+// probe: a token where the private key and the public key found under one
+// label are not a pair.
+//
+// This is reachable because PKCS#11 object search has no notion of a pair.
+// findKey asks for the first CKO_PRIVATE_KEY with the label and
+// extractECPublicKeyFromHSM asks, separately, for the first CKO_PUBLIC_KEY
+// with it. Two keys sharing a label - an aborted rotation, a script run
+// twice - and the two searches can land on different objects. The issuer
+// would then publish a public key whose private half it does not have, and
+// every encrypted request would fail with nothing to point at.
+//
+// The mismatch is built deterministically rather than by hoping the two
+// searches disagree: one pair's public key is relabelled onto the other
+// pair's label, and the original public key is destroyed, so exactly one
+// public key and one private key carry the label and they are not a pair.
+func TestPKCS11ECDH_RefusesAMismatchedPair(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	hsm := setupLocalSoftHSM2(t)
+	useSoftHSMConf(t, hsm)
+
+	const wanted = "test-ecdh-mismatched"
+	const stranger = "test-ecdh-stranger"
+	hsm.generateDeriveKeyPair(t, wanted)
+	hsm.generateDeriveKeyPair(t, stranger)
+
+	// Sanity: as generated, the label is a matched pair and is accepted.
+	// Whatever the test does below is therefore what the refusal is about.
+	key, err := pki.NewPKCS11ECDH(hsm.ecdhConfig(wanted))
+	require.NoError(t, err)
+	matched := key.PublicKey()
+	require.NoError(t, key.Close())
+
+	ctx, session := rawSession(t, hsm, true)
+
+	find := func(class uint, label string) []pkcs11.ObjectHandle {
+		require.NoError(t, ctx.FindObjectsInit(session, []*pkcs11.Attribute{
+			pkcs11.NewAttribute(pkcs11.CKA_CLASS, class),
+			pkcs11.NewAttribute(pkcs11.CKA_LABEL, label),
+		}))
+		objs, _, err := ctx.FindObjects(session, 16)
+		require.NoError(t, err)
+		require.NoError(t, ctx.FindObjectsFinal(session))
+		return objs
+	}
+
+	ours := find(pkcs11.CKO_PUBLIC_KEY, wanted)
+	require.Len(t, ours, 1)
+	theirs := find(pkcs11.CKO_PUBLIC_KEY, stranger)
+	require.Len(t, theirs, 1)
+
+	// Destroy the matching public key, then move the stranger's onto the
+	// label. Order matters: the label must never hold two public keys, or
+	// which one is found would be up to the token.
+	require.NoError(t, ctx.DestroyObject(session, ours[0]))
+	err = ctx.SetAttributeValue(session, theirs[0], []*pkcs11.Attribute{
+		pkcs11.NewAttribute(pkcs11.CKA_LABEL, wanted),
+	})
+	if err != nil {
+		t.Skipf("this token will not relabel a public key (%v), so a mismatched pair cannot be built here", err)
+	}
+
+	require.Len(t, find(pkcs11.CKO_PUBLIC_KEY, wanted), 1, "exactly one public key must carry the label")
+	require.Len(t, find(pkcs11.CKO_PRIVATE_KEY, wanted), 1, "exactly one private key must carry the label")
+
+	mismatched, err := pki.NewPKCS11ECDH(hsm.ecdhConfig(wanted))
+	if err == nil {
+		// Prove the setup actually produced a mismatch before blaming the
+		// implementation: the published key must have changed.
+		assert.NotEqual(t, matched.X, mismatched.PublicKey().X,
+			"the test did not manage to mispair the objects")
+		mismatched.Close()
+	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a pair")
 }
