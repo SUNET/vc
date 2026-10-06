@@ -1,6 +1,7 @@
 package configuration
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -53,9 +54,37 @@ func TestCheckCredentialEncryption_RefusesTheHandWrittenBlock(t *testing.T) {
 		EncValuesSupported: []string{"A256GCM"},
 	})
 
-	err := checkCredentialEncryption(cfg)
+	err := checkLegacyCredentialResponseEncryption(cfg)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "credential_response_encryption")
+	assert.Contains(t, err.Error(), "credential_encryption.keys")
+}
+
+// And the message has to be the one the operator actually sees.
+//
+// The legacy block's own fields are tagged required, and an apigw config
+// has to satisfy the VCTM requirement besides, so for most of the configs
+// this message was written for something else refuses them first: the
+// operator is told that enc_values_supported is missing, or that
+// common.credential_metadata is required, from a block the release notes
+// told them to delete. This runs the real loader over the smallest config
+// that reproduces that - nothing but the legacy block, incomplete - and
+// pins which error comes back.
+func TestNew_LegacyCredentialResponseEncryptionIsRefusedBeforeValidation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+apigw:
+  issuer_metadata:
+    credential_response_encryption:
+      alg_values_supported:
+        - ECDH-ES
+`), 0o600))
+
+	t.Setenv("VC_CONFIG_YAML", path)
+
+	_, err := New(context.Background(), "apigw")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "credential_response_encryption is no longer configured by hand")
 	assert.Contains(t, err.Error(), "credential_encryption.keys")
 }
 

@@ -252,7 +252,45 @@ func TestPKCS11ECDH_RefusesANonDeriveKey(t *testing.T) {
 		key.Close()
 	}
 	require.Error(t, err)
+	// The refusal has to come from an agreement that was actually
+	// attempted, not from reading CKA_DERIVE and believing it. A token can
+	// refuse for reasons the attribute does not describe - a policy against
+	// extractable derived secrets among them - and those are the ones that
+	// would otherwise be discovered by a wallet.
+	assert.Contains(t, err.Error(), "the token will not perform ECDH with it")
 	assert.Contains(t, err.Error(), "CKA_DERIVE")
+}
+
+// TestPKCS11ECDH_ClosedKeyRefusesToDerive pins the other end of the
+// session's life: once Close has run, an agreement must fail rather than
+// use a handle the module has reclaimed.
+func TestPKCS11ECDH_ClosedKeyRefusesToDerive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	hsm := setupLocalSoftHSM2(t)
+	useSoftHSMConf(t, hsm)
+	const keyLabel = "test-ecdh-closed"
+	hsm.generateDeriveKeyPair(t, keyLabel)
+
+	key, err := pki.NewPKCS11ECDH(hsm.ecdhConfig(keyLabel))
+	require.NoError(t, err)
+
+	peer, err := ecdh.P256().GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	// It works before Close, so what fails after it is the close and not
+	// the key or the peer.
+	_, err = key.ECDH(peer.PublicKey())
+	require.NoError(t, err)
+
+	require.NoError(t, key.Close())
+	require.NoError(t, key.Close(), "Close must be idempotent")
+
+	_, err = key.ECDH(peer.PublicKey())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "closed")
 }
 
 // TestCredentialEncryption_SoftHSMRoundTrip is the end-to-end claim: a
@@ -323,4 +361,70 @@ func TestCredentialEncryption_SoftHSMRoundTrip(t *testing.T) {
 
 	_, err = enc.DecryptRequest(strangerJWE)
 	assert.Error(t, err)
+}
+
+// TestPKCS11Module_SharedAcrossUsers is the collision this package used to
+// have: C_Initialize and C_Finalize are library-wide, so a second user of
+// the same module could not start, and a user that finalized when it was
+// done closed the module under everyone else.
+//
+// Two encryption keys on one token is what rotation looks like, and an
+// HSM-backed apigw.key_config alongside an HSM-backed credential encryption
+// key is an ordinary deployment. Both are exercised here.
+func TestPKCS11Module_SharedAcrossUsers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	hsm := setupLocalSoftHSM2(t)
+	useSoftHSMConf(t, hsm)
+	hsm.generateDeriveKeyPair(t, "rotation-current")
+	hsm.generateDeriveKeyPair(t, "rotation-next")
+
+	current, err := pki.NewPKCS11ECDH(hsm.ecdhConfig("rotation-current"))
+	require.NoError(t, err)
+	defer current.Close()
+
+	next, err := pki.NewPKCS11ECDH(hsm.ecdhConfig("rotation-next"))
+	require.NoError(t, err, "a second key on the same module must not collide")
+	defer next.Close()
+
+	// The signing path through the same module, as an HSM-backed
+	// apigw.key_config would open it.
+	signer, err := pki.NewPKCS11Signer(&pki.PKCS11Config{
+		ModulePath: hsm.modulePath,
+		SlotID:     hsm.slotID,
+		PIN:        hsm.userPIN,
+		KeyLabel:   "rotation-current",
+	})
+	require.NoError(t, err, "a signer on the same module must not collide")
+
+	// And the loader path, which used to initialize and finalize the module
+	// around each call.
+	loader := pki.NewKeyLoader()
+	_, err = loader.LoadKeyMaterial(&pki.KeyConfig{
+		PKCS11: &pki.PKCS11Config{
+			ModulePath: hsm.modulePath,
+			SlotID:     hsm.slotID,
+			PIN:        hsm.userPIN,
+			KeyLabel:   "rotation-current",
+		},
+		EnableHSM: true,
+	})
+	require.NoError(t, err)
+
+	// Closing one user must not take the module away from the others.
+	require.NoError(t, signer.Close())
+
+	for name, key := range map[string]*pki.PKCS11ECDH{"current": current, "next": next} {
+		peer, err := ecdh.P256().GenerateKey(rand.Reader)
+		require.NoError(t, err)
+		z, err := key.ECDH(peer.PublicKey())
+		require.NoError(t, err, "%s stopped working after another user closed the module", name)
+		require.Len(t, z, 32)
+	}
+
+	// The two keys are different keys, so the JWKS a rotation publishes has
+	// two distinct entries rather than one key listed twice.
+	assert.NotEqual(t, current.PublicKey().X, next.PublicKey().X)
 }

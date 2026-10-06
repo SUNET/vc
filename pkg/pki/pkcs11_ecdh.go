@@ -4,6 +4,7 @@ import (
 	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rand"
 	"fmt"
 	"sync"
 
@@ -38,6 +39,7 @@ import (
 type PKCS11ECDH struct {
 	mu       sync.Mutex
 	ctx      *pkcs11.Ctx
+	module   *pkcs11Module
 	session  pkcs11.SessionHandle
 	private  pkcs11.ObjectHandle
 	public   *ecdsa.PublicKey
@@ -46,35 +48,37 @@ type PKCS11ECDH struct {
 }
 
 // NewPKCS11ECDH opens a session on the configured token, finds the EC
-// private key by label and reads its public half.
+// private key by label, reads its public half, and proves that the token
+// will actually perform the agreement.
 //
 // Done once at startup rather than per request so that a token that is
-// missing, locked or holding the wrong kind of key is a configuration
-// failure instead of a 500 on a wallet's credential request.
+// missing, locked, holding the wrong kind of key or unwilling to derive is
+// a configuration failure instead of a 500 on a wallet's credential
+// request.
 func NewPKCS11ECDH(config *PKCS11Config) (*PKCS11ECDH, error) {
 	if config == nil {
 		return nil, fmt.Errorf("no PKCS#11 configuration")
 	}
 
-	ctx := pkcs11.New(config.ModulePath)
-	if ctx == nil {
-		return nil, fmt.Errorf("failed to load PKCS#11 module: %s", config.ModulePath)
-	}
-
-	if err := ctx.Initialize(); err != nil {
-		return nil, fmt.Errorf("failed to initialize PKCS#11: %w", err)
-	}
-
-	k := &PKCS11ECDH{ctx: ctx, keyLabel: config.KeyLabel}
-
-	session, err := ctx.OpenSession(config.SlotID, pkcs11.CKF_SERIAL_SESSION)
+	// Through the registry, not pkcs11.New + Initialize: C_Initialize is
+	// library-wide, so two encryption keys on one token - which is what
+	// rotation looks like - or an HSM-backed key_config alongside this one
+	// would collide. See pkcs11_module.go.
+	module, err := acquireModule(config.ModulePath)
 	if err != nil {
-		ctx.Finalize()
+		return nil, err
+	}
+
+	k := &PKCS11ECDH{ctx: module.ctx, module: module, keyLabel: config.KeyLabel}
+
+	session, err := module.ctx.OpenSession(config.SlotID, pkcs11.CKF_SERIAL_SESSION)
+	if err != nil {
+		k.Close()
 		return nil, fmt.Errorf("failed to open session: %w", err)
 	}
 	k.session = session
 
-	if err := ctx.Login(session, pkcs11.CKU_USER, config.PIN); err != nil {
+	if err := loginSession(module.ctx, session, config.PIN); err != nil {
 		k.Close()
 		return nil, fmt.Errorf("failed to login: %w", err)
 	}
@@ -84,7 +88,64 @@ func NewPKCS11ECDH(config *PKCS11Config) (*PKCS11ECDH, error) {
 		return nil, err
 	}
 
+	if err := k.selfTest(); err != nil {
+		k.Close()
+		return nil, err
+	}
+
 	return k, nil
+}
+
+// selfTest performs one throwaway agreement, against a public key generated
+// here and discarded, and refuses the key if the token will not do it.
+//
+// The attributes this asks for are not universally granted. The derived
+// generic secret is created with CKA_EXTRACTABLE true and CKA_SENSITIVE
+// false, because CKD_NULL means the agreed secret Z is the derived object
+// and the Concat KDF above it runs in this process; a token under a policy
+// that forbids extractable keys will refuse. The private key also needs
+// CKA_DERIVE, which keys generated for signing do not have.
+//
+// Neither is visible from the public key or from the metadata, so without
+// this the issuer would start, publish a JWK, and fail every encrypted
+// request a wallet built from it - a fault that looks like a wallet problem
+// and is discovered by a user. Doing the agreement here moves it to the
+// line in the config file that caused it.
+func (k *PKCS11ECDH) selfTest() error {
+	probe, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		return fmt.Errorf("key %s: generating a probe key: %w", k.keyLabel, err)
+	}
+
+	z, deriveErr := k.ECDH(probe.PublicKey())
+	if deriveErr == nil {
+		if len(z) != p256FieldSize {
+			return fmt.Errorf("key %s: the token derived %d bytes, want %d", k.keyLabel, len(z), p256FieldSize)
+		}
+		return nil
+	}
+
+	// The agreement is the authority on whether this key can be used. The
+	// attribute is read only now, to say why, because a token may refuse
+	// for reasons CKA_DERIVE does not describe - the extractable derived
+	// secret among them.
+	if k.deriveAttributeIsFalse() {
+		return fmt.Errorf("key %s: the token will not perform ECDH with it, and its CKA_DERIVE is false: %w", k.keyLabel, deriveErr)
+	}
+
+	return fmt.Errorf("key %s: the token refused a test ECDH agreement, so this key cannot decrypt credential requests "+
+		"(a token that will not create the derived secret with CKA_EXTRACTABLE true and CKA_SENSITIVE false cannot be used this way): %w",
+		k.keyLabel, deriveErr)
+}
+
+// deriveAttributeIsFalse reports whether the token says CKA_DERIVE is
+// false. A module that does not expose the attribute at all answers false
+// here: absence is not a refusal.
+func (k *PKCS11ECDH) deriveAttributeIsFalse() bool {
+	attrs, err := k.ctx.GetAttributeValue(k.session, k.private, []*pkcs11.Attribute{
+		pkcs11.NewAttribute(pkcs11.CKA_DERIVE, nil),
+	})
+	return err == nil && len(attrs) == 1 && len(attrs[0].Value) > 0 && attrs[0].Value[0] == 0
 }
 
 // findKey locates the private key and the matching public key.
@@ -118,17 +179,6 @@ func (k *PKCS11ECDH) findKey() error {
 	}
 	if keyType := bytesToUint(attrs[0].Value); keyType != pkcs11.CKK_EC {
 		return fmt.Errorf("key %s: ECDH needs an EC key, got PKCS#11 key type %d", k.keyLabel, keyType)
-	}
-
-	// CKA_DERIVE false means the token will refuse every agreement. Said
-	// here, where it names the key and the attribute, rather than as
-	// CKR_KEY_FUNCTION_NOT_PERMITTED on the first wallet request. A module
-	// that does not expose the attribute at all is left alone: absence is
-	// not a refusal, and the derivation will say so if it is.
-	if attrs, err := k.ctx.GetAttributeValue(k.session, k.private, []*pkcs11.Attribute{
-		pkcs11.NewAttribute(pkcs11.CKA_DERIVE, nil),
-	}); err == nil && len(attrs) == 1 && len(attrs[0].Value) > 0 && attrs[0].Value[0] == 0 {
-		return fmt.Errorf("key %s: CKA_DERIVE is false, so this token will not perform ECDH with it", k.keyLabel)
 	}
 
 	public, _, err := extractECPublicKeyFromHSM(k.ctx, k.session, k.keyLabel)
@@ -172,12 +222,7 @@ func (k *PKCS11ECDH) ECDH(peer *ecdh.PublicKey) ([]byte, error) {
 	// from ecdh.PublicKey it is already known to be on the curve.
 	point := peer.Bytes()
 
-	// Field size for P-256. CKA_VALUE_LEN has to be stated because a generic
-	// secret has no implied length, and a module that silently produced a
-	// shorter one would produce a wrong KEK rather than an error.
-	const fieldSize = 32
-
-	z, err := k.derive(point, fieldSize)
+	z, err := k.derive(point, p256FieldSize)
 	if err == nil {
 		return z, nil
 	}
@@ -194,13 +239,19 @@ func (k *PKCS11ECDH) ECDH(peer *ecdh.PublicKey) ([]byte, error) {
 	if wrapErr != nil {
 		return nil, err
 	}
-	z, derErr := k.derive(wrapped, fieldSize)
+	z, derErr := k.derive(wrapped, p256FieldSize)
 	if derErr != nil {
 		return nil, fmt.Errorf("CKM_ECDH1_DERIVE failed with a raw EC point (%w) and with a DER-wrapped one (%w)", err, derErr)
 	}
 
 	return z, nil
 }
+
+// p256FieldSize is the length of a P-256 shared secret. CKA_VALUE_LEN has
+// to be stated when deriving because a generic secret has no implied
+// length, and a module that silently produced a shorter one would produce a
+// wrong KEK rather than an error.
+const p256FieldSize = 32
 
 // derive runs one CKM_ECDH1_DERIVE and reads the result out of the token.
 func (k *PKCS11ECDH) derive(publicData []byte, valueLen int) ([]byte, error) {
@@ -269,10 +320,12 @@ func (k *PKCS11ECDH) Close() error {
 	k.closed = true
 
 	if k.session != 0 {
-		k.ctx.Logout(k.session)
+		// No Logout: it is token-wide. See loginSession.
 		k.ctx.CloseSession(k.session)
 	}
-	k.ctx.Finalize()
+	// releaseModule rather than Finalize: C_Finalize is library-wide, and
+	// this process may have other sessions open on the same module.
+	releaseModule(k.module)
 
 	return nil
 }

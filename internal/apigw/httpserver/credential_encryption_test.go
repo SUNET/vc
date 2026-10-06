@@ -399,6 +399,33 @@ func TestCredentialEncryption_BadResponseParametersAreRefused(t *testing.T) {
 			p["jwk"] = json.RawMessage(encoded)
 			return p
 		},
+		// RFC 7517 §4.2. jwe.Encrypt takes this key explicitly and never
+		// looks at use, so a signing key would be used for encryption and
+		// the mistake would surface in the wallet, after issuance.
+		"jwk declaring use sig": func(e *encryptionSetup) map[string]any {
+			p := e.responseParams(openid4vci.EncA256GCM, "")
+			var key map[string]any
+			require.NoError(t, json.Unmarshal(e.walletPub, &key))
+			key["use"] = "sig"
+			encoded, err := json.Marshal(key)
+			require.NoError(t, err)
+			p["jwk"] = json.RawMessage(encoded)
+			return p
+		},
+		// Absent is allowed: use is optional and claims nothing. This case
+		// is here so the check above cannot be written as "reject unless
+		// use is enc", which would refuse most wallets.
+		"jwk declaring use enc": func(e *encryptionSetup) map[string]any {
+			p := e.responseParams(openid4vci.EncA256GCM, "")
+			var key map[string]any
+			require.NoError(t, json.Unmarshal(e.walletPub, &key))
+			key["use"] = "enc"
+			key["alg"] = "ECDH-ES+A128KW" // the thing actually refused here
+			encoded, err := json.Marshal(key)
+			require.NoError(t, err)
+			p["jwk"] = json.RawMessage(encoded)
+			return p
+		},
 		"jwk that is not a key": func(e *encryptionSetup) map[string]any {
 			p := e.responseParams(openid4vci.EncA256GCM, "")
 			p["jwk"] = json.RawMessage(`{"kty":"EC"}`)

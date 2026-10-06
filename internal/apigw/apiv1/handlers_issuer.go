@@ -210,12 +210,20 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 
 // VCICredential implements OpenID4VCI credential issuance endpoint
 //
+// The two media types are the two halves of §8.3. A request may arrive as
+// application/jwt - a JWE encrypted to a key from
+// credential_request_encryption.jwks - and a response is returned as
+// application/jwt whenever the request carried
+// credential_response_encryption. A generated client that only knows about
+// application/json cannot find the encrypted path, and will reject the
+// response to a request that asked for one.
+//
 //	@Summary		VCICredential
 //	@ID				create-credential
-//	@Description	Create credential endpoint
+//	@Description	Create credential endpoint. Accepts a plain JSON Credential Request, or an OpenID4VCI 1.0 section 8.3 encrypted Credential Request as a JWE (application/jwt). Returns the Credential Response as JSON, or as a JWE (application/jwt) when the request supplied credential_response_encryption.
 //	@Tags			vc-platform
-//	@Accept			json
-//	@Produce		json
+//	@Accept			json,application/jwt
+//	@Produce		json,application/jwt
 //	@Success		200	{object}	apiv1_issuer.MakeSDJWTReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		openid4vci.CredentialRequest	true	" "
@@ -788,6 +796,22 @@ func convertJWKToCOSEKey(jwk *apiv1_issuer.Jwk) ([]byte, error) {
 
 // VCIDeferredCredential implements OpenID4VCI deferred credential endpoint
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-deferred-credential-endpoin
+//
+// Carries the same two media types as VCICredential, for the same reason.
+// §9.1 is explicit that the encryption parameters used are the ones in THIS
+// request, regardless of what the initial Credential Request sent, so a
+// client has to be able to see them here.
+//
+//	@Summary		VCIDeferredCredential
+//	@ID				create-deferred-credential
+//	@Description	Deferred credential endpoint. Accepts a plain JSON Deferred Credential Request, or an OpenID4VCI 1.0 section 8.3 encrypted one as a JWE (application/jwt). Returns the Credential Response as JSON, or as a JWE (application/jwt) when the request supplied credential_response_encryption.
+//	@Tags			vc-platform
+//	@Accept			json,application/jwt
+//	@Produce		json,application/jwt
+//	@Success		200	{object}	openid4vci.CredentialResponse			"Success"
+//	@Failure		400	{object}	helpers.ErrorResponse					"Bad Request"
+//	@Param			req	body		openid4vci.DeferredCredentialRequest	true	" "
+//	@Router			/deferred_credential [post]
 func (c *Client) VCIDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error) {
 	c.log.Debug("deferred credential", "req", req)
 	if c.vciMetrics != nil {

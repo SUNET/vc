@@ -1443,8 +1443,12 @@ type CredentialEncryptionKey struct {
 	//
 	// Not every module will do this: the derived generic secret is created
 	// with CKA_EXTRACTABLE true and CKA_SENSITIVE false, and a token
-	// configured to refuse extractable keys will refuse the derivation. It
-	// fails at startup, with the module's error, rather than silently.
+	// configured to refuse extractable keys will refuse the derivation.
+	// Neither that nor the CKA_DERIVE the private key needs can be seen
+	// from the published metadata, so the service performs one throwaway
+	// agreement while loading this key and refuses to start if the token
+	// will not do it. The alternative is an issuer that starts, publishes a
+	// JWK, and fails every encrypted request built from it.
 	PKCS11 *pki.PKCS11Config `yaml:"pkcs11" validate:"omitempty"`
 }
 

@@ -761,12 +761,14 @@ const docTemplate = `{
         },
         "/credential": {
             "post": {
-                "description": "Create credential endpoint",
+                "description": "Create credential endpoint. Accepts a plain JSON Credential Request, or an OpenID4VCI 1.0 section 8.3 encrypted Credential Request as a JWE (application/jwt). Returns the Credential Response as JSON, or as a JWE (application/jwt) when the request supplied credential_response_encryption.",
                 "consumes": [
-                    "application/json"
+                    "application/json",
+                    "application/jwt"
                 ],
                 "produces": [
-                    "application/json"
+                    "application/json",
+                    "application/jwt"
                 ],
                 "tags": [
                     "vc-platform"
@@ -789,6 +791,49 @@ const docTemplate = `{
                         "description": "Success",
                         "schema": {
                             "$ref": "#/definitions/apiv1_issuer.MakeSDJWTReply"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/deferred_credential": {
+            "post": {
+                "description": "Deferred credential endpoint. Accepts a plain JSON Deferred Credential Request, or an OpenID4VCI 1.0 section 8.3 encrypted one as a JWE (application/jwt). Returns the Credential Response as JSON, or as a JWE (application/jwt) when the request supplied credential_response_encryption.",
+                "consumes": [
+                    "application/json",
+                    "application/jwt"
+                ],
+                "produces": [
+                    "application/json",
+                    "application/jwt"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "VCIDeferredCredential",
+                "operationId": "create-deferred-credential",
+                "parameters": [
+                    {
+                        "description": " ",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/openid4vci.DeferredCredentialRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/openid4vci.CredentialResponse"
                         }
                     },
                     "400": {
@@ -1859,6 +1904,17 @@ const docTemplate = `{
                 }
             }
         },
+        "openid4vci.Credential": {
+            "type": "object",
+            "required": [
+                "credential"
+            ],
+            "properties": {
+                "credential": {
+                    "type": "string"
+                }
+            }
+        },
         "openid4vci.CredentialOfferResult": {
             "type": "object",
             "required": [
@@ -1948,6 +2004,34 @@ const docTemplate = `{
                 }
             }
         },
+        "openid4vci.CredentialResponse": {
+            "type": "object",
+            "properties": {
+                "c_nonce": {
+                    "description": "CNonce: OPTIONAL. String containing a nonce to be used to create a proof of possession of key material when requesting a Credential (see Section 7.2). When received, the Wallet MUST use this nonce value for its subsequent Credential Requests until the Credential Issuer provides a fresh nonce.",
+                    "type": "string"
+                },
+                "c_nonce_expires_in": {
+                    "description": "CNonceExpiresIn: OPTIONAL. Number denoting the lifetime in seconds of the c_nonce.",
+                    "type": "integer"
+                },
+                "credentials": {
+                    "description": "Credentials OPTIONAL. Contains an array of issued Credentials. It MUST NOT be used if credential or transaction_id parameter is present. The values in the array MAY be a string or an object, depending on the Credential Format. See Appendix A for the Credential Format-specific encoding requirements.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/openid4vci.Credential"
+                    }
+                },
+                "notification_id": {
+                    "description": "NotificationID: OPTIONAL. String identifying an issued Credential that the Wallet includes in the Notification Request as defined in Section 10.1. This parameter MUST NOT be present if credential parameter is not present.",
+                    "type": "string"
+                },
+                "transaction_id": {
+                    "description": "TransactionID: OPTIONAL. String identifying a Deferred Issuance transaction. This claim is contained in the response if the Credential Issuer was unable to immediately issue the Credential. The value is subsequently used to obtain the respective Credential with the Deferred Credential Endpoint (see Section 9). It MUST be present when the credential parameter is not returned. It MUST be invalidated after the Credential for which it was meant has been obtained by the Wallet.",
+                    "type": "string"
+                }
+            }
+        },
         "openid4vci.CredentialResponseEncryption": {
             "type": "object",
             "required": [
@@ -2017,6 +2101,25 @@ const docTemplate = `{
                 },
                 "verificationMethod": {
                     "description": "VerificationMethod is a URL that identifies the public key to use for verification",
+                    "type": "string"
+                }
+            }
+        },
+        "openid4vci.DeferredCredentialRequest": {
+            "type": "object",
+            "required": [
+                "transaction_id"
+            ],
+            "properties": {
+                "credential_response_encryption": {
+                    "description": "CredentialResponseEncryption OPTIONAL. As defined for the Credential\nRequest (§8.2). §9.1 is explicit that this object is the one used for\nthe Deferred Credential Response \"regardless of what was sent in the\ninitial Credential Request\", which is what keeps key management\ntractable across a long deferral - so it is read from this request and\nnever inherited.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/openid4vci.CredentialResponseEncryption"
+                        }
+                    ]
+                },
+                "transaction_id": {
                     "type": "string"
                 }
             }

@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/pki"
@@ -41,13 +42,54 @@ type softhsmInstance struct {
 	tmpDir     string
 }
 
-// setupLocalSoftHSM2 creates and initializes a local SoftHSM2 instance
+var (
+	softhsmOnce     sync.Once
+	softhsmShared   *softhsmInstance
+	softhsmErr      error
+	softhsmTempRoot string
+)
+
+// TestMain removes the shared SoftHSM2 token directory once every test in
+// this package is done with it. It cannot be a t.Cleanup, because the token
+// outlives the test that first asked for it.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if softhsmTempRoot != "" {
+		os.RemoveAll(softhsmTempRoot)
+	}
+	os.Exit(code)
+}
+
+// setupLocalSoftHSM2 returns the one SoftHSM2 token this package uses.
+//
+// One per process, not one per test. pkg/pki now initializes a PKCS#11
+// module once per process and keeps it initialized while anything holds it
+// (see pkcs11_module.go), and SoftHSM2 reads SOFTHSM2_CONF at
+// C_Initialize - so a second token directory created later would be
+// invisible to the module that is already up, and its slot id invalid.
+// That is not a test artifact: a deployment pointing two keys at two
+// different configurations of one module would see the same thing.
+//
+// Tests keep out of each other's way with distinct key labels instead.
 func setupLocalSoftHSM2(t *testing.T) *softhsmInstance {
+	t.Helper()
+
+	softhsmOnce.Do(func() {
+		softhsmShared, softhsmErr = newLocalSoftHSM2(t)
+	})
+	require.NoError(t, softhsmErr)
+	require.NotNil(t, softhsmShared)
+
+	return softhsmShared
+}
+
+func newLocalSoftHSM2(t *testing.T) (*softhsmInstance, error) {
 	t.Helper()
 
 	// Create temporary directories for SoftHSM2 configuration
 	tmpDir, err := os.MkdirTemp("", "softhsm2-test-*")
 	require.NoError(t, err)
+	softhsmTempRoot = tmpDir
 
 	tokensDir := filepath.Join(tmpDir, "tokens")
 	require.NoError(t, os.MkdirAll(tokensDir, 0o755))
@@ -75,9 +117,9 @@ slots.removable = false
 	// Find the slot ID for the token we just created
 	slotID := findTokenSlot(t, configPath, defaultTokenLabel)
 
-	t.Cleanup(func() {
-		os.RemoveAll(tmpDir)
-	})
+	// Set process-wide and left set: SoftHSM2 reads this at C_Initialize,
+	// and the module stays initialized for the rest of the process.
+	require.NoError(t, os.Setenv("SOFTHSM2_CONF", configPath))
 
 	return &softhsmInstance{
 		modulePath: modulePath,
@@ -87,7 +129,7 @@ slots.removable = false
 		configPath: configPath,
 		tokensDir:  tokensDir,
 		tmpDir:     tmpDir,
-	}
+	}, nil
 }
 
 // findSoftHSM2Module locates the SoftHSM2 PKCS#11 module

@@ -314,6 +314,21 @@ func (e *CredentialEncryption) DecryptRequest(body []byte) ([]byte, error) {
 			ErrorDescription: "this Credential Issuer does not support compressed requests",
 		}
 	}
+	// RFC 7516 §4.1.13, via RFC 7515 §4.1.11: a recipient MUST reject a JWE
+	// whose crit list names an extension it does not understand. This
+	// Credential Issuer understands none, so any crit at all is refused -
+	// including an empty list, which §4.1.11 makes invalid in its own right.
+	//
+	// Not inherited from the library. jwx only performs this check when
+	// asked, with jwe.WithCritValidation(true), and the default is off for
+	// compatibility with v3.0.13 and earlier - so the jwe.Decrypt call this
+	// replaced did not do it either. The check is new here, not restored.
+	if _, ok := headers.Critical(); ok {
+		return nil, &Error{
+			Err:              ErrInvalidEncryptionParameters,
+			ErrorDescription: "this Credential Issuer understands no critical JWE header extensions",
+		}
+	}
 
 	plaintext, err := e.decryptECDHES(body, headers)
 	if err != nil {
@@ -610,6 +625,19 @@ func (p *CredentialResponseEncryption) recipientKey() (jwk.Key, jwa.KeyEncryptio
 		return nil, empty, &Error{
 			Err:              ErrInvalidEncryptionParameters,
 			ErrorDescription: fmt.Sprintf("credential_response_encryption.jwk must use curve %s, got %q", jwa.P256(), crv),
+		}
+	}
+
+	// RFC 7517 §4.2: use says what the key may be used for. jwe.Encrypt is
+	// handed this key explicitly and does not consult it, so a wallet that
+	// sent a signing key would get a credential encrypted to a key its own
+	// library may then refuse to decrypt with - after issuance, which is
+	// the one place this package tries never to fail. Absent is fine: use
+	// is optional, and omitting it claims nothing.
+	if use, ok := key.KeyUsage(); ok && use != "" && use != "enc" {
+		return nil, empty, &Error{
+			Err:              ErrInvalidEncryptionParameters,
+			ErrorDescription: fmt.Sprintf("credential_response_encryption.jwk declares use %q; it must be enc, or absent", use),
 		}
 	}
 

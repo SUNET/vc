@@ -374,3 +374,82 @@ func buildJWE(t *testing.T, issuer *ecdsa.PublicKey, kid string, payload []byte,
 	b64 := base64.RawURLEncoding.EncodeToString
 	return []byte(strings.Join([]string{protected, b64(wrapped), b64(iv), b64(ciphertext), b64(tag)}, "."))
 }
+
+// TestDecryptRequest_CriticalHeaderIsRefused covers RFC 7516 §4.1.13: a
+// recipient MUST reject a JWE whose crit list names an extension it does
+// not understand, and this Credential Issuer understands none.
+//
+// Each case is tampered into an otherwise valid JWE, so what is measured is
+// the crit check and not some other malformation; the spy confirms the
+// refusal happens before any key agreement, which is where a header that
+// changes processing semantics has to be caught.
+func TestDecryptRequest_CriticalHeaderIsRefused(t *testing.T) {
+	private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	spy := &countingKeyAgreement{opaqueKeyAgreement: opaqueKeyAgreement{key: private}}
+	enc, err := NewCredentialEncryption([]crypto.PrivateKey{spy}, false, false)
+	require.NoError(t, err)
+
+	set, err := jwk.Parse(enc.RequestMetadata().JWKS)
+	require.NoError(t, err)
+	published, ok := set.Key(0)
+	require.True(t, ok)
+
+	payload := []byte(`{"credential_configuration_id":"crit"}`)
+	encrypted, err := jwe.Encrypt(payload,
+		jwe.WithKey(jwa.ECDH_ES_A256KW(), published),
+		jwe.WithContentEncryption(jwa.A256GCM()))
+	require.NoError(t, err)
+
+	// The same JWE without a crit header decrypts, so the refusals below
+	// are the crit header and nothing else about these messages.
+	got, err := enc.DecryptRequest(encrypted)
+	require.NoError(t, err)
+	require.Equal(t, payload, got)
+	require.Equal(t, 1, spy.calls)
+
+	for _, tc := range []struct {
+		name   string
+		header map[string]any
+	}{
+		{
+			// An extension nobody has heard of, carried as the RFC
+			// intends: named in crit and present in the header.
+			name:   "an unknown extension",
+			header: map[string]any{"crit": []any{"urn:example:must-understand"}, "urn:example:must-understand": true},
+		},
+		{
+			// Named in crit but absent from the header. Invalid per
+			// §4.1.11 and still an instruction we cannot honour.
+			name:   "an extension that is not even present",
+			header: map[string]any{"crit": []any{"urn:example:absent"}},
+		},
+		{
+			// §4.1.11 forbids an empty list outright.
+			name:   "an empty list",
+			header: map[string]any{"crit": []any{}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := spy.calls
+
+			segments := bytes.Split(encrypted, []byte("."))
+			require.Len(t, segments, 5)
+			raw, err := base64.RawURLEncoding.DecodeString(string(segments[0]))
+			require.NoError(t, err)
+
+			var header map[string]any
+			require.NoError(t, json.Unmarshal(raw, &header))
+			maps.Copy(header, tc.header)
+
+			tampered, err := json.Marshal(header)
+			require.NoError(t, err)
+			segments[0] = []byte(base64.RawURLEncoding.EncodeToString(tampered))
+
+			_, err = enc.DecryptRequest(bytes.Join(segments, []byte(".")))
+			require.Error(t, err)
+			assert.Equal(t, before, spy.calls, "a critical header reached the private key")
+		})
+	}
+}
