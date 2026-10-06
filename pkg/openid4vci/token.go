@@ -26,7 +26,9 @@ type TokenRequest struct {
 	// client_id, and wallets increasingly identify themselves with a DID. A
 	// did:key is short, but a did:jwk over a P-256 key is around 175
 	// characters - past the 128 this used to allow. Kept in step with
-	// cache.AuthorizationContext.ClientID, which stores the same value.
+	// cache.AuthorizationContext.WalletClientID, which is where PAR stores
+	// the wallet's own client_id; that type's ClientID holds this
+	// deployment's identifier instead.
 	ClientID string `form:"client_id" json:"client_id" validate:"omitempty,max=512,printascii"`
 
 	// CodeVerifier OPTIONAL (required for public clients using authorization_code grant)

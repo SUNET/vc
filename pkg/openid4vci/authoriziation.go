@@ -205,30 +205,47 @@ func (r *PARRequest) UnmarshalJSON(data []byte) error {
 // reaches us, so a literal "[]" and a percent-encoded "%5B%5D" both land here.
 const AuthorizationDetailsBracketKey = "authorization_details[]"
 
-// MergeNonStandardAuthorizationDetails folds the repeated-key and
-// bracketed-key encodings of authorization_details into the single JSON array
-// that ParseAuthorizationDetails expects:
+// ReadAuthorizationDetails settles which of the request's
+// authorization_details values count, before ParseAuthorizationDetails
+// decodes them.
 //
-//	authorization_details={..}&authorization_details={..}
-//	authorization_details[]={..}&authorization_details[]={..}
+// OpenID4VCI 1.0 §5.1.1 and RFC 9396 §2 define exactly one encoding for a
+// query string or form body - a single parameter whose value is the
+// URL-encoded JSON array - and RFC 6749 §3.1 says a request parameter MUST
+// NOT be included more than once. So with lenient false this refuses a
+// repeated parameter and otherwise leaves what the form binder read; gin
+// binds a scalar field from the FIRST value only, so without this check a
+// second authorization_details would be silently dropped rather than
+// refused.
 //
-// Neither is specified. OpenID4VCI 1.0 §5.1.1 and RFC 9396 §2 define exactly
-// one encoding - a single parameter whose value is the URL-encoded JSON array
-// - and that one is read by gin's own binder and left untouched here, so a
-// conformant request takes the identical path whether or not this is called.
-// Callers gate this on an explicit deployment opt-in
-// (model.Cfg.AcceptNonStandardAuthorizationDetailsArrays); nothing infers it
-// from the request.
+// With lenient true, two further encodings are folded into the single array
+// ParseAuthorizationDetails expects:
+//
+//	repeated key:   authorization_details={..}&authorization_details={..}
+//	bracketed key:  authorization_details[]={..}&authorization_details[]={..}
+//
+// Neither is specified. Callers gate leniency on an explicit deployment
+// opt-in (model.Cfg.AcceptNonStandardAuthorizationDetailsArrays); nothing
+// infers it from the request.
 //
 // values is the request's decoded query and form parameters. A request whose
 // AuthorizationDetails are already populated (a JSON body) is left alone.
-func (r *PARRequest) MergeNonStandardAuthorizationDetails(values url.Values) error {
+func (r *PARRequest) ReadAuthorizationDetails(values url.Values, lenient bool) error {
 	if r == nil || len(r.AuthorizationDetails) > 0 {
 		return nil
 	}
 
-	raw := make([]string, 0, len(values["authorization_details"])+len(values[AuthorizationDetailsBracketKey]))
-	raw = append(raw, values["authorization_details"]...)
+	plain := values["authorization_details"]
+
+	if !lenient {
+		if len(plain) > 1 {
+			return errors.New("authorization_details must not be included more than once")
+		}
+		return nil
+	}
+
+	raw := make([]string, 0, len(plain)+len(values[AuthorizationDetailsBracketKey]))
+	raw = append(raw, plain...)
 	raw = append(raw, values[AuthorizationDetailsBracketKey]...)
 	if len(raw) == 0 {
 		return nil

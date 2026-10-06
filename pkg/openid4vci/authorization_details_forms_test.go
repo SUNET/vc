@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMergeNonStandardAuthorizationDetails(t *testing.T) {
+func TestReadAuthorizationDetailsLenient(t *testing.T) {
 	const pid = `{"type":"openid_credential","credential_configuration_id":"pid"}`
 	const ehic = `{"type":"openid_credential","credential_configuration_id":"ehic"}`
 
@@ -99,7 +99,7 @@ func TestMergeNonStandardAuthorizationDetails(t *testing.T) {
 	for _, tt := range tts {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &PARRequest{}
-			err := r.MergeNonStandardAuthorizationDetails(tt.values)
+			err := r.ReadAuthorizationDetails(tt.values, true)
 			if tt.errStr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errStr)
@@ -113,16 +113,16 @@ func TestMergeNonStandardAuthorizationDetails(t *testing.T) {
 
 // A request whose details a JSON binder already decoded is not re-read from
 // the query string, so query parameters cannot override a JSON body.
-func TestMergeNonStandardAuthorizationDetailsLeavesADecodedRequestAlone(t *testing.T) {
+func TestReadAuthorizationDetailsLeavesADecodedRequestAlone(t *testing.T) {
 	r := &PARRequest{
 		AuthorizationDetails: []AuthorizationDetailsParameter{
 			{Type: "openid_credential", CredentialConfigurationID: "pid"},
 		},
 	}
 
-	require.NoError(t, r.MergeNonStandardAuthorizationDetails(url.Values{
+	require.NoError(t, r.ReadAuthorizationDetails(url.Values{
 		AuthorizationDetailsBracketKey: {`{"type":"openid_credential","credential_configuration_id":"attacker"}`},
-	}))
+	}, true))
 
 	require.Len(t, r.AuthorizationDetails, 1)
 	assert.Equal(t, "pid", r.AuthorizationDetails[0].CredentialConfigurationID)
@@ -131,7 +131,63 @@ func TestMergeNonStandardAuthorizationDetailsLeavesADecodedRequestAlone(t *testi
 
 // A nil receiver is a no-op rather than a panic, matching
 // ParseAuthorizationDetails.
-func TestMergeNonStandardAuthorizationDetailsNilReceiver(t *testing.T) {
+func TestReadAuthorizationDetailsNilReceiver(t *testing.T) {
 	var r *PARRequest
-	assert.NoError(t, r.MergeNonStandardAuthorizationDetails(url.Values{"authorization_details": {"[]"}}))
+	assert.NoError(t, r.ReadAuthorizationDetails(url.Values{"authorization_details": {"[]"}}, true))
+}
+
+// Strictly, a repeated parameter is refused rather than silently reduced to
+// its first value: RFC 6749 §3.1 says a request parameter MUST NOT be
+// included more than once, and gin binds only the first.
+func TestReadAuthorizationDetailsStrict(t *testing.T) {
+	const pid = `{"type":"openid_credential","credential_configuration_id":"pid"}`
+
+	tts := []struct {
+		name   string
+		values url.Values
+		errStr string
+	}{
+		{
+			name:   "one value is accepted",
+			values: url.Values{"authorization_details": {"[" + pid + "]"}},
+		},
+		{
+			name:   "no value is accepted",
+			values: url.Values{"client_id": {"wallet"}},
+		},
+		{
+			// The case that used to slip through: the first value is a
+			// well-formed array, so every later check passes and the second
+			// value simply vanishes.
+			name:   "a valid array followed by a second value is refused",
+			values: url.Values{"authorization_details": {"[" + pid + "]", pid}},
+			errStr: "more than once",
+		},
+		{
+			name:   "two values are refused",
+			values: url.Values{"authorization_details": {pid, pid}},
+			errStr: "more than once",
+		},
+		{
+			// Not a parameter this issuer defines, so OAuth says to ignore
+			// it - which is what leaving AuthorizationDetailsRaw alone does.
+			name:   "a bracketed key is ignored",
+			values: url.Values{AuthorizationDetailsBracketKey: {pid, pid}},
+		},
+	}
+
+	for _, tt := range tts {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &PARRequest{}
+			err := r.ReadAuthorizationDetails(tt.values, false)
+			if tt.errStr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errStr)
+				return
+			}
+			require.NoError(t, err)
+			// Strictly, this function never writes: whatever gin bound stands.
+			assert.Empty(t, r.AuthorizationDetailsRaw)
+		})
+	}
 }

@@ -142,16 +142,29 @@ func TestPAR_SpecifiedArrayEncodingUnaffectedByCompat(t *testing.T) {
 // Repeated keys are refused by default: RFC 6749 §3.1 says a parameter must
 // not appear more than once, so this is a protocol violation, not a dialect.
 func TestPAR_RepeatedKeyRefusedByDefault(t *testing.T) {
-	api := &parAPI{}
-	engine := parTestEngine(t, api, false)
+	for name, values := range map[string][][2]string{
+		"two objects": {
+			{"authorization_details", detailPID},
+			{"authorization_details", detailEHIC},
+		},
+		// The case that used to slip through: gin binds the first value only,
+		// so a well-formed array followed by anything else passed every later
+		// check and the second value simply vanished.
+		"a valid array, then a second value": {
+			{"authorization_details", "[" + detailPID + "]"},
+			{"authorization_details", detailEHIC},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			api := &parAPI{}
+			engine := parTestEngine(t, api, false)
 
-	w := postPAR(t, engine, parForm(
-		[2]string{"authorization_details", detailPID},
-		[2]string{"authorization_details", detailEHIC},
-	))
+			w := postPAR(t, engine, parForm(values...))
 
-	require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
-	assert.Zero(t, api.calls, "the request must not reach the API")
+			require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+			assert.Zero(t, api.calls, "the request must not reach the API")
+		})
+	}
 }
 
 // A bracketed key is an unknown parameter by default, and OAuth says to

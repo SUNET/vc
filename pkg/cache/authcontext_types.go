@@ -58,10 +58,14 @@ type AuthorizationContext struct {
 	SourceSessionID string `json:"source_session_id,omitempty" bson:"source_session_id,omitempty" validate:"omitempty,max=128,printascii"`
 
 	// Client and authorization fields
-	// ClientID and WalletClientID hold whatever identifier the wallet sent.
-	// 512 characters, not 128: a wallet may identify itself with a DID, and a
-	// did:jwk over a P-256 key is around 175 characters. Kept in step with
-	// openid4vci.TokenRequest.ClientID, which is where the same value arrives.
+	// ClientID is this deployment's own identifier for the flow - the
+	// issuance path stores "x509_san_dns:<host>", and the verifier stores an
+	// RP client_id. WalletClientID is the one the wallet sent, in PAR.
+	//
+	// Both are 512 characters, not 128, because the wallet's may be a DID: a
+	// did:jwk over a P-256 key is around 175. The bound is kept in step with
+	// openid4vci.TokenRequest.ClientID, where the same wallet-supplied value
+	// arrives at the token endpoint.
 	ClientID            string   `json:"client_id" bson:"client_id" validate:"omitempty,max=512,printascii"`
 	WalletClientID      string   `json:"wallet_client_id,omitempty" bson:"wallet_client_id,omitempty" validate:"omitempty,max=512,printascii"`
 	Scopes              []string `json:"scopes,omitempty" bson:"scopes,omitempty"`
