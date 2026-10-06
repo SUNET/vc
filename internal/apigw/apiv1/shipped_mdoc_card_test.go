@@ -24,7 +24,7 @@ func TestShippedMDocSchemasOfferACardImage(t *testing.T) {
 			schema, err := mdoc.LoadMDDLSchema(raw)
 			require.NoError(t, err)
 
-			uri := mddlCardURI(schema)
+			uri, _ := mddlCardURI(schema)
 			require.NotEmpty(t, uri, "the consent page would render no card for this credential")
 			assert.True(t, len(uri) > len("data:image/svg+xml;base64,"),
 				"the data URI carries no payload")

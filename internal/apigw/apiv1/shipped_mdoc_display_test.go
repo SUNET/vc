@@ -64,7 +64,7 @@ func TestShippedMDocCardPlaceholdersAreBackedByClaims(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			schema := loadShippedMDoc(t, name)
 
-			uri := mddlCardURI(schema)
+			uri, _ := mddlCardURI(schema)
 			require.NotEmpty(t, uri)
 			_, encoded, found := strings.Cut(uri, "base64,")
 			require.True(t, found, "the card is not a base64 data URI")

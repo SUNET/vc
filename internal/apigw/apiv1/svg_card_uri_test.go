@@ -20,8 +20,9 @@ const (
 // (mapSvgTemplates fills an absent logo from the first template).
 func TestVCTMCardURI(t *testing.T) {
 	for name, tc := range map[string]struct {
-		vctm *sdjwtvc.VCTM
-		want string
+		vctm     *sdjwtvc.VCTM
+		want     string
+		wantLogo bool
 	}{
 		"template wins": {
 			vctm: &sdjwtvc.VCTM{Display: []sdjwtvc.VCTMDisplay{{Rendering: &sdjwtvc.Rendering{
@@ -34,7 +35,8 @@ func TestVCTMCardURI(t *testing.T) {
 			vctm: &sdjwtvc.VCTM{Display: []sdjwtvc.VCTMDisplay{{Rendering: &sdjwtvc.Rendering{
 				Simple: &sdjwtvc.SimpleRendering{Logo: &sdjwtvc.Logo{URI: logoURI}},
 			}}}},
-			want: logoURI,
+			want:     logoURI,
+			wantLogo: true,
 		},
 		"nothing when rendering offers neither": {
 			vctm: &sdjwtvc.VCTM{Display: []sdjwtvc.VCTMDisplay{{Rendering: &sdjwtvc.Rendering{
@@ -52,7 +54,9 @@ func TestVCTMCardURI(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tc.want, vctmCardURI(tc.vctm))
+			uri, fromLogo := vctmCardURI(tc.vctm)
+			assert.Equal(t, tc.want, uri)
+			assert.Equal(t, tc.wantLogo, fromLogo, "the caller needs to know a logo is not a declared template")
 		})
 	}
 }
@@ -63,8 +67,9 @@ func TestVCTMCardURI(t *testing.T) {
 // rendering, which is the configuration in the report.
 func TestMDDLCardURI(t *testing.T) {
 	for name, tc := range map[string]struct {
-		mddl *mdoc.MDDLSchema
-		want string
+		mddl     *mdoc.MDDLSchema
+		want     string
+		wantLogo bool
 	}{
 		"template wins": {
 			mddl: &mdoc.MDDLSchema{Display: []mdoc.DisplayProperties{{
@@ -77,14 +82,16 @@ func TestMDDLCardURI(t *testing.T) {
 			mddl: &mdoc.MDDLSchema{Display: []mdoc.DisplayProperties{{
 				Logo: &mdoc.Logo{URI: logoURI},
 			}}},
-			want: logoURI,
+			want:     logoURI,
+			wantLogo: true,
 		},
 		"logo when rendering is present but empty": {
 			mddl: &mdoc.MDDLSchema{Display: []mdoc.DisplayProperties{{
 				Rendering: &mdoc.Rendering{},
 				Logo:      &mdoc.Logo{URI: logoURI},
 			}}},
-			want: logoURI,
+			want:     logoURI,
+			wantLogo: true,
 		},
 		"nothing when the display carries neither": {
 			mddl: &mdoc.MDDLSchema{Display: []mdoc.DisplayProperties{{Name: "mDL"}}},
@@ -96,7 +103,9 @@ func TestMDDLCardURI(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tc.want, mddlCardURI(tc.mddl))
+			uri, fromLogo := mddlCardURI(tc.mddl)
+			assert.Equal(t, tc.want, uri)
+			assert.Equal(t, tc.wantLogo, fromLogo)
 		})
 	}
 }
@@ -139,4 +148,54 @@ func TestSVGTemplateReplyStillRefusesABadRequest(t *testing.T) {
 	_, err := c.SVGTemplateReply(t.Context(), nil)
 	assert.Error(t, err)
 	assert.NotErrorIs(t, err, ErrNoSVGTemplate)
+}
+
+// A logo is any image, while this pipeline carries SVG only: the reply has
+// no media type and consent.js decodes it as UTF-8 text to substitute claim
+// values. Handing it raster bytes would produce a BROKEN image where there
+// used to be none, so a non-SVG logo means "this credential has no card".
+func TestSVGTemplateReplyIgnoresARasterLogo(t *testing.T) {
+	c := &Client{}
+
+	const pngDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="
+
+	t.Run("vctm", func(t *testing.T) {
+		_, err := c.SVGTemplateReply(t.Context(), &SVGTemplateRequest{
+			VCTM: &sdjwtvc.VCTM{Display: []sdjwtvc.VCTMDisplay{{Rendering: &sdjwtvc.Rendering{
+				Simple: &sdjwtvc.SimpleRendering{Logo: &sdjwtvc.Logo{URI: pngDataURI}},
+			}}}},
+		})
+		assert.ErrorIs(t, err, ErrNoSVGTemplate)
+	})
+
+	t.Run("mddl", func(t *testing.T) {
+		_, err := c.SVGTemplateReply(t.Context(), &SVGTemplateRequest{
+			MDDL: &mdoc.MDDLSchema{Display: []mdoc.DisplayProperties{{
+				Logo: &mdoc.Logo{URI: pngDataURI},
+			}}},
+		})
+		assert.ErrorIs(t, err, ErrNoSVGTemplate)
+	})
+}
+
+// The gate only applies to a logo. A declared svg_template carrying the
+// wrong media type is a configuration error that still travels the old
+// path - this does not change that, and claiming otherwise would be a test
+// asserting behaviour nobody wrote.
+func TestIsSVGDataURI(t *testing.T) {
+	for uri, want := range map[string]bool{
+		"data:image/svg+xml;base64,PHN2Zy8+":      true,
+		"data:image/svg+xml,<svg/>":               true,
+		"data:image/svg+xml;charset=utf-8,<svg/>": true,
+		"data:image/png;base64,iVBORw0KGgo=":      false,
+		"data:image/jpeg;base64,/9j/4AA=":         false,
+		"data:text/plain,hello":                   false,
+		"data:,hello":                             false,
+		"data:image/svg+xml;base64":               false,
+		"https://issuer.example.com/card.svg":     false,
+	} {
+		t.Run(uri, func(t *testing.T) {
+			assert.Equal(t, want, isSVGDataURI(uri))
+		})
+	}
 }
