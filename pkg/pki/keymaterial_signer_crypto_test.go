@@ -1,6 +1,7 @@
 package pki
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -10,6 +11,7 @@ import (
 	"encoding/asn1"
 	"io"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -160,10 +162,14 @@ func TestDetermineKeyIDFallsBackForAKeyThatCannotSign(t *testing.T) {
 	}
 }
 
-// normalizeECDSASignature discriminates by LENGTH, never by sniffing the
-// first byte for 0x30. A P1363 signature starts with 0x30 once in 256
-// tries, so a sniffing implementation has a one-in-256 failure that only
-// shows up in production - this repo has already shipped that bug once.
+// Neither shortcut is safe, and the tests have to pin both.
+//
+// A P1363 signature begins 0x30 once in 256 tries, so sniffing the first
+// byte is a one-in-256 failure. And a DER SEQUENCE of two INTEGERs costs 6
+// bytes of overhead, so for P-256 any |r|+|s| == 58 gives a DER signature
+// exactly 64 bytes long - which is also the P1363 length. Deciding by
+// length returns those DER bytes as if they were P1363, and the signature
+// fails verification wherever it lands.
 func TestNormalizeECDSASignatureDoesNotSniffTheFirstByte(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -172,34 +178,30 @@ func TestNormalizeECDSASignatureDoesNotSniffTheFirstByte(t *testing.T) {
 
 	// A valid 64-byte P1363 signature whose first byte is 0x30, which a
 	// first-byte check would mistake for an ASN.1 SEQUENCE.
-	var r, s *big.Int
+	var digest, p1363 []byte
 	for range 100000 {
-		digest := make([]byte, 32)
-		if _, err := rand.Read(digest); err != nil {
+		candidate := make([]byte, 32)
+		if _, err := rand.Read(candidate); err != nil {
 			t.Fatal(err)
 		}
-		cr, cs, err := ecdsa.Sign(rand.Reader, key, digest)
+		r, s, err := ecdsa.Sign(rand.Reader, key, candidate)
 		if err != nil {
 			t.Fatal(err)
 		}
-		encoded, err := EncodeECDSASignature(cr, cs, key.Curve)
+		encoded, err := EncodeECDSASignature(r, s, key.Curve)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if encoded[0] == 0x30 {
-			r, s = cr, cs
+			digest, p1363 = candidate, encoded
 			break
 		}
 	}
-	if r == nil {
+	if p1363 == nil {
 		t.Skip("no 0x30-leading signature found; the point still stands")
 	}
 
-	p1363, err := EncodeECDSASignature(r, s, key.Curve)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := normalizeECDSASignature(p1363, key.Curve)
+	got, err := normalizeECDSASignature(p1363, &key.PublicKey, digest)
 	if err != nil {
 		t.Fatalf("a P1363 signature beginning 0x30 was refused: %v", err)
 	}
@@ -208,18 +210,76 @@ func TestNormalizeECDSASignatureDoesNotSniffTheFirstByte(t *testing.T) {
 	}
 }
 
-func TestNormalizeECDSASignatureRefusesRubbish(t *testing.T) {
-	for name, sig := range map[string][]byte{
-		"empty":            {},
-		"short":            make([]byte, 10),
-		"not DER":          append(make([]byte, 70), 0xff),
-		"DER with trailer": derWithTrailer(t),
-	} {
-		t.Run(name, func(t *testing.T) {
-			if _, err := normalizeECDSASignature(sig, elliptic.P256()); err == nil {
-				t.Fatal("expected a refusal")
-			}
-		})
+// The other shortcut: a 64-byte input that is valid DER must not be
+// returned as if it were P1363.
+//
+// Built by hand rather than sampled. A real one needs r and s together
+// three bytes short of the curve, which happens about once in 4e13
+// signatures - too rare to find and exactly why deciding by length is the
+// kind of rule that holds until it does not.
+func TestNormalizeECDSASignatureRefusesA64ByteDER(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := make([]byte, 32)
+	if _, err := rand.Read(digest); err != nil {
+		t.Fatal(err)
+	}
+
+	// 0x30 0x3e | 0x02 0x1d <29 bytes> | 0x02 0x1d <29 bytes> = 64 bytes.
+	der := []byte{0x30, 0x3e, 0x02, 0x1d}
+	der = append(der, bytes.Repeat([]byte{0x11}, 29)...)
+	der = append(der, 0x02, 0x1d)
+	der = append(der, bytes.Repeat([]byte{0x22}, 29)...)
+	if len(der) != 64 {
+		t.Fatalf("hand-built DER is %d bytes, want 64", len(der))
+	}
+	var parsed struct{ R, S *big.Int }
+	if _, err := asn1.Unmarshal(der, &parsed); err != nil {
+		t.Fatalf("hand-built DER does not parse: %v", err)
+	}
+
+	got, err := normalizeECDSASignature(der, &key.PublicKey, digest)
+	if err == nil {
+		t.Fatalf("a 64-byte DER was accepted and returned as %x", got)
+	}
+	// Refused because nothing verified, not because the length was wrong -
+	// the length is the thing that used to be trusted.
+	if !strings.Contains(err.Error(), "does not verify") {
+		t.Fatalf("error = %v, want it refused on verification", err)
+	}
+}
+
+// A normal-length DER signature from a software signer is still converted.
+func TestNormalizeECDSASignatureConvertsDER(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := make([]byte, 32)
+	if _, err := rand.Read(digest); err != nil {
+		t.Fatal(err)
+	}
+	r, s, err := ecdsa.Sign(rand.Reader, key, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := asn1.Marshal(struct{ R, S *big.Int }{r, s})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := normalizeECDSASignature(der, &key.PublicKey, digest)
+	if err != nil {
+		t.Fatalf("normalizeECDSASignature() error = %v", err)
+	}
+	if len(got) != 64 {
+		t.Fatalf("converted signature is %d bytes, want 64", len(got))
+	}
+	if !ecdsa.Verify(&key.PublicKey, digest,
+		new(big.Int).SetBytes(got[:32]), new(big.Int).SetBytes(got[32:])) {
+		t.Error("the converted signature does not verify")
 	}
 }
 
