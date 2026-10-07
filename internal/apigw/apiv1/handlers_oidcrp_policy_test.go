@@ -269,7 +269,7 @@ func newPolicyGateTestClient(t *testing.T, opAsserts map[string]any) (*Client, *
 		RedirectURI:     op.issuerURL + "/callback",
 		Scopes:          []string{"openid"},
 		SessionDuration: 300,
-	}, sessionCache, nil, log)
+	}, sessionCache, nil, nil, log)
 	require.NoError(t, err)
 	require.NotNil(t, service)
 

@@ -40,7 +40,18 @@ func (f *fakeRegistrationStore) Save(_ context.Context, creds *db.DynamicRegistr
 }
 
 func (f *fakeRegistrationStore) Get(context.Context) (*db.DynamicRegistrationCredentials, error) {
-	return nil, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.saved) == 0 {
+		return nil, nil
+	}
+	// Newest wins, mirroring the real stores' ORDER BY registered_at DESC, and
+	// an expired secret reads as no credentials the way both backends do.
+	newest := f.saved[len(f.saved)-1]
+	if newest.ClientSecretExpiresAt > 0 && time.Now().Unix() >= newest.ClientSecretExpiresAt {
+		return nil, nil
+	}
+	return newest, nil
 }
 
 func (f *fakeRegistrationStore) GetByClientID(_ context.Context, clientID string) (*db.DynamicRegistrationCredentials, error) {
@@ -289,6 +300,36 @@ func TestEnsureCredentialsRenewsOnceUnderConcurrency(t *testing.T) {
 
 	assert.Equal(t, 1, op.count(), "sixteen callers must not register sixteen clients")
 	assert.Len(t, store.saved, 1)
+}
+
+// In HA the in-process lock is not enough: each replica has its own, so a
+// shared lock is what keeps a burst of them renewing the same expiring secret
+// from registering a new client apiece. The replica that loses the lock must
+// adopt the winner's registration out of the shared store, not register its
+// own.
+func TestEnsureCredentialsRegistersOnceAcrossReplicas(t *testing.T) {
+	op := newOPServer(t)
+	store := &fakeRegistrationStore{}
+	lock := cache.NewMemoryLocker()
+	expiry := time.Now().Add(clientSecretRenewBefore / 2)
+
+	newReplica := func() *Service {
+		s := renewalService(t, op, store, expiry)
+		s.renewalLock = lock
+		return s
+	}
+	a, b := newReplica(), newReplica()
+
+	// a wins the lock and registers; b finds it held and adopts a's result.
+	require.NoError(t, a.ensureCredentials(t.Context()))
+	require.NoError(t, b.ensureCredentials(t.Context()))
+
+	assert.Equal(t, 1, op.count(), "two replicas must not register two clients for one expiry")
+	assert.Len(t, store.saved, 1)
+
+	assert.NotEqual(t, "client-0", a.currentClientID(t), "the winner installed the new client")
+	assert.Equal(t, a.currentClientID(t), b.currentClientID(t),
+		"the replica that lost the lock adopted the winner's registration")
 }
 
 // A secret that is inside the renewal window but still valid must not take

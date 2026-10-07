@@ -31,6 +31,13 @@ const (
 	// race the OP's own clock, and a token exchange started just inside the
 	// window has to finish on the old secret.
 	clientSecretRenewBefore = 5 * time.Minute
+
+	// clientRenewLockTTL bounds how long the cross-replica renewal lock is
+	// held. It only needs to cover one registration round-trip plus the time
+	// a losing replica takes to read the winner's result back; the key is the
+	// expiring client id, so a lock lingering past that is harmless because
+	// renewal has already moved every replica to the new client.
+	clientRenewLockTTL = 2 * time.Minute
 )
 
 // Service provides OIDC Relying Party functionality
@@ -42,6 +49,12 @@ type Service struct {
 	dbService    *db.Service
 	httpClient   *http.Client
 	log          *logger.Log
+
+	// renewalLock serialises re-registration across HA replicas. Nil means
+	// in-process single-flight only (s.mu), which is all a single replica
+	// needs; the shared lock is what stops N replicas each registering a new
+	// client when the same secret ages out.
+	renewalLock pkgcache.Locker
 
 	// Lazy-init state
 	mu           sync.RWMutex
@@ -56,7 +69,7 @@ type Service struct {
 }
 
 // New creates a new OIDC RP service
-func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Session], dbService *db.Service, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Session], dbService *db.Service, renewalLock pkgcache.Locker, log *logger.Log) (*Service, error) {
 	if !cfg.Enable {
 		log.Info("OIDC RP support disabled")
 		return nil, nil
@@ -66,6 +79,7 @@ func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Se
 		cfg:          cfg,
 		sessionCache: sessionCache,
 		dbService:    dbService,
+		renewalLock:  renewalLock,
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
 		log:          log.New("oidcrp"),
 		// A superseded registration stays usable for as long as a flow can
@@ -346,6 +360,38 @@ func (s *Service) ensureCredentials(ctx context.Context) error {
 			current.expiresAt.Format(time.RFC3339), s.credentialRetryAfter.Format(time.RFC3339))
 	}
 
+	// Cluster-wide single-flight. s.mu already collapses concurrent renewals
+	// within this process; the lock extends that across HA replicas, so a
+	// burst of them all noticing the same secret age out registers one new
+	// client at the OP instead of one per replica. The key is the expiring
+	// client id - replicas renewing the same registration contend, and the
+	// loser adopts the winner's result from the shared store rather than
+	// registering again.
+	if s.renewalLock != nil {
+		acquired, err := s.renewalLock.TryLock(ctx, "oidcrp:renew:"+current.clientID, clientRenewLockTTL)
+		switch {
+		case err != nil:
+			// Lock backend unreachable. Renew anyway rather than refuse a
+			// flow for a lock we could not take: a possible extra
+			// registration is better than a failed login.
+			s.log.Warn("renewal lock unavailable, renewing without cross-replica coordination",
+				"error", err.Error(), "client_id", current.clientID)
+		case !acquired:
+			// Another replica holds the lock and is renewing this client.
+			if s.adoptRenewedRegistration(ctx, current) {
+				return nil
+			}
+			// Its result has not reached the store yet. Carry on with the
+			// current secret while it is still valid; only once it has run
+			// out is saying so better than presenting a dead secret.
+			if now.Before(current.expiresAt) {
+				return nil
+			}
+			return fmt.Errorf("OIDC client secret expired at %s and another replica holds the re-registration lock",
+				current.expiresAt.Format(time.RFC3339))
+		}
+	}
+
 	if err := s.renewCredentials(ctx); err != nil {
 		s.credentialBackoff = min(max(s.credentialBackoff*2, oidcRPRetryBase), oidcRPRetryMax)
 		s.credentialRetryAfter = time.Now().Add(s.credentialBackoff)
@@ -436,6 +482,43 @@ func (s *Service) renewCredentials(ctx context.Context) error {
 		"expires_at", s.creds.load().expiresAt.Format(time.RFC3339))
 
 	return nil
+}
+
+// adoptRenewedRegistration installs a registration another replica produced,
+// when the shared store already holds one newer than current. It returns true
+// if it adopted one. Callers hold s.mu for writing.
+//
+// This is the losing half of the cross-replica renewal lock: the replica that
+// did not get to register still has to stop presenting the expiring secret, so
+// it reads the newest stored registration - which the winner persists before
+// it publishes - and switches to it without contacting the OP at all.
+func (s *Service) adoptRenewedRegistration(ctx context.Context, current *credentials) bool {
+	if s.dbService == nil || s.dbService.DynamicRegistrationColl == nil {
+		return false
+	}
+
+	stored, err := s.dbService.DynamicRegistrationColl.Get(ctx)
+	if err != nil || stored == nil || stored.ClientID == "" {
+		return false
+	}
+	// The store still names the client we are trying to replace: the winner
+	// has not persisted yet, so there is nothing to adopt.
+	if current != nil && stored.ClientID == current.clientID {
+		return false
+	}
+
+	c := s.buildCredentials(stored.ClientID, stored.ClientSecret, stored.ClientSecretExpiresAt)
+	// The newest stored registration is itself due for renewal; adopting it
+	// would just loop back here, so let the caller fall through instead.
+	if c.needsRenewal(time.Now()) {
+		return false
+	}
+
+	s.creds.store(c)
+	s.log.Info("adopted a client registration renewed by another replica",
+		"previous_client_id", current.clientID,
+		"client_id", stored.ClientID)
+	return true
 }
 
 // ensureInitialized checks if the service is initialized and retries discovery if not.
