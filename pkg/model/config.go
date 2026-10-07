@@ -1502,6 +1502,34 @@ type APIGWDelivery struct {
 	OpenID4VCI OAuthServer `yaml:"openid4vci" validate:"required"`
 	// CredentialOffers holds credential offer wallet configurations
 	CredentialOffers CredentialOffers `yaml:"credential_offers" validate:"required"`
+	// OpenID4VCICompat holds opt-in switches for wallets that do not encode
+	// OpenID4VCI 1.0 requests the way the specification does.
+	OpenID4VCICompat OpenID4VCICompat `yaml:"openid4vci_compat" validate:"omitempty"`
+}
+
+// OpenID4VCICompat holds interoperability switches for non-conformant wallets.
+//
+// Every field defaults to the conformant behaviour, so a deployment that sets
+// none of them is an OpenID4VCI 1.0 deployment.
+type OpenID4VCICompat struct {
+	// AcceptNonStandardAuthorizationDetailsArrays accepts two further
+	// encodings of authorization_details in a query string or form body,
+	// alongside the single URL-encoded JSON array that OpenID4VCI 1.0 §5.1.1
+	// and RFC 9396 §2 define and that is always accepted:
+	//
+	//	repeated key:   authorization_details={..}&authorization_details={..}
+	//	bracketed key:  authorization_details[]={..}&authorization_details[]={..}
+	//
+	// Off by default, and deliberately. RFC 6749 §3.1 says a request
+	// parameter MUST NOT be included more than once, so the repeated form is
+	// a protocol violation rather than a dialect: once it is accepted, this
+	// server and anything in front of it (a reverse proxy, a WAF) can read
+	// different authorization_details out of one request. Turn this on only
+	// for a deployment that has to reach a wallet which cannot send the
+	// specified encoding, and expect to turn it off again once it can.
+	//
+	// See SUNET/vc#710 for the interop reports that motivated it.
+	AcceptNonStandardAuthorizationDetailsArrays *bool `yaml:"accept_non_standard_authorization_details_arrays" default:"false"`
 }
 
 // APIGWAuthProviders groups the authentication provider configurations.

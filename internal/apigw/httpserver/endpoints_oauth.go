@@ -41,6 +41,24 @@ func (s *Service) endpointOAuthPar(ctx context.Context, c *gin.Context) (any, er
 		return nil, err
 	}
 
+	// gin binds authorization_details from the FIRST value only, so a form
+	// or query string that repeats it needs looking at directly: strictly to
+	// refuse the repetition (RFC 6749 §3.1), or leniently to fold the
+	// non-standard encodings some wallets send into the single JSON array
+	// OpenID4VCI 1.0 §5.1.1 defines. See model.OpenID4VCICompat.
+	if c.ContentType() != "application/json" {
+		if err := c.Request.ParseForm(); err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			s.log.Error(err, "form parse error")
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "invalid request", 400, err)
+		}
+		if err := request.ReadAuthorizationDetails(c.Request.Form, model.BoolVal(s.cfg.APIGW.Delivery.OpenID4VCICompat.AcceptNonStandardAuthorizationDetailsArrays, false)); err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			s.log.Error(err, "authorization_details error")
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "invalid authorization_details", 400, err)
+		}
+	}
+
 	// gin's form binder cannot decode the JSON-array-string authorization_details (OpenID4VCI §5.1.1); PARRequest post-parses and validates it.
 	if err := request.ParseAuthorizationDetails(); err != nil {
 		span.SetStatus(codes.Error, err.Error())
