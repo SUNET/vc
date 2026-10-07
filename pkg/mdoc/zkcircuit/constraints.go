@@ -159,35 +159,61 @@ func (m *Manifest) Constraints(system, docType string) (SystemConstraints, error
 // SaltBytes resolves the one IssuerSignedItem salt length that every named
 // system's active circuits agree on, for docType.
 //
-// Returns 0 when no named system publishes a constraint, which leaves the
-// caller on its own default sizing. Two systems demanding different
-// lengths is an error: a credential carries ONE salt per item, so a schema
-// cannot satisfy both, and the schema has to name only the system it is
-// actually for.
+// Returns 0 when NO named system publishes a constraint, which leaves the
+// caller on its own default per-element sizing.
+//
+// Two kinds of disagreement, both refusals, because a credential carries
+// one salt per item and no credential can satisfy two answers:
+//
+//   - different lengths. Obvious.
+//   - some systems publishing a length and others not. NOT obvious, and
+//     the one worth spelling out: publishing nothing does not mean "any
+//     length will do". zk-cred-longfellow publishes no saltBytes because
+//     what it constrains is the TOTAL IssuerSignedItem size (~119 bytes),
+//     which is why this package sizes salts per element - 16 bytes for a
+//     claim, 8 for pseudonym_seed, whose value is itself 32 bytes. Giving
+//     every item Vega's uniform 32 blows that ceiling for exactly the
+//     items the smaller default exists for. So "longfellow + vega-mc"
+//     resolves to neither 32 nor the default: it is a schema that cannot
+//     be issued, and saying so is the entire point of resolving this from
+//     the catalog instead of letting someone write 32 into the schema and
+//     find out at presentation time.
+//
+// The schema then has to name only the system it is actually for - which
+// for a dual-system deployment means two schemas, not one.
 func (m *Manifest) SaltBytes(systems []string, docType string) (int, error) {
 	if len(systems) == 0 {
 		return 0, errors.New("no zk systems named")
 	}
 
 	saltFrom := map[int][]string{}
+	var defaultSized []string
 	for _, system := range systems {
 		c, err := m.Constraints(system, docType)
 		if err != nil {
 			return 0, err
 		}
 		if c.SaltBytes == 0 {
+			defaultSized = append(defaultSized, system)
 			continue
 		}
 		saltFrom[c.SaltBytes] = append(saltFrom[c.SaltBytes], system)
 	}
 
-	switch len(saltFrom) {
-	case 0:
+	if len(saltFrom) == 0 {
 		return 0, nil
-	case 1:
+	}
+	if len(saltFrom) == 1 && len(defaultSized) == 0 {
 		for salt := range saltFrom {
 			return salt, nil
 		}
+	}
+
+	if len(defaultSized) > 0 {
+		sort.Strings(defaultSized)
+		return 0, fmt.Errorf(
+			"zk systems %s publish no %s and need this package's per-element sizing, while %s - one credential carries one salt per item, so a schema cannot serve both",
+			strings.Join(defaultSized, ", "), ParamSaltBytes, describeDisagreement(saltFrom))
 	}
 	return 0, fmt.Errorf(
 		"zk systems %s require different %s: %s - one credential carries one salt per item, so a schema cannot serve both",
@@ -196,6 +222,7 @@ func (m *Manifest) SaltBytes(systems []string, docType string) (int, error) {
 
 // describeDisagreement renders a value -> who-said-it map deterministically,
 // so the same catalog inconsistency always produces the same message.
+// Reads as "32 (vega-mc)" or "16 (a) vs 32 (b)".
 func describeDisagreement(by map[int][]string) string {
 	values := make([]int, 0, len(by))
 	for v := range by {
@@ -220,6 +247,21 @@ func describeDisagreement(by map[int][]string) string {
 // published a circuit and wants it picked up now restarts the service.
 const DefaultResolverTTL = time.Hour
 
+// DefaultResolverRetryInterval is how long the resolver keeps serving a
+// stale manifest after a refresh fails, before trying the catalog again.
+//
+// Without it a failed refresh left the manifest expired, so EVERY
+// subsequent issuance attempted its own fetch - while holding the
+// resolver's mutex, which is what makes the fetch single-flight on the
+// happy path. One unreachable catalog therefore serialized every
+// credential behind a 30-second HTTP timeout, turning a cache that was
+// supposed to absorb an outage into the thing amplifying it.
+//
+// A minute: short enough that a catalog coming back is picked up promptly,
+// long enough that an outage costs one request a minute rather than all of
+// them.
+const DefaultResolverRetryInterval = time.Minute
+
 // Resolver answers circuit-constraint questions from a cached manifest.
 //
 // Issuance is on a request path and must not turn into a catalog round
@@ -235,12 +277,20 @@ type Resolver struct {
 	// TTL is how long a fetched manifest is reused. Zero means
 	// DefaultResolverTTL.
 	TTL time.Duration
+	// RetryInterval is how long a failed refresh is backed off for while
+	// the previous manifest is served stale. Zero means
+	// DefaultResolverRetryInterval.
+	RetryInterval time.Duration
 	// Now is the clock, for tests. Zero value means time.Now.
 	Now func() time.Time
 
 	mu        sync.Mutex
 	manifest  *Manifest
 	fetchedAt time.Time
+	// lastFailure is when a refresh last failed, cleared on the next
+	// success. fetchedAt only moves on success, so without this an expired
+	// manifest plus an unreachable catalog means a fetch attempt per call.
+	lastFailure time.Time
 }
 
 // NewResolver returns a Resolver over c.
@@ -262,6 +312,13 @@ func (r *Resolver) ttl() time.Duration {
 	return DefaultResolverTTL
 }
 
+func (r *Resolver) retryInterval() time.Duration {
+	if r.RetryInterval > 0 {
+		return r.RetryInterval
+	}
+	return DefaultResolverRetryInterval
+}
+
 // Manifest returns the cached manifest, refreshing it if it has aged past
 // the TTL. stale is true when the refresh failed and the returned manifest
 // is the previous one; the fetch error is reported through stale rather
@@ -272,23 +329,40 @@ func (r *Resolver) Manifest(ctx context.Context) (manifest *Manifest, stale bool
 		return nil, false, errors.New("zk circuit resolver has no catalog client")
 	}
 
+	// The lock is held across the fetch on purpose: it makes the refresh
+	// single-flight, so a cold start serving a burst of requests performs
+	// one catalog round trip rather than one per request. The retry
+	// backoff below is what stops that from turning an unreachable catalog
+	// into every request waiting on its own timeout.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.manifest != nil && r.now().Sub(r.fetchedAt) < r.ttl() {
+	now := r.now()
+	if r.manifest != nil && now.Sub(r.fetchedAt) < r.ttl() {
 		return r.manifest, false, nil
+	}
+	if r.manifest != nil && !r.lastFailure.IsZero() && now.Sub(r.lastFailure) < r.retryInterval() {
+		// A refresh failed recently and the previous manifest is still
+		// usable. Serve it and say so, rather than queueing behind
+		// another fetch that is probably about to fail the same way.
+		return r.manifest, true, nil
 	}
 
 	fetched, fetchErr := r.Client.FetchManifest(ctx)
 	if fetchErr != nil {
+		r.lastFailure = r.now()
 		if r.manifest != nil {
 			return r.manifest, true, nil
 		}
+		// Nothing cached to fall back to. No backoff either: a resolver
+		// that has never reached the catalog has nothing to protect, and
+		// the caller is being refused anyway.
 		return nil, false, fetchErr
 	}
 
 	r.manifest = fetched
 	r.fetchedAt = r.now()
+	r.lastFailure = time.Time{}
 	return r.manifest, false, nil
 }
 

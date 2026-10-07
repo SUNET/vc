@@ -306,7 +306,7 @@ func (c *Client) FetchCircuit(ctx context.Context, id string) (*CircuitDescripto
 	// verifier side it comes from a presented proof's zkSystemId - see
 	// validCircuitID for what a crafted one would otherwise reach,
 	// particularly against a vendored file:// mirror.
-	if !validCircuitID(id) {
+	if !ValidCircuitID(id) {
 		return nil, fmt.Errorf("invalid circuit id %q: a catalog id is a flat token of letters, digits, '-', '_' and '.'", id)
 	}
 
@@ -363,7 +363,8 @@ func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescri
 	if artifact.Hash == "" {
 		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact has no hash - refusing to download unverifiable bytes", descriptor.ID)}
 	}
-	if strings.HasPrefix(artifact.URL, "http://") {
+	scheme := absoluteURLScheme(artifact.URL)
+	if scheme == "http" {
 		// SHA-256 verification below still catches tampered bytes, but a
 		// remote/untrusted catalog dictating a plaintext transport for its
 		// own absolute artifact URL is unnecessary exposure to on-path
@@ -372,7 +373,7 @@ func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescri
 		// http.
 		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact URL %q uses plaintext http - refusing (must be https or a relative path resolved against a configured source)", descriptor.ID, artifact.URL)}
 	}
-	if scheme := absoluteURLScheme(artifact.URL); scheme != "" && scheme != "https" {
+	if scheme != "" && scheme != "https" {
 		// Anything else absolute - file://, ftp://, a scheme nobody has
 		// thought about - would fall through to candidateArtifactURLs,
 		// which treats a non-http URL as a RELATIVE PATH and glues it onto
@@ -382,7 +383,7 @@ func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescri
 		// paths, which is the supported form and takes the branch below.
 		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact URL %q uses scheme %q - refusing (must be https or a relative path resolved against a configured source)", descriptor.ID, artifact.URL, scheme)}
 	}
-	if strings.HasPrefix(artifact.URL, "https://") && !c.isAllowedAbsoluteHost(artifact.URL) {
+	if scheme == "https" && !c.isAllowedAbsoluteHost(artifact.URL) {
 		// Without this, an absolute artifact.URL from the remote,
 		// configurable catalog is a blind SSRF primitive: a
 		// compromised/malicious mirror could point it at an arbitrary host
@@ -395,7 +396,10 @@ func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescri
 	}
 
 	maxBytes := capFor(artifact.Size, hardCeilingCompressedBytes)
-	candidates := c.candidateArtifactURLs(artifact)
+	candidates, err := c.candidateArtifactURLs(artifact)
+	if err != nil {
+		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact URL is unusable: %v", descriptor.ID, err)}
+	}
 	var lastFailure string
 	for _, url := range candidates {
 		data, err := c.fetchBytes(ctx, url, maxBytes)
@@ -556,20 +560,32 @@ func (c *Client) isAllowedAbsoluteHost(rawURL string) bool {
 
 // candidateArtifactURLs implements the resolution rules documented on
 // DownloadArtifact.
-func (c *Client) candidateArtifactURLs(artifact *Artifact) []string {
-	url := artifact.URL
-	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
-		return []string{url}
+func (c *Client) candidateArtifactURLs(artifact *Artifact) ([]string, error) {
+	if absoluteURLScheme(artifact.URL) != "" {
+		// Already validated by DownloadArtifact: https, host allowlisted.
+		// It pins its own host, so there is nothing to mirror-fallback
+		// across.
+		return []string{artifact.URL}, nil
 	}
-	path := strings.TrimPrefix(url, "/")
-	if path == "" {
-		path = "v1/artifacts/sha256/" + bareHex(artifact.Hash)
+
+	relative := "v1/artifacts/sha256/" + bareHex(artifact.Hash)
+	if artifact.URL != "" {
+		// The descriptor's own path is REMOTE DATA and gets joined onto
+		// every source - including, now, a local directory behind a
+		// file:// source, where "../../x" reads outside the mirror before
+		// hash verification can have an opinion.
+		safe, err := SafeRelativeArtifactPath(artifact.URL)
+		if err != nil {
+			return nil, err
+		}
+		relative = safe
 	}
+
 	candidates := make([]string, 0, len(c.Sources))
 	for _, source := range c.Sources {
-		candidates = append(candidates, strings.TrimRight(source, "/")+"/"+path)
+		candidates = append(candidates, strings.TrimRight(source, "/")+"/"+relative)
 	}
-	return candidates
+	return candidates, nil
 }
 
 func sha256Hex(data []byte) string {

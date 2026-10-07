@@ -185,10 +185,22 @@ func TestSaltBytesAcrossSystems(t *testing.T) {
 		}
 	})
 
-	t.Run("a system stating no constraint does not cancel one that does", func(t *testing.T) {
-		got, err := m.SaltBytes([]string{"longfellow", "vega-mc"}, mDL)
-		if err != nil || got != 32 {
-			t.Fatalf("SaltBytes = %d, %v; want 32, nil", got, err)
+	// The case this got WRONG first time round, and the one worth the
+	// longest comment. "Publishes no saltBytes" is not "any length will
+	// do": zk-cred-longfellow constrains the TOTAL IssuerSignedItem size
+	// (~119 bytes), which is why this package sizes salts per element - 16
+	// for a claim, 8 for pseudonym_seed, whose value is itself 32 bytes.
+	// Giving every item Vega's uniform 32 blows that ceiling for exactly
+	// the items the smaller default exists for. Resolving such a schema to
+	// 32 would mint credentials that fail Longfellow verification, which
+	// is the failure this whole path exists to stop.
+	t.Run("a system needing default sizing cannot be combined with one that fixes a length", func(t *testing.T) {
+		_, err := m.SaltBytes([]string{"longfellow", "vega-mc"}, mDL)
+		if err == nil {
+			t.Fatal("expected a refusal, not a resolved length")
+		}
+		if !strings.Contains(err.Error(), "longfellow") || !strings.Contains(err.Error(), "32 (vega-mc)") {
+			t.Fatalf("error = %v, want one naming both sides of the conflict", err)
 		}
 	})
 
@@ -304,5 +316,51 @@ func TestResolverRefusesWithNothingCached(t *testing.T) {
 
 	if _, _, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL); err == nil {
 		t.Fatal("expected an error when the catalog has never been reached")
+	}
+}
+
+// A failed refresh must not leave the manifest expired, or every
+// subsequent issuance attempts its own fetch - while holding the
+// resolver's mutex, which makes the refresh single-flight on the happy
+// path. One unreachable catalog then serializes every credential behind a
+// 30-second HTTP timeout, which is the cache amplifying the outage it
+// exists to absorb.
+func TestResolverBacksOffAfterAFailedRefresh(t *testing.T) {
+	cc := newCountingClient(oneVegaCircuit)
+	now := time.Now()
+	r := &Resolver{
+		Client: cc.Client, TTL: time.Minute, RetryInterval: 5 * time.Minute,
+		Now: func() time.Time { return now },
+	}
+
+	if _, _, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL); err != nil {
+		t.Fatal(err)
+	}
+	cc.fail = true
+	now = now.Add(2 * time.Minute) // past the TTL
+
+	for range 5 {
+		if _, stale, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL); err != nil || !stale {
+			t.Fatalf("stale=%v, %v; want a stale answer, not a failure", stale, err)
+		}
+	}
+	if cc.fetches != 2 {
+		t.Errorf("fetches = %d, want 2 - one success and ONE failed retry, not one per call", cc.fetches)
+	}
+
+	// Past the retry interval, it tries again.
+	now = now.Add(6 * time.Minute)
+	if _, _, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL); err != nil {
+		t.Fatal(err)
+	}
+	if cc.fetches != 3 {
+		t.Errorf("fetches = %d, want 3 after the retry interval elapsed", cc.fetches)
+	}
+
+	// And once it succeeds again, the answer stops being stale.
+	cc.fail = false
+	now = now.Add(6 * time.Minute)
+	if _, stale, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL); err != nil || stale {
+		t.Fatalf("stale=%v, %v; want a fresh answer once the catalog is back", stale, err)
 	}
 }

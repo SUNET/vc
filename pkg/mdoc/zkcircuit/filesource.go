@@ -1,10 +1,12 @@
 package zkcircuit
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -102,7 +104,7 @@ func filePathFromURL(rawURL string) (string, error) {
 	return filepath.FromSlash(path), nil
 }
 
-// validCircuitID reports whether id is safe to interpolate into a catalog
+// ValidCircuitID reports whether id is safe to interpolate into a catalog
 // path.
 //
 // FetchCircuit's id comes from a presented proof's zkSystemId on the
@@ -114,7 +116,7 @@ func filePathFromURL(rawURL string) (string, error) {
 // "longfellow-libzk-v1_8_2_4307_2945" - so anything carrying a separator,
 // a percent-escape or a dot segment is not an id and is refused rather
 // than sanitised into one.
-func validCircuitID(id string) bool {
+func ValidCircuitID(id string) bool {
 	if id == "" || len(id) > 256 {
 		return false
 	}
@@ -131,4 +133,37 @@ func validCircuitID(id string) bool {
 	// Rejected after the character scan so "." and ".." - which pass it -
 	// are still refused.
 	return id != "." && id != ".."
+}
+
+// SafeRelativeArtifactPath returns the mirror-relative path an artifact is
+// stored at, or an error if the descriptor's URL is not one.
+//
+// The real catalog serves artifact URLs as relative paths like
+// "v1/artifacts/sha256/<hex>", resolved against each configured source.
+// That path is REMOTE DATA, and it is joined onto a local directory by the
+// vendoring tool and onto a file:// source by this client - so "../../x"
+// in a descriptor reads or writes outside the mirror entirely, before any
+// hash verification can have an opinion. Absolute URLs are not this
+// function's business and are refused here; DownloadArtifact handles them
+// separately.
+func SafeRelativeArtifactPath(rawURL string) (string, error) {
+	if rawURL == "" {
+		return "", errors.New("artifact URL is empty")
+	}
+	if absoluteURLScheme(rawURL) != "" {
+		return "", fmt.Errorf("artifact URL %q is absolute, not a mirror-relative path", rawURL)
+	}
+	if strings.ContainsAny(rawURL, "?#\\") {
+		return "", fmt.Errorf("artifact path %q contains a query, fragment or backslash", rawURL)
+	}
+
+	trimmed := strings.TrimPrefix(rawURL, "/")
+	cleaned := path.Clean(trimmed)
+	// Clean collapses "a/../b" to "b" and leaves an escaping path starting
+	// with "..", so comparing against it catches both the blatant
+	// "../../etc" and the roundabout "v1/../../etc".
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("artifact path %q escapes the mirror root", rawURL)
+	}
+	return cleaned, nil
 }

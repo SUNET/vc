@@ -234,3 +234,93 @@ func TestAllowedAbsoluteHostComparesTheSchemeToo(t *testing.T) {
 		t.Error("the file source should match itself")
 	}
 }
+
+// A descriptor's artifact URL is remote data joined onto every source -
+// including, since file:// sources exist, a local directory. "../../x"
+// would read outside the mirror entirely, and hash verification only
+// happens after the read.
+func TestVendoredArtifactURLCannotEscapeTheMirror(t *testing.T) {
+	source := writeVendoredMirror(t, []byte("x"))
+	dir := strings.TrimPrefix(source, "file://")
+	write(t, filepath.Join(filepath.Dir(dir), "outside.bin"), []byte("not yours"))
+
+	c := NewClient(source)
+	for _, raw := range []string{
+		"../outside.bin",
+		"v1/../../outside.bin",
+		"/../outside.bin",
+		"..",
+		"v1/artifacts/../../../outside.bin",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			_, err := c.DownloadArtifact(t.Context(), &CircuitDescriptor{
+				ID:       "c",
+				Artifact: &Artifact{URL: raw, Hash: "sha256:" + strings.Repeat("ab", 32)},
+			})
+			if err == nil {
+				t.Fatalf("DownloadArtifact(%q) succeeded; want a refusal", raw)
+			}
+			if !strings.Contains(err.Error(), "unusable") {
+				t.Fatalf("error = %v, want the URL refused before any read", err)
+			}
+		})
+	}
+}
+
+func TestSafeRelativeArtifactPath(t *testing.T) {
+	ok := map[string]string{
+		"v1/artifacts/sha256/abcd":   "v1/artifacts/sha256/abcd",
+		"/v1/artifacts/sha256/abcd":  "v1/artifacts/sha256/abcd",
+		"v1/./artifacts/sha256/abcd": "v1/artifacts/sha256/abcd",
+		"v1/x/../artifacts/sha/abcd": "v1/artifacts/sha/abcd",
+	}
+	for in, want := range ok {
+		t.Run("ok:"+in, func(t *testing.T) {
+			got, err := SafeRelativeArtifactPath(in)
+			if err != nil || got != want {
+				t.Fatalf("SafeRelativeArtifactPath(%q) = %q, %v; want %q, nil", in, got, err, want)
+			}
+		})
+	}
+
+	for _, in := range []string{
+		"", "..", "../x", "v1/../../x", "/../x",
+		"https://example.com/x", "file:///etc/passwd",
+		"v1/x?y=1", "v1/x#f", "v1\\x",
+	} {
+		t.Run("refused:"+in, func(t *testing.T) {
+			if got, err := SafeRelativeArtifactPath(in); err == nil {
+				t.Fatalf("SafeRelativeArtifactPath(%q) = %q; want a refusal", in, got)
+			}
+		})
+	}
+}
+
+// URL schemes are case-insensitive. An absolute "HTTPS://..." used to pass
+// the scheme check (which lowercases) and then fail the lowercase-only
+// prefix test, so it was treated as a RELATIVE path and glued onto every
+// source as "https://host/HTTPS://..." - a guaranteed download failure
+// wearing a confusing error.
+func TestDownloadArtifactHandlesAnUppercaseScheme(t *testing.T) {
+	c := NewClient("https://catalog.example")
+
+	_, err := c.DownloadArtifact(t.Context(), &CircuitDescriptor{
+		ID:       "c",
+		Artifact: &Artifact{URL: "HTTPS://elsewhere.example/x", Hash: "sha256:" + strings.Repeat("ab", 32)},
+	})
+	if err == nil {
+		t.Fatal("expected a refusal for an absolute URL on a host that is not a source")
+	}
+	if !strings.Contains(err.Error(), "not among this client's configured sources") {
+		t.Fatalf("error = %v, want it refused as an off-allowlist absolute URL", err)
+	}
+
+	// And an uppercase plaintext scheme is still refused as plaintext.
+	_, err = c.DownloadArtifact(t.Context(), &CircuitDescriptor{
+		ID:       "c",
+		Artifact: &Artifact{URL: "HTTP://catalog.example/x", Hash: "sha256:" + strings.Repeat("ab", 32)},
+	})
+	if err == nil || !strings.Contains(err.Error(), "plaintext http") {
+		t.Fatalf("error = %v, want it refused as plaintext", err)
+	}
+}

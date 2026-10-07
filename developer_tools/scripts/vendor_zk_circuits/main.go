@@ -28,6 +28,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -99,10 +100,19 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 	vendored := make([]zkcircuit.CircuitDescriptor, 0, len(selected))
 	for _, c := range selected {
 		descriptor := c
+		// The manifest is REMOTE DATA and everything here turns it into
+		// local paths: one file per entry, named by the catalog's id, plus
+		// one per artifact at the catalog's own relative path. An id of
+		// "../../../../tmp/owned", or an artifact URL of "../../target",
+		// writes outside the mirror. Both are refused by the same rules
+		// the client applies.
+		if !zkcircuit.ValidCircuitID(descriptor.ID) {
+			return fmt.Errorf("catalog returned an unusable circuit id %q - refusing to write it to disk", descriptor.ID)
+		}
 		if descriptor.Artifact != nil {
-			relative := artifactPath(descriptor.Artifact)
-			if relative == "" {
-				return fmt.Errorf("circuit %q has an artifact with no hash and no usable path", descriptor.ID)
+			relative, err := artifactPath(descriptor.Artifact)
+			if err != nil {
+				return fmt.Errorf("circuit %q: %w", descriptor.ID, err)
 			}
 			artifact := *descriptor.Artifact
 			artifact.URL = relative
@@ -148,7 +158,13 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 		if err != nil {
 			return fmt.Errorf("download artifact for %q: %w", descriptor.ID, err)
 		}
-		path := filepath.Join(outDir, filepath.FromSlash(artifactPath(descriptor.Artifact)))
+		// Validated above for every selected entry, and again here because
+		// this is the call that creates directories and writes bytes.
+		relative, err := artifactPath(descriptor.Artifact)
+		if err != nil {
+			return fmt.Errorf("circuit %q: %w", descriptor.ID, err)
+		}
+		path := filepath.Join(outDir, filepath.FromSlash(relative))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
@@ -190,20 +206,44 @@ func slicesContains(haystack []string, needle string) bool {
 }
 
 // artifactPath is the mirror-relative path an artifact is stored at, which
-// is the same path zkcircuit.candidateArtifactURLs builds when a
+// is the same path zkcircuit resolves against each source when a
 // descriptor carries a relative URL or none at all.
-func artifactPath(artifact *zkcircuit.Artifact) string {
+//
+// An absolute URL is rewritten to the hash-derived path: the mirror's whole
+// purpose is to stop pointing at the original host, and zkcircuit refuses
+// an absolute URL whose host is not a configured source anyway, so copying
+// it through would produce a confusing refusal rather than a local read.
+func artifactPath(artifact *zkcircuit.Artifact) (string, error) {
 	if artifact.URL != "" && !strings.Contains(artifact.URL, "://") {
-		return strings.TrimPrefix(artifact.URL, "/")
+		return zkcircuit.SafeRelativeArtifactPath(artifact.URL)
 	}
 	hash := artifact.Hash
 	if i := strings.Index(hash, ":"); i >= 0 {
 		hash = hash[i+1:]
 	}
 	if hash == "" {
-		return ""
+		return "", errors.New("artifact has no hash and no usable relative path")
 	}
-	return "v1/artifacts/sha256/" + hash
+	if !isHex(hash) {
+		return "", fmt.Errorf("artifact hash %q is not hexadecimal", artifact.Hash)
+	}
+	return "v1/artifacts/sha256/" + hash, nil
+}
+
+// isHex keeps a hash out of the path unless it really is one. The hash is
+// catalog data too, and it is the other half of what builds a file name.
+func isHex(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f', r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func writeJSON(path string, v any) error {
