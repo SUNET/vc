@@ -121,6 +121,44 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 		vendored = append(vendored, descriptor)
 	}
 
+	// ARTIFACTS FIRST, descriptors and the manifest last.
+	//
+	// The manifest is what a consumer reads to find out the mirror has
+	// something; publishing it before the bytes exist advertises
+	// descriptors whose files are absent or half-written. That is not only
+	// a failed run leaving a broken tree - a reader can be pointed at this
+	// directory WHILE a ~130MB artifact is still arriving. Worse on an
+	// update: a mirror that was working stops working, and the command
+	// still returns an error as if nothing had happened.
+	//
+	// Downloaded from the ORIGINAL descriptors: their artifact URLs still
+	// point at the live catalog, which is where the bytes are. The
+	// rewritten relative paths above are for the mirror's own consumers.
+	if !metadataOnly {
+		for i, descriptor := range selected {
+			if descriptor.Artifact == nil {
+				fmt.Printf("skip        %s (no artifact)\n", descriptor.ID)
+				continue
+			}
+			data, err := client.DownloadArtifact(ctx, &selected[i])
+			if err != nil {
+				return fmt.Errorf("download artifact for %q: %w", descriptor.ID, err)
+			}
+			// Validated when the descriptors were rewritten, and again
+			// here because this is the call that creates directories and
+			// writes bytes.
+			relative, err := artifactPath(descriptor.Artifact)
+			if err != nil {
+				return fmt.Errorf("circuit %q: %w", descriptor.ID, err)
+			}
+			path := filepath.Join(outDir, filepath.FromSlash(relative))
+			if err := writeFileAtomically(path, data); err != nil {
+				return err
+			}
+			fmt.Printf("artifact    %s (%d bytes)\n", path, len(data))
+		}
+	}
+
 	for _, descriptor := range vendored {
 		path := filepath.Join(outDir, "v1", "circuits", descriptor.ID+".json")
 		if err := writeJSON(path, descriptor); err != nil {
@@ -129,6 +167,8 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 		fmt.Printf("descriptor  %s\n", path)
 	}
 
+	// Last of all, and atomically: this is the file that says the rest is
+	// there.
 	out := zkcircuit.Manifest{
 		ManifestVersion: manifest.ManifestVersion,
 		GeneratedAt:     manifest.GeneratedAt,
@@ -143,35 +183,6 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 
 	if metadataOnly {
 		fmt.Println("metadata-only: no artifacts written")
-		return nil
-	}
-
-	// Download from the ORIGINAL descriptors: their artifact URLs still
-	// point at the live catalog, which is where the bytes are. The
-	// rewritten relative paths above are for the mirror's own consumers.
-	for i, descriptor := range selected {
-		if descriptor.Artifact == nil {
-			fmt.Printf("skip        %s (no artifact)\n", descriptor.ID)
-			continue
-		}
-		data, err := client.DownloadArtifact(ctx, &selected[i])
-		if err != nil {
-			return fmt.Errorf("download artifact for %q: %w", descriptor.ID, err)
-		}
-		// Validated above for every selected entry, and again here because
-		// this is the call that creates directories and writes bytes.
-		relative, err := artifactPath(descriptor.Artifact)
-		if err != nil {
-			return fmt.Errorf("circuit %q: %w", descriptor.ID, err)
-		}
-		path := filepath.Join(outDir, filepath.FromSlash(relative))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(path, data, 0o644); err != nil {
-			return err
-		}
-		fmt.Printf("artifact    %s (%d bytes)\n", path, len(data))
 	}
 
 	return nil
@@ -251,5 +262,41 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return writeFileAtomically(path, append(data, '\n'))
+}
+
+// writeFileAtomically writes to a temporary name in the destination
+// directory and renames it into place, so a reader pointed at this mirror
+// never sees a half-written file - and a re-run that fails partway leaves
+// the previous version of each file intact rather than a truncated one.
+func writeFileAtomically(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+
+	tmp, err := os.CreateTemp(dir, ".vendor-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
 }

@@ -33,8 +33,14 @@ import (
 // download does.
 
 // isFileURL reports whether rawURL is a file:// URL.
+//
+// Through absoluteURLScheme, which lowercases, because URL schemes are
+// case-insensitive: a configured "FILE:///srv/mirror" is a perfectly valid
+// local source, and a textual lowercase-only check sent it down the HTTP
+// path to fail. The same mistake the artifact-URL checks had, in the one
+// place that decides which reader runs at all.
 func isFileURL(rawURL string) bool {
-	return strings.HasPrefix(rawURL, "file://")
+	return absoluteURLScheme(rawURL) == "file"
 }
 
 // fetchFile reads a file:// URL, refusing to read more than maxBytes.
@@ -86,6 +92,7 @@ func filePathFromURL(rawURL string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parse file URL %q: %w", rawURL, err)
 	}
+	// url.Parse lowercases the scheme, so this matches "FILE://" too.
 	if parsed.Scheme != "file" {
 		return "", fmt.Errorf("not a file URL: %q", rawURL)
 	}

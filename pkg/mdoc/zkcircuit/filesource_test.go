@@ -396,3 +396,25 @@ func TestPercentEncodedTraversalIsRefused(t *testing.T) {
 		t.Fatal("fetchFile followed a percent-encoded dot segment")
 	}
 }
+
+// URL schemes are case-insensitive. A configured "FILE:///srv/mirror" is a
+// valid local source, and a lowercase-only prefix check sent it down the
+// HTTP path, where it always failed - the same mistake the artifact-URL
+// checks had, in the one place that decides which reader runs at all.
+func TestFileSourceSchemeIsCaseInsensitive(t *testing.T) {
+	source := writeVendoredMirror(t, []byte("x"))
+	upper := "FILE://" + strings.TrimPrefix(source, "file://")
+
+	c := NewClient(upper)
+	manifest, err := c.FetchManifest(t.Context())
+	if err != nil {
+		t.Fatalf("a FILE:// source must be read off disk: %v", err)
+	}
+	if salt, err := manifest.SaltBytes([]string{"vega-mc"}, "org.iso.18013.5.1.mDL"); err != nil || salt != 32 {
+		t.Fatalf("SaltBytes = %d, %v; want 32, nil", salt, err)
+	}
+
+	if _, err := c.FetchCircuit(t.Context(), "vega-mc-p256-v1-prover-key-r12"); err != nil {
+		t.Errorf("FetchCircuit over a FILE:// source: %v", err)
+	}
+}
