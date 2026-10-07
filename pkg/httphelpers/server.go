@@ -51,6 +51,13 @@ func (s *serverHandler) RegEndpoint(ctx context.Context, rg *gin.RouterGroup, me
 
 		res, err := handler(ctx, c)
 		if err != nil {
+			// Every failed request gets this, here rather than inside
+			// publicError: the two structured branches below return
+			// without reaching it, and an OAuth or OpenID4VCI refusal
+			// deliberately withholds its cause from the RESPONSE - which
+			// is exactly why the cause has to reach the log.
+			s.log.Debug("RegEndpoint", "err", err)
+
 			// OAuth 2.0 structured error response per RFC 6749 §5.2
 			if oauthErr, ok := errors.AsType[*oauth2.OAuthError](err); ok {
 				c.Header("Cache-Control", "no-store")
@@ -104,7 +111,8 @@ func (s *serverHandler) RegEndpoint(ctx context.Context, rg *gin.RouterGroup, me
 func (s *serverHandler) publicError(c *gin.Context, where string, err error, statusCode int) *helpers.Error {
 	shaped := helpers.NewErrorFromError(err)
 	if !shaped.IsUnclassified() {
-		s.log.Debug(where, "err", err)
+		// Already logged at Debug by the caller, along with every other
+		// failed request - see RegEndpoint.
 		return shaped
 	}
 
@@ -135,6 +143,7 @@ func (s *serverHandler) RegStreamEndpoint(ctx context.Context, rg *gin.RouterGro
 
 		res, err := handler(ctx, c, ch)
 		if err != nil {
+			s.log.Debug("RegStreamEndpoint", "err", err)
 			statusCode := StatusCode(ctx, err)
 			s.client.Rendering.Content(ctx, c, statusCode, gin.H{"error": s.publicError(c, "RegStreamEndpoint", err, statusCode)})
 			return

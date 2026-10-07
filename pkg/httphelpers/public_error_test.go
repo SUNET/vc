@@ -15,6 +15,8 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/oauth2"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/gin-gonic/gin"
@@ -40,10 +42,19 @@ type logLine struct {
 // is the threshold this behaviour is about.
 func errorEngine(t *testing.T, err error) (*gin.Engine, func() []logLine) {
 	t.Helper()
+	engine, read, _ := errorEngineAtLevel(t, err, true)
+	return engine, read
+}
+
+// errorEngineAtLevel is errorEngine with the logger's production flag
+// exposed, for the one test that is about a Debug line - which production
+// drops by design.
+func errorEngineAtLevel(t *testing.T, err error, production bool) (*gin.Engine, func() []logLine, string) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	dir := t.TempDir()
-	log, logErr := logger.New("errtest", dir, true)
+	log, logErr := logger.New("errtest", dir, production)
 	require.NoError(t, logErr)
 
 	ctx := context.Background()
@@ -79,7 +90,7 @@ func errorEngine(t *testing.T, err error) (*gin.Engine, func() []logLine) {
 		return lines
 	}
 
-	return engine, read
+	return engine, read, dir
 }
 
 func callBoom(t *testing.T, engine *gin.Engine) (*httptest.ResponseRecorder, map[string]any) {
@@ -209,4 +220,48 @@ func jsonSyntaxError(t *testing.T) error {
 	err := json.Unmarshal([]byte(`{"broken":`), &v)
 	require.Error(t, err)
 	return err
+}
+
+// The OAuth and OpenID4VCI branches return before publicError, so moving
+// the Debug line into it took their only log away - and those are exactly
+// the paths that withhold the cause from the RESPONSE on purpose, which is
+// what makes the log the only place it exists.
+//
+// A development logger, because the line under test is a Debug one and the
+// production threshold drops it. That is the point of the line being at
+// Debug: an OAuth refusal is an ordinary event, not an operator's problem.
+func TestStructuredErrorsAreStillLoggedWithTheirCause(t *testing.T) {
+	for name, err := range map[string]error{
+		"oauth2": &oauth2.OAuthError{
+			ErrorCode:        "invalid_client",
+			ErrorDescription: "client authentication failed",
+			HTTPStatus:       http.StatusUnauthorized,
+			Cause:            errors.New("client secret mismatch for acme-corp"),
+		},
+		"openid4vci": &openid4vci.Error{
+			Err:              "invalid_proof",
+			ErrorDescription: "proof of possession is invalid",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			wrapped := fmt.Errorf("resolving the client: %w", err)
+			engine, _, logDir := errorEngineAtLevel(t, wrapped, false)
+
+			req := httptest.NewRequest(http.MethodGet, "/boom", nil)
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+
+			// Still the structured response, unchanged.
+			assert.NotEqual(t, http.StatusOK, w.Code)
+			assert.NotContains(t, w.Body.String(), "resolving the client",
+				"the structured response must not grow a Go error chain")
+
+			// The development encoder is console, not JSON, so the parsed
+			// logLine reader does not apply - read the file directly.
+			data, readErr := os.ReadFile(filepath.Join(logDir, "errtest.log"))
+			require.NoError(t, readErr)
+			assert.Contains(t, string(data), "resolving the client",
+				"a structured refusal still has to put its cause in the log")
+		})
+	}
 }
