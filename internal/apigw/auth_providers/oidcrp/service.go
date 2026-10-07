@@ -239,8 +239,18 @@ func (s *Service) credentialsForSession(ctx context.Context, clientID string) (*
 	if clientID != "" && s.dbService != nil && s.dbService.DynamicRegistrationColl != nil {
 		stored, err := s.dbService.DynamicRegistrationColl.GetByClientID(ctx, clientID)
 		if err != nil {
+			// Returned, not swallowed into the refusal below. A database
+			// that cannot be read and a client that was never registered
+			// are different situations with different fixes, and in HA the
+			// first is the common one - collapsing them tells an operator
+			// chasing a wave of failed callbacks to go looking for a
+			// registration problem that does not exist. The caller deletes
+			// the session on an exchange failure, so saying which it was
+			// is the only chance anyone gets.
 			s.log.Error(err, "oidcrp_session_registration_lookup_failed", "client_id", clientID)
-		} else if stored != nil {
+			return nil, fmt.Errorf("looking up the client registration for %q: %w", clientID, err)
+		}
+		if stored != nil {
 			s.log.Debug("resolved a session's client registration from the store",
 				"client_id", clientID)
 			c := s.buildCredentials(stored.ClientID, stored.ClientSecret, stored.ClientSecretExpiresAt)

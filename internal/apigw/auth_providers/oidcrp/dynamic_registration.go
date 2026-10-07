@@ -138,6 +138,25 @@ func (s *Service) dynamicClientRegistration(ctx context.Context, registrationEnd
 		return nil, fmt.Errorf("failed to parse registration response: %w", err)
 	}
 
+	// client_id is REQUIRED in a registration response (RFC 7591 3.2.1),
+	// and without this check a 201 carrying none was accepted, stored and
+	// published as a registration with an empty client id. The failure
+	// after that is silent and permanent: an absent client_secret_expires_at
+	// decodes as 0, which means "never expires", so needsRenewal never
+	// fires and nothing ever tries again - every flow fails at the token
+	// exchange until somebody restarts the process, which is the exact
+	// shape of the bug this PR exists to fix.
+	//
+	// client_secret too: this RP authenticates with client_secret_basic, so
+	// a registration without one cannot complete a token exchange either,
+	// and the same never-retried trap applies.
+	if registrationResp.ClientID == "" {
+		return nil, fmt.Errorf("registration response from %s carries no client_id (required by RFC 7591 3.2.1)", registrationEndpoint)
+	}
+	if registrationResp.ClientSecret == "" {
+		return nil, fmt.Errorf("registration response from %s carries no client_secret; this RP authenticates with client_secret_basic and cannot use the registration", registrationEndpoint)
+	}
+
 	s.log.Info("Dynamic client registration successful",
 		"client_id", registrationResp.ClientID,
 		"has_secret", registrationResp.ClientSecret != "")

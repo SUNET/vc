@@ -3,6 +3,7 @@ package oidcrp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -74,6 +75,9 @@ type opServer struct {
 	refuse bool
 	// omitRegistrationEndpoint drops it from discovery.
 	omitRegistrationEndpoint bool
+	// registrationBody, when set, replaces /register's response body - for
+	// the responses an OP should not be sending.
+	registrationBody string
 }
 
 func newOPServer(t *testing.T) *opServer {
@@ -130,6 +134,10 @@ func newOPServer(t *testing.T) *opServer {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
+		if op.registrationBody != "" {
+			_, _ = w.Write([]byte(op.registrationBody))
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"client_id":                 "client-" + string(rune('0'+n)),
 			"client_secret":             "secret-" + string(rune('0'+n)),
@@ -341,11 +349,14 @@ func TestEnsureCredentialsFailsWithoutARegistrationEndpoint(t *testing.T) {
 	assert.Contains(t, err.Error(), "registration_endpoint")
 }
 
-// ensureReady is what every entry point calls - InitiateAuth,
-// ProcessCallback and GetUserInfo all start with it - so renewal has to
-// hang off it. A correct ensureCredentials that nothing calls is a renewal
-// that never happens: removing the call compiles and leaves every test
-// above passing.
+// ensureReady is what a path that STARTS a flow calls - InitiateAuth, and
+// InitiateAuthForVCI through it - so renewal has to hang off it. A correct
+// ensureCredentials that nothing calls is a renewal that never happens:
+// removing the call compiles and leaves every test above passing.
+//
+// ProcessCallback and GetUserInfo deliberately call ensureInitialized
+// instead and must NOT renew - see
+// TestProcessCallbackIsNotGatedOnThisReplicasCredentials below for why.
 func TestEnsureReadyRenewsExpiringCredentials(t *testing.T) {
 	op := newOPServer(t)
 	store := &fakeRegistrationStore{}
@@ -611,4 +622,67 @@ func TestInitiateAuthStillRenews(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, op.count(), "starting a flow renews an expiring registration")
 	assert.Equal(t, "client-1", s.currentClientID(t))
+}
+
+// errorStore is a store whose lookups fail, for the case below.
+type errorStore struct {
+	fakeRegistrationStore
+	lookupErr error
+}
+
+func (e *errorStore) GetByClientID(context.Context, string) (*db.DynamicRegistrationCredentials, error) {
+	return nil, e.lookupErr
+}
+
+// A database that cannot be read and a client that was never registered
+// are different situations with different fixes, and in HA the first is
+// the common one. Collapsing them sent an operator chasing a wave of
+// failed callbacks after a registration problem that did not exist.
+func TestCredentialsForSessionReportsALookupFailureAsItself(t *testing.T) {
+	op := newOPServer(t)
+	store := &errorStore{lookupErr: errors.New("connection refused")}
+	s := renewalService(t, op, store, time.Now().Add(time.Hour))
+
+	_, err := s.credentialsForSession(t.Context(), "client-from-another-replica")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "connection refused",
+		"the actionable cause has to survive")
+	assert.NotContains(t, err.Error(), "no client registration found",
+		"a store outage must not read as a missing registration")
+}
+
+// A registration response with no client_id used to be stored and
+// published as a client with an empty id. The failure after that is silent
+// and permanent: an absent client_secret_expires_at decodes as 0, which
+// means "never expires", so needsRenewal never fires and nothing tries
+// again - every flow fails at the token exchange until somebody restarts
+// the process, which is the exact shape of the bug this PR fixes.
+func TestRegistrationResponseMustCarryAClientIDAndSecret(t *testing.T) {
+	for name, body := range map[string]string{
+		"no client_id":     `{"client_secret":"s","client_secret_expires_at":0}`,
+		"no client_secret": `{"client_id":"c","client_secret_expires_at":0}`,
+		"neither":          `{}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			op := newOPServer(t)
+			op.registrationBody = body
+
+			store := &fakeRegistrationStore{}
+			// Already expired, so the failure surfaces rather than being
+			// tolerated - ensureCredentials deliberately carries on when
+			// the current secret still has life in it.
+			s := renewalService(t, op, store, time.Now().Add(-time.Hour))
+
+			err := s.ensureCredentials(t.Context())
+			require.Error(t, err, "an unusable registration response must not be accepted")
+
+			store.mu.Lock()
+			saved := len(store.saved)
+			store.mu.Unlock()
+			assert.Zero(t, saved, "nothing unusable may be persisted")
+			assert.Equal(t, "client-0", s.currentClientID(t),
+				"the previous registration must stay in place")
+		})
+	}
 }
