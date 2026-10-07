@@ -22,18 +22,25 @@ type serverHandler struct {
 	client *Client
 }
 
-// ListenAndServe starts the HTTP server with TLS or without based on the APIServer.TLS configuration
+// ListenAndServe starts the HTTP server with TLS or without based on the APIServer.TLS configuration.
+//
+// http.ErrServerClosed is the SUCCESS path, not a failure: Shutdown makes
+// the blocked ListenAndServe return it. Reporting it was harmless while
+// nothing called Shutdown; now that the verifier does, a clean
+// termination would otherwise end with a "listen_and_server" error in the
+// log and a trace beside it, which is how an operator learns to ignore
+// the errors this service prints.
 func (s *serverHandler) ListenAndServe(ctx context.Context, server *http.Server, apiConfig model.APIServer) error {
 	if apiConfig.TLS.Enable {
 		server.TLSConfig = s.client.TLS.Standard(ctx)
 
 		err := server.ListenAndServeTLS(apiConfig.TLS.CertFilePath, apiConfig.TLS.KeyFilePath)
-		if err != nil {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.log.Error(err, "listen_and_server_tls")
 			return err
 		}
 	} else {
-		if err := server.ListenAndServe(); err != nil {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.log.Error(err, "listen_and_server")
 			return err
 		}

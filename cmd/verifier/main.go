@@ -126,7 +126,22 @@ func main() {
 	shutdownCtx, cancelShutdown := context.WithTimeout(ctx, shutdownTimeout)
 	defer cancelShutdown()
 
+	// The HTTP server FIRST, and by name rather than by range: services is
+	// a map, so iteration order is random, and closing the database or the
+	// notify bus while the listener is still accepting leaves in-flight
+	// requests failing against dependencies that have already gone. The
+	// graceful shutdown added here is worth nothing if what it waits for
+	// has been pulled out from under it.
+	if httpService, ok := services["httpserver"]; ok {
+		if err := httpService.Close(shutdownCtx); err != nil {
+			mainLog.Trace("serviceName", "httpserver", "error", err)
+		}
+	}
+
 	for serviceName, service := range services {
+		if serviceName == "httpserver" {
+			continue
+		}
 		if err := service.Close(shutdownCtx); err != nil {
 			mainLog.Trace("serviceName", serviceName, "error", err)
 		}

@@ -199,9 +199,10 @@ func TestVegaKeyStoreEvictionDeletesTheFile(t *testing.T) {
 }
 
 // The entry just stored is the one the caller is about to hand to the
-// worker, so it must survive its own eviction pass even when it alone
-// exceeds the bound.
-func TestVegaKeyStoreKeepsTheEntryItJustWrote(t *testing.T) {
+// worker, so its FILE must survive its own eviction pass even when it
+// alone exceeds the bound - and go again once that caller is done, or
+// max_bytes is a target rather than the disk bound it is documented as.
+func TestVegaKeyStoreKeepsAnOversizedKeyOnlyWhilePinned(t *testing.T) {
 	s := newVegaKeyStore(t.TempDir(), 10)
 	t.Cleanup(func() { _ = s.removeAll(context.Background()) })
 
@@ -209,12 +210,21 @@ func TestVegaKeyStoreKeepsTheEntryItJustWrote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	releasePath()
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("the key just written must still be on disk: %v", err)
 	}
-	if got, ok := s.get("huge"); !ok || got != path {
-		t.Fatalf("get() = %q, %v; want %q, true", got, ok, path)
+	// Off the books immediately: it cannot be handed to a SECOND caller,
+	// because nothing would ever make room for it.
+	if got, ok := s.get("huge"); ok {
+		t.Errorf("get() = %q; an oversized key must not be cached", got)
+	}
+
+	releasePath()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("an oversized key must not outlive its holder (%v)", err)
+	}
+	if s.cache.bytes != 0 {
+		t.Errorf("bytes = %d, want 0 - max_bytes is a disk bound, not a target", s.cache.bytes)
 	}
 }
 
@@ -468,7 +478,11 @@ func TestVegaKeyStoreRefusesWritesAfterClose(t *testing.T) {
 // file when its old holder finally released. The path it remembered had
 // become somebody else's.
 func TestVegaKeyStoreGivesEachGenerationItsOwnFile(t *testing.T) {
-	s := newVegaKeyStore(t.TempDir(), 10)
+	// 20 bytes: each generation ("generation one", 14) fits on its own and
+	// two at once do not, so the eviction this test needs happens without
+	// either entry being oversized - which would retire it for a different
+	// reason and prove nothing about generations.
+	s := newVegaKeyStore(t.TempDir(), 20)
 	t.Cleanup(func() { _ = s.removeAll(context.Background()) })
 
 	// First generation, pinned by a verification in progress.

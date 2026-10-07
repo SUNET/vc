@@ -97,11 +97,12 @@ func (c *vegaKeyCache) get(id string) (int, bool) {
 // put records size under id and returns the ids evicted oldest-first to
 // bring the total back inside the bound. The caller deletes their files.
 //
-// The entry just stored is never evicted, even when it alone exceeds the
-// bound: the caller is about to use it, and reporting an entry that was
-// dropped on the way out would be a strange way to enforce a ceiling. A
-// single key larger than max therefore exceeds it, by design, for as long as
-// it is the only one held.
+// The entry just stored is never evicted here, even when it alone exceeds
+// the bound: the caller is about to use it, and reporting an entry that was
+// dropped on the way out would be a strange way to enforce a ceiling. It
+// does not get to stay, though - see vegaKeyStore.put, which retires an
+// oversized entry when its last holder lets go, so the bound is a real disk
+// bound and not a target the first big artifact permanently overshoots.
 func (c *vegaKeyCache) put(id string, size int) []string {
 	if previous, ok := c.sizes[id]; ok {
 		c.bytes -= previous
@@ -320,6 +321,28 @@ func (s *vegaKeyStore) releaseFunc(id string, entry *vegaKeyEntry) func() {
 	}
 }
 
+// partition splits ids into those the store still holds and those it does
+// not, under ONE lock.
+//
+// One lock because the answer is a snapshot and the server is serving
+// while it is taken: id-by-id get calls can see a key evicted between two
+// of them and report a set that was never true at any instant.
+func (s *vegaKeyStore) partition(ids []string) (resident, missing []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, id := range ids {
+		if entry, ok := s.entries[id]; ok {
+			if _, err := os.Stat(entry.path); err == nil {
+				resident = append(resident, id)
+				continue
+			}
+		}
+		missing = append(missing, id)
+	}
+	return resident, missing
+}
+
 // get reports whether id is held and returns its path WITHOUT pinning it.
 // For tests and for "is this warm?" questions; anything about to hand the
 // path to a worker must use acquire.
@@ -398,6 +421,16 @@ func (s *vegaKeyStore) put(id string, b []byte) (string, func(), error) {
 	// key alone exceeds the bound.
 	for _, evicted := range s.cache.put(id, len(b)) {
 		s.retireLocked(evicted)
+	}
+
+	// A key that alone exceeds the bound survived that pass - it had to,
+	// the caller is about to read it - and used to survive forever after,
+	// making max_bytes a target rather than the disk bound it is
+	// documented as. Retire it NOW, which leaves the file in place while
+	// pinned and deletes it on the last release.
+	if len(b) > s.cache.max {
+		s.cache.drop(id)
+		s.retireLocked(id)
 	}
 
 	return path, s.releaseFunc(id, entry), nil

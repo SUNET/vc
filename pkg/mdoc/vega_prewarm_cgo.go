@@ -87,13 +87,11 @@ func WarmVegaVerifierKeys(ctx context.Context, sources []string) (VegaWarmResult
 	// ready, with a startup log line to match, is worse than no claim at
 	// all when the first presentation has to refetch. It is also the only
 	// signal an operator has that the bound is too small for the catalog.
-	for _, id := range loaded {
-		if _, ok := vegaVerifierKeys.get(id); ok {
-			result.Warmed = append(result.Warmed, id)
-			continue
-		}
-		result.Evicted = append(result.Evicted, id)
-	}
+	//
+	// One lock for the whole set: the server is serving while this is
+	// taken, so asking id by id can see a key evicted between two
+	// questions and report a set that was never true at any instant.
+	result.Warmed, result.Evicted = vegaVerifierKeys.partition(loaded)
 
 	return result, nil
 }

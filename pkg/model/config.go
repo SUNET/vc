@@ -864,7 +864,11 @@ type ZkKeyCacheConfig struct {
 	// set one key larger than the bound makes every request evict the key
 	// the next one needs, which fails quietly: no error, nothing in the
 	// logs but latency.
-	MaxBytes int64 `yaml:"max_bytes,omitempty" doc_example:"536870912"`
+	// A negative value is a configuration error, not a smaller bound: the
+	// runtime ignores anything at or below zero, so without this check an
+	// operator who wrote -1 would get the 512MiB default and no indication
+	// that their setting did nothing.
+	MaxBytes int64 `yaml:"max_bytes,omitempty" validate:"omitempty,gte=0" doc_example:"536870912"`
 
 	// Prewarm downloads every currently-active Vega circuit's verifier key
 	// at startup, in the background, instead of leaving the first

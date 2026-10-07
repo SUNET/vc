@@ -434,3 +434,43 @@ func TestWarmVegaVerifierKeysReportsResidencyNotAttempts(t *testing.T) {
 		t.Errorf("%s is reported evicted but is still in the store", result.Evicted[0])
 	}
 }
+
+// The residency snapshot is taken under ONE lock. Asking id by id while
+// the server is serving can see a key evicted between two questions and
+// report a set that was never true at any instant.
+func TestWarmResidencySnapshotIsTakenAtOnce(t *testing.T) {
+	resetVegaKeyState(t)
+
+	for _, id := range []string{"a", "b", "c"} {
+		if _, release, err := vegaVerifierKeys.put(id, []byte("key "+id)); err != nil {
+			t.Fatal(err)
+		} else {
+			release()
+		}
+	}
+
+	resident, missing := vegaVerifierKeys.partition([]string{"a", "b", "c", "never-loaded"})
+	if len(resident) != 3 {
+		t.Errorf("resident = %v, want all three", resident)
+	}
+	if len(missing) != 1 || missing[0] != "never-loaded" {
+		t.Errorf("missing = %v, want [never-loaded]", missing)
+	}
+
+	// A file that has gone counts as missing, not resident - the same rule
+	// acquire applies, so the report matches what a request would find.
+	path, ok := vegaVerifierKeys.get("b")
+	if !ok {
+		t.Fatal("b should be resident")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	resident, missing = vegaVerifierKeys.partition([]string{"a", "b", "c"})
+	if len(resident) != 2 {
+		t.Errorf("resident = %v, want a and c", resident)
+	}
+	if len(missing) != 1 || missing[0] != "b" {
+		t.Errorf("missing = %v, want [b]", missing)
+	}
+}
