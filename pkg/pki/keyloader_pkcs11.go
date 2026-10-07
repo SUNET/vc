@@ -328,10 +328,27 @@ func (k *PKCS11PrivateKey) Sign(rand io.Reader, digest []byte, opts crypto.Signe
 
 	// Sign with the appropriate mechanism
 	var mechanism *pkcs11.Mechanism
+	// toSign is what the mechanism is handed, which is not always the
+	// digest - see below.
+	toSign := digest
 	switch k.KeyType {
 	case pkcs11.CKK_RSA:
 		mechanism = pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)
+		// CKM_RSA_PKCS adds PKCS#1 v1.5 padding and NOTHING else: the
+		// DigestInfo saying which hash produced these bytes is the
+		// caller's to supply (RFC 8017 9.2). Signing the bare digest
+		// produced a well-formed signature that verified as nothing and
+		// failed every RS256/384/512 verifier - see
+		// pkcs11_rsa_digestinfo.go. opts carries the hash, which this
+		// used to ignore entirely.
+		wrapped, err := pkcs1v15DigestInfo(digest, opts)
+		if err != nil {
+			return nil, err
+		}
+		toSign = wrapped
 	case pkcs11.CKK_EC:
+		// CKM_ECDSA takes the bare digest and returns r||s, which is the
+		// IEEE P1363 form JWT wants.
 		mechanism = pkcs11.NewMechanism(pkcs11.CKM_ECDSA, nil)
 	default:
 		return nil, fmt.Errorf("unsupported key type: %d", k.KeyType)
@@ -341,7 +358,7 @@ func (k *PKCS11PrivateKey) Sign(rand io.Reader, digest []byte, opts crypto.Signe
 		return nil, fmt.Errorf("failed to init sign: %w", err)
 	}
 
-	signature, err := ctx.Sign(session, digest)
+	signature, err := ctx.Sign(session, toSign)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign: %w", err)
 	}

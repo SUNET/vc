@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/asn1"
 	"io"
@@ -229,4 +230,65 @@ func derWithTrailer(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return append(der, 0x00)
+}
+
+// opaqueRSAKey is a crypto.Signer that behaves the way the PKCS#11 binding
+// does for an RSA key: it pads only, and relies on the caller having
+// wrapped the digest in a DigestInfo. It records the opts it was handed,
+// because passing them through is the thing being checked - the binding
+// used to ignore them entirely and sign the bare digest.
+type opaqueRSAKey struct {
+	inner    *rsa.PrivateKey
+	gotHash  crypto.Hash
+	gotOpts  crypto.SignerOpts
+	signs    int
+	wrapFunc func([]byte, crypto.SignerOpts) ([]byte, error)
+}
+
+func (k *opaqueRSAKey) Public() crypto.PublicKey { return k.inner.Public() }
+
+func (k *opaqueRSAKey) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
+	k.signs++
+	k.gotOpts = opts
+	k.gotHash = opts.HashFunc()
+
+	toSign, err := k.wrapFunc(digest, opts)
+	if err != nil {
+		return nil, err
+	}
+	// crypto.Hash(0) pads only, which is exactly CKM_RSA_PKCS.
+	return rsa.SignPKCS1v15(rand.Reader, k.inner, crypto.Hash(0), toSign)
+}
+
+// An RSA key behind the crypto.Signer fallback has to produce a signature
+// a standard RS256 verifier accepts, and the hash has to reach it - the
+// PKCS#11 binding ignored SignerOpts and signed the bare digest, which
+// verifies as nothing.
+func TestKeyMaterialSignerRSAThroughAnOpaqueKey(t *testing.T) {
+	inner, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := &opaqueRSAKey{inner: inner, wrapFunc: pkcs1v15DigestInfo}
+
+	signer := NewKeyMaterialSigner(&KeyMaterial{
+		PrivateKey:    key,
+		SigningMethod: jwt.SigningMethodRS256,
+	})
+
+	sig, err := signer.Sign(t.Context(), []byte("payload to sign"))
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+	if key.signs == 0 {
+		t.Fatal("the key was never asked to sign")
+	}
+	if key.gotHash != crypto.SHA256 {
+		t.Errorf("the key was handed hash %v, want SHA-256 - RS256 needs it to build the DigestInfo", key.gotHash)
+	}
+
+	digest := sha256.Sum256([]byte("payload to sign"))
+	if err := rsa.VerifyPKCS1v15(&inner.PublicKey, crypto.SHA256, digest[:], sig); err != nil {
+		t.Errorf("a standard RS256 verifier rejects the signature: %v", err)
+	}
 }
