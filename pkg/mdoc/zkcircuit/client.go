@@ -199,6 +199,19 @@ func (d *CircuitDescriptor) ParamInt(key string) (int, bool) {
 	}
 }
 
+// HasParam reports whether key is present in Params at all, whatever shape
+// its value has - including a JSON null.
+//
+// The companion to ParamInt/ParamString, which cannot tell "the catalog
+// said nothing" from "the catalog said something this cannot read". For a
+// constraint, those are opposites: absent means no constraint, malformed
+// means a constraint nobody can honour, and treating the second as the
+// first fails OPEN.
+func (d *CircuitDescriptor) HasParam(key string) bool {
+	_, ok := d.Params[key]
+	return ok
+}
+
 // ParamString reads a string Params entry. Returns ("", false) if the key
 // is absent or not a string.
 func (d *CircuitDescriptor) ParamString(key string) (string, bool) {

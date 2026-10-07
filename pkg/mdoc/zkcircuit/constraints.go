@@ -131,9 +131,20 @@ func (m *Manifest) Constraints(system, docType string) (SystemConstraints, error
 
 		salt, ok := c.ParamInt(ParamSaltBytes)
 		if !ok {
-			// This circuit states no salt constraint. Legitimate on its
-			// own - longfellow publishes none - but NOT something to skip
-			// past: see the refusal below.
+			// A key that is PRESENT but unreadable - "32.0", an object, a
+			// JSON null - is a constraint nobody can honour, not an
+			// absent one. ParamInt cannot tell the two apart, and reading
+			// the second as the first fails OPEN: resolution falls back to
+			// the package default and mints credentials this very circuit
+			// cannot verify.
+			if c.HasParam(ParamSaltBytes) {
+				return SystemConstraints{}, fmt.Errorf(
+					"circuit %q publishes %s as %#v, which is not an integer - refusing rather than treating it as no constraint",
+					c.ID, ParamSaltBytes, c.Params[ParamSaltBytes])
+			}
+			// Genuinely absent: this circuit states no salt constraint.
+			// Legitimate on its own - longfellow publishes none - but NOT
+			// something to skip past either: see the refusal below.
 			unconstrained = append(unconstrained, c.ID)
 			continue
 		}

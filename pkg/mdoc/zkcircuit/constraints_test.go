@@ -405,3 +405,53 @@ func TestConstraintsResolvesAnUnmixedSet(t *testing.T) {
 		t.Fatalf("SaltBytes = %d, %v; want 0, nil", got.SaltBytes, err)
 	}
 }
+
+// ParamInt returns false for an absent key AND for one it cannot read, and
+// those are opposites: absent means no constraint, malformed means a
+// constraint nobody can honour. Reading the second as the first falls back
+// to the package default and mints credentials this very circuit cannot
+// verify - a fail-OPEN, in the one place that must not have one.
+func TestConstraintsRefusesAMalformedSaltBytes(t *testing.T) {
+	for name, value := range map[string]any{
+		"a decimal string": "32.0",
+		"a fractional":     2.5,
+		"an object":        map[string]any{"bytes": 32},
+		"an array":         []any{32},
+		"a boolean":        true,
+		"null":             nil,
+		"an empty string":  "",
+		"a padded string":  " 32 ",
+		"hex":              "0x20",
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := &Manifest{Circuits: []CircuitDescriptor{
+				circuit("vega-r12", "vega-mc", StatusActive, []string{mDL}, map[string]any{"saltBytes": value}),
+			}}
+
+			got, err := m.Constraints("vega-mc", mDL)
+			if err == nil {
+				t.Fatalf("Constraints() = %d, nil; want a refusal", got.SaltBytes)
+			}
+			if !strings.Contains(err.Error(), "not an integer") {
+				t.Fatalf("error = %v, want it refused as malformed rather than as something else", err)
+			}
+		})
+	}
+}
+
+// ... and a circuit with no saltBytes key at all is still the legitimate
+// "no constraint" case, so this is a refusal of malformed values, not of
+// Longfellow.
+func TestConstraintsAcceptsAnAbsentSaltBytes(t *testing.T) {
+	m := &Manifest{Circuits: []CircuitDescriptor{
+		circuit("lf-8-2", "longfellow", StatusActive, []string{mDL}, map[string]any{"num_attributes": float64(2)}),
+	}}
+
+	got, err := m.Constraints("longfellow", mDL)
+	if err != nil {
+		t.Fatalf("Constraints() error = %v", err)
+	}
+	if got.SaltBytes != 0 {
+		t.Errorf("SaltBytes = %d, want 0", got.SaltBytes)
+	}
+}
