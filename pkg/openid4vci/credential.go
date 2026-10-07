@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -234,15 +235,6 @@ type ProofJWT struct {
 	jwt.RegisteredClaims
 }
 
-// JWK holds the JSON Web Key
-type JWK struct {
-	CRV string `json:"crv" validate:"required"`
-	KID string `json:"kid" validate:"required"`
-	KTY string `json:"kty" validate:"required"`
-	X   string `json:"x" validate:"required"`
-	Y   string `json:"y" validate:"required"`
-}
-
 // Proof represents a single proof object (used in non-batch requests)
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-proof-types
 type Proof struct {
@@ -396,10 +388,26 @@ func (p *Proofs) extractAllJWKsFromDIVP(maxLength int) ([]*apiv1_issuer.Jwk, err
 // CredentialResponseEncryption contains information for encrypting the Credential Response.
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-request
 type CredentialResponseEncryption struct {
-	// JWK REQUIRED. Object containing a single public key as a JWK used for encrypting the Credential Response.
-	JWK JWK `json:"jwk" validate:"required"`
+	// JWK REQUIRED. Object containing a single public key as a JWK used for
+	// encrypting the Credential Response.
+	//
+	// Kept as raw JSON rather than as the JWK struct in this package: §8.3
+	// requires this key to carry an alg, which that struct does not model,
+	// and it fixes kty/crv/x/y, which a wallet is free to vary. It is parsed
+	// by a JWK implementation in CredentialResponseEncryption.recipientKey,
+	// which is also the only place that decides whether vc can use it.
+	//
+	// The required tag here and on Enc is for the published schema, and is
+	// deliberately not what enforces them: Validate checks both and returns
+	// invalid_encryption_parameters, which is the code §7.3.1 defines for
+	// this, rather than whatever a generic binder would produce. Measured
+	// rather than assumed - the endpoint returns that code with these tags
+	// present, and TestCredentialEncryption_IncompleteParametersAreAnEncryptionError
+	// pins it either way.
+	JWK json.RawMessage `json:"jwk" validate:"required" swaggertype:"object"`
 
 	// Enc REQUIRED. JWE enc algorithm for encrypting Credential Responses.
+	// Checked by Validate as well as by the tag - see JWK above.
 	Enc string `json:"enc" validate:"required"`
 
 	// Zip OPTIONAL. JWE zip algorithm for compressing Credential Responses prior to encryption.
@@ -420,18 +428,60 @@ func (req *CredentialRequest) ResolveCredentialFormat(metadata *CredentialIssuer
 // When credential_identifier is used, the authorizationDetails from the token response
 // are needed to map the identifier to a credential_configuration_id.
 func (req *CredentialRequest) ResolveCredentialFormatWithAuthDetails(metadata *CredentialIssuerMetadataParameters, authorizationDetails []AuthorizationDetailsParameter) (string, error) {
+	selection, err := req.resolveCredentialSelection(metadata, authorizationDetails)
+	if err != nil {
+		return "", err
+	}
+	return selection.Format, nil
+}
+
+// ResolveCredentialConfigurationID returns the credential configuration the
+// request selected, by whichever of the two mechanisms it used.
+//
+// Separate from the format because a caller that has to build the credential
+// needs to know WHICH configuration was chosen, not merely what shape it is.
+// With credential_identifier, req.CredentialConfigurationID is empty and the
+// id lives in the authorization_details the token response returned - so a
+// caller reading the request field alone silently falls back to something
+// else (an authorised scope, say) and issues a credential the identifier did
+// not select.
+//
+// Empty with no error is a real answer: a format-based authorization_details
+// entry (OID4VCI 5.1.1) names a format and no configuration at all, so there
+// is no configuration id to return and the caller must fall back on purpose
+// rather than by accident.
+func (req *CredentialRequest) ResolveCredentialConfigurationID(metadata *CredentialIssuerMetadataParameters, authorizationDetails []AuthorizationDetailsParameter) (string, error) {
+	selection, err := req.resolveCredentialSelection(metadata, authorizationDetails)
+	if err != nil {
+		return "", err
+	}
+	return selection.ConfigurationID, nil
+}
+
+// credentialSelection is what a request picked out of the issuer's metadata.
+type credentialSelection struct {
+	// ConfigurationID is the credential_configuration_id, empty when the
+	// request was authorised by format rather than by configuration.
+	ConfigurationID string
+	// Format is always present.
+	Format string
+}
+
+// resolveCredentialSelection does the lookup once, so the format and the
+// configuration id can never disagree about which entry was chosen.
+func (req *CredentialRequest) resolveCredentialSelection(metadata *CredentialIssuerMetadataParameters, authorizationDetails []AuthorizationDetailsParameter) (credentialSelection, error) {
 	if metadata == nil {
-		return "", fmt.Errorf("metadata is required")
+		return credentialSelection{}, fmt.Errorf("metadata is required")
 	}
 
 	// Use credential_configuration_id to look up the format from issuer metadata
 	if req.CredentialConfigurationID != "" {
 		if metadata.CredentialConfigurationsSupported != nil {
 			if config, ok := metadata.CredentialConfigurationsSupported[req.CredentialConfigurationID]; ok {
-				return config.Format, nil
+				return credentialSelection{ConfigurationID: req.CredentialConfigurationID, Format: config.Format}, nil
 			}
 		}
-		return "", &Error{Err: ErrUnknownCredentialConfiguration, ErrorDescription: fmt.Sprintf("unknown credential_configuration_id: %s", req.CredentialConfigurationID)}
+		return credentialSelection{}, &Error{Err: ErrUnknownCredentialConfiguration, ErrorDescription: fmt.Sprintf("unknown credential_configuration_id: %s", req.CredentialConfigurationID)}
 	}
 
 	// Use credential_identifier to look up the format via authorization_details.
@@ -441,22 +491,22 @@ func (req *CredentialRequest) ResolveCredentialFormatWithAuthDetails(metadata *C
 		for _, ad := range authorizationDetails {
 			if slices.Contains(ad.CredentialIdentifiers, req.CredentialIdentifier) {
 				// Format-based authorization_details: the entry carries Format directly
-				// instead of CredentialConfigurationID (OID4VCI §5.1.1).
+				// instead of CredentialConfigurationID (OID4VCI 5.1.1).
 				if ad.CredentialConfigurationID == "" && ad.Format != "" {
-					return ad.Format, nil
+					return credentialSelection{Format: ad.Format}, nil
 				}
 				if metadata.CredentialConfigurationsSupported != nil {
 					if config, ok := metadata.CredentialConfigurationsSupported[ad.CredentialConfigurationID]; ok {
-						return config.Format, nil
+						return credentialSelection{ConfigurationID: ad.CredentialConfigurationID, Format: config.Format}, nil
 					}
 				}
-				return "", &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("credential_configuration_id %q from authorization_details not found in issuer metadata", ad.CredentialConfigurationID)}
+				return credentialSelection{}, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("credential_configuration_id %q from authorization_details not found in issuer metadata", ad.CredentialConfigurationID)}
 			}
 		}
-		return "", &Error{Err: ErrUnknownCredentialIdentifier, ErrorDescription: fmt.Sprintf("could not resolve credential_identifier %q to a credential configuration", req.CredentialIdentifier)}
+		return credentialSelection{}, &Error{Err: ErrUnknownCredentialIdentifier, ErrorDescription: fmt.Sprintf("could not resolve credential_identifier %q to a credential configuration", req.CredentialIdentifier)}
 	}
 
-	return "", &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "either credential_configuration_id or credential_identifier must be provided"}
+	return credentialSelection{}, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "either credential_configuration_id or credential_identifier must be provided"}
 }
 
 // validateBBS checks the blind-BBS members of a credential request.

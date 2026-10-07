@@ -37,8 +37,8 @@ func (n native) BlindSign(suite Suite, secretKey, publicKey, commitment, header 
 }
 
 func (n native) VerifyProof(suite Suite, publicKey, proof, header, presentationHeader []byte,
-	issuerKnownMessages int, disclosedMessages [][]byte, disclosures []Disclosure) error {
-
+	issuerKnownMessages int, disclosedMessages [][]byte, disclosures []Disclosure,
+) error {
 	// Rejected before the FFI boundary, not after it. This crosses as a
 	// C.size_t, so a negative count does not arrive as a negative number -
 	// it arrives as an enormous one, and the native verifier is then asked

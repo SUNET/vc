@@ -826,3 +826,69 @@ func TestParseSuiteRoundTrips(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveCredentialConfigurationID: a wallet using credential_identifier
+// leaves req.CredentialConfigurationID empty, and the configuration it
+// actually selected lives in the authorization_details the token response
+// returned. Anything downstream that reads the request field alone sees "no
+// configuration named" and falls back - in the issuer's W3C path, to the
+// first authorised scope - so a credential can be minted with another
+// configuration's types, contexts and cryptosuite than the identifier chose.
+func TestResolveCredentialConfigurationID(t *testing.T) {
+	metadata := &CredentialIssuerMetadataParameters{
+		CredentialConfigurationsSupported: map[string]CredentialConfigurationsSupported{
+			"diploma": {Format: "ldp_vc"},
+			"licence": {Format: "ldp_vc"},
+		},
+	}
+	authDetails := []AuthorizationDetailsParameter{{
+		CredentialConfigurationID: "licence",
+		CredentialIdentifiers:     []string{"licence-1"},
+	}}
+
+	t.Run("credential_identifier resolves to its configuration", func(t *testing.T) {
+		req := &CredentialRequest{CredentialIdentifier: "licence-1"}
+		got, err := req.ResolveCredentialConfigurationID(metadata, authDetails)
+		require.NoError(t, err)
+		require.Equal(t, "licence", got,
+			"the identifier selected this configuration; nothing downstream should have to guess")
+	})
+
+	t.Run("credential_configuration_id resolves to itself", func(t *testing.T) {
+		req := &CredentialRequest{CredentialConfigurationID: "diploma"}
+		got, err := req.ResolveCredentialConfigurationID(metadata, nil)
+		require.NoError(t, err)
+		require.Equal(t, "diploma", got)
+	})
+
+	// A format-based authorization_details entry (OID4VCI 5.1.1) names a
+	// format and no configuration, so there is genuinely nothing to return.
+	// Empty WITHOUT an error, so a caller falls back deliberately rather
+	// than because a lookup quietly failed.
+	t.Run("a format-based entry has no configuration to name", func(t *testing.T) {
+		req := &CredentialRequest{CredentialIdentifier: "bare-1"}
+		got, err := req.ResolveCredentialConfigurationID(metadata, []AuthorizationDetailsParameter{{
+			Format:                "ldp_vc",
+			CredentialIdentifiers: []string{"bare-1"},
+		}})
+		require.NoError(t, err)
+		require.Empty(t, got)
+	})
+
+	// The two resolvers must never disagree about which entry was chosen -
+	// they share one lookup precisely so a future edit cannot drift them.
+	t.Run("format and configuration come from the same entry", func(t *testing.T) {
+		req := &CredentialRequest{CredentialIdentifier: "licence-1"}
+		configID, err := req.ResolveCredentialConfigurationID(metadata, authDetails)
+		require.NoError(t, err)
+		format, err := req.ResolveCredentialFormatWithAuthDetails(metadata, authDetails)
+		require.NoError(t, err)
+		require.Equal(t, metadata.CredentialConfigurationsSupported[configID].Format, format)
+	})
+
+	t.Run("an unresolvable identifier is an error, not an empty string", func(t *testing.T) {
+		req := &CredentialRequest{CredentialIdentifier: "no-such-identifier"}
+		_, err := req.ResolveCredentialConfigurationID(metadata, authDetails)
+		require.Error(t, err)
+	})
+}
