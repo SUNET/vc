@@ -1054,10 +1054,12 @@ gen-bootstrap: build-gen-bootstrap ## Generate bootstrapping JSON files from YAM
 	./bin/gen_bootstrap developer_tools/scripts/gen_bootstrap/users_paris.yaml bootstrapping
 
 # Fly environments that receive the bootstrap tree. gen_bootstrap writes the
-# gzipped files (see writeJSON); this target only copies them. The two env
-# trees are independent — restrict to one with FLY_ENV=dev (or demo) to sync
-# it without touching the other.
-FLY_BOOTSTRAP_ENVS := dev demo
+# gzipped files (see writeJSON); this target only copies them. Only dev reads
+# the .json.gz fixtures; demo's config still imports the plain .json files, so
+# syncing .gz into demo would refresh files it does not read while leaving the
+# ones it does read stale. Keep demo out until its config is migrated to
+# .json.gz. Override per-run with FLY_ENV=dev.
+FLY_BOOTSTRAP_ENVS := dev
 
 fly-sync-bootstrap: gen-bootstrap ## Sync bootstrapping/*.gz into each fly env (FLY_ENV=dev|demo to restrict)
 	@envs="$(or $(FLY_ENV),$(FLY_BOOTSTRAP_ENVS))"; \

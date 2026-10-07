@@ -108,6 +108,14 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 		}
 
 		if err := dbService.DatastoreColl.Save(ctx, doc); err != nil {
+			// A concurrent importer may have inserted the same natural key
+			// between the presence check and this Save. Re-check: if the
+			// document exists now, a losing racer counts it as skipped instead
+			// of aborting the whole import and leaving later fixtures unprocessed.
+			if nowPresent, lookupErr := documentPresent(ctx, dbService.DatastoreColl, doc.Meta); lookupErr == nil && nowPresent {
+				skipped++
+				continue
+			}
 			return fmt.Errorf("save document %s/%s: %w", name, id, err)
 		}
 		imported++
