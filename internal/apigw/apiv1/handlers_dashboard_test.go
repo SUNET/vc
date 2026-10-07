@@ -152,15 +152,15 @@ func TestDashboardURLAllowed(t *testing.T) {
 		url     string
 		allowed bool
 	}{
-		{"https://issuer.example.com/health", true},                // exact JSON link
-		{"https://issuer.example.com/health?ts=1", true},           // query ignored
-		{"https://other.example.com/foo", true},                    // exact JSON link on other host
-		{"https://issuer.example.com/anything", false},             // path not advertised
-		{"https://issuer.example.com/ui", false},                   // page link, not json
-		{"https://issuer.example.com/metrics", false},              // unadvertised path on allowed host
-		{"https://other.example.com/anything", false},              // unadvertised path on allowed host
-		{"https://evil.example.com/foo", false},                    // unknown host
-		{"http://issuer.example.com/health", false},                // scheme mismatch
+		{"https://issuer.example.com/health", true},      // exact JSON link
+		{"https://issuer.example.com/health?ts=1", true}, // query ignored
+		{"https://other.example.com/foo", true},          // exact JSON link on other host
+		{"https://issuer.example.com/anything", false},   // path not advertised
+		{"https://issuer.example.com/ui", false},         // page link, not json
+		{"https://issuer.example.com/metrics", false},    // unadvertised path on allowed host
+		{"https://other.example.com/anything", false},    // unadvertised path on allowed host
+		{"https://evil.example.com/foo", false},          // unknown host
+		{"http://issuer.example.com/health", false},      // scheme mismatch
 	}
 	for _, tc := range cases {
 		t.Run(tc.url, func(t *testing.T) {
@@ -251,37 +251,37 @@ func TestClassifyHealthBody(t *testing.T) {
 		msgSubs string
 	}{
 		{
-			name: "unhealthy probe on 200",
+			name:   "unhealthy probe on 200",
 			status: 200,
 			body:   `{"data":{"status":"STATUS_FAIL_verifier","probes":[{"name":"verifier.db","healthy":false,"message":"connection refused"}]}}`,
 			want:   "unhealthy", msgSubs: "connection refused",
 		},
 		{
-			name: "all probes healthy on 200",
+			name:   "all probes healthy on 200",
 			status: 200,
 			body:   `{"data":{"status":"STATUS_OK_verifier","probes":[{"name":"verifier.db","healthy":true}]}}`,
 			want:   "healthy",
 		},
 		{
-			name: "non-2xx overrides body",
+			name:   "non-2xx overrides body",
 			status: 503,
 			body:   `{"data":{"status":"STATUS_OK_verifier"}}`,
 			want:   "unhealthy", msgSubs: "HTTP 503",
 		},
 		{
-			name: "empty payload falls back to 2xx=healthy",
+			name:   "empty payload falls back to 2xx=healthy",
 			status: 200,
 			body:   `{}`,
 			want:   "healthy",
 		},
 		{
-			name: "non-JSON 2xx body falls back to healthy",
+			name:   "non-JSON 2xx body falls back to healthy",
 			status: 200,
 			body:   `OK`,
 			want:   "healthy",
 		},
 		{
-			name: "status FAIL rollup with no probes still unhealthy",
+			name:   "status FAIL rollup with no probes still unhealthy",
 			status: 200,
 			body:   `{"data":{"status":"STATUS_FAIL_verifier"}}`,
 			want:   "unhealthy", msgSubs: "STATUS_FAIL_verifier",

@@ -714,6 +714,22 @@ func cleanFieldDesc(line, goName string) string {
 	return line
 }
 
+// fenceEdge handles a ``` line and the blank lines gofmt insists on putting
+// just inside it. Those blanks are the Go comment's punctuation, not the
+// example's, so they are dropped rather than rendered inside the block.
+func fenceEdge(extra []string, opening bool) []string {
+	if !opening && len(extra) > 0 && extra[len(extra)-1] == "" {
+		extra = extra[:len(extra)-1]
+	}
+	return extra
+}
+
+// structDescription renders a struct's doc comment as the section preamble.
+//
+// Lines reflow as markdown, EXCEPT inside a ``` fenced block, where the
+// indentation is the content - a YAML example flattened to column zero is not
+// an example of anything. See IssuancePolicy, whose policy has to be shown as
+// rules and query_template together to be a configuration at all.
 func structDescription(def *StructDef) string {
 	if def == nil || def.Doc == "" {
 		return ""
@@ -730,8 +746,27 @@ func structDescription(def *StructDef) string {
 	}
 	var extra []string
 	pastBlank := false
-	for _, l := range lines[1:] {
-		l = strings.TrimSpace(l)
+	inFence, skipBlank := false, false
+	for _, raw := range lines[1:] {
+		l := strings.TrimSpace(raw)
+		// Inside a fenced block the indentation IS the content, so the
+		// line is taken as written. Go doc comments indent an example by
+		// one tab; that tab is the comment's, not the example's.
+		if strings.HasPrefix(l, "```") {
+			inFence = !inFence
+			pastBlank = true
+			extra = append(fenceEdge(extra, inFence), l)
+			skipBlank = inFence
+			continue
+		}
+		if inFence {
+			if skipBlank && l == "" {
+				continue
+			}
+			skipBlank = false
+			extra = append(extra, strings.TrimPrefix(raw, "\t"))
+			continue
+		}
 		if l == "" {
 			pastBlank = true
 			if len(extra) > 0 {
@@ -758,8 +793,23 @@ func structDescriptionExtra(def *StructDef) string {
 		return ""
 	}
 	var extra []string
-	for _, l := range lines[1:] {
-		l = strings.TrimSpace(l)
+	inFence, skipBlank := false, false
+	for _, raw := range lines[1:] {
+		l := strings.TrimSpace(raw)
+		if strings.HasPrefix(l, "```") {
+			inFence = !inFence
+			extra = append(fenceEdge(extra, inFence), l)
+			skipBlank = inFence
+			continue
+		}
+		if inFence {
+			if skipBlank && l == "" {
+				continue
+			}
+			skipBlank = false
+			extra = append(extra, strings.TrimPrefix(raw, "\t"))
+			continue
+		}
 		if l == "" {
 			if len(extra) > 0 {
 				extra = append(extra, "")

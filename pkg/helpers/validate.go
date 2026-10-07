@@ -3,6 +3,7 @@ package helpers
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -17,6 +18,7 @@ import (
 	"github.com/SUNET/vc/pkg/credential/primitives"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sqlstore"
 	"github.com/SUNET/vc/pkg/trace"
@@ -24,6 +26,12 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/kaptinlin/jsonschema"
 )
+
+// spocpDimensionPattern is the shape of a SPOCP dimension name: a letter,
+// then letters, digits, underscores or hyphens. Deliberately narrower than
+// "anything without whitespace" so a name is written exactly one way in both
+// the query and the rule file that has to match it.
+var spocpDimensionPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 
 // NewValidator creates a new validator
 func NewValidator() (*validator.Validate, error) {
@@ -119,6 +127,84 @@ func NewValidator() (*validator.Validate, error) {
 		}
 
 		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for spocp_dimension - a SPOCP dimension
+	// name as written in a rule: a letter, then letters, digits, underscores
+	// or hyphens.
+	//
+	// These names are not free text. They are emitted into the query
+	// S-expression and have to be matched by name in a rule file, so a name
+	// carrying whitespace or punctuation is either unwritable there or
+	// writable in more than one way. The concrete hazard is the near-miss:
+	// " scope" is not equal to "scope", so it passes the reserved-name check
+	// that keeps operators from restating the auto-populated dimension,
+	// while still producing a rule shape no query matches.
+	err = validate.RegisterValidation("spocp_dimension", func(fl validator.FieldLevel) bool {
+		return spocpDimensionPattern.MatchString(fl.Field().String())
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for https_endpoint - a server-side endpoint,
+	// configured by the operator, that must be reached over TLS.
+	//
+	// Deliberately not httpsurl. That one is for URIs supplied by a
+	// registering client, so besides the scheme it resolves the host and
+	// refuses private/loopback addresses, to stop an outsider aiming the
+	// server at its own network. These URLs come from the deployment's own
+	// config file, where an in-cluster issuer on a private address is the
+	// normal case and not an attack, and where resolving at startup would
+	// make config validation fail whenever DNS happens to be unavailable.
+	//
+	// The scheme is what cannot be relaxed: the endpoint behind such a URL
+	// supplies the keys a token is judged against, so over plaintext anyone
+	// on the path chooses those keys and the signature check proves nothing.
+	err = validate.RegisterValidation("https_endpoint", func(fl validator.FieldLevel) bool {
+		urlStr := fl.Field().String()
+		if urlStr == "" {
+			return false
+		}
+
+		parsedURL, err := url.Parse(urlStr)
+		if err != nil {
+			return false
+		}
+
+		if !strings.EqualFold(parsedURL.Scheme, "https") {
+			return false
+		}
+
+		// Hostname(), not Host. Host keeps the port, so "https://:443/jwks"
+		// has a non-empty Host and no host at all - the service then starts
+		// on a URL nothing can be fetched from and fails at request time
+		// instead, which for the JWKS endpoint means a 503 per request
+		// rather than a configuration that is refused.
+		return parsedURL.Hostname() != ""
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Register custom validation for asymmetric_jws_alg - a JWS algorithm a
+	// PUBLIC key set can legitimately carry.
+	//
+	// The key set behind jwks_uri is published: anyone who can reach it has
+	// every key in it. That is fine for a public key and fatal for a shared
+	// secret - configure HS256 and point at a JWKS holding an `oct` key, and
+	// whoever reads the key set can mint registration tokens. "none" is the
+	// same hole without even the pretence of a key.
+	//
+	// An allowlist rather than a denylist of HS*/none: an algorithm this
+	// build does not recognise is one whose key model has not been thought
+	// about, and passing it straight through to go-oidc is how the symmetric
+	// family got in in the first place.
+	err = validate.RegisterValidation("asymmetric_jws_alg", func(fl validator.FieldLevel) bool {
+		return IsAsymmetricJWSAlg(fl.Field().String())
 	})
 	if err != nil {
 		return nil, err
@@ -254,14 +340,11 @@ func NewValidator() (*validator.Validate, error) {
 	// CredentialRequest.Validate() (pkg/openid4vci/credential.go), which
 	// reliably runs for this request instead.
 
-	// Register custom validation for safe_key - validates map keys used in MongoDB field paths.
-	// Only allows simple alphanumeric/underscore keys starting with a letter (max 64 chars).
-	// Prevents field-path injection via dots or MongoDB operator prefixes ($).
-	safeKeyRe := regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,63}$`)
-	err = validate.RegisterValidation("safe_key", func(fl validator.FieldLevel) bool {
-		return safeKeyRe.MatchString(fl.Field().String())
-	})
-	if err != nil {
+	// safe_key validates map keys that reach MongoDB field paths. Defined in
+	// pkg/openid4vci, which is below this package and where PARRequest is
+	// tagged with it, so the guard has one definition rather than a copy per
+	// validator.
+	if err := openid4vci.RegisterSafeKey(validate); err != nil {
 		return nil, err
 	}
 
@@ -425,9 +508,121 @@ func NewValidator() (*validator.Validate, error) {
 		}
 	}, model.VerificationPresetScope{})
 
+	// Register struct-level validation for IssuancePolicy: query_template
+	// must not restate the reserved "scope" dimension or repeat a name.
+	//
+	// A missing dimension or claim is a per-field requirement instead, and
+	// lives as a `required` tag on QueryDimension - that way the generated
+	// configuration reference reports the field as required, which it did
+	// not while this function was the only thing enforcing it.
+	//
+	// policyRuleDimensions prepends "scope" unconditionally (it is
+	// auto-populated with the credential type), so an operator who also
+	// lists it gets two "scope" dimensions in every rule shape - and rules
+	// that can then never match, which reads as a blanket deny with nothing
+	// in the config looking wrong. A repeated name has the same effect.
+	// Validated here rather than in NewPolicyEngine because that runs per
+	// OIDC callback behind a cache, so a failure there is a broken request
+	// rather than a refused start.
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		policy := sl.Current().Interface().(model.IssuancePolicy)
+
+		// A policy with rules must say which dimensions its queries carry.
+		// SPOCP matches rule dimensions to query dimensions by position, and
+		// the fallback this replaces built the query from whatever claims the
+		// token returned, in name order - so a rule naming two claims matched
+		// only if those two sorted ahead of every other claim present. Real ID
+		// tokens always carry aud, iss, nonce and sub, so such a policy denied
+		// every request while reading as a working configuration.
+		//
+		// NewPolicyEngine refuses the same thing, since it is the one place
+		// every path goes through; reported here too so the failure names the
+		// field rather than arriving as a policy-construction error.
+		if len(policy.QueryTemplate) == 0 && (len(policy.Rules) > 0 || strings.TrimSpace(policy.RulesFile) != "") {
+			sl.ReportError(policy.QueryTemplate, "QueryTemplate", "QueryTemplate", "query_template_required_with_rules", "")
+		}
+
+		seen := make(map[string]bool, len(policy.QueryTemplate))
+		for _, d := range policy.QueryTemplate {
+			// The dive tag already reports an entry with no dimension. An
+			// empty name cannot be reserved, and calling two of them
+			// duplicates of each other would only bury that report.
+			if strings.TrimSpace(d.Dimension) == "" {
+				continue
+			}
+			switch {
+			case d.Dimension == "scope":
+				sl.ReportError(policy.QueryTemplate, "QueryTemplate", "QueryTemplate", "query_template_scope_is_reserved", d.Dimension)
+			case seen[d.Dimension]:
+				sl.ReportError(policy.QueryTemplate, "QueryTemplate", "QueryTemplate", "query_template_duplicate_dimension", d.Dimension)
+			}
+			seen[d.Dimension] = true
+		}
+	}, model.IssuancePolicy{})
+
+	// Register struct-level validation for the three scope types: the two
+	// OIDC-only settings must not appear on a scope authenticated any other
+	// way.
+	//
+	// oidc_request_params customises the OIDC authorization request, and
+	// issuance_policy is evaluated in the OIDC callback. Neither has any
+	// effect on a saml, openid4vp or preauth scope, and nothing in the flow
+	// says so - for a policy that is the worst shape a security control can
+	// take: the configuration reads as a gate, passes validation, starts
+	// clean, and every credential goes out through a path that never consults
+	// it. Refused here rather than implemented elsewhere, because a gate that
+	// looks applied and is not is worse than one that was never offered.
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		scope := sl.Current().Interface().(model.DatastoreScope)
+		reportOIDCOnlyScopeFields(sl, scope.AuthProvider, scope.OIDCRequestParams, scope.IssuancePolicy)
+	}, model.DatastoreScope{})
+
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		scope := sl.Current().Interface().(model.AssertionScope)
+		reportOIDCOnlyScopeFields(sl, scope.AuthProvider, scope.OIDCRequestParams, scope.IssuancePolicy)
+	}, model.AssertionScope{})
+
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		scope := sl.Current().Interface().(model.ExternalAPIScope)
+		reportOIDCOnlyScopeFields(sl, scope.AuthProvider, scope.OIDCRequestParams, scope.IssuancePolicy)
+	}, model.ExternalAPIScope{})
+
+	// Register struct-level validation for DynamicRegistrationAuthConfig:
+	// auth settings must not be paired with an open mode.
+	//
+	// required_if already covers the other direction - mode static needs a
+	// token file, mode jwt needs a jwt block. This is the direction that
+	// fails open: mode defaults to "open", and the middleware returns a
+	// pass-through for "open" or empty without ever consulting the rest of
+	// the config. So an operator who writes a jwt: block and forgets
+	// mode: "jwt" gets dynamic client registration wide open, with their
+	// auth configuration present, ignored, and silent about it.
+	validate.RegisterStructValidation(func(sl validator.StructLevel) {
+		cfg := sl.Current().Interface().(model.DynamicRegistrationAuthConfig)
+		mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
+		if mode != "" && mode != "open" {
+			return
+		}
+		if cfg.JWT != nil {
+			sl.ReportError(cfg.JWT, "JWT", "JWT", "auth_config_requires_non_open_mode", mode)
+		}
+		// Not TrimSpace: the question here is whether the operator wrote
+		// the key, not whether what they wrote is usable. Trimming first
+		// made `static_bearer_token_file: " "` under the default mode look
+		// like an absent setting, so the one configuration this guard
+		// exists to catch - auth settings with no mode to activate them -
+		// slipped through and left /register open. The same value under
+		// mode: static is rejected outright, and an intent that fails one
+		// way must not pass the other.
+		if cfg.StaticBearerTokenFile != "" {
+			sl.ReportError(cfg.StaticBearerTokenFile, "StaticBearerTokenFile", "StaticBearerTokenFile", "auth_config_requires_non_open_mode", mode)
+		}
+	}, model.DynamicRegistrationAuthConfig{})
+
 	// Register struct-level validation for DataSources: openid4vp auth_scopes must not self-reference
 	validate.RegisterStructValidation(func(sl validator.StructLevel) {
 		ds := sl.Current().Interface().(model.DataSources)
+		validateScopeProviderUniqueness(sl, ds)
 		for scope, cred := range ds.Datastore.Scopes {
 			switch cred.AuthProvider {
 			case model.AuthProviderOpenID4VP:
@@ -581,4 +776,116 @@ func ValidateDocumentData(ctx context.Context, completeDocument *model.CompleteD
 	}
 
 	return nil
+}
+
+// reportOIDCOnlyScopeFields reports oidc_request_params or issuance_policy
+// present on a scope whose auth_provider is not oidc.
+//
+// Shared by all three scope types deliberately: the same two fields are
+// declared on each, and the rule that only the OIDC path reads them is a
+// property of the fields, not of the data source. One function so a fourth
+// scope type cannot quietly acquire the fields without the check.
+func reportOIDCOnlyScopeFields(sl validator.StructLevel, authProvider string, params *model.OIDCRequestParams, policy *model.IssuancePolicy) {
+	if strings.TrimSpace(strings.ToLower(authProvider)) == string(model.AuthProviderOIDC) {
+		return
+	}
+
+	if params != nil {
+		sl.ReportError(params, "OIDCRequestParams", "OIDCRequestParams", "oidc_only_scope_field", authProvider)
+	}
+	if policy != nil {
+		sl.ReportError(policy, "IssuancePolicy", "IssuancePolicy", "oidc_only_scope_field", authProvider)
+	}
+}
+
+// validateScopeProviderUniqueness refuses the same credential scope appearing
+// under the same auth_provider in more than one data source.
+//
+// One scope in several data sources is legitimate and documented - that is
+// what ResolveDataSource exists to disambiguate - but only when the providers
+// differ. With the same provider twice there is nothing to disambiguate with,
+// and two pieces of code then pick a winner independently:
+// LookupCredentialSources (which ResolveDataSource and the auth provider
+// Selector read) takes the first match in datastore/assertion/external_api
+// order, and LookupScopePolicyConfig does its own scan for the issuance policy
+// and OIDC request parameters. Keeping those two orders aligned makes them
+// agree today; it does not stop a third reader from disagreeing tomorrow, and
+// the failure mode is a credential issued from one entry while the gate that
+// governs it was read off another.
+//
+// So the ambiguity is removed rather than arbitrated. An operator who means
+// two different configurations for one scope has to say which provider each
+// belongs to, which is the only way the flow could have told them apart.
+func validateScopeProviderUniqueness(sl validator.StructLevel, ds model.DataSources) {
+	// scope -> provider -> data sources declaring it.
+	seen := map[string]map[string][]string{}
+
+	record := func(scope, provider, source string) {
+		provider = strings.ToLower(strings.TrimSpace(provider))
+		if provider == "" {
+			// An absent provider is the `required` tag's business; counting
+			// it here would report the same mistake twice.
+			return
+		}
+		if seen[scope] == nil {
+			seen[scope] = map[string][]string{}
+		}
+		seen[scope][provider] = append(seen[scope][provider], source)
+	}
+
+	for scope, cred := range ds.Datastore.Scopes {
+		record(scope, cred.AuthProvider, "datastore")
+	}
+	for scope, cred := range ds.Assertion.Scopes {
+		record(scope, cred.AuthProvider, "assertion")
+	}
+	for scope, cred := range ds.ExternalAPI.Scopes {
+		record(scope, cred.AuthProvider, "external_api")
+	}
+
+	// Sorted so the reported order does not depend on map iteration.
+	scopes := slices.Sorted(maps.Keys(seen))
+	for _, scope := range scopes {
+		providers := slices.Sorted(maps.Keys(seen[scope]))
+		for _, provider := range providers {
+			sources := seen[scope][provider]
+			if len(sources) < 2 {
+				continue
+			}
+			slices.Sort(sources)
+			sl.ReportError(ds, "Scopes", "Scopes", "scope_provider_not_unique",
+				fmt.Sprintf("%s/%s in %s", scope, provider, strings.Join(sources, ", ")))
+		}
+	}
+}
+
+// IsAsymmetricJWSAlg reports whether a JWS "alg" is one a PUBLIC key set can
+// legitimately carry - see the asymmetric_jws_alg validator above for why
+// that matters, and why this is an allowlist rather than a denylist of
+// HS*/none.
+//
+// Exported because the verifier's JWKS handling has to ask the same question
+// of a key set it just fetched, and two copies of this list would drift.
+func IsAsymmetricJWSAlg(alg string) bool {
+	switch alg {
+	case "RS256", "RS384", "RS512",
+		"PS256", "PS384", "PS512",
+		"ES256", "ES384", "ES512",
+		"EdDSA":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsAsymmetricJWKType reports whether a JWK "kty" names a key with a public
+// half. "oct" - a shared secret - does not, and is the thing that must never
+// be served from a published key set.
+func IsAsymmetricJWKType(kty string) bool {
+	switch kty {
+	case "RSA", "EC", "OKP":
+		return true
+	default:
+		return false
+	}
 }

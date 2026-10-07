@@ -83,7 +83,7 @@ func ExampleClients_Allow() {
 	fmt.Println("disallowed scope:", err)
 	// Output:
 	// allowed type: public
-	// disallowed scope: requested scope is not allowed for this client
+	// disallowed scope: scope "admin" is not allowed for client "wallet-app" (allowed: openid, pid)
 }
 
 func ExampleDPoP_ValidateJTI() {

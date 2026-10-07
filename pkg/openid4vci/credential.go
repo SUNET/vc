@@ -428,18 +428,60 @@ func (req *CredentialRequest) ResolveCredentialFormat(metadata *CredentialIssuer
 // When credential_identifier is used, the authorizationDetails from the token response
 // are needed to map the identifier to a credential_configuration_id.
 func (req *CredentialRequest) ResolveCredentialFormatWithAuthDetails(metadata *CredentialIssuerMetadataParameters, authorizationDetails []AuthorizationDetailsParameter) (string, error) {
+	selection, err := req.resolveCredentialSelection(metadata, authorizationDetails)
+	if err != nil {
+		return "", err
+	}
+	return selection.Format, nil
+}
+
+// ResolveCredentialConfigurationID returns the credential configuration the
+// request selected, by whichever of the two mechanisms it used.
+//
+// Separate from the format because a caller that has to build the credential
+// needs to know WHICH configuration was chosen, not merely what shape it is.
+// With credential_identifier, req.CredentialConfigurationID is empty and the
+// id lives in the authorization_details the token response returned - so a
+// caller reading the request field alone silently falls back to something
+// else (an authorised scope, say) and issues a credential the identifier did
+// not select.
+//
+// Empty with no error is a real answer: a format-based authorization_details
+// entry (OID4VCI 5.1.1) names a format and no configuration at all, so there
+// is no configuration id to return and the caller must fall back on purpose
+// rather than by accident.
+func (req *CredentialRequest) ResolveCredentialConfigurationID(metadata *CredentialIssuerMetadataParameters, authorizationDetails []AuthorizationDetailsParameter) (string, error) {
+	selection, err := req.resolveCredentialSelection(metadata, authorizationDetails)
+	if err != nil {
+		return "", err
+	}
+	return selection.ConfigurationID, nil
+}
+
+// credentialSelection is what a request picked out of the issuer's metadata.
+type credentialSelection struct {
+	// ConfigurationID is the credential_configuration_id, empty when the
+	// request was authorised by format rather than by configuration.
+	ConfigurationID string
+	// Format is always present.
+	Format string
+}
+
+// resolveCredentialSelection does the lookup once, so the format and the
+// configuration id can never disagree about which entry was chosen.
+func (req *CredentialRequest) resolveCredentialSelection(metadata *CredentialIssuerMetadataParameters, authorizationDetails []AuthorizationDetailsParameter) (credentialSelection, error) {
 	if metadata == nil {
-		return "", fmt.Errorf("metadata is required")
+		return credentialSelection{}, fmt.Errorf("metadata is required")
 	}
 
 	// Use credential_configuration_id to look up the format from issuer metadata
 	if req.CredentialConfigurationID != "" {
 		if metadata.CredentialConfigurationsSupported != nil {
 			if config, ok := metadata.CredentialConfigurationsSupported[req.CredentialConfigurationID]; ok {
-				return config.Format, nil
+				return credentialSelection{ConfigurationID: req.CredentialConfigurationID, Format: config.Format}, nil
 			}
 		}
-		return "", &Error{Err: ErrUnknownCredentialConfiguration, ErrorDescription: fmt.Sprintf("unknown credential_configuration_id: %s", req.CredentialConfigurationID)}
+		return credentialSelection{}, &Error{Err: ErrUnknownCredentialConfiguration, ErrorDescription: fmt.Sprintf("unknown credential_configuration_id: %s", req.CredentialConfigurationID)}
 	}
 
 	// Use credential_identifier to look up the format via authorization_details.
@@ -449,22 +491,22 @@ func (req *CredentialRequest) ResolveCredentialFormatWithAuthDetails(metadata *C
 		for _, ad := range authorizationDetails {
 			if slices.Contains(ad.CredentialIdentifiers, req.CredentialIdentifier) {
 				// Format-based authorization_details: the entry carries Format directly
-				// instead of CredentialConfigurationID (OID4VCI §5.1.1).
+				// instead of CredentialConfigurationID (OID4VCI 5.1.1).
 				if ad.CredentialConfigurationID == "" && ad.Format != "" {
-					return ad.Format, nil
+					return credentialSelection{Format: ad.Format}, nil
 				}
 				if metadata.CredentialConfigurationsSupported != nil {
 					if config, ok := metadata.CredentialConfigurationsSupported[ad.CredentialConfigurationID]; ok {
-						return config.Format, nil
+						return credentialSelection{ConfigurationID: ad.CredentialConfigurationID, Format: config.Format}, nil
 					}
 				}
-				return "", &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("credential_configuration_id %q from authorization_details not found in issuer metadata", ad.CredentialConfigurationID)}
+				return credentialSelection{}, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: fmt.Sprintf("credential_configuration_id %q from authorization_details not found in issuer metadata", ad.CredentialConfigurationID)}
 			}
 		}
-		return "", &Error{Err: ErrUnknownCredentialIdentifier, ErrorDescription: fmt.Sprintf("could not resolve credential_identifier %q to a credential configuration", req.CredentialIdentifier)}
+		return credentialSelection{}, &Error{Err: ErrUnknownCredentialIdentifier, ErrorDescription: fmt.Sprintf("could not resolve credential_identifier %q to a credential configuration", req.CredentialIdentifier)}
 	}
 
-	return "", &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "either credential_configuration_id or credential_identifier must be provided"}
+	return credentialSelection{}, &Error{Err: ErrInvalidCredentialRequest, ErrorDescription: "either credential_configuration_id or credential_identifier must be provided"}
 }
 
 // validateBBS checks the blind-BBS members of a credential request.

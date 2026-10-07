@@ -788,6 +788,24 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 	// Validate and parse VP token
 	c.log.Debug("Processing VP token", "state", state, "vp_token_length", len(vpToken))
 
+	// Every W3C VC 2.0 document in the response is VERIFIED before any claim
+	// in it is read.
+	//
+	// This flow verifies nothing for any format, which is a gap of its own -
+	// but it is not a licence to add another unverified one. Making W3C
+	// usable here means an arbitrary JSON-LD document would otherwise have
+	// its credentialSubject mapped into the session, with nothing checking
+	// who signed it or whether the holder was present.
+	//
+	// Unconditional rather than gated on detectCredentialFormat: a DCQL
+	// response is a JSON object too, so that detector calls the ENVELOPE a
+	// W3C credential. verifyVC20ForOIDC asks which documents are actually in
+	// there and does nothing when the answer is none.
+	if err := c.verifyVC20ForOIDC(ctx, session, vpToken); err != nil {
+		c.log.Error(err, "W3C VC verification failed on the OIDC direct-post path", "state", state)
+		return nil, ErrInvalidVP
+	}
+
 	// Extract and map claims from VP token
 	oidcClaims, err := c.extractAndMapClaims(ctx, vpToken, strings.Join(session.Scopes, " "))
 	if err != nil {

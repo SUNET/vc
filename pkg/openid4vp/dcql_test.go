@@ -615,3 +615,118 @@ func TestCredentialQueryRequireCryptographicHolderBindingTriState(t *testing.T) 
 		})
 	}
 }
+
+// TestValidateCredentialQuery_VCLDJSON covers a review finding: vc+ld+json is
+// issued by this repo (handlers_issuer.go routes it to issueVC20 alongside
+// ldp_vc) and DCQLMetaQuery treats it as W3C, but the shared format checks did
+// not - so a query in that format skipped the type_values requirement the other
+// two W3C formats are held to, and an unconstrained one passed validation.
+func TestValidateCredentialQuery_VCLDJSON(t *testing.T) {
+	assert.True(t, IsW3CVCFormatIdentifier(FormatVCLDJSON))
+
+	err := ValidateCredentialQuery(CredentialQuery{
+		ID:     "diploma",
+		Format: FormatVCLDJSON,
+	})
+	require.Error(t, err, "a W3C query with no type_values must be rejected")
+	assert.Contains(t, err.Error(), "type_values")
+
+	// Fully expanded IRIs, as MetaQuery.TypeValues documents and
+	// MatchTypeValues compares against - not the compact terms OID4VCI's
+	// credential_definition.type uses. A positive case written with compact
+	// terms would bless the representation a wallet cannot match.
+	assert.NoError(t, ValidateCredentialQuery(CredentialQuery{
+		ID:     "diploma",
+		Format: FormatVCLDJSON,
+		Meta: MetaQuery{TypeValues: [][]string{{
+			"https://www.w3.org/2018/credentials#VerifiableCredential",
+			"https://example.org/diploma#DiplomaCredential",
+		}}},
+	}))
+}
+
+// TestValidateCredentialQueryRejectsUnconstrainedTypes covers the alternatives
+// that look like a constraint and are not.
+//
+// MatchTypeValues reads an empty alternative as satisfied by any credential,
+// and one satisfied alternative answers the whole constraint - so [[]] is an
+// unconstrained request wearing a constraint's shape. An alternative naming
+// only VerifiableCredential is the same defect one step along: every W3C
+// credential carries it.
+//
+// CredentialMetadata.w3cTypeValues already refuses both on the config path.
+// This validator is where templates and API-supplied queries arrive, and they
+// never pass through config validation.
+func TestValidateCredentialQueryRejectsUnconstrainedTypes(t *testing.T) {
+	base := []string{BaseVCTypeIRI}
+	narrowing := []string{BaseVCTypeIRI, "https://example.org/diploma#DiplomaCredential"}
+
+	for _, format := range []string{"ldp_vc", FormatVCLDJSON} {
+		t.Run(format, func(t *testing.T) {
+			refused := [][][]string{
+				{{}},              // empty alternative
+				{base},            // base type only
+				{narrowing, {}},   // one real alternative beside an empty one
+				{narrowing, base}, // one real alternative beside a base-only one
+				{{""}},            // an empty string is not a type
+				// A compact term in the expanded field narrows nothing:
+				// type_values are matched as fully expanded IRIs, and the
+				// verifier drops relative IRIs from the credential side too.
+				{{BaseVCTypeIRI, "DiplomaCredential"}},
+				{{"DiplomaCredential"}},
+			}
+			for _, typeValues := range refused {
+				err := ValidateCredentialQuery(CredentialQuery{
+					ID: "diploma", Format: format,
+					Meta: MetaQuery{TypeValues: typeValues},
+				})
+				require.Error(t, err, "%v must be refused", typeValues)
+				assert.Contains(t, err.Error(), "type_values")
+			}
+
+			assert.NoError(t, ValidateCredentialQuery(CredentialQuery{
+				ID: "diploma", Format: format,
+				Meta: MetaQuery{TypeValues: [][]string{narrowing}},
+			}), "an alternative that actually narrows is fine")
+		})
+	}
+}
+
+// TestValidateCredentialQueryRefusesUnrequestableFormats pins the formats that
+// are advertised in issuer metadata but cannot be answered.
+//
+// Nothing issues either, and a compact JWT-VC is read as SD-JWT by the
+// verifier, so it would be verified under the wrong credential model. They
+// have to be refused HERE rather than dropped to the default branch, which
+// allows an unrecognised format through without validating it at all -
+// UIInteraction calls this on the live ingress.
+func TestValidateCredentialQueryRefusesUnrequestableFormats(t *testing.T) {
+	for _, format := range []string{FormatJwtVCJson, "jwt_vc_json-ld"} {
+		t.Run(format, func(t *testing.T) {
+			err := ValidateCredentialQuery(CredentialQuery{
+				ID: "diploma", Format: format,
+				Meta: MetaQuery{TypeValues: [][]string{{BaseVCTypeIRI, "https://example.org/diploma#DiplomaCredential"}}},
+			})
+			require.Error(t, err, "a well-formed query in an unrequestable format must still be refused")
+			assert.Contains(t, err.Error(), "not requestable")
+		})
+	}
+}
+
+// TestValidateCredentialQueryTreatsEmptyFormatAsSDJWT pins the empty format.
+//
+// Format's zero value means dc+sd-jwt everywhere that decides what a format
+// means - DCQLMetaQuery, the UI builder, the verifier's format check - so the
+// validator has to agree. Falling through to the permissive default let a
+// query with no format and no vct_values through unconstrained, and it was
+// then treated as SD-JWT by everything downstream.
+func TestValidateCredentialQueryTreatsEmptyFormatAsSDJWT(t *testing.T) {
+	err := ValidateCredentialQuery(CredentialQuery{ID: "pid", Format: ""})
+	require.Error(t, err, "an empty format is SD-JWT, which requires vct_values")
+	assert.Contains(t, err.Error(), "vct_values")
+
+	assert.NoError(t, ValidateCredentialQuery(CredentialQuery{
+		ID: "pid", Format: "",
+		Meta: MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}},
+	}), "and it is satisfied the same way SD-JWT is")
+}
