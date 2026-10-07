@@ -211,12 +211,20 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 
 // VCICredential implements OpenID4VCI credential issuance endpoint
 //
+// The two media types are the two halves of §8.3. A request may arrive as
+// application/jwt - a JWE encrypted to a key from
+// credential_request_encryption.jwks - and a response is returned as
+// application/jwt whenever the request carried
+// credential_response_encryption. A generated client that only knows about
+// application/json cannot find the encrypted path, and will reject the
+// response to a request that asked for one.
+//
 //	@Summary		VCICredential
 //	@ID				create-credential
-//	@Description	Create credential endpoint
+//	@Description	Create credential endpoint. Accepts a plain JSON Credential Request, or an OpenID4VCI 1.0 section 8.3 encrypted Credential Request as a JWE (application/jwt). Returns the Credential Response as JSON, or as a JWE (application/jwt) when the request supplied credential_response_encryption.
 //	@Tags			vc-platform
-//	@Accept			json
-//	@Produce		json
+//	@Accept			json,application/jwt
+//	@Produce		json,application/jwt
 //	@Success		200	{object}	apiv1_issuer.MakeSDJWTReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		openid4vci.CredentialRequest	true	" "
@@ -957,6 +965,30 @@ func convertJWKToCOSEKey(jwk *apiv1_issuer.Jwk) ([]byte, error) {
 
 // VCIDeferredCredential implements OpenID4VCI deferred credential endpoint
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-deferred-credential-endpoin
+//
+// Carries the same two media types as VCICredential, for the same reason.
+// §9.1 is explicit that the encryption parameters used are the ones in THIS
+// request, regardless of what the initial Credential Request sent, so a
+// client has to be able to see them here.
+//
+// The annotations describe what this endpoint does, which today is answer
+// 501: the body below is a stub, and the HTTP handler turns its nil reply
+// into a refusal rather than a 200 with nothing in it. Documenting the
+// Credential Response it will eventually return would advertise a success a
+// client cannot reach, which is the failure this whole PR is about - the
+// published contract and the endpoint saying different things. The success
+// response goes in when deferred issuance does.
+//
+//	@Summary		VCIDeferredCredential
+//	@ID				create-deferred-credential
+//	@Description	Deferred credential endpoint, per OpenID4VCI 1.0 section 9. NOT IMPLEMENTED: this Credential Issuer parses and validates the request - including an OpenID4VCI 1.0 section 8.3 encrypted one sent as a JWE (application/jwt), and the credential_response_encryption parameters in it - and then answers 501. No Credential Response is returned by this endpoint today.
+//	@Tags			vc-platform
+//	@Accept			json,application/jwt
+//	@Produce		json
+//	@Failure		400	{object}	helpers.ErrorResponse					"Bad Request - the request, or its encryption parameters, could not be accepted"
+//	@Failure		501	{object}	helpers.ErrorResponse					"Not Implemented - deferred credential issuance is not available from this Credential Issuer"
+//	@Param			req	body		openid4vci.DeferredCredentialRequest	true	" "
+//	@Router			/deferred_credential [post]
 func (c *Client) VCIDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error) {
 	c.log.Debug("deferred credential", "req", req)
 	if c.vciMetrics != nil {

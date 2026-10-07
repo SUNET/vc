@@ -26,6 +26,9 @@ type CredentialIssuerMetadataParameters struct {
 	// NotificationEndpoint: OPTIONAL. URL of the Credential Issuer's Notification Endpoint, as defined in Section 11. This URL MUST use the https scheme and MAY contain port, path, and query parameter components. If omitted, the Credential Issuer does not support the Notification Endpoint.
 	NotificationEndpoint string `json:"notification_endpoint,omitempty" yaml:"notification_endpoint,omitempty"`
 
+	// CredentialRequestEncryption: OPTIONAL. Object containing information about whether the Credential Issuer supports encryption of the Credential Request on top of TLS.
+	CredentialRequestEncryption *MetadataCredentialRequestEncryption `json:"credential_request_encryption,omitempty" yaml:"credential_request_encryption" validate:"omitempty"`
+
 	// CredentialResponseEncryption: OPTIONAL. Object containing information about whether the Credential Issuer supports encryption of the Credential Response on top of TLS.
 	CredentialResponseEncryption *MetadataCredentialResponseEncryption `json:"credential_response_encryption,omitempty" yaml:"credential_response_encryption" validate:"omitempty"`
 
@@ -82,7 +85,30 @@ type MetadataCredentialResponseEncryption struct {
 	// EncValuesSupported: REQUIRED. Array containing a list of the JWE [RFC7516] encryption algorithms (enc values) [RFC7518] supported by the Credential and Batch Credential Endpoint to encode the Credential or Batch Credential Response in a JWT [RFC7519].
 	EncValuesSupported []string `json:"enc_values_supported" yaml:"enc_values_supported" validate:"required"`
 
+	// ZipValuesSupported: OPTIONAL. A non-empty array containing a list of the JWE [RFC7516] compression algorithms (zip values) [RFC7518] supported by the Credential Endpoint to compress the Credential Response prior to encryption. If absent then compression is not supported.
+	ZipValuesSupported []string `json:"zip_values_supported,omitempty" yaml:"zip_values_supported,omitempty"`
+
 	// EncryptionRequired: REQUIRED. Boolean value specifying whether the Credential Issuer requires the additional encryption on top of TLS for the Credential Response. If the value is true, the Credential Issuer requires encryption for every Credential Response and therefore the Wallet MUST provide encryption keys in the Credential Request. If the value is false, the Wallet MAY chose whether it provides encryption keys or not.
+	EncryptionRequired bool `json:"encryption_required" yaml:"encryption_required"`
+}
+
+// MetadataCredentialRequestEncryption is the credential_request_encryption
+// object of the Credential Issuer Metadata (OpenID4VCI 1.0 §12.2.4): what a
+// wallet needs in order to encrypt a Credential Request to this issuer.
+type MetadataCredentialRequestEncryption struct {
+	// JWKS: REQUIRED. A JSON Web Key Set containing one or more public keys,
+	// to be used by the Wallet as an input to a key agreement for encryption
+	// of the Credential Request. Each JWK in the set MUST have a kid that
+	// uniquely identifies the key.
+	JWKS json.RawMessage `json:"jwks" yaml:"jwks"`
+
+	// EncValuesSupported: REQUIRED. A non-empty array of the JWE enc algorithms supported by the Credential Endpoint to decode the Credential Request.
+	EncValuesSupported []string `json:"enc_values_supported" yaml:"enc_values_supported"`
+
+	// ZipValuesSupported: OPTIONAL. A non-empty array of the JWE zip algorithms supported by the Credential Endpoint to uncompress the Credential Request after decryption. If absent then no compression algorithms are supported.
+	ZipValuesSupported []string `json:"zip_values_supported,omitempty" yaml:"zip_values_supported,omitempty"`
+
+	// EncryptionRequired: REQUIRED. Boolean value specifying whether the Credential Issuer requires the additional encryption on top of TLS for the Credential Requests.
 	EncryptionRequired bool `json:"encryption_required" yaml:"encryption_required"`
 }
 

@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"crypto"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -1448,8 +1449,22 @@ type IssuerMetadata struct {
 	// Set ["jwt"] for such a deployment, and remove the setting once the
 	// wallet catches up.
 	ProofTypesSupported []string `yaml:"proof_types_supported" validate:"omitempty,dive,oneof=jwt attestation"`
-	// CredentialResponseEncryption holds the response encryption configuration
+	// CredentialResponseEncryption is no longer written by hand.
+	//
+	// It used to let an operator state the algorithms this issuer would accept
+	// for an encrypted Credential Response - which nothing implemented, so the
+	// metadata asserted a capability the Credential Endpoint did not have.
+	// Both encryption objects are now derived from CredentialEncryption below,
+	// from keys that have actually been loaded, so the metadata and the
+	// endpoint cannot say different things.
+	//
+	// Config load refuses a deployment that still sets this, rather than
+	// ignoring it: silently dropping an operator's encryption settings is
+	// exactly the failure this replaces. See SUNET/vc#707.
 	CredentialResponseEncryption *openid4vci.MetadataCredentialResponseEncryption `yaml:"credential_response_encryption" validate:"omitempty"`
+	// CredentialEncryption configures JWE encryption of Credential and
+	// Deferred Credential messages.
+	CredentialEncryption CredentialEncryption `yaml:"credential_encryption" validate:"omitempty"`
 	// BatchCredentialIssuance holds the batch issuance configuration
 	BatchCredentialIssuance *openid4vci.BatchCredentialIssuance `yaml:"batch_credential_issuance" validate:"omitempty"`
 	// Display holds the display metadata
@@ -1474,6 +1489,155 @@ type IssuerMetadata struct {
 	// still reads signed_metadata out of the JSON, and expect to turn it off
 	// again once it can send an Accept header instead. See SUNET/vc#708.
 	IncludeSignedMetadataInJSON *bool `yaml:"include_signed_metadata_in_json" default:"false"`
+}
+
+// CredentialEncryption configures JWE encryption of the Credential endpoints.
+//
+// Per OpenID4VCI 1.0 §8.3 and §12.2.4, for both the Credential and the
+// Deferred Credential messages.
+//
+// With no key configured, neither credential_request_encryption nor
+// credential_response_encryption appears in the issuer metadata and the
+// Credential Endpoint refuses an encrypted request - an issuer that cannot
+// do this says so by staying silent, rather than by advertising it and
+// failing later.
+type CredentialEncryption struct {
+	// Keys are this Credential Issuer's key-agreement keys. Their public
+	// halves are published in credential_request_encryption.jwks, each with a
+	// kid derived as its RFC 7638 thumbprint, so rotation is adding a key,
+	// waiting for cached metadata to expire, and removing the old one.
+	//
+	// Each key is a P-256 key held either in a PEM file or in a PKCS#11
+	// token. The type is deliberately narrower than pki.KeyConfig: this is
+	// a key-agreement key, not a signing key, so the curve is fixed by the
+	// one algorithm pair §8.3 is implemented for here (ECDH-ES+A256KW with
+	// A256GCM).
+	Keys []CredentialEncryptionKey `yaml:"keys" validate:"omitempty,dive"`
+
+	// RequestEncryptionRequired publishes
+	// credential_request_encryption.encryption_required. When true, a
+	// Credential Request that arrives unencrypted is refused.
+	//
+	// False by default: turning the key on should not break every wallet that
+	// does not do JWE on the same day.
+	RequestEncryptionRequired *bool `yaml:"request_encryption_required" default:"false"`
+
+	// ResponseEncryptionRequired publishes
+	// credential_response_encryption.encryption_required. When true, a
+	// Credential Request without credential_response_encryption is refused.
+	//
+	// False by default, for the same reason.
+	ResponseEncryptionRequired *bool `yaml:"response_encryption_required" default:"false"`
+
+	// loaded memoizes Load, so the issuer metadata and the Credential
+	// Endpoint cannot end up holding different keys. They load at different
+	// points in startup, and a secret rotated between those two moments
+	// would otherwise publish one public key while the endpoint kept the
+	// matching private half of another - every JWE a wallet built from the
+	// metadata would then be undecryptable.
+	//
+	// No lock: every caller is on the startup path, which is sequential, and
+	// a mutex here would make this struct uncopyable for no gain.
+	loaded    *openid4vci.CredentialEncryption
+	loadedErr error
+	didLoad   bool
+}
+
+// CredentialEncryptionKey is one of this issuer's key-agreement keys.
+//
+// The key is held either in a PEM file or in a PKCS#11 token, and exactly
+// one of private_key_path and pkcs11 must be set. That is checked
+// when the keys are loaded rather than by a struct tag: the constraint is
+// "one of these two", which a tag states as required_without/excluded_with
+// and which the validator then reports in its own words, before the check
+// that can name both settings and say which combination was written.
+type CredentialEncryptionKey struct {
+	// PrivateKeyPath is the path to a PEM file holding an ECDSA P-256
+	// private key.
+	PrivateKeyPath string `yaml:"private_key_path" validate:"omitempty" doc_example:"\"/etc/vc/credential-encryption.pem\""`
+
+	// PKCS11 is an alternative to private_key_path: the key stays in an HSM,
+	// which performs the ECDH-ES key agreement with CKM_ECDH1_DERIVE. The
+	// key must be an EC P-256 private key with CKA_DERIVE set; it is found
+	// by key_label, and key_id is unused here (it names a JWT kid, and the
+	// kid of an encryption key is its RFC 7638 thumbprint).
+	//
+	// SECURITY: this keeps the long-term private key inside the token, but
+	// not the per-request shared secret. The derivation uses CKD_NULL, so
+	// the agreed secret Z is read back out of the token and the RFC 7518
+	// §4.6.2 Concat KDF, the AES key unwrap and the content decryption all
+	// run in this process. An attacker who can read this process's memory
+	// can therefore recover the content encryption key of a request being
+	// decrypted - but not the private key, and not any other request's,
+	// each of which needs its own agreement through the token. Running the
+	// whole unwrap inside the token would need CKD_SHA256_KDF_CONCATENATE
+	// with a module-specific encoding of the JWE OtherInfo, which PKCS#11
+	// v2.40 does not standardize. Weigh that against a PEM file on disk,
+	// where the long-term key is readable, before choosing either.
+	//
+	// Not every module will do this: the derived generic secret is created
+	// with CKA_EXTRACTABLE true and CKA_SENSITIVE false, and a token
+	// configured to refuse extractable keys will refuse the derivation.
+	// Neither that nor the CKA_DERIVE the private key needs can be seen
+	// from the published metadata, so the service performs one throwaway
+	// agreement while loading this key and refuses to start if the token
+	// will not do it. The alternative is an issuer that starts, publishes a
+	// JWK, and fails every encrypted request built from it.
+	PKCS11 *pki.PKCS11Config `yaml:"pkcs11" validate:"omitempty"`
+}
+
+// Load builds the encrypter from the configured keys, or returns nil when
+// none are configured.
+//
+// The result is memoized, so the metadata generator and the Credential
+// Endpoint get the same instance rather than two reads of the same files:
+// what is advertised and what is accepted then cannot drift apart, not even
+// across a secret rotated between the two calls.
+func (cfg *CredentialEncryption) Load() (*openid4vci.CredentialEncryption, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	if cfg.didLoad {
+		return cfg.loaded, cfg.loadedErr
+	}
+
+	cfg.loaded, cfg.loadedErr = cfg.load()
+	cfg.didLoad = true
+
+	return cfg.loaded, cfg.loadedErr
+}
+
+func (cfg *CredentialEncryption) load() (*openid4vci.CredentialEncryption, error) {
+	loader := pki.NewKeyLoader()
+	keys := make([]crypto.PrivateKey, 0, len(cfg.Keys))
+	for i, key := range cfg.Keys {
+		switch {
+		case key.PrivateKeyPath != "" && key.PKCS11 != nil:
+			return nil, fmt.Errorf("credential encryption key %d: set either private_key_path or pkcs11, not both", i)
+		case key.PrivateKeyPath == "" && key.PKCS11 == nil:
+			return nil, fmt.Errorf("credential encryption key %d: set either private_key_path or pkcs11", i)
+		case key.PKCS11 != nil:
+			// Opened once, at config load, and kept: the session holds the
+			// login, and a credential request is not the place to discover
+			// that the token is gone. Never closed, because the process
+			// holds it for its whole life.
+			private, err := pki.NewPKCS11ECDH(key.PKCS11)
+			if err != nil {
+				return nil, fmt.Errorf("credential encryption key %d: %w", i, err)
+			}
+			keys = append(keys, private)
+		default:
+			private, err := loader.LoadPrivateKey(key.PrivateKeyPath)
+			if err != nil {
+				return nil, fmt.Errorf("credential encryption key %d: %w", i, err)
+			}
+			keys = append(keys, private)
+		}
+	}
+
+	return openid4vci.NewCredentialEncryption(keys,
+		BoolVal(cfg.RequestEncryptionRequired, false),
+		BoolVal(cfg.ResponseEncryptionRequired, false))
 }
 
 // CredentialOfferWallets holds wallet redirect configuration
@@ -3045,6 +3209,14 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		return nil, fmt.Errorf("failed to construct nonce endpoint URL: %w", err)
 	}
 
+	// Both encryption objects come from keys that have actually been loaded,
+	// so the metadata cannot advertise something the Credential Endpoint will
+	// refuse. nil when no key is configured, which omits both objects.
+	encryption, err := cfg.CredentialEncryption.Load()
+	if err != nil {
+		return nil, fmt.Errorf("credential encryption: %w", err)
+	}
+
 	metadataConfig := &openid4vci.MetadataConfig{
 		CredentialIssuer:                     publicURL,
 		CredentialEndpoint:                   credentialEndpoint,
@@ -3055,7 +3227,8 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		CryptographicBindingMethodsSupported: cfg.CryptographicBindingMethodsSupported,
 		CredentialSigningAlgValuesSupported:  cfg.CredentialSigningAlgValuesSupported,
 		ProofSigningAlgValuesSupported:       cfg.ProofSigningAlgValuesSupported,
-		CredentialResponseEncryption:         cfg.CredentialResponseEncryption,
+		CredentialRequestEncryption:          encryption.RequestMetadata(),
+		CredentialResponseEncryption:         encryption.ResponseMetadata(),
 		BatchCredentialIssuance:              cfg.BatchCredentialIssuance,
 		Display:                              cfg.Display,
 		CredentialConfigurationsSupported:    credentialConfigs,

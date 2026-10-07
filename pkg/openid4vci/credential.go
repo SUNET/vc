@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -234,15 +235,6 @@ type ProofJWT struct {
 	jwt.RegisteredClaims
 }
 
-// JWK holds the JSON Web Key
-type JWK struct {
-	CRV string `json:"crv" validate:"required"`
-	KID string `json:"kid" validate:"required"`
-	KTY string `json:"kty" validate:"required"`
-	X   string `json:"x" validate:"required"`
-	Y   string `json:"y" validate:"required"`
-}
-
 // Proof represents a single proof object (used in non-batch requests)
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-proof-types
 type Proof struct {
@@ -396,10 +388,26 @@ func (p *Proofs) extractAllJWKsFromDIVP(maxLength int) ([]*apiv1_issuer.Jwk, err
 // CredentialResponseEncryption contains information for encrypting the Credential Response.
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-request
 type CredentialResponseEncryption struct {
-	// JWK REQUIRED. Object containing a single public key as a JWK used for encrypting the Credential Response.
-	JWK JWK `json:"jwk" validate:"required"`
+	// JWK REQUIRED. Object containing a single public key as a JWK used for
+	// encrypting the Credential Response.
+	//
+	// Kept as raw JSON rather than as the JWK struct in this package: §8.3
+	// requires this key to carry an alg, which that struct does not model,
+	// and it fixes kty/crv/x/y, which a wallet is free to vary. It is parsed
+	// by a JWK implementation in CredentialResponseEncryption.recipientKey,
+	// which is also the only place that decides whether vc can use it.
+	//
+	// The required tag here and on Enc is for the published schema, and is
+	// deliberately not what enforces them: Validate checks both and returns
+	// invalid_encryption_parameters, which is the code §7.3.1 defines for
+	// this, rather than whatever a generic binder would produce. Measured
+	// rather than assumed - the endpoint returns that code with these tags
+	// present, and TestCredentialEncryption_IncompleteParametersAreAnEncryptionError
+	// pins it either way.
+	JWK json.RawMessage `json:"jwk" validate:"required" swaggertype:"object"`
 
 	// Enc REQUIRED. JWE enc algorithm for encrypting Credential Responses.
+	// Checked by Validate as well as by the tag - see JWK above.
 	Enc string `json:"enc" validate:"required"`
 
 	// Zip OPTIONAL. JWE zip algorithm for compressing Credential Responses prior to encryption.

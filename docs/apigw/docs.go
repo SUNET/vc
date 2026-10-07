@@ -761,12 +761,14 @@ const docTemplate = `{
         },
         "/credential": {
             "post": {
-                "description": "Create credential endpoint",
+                "description": "Create credential endpoint. Accepts a plain JSON Credential Request, or an OpenID4VCI 1.0 section 8.3 encrypted Credential Request as a JWE (application/jwt). Returns the Credential Response as JSON, or as a JWE (application/jwt) when the request supplied credential_response_encryption.",
                 "consumes": [
-                    "application/json"
+                    "application/json",
+                    "application/jwt"
                 ],
                 "produces": [
-                    "application/json"
+                    "application/json",
+                    "application/jwt"
                 ],
                 "tags": [
                     "vc-platform"
@@ -793,6 +795,48 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/deferred_credential": {
+            "post": {
+                "description": "Deferred credential endpoint, per OpenID4VCI 1.0 section 9. NOT IMPLEMENTED: this Credential Issuer parses and validates the request - including an OpenID4VCI 1.0 section 8.3 encrypted one sent as a JWE (application/jwt), and the credential_response_encryption parameters in it - and then answers 501. No Credential Response is returned by this endpoint today.",
+                "consumes": [
+                    "application/json",
+                    "application/jwt"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vc-platform"
+                ],
+                "summary": "VCIDeferredCredential",
+                "operationId": "create-deferred-credential",
+                "parameters": [
+                    {
+                        "description": " ",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/openid4vci.DeferredCredentialRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "400": {
+                        "description": "Bad Request - the request, or its encryption parameters, could not be accepted",
+                        "schema": {
+                            "$ref": "#/definitions/helpers.ErrorResponse"
+                        }
+                    },
+                    "501": {
+                        "description": "Not Implemented - deferred credential issuance is not available from this Credential Issuer",
                         "schema": {
                             "$ref": "#/definitions/helpers.ErrorResponse"
                         }
@@ -1659,6 +1703,20 @@ const docTemplate = `{
                     "description": "AuthorizationEndpoint URL of the authorization server's authorization endpoint [RFC6749].  This is REQUIRED unless no grant types are supported that use the authorization endpoint.",
                     "type": "string"
                 },
+                "client_attestation_pop_signing_alg_values_supported": {
+                    "description": "ClientAttestationPoPSigningALGValuesSupported lists the JWS \"alg\" values supported for the Client Attestation PoP JWT signature (draft-ietf-oauth-attestation-based-client-auth-07 §10.1). MUST be present when \"attest_jwt_client_auth\" appears in TokenEndpointAuthMethodsSupported.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "client_attestation_signing_alg_values_supported": {
+                    "description": "ClientAttestationSigningALGValuesSupported lists the JWS \"alg\" values supported for the Client Attestation JWT signature (draft-ietf-oauth-attestation-based-client-auth-07 §10.1). MUST be present when \"attest_jwt_client_auth\" appears in TokenEndpointAuthMethodsSupported.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "code_challenge_methods_supported": {
                     "description": "CodeChallengeMethodsSupported OPTIONAL. JSON array containing a list of Proof Key for Code Exchange (PKCE) [RFC7636] code challenge methods supported by this authorization server.  Code challenge method values are used in the \"code_challenge_method\" parameter defined in Section 4.3 of [RFC7636].  The valid code challenge method values are those registered in the IANA \"PKCE Code Challenge Methods\" registry [IANA.OAuth.Parameters].  If omitted, the authorization server does not support PKCE.",
                     "type": "array",
@@ -1825,6 +1883,10 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "doctype": {
+                    "description": "Doctype is the ISO mdoc doctype identifier (Appendix A.2.2). Required\nfor format=\"mso_mdoc\"; must be absent for other formats. Enforced\nformat-specifically in ParseAuthorizationDetails.",
+                    "type": "string"
+                },
                 "format": {
                     "description": "Format REQUIRED when credential_configuration_id parameter is not present. String identifying the format of the Credential the Wallet needs. This Credential format identifier determines further claims in the authorization details object needed to identify the Credential type in the requested format. This specification defines Credential Format Profiles in Appendix A. It MUST NOT be present if credential_configuration_id parameter is present.",
                     "type": "string"
@@ -1836,7 +1898,7 @@ const docTemplate = `{
                     ]
                 },
                 "vct": {
-                    "description": "VCT REQUIRED. String as defined in Appendix A.3.2. This claim contains the type values the Wallet requests authorization for at the Credential Issuer. It MUST only be present if the format claim is present. It MUST not be present otherwise.",
+                    "description": "VCT is the SD-JWT VC type identifier (Appendix A.3.2). Required for\nformat=\"vc+sd-jwt\" / \"dc+sd-jwt\"; must be absent for other formats.\nEnforced format-specifically in ParseAuthorizationDetails.",
                     "type": "string"
                 }
             }
@@ -1938,16 +2000,12 @@ const docTemplate = `{
             ],
             "properties": {
                 "enc": {
-                    "description": "Enc REQUIRED. JWE enc algorithm for encrypting Credential Responses.",
+                    "description": "Enc REQUIRED. JWE enc algorithm for encrypting Credential Responses.\nChecked by Validate as well as by the tag - see JWK above.",
                     "type": "string"
                 },
                 "jwk": {
-                    "description": "JWK REQUIRED. Object containing a single public key as a JWK used for encrypting the Credential Response.",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/openid4vci.JWK"
-                        }
-                    ]
+                    "description": "JWK REQUIRED. Object containing a single public key as a JWK used for\nencrypting the Credential Response.\n\nKept as raw JSON rather than as the JWK struct in this package: §8.3\nrequires this key to carry an alg, which that struct does not model,\nand it fixes kty/crv/x/y, which a wallet is free to vary. It is parsed\nby a JWK implementation in CredentialResponseEncryption.recipientKey,\nwhich is also the only place that decides whether vc can use it.\n\nThe required tag here and on Enc is for the published schema, and is\ndeliberately not what enforces them: Validate checks both and returns\ninvalid_encryption_parameters, which is the code §7.3.1 defines for\nthis, rather than whatever a generic binder would produce. Measured\nrather than assumed - the endpoint returns that code with these tags\npresent, and TestCredentialEncryption_IncompleteParametersAreAnEncryptionError\npins it either way.",
+                    "type": "object"
                 },
                 "zip": {
                     "description": "Zip OPTIONAL. JWE zip algorithm for compressing Credential Responses prior to encryption.\nIf absent then compression MUST not be used.",
@@ -2007,29 +2065,21 @@ const docTemplate = `{
                 }
             }
         },
-        "openid4vci.JWK": {
+        "openid4vci.DeferredCredentialRequest": {
             "type": "object",
             "required": [
-                "crv",
-                "kid",
-                "kty",
-                "x",
-                "y"
+                "transaction_id"
             ],
             "properties": {
-                "crv": {
-                    "type": "string"
+                "credential_response_encryption": {
+                    "description": "CredentialResponseEncryption OPTIONAL. As defined for the Credential\nRequest (§8.2). §9.1 is explicit that this object is the one used for\nthe Deferred Credential Response \"regardless of what was sent in the\ninitial Credential Request\", which is what keeps key management\ntractable across a long deferral - so it is read from this request and\nnever inherited.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/openid4vci.CredentialResponseEncryption"
+                        }
+                    ]
                 },
-                "kid": {
-                    "type": "string"
-                },
-                "kty": {
-                    "type": "string"
-                },
-                "x": {
-                    "type": "string"
-                },
-                "y": {
+                "transaction_id": {
                     "type": "string"
                 }
             }
@@ -2045,6 +2095,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "authorization_details": {
+                    "description": "AuthorizationDetails carries the parsed authorization_details array. The\nform-body variant is a single JSON-array string in AuthorizationDetailsRaw,\nwhich the endpoint post-parses because gin's form binder cannot decode a\nJSON array into a []struct field.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/openid4vci.AuthorizationDetailsParameter"

@@ -153,6 +153,21 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		log.Info("Secrets loaded from external file", "path", cfg.Common.SecretFilePath)
 	}
 
+	// Before anything else looks at the config: a deployment still carrying
+	// the hand-written credential_response_encryption block gets the
+	// migration message and nothing else.
+	//
+	// Ordering, not taste. That block's own fields carry required tags, so
+	// helpers.Check below refuses an incomplete one with a generic
+	// validation error - and the VCTM requirement a few lines down refuses
+	// an apigw config for an unrelated reason before that. Either way the
+	// operator is told something true and useless instead of being told
+	// which setting replaced theirs. The check that can say that has to run
+	// first.
+	if err := checkLegacyCredentialResponseEncryption(cfg); err != nil {
+		return nil, err
+	}
+
 	// W3C context work is gated separately from VCTM loading: the issuer
 	// needs the former and not the latter. Both are no-ops when nothing
 	// W3C is configured, so this costs a non-W3C deployment nothing.
@@ -247,6 +262,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkCredentialEncryption(cfg); err != nil {
+		return nil, err
+	}
+
 	if err := checkAuthScopes(cfg); err != nil {
 		return nil, err
 	}
@@ -279,6 +298,50 @@ func checkCredentialMetadataEntries(cfg *model.Cfg) error {
 	if len(empty) > 0 {
 		return fmt.Errorf("common.credential_metadata: no configuration under %s", strings.Join(empty, ", "))
 	}
+	return nil
+}
+
+
+// checkLegacyCredentialResponseEncryption refuses the hand-written
+// apigw.issuer_metadata.credential_response_encryption, which used to publish
+// algorithms nothing implemented (SUNET/vc#707).
+//
+// Refusing rather than ignoring: an operator who wrote those algorithms down
+// meant for responses to be encrypted, and silently dropping that is the same
+// class of failure the configuration is replacing.
+//
+// Separate from checkCredentialEncryption, and called before generic
+// validation, because this message only helps if it is the one the operator
+// sees. See the call site in New.
+func checkLegacyCredentialResponseEncryption(cfg *model.Cfg) error {
+	if cfg == nil || cfg.APIGW == nil {
+		return nil
+	}
+
+	if cfg.APIGW.IssuerMetadata.CredentialResponseEncryption != nil {
+		return fmt.Errorf("apigw.issuer_metadata.credential_response_encryption is no longer configured by hand: " +
+			"the algorithms are now derived from the keys under apigw.issuer_metadata.credential_encryption.keys, " +
+			"so the metadata cannot advertise what the Credential Endpoint will not do. Remove this block and " +
+			"configure a key instead")
+	}
+
+	return nil
+}
+
+// checkCredentialEncryption verifies that the configured encryption keys can
+// actually be loaded.
+func checkCredentialEncryption(cfg *model.Cfg) error {
+	if cfg == nil || cfg.APIGW == nil {
+		return nil
+	}
+
+	// Loading here rather than at first use: a key that cannot perform
+	// ECDH-ES must not become a 500 on a wallet's credential request, and the
+	// metadata is generated from the same call.
+	if _, err := cfg.APIGW.IssuerMetadata.CredentialEncryption.Load(); err != nil {
+		return fmt.Errorf("apigw.issuer_metadata.credential_encryption: %w", err)
+	}
+
 	return nil
 }
 
