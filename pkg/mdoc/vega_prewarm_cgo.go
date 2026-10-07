@@ -54,6 +54,14 @@ func WarmVegaVerifierKeys(ctx context.Context, sources []string) (VegaWarmResult
 		if !c.Published || c.Status != vegaStatusActive {
 			continue
 		}
+		// System as well as role. "role" is a generic params key and
+		// another proof system adopting it would have its artifacts
+		// downloaded into a store sized for Vega keys, evicting the real
+		// ones - a cache that quietly stops holding what it is for, which
+		// shows up as latency and never as an error.
+		if !isVegaCatalogSystem(c.System) {
+			continue
+		}
 		if role, _ := c.ParamString(vegaRoleParam); role != vegaRoleProver {
 			continue
 		}

@@ -124,7 +124,7 @@ func main() {
 	// a temp directory eventually; a configured zk_key_cache.dir it would
 	// not, and "eventually" is not a promise worth making about that much
 	// disk either way.
-	if err := mdoc.CloseVegaVerifierKeyStore(); err != nil {
+	if err := mdoc.CloseVegaVerifierKeyStore(ctx); err != nil {
 		mainLog.Error(err, "removing the Vega verifier key store")
 	}
 

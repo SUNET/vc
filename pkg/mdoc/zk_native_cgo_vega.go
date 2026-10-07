@@ -190,6 +190,22 @@ func getOrLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitS
 	}
 
 	vegaVerifierKeyCacheState.mu.Lock()
+
+	// Re-check the store under the in-flight lock. The acquire above is
+	// unlocked relative to this one, so between the two another goroutine
+	// can finish its load, install the key and drop its inFly entry -
+	// leaving this one to see no load in progress and start a second
+	// ~100MB download of a key that is already on disk. Exactly the
+	// overlap a cold start with traffic produces, which is when it costs
+	// the most.
+	//
+	// Lock order is cacheState.mu then keys.mu, and never the reverse:
+	// put() below runs with cacheState.mu released.
+	if cached, releaseCached, ok := vegaVerifierKeys.acquire(zkSystemID); ok {
+		vegaVerifierKeyCacheState.mu.Unlock()
+		return cached, releaseCached, nil
+	}
+
 	if load, loading := vegaVerifierKeyCacheState.inFly[zkSystemID]; loading {
 		vegaVerifierKeyCacheState.mu.Unlock()
 		select {

@@ -1,9 +1,12 @@
 package mdoc
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestVegaKeyCacheEviction(t *testing.T) {
@@ -139,7 +142,7 @@ func TestVegaKeyCacheDropForgetsOneEntry(t *testing.T) {
 
 func TestVegaKeyStoreRoundTrip(t *testing.T) {
 	s := newVegaKeyStore(t.TempDir(), 1000)
-	t.Cleanup(func() { _ = s.removeAll() })
+	t.Cleanup(func() { _ = s.removeAll(context.Background()) })
 
 	if _, ok := s.get("a"); ok {
 		t.Fatal("an empty store should hold nothing")
@@ -174,7 +177,7 @@ func TestVegaKeyStoreRoundTrip(t *testing.T) {
 // the disk fills up anyway.
 func TestVegaKeyStoreEvictionDeletesTheFile(t *testing.T) {
 	s := newVegaKeyStore(t.TempDir(), 10)
-	t.Cleanup(func() { _ = s.removeAll() })
+	t.Cleanup(func() { _ = s.removeAll(context.Background()) })
 
 	oldPath, releaseOldpath, err := s.put("a", make([]byte, 8))
 	if err != nil {
@@ -200,7 +203,7 @@ func TestVegaKeyStoreEvictionDeletesTheFile(t *testing.T) {
 // exceeds the bound.
 func TestVegaKeyStoreKeepsTheEntryItJustWrote(t *testing.T) {
 	s := newVegaKeyStore(t.TempDir(), 10)
-	t.Cleanup(func() { _ = s.removeAll() })
+	t.Cleanup(func() { _ = s.removeAll(context.Background()) })
 
 	path, releasePath, err := s.put("huge", make([]byte, 500))
 	if err != nil {
@@ -220,7 +223,7 @@ func TestVegaKeyStoreKeepsTheEntryItJustWrote(t *testing.T) {
 // not as a path the worker then fails to open.
 func TestVegaKeyStoreTreatsAMissingFileAsAMiss(t *testing.T) {
 	s := newVegaKeyStore(t.TempDir(), 1000)
-	t.Cleanup(func() { _ = s.removeAll() })
+	t.Cleanup(func() { _ = s.removeAll(context.Background()) })
 
 	path, releasePath, err := s.put("a", []byte("key material"))
 	if err != nil {
@@ -241,7 +244,7 @@ func TestVegaKeyStoreTreatsAMissingFileAsAMiss(t *testing.T) {
 
 func TestVegaKeyStoreSetMaxEvictsDownToTheNewBound(t *testing.T) {
 	s := newVegaKeyStore(t.TempDir(), 1000)
-	t.Cleanup(func() { _ = s.removeAll() })
+	t.Cleanup(func() { _ = s.removeAll(context.Background()) })
 
 	aPath, releaseApath, err := s.put("a", make([]byte, 100))
 	if err != nil {
@@ -278,7 +281,7 @@ func TestVegaKeyStoreRemoveAllTakesTheDirectory(t *testing.T) {
 	releasePath()
 	dir := filepath.Dir(path)
 
-	if err := s.removeAll(); err != nil {
+	if err := s.removeAll(context.Background()); err != nil {
 		t.Fatalf("removeAll() error = %v", err)
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
@@ -326,7 +329,7 @@ func TestSetVegaVerifierKeyCacheBytes(t *testing.T) {
 
 func TestSetVegaVerifierKeyCacheDirOnlyAppliesBeforeTheDirectoryExists(t *testing.T) {
 	s := newVegaKeyStore("", 1000)
-	t.Cleanup(func() { _ = s.removeAll() })
+	t.Cleanup(func() { _ = s.removeAll(context.Background()) })
 
 	first := t.TempDir()
 	s.parent = first
@@ -361,7 +364,7 @@ func TestSetVegaVerifierKeyCacheDirOnlyAppliesBeforeTheDirectoryExists(t *testin
 // perfectly valid presentation.
 func TestVegaKeyStoreDoesNotUnlinkAKeyInUse(t *testing.T) {
 	s := newVegaKeyStore(t.TempDir(), 10)
-	t.Cleanup(func() { _ = s.removeAll() })
+	t.Cleanup(func() { _ = s.removeAll(context.Background()) })
 
 	inUse, release, err := s.put("in-use", make([]byte, 8))
 	if err != nil {
@@ -398,7 +401,7 @@ func TestVegaKeyStoreDoesNotUnlinkAKeyInUse(t *testing.T) {
 // deletes the file out from under the second.
 func TestVegaKeyStoreReleaseIsIdempotent(t *testing.T) {
 	s := newVegaKeyStore(t.TempDir(), 10)
-	t.Cleanup(func() { _ = s.removeAll() })
+	t.Cleanup(func() { _ = s.removeAll(context.Background()) })
 
 	path, releaseFirst, err := s.put("a", make([]byte, 8))
 	if err != nil {
@@ -442,7 +445,7 @@ func TestVegaKeyStoreRefusesWritesAfterClose(t *testing.T) {
 	} else {
 		release()
 	}
-	if err := s.removeAll(); err != nil {
+	if err := s.removeAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -466,7 +469,7 @@ func TestVegaKeyStoreRefusesWritesAfterClose(t *testing.T) {
 // become somebody else's.
 func TestVegaKeyStoreGivesEachGenerationItsOwnFile(t *testing.T) {
 	s := newVegaKeyStore(t.TempDir(), 10)
-	t.Cleanup(func() { _ = s.removeAll() })
+	t.Cleanup(func() { _ = s.removeAll(context.Background()) })
 
 	// First generation, pinned by a verification in progress.
 	oldPath, releaseOld, err := s.put("a", []byte("generation one"))
@@ -510,5 +513,73 @@ func TestVegaKeyStoreGivesEachGenerationItsOwnFile(t *testing.T) {
 	}
 	if got, ok := s.get("a"); !ok || got != newPath {
 		t.Errorf("get() = %q, %v; want %q, true", got, ok, newPath)
+	}
+}
+
+// Teardown must not delete a key a verification still has pinned. The
+// same failure eviction was taught to avoid, arriving at shutdown: a
+// handler that has the path but has not yet exec'd the worker.
+func TestVegaKeyStoreCloseWaitsForPins(t *testing.T) {
+	s := newVegaKeyStore(t.TempDir(), 1000)
+
+	path, release, err := s.put("a", []byte("key material"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- s.removeAll(context.Background()) }()
+
+	// Still pinned: the file must still be there a moment later.
+	time.Sleep(50 * time.Millisecond)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("teardown deleted a key that is still in use: %v", err)
+	}
+	select {
+	case err := <-closed:
+		t.Fatalf("removeAll returned while a key was pinned: %v", err)
+	default:
+	}
+
+	release()
+
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("removeAll() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("removeAll did not finish after the last release")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("the store should be gone (%v)", err)
+	}
+}
+
+// ... but it does not wait forever. The process is exiting; a verification
+// that was going to fail because the process is going away will fail
+// either way, and leaving half a gigabyte behind to avoid a doomed request
+// is the worse trade.
+func TestVegaKeyStoreCloseGivesUpOnATimeout(t *testing.T) {
+	s := newVegaKeyStore(t.TempDir(), 1000)
+
+	path, release, err := s.put("a", []byte("key material"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err = s.removeAll(ctx)
+	if err == nil {
+		t.Fatal("expected removeAll to report that it gave up on a pinned key")
+	}
+	if !strings.Contains(err.Error(), "still in use") {
+		t.Fatalf("error = %v, want it to say a key was still in use", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("the store should have been removed anyway (%v)", err)
 	}
 }

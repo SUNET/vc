@@ -1,12 +1,15 @@
 package mdoc
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
+	"time"
 )
 
 // defaultVegaVerifierKeyCacheBytes bounds what the Vega verifier-key store
@@ -406,19 +409,83 @@ func (s *vegaKeyStore) ensureDir() error {
 
 // removeAll deletes the store's directory and everything in it, and closes
 // the store so nothing recreates it afterwards.
-func (s *vegaKeyStore) removeAll() error {
+//
+// Waits, bounded by ctx, for any key still pinned by a verification in
+// progress. Deleting the directory out from under one is the same failure
+// eviction was taught to avoid, arriving at shutdown instead - and the
+// window is real: the verifier's HTTP server only recently learned to stop
+// accepting requests before this runs, and a handler that has the path but
+// has not yet exec'd the worker is exactly the case.
+//
+// On timeout it deletes anyway and says so. The process is exiting; a
+// verification that was going to fail because the process is going away
+// will fail either way, and leaving half a gigabyte behind to avoid a
+// doomed request is the worse trade.
+func (s *vegaKeyStore) removeAll(ctx context.Context) error {
+	s.mu.Lock()
+	s.closed = true
+	dir := s.dir
+	s.mu.Unlock()
+
+	if dir == "" {
+		return nil
+	}
+
+	if pinned := s.waitForPins(ctx); pinned > 0 {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.resetLocked()
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+		return fmt.Errorf("removed the Vega verifier key store with %d key(s) still in use", pinned)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resetLocked()
+	return os.RemoveAll(dir)
+}
+
+// vegaKeyStorePinPollInterval is how often removeAll re-checks for
+// outstanding pins. Short: this runs once, at shutdown, and the thing it
+// is waiting for is a subprocess that takes well under a second.
+const vegaKeyStorePinPollInterval = 10 * time.Millisecond
+
+// waitForPins blocks until no entry is pinned or ctx is done, returning
+// how many were still pinned when it gave up (0 on a clean drain).
+func (s *vegaKeyStore) waitForPins(ctx context.Context) int {
+	for {
+		pinned := s.pinnedCount()
+		if pinned == 0 {
+			return 0
+		}
+		select {
+		case <-ctx.Done():
+			return pinned
+		case <-time.After(vegaKeyStorePinPollInterval):
+		}
+	}
+}
+
+func (s *vegaKeyStore) pinnedCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.closed = true
-	if s.dir == "" {
-		return nil
+	count := 0
+	for _, entry := range s.entries {
+		if entry.pins > 0 {
+			count++
+		}
 	}
-	dir := s.dir
+	return count
+}
+
+// resetLocked empties the store's bookkeeping. Callers hold s.mu.
+func (s *vegaKeyStore) resetLocked() {
 	s.entries = make(map[string]*vegaKeyEntry)
 	s.cache = newVegaKeyCache(s.cache.max)
 	s.dir = ""
-	return os.RemoveAll(dir)
 }
 
 // vegaKeyFileSuffix is appended to a store file's unique name. Cosmetic;
@@ -497,10 +564,24 @@ func VegaVerifierKeyCacheBytes() int {
 }
 
 // CloseVegaVerifierKeyStore deletes the store's directory and everything in
-// it. For a clean shutdown; the OS would get the temp directory eventually,
-// but "eventually" is not a promise worth making about half a gigabyte.
-func CloseVegaVerifierKeyStore() error {
-	return vegaVerifierKeys.removeAll()
+// it, waiting (bounded by ctx) for any key a verification still has pinned.
+//
+// For a clean shutdown; the OS would get the temp directory eventually, but
+// "eventually" is not a promise worth making about half a gigabyte, and a
+// configured key_cache_dir it would not get at all.
+func CloseVegaVerifierKeyStore(ctx context.Context) error {
+	return vegaVerifierKeys.removeAll(ctx)
+}
+
+// isVegaCatalogSystem reports whether a catalog descriptor's System names
+// a zk-cred-vega circuit - the only kind this store holds keys for.
+//
+// Separate from isVegaSystem in zk_verifier.go, which answers the same
+// question about a DCQL zk_system_type entry on the VERIFY path. Same
+// vegaSystemPrefix, different input: that one takes a request spec and
+// falls back to the presented id, which has nothing to say here.
+func isVegaCatalogSystem(system string) bool {
+	return strings.HasPrefix(system, vegaSystemPrefix)
 }
 
 // VegaWarmResult reports what WarmVegaVerifierKeys managed to do.

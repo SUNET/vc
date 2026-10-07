@@ -3,6 +3,7 @@
 package mdoc
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,6 +11,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -50,6 +53,41 @@ func warmMirror(t *testing.T, circuits []map[string]any) string {
 	t.Cleanup(server.Close)
 	mirrorDirs[server.URL] = dir
 	return server.URL
+}
+
+// mirrorCounts records how often a mirror served an artifact, so a test
+// can tell one shared load from several.
+type mirrorCounts struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (m *mirrorCounts) artifactFetches() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.n
+}
+
+// countingWarmMirror is warmMirror with a request counter over the
+// artifact paths.
+func countingWarmMirror(t *testing.T, circuits []map[string]any) (string, *mirrorCounts) {
+	t.Helper()
+	source := warmMirror(t, circuits)
+	dir := mirrorDirs[source]
+
+	counts := &mirrorCounts{}
+	files := http.FileServer(http.Dir(dir))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/artifacts/") {
+			counts.mu.Lock()
+			counts.n++
+			counts.mu.Unlock()
+		}
+		files.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	mirrorDirs[server.URL] = dir
+	return server.URL, counts
 }
 
 // mirrorDirs maps a mirror's URL back to the directory behind it, so a test
@@ -96,7 +134,7 @@ func resetVegaKeyState(t *testing.T) {
 	vegaVerifierKeyCacheState.mu.Unlock()
 
 	t.Cleanup(func() {
-		_ = vegaVerifierKeys.removeAll()
+		_ = vegaVerifierKeys.removeAll(context.Background())
 		vegaVerifierKeys = previous
 	})
 }
@@ -167,6 +205,26 @@ func TestWarmVegaVerifierKeysSkipsWhatItShould(t *testing.T) {
 			"docTypes": []string{"org.iso.18013.5.1.mDL"},
 			"params":   map[string]any{"num_attributes": 2},
 		},
+		// "role" is a GENERIC params key. A future or custom system
+		// adopting it would otherwise have its artifacts downloaded into
+		// a store sized for Vega keys, evicting the real ones - a cache
+		// that quietly stops holding what it is for.
+		//
+		// Given a verifier SIBLING on purpose: without one, resolution
+		// fails and the entry stays out of the store for the wrong
+		// reason, and the test would pass with no system filter at all.
+		{
+			"id": "someother-prover-v1", "system": "someother-zk", "systemVersion": "1",
+			"status": "active", "published": true,
+			"docTypes": []string{"org.iso.18013.5.1.mDL"},
+			"params":   map[string]any{"role": "prover"},
+		},
+		{
+			"id": "someother-verifier-v1", "system": "someother-zk", "systemVersion": "1",
+			"status": "active", "published": true,
+			"docTypes": []string{"org.iso.18013.5.1.mDL"},
+			"params":   map[string]any{"role": "verifier"},
+		},
 	})
 
 	result, err := WarmVegaVerifierKeys(t.Context(), []string{source})
@@ -174,9 +232,12 @@ func TestWarmVegaVerifierKeysSkipsWhatItShould(t *testing.T) {
 		t.Fatalf("WarmVegaVerifierKeys() error = %v", err)
 	}
 	if len(result.Warmed) != 1 || result.Warmed[0] != "vega-prover-r12" {
-		t.Fatalf("Warmed = %v, want only the active, published, prover-role entry", result.Warmed)
+		t.Fatalf("Warmed = %v, want only the active, published, Vega prover-role entry", result.Warmed)
 	}
-	for _, id := range []string{"vega-prover-r11", "vega-prover-r13", "longfellow-libzk-v1_8_2"} {
+	if len(result.Failed) != 0 {
+		t.Fatalf("Failed = %v, want none - a skipped entry is skipped, not attempted and failed", result.Failed)
+	}
+	for _, id := range []string{"vega-prover-r11", "vega-prover-r13", "longfellow-libzk-v1_8_2", "someother-prover-v1"} {
 		if _, ok := vegaVerifierKeys.get(id); ok {
 			t.Errorf("%s should not have been warmed", id)
 		}
@@ -277,5 +338,54 @@ func TestGetOrLoadVegaVerifierKeyRefetchesAfterTheFileGoes(t *testing.T) {
 	defer releaseAgain()
 	if _, err := os.Stat(again); err != nil {
 		t.Errorf("the refetched path must be readable: %v", err)
+	}
+}
+
+// Every caller that misses the cache during a cold start must join one
+// load, not start its own ~100MB download. The in-flight map does that,
+// but the store check ahead of it is unlocked relative to the map, so a
+// loader finishing in that gap used to leave the next caller believing no
+// load was running.
+//
+// A general dedup assertion: it pins "one fetch for N concurrent callers"
+// and does not deterministically reproduce that particular interleaving,
+// which needs a seam this code does not have.
+func TestGetOrLoadVegaVerifierKeyLoadsOncePerID(t *testing.T) {
+	resetVegaKeyState(t)
+
+	source, counts := countingWarmMirror(t, []map[string]any{
+		vegaCircuit("vega-prover-r12", "12", "prover", "active"),
+		vegaCircuit("vega-verifier-r12", "12", "verifier", "active"),
+	})
+
+	const callers = 16
+	var wg sync.WaitGroup
+	paths := make([]string, callers)
+	errs := make([]error, callers)
+
+	wg.Add(callers)
+	for i := range callers {
+		go func() {
+			defer wg.Done()
+			path, release, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source})
+			paths[i], errs[i] = path, err
+			if err == nil {
+				release()
+			}
+		}()
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("caller %d: %v", i, err)
+		}
+		if paths[i] != paths[0] {
+			t.Errorf("caller %d got %q, want the single shared %q", i, paths[i], paths[0])
+		}
+	}
+
+	if got := counts.artifactFetches(); got != 1 {
+		t.Errorf("artifact fetched %d times for %d callers, want 1", got, callers)
 	}
 }
