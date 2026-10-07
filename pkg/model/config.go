@@ -879,7 +879,7 @@ type ZkKeyCacheConfig struct {
 	// latency, or where the catalog is not reachable from the instance at
 	// boot. A failed warm is logged and never fatal; the key then loads
 	// lazily exactly as it did before.
-	Prewarm *bool `yaml:"prewarm,omitempty"`
+	Prewarm *bool `yaml:"prewarm,omitempty" default:"true"`
 }
 
 // ZkCircuitsConfig configures the zk-circuits catalog client

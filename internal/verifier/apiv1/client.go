@@ -70,6 +70,11 @@ type Client struct {
 	claimsExtractor     *openid4vp.ClaimsExtractor
 
 	statusAggregator *status.Aggregator
+
+	// zkPrewarmCancel stops the background Vega verifier-key warm-up and
+	// zkPrewarmDone is closed when it has. See StopVegaPrewarm.
+	zkPrewarmCancel context.CancelFunc
+	zkPrewarmDone   chan struct{}
 }
 
 // New creates a new instance of the public api

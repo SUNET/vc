@@ -418,9 +418,13 @@ Vega verifier keys (~100MB decompressed, one per circuit revision) are kept
 as FILES in a process-private directory and handed to the worker by path,
 not inline: sending one as base64 inside the request JSON cost ~133MB of
 encode, pipe and decode on every single verification, cache hit or miss.
-The store is warmed at startup from the catalog's currently-active
-circuits, so no holder waits for a download at the end of their
-presentation. Both are configurable under `verifier.zk_key_cache` (`dir`,
+The store is warmed at startup, in the background, from the catalog's
+currently-active circuits. That is best-effort: the server is ready before
+the warm-up finishes, so a presentation in that window still joins or
+starts a load. What it removes is the steady-state case - an instance that
+has been up a minute already holds every active circuit, instead of one
+holder per instance per rollout paying for the download at the end of
+their presentation. Both are configurable under `verifier.zk_key_cache` (`dir`,
 `max_bytes`, `prewarm`); see `docs/CONFIGURATION.md`.
 
 See `docs/ZK_PPID_VERIFICATION_PLAN.md` for the full Longfellow design

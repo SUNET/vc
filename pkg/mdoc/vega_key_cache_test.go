@@ -145,10 +145,11 @@ func TestVegaKeyStoreRoundTrip(t *testing.T) {
 		t.Fatal("an empty store should hold nothing")
 	}
 
-	path, err := s.put("a", []byte("key material"))
+	path, releasePath, err := s.put("a", []byte("key material"))
 	if err != nil {
-		t.Fatalf("put() error = %v", err)
+		t.Fatal(err)
 	}
+	releasePath()
 
 	got, ok := s.get("a")
 	if !ok || got != path {
@@ -175,12 +176,15 @@ func TestVegaKeyStoreEvictionDeletesTheFile(t *testing.T) {
 	s := newVegaKeyStore(t.TempDir(), 10)
 	t.Cleanup(func() { _ = s.removeAll() })
 
-	oldPath, err := s.put("a", make([]byte, 8))
+	oldPath, releaseOldpath, err := s.put("a", make([]byte, 8))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.put("b", make([]byte, 8)); err != nil {
+	releaseOldpath()
+	if _, release, err := s.put("b", make([]byte, 8)); err != nil {
 		t.Fatal(err)
+	} else {
+		release()
 	}
 
 	if _, ok := s.get("a"); ok {
@@ -198,10 +202,11 @@ func TestVegaKeyStoreKeepsTheEntryItJustWrote(t *testing.T) {
 	s := newVegaKeyStore(t.TempDir(), 10)
 	t.Cleanup(func() { _ = s.removeAll() })
 
-	path, err := s.put("huge", make([]byte, 500))
+	path, releasePath, err := s.put("huge", make([]byte, 500))
 	if err != nil {
 		t.Fatal(err)
 	}
+	releasePath()
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("the key just written must still be on disk: %v", err)
 	}
@@ -217,10 +222,11 @@ func TestVegaKeyStoreTreatsAMissingFileAsAMiss(t *testing.T) {
 	s := newVegaKeyStore(t.TempDir(), 1000)
 	t.Cleanup(func() { _ = s.removeAll() })
 
-	path, err := s.put("a", []byte("key material"))
+	path, releasePath, err := s.put("a", []byte("key material"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	releasePath()
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
@@ -237,12 +243,15 @@ func TestVegaKeyStoreSetMaxEvictsDownToTheNewBound(t *testing.T) {
 	s := newVegaKeyStore(t.TempDir(), 1000)
 	t.Cleanup(func() { _ = s.removeAll() })
 
-	aPath, err := s.put("a", make([]byte, 100))
+	aPath, releaseApath, err := s.put("a", make([]byte, 100))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.put("b", make([]byte, 100)); err != nil {
+	releaseApath()
+	if _, release, err := s.put("b", make([]byte, 100)); err != nil {
 		t.Fatal(err)
+	} else {
+		release()
 	}
 
 	s.setMax(150)
@@ -262,10 +271,11 @@ func TestVegaKeyStoreRemoveAllTakesTheDirectory(t *testing.T) {
 	parent := t.TempDir()
 	s := newVegaKeyStore(parent, 1000)
 
-	path, err := s.put("a", []byte("key material"))
+	path, releasePath, err := s.put("a", []byte("key material"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	releasePath()
 	dir := filepath.Dir(path)
 
 	if err := s.removeAll(); err != nil {
@@ -321,17 +331,20 @@ func TestSetVegaVerifierKeyCacheDirOnlyAppliesBeforeTheDirectoryExists(t *testin
 	first := t.TempDir()
 	s.parent = first
 
-	path, err := s.put("a", []byte("key material"))
+	path, releasePath, err := s.put("a", []byte("key material"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	releasePath()
 	created := filepath.Dir(path)
 
 	// Once the directory exists, moving it would be a race against a worker
 	// that may already hold a path into it, for no benefit.
 	s.parent = t.TempDir()
-	if _, err := s.put("b", []byte("more key material")); err != nil {
+	if _, release, err := s.put("b", []byte("more key material")); err != nil {
 		t.Fatal(err)
+	} else {
+		release()
 	}
 	second, ok := s.get("b")
 	if !ok {
@@ -339,5 +352,109 @@ func TestSetVegaVerifierKeyCacheDirOnlyAppliesBeforeTheDirectoryExists(t *testin
 	}
 	if filepath.Dir(second) != created {
 		t.Errorf("the store moved to %s after its directory existed", filepath.Dir(second))
+	}
+}
+
+// The race the reference counting exists for: the worker is a separate
+// process that opens the path ITSELF, some milliseconds after being handed
+// it, so a concurrent load evicting the file in that window fails a
+// perfectly valid presentation.
+func TestVegaKeyStoreDoesNotUnlinkAKeyInUse(t *testing.T) {
+	s := newVegaKeyStore(t.TempDir(), 10)
+	t.Cleanup(func() { _ = s.removeAll() })
+
+	inUse, release, err := s.put("in-use", make([]byte, 8))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Another circuit arrives and the bound forces an eviction.
+	_, releaseOther, err := s.put("other", make([]byte, 8))
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseOther()
+
+	if _, ok := s.get("in-use"); ok {
+		t.Error("the pinned entry should be off the books once evicted")
+	}
+	if _, err := os.Stat(inUse); err != nil {
+		t.Fatalf("a key still in use must not be unlinked: %v", err)
+	}
+
+	// Once the holder is done, the deferred delete happens.
+	release()
+	if _, err := os.Stat(inUse); !os.IsNotExist(err) {
+		t.Errorf("the file should be gone after the last release (%v)", err)
+	}
+}
+
+// Releasing twice must not double-count, or one holder calling release
+// twice unlinks a key another holder is still using - the very failure the
+// pinning exists to prevent, arrived at from the other direction.
+//
+// Two holders, the entry then evicted, and the first holder releasing
+// twice. With a non-idempotent release that takes pins from 2 to 0 and
+// deletes the file out from under the second.
+func TestVegaKeyStoreReleaseIsIdempotent(t *testing.T) {
+	s := newVegaKeyStore(t.TempDir(), 10)
+	t.Cleanup(func() { _ = s.removeAll() })
+
+	path, releaseFirst, err := s.put("a", make([]byte, 8))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	again, releaseSecond, ok := s.acquire("a")
+	if !ok || again != path {
+		t.Fatalf("acquire() = %q, %v; want %q, true", again, ok, path)
+	}
+
+	// Another circuit arrives and the bound evicts "a" while it is pinned.
+	_, releaseOther, err := s.put("other", make([]byte, 8))
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseOther()
+
+	releaseFirst()
+	releaseFirst()
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the key is still held by another caller and must not be unlinked: %v", err)
+	}
+
+	releaseSecond()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("the file should be gone once the last holder releases (%v)", err)
+	}
+}
+
+// A store that has been torn down must not quietly recreate its directory
+// because a background pre-warm landed a moment later, leaving key files
+// behind after the process exited.
+func TestVegaKeyStoreRefusesWritesAfterClose(t *testing.T) {
+	parent := t.TempDir()
+	s := newVegaKeyStore(parent, 1000)
+
+	if _, release, err := s.put("a", []byte("key material")); err != nil {
+		t.Fatal(err)
+	} else {
+		release()
+	}
+	if err := s.removeAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := s.put("b", []byte("late arrival")); err == nil {
+		t.Fatal("a closed store must refuse writes")
+	}
+
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("the store recreated its directory after close: %v", entries)
 	}
 }

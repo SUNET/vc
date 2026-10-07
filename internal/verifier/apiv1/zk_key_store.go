@@ -21,6 +21,14 @@ const zkPrewarmTimeout = 15 * time.Minute
 // ZkVerifierConfig, and that is forced rather than chosen: NewZkHandler is
 // called INSIDE the request loop, so anything hung off its config would be
 // built and discarded once per presentation.
+//
+// The warm-up is BEST-EFFORT latency reduction, not a guarantee. It runs in
+// the background, so the HTTP server becomes ready while downloads are
+// still going: a presentation arriving in that window either joins the
+// in-flight load for its circuit - which is still better than starting its
+// own - or loads one the warm-up has not reached yet, exactly as it did
+// before. What it removes is the steady-state case, where every instance
+// that has been up for a minute already holds every active circuit.
 func (c *Client) configureVegaKeyStore() {
 	cache := c.cfg.Verifier.ZkKeyCache
 
@@ -38,7 +46,37 @@ func (c *Client) configureVegaKeyStore() {
 	// startup and this outlives it. The warm-up never blocks startup -
 	// several hundred MB of downloads before the first health check would
 	// trade one holder's latency for every holder's.
-	go c.prewarmVegaKeys(context.Background(), c.cfg.Verifier.ZkCircuits.Sources)
+	//
+	// Cancellable and awaitable all the same: a download finishing after
+	// the store has been torn down would otherwise recreate its directory
+	// and leave key files behind after the process exited.
+	ctx, cancel := context.WithCancel(context.Background())
+	c.zkPrewarmCancel = cancel
+	c.zkPrewarmDone = make(chan struct{})
+
+	go func() {
+		defer close(c.zkPrewarmDone)
+		c.prewarmVegaKeys(ctx, c.cfg.Verifier.ZkCircuits.Sources)
+	}()
+}
+
+// StopVegaPrewarm cancels the background warm-up and waits for it to
+// finish, so a shutdown can tear the key store down without racing a
+// download into recreating it. Safe to call when no warm-up was started.
+func (c *Client) StopVegaPrewarm(ctx context.Context) {
+	if c == nil || c.zkPrewarmCancel == nil {
+		return
+	}
+	c.zkPrewarmCancel()
+
+	select {
+	case <-c.zkPrewarmDone:
+	case <-ctx.Done():
+		// The store refuses writes once closed, so a warm-up that outlives
+		// this cannot recreate the directory - it just will not be waited
+		// for.
+		c.log.Info("gave up waiting for the Vega verifier-key warm-up to stop")
+	}
 }
 
 // prewarmVegaKeys warms the store and reports what happened. Never fatal:

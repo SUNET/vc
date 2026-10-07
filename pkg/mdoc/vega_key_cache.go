@@ -3,6 +3,7 @@ package mdoc
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,7 +32,7 @@ import (
 // vegaKeyStore), which is also why the default can afford to be generous:
 // what used to be resident memory shared with everything else the verifier
 // does is now a file the kernel pages in for the worker and drops again.
-// Override it with verifier.zk_circuits.key_cache_bytes.
+// Override it with verifier.zk_key_cache.max_bytes.
 //
 // The ceiling is PER PROCESS, not per deployment. Under Common.HA.Enable
 // there are several verifier instances, each with its own store, so the
@@ -166,18 +167,38 @@ type vegaKeyStore struct {
 	// parent is where dir gets created; "" means the OS temp directory.
 	parent string
 	// dir is this store's own directory, created on first write.
-	dir   string
-	cache *vegaKeyCache
-	paths map[string]string
+	dir     string
+	cache   *vegaKeyCache
+	entries map[string]*vegaKeyEntry
+	// closed is set by removeAll. A store that has been torn down must not
+	// quietly recreate its directory because a background pre-warm landed
+	// a moment later and left key files behind after the process exited.
+	closed bool
+}
+
+// vegaKeyEntry is one key file and who is using it.
+type vegaKeyEntry struct {
+	path string
+	size int
+	// pins counts callers holding the path and not finished with it. The
+	// worker is a separate process that opens the file ITSELF, some
+	// milliseconds after being handed the path, so a concurrent load
+	// evicting the file in that window makes a perfectly valid
+	// presentation fail (SUNET/vc#656 review). A pinned entry is never
+	// unlinked.
+	pins int
+	// evicted records that the LRU has given up on this entry while it was
+	// still pinned. The file goes when the last holder releases it.
+	evicted bool
 }
 
 // newVegaKeyStore returns a store that will create its directory under
 // parent on first write. An empty parent means the OS temp directory.
 func newVegaKeyStore(parent string, max int) *vegaKeyStore {
 	return &vegaKeyStore{
-		cache:  newVegaKeyCache(max),
-		paths:  make(map[string]string),
-		parent: parent,
+		cache:   newVegaKeyCache(max),
+		entries: make(map[string]*vegaKeyEntry),
+		parent:  parent,
 	}
 }
 
@@ -186,87 +207,159 @@ func newVegaKeyStore(parent string, max int) *vegaKeyStore {
 // reading or - far more to the point - writing it.
 const vegaKeyStoreDirPerm = 0o700
 
-// setMax changes the bound, evicting down to it. Safe to call before any
-// write; see SetVegaVerifierKeyCacheBytes.
+// setMax changes the bound, evicting down to it.
 func (s *vegaKeyStore) setMax(max int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cache.max = max
+	s.evictDownLocked()
+}
+
+// evictDownLocked brings the accounting back inside the bound. Callers hold
+// s.mu.
+func (s *vegaKeyStore) evictDownLocked() {
 	for s.cache.bytes > s.cache.max && len(s.cache.lru) > 1 {
 		oldest := s.cache.lru[0]
 		s.cache.lru = s.cache.lru[1:]
 		s.cache.bytes -= s.cache.sizes[oldest]
 		delete(s.cache.sizes, oldest)
-		s.removeFile(oldest)
+		s.retireLocked(oldest)
 	}
 }
 
-// get returns the path to id's key file, or ok=false.
+// retireLocked drops an entry from the store, deleting its file unless
+// somebody is still using it. Callers hold s.mu.
+func (s *vegaKeyStore) retireLocked(id string) {
+	entry, ok := s.entries[id]
+	if !ok {
+		return
+	}
+	delete(s.entries, id)
+	if entry.pins > 0 {
+		// Still in use. Mark it and let the last release unlink the file;
+		// until then it is off the books but still on disk, which is the
+		// right way round - a verification in progress must not have its
+		// key pulled out from under it.
+		entry.evicted = true
+		return
+	}
+	os.Remove(entry.path)
+}
+
+// acquire returns the path to id's key file and a function to call when the
+// caller is done with it. The file will not be unlinked before then.
 //
 // A path whose file has gone - someone cleaned /tmp, a container restarted
 // around a mounted directory - is reported as a miss and forgotten, not
 // handed to the worker to fail on. The caller then refetches, which is the
 // behaviour a cache is supposed to have.
-func (s *vegaKeyStore) get(id string) (string, bool) {
+func (s *vegaKeyStore) acquire(id string) (string, func(), bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	path, ok := s.paths[id]
+	entry, ok := s.entries[id]
 	if !ok {
-		return "", false
+		return "", nil, false
 	}
-	if _, err := os.Stat(path); err != nil {
+	if _, err := os.Stat(entry.path); err != nil {
 		s.cache.drop(id)
-		delete(s.paths, id)
-		return "", false
+		delete(s.entries, id)
+		return "", nil, false
 	}
 	s.cache.get(id)
-	return path, true
+	entry.pins++
+	return entry.path, s.releaseFunc(id, entry), true
 }
 
-// put writes b to the store and returns its path.
+// releaseFunc returns the one-shot release for a pinned entry.
+func (s *vegaKeyStore) releaseFunc(id string, entry *vegaKeyEntry) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			entry.pins--
+			if entry.pins > 0 || !entry.evicted {
+				return
+			}
+			// Evicted while in use and now unused: this is the delete the
+			// eviction pass deferred. Guarded against the id having been
+			// re-added since, which would be a different file.
+			if current, ok := s.entries[id]; !ok || current != entry {
+				os.Remove(entry.path)
+			}
+		})
+	}
+}
+
+// get reports whether id is held and returns its path WITHOUT pinning it.
+// For tests and for "is this warm?" questions; anything about to hand the
+// path to a worker must use acquire.
+func (s *vegaKeyStore) get(id string) (string, bool) {
+	path, release, ok := s.acquire(id)
+	if ok {
+		release()
+	}
+	return path, ok
+}
+
+// put writes b to the store and returns its path, ALREADY PINNED - the
+// caller is about to use it, and the release closes that window rather
+// than leaving it open between writing the file and asking for it back.
 //
 // Written to a temporary name and renamed into place, so a concurrent
 // reader - or a worker that has already been handed the path - never sees a
 // half-written key. Rename within one directory is atomic on every
 // filesystem this runs on.
-func (s *vegaKeyStore) put(id string, b []byte) (string, error) {
+func (s *vegaKeyStore) put(id string, b []byte) (string, func(), error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.closed {
+		return "", nil, errors.New("the Vega verifier key store has been closed")
+	}
 	if err := s.ensureDir(); err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	path := filepath.Join(s.dir, vegaKeyFileName(id))
 	tmp, err := os.CreateTemp(s.dir, ".vk-*")
 	if err != nil {
-		return "", fmt.Errorf("creating a temporary file for Vega verifier key %q: %w", id, err)
+		return "", nil, fmt.Errorf("creating a temporary file for Vega verifier key %q: %w", id, err)
 	}
 	tmpName := tmp.Name()
 
 	if _, err := tmp.Write(b); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
-		return "", fmt.Errorf("writing Vega verifier key %q: %w", id, err)
+		return "", nil, fmt.Errorf("writing Vega verifier key %q: %w", id, err)
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
-		return "", fmt.Errorf("closing Vega verifier key %q: %w", id, err)
+		return "", nil, fmt.Errorf("closing Vega verifier key %q: %w", id, err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
 		os.Remove(tmpName)
-		return "", fmt.Errorf("installing Vega verifier key %q: %w", id, err)
+		return "", nil, fmt.Errorf("installing Vega verifier key %q: %w", id, err)
 	}
 
-	// Evict only AFTER the new entry is installed. The other order can
-	// delete the file the caller is about to use, when the new key alone
-	// exceeds the bound.
-	for _, evicted := range s.cache.put(id, len(b)) {
-		s.removeFile(evicted)
+	// Replacing an entry for the same id retires the old one, which may be
+	// pinned by a verification already under way.
+	if previous, ok := s.entries[id]; ok && previous.path != path {
+		s.retireLocked(id)
 	}
-	s.paths[id] = path
-	return path, nil
+
+	entry := &vegaKeyEntry{path: path, size: len(b), pins: 1}
+	s.entries[id] = entry
+
+	// Evict only AFTER the new entry is installed and pinned. The other
+	// order can delete the file the caller is about to use, when the new
+	// key alone exceeds the bound.
+	for _, evicted := range s.cache.put(id, len(b)) {
+		s.retireLocked(evicted)
+	}
+
+	return path, s.releaseFunc(id, entry), nil
 }
 
 // ensureDir creates the store's own directory, once. Callers hold s.mu.
@@ -296,23 +389,18 @@ func (s *vegaKeyStore) ensureDir() error {
 	return nil
 }
 
-func (s *vegaKeyStore) removeFile(id string) {
-	if path, ok := s.paths[id]; ok {
-		os.Remove(path)
-		delete(s.paths, id)
-	}
-}
-
-// removeAll deletes the store's directory and everything in it.
+// removeAll deletes the store's directory and everything in it, and closes
+// the store so nothing recreates it afterwards.
 func (s *vegaKeyStore) removeAll() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.closed = true
 	if s.dir == "" {
 		return nil
 	}
 	dir := s.dir
-	s.paths = make(map[string]string)
+	s.entries = make(map[string]*vegaKeyEntry)
 	s.cache = newVegaKeyCache(s.cache.max)
 	s.dir = ""
 	return os.RemoveAll(dir)

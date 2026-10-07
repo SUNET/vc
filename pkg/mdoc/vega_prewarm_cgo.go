@@ -10,9 +10,17 @@ import (
 )
 
 // WarmVegaVerifierKeys downloads every currently-active Vega circuit's
-// verifier key into the local store, so no holder pays for it.
+// verifier key into the local store.
 //
-// Without this the first Vega presentation on each instance paid the
+// BEST-EFFORT latency reduction, not a guarantee: the caller runs this in
+// the background and the server is ready before it finishes, so a
+// presentation arriving during the warm-up either joins the in-flight load
+// for its circuit - still better than starting its own - or loads one this
+// has not reached yet, exactly as before. What it removes is the
+// steady-state case, where an instance that has been up a minute already
+// holds every active circuit.
+//
+// Without it the first Vega presentation on each instance paid the
 // download and decompression of a ~100MB artifact INLINE - while the holder
 // waited at the very end of a presentation, after selecting credentials and
 // signing. With N instances that is N unlucky users, load balancing picks
@@ -52,10 +60,15 @@ func WarmVegaVerifierKeys(ctx context.Context, sources []string) (VegaWarmResult
 		// Every error is recorded and none stops the loop: one circuit
 		// revision the catalog cannot serve should not deny the others
 		// the warm-up they were going to get.
-		if _, err := getOrLoadVegaVerifierKey(ctx, c.ID, sources); err != nil {
+		_, release, err := getOrLoadVegaVerifierKey(ctx, c.ID, sources)
+		if err != nil {
 			result.Failed[c.ID] = err
 			continue
 		}
+		// Warming holds no pin: nothing is about to read the file, and a
+		// pin held past this loop would exempt the key from eviction for
+		// the life of the process.
+		release()
 		result.Warmed = append(result.Warmed, c.ID)
 	}
 

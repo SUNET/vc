@@ -114,6 +114,11 @@ func main() {
 		}
 	}
 
+	// Stop the background verifier-key warm-up before tearing its store
+	// down, or a download finishing a moment later recreates the directory
+	// and leaves half a gigabyte of key files behind.
+	apiv1.StopVegaPrewarm(ctx)
+
 	// The Vega verifier-key store is a process-wide directory of decompressed
 	// circuit artifacts, up to half a gigabyte of them. The OS would reclaim
 	// a temp directory eventually; a configured zk_key_cache.dir it would

@@ -227,20 +227,22 @@ func TestGetOrLoadVegaVerifierKeyCachesThePath(t *testing.T) {
 		vegaCircuit("vega-verifier-r12", "12", "verifier", "active"),
 	})
 
-	first, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source})
+	first, releaseFirst, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source})
 	if err != nil {
 		t.Fatalf("getOrLoadVegaVerifierKey() error = %v", err)
 	}
+	defer releaseFirst()
 
 	// Breaking the mirror proves the second call did not go back to it.
 	if err := os.RemoveAll(filepath.Join(mirrorDirs[source], "v1")); err != nil {
 		t.Fatal(err)
 	}
 
-	second, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source})
+	second, releaseSecond, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source})
 	if err != nil {
 		t.Fatalf("a cached key must not need the catalog: %v", err)
 	}
+	defer releaseSecond()
 	if second != first {
 		t.Errorf("path = %q, want the cached %q", second, first)
 	}
@@ -259,18 +261,20 @@ func TestGetOrLoadVegaVerifierKeyRefetchesAfterTheFileGoes(t *testing.T) {
 		vegaCircuit("vega-verifier-r12", "12", "verifier", "active"),
 	})
 
-	path, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source})
+	path, releasePath, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source})
 	if err != nil {
 		t.Fatal(err)
 	}
+	releasePath()
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
 
-	again, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source})
+	again, releaseAgain, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source})
 	if err != nil {
 		t.Fatalf("a key whose file is gone must be refetched: %v", err)
 	}
+	defer releaseAgain()
 	if _, err := os.Stat(again); err != nil {
 		t.Errorf("the refetched path must be readable: %v", err)
 	}
