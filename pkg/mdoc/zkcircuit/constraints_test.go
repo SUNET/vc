@@ -455,3 +455,45 @@ func TestConstraintsAcceptsAnAbsentSaltBytes(t *testing.T) {
 		t.Errorf("SaltBytes = %d, want 0", got.SaltBytes)
 	}
 }
+
+// A COLD failure - nothing cached - was not backed off at all, so every
+// issuance took the mutex in turn and repeated the client's 30-second
+// fetch. One unreachable catalog serialized the whole deployment behind
+// one timeout after another, including schemas that pin zk_salt_bytes:
+// resolveZkSaltBytes falls back to the pin only after the error arrives,
+// so they paid the full wait for an answer they already had.
+func TestResolverBacksOffWhenItHasNeverReachedTheCatalog(t *testing.T) {
+	cc := newCountingClient(oneVegaCircuit)
+	cc.fail = true
+	now := time.Now()
+	r := &Resolver{
+		Client: cc.Client, TTL: time.Minute, RetryInterval: 5 * time.Minute,
+		Now: func() time.Time { return now },
+	}
+
+	for range 5 {
+		if _, _, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL); err == nil {
+			t.Fatal("expected the cold failure to be reported")
+		}
+	}
+	if cc.fetches != 1 {
+		t.Errorf("fetches = %d, want 1 - the others must replay the remembered failure", cc.fetches)
+	}
+
+	// Past the retry interval it tries again...
+	now = now.Add(6 * time.Minute)
+	if _, _, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL); err == nil {
+		t.Fatal("expected the retry to fail too")
+	}
+	if cc.fetches != 2 {
+		t.Errorf("fetches = %d, want 2 after the retry interval elapsed", cc.fetches)
+	}
+
+	// ... and once the catalog is back, it answers and stops replaying.
+	cc.fail = false
+	now = now.Add(6 * time.Minute)
+	salt, stale, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL)
+	if err != nil || stale || salt != 32 {
+		t.Fatalf("SaltBytes = %d, stale=%v, %v; want 32, false, nil", salt, stale, err)
+	}
+}

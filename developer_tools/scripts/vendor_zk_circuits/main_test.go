@@ -350,3 +350,128 @@ func TestVendorLeavesAWorkingMirrorAloneWhenAnUpdateFails(t *testing.T) {
 		t.Errorf("the mirror's artifact is gone after a failed update: %v", err)
 	}
 }
+
+// Each run must publish exactly one complete selection. Writing into the
+// live tree could not express that: a narrower rerun - a different
+// -system, or -active-only after the catalog deprecated something - left
+// the omitted descriptors in place, still reachable, because the verifier
+// calls FetchCircuit by the id a wallet presents rather than reading the
+// manifest. The mirror then served a selection nobody asked for.
+func TestVendorPrunesDescriptorsItNoLongerSelects(t *testing.T) {
+	body := []byte("verifier key bytes")
+	artifact, urlPath := artifactFor(body, "")
+	other := []byte("another key")
+	otherArtifact, otherPath := artifactFor(other, "")
+
+	source := catalogServer(t,
+		[]map[string]any{
+			{
+				"id": "vega-verifier-r12", "system": "vega-mc", "systemVersion": "12",
+				"status": "active", "published": true, "artifact": artifact,
+				"params": map[string]any{"role": "verifier", "saltBytes": "32"},
+			},
+			{
+				"id": "lf-verifier-v8", "system": "longfellow", "systemVersion": "8",
+				"status": "active", "published": true, "artifact": otherArtifact,
+				"params": map[string]any{"num_attributes": 2},
+			},
+		},
+		map[string][]byte{urlPath: body, otherPath: other},
+	)
+
+	out := t.TempDir()
+	if err := run(t.Context(), source, out, "", "", true, false); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	mirror := zkcircuit.NewClient("file://" + filepath.ToSlash(out))
+	if _, err := mirror.FetchCircuit(t.Context(), "lf-verifier-v8"); err != nil {
+		t.Fatalf("the longfellow entry should be in the first mirror: %v", err)
+	}
+
+	// Narrower rerun: vega only.
+	if err := run(t.Context(), source, out, "vega-mc", "", true, false); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+
+	if _, err := mirror.FetchCircuit(t.Context(), "lf-verifier-v8"); err == nil {
+		t.Error("a descriptor omitted from the new selection is still reachable by id")
+	}
+	if _, err := mirror.FetchCircuit(t.Context(), "vega-verifier-r12"); err != nil {
+		t.Errorf("the selected descriptor should still be there: %v", err)
+	}
+
+	manifest, err := mirror.FetchManifest(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Circuits) != 1 || manifest.Circuits[0].ID != "vega-verifier-r12" {
+		t.Errorf("manifest holds %d circuit(s), want exactly the new selection", len(manifest.Circuits))
+	}
+
+	// No staging or retiring directories left behind.
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "v1" {
+			t.Errorf("%s left behind in the mirror root", e.Name())
+		}
+	}
+}
+
+// An artifact the previous run already verified is reused rather than
+// pulled again - but only while the bytes still hash to what the
+// descriptor says.
+func TestVendorReusesAVerifiedArtifactAndRefetchesATamperedOne(t *testing.T) {
+	body := []byte("verifier key bytes")
+	artifact, urlPath := artifactFor(body, "")
+
+	fetches := 0
+	mux := http.NewServeMux()
+	descriptor := map[string]any{
+		"id": "vega-verifier-r12", "system": "vega-mc", "systemVersion": "12",
+		"status": "active", "published": true, "artifact": artifact,
+		"params": map[string]any{"role": "verifier", "saltBytes": "32"},
+	}
+	mux.HandleFunc("/v1/manifest.json", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"manifestVersion": 1, "circuits": []map[string]any{descriptor}})
+	})
+	mux.HandleFunc("/v1/circuits/vega-verifier-r12.json", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(descriptor)
+	})
+	mux.HandleFunc("/"+urlPath, func(w http.ResponseWriter, _ *http.Request) {
+		fetches++
+		_, _ = w.Write(body)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	out := t.TempDir()
+	if err := run(t.Context(), server.URL, out, "", "", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if fetches != 1 {
+		t.Fatalf("fetches = %d after the first run, want 1", fetches)
+	}
+
+	if err := run(t.Context(), server.URL, out, "", "", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if fetches != 1 {
+		t.Errorf("fetches = %d after an unchanged rerun, want the artifact reused", fetches)
+	}
+
+	// Tamper with it: a file that no longer hashes to the descriptor is a
+	// download, not a shortcut.
+	staged := filepath.Join(out, filepath.FromSlash(urlPath))
+	if err := os.WriteFile(staged, []byte("tampered"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(t.Context(), server.URL, out, "", "", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if fetches != 2 {
+		t.Errorf("fetches = %d after tampering, want the artifact refetched", fetches)
+	}
+}

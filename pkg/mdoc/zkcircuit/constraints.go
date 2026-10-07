@@ -325,6 +325,10 @@ type Resolver struct {
 	// success. fetchedAt only moves on success, so without this an expired
 	// manifest plus an unreachable catalog means a fetch attempt per call.
 	lastFailure time.Time
+	// coldErr is the failure from a resolver that has never successfully
+	// fetched, replayed for the retry window so a cold catalog outage
+	// costs one fetch a minute rather than one per request.
+	coldErr error
 }
 
 // NewResolver returns a Resolver over c.
@@ -375,11 +379,21 @@ func (r *Resolver) Manifest(ctx context.Context) (manifest *Manifest, stale bool
 	if r.manifest != nil && now.Sub(r.fetchedAt) < r.ttl() {
 		return r.manifest, false, nil
 	}
-	if r.manifest != nil && !r.lastFailure.IsZero() && now.Sub(r.lastFailure) < r.retryInterval() {
-		// A refresh failed recently and the previous manifest is still
-		// usable. Serve it and say so, rather than queueing behind
-		// another fetch that is probably about to fail the same way.
-		return r.manifest, true, nil
+	if !r.lastFailure.IsZero() && now.Sub(r.lastFailure) < r.retryInterval() {
+		if r.manifest != nil {
+			// A refresh failed recently and the previous manifest is
+			// still usable. Serve it and say so, rather than queueing
+			// behind another fetch that is probably about to fail the
+			// same way.
+			return r.manifest, true, nil
+		}
+		if r.coldErr != nil {
+			// Never reached the catalog, and the last attempt failed
+			// within the window. Replay that failure instead of making
+			// this caller - and everyone behind the mutex - wait out
+			// another fetch.
+			return nil, false, r.coldErr
+		}
 	}
 
 	fetched, fetchErr := r.Client.FetchManifest(ctx)
@@ -388,15 +402,24 @@ func (r *Resolver) Manifest(ctx context.Context) (manifest *Manifest, stale bool
 		if r.manifest != nil {
 			return r.manifest, true, nil
 		}
-		// Nothing cached to fall back to. No backoff either: a resolver
-		// that has never reached the catalog has nothing to protect, and
-		// the caller is being refused anyway.
+		// Nothing cached to fall back to. The error is REMEMBERED and
+		// replayed for the retry window all the same: a resolver that has
+		// never reached the catalog has no manifest to protect, but it
+		// still has the request path. Without this every issuance took
+		// the mutex in turn and repeated the client's 30-second fetch, so
+		// a cold start against an unreachable catalog serialized the
+		// whole deployment behind one timeout after another - including
+		// schemas that pin zk_salt_bytes, which fall back to the pin only
+		// AFTER the error arrives, and so paid 30 seconds each for an
+		// answer they already had.
+		r.coldErr = fetchErr
 		return nil, false, fetchErr
 	}
 
 	r.manifest = fetched
 	r.fetchedAt = r.now()
 	r.lastFailure = time.Time{}
+	r.coldErr = nil
 	return r.manifest, false, nil
 }
 

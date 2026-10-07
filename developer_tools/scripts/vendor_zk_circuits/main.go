@@ -27,6 +27,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -87,16 +89,12 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 		return fmt.Errorf("no circuit in %s matched (system=%q doctype=%q active-only=%v)", source, system, docType, activeOnly)
 	}
 
-	if err := os.MkdirAll(filepath.Join(outDir, "v1", "circuits"), 0o755); err != nil {
-		return err
-	}
-
 	// Rewrite each selected descriptor's artifact URL to the catalog's own
-	// relative form before writing it out. An ABSOLUTE url would make a
-	// vendored mirror fetch from the original host - which is the one thing
-	// a vendored mirror exists to avoid - and zkcircuit refuses an absolute
-	// URL whose host is not a configured source anyway, so leaving it would
-	// turn into a confusing refusal rather than a local read.
+	// relative form. An ABSOLUTE url would make a vendored mirror fetch
+	// from the original host - which is the one thing a vendored mirror
+	// exists to avoid - and zkcircuit refuses an absolute URL whose host is
+	// not a configured source anyway, so leaving it would turn into a
+	// confusing refusal rather than a local read.
 	vendored := make([]zkcircuit.CircuitDescriptor, 0, len(selected))
 	for _, c := range selected {
 		descriptor := c
@@ -121,17 +119,31 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 		vendored = append(vendored, descriptor)
 	}
 
-	// ARTIFACTS FIRST, descriptors and the manifest last.
+	// EVERYTHING INTO A STAGING TREE, SWAPPED IN AT THE END.
 	//
-	// The manifest is what a consumer reads to find out the mirror has
-	// something; publishing it before the bytes exist advertises
-	// descriptors whose files are absent or half-written. That is not only
-	// a failed run leaving a broken tree - a reader can be pointed at this
-	// directory WHILE a ~130MB artifact is still arriving. Worse on an
-	// update: a mirror that was working stops working, and the command
-	// still returns an error as if nothing had happened.
+	// Writing into the live mirror cannot express "this run's selection" as
+	// one thing. A descriptor write failing partway leaves some entries
+	// replaced and the old manifest still standing; and a narrower rerun -
+	// a different -system, or -active-only after the catalog deprecated
+	// something - leaves the omitted descriptors in place, still reachable,
+	// because the verifier calls FetchCircuit by the id a wallet presents
+	// rather than reading the manifest. The mirror then serves a selection
+	// nobody asked for.
 	//
-	// Downloaded from the ORIGINAL descriptors: their artifact URLs still
+	// So each run builds a complete tree and swaps it in. Either the whole
+	// new selection is published or none of it is, and what the previous
+	// run left behind goes with the old tree.
+	staging, err := os.MkdirTemp(outDir, ".staging-")
+	if err != nil {
+		return fmt.Errorf("creating a staging directory under %s: %w", outDir, err)
+	}
+	defer os.RemoveAll(staging)
+
+	if err := os.MkdirAll(filepath.Join(staging, "v1", "circuits"), 0o755); err != nil {
+		return err
+	}
+
+	// Artifacts first, from the ORIGINAL descriptors: their URLs still
 	// point at the live catalog, which is where the bytes are. The
 	// rewritten relative paths above are for the mirror's own consumers.
 	if !metadataOnly {
@@ -140,51 +152,119 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 				fmt.Printf("skip        %s (no artifact)\n", descriptor.ID)
 				continue
 			}
-			data, err := client.DownloadArtifact(ctx, &selected[i])
-			if err != nil {
-				return fmt.Errorf("download artifact for %q: %w", descriptor.ID, err)
-			}
-			// Validated when the descriptors were rewritten, and again
-			// here because this is the call that creates directories and
-			// writes bytes.
 			relative, err := artifactPath(descriptor.Artifact)
 			if err != nil {
 				return fmt.Errorf("circuit %q: %w", descriptor.ID, err)
 			}
-			path := filepath.Join(outDir, filepath.FromSlash(relative))
-			if err := writeFileAtomically(path, data); err != nil {
+			stagedPath := filepath.Join(staging, filepath.FromSlash(relative))
+			existing := filepath.Join(outDir, filepath.FromSlash(relative))
+
+			// Reuse what the previous run already verified rather than
+			// pulling ~130MB again. Only when the bytes on disk still
+			// hash to what the descriptor says: a stale or edited file is
+			// a download, not a shortcut.
+			if reused, err := reuseArtifact(existing, stagedPath, descriptor.Artifact.Hash); err != nil {
+				return err
+			} else if reused {
+				fmt.Printf("reused      %s\n", stagedPath)
+				continue
+			}
+
+			data, err := client.DownloadArtifact(ctx, &selected[i])
+			if err != nil {
+				return fmt.Errorf("download artifact for %q: %w", descriptor.ID, err)
+			}
+			if err := writeFileAtomically(stagedPath, data); err != nil {
 				return err
 			}
-			fmt.Printf("artifact    %s (%d bytes)\n", path, len(data))
+			fmt.Printf("artifact    %s (%d bytes)\n", stagedPath, len(data))
 		}
 	}
 
 	for _, descriptor := range vendored {
-		path := filepath.Join(outDir, "v1", "circuits", descriptor.ID+".json")
+		path := filepath.Join(staging, "v1", "circuits", descriptor.ID+".json")
 		if err := writeJSON(path, descriptor); err != nil {
 			return err
 		}
-		fmt.Printf("descriptor  %s\n", path)
 	}
 
-	// Last of all, and atomically: this is the file that says the rest is
-	// there.
 	out := zkcircuit.Manifest{
 		ManifestVersion: manifest.ManifestVersion,
 		GeneratedAt:     manifest.GeneratedAt,
 		Catalog:         manifest.Catalog,
 		Circuits:        vendored,
 	}
-	manifestPath := filepath.Join(outDir, "v1", "manifest.json")
-	if err := writeJSON(manifestPath, out); err != nil {
+	if err := writeJSON(filepath.Join(staging, "v1", "manifest.json"), out); err != nil {
 		return err
 	}
-	fmt.Printf("manifest    %s (%d circuit(s))\n", manifestPath, len(vendored))
 
+	if err := swapIn(filepath.Join(staging, "v1"), filepath.Join(outDir, "v1")); err != nil {
+		return err
+	}
+
+	fmt.Printf("published   %s (%d circuit(s))\n", filepath.Join(outDir, "v1"), len(vendored))
 	if metadataOnly {
 		fmt.Println("metadata-only: no artifacts written")
 	}
+	return nil
+}
 
+// reuseArtifact copies an already-verified artifact out of the live mirror
+// into the staging tree, and reports whether it did.
+//
+// Verified by hash, not by presence: a file left by an interrupted run, or
+// edited since, is a download rather than a shortcut. Reading ~130MB to
+// hash it is an order of magnitude cheaper than fetching it again.
+func reuseArtifact(existing, staged, expectedHash string) (bool, error) {
+	data, err := os.ReadFile(existing)
+	if err != nil {
+		return false, nil //nolint:nilerr // absent or unreadable means "download it"
+	}
+
+	sum := sha256.Sum256(data)
+	want := expectedHash
+	if i := strings.Index(want, ":"); i >= 0 {
+		want = want[i+1:]
+	}
+	if !strings.EqualFold(hex.EncodeToString(sum[:]), want) {
+		return false, nil
+	}
+
+	if err := writeFileAtomically(staged, data); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// swapIn replaces live with staged, atomically enough that a reader sees
+// one complete selection or the other.
+//
+// Two renames rather than one, because rename onto an existing non-empty
+// directory is not allowed. The window where neither is in place is the
+// time between two renames in the same directory - microseconds - and the
+// alternative, writing into the live tree, has a window the length of the
+// whole run.
+func swapIn(staged, live string) error {
+	retired := ""
+	if _, err := os.Stat(live); err == nil {
+		retired = live + ".retiring"
+		os.RemoveAll(retired)
+		if err := os.Rename(live, retired); err != nil {
+			return fmt.Errorf("setting aside the previous mirror: %w", err)
+		}
+	}
+
+	if err := os.Rename(staged, live); err != nil {
+		// Put the previous mirror back rather than leaving nothing there.
+		if retired != "" {
+			_ = os.Rename(retired, live)
+		}
+		return fmt.Errorf("publishing the new mirror: %w", err)
+	}
+
+	if retired != "" {
+		_ = os.RemoveAll(retired)
+	}
 	return nil
 }
 
