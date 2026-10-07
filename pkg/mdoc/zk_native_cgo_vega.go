@@ -56,7 +56,7 @@ func nativeVerifyZkProofVega(
 	zkCircuitSources []string,
 	workerPath string,
 ) (zkvegaworker.VerifyResult, error) {
-	verifierKeyBytes, err := getOrLoadVegaVerifierKey(ctx, zkSystemID, zkCircuitSources)
+	verifierKeyPath, err := getOrLoadVegaVerifierKey(ctx, zkSystemID, zkCircuitSources)
 	if err != nil {
 		return zkvegaworker.VerifyResult{}, fmt.Errorf("failed to resolve/load Vega verifier key for %q: %w", zkSystemID, err)
 	}
@@ -64,7 +64,7 @@ func nativeVerifyZkProofVega(
 	if workerPath == "" {
 		workerPath = DefaultZkVegaWorkerPath
 	}
-	result, err := runZkVegaVerifyWorker(ctx, workerPath, verifierKeyBytes, proof, disclosedBytes)
+	result, err := runZkVegaVerifyWorker(ctx, workerPath, verifierKeyPath, proof, disclosedBytes)
 	if err != nil {
 		return zkvegaworker.VerifyResult{}, fmt.Errorf("Vega ZK proof verification failed: %w", err)
 	}
@@ -76,11 +76,11 @@ func nativeVerifyZkProofVega(
 // stdout - see pkg/mdoc/zkvegaworker's package doc for the full protocol
 // and subprocess-isolation rationale. One process per call (see that
 // package's doc on why this isn't pooled yet).
-func runZkVegaVerifyWorker(ctx context.Context, workerPath string, verifierKeyBytes, proof []byte, disclosedBytes [][]byte) (zkvegaworker.VerifyResult, error) {
+func runZkVegaVerifyWorker(ctx context.Context, workerPath, verifierKeyPath string, proof []byte, disclosedBytes [][]byte) (zkvegaworker.VerifyResult, error) {
 	reqBytes, err := json.Marshal(zkvegaworker.Request{
-		VerifierKeyBytes: verifierKeyBytes,
-		ProofBytes:       proof,
-		DisclosedBytes:   disclosedBytes,
+		VerifierKeyPath: verifierKeyPath,
+		ProofBytes:      proof,
+		DisclosedBytes:  disclosedBytes,
 	})
 	if err != nil {
 		return zkvegaworker.VerifyResult{}, fmt.Errorf("encoding worker request: %w", err)
@@ -130,7 +130,7 @@ func runZkVegaVerifyWorker(ctx context.Context, workerPath string, verifierKeyBy
 }
 
 // vegaVerifierKeyCacheState caches raw (decompressed) verifier-key
-// artifact bytes, keyed by the wallet-declared PROVER-key zkSystemID -
+// artifacts ON DISK, keyed by the wallet-declared PROVER-key zkSystemID -
 // mirrors verifierCacheState's shape/in-flight-dedup pattern below, but
 // caches bytes rather than a loaded native handle: deserialization into a
 // native handle happens once PER WORKER INVOCATION (see
@@ -151,15 +151,15 @@ func runZkVegaVerifyWorker(ctx context.Context, workerPath string, verifierKeyBy
 // a burst of identical fetches as a bug.
 var vegaVerifierKeyCacheState = struct {
 	mu    sync.Mutex
-	keys  *vegaKeyCache
 	inFly map[string]*inFlightLoad
 }{
-	keys:  newVegaKeyCache(maxVegaVerifierKeyCacheBytes),
 	inFly: make(map[string]*inFlightLoad),
 }
 
-// getOrLoadVegaVerifierKey returns cached, raw (decompressed) verifier-key
-// bytes for the wallet-declared zkSystemID, loading them on a cache miss.
+// getOrLoadVegaVerifierKey returns the path to a local file holding the raw
+// (decompressed) verifier key for the wallet-declared zkSystemID, fetching
+// it on a miss. The file belongs to vegaKeyStore and may be evicted once
+// the caller is done with it.
 //
 // zkSystemID (from ZkDocumentDataMdoc.ZkSystemID, i.e. ZkSystemSpec.id on
 // the wallet side - see SirosWallet.buildZkPresentationToken) is the
@@ -175,27 +175,25 @@ var vegaVerifierKeyCacheState = struct {
 // params.role == "verifier" - robust against the exact id-suffix
 // convention (e.g. "-prover-key-r7" -> "-verifier-key-r7") ever changing,
 // unlike a plain string substitution would be.
-func getOrLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitSources []string) (verifierKeyBytes []byte, err error) {
-	vegaVerifierKeyCacheState.mu.Lock()
-	if cached, ok := vegaVerifierKeyCacheState.keys.get(zkSystemID); ok {
-		vegaVerifierKeyCacheState.mu.Unlock()
+func getOrLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitSources []string) (verifierKeyPath string, err error) {
+	if cached, ok := vegaVerifierKeys.get(zkSystemID); ok {
 		return cached, nil
 	}
+
+	vegaVerifierKeyCacheState.mu.Lock()
 	if load, loading := vegaVerifierKeyCacheState.inFly[zkSystemID]; loading {
 		vegaVerifierKeyCacheState.mu.Unlock()
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("waiting for Vega verifier key %q to finish loading on another goroutine: %w", zkSystemID, ctx.Err())
+			return "", fmt.Errorf("waiting for Vega verifier key %q to finish loading on another goroutine: %w", zkSystemID, ctx.Err())
 		case <-load.done:
 		}
 		if load.err != nil {
-			return nil, fmt.Errorf("Vega verifier key %q failed to load on another goroutine: %w", zkSystemID, load.err)
+			return "", fmt.Errorf("Vega verifier key %q failed to load on another goroutine: %w", zkSystemID, load.err)
 		}
-		vegaVerifierKeyCacheState.mu.Lock()
-		cached, ok := vegaVerifierKeyCacheState.keys.get(zkSystemID)
-		vegaVerifierKeyCacheState.mu.Unlock()
+		cached, ok := vegaVerifierKeys.get(zkSystemID)
 		if !ok {
-			return nil, fmt.Errorf("Vega verifier key %q finished loading on another goroutine but is unexpectedly missing from the cache", zkSystemID)
+			return "", fmt.Errorf("Vega verifier key %q finished loading on another goroutine but is unexpectedly missing from the cache", zkSystemID)
 		}
 		return cached, nil
 	}
@@ -215,9 +213,6 @@ func getOrLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitS
 		}
 
 		vegaVerifierKeyCacheState.mu.Lock()
-		if err == nil && len(verifierKeyBytes) > 0 {
-			vegaVerifierKeyCacheState.keys.put(zkSystemID, verifierKeyBytes)
-		}
 		load.err = err
 		delete(vegaVerifierKeyCacheState.inFly, zkSystemID)
 		close(load.done)
@@ -228,29 +223,42 @@ func getOrLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitS
 	proverDescriptor, fetchErr := client.FetchCircuit(ctx, zkSystemID)
 	if fetchErr != nil {
 		err = fmt.Errorf("fetching prover-key circuit descriptor: %w", fetchErr)
-		return nil, err
+		return "", err
 	}
 
 	manifest, manifestErr := client.FetchManifest(ctx)
 	if manifestErr != nil {
 		err = fmt.Errorf("fetching circuit manifest to resolve verifier-key sibling: %w", manifestErr)
-		return nil, err
+		return "", err
 	}
 
 	verifierDescriptor, findErr := findVegaVerifierKeyEntry(manifest, proverDescriptor)
 	if findErr != nil {
 		err = findErr
-		return nil, err
+		return "", err
 	}
 
 	circuitBytes, dlErr := client.DownloadAndDecompress(ctx, verifierDescriptor)
 	if dlErr != nil {
 		err = fmt.Errorf("downloading verifier-key artifact %q: %w", verifierDescriptor.ID, dlErr)
-		return nil, err
+		return "", err
+	}
+	if len(circuitBytes) == 0 {
+		err = fmt.Errorf("verifier-key artifact %q decompressed to nothing", verifierDescriptor.ID)
+		return "", err
 	}
 
-	verifierKeyBytes = circuitBytes
-	return verifierKeyBytes, nil
+	// Stored before returning rather than in the defer, so a store that
+	// cannot be written is the caller's error rather than a silent fall
+	// through to a path that is not there. The bytes are dropped here: from
+	// this point on the key only exists as a file, which is the whole point
+	// (SUNET/vc#656).
+	path, storeErr := vegaVerifierKeys.put(zkSystemID, circuitBytes)
+	if storeErr != nil {
+		err = storeErr
+		return "", err
+	}
+	return path, nil
 }
 
 // findVegaVerifierKeyEntry searches manifest for the single entry sharing

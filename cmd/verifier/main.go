@@ -16,6 +16,7 @@ import (
 	"github.com/SUNET/vc/internal/verifier/notify"
 	"github.com/SUNET/vc/pkg/configuration"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/metric"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/pubsub"
@@ -111,6 +112,15 @@ func main() {
 		if err := service.Close(ctx); err != nil {
 			mainLog.Trace("serviceName", serviceName, "error", err)
 		}
+	}
+
+	// The Vega verifier-key store is a process-wide directory of decompressed
+	// circuit artifacts, up to half a gigabyte of them. The OS would reclaim
+	// a temp directory eventually; a configured zk_key_cache.dir it would
+	// not, and "eventually" is not a promise worth making about that much
+	// disk either way.
+	if err := mdoc.CloseVegaVerifierKeyStore(); err != nil {
+		mainLog.Error(err, "removing the Vega verifier key store")
 	}
 
 	// notifyService.Close only tears down its own subscriptions; the bus

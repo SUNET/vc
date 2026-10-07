@@ -414,6 +414,15 @@ systems; Vega additionally resolves a verifier-key catalog entry from the
 wallet-declared prover-key entry via the manifest (see
 `getOrLoadVegaVerifierKey`'s doc comment in `pkg/mdoc/zk_native_cgo_vega.go`).
 
+Vega verifier keys (~100MB decompressed, one per circuit revision) are kept
+as FILES in a process-private directory and handed to the worker by path,
+not inline: sending one as base64 inside the request JSON cost ~133MB of
+encode, pipe and decode on every single verification, cache hit or miss.
+The store is warmed at startup from the catalog's currently-active
+circuits, so no holder waits for a download at the end of their
+presentation. Both are configurable under `verifier.zk_key_cache` (`dir`,
+`max_bytes`, `prewarm`); see `docs/CONFIGURATION.md`.
+
 See `docs/ZK_PPID_VERIFICATION_PLAN.md` for the full Longfellow design
 writeup: what this verifies, the confirmed
 `verifier_context`/pseudonym-derivation wire formula, and exactly what's

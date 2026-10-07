@@ -168,6 +168,11 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		}
 	}
 
+	// Size the Vega verifier-key store and start its warm-up before
+	// anything can serve a presentation, so the first one does not pay for
+	// a 100MB download inline (SUNET/vc#656).
+	c.configureVegaKeyStore()
+
 	c.trustService = &openid4vp.TrustService{}
 
 	// Initialize trust evaluator from config
