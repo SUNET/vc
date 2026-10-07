@@ -364,3 +364,44 @@ func TestResolverBacksOffAfterAFailedRefresh(t *testing.T) {
 		t.Fatalf("stale=%v, %v; want a fresh answer once the catalog is back", stale, err)
 	}
 }
+
+// The same incompatibility SaltBytes refuses across systems, one level
+// down: within ONE system, an active circuit publishing no saltBytes next
+// to one that publishes 32. Skipping the unconstrained one resolved to 32
+// and minted credentials that fail against it.
+func TestConstraintsRefusesAMixedSetWithinOneSystem(t *testing.T) {
+	m := &Manifest{Circuits: []CircuitDescriptor{
+		circuit("vega-fixed", "vega-mc", StatusActive, []string{mDL}, map[string]any{"saltBytes": "32"}),
+		circuit("vega-default", "vega-mc", StatusActive, []string{mDL}, map[string]any{"numClaims": "4"}),
+	}}
+
+	_, err := m.Constraints("vega-mc", mDL)
+	if err == nil {
+		t.Fatal("expected a refusal, not a resolved length")
+	}
+	if !strings.Contains(err.Error(), "vega-default") || !strings.Contains(err.Error(), "32 (vega-fixed)") {
+		t.Fatalf("error = %v, want one naming both sides", err)
+	}
+}
+
+// ... and the unmixed cases still resolve, so this is a refusal of the
+// combination rather than of an absent value.
+func TestConstraintsResolvesAnUnmixedSet(t *testing.T) {
+	allFixed := &Manifest{Circuits: []CircuitDescriptor{
+		circuit("a", "vega-mc", StatusActive, []string{mDL}, map[string]any{"saltBytes": "32"}),
+		circuit("b", "vega-mc", StatusActive, []string{mDL}, map[string]any{"saltBytes": float64(32)}),
+	}}
+	got, err := allFixed.Constraints("vega-mc", mDL)
+	if err != nil || got.SaltBytes != 32 {
+		t.Fatalf("SaltBytes = %d, %v; want 32, nil", got.SaltBytes, err)
+	}
+
+	allDefault := &Manifest{Circuits: []CircuitDescriptor{
+		circuit("a", "longfellow", StatusActive, []string{mDL}, map[string]any{"num_attributes": float64(1)}),
+		circuit("b", "longfellow", StatusActive, []string{mDL}, map[string]any{"num_attributes": float64(2)}),
+	}}
+	got, err = allDefault.Constraints("longfellow", mDL)
+	if err != nil || got.SaltBytes != 0 {
+		t.Fatalf("SaltBytes = %d, %v; want 0, nil", got.SaltBytes, err)
+	}
+}

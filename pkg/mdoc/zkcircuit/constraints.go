@@ -120,16 +120,21 @@ func (m *Manifest) Constraints(system, docType string) (SystemConstraints, error
 	resolved := SystemConstraints{System: system}
 	// saltFrom records which circuit each distinct value came from, so a
 	// disagreement can be reported as the catalog inconsistency it is
-	// instead of "expected 32, got 16".
+	// instead of "expected 32, got 16". unconstrained records the ones
+	// that publish no length at all, which is a constraint of its own -
+	// see below.
 	saltFrom := map[int][]string{}
+	var unconstrained []string
 
 	for _, c := range circuits {
 		resolved.CircuitIDs = append(resolved.CircuitIDs, c.ID)
 
 		salt, ok := c.ParamInt(ParamSaltBytes)
 		if !ok {
-			// This system states no salt constraint in this circuit.
-			// Legitimate: longfellow publishes none.
+			// This circuit states no salt constraint. Legitimate on its
+			// own - longfellow publishes none - but NOT something to skip
+			// past: see the refusal below.
+			unconstrained = append(unconstrained, c.ID)
 			continue
 		}
 		if salt < MinSaltBytes || salt > MaxSaltBytes {
@@ -140,13 +145,31 @@ func (m *Manifest) Constraints(system, docType string) (SystemConstraints, error
 		saltFrom[salt] = append(saltFrom[salt], c.ID)
 	}
 
-	switch len(saltFrom) {
-	case 0:
-		// No active circuit publishes one; SaltBytes stays 0.
-	case 1:
+	switch {
+	case len(saltFrom) == 0:
+		// Every active circuit is unconstrained; SaltBytes stays 0, which
+		// means this system wants the caller's default per-element sizing.
+
+	case len(saltFrom) == 1 && len(unconstrained) == 0:
 		for salt := range saltFrom {
 			resolved.SaltBytes = salt
 		}
+
+	case len(unconstrained) > 0:
+		// The same incompatibility SaltBytes refuses ACROSS systems,
+		// one level down and inside a single one. Publishing no length
+		// does not mean "any length will do": it means the circuit
+		// constrains the item some other way - zk-cred-longfellow's total
+		// IssuerSignedItem ceiling - which per-element sizing is what
+		// satisfies. A credential carries one salt per item, so a system
+		// whose active circuits want both cannot be issued for, and
+		// picking the explicit value would mint credentials that fail
+		// against the circuit that was skipped.
+		sort.Strings(unconstrained)
+		return SystemConstraints{}, fmt.Errorf(
+			"active circuits for zk system %q disagree about %s: %s publish none and need per-element sizing, while %s",
+			system, ParamSaltBytes, strings.Join(unconstrained, ", "), describeDisagreement(saltFrom))
+
 	default:
 		return SystemConstraints{}, fmt.Errorf(
 			"active circuits for zk system %q disagree about %s: %s",
