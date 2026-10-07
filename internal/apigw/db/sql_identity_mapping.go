@@ -135,17 +135,14 @@ func (c *SQLIdentityMappingsColl) ResolveMapping(ctx context.Context, query *Res
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:identities:resolveMapping")
 	defer span.End()
 
-	if query.AuthenticSource == "" && len(query.Attributes) == 0 {
-		span.SetStatus(codes.Error, helpers.ErrNoIdentityFound.Error())
-		return "", helpers.ErrNoIdentityFound
+	// See the note on IdentityMappingsColl.ResolveMapping.
+	if query.AuthenticSource == "" {
+		span.SetStatus(codes.Error, helpers.ErrIdentityMappingNamespaceRequired.Error())
+		return "", helpers.ErrIdentityMappingNamespaceRequired
 	}
 
-	conditions := []string{}
-	args := []any{}
-	if query.AuthenticSource != "" {
-		conditions = append(conditions, "authentic_source = ?")
-		args = append(args, query.AuthenticSource)
-	}
+	conditions := []string{"authentic_source = ?"}
+	args := []any{query.AuthenticSource}
 	if len(query.Attributes) > 0 {
 		conditions = append(conditions, c.dialect.JSONContains("attributes"))
 		args = append(args, sqlstore.JSON[map[string]string]{V: query.Attributes})

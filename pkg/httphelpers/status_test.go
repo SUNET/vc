@@ -2,6 +2,7 @@ package httphelpers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -43,11 +44,33 @@ func TestStatusCode(t *testing.T) {
 		}{
 			{"not_found", helpers.ErrNoDocumentFound, http.StatusNotFound},
 			{"no_identity", helpers.ErrNoIdentityFound, http.StatusNotFound},
+			{"namespace_required", helpers.ErrIdentityMappingNamespaceRequired, http.StatusBadRequest},
 			{"already_exists", helpers.ErrDocumentAlreadyExists, http.StatusConflict},
 			{"duplicate_key", helpers.ErrDuplicateKey, http.StatusConflict},
 			{"validation_failed", helpers.ErrDocumentValidationFailed, http.StatusBadRequest},
 			{"revoked", helpers.ErrDocumentIsRevoked, http.StatusForbidden},
 			{"internal_error", helpers.ErrInternalServerError, http.StatusInternalServerError},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				status := StatusCode(ctx, tt.err)
+				assert.Equal(t, tt.expected, status)
+			})
+		}
+	})
+
+	t.Run("Wrapped helpers errors", func(t *testing.T) {
+		// ResolveIdentifier wraps mapping failures with %w, so the status must
+		// survive wrapping via the errors.Is branch rather than the type switch.
+		tests := []struct {
+			name     string
+			err      error
+			expected int
+		}{
+			{"no_document", fmt.Errorf("lookup failed: %w", helpers.ErrNoDocumentFound), http.StatusNotFound},
+			{"no_identity", fmt.Errorf("lookup failed: %w", helpers.ErrNoIdentityFound), http.StatusNotFound},
+			{"namespace_required", fmt.Errorf("identity mapping resolution failed: %w", helpers.ErrIdentityMappingNamespaceRequired), http.StatusBadRequest},
 		}
 
 		for _, tt := range tests {
