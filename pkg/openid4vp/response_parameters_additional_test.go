@@ -244,3 +244,46 @@ func TestVPResponse(t *testing.T) {
 		assert.Equal(t, vpResp.VPToken["credential_1"], decoded.VPToken["credential_1"])
 	})
 }
+
+// TestVPResponseRefusesATokenlessResponse: UnmarshalJSON states that an empty
+// vp_token is an error, and four shapes got past that rule.
+//
+// JSON null unmarshals into a map WITHOUT error, leaving a nil map - so
+// "vp_token": null passed the emptiness check (which tests the raw bytes and
+// sees four of them), produced zero tokens, and returned success. An empty
+// object did the same, and a key carrying null or [] named a credential the
+// wallet then did not supply.
+//
+// The scope loop downstream refuses a scope it finds no token for, so this is
+// the fail-closed half rather than the only check. What it fixes is a parser
+// that accepted a response contradicting its own stated rule.
+func TestVPResponseRefusesATokenlessResponse(t *testing.T) {
+	for _, body := range []string{
+		`{"state":"s","vp_token":null}`,
+		`{"state":"s","vp_token":{}}`,
+		`{"state":"s","vp_token":{"cred":[]}}`,
+		`{"state":"s","vp_token":{"cred":null}}`,
+		`{"state":"s","vp_token":{"cred":""}}`,
+		`{"state":"s","vp_token":{"cred":["tok",""]}}`,
+		`{"state":"s","vp_token":""}`,
+	} {
+		var v VPResponse
+		err := json.Unmarshal([]byte(body), &v)
+		require.Error(t, err, "a response presenting nothing must not parse: %s", body)
+	}
+}
+
+// TestVPResponseAcceptsAPresentation keeps the refusals above from becoming a
+// refusal of everything.
+func TestVPResponseAcceptsAPresentation(t *testing.T) {
+	for body, want := range map[string]map[string][]string{
+		`{"state":"s","vp_token":{"cred":"tok"}}`:          {"cred": {"tok"}},
+		`{"state":"s","vp_token":{"cred":["one","two"]}}`:  {"cred": {"one", "two"}},
+		`{"state":"s","vp_token":"tok"}`:                   {"_default": {"tok"}},
+		`{"state":"s","vp_token":{"a":"one","b":["two"]}}`: {"a": {"one"}, "b": {"two"}},
+	} {
+		var v VPResponse
+		require.NoError(t, json.Unmarshal([]byte(body), &v), body)
+		require.Equal(t, want, v.VPToken, body)
+	}
+}

@@ -123,8 +123,8 @@ func (Backend) BlindSign(suite uint32, secretKey, publicKey, commitment, header 
 
 // VerifyProof implements the verifier half. See bbs.ProofVerifier.
 func (Backend) VerifyProof(suite uint32, publicKey, proof, header, presentationHeader []byte,
-	issuerKnownMessages int, disclosedMessages [][]byte, disclosures []byte) (int32, string) {
-
+	issuerKnownMessages int, disclosedMessages [][]byte, disclosures []byte,
+) (int32, string) {
 	discPtrs, discLens, discCount, free := byteArrays(disclosedMessages)
 	defer free()
 
@@ -180,8 +180,8 @@ func Describe(status int32, msg string) string {
 // is exactly one implementation of it.
 func (Backend) Issue(suite uint32, secretKey, publicKey, commitment []byte,
 	vct string, issuerClaimsJSON, holderPointersJSON, extraHeaderJSON []byte,
-	keybind uint32) (string, int32, string) {
-
+	keybind uint32,
+) (string, int32, string) {
 	skPtr, skLen := cBytes(secretKey)
 	pkPtr, pkLen := cBytes(publicKey)
 	comPtr, comLen := cBytes(commitment)

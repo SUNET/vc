@@ -658,3 +658,74 @@ func ecCoordinates(t *testing.T, pub *ecdsa.PublicKey) (x, y []byte) {
 	require.Equal(t, 65, len(raw), "unexpected uncompressed P-256 point length")
 	return raw[1:33], raw[33:65]
 }
+
+// TestVerificationDirectPostRefusesAScopeTheRequestDidNotAsk pins that a
+// response naming a scope the request does not contain is refused, and
+// refused BEFORE anything about the token is trusted.
+//
+// Worth a test of its own because it is what makes the format check's
+// remaining log-and-continue branch narrow: the only case that reaches it is
+// a session whose DCQL query is not available on this replica at all - the
+// persisted one comes back nil from Mongo and the request-object cache is
+// per-process without HA - and not "the wallet answered a scope nobody asked
+// about", which is refused here.
+func TestVerificationDirectPostRefusesAScopeTheRequestDidNotAsk(t *testing.T) {
+	ctx := t.Context()
+
+	sigKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	client, _ := CreateTestClientWithMock(t, nil)
+	log := logger.NewSimple("test")
+	notifyService, _ := notify.New(ctx, client.cfg, log)
+	client.notify = notifyService
+	openid4vpClient, _ := openid4vp.New(ctx, &openid4vp.Config{})
+	client.openid4vp = openid4vpClient
+	client.jwtTrustVerifier = trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
+		TrustEvaluator: trust.NewAllowAllEvaluator(),
+		JWKSResolver:   trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{}),
+		ParseX5C:       func(x5cRaw any) ([]*x509.Certificate, error) { return jose.ParseX5CHeader(x5cRaw) },
+		ParseJWK:       jose.ParseJWKToPublicKey,
+		Log:            log,
+	})
+
+	kid := "refuse-unasked-kid"
+	_, ephemeralPubJWK, err := client.ephemeralEncryptionKey(ctx, kid)
+	require.NoError(t, err)
+
+	const (
+		state = "refuse-unasked-state"
+		nonce = "refuse-unasked-nonce"
+	)
+	// The request asks for "ehic" and nothing else; the session names "pid"
+	// as a scope, which is the shape a configured-but-unrequested scope has.
+	require.NoError(t, client.cacheService.AuthContext.Save(ctx, &cache.AuthorizationContext{
+		SessionID:                "refuse-unasked-session",
+		State:                    state,
+		Nonce:                    nonce,
+		ClientID:                 "x509_san_dns:verifier.example.com",
+		Scopes:                   []string{"pid"},
+		EphemeralEncryptionKeyID: kid,
+		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+			{ID: "ehic", Format: openid4vp.FormatSDJWTVC, Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:ehic:1"}}},
+		}},
+	}))
+
+	vpResponseBytes, err := json.Marshal(openid4vp.VPResponse{
+		State: state,
+		VPToken: map[string][]string{
+			"pid": {createTestSDJWT(t, sigKey, map[string]any{"given_name": "Alice"}, nonce, "x509_san_dns:verifier.example.com")},
+		},
+	})
+	require.NoError(t, err)
+
+	encrypted, err := jwe.Encrypt(vpResponseBytes,
+		jwe.WithKey(jwa.ECDH_ES(), ephemeralPubJWK),
+		jwe.WithContentEncryption(jwa.A256GCM()),
+	)
+	require.NoError(t, err)
+
+	_, err = client.VerificationDirectPost(ctx, &VerificationDirectPostRequest{Response: string(encrypted)})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "names no credential query in this request")
+}

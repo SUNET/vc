@@ -399,6 +399,15 @@ func createTestDBSession(sessionID string) *cache.AuthorizationContext {
 		ResponseType: "code",
 		Scopes:       []string{"openid"},
 		State:        "client-state",
+		// Every session this flow creates carries the query it asked -
+		// Authorize builds one for the requested scopes - and both
+		// direct-post handlers now refuse a response they cannot check
+		// against a request.
+		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+			ID:     "pid",
+			Format: openid4vp.FormatSDJWTVC,
+			Meta:   openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}},
+		}}},
 	}
 
 	return authCtx
