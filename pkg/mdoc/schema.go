@@ -3,6 +3,9 @@ package mdoc
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+
+	"github.com/SUNET/vc/pkg/mdoc/zkcircuit"
 )
 
 // MDDLSchema describes an mso_mdoc credential's document type, namespace(s),
@@ -15,12 +18,35 @@ type MDDLSchema struct {
 	DocType string                     `json:"doctype"`
 	Display []DisplayProperties        `json:"display,omitempty"`
 	Claims  map[string]NamespaceClaims `json:"claims,omitempty"`
+	// ZkSystems names the ZK proof systems this schema's credentials are
+	// meant to be provable under, spelled as the circuit catalog spells
+	// them ("vega-mc", "longfellow"). It is what lets the issuer resolve a
+	// circuit's wire-shape requirements - today the IssuerSignedItem salt
+	// length - from the catalog at issuance instead of having them
+	// hand-copied into ZkSaltBytes, where nothing could notice them going
+	// stale when a new circuit revision changed its mind
+	// (SUNET/vc#723).
+	//
+	// Naming two systems is only meaningful while they agree: a credential
+	// carries one salt per item, so if the catalog says they want
+	// different lengths, resolution refuses rather than picking one.
+	ZkSystems []string `json:"zk_systems,omitempty"`
+
 	// ZkSaltBytes, when non-zero, fixes every claim's IssuerSignedItem
 	// random salt to exactly this many bytes - see
 	// MSOBuilder.WithSaltBytes's doc for why this exists and why it must
-	// stay opt-in per schema rather than a package-wide default. Set this
-	// only on a schema that is Vega-only: zk-cred-vega's r12 circuit
-	// requires exactly 32 here, and a schema meant to also serve
+	// stay opt-in per schema rather than a package-wide default.
+	//
+	// This is now an OVERRIDE, not the primary source. Prefer ZkSystems
+	// and let the catalog answer. Setting it pins the value: issuance no
+	// longer depends on the catalog being reachable, which is what an
+	// air-gapped deployment or an interop test against a circuit that is
+	// not published yet actually wants - and the issuer logs when the
+	// catalog disagrees with the pin, so the pin going stale is visible
+	// rather than silent.
+	//
+	// Set it alone only on a schema that is Vega-only: zk-cred-vega's
+	// r12 circuit requires exactly 32, and a schema meant to also serve
 	// zk-cred-longfellow (whose own item-size ceiling a uniform 32-byte
 	// salt can violate) must leave this unset and keep the package's
 	// default per-element sizing.
@@ -235,12 +261,28 @@ func LoadMDDLSchema(raw []byte) (*MDDLSchema, error) {
 		return nil, fmt.Errorf("MDDL schema for doctype %q declares no claims", schema.DocType)
 	}
 	// ZkSaltBytes reaches make([]byte, saltSize) in AddDataElement with no
-	// further checks - an unvalidated value here either issues credentials
-	// silently incompatible with Vega (anything but 32, other than unset/0)
-	// or, for a very large value, exhausts memory during issuance. 0 and 32
-	// are the only two sizes anything in this codebase understands today.
-	if schema.ZkSaltBytes != 0 && schema.ZkSaltBytes != 32 {
-		return nil, fmt.Errorf("MDDL schema for doctype %q has zk_salt_bytes %d: only 0 (default sizing) or 32 (zk-cred-vega's r12 circuit) is supported", schema.DocType, schema.ZkSaltBytes)
+	// further checks, so it is bounded here rather than trusted.
+	//
+	// The bound is a range, not "32". Which length a credential needs is
+	// the circuit's to state and the catalog's to publish - that is the
+	// whole point of ZkSystems - so hardcoding today's Vega answer here
+	// would refuse tomorrow's correct one and reintroduce the coupling
+	// this is meant to remove. The range is zkcircuit's, so a value a
+	// schema pins and a value the catalog publishes are held to exactly
+	// the same bound.
+	if schema.ZkSaltBytes != 0 &&
+		(schema.ZkSaltBytes < zkcircuit.MinSaltBytes || schema.ZkSaltBytes > zkcircuit.MaxSaltBytes) {
+		return nil, fmt.Errorf("MDDL schema for doctype %q has zk_salt_bytes %d: must be 0 (default sizing) or within [%d, %d]",
+			schema.DocType, schema.ZkSaltBytes, zkcircuit.MinSaltBytes, zkcircuit.MaxSaltBytes)
+	}
+
+	// An empty or blank system name resolves to nothing and would be
+	// silently dropped by the catalog lookup, leaving a schema that looks
+	// like it declares a ZK system but is issued with default sizing.
+	for i, system := range schema.ZkSystems {
+		if strings.TrimSpace(system) == "" {
+			return nil, fmt.Errorf("MDDL schema for doctype %q has an empty zk_systems entry at index %d", schema.DocType, i)
+		}
 	}
 
 	// addElements() (pkg/mdoc/issuer.go) looks up document_data by element

@@ -591,6 +591,14 @@ build-jwt-issuer: ## Build jwt_issuer developer tool
 		-ldflags "-w -s --extldflags '-static' -X main.version=$(JWT_ISSUER_VERSION)" \
 		./developer_tools/scripts/jwt_issuer/
 
+build-vendor-zk-circuits: ## Build vendor_zk_circuits developer tool
+	$(info Building vendor_zk_circuits)
+	$(eval VENDOR_ZK_CIRCUITS_VERSION := $(or $(shell git tag -l "vendor-zk-circuits-v*" --sort=-v:refname | head -n1 | sed 's/^vendor-zk-circuits-//'),dev))
+	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
+		$(BUILD_FLAGS) -o ./bin/vendor_zk_circuits \
+		-ldflags "-w -s --extldflags '-static' -X main.version=$(VENDOR_ZK_CIRCUITS_VERSION)" \
+		./developer_tools/scripts/vendor_zk_circuits/
+
 build-tsl-checker: bbs-native-lib-ensure ## Build tsl_checker developer tool
 	$(info Building tsl_checker)
 	$(eval TSL_CHECKER_VERSION := $(or $(shell git tag -l "tsl-checker-v*" --sort=-v:refname | head -n1 | sed 's/^tsl-checker-//'),dev))

@@ -31,6 +31,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -159,12 +160,21 @@ type CircuitDescriptor struct {
 	Notes         string         `json:"notes,omitempty"`
 }
 
-// ParamInt reads a numeric Params entry (decoded from JSON, so stored as
-// float64) as an int. Returns (0, false) if the key is absent, not
-// numeric, not an integral value (e.g. a catalog entry with
-// "num_attributes": 2.5), or outside the platform int range - all of
-// which would otherwise let a remote/untrusted catalog response silently
-// truncate into a nonsensical value via int(float64).
+// ParamInt reads a numeric Params entry as an int. Returns (0, false) if
+// the key is absent, not numeric, not an integral value (e.g. a catalog
+// entry with "num_attributes": 2.5), or outside the platform int range -
+// all of which would otherwise let a remote/untrusted catalog response
+// silently truncate into a nonsensical value via int(float64).
+//
+// A decimal string holding an integer is accepted as well, because the
+// live catalog publishes both shapes: the longfellow entries carry
+// "num_attributes": 2 while every vega-mc entry carries "saltBytes": "32",
+// "numClaims": "4" and "maxClaimBytes": "176". Which shape a publisher
+// chose is not something a consumer should have to know, and reading one
+// of them as "absent" is how a circuit constraint silently stops being
+// enforced. Only a plain decimal integer is taken - "32.0", "0x20",
+// " 32 " and "" are all refused, so a malformed entry still reads as
+// absent rather than as some number nobody wrote.
 func (d *CircuitDescriptor) ParamInt(key string) (int, bool) {
 	v, ok := d.Params[key]
 	if !ok {
@@ -178,6 +188,12 @@ func (d *CircuitDescriptor) ParamInt(key string) (int, bool) {
 		return int(n), true
 	case int:
 		return n, true
+	case string:
+		parsed, err := strconv.Atoi(n)
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
 	default:
 		return 0, false
 	}
@@ -286,6 +302,14 @@ func (c *Client) FetchManifest(ctx context.Context) (*Manifest, error) {
 // net/http's default behavior). Returns an error only if every source
 // failed.
 func (c *Client) FetchCircuit(ctx context.Context, id string) (*CircuitDescriptor, error) {
+	// id is interpolated straight into the request path, and on the
+	// verifier side it comes from a presented proof's zkSystemId - see
+	// validCircuitID for what a crafted one would otherwise reach,
+	// particularly against a vendored file:// mirror.
+	if !validCircuitID(id) {
+		return nil, fmt.Errorf("invalid circuit id %q: a catalog id is a flat token of letters, digits, '-', '_' and '.'", id)
+	}
+
 	var lastErr error
 	for _, source := range c.Sources {
 		url := circuitURL(source, id)
@@ -347,6 +371,16 @@ func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescri
 		// fragility) - reject up front rather than silently fetching over
 		// http.
 		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact URL %q uses plaintext http - refusing (must be https or a relative path resolved against a configured source)", descriptor.ID, artifact.URL)}
+	}
+	if scheme := absoluteURLScheme(artifact.URL); scheme != "" && scheme != "https" {
+		// Anything else absolute - file://, ftp://, a scheme nobody has
+		// thought about - would fall through to candidateArtifactURLs,
+		// which treats a non-http URL as a RELATIVE PATH and glues it onto
+		// every source. That produces a nonsense URL rather than an error,
+		// which is the wrong way to find out the catalog said something
+		// unexpected. A vendored mirror's descriptors carry relative
+		// paths, which is the supported form and takes the branch below.
+		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact URL %q uses scheme %q - refusing (must be https or a relative path resolved against a configured source)", descriptor.ID, artifact.URL, scheme)}
 	}
 	if strings.HasPrefix(artifact.URL, "https://") && !c.isAllowedAbsoluteHost(artifact.URL) {
 		// Without this, an absolute artifact.URL from the remote,
@@ -461,6 +495,28 @@ func (c *Client) DownloadAndDecompress(ctx context.Context, descriptor *CircuitD
 	return decompressed, nil
 }
 
+// absoluteURLScheme returns the scheme of rawURL if it is written as an
+// absolute "scheme://..." URL, and "" if it is a relative path. Deliberately
+// textual rather than url.Parse-based: "v1/artifacts/sha256/ab:cd" parses
+// as a URL with no scheme but is a relative path, and that is the form the
+// real catalog serves.
+func absoluteURLScheme(rawURL string) string {
+	i := strings.Index(rawURL, "://")
+	if i <= 0 {
+		return ""
+	}
+	scheme := rawURL[:i]
+	for _, r := range scheme {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9', r == '+', r == '-', r == '.':
+		default:
+			return ""
+		}
+	}
+	return strings.ToLower(scheme)
+}
+
 func manifestURL(source string) string {
 	return strings.TrimRight(source, "/") + "/v1/manifest.json"
 }
@@ -482,6 +538,13 @@ func (c *Client) isAllowedAbsoluteHost(rawURL string) bool {
 	for _, source := range c.Sources {
 		sourceURL, err := url.Parse(source)
 		if err != nil {
+			continue
+		}
+		// Scheme as well as host: a file:// source has an empty Host, and
+		// matching on Host alone would make every empty-host URL - any
+		// scheme at all - "one of our sources". Hosts still compare
+		// case-insensitively; schemes are lowercase out of url.Parse.
+		if parsed.Scheme != sourceURL.Scheme {
 			continue
 		}
 		if strings.EqualFold(parsed.Host, sourceURL.Host) {
@@ -535,7 +598,7 @@ func (c *Client) fetchText(ctx context.Context, url string, maxBytes int64) (str
 	if c.FetchText != nil {
 		return c.FetchText(ctx, url)
 	}
-	data, err := c.fetchBytesHTTP(ctx, url, maxBytes)
+	data, err := c.fetchBytesURL(ctx, url, maxBytes)
 	if err != nil {
 		return "", err
 	}
@@ -548,6 +611,16 @@ func (c *Client) fetchText(ctx context.Context, url string, maxBytes int64) (str
 func (c *Client) fetchBytes(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
 	if c.FetchBytes != nil {
 		return c.FetchBytes(ctx, url)
+	}
+	return c.fetchBytesURL(ctx, url, maxBytes)
+}
+
+// fetchBytesURL dispatches on scheme: a file:// URL is a vendored local
+// mirror (see filesource.go) and is read off disk; everything else goes
+// over HTTP.
+func (c *Client) fetchBytesURL(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
+	if isFileURL(url) {
+		return fetchFile(url, maxBytes)
 	}
 	return c.fetchBytesHTTP(ctx, url, maxBytes)
 }
@@ -579,21 +652,24 @@ func (c *Client) fetchBytesHTTP(ctx context.Context, url string, maxBytes int64)
 			if len(via) >= 5 {
 				return fmt.Errorf("too many redirects fetching %s", url)
 			}
-			if !c.isAllowedAbsoluteHost(req.URL.String()) {
-				return fmt.Errorf("redirect to disallowed host %q", req.URL.Host)
-			}
-			// The host allowlist alone isn't enough: a same-host https->http
-			// redirect would still pass it while silently downgrading the
-			// transport, defeating DownloadArtifact's explicit rejection of
-			// plaintext absolute artifact URLs (candidateArtifactURLs never
-			// builds a plain-http URL itself, so this can only happen via a
-			// redirect response). Only enforce https when the ORIGINAL
-			// request was https (via[0]) - blocking every non-https redirect
-			// unconditionally would also break a Source legitimately
-			// configured as http:// (e.g. a local dev/test mirror), whose
-			// own same-scheme alias redirects are not a downgrade at all.
+			// Checked BEFORE the host allowlist, because a same-host
+			// https->http redirect fails both and the downgrade is the more
+			// useful thing to say: the allowlist compares scheme as well as
+			// host, so it would otherwise report a same-host downgrade as a
+			// "disallowed host". A downgrade defeats DownloadArtifact's
+			// explicit rejection of plaintext absolute artifact URLs
+			// (candidateArtifactURLs never builds a plain-http URL itself,
+			// so this can only happen via a redirect response). Only
+			// enforce https when the ORIGINAL request was https (via[0]) -
+			// blocking every non-https redirect unconditionally would also
+			// break a Source legitimately configured as http:// (e.g. a
+			// local dev/test mirror), whose own same-scheme alias redirects
+			// are not a downgrade at all.
 			if len(via) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme != "https" {
 				return fmt.Errorf("redirect from https to non-https scheme %q (downgrade not allowed)", req.URL.Scheme)
+			}
+			if !c.isAllowedAbsoluteHost(req.URL.String()) {
+				return fmt.Errorf("redirect to disallowed host %q", req.URL.Host)
 			}
 			return nil
 		},

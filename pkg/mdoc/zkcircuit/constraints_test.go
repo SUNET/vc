@@ -1,0 +1,308 @@
+package zkcircuit
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+)
+
+// circuit is a terse descriptor builder for the tables below.
+func circuit(id, system, status string, docTypes []string, params map[string]any) CircuitDescriptor {
+	return CircuitDescriptor{
+		ID:        id,
+		System:    system,
+		Status:    status,
+		DocTypes:  docTypes,
+		Published: true,
+		Params:    params,
+	}
+}
+
+const mDL = "org.iso.18013.5.1.mDL"
+
+// The live catalog publishes every vega-mc param as a STRING - "saltBytes":
+// "32" - while the longfellow entries use JSON numbers. A consumer reading
+// only numbers sees no constraint at all and sizes the salt from its own
+// default, which is the exact failure this whole path exists to prevent.
+func TestParamIntReadsTheCatalogsStringShape(t *testing.T) {
+	d := circuit("vega", "vega-mc", StatusActive, []string{mDL}, map[string]any{"saltBytes": "32"})
+
+	got, ok := d.ParamInt(ParamSaltBytes)
+	if !ok || got != 32 {
+		t.Fatalf(`ParamInt("saltBytes") = %d, %v; want 32, true`, got, ok)
+	}
+}
+
+func TestParamIntRefusesMalformedStrings(t *testing.T) {
+	for _, raw := range []string{"", " 32 ", "32.0", "0x20", "32px", "+-1"} {
+		t.Run(raw, func(t *testing.T) {
+			d := CircuitDescriptor{Params: map[string]any{"k": raw}}
+			if got, ok := d.ParamInt("k"); ok {
+				t.Fatalf("ParamInt(%q) = %d, true; want absent", raw, got)
+			}
+		})
+	}
+}
+
+func TestActiveCircuits(t *testing.T) {
+	m := &Manifest{Circuits: []CircuitDescriptor{
+		circuit("active-mdl", "vega-mc", StatusActive, []string{mDL}, nil),
+		circuit("deprecated", "vega-mc", "deprecated", []string{mDL}, nil),
+		circuit("other-system", "longfellow", StatusActive, []string{mDL}, nil),
+		circuit("other-doctype", "vega-mc", StatusActive, []string{"eu.europa.ec.eudi.pid.1"}, nil),
+		circuit("no-doctypes", "vega-mc", StatusActive, nil, nil),
+		circuit("no-status", "vega-mc", "", []string{mDL}, nil),
+		{ID: "unpublished", System: "vega-mc", Status: StatusActive, DocTypes: []string{mDL}},
+	}}
+
+	got := m.ActiveCircuits("vega-mc", mDL)
+	if len(got) != 1 || got[0].ID != "active-mdl" {
+		ids := make([]string, len(got))
+		for i, c := range got {
+			ids[i] = c.ID
+		}
+		t.Fatalf("ActiveCircuits = %v, want [active-mdl]", ids)
+	}
+
+	// An unscoped entry - one declaring no docTypes - is skipped when a
+	// doctype is ASKED FOR, which is the only way constraint resolution
+	// ever calls this: "declares no document type" is the catalog not
+	// having said, and reading that as "every document type" is how a
+	// constraint meant for an mDL gets applied to something else. With no
+	// doctype asked for there is nothing to narrow against, so it appears.
+	all := m.ActiveCircuits("vega-mc", "")
+	var sawUnscoped bool
+	for _, c := range all {
+		if c.ID == "no-doctypes" {
+			sawUnscoped = true
+		}
+	}
+	if !sawUnscoped {
+		t.Error("an unfiltered listing should include a circuit that declares no doctypes")
+	}
+}
+
+// The resolution path always asks for a doctype, so the skip above is what
+// it actually gets: a circuit that never says what it is for cannot supply
+// a constraint for an mDL.
+func TestConstraintsIgnoresACircuitThatDeclaresNoDocType(t *testing.T) {
+	m := &Manifest{Circuits: []CircuitDescriptor{
+		circuit("unscoped", "vega-mc", StatusActive, nil, map[string]any{"saltBytes": "32"}),
+	}}
+
+	if _, err := m.Constraints("vega-mc", mDL); !errors.Is(err, ErrNoActiveCircuit) {
+		t.Fatalf("error = %v, want ErrNoActiveCircuit", err)
+	}
+}
+
+func TestConstraints(t *testing.T) {
+	tests := map[string]struct {
+		circuits  []CircuitDescriptor
+		wantSalt  int
+		wantErr   string
+		wantIsErr error
+	}{
+		"reads the published salt": {
+			circuits: []CircuitDescriptor{
+				circuit("vega-r12-prover", "vega-mc", StatusActive, []string{mDL}, map[string]any{"saltBytes": "32"}),
+				circuit("vega-r12-verifier", "vega-mc", StatusActive, []string{mDL}, map[string]any{"saltBytes": "32"}),
+			},
+			wantSalt: 32,
+		},
+		"a system that publishes none states no constraint": {
+			circuits: []CircuitDescriptor{
+				circuit("lf-1", "vega-mc", StatusActive, []string{mDL}, map[string]any{"num_attributes": float64(2)}),
+			},
+			wantSalt: 0,
+		},
+		"no active circuit refuses": {
+			circuits: []CircuitDescriptor{
+				circuit("vega-r11", "vega-mc", "deprecated", []string{mDL}, map[string]any{"saltBytes": "32"}),
+			},
+			wantIsErr: ErrNoActiveCircuit,
+		},
+		"active circuits that disagree refuse": {
+			circuits: []CircuitDescriptor{
+				circuit("vega-a", "vega-mc", StatusActive, []string{mDL}, map[string]any{"saltBytes": "32"}),
+				circuit("vega-b", "vega-mc", StatusActive, []string{mDL}, map[string]any{"saltBytes": "16"}),
+			},
+			wantErr: "disagree about saltBytes: 16 (vega-b) vs 32 (vega-a)",
+		},
+		"below the accepted range refuses": {
+			circuits: []CircuitDescriptor{
+				circuit("tiny", "vega-mc", StatusActive, []string{mDL}, map[string]any{"saltBytes": MinSaltBytes - 1}),
+			},
+			wantErr: "outside the accepted range",
+		},
+		"above the accepted range refuses": {
+			circuits: []CircuitDescriptor{
+				circuit("huge", "vega-mc", StatusActive, []string{mDL}, map[string]any{"saltBytes": "1000000000"}),
+			},
+			wantErr: "outside the accepted range",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := (&Manifest{Circuits: tc.circuits}).Constraints("vega-mc", mDL)
+
+			switch {
+			case tc.wantIsErr != nil:
+				if !errors.Is(err, tc.wantIsErr) {
+					t.Fatalf("error = %v, want %v", err, tc.wantIsErr)
+				}
+			case tc.wantErr != "":
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %v, want one containing %q", err, tc.wantErr)
+				}
+			default:
+				if err != nil {
+					t.Fatalf("Constraints() error = %v", err)
+				}
+				if got.SaltBytes != tc.wantSalt {
+					t.Errorf("SaltBytes = %d, want %d", got.SaltBytes, tc.wantSalt)
+				}
+			}
+		})
+	}
+}
+
+func TestSaltBytesAcrossSystems(t *testing.T) {
+	// Mirrors the live catalog's shape: vega publishes a salt length,
+	// longfellow publishes none and is served by the default sizing.
+	m := &Manifest{Circuits: []CircuitDescriptor{
+		circuit("vega-r12", "vega-mc", StatusActive, []string{mDL}, map[string]any{"saltBytes": "32"}),
+		circuit("lf-8-2", "longfellow", StatusActive, []string{mDL}, map[string]any{"num_attributes": float64(2)}),
+		circuit("other", "other-system", StatusActive, []string{mDL}, map[string]any{"saltBytes": float64(16)}),
+	}}
+
+	t.Run("one system", func(t *testing.T) {
+		got, err := m.SaltBytes([]string{"vega-mc"}, mDL)
+		if err != nil || got != 32 {
+			t.Fatalf("SaltBytes = %d, %v; want 32, nil", got, err)
+		}
+	})
+
+	t.Run("a system stating no constraint does not cancel one that does", func(t *testing.T) {
+		got, err := m.SaltBytes([]string{"longfellow", "vega-mc"}, mDL)
+		if err != nil || got != 32 {
+			t.Fatalf("SaltBytes = %d, %v; want 32, nil", got, err)
+		}
+	})
+
+	t.Run("no constraint anywhere leaves the default sizing", func(t *testing.T) {
+		got, err := m.SaltBytes([]string{"longfellow"}, mDL)
+		if err != nil || got != 0 {
+			t.Fatalf("SaltBytes = %d, %v; want 0, nil", got, err)
+		}
+	})
+
+	t.Run("systems that want different lengths refuse", func(t *testing.T) {
+		_, err := m.SaltBytes([]string{"vega-mc", "other-system"}, mDL)
+		if err == nil || !strings.Contains(err.Error(), "16 (other-system) vs 32 (vega-mc)") {
+			t.Fatalf("error = %v, want one naming both systems and both lengths", err)
+		}
+	})
+
+	t.Run("an unknown system refuses rather than resolving to nothing", func(t *testing.T) {
+		_, err := m.SaltBytes([]string{"vega-mc", "nonesuch"}, mDL)
+		if !errors.Is(err, ErrNoActiveCircuit) {
+			t.Fatalf("error = %v, want ErrNoActiveCircuit", err)
+		}
+	})
+
+	t.Run("naming no system at all refuses", func(t *testing.T) {
+		if _, err := m.SaltBytes(nil, mDL); err == nil {
+			t.Fatal("expected an error when no system is named")
+		}
+	})
+}
+
+// countingClient serves a fixed manifest body and counts fetches, so a
+// test can tell a cache hit from a round trip.
+type countingClient struct {
+	*Client
+	fetches int
+	fail    bool
+}
+
+func newCountingClient(body string) *countingClient {
+	cc := &countingClient{}
+	cc.Client = &Client{
+		Sources: []string{"https://catalog.example"},
+		FetchText: func(context.Context, string) (string, error) {
+			cc.fetches++
+			if cc.fail {
+				return "", errors.New("catalog unreachable")
+			}
+			return body, nil
+		},
+	}
+	return cc
+}
+
+const oneVegaCircuit = `{"circuits":[{"id":"vega-r12","system":"vega-mc","status":"active","published":true,` +
+	`"docTypes":["org.iso.18013.5.1.mDL"],"params":{"saltBytes":"32"}}]}`
+
+func TestResolverCachesWithinTheTTL(t *testing.T) {
+	cc := newCountingClient(oneVegaCircuit)
+	now := time.Now()
+	r := &Resolver{Client: cc.Client, TTL: time.Hour, Now: func() time.Time { return now }}
+
+	for range 5 {
+		salt, stale, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL)
+		if err != nil || stale || salt != 32 {
+			t.Fatalf("SaltBytes = %d, stale=%v, %v", salt, stale, err)
+		}
+	}
+	if cc.fetches != 1 {
+		t.Errorf("fetches = %d, want 1 - issuance must not be a catalog round trip per credential", cc.fetches)
+	}
+
+	now = now.Add(time.Hour + time.Second)
+	if _, _, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL); err != nil {
+		t.Fatal(err)
+	}
+	if cc.fetches != 2 {
+		t.Errorf("fetches = %d, want 2 after the TTL expired", cc.fetches)
+	}
+}
+
+func TestResolverServesTheLastManifestWhenARefreshFails(t *testing.T) {
+	cc := newCountingClient(oneVegaCircuit)
+	now := time.Now()
+	r := &Resolver{Client: cc.Client, TTL: time.Minute, Now: func() time.Time { return now }}
+
+	if _, stale, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL); err != nil || stale {
+		t.Fatalf("first resolve: stale=%v, %v", stale, err)
+	}
+
+	cc.fail = true
+	now = now.Add(time.Hour)
+
+	salt, stale, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL)
+	if err != nil {
+		t.Fatalf("a brief catalog outage must not stop issuance: %v", err)
+	}
+	if !stale {
+		t.Error("stale = false, want true - the caller has to be able to say so")
+	}
+	if salt != 32 {
+		t.Errorf("SaltBytes = %d, want 32", salt)
+	}
+}
+
+// The one thing the resolver will not do is answer from nothing: a
+// credential sized by a guess fails in the wallet's hands at presentation
+// time, with an error that says nothing about why.
+func TestResolverRefusesWithNothingCached(t *testing.T) {
+	cc := newCountingClient(oneVegaCircuit)
+	cc.fail = true
+	r := &Resolver{Client: cc.Client}
+
+	if _, _, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL); err == nil {
+		t.Fatal("expected an error when the catalog has never been reached")
+	}
+}

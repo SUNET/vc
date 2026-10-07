@@ -21,6 +21,7 @@ import (
 	"github.com/SUNET/vc/pkg/grpchelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/mdoc"
+	"github.com/SUNET/vc/pkg/mdoc/zkcircuit"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/status"
@@ -64,6 +65,10 @@ type Client struct {
 	// that it rejects the ones it should. Those are different properties,
 	// and hardcoding the suite again passed every test until this existed.
 	bbsIssuerOverride bbs.Issuer
+
+	// zkResolver resolves circuit wire-shape constraints from the
+	// zk-circuits catalog. Nil when no sources are configured.
+	zkResolver *zkcircuit.Resolver
 }
 
 // bbsKeyPair is the issuer's BLS12-381 key pair, held as raw bytes.
@@ -85,6 +90,7 @@ func New(ctx context.Context, auditLog *auditlog.Service, cfg *model.Cfg, tracer
 		auditLog:       auditLog,
 		jwkProto:       &apiv1_issuer.Jwk{},
 		signMetadataRL: rate.NewLimiter(rate.Limit(cfg.Issuer.SignMetadataRateLimit.RequestsPerSecond), cfg.Issuer.SignMetadataRateLimit.Burst),
+		zkResolver:     newZkCircuitResolver(cfg.Issuer.ZkCircuits.Sources, cfg.Issuer.ZkCircuits.CacheTTL),
 	}
 
 	if err := c.initSigner(ctx); err != nil {

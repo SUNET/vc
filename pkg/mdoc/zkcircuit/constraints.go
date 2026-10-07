@@ -1,0 +1,308 @@
+package zkcircuit
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Wire-shape constraints an issuer has to honour are published per circuit
+// version in the catalog's params. Today there is exactly one:
+//
+//	saltBytes - the length, in bytes, of every IssuerSignedItem's `random`
+//	salt that the circuit's digest-ID extraction assumes.
+//
+// It is a property of the CIRCUIT BUILD, not of any credential schema:
+// zk-cred-vega bakes DIGEST_ID_OFFSET_BYTES into its R1CS at setup() time,
+// and a credential whose salt is any other length shifts every field out of
+// position and fails verification with InvalidSumcheckProof on every claim.
+// Before the catalog published it, the number had to be hand-copied into
+// each schema, where nothing could notice it going stale - which is the
+// defect this resolves (SUNET/vc#723, sirosfoundation/go-zk-circuits#29).
+const (
+	// ParamSaltBytes is the catalog params key carrying the above.
+	ParamSaltBytes = "saltBytes"
+
+	// StatusActive is the only Status an issuer may build for. A
+	// deprecated circuit's constraints describe credentials that should no
+	// longer be minted, and an entry with any other status - including an
+	// empty one - is not something to guess about.
+	StatusActive = "active"
+)
+
+// MinSaltBytes and MaxSaltBytes bound a catalog-published salt length.
+//
+// The value reaches make([]byte, n) and is signed by the issuer into every
+// credential, so it is read from a remote, configurable source and must be
+// bounded here rather than trusted. The window is deliberately wide: the
+// point of resolving from the catalog is that the circuit decides, so
+// anything a plausible circuit could want has to fit. It is not a
+// restatement of "32" - pinning that here would reintroduce exactly the
+// hand-copied constant this package exists to remove.
+const (
+	MinSaltBytes = 8
+	MaxSaltBytes = 64
+)
+
+// SystemConstraints is what the catalog publishes about one ZK proof
+// system's currently-active circuits.
+type SystemConstraints struct {
+	// System is the catalog's System value, e.g. "vega-mc" or "longfellow".
+	System string
+	// CircuitIDs are the active circuits the constraints were read from,
+	// in catalog order - carried so a log line or an error can name them.
+	CircuitIDs []string
+	// SaltBytes is the required IssuerSignedItem salt length, or 0 when no
+	// active circuit for this system publishes one. Zero means "this
+	// system states no salt constraint", NOT "zero bytes": longfellow
+	// publishes none and is served by the package's default per-element
+	// sizing.
+	SaltBytes int
+}
+
+// ActiveCircuits returns the manifest's published, active circuits for
+// system, in manifest order.
+//
+// docType, when non-empty, narrows to circuits that declare it. A circuit
+// declaring no docTypes at all is NOT assumed to apply to every document
+// type - it is skipped. An unscoped entry is a catalog that has not said
+// what the circuit is for, and inferring "all" from silence is how a
+// constraint meant for an mDL ends up applied to something else.
+func (m *Manifest) ActiveCircuits(system, docType string) []CircuitDescriptor {
+	if m == nil {
+		return nil
+	}
+	var out []CircuitDescriptor
+	for _, c := range m.Circuits {
+		if !c.Published || c.Status != StatusActive {
+			continue
+		}
+		if !strings.EqualFold(c.System, system) {
+			continue
+		}
+		if docType != "" && !declaresDocType(&c, docType) {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func declaresDocType(c *CircuitDescriptor, docType string) bool {
+	for _, d := range c.DocTypes {
+		if d == docType {
+			return true
+		}
+	}
+	return false
+}
+
+// ErrNoActiveCircuit is returned when a named system has no published,
+// active circuit in the manifest for the document type in question.
+var ErrNoActiveCircuit = errors.New("no active circuit")
+
+// Constraints resolves one system's currently-active wire-shape
+// constraints for docType.
+//
+// Fails closed in both directions: a system the catalog has no active
+// circuit for is an error rather than "no constraint", and active circuits
+// that disagree with each other are an error rather than a pick.
+func (m *Manifest) Constraints(system, docType string) (SystemConstraints, error) {
+	circuits := m.ActiveCircuits(system, docType)
+	if len(circuits) == 0 {
+		return SystemConstraints{}, fmt.Errorf("%w for zk system %q and doctype %q", ErrNoActiveCircuit, system, docType)
+	}
+
+	resolved := SystemConstraints{System: system}
+	// saltFrom records which circuit each distinct value came from, so a
+	// disagreement can be reported as the catalog inconsistency it is
+	// instead of "expected 32, got 16".
+	saltFrom := map[int][]string{}
+
+	for _, c := range circuits {
+		resolved.CircuitIDs = append(resolved.CircuitIDs, c.ID)
+
+		salt, ok := c.ParamInt(ParamSaltBytes)
+		if !ok {
+			// This system states no salt constraint in this circuit.
+			// Legitimate: longfellow publishes none.
+			continue
+		}
+		if salt < MinSaltBytes || salt > MaxSaltBytes {
+			return SystemConstraints{}, fmt.Errorf(
+				"circuit %q publishes %s %d, outside the accepted range [%d, %d]",
+				c.ID, ParamSaltBytes, salt, MinSaltBytes, MaxSaltBytes)
+		}
+		saltFrom[salt] = append(saltFrom[salt], c.ID)
+	}
+
+	switch len(saltFrom) {
+	case 0:
+		// No active circuit publishes one; SaltBytes stays 0.
+	case 1:
+		for salt := range saltFrom {
+			resolved.SaltBytes = salt
+		}
+	default:
+		return SystemConstraints{}, fmt.Errorf(
+			"active circuits for zk system %q disagree about %s: %s",
+			system, ParamSaltBytes, describeDisagreement(saltFrom))
+	}
+
+	return resolved, nil
+}
+
+// SaltBytes resolves the one IssuerSignedItem salt length that every named
+// system's active circuits agree on, for docType.
+//
+// Returns 0 when no named system publishes a constraint, which leaves the
+// caller on its own default sizing. Two systems demanding different
+// lengths is an error: a credential carries ONE salt per item, so a schema
+// cannot satisfy both, and the schema has to name only the system it is
+// actually for.
+func (m *Manifest) SaltBytes(systems []string, docType string) (int, error) {
+	if len(systems) == 0 {
+		return 0, errors.New("no zk systems named")
+	}
+
+	saltFrom := map[int][]string{}
+	for _, system := range systems {
+		c, err := m.Constraints(system, docType)
+		if err != nil {
+			return 0, err
+		}
+		if c.SaltBytes == 0 {
+			continue
+		}
+		saltFrom[c.SaltBytes] = append(saltFrom[c.SaltBytes], system)
+	}
+
+	switch len(saltFrom) {
+	case 0:
+		return 0, nil
+	case 1:
+		for salt := range saltFrom {
+			return salt, nil
+		}
+	}
+	return 0, fmt.Errorf(
+		"zk systems %s require different %s: %s - one credential carries one salt per item, so a schema cannot serve both",
+		strings.Join(systems, ", "), ParamSaltBytes, describeDisagreement(saltFrom))
+}
+
+// describeDisagreement renders a value -> who-said-it map deterministically,
+// so the same catalog inconsistency always produces the same message.
+func describeDisagreement(by map[int][]string) string {
+	values := make([]int, 0, len(by))
+	for v := range by {
+		values = append(values, v)
+	}
+	sort.Ints(values)
+
+	parts := make([]string, 0, len(values))
+	for _, v := range values {
+		names := append([]string(nil), by[v]...)
+		sort.Strings(names)
+		parts = append(parts, fmt.Sprintf("%d (%s)", v, strings.Join(names, ", ")))
+	}
+	return strings.Join(parts, " vs ")
+}
+
+// DefaultResolverTTL is how long a Resolver reuses a fetched manifest.
+//
+// Circuit publication is a human-scale event - a new Vega revision lands
+// every few months - so this is about not making the catalog a dependency
+// of every issuance, not about propagation speed. An operator who has just
+// published a circuit and wants it picked up now restarts the service.
+const DefaultResolverTTL = time.Hour
+
+// Resolver answers circuit-constraint questions from a cached manifest.
+//
+// Issuance is on a request path and must not turn into a catalog round
+// trip per credential, but it must also not be taken down by the catalog
+// being briefly unreachable. So: refresh on expiry, and when a refresh
+// fails, keep serving the last manifest that parsed and say that it is
+// stale. The one thing it will not do is answer from nothing - a resolver
+// that has never successfully fetched returns the fetch error, because the
+// alternative is issuing credentials shaped by a guess.
+type Resolver struct {
+	// Client fetches the manifest. Required.
+	Client *Client
+	// TTL is how long a fetched manifest is reused. Zero means
+	// DefaultResolverTTL.
+	TTL time.Duration
+	// Now is the clock, for tests. Zero value means time.Now.
+	Now func() time.Time
+
+	mu        sync.Mutex
+	manifest  *Manifest
+	fetchedAt time.Time
+}
+
+// NewResolver returns a Resolver over c.
+func NewResolver(c *Client) *Resolver {
+	return &Resolver{Client: c}
+}
+
+func (r *Resolver) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
+}
+
+func (r *Resolver) ttl() time.Duration {
+	if r.TTL > 0 {
+		return r.TTL
+	}
+	return DefaultResolverTTL
+}
+
+// Manifest returns the cached manifest, refreshing it if it has aged past
+// the TTL. stale is true when the refresh failed and the returned manifest
+// is the previous one; the fetch error is reported through stale rather
+// than returned, since the caller got a usable answer. An error is
+// returned only when there is nothing cached to fall back to.
+func (r *Resolver) Manifest(ctx context.Context) (manifest *Manifest, stale bool, err error) {
+	if r == nil || r.Client == nil {
+		return nil, false, errors.New("zk circuit resolver has no catalog client")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.manifest != nil && r.now().Sub(r.fetchedAt) < r.ttl() {
+		return r.manifest, false, nil
+	}
+
+	fetched, fetchErr := r.Client.FetchManifest(ctx)
+	if fetchErr != nil {
+		if r.manifest != nil {
+			return r.manifest, true, nil
+		}
+		return nil, false, fetchErr
+	}
+
+	r.manifest = fetched
+	r.fetchedAt = r.now()
+	return r.manifest, false, nil
+}
+
+// SaltBytes resolves the required salt length for systems and docType.
+// stale reports that the answer came from a manifest the resolver could
+// not refresh - worth logging, not worth refusing to issue over.
+func (r *Resolver) SaltBytes(ctx context.Context, systems []string, docType string) (salt int, stale bool, err error) {
+	manifest, stale, err := r.Manifest(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	salt, err = manifest.SaltBytes(systems, docType)
+	if err != nil {
+		return 0, stale, err
+	}
+	return salt, stale, nil
+}

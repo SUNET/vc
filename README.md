@@ -414,6 +414,33 @@ systems; Vega additionally resolves a verifier-key catalog entry from the
 wallet-declared prover-key entry via the manifest (see
 `getOrLoadVegaVerifierKey`'s doc comment in `pkg/mdoc/zk_native_cgo_vega.go`).
 
+The ISSUER consults the same catalog, for a different reason. An mdoc
+schema that declares which proof systems its credentials are meant for -
+`"zk_systems": ["vega-mc"]` in the MDDL document - has its
+`IssuerSignedItem` salt length resolved from those circuits' published
+`params.saltBytes` rather than hand-copied into the schema as
+`zk_salt_bytes`. That number is a property of the circuit build, and a
+hand-copied one cannot notice a new circuit revision changing it: the
+mismatch that prompted this failed Vega verification on every claim of
+every presentation, from a credential that looked perfectly well-formed.
+Configure the sources under `issuer.zk_circuits`; `zk_salt_bytes` remains
+as an explicit pin for a deployment the catalog cannot serve, and the
+issuer logs when a pin and the catalog disagree. Unlike the verifier, the
+issuer runs no ZK code and downloads no circuit artifacts - only the
+few-KB descriptors.
+
+A `zk_circuits` source may also be a `file:///path` URL naming a VENDORED
+mirror: a directory laid out exactly like the service, written by
+
+```sh
+make build-vendor-zk-circuits
+./bin/vendor_zk_circuits -out /etc/vc/zk-circuits -system vega-mc          # verifier: with artifacts
+./bin/vendor_zk_circuits -out /etc/vc/zk-circuits -metadata-only           # issuer: descriptors only
+```
+
+Artifact hashes are verified against their descriptors on the way in and
+again on every read, so vendoring pins the bytes without relaxing anything.
+
 See `docs/ZK_PPID_VERIFICATION_PLAN.md` for the full Longfellow design
 writeup: what this verifies, the confirmed
 `verifier_context`/pseudonym-derivation wire formula, and exactly what's

@@ -6,10 +6,14 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	//"github.com/fxamacker/cbor/v2"
-	"math/big"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/SUNET/vc/pkg/mdoc/zkcircuit"
+
+	//"github.com/fxamacker/cbor/v2"
+	"math/big"
 )
 
 func createTestSignerAndCert(t *testing.T) (*ecdsa.PrivateKey, []*x509.Certificate) {
@@ -175,11 +179,15 @@ func TestMSOBuilder_WithSaltBytes_OverridesEvenPseudonymSeed(t *testing.T) {
 // WithSaltBytes directly must still be rejected before the make([]byte,
 // saltSize) allocation, not just at the JSON-loading boundary.
 func TestMSOBuilder_WithSaltBytes_RejectsUnsupportedValue(t *testing.T) {
-	builder := NewMSOBuilder(DocType).WithSaltBytes(16)
+	for _, saltBytes := range []int{zkcircuit.MinSaltBytes - 1, zkcircuit.MaxSaltBytes + 1, 1000000000} {
+		t.Run(fmt.Sprintf("saltBytes=%d", saltBytes), func(t *testing.T) {
+			builder := NewMSOBuilder(DocType).WithSaltBytes(saltBytes)
 
-	err := builder.AddDataElement(Namespace, "family_name", "Doe")
-	if err == nil {
-		t.Fatal("expected an error for an unsupported salt size, got none")
+			err := builder.AddDataElement(Namespace, "family_name", "Doe")
+			if err == nil {
+				t.Fatal("expected an error for an unsupported salt size, got none")
+			}
+		})
 	}
 }
 
