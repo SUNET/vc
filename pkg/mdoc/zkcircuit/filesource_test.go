@@ -324,3 +324,75 @@ func TestDownloadArtifactHandlesAnUppercaseScheme(t *testing.T) {
 		t.Fatalf("error = %v, want it refused as plaintext", err)
 	}
 }
+
+// With no URL the HASH is the whole of the path, and it is catalog data
+// like everything else in the descriptor.
+func TestArtifactHashCannotBeAPath(t *testing.T) {
+	source := writeVendoredMirror(t, []byte("x"))
+	c := NewClient(source)
+
+	for _, hash := range []string{
+		"sha256:../../../../etc/passwd",
+		"sha256:..",
+		"sha256:",
+		"sha256:nothexatall",
+		"sha256:ab", // hex, but not a digest
+		"../../etc/passwd",
+	} {
+		t.Run(hash, func(t *testing.T) {
+			_, err := c.DownloadArtifact(t.Context(), &CircuitDescriptor{
+				ID:       "c",
+				Artifact: &Artifact{Hash: hash},
+			})
+			if err == nil {
+				t.Fatalf("DownloadArtifact with hash %q succeeded; want a refusal", hash)
+			}
+			// The REFUSAL, not a fetch that happened to fail: every one
+			// of these also names a file the mirror does not have, so
+			// "an error came back" would pass without any validation at
+			// all.
+			if !strings.Contains(err.Error(), "not a SHA-256 digest") {
+				t.Fatalf("error = %v, want the hash refused before any read", err)
+			}
+		})
+	}
+}
+
+// path.Clean is LEXICAL and url.Parse DECODES, so a percent-encoded dot
+// segment survives the first and becomes a real one before os.Open.
+func TestPercentEncodedTraversalIsRefused(t *testing.T) {
+	source := writeVendoredMirror(t, []byte("x"))
+	dir := strings.TrimPrefix(source, "file://")
+	write(t, filepath.Join(filepath.Dir(dir), "outside.bin"), []byte("not yours"))
+
+	c := NewClient(source)
+	for _, raw := range []string{
+		"%2e%2e/outside.bin",
+		"v1/%2e%2e/%2e%2e/outside.bin",
+		"%2E%2E/outside.bin",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			_, err := c.DownloadArtifact(t.Context(), &CircuitDescriptor{
+				ID:       "c",
+				Artifact: &Artifact{URL: raw, Hash: "sha256:" + strings.Repeat("ab", 32)},
+			})
+			if err == nil {
+				t.Fatalf("DownloadArtifact(%q) succeeded; want a refusal", raw)
+			}
+			// Refused as a path, not reported as a hash mismatch after
+			// reading the file outside the mirror - the read IS the
+			// vulnerability, and the planted file would never match the
+			// digest anyway, so "an error came back" proves nothing.
+			if !strings.Contains(err.Error(), "unusable") {
+				t.Fatalf("error = %v, want the path refused before any read", err)
+			}
+		})
+	}
+
+	// And the decoded check holds even if something gets past the lexical
+	// one: a file URL whose decoded path carries a ".." segment is refused
+	// at the point of opening it.
+	if _, err := fetchFile("file://"+filepath.ToSlash(dir)+"/v1/%2e%2e/outside.bin", 1024); err == nil {
+		t.Fatal("fetchFile followed a percent-encoded dot segment")
+	}
+}

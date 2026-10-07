@@ -568,7 +568,15 @@ func (c *Client) candidateArtifactURLs(artifact *Artifact) ([]string, error) {
 		return []string{artifact.URL}, nil
 	}
 
-	relative := "v1/artifacts/sha256/" + bareHex(artifact.Hash)
+	// The hash is catalog data too, and with no URL it is the whole of the
+	// path. "sha256:../../../../etc/passwd" would otherwise escape a
+	// file:// mirror before the digest check it is supposed to be.
+	digest := bareHex(artifact.Hash)
+	if !isSHA256Hex(digest) {
+		return nil, fmt.Errorf("artifact hash %q is not a SHA-256 digest", artifact.Hash)
+	}
+
+	relative := "v1/artifacts/sha256/" + digest
 	if artifact.URL != "" {
 		// The descriptor's own path is REMOTE DATA and gets joined onto
 		// every source - including, now, a local directory behind a
@@ -599,6 +607,17 @@ func sha256Hex(data []byte) string {
 // correctly too. The prefix match is case-insensitive so an uppercase or
 // mixed-case "SHA256:" from the catalog doesn't get left in place and
 // break an otherwise-correct hash comparison/URL fallback.
+// isSHA256Hex reports whether digest is exactly a 32-byte hex SHA-256.
+// Length as well as alphabet: a 2-character "ab" is hex and is not a
+// digest, and anything built from it is not a path to a circuit.
+func isSHA256Hex(digest string) bool {
+	if len(digest) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
+	return err == nil
+}
+
 func bareHex(hash string) string {
 	if len(hash) >= 7 && strings.EqualFold(hash[:7], "sha256:") {
 		return hash[7:]

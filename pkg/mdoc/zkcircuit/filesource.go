@@ -93,7 +93,21 @@ func filePathFromURL(rawURL string) (string, error) {
 		return "", fmt.Errorf("file URL %q names host %q: only a local path is supported", rawURL, parsed.Host)
 	}
 
-	path := parsed.Path
+	// parsed.Path is DECODED, which is why this check is here and not only
+	// in SafeRelativeArtifactPath: a percent-encoded dot segment arrives
+	// as a real one. Nothing this client builds needs a ".." segment - the
+	// paths are v1/manifest.json, v1/circuits/<id>.json and
+	// v1/artifacts/sha256/<hex> - so refusing them costs nothing and
+	// closes the decode-then-traverse route for good. An operator whose
+	// source URL genuinely contains ".." can write the resolved path.
+	decoded := parsed.Path
+	for segment := range strings.SplitSeq(decoded, "/") {
+		if segment == ".." {
+			return "", fmt.Errorf("file URL %q contains a %q path segment", rawURL, "..")
+		}
+	}
+
+	path := decoded
 	if path == "" {
 		return "", fmt.Errorf("file URL %q has no path", rawURL)
 	}
@@ -155,6 +169,16 @@ func SafeRelativeArtifactPath(rawURL string) (string, error) {
 	}
 	if strings.ContainsAny(rawURL, "?#\\") {
 		return "", fmt.Errorf("artifact path %q contains a query, fragment or backslash", rawURL)
+	}
+	// Percent escapes are refused outright rather than decoded and
+	// re-checked. The cleaning below is LEXICAL, and the file:// path is
+	// produced by url.Parse, which DECODES - so "%2e%2e/outside" survives
+	// path.Clean untouched and arrives at os.Open as "../outside". Real
+	// catalog artifact paths are hex digests and slashes, so there is
+	// nothing legitimate to lose, and "decode first, then re-check" invites
+	// the next double-encoding to be the one nobody thought about.
+	if strings.Contains(rawURL, "%") {
+		return "", fmt.Errorf("artifact path %q contains a percent escape", rawURL)
 	}
 
 	trimmed := strings.TrimPrefix(rawURL, "/")
