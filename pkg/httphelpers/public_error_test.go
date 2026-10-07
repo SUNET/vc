@@ -185,6 +185,34 @@ func TestClassifiedErrorsKeepTheirDetails(t *testing.T) {
 			wantTitle:  "teapot",
 			wantInBody: "a deliberate, publishable message",
 		},
+
+		// Wrapped with %w, which is ordinary Go and what handlers in this
+		// tree actually do. The classification used to be direct type
+		// assertions, so every one of these fell past every branch and out
+		// the catch-all. Survivable while the catch-all returned the error
+		// text; now that it redacts, it turns a client error into an
+		// opaque internal_server_error and takes the parse offset or the
+		// field report with it.
+		"wrapped validation error": {
+			err:        fmt.Errorf("binding the request: %w", validationError(t)),
+			wantTitle:  "validation_error",
+			wantInBody: "required_field",
+		},
+		"wrapped json syntax error": {
+			err:        fmt.Errorf("parsing the credential request: %w", jsonSyntaxError(t)),
+			wantTitle:  "json_syntax_error",
+			wantInBody: "position",
+		},
+		"wrapped sentinel": {
+			err:        fmt.Errorf("resolving the identity: %w", helpers.ErrNoDocumentFound),
+			wantTitle:  "database_error",
+			wantInBody: "NO_DOCUMENT_FOUND",
+		},
+		"wrapped chosen error": {
+			err:        fmt.Errorf("looking up the mapping: %w", helpers.NewErrorDetails("teapot", "a deliberate, publishable message")),
+			wantTitle:  "teapot",
+			wantInBody: "a deliberate, publishable message",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			engine, _ := errorEngine(t, tc.err)
@@ -197,6 +225,12 @@ func TestClassifiedErrorsKeepTheirDetails(t *testing.T) {
 			}
 			assert.NotContains(t, w.Body.String(), "req_id",
 				"only the redacted response carries the request id")
+			// The wrapping context is the operator's, not the caller's:
+			// it goes to the log, never to the body.
+			for _, context := range []string{"binding the request", "parsing the credential request", "resolving the identity", "looking up the mapping"} {
+				assert.NotContains(t, w.Body.String(), context,
+					"a wrapper's own context must not reach the client")
+			}
 		})
 	}
 }

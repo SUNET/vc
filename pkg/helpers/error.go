@@ -133,13 +133,20 @@ func NewErrorFromError(v any) *Error {
 		return pbErr
 	}
 
-	if jsonUnmarshalTypeError, ok := err.(*json.UnmarshalTypeError); ok {
+	// errors.As, not a direct type assertion. A handler that adds context
+	// with %w - "parsing the credential request: <json syntax error>",
+	// which is ordinary Go - used to fall past every branch here and out
+	// the catch-all. That was survivable while the catch-all returned the
+	// error text; now that it redacts, it turns a client error into an
+	// opaque internal_server_error and the caller loses the parse offset
+	// that would have told them what to fix.
+	if jsonUnmarshalTypeError, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
 		return &Error{Title: "json_type_error", Err: formatJSONUnmarshalTypeError(jsonUnmarshalTypeError)}
 	}
-	if jsonSyntaxError, ok := err.(*json.SyntaxError); ok {
+	if jsonSyntaxError, ok := errors.AsType[*json.SyntaxError](err); ok {
 		return &Error{Title: "json_syntax_error", Err: map[string]any{"position": jsonSyntaxError.Offset, "error": jsonSyntaxError.Error()}}
 	}
-	if validatorErr, ok := err.(validator.ValidationErrors); ok {
+	if validatorErr, ok := errors.AsType[validator.ValidationErrors](err); ok {
 		return &Error{Title: "validation_error", Err: formatValidationErrors(validatorErr)}
 	}
 
