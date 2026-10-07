@@ -332,6 +332,62 @@ func TestEnsureCredentialsRegistersOnceAcrossReplicas(t *testing.T) {
 		"the replica that lost the lock adopted the winner's registration")
 }
 
+// The renewal lead must cover the configured session, not a fixed five
+// minutes: a flow begun just inside the window has to outlive the old secret.
+func TestRenewLeadCoversTheSessionLifetime(t *testing.T) {
+	long := &Service{cfg: &model.OIDCRP{SessionDuration: 3600}}
+	assert.Equal(t, time.Hour+clientSecretRenewBefore, long.renewLead())
+
+	none := &Service{cfg: &model.OIDCRP{SessionDuration: 0}}
+	assert.Equal(t, clientSecretRenewBefore, none.renewLead())
+}
+
+// When a replica loses the renewal lock and the winner's registration is not
+// in the store yet, it must not start a flow the current client cannot redeem:
+// if the secret would expire within one session, refuse with a retryable error
+// rather than hand out a doomed authorization URL.
+func TestEnsureCredentialsRefusesAFlowThatCannotOutlastTheSecret(t *testing.T) {
+	op := newOPServer(t)
+	store := &fakeRegistrationStore{}
+	lock := cache.NewMemoryLocker()
+	// Session 0 + skew (1m) exceeds the 30s left, so a new flow could not
+	// complete in time.
+	s := renewalService(t, op, store, time.Now().Add(30*time.Second))
+	s.renewalLock = lock
+
+	// Another replica already holds the lock and has not yet published.
+	held, err := lock.TryLock(t.Context(), "oidcrp:renew:"+s.currentClientID(t), clientRenewLockTTL)
+	require.NoError(t, err)
+	require.True(t, held)
+
+	err = s.ensureCredentials(t.Context())
+	require.Error(t, err, "a flow begun now could not redeem its code before the secret expires")
+	assert.Equal(t, 0, op.count(), "the losing replica must not register")
+	assert.Empty(t, store.saved)
+}
+
+// But when the current secret still has more than a session of life, losing
+// the lock is not fatal: a flow begun now would complete in time, so carry on
+// without registering and let the winner's renewal land.
+func TestEnsureCredentialsCarriesOnWhenAFlowCanStillComplete(t *testing.T) {
+	op := newOPServer(t)
+	store := &fakeRegistrationStore{}
+	lock := cache.NewMemoryLocker()
+	// Inside the renewal window (< 5m) but comfortably more than a session
+	// (0) plus skew away from expiry.
+	s := renewalService(t, op, store, time.Now().Add(3*time.Minute))
+	s.renewalLock = lock
+
+	held, err := lock.TryLock(t.Context(), "oidcrp:renew:"+s.currentClientID(t), clientRenewLockTTL)
+	require.NoError(t, err)
+	require.True(t, held)
+
+	require.NoError(t, s.ensureCredentials(t.Context()),
+		"the current secret still outlasts a flow; refusing would be premature")
+	assert.Equal(t, 0, op.count(), "the losing replica must not register")
+	assert.Equal(t, "client-0", s.currentClientID(t))
+}
+
 // A secret that is inside the renewal window but still valid must not take
 // the service down when the OP is unreachable - there is still time.
 func TestEnsureCredentialsToleratesAFailureWhileTheSecretIsStillValid(t *testing.T) {

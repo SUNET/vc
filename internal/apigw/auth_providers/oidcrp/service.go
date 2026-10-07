@@ -38,6 +38,12 @@ const (
 	// expiring client id, so a lock lingering past that is harmless because
 	// renewal has already moved every replica to the new client.
 	clientRenewLockTTL = 2 * time.Minute
+
+	// flowStartSkew is the clock/network margin required on top of a full
+	// session before a new flow may begin on a client whose secret is nearing
+	// expiry: the flow must still redeem its code comfortably before the
+	// secret dies.
+	flowStartSkew = 1 * time.Minute
 )
 
 // Service provides OIDC Relying Party functionality
@@ -208,9 +214,11 @@ func (s *Service) applyCredentials(clientID, clientSecret string, expiresAtUnix 
 // verifier are built together because they have to agree: the verifier
 // checks `aud` against the client id the config authenticates with.
 func (s *Service) buildCredentials(clientID, clientSecret string, expiresAtUnix int64) *credentials {
+	lead := s.renewLead()
 	c := &credentials{
-		clientID: clientID,
-		verifier: s.provider.Verifier(&oidc.Config{ClientID: clientID}),
+		clientID:  clientID,
+		renewLead: lead,
+		verifier:  s.provider.Verifier(&oidc.Config{ClientID: clientID}),
 		config: &oauth2.Config{
 			ClientID:     clientID,
 			ClientSecret: clientSecret,
@@ -228,12 +236,43 @@ func (s *Service) buildCredentials(clientID, clientSecret string, expiresAtUnix 
 		// produce one this service calls fresh, and every request would
 		// register another client. Half the remaining lifetime is a
 		// compromise between that and renewing in good time.
-		if remaining := time.Until(c.expiresAt); remaining < clientSecretRenewBefore*2 {
+		if remaining := time.Until(c.expiresAt); remaining < lead*2 {
 			c.renewNotBefore = time.Now().Add(remaining / 2)
 		}
 	}
 
 	return c
+}
+
+// renewLead is how long before secret expiry the service renews. It must
+// exceed the longest a flow can run - the session lifetime - so a flow begun
+// just inside the window can still redeem its code on the old client after
+// new flows switch to the successor, plus clientSecretRenewBefore as a
+// clock/network margin. A fixed five minutes was wrong for any deployment
+// whose configured session outran it.
+func (s *Service) renewLead() time.Duration {
+	if s.cfg == nil {
+		return clientSecretRenewBefore
+	}
+	lead := time.Duration(s.cfg.SessionDuration)*time.Second + clientSecretRenewBefore
+	if lead < clientSecretRenewBefore {
+		return clientSecretRenewBefore
+	}
+	return lead
+}
+
+// flowCanOutlastSecret reports whether a flow begun now on c could still
+// redeem its code before c's secret expires - a full session plus a skew
+// margin. A never-expiring secret always can.
+func (s *Service) flowCanOutlastSecret(now time.Time, c *credentials) bool {
+	if c == nil {
+		return false
+	}
+	if c.expiresAt.IsZero() {
+		return true
+	}
+	session := time.Duration(s.cfg.SessionDuration) * time.Second
+	return now.Add(session + flowStartSkew).Before(c.expiresAt)
 }
 
 // credentialsForSession resolves the registration a flow started under.
@@ -378,17 +417,22 @@ func (s *Service) ensureCredentials(ctx context.Context) error {
 				"error", err.Error(), "client_id", current.clientID)
 		case !acquired:
 			// Another replica holds the lock and is renewing this client.
+			// Prefer its result.
 			if s.adoptRenewedRegistration(ctx, current) {
 				return nil
 			}
-			// Its result has not reached the store yet. Carry on with the
-			// current secret while it is still valid; only once it has run
-			// out is saying so better than presenting a dead secret.
-			if now.Before(current.expiresAt) {
+			// Its result has not reached the store yet. If a flow begun now on
+			// the current client could still finish before the secret expires,
+			// carry on - the secret is not the problem yet.
+			if s.flowCanOutlastSecret(now, current) {
 				return nil
 			}
-			return fmt.Errorf("OIDC client secret expired at %s and another replica holds the re-registration lock",
-				current.expiresAt.Format(time.RFC3339))
+			// Too close to expiry to start a flow this client could not redeem.
+			// Refuse with a retryable error rather than hand out an
+			// authorization URL whose callback is doomed; the winner's
+			// registration will have landed by the time the caller retries.
+			return fmt.Errorf("OIDC client secret for %q expires at %s, within one session of now, and another replica is re-registering it; retry shortly",
+				current.clientID, current.expiresAt.Format(time.RFC3339))
 		}
 	}
 

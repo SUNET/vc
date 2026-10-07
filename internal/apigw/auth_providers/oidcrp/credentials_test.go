@@ -77,6 +77,24 @@ func TestCredentialSetDoesNotRetireTheSameClient(t *testing.T) {
 	assert.Empty(t, set.retired)
 }
 
+// retain must drop aged-out entries too, not only store: a callback-heavy
+// replica reaches retain far more often, and without pruning there it would
+// keep one bundle per remote renewal forever.
+func TestCredentialSetRetainPrunesAgedEntries(t *testing.T) {
+	set := newCredentialSet(time.Millisecond)
+
+	set.retain(bundle("remote-0", time.Now().Add(time.Hour)))
+	require.Len(t, set.retired, 1)
+
+	time.Sleep(5 * time.Millisecond)
+	set.retain(bundle("remote-1", time.Now().Add(time.Hour)))
+
+	_, stillThere := set.retired["remote-0"]
+	assert.False(t, stillThere, "the aged-out entry should have been pruned by the next retain")
+	_, kept := set.retired["remote-1"]
+	assert.True(t, kept)
+}
+
 func TestCredentialsNeedsRenewal(t *testing.T) {
 	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 
@@ -99,6 +117,12 @@ func TestCredentialsNeedsRenewal(t *testing.T) {
 		},
 		"already expired": {
 			creds: &credentials{expiresAt: now.Add(-time.Hour)},
+			want:  true,
+		},
+		// A long configured session widens the lead past the default five
+		// minutes, so a secret still half an hour out already needs renewing.
+		"long session widens the lead": {
+			creds: &credentials{expiresAt: now.Add(30 * time.Minute), renewLead: time.Hour},
 			want:  true,
 		},
 		// The floor: an OP handing out short-lived secrets would otherwise

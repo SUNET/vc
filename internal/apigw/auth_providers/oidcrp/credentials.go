@@ -23,6 +23,13 @@ type credentials struct {
 	verifier  *oidc.IDTokenVerifier
 	expiresAt time.Time
 
+	// renewLead is how long before expiresAt this registration asks to be
+	// replaced. It is at least a full session lifetime plus margin, so a flow
+	// begun just inside the window can still redeem its code on this client
+	// after new flows have moved to the successor. Zero falls back to
+	// clientSecretRenewBefore, e.g. for a directly-built test credential.
+	renewLead time.Duration
+
 	// renewNotBefore keeps a short-lived secret from being replaced on
 	// every request. An OP that issues secrets lasting less than the
 	// renewal lead time would otherwise never produce one this service
@@ -42,7 +49,11 @@ func (c *credentials) needsRenewal(now time.Time) bool {
 	if now.Before(c.renewNotBefore) {
 		return false
 	}
-	return !now.Before(c.expiresAt.Add(-clientSecretRenewBefore))
+	lead := c.renewLead
+	if lead <= 0 {
+		lead = clientSecretRenewBefore
+	}
+	return !now.Before(c.expiresAt.Add(-lead))
 }
 
 // credentialSet holds the registration in use plus the ones a flow started
@@ -110,8 +121,24 @@ func (s *credentialSet) retain(c *credentials) {
 	if s.current != nil && s.current.clientID == c.clientID {
 		return
 	}
+	// Prune here too, not only in store: a replica that mostly handles
+	// callbacks reaches retain far more often than store, and without this a
+	// remote renewal would leave one bundle behind per retain forever.
+	now := time.Now()
+	s.pruneRetiredLocked(now)
 	s.retired[c.clientID] = c
-	s.retiredAt[c.clientID] = time.Now()
+	s.retiredAt[c.clientID] = now
+}
+
+// pruneRetiredLocked drops superseded registrations whose retain window has
+// elapsed. Callers hold s.mu.
+func (s *credentialSet) pruneRetiredLocked(now time.Time) {
+	for id, at := range s.retiredAt {
+		if now.Sub(at) > s.retainFor {
+			delete(s.retired, id)
+			delete(s.retiredAt, id)
+		}
+	}
 }
 
 // store publishes a registration, retiring the one it replaces.
@@ -120,12 +147,7 @@ func (s *credentialSet) store(c *credentials) {
 	defer s.mu.Unlock()
 
 	now := time.Now()
-	for id, at := range s.retiredAt {
-		if now.Sub(at) > s.retainFor {
-			delete(s.retired, id)
-			delete(s.retiredAt, id)
-		}
-	}
+	s.pruneRetiredLocked(now)
 
 	if s.current != nil && s.current.clientID != c.clientID {
 		s.retired[s.current.clientID] = s.current
