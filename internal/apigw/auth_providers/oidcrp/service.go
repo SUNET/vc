@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -24,28 +25,57 @@ import (
 const (
 	oidcRPRetryBase = 5 * time.Second
 	oidcRPRetryMax  = 2 * time.Minute
+
+	// clientSecretRenewBefore is how long before expiry a dynamically
+	// registered client secret is replaced. Renewing exactly at expiry would
+	// race the OP's own clock, and a token exchange started just inside the
+	// window has to finish on the old secret.
+	clientSecretRenewBefore = 5 * time.Minute
+
+	// clientRenewLockTTL bounds how long the cross-replica renewal lock is
+	// held. It only needs to cover one registration round-trip plus the time
+	// a losing replica takes to read the winner's result back; the key is the
+	// expiring client id, so a lock lingering past that is harmless because
+	// renewal has already moved every replica to the new client.
+	clientRenewLockTTL = 2 * time.Minute
+
+	// flowStartSkew is the clock/network margin required on top of a full
+	// session before a new flow may begin on a client whose secret is nearing
+	// expiry: the flow must still redeem its code comfortably before the
+	// secret dies.
+	flowStartSkew = 1 * time.Minute
 )
 
 // Service provides OIDC Relying Party functionality
 type Service struct {
 	cfg          *model.OIDCRP
 	provider     *oidc.Provider
-	verifier     *oidc.IDTokenVerifier
-	oauth2Config *oauth2.Config
+	creds        *credentialSet
 	sessionCache pkgcache.Cache[*Session]
 	dbService    *db.Service
 	httpClient   *http.Client
 	log          *logger.Log
+
+	// renewalLock serialises re-registration across HA replicas. Nil means
+	// in-process single-flight only (s.mu), which is all a single replica
+	// needs; the shared lock is what stops N replicas each registering a new
+	// client when the same secret ages out.
+	renewalLock pkgcache.Locker
 
 	// Lazy-init state
 	mu           sync.RWMutex
 	ready        bool
 	retryAfter   time.Time
 	retryBackoff time.Duration
+
+	// Re-registration backoff. The credentials themselves live in creds,
+	// which has its own lock because request handlers read it.
+	credentialRetryAfter time.Time
+	credentialBackoff    time.Duration
 }
 
 // New creates a new OIDC RP service
-func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Session], dbService *db.Service, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Session], dbService *db.Service, renewalLock pkgcache.Locker, log *logger.Log) (*Service, error) {
 	if !cfg.Enable {
 		log.Info("OIDC RP support disabled")
 		return nil, nil
@@ -55,8 +85,12 @@ func New(ctx context.Context, cfg *model.OIDCRP, sessionCache pkgcache.Cache[*Se
 		cfg:          cfg,
 		sessionCache: sessionCache,
 		dbService:    dbService,
+		renewalLock:  renewalLock,
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
 		log:          log.New("oidcrp"),
+		// A superseded registration stays usable for as long as a flow can
+		// take, which is the session lifetime.
+		creds: newCredentialSet(time.Duration(cfg.SessionDuration) * time.Second),
 	}
 
 	// Attempt eager initialization; if the IdP is unreachable, defer to lazy retry.
@@ -79,7 +113,11 @@ func (s *Service) initialize(ctx context.Context) error {
 	s.provider = provider
 
 	// Resolve client credentials based on registration method
-	var clientID, clientSecret string
+	var (
+		clientID              string
+		clientSecret          string
+		clientSecretExpiresAt int64
+	)
 
 	if s.cfg.Registration.Preconfigured != nil && s.cfg.Registration.Preconfigured.Enable {
 		clientID = s.cfg.Registration.Preconfigured.ClientID
@@ -92,10 +130,20 @@ func (s *Service) initialize(ctx context.Context) error {
 		if err != nil {
 			s.log.Info("Failed to load dynamic registration credentials", "error", err)
 		}
+		// A legacy row written before response validation may carry an empty
+		// client id or secret. Loaded with expiry 0 it reads as never-expiring,
+		// so the service would keep presenting an unusable client and never
+		// re-register. Treat it as absent and take the registration branch.
+		if storedCreds != nil && (storedCreds.ClientID == "" || storedCreds.ClientSecret == "") {
+			s.log.Warn("discarding an unusable stored dynamic registration",
+				"client_id", storedCreds.ClientID, "has_secret", storedCreds.ClientSecret != "")
+			storedCreds = nil
+		}
 		if storedCreds != nil {
 			s.log.Info("Using stored dynamic registration credentials", "client_id", storedCreds.ClientID)
 			clientID = storedCreds.ClientID
 			clientSecret = storedCreds.ClientSecret
+			clientSecretExpiresAt = storedCreds.ClientSecretExpiresAt
 		} else {
 			// Perform dynamic registration
 			regReq := s.buildRegistrationRequest()
@@ -119,12 +167,19 @@ func (s *Service) initialize(ctx context.Context) error {
 
 			clientID = regResp.ClientID
 			clientSecret = regResp.ClientSecret
+			clientSecretExpiresAt = regResp.ClientSecretExpiresAt
 
 			s.log.Info("Dynamic client registration successful",
 				"client_id", clientID,
 				"registration_access_token_present", regResp.RegistrationAccessToken != "")
 
-			// Persist credentials
+			// Persist before publishing, the same rule renewCredentials
+			// follows: sessions record the client id, and a callback on
+			// another HA replica resolves it through the shared store, so a
+			// registration nobody can look up cannot redeem its own codes.
+			// Failing here leaves the service unready and retrying, which
+			// is recoverable; starting flows on an unresolvable client is
+			// not.
 			if err := s.dbService.DynamicRegistrationColl.Save(ctx, &db.DynamicRegistrationCredentials{
 				ClientID:                regResp.ClientID,
 				ClientSecret:            regResp.ClientSecret,
@@ -132,24 +187,12 @@ func (s *Service) initialize(ctx context.Context) error {
 				RegistrationClientURI:   regResp.RegistrationClientURI,
 				ClientSecretExpiresAt:   regResp.ClientSecretExpiresAt,
 			}); err != nil {
-				s.log.Info("Failed to persist dynamic registration credentials", "error", err)
+				return fmt.Errorf("storing the dynamic client registration: %w", err)
 			}
 		}
 	}
 
-	// Create ID token verifier
-	s.verifier = provider.Verifier(&oidc.Config{
-		ClientID: clientID,
-	})
-
-	// Configure OAuth2
-	s.oauth2Config = &oauth2.Config{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		RedirectURL:  s.cfg.RedirectURI,
-		Endpoint:     provider.Endpoint(),
-		Scopes:       s.cfg.Scopes,
-	}
+	s.applyCredentials(clientID, clientSecret, clientSecretExpiresAt)
 
 	s.ready = true
 	s.retryBackoff = 0
@@ -163,8 +206,410 @@ func (s *Service) initialize(ctx context.Context) error {
 	return nil
 }
 
-// ensureReady checks if the service is initialized and retries discovery if not.
+// applyCredentials installs a client id and secret, rebuilding both the
+// oauth2 config and the ID token verifier. The verifier is rebuilt and not
+// just the config: it checks the `aud` claim against the client id, and a
+// re-registration may return a different one.
+//
+// expiresAtUnix is the OP's client_secret_expires_at; 0 means never, which
+// RFC 7591 §3.2.1 defines and which is also the preconfigured case.
+//
+// Callers hold s.mu for writing, or are in New before the service is shared.
+func (s *Service) applyCredentials(clientID, clientSecret string, expiresAtUnix int64) {
+	s.creds.store(s.buildCredentials(clientID, clientSecret, expiresAtUnix))
+}
+
+// buildCredentials assembles one registration. The oauth2 config and the
+// verifier are built together because they have to agree: the verifier
+// checks `aud` against the client id the config authenticates with.
+func (s *Service) buildCredentials(clientID, clientSecret string, expiresAtUnix int64) *credentials {
+	lead := s.renewLead()
+	c := &credentials{
+		clientID:  clientID,
+		renewLead: lead,
+		verifier:  s.provider.Verifier(&oidc.Config{ClientID: clientID}),
+		config: &oauth2.Config{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			RedirectURL:  s.cfg.RedirectURI,
+			Endpoint:     s.provider.Endpoint(),
+			Scopes:       s.cfg.Scopes,
+		},
+	}
+
+	if expiresAtUnix > 0 {
+		c.expiresAt = time.Unix(expiresAtUnix, 0)
+
+		// Do not renew again immediately. An OP handing out secrets that
+		// live for less than the renewal lead time would otherwise never
+		// produce one this service calls fresh, and every request would
+		// register another client. Half the remaining lifetime is a
+		// compromise between that and renewing in good time.
+		if remaining := time.Until(c.expiresAt); remaining < lead*2 {
+			c.renewNotBefore = time.Now().Add(remaining / 2)
+		}
+	}
+
+	return c
+}
+
+// renewLead is how long before secret expiry the service renews. It must
+// exceed the longest a flow can run - the session lifetime - so a flow begun
+// just inside the window can still redeem its code on the old client after
+// new flows switch to the successor, plus clientSecretRenewBefore as a
+// clock/network margin. A fixed five minutes was wrong for any deployment
+// whose configured session outran it.
+func (s *Service) renewLead() time.Duration {
+	if s.cfg == nil {
+		return clientSecretRenewBefore
+	}
+	lead := time.Duration(s.cfg.SessionDuration)*time.Second + clientSecretRenewBefore
+	if lead < clientSecretRenewBefore {
+		return clientSecretRenewBefore
+	}
+	return lead
+}
+
+// flowCanOutlastSecret reports whether a flow begun now on c could still
+// redeem its code before c's secret expires - a full session plus a skew
+// margin. A never-expiring secret always can.
+func (s *Service) flowCanOutlastSecret(now time.Time, c *credentials) bool {
+	if c == nil {
+		return false
+	}
+	if c.expiresAt.IsZero() {
+		return true
+	}
+	session := time.Duration(s.cfg.SessionDuration) * time.Second
+	return now.Add(session + flowStartSkew).Before(c.expiresAt)
+}
+
+// renewLockKey is the cross-replica renewal lock key: the RP's stable identity,
+// so diverged replicas always contend on one key. See ensureCredentials.
+func (s *Service) renewLockKey() string {
+	return "oidcrp:renew:" + s.cfg.IssuerURL
+}
+
+// credentialsForSession resolves the registration a flow started under.
+//
+// In HA the session store is shared but credentialSet is per process, so a
+// callback can land on a replica that never saw the registration its flow
+// began on - renewal happened on another one. Falling back to this
+// replica's current client would exchange the code with the wrong client
+// and fail, so the stored registration is read instead. The row is there
+// to be read because pruning removes only registrations whose secret has
+// expired - one that a flow can still be using never has.
+func (s *Service) credentialsForSession(ctx context.Context, clientID string) (*credentials, error) {
+	if c := s.creds.forClient(clientID); c != nil && (clientID == "" || c.clientID == clientID) {
+		return c, nil
+	}
+
+	if clientID != "" && s.dbService != nil && s.dbService.DynamicRegistrationColl != nil {
+		stored, err := s.dbService.DynamicRegistrationColl.GetByClientID(ctx, clientID)
+		if err != nil {
+			// Returned, not swallowed into the refusal below. A database
+			// that cannot be read and a client that was never registered
+			// are different situations with different fixes, and in HA the
+			// first is the common one - collapsing them tells an operator
+			// chasing a wave of failed callbacks to go looking for a
+			// registration problem that does not exist. The caller deletes
+			// the session on an exchange failure, so saying which it was
+			// is the only chance anyone gets.
+			s.log.Error(err, "oidcrp_session_registration_lookup_failed", "client_id", clientID)
+			return nil, fmt.Errorf("looking up the client registration for %q: %w", clientID, err)
+		}
+		if stored != nil {
+			s.log.Debug("resolved a session's client registration from the store",
+				"client_id", clientID)
+			c := s.buildCredentials(stored.ClientID, stored.ClientSecret, stored.ClientSecretExpiresAt)
+			s.creds.retain(c)
+			return c, nil
+		}
+	}
+
+	// A session naming a client nobody can resolve must not fall back. Both
+	// lookups above have established that the current registration is a
+	// different client, so exchanging with it is guaranteed to fail - and
+	// the caller deletes the session on an exchange failure, turning a
+	// retryable situation into a lost flow. Say what is wrong instead.
+	if clientID != "" {
+		return nil, fmt.Errorf("no client registration found for %q; this flow cannot be completed", clientID)
+	}
+
+	// No client named at all: a session created before this was recorded.
+	// The current registration is what the service used then.
+	if c := s.creds.load(); c != nil {
+		return c, nil
+	}
+
+	return nil, errors.New("OIDC RP has no client credentials")
+}
+
+// dynamicRegistrationEnabled reports whether this RP registers itself.
+// cfg is immutable after New, so no lock is needed. Nil-safe down the whole
+// chain: Registration is a pointer and is only required when Enable is true,
+// so a preconfigured or directly-built Service reaches here with nils, and
+// nothing about credential renewal applies to it.
+func (s *Service) dynamicRegistrationEnabled() bool {
+	return s.cfg != nil && s.cfg.Registration != nil &&
+		s.cfg.Registration.Dynamic != nil && s.cfg.Registration.Dynamic.Enable
+}
+
+// ensureReady makes the service usable: discovered, and holding a client
+// secret that has not run out.
+//
+// This is for paths that START a flow. Renewal replaces the client, so a
+// path that has to finish on an existing one - ProcessCallback - calls
+// ensureInitialized and resolves the session's own registration instead,
+// and a path that uses no client credentials at all - GetUserInfo - calls
+// ensureInitialized too.
 func (s *Service) ensureReady(ctx context.Context) error {
+	if err := s.ensureInitialized(ctx); err != nil {
+		return err
+	}
+	return s.ensureCredentials(ctx)
+}
+
+// ensureCredentials re-registers before a dynamically registered client
+// secret expires.
+//
+// Without this the secret was read once at startup and never looked at
+// again, so a long-running instance kept presenting an expired secret and
+// every OIDC flow failed at the token exchange with an error that said
+// nothing about why - until somebody restarted the process (SUNET/vc#295).
+//
+// Renewal is lazy rather than a background ticker: it happens on the path
+// that is about to use the credential, so there is no goroutine to own and
+// an idle instance does not register clients nobody asked for.
+func (s *Service) ensureCredentials(ctx context.Context) error {
+	if !s.dynamicRegistrationEnabled() {
+		return nil
+	}
+
+	now := time.Now()
+	current := s.creds.load()
+	if !current.needsRenewal(now) {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Re-check under the lock: concurrent requests all arrive here when the
+	// secret ages out, and only the first should register.
+	now = time.Now()
+	current = s.creds.load()
+	if !current.needsRenewal(now) {
+		return nil
+	}
+
+	if now.Before(s.credentialRetryAfter) {
+		// Back off, but do not fail a request the current secret can still
+		// serve. Only once it has actually expired is refusing better than
+		// trying and getting an opaque error from the OP.
+		if now.Before(current.expiresAt) {
+			return nil
+		}
+		return fmt.Errorf("OIDC client secret expired at %s and re-registration is backing off until %s",
+			current.expiresAt.Format(time.RFC3339), s.credentialRetryAfter.Format(time.RFC3339))
+	}
+
+	// Cluster-wide single-flight. s.mu already collapses concurrent renewals
+	// within this process; the lock extends that across HA replicas, so a
+	// burst of them all noticing the same secret age out registers one new
+	// client at the OP instead of one per replica. The loser adopts the
+	// winner's result from the shared store rather than registering again.
+	//
+	// Keyed on the RP's stable identity (the issuer URL), not the current
+	// client id: if replicas ever diverge - a brief lock-backend outage lets
+	// two of them register different clients - a per-client-id key would put
+	// them on different locks forever and they would never re-converge. On the
+	// issuer URL they always contend, so adoptRenewedRegistration pulls them
+	// back onto one client.
+	//
+	// The lease is released on completion, not left to the TTL: a failed
+	// registration otherwise blocked every replica - the holder included -
+	// until the 2-minute TTL, defeating the 5-second backoff and turning a
+	// transient OP error into an outage. Because the holder releases, a later
+	// acquirer must re-check the store before registering, or releasing on
+	// success would let a straggler register a second client.
+	if s.renewalLock != nil {
+		token, err := s.renewalLock.TryLock(ctx, s.renewLockKey(), clientRenewLockTTL)
+		switch {
+		case err != nil:
+			// Lock backend unreachable. Renew anyway rather than refuse a
+			// flow for a lock we could not take: a possible extra
+			// registration is better than a failed login.
+			s.log.Warn("renewal lock unavailable, renewing without cross-replica coordination",
+				"error", err.Error(), "client_id", current.clientID)
+		case token == "":
+			// Another replica holds the lock and is renewing this client.
+			// Prefer its result.
+			if s.adoptRenewedRegistration(ctx, current) {
+				return nil
+			}
+			// Its result has not reached the store yet. If a flow begun now on
+			// the current client could still finish before the secret expires,
+			// carry on - the secret is not the problem yet.
+			if s.flowCanOutlastSecret(now, current) {
+				return nil
+			}
+			// Too close to expiry to start a flow this client could not redeem.
+			// Refuse with a retryable error rather than hand out an
+			// authorization URL whose callback is doomed; the winner's
+			// registration will have landed by the time the caller retries.
+			return fmt.Errorf("OIDC client secret for %q expires at %s, within one session of now, and another replica is re-registering it; retry shortly",
+				current.clientID, current.expiresAt.Format(time.RFC3339))
+		default:
+			// Acquired. Release on return so a failed renewal can retry before
+			// the TTL, using a context that outlives a cancelled request so
+			// the lock is always freed.
+			defer func() {
+				releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				if err := s.renewalLock.Unlock(releaseCtx, s.renewLockKey(), token); err != nil {
+					s.log.Warn("failed to release renewal lock", "error", err.Error(), "client_id", current.clientID)
+				}
+			}()
+			// A winner may have registered between our needsRenewal check and
+			// taking the lock; adopt it rather than register a second client.
+			if s.adoptRenewedRegistration(ctx, current) {
+				return nil
+			}
+		}
+	}
+
+	if err := s.renewCredentials(ctx); err != nil {
+		s.credentialBackoff = min(max(s.credentialBackoff*2, oidcRPRetryBase), oidcRPRetryMax)
+		s.credentialRetryAfter = time.Now().Add(s.credentialBackoff)
+		s.log.Error(err, "oidcrp_reregistration_failed",
+			"client_id", current.clientID,
+			"expires_at", current.expiresAt.Format(time.RFC3339),
+			"next_retry_in", s.credentialBackoff.String())
+
+		if time.Now().Before(current.expiresAt) {
+			// Still usable. Say so and carry on rather than taking the
+			// service down for a secret that has not run out yet.
+			return nil
+		}
+		return err
+	}
+
+	s.credentialBackoff = 0
+	s.credentialRetryAfter = time.Time{}
+
+	return nil
+}
+
+// renewCredentials registers a new client and installs it. Callers hold
+// s.mu for writing.
+//
+// This registers afresh rather than rotating the existing client through
+// the RFC 7592 management endpoint. vc stores the registration access token
+// and client URI that would allow that, and it would avoid leaving a
+// superseded registration at the OP - but RFC 7592 support is optional and
+// uneven, while registration is the one thing an OP that got us here is
+// known to implement. The superseded local record is deleted below; the
+// one at the OP is not ours to clean up.
+func (s *Service) renewCredentials(ctx context.Context) error {
+	var providerJSON struct {
+		RegistrationEndpoint string `json:"registration_endpoint"`
+	}
+	if err := s.provider.Claims(&providerJSON); err != nil {
+		return fmt.Errorf("failed to read provider metadata: %w", err)
+	}
+	if providerJSON.RegistrationEndpoint == "" {
+		return errors.New("OIDC provider does not support dynamic client registration (no registration_endpoint in metadata)")
+	}
+
+	regResp, err := s.dynamicClientRegistration(ctx, providerJSON.RegistrationEndpoint,
+		s.buildRegistrationRequest(), s.cfg.Registration.Dynamic.InitialAccessToken)
+	if err != nil {
+		return fmt.Errorf("dynamic client re-registration failed: %w", err)
+	}
+
+	previousClientID := ""
+	if current := s.creds.load(); current != nil {
+		previousClientID = current.clientID
+	}
+
+	// Persist before publishing, and fail the renewal if it cannot be
+	// persisted. A client this process uses but nobody can look up breaks
+	// HA: the shared session records the client id, and a callback landing
+	// on another replica cannot resolve credentials for it, so the code
+	// cannot be redeemed at all. The caller already tolerates a renewal
+	// error while the current secret is still valid, which is the case
+	// where carrying on was tempting.
+	if err := s.dbService.DynamicRegistrationColl.Save(ctx, &db.DynamicRegistrationCredentials{
+		ClientID:                regResp.ClientID,
+		ClientSecret:            regResp.ClientSecret,
+		RegistrationAccessToken: regResp.RegistrationAccessToken,
+		RegistrationClientURI:   regResp.RegistrationClientURI,
+		ClientSecretExpiresAt:   regResp.ClientSecretExpiresAt,
+	}); err != nil {
+		return fmt.Errorf("storing the new client registration: %w", err)
+	}
+
+	// Remove registrations whose secret has expired. Expiry rather than
+	// age: "registered long ago" says nothing about whether a registration
+	// is still in use, and in HA another replica can be running on an
+	// hours-old one as its current client. A secret that has expired cannot
+	// be redeemed by anyone, so its row is dead to every replica. A failure
+	// here is not worth refusing a working renewal over - the rows are
+	// inert, and a later renewal clears them.
+	if err := s.dbService.DynamicRegistrationColl.PruneExpiredRegistrations(ctx, regResp.ClientID, time.Now()); err != nil {
+		s.log.Error(err, "oidcrp_expired_registrations_not_pruned", "client_id", regResp.ClientID)
+	}
+
+	s.applyCredentials(regResp.ClientID, regResp.ClientSecret, regResp.ClientSecretExpiresAt)
+
+	s.log.Info("OIDC client re-registered before secret expiry",
+		"previous_client_id", previousClientID,
+		"client_id", regResp.ClientID,
+		"expires_at", s.creds.load().expiresAt.Format(time.RFC3339))
+
+	return nil
+}
+
+// adoptRenewedRegistration installs a registration another replica produced,
+// when the shared store already holds one newer than current. It returns true
+// if it adopted one. Callers hold s.mu for writing.
+//
+// This is the losing half of the cross-replica renewal lock: the replica that
+// did not get to register still has to stop presenting the expiring secret, so
+// it reads the newest stored registration - which the winner persists before
+// it publishes - and switches to it without contacting the OP at all.
+func (s *Service) adoptRenewedRegistration(ctx context.Context, current *credentials) bool {
+	if s.dbService == nil || s.dbService.DynamicRegistrationColl == nil {
+		return false
+	}
+
+	stored, err := s.dbService.DynamicRegistrationColl.Get(ctx)
+	if err != nil || stored == nil || stored.ClientID == "" {
+		return false
+	}
+	// The store still names the client we are trying to replace: the winner
+	// has not persisted yet, so there is nothing to adopt.
+	if current != nil && stored.ClientID == current.clientID {
+		return false
+	}
+
+	c := s.buildCredentials(stored.ClientID, stored.ClientSecret, stored.ClientSecretExpiresAt)
+	// The newest stored registration is itself due for renewal; adopting it
+	// would just loop back here, so let the caller fall through instead.
+	if c.needsRenewal(time.Now()) {
+		return false
+	}
+
+	s.creds.store(c)
+	s.log.Info("adopted a client registration renewed by another replica",
+		"previous_client_id", current.clientID,
+		"client_id", stored.ClientID)
+	return true
+}
+
+// ensureInitialized checks if the service is initialized and retries discovery if not.
+func (s *Service) ensureInitialized(ctx context.Context) error {
 	s.mu.RLock()
 	if s.ready {
 		s.mu.RUnlock()
@@ -266,23 +711,31 @@ func (s *Service) InitiateAuth(ctx context.Context, credentialType string, oidcP
 		extraOpts = resolved
 	}
 
+	// Read the registration once. It is immutable, so the authorization URL
+	// built below and the client id recorded on the session describe the
+	// same client even if a renewal publishes a new one meanwhile.
+	creds := s.creds.load()
+	if creds == nil {
+		return nil, errors.New("OIDC RP has no client credentials")
+	}
+
 	// If extra scopes are configured, create a temporary config with merged scopes
-	oauthCfg := s.oauth2Config
+	oauthCfg := creds.config
 	if oidcParams != nil && len(oidcParams.ExtraScopes) > 0 {
-		mergedScopes := make([]string, len(s.oauth2Config.Scopes))
-		copy(mergedScopes, s.oauth2Config.Scopes)
+		mergedScopes := make([]string, len(creds.config.Scopes))
+		copy(mergedScopes, creds.config.Scopes)
 		mergedScopes = append(mergedScopes, oidcParams.ExtraScopes...)
 		oauthCfg = &oauth2.Config{
-			ClientID:     s.oauth2Config.ClientID,
-			ClientSecret: s.oauth2Config.ClientSecret,
-			RedirectURL:  s.oauth2Config.RedirectURL,
-			Endpoint:     s.oauth2Config.Endpoint,
+			ClientID:     creds.config.ClientID,
+			ClientSecret: creds.config.ClientSecret,
+			RedirectURL:  creds.config.RedirectURL,
+			Endpoint:     creds.config.Endpoint,
 			Scopes:       mergedScopes,
 		}
 	}
 
 	// Create session with state, nonce, and PKCE verifier
-	session, err := s.createSession(ctx, credentialType)
+	session, err := s.createSession(ctx, credentialType, creds.clientID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
@@ -471,7 +924,19 @@ type AuthResponse struct {
 
 // ProcessCallback processes the OIDC provider callback
 func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*AuthResponse, error) {
-	if err := s.ensureReady(ctx); err != nil {
+	// Discovery only. A callback must NOT renew: renewal registers a brand
+	// new client, and this request has to be finished on the client the
+	// authorization code was issued to. Credentials come from
+	// credentialsForSession below, which reads the session's own client id
+	// - including from the store, when the flow started on another replica.
+	//
+	// Going through ensureReady here also made a callback fail for a reason
+	// that had nothing to do with it: if THIS replica's secret had run out
+	// and re-registration was backing off, ensureCredentials returned an
+	// error before the session was ever loaded - even though the stored
+	// registration the flow actually needs was sitting there, valid, and
+	// would have worked.
+	if err := s.ensureInitialized(ctx); err != nil {
 		return nil, fmt.Errorf("OIDC RP not ready: %w", err)
 	}
 
@@ -483,9 +948,19 @@ func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*Aut
 		return nil, fmt.Errorf("invalid or expired session: %w", err)
 	}
 
+	// Finish on the client the flow started on. An authorization code is
+	// issued to a specific client, so a renewal that lands between the
+	// authorization request and this callback must not change which client
+	// redeems it - and the ID token has to be verified against the same
+	// one, since the verifier checks `aud`.
+	creds, err := s.credentialsForSession(ctx, session.ClientID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Exchange authorization code for tokens with PKCE
-	s.log.Debug("ProcessCallback: exchanging authorization code", "state", state)
-	oauth2Token, err := s.oauth2Config.Exchange(
+	s.log.Debug("ProcessCallback: exchanging authorization code", "state", state, "client_id", session.ClientID)
+	oauth2Token, err := creds.config.Exchange(
 		ctx,
 		code,
 		oauth2.SetAuthURLParam("code_verifier", session.CodeVerifier),
@@ -506,7 +981,7 @@ func (s *Service) ProcessCallback(ctx context.Context, code, state string) (*Aut
 	}
 
 	s.log.Debug("ProcessCallback: verifying ID token", "state", state)
-	idToken, err := s.verifier.Verify(ctx, rawIDToken)
+	idToken, err := creds.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
 		s.log.Debug("ProcessCallback: ID token verification failed", "state", state, "error", err)
 		s.deleteSession(ctx, state)
@@ -560,7 +1035,7 @@ func (s *Service) BuildAttributeMapper() *AttributeMapper {
 }
 
 // createSession creates a new session with generated state, nonce, and PKCE code_verifier.
-func (s *Service) createSession(ctx context.Context, credentialType string) (*Session, error) {
+func (s *Service) createSession(ctx context.Context, credentialType, clientID string) (*Session, error) {
 	state, err := crypto.GenerateSecureToken(0, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate state: %w", err)
@@ -584,6 +1059,7 @@ func (s *Service) createSession(ctx context.Context, credentialType string) (*Se
 		CodeVerifier:   codeVerifier,
 		CredentialType: credentialType,
 		IssuerURL:      s.cfg.IssuerURL,
+		ClientID:       clientID,
 		CreatedAt:      now,
 		ExpiresAt:      now.Add(time.Duration(s.cfg.SessionDuration) * time.Second),
 	}
@@ -616,7 +1092,11 @@ func (s *Service) deleteSession(ctx context.Context, state string) {
 
 // GetUserInfo fetches additional claims from the UserInfo endpoint
 func (s *Service) GetUserInfo(ctx context.Context, accessToken string) (map[string]any, error) {
-	if err := s.ensureReady(ctx); err != nil {
+	// Discovery only. The UserInfo request authenticates with the access
+	// token it is handed; no client secret takes part in it, so the state
+	// of this replica's registration is irrelevant and must not be able to
+	// fail the call.
+	if err := s.ensureInitialized(ctx); err != nil {
 		return nil, fmt.Errorf("OIDC RP not ready: %w", err)
 	}
 
