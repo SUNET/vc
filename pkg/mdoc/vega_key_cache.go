@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 )
 
@@ -283,9 +282,13 @@ func (s *vegaKeyStore) releaseFunc(id string, entry *vegaKeyEntry) func() {
 				return
 			}
 			// Evicted while in use and now unused: this is the delete the
-			// eviction pass deferred. Guarded against the id having been
-			// re-added since, which would be a different file.
-			if current, ok := s.entries[id]; !ok || current != entry {
+			// eviction pass deferred. Guarded on the PATH rather than the
+			// entry, so that even if two generations somehow shared a file
+			// name this could only ever unlink a file no current entry
+			// claims. put gives every generation its own path, which makes
+			// this guard redundant and worth keeping anyway - it is the
+			// line that decides whether a live key gets deleted.
+			if current, ok := s.entries[id]; !ok || current.path != entry.path {
 				os.Remove(entry.path)
 			}
 		})
@@ -322,12 +325,22 @@ func (s *vegaKeyStore) put(id string, b []byte) (string, func(), error) {
 		return "", nil, err
 	}
 
-	path := filepath.Join(s.dir, vegaKeyFileName(id))
-	tmp, err := os.CreateTemp(s.dir, ".vk-*")
+	// A UNIQUE path per generation, not a deterministic one per id. Two
+	// generations of the same circuit sharing a file name means the
+	// rename below replaces a file an earlier, still-pinned holder was
+	// about to open, and - worse - that holder's release then unlinks the
+	// NEW generation's file, because the path it remembers is the path
+	// that now belongs to somebody else. Uniqueness makes "this entry's
+	// file" mean exactly one thing for the entry's whole life.
+	//
+	// CreateTemp supplies the uniqueness; the hashed id is kept as a
+	// prefix so a directory listing is still readable.
+	tmp, err := os.CreateTemp(s.dir, vegaKeyFileName(id)+".*")
 	if err != nil {
 		return "", nil, fmt.Errorf("creating a temporary file for Vega verifier key %q: %w", id, err)
 	}
 	tmpName := tmp.Name()
+	path := tmpName + vegaKeyFileSuffix
 
 	if _, err := tmp.Write(b); err != nil {
 		tmp.Close()
@@ -344,8 +357,10 @@ func (s *vegaKeyStore) put(id string, b []byte) (string, func(), error) {
 	}
 
 	// Replacing an entry for the same id retires the old one, which may be
-	// pinned by a verification already under way.
-	if previous, ok := s.entries[id]; ok && previous.path != path {
+	// pinned by a verification already under way - its file then survives
+	// until that release. Paths are unique per generation, so the two
+	// never collide.
+	if _, ok := s.entries[id]; ok {
 		s.retireLocked(id)
 	}
 
@@ -406,7 +421,13 @@ func (s *vegaKeyStore) removeAll() error {
 	return os.RemoveAll(dir)
 }
 
-// vegaKeyFileName maps a catalog id to a file name.
+// vegaKeyFileSuffix is appended to a store file's unique name. Cosmetic;
+// the uniqueness comes from CreateTemp.
+const vegaKeyFileSuffix = ".vk"
+
+// vegaKeyFileName maps a catalog id to a file-name PREFIX. The suffix that
+// makes the name unique comes from os.CreateTemp - see put for why two
+// generations of one circuit must never share a path.
 //
 // Hashed rather than used directly: the id reaches here from a presented
 // proof's zkSystemId. FetchCircuit refuses one that is not a flat token
@@ -415,7 +436,7 @@ func (s *vegaKeyStore) removeAll() error {
 // agree, and a hash cannot contain a separator at all.
 func vegaKeyFileName(id string) string {
 	sum := sha256.Sum256([]byte(id))
-	return hex.EncodeToString(sum[:]) + ".vk"
+	return hex.EncodeToString(sum[:])
 }
 
 // vegaVerifierKeys is the process-wide Vega verifier-key store.

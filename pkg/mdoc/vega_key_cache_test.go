@@ -458,3 +458,57 @@ func TestVegaKeyStoreRefusesWritesAfterClose(t *testing.T) {
 		t.Errorf("the store recreated its directory after close: %v", entries)
 	}
 }
+
+// Two generations of one circuit must never share a file name. They used
+// to - the name was a hash of the id alone - so an entry evicted while
+// pinned, whose id was then fetched again, unlinked the NEW generation's
+// file when its old holder finally released. The path it remembered had
+// become somebody else's.
+func TestVegaKeyStoreGivesEachGenerationItsOwnFile(t *testing.T) {
+	s := newVegaKeyStore(t.TempDir(), 10)
+	t.Cleanup(func() { _ = s.removeAll() })
+
+	// First generation, pinned by a verification in progress.
+	oldPath, releaseOld, err := s.put("a", []byte("generation one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Evicted while pinned.
+	_, releaseOther, err := s.put("other", make([]byte, 8))
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseOther()
+	if _, ok := s.get("a"); ok {
+		t.Fatal("a should have been evicted")
+	}
+
+	// Fetched again: a second generation under the same id.
+	newPath, releaseNew, err := s.put("a", []byte("generation two"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseNew()
+
+	if newPath == oldPath {
+		t.Fatalf("both generations share the path %s", newPath)
+	}
+
+	// The old holder finishes. Its file goes; the new one must not.
+	releaseOld()
+
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Errorf("the old generation's file should be gone (%v)", err)
+	}
+	data, err := os.ReadFile(newPath)
+	if err != nil {
+		t.Fatalf("the current generation's file was unlinked by the old holder's release: %v", err)
+	}
+	if string(data) != "generation two" {
+		t.Errorf("current file = %q, want the second generation's bytes", data)
+	}
+	if got, ok := s.get("a"); !ok || got != newPath {
+		t.Errorf("get() = %q, %v; want %q, true", got, ok, newPath)
+	}
+}
