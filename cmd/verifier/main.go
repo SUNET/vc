@@ -32,6 +32,15 @@ type service interface {
 	Close(ctx context.Context) error
 }
 
+// shutdownTimeout bounds everything that happens after SIGTERM: the
+// graceful HTTP shutdown, the verifier-key warm-up, and the key store
+// waiting for in-flight verifications to let go of their key files.
+//
+// Shorter than the grace period an orchestrator gives before SIGKILL
+// (Kubernetes defaults to 30s), so the cleanup below actually runs rather
+// than being cut off halfway.
+const shutdownTimeout = 20 * time.Second
+
 func main() {
 	var (
 		wg                 = &sync.WaitGroup{}
@@ -108,8 +117,17 @@ func main() {
 
 	mainLog.Info("HALTING SIGNAL!")
 
+	// A deadline, not ctx. Everything below waits for something - a
+	// graceful HTTP shutdown waits for handlers, the verifier-key store
+	// waits for the keys they have pinned - and ctx is context.Background()
+	// with no deadline at all, so one stuck handler would hold SIGTERM
+	// open forever and the orchestrator would send SIGKILL instead,
+	// skipping the cleanup entirely.
+	shutdownCtx, cancelShutdown := context.WithTimeout(ctx, shutdownTimeout)
+	defer cancelShutdown()
+
 	for serviceName, service := range services {
-		if err := service.Close(ctx); err != nil {
+		if err := service.Close(shutdownCtx); err != nil {
 			mainLog.Trace("serviceName", serviceName, "error", err)
 		}
 	}
@@ -117,14 +135,14 @@ func main() {
 	// Stop the background verifier-key warm-up before tearing its store
 	// down, or a download finishing a moment later recreates the directory
 	// and leaves half a gigabyte of key files behind.
-	apiv1.StopVegaPrewarm(ctx)
+	apiv1.StopVegaPrewarm(shutdownCtx)
 
 	// The Vega verifier-key store is a process-wide directory of decompressed
 	// circuit artifacts, up to half a gigabyte of them. The OS would reclaim
 	// a temp directory eventually; a configured zk_key_cache.dir it would
 	// not, and "eventually" is not a promise worth making about that much
 	// disk either way.
-	if err := mdoc.CloseVegaVerifierKeyStore(ctx); err != nil {
+	if err := mdoc.CloseVegaVerifierKeyStore(shutdownCtx); err != nil {
 		mainLog.Error(err, "removing the Vega verifier key store")
 	}
 

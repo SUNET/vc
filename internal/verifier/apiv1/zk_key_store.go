@@ -97,15 +97,27 @@ func (c *Client) prewarmVegaKeys(ctx context.Context, sources []string) {
 		c.log.Error(failure, "zk_vega_prewarm_circuit_failed", "circuit_id", id)
 	}
 
+	// An eviction during warm-up means the active working set does not fit
+	// in zk_key_cache.max_bytes. Nothing is broken - those keys load
+	// lazily as before - but every request for one pays ~100MB, and
+	// latency is the only other symptom, so it gets its own line with the
+	// knob's name in it.
+	if len(result.Evicted) > 0 {
+		c.log.Warn("Vega verifier keys evicted during pre-warm; verifier.zk_key_cache.max_bytes is smaller than the active working set",
+			"evicted", len(result.Evicted), "circuit_ids", result.Evicted,
+			"resident", len(result.Warmed))
+	}
+
 	// Debug when there was nothing to do: a build without the zknative tag
 	// warms nothing by design, and so does a catalog with no active Vega
 	// circuit. Neither is worth a line in every verifier's startup log.
-	if len(result.Warmed) == 0 && len(result.Failed) == 0 {
+	if len(result.Warmed) == 0 && len(result.Failed) == 0 && len(result.Evicted) == 0 {
 		c.log.Debug("no Vega verifier keys to pre-warm")
 		return
 	}
 
 	c.log.Info("Vega verifier keys pre-warmed",
 		"warmed", len(result.Warmed), "failed", len(result.Failed),
+		"evicted", len(result.Evicted),
 		"circuit_ids", result.Warmed, "took", time.Since(started).String())
 }

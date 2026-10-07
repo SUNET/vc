@@ -389,3 +389,48 @@ func TestGetOrLoadVegaVerifierKeyLoadsOncePerID(t *testing.T) {
 		t.Errorf("artifact fetched %d times for %d callers, want 1", got, callers)
 	}
 }
+
+// Warmed must mean "on disk now", not "loaded successfully at some point".
+// The store is bounded, so a working set larger than max_bytes has later
+// circuits evicting earlier ones - and a result claiming every key is
+// ready, with a startup log to match, is worse than no claim at all when
+// the first presentation has to refetch.
+func TestWarmVegaVerifierKeysReportsResidencyNotAttempts(t *testing.T) {
+	resetVegaKeyState(t)
+
+	// Room for one key only: "artifact for vega-verifier-rNN" is ~30 bytes.
+	vegaVerifierKeys.setMax(40)
+
+	source := warmMirror(t, []map[string]any{
+		vegaCircuit("vega-prover-r11", "11", "prover", "active"),
+		vegaCircuit("vega-verifier-r11", "11", "verifier", "active"),
+		vegaCircuit("vega-prover-r12", "12", "prover", "active"),
+		vegaCircuit("vega-verifier-r12", "12", "verifier", "active"),
+	})
+
+	result, err := WarmVegaVerifierKeys(t.Context(), []string{source})
+	if err != nil {
+		t.Fatalf("WarmVegaVerifierKeys() error = %v", err)
+	}
+	if len(result.Failed) != 0 {
+		t.Fatalf("Failed = %v, want none - both loaded fine, one just did not survive", result.Failed)
+	}
+
+	if len(result.Warmed) != 1 {
+		t.Fatalf("Warmed = %v, want exactly the one key the bound has room for", result.Warmed)
+	}
+	if len(result.Evicted) != 1 {
+		t.Fatalf("Evicted = %v, want the one that did not survive", result.Evicted)
+	}
+	if result.Warmed[0] == result.Evicted[0] {
+		t.Fatal("the same id is reported both resident and evicted")
+	}
+
+	// And the claim is true: what Warmed names really is on disk.
+	if _, ok := vegaVerifierKeys.get(result.Warmed[0]); !ok {
+		t.Errorf("%s is reported warmed but is not in the store", result.Warmed[0])
+	}
+	if _, ok := vegaVerifierKeys.get(result.Evicted[0]); ok {
+		t.Errorf("%s is reported evicted but is still in the store", result.Evicted[0])
+	}
+}

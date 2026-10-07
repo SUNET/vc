@@ -42,6 +42,7 @@ import (
 // load lazily, which is what used to happen to all of them.
 func WarmVegaVerifierKeys(ctx context.Context, sources []string) (VegaWarmResult, error) {
 	result := VegaWarmResult{Failed: map[string]error{}}
+	var loaded []string
 
 	client := zkcircuit.NewClient(sources...)
 	manifest, err := client.FetchManifest(ctx)
@@ -77,7 +78,21 @@ func WarmVegaVerifierKeys(ctx context.Context, sources []string) (VegaWarmResult
 		// pin held past this loop would exempt the key from eviction for
 		// the life of the process.
 		release()
-		result.Warmed = append(result.Warmed, c.ID)
+		loaded = append(loaded, c.ID)
+	}
+
+	// Report what is still RESIDENT, not what loaded successfully. The
+	// store is bounded, so a working set larger than max_bytes means later
+	// circuits evict earlier ones - and a result claiming every key is
+	// ready, with a startup log line to match, is worse than no claim at
+	// all when the first presentation has to refetch. It is also the only
+	// signal an operator has that the bound is too small for the catalog.
+	for _, id := range loaded {
+		if _, ok := vegaVerifierKeys.get(id); ok {
+			result.Warmed = append(result.Warmed, id)
+			continue
+		}
+		result.Evicted = append(result.Evicted, id)
 	}
 
 	return result, nil

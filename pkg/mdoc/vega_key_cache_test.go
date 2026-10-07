@@ -583,3 +583,63 @@ func TestVegaKeyStoreCloseGivesUpOnATimeout(t *testing.T) {
 		t.Errorf("the store should have been removed anyway (%v)", err)
 	}
 }
+
+// removeAll sets closed BEFORE it waits, so the pin count can only fall.
+// Without that, a new acquire could pin an entry in the gap between the
+// count reaching zero and the directory going away - handing a worker a
+// path about to disappear, which is the failure the pinning exists to
+// prevent arriving through the door marked shutdown.
+//
+// Tested inside the window on purpose. Once removeAll has returned, the
+// entries map is empty and acquire would refuse anything whether or not it
+// checked closed - so a test run after teardown proves nothing at all.
+func TestVegaKeyStoreRefusesAcquisitionsOnceClosed(t *testing.T) {
+	s := newVegaKeyStore(t.TempDir(), 1000)
+
+	// Two entries: one pinned to hold removeAll in its wait, one idle and
+	// still in the map for the acquire below to find.
+	if _, release, err := s.put("idle", []byte("key material")); err != nil {
+		t.Fatal(err)
+	} else {
+		release()
+	}
+	_, releasePinned, err := s.put("pinned", []byte("key material"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- s.removeAll(context.Background()) }()
+
+	// Wait until removeAll has marked the store closed and is waiting.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.mu.Lock()
+		isClosed := s.closed
+		stillThere := s.entries["idle"] != nil
+		s.mu.Unlock()
+		if isClosed && stillThere {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("removeAll never reached its wait with the entries still present")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// The window: closed, but the entry is still in the map.
+	if path, release, ok := s.acquire("idle"); ok {
+		release()
+		t.Fatalf("acquire returned %q while the store was tearing down", path)
+	}
+
+	releasePinned()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("removeAll() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("removeAll did not finish")
+	}
+}

@@ -259,6 +259,15 @@ func (s *vegaKeyStore) acquire(id string) (string, func(), bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// A closed store hands out nothing. Without this, removeAll's pin check
+	// can see zero and a new acquire can pin an entry in the gap before
+	// resetLocked - handing a worker a path that is about to disappear,
+	// which is the failure the pinning exists to prevent arriving through
+	// the door marked shutdown.
+	if s.closed {
+		return "", nil, false
+	}
+
 	entry, ok := s.entries[id]
 	if !ok {
 		return "", nil, false
@@ -431,6 +440,9 @@ func (s *vegaKeyStore) removeAll(ctx context.Context) error {
 		return nil
 	}
 
+	// closed is set above, BEFORE the wait: a store that is shutting down
+	// stops handing out paths immediately, so the count below can only
+	// fall.
 	if pinned := s.waitForPins(ctx); pinned > 0 {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -586,9 +598,21 @@ func isVegaCatalogSystem(system string) bool {
 
 // VegaWarmResult reports what WarmVegaVerifierKeys managed to do.
 type VegaWarmResult struct {
-	// Warmed are the prover-key catalog ids whose verifier keys are now on
-	// disk, ready for the first presentation that names them.
+	// Warmed are the prover-key catalog ids whose verifier keys are on
+	// disk WHEN THE WARM-UP FINISHED, ready for the first presentation
+	// that names them.
+	//
+	// Residency at the end, not a count of successful loads: the store is
+	// bounded, so a working set larger than max_bytes means later circuits
+	// evict earlier ones, and reporting the loads would claim keys are
+	// ready that the first presentation has to refetch.
 	Warmed []string
+	// Evicted are ids that loaded and did not survive - the working set
+	// does not fit in max_bytes. Nothing is broken; the keys load lazily
+	// as before, and every request pays for one. The only visible symptom
+	// otherwise is latency, which is why this is reported separately
+	// rather than folded into Warmed or Failed.
+	Evicted []string
 	// Failed maps a prover-key id to why warming it did not work. A
 	// failure here is not fatal: the key loads lazily on first use exactly
 	// as it did before, the caller simply pays for it then.
