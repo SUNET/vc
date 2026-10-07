@@ -1431,6 +1431,23 @@ type IssuerMetadata struct {
 	CredentialSigningAlgValuesSupported []string `yaml:"credential_signing_alg_values_supported" validate:"omitempty"`
 	// ProofSigningAlgValuesSupported lists the supported proof algorithms
 	ProofSigningAlgValuesSupported []string `yaml:"proof_signing_alg_values_supported" validate:"omitempty"`
+	// ProofTypesSupported narrows which key proof types this issuer
+	// advertises in credential_configurations_supported.
+	//
+	// Empty (the default) advertises every proof type this issuer actually
+	// implements: "jwt" and "attestation". Both are real - attestation
+	// proofs are signature-verified against the x5c in their own header,
+	// see openid4vci.ProofAttestation.Verify - so advertising both is a
+	// truthful statement of capability, which is what OpenID4VCI 1.0
+	// 12.2.4 asks of this parameter.
+	//
+	// Narrow it only for a wallet that cannot cope with a proof type it
+	// does not have to use. The German EUDI Wallet was one such in
+	// September 2026 (SUNET/vc#671): its own attestation support was
+	// incomplete and advertising "attestation" made issuance fail there.
+	// Set ["jwt"] for such a deployment, and remove the setting once the
+	// wallet catches up.
+	ProofTypesSupported []string `yaml:"proof_types_supported" validate:"omitempty,dive,oneof=jwt attestation"`
 	// CredentialResponseEncryption holds the response encryption configuration
 	CredentialResponseEncryption *openid4vci.MetadataCredentialResponseEncryption `yaml:"credential_response_encryption" validate:"omitempty"`
 	// BatchCredentialIssuance holds the batch issuance configuration
@@ -2638,43 +2655,51 @@ func (cfg *IssuerMetadata) applyCommonCredentialConfig(credConfig *openid4vci.Cr
 		credConfig.CredentialSigningAlgValuesSupported = []any{"ES256", "ES384", "RS256"}
 	}
 
-	// Set proof types supported from configuration
-	// These must be explicitly configured to match what the Issuer service accepts
 	proofAlgs := cfg.ProofSigningAlgValuesSupported
 	if len(proofAlgs) == 0 {
-		// Default to common algorithms if not configured
 		proofAlgs = []string{"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}
 	}
-	// Confirmed by direct testing (lpidproto PLAN.md workstream 7): scoping
-	// 'attestation' to only the "pid" credential config breaks metadata
-	// parsing for EVERY offer, including ones that only reference "pid" --
-	// eudi-lib-jvm-openid4vci-kt validates proof_types_supported across the
-	// whole credential_configurations_supported document, not per-entry.
-	// So this must be declared uniformly for every scope, "lpid" included;
-	// it cannot be scoped away. See ARCHITECTURE.md for the resulting
-	// caveat this leaves on "lpid"'s advertised proof capabilities, and
-	// pkg/openid4vci/proof_attestation.go's Verify() for the deeper gap
-	// this uncovered (attestation proofs are never signature-verified).
-	credConfig.ProofTypesSupported = map[string]openid4vci.ProofsTypesSupported{
-		"jwt": {
+
+	// Advertise the proof types this issuer implements, narrowed by
+	// configuration when a deployment has to accommodate a wallet that
+	// cannot cope with one of them. Both are implemented: "attestation"
+	// proofs are signature-verified against the x5c in their own header
+	// (openid4vci.ProofAttestation.Verify), so listing both is a truthful
+	// capability statement rather than padding.
+	//
+	// Declared uniformly for every scope, "lpid" included, and it cannot be
+	// scoped away: eudi-lib-jvm-openid4vci-kt validates
+	// proof_types_supported across the WHOLE
+	// credential_configurations_supported document, not per entry, so one
+	// scope differing breaks parsing for every offer. See ARCHITECTURE.md
+	// for the resulting caveat on "lpid"'s advertised proof capabilities.
+	proofTypes := cfg.ProofTypesSupported
+	if len(proofTypes) == 0 {
+		proofTypes = []string{"jwt", "attestation"}
+	}
+
+	credConfig.ProofTypesSupported = make(map[string]openid4vci.ProofsTypesSupported, len(proofTypes))
+	for _, proofType := range proofTypes {
+		credConfig.ProofTypesSupported[proofType] = openid4vci.ProofsTypesSupported{
 			ProofSigningAlgValuesSupported: proofAlgs,
-			KeyAttestationsRequired:        openid4vci.KeyAttestationRequirement{},
-		},
-		// "attestation": declared alongside "jwt" because
-		// eudi-lib-jvm-openid4vci-kt 0.12.1+ hard-fails issuer metadata
-		// validation unless both proof types are present ("Both JWT Proofs
-		// and Attestation Proofs must be supported"). This is a declarative
-		// capability advertisement only -- vc-apigw has no wallet-attestation
-		// verification wired up (lpidproto PLAN.md workstream 8, not started),
-		// and this project's reference-wallet client config uses
-		// ClientAuthenticationType.None rather than AttestationBased, so it
-		// won't actually submit an attestation-typed proof. Revisit alongside
-		// KeyAttestationsRequired above if WS8 ever implements real
-		// attestation verification.
-		"attestation": {
-			ProofSigningAlgValuesSupported: proofAlgs,
-			KeyAttestationsRequired:        openid4vci.KeyAttestationRequirement{},
-		},
+			// Always absent, and not configurable. OpenID4VCI 1.0 12.2.4:
+			// when the issuer does not require a key attestation the
+			// parameter MUST NOT be present, and an empty object is not
+			// the neutral value - the same paragraph gives it the meaning
+			// "a key attestation is needed without additional
+			// constraints". Emitting it was SUNET/vc#672.
+			//
+			// There is deliberately no setting to turn it back on. Nothing
+			// on the issuance path enforces such a requirement: a plain
+			// "jwt" proof with no attestation is accepted
+			// (handlers_issuer.go), and the key_attestation JOSE header of
+			// a JWT proof is not read at all (openid4vci/proof_jwt.go), so
+			// key_storage and user_authentication constraints would go
+			// unchecked. A setting here would let a deployment advertise a
+			// requirement this build does not keep. Wire the enforcement in
+			// first, then give it a knob.
+			KeyAttestationsRequired: nil,
+		}
 	}
 }
 
