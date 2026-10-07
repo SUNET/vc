@@ -235,6 +235,10 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
+	if err := checkIssuableCredentialFormats(cfg, serviceName); err != nil {
+		return nil, err
+	}
+
 	if err := checkIssuancePolicies(cfg, serviceName); err != nil {
 		return nil, err
 	}
@@ -274,6 +278,53 @@ func checkCredentialMetadataEntries(cfg *model.Cfg) error {
 	}
 	if len(empty) > 0 {
 		return fmt.Errorf("common.credential_metadata: no configuration under %s", strings.Join(empty, ", "))
+	}
+	return nil
+}
+
+// unissuableFormats names credential formats that issuer metadata would
+// advertise but no issuance path can mint.
+//
+// "jwt_vc_json" and "jwt_vc_json-ld" are JWT-encoded W3C VCs. They are real
+// OpenID4VCI formats and the metadata generator used to put them in its W3C
+// branch, complete with the credential_definition Appendix A.1 requires -
+// but handlers_issuer.go dispatches W3C issuance on "ldp_vc" and
+// "vc+ld+json" only, so a scope configured with either spelling was
+// advertised as issuable and failed with "unsupported or missing credential
+// format" when a wallet asked for it (SUNET/vc#686).
+//
+// Refusing at config load rather than silently dropping the scope from the
+// metadata: a deployment that configured one of these meant to offer that
+// credential, and a scope that quietly disappears from the advertised set
+// is harder to notice than a startup error naming it.
+var unissuableFormats = map[string]string{
+	"jwt_vc_json":    "JWT-encoded W3C VCs are not implemented; use ldp_vc for a Data Integrity W3C VC",
+	"jwt_vc_json-ld": "JWT-encoded W3C VCs are not implemented; use ldp_vc for a Data Integrity W3C VC",
+}
+
+// checkIssuableCredentialFormats refuses a credential_metadata scope whose
+// format the issuer advertises but cannot issue.
+//
+// The apigw only. common.credential_metadata is shared, but it means
+// different things to different services: the apigw ISSUES these credentials
+// and advertises them in its issuer metadata, while the verifier and the
+// registry read the same stanza to describe credentials somebody else
+// issued. A verifier asking for a jwt_vc_json credential from an external
+// issuer is exactly the case #686 means to keep working, so the check that
+// protects the issuance path must not reach it.
+func checkIssuableCredentialFormats(cfg *model.Cfg, serviceName string) error {
+	if cfg.Common == nil || serviceName != "apigw" {
+		return nil
+	}
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		constructor := cfg.Common.CredentialMetadata[scope]
+		if constructor == nil {
+			continue
+		}
+		if why, bad := unissuableFormats[constructor.Format]; bad {
+			return fmt.Errorf("common.credential_metadata.%s: format %q cannot be issued by this build - %s",
+				scope, constructor.Format, why)
+		}
 	}
 	return nil
 }
