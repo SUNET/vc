@@ -48,6 +48,7 @@ type Service struct {
 	tokenLimiter     *middleware.RateLimiter
 	authorizeLimiter *middleware.RateLimiter
 	registerLimiter  *middleware.RateLimiter
+	registerAuth     gin.HandlerFunc
 
 	// openidFederationService is nil when OpenID Federation is not enabled.
 	// Built once here rather than per-request, since constructing a signer
@@ -73,6 +74,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		tokenLimiter:     middleware.NewRateLimiter(rateLimitConfig.TokenRequestsPerMinute, rateLimitConfig.TokenBurst),
 		authorizeLimiter: middleware.NewRateLimiter(rateLimitConfig.AuthorizeRequestsPerMinute, rateLimitConfig.AuthorizeBurst),
 		registerLimiter:  middleware.NewRateLimiter(rateLimitConfig.RegisterRequestsPerMinute, rateLimitConfig.RegisterBurst),
+		registerAuth:     func(c *gin.Context) { c.Next() },
 		sessionsOptions: sessions.Options{
 			Path:     "/",
 			Domain:   "",
@@ -112,10 +114,25 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		s.gin.Use(cors.New(corsConfig))
 	}
 
+	s.registerAuth, err = middleware.NewRegistrationAuthMiddleware(s.cfg, s.log.New("registration_auth"))
+	if err != nil {
+		return nil, err
+	}
+
 	rgRoot, err := s.httpHelpers.Server.Default(ctx, s.server, s.gin, s.cfg.Verifier.APIServer)
 	if err != nil {
 		return nil, err
 	}
+
+	// Force revalidation of embedded static assets. There is no cache
+	// busting on these URLs, so a browser's heuristic cache can hold onto
+	// an old ES module across a plain reload even after a deploy.
+	s.gin.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/static/") {
+			c.Header("Cache-Control", "no-cache")
+		}
+		c.Next()
+	})
 
 	s.gin.StaticFS("/static", http.FS(webvendor.Overlay(staticembed.FS)))
 
@@ -188,7 +205,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	})
 
 	// Dynamic Client Registration (RFC 7591/7592) with rate limiting
-	rgRoot.POST("register", s.registerLimiter.Middleware(), func(c *gin.Context) {
+	rgRoot.POST("register", s.registerLimiter.Middleware(), s.registerAuth, func(c *gin.Context) {
 		response, err := s.endpointRegisterClient(ctx, c)
 		if err != nil {
 			s.handleOAuthError(c, err)
@@ -205,13 +222,15 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	s.httpHelpers.Server.RegEndpoint(ctx, sgVerification, http.MethodGet, "request-object", http.StatusOK, s.endpointVerificationRequestObject)
 	s.httpHelpers.Server.RegEndpoint(ctx, sgVerification, http.MethodPost, "direct_post", http.StatusOK, s.endpointVerificationDirectPost)
 	s.httpHelpers.Server.RegEndpoint(ctx, sgVerification, http.MethodGet, "callback", http.StatusOK, s.endpointVerificationCallback)
+	// Under sgVerification so endpointSessionPreference can read session_id
+	// from the gin cookie when the body omits it (standalone verifier UI).
+	s.httpHelpers.Server.RegEndpoint(ctx, sgVerification, http.MethodPost, "session-preference", http.StatusOK, s.endpointSessionPreference)
 
 	// OIDC-flow OpenID4VP endpoints
 	rgOIDCVerification := rgRoot.Group("/verification")
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodGet, "request-object/:session_id", http.StatusOK, s.endpointOIDCRequestObject)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodPost, "oidc-direct_post", http.StatusOK, s.endpointOIDCDirectPost)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodGet, "oidc-callback", http.StatusOK, s.endpointOIDCCallback)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodPost, "session-preference", http.StatusOK, s.endpointSessionPreference)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodGet, "display/:session_id", http.StatusOK, s.endpointCredentialDisplay)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodPost, "confirm/:session_id", http.StatusOK, s.endpointConfirmCredentialDisplay)
 
@@ -224,6 +243,9 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodPost, "/interaction", http.StatusOK, s.endpointUIInteraction)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/notify", http.StatusOK, s.endpointUINotify)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/metadata", http.StatusOK, s.endpointUIMetadata)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/result", http.StatusOK, s.endpointUIResult)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/completion", http.StatusOK, s.endpointUICompletion)
+	s.httpHelpers.Server.RegEndpoint(ctx, rgUI, http.MethodGet, "/resume", http.StatusOK, s.endpointUIResume)
 
 	rgDocs := rgRoot.Group("/swagger")
 	rgDocs.GET("/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))

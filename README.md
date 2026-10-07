@@ -203,6 +203,82 @@ determined by `auth_method` in the credential configuration.
 - OpenTelemetry distributed tracing
 - Static Linux/amd64 binaries for containerized deployment
 
+## Verifier Dynamic Client Registration Authorization
+
+The verifier exposes OAuth 2.0 Dynamic Client Registration at `POST /register`.
+You can protect this endpoint with an initial access token policy.
+
+Supported modes:
+
+- `open` (default): registration is open (rate-limited)
+- `static`: requires a fixed bearer token loaded from local file
+- `jwt`: requires a signed JWT bearer token validated with configured `issuer`, `audience`, and `jwks_uri`
+
+`jwks_uri` and `issuer` must be `https`. The key set is the trust root for
+every token accepted in `jwt` mode, so over plaintext anyone on the network
+path can substitute the keys and mint a token the verifier accepts. Private
+and loopback addresses are allowed, so an in-cluster issuer works, as long as
+it is reached over TLS.
+
+A request carrying no bearer credentials is answered with `401`, a bare
+`WWW-Authenticate: Bearer` challenge and an empty body (RFC 6750 section 3: no
+error code "or other error information", since none was presented). An
+`Authorization` header that does use the Bearer scheme but cannot be parsed —
+including one whose token falls outside RFC 6750's `b64token` syntax, such as
+`Bearer abc def` — is `400 invalid_request`; a token that was checked and
+rejected is `401 invalid_token`.
+
+If the key set itself cannot be retrieved, the answer is `503
+temporarily_unavailable` rather than `401`: no verdict on the token was
+reached, so reporting it as a bad credential would send a caller off to mint a
+new one and file a local outage as ordinary auth noise. "Cannot be retrieved"
+covers a `200` that carries nothing usable as well as a refused connection or
+an error status — a body that is not a JSON key set, `{"keys":[]}`, and a key
+set holding only keys this verifier cannot use all leave it with nothing to
+judge a token against. "Cannot use" is decided by PARSING each key with the
+same library the verifier loads them with, not by reading its `kty` and `alg`:
+an RSA entry with no `n` or `e` looks usable and is not.
+
+`allowed_signing_algs` is asymmetric-only, enforced at startup. The key set
+behind `jwks_uri` is published, so configuring `HS256` and serving an `oct`
+key would hand the signing secret to everyone who can fetch it; `none` is the
+same hole with no key at all. Unrecognised algorithms are refused rather than
+forwarded, and a fetched key set is judged the same way — an `oct` key, or one
+whose `alg` is symmetric, does not count towards "a key set arrived".
+
+In `static` mode the token file must hold a single `b64token` on one line
+(letters, digits, and `-` `.` `_` `~` `+` `/`, with optional trailing `=`).
+Anything else is refused at startup, since no `Authorization` header could ever
+carry it.
+
+Example (`config.yaml`):
+
+```yaml
+verifier:
+  outbound:
+    oidc_provider:
+      dynamic_registration_auth:
+        mode: "static"
+        static_bearer_token_file: "/run/secrets/verifier_dcr_initial_access_token"
+```
+
+```yaml
+verifier:
+  outbound:
+    oidc_provider:
+      dynamic_registration_auth:
+        mode: "jwt"
+        jwt:
+          jwks_uri: "https://auth.example.com/.well-known/jwks.json"
+          issuer: "https://auth.example.com"
+          audience: "vc-verifier-register"
+          allowed_signing_algs: ["RS256", "ES256"]
+          # Omit for the 60s default; set 0 to turn the tolerance off.
+          clock_skew_seconds: 60
+```
+
+Note: `introspection` is reserved for future implementation and is not enabled yet.
+
 ## Docker release version
 
 `latest` tracks the latest tag available and is built from branch `main`.

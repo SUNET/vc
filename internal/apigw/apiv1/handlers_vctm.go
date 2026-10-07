@@ -334,12 +334,99 @@ func (c *Client) TypeMetadata(ctx context.Context, req *TypeMetadataRequest) (js
 	return reply, nil
 }
 
+// ErrNoSVGTemplate reports that the credential's metadata offers no image
+// for the consent card. It is a normal configuration, not a failure: a
+// credential type is free to have no card, and the consent page renders its
+// claims without one.
+//
+// Distinguished from every other error here because the caller treats it
+// completely differently - this one is answered with an empty template and a
+// 200, while a fetch that failed is a 400 somebody should look at. Both used
+// to be an undifferentiated error, so a credential with no card produced an
+// error log and a 400 on every consent page load (SUNET/vc#737).
+var ErrNoSVGTemplate = errors.New("credential metadata declares no SVG template or logo")
+
 // SVGTemplateRequest holds the request for fetching an SVG template. Exactly
 // one of VCTM or MDDL should be set, mirroring the two credential-metadata
 // sources GetVCTMFromScope/GetMDDLFromScope resolve a scope to.
 type SVGTemplateRequest struct {
 	VCTM *sdjwtvc.VCTM    `json:"-"`
 	MDDL *mdoc.MDDLSchema `json:"-"`
+}
+
+// vctmCardURI returns the image a VCTM offers for the consent card: its SVG
+// template, or the simple-rendering logo when there is none.
+//
+// The fallback is the same one GenerateIssuerMetadata applies in reverse
+// (mapSvgTemplates fills an absent logo from the first template). A
+// credential whose metadata offers a logo and no template used to render no
+// card at all, which is not what the metadata said.
+func vctmCardURI(vctm *sdjwtvc.VCTM) (uri string, fromLogo bool) {
+	if len(vctm.Display) == 0 {
+		return "", false
+	}
+	rendering := vctm.Display[0].Rendering
+	if rendering == nil {
+		return "", false
+	}
+	if len(rendering.SVGTemplates) > 0 {
+		return rendering.SVGTemplates[0].URI, false
+	}
+	if rendering.Simple != nil && rendering.Simple.Logo != nil {
+		return rendering.Simple.Logo.URI, true
+	}
+	return "", false
+}
+
+// checkCardContentType decides whether a fetched card may be used, given
+// what the origin said it is.
+//
+// A logo must be SVG and must SAY so: this pipeline carries no media type
+// and consent.js decodes the bytes as UTF-8 text, so raster bytes become a
+// broken image rather than no image. A response with no Content-Type at all
+// is therefore not usable either - "could not confirm" is not "SVG" - and
+// the credential is treated as having no card.
+//
+// A declared svg_template keeps the behaviour it had: a missing header is
+// tolerated, since an origin serving a template is being pointed at
+// deliberately, and a header naming something else is a configuration error
+// worth seeing rather than a silent absence.
+func checkCardContentType(contentType string, fromLogo bool) error {
+	if fromLogo {
+		if !strings.HasPrefix(contentType, "image/svg+xml") {
+			return ErrNoSVGTemplate
+		}
+		return nil
+	}
+	if contentType != "" && !strings.HasPrefix(contentType, "image/svg+xml") {
+		return fmt.Errorf("unexpected content type from SVG template origin: %s", contentType)
+	}
+	return nil
+}
+
+// isSVGDataURI reports whether a data: URI declares SVG content. A URI with
+// no media type at all defaults to text/plain per RFC 2397, which is not
+// SVG, so the absent case is correctly false.
+func isSVGDataURI(uri string) bool {
+	header, _, found := strings.Cut(strings.TrimPrefix(uri, "data:"), ",")
+	return found && strings.HasPrefix(header, "image/svg+xml")
+}
+
+// mddlCardURI is vctmCardURI for an mdoc schema. The dialects differ in
+// where the logo lives: mdoc has no "simple" sub-object, so Logo sits on the
+// display entry itself (see mdoc.Rendering's own comment).
+func mddlCardURI(mddl *mdoc.MDDLSchema) (uri string, fromLogo bool) {
+	if len(mddl.Display) == 0 {
+		return "", false
+	}
+	display := mddl.Display[0]
+	if display.Rendering != nil && len(display.Rendering.SVGTemplates) > 0 {
+		return display.Rendering.SVGTemplates[0].URI, false
+	}
+	if display.Logo != nil {
+		return display.Logo.URI, true
+	}
+	return "", false
 }
 
 func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) (*vcclient.SVGTemplateReply, error) {
@@ -350,22 +437,33 @@ func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) 
 		return nil, fmt.Errorf("SVGTemplateRequest must set exactly one of VCTM or MDDL, not both")
 	}
 
-	var svgTemplateURI string
+	var (
+		svgTemplateURI string
+		fromLogo       bool
+	)
 	switch {
 	case req.VCTM != nil:
-		if len(req.VCTM.Display) == 0 || req.VCTM.Display[0].Rendering == nil ||
-			len(req.VCTM.Display[0].Rendering.SVGTemplates) == 0 {
-			return nil, fmt.Errorf("VCTM has no SVG templates")
-		}
-		svgTemplateURI = req.VCTM.Display[0].Rendering.SVGTemplates[0].URI
+		svgTemplateURI, fromLogo = vctmCardURI(req.VCTM)
 	case req.MDDL != nil:
-		if len(req.MDDL.Display) == 0 || req.MDDL.Display[0].Rendering == nil ||
-			len(req.MDDL.Display[0].Rendering.SVGTemplates) == 0 {
-			return nil, fmt.Errorf("MDDL schema has no SVG templates")
-		}
-		svgTemplateURI = req.MDDL.Display[0].Rendering.SVGTemplates[0].URI
+		svgTemplateURI, fromLogo = mddlCardURI(req.MDDL)
 	default:
 		return nil, fmt.Errorf("no VCTM or MDDL schema provided")
+	}
+
+	if svgTemplateURI == "" {
+		return nil, ErrNoSVGTemplate
+	}
+
+	// A logo is any image; this pipeline carries SVG only - the reply has no
+	// media type, and consent.js decodes it as UTF-8 text to substitute claim
+	// values. Handing it raster bytes would produce a BROKEN image where
+	// there used to be none, so a non-SVG logo means "this credential has no
+	// card". Checked before the cache, so a URI that will be refused is
+	// never looked up or stored. A declared svg_template is not second
+	// guessed the same way: a wrong media type there is a configuration
+	// error worth seeing.
+	if fromLogo && strings.HasPrefix(svgTemplateURI, "data:") && !isSVGDataURI(svgTemplateURI) {
+		return nil, ErrNoSVGTemplate
 	}
 
 	if cached, ok := c.cacheService.SVGTemplate.Get(ctx, svgTemplateURI); ok {
@@ -433,9 +531,8 @@ func (c *Client) SVGTemplateReply(ctx context.Context, req *SVGTemplateRequest) 
 			return nil, err
 		}
 
-		contentType := response.Header.Get("Content-Type")
-		if contentType != "" && !strings.HasPrefix(contentType, "image/svg+xml") {
-			return nil, fmt.Errorf("unexpected content type from SVG template origin: %s", contentType)
+		if err := checkCardContentType(response.Header.Get("Content-Type"), fromLogo); err != nil {
+			return nil, err
 		}
 
 		const maxSVGSize = 5 * 1024 * 1024 // 5MB

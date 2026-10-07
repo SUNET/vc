@@ -33,6 +33,8 @@ func StatusCode(ctx context.Context, err error) int {
 		switch err {
 		case helpers.ErrNoDocumentFound, helpers.ErrNoIdentityFound:
 			return http.StatusNotFound
+		case helpers.ErrIdentityMappingNamespaceRequired:
+			return http.StatusBadRequest
 		case helpers.ErrDocumentAlreadyExists, helpers.ErrDuplicateKey:
 			return http.StatusConflict
 		case helpers.ErrDocumentValidationFailed:
@@ -62,6 +64,9 @@ func StatusCode(ctx context.Context, err error) int {
 	// Check if it's wrapped in one of our known errors
 	if errors.Is(err, helpers.ErrNoDocumentFound) || errors.Is(err, helpers.ErrNoIdentityFound) {
 		return http.StatusNotFound
+	}
+	if errors.Is(err, helpers.ErrIdentityMappingNamespaceRequired) {
+		return http.StatusBadRequest
 	}
 	if errors.Is(err, helpers.ErrDocumentAlreadyExists) || errors.Is(err, helpers.ErrDuplicateKey) {
 		return http.StatusConflict
@@ -106,7 +111,7 @@ func inferStatusFromErrorTitle(title string) int {
 		return http.StatusNotFound
 	case contains(title, "unauthorized", "authentication"):
 		return http.StatusUnauthorized
-	case contains(title, "forbidden", "revoked", "access_denied"):
+	case contains(title, "forbidden", "revoked", "access_denied", "not_allowed"):
 		return http.StatusForbidden
 	case contains(title, "invalid", "validation", "bad_request", "malformed"):
 		return http.StatusBadRequest

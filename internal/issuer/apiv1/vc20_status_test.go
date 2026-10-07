@@ -31,9 +31,10 @@ func buildVC20WithStatusEnabled(t *testing.T, status *statusAllocation, enabled 
 	raw, err := vc20Builder(t, enabled).buildVC20CredentialJSON(
 		"urn:uuid:11111111-2222-3333-4444-555555555555",
 		[]string{"VerifiableCredential"},
+		nil, // additionalContexts: this test is about the status reference
 		map[string]any{"id": "did:example:holder"},
 		time.Now().UTC(),
-		nil,
+		nil, // validUntil
 		status,
 	)
 	require.NoError(t, err)

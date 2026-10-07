@@ -9,6 +9,12 @@
   **Migration:** if APIGW fails to start with `apigw.data_sources.datastore.scopes: ... name no scope in common.credential_metadata`, either add the missing `common.credential_metadata` entry or drop the scope from `auth_scopes`. The error lists every offending `<scope>.auth_scopes.<auth_scope>` pair.
 
   A `credential_metadata` key present but empty (a YAML typo) is likewise rejected now rather than dereferenced at startup, as is a VCTM document holding the literal `null`, which used to load and then fail every issuance after a successful `/token`.
+- **Status-list and DCQL changes** — see the entries below. The Docker image
+  still ships `/metadata`: an earlier revision of this branch removed it, but
+  the in-repo Fly environment configures `common.credential_metadata` with
+  `/metadata/...` paths and mounts nothing of its own, so removing the copy
+  left all four services failing at config load. Dropping it from the image
+  needs those configurations migrated first, which is its own change.
 
 - **Configuration Refactoring**: Migrated to centralized `key_config` using `pki.KeyConfig` across all services. All signing key configurations now use the unified PKI package structure. Existing configurations will fail validation without these updates.
   
@@ -56,6 +62,22 @@
   wallet is selected before it is produced; the single response carries the
   offer once plus one entry per configured wallet. This is the internal
   operator UI's own endpoint, not a wallet-facing one.
+
+### Fixed
+
+- **W3C presentation verification picked a proof by accident.** A verifiable
+  presentation holds two Data Integrity proofs - the holder's, over the
+  presentation, and the embedded credential's, from the issuer - and both
+  reach the suite through `ProofObject()`. The suite verified whichever proof
+  node it reached first, which depended on the blank-node ordering json-gold
+  happened to assign and, where a proof sat under a map key, on Go's
+  randomised map iteration. Nothing tied the signature that was checked to
+  the proof whose `proofPurpose`, challenge and domain had been validated.
+
+  The presentation path now names its own proof by `proofValue`
+  (`Suite.VerifyProof`), and `common.FindProofNode` traverses in a
+  deterministic order. Verification behaviour for a single-proof document is
+  unchanged.
 
 ### Changed
 

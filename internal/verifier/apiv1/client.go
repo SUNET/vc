@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"crypto/x509"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -429,6 +430,19 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 		// fallback unreachable for any deployment with templates configured.
 		dcql, _, matched := c.presentationBuilder.TemplateDCQLQuery(ctx, scopes)
 		if matched {
+			// A template is written by hand and goes out signed without
+			// passing through /ui/interaction's validation, so this is the
+			// only place its queries are checked. An unconstrained or
+			// unanswerable one would be discovered at the response instead -
+			// after the user has been sent to their wallet and come back.
+			//
+			// Distinct from the two coverage checks below: this asks whether
+			// each query can be answered at all, they ask whether the set of
+			// queries and the set of scopes agree.
+			if err := validateDCQL(dcql); err != nil {
+				c.log.Error(err, "presentation template built an unusable DCQL query", "scopes", scopes)
+				return nil, fmt.Errorf("presentation template for scopes %v built an unusable query: %w", scopes, err)
+			}
 			if uncovered := c.uncoveredScopes(ctx, dcql, scopes); len(uncovered) > 0 {
 				return nil, fmt.Errorf("the presentation template selected for this request does not cover requested scope(s) %v; a wallet would never be asked for them", uncovered)
 			}
@@ -442,7 +456,48 @@ func (c *Client) createDCQLQuery(ctx context.Context, scopes []string) (*openid4
 	}
 
 	// Fallback to building DCQL query from credential config
-	return c.buildDCQLQueryFromConfig(scopes)
+	dcql, err := c.buildDCQLQueryFromConfig(scopes)
+	if err != nil {
+		return nil, err
+	}
+	// Config-built queries come from DCQLMetaQuery, which refuses what it
+	// cannot express - but the two paths should be held to one standard, and
+	// this catches anything DCQLMetaQuery starts allowing that the validator
+	// does not.
+	if err := validateDCQL(dcql); err != nil {
+		c.log.Error(err, "config built an unusable DCQL query", "scopes", scopes)
+		return nil, fmt.Errorf("configuration for scopes %v builds an unusable query: %w", scopes, err)
+	}
+	return dcql, nil
+}
+
+// validateDCQL checks every credential query a request is about to carry.
+//
+// A nil query is not this function's business - the caller decides whether
+// one was required. An EMPTY one is: the loop below runs zero times and
+// reports nothing wrong, so a request asking for no credential at all used
+// to pass as valid, and so did the uncoveredScopes and
+// unclaimedRequiredQueries checks that iterate the same empty list. The
+// session then went to the wallet asking for nothing, and the direct-post
+// guards refused the response - which is the right outcome discovered at
+// the worst moment, after the user has already been sent to their wallet
+// and come back.
+//
+// UIInteraction refuses an empty dcql_query for the same reason. This is
+// the other way a request is built.
+func validateDCQL(dcql *openid4vp.DCQL) error {
+	if dcql == nil {
+		return nil
+	}
+	if len(dcql.Credentials) == 0 {
+		return errors.New("asks for no credential at all")
+	}
+	for _, credential := range dcql.Credentials {
+		if err := openid4vp.ValidateCredentialQuery(credential); err != nil {
+			return fmt.Errorf("credential query %q: %w", credential.ID, err)
+		}
+	}
+	return nil
 }
 
 // ScopeQueryIDs pairs each requested scope with the id of the DCQL credential
@@ -818,21 +873,7 @@ func (c *Client) extractAndMapClaims(ctx context.Context, vpToken string, scopeS
 		return c.claimsExtractor.ExtractClaimsFromVPToken(ctx, vpToken)
 	}
 
-	// Convert ClaimTransform to ClaimTransformDef for the extractor
-	transformDefs := make(map[string]openid4vp.ClaimTransformDef)
-	if templateWithTransforms, ok := template.(interface {
-		GetClaimTransforms() map[string]configuration.ClaimTransform
-	}); ok {
-		for claimName, transform := range templateWithTransforms.GetClaimTransforms() {
-			transformDefs[claimName] = openid4vp.ClaimTransformDef{
-				Type:   transform.Type,
-				Params: transform.Params,
-			}
-		}
-	}
-
-	// Extract, map, and transform claims
-	oidcClaims, err := c.claimsExtractor.ExtractAndMapClaims(ctx, vpToken, claimMappings, transformDefs)
+	oidcClaims, err := c.claimsExtractor.ExtractAndMapClaims(ctx, vpToken, claimMappings)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract and map claims: %w", err)
 	}

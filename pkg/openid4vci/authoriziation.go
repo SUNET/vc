@@ -67,6 +67,16 @@ type PARRequest struct {
 	UserHint     string `json:"user_hint" form:"user_hint"`
 	IssuingState string `json:"issuing_state" form:"issuing_state"`
 
+	// DynamicParams holds key-value parameters bound directly from the PAR
+	// caller's request body. Despite the name, these are NOT verified to
+	// originate from any authentic source business system -- nothing here
+	// authenticates the caller's claim about where the values came from.
+	// They are used only for template substitution in the outgoing OIDC
+	// request parameters (resolveOIDCRequestParams); issuance policy
+	// evaluation is deliberately gated on OP-asserted claims instead (see
+	// handlers_oidcrp.go), precisely because these values are unverified.
+	DynamicParams map[string]string `json:"dynamic_params,omitempty" form:"dynamic_params" validate:"omitempty,dive,keys,safe_key,endkeys,max=1024,printascii"`
+
 	// Client authentication via wallet attestation.
 	// Supports two mechanisms per draft-ietf-oauth-attestation-based-client-auth-04:
 	//  1. HTTP headers: OAuth-Client-Attestation + OAuth-Client-Attestation-PoP (§3.1)
@@ -197,6 +207,113 @@ func (r *PARRequest) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(raw, &r.AuthorizationDetails); err != nil {
 		return fmt.Errorf("authorization_details parse: %w", err)
 	}
+	return nil
+}
+
+// AuthorizationDetailsBracketKey is the "PHP-style" array parameter name some
+// wallets use for authorization_details. net/url decodes the key before it
+// reaches us, so a literal "[]" and a percent-encoded "%5B%5D" both land here.
+const AuthorizationDetailsBracketKey = "authorization_details[]"
+
+// ReadAuthorizationDetails settles which of the request's
+// authorization_details values count, before ParseAuthorizationDetails
+// decodes them.
+//
+// OpenID4VCI 1.0 §5.1.1 and RFC 9396 §2 define exactly one encoding for a
+// query string or form body - a single parameter whose value is the
+// URL-encoded JSON array - and RFC 6749 §3.1 says a request parameter MUST
+// NOT be included more than once. So with lenient false this refuses a
+// repeated parameter and otherwise leaves what the form binder read; gin
+// binds a scalar field from the FIRST value only, so without this check a
+// second authorization_details would be silently dropped rather than
+// refused.
+//
+// With lenient true, two further encodings are folded into the single array
+// ParseAuthorizationDetails expects:
+//
+//	repeated key:   authorization_details={..}&authorization_details={..}
+//	bracketed key:  authorization_details[]={..}&authorization_details[]={..}
+//
+// Neither is specified. Callers gate leniency on an explicit deployment
+// opt-in (model.Cfg.AcceptNonStandardAuthorizationDetailsArrays); nothing
+// infers it from the request.
+//
+// values is the request's decoded query and form parameters. A request whose
+// AuthorizationDetails are already populated (a JSON body) is left alone.
+func (r *PARRequest) ReadAuthorizationDetails(values url.Values, lenient bool) error {
+	if r == nil || len(r.AuthorizationDetails) > 0 {
+		return nil
+	}
+
+	plain := values["authorization_details"]
+
+	if !lenient {
+		if len(plain) > 1 {
+			return errors.New("authorization_details must not be included more than once")
+		}
+		return nil
+	}
+
+	raw := make([]string, 0, len(plain)+len(values[AuthorizationDetailsBracketKey]))
+	raw = append(raw, plain...)
+	raw = append(raw, values[AuthorizationDetailsBracketKey]...)
+	if len(raw) == 0 {
+		return nil
+	}
+
+	// Bound the input before parsing it, not just the result: the merged array
+	// is built from every value, so a caller could otherwise hand us an
+	// unbounded amount of JSON to decode.
+	total := 0
+	for _, v := range raw {
+		total += len(v)
+	}
+	if total > maxAuthorizationDetailsBytes {
+		return fmt.Errorf("authorization_details exceeds %d bytes", maxAuthorizationDetailsBytes)
+	}
+
+	// A single value that is already a JSON array is the specified encoding.
+	// Pass it through verbatim so ParseAuthorizationDetails owns its errors
+	// and this function cannot change what a conformant request means.
+	if len(raw) == 1 && bytes.HasPrefix(bytes.TrimSpace([]byte(raw[0])), []byte("[")) {
+		r.AuthorizationDetailsRaw = raw[0]
+		return nil
+	}
+
+	merged := make([]json.RawMessage, 0, len(raw))
+	for i, v := range raw {
+		trimmed := bytes.TrimSpace([]byte(v))
+		switch {
+		case len(trimmed) == 0:
+			continue
+		case trimmed[0] == '[':
+			var part []json.RawMessage
+			if err := json.Unmarshal(trimmed, &part); err != nil {
+				return fmt.Errorf("authorization_details value %d parse: %w", i, err)
+			}
+			merged = append(merged, part...)
+		case trimmed[0] == '{':
+			if !json.Valid(trimmed) {
+				return fmt.Errorf("authorization_details value %d is not valid JSON", i)
+			}
+			merged = append(merged, json.RawMessage(trimmed))
+		default:
+			return fmt.Errorf("authorization_details value %d must be a JSON object or array", i)
+		}
+	}
+	if len(merged) == 0 {
+		return errors.New("authorization_details is empty")
+	}
+
+	out, err := json.Marshal(merged)
+	if err != nil {
+		return err
+	}
+	if len(out) > maxAuthorizationDetailsBytes {
+		return fmt.Errorf("authorization_details exceeds %d bytes", maxAuthorizationDetailsBytes)
+	}
+	r.AuthorizationDetailsRaw = string(out)
+
 	return nil
 }
 

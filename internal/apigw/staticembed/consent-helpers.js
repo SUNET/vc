@@ -44,7 +44,10 @@ export const SAFE_IMAGE_SUBTYPES = new Set(["png", "jpeg", "gif", "webp"]);
 // replaced with the empty string so an arbitrary URL in a claim value
 // (e.g. https://tracker.example/...) cannot cause the consent page to
 // perform an external network fetch at render time.
-export const IMAGE_PLACEHOLDERS = new Set(["picture"]);
+// "picture" is the SD-JWT VC spelling; "portrait" is the ISO 18013-5 and
+// EUDI PID element id for the same thing. Both have to be listed, or an
+// mdoc card's photo slot would take an arbitrary claim string as an href.
+export const IMAGE_PLACEHOLDERS = new Set(["picture", "portrait"]);
 
 // Common subtype aliases normalized to their canonical form before the
 // allowlist check. Upstream issuers sometimes emit `image/jpg` even though
@@ -148,6 +151,47 @@ export function detectBase64Image(s) {
  * @param {unknown} value
  * @returns {string | null}
  */
+// Matches an SVG template placeholder. The character class is deliberately
+// narrow — it is the same shape an svg_id takes — so this cannot eat
+// unrelated markup.
+const PLACEHOLDER_RE = /{{[A-Za-z0-9_]+}}/g;
+
+/**
+ * Escape a claim value for substitution into an SVG template.
+ *
+ * escapeHtml plus the braces. The braces matter because
+ * clearUnresolvedPlaceholders runs afterwards and removes anything still
+ * placeholder-shaped: a claim value of "Ada {{middle_name}}" would
+ * otherwise be substituted literally and then half-deleted, rendering as
+ * "Ada ". `&#123;` and `&#125;` are valid XML character references and draw
+ * as the braces they stand for, so the value survives intact and can never
+ * be mistaken for a slot.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+export function escapeSvgValue(s) {
+    return escapeHtml(s).replaceAll("{", "&#123;").replaceAll("}", "&#125;");
+}
+
+/**
+ * Remove every template placeholder no claim resolved.
+ *
+ * A slot whose claim is optional and absent — a PID without
+ * `document_number`, say — would otherwise be drawn as the literal text
+ * "{{document_number}}", and an image slot would keep "{{portrait}}" as its
+ * href. Run this after substitution. A substituted value cannot be eaten
+ * here because escapeSvgValue encodes its braces as character references
+ * first - escapeHtml alone does NOT touch braces, so substituting with it
+ * would leave "Ada {{middle_name}}" to be half-deleted into "Ada ".
+ *
+ * @param {string} svg
+ * @returns {string}
+ */
+export function clearUnresolvedPlaceholders(svg) {
+    return svg.replaceAll(PLACEHOLDER_RE, "");
+}
+
 export function valueForSvgPlaceholder(svgId, value) {
     if (IMAGE_PLACEHOLDERS.has(svgId)) {
         if (typeof value !== "string") return "";

@@ -19,7 +19,7 @@ import (
 type Service struct {
 	cfg          *eduapi.Config
 	client       *eduapi.Client
-	transformers map[string]*credential.ClaimTransformer // credential type → transformer
+	mappers map[string]*credential.AttributeMapper // credential type → mapper
 	docCache     pkgcache.Cache[map[string]*model.CompleteDocument]
 	log          *logger.Log
 }
@@ -39,15 +39,15 @@ func New(ctx context.Context, cfg *eduapi.Config, docCache pkgcache.Cache[map[st
 		return nil, fmt.Errorf("eduapi: create client: %w", err)
 	}
 
-	transformers := make(map[string]*credential.ClaimTransformer, len(cfg.AttributeMappings))
+	mappers := make(map[string]*credential.AttributeMapper, len(cfg.AttributeMappings))
 	for credType, mapping := range cfg.AttributeMappings {
-		transformers[credType] = credential.NewClaimTransformer(toModelMapping(mapping))
+		mappers[credType] = credential.NewAttributeMapper(toModelMapping(mapping))
 	}
 
 	s := &Service{
 		cfg:          cfg,
 		client:       client,
-		transformers: transformers,
+		mappers: mappers,
 		docCache:     docCache,
 		log:          log.New("eduapi"),
 	}
@@ -146,11 +146,11 @@ func (s *Service) FetchAndStoreForVCI(ctx context.Context, personID, credentialT
 		}
 	}
 
-	// Apply claim transformer if configured for this credential type
+	// Apply attribute mapper if configured for this credential type
 	var transformedClaims map[string]any
-	if t, ok := s.transformers[credentialType]; ok {
+	if t, ok := s.mappers[credentialType]; ok {
 		var err error
-		transformedClaims, err = t.TransformClaims(claims)
+		transformedClaims, err = t.Apply(claims)
 		if err != nil {
 			return fmt.Errorf("eduapi: transform claims: %w", err)
 		}
@@ -191,10 +191,9 @@ func toModelMapping(src eduapi.AttributeMapping) model.AttributeMapping {
 	attrs := make(model.AttributeMapping, len(src))
 	for ak, av := range src {
 		attrs[ak] = model.AttributeConfig{
-			Claim:     av.Claim,
-			Required:  av.Required,
-			Transform: av.Transform,
-			Default:   av.Default,
+			Claim:    av.Claim,
+			Required: av.Required,
+			Default:  av.Default,
 		}
 	}
 	return attrs

@@ -179,6 +179,7 @@
         "SPOCP",
         "SPSSO",
         "SQLDB",
+        "sqlstore",
         "starform",
         "staticcheck",
         "staticembed",

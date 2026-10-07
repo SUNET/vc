@@ -14,12 +14,23 @@ common:
     pid:
       vctm_file_path: "/metadata/vctm_pid.json"
       format: "dc+sd-jwt"
+      replace_vct: true
     ehic:
       vctm_file_path: "/metadata/vctm_ehic.json"
       format: "dc+sd-jwt"
+      replace_vct: true
     eduid:
       vctm_file_path: "/metadata/vctm_eduid.json"
       format: "dc+sd-jwt"
+      replace_vct: true
+    eduid_age_verification:
+      vctm_file_path: "/metadata/vctm_eduid_age_verification.json"
+      format: "dc+sd-jwt"
+      replace_vct: true
+    # Disabled pending Longfellow wallet support and age-proof validation.
+    #eduid_age_verification_zk:
+    #  mddl_file_path: "/metadata/eduid_age_verification_zk.mdoc.json"
+    #  format: "mso_mdoc"
     #pid_mdoc:
     #  mddl_file_path: "/metadata/pid_mdoc.mdoc.json"
     #  format: "mso_mdoc"
@@ -47,6 +58,10 @@ issuer:
     valid_duration: 3600
     verifiable_credential_type: "https://credential.sunet.se/identity_credential"
   pseudonym_seed: true
+  #mdoc:
+  #  certificate_chain_path: "/pki/signing_ec_chain.pem"
+  #  default_validity: "8760h"
+  #  digest_algorithm: "SHA-256"
 
 verifier:
   api_server:
@@ -114,6 +129,11 @@ verifier:
             - rule: "age_over"
               path: ["birthdate"]
               value: 18
+    "eduID Age Over 18":
+      credentials:
+        eduid_age_verification:
+          claims:
+            - path: ["age_over_18"]
     "PID + EHIC":
       credentials:
         pid:
@@ -250,17 +270,17 @@ apigw:
         # would make the winning value depend on map iteration order.
         "urn:oid:1.3.6.1.4.1.25178.1.2.3":
           claim: "birthdate"
-          transform: "yyyymmdd_to_iso"
         "urn:oid:2.5.4.6":
           claim: "nationalities"
-          transform: "country_alpha2"
           as_array: true
         "urn:oid:1.2.752.29.4.13":
           claim: "personal_administrative_number"
         "urn:oid:1.3.6.1.4.1.5923.1.1.1.6":
           claim: "preferred_username"
         "urn:oid:1.3.6.1.4.1.5923.1.1.1.11":
-          claim: "assurance"
+          claim: "assurance_level"
+          # eduPersonAssurance is multi-valued; keep it as a slice so
+          # swamid_highest_assurance_level can select the strongest URI.
           as_array: true
         "urn:oasis:names:tc:SAML:attribute:subject-id":
           claim: "subject_id"
@@ -305,6 +325,42 @@ apigw:
           defaults:
             issuing_authority: "SUNET"
             issuing_country: "SE"
+          # Value transformations that used to live on attribute_mapping.*.transform
+          # now run here, after rename+select and before identity resolution.
+          derivations:
+            - yyyymmdd_to_iso: { input: "birthdate" }
+            - country_alpha2: { input: "nationalities" }
+            - swamid_highest_assurance_level: { input: "assurance_level" }
+    presentation:
+      scopes:
+        eduid_age_verification:
+          from_scope: "eduid"
+          # Every key must be present on the presented eduid; a populated
+          # allow-list is an exact-match one-of on the string value.
+          required_claims:
+            birthdate: []
+            assurance_level:
+              - "http://www.swamid.se/policy/assurance/al2"
+              - "http://www.swamid.se/policy/assurance/al3"
+          derivations:
+            - age_over_thresholds:
+                input: "birthdate"
+                thresholds: [13, 15, 18, 21, 65]
+          expiry_duration: "8760h"
+          defaults:
+            issuing_authority: "SUNET"
+            issuing_country: "SE"
+        #eduid_age_verification_zk:
+        #  from_scope: "eduid"
+        #  required_claims:
+        #    birthdate: []
+        #    assurance_level:
+        #      - "http://www.swamid.se/policy/assurance/al2"
+        #      - "http://www.swamid.se/policy/assurance/al3"
+        #  derivations:
+        #    - age_over_thresholds:
+        #        input: "birthdate"
+        #        thresholds: [13, 15, 18, 21, 65]
   delivery:
     openid4vci:
       token_endpoint: "https://sunet-vc-apigw.fly.dev/token"
@@ -317,6 +373,8 @@ apigw:
             - "ehic"
             - "mdl"
             - "eduid"
+            - "eduid_age_verification"
+            #- "eduid_age_verification_zk"
         # Interop testbed (webuild-cs01, University of the Aegean). Static
         # allowlist entry lets the headless testbed wallet pass PAR client
         # validation without going through the wallet-attestation PDP.

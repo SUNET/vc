@@ -68,6 +68,7 @@ type Client struct {
 	adminOIDC *lazyOIDCProvider
 
 	// Trust evaluation
+	trustEvaluator             trust.TrustEvaluator
 	jwtTrustVerifier           *trust.JWTTrustVerifier
 	walletAttestationEvaluator *trust.WalletAttestationEvaluator
 	walletAttestationPolicy    *trust.WalletAttestationPolicyEngine
@@ -171,6 +172,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	} else {
 		c.log.Info("Trust evaluator initialized", "mode", "authzen", "pdp_url", pdpURL)
 	}
+	c.trustEvaluator = trustEvaluator
 
 	c.jwtTrustVerifier = trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
 		TrustEvaluator: trustEvaluator,

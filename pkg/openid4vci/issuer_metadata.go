@@ -26,6 +26,9 @@ type CredentialIssuerMetadataParameters struct {
 	// NotificationEndpoint: OPTIONAL. URL of the Credential Issuer's Notification Endpoint, as defined in Section 11. This URL MUST use the https scheme and MAY contain port, path, and query parameter components. If omitted, the Credential Issuer does not support the Notification Endpoint.
 	NotificationEndpoint string `json:"notification_endpoint,omitempty" yaml:"notification_endpoint,omitempty"`
 
+	// CredentialRequestEncryption: OPTIONAL. Object containing information about whether the Credential Issuer supports encryption of the Credential Request on top of TLS.
+	CredentialRequestEncryption *MetadataCredentialRequestEncryption `json:"credential_request_encryption,omitempty" yaml:"credential_request_encryption" validate:"omitempty"`
+
 	// CredentialResponseEncryption: OPTIONAL. Object containing information about whether the Credential Issuer supports encryption of the Credential Response on top of TLS.
 	CredentialResponseEncryption *MetadataCredentialResponseEncryption `json:"credential_response_encryption,omitempty" yaml:"credential_response_encryption" validate:"omitempty"`
 
@@ -82,7 +85,30 @@ type MetadataCredentialResponseEncryption struct {
 	// EncValuesSupported: REQUIRED. Array containing a list of the JWE [RFC7516] encryption algorithms (enc values) [RFC7518] supported by the Credential and Batch Credential Endpoint to encode the Credential or Batch Credential Response in a JWT [RFC7519].
 	EncValuesSupported []string `json:"enc_values_supported" yaml:"enc_values_supported" validate:"required"`
 
+	// ZipValuesSupported: OPTIONAL. A non-empty array containing a list of the JWE [RFC7516] compression algorithms (zip values) [RFC7518] supported by the Credential Endpoint to compress the Credential Response prior to encryption. If absent then compression is not supported.
+	ZipValuesSupported []string `json:"zip_values_supported,omitempty" yaml:"zip_values_supported,omitempty"`
+
 	// EncryptionRequired: REQUIRED. Boolean value specifying whether the Credential Issuer requires the additional encryption on top of TLS for the Credential Response. If the value is true, the Credential Issuer requires encryption for every Credential Response and therefore the Wallet MUST provide encryption keys in the Credential Request. If the value is false, the Wallet MAY chose whether it provides encryption keys or not.
+	EncryptionRequired bool `json:"encryption_required" yaml:"encryption_required"`
+}
+
+// MetadataCredentialRequestEncryption is the credential_request_encryption
+// object of the Credential Issuer Metadata (OpenID4VCI 1.0 §12.2.4): what a
+// wallet needs in order to encrypt a Credential Request to this issuer.
+type MetadataCredentialRequestEncryption struct {
+	// JWKS: REQUIRED. A JSON Web Key Set containing one or more public keys,
+	// to be used by the Wallet as an input to a key agreement for encryption
+	// of the Credential Request. Each JWK in the set MUST have a kid that
+	// uniquely identifies the key.
+	JWKS json.RawMessage `json:"jwks" yaml:"jwks"`
+
+	// EncValuesSupported: REQUIRED. A non-empty array of the JWE enc algorithms supported by the Credential Endpoint to decode the Credential Request.
+	EncValuesSupported []string `json:"enc_values_supported" yaml:"enc_values_supported"`
+
+	// ZipValuesSupported: OPTIONAL. A non-empty array of the JWE zip algorithms supported by the Credential Endpoint to uncompress the Credential Request after decryption. If absent then no compression algorithms are supported.
+	ZipValuesSupported []string `json:"zip_values_supported,omitempty" yaml:"zip_values_supported,omitempty"`
+
+	// EncryptionRequired: REQUIRED. Boolean value specifying whether the Credential Issuer requires the additional encryption on top of TLS for the Credential Requests.
 	EncryptionRequired bool `json:"encryption_required" yaml:"encryption_required"`
 }
 
@@ -190,16 +216,35 @@ type ProofsTypesSupported struct {
 	// ProofSigningAlgValuesSupported: REQUIRED. Array of case sensitive strings that identify the algorithms that the Issuer supports for this proof type. The Wallet uses one of them to sign the proof. Algorithm names used are determined by the key proof type and are defined in Section 7.2.1.
 	ProofSigningAlgValuesSupported []string `json:"proof_signing_alg_values_supported" yaml:"proof_signing_alg_values_supported" validate:"required"`
 
-	// KeyAttestationsRequired: REQUIRED (per later OpenID4VCI drafts consumed by
-	// eudi-lib-jvm-openid4vci-kt 0.12.1+, which hard-fails issuer metadata
-	// validation without this field, and expects it to be a JSON object, not a
-	// boolean -- confirmed by decompiling KeyAttestationRequirementTO in that
-	// library). A zero-value KeyAttestationRequirement serializes to `{}`,
-	// declaring no specific attestation constraints -- this project has no
-	// Wallet Attestation / WSCD verification wired up yet (lpidproto PLAN.md
-	// workstream 8, not yet started), so asserting real constraints here would
-	// be dishonest. Revisit together with WS8 (production trust rollout).
-	KeyAttestationsRequired KeyAttestationRequirement `json:"key_attestations_required" yaml:"key_attestations_required"`
+	// KeyAttestationsRequired: OPTIONAL, and ABSENT unless this issuer
+	// really does require a key attestation.
+	//
+	// OpenID4VCI 1.0 12.2.4: "Object that describes the requirement for key
+	// attestations [...] If the Credential Issuer does not require a key
+	// attestation, this parameter MUST NOT be present in the metadata. If
+	// both key_storage and user_authentication parameters are absent, the
+	// key_attestations_required parameter may be empty, indicating a key
+	// attestation is needed without additional constraints."
+	//
+	// So `{}` is not a neutral value - it ASSERTS a requirement, just an
+	// unconstrained one. This field was previously a struct rather than a
+	// pointer and carried no omitempty, so every credential configuration
+	// advertised `"key_attestations_required": {}` and claimed a
+	// requirement nothing enforces: a plain "jwt" proof with no attestation
+	// is accepted. A pointer is what lets absent and present-but-empty be
+	// different things, which is exactly the distinction the spec draws.
+	//
+	// It was emitted unconditionally because eudi-lib-jvm-openid4vci-kt
+	// 0.12.1+ hard-fails metadata validation without the field. That is a
+	// lagging implementation, not the specification.
+	//
+	// vc's own metadata generator now always leaves this nil, with no
+	// setting to change that: nothing on the issuance path enforces a key
+	// attestation requirement, so any value here would advertise something
+	// this build does not keep. The field stays because it is part of the
+	// wire format - metadata read FROM another issuer may carry it - and
+	// because enforcement, once written, needs somewhere to put the answer.
+	KeyAttestationsRequired *KeyAttestationRequirement `json:"key_attestations_required,omitempty" yaml:"key_attestations_required,omitempty"`
 }
 
 // CredentialMetadata contains information relevant to the usage and display of issued Credentials.

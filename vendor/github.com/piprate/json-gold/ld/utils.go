@@ -19,22 +19,32 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 )
 
 // IsKeyword returns whether or not the given value is a keyword.
+//
+// It is called for every key of every object during expansion and conversion
+// to RDF, so it rejects non-keywords by their first byte and matches the rest
+// with a string switch rather than comparing interface values one by one.
 func IsKeyword(key interface{}) bool {
-	if _, isString := key.(string); !isString {
+	s, isString := key.(string)
+	if !isString || len(s) < 2 || s[0] != '@' {
 		return false
 	}
-	return key == "@base" || key == "@container" || key == "@context" || key == "@default" || key == "@direction" ||
-		key == "@embed" || key == "@explicit" || key == "@json" || key == "@id" || key == "@included" ||
-		key == "@index" || key == "@first" || key == "@graph" || key == "@import" || key == "@language" ||
-		key == "@list" || key == "@nest" || key == "@none" || key == "@omitDefault" || key == "@prefix" ||
-		key == "@preserve" || key == "@propagate" || key == "@protected" || key == "@requireAll" ||
-		key == "@reverse" || key == "@set" || key == "@type" || key == "@value" || key == "@version" ||
-		key == "@vocab"
+	switch s {
+	case "@always", "@base", "@container", "@context", "@default",
+		"@direction", "@embed", "@explicit", "@first", "@json",
+		"@id", "@included", "@index", "@graph", "@import",
+		"@language", "@last", "@list", "@nest", "@never",
+		"@none", "@null", "@omitDefault", "@once", "@prefix",
+		"@preserve", "@propagate", "@protected", "@requireAll", "@reverse",
+		"@set", "@type", "@value", "@version", "@vocab":
+		return true
+	}
+	return false
 }
 
 // DeepCompare returns true if v1 equals v2.
@@ -227,6 +237,21 @@ func IsSimpleGraph(v interface{}) bool {
 	return IsGraph(v) && !containsID
 }
 
+// isBlankNodeGraph returns true if the given value is a @graph whose @id is a blank node identifier.
+// Per JSON-LD 1.1, blank-node-named graphs are treated as simple graphs for @container: @graph.
+func isBlankNodeGraph(v interface{}) bool {
+	vMap, isMap := v.(map[string]interface{})
+	if !isMap || !IsGraph(v) {
+		return false
+	}
+	id, hasID := vMap["@id"]
+	if !hasID {
+		return false
+	}
+	idStr, isStr := id.(string)
+	return isStr && strings.HasPrefix(idStr, "_:")
+}
+
 // IsRelativeIri returns true if the given value is a relative IRI, false if not.
 func IsRelativeIri(value string) bool {
 	return !(IsKeyword(value) || IsAbsoluteIri(value))
@@ -297,13 +322,14 @@ func (s ShortestLeast) Less(i, j int) bool {
 
 func inArray(v interface{}, array []interface{}) bool {
 	for _, x := range array {
-		if v == x {
+		if reflect.DeepEqual(v, x) {
 			return true
 		}
 	}
 	return false
 }
 
+// Also called Wildcard https://www.w3.org/TR/json-ld-framing/#dfn-wildcard
 func isEmptyObject(v interface{}) bool {
 	vMap, isMap := v.(map[string]interface{})
 	return isMap && len(vMap) == 0

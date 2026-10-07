@@ -59,8 +59,17 @@ func TestExtractClientIDFromAssertion(t *testing.T) {
 			wantErr:   "failed to parse JWT claims",
 		},
 		{
+			// A DID is a client_id like any other, and private_key_jwt
+			// conveys it here instead of in a parameter: a bound that
+			// differs from the one on the client_id field would refuse by
+			// the back door what the front door accepts (SUNET/vc#706).
+			name:      "a did:jwk-length sub is accepted",
+			assertion: makeJWT(`{"sub":"did:jwk:` + strings.Repeat("a", 170) + `"}`),
+			wantSub:   "did:jwk:" + strings.Repeat("a", 170),
+		},
+		{
 			name:      "sub exceeds max length",
-			assertion: makeJWT(`{"sub":"` + strings.Repeat("a", 129) + `"}`),
+			assertion: makeJWT(`{"sub":"` + strings.Repeat("a", MaxClientIDLength+1) + `"}`),
 			wantErr:   "exceeds maximum length",
 		},
 		{

@@ -2,8 +2,16 @@ package model
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/mdoc"
@@ -391,28 +399,98 @@ func TestIssuerMetadata_Generate_OptionalEndpoints(t *testing.T) {
 	assert.Equal(t, "https://issuer.sunet.se/notification", metadata.NotificationEndpoint)
 }
 
-func TestIssuerMetadata_Generate_CredentialResponseEncryption(t *testing.T) {
-	cfg := &IssuerMetadata{
-		CredentialResponseEncryption: &openid4vci.MetadataCredentialResponseEncryption{
-			AlgValuesSupported: []string{"ECDH-ES", "ECDH-ES+A128KW"},
-			EncValuesSupported: []string{"A256GCM", "A128GCM"},
-			EncryptionRequired: true,
-		},
-	}
-
+// Both encryption objects are derived from keys that were actually loaded.
+// With a key configured they appear, carrying the algorithms vc performs and
+// a JWKS whose every key has a kid; with none, neither appears, because an
+// issuer that cannot do this says so by staying silent (SUNET/vc#707).
+func TestIssuerMetadata_Generate_CredentialEncryption(t *testing.T) {
 	credMeta := map[string]*CredentialMetadata{
-		"test_cred": {
-			VCTM: &sdjwtvc.VCTM{VCT: "urn:example:test:1"},
-		},
+		"test_cred": {VCTM: &sdjwtvc.VCTM{VCT: "urn:example:test:1"}},
 	}
-
 	ctx := context.Background()
-	metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
+
+	t.Run("no key configured omits both objects", func(t *testing.T) {
+		metadata, err := (&IssuerMetadata{}).Generate(ctx, "https://issuer.sunet.se", credMeta)
+		require.NoError(t, err)
+		assert.Nil(t, metadata.CredentialRequestEncryption)
+		assert.Nil(t, metadata.CredentialResponseEncryption)
+	})
+
+	t.Run("a key publishes both objects", func(t *testing.T) {
+		required := true
+		cfg := &IssuerMetadata{
+			CredentialEncryption: CredentialEncryption{
+				Keys:                       []CredentialEncryptionKey{{PrivateKeyPath: writeP256Key(t)}},
+				RequestEncryptionRequired:  &required,
+				ResponseEncryptionRequired: &required,
+			},
+		}
+
+		metadata, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
+		require.NoError(t, err)
+
+		req := metadata.CredentialRequestEncryption
+		require.NotNil(t, req)
+		assert.Equal(t, openid4vci.RequestEncryptionEncValuesSupported, req.EncValuesSupported)
+		assert.True(t, req.EncryptionRequired)
+		// Not advertised, so nothing compressed reaches the decryptor.
+		assert.Empty(t, req.ZipValuesSupported)
+
+		var jwks struct {
+			Keys []map[string]any `json:"keys"`
+		}
+		require.NoError(t, json.Unmarshal(req.JWKS, &jwks))
+		require.Len(t, jwks.Keys, 1)
+		assert.Equal(t, "EC", jwks.Keys[0]["kty"])
+		assert.Equal(t, "P-256", jwks.Keys[0]["crv"])
+		assert.Equal(t, openid4vci.AlgECDHESA256KW, jwks.Keys[0]["alg"])
+		assert.Equal(t, "enc", jwks.Keys[0]["use"])
+		assert.NotEmpty(t, jwks.Keys[0]["kid"], "§12.2.4: each JWK MUST have a kid")
+		assert.NotContains(t, jwks.Keys[0], "d", "the private scalar must never be published")
+
+		resp := metadata.CredentialResponseEncryption
+		require.NotNil(t, resp)
+		assert.Equal(t, openid4vci.ResponseEncryptionAlgValuesSupported, resp.AlgValuesSupported)
+		assert.Equal(t, openid4vci.ResponseEncryptionEncValuesSupported, resp.EncValuesSupported)
+		assert.Equal(t, openid4vci.ResponseEncryptionZipValuesSupported, resp.ZipValuesSupported)
+		assert.True(t, resp.EncryptionRequired)
+	})
+
+	t.Run("a key that cannot do ECDH-ES is refused", func(t *testing.T) {
+		cfg := &IssuerMetadata{
+			CredentialEncryption: CredentialEncryption{
+				Keys: []CredentialEncryptionKey{{PrivateKeyPath: writeRSAKey(t)}},
+			},
+		}
+
+		_, err := cfg.Generate(ctx, "https://issuer.sunet.se", credMeta)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ECDSA P-256")
+	})
+}
+
+// writeP256Key writes a fresh P-256 key as PKCS#8 PEM and returns its path.
+func writeP256Key(t *testing.T) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	require.NotNil(t, metadata.CredentialResponseEncryption)
-	assert.Equal(t, []string{"ECDH-ES", "ECDH-ES+A128KW"}, metadata.CredentialResponseEncryption.AlgValuesSupported)
-	assert.Equal(t, []string{"A256GCM", "A128GCM"}, metadata.CredentialResponseEncryption.EncValuesSupported)
-	assert.True(t, metadata.CredentialResponseEncryption.EncryptionRequired)
+	return writePKCS8(t, key)
+}
+
+func writeRSAKey(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	return writePKCS8(t, key)
+}
+
+func writePKCS8(t *testing.T, key any) string {
+	t.Helper()
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	require.NoError(t, err)
+	path := filepath.Join(t.TempDir(), "key.pem")
+	require.NoError(t, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600))
+	return path
 }
 
 func TestIssuerMetadata_Generate_BatchCredentialIssuance(t *testing.T) {
@@ -970,4 +1048,87 @@ func TestIssuerMetadata_Generate_DisclosurePolicy(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestIssuerMetadata_W3CCredentialTypes covers the issuance half:
+// credential_definition.type comes from credential_types, so the types
+// advertised, the types issueVC20 mints (it reads them back from this
+// metadata) and the DCQL type_values a verifier asks by are one list.
+func TestIssuerMetadata_W3CCredentialTypes(t *testing.T) {
+	cfg := &IssuerMetadata{}
+	baseURL := "https://issuer.sunet.se"
+
+	metadata, err := cfg.Generate(context.Background(), baseURL, map[string]*CredentialMetadata{
+		"diploma": {
+			Format:          "ldp_vc",
+			VCTM:            &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+			VCTURL:          baseURL + "/type-metadata/diploma",
+			CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"},
+		},
+		// Unconfigured: keeps the bare base type this always advertised.
+		"generic": {
+			Format: "ldp_vc",
+			VCTM:   &sdjwtvc.VCTM{VCT: "urn:example:generic:1"},
+			VCTURL: baseURL + "/type-metadata/generic",
+		},
+	})
+	require.NoError(t, err)
+
+	diploma := metadata.CredentialConfigurationsSupported["diploma"]
+	require.NotNil(t, diploma.CredentialDefinition)
+	assert.Equal(t, []string{"VerifiableCredential", "DiplomaCredential"}, diploma.CredentialDefinition.Type)
+
+	generic := metadata.CredentialConfigurationsSupported["generic"]
+	require.NotNil(t, generic.CredentialDefinition)
+	assert.Equal(t, []string{"VerifiableCredential"}, generic.CredentialDefinition.Type,
+		"an unconfigured W3C scope keeps the previous behaviour")
+}
+
+// TestIssuerMetadata_VCLDJSONGetsCredentialDefinition covers a review finding:
+// vc+ld+json is issued alongside ldp_vc (handlers_issuer.go) and treated as a
+// W3C format by DCQLMetaQuery, but the metadata switch omitted it - so it fell
+// to the default branch with no credential_definition, its credential_types
+// went unadvertised, and issuance and the DCQL constraint disagreed about the
+// credential's types.
+func TestIssuerMetadata_VCLDJSONGetsCredentialDefinition(t *testing.T) {
+	cfg := &IssuerMetadata{}
+	baseURL := "https://issuer.sunet.se"
+
+	metadata, err := cfg.Generate(context.Background(), baseURL, map[string]*CredentialMetadata{
+		"diploma": {
+			Format:          "vc+ld+json",
+			VCTM:            &sdjwtvc.VCTM{VCT: "urn:eudi:diploma:1"},
+			VCTURL:          baseURL + "/type-metadata/diploma",
+			CredentialTypes: []string{"VerifiableCredential", "DiplomaCredential"},
+		},
+	})
+	require.NoError(t, err)
+
+	diploma := metadata.CredentialConfigurationsSupported["diploma"]
+	require.NotNil(t, diploma.CredentialDefinition, "vc+ld+json is a W3C format and needs credential_definition")
+	assert.Equal(t, []string{"VerifiableCredential", "DiplomaCredential"}, diploma.CredentialDefinition.Type)
+}
+
+// TestW3CCredentialDefinitionAdvertisesContext pins the @context in
+// credential_definition.
+//
+// OpenID4VCI requires it for ldp_vc, and it was omitted entirely - a wallet
+// had no way to expand the types advertised beside it. It also has to match
+// what the credential is actually issued with, which is the same list
+// credential_contexts feeds to the issuer.
+func TestW3CCredentialDefinitionAdvertisesContext(t *testing.T) {
+	cm := &CredentialMetadata{
+		Format:             "ldp_vc",
+		CredentialTypes:    []string{"UniversityDegreeCredential"},
+		CredentialContexts: []string{"https://example.org/degree"},
+	}
+
+	assert.Equal(t,
+		[]string{VCContextV2, "https://example.org/degree"},
+		cm.W3CContexts(),
+		"the base context first, then what the credential type configures")
+
+	// Nil-safe and still correct for a scope configuring no extra context.
+	assert.Equal(t, []string{VCContextV2}, (*CredentialMetadata)(nil).W3CContexts())
+	assert.Equal(t, []string{VCContextV2}, (&CredentialMetadata{}).W3CContexts())
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/grpchelpers"
+	"github.com/SUNET/vc/pkg/issuance"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
@@ -22,6 +23,29 @@ import (
 )
 
 // OIDCRPInitiateRequest represents the request to initiate OIDC authentication
+//
+// Carries no dynamic parameters, so a scope whose oidc_request_params contain
+// a template ("{{.org_id}}") cannot be initiated through this endpoint: there
+// is no value to substitute and flow initiation fails with a template error
+// naming the missing key. That is the intended behaviour, not an oversight to
+// work around - the alternative, sending the literal "{{.org_id}}" to the OP,
+// produced an authorization request that was not bound to the value it was
+// meant to carry and said nothing about it.
+//
+// Dynamic parameters reach the OIDC request through the PAR/VCI path only:
+// PARRequest.DynamicParams -> AuthorizationContext.DynamicParams -> the
+// consent flow's InitiateAuthForVCI.
+//
+// This is a decision, not a gap left to be closed later (SUNET/vc#380):
+// templated oidc_request_params are supported on the PAR/VCI path and
+// nowhere else. Adding a dynamic-parameter field here would accept
+// caller-supplied values into an authorization request this service sends
+// to the OP, and this endpoint is reachable without authentication - the
+// /oidcrp group carries no auth middleware, unlike api/v1 with its
+// SessionOrAPIAuth and CSRF, and /oidcrp/ is deliberately exempted from the
+// CORS origin check so the IdP redirect can land. So the prerequisite for
+// such a field is authenticating this endpoint, which is a separate change;
+// the field is not the hard part and must not be added without it.
 type OIDCRPInitiateRequest struct {
 	CredentialType string `json:"credential_type" binding:"required"`
 }
@@ -74,7 +98,13 @@ func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest,
 		return nil, fmt.Errorf("OIDC RP service not available")
 	}
 
-	authReq, err := service.InitiateAuth(ctx, req.CredentialType)
+	// Look up per-scope OIDC request params
+	var oidcParams *model.OIDCRequestParams
+	if scopeCfg := c.cfg.APIGW.DataSources.LookupScopePolicyConfig(req.CredentialType, model.AuthProviderOIDC); scopeCfg != nil {
+		oidcParams = scopeCfg.OIDCRequestParams
+	}
+
+	authReq, err := service.InitiateAuth(ctx, req.CredentialType, oidcParams, nil)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
@@ -90,6 +120,13 @@ func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest,
 
 // OIDCRPCallback processes OIDC callback and issues credential
 //
+// The results are named so that the deferred session cleanup below actually
+// sees them. Every `return nil, fmt.Errorf(...)` in this function assigns the
+// named err on its way out, whereas the local error variables these branches
+// use (policyErr, lookupErr, derr, resolveErr, saveErr, ...) do not - so with
+// an unnamed result the cleanup fired for a handful of paths and silently
+// skipped the rest, including the policy denial.
+//
 //	@Summary		OIDC Provider Callback
 //	@ID				oidcrp-callback
 //	@Description	Receives and processes the authorization code from the OIDC Provider
@@ -101,7 +138,7 @@ func (c *Client) OIDCRPInitiate(ctx context.Context, req *OIDCRPInitiateRequest,
 //	@Success		200		{object}	OIDCRPCallbackResponse
 //	@Failure		400		{object}	helpers.ErrorResponse	"Bad Request"
 //	@Router			/oidcrp/callback [get]
-func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest, oidcrpService any) (*OIDCRPCallbackResponse, error) {
+func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest, oidcrpService any) (resp *OIDCRPCallbackResponse, err error) {
 	ctx, span := c.tracer.Start(ctx, "apiv1:OIDCRPCallback")
 	defer span.End()
 
@@ -139,6 +176,24 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		}
 	}
 
+	// The claims the OP actually asserted, snapshotted HERE - after the
+	// UserInfo merge, which is still the OP speaking, and before anything
+	// local rewrites them.
+	//
+	// Everything below may mutate authResp.Claims in place. With no
+	// attribute mapper configured, newCallbackClaims sets cc.identity =
+	// raw, which IS this map, and MergeNestedClaims then writes the
+	// configured derivations straight into it. A policy clone taken at the
+	// point of evaluation therefore contained derived values, and a rule
+	// meant to gate on what the OP asserted could be satisfied by a claim
+	// this deployment computed for itself.
+	//
+	// Deep, not maps.Clone: MergeNestedClaims recurses into nested
+	// map[string]any, so a shallow copy shares exactly the maps it writes
+	// through. CloneNestedClaims recurses in the same places, which is what
+	// makes it deep ENOUGH rather than merely deeper.
+	policyClaims := credential.CloneNestedClaims(authResp.Claims)
+
 	// Retrieve session to get credential type.
 	// ProcessCallback already validated the session, but we need it for credential type etc.
 	session, err := service.GetSession(ctx, req.State)
@@ -147,21 +202,56 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, fmt.Errorf("failed to retrieve session: %w", err)
 	}
 
-	// Ensure session is cleaned up if any subsequent step fails
+	// Ensure the session is cleaned up if any subsequent step fails.
+	//
+	// This reads the named result, so it covers every error return past this
+	// point rather than only the ones that happen to assign the local `err`.
+	// The policy denial was one of the ones it missed: the request was
+	// refused, but the OIDC session stayed in the cache until its TTL, still
+	// usable.
 	defer func() {
 		if err != nil {
 			service.DeleteSession(ctx, req.State)
 		}
 	}()
 
-	// Build transformer from config (nil means passthrough — OIDC claims already use standard names)
-	c.log.Debug("OIDCRPCallback: building claim transformer", "credential_type", session.CredentialType)
-	transformer := service.BuildTransformer()
+	// Build mapper from config (nil means passthrough — OIDC claims already use standard names)
+	c.log.Debug("OIDCRPCallback: building attribute mapper", "credential_type", session.CredentialType)
+	mapper := service.BuildAttributeMapper()
 
-	cc, err := c.newCallbackClaims(session.CredentialType, authResp.Claims, transformer)
+	cc, err := c.newCallbackClaims(session.CredentialType, authResp.Claims, mapper)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, err
+	}
+
+	// Apply the credential type's derivations (from data_sources.<*>.<scope>.derivations)
+	// after the claim split and before identity resolution so downstream code sees
+	// canonicalised values. Resolve derivations against the actual OIDC-backed
+	// data source, so a scope also present in (say) datastore does not inherit
+	// its rules here. Derivations mutate cc.identity so identity resolution and
+	// (via the filter) document data both see the derived values.
+	credSourceForDerivs, dsErr := c.cfg.APIGW.DataSources.ResolveDataSource(session.CredentialType, model.AuthProviderOIDC)
+	if dsErr != nil {
+		span.SetStatus(codes.Error, dsErr.Error())
+		return nil, fmt.Errorf("OIDC data source resolution failed: %w", dsErr)
+	}
+	// Only assertion scopes derive the credential document from the ID
+	// token itself. For datastore and external_api the credential is
+	// fetched later and VCICredential runs the source's derivations against
+	// that document; applying them here against the IdQ identity can
+	// transform lookup claims prematurely or fail the callback when the
+	// IdP identity simply does not carry a source-only input (e.g. a
+	// birthdate that only the external API returns).
+	if credSourceForDerivs.DataSource == model.DataSourceAssertion {
+		if derivs := c.cfg.APIGW.DataSources.DerivationsForSource(session.CredentialType, credSourceForDerivs.DataSource); len(derivs) > 0 {
+			derived, derr := credential.ApplyDerivations(derivs, cc.identity, time.Now())
+			if derr != nil {
+				span.SetStatus(codes.Error, derr.Error())
+				return nil, fmt.Errorf("OIDC derivations failed: %w", derr)
+			}
+			credential.MergeNestedClaims(cc.identity, derived)
+		}
 	}
 
 	// The authenticated claim set. It is deliberately NOT filtered against the
@@ -181,6 +271,44 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		"claims_count", len(claims),
 		"claim_keys", claimKeys,
 		"subject", authResp.IDToken.Subject)
+
+	// Evaluate issuance policy (if configured for this scope).
+	// This uses SPOCP rules to gate credential issuance on claim values.
+	// The raw OIDC claims (pre-transformation) are used for policy evaluation
+	// since the rules reference OIDC claim names, not mapped credential claim names.
+	if scopeCfg := c.cfg.APIGW.DataSources.LookupScopePolicyConfig(session.CredentialType, model.AuthProviderOIDC); scopeCfg != nil && scopeCfg.IssuancePolicy != nil {
+		policyEngine, policyErr := issuance.GetPolicyEngine(scopeCfg.IssuancePolicy)
+		if policyErr != nil {
+			span.SetStatus(codes.Error, policyErr.Error())
+			return nil, fmt.Errorf("failed to initialize issuance policy engine: %w", policyErr)
+		}
+		if policyEngine != nil {
+			// Evaluate against the OIDC-provider-asserted claims only. Do NOT
+			// fall back to session.DynamicParams here: those are supplied by
+			// the caller in the PAR request body (nominally "from the
+			// authentic source business system", but nothing here verifies
+			// that), not validated by the OP. Letting them silently satisfy a
+			// missing OIDC claim would let a caller forge any policy
+			// dimension the OP didn't actually assert, defeating the point of
+			// gating issuance on the returned token. DynamicParams are still
+			// used (legitimately) to template the outgoing OIDC request
+			// parameters in resolveOIDCRequestParams - this is a separate,
+			// later use of the same data for a security decision.
+			// policyClaims was captured before mapping and derivation; see
+			// its declaration for why it cannot be taken here.
+			if policyErr := policyEngine.Evaluate(session.CredentialType, policyClaims, scopeCfg.IssuancePolicy.QueryTemplate); policyErr != nil {
+				c.log.Warn("Issuance policy denied credential",
+					"credential_type", session.CredentialType,
+					"subject", authResp.IDToken.Subject,
+					"error", policyErr)
+				span.SetStatus(codes.Error, policyErr.Error())
+				return nil, fmt.Errorf("credential issuance denied: %w", policyErr)
+			}
+			c.log.Info("Issuance policy evaluation passed",
+				"credential_type", session.CredentialType,
+				"subject", authResp.IDToken.Subject)
+		}
+	}
 
 	// VCI mode: if the OIDC session was initiated from the OpenID4VCI consent flow,
 	// store the transformed claims as a document in the VCI session cache and signal
@@ -471,16 +599,16 @@ type callbackClaims struct {
 	identity map[string]any
 
 	// filter records whether documentData still has to drop undeclared claims.
-	// It is false when a transformer produced the claims: the operator has then
+	// It is false when a mapper produced the claims: the operator has then
 	// already declared exactly which claims the credential gets, and filtering
 	// that output on top would overrule their configuration.
 	filter bool
 }
 
-// newCallbackClaims applies the configured claim transformer, if any, and
+// newCallbackClaims applies the configured attribute mapper, if any, and
 // records whether the resulting claims still need filtering before they may
 // become credential content.
-func (c *Client) newCallbackClaims(credentialType string, raw map[string]any, transformer *oidcrp.ClaimTransformer) (*callbackClaims, error) {
+func (c *Client) newCallbackClaims(credentialType string, raw map[string]any, mapper *oidcrp.AttributeMapper) (*callbackClaims, error) {
 	cc := &callbackClaims{
 		c:              c,
 		credentialType: credentialType,
@@ -490,13 +618,13 @@ func (c *Client) newCallbackClaims(credentialType string, raw map[string]any, tr
 		filter: true,
 	}
 
-	if transformer != nil {
-		c.log.Debug("OIDCRPCallback: transforming claims", "raw_claims_count", len(raw))
-		transformed, err := transformer.TransformClaims(raw)
+	if mapper != nil {
+		c.log.Debug("OIDCRPCallback: applying attribute mapper", "raw_claims_count", len(raw))
+		mapped, err := mapper.Apply(raw)
 		if err != nil {
 			return nil, err
 		}
-		cc.identity = transformed
+		cc.identity = mapped
 		cc.filter = false
 	}
 
@@ -514,7 +642,7 @@ func (c *Client) newCallbackClaims(credentialType string, raw map[string]any, tr
 // reads afterwards, or a default named sub or authentic_source_person_id would
 // come back as an authenticated identifier. Filtering alone does not guarantee
 // that - filterClaimsByCredentialType hands its input straight back when there
-// is no metadata to filter against, and with a transformer configured there is
+// is no metadata to filter against, and with a mapper configured there is
 // no filtering at all.
 func (cc *callbackClaims) documentData() map[string]any {
 	claims := cc.identity

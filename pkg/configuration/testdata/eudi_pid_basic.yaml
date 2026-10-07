@@ -34,12 +34,4 @@ claim_mappings:
   birthdate: "birthdate"
   "place_of_birth.country": "birth_country"
 
-# Optional: Transform claim values
-claim_transforms:
-  birthdate:
-    type: "date_format"
-    params:
-      from: "YYYY-MM-DD"
-      to: "YYYYMMDD"
-
 enabled: true

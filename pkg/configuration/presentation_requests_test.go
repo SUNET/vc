@@ -138,9 +138,6 @@ func newTestTemplate() *PresentationRequestTemplate {
 		ClaimMappings: map[string]string{
 			"a": "b",
 		},
-		ClaimTransforms: map[string]ClaimTransform{
-			"a": {Type: "uppercase"},
-		},
 		Enabled: true,
 	}
 }
@@ -172,14 +169,6 @@ func TestGetClaimMappings(t *testing.T) {
 	m := tmpl.GetClaimMappings()
 	if m["a"] != "b" {
 		t.Errorf("GetClaimMappings() = %v, want map[a:b]", m)
-	}
-}
-
-func TestGetClaimTransforms(t *testing.T) {
-	tmpl := newTestTemplate()
-	ct := tmpl.GetClaimTransforms()
-	if ct["a"].Type != "uppercase" {
-		t.Errorf("GetClaimTransforms() type = %q, want %q", ct["a"].Type, "uppercase")
 	}
 }
 

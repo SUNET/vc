@@ -413,6 +413,32 @@ func (v *Verifier) VerifyDeviceAuthWithSessionKey(doc *DocumentMdoc, sessionTran
 	return verifier.VerifyMAC(&doc.DeviceSigned, sessionKey)
 }
 
+// hasDeviceAuth reports whether a document carries a device signature or a
+// device MAC — i.e. whether VerifyDeviceAuth will actually check anything
+// rather than returning nil for a document with no device authentication.
+func hasDeviceAuth(doc *DocumentMdoc) bool {
+	return hasDeviceSignature(doc) || hasDeviceMac(doc)
+}
+
+// hasDeviceSignature reports whether a document carries a COSE_Sign1 device
+// signature (as opposed to a MAC or nothing).
+func hasDeviceSignature(doc *DocumentMdoc) bool {
+	switch s := doc.DeviceSigned.DeviceAuth.DeviceSignature.(type) {
+	case []any:
+		return len(s) > 0
+	case []byte:
+		return len(s) > 0
+	case cbor.Tag:
+		return true
+	}
+	return false
+}
+
+// hasDeviceMac reports whether a document carries a COSE_Mac0 device MAC.
+func hasDeviceMac(doc *DocumentMdoc) bool {
+	return len(doc.DeviceSigned.DeviceAuth.DeviceMac) > 0
+}
+
 // DeriveDeviceAuthenticationKey derives the key used for device MAC authentication.
 // Per ISO 18013-5, this is derived from the session encryption keys.
 func DeriveDeviceAuthenticationKey(sessionEncryption *SessionEncryption) ([]byte, error) {

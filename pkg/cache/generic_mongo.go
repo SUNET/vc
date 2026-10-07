@@ -125,6 +125,26 @@ func (m *MongoCache[V]) Get(ctx context.Context, key string) (V, bool) {
 	return m.decodeEntry(&entry, "get", key)
 }
 
+// GetErr retrieves a value by key and distinguishes "not found" (returns
+// ErrNoDocuments) from operational errors (returns the underlying error).
+// Use this on paths where a transient Mongo outage must not be surfaced
+// as a client-facing "gone" response.
+func (m *MongoCache[V]) GetErr(ctx context.Context, key string) (V, error) {
+	var zero V
+	var entry mongoCacheEntry
+	if err := m.coll.FindOne(ctx, bson.M{"_id": key}).Decode(&entry); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return zero, ErrNoDocuments
+		}
+		return zero, fmt.Errorf("mongo cache geterr (cache=%s): %w", m.collection, err)
+	}
+	v, ok := m.decodeEntry(&entry, "geterr", key)
+	if !ok {
+		return zero, fmt.Errorf("mongo cache geterr: decode failed (cache=%s)", m.collection)
+	}
+	return v, nil
+}
+
 // Set stores a value with the default TTL (uses upsert).
 func (m *MongoCache[V]) Set(ctx context.Context, key string, value V) {
 	m.upsert(ctx, key, value)

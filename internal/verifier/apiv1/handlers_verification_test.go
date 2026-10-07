@@ -386,6 +386,117 @@ func TestVerificationDirectPost(t *testing.T) {
 	}
 }
 
+// TestVerificationDirectPost_SameDeviceDecision covers the branch that
+// selects between same-device (return redirect_uri) and cross-device (omit
+// it): the explicit WalletFollowsRedirect flag on the auth context, plus an
+// implicit same-device signal from req.DCAPI.
+func TestVerificationDirectPost_SameDeviceDecision(t *testing.T) {
+	ctx := t.Context()
+
+	sigKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name                  string
+		walletFollowsRedirect bool
+		dcAPI                 bool
+		wantRedirectURI       bool
+	}{
+		{
+			name:                  "cross-device: no flag, no dc_api",
+			walletFollowsRedirect: false,
+			dcAPI:                 false,
+			wantRedirectURI:       false,
+		},
+		{
+			name:                  "same-device: explicit flag",
+			walletFollowsRedirect: true,
+			dcAPI:                 false,
+			wantRedirectURI:       true,
+		},
+		{
+			name:                  "same-device: dc_api implies in-tab response",
+			walletFollowsRedirect: false,
+			dcAPI:                 true,
+			wantRedirectURI:       true,
+		},
+		{
+			name:                  "same-device: both signals",
+			walletFollowsRedirect: true,
+			dcAPI:                 true,
+			wantRedirectURI:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, _ := CreateTestClientWithMock(t, nil)
+
+			log := logger.NewSimple("test")
+			notifyService, _ := notify.New(ctx, client.cfg, log)
+			client.notify = notifyService
+
+			openid4vpClient, _ := openid4vp.New(ctx, &openid4vp.Config{})
+			client.openid4vp = openid4vpClient
+
+			client.jwtTrustVerifier = trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
+				TrustEvaluator: trust.NewAllowAllEvaluator(),
+				JWKSResolver:   trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{}),
+				ParseX5C:       func(x5cRaw any) ([]*x509.Certificate, error) { return jose.ParseX5CHeader(x5cRaw) },
+				ParseJWK:       jose.ParseJWKToPublicKey,
+				Log:            log,
+			})
+
+			kid := "test-ephemeral-kid-same-device"
+			_, ephemeralPubJWK, err := client.ephemeralEncryptionKey(ctx, kid)
+			require.NoError(t, err)
+
+			state := "test-state-same-device-" + tt.name
+			nonce := "test-nonce-same-device"
+			authCtx := &cache.AuthorizationContext{
+				SessionID:                "test-session-same-device",
+				State:                    state,
+				Nonce:                    nonce,
+				ClientID:                 "x509_san_dns:verifier.example.com",
+				Scopes:                   []string{"pid"},
+				EphemeralEncryptionKeyID: kid,
+				WalletFollowsRedirect:    tt.walletFollowsRedirect,
+			}
+			require.NoError(t, client.cacheService.AuthContext.Save(ctx, authCtx))
+
+			vpToken := createTestSDJWT(t, sigKey, map[string]any{"given_name": "John"}, nonce, authCtx.ClientID)
+			vpResponse := openid4vp.VPResponse{
+				VPToken: map[string][]string{"pid": {vpToken}},
+				State:   state,
+			}
+			vpResponseBytes, err := json.Marshal(vpResponse)
+			require.NoError(t, err)
+
+			encrypted, err := jwe.Encrypt(vpResponseBytes,
+				jwe.WithKey(jwa.ECDH_ES(), ephemeralPubJWK),
+				jwe.WithContentEncryption(jwa.A256GCM()),
+			)
+			require.NoError(t, err)
+
+			req := &VerificationDirectPostRequest{
+				Response: string(encrypted),
+				DCAPI:    tt.dcAPI,
+			}
+
+			resp, err := client.VerificationDirectPost(ctx, req)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+
+			if tt.wantRedirectURI {
+				assert.NotEmpty(t, resp.RedirectURI, "same-device flow must return redirect_uri")
+				assert.Contains(t, resp.RedirectURI, "/verification/callback?response_code=")
+			} else {
+				assert.Empty(t, resp.RedirectURI, "cross-device flow must not return redirect_uri")
+			}
+		})
+	}
+}
+
 // TestVerificationDirectPostDecoyDisclosure verifies that a decoy disclosure
 // (not referenced in _sd) is ignored during claim validation. A fake birthdate
 // decoy should NOT satisfy age_over validation when the real credential lacks it.
@@ -546,4 +657,75 @@ func ecCoordinates(t *testing.T, pub *ecdsa.PublicKey) (x, y []byte) {
 	raw := ecdhKey.Bytes()
 	require.Equal(t, 65, len(raw), "unexpected uncompressed P-256 point length")
 	return raw[1:33], raw[33:65]
+}
+
+// TestVerificationDirectPostRefusesAScopeTheRequestDidNotAsk pins that a
+// response naming a scope the request does not contain is refused, and
+// refused BEFORE anything about the token is trusted.
+//
+// Worth a test of its own because it is what makes the format check's
+// remaining log-and-continue branch narrow: the only case that reaches it is
+// a session whose DCQL query is not available on this replica at all - the
+// persisted one comes back nil from Mongo and the request-object cache is
+// per-process without HA - and not "the wallet answered a scope nobody asked
+// about", which is refused here.
+func TestVerificationDirectPostRefusesAScopeTheRequestDidNotAsk(t *testing.T) {
+	ctx := t.Context()
+
+	sigKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	client, _ := CreateTestClientWithMock(t, nil)
+	log := logger.NewSimple("test")
+	notifyService, _ := notify.New(ctx, client.cfg, log)
+	client.notify = notifyService
+	openid4vpClient, _ := openid4vp.New(ctx, &openid4vp.Config{})
+	client.openid4vp = openid4vpClient
+	client.jwtTrustVerifier = trust.NewJWTTrustVerifier(trust.JWTTrustVerifierConfig{
+		TrustEvaluator: trust.NewAllowAllEvaluator(),
+		JWKSResolver:   trust.NewJWKSKeyResolver(trust.JWKSResolverConfig{}),
+		ParseX5C:       func(x5cRaw any) ([]*x509.Certificate, error) { return jose.ParseX5CHeader(x5cRaw) },
+		ParseJWK:       jose.ParseJWKToPublicKey,
+		Log:            log,
+	})
+
+	kid := "refuse-unasked-kid"
+	_, ephemeralPubJWK, err := client.ephemeralEncryptionKey(ctx, kid)
+	require.NoError(t, err)
+
+	const (
+		state = "refuse-unasked-state"
+		nonce = "refuse-unasked-nonce"
+	)
+	// The request asks for "ehic" and nothing else; the session names "pid"
+	// as a scope, which is the shape a configured-but-unrequested scope has.
+	require.NoError(t, client.cacheService.AuthContext.Save(ctx, &cache.AuthorizationContext{
+		SessionID:                "refuse-unasked-session",
+		State:                    state,
+		Nonce:                    nonce,
+		ClientID:                 "x509_san_dns:verifier.example.com",
+		Scopes:                   []string{"pid"},
+		EphemeralEncryptionKeyID: kid,
+		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{
+			{ID: "ehic", Format: openid4vp.FormatSDJWTVC, Meta: openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:ehic:1"}}},
+		}},
+	}))
+
+	vpResponseBytes, err := json.Marshal(openid4vp.VPResponse{
+		State: state,
+		VPToken: map[string][]string{
+			"pid": {createTestSDJWT(t, sigKey, map[string]any{"given_name": "Alice"}, nonce, "x509_san_dns:verifier.example.com")},
+		},
+	})
+	require.NoError(t, err)
+
+	encrypted, err := jwe.Encrypt(vpResponseBytes,
+		jwe.WithKey(jwa.ECDH_ES(), ephemeralPubJWK),
+		jwe.WithContentEncryption(jwa.A256GCM()),
+	)
+	require.NoError(t, err)
+
+	_, err = client.VerificationDirectPost(ctx, &VerificationDirectPostRequest{Response: string(encrypted)})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "names no credential query in this request")
 }

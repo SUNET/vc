@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/bbs"
+	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/jose"
@@ -61,11 +63,15 @@ func (c *Client) ResolveIdentifier(ctx context.Context, authenticSource string, 
 }
 
 // requireIdentifier validates that a non-empty identifier exists for data sources
-// that require it. Assertion-based and datastore-based issuance allow an empty
-// identifier because the data comes from trusted sources (IdP claims or
-// pre-uploaded documents) rather than identity-mapped lookups.
+// that require it. Assertion-based, datastore-based, and presentation-based
+// issuance allow an empty identifier because the data comes from trusted
+// sources (IdP claims, pre-uploaded documents, or a verified presented
+// credential) rather than identity-mapped lookups.
 func requireIdentifier(identifier string, dataSource model.DataSourceType) (string, error) {
-	if identifier == "" && dataSource != model.DataSourceAssertion && dataSource != model.DataSourceDatastore {
+	if identifier == "" &&
+		dataSource != model.DataSourceAssertion &&
+		dataSource != model.DataSourceDatastore &&
+		dataSource != model.DataSourcePresentation {
 		return "", errors.New("no identifier in auth context")
 	}
 	return identifier, nil
@@ -206,12 +212,20 @@ func (c *Client) VCINonce(ctx context.Context) (*openid4vci.NonceResponse, error
 
 // VCICredential implements OpenID4VCI credential issuance endpoint
 //
+// The two media types are the two halves of §8.3. A request may arrive as
+// application/jwt - a JWE encrypted to a key from
+// credential_request_encryption.jwks - and a response is returned as
+// application/jwt whenever the request carried
+// credential_response_encryption. A generated client that only knows about
+// application/json cannot find the encrypted path, and will reject the
+// response to a request that asked for one.
+//
 //	@Summary		VCICredential
 //	@ID				create-credential
-//	@Description	Create credential endpoint
+//	@Description	Create credential endpoint. Accepts a plain JSON Credential Request, or an OpenID4VCI 1.0 section 8.3 encrypted Credential Request as a JWE (application/jwt). Returns the Credential Response as JSON, or as a JWE (application/jwt) when the request supplied credential_response_encryption.
 //	@Tags			vc-platform
-//	@Accept			json
-//	@Produce		json
+//	@Accept			json,application/jwt
+//	@Produce		json,application/jwt
 //	@Success		200	{object}	apiv1_issuer.MakeSDJWTReply		"Success"
 //	@Failure		400	{object}	helpers.ErrorResponse			"Bad Request"
 //	@Param			req	body		openid4vci.CredentialRequest	true	" "
@@ -272,10 +286,11 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		return nil, err
 	}
 
-	// Match a scope from the authorization context to a known credential constructor
-	scope, _, err := c.matchScope(authContext.Scopes)
+	// Scope, configuration and format together: they are three answers to
+	// one question - which credential is this request for - and resolving
+	// them apart is how they came to disagree.
+	scope, configurationID, format, err := c.selectScope(req, authContext)
 	if err != nil {
-		c.log.Error(err, "no matching scope in auth context")
 		return nil, err
 	}
 
@@ -286,27 +301,68 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	docSessionID := docLookupSessionID(authContext)
 
 	c.log.Debug("VCICredential: retrieving credential data", "auth_provider", authContext.AuthProvider, "scope", scope, "session_id", authContext.SessionID, "doc_session_id", docSessionID)
-	// Retrieve credential data based on the auth provider used during authorization
-	switch authContext.AuthProvider {
-	case model.AuthProviderOpenID4VP, model.AuthProviderSAML, model.AuthProviderOIDC, model.AuthProviderDatastore:
-		// Session-based auth providers: retrieve from session cache
-		docs, ok := c.cacheService.Document.Get(ctx, docSessionID)
-		if !ok || len(docs) == 0 {
-			c.log.Error(nil, "no documents found in cache for session", "session_id", docSessionID)
-			return nil, errors.New("no documents found for session " + docSessionID)
+
+	// Presentation-source scopes derive their whole document from the
+	// presented credential's claims (already stashed on
+	// authContext.VerifiedClaims by VerificationDirectPost). No cache lookup.
+	// Also requires DataSource=="presentation" so a scope configured in
+	// multiple sources doesn't route non-presentation flows through here.
+	if pScope, ok := c.cfg.APIGW.DataSources.Presentation.Scopes[scope]; ok && authContext.DataSource == string(model.DataSourcePresentation) {
+		docData, err := c.buildPresentationDocument(scope, pScope, authContext, time.Now())
+		if err != nil {
+			return nil, err
 		}
-		if len(docs) > 1 {
-			c.log.Info("multiple documents in cache for session, using first", "session_id", docSessionID, "count", len(docs))
+		document = &model.CompleteDocument{DocumentData: docData}
+	} else {
+		// Retrieve credential data based on the auth provider used during authorization
+		switch authContext.AuthProvider {
+		case model.AuthProviderOpenID4VP, model.AuthProviderSAML, model.AuthProviderOIDC, model.AuthProviderDatastore:
+			// Session-based auth providers: retrieve from session cache
+			docs, ok := c.cacheService.Document.Get(ctx, docSessionID)
+			if !ok || len(docs) == 0 {
+				c.log.Error(nil, "no documents found in cache for session", "session_id", docSessionID)
+				return nil, errors.New("no documents found for session " + docSessionID)
+			}
+			if len(docs) > 1 {
+				c.log.Info("multiple documents in cache for session, using first", "session_id", docSessionID, "count", len(docs))
+			}
+			for _, doc := range docs {
+				document = doc
+				break
+			}
+			if document == nil || document.DocumentData == nil {
+				return nil, errors.New("cached document is empty for session " + docSessionID)
+			}
+		default:
+			return nil, fmt.Errorf("unsupported or missing auth provider: %q", authContext.AuthProvider)
 		}
-		for _, doc := range docs {
-			document = doc
-			break
+
+		// Apply the scope's configured derivations to the cached document.
+		// Presentation is handled above (its derivations run against
+		// VerifiedClaims, not against the assembled doc). Assertion sources
+		// already apply derivations in the SAML ACS / OIDC callback before
+		// caching the document, so re-running them here would double-transform
+		// values (e.g. yyyymmdd_to_iso parsing an already-ISO date).
+		if authContext.DataSource != string(model.DataSourceAssertion) {
+			if derivs := c.cfg.APIGW.DataSources.DerivationsForSource(scope, model.DataSourceType(authContext.DataSource)); len(derivs) > 0 {
+				// Deep-clone the cached document before applying/merging:
+				// MergeNestedClaims writes into existing nested maps, so a
+				// shallow maps.Clone would still share nested references
+				// (e.g. the "identity" sub-map) with the cache and let a
+				// derivation targeting a dotted path corrupt it.
+				docData := credential.CloneNestedClaims(document.DocumentData)
+				derived, err := credential.ApplyDerivations(derivs, docData, time.Now())
+				if err != nil {
+					return nil, err
+				}
+				credential.MergeNestedClaims(docData, derived)
+				document = &model.CompleteDocument{
+					Meta:               document.Meta,
+					IdentityMappingIDs: document.IdentityMappingIDs,
+					DocumentData:       docData,
+				}
+			}
 		}
-		if document == nil || document.DocumentData == nil {
-			return nil, errors.New("cached document is empty for session " + docSessionID)
-		}
-	default:
-		return nil, fmt.Errorf("unsupported or missing auth provider: %q", authContext.AuthProvider)
 	}
 
 	documentData, err := json.Marshal(document.DocumentData)
@@ -429,13 +485,6 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		}
 	}
 
-	// Determine credential format from credential_configuration_id or credential_identifier
-	format, err := req.ResolveCredentialFormatWithAuthDetails(c.issuerMetadata, authContext.AuthorizationDetails)
-	if err != nil {
-		c.log.Error(err, "failed to resolve credential format")
-		return nil, err
-	}
-
 	// The authenticated identifier is used for registry; for assertion-based
 	// issuance the identifier is best-effort (all data comes from trusted IdP claims).
 	identifier, err := requireIdentifier(authContext.Identifier, model.DataSourceType(authContext.DataSource))
@@ -452,7 +501,7 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 	case "vc+sd-jwt", "dc+sd-jwt":
 		credentials, issueErr = c.issueSDJWT(ctx, scope, documentData, jwks, identifier, authContext.AuthenticSource)
 	case "ldp_vc", "vc+ld+json":
-		credentials, issueErr = c.issueVC20(ctx, scope, documentData, identifier, authContext.AuthenticSource, req)
+		credentials, issueErr = c.issueVC20(ctx, scope, documentData, identifier, authContext.AuthenticSource, configurationID, req)
 	case "jwp":
 		credentials, issueErr = c.issueBBS(ctx, scope, documentData, identifier, authContext.AuthenticSource, req)
 	default:
@@ -631,7 +680,183 @@ func (c *Client) issueMDoc(ctx context.Context, scope string, documentData []byt
 
 // issueVC20 issues W3C VC 2.0 Data Integrity credentials, one per JWT proof.
 // Caller must ensure only JWT proof types are present (singular Proof or Proofs.JWT).
-func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, identifier, authenticSource string, req *openid4vci.CredentialRequest) (_ []openid4vci.Credential, err error) {
+// selectScope decides which credential scope a request is for, and reports
+// the configuration it named.
+//
+// Two things answer that question and they can disagree. matchScope takes
+// the FIRST authorised scope that has credential metadata; the request may
+// separately NAME a configuration, either as credential_configuration_id or
+// through a credential_identifier that the token response's
+// authorization_details map to one. CredentialConfigurationsSupported is
+// keyed by scope, so a named configuration IS a scope.
+//
+// With scopes A and B both authorised and a request selecting B, matchScope
+// answers A. Everything downstream then uses A - the document that gets
+// loaded, the Scope sent to the issuer - while the W3C types and contexts
+// were read from B, producing a credential carrying B's types over A's
+// claims and labelled A. That is the "these three fields only work as a
+// set" failure this change exists to prevent, assembled out of two scopes
+// instead of one.
+//
+// So the named configuration wins, and must be AUTHORISED to: the token
+// says which scopes the wallet may have, and an identifier resolving
+// outside that set is an authorisation failure, not a preference.
+//
+// An empty configuration id is a real answer rather than a failure - a
+// format-based authorization_details entry (OID4VCI 5.1.1) names a format
+// and no configuration - and matchScope's answer stands.
+func (c *Client) selectScope(req *openid4vci.CredentialRequest, authContext *cache.AuthorizationContext) (scope, configurationID, format string, err error) {
+	scope, _, err = c.matchScope(authContext.Scopes)
+	if err != nil {
+		c.log.Error(err, "no matching scope in auth context")
+		return "", "", "", err
+	}
+
+	format, err = req.ResolveCredentialFormatWithAuthDetails(c.issuerMetadata, authContext.AuthorizationDetails)
+	if err != nil {
+		c.log.Error(err, "failed to resolve credential format")
+		return "", "", "", err
+	}
+
+	configurationID, err = req.ResolveCredentialConfigurationID(c.issuerMetadata, authContext.AuthorizationDetails)
+	if err != nil {
+		c.log.Error(err, "failed to resolve credential configuration")
+		return "", "", "", err
+	}
+
+	if configurationID == "" {
+		// Format-based authorization_details (OID4VCI 5.1.1): the entry
+		// names a FORMAT and no configuration, so there is no scope name to
+		// take. matchScope's answer is the first authorised scope with
+		// metadata, chosen without reference to the format - and the
+		// dispatch below routes on the format. With scopes A (sd-jwt) and
+		// B (ldp_vc) authorised and a request for ldp_vc, that issued A's
+		// document and A's configuration through the W3C path.
+		//
+		// So the scope has to be one whose configured format matches.
+		// Exactly one, or this is a request that does not identify a
+		// credential: zero means nothing authorised can answer it, and
+		// several means the format alone cannot say which - and guessing
+		// is how the mismatch above happened.
+		matching := make([]string, 0, len(authContext.Scopes))
+		for _, authorized := range authContext.Scopes {
+			cm := c.cfg.GetCredentialMetadata(authorized)
+			if cm != nil && sameCredentialFormat(cm.Format, format) {
+				matching = append(matching, authorized)
+			}
+		}
+		switch len(matching) {
+		case 1:
+			return matching[0], "", format, nil
+		case 0:
+			c.log.Error(nil, "no authorized scope is configured for the requested format",
+				"format", format, "authorized_scopes", authContext.Scopes)
+			return "", "", "", &openid4vci.Error{
+				Err:              openid4vci.ErrInvalidCredentialRequest,
+				ErrorDescription: fmt.Sprintf("no authorized scope is configured for format %q", format),
+			}
+		default:
+			c.log.Error(nil, "the requested format matches several authorized scopes, so it does not identify a credential",
+				"format", format, "matching_scopes", matching)
+			return "", "", "", &openid4vci.Error{
+				Err:              openid4vci.ErrInvalidCredentialRequest,
+				ErrorDescription: fmt.Sprintf("format %q matches several authorized scopes (%s); use credential_configuration_id or credential_identifier to say which", format, strings.Join(matching, ", ")),
+			}
+		}
+	}
+
+	if configurationID == scope {
+		return scope, configurationID, format, nil
+	}
+
+	if !slices.Contains(authContext.Scopes, configurationID) {
+		c.log.Error(nil, "credential request selected a configuration outside the authorized scopes",
+			"configuration_id", configurationID, "authorized_scopes", authContext.Scopes)
+		return "", "", "", &openid4vci.Error{
+			Err:              openid4vci.ErrInvalidCredentialRequest,
+			ErrorDescription: fmt.Sprintf("credential configuration %q is not among the authorized scopes", configurationID),
+		}
+	}
+	if c.cfg.GetCredentialMetadata(configurationID) == nil {
+		c.log.Error(nil, "credential request selected a configuration with no credential metadata",
+			"configuration_id", configurationID)
+		return "", "", "", &openid4vci.Error{
+			Err:              openid4vci.ErrInvalidCredentialRequest,
+			ErrorDescription: fmt.Sprintf("credential configuration %q has no credential metadata", configurationID),
+		}
+	}
+
+	c.log.Debug("credential request selected a configuration other than the first authorized scope",
+		"configuration_id", configurationID, "first_authorized_scope", scope)
+	return configurationID, configurationID, format, nil
+}
+
+// sameCredentialFormat reports whether two format identifiers name the same
+// credential format.
+//
+// Grouped exactly as VCICredential's dispatch groups them, because that is
+// what the comparison is FOR: a scope is a usable answer to a requested
+// format when both land in the same branch of that switch. Comparing the
+// strings directly would reject a "dc+sd-jwt" scope for a "vc+sd-jwt"
+// request, which are the same thing.
+func sameCredentialFormat(a, b string) bool {
+	family := func(format string) string {
+		switch format {
+		case "vc+sd-jwt", "dc+sd-jwt":
+			return "sd-jwt"
+		case "ldp_vc", "vc+ld+json":
+			return "w3c"
+		default:
+			return format
+		}
+	}
+	return a != "" && b != "" && family(a) == family(b)
+}
+
+// w3cTypesAndContexts returns the types a W3C credential is minted with, the
+// JSON-LD contexts that define them, and the cryptosuite - all read from ONE
+// scope.
+//
+// CredentialConfigurationsSupported is keyed by scope, and the configuration
+// id comes from the REQUEST while the scope comes from the token. Reading
+// types from the named configuration and contexts from the authorised scope
+// paired two different scopes: a caller authorised for A naming configuration
+// B got B's types with A's contexts - terms those contexts do not define,
+// which expand to relative IRIs and match no query a verifier builds from B's
+// credential_type_values. That is the "these three fields only work as a set"
+// failure this change exists to prevent, reached through the request rather
+// than through the configuration file.
+//
+// Resolving both from the named configuration also answers the multi-scope
+// case, where matchScope picks the first authorised scope and the caller asked
+// for another.
+//
+// The types fall back to the scope's configured credential_types rather than
+// to the bare base type: a request naming no configuration took the hardcoded
+// default, so the credential was minted as plain VerifiableCredential while a
+// verifier constrained the request by the configured types, and nothing
+// matched. W3CTypes itself defaults to the base type, so an unconfigured scope
+// behaves as before.
+func (c *Client) w3cTypesAndContexts(scope, configurationID string) (types []string, contexts []string, cryptosuite string) {
+	resolved := scope
+	if configurationID != "" && c.issuerMetadata != nil {
+		if config, ok := c.issuerMetadata.CredentialConfigurationsSupported[configurationID]; ok {
+			resolved = configurationID
+			cryptosuite = config.Cryptosuite
+			if config.CredentialDefinition != nil {
+				types = config.CredentialDefinition.Type
+			}
+		}
+	}
+
+	metadata := c.cfg.GetCredentialMetadata(resolved)
+	if len(types) == 0 {
+		types = metadata.W3CTypes()
+	}
+	return types, metadata.GetCredentialContexts(), cryptosuite
+}
+
+func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byte, identifier, authenticSource, configurationID string, req *openid4vci.CredentialRequest) (_ []openid4vci.Credential, err error) {
 	hasNoJWTProof := req.Proof != nil && req.Proof.ProofType != "jwt"
 	hasNoJWTProofs := req.Proofs != nil && len(req.Proofs.JWT) == 0
 	if hasNoJWTProof || hasNoJWTProofs {
@@ -643,23 +868,16 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 	var mandatoryPointers []string
 	var credentialTypes []string
 
-	if req.CredentialConfigurationID != "" && c.issuerMetadata != nil {
-		if config, ok := c.issuerMetadata.CredentialConfigurationsSupported[req.CredentialConfigurationID]; ok {
-			cryptosuite = config.Cryptosuite
-			if config.CredentialDefinition != nil {
-				credentialTypes = config.CredentialDefinition.Type
-			}
-		}
+	// The RESOLVED configuration, not req.CredentialConfigurationID: the
+	// latter is empty whenever the wallet used credential_identifier.
+	credentialTypes, additionalContexts, configuredSuite := c.w3cTypesAndContexts(scope, configurationID)
+	if configuredSuite != "" {
+		cryptosuite = configuredSuite
 	}
 
 	// Default cryptosuite if not specified
 	if cryptosuite == "" {
 		cryptosuite = "ecdsa-rdfc-2019"
-	}
-
-	// Default credential types
-	if len(credentialTypes) == 0 {
-		credentialTypes = []string{"VerifiableCredential"}
 	}
 
 	var subjectDIDs []string
@@ -691,6 +909,11 @@ func (c *Client) issueVC20(ctx context.Context, scope string, documentData []byt
 			SubjectDid:        did,
 			Cryptosuite:       cryptosuite,
 			MandatoryPointers: mandatoryPointers,
+			// Without the context that defines them, the configured types
+			// expand to relative IRIs and no verifier can match the query
+			// built from credential_type_values. Both come from
+			// w3cTypesAndContexts, so they always describe one credential.
+			AdditionalContexts: additionalContexts,
 		})
 		if err != nil {
 			c.log.Error(err, "failed to call MakeVC20")
@@ -1139,6 +1362,30 @@ func convertJWKToCOSEKey(jwk *apiv1_issuer.Jwk) ([]byte, error) {
 
 // VCIDeferredCredential implements OpenID4VCI deferred credential endpoint
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-deferred-credential-endpoin
+//
+// Carries the same two media types as VCICredential, for the same reason.
+// §9.1 is explicit that the encryption parameters used are the ones in THIS
+// request, regardless of what the initial Credential Request sent, so a
+// client has to be able to see them here.
+//
+// The annotations describe what this endpoint does, which today is answer
+// 501: the body below is a stub, and the HTTP handler turns its nil reply
+// into a refusal rather than a 200 with nothing in it. Documenting the
+// Credential Response it will eventually return would advertise a success a
+// client cannot reach, which is the failure this whole PR is about - the
+// published contract and the endpoint saying different things. The success
+// response goes in when deferred issuance does.
+//
+//	@Summary		VCIDeferredCredential
+//	@ID				create-deferred-credential
+//	@Description	Deferred credential endpoint, per OpenID4VCI 1.0 section 9. NOT IMPLEMENTED: this Credential Issuer parses and validates the request - including an OpenID4VCI 1.0 section 8.3 encrypted one sent as a JWE (application/jwt), and the credential_response_encryption parameters in it - and then answers 501. No Credential Response is returned by this endpoint today.
+//	@Tags			vc-platform
+//	@Accept			json,application/jwt
+//	@Produce		json
+//	@Failure		400	{object}	helpers.ErrorResponse					"Bad Request - the request, or its encryption parameters, could not be accepted"
+//	@Failure		501	{object}	helpers.ErrorResponse					"Not Implemented - deferred credential issuance is not available from this Credential Issuer"
+//	@Param			req	body		openid4vci.DeferredCredentialRequest	true	" "
+//	@Router			/deferred_credential [post]
 func (c *Client) VCIDeferredCredential(ctx context.Context, req *openid4vci.DeferredCredentialRequest) (*openid4vci.CredentialResponse, error) {
 	c.log.Debug("deferred credential", "req", req)
 	if c.vciMetrics != nil {

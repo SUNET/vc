@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"crypto"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +26,7 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/openidfederation"
 	"github.com/SUNET/vc/pkg/pki"
+	"github.com/SUNET/vc/pkg/pubsub"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/sqlstore"
 	ts11client "github.com/sirosfoundation/go-ts11client"
@@ -124,6 +127,12 @@ type HAConfig struct {
 	Enable bool `yaml:"enable" default:"false"`
 	// CacheDatabaseName is the MongoDB database name used for caches.
 	CacheDatabaseName string `yaml:"cache_database_name" default:"vc_cache"`
+	// PubSub configures the optional pub/sub backend (Redis or Valkey)
+	// used for cross-node notifications in HA mode - today just the
+	// verifier's SSE fanout. Omitted entirely in standalone deployments;
+	// when omitted in HA, notifications remain in-process and do not
+	// cross nodes.
+	PubSub *pubsub.Config `yaml:"pubsub,omitempty" validate:"omitempty"`
 }
 
 // Kafka holds the Kafka message broker configuration
@@ -497,17 +506,17 @@ type OIDCRPDynamicRegistrationConfig struct {
 type AttributeMapping map[string]AttributeConfig
 
 // AttributeConfig defines how a single external attribute maps to a credential claim
-// Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys
+// Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys.
+// AttributeConfig is a pure rename + presence step. Any value transformation
+// (canonicalisation, case folding, date reformatting, etc.) is expressed as
+// a derivation on the target scope; see the Derivation Primitives catalog
+// (pkg/credential/primitives).
 type AttributeConfig struct {
 	// Claim is the target claim name (supports dot-notation for nesting)
 	Claim string `yaml:"claim" validate:"required" doc_example:"\"identity.given_name\""`
 
 	// Required indicates if this attribute must be present in the assertion/response
 	Required bool `yaml:"required" default:"false"`
-
-	// Transform is an optional transformation to apply
-	// Supported: "lowercase", "uppercase", "trim", "country_alpha2", "country_alpha3", "yyyymmdd_to_iso"
-	Transform string `yaml:"transform,omitempty" validate:"omitempty,oneof=lowercase uppercase trim country_alpha2 country_alpha3 yyyymmdd_to_iso"`
 
 	// Default is an optional default value if attribute is missing
 	Default string `yaml:"default,omitempty"`
@@ -535,6 +544,23 @@ type Issuer struct {
 	MDoc *MDocConfig `yaml:"mdoc" validate:"omitempty"`
 	// AuditLog holds audit log configuration
 	AuditLog *AuditLog `yaml:"audit_log" validate:"omitempty"`
+	// JSONLDContextAllowlist names the JSON-LD context URLs this issuer may
+	// dereference when signing a W3C credential.
+	//
+	// additional_contexts arrives over gRPC from the caller, and signing
+	// canonicalizes the credential to RDF, which FETCHES every context in it.
+	// Without an allowlist that is a caller-directed outbound request from
+	// the issuer - reachable hosts include anything the issuer's network can
+	// reach, which is the part a scheme check cannot address.
+	//
+	// Empty means no additional context may be used: a request carrying one
+	// is refused, and an issuer configured with a W3C scope will not start,
+	// since common.credential_metadata.<scope>.credential_contexts is
+	// forwarded here on every issuance. Nothing is lost by that default,
+	// since a deployment using custom W3C types has to publish its context
+	// anyway and can name it here. Matching is exact.
+	JSONLDContextAllowlist []string `yaml:"jsonld_context_allowlist" validate:"omitempty,dive,required,url" doc_example:"\"https://example.org/diploma\""`
+
 	// SignMetadataRateLimit configures the rate limiter for the SignMetadata gRPC endpoint.
 	// In HA setups each APIGW node refreshes two documents (VCI+OAuth2), so the defaults
 	// should accommodate the expected cluster size. Default: 2 req/s, burst 20.
@@ -1152,6 +1178,89 @@ type OIDCOP struct {
 	// StaticClients is a list of pre-configured OIDC clients
 	// These clients are checked in addition to dynamically registered clients
 	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty"`
+
+	// DynamicRegistrationAuth configures authorization for POST /register (RFC 7591).
+	// Modes:
+	//   - open: no authorization required (default)
+	//   - static: require a bearer token loaded from a local file
+	//   - jwt: require a signed JWT validated against configured JWKS/issuer/audience
+	//
+	// Future option (not implemented yet): introspection via external authorization server.
+	DynamicRegistrationAuth *DynamicRegistrationAuthConfig `yaml:"dynamic_registration_auth,omitempty" validate:"omitempty"`
+}
+
+// DynamicRegistrationAuthConfig configures how the verifier authorizes dynamic client registration requests.
+type DynamicRegistrationAuthConfig struct {
+	// Mode controls registration authorization behavior.
+	// Supported values: open, static, jwt.
+	//
+	// Future option (not implemented yet): introspection, which the
+	// validator rejects until it is.
+	Mode string `yaml:"mode,omitempty" default:"open" validate:"omitempty,oneof=open static jwt"`
+
+	// StaticBearerTokenFile points to a file containing the expected bearer token (single line).
+	// Required when Mode=static.
+	StaticBearerTokenFile string `yaml:"static_bearer_token_file,omitempty" validate:"required_if=Mode static"`
+
+	// JWT config for Mode=jwt.
+	JWT *DynamicRegistrationJWTAuthConfig `yaml:"jwt,omitempty" validate:"required_if=Mode jwt"`
+}
+
+// DynamicRegistrationJWTAuthConfig configures JWT verification for registration authorization.
+type DynamicRegistrationJWTAuthConfig struct {
+	// JWKSURI is the URL to fetch signing keys from.
+	//
+	// HTTPS only. This key set is the trust root for every registration
+	// token accepted in jwt mode: whoever controls the bytes it returns
+	// decides which signatures verify. Over plaintext that is anyone on the
+	// network path, who can then mint a token this verifier accepts and
+	// register clients at will - so the signature check would be theatre,
+	// not protection.
+	JWKSURI string `yaml:"jwks_uri" validate:"required,https_endpoint"`
+
+	// Issuer is the required issuer claim (iss).
+	//
+	// HTTPS only, both because OpenID Connect Discovery requires it and
+	// because an http issuer paired with an https key set is a sign the
+	// deployment was copied from a plaintext one.
+	Issuer string `yaml:"issuer" validate:"required,https_endpoint"`
+
+	// Audience is the required audience claim (aud).
+	Audience string `yaml:"audience" validate:"required"`
+
+	// AllowedSigningAlgs restricts accepted JWT signing algorithms.
+	//
+	// Asymmetric only, enforced at startup. The key set behind jwks_uri is
+	// PUBLISHED, so a symmetric algorithm turns it into a secret handout:
+	// configure HS256 and serve an `oct` key, and anyone who can fetch the
+	// key set can mint registration tokens for this endpoint. "none" is the
+	// same hole with no key at all. Unrecognised algorithms are refused for
+	// the same reason rather than forwarded to go-oidc, which is how the
+	// symmetric family would get in.
+	AllowedSigningAlgs []string `yaml:"allowed_signing_algs,omitempty" validate:"omitempty,dive,asymmetric_jws_alg" default:"[\"RS256\",\"ES256\"]"`
+
+	// ClockSkewSeconds is how far the token's exp may lie in the past and
+	// still be accepted, for a client whose clock runs behind ours.
+	//
+	// The underlying verifier (coreos/go-oidc) has no leeway setting, so
+	// this is applied by moving the clock it reads. That clock serves two
+	// checks, and the effect on each is opposite: exp is relaxed by this
+	// much, and go-oidc's own fixed five-minute nbf leeway is reduced by
+	// the same amount. Keep it well under five minutes, or a token whose
+	// nbf is legitimately a little in the future stops being accepted. iat
+	// is not validated at all. Zero disables both effects, and the upper
+	// bound is one second short of go-oidc's nbf leeway - at or past it the
+	// leeway is gone and a token with a legitimately future nbf starts
+	// being rejected, which is the opposite of what raising a skew
+	// tolerance is meant to achieve.
+	//
+	// A pointer so that an explicit zero survives. Defaults are applied
+	// after unmarshalling and creasty/defaults fills any field still at its
+	// zero value, so as a plain int, clock_skew_seconds: 0 - the one value
+	// an operator writes on purpose, to turn the tolerance off - is
+	// indistinguishable from the key being absent and gets overwritten with
+	// 60. Unset stays nil until the default is applied; zero stays zero.
+	ClockSkewSeconds *int `yaml:"clock_skew_seconds,omitempty" default:"60" validate:"omitempty,min=0,max=299"`
 }
 
 // OpenID4VPConfig holds OpenID4VP-specific configuration
@@ -1414,8 +1523,39 @@ type IssuerMetadata struct {
 	CredentialSigningAlgValuesSupported []string `yaml:"credential_signing_alg_values_supported" validate:"omitempty"`
 	// ProofSigningAlgValuesSupported lists the supported proof algorithms
 	ProofSigningAlgValuesSupported []string `yaml:"proof_signing_alg_values_supported" validate:"omitempty"`
-	// CredentialResponseEncryption holds the response encryption configuration
+	// ProofTypesSupported narrows which key proof types this issuer
+	// advertises in credential_configurations_supported.
+	//
+	// Empty (the default) advertises every proof type this issuer actually
+	// implements: "jwt" and "attestation". Both are real - attestation
+	// proofs are signature-verified against the x5c in their own header,
+	// see openid4vci.ProofAttestation.Verify - so advertising both is a
+	// truthful statement of capability, which is what OpenID4VCI 1.0
+	// 12.2.4 asks of this parameter.
+	//
+	// Narrow it only for a wallet that cannot cope with a proof type it
+	// does not have to use. The German EUDI Wallet was one such in
+	// September 2026 (SUNET/vc#671): its own attestation support was
+	// incomplete and advertising "attestation" made issuance fail there.
+	// Set ["jwt"] for such a deployment, and remove the setting once the
+	// wallet catches up.
+	ProofTypesSupported []string `yaml:"proof_types_supported" validate:"omitempty,dive,oneof=jwt attestation"`
+	// CredentialResponseEncryption is no longer written by hand.
+	//
+	// It used to let an operator state the algorithms this issuer would accept
+	// for an encrypted Credential Response - which nothing implemented, so the
+	// metadata asserted a capability the Credential Endpoint did not have.
+	// Both encryption objects are now derived from CredentialEncryption below,
+	// from keys that have actually been loaded, so the metadata and the
+	// endpoint cannot say different things.
+	//
+	// Config load refuses a deployment that still sets this, rather than
+	// ignoring it: silently dropping an operator's encryption settings is
+	// exactly the failure this replaces. See SUNET/vc#707.
 	CredentialResponseEncryption *openid4vci.MetadataCredentialResponseEncryption `yaml:"credential_response_encryption" validate:"omitempty"`
+	// CredentialEncryption configures JWE encryption of Credential and
+	// Deferred Credential messages.
+	CredentialEncryption CredentialEncryption `yaml:"credential_encryption" validate:"omitempty"`
 	// BatchCredentialIssuance holds the batch issuance configuration
 	BatchCredentialIssuance *openid4vci.BatchCredentialIssuance `yaml:"batch_credential_issuance" validate:"omitempty"`
 	// Display holds the display metadata
@@ -1424,6 +1564,171 @@ type IssuerMetadata struct {
 	// When configured, this is included in .well-known/openid-credential-issuer metadata
 	// so verifiers can dynamically discover trust anchors for ISO 18013-5 credentials.
 	MdocIacasURI string `yaml:"mdoc_iacas_uri" validate:"omitempty,url"`
+
+	// IncludeSignedMetadataInJSON re-adds the draft-era signed_metadata member
+	// to the unsigned JSON metadata document.
+	//
+	// Off by default, and deliberately. OpenID4VCI 1.0 §12.2.2 returns the
+	// signed form as the whole response - a JWT served as application/jwt,
+	// selected by the wallet's Accept header - and §12.2.4 does not define a
+	// signed_metadata parameter at all, so carrying one inside the JSON
+	// document is a draft-era shape rather than a 1.0 one. The signed
+	// document is still served, at the same URL, to a wallet that asks for
+	// application/jwt.
+	//
+	// Turn this on only for a deployment that has to reach a wallet which
+	// still reads signed_metadata out of the JSON, and expect to turn it off
+	// again once it can send an Accept header instead. See SUNET/vc#708.
+	IncludeSignedMetadataInJSON *bool `yaml:"include_signed_metadata_in_json" default:"false"`
+}
+
+// CredentialEncryption configures JWE encryption of the Credential endpoints.
+//
+// Per OpenID4VCI 1.0 §8.3 and §12.2.4, for both the Credential and the
+// Deferred Credential messages.
+//
+// With no key configured, neither credential_request_encryption nor
+// credential_response_encryption appears in the issuer metadata and the
+// Credential Endpoint refuses an encrypted request - an issuer that cannot
+// do this says so by staying silent, rather than by advertising it and
+// failing later.
+type CredentialEncryption struct {
+	// Keys are this Credential Issuer's key-agreement keys. Their public
+	// halves are published in credential_request_encryption.jwks, each with a
+	// kid derived as its RFC 7638 thumbprint, so rotation is adding a key,
+	// waiting for cached metadata to expire, and removing the old one.
+	//
+	// Each key is a P-256 key held either in a PEM file or in a PKCS#11
+	// token. The type is deliberately narrower than pki.KeyConfig: this is
+	// a key-agreement key, not a signing key, so the curve is fixed by the
+	// one algorithm pair §8.3 is implemented for here (ECDH-ES+A256KW with
+	// A256GCM).
+	Keys []CredentialEncryptionKey `yaml:"keys" validate:"omitempty,dive"`
+
+	// RequestEncryptionRequired publishes
+	// credential_request_encryption.encryption_required. When true, a
+	// Credential Request that arrives unencrypted is refused.
+	//
+	// False by default: turning the key on should not break every wallet that
+	// does not do JWE on the same day.
+	RequestEncryptionRequired *bool `yaml:"request_encryption_required" default:"false"`
+
+	// ResponseEncryptionRequired publishes
+	// credential_response_encryption.encryption_required. When true, a
+	// Credential Request without credential_response_encryption is refused.
+	//
+	// False by default, for the same reason.
+	ResponseEncryptionRequired *bool `yaml:"response_encryption_required" default:"false"`
+
+	// loaded memoizes Load, so the issuer metadata and the Credential
+	// Endpoint cannot end up holding different keys. They load at different
+	// points in startup, and a secret rotated between those two moments
+	// would otherwise publish one public key while the endpoint kept the
+	// matching private half of another - every JWE a wallet built from the
+	// metadata would then be undecryptable.
+	//
+	// No lock: every caller is on the startup path, which is sequential, and
+	// a mutex here would make this struct uncopyable for no gain.
+	loaded    *openid4vci.CredentialEncryption
+	loadedErr error
+	didLoad   bool
+}
+
+// CredentialEncryptionKey is one of this issuer's key-agreement keys.
+//
+// The key is held either in a PEM file or in a PKCS#11 token, and exactly
+// one of private_key_path and pkcs11 must be set. That is checked
+// when the keys are loaded rather than by a struct tag: the constraint is
+// "one of these two", which a tag states as required_without/excluded_with
+// and which the validator then reports in its own words, before the check
+// that can name both settings and say which combination was written.
+type CredentialEncryptionKey struct {
+	// PrivateKeyPath is the path to a PEM file holding an ECDSA P-256
+	// private key.
+	PrivateKeyPath string `yaml:"private_key_path" validate:"omitempty" doc_example:"\"/etc/vc/credential-encryption.pem\""`
+
+	// PKCS11 is an alternative to private_key_path: the key stays in an HSM,
+	// which performs the ECDH-ES key agreement with CKM_ECDH1_DERIVE. The
+	// key must be an EC P-256 private key with CKA_DERIVE set; it is found
+	// by key_label, and key_id is unused here (it names a JWT kid, and the
+	// kid of an encryption key is its RFC 7638 thumbprint).
+	//
+	// SECURITY: this keeps the long-term private key inside the token, but
+	// not the per-request shared secret. The derivation uses CKD_NULL, so
+	// the agreed secret Z is read back out of the token and the RFC 7518
+	// §4.6.2 Concat KDF, the AES key unwrap and the content decryption all
+	// run in this process. An attacker who can read this process's memory
+	// can therefore recover the content encryption key of a request being
+	// decrypted - but not the private key, and not any other request's,
+	// each of which needs its own agreement through the token. Running the
+	// whole unwrap inside the token would need CKD_SHA256_KDF_CONCATENATE
+	// with a module-specific encoding of the JWE OtherInfo, which PKCS#11
+	// v2.40 does not standardize. Weigh that against a PEM file on disk,
+	// where the long-term key is readable, before choosing either.
+	//
+	// Not every module will do this: the derived generic secret is created
+	// with CKA_EXTRACTABLE true and CKA_SENSITIVE false, and a token
+	// configured to refuse extractable keys will refuse the derivation.
+	// Neither that nor the CKA_DERIVE the private key needs can be seen
+	// from the published metadata, so the service performs one throwaway
+	// agreement while loading this key and refuses to start if the token
+	// will not do it. The alternative is an issuer that starts, publishes a
+	// JWK, and fails every encrypted request built from it.
+	PKCS11 *pki.PKCS11Config `yaml:"pkcs11" validate:"omitempty"`
+}
+
+// Load builds the encrypter from the configured keys, or returns nil when
+// none are configured.
+//
+// The result is memoized, so the metadata generator and the Credential
+// Endpoint get the same instance rather than two reads of the same files:
+// what is advertised and what is accepted then cannot drift apart, not even
+// across a secret rotated between the two calls.
+func (cfg *CredentialEncryption) Load() (*openid4vci.CredentialEncryption, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	if cfg.didLoad {
+		return cfg.loaded, cfg.loadedErr
+	}
+
+	cfg.loaded, cfg.loadedErr = cfg.load()
+	cfg.didLoad = true
+
+	return cfg.loaded, cfg.loadedErr
+}
+
+func (cfg *CredentialEncryption) load() (*openid4vci.CredentialEncryption, error) {
+	loader := pki.NewKeyLoader()
+	keys := make([]crypto.PrivateKey, 0, len(cfg.Keys))
+	for i, key := range cfg.Keys {
+		switch {
+		case key.PrivateKeyPath != "" && key.PKCS11 != nil:
+			return nil, fmt.Errorf("credential encryption key %d: set either private_key_path or pkcs11, not both", i)
+		case key.PrivateKeyPath == "" && key.PKCS11 == nil:
+			return nil, fmt.Errorf("credential encryption key %d: set either private_key_path or pkcs11", i)
+		case key.PKCS11 != nil:
+			// Opened once, at config load, and kept: the session holds the
+			// login, and a credential request is not the place to discover
+			// that the token is gone. Never closed, because the process
+			// holds it for its whole life.
+			private, err := pki.NewPKCS11ECDH(key.PKCS11)
+			if err != nil {
+				return nil, fmt.Errorf("credential encryption key %d: %w", i, err)
+			}
+			keys = append(keys, private)
+		default:
+			private, err := loader.LoadPrivateKey(key.PrivateKeyPath)
+			if err != nil {
+				return nil, fmt.Errorf("credential encryption key %d: %w", i, err)
+			}
+			keys = append(keys, private)
+		}
+	}
+
+	return openid4vci.NewCredentialEncryption(keys,
+		BoolVal(cfg.RequestEncryptionRequired, false),
+		BoolVal(cfg.ResponseEncryptionRequired, false))
 }
 
 // CredentialOfferWallets holds wallet redirect configuration
@@ -1468,6 +1773,34 @@ type APIGWDelivery struct {
 	OpenID4VCI OAuthServer `yaml:"openid4vci" validate:"required"`
 	// CredentialOffers holds credential offer wallet configurations
 	CredentialOffers CredentialOffers `yaml:"credential_offers" validate:"required"`
+	// OpenID4VCICompat holds opt-in switches for wallets that do not encode
+	// OpenID4VCI 1.0 requests the way the specification does.
+	OpenID4VCICompat OpenID4VCICompat `yaml:"openid4vci_compat" validate:"omitempty"`
+}
+
+// OpenID4VCICompat holds interoperability switches for non-conformant wallets.
+//
+// Every field defaults to the conformant behaviour, so a deployment that sets
+// none of them is an OpenID4VCI 1.0 deployment.
+type OpenID4VCICompat struct {
+	// AcceptNonStandardAuthorizationDetailsArrays accepts two further
+	// encodings of authorization_details in a query string or form body,
+	// alongside the single URL-encoded JSON array that OpenID4VCI 1.0 §5.1.1
+	// and RFC 9396 §2 define and that is always accepted:
+	//
+	//	repeated key:   authorization_details={..}&authorization_details={..}
+	//	bracketed key:  authorization_details[]={..}&authorization_details[]={..}
+	//
+	// Off by default, and deliberately. RFC 6749 §3.1 says a request
+	// parameter MUST NOT be included more than once, so the repeated form is
+	// a protocol violation rather than a dialect: once it is accepted, this
+	// server and anything in front of it (a reverse proxy, a WAF) can read
+	// different authorization_details out of one request. Turn this on only
+	// for a deployment that has to reach a wallet which cannot send the
+	// specified encoding, and expect to turn it off again once it can.
+	//
+	// See SUNET/vc#710 for the interop reports that motivated it.
+	AcceptNonStandardAuthorizationDetailsArrays *bool `yaml:"accept_non_standard_authorization_details_arrays" default:"false"`
 }
 
 // APIGWAuthProviders groups the authentication provider configurations.
@@ -1760,6 +2093,10 @@ func (c *Cfg) LookupCredentialSources(scope string) ([]CredentialSource, error) 
 }
 
 // GetOpenID4VPAuth returns the OpenID4VP authentication config for a credential type, or nil if not found.
+// For a datastore scope with auth_provider=openid4vp, returns its AuthScopes as-is.
+// For a presentation scope, synthesises a single-entry AuthScopes map from the
+// scope's from_scope + required_claims: the wallet must present a credential of
+// FromScope disclosing every key of RequiredClaims.
 func (c *Cfg) GetOpenID4VPAuth(scope string) *OpenID4VPCredentialAuth {
 	if c.APIGW == nil {
 		return nil
@@ -1769,6 +2106,21 @@ func (c *Cfg) GetOpenID4VPAuth(scope string) *OpenID4VPCredentialAuth {
 			return &OpenID4VPCredentialAuth{
 				AuthScopes: cred.AuthScopes,
 			}
+		}
+	}
+	if cred, ok := c.APIGW.DataSources.Presentation.Scopes[scope]; ok {
+		if cred.AuthProvider != AuthProviderOpenID4VP {
+			return nil
+		}
+		claims := make([]string, 0, len(cred.RequiredClaims))
+		for k := range cred.RequiredClaims {
+			claims = append(claims, k)
+		}
+		sort.Strings(claims)
+		return &OpenID4VPCredentialAuth{
+			AuthScopes: map[string]AuthScopeEntry{
+				cred.FromScope: {AuthClaims: claims},
+			},
 		}
 	}
 	return nil
@@ -1923,6 +2275,76 @@ type CredentialMetadata struct {
 	// VCT. Used only for mso_mdoc.
 	Doctype string `yaml:"doctype,omitempty" json:"-" validate:"required_without_all=VCTMFilePath VCTMUrl MDDLFilePath MDDLUrl VCT"`
 
+	// CredentialTypes lists the W3C VC types this scope ISSUES, most general
+	// first, e.g. ["VerifiableCredential", "DiplomaCredential"].
+	//
+	// Compact terms (OID4VCI Appendix A.1). Advertised as
+	// credential_definition.type, which is also where issueVC20 reads the
+	// types it mints, so advertised and issued stay in step.
+	//
+	// A verifier constrains by CredentialTypeValues instead, which cannot be
+	// derived from this - a scope that is both issued and requested sets both.
+	// W3C formats only; defaults to the bare base type, as before.
+	//
+	// A CUSTOM term here needs CredentialContexts to define it, and the three
+	// fields only work as a set. Configuring a term with no context issues a
+	// credential whose type expands to a relative IRI, which can never equal
+	// the absolute IRI credential_type_values names - so the deployment
+	// issues credentials its own verifier refuses. A complete example:
+	//
+	//	credential_types:        ["VerifiableCredential", "DiplomaCredential"]
+	//	credential_contexts:     ["https://example.org/diploma"]
+	//	credential_type_values:  [["https://www.w3.org/2018/credentials#VerifiableCredential",
+	//	                           "https://example.org/diploma#DiplomaCredential"]]
+	//
+	// where https://example.org/diploma is published and defines
+	// DiplomaCredential as that IRI.
+	CredentialTypes []string `yaml:"credential_types,omitempty" json:"-" validate:"omitempty,dive,required"`
+
+	// CredentialTypeValues is the DCQL meta.type_values a verifier REQUESTS
+	// this credential by: alternatives, each a set of types the credential
+	// must carry all of (OpenID4VP 1.0 6.4.1).
+	//
+	// Fully expanded IRIs - ".../2018/credentials#VerifiableCredential", not
+	// "VerifiableCredential". Separate from CredentialTypes because converting
+	// between them needs a JSON-LD expansion this repo does not do; guessing
+	// would emit a query wallets cannot match.
+	//
+	// Unset leaves the scope unrequestable rather than guessed at.
+	CredentialTypeValues [][]string `yaml:"credential_type_values,omitempty" json:"-" validate:"omitempty,dive,required,dive,required"`
+
+	// CredentialContexts are JSON-LD contexts appended after the VC 2.0 base
+	// context when this credential is issued.
+	//
+	// This is what connects the two fields above. A term in credential_types
+	// that no context defines survives JSON-LD expansion as a RELATIVE IRI,
+	// so it can never equal the absolute IRI credential_type_values names,
+	// and a verifier constraining by that IRI will refuse every credential
+	// this deployment issues. Publish a context defining the term and name it
+	// here.
+	//
+	// The URL must be dereferenceable by BOTH sides, and the issuer's need is
+	// the sharper one: signing canonicalizes the credential to RDF, so an
+	// unreachable context fails issuance outright rather than degrading
+	// verification. Publish it before configuring it.
+	//
+	// The issuer also refuses to fetch a context it has not been told about -
+	// name it in issuer.jsonld_context_allowlist as well. The issuer REFUSES
+	// TO START if a W3C scope names a context its allowlist does not, because
+	// the apigw forwards this list verbatim as additional_contexts and every
+	// issuance of that credential would otherwise be rejected at request
+	// time.
+	//
+	// Resolved and PINNED at config load, which has three consequences worth
+	// knowing before configuring this. The host must be reachable when the
+	// service starts, or it will not start. The document is then fixed for
+	// the life of the process, so republishing the context does not affect a
+	// running service - restart it. And startup verifies that the context
+	// actually defines credential_types and that the result matches
+	// credential_type_values, so a mismatch is a boot failure rather than a
+	// presentation that silently never matches.
+	CredentialContexts []string `yaml:"credential_contexts,omitempty" json:"-" validate:"omitempty,dive,required,url"`
+
 	MDDL *mdoc.MDDLSchema `yaml:"-" json:"-"`
 
 	// MDDLRaw holds the raw JSON bytes of the MDDL document, passed inline
@@ -1935,7 +2357,9 @@ type CredentialMetadata struct {
 	// Per CIR 2024/2979 Annex III and ETSI TS 119 472-3 §4.2.5. Only applicable to QEAAs and PuB-EAAs (not PIDs).
 	// Optional and off by default: when omitted, no `disclosure_policy` field is emitted in the credential issuer metadata.
 	DisclosurePolicy *openid4vci.EmbeddedDisclosurePolicy `yaml:"disclosure_policy,omitempty" json:"-" validate:"omitempty"`
-	// Attributes maps claim names to their source fields and transformation rules for credential issuance
+	// Attributes maps claim names to their source fields for credential issuance.
+	// Data sources are rename-only (attribute_mapping); value transformations
+	// belong in the target scope's derivations.
 	Attributes map[string]map[string][]*string `yaml:"attributes" json:"attributes_v2" validate:"omitempty,dive,required"`
 
 	// VCTMRaw holds the raw JSON bytes of the VCTM document, passed inline
@@ -2152,6 +2576,43 @@ func (c *CredentialMetadata) GetVCTURL() string {
 	return c.VCTURL
 }
 
+// VCContextV2 is the W3C VC 2.0 base context every credential this repo issues
+// carries first.
+const VCContextV2 = "https://www.w3.org/ns/credentials/v2"
+
+// W3CTypeValuesForCheck exposes the narrowing type alternatives for config
+// validation, which lives in another package.
+func (c *CredentialMetadata) W3CTypeValuesForCheck() [][]string {
+	if c == nil {
+		return nil
+	}
+	return c.w3cTypeValues()
+}
+
+// W3CContexts returns the full @context a W3C credential of this type is
+// issued with: the VC 2.0 base, then whatever credential_contexts configures.
+//
+// One source for two readers. The issuer builds the credential's @context from
+// the same list (sent as MakeVC20Request.additional_contexts), and issuer
+// metadata advertises it - OpenID4VCI requires @context in
+// credential_definition for ldp_vc, and a wallet cannot expand the types
+// without it.
+func (c *CredentialMetadata) W3CContexts() []string {
+	if c == nil {
+		return []string{VCContextV2}
+	}
+	return append([]string{VCContextV2}, c.CredentialContexts...)
+}
+
+// GetCredentialContexts returns the JSON-LD contexts to issue this credential
+// with, nil-safe like the other accessors.
+func (c *CredentialMetadata) GetCredentialContexts() []string {
+	if c == nil {
+		return nil
+	}
+	return c.CredentialContexts
+}
+
 // GetVCTMRaw returns the raw VCTM JSON bytes under a read lock.
 func (c *CredentialMetadata) GetVCTMRaw() []byte {
 	if c == nil {
@@ -2279,6 +2740,48 @@ func (c *CredentialMetadata) doctype() string {
 	return c.Doctype
 }
 
+// baseVCType is the compact term every W3C VC must carry, the counterpart of
+// openid4vp.BaseVCTypeIRI on the DCQL side.
+const baseVCType = "VerifiableCredential"
+
+// W3CTypes returns the compact-term types this scope issues, always including
+// the base type and defaulting to it alone, as the issuer metadata always
+// advertised.
+//
+// The base type is prepended when a config omits it: the W3C VC data model
+// requires every credential to carry it, and a verifier's type_values
+// alternatives name its IRI, which MatchTypeValues needs the credential to
+// have. Issuing without it produces a credential that matches nothing.
+//
+// The issuance side. A verifier reads CredentialTypeValues: different
+// representation, and a different reading of the bare base type - issuing one
+// is merely unspecific, requesting one matches every W3C credential.
+func (c *CredentialMetadata) W3CTypes() []string {
+	if c == nil || len(c.CredentialTypes) == 0 {
+		return []string{baseVCType}
+	}
+	if slices.Contains(c.CredentialTypes, baseVCType) {
+		return slices.Clone(c.CredentialTypes)
+	}
+	return append([]string{baseVCType}, c.CredentialTypes...)
+}
+
+// w3cTypeValues returns the configured DCQL type_values, dropping alternatives
+// that would not narrow the request - one naming only the base type would turn
+// "cannot be built" into "asks for anything".
+func (c *CredentialMetadata) w3cTypeValues() [][]string {
+	var out [][]string
+	for _, alternative := range c.CredentialTypeValues {
+		narrowing := slices.ContainsFunc(alternative, func(t string) bool {
+			return t != "" && t != openid4vp.BaseVCTypeIRI
+		})
+		if narrowing {
+			out = append(out, slices.Clone(alternative))
+		}
+	}
+	return out
+}
+
 // DCQLMetaQuery returns the DCQL meta constraint for this credential type, and
 // whether one could be expressed at all.
 //
@@ -2289,7 +2792,12 @@ func (c *CredentialMetadata) doctype() string {
 //   - mso_mdoc: doctype_value, see doctype.
 //   - dc+sd-jwt, the legacy vc+sd-jwt spelling, and an empty format (Format
 //     defaults to dc+sd-jwt): vct_values, see vctIdentifier.
-//   - anything else: ok is false.
+//   - ldp_vc / vc+ld+json: type_values from credential_type_values - expanded
+//     IRIs, only alternatives that narrow past the base type. Not
+//     credential_types, which cannot be expanded.
+//   - anything else: ok is false, jwt_vc_json included. Nothing issues it and
+//     the verifier reads a compact JWT-VC as SD-JWT, so it is advertised in
+//     issuer metadata but never requestable.
 //
 // ok=false means no constraint can be built - a nil receiver, a W3C format
 // with no configured type list, mso_mdoc_zk (below), or a missing identifier -
@@ -2317,6 +2825,25 @@ func (c *CredentialMetadata) DCQLMetaQuery() (openid4vp.MetaQuery, bool) {
 			return openid4vp.MetaQuery{}, false
 		}
 		return openid4vp.MetaQuery{VCTValues: []string{vct}}, true
+	// Not jwt_vc_json: a JWT-secured W3C VC is a compact JWT, which
+	// detectCredentialFormat reads as SD-JWT and the verifier would then
+	// process under the wrong credential model - and nothing in this stack
+	// issues it either (handlers_issuer.go has no case, SUNET/vc#686). Same
+	// treatment as jwt_vc_json-ld: advertised, not requestable.
+	case openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON:
+		// type_values is an array of ALTERNATIVES, each an array of types a
+		// credential must carry all of (OpenID4VP 1.0 6.4.1).
+		//
+		// Refused when credential_type_values is unset or names only the base
+		// type: a query constrained by that matches every W3C credential in
+		// the wallet, turning "this request cannot be built" into "this
+		// request asks for anything", which over-discloses silently instead of
+		// failing.
+		typeValues := c.w3cTypeValues()
+		if len(typeValues) == 0 {
+			return openid4vp.MetaQuery{}, false
+		}
+		return openid4vp.MetaQuery{TypeValues: typeValues}, true
 	default:
 		return openid4vp.MetaQuery{}, false
 	}
@@ -2435,43 +2962,51 @@ func (cfg *IssuerMetadata) applyCommonCredentialConfig(credConfig *openid4vci.Cr
 		credConfig.CredentialSigningAlgValuesSupported = []any{"ES256", "ES384", "RS256"}
 	}
 
-	// Set proof types supported from configuration
-	// These must be explicitly configured to match what the Issuer service accepts
 	proofAlgs := cfg.ProofSigningAlgValuesSupported
 	if len(proofAlgs) == 0 {
-		// Default to common algorithms if not configured
 		proofAlgs = []string{"ES256", "ES384", "ES512", "RS256", "RS384", "RS512"}
 	}
-	// Confirmed by direct testing (lpidproto PLAN.md workstream 7): scoping
-	// 'attestation' to only the "pid" credential config breaks metadata
-	// parsing for EVERY offer, including ones that only reference "pid" --
-	// eudi-lib-jvm-openid4vci-kt validates proof_types_supported across the
-	// whole credential_configurations_supported document, not per-entry.
-	// So this must be declared uniformly for every scope, "lpid" included;
-	// it cannot be scoped away. See ARCHITECTURE.md for the resulting
-	// caveat this leaves on "lpid"'s advertised proof capabilities, and
-	// pkg/openid4vci/proof_attestation.go's Verify() for the deeper gap
-	// this uncovered (attestation proofs are never signature-verified).
-	credConfig.ProofTypesSupported = map[string]openid4vci.ProofsTypesSupported{
-		"jwt": {
+
+	// Advertise the proof types this issuer implements, narrowed by
+	// configuration when a deployment has to accommodate a wallet that
+	// cannot cope with one of them. Both are implemented: "attestation"
+	// proofs are signature-verified against the x5c in their own header
+	// (openid4vci.ProofAttestation.Verify), so listing both is a truthful
+	// capability statement rather than padding.
+	//
+	// Declared uniformly for every scope, "lpid" included, and it cannot be
+	// scoped away: eudi-lib-jvm-openid4vci-kt validates
+	// proof_types_supported across the WHOLE
+	// credential_configurations_supported document, not per entry, so one
+	// scope differing breaks parsing for every offer. See ARCHITECTURE.md
+	// for the resulting caveat on "lpid"'s advertised proof capabilities.
+	proofTypes := cfg.ProofTypesSupported
+	if len(proofTypes) == 0 {
+		proofTypes = []string{"jwt", "attestation"}
+	}
+
+	credConfig.ProofTypesSupported = make(map[string]openid4vci.ProofsTypesSupported, len(proofTypes))
+	for _, proofType := range proofTypes {
+		credConfig.ProofTypesSupported[proofType] = openid4vci.ProofsTypesSupported{
 			ProofSigningAlgValuesSupported: proofAlgs,
-			KeyAttestationsRequired:        openid4vci.KeyAttestationRequirement{},
-		},
-		// "attestation": declared alongside "jwt" because
-		// eudi-lib-jvm-openid4vci-kt 0.12.1+ hard-fails issuer metadata
-		// validation unless both proof types are present ("Both JWT Proofs
-		// and Attestation Proofs must be supported"). This is a declarative
-		// capability advertisement only -- vc-apigw has no wallet-attestation
-		// verification wired up (lpidproto PLAN.md workstream 8, not started),
-		// and this project's reference-wallet client config uses
-		// ClientAuthenticationType.None rather than AttestationBased, so it
-		// won't actually submit an attestation-typed proof. Revisit alongside
-		// KeyAttestationsRequired above if WS8 ever implements real
-		// attestation verification.
-		"attestation": {
-			ProofSigningAlgValuesSupported: proofAlgs,
-			KeyAttestationsRequired:        openid4vci.KeyAttestationRequirement{},
-		},
+			// Always absent, and not configurable. OpenID4VCI 1.0 12.2.4:
+			// when the issuer does not require a key attestation the
+			// parameter MUST NOT be present, and an empty object is not
+			// the neutral value - the same paragraph gives it the meaning
+			// "a key attestation is needed without additional
+			// constraints". Emitting it was SUNET/vc#672.
+			//
+			// There is deliberately no setting to turn it back on. Nothing
+			// on the issuance path enforces such a requirement: a plain
+			// "jwt" proof with no attestation is accepted
+			// (handlers_issuer.go), and the key_attestation JOSE header of
+			// a JWT proof is not read at all (openid4vci/proof_jwt.go), so
+			// key_storage and user_authentication constraints would go
+			// unchecked. A setting here would let a deployment advertise a
+			// requirement this build does not keep. Wire the enforcement in
+			// first, then give it a knob.
+			KeyAttestationsRequired: nil,
+		}
 	}
 }
 
@@ -2634,10 +3169,31 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		case "dc+sd-jwt":
 			// Appendix A.3: only vct is format-specific for dc+sd-jwt
 			credConfig.VCT = resolvedVCT
-		case "jwt_vc_json", "ldp_vc", "jwt_vc_json-ld":
-			// Appendix A.1: credential_definition with type array is format-specific for W3C VC formats
+		// vc+ld+json belongs here: handlers_issuer.go issues it alongside
+		// ldp_vc, and DCQLMetaQuery treats it as a W3C format, so leaving it
+		// out sent it down the default branch with no credential_definition at
+		// all - its credential_types went unadvertised while a verifier
+		// constrained requests by them, which is the disagreement this field
+		// exists to remove.
+		//
+		// jwt_vc_json-ld stays advertised but is deliberately not requestable:
+		// nothing issues it (see handlers_issuer.go's format switch), so
+		// DCQLMetaQuery does not accept it either.
+		case openid4vp.FormatJwtVCJson, openid4vp.FormatLdpVCDCQL, openid4vp.FormatVCLDJSON, "jwt_vc_json-ld":
+			// Appendix A.1: credential_definition with type array is format-specific for W3C VC formats.
+			//
+			// credential_types when configured, so the advertised types, the
+			// types issueVC20 mints (it reads them back from here) and the DCQL
+			// type_values a verifier asks by all come from one place. The bare
+			// base type remains the default, which is what this always
+			// advertised.
 			credConfig.CredentialDefinition = &openid4vci.CredentialDefinition{
-				Type: []string{"VerifiableCredential"},
+				Type: constructor.W3CTypes(),
+				// REQUIRED for ldp_vc (OpenID4VCI 1.0 Appendix A.1.2). It was
+				// omitted entirely, so a wallet had no way to expand the types
+				// advertised beside it - and after credential_contexts, the
+				// advertised context has to match what is actually issued.
+				Context: constructor.W3CContexts(),
 			}
 			credConfig.VCT = resolvedVCT
 		default:
@@ -2752,6 +3308,14 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		return nil, fmt.Errorf("failed to construct nonce endpoint URL: %w", err)
 	}
 
+	// Both encryption objects come from keys that have actually been loaded,
+	// so the metadata cannot advertise something the Credential Endpoint will
+	// refuse. nil when no key is configured, which omits both objects.
+	encryption, err := cfg.CredentialEncryption.Load()
+	if err != nil {
+		return nil, fmt.Errorf("credential encryption: %w", err)
+	}
+
 	metadataConfig := &openid4vci.MetadataConfig{
 		CredentialIssuer:                     publicURL,
 		CredentialEndpoint:                   credentialEndpoint,
@@ -2762,7 +3326,8 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 		CryptographicBindingMethodsSupported: cfg.CryptographicBindingMethodsSupported,
 		CredentialSigningAlgValuesSupported:  cfg.CredentialSigningAlgValuesSupported,
 		ProofSigningAlgValuesSupported:       cfg.ProofSigningAlgValuesSupported,
-		CredentialResponseEncryption:         cfg.CredentialResponseEncryption,
+		CredentialRequestEncryption:          encryption.RequestMetadata(),
+		CredentialResponseEncryption:         encryption.ResponseMetadata(),
 		BatchCredentialIssuance:              cfg.BatchCredentialIssuance,
 		Display:                              cfg.Display,
 		CredentialConfigurationsSupported:    credentialConfigs,

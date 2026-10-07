@@ -1128,8 +1128,13 @@ type MakeVC20Request struct {
 	SubjectDid        string                 `protobuf:"bytes,4,opt,name=subject_did,json=subjectDid,proto3" json:"subject_did,omitempty"`                      // Optional subject DID for holder binding
 	Cryptosuite       string                 `protobuf:"bytes,5,opt,name=cryptosuite,proto3" json:"cryptosuite,omitempty"`                                      // Cryptosuite: "ecdsa-rdfc-2019", "ecdsa-sd-2023", or "eddsa-rdfc-2022"
 	MandatoryPointers []string               `protobuf:"bytes,6,rep,name=mandatory_pointers,json=mandatoryPointers,proto3" json:"mandatory_pointers,omitempty"` // JSON pointers for mandatory claims (SD-2023 only)
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Extra JSON-LD contexts appended after the VC 2.0 base context. A custom
+	// type carries no meaning without one: it survives JSON-LD expansion as a
+	// relative IRI, so a verifier constraining by meta.type_values can never
+	// match it. Must be dereferenceable by the verifier.
+	AdditionalContexts []string `protobuf:"bytes,7,rep,name=additional_contexts,json=additionalContexts,proto3" json:"additional_contexts,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *MakeVC20Request) Reset() {
@@ -1200,6 +1205,13 @@ func (x *MakeVC20Request) GetCryptosuite() string {
 func (x *MakeVC20Request) GetMandatoryPointers() []string {
 	if x != nil {
 		return x.MandatoryPointers
+	}
+	return nil
+}
+
+func (x *MakeVC20Request) GetAdditionalContexts() []string {
+	if x != nil {
+		return x.AdditionalContexts
 	}
 	return nil
 }
@@ -1520,7 +1532,7 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\x01e\x18\n" +
 	" \x01(\tR\x01e\x12\x10\n" +
 	"\x03alg\x18\v \x01(\tR\x03alg\x12\x10\n" +
-	"\x03use\x18\f \x01(\tR\x03use\"\xe9\x01\n" +
+	"\x03use\x18\f \x01(\tR\x03use\"\x9a\x02\n" +
 	"\x0fMakeVC20Request\x12\x14\n" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12#\n" +
 	"\rdocument_data\x18\x02 \x01(\fR\fdocumentData\x12)\n" +
@@ -1528,7 +1540,8 @@ const file_v1_issuer_proto_rawDesc = "" +
 	"\vsubject_did\x18\x04 \x01(\tR\n" +
 	"subjectDid\x12 \n" +
 	"\vcryptosuite\x18\x05 \x01(\tR\vcryptosuite\x12-\n" +
-	"\x12mandatory_pointers\x18\x06 \x03(\tR\x11mandatoryPointers\"\x92\x03\n" +
+	"\x12mandatory_pointers\x18\x06 \x03(\tR\x11mandatoryPointers\x12/\n" +
+	"\x13additional_contexts\x18\a \x03(\tR\x12additionalContexts\"\x92\x03\n" +
 	"\rMakeVC20Reply\x12\x1e\n" +
 	"\n" +
 	"credential\x18\x01 \x01(\fR\n" +

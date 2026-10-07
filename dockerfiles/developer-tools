@@ -1,7 +1,11 @@
 # Compile
 FROM docker.sunet.se/iam_vc/gobuild:local AS builder
 
-ENV GOTOOLCHAIN=auto
+# GOTOOLCHAIN=local, matching dockerfiles/worker: "auto" cannot work with
+# GOPROXY=off, because it answers a go.mod the base image is too old for by
+# downloading a toolchain the disabled proxy then denies. local fails
+# instead with the version mismatch, which names the thing to fix.
+ENV GOTOOLCHAIN=local
 ENV GOFLAGS=-mod=vendor
 ENV GOPROXY=off
 ENV GONOSUMDB=*

@@ -38,16 +38,15 @@ type Config struct {
 type AttributeMapping map[string]AttributeConfig
 
 // AttributeConfig defines how a single external attribute maps to a credential claim.
-// Mirrors model.AttributeConfig to avoid circular imports.
+// Mirrors model.AttributeConfig to avoid circular imports. Value transformation
+// (canonicalisation, case folding, date reformatting) is expressed as
+// derivations on the target scope.
 type AttributeConfig struct {
 	// Claim is the target claim name (supports dot-notation for nesting)
 	Claim string `yaml:"claim" validate:"required"`
 
 	// Required indicates if this attribute must be present
 	Required bool `yaml:"required" default:"false"`
-
-	// Transform is an optional transformation to apply
-	Transform string `yaml:"transform,omitempty" validate:"omitempty,oneof=lowercase uppercase trim country_alpha2 country_alpha3"`
 
 	// Default is an optional default value if attribute is missing
 	Default string `yaml:"default,omitempty"`

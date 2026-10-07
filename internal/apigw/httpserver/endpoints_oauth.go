@@ -41,6 +41,24 @@ func (s *Service) endpointOAuthPar(ctx context.Context, c *gin.Context) (any, er
 		return nil, err
 	}
 
+	// gin binds authorization_details from the FIRST value only, so a form
+	// or query string that repeats it needs looking at directly: strictly to
+	// refuse the repetition (RFC 6749 §3.1), or leniently to fold the
+	// non-standard encodings some wallets send into the single JSON array
+	// OpenID4VCI 1.0 §5.1.1 defines. See model.OpenID4VCICompat.
+	if c.ContentType() != "application/json" {
+		if err := c.Request.ParseForm(); err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			s.log.Error(err, "form parse error")
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "invalid request", 400, err)
+		}
+		if err := request.ReadAuthorizationDetails(c.Request.Form, model.BoolVal(s.cfg.APIGW.Delivery.OpenID4VCICompat.AcceptNonStandardAuthorizationDetailsArrays, false)); err != nil {
+			span.SetStatus(codes.Error, err.Error())
+			s.log.Error(err, "authorization_details error")
+			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "invalid authorization_details", 400, err)
+		}
+	}
+
 	// gin's form binder cannot decode the JSON-array-string authorization_details (OpenID4VCI §5.1.1); PARRequest post-parses and validates it.
 	if err := request.ParseAuthorizationDetails(); err != nil {
 		span.SetStatus(codes.Error, err.Error())
@@ -339,7 +357,29 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			}
 
 			s.log.Debug("consent: initiating OIDC auth for VCI", "scope", scope, "session_id", sessionID)
-			authReq, err := s.authProviders.OIDC().InitiateAuthForVCI(ctx, scope, sessionID)
+
+			// Look up per-scope OIDC request params and dynamic params from auth context
+			var oidcParams *model.OIDCRequestParams
+			var dynamicParams map[string]string
+			if scopeCfg := s.cfg.APIGW.DataSources.LookupScopePolicyConfig(scope, model.AuthProviderOIDC); scopeCfg != nil {
+				oidcParams = scopeCfg.OIDCRequestParams
+			}
+			authCtx, authCtxErr := s.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{SessionID: sessionID})
+			if authCtxErr != nil {
+				// Not fatal here: a session legitimately carries no dynamic
+				// parameters, and Get reports that as an error too, so
+				// failing on every lookup error would break those flows. What
+				// must not happen is proceeding SILENTLY - resolveTemplate
+				// now refuses to emit an unresolved placeholder, so a scope
+				// that actually needed these fails with a clear template
+				// error instead of sending "{{.org_id}}" to the OP.
+				s.log.Info("no authorization context for dynamic OIDC parameters",
+					"session_id", sessionID, "scope", scope, "error", authCtxErr)
+			} else if len(authCtx.DynamicParams) > 0 {
+				dynamicParams = authCtx.DynamicParams
+			}
+
+			authReq, err := s.authProviders.OIDC().InitiateAuthForVCI(ctx, scope, sessionID, oidcParams, dynamicParams)
 			if err != nil {
 				span.SetStatus(codes.Error, err.Error())
 				return nil, err
@@ -555,7 +595,16 @@ func (s *Service) endpointOAuthAuthorizationConsentSvgTemplate(ctx context.Conte
 	}
 
 	reply, err := s.apiv1.SVGTemplateReply(ctx, svgTemplateRequest)
-	if err != nil {
+	switch {
+	case errors.Is(err, apiv1.ErrNoSVGTemplate):
+		// Not a failure: a credential type is free to have no card image,
+		// and the consent page renders its claims without one. Answering
+		// 400 made every load of such a page log an error and made a real
+		// fetch failure indistinguishable from a configuration that simply
+		// has no card (SUNET/vc#737).
+		s.log.Debug("no SVG template configured for scope; consent page will render without a card", "scope", scope)
+		reply = &vcclient.SVGTemplateReply{}
+	case err != nil:
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "getting SVG template failed")
 		c.AbortWithStatus(http.StatusBadRequest)

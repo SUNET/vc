@@ -17,7 +17,7 @@ func (c *Client) Health(ctx context.Context, req *apiv1_status.StatusRequest) (*
 }
 
 func (c *Client) buildStatusAggregator() *status.Aggregator {
-	return status.New("verifier").
+	a := status.New("verifier").
 		Register("db", c.db).
 		RegisterFunc("signer", func(ctx context.Context) error {
 			if c.pkiSigner == nil {
@@ -25,4 +25,8 @@ func (c *Client) buildStatusAggregator() *status.Aggregator {
 			}
 			return nil
 		})
+	if c.notify != nil {
+		a.Register("pubsub", c.notify)
+	}
+	return a
 }
