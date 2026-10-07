@@ -2153,6 +2153,16 @@ func TestProcessCallback(t *testing.T) {
 					RedirectURI: "https://client.example.com/callback",
 					Scopes:      []string{"openid"},
 					State:       "client-state",
+					// Authorize builds one for every session this flow
+					// creates, so a fixture without it is not a session
+					// ProcessDirectPost can ever be handed - and the
+					// response gate now refuses one, since a request it
+					// cannot recover is a request it cannot check against.
+					DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+						ID:     "pid",
+						Format: openid4vp.FormatSDJWTVC,
+						Meta:   openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}},
+					}}},
 				}
 				tt.authCtxSetup(authCtx)
 				err := client.cacheService.AuthContext.Create(ctx, authCtx)
@@ -2425,6 +2435,16 @@ func TestProcessDirectPost(t *testing.T) {
 					RedirectURI: "https://client.example.com/callback",
 					Scopes:      []string{"openid"},
 					State:       "client-state",
+					// Authorize builds one for every session this flow
+					// creates, so a fixture without it is not a session
+					// ProcessDirectPost can ever be handed - and the
+					// response gate now refuses one, since a request it
+					// cannot recover is a request it cannot check against.
+					DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+						ID:     "pid",
+						Format: openid4vp.FormatSDJWTVC,
+						Meta:   openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}},
+					}}},
 				}
 				tt.authCtxSetup(authCtx)
 				err := client.cacheService.AuthContext.Create(ctx, authCtx)

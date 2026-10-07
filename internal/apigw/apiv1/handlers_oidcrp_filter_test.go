@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-
 func filterTestClient(t *testing.T, scope string, metadata *model.CredentialMetadata) *Client {
 	t.Helper()
 	md := map[string]*model.CredentialMetadata{}

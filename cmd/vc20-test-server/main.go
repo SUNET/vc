@@ -411,6 +411,19 @@ func verifyEdDSA(vpCred *credential.RDFCredential, proof map[string]any) error {
 	pubKey := ed25519.PublicKey(decoded[2:])
 
 	// 3. Verify using suite
+	//
+	// VerifyProof, naming the proof by its proofValue: a presentation
+	// carries the holder's proof AND the embedded credential's issuer
+	// proof, and Verify refuses a document holding more than one rather
+	// than pick by traversal order. `proof` is the presentation's own
+	// proof - the caller parsed it out of the VP to read
+	// verificationMethod above - so its proofValue names exactly the node
+	// whose key was just resolved.
+	proofValue, ok := proof["proofValue"].(string)
+	if !ok {
+		return fmt.Errorf("missing proofValue")
+	}
+
 	suite := vc_eddsa.NewSuite()
-	return suite.Verify(vpCred, pubKey)
+	return suite.VerifyProof(vpCred, pubKey, proofValue)
 }

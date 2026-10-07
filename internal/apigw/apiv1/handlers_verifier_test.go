@@ -120,3 +120,42 @@ func TestBuildIssuanceAuthDCQLRejectsUnusableScope(t *testing.T) {
 	assert.Nil(t, dcql)
 	assert.Contains(t, err.Error(), "nosuch")
 }
+
+// TestBuildIssuanceAuthDCQLRefusesW3C pins the boundary between the two
+// direct-post flows.
+//
+// This package's VerificationDirectPost validates the response as an SD-JWT
+// and has no format dispatch, so a W3C auth scope would produce a query the
+// wallet can satisfy and this flow then cannot read - failing after the user
+// has already been sent to their wallet. The verifier service verifies W3C;
+// issuance auth is a separate flow that has not been taught to.
+func TestBuildIssuanceAuthDCQLRefusesW3C(t *testing.T) {
+	cfg := &model.Cfg{Common: &model.Common{CredentialMetadata: map[string]*model.CredentialMetadata{
+		"diploma": {
+			Format:               openid4vp.FormatLdpVCDCQL,
+			CredentialTypeValues: [][]string{{openid4vp.BaseVCTypeIRI, "https://example.org/degree#DiplomaCredential"}},
+		},
+		"pid": {
+			Format: openid4vp.FormatSDJWTVC,
+			VCTM:   &sdjwtvc.VCTM{VCT: "urn:eudi:pid:1"},
+		},
+	}}}
+
+	_, err := buildIssuanceAuthDCQL(&model.OpenID4VPCredentialAuth{
+		AuthScopes: map[string]model.AuthScopeEntry{
+			"diploma": {AuthClaims: []string{"given_name"}},
+		},
+	}, cfg)
+	require.Error(t, err, "a W3C auth scope must be refused at build time, not at response time")
+	assert.Contains(t, err.Error(), "issuance auth cannot verify")
+
+	// An SD-JWT auth scope is unaffected.
+	dcql, err := buildIssuanceAuthDCQL(&model.OpenID4VPCredentialAuth{
+		AuthScopes: map[string]model.AuthScopeEntry{
+			"pid": {AuthClaims: []string{"given_name"}},
+		},
+	}, cfg)
+	require.NoError(t, err)
+	require.Len(t, dcql.Credentials, 1)
+	assert.Equal(t, []string{"urn:eudi:pid:1"}, dcql.Credentials[0].Meta.VCTValues)
+}
