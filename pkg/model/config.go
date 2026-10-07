@@ -1458,6 +1458,22 @@ type IssuerMetadata struct {
 	// When configured, this is included in .well-known/openid-credential-issuer metadata
 	// so verifiers can dynamically discover trust anchors for ISO 18013-5 credentials.
 	MdocIacasURI string `yaml:"mdoc_iacas_uri" validate:"omitempty,url"`
+
+	// IncludeSignedMetadataInJSON re-adds the draft-era signed_metadata member
+	// to the unsigned JSON metadata document.
+	//
+	// Off by default, and deliberately. OpenID4VCI 1.0 §12.2.2 returns the
+	// signed form as the whole response - a JWT served as application/jwt,
+	// selected by the wallet's Accept header - and §12.2.4 does not define a
+	// signed_metadata parameter at all, so carrying one inside the JSON
+	// document is a draft-era shape rather than a 1.0 one. The signed
+	// document is still served, at the same URL, to a wallet that asks for
+	// application/jwt.
+	//
+	// Turn this on only for a deployment that has to reach a wallet which
+	// still reads signed_metadata out of the JSON, and expect to turn it off
+	// again once it can send an Accept header instead. See SUNET/vc#708.
+	IncludeSignedMetadataInJSON *bool `yaml:"include_signed_metadata_in_json" default:"false"`
 }
 
 // CredentialOfferWallets holds wallet redirect configuration

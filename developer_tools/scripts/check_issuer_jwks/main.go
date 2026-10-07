@@ -143,14 +143,15 @@ func main() {
 
 	fmt.Printf("%s Found %s%d%s key(s)\n\n", c.ok, c.bold, len(keySet.Keys), c.reset)
 
-	// Step 3: Check signed_metadata
-	fmt.Printf("%s[3] Checking signed_metadata%s\n", c.heading, c.reset)
-	if metadata.SignedMetadata == "" {
-		fmt.Printf("  %ssigned_metadata: not present\n\n", c.warn)
-		failures = append(failures, "signed_metadata not present")
+	// Step 3: Check the signed metadata
+	fmt.Printf("%s[3] Checking signed metadata%s\n", c.heading, c.reset)
+	signed, source := fetchSignedMetadata(wellKnownURL, metadata.SignedMetadata)
+	if signed == "" {
+		fmt.Printf("  %ssigned metadata: not present (%s)\n\n", c.warn, source)
+		failures = append(failures, "signed metadata not present")
 	} else {
-		fmt.Printf("  %s signed_metadata: present\n", c.ok)
-		inspectSignedMetadata(metadata.SignedMetadata, keySet.Keys, c, &failures)
+		fmt.Printf("  %s signed metadata: present, from the %s\n", c.ok, source)
+		inspectSignedMetadata(signed, keySet.Keys, c, &failures)
 		fmt.Println()
 	}
 
@@ -566,24 +567,81 @@ func algToHash(alg string) (crypto.Hash, error) {
 	}
 }
 
+// mediaTypeJWT is the media type OpenID4VCI 1.0 §12.2.2 gives the signed
+// form of the issuer metadata.
+const mediaTypeJWT = "application/jwt"
+
 func httpGet(url string) ([]byte, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
+	body, _, err := httpGetAccepting(url, "")
+	return body, err
+}
+
+// httpGetAccepting fetches url with an optional Accept header and reports the
+// media type that came back. OpenID4VCI 1.0 §12.2.2 serves the issuer
+// metadata as either application/json or application/jwt, chosen by this
+// header, so a caller that wants the signed form has to ask for it and then
+// check what it actually got.
+func httpGetAccepting(url, accept string) ([]byte, string, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, "", fmt.Errorf("building request: %w", err)
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
+		return nil, "", fmt.Errorf("reading response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		return nil, "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	return body, nil
+	mediaType := resp.Header.Get("Content-Type")
+	if i := strings.IndexByte(mediaType, ';'); i >= 0 {
+		mediaType = mediaType[:i]
+	}
+
+	return body, strings.TrimSpace(mediaType), nil
+}
+
+// fetchSignedMetadata asks the metadata endpoint for the signed form.
+//
+// §12.2.2 returns it as the whole response, typed application/jwt. A
+// deployment that has not configured a signing key answers with the unsigned
+// JSON document instead, which is conformant - the signed form is a MAY - and
+// a deployment running the draft-era shape carries the JWT in a
+// signed_metadata member of that JSON. All three are handled here, so this
+// tool reports what the issuer does rather than what it used to do.
+func fetchSignedMetadata(wellKnownURL, embedded string) (string, string) {
+	body, mediaType, err := httpGetAccepting(wellKnownURL, mediaTypeJWT)
+	if err != nil {
+		if embedded != "" {
+			return embedded, "signed_metadata member (draft-era shape)"
+		}
+		return "", fmt.Sprintf("request with Accept: %s failed: %v", mediaTypeJWT, err)
+	}
+
+	// Media type tokens are case-insensitive (RFC 9110 §8.3.1), so a
+	// conforming issuer may answer "Application/JWT".
+	if strings.EqualFold(mediaType, mediaTypeJWT) {
+		return strings.TrimSpace(string(body)), "application/jwt response"
+	}
+
+	if embedded != "" {
+		return embedded, "signed_metadata member (draft-era shape)"
+	}
+
+	return "", fmt.Sprintf("issuer answered %s; it does not serve signed metadata", mediaType)
 }
 
 func verifyChain(certs []*x509.Certificate) error {
