@@ -643,3 +643,55 @@ func TestVegaKeyStoreRefusesAcquisitionsOnceClosed(t *testing.T) {
 		t.Fatal("removeAll did not finish")
 	}
 }
+
+// The pin count has to span the WHOLE store, not just what is in the
+// entries map - because retireLocked takes an evicted-but-pinned entry OUT
+// of the map and leaves its file on disk for the last release. A shutdown
+// scanning the map saw zero and deleted the directory out from under that
+// worker: the failure the pinning exists to prevent, reached through the
+// one case where the entry is gone and the file is not.
+func TestVegaKeyStoreCloseWaitsForARetiredPin(t *testing.T) {
+	s := newVegaKeyStore(t.TempDir(), 10)
+
+	path, release, err := s.put("in-use", make([]byte, 8))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Evict it while pinned: gone from the map, file still on disk.
+	if _, releaseOther, err := s.put("other", make([]byte, 8)); err != nil {
+		t.Fatal(err)
+	} else {
+		releaseOther()
+	}
+	s.mu.Lock()
+	_, stillMapped := s.entries["in-use"]
+	s.mu.Unlock()
+	if stillMapped {
+		t.Fatal("in-use should have been retired out of the map")
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- s.removeAll(context.Background()) }()
+
+	time.Sleep(50 * time.Millisecond)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("teardown deleted a retired key that is still in use: %v", err)
+	}
+	select {
+	case err := <-closed:
+		t.Fatalf("removeAll returned while a retired key was pinned: %v", err)
+	default:
+	}
+
+	release()
+
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("removeAll() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("removeAll did not finish after the last release")
+	}
+}

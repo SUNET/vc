@@ -176,6 +176,17 @@ type vegaKeyStore struct {
 	// quietly recreate its directory because a background pre-warm landed
 	// a moment later and left key files behind after the process exited.
 	closed bool
+	// pins counts every outstanding hold across the WHOLE store, including
+	// entries that have been retired out of the map while still in use.
+	//
+	// Counted here rather than summed over entries, because the entries
+	// map is exactly where a retired-but-pinned key is NOT: retireLocked
+	// removes it and leaves its file on disk for the last release. A
+	// shutdown that scanned the map would see zero and delete the
+	// directory out from under that worker - the failure the pinning
+	// exists to prevent, reached through the one case where the entry is
+	// gone and the file is not.
+	pins int
 }
 
 // vegaKeyEntry is one key file and who is using it.
@@ -279,6 +290,7 @@ func (s *vegaKeyStore) acquire(id string) (string, func(), bool) {
 	}
 	s.cache.get(id)
 	entry.pins++
+	s.pins++
 	return entry.path, s.releaseFunc(id, entry), true
 }
 
@@ -290,6 +302,7 @@ func (s *vegaKeyStore) releaseFunc(id string, entry *vegaKeyEntry) func() {
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			entry.pins--
+			s.pins--
 			if entry.pins > 0 || !entry.evicted {
 				return
 			}
@@ -377,6 +390,7 @@ func (s *vegaKeyStore) put(id string, b []byte) (string, func(), error) {
 	}
 
 	entry := &vegaKeyEntry{path: path, size: len(b), pins: 1}
+	s.pins++
 	s.entries[id] = entry
 
 	// Evict only AFTER the new entry is installed and pinned. The other
@@ -483,14 +497,7 @@ func (s *vegaKeyStore) waitForPins(ctx context.Context) int {
 func (s *vegaKeyStore) pinnedCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	count := 0
-	for _, entry := range s.entries {
-		if entry.pins > 0 {
-			count++
-		}
-	}
-	return count
+	return s.pins
 }
 
 // resetLocked empties the store's bookkeeping. Callers hold s.mu.
@@ -498,6 +505,10 @@ func (s *vegaKeyStore) resetLocked() {
 	s.entries = make(map[string]*vegaKeyEntry)
 	s.cache = newVegaKeyCache(s.cache.max)
 	s.dir = ""
+	// pins is deliberately NOT cleared. Outstanding holds still exist and
+	// their releases will decrement it; zeroing it here would make the
+	// counter go negative and a second teardown read as "nothing pinned"
+	// when something is.
 }
 
 // vegaKeyFileSuffix is appended to a store file's unique name. Cosmetic;
