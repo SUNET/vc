@@ -86,6 +86,13 @@ func TestNewErrorFromError(t *testing.T) {
 		assert.Equal(t, have, got)
 	})
 
+	t.Run("wrapped *Error sentinel keeps its title", func(t *testing.T) {
+		have := fmt.Errorf("identity mapping resolution failed: %w", ErrIdentityMappingNamespaceRequired)
+		got := NewErrorFromError(have)
+		assert.Equal(t, ErrIdentityMappingNamespaceRequired, got)
+		assert.Equal(t, "IDENTITY_MAPPING_NAMESPACE_REQUIRED", got.Title)
+	})
+
 	t.Run("json.UnmarshalTypeError", func(t *testing.T) {
 		have := &json.UnmarshalTypeError{
 			Value:  "bool",

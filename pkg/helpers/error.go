@@ -132,6 +132,13 @@ func NewErrorFromError(v any) *Error {
 		return &Error{Title: "database_error", Err: ErrDocumentAlreadyExists}
 	}
 
+	// A sentinel wrapped with %w - e.g. ErrIdentityMappingNamespaceRequired from
+	// ResolveIdentifier - keeps its named title instead of collapsing to
+	// internal_server_error below.
+	if wrapped, ok := errors.AsType[*Error](err); ok {
+		return wrapped
+	}
+
 	return NewErrorDetails("internal_server_error", err.Error())
 }
 
