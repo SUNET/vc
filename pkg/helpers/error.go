@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 
@@ -30,6 +31,10 @@ var (
 
 	// ErrNoIdentityFound is returned when no identity is found
 	ErrNoIdentityFound = NewError("NO_IDENTITY_FOUND")
+
+	// ErrIdentityMappingNamespaceRequired is returned when an identity-mapping
+	// resolution names no authentic source to scope the lookup to. See SUNET/vc#507.
+	ErrIdentityMappingNamespaceRequired = NewErrorWithStatus("IDENTITY_MAPPING_NAMESPACE_REQUIRED", http.StatusBadRequest)
 
 	// ErrDuplicateKey is returned when a duplicate key is found
 	ErrDuplicateKey = NewError("DUPLICATE_KEY")
@@ -125,6 +130,13 @@ func NewErrorFromError(v any) *Error {
 	if mongo.IsDuplicateKeyError(err) {
 		fmt.Println("Duplicate key error")
 		return &Error{Title: "database_error", Err: ErrDocumentAlreadyExists}
+	}
+
+	// A sentinel wrapped with %w - e.g. ErrIdentityMappingNamespaceRequired from
+	// ResolveIdentifier - keeps its named title instead of collapsing to
+	// internal_server_error below.
+	if wrapped, ok := errors.AsType[*Error](err); ok {
+		return wrapped
 	}
 
 	return NewErrorDetails("internal_server_error", err.Error())

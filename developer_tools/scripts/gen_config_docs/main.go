@@ -714,6 +714,22 @@ func cleanFieldDesc(line, goName string) string {
 	return line
 }
 
+// fenceEdge handles a ``` line and the blank lines gofmt insists on putting
+// just inside it. Those blanks are the Go comment's punctuation, not the
+// example's, so they are dropped rather than rendered inside the block.
+func fenceEdge(extra []string, opening bool) []string {
+	if !opening && len(extra) > 0 && extra[len(extra)-1] == "" {
+		extra = extra[:len(extra)-1]
+	}
+	return extra
+}
+
+// structDescription renders a struct's doc comment as the section preamble.
+//
+// Lines reflow as markdown, EXCEPT inside a ``` fenced block, where the
+// indentation is the content - a YAML example flattened to column zero is not
+// an example of anything. See IssuancePolicy, whose policy has to be shown as
+// rules and query_template together to be a configuration at all.
 func structDescription(def *StructDef) string {
 	if def == nil || def.Doc == "" {
 		return ""
@@ -730,8 +746,27 @@ func structDescription(def *StructDef) string {
 	}
 	var extra []string
 	pastBlank := false
-	for _, l := range lines[1:] {
-		l = strings.TrimSpace(l)
+	inFence, skipBlank := false, false
+	for _, raw := range lines[1:] {
+		l := strings.TrimSpace(raw)
+		// Inside a fenced block the indentation IS the content, so the
+		// line is taken as written. Go doc comments indent an example by
+		// one tab; that tab is the comment's, not the example's.
+		if strings.HasPrefix(l, "```") {
+			inFence = !inFence
+			pastBlank = true
+			extra = append(fenceEdge(extra, inFence), l)
+			skipBlank = inFence
+			continue
+		}
+		if inFence {
+			if skipBlank && l == "" {
+				continue
+			}
+			skipBlank = false
+			extra = append(extra, strings.TrimPrefix(raw, "\t"))
+			continue
+		}
 		if l == "" {
 			pastBlank = true
 			if len(extra) > 0 {
@@ -758,8 +793,23 @@ func structDescriptionExtra(def *StructDef) string {
 		return ""
 	}
 	var extra []string
-	for _, l := range lines[1:] {
-		l = strings.TrimSpace(l)
+	inFence, skipBlank := false, false
+	for _, raw := range lines[1:] {
+		l := strings.TrimSpace(raw)
+		if strings.HasPrefix(l, "```") {
+			inFence = !inFence
+			extra = append(fenceEdge(extra, inFence), l)
+			skipBlank = inFence
+			continue
+		}
+		if inFence {
+			if skipBlank && l == "" {
+				continue
+			}
+			skipBlank = false
+			extra = append(extra, strings.TrimPrefix(raw, "\t"))
+			continue
+		}
 		if l == "" {
 			if len(extra) > 0 {
 				extra = append(extra, "")
@@ -1113,6 +1163,16 @@ func asMapType(expr ast.Expr) (*ast.MapType, bool) {
 	}
 }
 
+// structHasField reports whether def declares a field with this yaml name.
+func structHasField(def *StructDef, yamlName string) bool {
+	for _, f := range def.Fields {
+		if f.Tag.YAMLName == yamlName {
+			return true
+		}
+	}
+	return false
+}
+
 func buildStructSubSection(reg *TypeRegistry, def *StructDef, path string) *SubSection {
 	sub := &SubSection{Path: path, TypeName: def.Name}
 
@@ -1125,9 +1185,12 @@ func buildStructSubSection(reg *TypeRegistry, def *StructDef, path string) *SubS
 		if f.Tag.YAMLName == "" || f.Tag.YAMLName == "-" {
 			continue
 		}
-		// Primitive Args structs always pair `input` with an `output` that
-		// mirrors it; the description covers the semantics, so skip the row.
-		if def.PkgName == "primitives" && f.Tag.YAMLName == "output" {
+		// A primitive that pairs `input` with an `output` mirroring it has
+		// the semantics covered by the description, so the row is skipped.
+		// Only then: a primitive with no input has nothing for `output` to
+		// mirror, and dropping it hides the one field a configuration
+		// cannot omit - see `random`.
+		if def.PkgName == "primitives" && f.Tag.YAMLName == "output" && structHasField(def, "input") {
 			continue
 		}
 		row := TableRow{

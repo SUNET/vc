@@ -9,7 +9,9 @@ import {
     base64ToUtf8,
     detectBase64Image,
     escapeHtml,
+    escapeSvgValue,
     flattenClaims,
+    clearUnresolvedPlaceholders,
     IMAGE_PLACEHOLDERS,
     keyToLabel,
     renderClaimValueHtml,
@@ -176,6 +178,23 @@ describe("valueForSvgPlaceholder", () => {
 
     it("declares `picture` as an image-bearing placeholder", () => {
         assert.ok(IMAGE_PLACEHOLDERS.has("picture"));
+    });
+
+    // "portrait" is the ISO 18013-5 and EUDI PID element id for the same
+    // thing, and the mdoc cards use it. Without it the photo slot would
+    // take an arbitrary claim string as an href.
+    it("declares `portrait` as an image-bearing placeholder", () => {
+        assert.ok(IMAGE_PLACEHOLDERS.has("portrait"));
+    });
+
+    it("applies the same rules to `portrait` as to `picture`", () => {
+        assert.equal(
+            valueForSvgPlaceholder("portrait", tinyPngB64),
+            `data:image/png;base64,${tinyPngB64}`,
+        );
+        assert.equal(valueForSvgPlaceholder("portrait", "https://tracker.example/x"), "");
+        assert.equal(valueForSvgPlaceholder("portrait", "data:image/svg+xml,<svg onload='x'/>"), "");
+        assert.equal(valueForSvgPlaceholder("portrait", "not-an-image"), "");
     });
 
     it("accepts a validated base64 image for an image placeholder", () => {
@@ -516,5 +535,72 @@ describe("PID end-to-end: Valibot schema + flattenClaims + renderClaimValueHtml"
         // Array of objects — indexed layout preserved.
         const objHtml = renderClaimValueHtml([{ name: "a" }]);
         assert.ok(objHtml.includes("0"), "array of objects shows index");
+    });
+});
+
+describe("clearUnresolvedPlaceholders", () => {
+    it("removes a slot no claim resolved", () => {
+        // A PID without the optional document_number: the label stays, the
+        // value slot goes, instead of drawing "{{document_number}}".
+        const svg = '<text>DOCUMENT NUMBER</text><text>{{document_number}}</text>';
+        assert.equal(
+            clearUnresolvedPlaceholders(svg),
+            "<text>DOCUMENT NUMBER</text><text></text>",
+        );
+    });
+
+    it("empties an unresolved image href rather than leaving a literal", () => {
+        const svg = '<image href="{{portrait}}"/>';
+        assert.equal(clearUnresolvedPlaceholders(svg), '<image href=""/>');
+    });
+
+    it("removes several, and leaves the rest of the markup alone", () => {
+        const svg = "<svg><a>{{given_name}}</a><b>Ada</b><c>{{portrait}}</c></svg>";
+        assert.equal(clearUnresolvedPlaceholders(svg), "<svg><a></a><b>Ada</b><c></c></svg>");
+    });
+
+    it("leaves a document with no placeholders untouched", () => {
+        const svg = "<svg><text>mDL</text></svg>";
+        assert.equal(clearUnresolvedPlaceholders(svg), svg);
+    });
+
+    // escapeHtml runs before this, so a claim value containing braces
+    // arrives as entities and cannot be eaten here. The narrow character
+    // class is the second line of defence.
+    it("does not match anything that is not placeholder-shaped", () => {
+        const svg = "<text>{{ spaced }}</text><text>{{a-b}}</text><text>{single}</text>";
+        assert.equal(clearUnresolvedPlaceholders(svg), svg);
+    });
+});
+
+describe("escapeSvgValue", () => {
+    it("escapes what escapeHtml escapes", () => {
+        assert.equal(escapeSvgValue(`O'Brien & <Co>`), "O&#39;Brien &amp; &lt;Co&gt;");
+    });
+
+    // The reason this exists: clearUnresolvedPlaceholders runs afterwards
+    // and removes anything still placeholder-shaped, so a claim value that
+    // contains braces has to stop looking like one. escapeHtml alone does
+    // not touch braces.
+    it("encodes braces so a value is never mistaken for a slot", () => {
+        assert.equal(escapeSvgValue("Ada {{middle_name}}"), "Ada &#123;&#123;middle_name&#125;&#125;");
+        assert.equal(escapeHtml("Ada {{middle_name}}"), "Ada {{middle_name}}");
+    });
+
+    it("survives the cleanup that follows it", () => {
+        const substituted = `<text>${escapeSvgValue("Ada {{middle_name}}")}</text><text>{{missing}}</text>`;
+        assert.equal(
+            clearUnresolvedPlaceholders(substituted),
+            "<text>Ada &#123;&#123;middle_name&#125;&#125;</text><text></text>",
+        );
+    });
+
+    it("leaves an ordinary value alone", () => {
+        assert.equal(escapeSvgValue("Lovelace"), "Lovelace");
+    });
+
+    it("leaves a base64 data URL alone", () => {
+        const url = "data:image/png;base64,iVBORw0KGgo=";
+        assert.equal(escapeSvgValue(url), url);
     });
 });

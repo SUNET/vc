@@ -28,6 +28,7 @@ type PKCS11Config struct {
 // PKCS11Signer implements Signer using a PKCS#11 HSM.
 type PKCS11Signer struct {
 	ctx        *pkcs11.Ctx
+	module     *pkcs11Module
 	session    pkcs11.SessionHandle
 	privateKey pkcs11.ObjectHandle
 	publicKey  any
@@ -38,29 +39,31 @@ type PKCS11Signer struct {
 
 // NewPKCS11Signer creates a new PKCS11Signer from HSM configuration.
 func NewPKCS11Signer(config *PKCS11Config) (*PKCS11Signer, error) {
-	ctx := pkcs11.New(config.ModulePath)
-	if ctx == nil {
-		return nil, fmt.Errorf("failed to load PKCS#11 module: %s", config.ModulePath)
+	// Through the registry, not pkcs11.New + Initialize: C_Initialize is
+	// library-wide, so a signer that opened the module itself could neither
+	// start alongside another user of the same module nor stop without
+	// finalizing it under them. See pkcs11_module.go.
+	module, err := acquireModule(config.ModulePath)
+	if err != nil {
+		return nil, err
 	}
-
-	if err := ctx.Initialize(); err != nil {
-		return nil, fmt.Errorf("failed to initialize PKCS#11: %w", err)
-	}
+	ctx := module.ctx
 
 	session, err := ctx.OpenSession(config.SlotID, pkcs11.CKF_SERIAL_SESSION)
 	if err != nil {
-		ctx.Finalize()
+		releaseModule(module)
 		return nil, fmt.Errorf("failed to open session: %w", err)
 	}
 
-	if err := ctx.Login(session, pkcs11.CKU_USER, config.PIN); err != nil {
+	if err := loginSession(ctx, session, config.PIN); err != nil {
 		ctx.CloseSession(session)
-		ctx.Finalize()
+		releaseModule(module)
 		return nil, fmt.Errorf("failed to login: %w", err)
 	}
 
 	s := &PKCS11Signer{
 		ctx:     ctx,
+		module:  module,
 		session: session,
 		keyID:   config.KeyID,
 	}
@@ -292,9 +295,15 @@ func (s *PKCS11Signer) PublicKey() any {
 // Close releases HSM resources.
 func (s *PKCS11Signer) Close() error {
 	if s.ctx != nil {
-		s.ctx.Logout(s.session)
+		// No Logout: it is token-wide, so it would log out every other
+		// session this process holds on the same slot. Closing the last
+		// session logs the application out by itself.
 		s.ctx.CloseSession(s.session)
-		s.ctx.Finalize()
+		// releaseModule rather than Finalize: the module is shared, and
+		// finalizing it here would close it for every other session in the
+		// process. It is finalized when the last user releases it.
+		releaseModule(s.module)
+		s.ctx, s.module = nil, nil
 	}
 	return nil
 }

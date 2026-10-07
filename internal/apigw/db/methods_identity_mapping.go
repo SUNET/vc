@@ -148,22 +148,24 @@ func (c *IdentityMappingsColl) ResolveMapping(ctx context.Context, query *Resolv
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:identities:resolveMapping")
 	defer span.End()
 
-	conditions := []bson.M{}
-	if query.AuthenticSource != "" {
-		conditions = append(conditions, bson.M{
-			"authentic_source": bson.M{"$eq": query.AuthenticSource},
-		})
+	// An identity mapping is scoped to an authentic source, and a lookup
+	// that names none searches every namespace at once: the result is
+	// whichever row the store reaches first, which is not the namespace the
+	// caller meant even when it happens to be the right person. Refusing is
+	// the only answer that holds regardless of what is stored. SUNET/vc#507.
+	if query.AuthenticSource == "" {
+		span.SetStatus(codes.Error, helpers.ErrIdentityMappingNamespaceRequired.Error())
+		return "", helpers.ErrIdentityMappingNamespaceRequired
+	}
+
+	conditions := []bson.M{
+		{"authentic_source": bson.M{"$eq": query.AuthenticSource}},
 	}
 
 	for key, value := range query.Attributes {
 		conditions = append(conditions, bson.M{
 			"attributes." + key: bson.M{"$eq": value},
 		})
-	}
-
-	if len(conditions) == 0 {
-		span.SetStatus(codes.Error, helpers.ErrNoIdentityFound.Error())
-		return "", helpers.ErrNoIdentityFound
 	}
 
 	filter := bson.M{"$and": conditions}

@@ -43,6 +43,7 @@ type MetadataConfig struct {
 	// that map here would duplicate the policy in the place least able to see
 	// it, so callers populate ProofTypesSupported themselves.
 	ProofSigningAlgValuesSupported    []string
+	CredentialRequestEncryption       *MetadataCredentialRequestEncryption
 	CredentialResponseEncryption      *MetadataCredentialResponseEncryption
 	BatchCredentialIssuance           *BatchCredentialIssuance
 	Display                           []MetadataDisplay
@@ -84,7 +85,10 @@ func (cfg *MetadataConfig) GenerateIssuerMetadata(ctx context.Context) *Credenti
 		metadata.CredentialConfigurationsSupported[id] = cfg.applyDefaults(config)
 	}
 
-	// Set credential response encryption if provided
+	// Set credential request/response encryption if provided
+	if cfg.CredentialRequestEncryption != nil {
+		metadata.CredentialRequestEncryption = cfg.CredentialRequestEncryption
+	}
 	if cfg.CredentialResponseEncryption != nil {
 		metadata.CredentialResponseEncryption = cfg.CredentialResponseEncryption
 	}

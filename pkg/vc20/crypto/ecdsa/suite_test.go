@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestSignAndVerify(t *testing.T) {
@@ -60,4 +62,37 @@ func TestSignAndVerify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to verify credential: %v", err)
 	}
+}
+
+// TestVerifyProofSelectsByProofValue pins the mechanism the OpenID4VP handler
+// now relies on: VerifyProof checks the proof carrying exactly the value it is
+// given, and an empty value means "whichever proof is found first".
+//
+// Without this, passing a selector through from the handler would be
+// ceremony - the suite has to actually honour it.
+func TestVerifyProofSelectsByProofValue(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	cred, err := credential.NewRDFCredentialFromJSON([]byte(`{
+		"@context": "https://www.w3.org/ns/credentials/v2",
+		"type": ["VerifiableCredential"],
+		"issuer": "did:example:issuer",
+		"credentialSubject": {"id": "did:example:subject"}
+	}`), nil)
+	require.NoError(t, err)
+
+	signed, err := NewSuite().Sign(context.Background(), cred, key, &SignOptions{
+		VerificationMethod: "did:example:issuer#key-1",
+		ProofPurpose:       "assertionMethod",
+		Created:            time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	suite := NewSuite()
+	require.NoError(t, suite.Verify(signed, &key.PublicKey),
+		"the empty selector takes the only proof there is")
+
+	require.Error(t, suite.VerifyProof(signed, &key.PublicKey, "zNotTheProofValueOnThisDocument"),
+		"a selector naming no proof in the document must not fall back to one that is there")
 }

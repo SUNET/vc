@@ -22,6 +22,13 @@ func NewValidator() (*validator.Validate, error) {
 		return name
 	})
 
+	// PARRequest.DynamicParams is tagged safe_key, and an unregistered tag
+	// panics when the struct is first parsed - not merely when the field is
+	// set - so this is required for any validation of that struct at all.
+	if err := RegisterSafeKey(validate); err != nil {
+		return nil, err
+	}
+
 	return validate, nil
 }
 

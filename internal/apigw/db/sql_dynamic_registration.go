@@ -59,6 +59,60 @@ func (c *SQLDynamicRegistrationColl) Save(ctx context.Context, creds *DynamicReg
 	return nil
 }
 
+// GetByClientID returns one stored registration by client_id, or nil.
+func (c *SQLDynamicRegistrationColl) GetByClientID(ctx context.Context, clientID string) (*DynamicRegistrationCredentials, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:dynamic_registration:get_by_client_id")
+	defer span.End()
+
+	if clientID == "" {
+		return nil, nil
+	}
+
+	query := c.dialect.Rebind(`SELECT client_id, client_secret, registration_access_token,
+		registration_client_uri, client_secret_expires_at, registered_at
+		FROM oidc_dynamic_registration WHERE client_id = ?`)
+
+	var row dynamicRegistrationRow
+	if err := c.db.GetContext(ctx, &row, query, clientID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	return &DynamicRegistrationCredentials{
+		ClientID:                row.ClientID,
+		ClientSecret:            row.ClientSecret,
+		RegistrationAccessToken: row.RegistrationAccessToken,
+		RegistrationClientURI:   row.RegistrationClientURI,
+		ClientSecretExpiresAt:   row.ClientSecretExpiresAt,
+		RegisteredAt:            row.RegisteredAt,
+	}, nil
+}
+
+// PruneExpiredRegistrations removes registrations other than keepClientID
+// whose client secret had expired at now.
+func (c *SQLDynamicRegistrationColl) PruneExpiredRegistrations(ctx context.Context, keepClientID string, now time.Time) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:dynamic_registration:prune_expired")
+	defer span.End()
+
+	if keepClientID == "" {
+		return nil
+	}
+
+	// client_secret_expires_at 0 means "never expires" (RFC 7591 §3.2.1).
+	query := c.dialect.Rebind(
+		`DELETE FROM oidc_dynamic_registration
+		 WHERE client_id <> ? AND client_secret_expires_at > 0 AND client_secret_expires_at < ?`)
+	if _, err := c.db.ExecContext(ctx, query, keepClientID, now.Unix()); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
+	return nil
+}
+
 // Get returns the stored credentials, or nil if none exist or the client secret has expired.
 func (c *SQLDynamicRegistrationColl) Get(ctx context.Context) (*DynamicRegistrationCredentials, error) {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:dynamic_registration:get")
@@ -66,7 +120,7 @@ func (c *SQLDynamicRegistrationColl) Get(ctx context.Context) (*DynamicRegistrat
 
 	query := c.dialect.Rebind(`SELECT client_id, client_secret, registration_access_token,
 		registration_client_uri, client_secret_expires_at, registered_at
-		FROM oidc_dynamic_registration LIMIT 1`)
+		FROM oidc_dynamic_registration ORDER BY registered_at DESC LIMIT 1`)
 
 	var row dynamicRegistrationRow
 	if err := c.db.GetContext(ctx, &row, query); err != nil {

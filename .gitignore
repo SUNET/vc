@@ -35,6 +35,7 @@ developer_tools/pki/*
 /persistent
 /registry
 /verifier
+/jwt_issuer
 
 # gen_bootstrap gzip artifacts (committed copies live under fly/dev/bootstrapping/)
 bootstrapping/*.json.gz
