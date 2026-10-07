@@ -148,7 +148,7 @@ func testIdentityMappingStoreContract(t *testing.T, store IdentityMappingStore) 
 	_, err = store.ResolveMapping(ctx, &ResolveMappingQuery{
 		Attributes: map[string]string{"family_name": "Twin", "given_name": "Sam"},
 	})
-	assert.ErrorIs(t, err, ErrIdentityMappingNamespaceRequired,
+	assert.ErrorIs(t, err, helpers.ErrIdentityMappingNamespaceRequired,
 		"an unnamespaced resolve can only return an arbitrary one of the two")
 
 	// Naming the namespace resolves, and resolves to the right person.

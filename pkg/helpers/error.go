@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 
@@ -30,6 +31,10 @@ var (
 
 	// ErrNoIdentityFound is returned when no identity is found
 	ErrNoIdentityFound = NewError("NO_IDENTITY_FOUND")
+
+	// ErrIdentityMappingNamespaceRequired is returned when an identity-mapping
+	// resolution names no authentic source to scope the lookup to. See SUNET/vc#507.
+	ErrIdentityMappingNamespaceRequired = NewErrorWithStatus("IDENTITY_MAPPING_NAMESPACE_REQUIRED", http.StatusBadRequest)
 
 	// ErrDuplicateKey is returned when a duplicate key is found
 	ErrDuplicateKey = NewError("DUPLICATE_KEY")

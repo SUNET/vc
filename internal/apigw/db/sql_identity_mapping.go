@@ -137,8 +137,8 @@ func (c *SQLIdentityMappingsColl) ResolveMapping(ctx context.Context, query *Res
 
 	// See the note on IdentityMappingsColl.ResolveMapping.
 	if query.AuthenticSource == "" {
-		span.SetStatus(codes.Error, ErrIdentityMappingNamespaceRequired.Error())
-		return "", ErrIdentityMappingNamespaceRequired
+		span.SetStatus(codes.Error, helpers.ErrIdentityMappingNamespaceRequired.Error())
+		return "", helpers.ErrIdentityMappingNamespaceRequired
 	}
 
 	conditions := []string{"authentic_source = ?"}

@@ -43,6 +43,7 @@ func TestStatusCode(t *testing.T) {
 		}{
 			{"not_found", helpers.ErrNoDocumentFound, http.StatusNotFound},
 			{"no_identity", helpers.ErrNoIdentityFound, http.StatusNotFound},
+			{"namespace_required", helpers.ErrIdentityMappingNamespaceRequired, http.StatusBadRequest},
 			{"already_exists", helpers.ErrDocumentAlreadyExists, http.StatusConflict},
 			{"duplicate_key", helpers.ErrDuplicateKey, http.StatusConflict},
 			{"validation_failed", helpers.ErrDocumentValidationFailed, http.StatusBadRequest},

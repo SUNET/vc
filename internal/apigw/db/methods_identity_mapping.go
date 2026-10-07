@@ -154,8 +154,8 @@ func (c *IdentityMappingsColl) ResolveMapping(ctx context.Context, query *Resolv
 	// caller meant even when it happens to be the right person. Refusing is
 	// the only answer that holds regardless of what is stored. SUNET/vc#507.
 	if query.AuthenticSource == "" {
-		span.SetStatus(codes.Error, ErrIdentityMappingNamespaceRequired.Error())
-		return "", ErrIdentityMappingNamespaceRequired
+		span.SetStatus(codes.Error, helpers.ErrIdentityMappingNamespaceRequired.Error())
+		return "", helpers.ErrIdentityMappingNamespaceRequired
 	}
 
 	conditions := []bson.M{
