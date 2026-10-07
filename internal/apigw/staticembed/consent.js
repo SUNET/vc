@@ -3,7 +3,9 @@ import * as v from "valibot";
 
 import {
     base64ToUtf8,
+    clearUnresolvedPlaceholders,
     escapeHtml,
+    escapeSvgValue,
     flattenClaims,
     renderClaimValueHtml,
     utf8ToBase64,
@@ -289,7 +291,10 @@ Alpine.data("app", () => ({
                         data.svg_template_claims,
                     );
                 } catch (_) {
-                    // VCTM has no SVG template — display claims without card image
+                    // Template could not be decoded — display claims without
+                    // a card image. An absent template is not an error and
+                    // does not reach here; applyClaimsToSvgTemplate returns
+                    // null for it.
                 }
             }
 
@@ -354,9 +359,17 @@ Alpine.data("app", () => ({
      * Apply claim values to a pre-fetched SVG template and return a data URI.
      * @param {SvgTemplateResponse} svgData - Pre-fetched SVG template response
      * @param {Record<string, { label: string; value: unknown; }>} claims
-     * @returns {string}
+     * @returns {string|null}
      */
     applyClaimsToSvgTemplate(svgData, claims) {
+        // An empty template is how the server says this credential type has
+        // no card image. Encoding it anyway would produce
+        // "data:image/svg+xml;base64," — a truthy string, so the <img> would
+        // be shown and render as a broken image rather than being hidden.
+        if (!svgData || !svgData.template) {
+            return null;
+        }
+
         // Decode the template as UTF-8 — `atob` alone returns a Latin-1 byte
         // string, which would corrupt any non-ASCII characters in the SVG
         // when re-encoded with utf8ToBase64 below.
@@ -372,10 +385,20 @@ Alpine.data("app", () => ({
             if (resolved === null) continue;
             // Escape for XML text/attribute contexts. Without this, a value
             // like O'Brien & Co. or "</text>..." would break SVG parsing or
-            // alter its structure. Base64 data: URLs only use characters
+            // alter its structure. escapeSvgValue also encodes braces, so a
+            // value containing "{{...}}" is not mistaken for a slot by the
+            // cleanup below. Base64 data: URLs only use characters
             // [A-Za-z0-9+/=:;,/.] so escaping is a no-op for them.
-            svg = svg.replaceAll(`{{${svg_id}}}`, escapeHtml(resolved));
+            //
+            // The replacement is a function so the string is taken
+            // literally: a value containing "$&" or "$1" would otherwise be
+            // interpreted as a replacement pattern.
+            const escaped = escapeSvgValue(resolved);
+            svg = svg.replaceAll(`{{${svg_id}}}`, () => escaped);
         }
+
+        // Clear whatever is left — see clearUnresolvedPlaceholders.
+        svg = clearUnresolvedPlaceholders(svg);
 
         return `data:image/svg+xml;base64,${utf8ToBase64(svg)}`;
     },
