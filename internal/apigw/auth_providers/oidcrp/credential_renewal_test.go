@@ -356,9 +356,9 @@ func TestEnsureCredentialsRefusesAFlowThatCannotOutlastTheSecret(t *testing.T) {
 	s.renewalLock = lock
 
 	// Another replica already holds the lock and has not yet published.
-	held, err := lock.TryLock(t.Context(), "oidcrp:renew:"+s.cfg.IssuerURL, clientRenewLockTTL)
+	token, err := lock.TryLock(t.Context(), s.renewLockKey(), clientRenewLockTTL)
 	require.NoError(t, err)
-	require.True(t, held)
+	require.NotEmpty(t, token)
 
 	err = s.ensureCredentials(t.Context())
 	require.Error(t, err, "a flow begun now could not redeem its code before the secret expires")
@@ -378,14 +378,34 @@ func TestEnsureCredentialsCarriesOnWhenAFlowCanStillComplete(t *testing.T) {
 	s := renewalService(t, op, store, time.Now().Add(3*time.Minute))
 	s.renewalLock = lock
 
-	held, err := lock.TryLock(t.Context(), "oidcrp:renew:"+s.cfg.IssuerURL, clientRenewLockTTL)
+	held, err := lock.TryLock(t.Context(), s.renewLockKey(), clientRenewLockTTL)
 	require.NoError(t, err)
-	require.True(t, held)
+	require.NotEmpty(t, held)
 
 	require.NoError(t, s.ensureCredentials(t.Context()),
 		"the current secret still outlasts a flow; refusing would be premature")
 	assert.Equal(t, 0, op.count(), "the losing replica must not register")
 	assert.Equal(t, "client-0", s.currentClientID(t))
+}
+
+// A failed renewal must release the lock, not hold it for the full TTL:
+// otherwise the 5-second backoff cannot retry, because every replica - the
+// original holder included - would see the lock as taken until the TTL. After
+// a tolerated failure the lock is free again.
+func TestEnsureCredentialsReleasesTheLockAfterAFailedRenewal(t *testing.T) {
+	op := newOPServer(t)
+	op.refuse = true
+	store := &fakeRegistrationStore{}
+	lock := cache.NewMemoryLocker()
+	s := renewalService(t, op, store, time.Now().Add(clientSecretRenewBefore/2))
+	s.renewalLock = lock
+
+	require.NoError(t, s.ensureCredentials(t.Context()),
+		"the secret is still valid, so a failed renewal is tolerated")
+
+	token, err := lock.TryLock(t.Context(), s.renewLockKey(), clientRenewLockTTL)
+	require.NoError(t, err)
+	assert.NotEmpty(t, token, "a failed renewal must release the lock, not hold it until the TTL")
 }
 
 // A secret that is inside the renewal window but still valid must not take

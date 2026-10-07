@@ -284,6 +284,12 @@ func (s *Service) flowCanOutlastSecret(now time.Time, c *credentials) bool {
 	return now.Add(session + flowStartSkew).Before(c.expiresAt)
 }
 
+// renewLockKey is the cross-replica renewal lock key: the RP's stable identity,
+// so diverged replicas always contend on one key. See ensureCredentials.
+func (s *Service) renewLockKey() string {
+	return "oidcrp:renew:" + s.cfg.IssuerURL
+}
+
 // credentialsForSession resolves the registration a flow started under.
 //
 // In HA the session store is shared but credentialSet is per process, so a
@@ -420,8 +426,15 @@ func (s *Service) ensureCredentials(ctx context.Context) error {
 	// them on different locks forever and they would never re-converge. On the
 	// issuer URL they always contend, so adoptRenewedRegistration pulls them
 	// back onto one client.
+	//
+	// The lease is released on completion, not left to the TTL: a failed
+	// registration otherwise blocked every replica - the holder included -
+	// until the 2-minute TTL, defeating the 5-second backoff and turning a
+	// transient OP error into an outage. Because the holder releases, a later
+	// acquirer must re-check the store before registering, or releasing on
+	// success would let a straggler register a second client.
 	if s.renewalLock != nil {
-		acquired, err := s.renewalLock.TryLock(ctx, "oidcrp:renew:"+s.cfg.IssuerURL, clientRenewLockTTL)
+		token, err := s.renewalLock.TryLock(ctx, s.renewLockKey(), clientRenewLockTTL)
 		switch {
 		case err != nil:
 			// Lock backend unreachable. Renew anyway rather than refuse a
@@ -429,7 +442,7 @@ func (s *Service) ensureCredentials(ctx context.Context) error {
 			// registration is better than a failed login.
 			s.log.Warn("renewal lock unavailable, renewing without cross-replica coordination",
 				"error", err.Error(), "client_id", current.clientID)
-		case !acquired:
+		case token == "":
 			// Another replica holds the lock and is renewing this client.
 			// Prefer its result.
 			if s.adoptRenewedRegistration(ctx, current) {
@@ -447,6 +460,22 @@ func (s *Service) ensureCredentials(ctx context.Context) error {
 			// registration will have landed by the time the caller retries.
 			return fmt.Errorf("OIDC client secret for %q expires at %s, within one session of now, and another replica is re-registering it; retry shortly",
 				current.clientID, current.expiresAt.Format(time.RFC3339))
+		default:
+			// Acquired. Release on return so a failed renewal can retry before
+			// the TTL, using a context that outlives a cancelled request so
+			// the lock is always freed.
+			defer func() {
+				releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				if err := s.renewalLock.Unlock(releaseCtx, s.renewLockKey(), token); err != nil {
+					s.log.Warn("failed to release renewal lock", "error", err.Error(), "client_id", current.clientID)
+				}
+			}()
+			// A winner may have registered between our needsRenewal check and
+			// taking the lock; adopt it rather than register a second client.
+			if s.adoptRenewedRegistration(ctx, current) {
+				return nil
+			}
 		}
 	}
 
