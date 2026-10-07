@@ -61,7 +61,7 @@ func TestAllow(t *testing.T) {
 			redirectURI: "https://example.com/callback",
 			scope:       "el",
 			clients:     mockClients,
-			want:        want{client: nil, err: errors.New("requested scope is not allowed for this client")},
+			want:        want{client: nil, err: errors.New(`scope "el" is not allowed for client "client_2" (allowed: diploma, elm)`)},
 		},
 		{
 			name:        "client not in config",
@@ -69,7 +69,7 @@ func TestAllow(t *testing.T) {
 			redirectURI: "https://example.com/callback",
 			scope:       "openid",
 			clients:     mockClients,
-			want:        want{client: nil, err: errors.New("client not found in config")},
+			want:        want{client: nil, err: ErrClientNotFound},
 		},
 		{
 			name:        "redirect url trailing slash",
@@ -77,7 +77,7 @@ func TestAllow(t *testing.T) {
 			redirectURI: "https://example.com/callback/",
 			scope:       "ehic",
 			clients:     mockClients,
-			want:        want{client: nil, err: errors.New("redirect_uri does not match any allowed URI")},
+			want:        want{client: nil, err: errors.New(`redirect_uri "https://example.com/callback/" does not match any of the 1 URIs configured for client "client_1" (allowed: https://example.com/callback)`)},
 		},
 		{
 			name:        "client with no redirect URIs configured",
@@ -85,7 +85,7 @@ func TestAllow(t *testing.T) {
 			redirectURI: "https://example.com/callback",
 			scope:       "ehic",
 			clients:     mockClients,
-			want:        want{client: nil, err: errors.New("no redirect_uri configured for client")},
+			want:        want{client: nil, err: errors.New(`client "client_no_redirect" has no redirect_uri configured`)},
 		},
 		{
 			name:        "nil client value in config",
@@ -93,7 +93,7 @@ func TestAllow(t *testing.T) {
 			redirectURI: "https://example.com/callback",
 			scope:       "ehic",
 			clients:     mockClients,
-			want:        want{client: nil, err: errors.New("client not found in config")},
+			want:        want{client: nil, err: ErrClientNotFound},
 		},
 	}
 
