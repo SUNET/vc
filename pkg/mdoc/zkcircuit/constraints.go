@@ -398,6 +398,18 @@ func (r *Resolver) Manifest(ctx context.Context) (manifest *Manifest, stale bool
 
 	fetched, fetchErr := r.Client.FetchManifest(ctx)
 	if fetchErr != nil {
+		// A cancelled or timed-out REQUEST says nothing about the
+		// catalog, and the backoff state is shared by every caller. One
+		// client hanging up during the first fetch would otherwise make
+		// every subsequent issuance replay that cancellation for the
+		// retry interval, against a catalog that is perfectly healthy.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if r.manifest != nil {
+				return r.manifest, true, nil
+			}
+			return nil, false, fetchErr
+		}
+
 		r.lastFailure = r.now()
 		if r.manifest != nil {
 			return r.manifest, true, nil

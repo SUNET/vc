@@ -244,8 +244,11 @@ func newCountingClient(body string) *countingClient {
 	cc := &countingClient{}
 	cc.Client = &Client{
 		Sources: []string{"https://catalog.example"},
-		FetchText: func(context.Context, string) (string, error) {
+		FetchText: func(ctx context.Context, _ string) (string, error) {
 			cc.fetches++
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
 			if cc.fail {
 				return "", errors.New("catalog unreachable")
 			}
@@ -495,5 +498,31 @@ func TestResolverBacksOffWhenItHasNeverReachedTheCatalog(t *testing.T) {
 	salt, stale, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL)
 	if err != nil || stale || salt != 32 {
 		t.Fatalf("SaltBytes = %d, stale=%v, %v; want 32, false, nil", salt, stale, err)
+	}
+}
+
+// The backoff state is shared by every caller, so a REQUEST being
+// cancelled must not enter it: one client hanging up during the first
+// fetch would otherwise make every subsequent issuance replay that
+// cancellation for the retry interval, against a healthy catalog.
+func TestResolverDoesNotBackOffOnACancelledRequest(t *testing.T) {
+	cc := newCountingClient(oneVegaCircuit)
+	cc.fail = true
+	r := &Resolver{Client: cc.Client, TTL: time.Minute, RetryInterval: 5 * time.Minute}
+
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, _, err := r.SaltBytes(cancelled, []string{"vega-mc"}, mDL); err == nil {
+		t.Fatal("expected the cancelled request to fail")
+	}
+
+	// The catalog comes back - or rather, was never the problem.
+	cc.fail = false
+	salt, stale, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL)
+	if err != nil {
+		t.Fatalf("a healthy catalog must answer the next request: %v", err)
+	}
+	if stale || salt != 32 {
+		t.Fatalf("SaltBytes = %d, stale=%v; want 32, false", salt, stale)
 	}
 }

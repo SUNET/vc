@@ -475,3 +475,62 @@ func TestVendorReusesAVerifiedArtifactAndRefetchesATamperedOne(t *testing.T) {
 		t.Errorf("fetches = %d after tampering, want the artifact refetched", fetches)
 	}
 }
+
+// -out names a directory the operator has not created yet, which is the
+// documented first run: MkdirTemp wants its parent to exist.
+func TestVendorCreatesTheOutputDirectory(t *testing.T) {
+	body := []byte("verifier key bytes")
+	artifact, urlPath := artifactFor(body, "")
+	source := catalogServer(t,
+		[]map[string]any{{
+			"id": "vega-verifier-r12", "system": "vega-mc", "systemVersion": "12",
+			"status": "active", "published": true, "artifact": artifact,
+			"params": map[string]any{"role": "verifier", "saltBytes": "32"},
+		}},
+		map[string][]byte{urlPath: body},
+	)
+
+	out := filepath.Join(t.TempDir(), "etc", "vc", "zk-circuits")
+	if err := run(t.Context(), source, out, "", "", true, false); err != nil {
+		t.Fatalf("run() into a directory that does not exist yet: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "v1", "manifest.json")); err != nil {
+		t.Errorf("the mirror was not written: %v", err)
+	}
+}
+
+// Artifact.Hash is catalog data, and the ALGORITHM has to be checked
+// rather than stripped: "md5:<64 hex>" was taken as a SHA-256 digest, so a
+// reuse compared a SHA-256 sum against an MD5 one and a mirror could be
+// published that the client then refuses for the same reason.
+func TestSHA256HexFromHash(t *testing.T) {
+	valid := strings.Repeat("ab", 32)
+
+	for name, in := range map[string]string{
+		"bare hex":         valid,
+		"sha256 prefix":    "sha256:" + valid,
+		"uppercase prefix": "SHA256:" + valid,
+	} {
+		t.Run("ok:"+name, func(t *testing.T) {
+			got, ok := sha256HexFromHash(in)
+			if !ok || !strings.EqualFold(got, valid) {
+				t.Fatalf("sha256HexFromHash(%q) = %q, %v", in, got, ok)
+			}
+		})
+	}
+
+	for name, in := range map[string]string{
+		"md5 with a 64-hex body": "md5:" + valid,
+		"sha512":                 "sha512:" + strings.Repeat("ab", 64),
+		"too short":              strings.Repeat("ab", 16),
+		"not hex":                strings.Repeat("zz", 32),
+		"empty":                  "",
+		"prefix only":            "sha256:",
+	} {
+		t.Run("refused:"+name, func(t *testing.T) {
+			if got, ok := sha256HexFromHash(in); ok {
+				t.Fatalf("sha256HexFromHash(%q) = %q, true; want refused", in, got)
+			}
+		})
+	}
+}

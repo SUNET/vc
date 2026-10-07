@@ -30,7 +30,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -133,6 +132,13 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 	// So each run builds a complete tree and swaps it in. Either the whole
 	// new selection is published or none of it is, and what the previous
 	// run left behind goes with the old tree.
+	// outDir first: MkdirTemp wants its parent to exist, so a first run
+	// against the documented -out /etc/vc/zk-circuits failed unless
+	// somebody had created that leaf by hand.
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return fmt.Errorf("creating the mirror directory %s: %w", outDir, err)
+	}
+
 	staging, err := os.MkdirTemp(outDir, ".staging-")
 	if err != nil {
 		return fmt.Errorf("creating a staging directory under %s: %w", outDir, err)
@@ -221,11 +227,16 @@ func reuseArtifact(existing, staged, expectedHash string) (bool, error) {
 		return false, nil //nolint:nilerr // absent or unreadable means "download it"
 	}
 
-	sum := sha256.Sum256(data)
-	want := expectedHash
-	if i := strings.Index(want, ":"); i >= 0 {
-		want = want[i+1:]
+	want, ok := sha256HexFromHash(expectedHash)
+	if !ok {
+		// Not a SHA-256 digest, so there is nothing here to compare
+		// against. Download it and let DownloadArtifact refuse it
+		// properly, rather than reusing bytes on the strength of a hash
+		// in some other algorithm.
+		return false, nil
 	}
+
+	sum := sha256.Sum256(data)
 	if !strings.EqualFold(hex.EncodeToString(sum[:]), want) {
 		return false, nil
 	}
@@ -308,33 +319,36 @@ func artifactPath(artifact *zkcircuit.Artifact) (string, error) {
 	if artifact.URL != "" && !strings.Contains(artifact.URL, "://") {
 		return zkcircuit.SafeRelativeArtifactPath(artifact.URL)
 	}
-	hash := artifact.Hash
-	if i := strings.Index(hash, ":"); i >= 0 {
-		hash = hash[i+1:]
-	}
-	if hash == "" {
-		return "", errors.New("artifact has no hash and no usable relative path")
-	}
-	if !isHex(hash) {
-		return "", fmt.Errorf("artifact hash %q is not hexadecimal", artifact.Hash)
+	hash, ok := sha256HexFromHash(artifact.Hash)
+	if !ok {
+		return "", fmt.Errorf("artifact hash %q is not a SHA-256 digest", artifact.Hash)
 	}
 	return "v1/artifacts/sha256/" + hash, nil
 }
 
-// isHex keeps a hash out of the path unless it really is one. The hash is
-// catalog data too, and it is the other half of what builds a file name.
-func isHex(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, r := range s {
-		switch {
-		case r >= '0' && r <= '9', r >= 'a' && r <= 'f', r >= 'A' && r <= 'F':
-		default:
-			return false
+// sha256HexFromHash reads a catalog Artifact.Hash as a SHA-256 digest,
+// accepting a bare 64-character hex string or one prefixed "sha256:".
+//
+// The ALGORITHM is checked, not merely stripped. Taking whatever follows
+// the colon let "md5:<64 hex>" through as if it were SHA-256 - comparing a
+// SHA-256 sum against an MD5 one, so a reuse would never match and a
+// mirror would be published that the client then refuses for the same
+// reason. The catalog serves sha256 today; anything else is something this
+// tool does not understand and should say so.
+func sha256HexFromHash(hash string) (string, bool) {
+	if i := strings.Index(hash, ":"); i >= 0 {
+		if !strings.EqualFold(hash[:i], "sha256") {
+			return "", false
 		}
+		hash = hash[i+1:]
 	}
-	return true
+	if len(hash) != sha256.Size*2 {
+		return "", false
+	}
+	if _, err := hex.DecodeString(hash); err != nil {
+		return "", false
+	}
+	return hash, true
 }
 
 func writeJSON(path string, v any) error {
