@@ -136,6 +136,40 @@ func (pb *PresentationBuilder) selectTemplate(scopes []string) (PresentationRequ
 	return nil, false
 }
 
+// TemplateRequestsW3C reports whether the template these scopes select asks
+// for a W3C credential in any of its credential queries.
+//
+// For the verifier's "could this session have asked for a W3C credential?"
+// question, which is asked exactly when the persisted request cannot be
+// read back - so it has to be answered from configuration rather than from
+// the request. Reading common.credential_metadata alone was not enough: a
+// template names its own credential queries with arbitrary ids and may
+// request ldp_vc for a scope that configures no metadata at all, and such a
+// session then looked like it could not have wanted W3C.
+//
+// Scope-selected rather than "any template anywhere", because that is how
+// the request was built: selectTemplate is a pure function of the scopes,
+// so this asks about the same template the session actually used.
+func (pb *PresentationBuilder) TemplateRequestsW3C(scopes []string) bool {
+	if pb == nil {
+		return false
+	}
+	template, ok := pb.selectTemplate(scopes)
+	if !ok {
+		return false
+	}
+	dcql := template.GetDCQLQuery()
+	if dcql == nil {
+		return false
+	}
+	for _, credential := range dcql.Credentials {
+		if IsW3CVCFormatIdentifier(credential.Format) {
+			return true
+		}
+	}
+	return false
+}
+
 func (pb *PresentationBuilder) TemplateDCQLQuery(_ context.Context, scopes []string) (*DCQL, []string, bool) {
 	if len(scopes) == 0 {
 		return nil, nil, false

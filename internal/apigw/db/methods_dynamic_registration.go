@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/SUNET/vc/pkg/logger"
@@ -14,12 +15,18 @@ import (
 
 // DynamicRegistrationCredentials holds OIDC dynamic client registration credentials.
 type DynamicRegistrationCredentials struct {
-	ClientID                string    `bson:"client_id"`
-	ClientSecret            string    `bson:"client_secret"`
-	RegistrationAccessToken string    `bson:"registration_access_token,omitempty"`
-	RegistrationClientURI   string    `bson:"registration_client_uri,omitempty"`
-	ClientSecretExpiresAt   int64     `bson:"client_secret_expires_at,omitempty"`
-	RegisteredAt            time.Time `bson:"registered_at"`
+	ClientID                string `bson:"client_id"`
+	ClientSecret            string `bson:"client_secret"`
+	RegistrationAccessToken string `bson:"registration_access_token,omitempty"`
+	RegistrationClientURI   string `bson:"registration_client_uri,omitempty"`
+	// No omitempty: 0 is a meaningful value here - RFC 7591 3.2.1 makes it
+	// "this secret never expires" - and omitting it left that case and "the
+	// field was never written" as the same document. The pruning filter's
+	// lower bound then had nothing to exclude, so a non-expiring
+	// registration survived only because MongoDB's range operators skip
+	// missing fields. Write the zero and let the predicate say what it means.
+	ClientSecretExpiresAt int64     `bson:"client_secret_expires_at"`
+	RegisteredAt          time.Time `bson:"registered_at"`
 }
 
 // DynamicRegistrationColl handles persistence of dynamic client registration credentials.
@@ -80,13 +87,65 @@ func (c *DynamicRegistrationColl) Save(ctx context.Context, creds *DynamicRegist
 	return nil
 }
 
-// Get returns the stored credentials, or nil if none exist.
+// GetByClientID returns one stored registration by client_id, or nil.
+func (c *DynamicRegistrationColl) GetByClientID(ctx context.Context, clientID string) (*DynamicRegistrationCredentials, error) {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:get_by_client_id")
+	defer span.End()
+
+	if clientID == "" {
+		return nil, nil
+	}
+
+	var creds DynamicRegistrationCredentials
+	if err := c.Coll.FindOne(ctx, bson.M{"client_id": clientID}).Decode(&creds); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+
+	return &creds, nil
+}
+
+// PruneExpiredRegistrations removes registrations other than keepClientID
+// whose client secret had expired at now.
+func (c *DynamicRegistrationColl) PruneExpiredRegistrations(ctx context.Context, keepClientID string, now time.Time) error {
+	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:prune_expired")
+	defer span.End()
+
+	if keepClientID == "" {
+		return nil
+	}
+
+	// client_secret_expires_at 0 means "never expires" (RFC 7591 §3.2.1),
+	// so those rows are excluded by the lower bound as well as the upper.
+	filter := bson.M{
+		"client_id": bson.M{"$ne": keepClientID},
+		"client_secret_expires_at": bson.M{
+			"$gt": int64(0),
+			"$lt": now.Unix(),
+		},
+	}
+	if _, err := c.Coll.DeleteMany(ctx, filter); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		return err
+	}
+
+	return nil
+}
+
 func (c *DynamicRegistrationColl) Get(ctx context.Context) (*DynamicRegistrationCredentials, error) {
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:dynamic_registration:get")
 	defer span.End()
 
+	// Newest first. Save upserts on client_id, so more than one row can
+	// exist after a re-registration; picking an arbitrary one let startup
+	// find a superseded, expired record and register all over again.
+	opts := options.FindOne().SetSort(bson.D{{Key: "registered_at", Value: -1}})
+
 	var creds DynamicRegistrationCredentials
-	if err := c.Coll.FindOne(ctx, bson.M{}).Decode(&creds); err != nil {
+	if err := c.Coll.FindOne(ctx, bson.M{}, opts).Decode(&creds); err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, nil
 		}

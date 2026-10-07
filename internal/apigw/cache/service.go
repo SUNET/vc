@@ -80,6 +80,11 @@ type Service struct {
 	SessionAuthKey string
 	// SessionEncKey is the AES encryption key for session cookies, shared across HA instances.
 	SessionEncKey string
+
+	// OIDCRPRenewalLock serialises dynamic-client re-registration across HA
+	// replicas so a burst of them renewing the same expiring secret registers
+	// one new client at the OP instead of one per replica.
+	OIDCRPRenewalLock pkgcache.Locker
 }
 
 // New creates the apigw cache service and initialises all caches.
@@ -138,6 +143,10 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 
 	if s.RateLimit, err = cs.NewRateLimitCounter(ctx, "apigw_rate_limit"); err != nil {
 		return nil, fmt.Errorf("cache: rate_limit: %w", err)
+	}
+
+	if s.OIDCRPRenewalLock, err = cs.NewLocker(ctx, "apigw_oidcrp_renewal_lock"); err != nil {
+		return nil, fmt.Errorf("cache: oidcrp_renewal_lock: %w", err)
 	}
 
 	// Resolve HA-shared session keys (atomic upsert in MongoDB when HA, ephemeral otherwise).

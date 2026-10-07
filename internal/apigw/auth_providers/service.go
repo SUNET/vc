@@ -20,7 +20,7 @@ type Service struct {
 }
 
 // New creates a new auth providers service, starting all enabled providers.
-func New(ctx context.Context, cfg *model.APIGWAuthProviders, samlSessionCache pkgcache.Cache[*samlsp.Session], oidcSessionCache pkgcache.Cache[*oidcrp.Session], dbService *db.Service, log *logger.Log) (*Service, error) {
+func New(ctx context.Context, cfg *model.APIGWAuthProviders, samlSessionCache pkgcache.Cache[*samlsp.Session], oidcSessionCache pkgcache.Cache[*oidcrp.Session], dbService *db.Service, oidcRenewalLock pkgcache.Locker, log *logger.Log) (*Service, error) {
 	s := &Service{}
 
 	if cfg.SAML.Enable {
@@ -34,7 +34,7 @@ func New(ctx context.Context, cfg *model.APIGWAuthProviders, samlSessionCache pk
 
 	if cfg.OIDC.Enable {
 		var err error
-		s.oidc, err = oidcrp.New(ctx, &cfg.OIDC, oidcSessionCache, dbService, log)
+		s.oidc, err = oidcrp.New(ctx, &cfg.OIDC, oidcSessionCache, dbService, oidcRenewalLock, log)
 		if err != nil {
 			return nil, err
 		}

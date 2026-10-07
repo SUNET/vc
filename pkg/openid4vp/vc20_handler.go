@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
+
 	ecdsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/ecdsa"
 	eddsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/eddsa"
+	"github.com/piprate/json-gold/ld"
 )
 
 // VC20Format identifiers per OpenID4VC spec Appendix A
@@ -65,6 +67,13 @@ type VC20Handler struct {
 	clock           func() time.Time
 	allowedSkew     time.Duration
 	signerConfig    *VC20SignerConfig
+
+	// Presentation binding. A W3C VP proves holder binding with a proof over
+	// the presentation carrying the verifier's challenge and domain; without
+	// checking it, an issuer-signed credential replays.
+	requireHolderBinding bool
+	expectedChallenge    string
+	expectedDomain       string
 }
 
 // VC20HandlerOption configures a VC20Handler.
@@ -114,6 +123,24 @@ func WithVC20AllowedSkew(skew time.Duration) VC20HandlerOption {
 	}
 }
 
+// WithVC20PresentationBinding requires the VP token to be a presentation whose
+// proof is bound to this session, and names the values it must carry:
+// challenge is the verifier's nonce, domain its client identifier.
+//
+// Without this a credential is accepted on its issuer's signature alone, which
+// proves it was issued but not that this holder is presenting it now.
+// An empty challenge or domain is accepted here rather than refused, because
+// the option cannot report an error - but verification refuses both.
+// Requiring binding while having no nonce, or no verifier identity, to bind
+// to is a caller bug, and the failure belongs where it can be returned.
+func WithVC20PresentationBinding(challenge, domain string) VC20HandlerOption {
+	return func(h *VC20Handler) {
+		h.requireHolderBinding = true
+		h.expectedChallenge = challenge
+		h.expectedDomain = domain
+	}
+}
+
 // NewVC20Handler creates a new W3C VC 2.0 handler for OpenID4VP.
 func NewVC20Handler(opts ...VC20HandlerOption) (*VC20Handler, error) {
 	h := &VC20Handler{
@@ -148,6 +175,22 @@ type VC20VerificationResult struct {
 	VerificationMethod string    `json:"verificationMethod"`
 	ProofPurpose       string    `json:"proofPurpose"`
 	ProofCreated       time.Time `json:"proofCreated"`
+
+	// IssuerKey is the key this credential's signature was actually verified
+	// with. A caller evaluating trust must judge THIS key: resolving the
+	// verification method again can return a different one from a rotating or
+	// remote resolver, and then the key trusted is not the key that signed.
+	IssuerKey crypto.PublicKey `json:"-"`
+
+	// TypeIRIs are the credential's types in fully expanded form, which is
+	// what DCQL meta.type_values is expressed in. Types above holds whatever
+	// the document carried, usually compact terms.
+	TypeIRIs []string `json:"typeIRIs,omitempty"`
+
+	// Holder binding, set when the token was a presentation whose proof
+	// verified against this session's challenge and domain.
+	HolderBound bool   `json:"holderBound"`
+	Holder      string `json:"holder,omitempty"`
 
 	// Selective disclosure info (for ecdsa-sd-2023)
 	IsSelectiveDisclosure bool     `json:"isSelectiveDisclosure"`
@@ -185,26 +228,58 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		if err2 := json.Unmarshal(credBytes, &expanded); err2 != nil {
 			return nil, fmt.Errorf("failed to parse credential JSON: %w (also tried array: %v)", err, err2)
 		}
-		// Find the credential node in the expanded format for result extraction
-		// Keep original bytes for vc20 library verification
+		// An expanded presentation cannot be verified in this form, whatever
+		// the holder-binding setting.
+		//
+		// extractCredentialFromExpanded narrows credMap to the credential
+		// node, but credBytes stays the WHOLE document - deliberately, since
+		// the vc20 suites verify the bytes they were given. For a presentation
+		// that means the issuer's proof would be checked against the VP
+		// wrapper rather than the credential, and the holder's proof is
+		// discarded along with the wrapper.
+		//
+		// Unconditional, because the isolation problem is not about binding:
+		// gating it on requireHolderBinding let an expanded VP through as a
+		// bare credential whenever a query opted out.
+		if expandedContainsPresentation(expanded) {
+			return nil, errors.New("expanded-form presentations are not supported; send the compacted form")
+		}
 		credMap, err = h.extractCredentialFromExpanded(expanded)
 		if err != nil {
 			return nil, fmt.Errorf("failed to extract credential from expanded JSON-LD: %w", err)
 		}
 	}
 
-	// 3. Check if this is a VP or VC
-	// If it's a VP, extract the embedded credential
+	// 3. Check if this is a VP or VC. A VP's own proof is the holder's
+	// signature over this exchange; verify it BEFORE unwrapping, because
+	// after unwrapping there is nothing left tying the credential to this
+	// session.
+	isPresentation := false
 	if types, ok := credMap["type"].([]any); ok {
 		for _, t := range types {
 			if t == "VerifiablePresentation" {
-				credBytes, credMap, err = h.extractCredentialFromVP(credMap)
-				if err != nil {
-					return nil, fmt.Errorf("failed to extract credential from VP: %w", err)
-				}
+				isPresentation = true
 				break
 			}
 		}
+	}
+
+	holder := ""
+	if isPresentation {
+		if h.requireHolderBinding {
+			holder, err = h.verifyPresentationProof(ctx, credBytes, credMap)
+			if err != nil {
+				return nil, fmt.Errorf("presentation is not bound to this session: %w", err)
+			}
+		}
+		credBytes, credMap, err = h.extractCredentialFromVP(credMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract credential from VP: %w", err)
+		}
+	} else if h.requireHolderBinding {
+		// A bare credential proves issuance, not presentation. Accepting one
+		// where binding was required is exactly the replay this guards.
+		return nil, errors.New("holder binding is required but the token is a bare credential, not a presentation")
 	}
 
 	// 4. Extract and validate issuer
@@ -245,31 +320,42 @@ func (h *VC20Handler) VerifyAndExtract(ctx context.Context, vpToken string) (*VC
 		return nil, errors.New("proof missing cryptosuite")
 	}
 
+	var result *VC20VerificationResult
 	switch cryptosuite {
 	case CryptosuiteECDSA2019:
 		ecdsaKey, ok := pubKey.(*ecdsa.PublicKey)
 		if !ok {
 			return nil, fmt.Errorf("cryptosuite %s requires ECDSA key, got %T", cryptosuite, pubKey)
 		}
-		return h.verifyECDSA2019(ctx, credBytes, credMap, proof, ecdsaKey)
+		result, err = h.verifyECDSA2019(ctx, credBytes, credMap, proof, ecdsaKey)
 
 	case CryptosuiteECDSASd:
 		ecdsaKey, ok := pubKey.(*ecdsa.PublicKey)
 		if !ok {
 			return nil, fmt.Errorf("cryptosuite %s requires ECDSA key, got %T", cryptosuite, pubKey)
 		}
-		return h.verifyECDSASd2023(ctx, credBytes, credMap, proof, ecdsaKey)
+		result, err = h.verifyECDSASd2023(ctx, credBytes, credMap, proof, ecdsaKey)
 
 	case CryptosuiteEdDSA2022:
 		ed25519Key, ok := pubKey.(ed25519.PublicKey)
 		if !ok {
 			return nil, fmt.Errorf("cryptosuite %s requires Ed25519 key, got %T", cryptosuite, pubKey)
 		}
-		return h.verifyEdDSA2022(ctx, credBytes, credMap, proof, ed25519Key)
+		result, err = h.verifyEdDSA2022(ctx, credBytes, credMap, proof, ed25519Key)
 
 	default:
 		return nil, fmt.Errorf("unsupported cryptosuite: %s", cryptosuite)
 	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Carry the holder binding onto the result, so a caller can tell a
+	// presentation bound to this exchange from a bare credential.
+	result.HolderBound = h.requireHolderBinding
+	result.Holder = holder
+	result.IssuerKey = pubKey
+	return result, nil
 }
 
 // decodeVPToken decodes the VP token from base64url or returns plain JSON.
@@ -576,6 +662,184 @@ func (h *VC20Handler) extractProof(cred map[string]any) (map[string]any, error) 
 	return proofMap, nil
 }
 
+// expandedContainsPresentation reports whether an expanded JSON-LD document
+// carries a VerifiablePresentation node. Expanded nodes name their types in
+// @type as absolute IRIs, not the compact "VerifiablePresentation".
+func expandedContainsPresentation(expanded []any) bool {
+	const vpIRI = "https://www.w3.org/2018/credentials#VerifiablePresentation"
+	for _, node := range expanded {
+		nodeMap, ok := node.(map[string]any)
+		if !ok {
+			continue
+		}
+		types, ok := nodeMap["@type"].([]any)
+		if !ok {
+			continue
+		}
+		for _, t := range types {
+			if iri, ok := t.(string); ok && iri == vpIRI {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// expandedTypes returns a credential's types as fully expanded IRIs.
+//
+// DCQL meta.type_values names expanded IRIs (OpenID4VP 1.0 B.3.2), while a
+// compacted credential carries terms like "UniversityDegreeCredential". The
+// two are only comparable through the document's own @context, so expansion is
+// the comparison - a term the context does not define expands to nothing, and
+// the constraint correctly fails to match.
+func expandedTypes(credMap map[string]any) ([]string, error) {
+	// The identified credential node, NOT the whole document. Expanding raw
+	// bytes collects @type from every top-level node, so an expanded-form
+	// response carrying a decoy node beside the credential would satisfy a
+	// type constraint the credential itself does not meet.
+	doc, err := json.Marshal(credMap)
+	if err != nil {
+		return nil, fmt.Errorf("re-encoding credential for expansion: %w", err)
+	}
+	var parsed any
+	if err := json.Unmarshal(doc, &parsed); err != nil {
+		return nil, fmt.Errorf("parsing credential for expansion: %w", err)
+	}
+
+	opts := ld.NewJsonLdOptions("")
+	opts.DocumentLoader = credential.GetGlobalLoader()
+
+	expanded, err := ld.NewJsonLdProcessor().Expand(parsed, opts)
+	if err != nil {
+		return nil, fmt.Errorf("expanding credential: %w", err)
+	}
+
+	// Exactly one node: a single JSON object expands to one top-level node,
+	// and only that node's types are the credential's.
+	var iris []string
+	if len(expanded) > 0 {
+		nodeMap, ok := expanded[0].(map[string]any)
+		if !ok {
+			return nil, errors.New("expanded credential is not a node object")
+		}
+		types, _ := nodeMap["@type"].([]any)
+		for _, t := range types {
+			iri, ok := t.(string)
+			if !ok {
+				continue
+			}
+			// Absolute only. A term the document's context does not define
+			// survives expansion as a RELATIVE IRI - "UniversityDegreeCredential"
+			// stays exactly that - and a relative IRI identifies nothing
+			// stable, so it must never satisfy a type constraint. Dropping it
+			// here means such a credential fails the constraint rather than
+			// matching by string coincidence.
+			//
+			// The strict test, not `strings.Contains(iri, ":")`: a relative
+			// reference like "/relative:Type" carries a colon and is still
+			// relative, so the loose version admitted exactly the values
+			// meta.type_values must never contain.
+			if !credential.IsAbsoluteIRI(iri) {
+				continue
+			}
+			iris = append(iris, iri)
+		}
+	}
+	return iris, nil
+}
+
+// verifyPresentationProof verifies the proof over a Verifiable Presentation
+// and its binding to this session.
+//
+// This is the holder's signature, distinct from the issuer's signature on the
+// credential inside. It is what makes a presentation non-replayable: the proof
+// covers a challenge the verifier chose and a domain naming the verifier, so a
+// credential captured from one exchange cannot be replayed into another.
+//
+// Mirrors VPBuilder.BuildVC20Presentation, which signs the VP as an
+// RDFCredential with proofPurpose "authentication" and the challenge and
+// domain in the proof.
+func (h *VC20Handler) verifyPresentationProof(ctx context.Context, vpBytes []byte, vpMap map[string]any) (string, error) {
+	proof, err := h.extractProof(vpMap)
+	if err != nil {
+		return "", fmt.Errorf("presentation carries no usable proof: %w", err)
+	}
+
+	// The proof has to be an authentication proof. An assertionMethod proof
+	// over a presentation would verify cryptographically while proving
+	// something else entirely.
+	if purpose, _ := proof["proofPurpose"].(string); purpose != "authentication" {
+		return "", fmt.Errorf("presentation proof purpose is %q, want \"authentication\"", purpose)
+	}
+
+	// Binding to THIS request. The signature covers these values, so a
+	// mismatch means the presentation was made for someone else - which is
+	// exactly what replay looks like.
+	if err := h.checkPresentationBinding(proof); err != nil {
+		return "", err
+	}
+
+	vm, _ := proof["verificationMethod"].(string)
+	if vm == "" {
+		return "", errors.New("presentation proof has no verificationMethod")
+	}
+	if h.keyResolver == nil {
+		return "", errors.New("no key resolver configured for presentation verification")
+	}
+	holderKey, err := h.keyResolver.ResolveKey(ctx, vm)
+	if err != nil {
+		return "", fmt.Errorf("resolving holder key %q: %w", vm, err)
+	}
+
+	vpCred, err := credential.NewRDFCredentialFromJSON(vpBytes, nil)
+	if err != nil {
+		return "", fmt.Errorf("parsing presentation as RDF: %w", err)
+	}
+
+	// WHICH proof is verified has to be said out loud here. A presentation
+	// holds two: the holder's, checked for purpose/challenge/domain above,
+	// and the embedded credential's issuer proof, which stays in the
+	// document because the holder's signature covers it. A plain Verify
+	// takes the first proof node it finds, and map iteration made that
+	// choice at random - so the holder's key was sometimes checked against
+	// the ISSUER's proofValue and a legitimate presentation failed, on
+	// some runs and not others, for identical input.
+	//
+	// Naming it by proofValue - the signature the checks above were made
+	// against - ties the cryptographic step to the proof whose claims were
+	// validated, which is the property that was missing whether or not the
+	// selection happened to land right.
+	vpProofValue, _ := proof["proofValue"].(string)
+	if vpProofValue == "" {
+		return "", errors.New("presentation proof has no proofValue")
+	}
+
+	cryptosuite, _ := proof["cryptosuite"].(string)
+	switch cryptosuite {
+	case CryptosuiteEdDSA2022:
+		edKey, ok := holderKey.(ed25519.PublicKey)
+		if !ok {
+			return "", fmt.Errorf("holder key for %s is %T, want ed25519.PublicKey", cryptosuite, holderKey)
+		}
+		if err := eddsaSuite.NewSuite().VerifyProof(vpCred, edKey, vpProofValue); err != nil {
+			return "", fmt.Errorf("presentation signature verification failed: %w", err)
+		}
+	case CryptosuiteECDSA2019:
+		ecKey, ok := holderKey.(*ecdsa.PublicKey)
+		if !ok {
+			return "", fmt.Errorf("holder key for %s is %T, want *ecdsa.PublicKey", cryptosuite, holderKey)
+		}
+		if err := ecdsaSuite.NewSuite().VerifyProof(vpCred, ecKey, vpProofValue); err != nil {
+			return "", fmt.Errorf("presentation signature verification failed: %w", err)
+		}
+	default:
+		return "", fmt.Errorf("unsupported cryptosuite %q for a presentation proof", cryptosuite)
+	}
+
+	holder, _ := vpMap["holder"].(string)
+	return holder, nil
+}
+
 // verifyECDSA2019 verifies a credential with ecdsa-rdfc-2019 cryptosuite.
 func (h *VC20Handler) verifyECDSA2019(
 	ctx context.Context,
@@ -590,9 +854,21 @@ func (h *VC20Handler) verifyECDSA2019(
 		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
 	}
 
-	// Verify using the standard suite
+	// The proof extractProof SELECTED, not whichever one the suite reaches
+	// first. The key was resolved from this proof's verificationMethod, and
+	// Verify passes an empty selector - so on a document carrying more than
+	// one proof the key from proof A could be checked against proof B, and
+	// the result then reports A's metadata for a signature that B carries.
+	//
+	// Empty is refused rather than passed through: an empty selector means
+	// "the first proof found", which is the ambiguity being removed here.
+	proofValue, _ := proof["proofValue"].(string)
+	if proofValue == "" {
+		return nil, errors.New("the selected proof carries no proofValue, so the proof whose key was resolved cannot be identified")
+	}
+
 	suite := ecdsaSuite.NewSuite()
-	if err := suite.Verify(rdfCred, pubKey); err != nil {
+	if err := suite.VerifyProof(rdfCred, pubKey, proofValue); err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
 	}
 
@@ -614,7 +890,23 @@ func (h *VC20Handler) verifyECDSASd2023(
 		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
 	}
 
-	// Verify using the SD suite
+	// REFUSED when the document carries more than one proof.
+	//
+	// The rdfc paths pass the selected proof's value to the suite so the key
+	// that was resolved is checked against the proof whose metadata was
+	// selected. SdSuite has no such selector: it finds the proof by
+	// traversing the proof object, which need not be the one extractProof
+	// chose - so the key from proof A could be checked against proof B while
+	// the result reports A.
+	//
+	// Refusing is the honest answer until that selector exists. It costs
+	// nothing real: a document carrying a second proof does not verify on
+	// this branch under any selector, because hashing removes every proof in
+	// the graph and the second one invalidates the first.
+	if proofs, several := credMap["proof"].([]any); several && len(proofs) > 1 {
+		return nil, fmt.Errorf("the credential carries %d proofs and %s cannot say which one a key was resolved for", len(proofs), CryptosuiteECDSASd)
+	}
+
 	sdSuite := ecdsaSuite.NewSdSuite()
 	if err := sdSuite.Verify(rdfCred, pubKey); err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
@@ -638,9 +930,21 @@ func (h *VC20Handler) verifyEdDSA2022(
 		return nil, fmt.Errorf("failed to create RDF credential: %w", err)
 	}
 
-	// Verify using the EdDSA suite
+	// The proof extractProof SELECTED, not whichever one the suite reaches
+	// first. The key was resolved from this proof's verificationMethod, and
+	// Verify passes an empty selector - so on a document carrying more than
+	// one proof the key from proof A could be checked against proof B, and
+	// the result then reports A's metadata for a signature that B carries.
+	//
+	// Empty is refused rather than passed through: an empty selector means
+	// "the first proof found", which is the ambiguity being removed here.
+	proofValue, _ := proof["proofValue"].(string)
+	if proofValue == "" {
+		return nil, errors.New("the selected proof carries no proofValue, so the proof whose key was resolved cannot be identified")
+	}
+
 	suite := eddsaSuite.NewSuite()
-	if err := suite.Verify(rdfCred, pubKey); err != nil {
+	if err := suite.VerifyProof(rdfCred, pubKey, proofValue); err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
 	}
 
@@ -668,6 +972,13 @@ func (h *VC20Handler) buildResult(
 
 	// Extract issuer
 	result.Issuer, _ = h.extractIssuer(credMap)
+
+	// The expanded form, which is what a DCQL type_values constraint is
+	// written in. Best effort: a credential whose context cannot be resolved
+	// still verifies, it just cannot satisfy a type constraint.
+	if iris, err := expandedTypes(credMap); err == nil {
+		result.TypeIRIs = iris
+	}
 
 	// Extract types
 	if types, ok := credMap["type"].([]any); ok {
@@ -965,4 +1276,46 @@ func generateUUID() string {
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+// checkPresentationBinding ties the presentation to THIS request. The
+// signature covers these values, so a mismatch means the presentation was
+// made for someone else - which is what replay looks like.
+//
+// Both halves of the challenge must be non-empty. A missing or non-string
+// challenge asserts to "", and an empty expectedChallenge would then match
+// it, so holder binding would "succeed" having bound the presentation to
+// nothing - precisely what it exists to prevent. An empty expected challenge
+// is a caller requiring binding with no nonce to bind to, which is a bug
+// worth reporting rather than quietly tolerating.
+func (h *VC20Handler) checkPresentationBinding(proof map[string]any) error {
+	if h.expectedChallenge == "" {
+		return errors.New("holder binding was required but this session has no nonce to bind to")
+	}
+	challenge, _ := proof["challenge"].(string)
+	if challenge == "" {
+		return errors.New("presentation proof carries no challenge")
+	}
+	if challenge != h.expectedChallenge {
+		return errors.New("presentation proof challenge does not match this session's nonce")
+	}
+
+	// Domain, checked the same way and for the same reason as the
+	// challenge. The challenge says the presentation was made for THIS
+	// session; the domain says it was made for THIS verifier, which is what
+	// stops one relying party replaying a presentation at another.
+	//
+	// An empty expected domain used to skip the check, so a proof naming no
+	// domain - or naming somebody else's - was accepted as bound here on
+	// the strength of the nonce alone. That is the same fail-open the empty
+	// challenge above refuses, and it is refused the same way: with holder
+	// binding required, a session that cannot say which verifier it is
+	// cannot conclude that a presentation was bound to it.
+	if h.expectedDomain == "" {
+		return errors.New("holder binding was required but this session has no verifier identity to bind to")
+	}
+	if domain, _ := proof["domain"].(string); domain != h.expectedDomain {
+		return errors.New("presentation proof domain does not name this verifier")
+	}
+	return nil
 }

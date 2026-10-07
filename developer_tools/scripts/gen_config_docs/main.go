@@ -1163,6 +1163,16 @@ func asMapType(expr ast.Expr) (*ast.MapType, bool) {
 	}
 }
 
+// structHasField reports whether def declares a field with this yaml name.
+func structHasField(def *StructDef, yamlName string) bool {
+	for _, f := range def.Fields {
+		if f.Tag.YAMLName == yamlName {
+			return true
+		}
+	}
+	return false
+}
+
 func buildStructSubSection(reg *TypeRegistry, def *StructDef, path string) *SubSection {
 	sub := &SubSection{Path: path, TypeName: def.Name}
 
@@ -1175,9 +1185,12 @@ func buildStructSubSection(reg *TypeRegistry, def *StructDef, path string) *SubS
 		if f.Tag.YAMLName == "" || f.Tag.YAMLName == "-" {
 			continue
 		}
-		// Primitive Args structs always pair `input` with an `output` that
-		// mirrors it; the description covers the semantics, so skip the row.
-		if def.PkgName == "primitives" && f.Tag.YAMLName == "output" {
+		// A primitive that pairs `input` with an `output` mirroring it has
+		// the semantics covered by the description, so the row is skipped.
+		// Only then: a primitive with no input has nothing for `output` to
+		// mirror, and dropping it hides the one field a configuration
+		// cannot omit - see `random`.
+		if def.PkgName == "primitives" && f.Tag.YAMLName == "output" && structHasField(def, "input") {
 			continue
 		}
 		row := TableRow{

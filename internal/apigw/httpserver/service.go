@@ -19,6 +19,7 @@ import (
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/trace"
 
 	"github.com/gin-contrib/sessions"
@@ -51,6 +52,11 @@ type Service struct {
 	cacheService    *cache.Service
 	spocpEngine     *httphelpers.SafeEngine
 	metricsHandler  http.Handler
+
+	// credentialEncryption decrypts Credential Requests and encrypts
+	// Credential Responses. nil when no encryption key is configured, which
+	// every method on it tolerates.
+	credentialEncryption *openid4vci.CredentialEncryption
 }
 
 // New creates a new httpserver service
@@ -93,6 +99,13 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers, err = httphelpers.New(ctx, s.tracer, s.cfg, s.log)
 	if err != nil {
 		return nil, err
+	}
+
+	// Same loader the issuer metadata is generated from, so what this
+	// endpoint accepts and what the metadata advertises come from one place.
+	s.credentialEncryption, err = s.cfg.APIGW.IssuerMetadata.CredentialEncryption.Load()
+	if err != nil {
+		return nil, fmt.Errorf("credential encryption: %w", err)
 	}
 
 	// Configure CORS at the engine level (before route registration) so that

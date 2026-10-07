@@ -211,10 +211,10 @@ func writeTestKeyAndCert(t *testing.T) (keyPath, certPath string) {
 	keyPath = filepath.Join(dir, "key.pem")
 	certPath = filepath.Join(dir, "cert.pem")
 
-	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0600); err != nil {
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), 0644); err != nil {
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return keyPath, certPath

@@ -15,18 +15,23 @@ import (
 
 func readyService(t *testing.T) *Service {
 	t.Helper()
-	return &Service{
+	s := &Service{
 		cfg:          &model.OIDCRP{IssuerURL: "https://op.example.com", SessionDuration: 300},
 		sessionCache: cache.NewMemoryCache[*Session](5 * time.Minute),
 		log:          logger.NewSimple("test"),
 		ready:        true,
-		oauth2Config: &oauth2.Config{
+		creds:        newCredentialSet(5 * time.Minute),
+	}
+	s.creds.store(&credentials{
+		clientID: "vc",
+		config: &oauth2.Config{
 			ClientID:    "vc",
 			RedirectURL: "https://apigw.example.com/callback",
 			Endpoint:    oauth2.Endpoint{AuthURL: "https://op.example.com/authorize"},
 			Scopes:      []string{"openid"},
 		},
-	}
+	})
+	return s
 }
 
 // TestInitiateAuthLeavesNoSessionWhenParamsAreRejected: a request whose OIDC

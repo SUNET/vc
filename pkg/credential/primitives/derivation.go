@@ -48,6 +48,13 @@ type Derivation struct {
 	// SWAMIDHighestAssuranceLevel reduces a multi-valued eduPersonAssurance
 	// claim to the strongest recognised SWAMID Assurance Framework URI.
 	SWAMIDHighestAssuranceLevel *SWAMIDHighestAssuranceLevelArgs `yaml:"swamid_highest_assurance_level,omitempty"`
+
+	// Random writes a freshly generated random value to a claim the source
+	// data did not supply - a document identifier, typically. The only
+	// primitive here that reads nothing and is not a pure function of its
+	// input; see RandomArgs for where the value is generated and how long
+	// it lives.
+	Random *RandomArgs `yaml:"random,omitempty"`
 }
 
 // Applier is the shape every primitive Args struct implements. Every

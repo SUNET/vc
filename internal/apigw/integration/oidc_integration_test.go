@@ -470,7 +470,7 @@ func setupOIDCTestEnvironment(t *testing.T) *oidcTestEnvironment {
 	sessionCache := pkgcache.NewMemoryCache[*oidcrp.Session](300 * time.Second)
 
 	// Create OIDC RP service (dbService=nil since preconfigured creds are used)
-	service, err := oidcrp.New(ctx, config, sessionCache, nil, log)
+	service, err := oidcrp.New(ctx, config, sessionCache, nil, nil, log)
 	require.NoError(t, err)
 	require.NotNil(t, service)
 
@@ -705,7 +705,7 @@ func testExpiredSession(t *testing.T, env *oidcTestEnvironment) {
 	shortConfig := createTestOIDCRPConfig(env.mockOP)
 	shortConfig.SessionDuration = 1
 
-	shortService, err := oidcrp.New(ctx, shortConfig, shortCache, nil, env.log)
+	shortService, err := oidcrp.New(ctx, shortConfig, shortCache, nil, nil, env.log)
 	require.NoError(t, err)
 
 	authReq, err := shortService.InitiateAuth(ctx, "pid", nil, nil)
