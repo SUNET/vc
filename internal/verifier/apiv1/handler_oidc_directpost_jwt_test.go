@@ -188,6 +188,13 @@ func TestProcessDirectPostEncryptedEndToEnd(t *testing.T) {
 		State:                 "client-state",
 		Scopes:                []string{"openid"},
 		WalletFollowsRedirect: true,
+		// Every session this flow creates carries the query it asked, and
+		// the response gate refuses one it cannot recover.
+		DCQLQuery: &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+			ID:     "pid",
+			Format: openid4vp.FormatSDJWTVC,
+			Meta:   openid4vp.MetaQuery{VCTValues: []string{"urn:eudi:pid:1"}},
+		}}},
 	}))
 
 	_, ephemeralPubJWK, err := client.ephemeralEncryptionKey(ctx, sessionID)

@@ -988,7 +988,6 @@ func TestDatastorePreAuthOffer_Success(t *testing.T) {
 	// Verify credential offer URL
 	assert.Contains(t, reply.CredentialOfferURL, "openid-credential-offer://")
 	assert.Contains(t, reply.CredentialOfferURL, "credential_offer")
-
 }
 
 func TestDatastorePreAuthOffer_DocumentNotFound(t *testing.T) {

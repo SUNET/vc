@@ -139,8 +139,12 @@ func (m *RegistryManager) evaluateFirstMatch(ctx context.Context, req *authzen.E
 		// Deny — capture the reason
 		detail := map[string]interface{}{
 			"registry":    r.registry,
-			"decision":    false,
 			"duration_ms": r.duration,
+		}
+		if r.response != nil {
+			// Only a real response is an explicit denial; a nil response
+			// leaves "decision" absent so it is not counted as one.
+			detail["decision"] = false
 		}
 		if r.response != nil && r.response.Context != nil && r.response.Context.Reason != nil {
 			detail["reason"] = r.response.Context.Reason
@@ -149,16 +153,100 @@ func (m *RegistryManager) evaluateFirstMatch(ctx context.Context, req *authzen.E
 	}
 
 	// No positive results — aggregate deny details
+	reason := map[string]interface{}{
+		"error":              "no registry returned positive match",
+		"registries_queried": len(registries),
+		"registry_results":   denyDetails,
+	}
+	promoteSingleDenyCode(reason, denyDetails)
 	return &authzen.EvaluationResponse{
 		Decision: false,
-		Context: &authzen.EvaluationResponseContext{
-			Reason: map[string]interface{}{
-				"error":              "no registry returned positive match",
-				"registries_queried": len(registries),
-				"registry_results":   denyDetails,
-			},
-		},
+		Context:  &authzen.EvaluationResponseContext{Reason: reason},
 	}, nil
+}
+
+// promoteSingleDenyCode surfaces a registry's machine-readable deny "code"
+// (and its "admin" detail) at the top level of the aggregated reason when
+// exactly one registry produced a denial reason. Policies that route an
+// action to a single registry (e.g. emrtd-document-signer) would otherwise
+// force clients to dig the code out of registry_results[0].reason. The
+// nested form is unchanged; this only adds keys.
+func promoteSingleDenyCode(reason map[string]interface{}, details []map[string]interface{}) {
+	// Count denials only: error and circuit-breaker records are not denials
+	// and must not hide the one registry that did deny with a code.
+	var denials []map[string]interface{}
+	for _, d := range details {
+		if _, isErr := d["error"]; isErr {
+			continue
+		}
+		// Only an explicit decision=false is a denial: an entry without a
+		// decision (a nil response) is not one.
+		if allowed, ok := d["decision"].(bool); !ok || allowed {
+			continue
+		}
+		denials = append(denials, d)
+	}
+	if len(denials) != 1 {
+		return
+	}
+	inner, ok := denials[0]["reason"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	if code, ok := inner["code"].(string); ok && code != "" {
+		reason["code"] = code
+		if admin, ok := inner["admin"]; ok {
+			reason["admin"] = admin
+		}
+	}
+}
+
+// promoteSingleAllowAdmin surfaces the "admin" details (e.g. the eMRTD CSCA/DSC
+// fingerprints) of the one matching registry at the top level of an all-results
+// reason, so they survive best_match dropping all_results.
+func promoteSingleAllowAdmin(reason map[string]interface{}, matched []string) {
+	if len(matched) != 1 {
+		return
+	}
+	promoteSelectedAdmin(reason, matched[0])
+}
+
+// promoteSelectedAdmin copies reason.admin of the FIRST ALLOWING result of the
+// named registry from reason["all_results"] to the top level. Best-match calls
+// it for the winner before dropping all_results. Registry names are not
+// unique (Register allows duplicates), so a later same-named allow or deny
+// must never overwrite the selected result's details: the scan stops at the
+// first allow.
+func promoteSelectedAdmin(reason map[string]interface{}, registry string) {
+	all, _ := reason["all_results"].([]map[string]interface{})
+	for _, ri := range all {
+		if ri["registry"] != registry {
+			continue
+		}
+		if allowed, _ := ri["decision"].(bool); !allowed {
+			continue
+		}
+		if inner, ok := ri["reason"].(map[string]interface{}); ok {
+			if admin, ok := inner["admin"]; ok {
+				reason["admin"] = admin
+			}
+		}
+		return
+	}
+}
+
+// promoteAllResultsDenyCode applies promoteSingleDenyCode to the non-allow
+// entries of an all-results aggregation.
+func promoteAllResultsDenyCode(reason map[string]interface{}, allResults []map[string]interface{}) {
+	var denied []map[string]interface{}
+	for _, ri := range allResults {
+		// Only an explicit decision=false is a denial: an entry with no
+		// decision (a nil response, or an error record) is not one.
+		if d, ok := ri["decision"].(bool); ok && !d {
+			denied = append(denied, ri)
+		}
+	}
+	promoteSingleDenyCode(reason, denied)
 }
 
 // evaluateAll queries all applicable registries and aggregates results.
@@ -275,20 +363,27 @@ func (m *RegistryManager) evaluateAll(ctx context.Context, req *authzen.Evaluati
 				decision = true
 				registriesMatched = append(registriesMatched, r.registry)
 			}
+			if r.response.Context != nil && r.response.Context.Reason != nil {
+				resultInfo["reason"] = r.response.Context.Reason
+			}
 		}
 
 		allResults = append(allResults, resultInfo)
 	}
 
+	reason := map[string]interface{}{
+		"registries_queried": len(registries),
+		"registries_matched": registriesMatched,
+		"all_results":        allResults,
+	}
+	if !decision {
+		promoteAllResultsDenyCode(reason, allResults)
+	} else {
+		promoteSingleAllowAdmin(reason, registriesMatched)
+	}
 	return &authzen.EvaluationResponse{
 		Decision: decision,
-		Context: &authzen.EvaluationResponseContext{
-			Reason: map[string]interface{}{
-				"registries_queried": len(registries),
-				"registries_matched": registriesMatched,
-				"all_results":        allResults,
-			},
-		},
+		Context:  &authzen.EvaluationResponseContext{Reason: reason},
 	}, nil
 }
 
@@ -308,6 +403,7 @@ func (m *RegistryManager) evaluateBestMatch(ctx context.Context, req *authzen.Ev
 		if matched, ok := resp.Context.Reason["registries_matched"].([]string); ok && len(matched) > 0 {
 			resp.Context.Reason["registry"] = matched[0]
 			resp.Context.Reason["strategy"] = "best_match"
+			promoteSelectedAdmin(resp.Context.Reason, matched[0])
 			// Remove aggregation details
 			delete(resp.Context.Reason, "all_results")
 		}
@@ -403,8 +499,12 @@ func (m *RegistryManager) evaluateSequentialFiltered(ctx context.Context, req *a
 			logging.F("duration_ms", duration))
 		detail := map[string]interface{}{
 			"registry":    info.Name,
-			"decision":    false,
 			"duration_ms": duration,
+		}
+		if resp != nil {
+			// Only a real response is an explicit denial; a nil response
+			// leaves "decision" absent so it is not counted as one.
+			detail["decision"] = false
 		}
 		if resp != nil && resp.Context != nil && resp.Context.Reason != nil {
 			detail["reason"] = resp.Context.Reason
@@ -417,6 +517,7 @@ func (m *RegistryManager) evaluateSequentialFiltered(ctx context.Context, req *a
 		"registries_queried": len(registries),
 		"registry_results":   registryResults,
 	}
+	promoteSingleDenyCode(reason, registryResults)
 	if policyCtx != nil && policyCtx.Policy != nil {
 		reason["policy"] = policyCtx.Policy.Name
 	}
@@ -546,8 +647,12 @@ func (m *RegistryManager) evaluateFirstMatchFiltered(ctx context.Context, req *a
 		// Deny — capture the reason
 		detail := map[string]interface{}{
 			"registry":    r.registry,
-			"decision":    false,
 			"duration_ms": r.duration,
+		}
+		if r.response != nil {
+			// Only a real response is an explicit denial; a nil response
+			// leaves "decision" absent so it is not counted as one.
+			detail["decision"] = false
 		}
 		if r.response != nil && r.response.Context != nil && r.response.Context.Reason != nil {
 			detail["reason"] = r.response.Context.Reason
@@ -565,6 +670,7 @@ func (m *RegistryManager) evaluateFirstMatchFiltered(ctx context.Context, req *a
 		"registries_queried": len(registries),
 		"registry_results":   denyDetails,
 	}
+	promoteSingleDenyCode(reason, denyDetails)
 	if policyCtx != nil && policyCtx.Policy != nil {
 		reason["policy"] = policyCtx.Policy.Name
 	}
@@ -673,6 +779,9 @@ func (m *RegistryManager) evaluateAllFiltered(ctx context.Context, req *authzen.
 				decision = true
 				registriesMatched = append(registriesMatched, r.registry)
 			}
+			if r.response.Context != nil && r.response.Context.Reason != nil {
+				resultInfo["reason"] = r.response.Context.Reason
+			}
 		}
 
 		allResults = append(allResults, resultInfo)
@@ -682,6 +791,11 @@ func (m *RegistryManager) evaluateAllFiltered(ctx context.Context, req *authzen.
 		"registries_queried": len(registries),
 		"registries_matched": registriesMatched,
 		"all_results":        allResults,
+	}
+	if !decision {
+		promoteAllResultsDenyCode(reason, allResults)
+	} else {
+		promoteSingleAllowAdmin(reason, registriesMatched)
 	}
 	if policyCtx != nil && policyCtx.Policy != nil {
 		reason["policy"] = policyCtx.Policy.Name

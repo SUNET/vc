@@ -19,6 +19,22 @@ test: ## Run all tests
 test-brainpool: ## Run brainpool plugin tests
 	cd brainpool && go test -v -race ./...
 
+.PHONY: test-ecparams
+test-ecparams: ## Run ecparams plugin tests
+	cd ecparams && go test -v -race ./...
+
+.PHONY: check-modules
+check-modules: ## Fail if a nested go.mod contains a replace directive
+	scripts/check-nested-modules.sh
+
+.PHONY: test-release-script
+test-release-script: ## Test scripts/release.sh in a temp clone with a fake remote
+	GOWORK=off scripts/release_test.sh
+
+.PHONY: test-pkcs11pool
+test-pkcs11pool: ## Run pkcs11pool module tests (nested module, not reached by ./...)
+	cd pkcs11pool && go test -v -race ./...
+
 .PHONY: coverage
 coverage: ## Generate coverage report
 	go test -coverprofile=cover.out -covermode=atomic -coverpkg=./... ./...
@@ -60,6 +76,7 @@ vet: ## Run go vet
 tidy: ## Tidy module dependencies
 	go mod tidy
 	cd brainpool && go mod tidy
+	cd ecparams && go mod tidy
 
 .PHONY: clean
 clean: ## Remove build artifacts

@@ -16,15 +16,16 @@ import (
 // loadKeyMaterialFromHSMWithConfig loads key material from a PKCS#11 HSM with explicit config.
 // The key label is taken from hsmConfig.KeyLabel.
 func (kl *KeyLoader) loadKeyMaterialFromHSMWithConfig(hsmConfig *PKCS11Config) (*KeyMaterial, error) {
-	ctx := pkcs11.New(hsmConfig.ModulePath)
-	if ctx == nil {
-		return nil, fmt.Errorf("failed to load PKCS#11 module: %s", hsmConfig.ModulePath)
+	// Through the registry: C_Initialize and C_Finalize are library-wide,
+	// so opening and finalizing the module here would collide with - and
+	// then tear down - any other user of the same module in this process.
+	// See pkcs11_module.go.
+	module, err := acquireModule(hsmConfig.ModulePath)
+	if err != nil {
+		return nil, err
 	}
-
-	if err := ctx.Initialize(); err != nil {
-		return nil, fmt.Errorf("failed to initialize PKCS#11: %w", err)
-	}
-	defer ctx.Finalize()
+	defer releaseModule(module)
+	ctx := module.ctx
 
 	session, err := ctx.OpenSession(hsmConfig.SlotID, pkcs11.CKF_SERIAL_SESSION)
 	if err != nil {
@@ -32,10 +33,9 @@ func (kl *KeyLoader) loadKeyMaterialFromHSMWithConfig(hsmConfig *PKCS11Config) (
 	}
 	defer ctx.CloseSession(session)
 
-	if err := ctx.Login(session, pkcs11.CKU_USER, hsmConfig.PIN); err != nil {
+	if err := loginSession(ctx, session, hsmConfig.PIN); err != nil {
 		return nil, fmt.Errorf("failed to login: %w", err)
 	}
-	defer ctx.Logout(session)
 
 	// Find private key
 	template := []*pkcs11.Attribute{
@@ -279,15 +279,16 @@ func (k *PKCS11PrivateKey) Public() crypto.PublicKey {
 // Sign implements crypto.Signer interface for PKCS11 keys
 // Note: This requires opening a new HSM session each time
 func (k *PKCS11PrivateKey) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
-	ctx := pkcs11.New(k.Config.ModulePath)
-	if ctx == nil {
-		return nil, fmt.Errorf("failed to load PKCS#11 module")
+	// Through the registry. This used to initialize and finalize the module
+	// around every single signature, which is both wasteful and - because
+	// C_Finalize is library-wide - destructive to any other session open on
+	// the same module. See pkcs11_module.go.
+	module, err := acquireModule(k.Config.ModulePath)
+	if err != nil {
+		return nil, err
 	}
-
-	if err := ctx.Initialize(); err != nil {
-		return nil, fmt.Errorf("failed to initialize PKCS#11: %w", err)
-	}
-	defer ctx.Finalize()
+	defer releaseModule(module)
+	ctx := module.ctx
 
 	session, err := ctx.OpenSession(k.Config.SlotID, pkcs11.CKF_SERIAL_SESSION)
 	if err != nil {
@@ -295,10 +296,9 @@ func (k *PKCS11PrivateKey) Sign(rand io.Reader, digest []byte, opts crypto.Signe
 	}
 	defer ctx.CloseSession(session)
 
-	if err := ctx.Login(session, pkcs11.CKU_USER, k.Config.PIN); err != nil {
+	if err := loginSession(ctx, session, k.Config.PIN); err != nil {
 		return nil, fmt.Errorf("failed to login: %w", err)
 	}
-	defer ctx.Logout(session)
 
 	// Find the private key again
 	template := []*pkcs11.Attribute{
