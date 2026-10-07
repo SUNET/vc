@@ -222,11 +222,26 @@ func newVegaKeyStore(parent string, max int) *vegaKeyStore {
 const vegaKeyStoreDirPerm = 0o700
 
 // setMax changes the bound, evicting down to it.
+//
+// All the way down, including the last entry. evictDownLocked keeps one
+// because INSERTION must: the caller of put is about to read what it just
+// wrote. Lowering the bound has no such caller, so stopping at one entry
+// left a sole oversized key resident and made
+// SetVegaVerifierKeyCacheBytes' immediate-bound promise untrue.
 func (s *vegaKeyStore) setMax(max int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.cache.max = max
 	s.evictDownLocked()
+
+	for s.cache.bytes > s.cache.max && len(s.cache.lru) > 0 {
+		oldest := s.cache.lru[0]
+		s.cache.lru = s.cache.lru[1:]
+		s.cache.bytes -= s.cache.sizes[oldest]
+		delete(s.cache.sizes, oldest)
+		s.retireLocked(oldest)
+	}
 }
 
 // evictDownLocked brings the accounting back inside the bound. Callers hold
@@ -363,14 +378,31 @@ func (s *vegaKeyStore) get(id string) (string, bool) {
 // half-written key. Rename within one directory is atomic on every
 // filesystem this runs on.
 func (s *vegaKeyStore) put(id string, b []byte) (string, func(), error) {
+	// The ~100MB write happens WITHOUT the lock. Holding it across the
+	// write put every cache hit behind somebody else's disk I/O, and -
+	// worse - meant removeAll could not acquire the lock to notice its own
+	// shutdown deadline while a slow or stalled filesystem had it. Only
+	// the metadata operations below need serialising.
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.closed {
+		s.mu.Unlock()
 		return "", nil, errors.New("the Vega verifier key store has been closed")
 	}
 	if err := s.ensureDir(); err != nil {
+		s.mu.Unlock()
 		return "", nil, err
+	}
+	dir := s.dir
+	s.mu.Unlock()
+
+	// A seam, and the only one in this file. The property below - that the
+	// ~100MB write happens with no lock held - cannot be observed from
+	// outside: timing it is unreliable (a 64MB write to tmpfs is ~30ms, so
+	// even serialised it finishes before any threshold worth asserting),
+	// and there is nothing else to measure. A nil-checked hook lets a test
+	// try the mutex at exactly the moment that matters. Nil in production.
+	if vegaKeyStoreWriteHook != nil {
+		vegaKeyStoreWriteHook()
 	}
 
 	// A UNIQUE path per generation, not a deterministic one per id. Two
@@ -383,7 +415,7 @@ func (s *vegaKeyStore) put(id string, b []byte) (string, func(), error) {
 	//
 	// CreateTemp supplies the uniqueness; the hashed id is kept as a
 	// prefix so a directory listing is still readable.
-	tmp, err := os.CreateTemp(s.dir, vegaKeyFileName(id)+".*")
+	tmp, err := os.CreateTemp(dir, vegaKeyFileName(id)+".*")
 	if err != nil {
 		return "", nil, fmt.Errorf("creating a temporary file for Vega verifier key %q: %w", id, err)
 	}
@@ -399,6 +431,18 @@ func (s *vegaKeyStore) put(id string, b []byte) (string, func(), error) {
 		os.Remove(tmpName)
 		return "", nil, fmt.Errorf("closing Vega verifier key %q: %w", id, err)
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// The store may have been torn down while that write was in progress.
+	// s.dir changing is the same event seen from here: removeAll clears it
+	// before deleting the directory, so a temporary file written into the
+	// old one is ours to clean up and nobody else's to trip over.
+	if s.closed || s.dir != dir {
+		os.Remove(tmpName)
+		return "", nil, errors.New("the Vega verifier key store has been closed")
+	}
+
 	if err := os.Rename(tmpName, path); err != nil {
 		os.Remove(tmpName)
 		return "", nil, fmt.Errorf("installing Vega verifier key %q: %w", id, err)
@@ -543,6 +587,10 @@ func (s *vegaKeyStore) resetLocked() {
 	// counter go negative and a second teardown read as "nothing pinned"
 	// when something is.
 }
+
+// vegaKeyStoreWriteHook runs inside put, after the store lock is released
+// and before the key is written. Tests only; see the call site.
+var vegaKeyStoreWriteHook func()
 
 // vegaKeyFileSuffix is appended to a store file's unique name. Cosmetic;
 // the uniqueness comes from CreateTemp.

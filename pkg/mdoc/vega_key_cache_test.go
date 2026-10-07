@@ -709,3 +709,69 @@ func TestVegaKeyStoreCloseWaitsForARetiredPin(t *testing.T) {
 		t.Fatal("removeAll did not finish after the last release")
 	}
 }
+
+// Lowering the bound has to evict all the way down, including the last
+// entry. evictDownLocked keeps one because INSERTION must - put's caller
+// is about to read what it just wrote - and setMax has no such caller, so
+// stopping at one entry left a sole oversized key resident and made the
+// immediate-bound promise untrue.
+func TestVegaKeyStoreSetMaxEvictsTheLastEntryToo(t *testing.T) {
+	s := newVegaKeyStore(t.TempDir(), 1000)
+	t.Cleanup(func() { _ = s.removeAll(context.Background()) })
+
+	path, release, err := s.put("only", make([]byte, 500))
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+
+	s.setMax(100)
+
+	if got, ok := s.get("only"); ok {
+		t.Errorf("get() = %q; the sole entry exceeds the new bound and must go", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("its file is still on disk (%v)", err)
+	}
+	if s.cache.bytes != 0 {
+		t.Errorf("bytes = %d, want 0", s.cache.bytes)
+	}
+}
+
+// The ~100MB write must not hold the store-wide lock: that put every cache
+// hit behind somebody else's disk I/O, and removeAll could not acquire the
+// lock to notice its own shutdown deadline while a stalled filesystem had
+// it.
+//
+// Checked with TryLock at exactly the moment the write is about to
+// happen, not by timing it. A 64MB write to tmpfs is about 30ms, so a
+// timing test passes whether or not the lock is held - which is how a test
+// for a lock-scope property comes to prove nothing.
+func TestVegaKeyStorePutDoesNotHoldTheLockWhileWriting(t *testing.T) {
+	s := newVegaKeyStore(t.TempDir(), 1<<30)
+	t.Cleanup(func() { _ = s.removeAll(context.Background()) })
+
+	var lockWasFree bool
+	var hookRan bool
+	vegaKeyStoreWriteHook = func() {
+		hookRan = true
+		if s.mu.TryLock() {
+			lockWasFree = true
+			s.mu.Unlock()
+		}
+	}
+	t.Cleanup(func() { vegaKeyStoreWriteHook = nil })
+
+	if _, release, err := s.put("a", make([]byte, 4096)); err != nil {
+		t.Fatal(err)
+	} else {
+		release()
+	}
+
+	if !hookRan {
+		t.Fatal("the hook never ran; the seam is in the wrong place")
+	}
+	if !lockWasFree {
+		t.Error("the store lock is held across the key write")
+	}
+}

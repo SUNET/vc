@@ -170,7 +170,12 @@ func main() {
 		}
 	}
 
-	if err := meter.Shutdown(ctx); err != nil {
+	// shutdownCtx, not ctx: MeterProvider.Shutdown performs exporter I/O
+	// when OTLP metrics are enabled, so a stuck collector would otherwise
+	// hold SIGTERM open past the orchestrator's grace period and get the
+	// whole process SIGKILLed - exactly what the deadline above exists to
+	// prevent, undone two statements later.
+	if err := meter.Shutdown(shutdownCtx); err != nil {
 		mainLog.Error(err, "Meter shutdown")
 	}
 
