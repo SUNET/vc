@@ -130,6 +130,15 @@ func (s *Service) initialize(ctx context.Context) error {
 		if err != nil {
 			s.log.Info("Failed to load dynamic registration credentials", "error", err)
 		}
+		// A legacy row written before response validation may carry an empty
+		// client id or secret. Loaded with expiry 0 it reads as never-expiring,
+		// so the service would keep presenting an unusable client and never
+		// re-register. Treat it as absent and take the registration branch.
+		if storedCreds != nil && (storedCreds.ClientID == "" || storedCreds.ClientSecret == "") {
+			s.log.Warn("discarding an unusable stored dynamic registration",
+				"client_id", storedCreds.ClientID, "has_secret", storedCreds.ClientSecret != "")
+			storedCreds = nil
+		}
 		if storedCreds != nil {
 			s.log.Info("Using stored dynamic registration credentials", "client_id", storedCreds.ClientID)
 			clientID = storedCreds.ClientID
@@ -402,12 +411,17 @@ func (s *Service) ensureCredentials(ctx context.Context) error {
 	// Cluster-wide single-flight. s.mu already collapses concurrent renewals
 	// within this process; the lock extends that across HA replicas, so a
 	// burst of them all noticing the same secret age out registers one new
-	// client at the OP instead of one per replica. The key is the expiring
-	// client id - replicas renewing the same registration contend, and the
-	// loser adopts the winner's result from the shared store rather than
-	// registering again.
+	// client at the OP instead of one per replica. The loser adopts the
+	// winner's result from the shared store rather than registering again.
+	//
+	// Keyed on the RP's stable identity (the issuer URL), not the current
+	// client id: if replicas ever diverge - a brief lock-backend outage lets
+	// two of them register different clients - a per-client-id key would put
+	// them on different locks forever and they would never re-converge. On the
+	// issuer URL they always contend, so adoptRenewedRegistration pulls them
+	// back onto one client.
 	if s.renewalLock != nil {
-		acquired, err := s.renewalLock.TryLock(ctx, "oidcrp:renew:"+current.clientID, clientRenewLockTTL)
+		acquired, err := s.renewalLock.TryLock(ctx, "oidcrp:renew:"+s.cfg.IssuerURL, clientRenewLockTTL)
 		switch {
 		case err != nil:
 			// Lock backend unreachable. Renew anyway rather than refuse a

@@ -356,7 +356,7 @@ func TestEnsureCredentialsRefusesAFlowThatCannotOutlastTheSecret(t *testing.T) {
 	s.renewalLock = lock
 
 	// Another replica already holds the lock and has not yet published.
-	held, err := lock.TryLock(t.Context(), "oidcrp:renew:"+s.currentClientID(t), clientRenewLockTTL)
+	held, err := lock.TryLock(t.Context(), "oidcrp:renew:"+s.cfg.IssuerURL, clientRenewLockTTL)
 	require.NoError(t, err)
 	require.True(t, held)
 
@@ -378,7 +378,7 @@ func TestEnsureCredentialsCarriesOnWhenAFlowCanStillComplete(t *testing.T) {
 	s := renewalService(t, op, store, time.Now().Add(3*time.Minute))
 	s.renewalLock = lock
 
-	held, err := lock.TryLock(t.Context(), "oidcrp:renew:"+s.currentClientID(t), clientRenewLockTTL)
+	held, err := lock.TryLock(t.Context(), "oidcrp:renew:"+s.cfg.IssuerURL, clientRenewLockTTL)
 	require.NoError(t, err)
 	require.True(t, held)
 
@@ -654,6 +654,44 @@ func TestInitializeDoesNotPublishAnUnstorableRegistration(t *testing.T) {
 	require.Error(t, err, "an unstorable registration must fail initialization")
 	assert.Nil(t, s.creds.load(), "and must not be published")
 	assert.False(t, s.ready)
+}
+
+// A legacy stored registration with an empty client id or secret predates
+// response validation; loaded with expiry 0 it reads as never-expiring, so
+// without discarding it the service would present an unusable client and
+// never re-register. It must be ignored and a fresh client registered.
+func TestInitializeDiscardsAnUnusableStoredRegistration(t *testing.T) {
+	op := newOPServer(t)
+	store := &fakeRegistrationStore{
+		saved: []*db.DynamicRegistrationCredentials{
+			{ClientID: "", ClientSecret: "", ClientSecretExpiresAt: 0},
+		},
+	}
+
+	log, err := logger.New("test", "", false)
+	require.NoError(t, err)
+
+	s := &Service{
+		cfg: &model.OIDCRP{
+			IssuerURL:       op.URL,
+			RedirectURI:     "https://apigw.example.com/callback",
+			Scopes:          []string{"openid"},
+			SessionDuration: 300,
+			Registration: &model.OIDCRPRegistrationConfig{
+				Dynamic: &model.OIDCRPDynamicRegistrationConfig{Enable: true},
+			},
+		},
+		httpClient: op.Client(),
+		dbService:  &db.Service{DynamicRegistrationColl: store},
+		log:        log.New("oidcrp"),
+		creds:      newCredentialSet(5 * time.Minute),
+	}
+
+	require.NoError(t, s.initialize(t.Context()))
+	assert.Equal(t, 1, op.count(), "the unusable stored row must trigger a fresh registration")
+	current := s.creds.load()
+	require.NotNil(t, current)
+	assert.NotEmpty(t, current.clientID, "the service must not adopt the empty stored client id")
 }
 
 // backedOffService is a replica whose own registration has run out and
