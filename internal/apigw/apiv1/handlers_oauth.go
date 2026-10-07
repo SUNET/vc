@@ -110,7 +110,6 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 				Scopes:       []string{"*"},
 			}
 		} else {
-			c.log.Debug("OAuthPar client validation failed", "client_id", req.ClientID, "error", err)
 			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidClient, "client validation failed", 401, err)
 		}
 	}
