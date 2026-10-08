@@ -336,18 +336,26 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 		return nil, fmt.Errorf("failed to generate nonce: %w", nonceErr)
 	}
 
-	identifier, resolveErr := s.apiv1.ResolveIdentifier(ctx, session.IDPEntityID, claims)
-	if resolveErr != nil {
-		s.log.Debug("standalone SAML: could not resolve identifier", "error", resolveErr)
-	}
-
-	// Resolve the data source for this credential type so that the credential
-	// endpoint knows whether the identity is assertion-based, and so that we
-	// don't merge assertion-only defaults into a document belonging to a
-	// datastore or external-API source. Mirrors the OIDC standalone path.
+	// Resolve the data source first so we don't merge assertion-only defaults
+	// into a document belonging to a datastore or external-API source, and so
+	// identity resolution below uses the scope's configured identity-mapping
+	// namespace (authentic_source) rather than the IdP entity ID. Mirrors the
+	// OIDC standalone path.
 	credSource, credSourceErr := s.cfg.APIGW.DataSources.ResolveDataSource(session.CredentialType, string(model.AuthProviderSAML))
 	if credSourceErr != nil {
 		s.log.Debug("standalone SAML: could not resolve data source", "error", credSourceErr)
+	}
+
+	// Resolve the identity against the scope's configured authentic_source
+	// namespace, falling back to the IdP entity ID only when the scope did not
+	// configure one (e.g. assertion scopes).
+	authenticSource := session.IDPEntityID
+	if credSource.AuthenticSource != "" {
+		authenticSource = credSource.AuthenticSource
+	}
+	identifier, resolveErr := s.apiv1.ResolveIdentifier(ctx, authenticSource, claims)
+	if resolveErr != nil {
+		s.log.Debug("standalone SAML: could not resolve identifier", "error", resolveErr)
 	}
 
 	// Fail fast if we have neither an identifier nor a resolved data source —
@@ -386,6 +394,7 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	}
 	if credSourceErr == nil {
 		authCtx.DataSource = string(credSource.DataSource)
+		authCtx.AuthenticSource = credSource.AuthenticSource
 	}
 	if err = s.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
 		span.SetStatus(codes.Error, "pre-auth code persistence failed")
