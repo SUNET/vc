@@ -59,7 +59,7 @@ func RunDocuments(ctx context.Context, cfg *model.DatastoreImport, dbService *db
 	for _, path := range cfg.FilePaths {
 		name := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(path), ".gz"), ".json")
 
-		if err := importDocuments(ctx, path, name, cfg.Users, dbService, log); err != nil {
+		if err := importDocuments(ctx, path, name, cfg.Users, dbService.DatastoreColl, log); err != nil {
 			return fmt.Errorf("import documents from %s: %w", filepath.Base(path), err)
 		}
 	}
@@ -68,7 +68,7 @@ func RunDocuments(ctx context.Context, cfg *model.DatastoreImport, dbService *db
 	return nil
 }
 
-func importDocuments(ctx context.Context, path, name string, filterUsers []string, dbService *db.Service, log *logger.Log) error {
+func importDocuments(ctx context.Context, path, name string, filterUsers []string, store db.DatastoreStore, log *logger.Log) error {
 	data, err := readBootstrapFile(path)
 	if err != nil {
 		return err
@@ -98,7 +98,7 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 			continue
 		}
 
-		present, err := documentPresent(ctx, dbService.DatastoreColl, doc.Meta)
+		present, err := documentPresent(ctx, store, doc.Meta)
 		if err != nil {
 			return fmt.Errorf("check document %s/%s: %w", name, id, err)
 		}
@@ -107,12 +107,12 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 			continue
 		}
 
-		if err := dbService.DatastoreColl.Save(ctx, doc); err != nil {
+		if err := store.Save(ctx, doc); err != nil {
 			// A concurrent importer may have inserted the same natural key
 			// between the presence check and this Save. Re-check: if the
 			// document exists now, a losing racer counts it as skipped instead
 			// of aborting the whole import and leaving later fixtures unprocessed.
-			if nowPresent, lookupErr := documentPresent(ctx, dbService.DatastoreColl, doc.Meta); lookupErr == nil && nowPresent {
+			if nowPresent, lookupErr := documentPresent(ctx, store, doc.Meta); lookupErr == nil && nowPresent {
 				skipped++
 				continue
 			}
