@@ -139,13 +139,15 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 		return fmt.Errorf("creating the mirror directory %s: %w", outDir, err)
 	}
 
+	fileMode := mirrorFileMode(outDir)
+
 	staging, err := os.MkdirTemp(outDir, ".staging-")
 	if err != nil {
 		return fmt.Errorf("creating a staging directory under %s: %w", outDir, err)
 	}
 	defer os.RemoveAll(staging)
 
-	if err := os.MkdirAll(filepath.Join(staging, "v1", "circuits"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(staging, "v1", "circuits"), dirModeFor(fileMode)); err != nil {
 		return err
 	}
 
@@ -169,7 +171,7 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 			// pulling ~130MB again. Only when the bytes on disk still
 			// hash to what the descriptor says: a stale or edited file is
 			// a download, not a shortcut.
-			if reused, err := reuseArtifact(existing, stagedPath, descriptor.Artifact.Hash); err != nil {
+			if reused, err := reuseArtifact(existing, stagedPath, descriptor.Artifact.Hash, fileMode); err != nil {
 				return err
 			} else if reused {
 				fmt.Printf("reused      %s\n", stagedPath)
@@ -180,7 +182,7 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 			if err != nil {
 				return fmt.Errorf("download artifact for %q: %w", descriptor.ID, err)
 			}
-			if err := writeFileAtomically(stagedPath, data); err != nil {
+			if err := writeFileAtomically(stagedPath, data, fileMode); err != nil {
 				return err
 			}
 			fmt.Printf("artifact    %s (%d bytes)\n", stagedPath, len(data))
@@ -189,7 +191,7 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 
 	for _, descriptor := range vendored {
 		path := filepath.Join(staging, "v1", "circuits", descriptor.ID+".json")
-		if err := writeJSON(path, descriptor); err != nil {
+		if err := writeJSON(path, descriptor, fileMode); err != nil {
 			return err
 		}
 	}
@@ -200,7 +202,7 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 		Catalog:         manifest.Catalog,
 		Circuits:        vendored,
 	}
-	if err := writeJSON(filepath.Join(staging, "v1", "manifest.json"), out); err != nil {
+	if err := writeJSON(filepath.Join(staging, "v1", "manifest.json"), out, fileMode); err != nil {
 		return err
 	}
 
@@ -221,7 +223,7 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 // Verified by hash, not by presence: a file left by an interrupted run, or
 // edited since, is a download rather than a shortcut. Reading ~130MB to
 // hash it is an order of magnitude cheaper than fetching it again.
-func reuseArtifact(existing, staged, expectedHash string) (bool, error) {
+func reuseArtifact(existing, staged, expectedHash string, mode os.FileMode) (bool, error) {
 	data, err := os.ReadFile(existing)
 	if err != nil {
 		return false, nil //nolint:nilerr // absent or unreadable means "download it"
@@ -241,7 +243,7 @@ func reuseArtifact(existing, staged, expectedHash string) (bool, error) {
 		return false, nil
 	}
 
-	if err := writeFileAtomically(staged, data); err != nil {
+	if err := writeFileAtomically(staged, data, mode); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -351,21 +353,24 @@ func sha256HexFromHash(hash string) (string, bool) {
 	return hash, true
 }
 
-func writeJSON(path string, v any) error {
+func writeJSON(path string, v any, mode os.FileMode) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
-	return writeFileAtomically(path, append(data, '\n'))
+	return writeFileAtomically(path, append(data, '\n'), mode)
 }
 
 // writeFileAtomically writes to a temporary name in the destination
 // directory and renames it into place, so a reader pointed at this mirror
 // never sees a half-written file - and a re-run that fails partway leaves
 // the previous version of each file intact rather than a truncated one.
-func writeFileAtomically(path string, data []byte) error {
+//
+// mode comes from mirrorFileMode rather than a constant here; see its doc
+// comment for why the mirror's own directory decides.
+func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, dirModeFor(mode)); err != nil {
 		return err
 	}
 
@@ -384,7 +389,10 @@ func writeFileAtomically(path string, data []byte) error {
 		os.Remove(tmpName)
 		return err
 	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
+	// CreateTemp always makes 0600 and ignores the umask, so without this
+	// the mirror would be readable only by whoever ran the tool - which is
+	// usually not the user the verifier runs as.
+	if err := os.Chmod(tmpName, mode); err != nil {
 		os.Remove(tmpName)
 		return err
 	}
@@ -393,4 +401,48 @@ func writeFileAtomically(path string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+// mirrorFileMode decides what mode the mirror's files get, by reading the
+// mode of the directory the operator gave us.
+//
+// Not a constant, and not the umask either. os.CreateTemp hardcodes 0600
+// and ignores the umask, so something has to set the mode explicitly - and
+// a hardcoded 0644 imposes this tool's opinion on a tree somebody else
+// owns. A mirror served to another user wants group or world read; one on
+// a single-user host does not; and the operator has already said which by
+// creating (or not creating) the output directory.
+//
+// So the directory decides: its permission bits, minus execute, which is
+// the ordinary relationship between a directory and the files in it. An
+// operator who wants 0640 creates the directory 0750 and gets it. The
+// default path - this tool creating the directory itself at 0755 - yields
+// 0644, which is what it always did.
+//
+// A directory that cannot be read falls back to 0600: the tightest mode,
+// not the loosest, since the one thing worse than a mirror the service
+// cannot read is one anybody can rewrite.
+func mirrorFileMode(dir string) os.FileMode {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return 0o600
+	}
+	mode := info.Mode().Perm() &^ 0o111
+	if mode == 0 {
+		return 0o600
+	}
+	return mode
+}
+
+// dirModeFor is the directory mode matching a file mode: the same bits,
+// plus execute wherever read is allowed, since a directory has to be
+// traversable by whoever may read what is in it.
+func dirModeFor(mode os.FileMode) os.FileMode {
+	dir := mode
+	for _, read := range []os.FileMode{0o400, 0o040, 0o004} {
+		if mode&read != 0 {
+			dir |= read >> 2
+		}
+	}
+	return dir
 }

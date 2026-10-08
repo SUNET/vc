@@ -534,3 +534,83 @@ func TestSHA256HexFromHash(t *testing.T) {
 		})
 	}
 }
+
+// The mirror's files take their mode from the directory the operator gave
+// us, rather than a constant this tool picks. os.CreateTemp hardcodes 0600
+// and ignores the umask, so something has to set it explicitly - and a
+// hardcoded 0644 imposes this tool's opinion on a tree somebody else owns.
+func TestMirrorFileModeFollowsTheDirectory(t *testing.T) {
+	for name, tc := range map[string]struct {
+		dir  os.FileMode
+		want os.FileMode
+	}{
+		"world readable": {0o755, 0o644},
+		"group readable": {0o750, 0o640},
+		"owner only":     {0o700, 0o600},
+		"group writable": {0o770, 0o660},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "mirror")
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			// Set explicitly: Mkdir applies the umask, which would make
+			// this test depend on the environment it runs in.
+			if err := os.Chmod(dir, tc.dir); err != nil {
+				t.Fatal(err)
+			}
+
+			if got := mirrorFileMode(dir); got != tc.want {
+				t.Errorf("mirrorFileMode(%o) = %o, want %o", tc.dir, got, tc.want)
+			}
+		})
+	}
+
+	// A directory that cannot be read falls back to the TIGHTEST mode, not
+	// the loosest: the one thing worse than a mirror the service cannot
+	// read is one anybody can rewrite.
+	if got := mirrorFileMode(filepath.Join(t.TempDir(), "does-not-exist")); got != 0o600 {
+		t.Errorf("mirrorFileMode(missing) = %o, want 0600", got)
+	}
+}
+
+// And the mode the mirror ends up with on disk is that one, not whatever
+// CreateTemp left behind.
+func TestVendorWritesFilesWithTheMirrorsMode(t *testing.T) {
+	body := []byte("verifier key bytes")
+	artifact, urlPath := artifactFor(body, "")
+	source := catalogServer(t,
+		[]map[string]any{{
+			"id": "vega-verifier-r12", "system": "vega-mc", "systemVersion": "12",
+			"status": "active", "published": true, "artifact": artifact,
+			"params": map[string]any{"role": "verifier", "saltBytes": "32"},
+		}},
+		map[string][]byte{urlPath: body},
+	)
+
+	out := filepath.Join(t.TempDir(), "mirror")
+	if err := os.Mkdir(out, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(out, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := run(t.Context(), source, out, "", "", true, false); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, rel := range []string{
+		filepath.Join("v1", "manifest.json"),
+		filepath.Join("v1", "circuits", "vega-verifier-r12.json"),
+		filepath.FromSlash(urlPath),
+	} {
+		info, err := os.Stat(filepath.Join(out, rel))
+		if err != nil {
+			t.Fatalf("%s: %v", rel, err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o640 {
+			t.Errorf("%s has mode %o, want 0640 from the 0750 directory", rel, perm)
+		}
+	}
+}
