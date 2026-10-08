@@ -412,7 +412,7 @@ func genMicroCredential(pids []string, input *InputFile) map[string]*vcclient.Up
 			},
 			"learningOutcomeSummary": "Applies ethical reasoning to real-world data science scenarios.",
 			"fieldOfEducation":       "0613",
-			"escoReference":          []string{"http://data.europa.eu/esco/skill/abc12345"},
+			"escoReference":          []string{"http://data.europa.eu/esco/skill/d2564da5-c21f-4c02-8887-c78a001bb183"},
 			"notionalWorkload": map[string]any{
 				"value": 3,
 				"unit":  "ECTS",
