@@ -77,7 +77,9 @@ type DatastoreScope struct {
 	// an authentic source (SUNET/vc#507 made the namespace mandatory), so this
 	// must match the namespace the mappings were imported under. Not used for
 	// preauth, where the pre-authorized offer already carries the identifier.
-	AuthenticSource string `yaml:"authentic_source,omitempty" doc_example:"\"SUNET\""`
+	// Constrained to match AuthorizationContext.AuthenticSource so a namespace
+	// that passes config load cannot later fail every authorize request.
+	AuthenticSource string `yaml:"authentic_source,omitempty" validate:"omitempty,max=128,printascii" doc_example:"\"SUNET\""`
 
 	// AuthClaims lists the normalized claim names used for datastore identity lookup
 	// when auth_provider is saml or oidc. Not used for openid4vp (use AuthScopes instead).
