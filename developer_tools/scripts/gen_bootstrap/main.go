@@ -85,7 +85,6 @@ type EHICFields struct {
 	IssuingCountry               string `yaml:"issuing_country"`
 	InstitutionID                string `yaml:"institution_id"`
 	DateOfIssuance               string `yaml:"date_of_issuance"`
-	DateOfExpiry                 string `yaml:"date_of_expiry"`
 }
 
 // PDA1Fields are the per-person fields for PDA1 credentials.
@@ -93,7 +92,6 @@ type PDA1Fields struct {
 	PersonalAdministrativeNumber string           `yaml:"personal_administrative_number"`
 	DocumentNumber               string           `yaml:"document_number"`
 	DateOfIssuance               string           `yaml:"date_of_issuance"`
-	DateOfExpiry                 string           `yaml:"date_of_expiry"`
 	StatusConfirmation           string           `yaml:"status_confirmation"`
 	Employer                     *PDA1Employer    `yaml:"employer,omitempty"`
 	WorkAddress                  *PDA1WorkAddress `yaml:"work_address,omitempty"`
@@ -241,7 +239,7 @@ func genEHIC(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 				Name: input.Defaults.IssuingAuthority,
 			},
 			IssuingCountry: or_(e.IssuingCountry, "FR"),
-			DateOfExpiry:   e.DateOfExpiry,
+			DateOfExpiry:   now.AddDate(1, 0, 0).Format("2006-01-02"),
 			DateOfIssuance: e.DateOfIssuance,
 			DocumentNumber: e.DocumentNumber,
 			StartingDate:   now.Format("2006-01-02"),
@@ -320,7 +318,7 @@ func genPDA1(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 			LegislationCountry: "EU",
 			StatusConfirmation: or_(d.StatusConfirmation, "02"),
 			IssuingCountry:     "EU",
-			DateOfExpiry:       d.DateOfExpiry,
+			DateOfExpiry:       now.AddDate(1, 0, 0).Format("2006-01-02"),
 			DateOfIssuance:     d.DateOfIssuance,
 			DocumentNumber:     d.DocumentNumber,
 			StartingDate:       now.Format("2006-01-02"),
