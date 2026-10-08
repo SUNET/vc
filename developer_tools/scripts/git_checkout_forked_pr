@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 #
-# git_checkout_fork_pr [options] <pr-number> [remote]
+# git_checkout_forked_pr [options] <pr-number> [remote]
 
-# ./git_checkout_forked_pr -b fix/issuer-metadata-proof-config 730   # checkout once -> fix/issuer-metadata-proof-config-merge
-# ./git_checkout_forked_pr -b fix/issuer-metadata-proof-config -p 730 # push, repeat as needed
+# ./git_checkout_forked_pr -b fix/issuer-metadata-proof-config 730   # checkout -> fix/issuer-metadata-proof-config-merge
 
 
 #
 # Fetch a GitHub pull request (including from forks) into a local
 # "<headref>-merge" working branch you control, keeping the original head
-# ref name as the stem. Run once to check out; run again with --push to
-# publish the -merge branch to a remote you have access to.
+# ref name as the stem.
 #
 # The <headref> is resolved from the PR's head ref name (via gh) unless
 # given with --branch.
@@ -18,7 +16,6 @@
 # Options:
 #   -c, --checkout       Fetch the PR into <headref>-merge and check it out (default)
 #   -n, --no-checkout    Fetch only, do not checkout
-#   -p, --push           Push the <headref>-merge branch to the remote (repeatable)
 #   -b, --branch <name>  Use <name> as the head ref instead of resolving it
 #                        via gh (copy the head ref name from GitHub)
 #       --help           Show this help
@@ -29,14 +26,12 @@ usage() {
 	echo "Usage: $(basename "$0") [options] <pr-number> [remote]" >&2
 	echo "  -c, --checkout       Fetch into <headref>-merge and check it out (default)" >&2
 	echo "  -n, --no-checkout    Fetch only, do not checkout" >&2
-	echo "  -p, --push           Push the <headref>-merge branch (repeatable)" >&2
 	echo "  -b, --branch <name>  Use <name> as the head ref (skip gh)" >&2
 	echo "      --help           Show this help" >&2
 	exit 1
 }
 
 DO_CHECKOUT=1
-DO_PUSH=0
 BRANCH=""
 POSITIONAL=()
 
@@ -44,7 +39,6 @@ while [[ $# -gt 0 ]]; do
 	case "$1" in
 		-c|--checkout) DO_CHECKOUT=1; shift ;;
 		-n|--no-checkout) DO_CHECKOUT=0; shift ;;
-		-p|--push) DO_PUSH=1; shift ;;
 		-b|--branch) [[ $# -ge 2 ]] || { echo "Error: --branch requires a name" >&2; usage; }; BRANCH="$2"; shift 2 ;;
 		--help) usage ;;
 		--) shift; POSITIONAL+=("$@"); break ;;
@@ -75,15 +69,9 @@ fi
 # The working branch keeps the original head ref name as its stem.
 MERGE_BRANCH="${BRANCH}-merge"
 
-if [[ "$DO_PUSH" -eq 1 ]]; then
-	# Push mode (safe to repeat): publish the local -merge branch.
-	echo "Pushing '${MERGE_BRANCH}' -> ${REMOTE}"
-	git push -u "$REMOTE" "$MERGE_BRANCH"
-else
-	# Checkout mode (run once): fetch the fork PR into the -merge branch.
-	echo "PR #${PR_ID} -> local branch '${MERGE_BRANCH}'"
-	git fetch "$REMOTE" "pull/${PR_ID}/head:${MERGE_BRANCH}"
-	if [[ "$DO_CHECKOUT" -eq 1 ]]; then
-		git checkout "$MERGE_BRANCH"
-	fi
+# Fetch the fork PR into the -merge branch.
+echo "PR #${PR_ID} -> local branch '${MERGE_BRANCH}'"
+git fetch "$REMOTE" "pull/${PR_ID}/head:${MERGE_BRANCH}"
+if [[ "$DO_CHECKOUT" -eq 1 ]]; then
+	git checkout "$MERGE_BRANCH"
 fi
