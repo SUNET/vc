@@ -402,28 +402,37 @@ func (s *Service) endpointSAMLACS(ctx context.Context, c *gin.Context) (any, err
 	}
 
 	// Store document data so the credential endpoint can issue the credential
-	// when the wallet redeems the offer. Only merge assertion defaults when
-	// the resolved source is Assertion; other sources (datastore, external
-	// API) own their document data and must not be polluted with SAML
-	// assertion defaults.
-	if credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion {
-		defaults, derr := s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].ResolveDefaults(time.Now())
-		if derr != nil {
-			span.SetStatus(codes.Error, "assertion defaults resolve failed")
-			return nil, fmt.Errorf("failed to resolve assertion defaults: %w", derr)
+	// when the wallet redeems the offer. A datastore scope must serve its
+	// pre-loaded document (found via the authenticated identity), not the SAML
+	// assertion claims — mirroring the VCI-mode branch above. Assertion scopes
+	// store the transformed claims directly and get assertion defaults merged
+	// in; other sources (datastore, external API) own their document data.
+	if credSourceErr == nil && credSource.DataSource == model.DataSourceDatastore {
+		dsCred := s.cfg.APIGW.DataSources.Datastore.Scopes[session.CredentialType]
+		if err = s.apiv1.LookupDatastoreByIdentity(ctx, preAuthCode, session.CredentialType, authenticSource, claims, &dsCred); err != nil {
+			span.SetStatus(codes.Error, "datastore lookup failed")
+			return nil, fmt.Errorf("standalone SAML datastore lookup failed: %w", err)
 		}
-		if err := credential.MergeDefaults(claims, defaults); err != nil {
-			span.SetStatus(codes.Error, "assertion defaults merge failed")
-			return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
+	} else {
+		if credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion {
+			defaults, derr := s.cfg.APIGW.DataSources.Assertion.Scopes[session.CredentialType].ResolveDefaults(time.Now())
+			if derr != nil {
+				span.SetStatus(codes.Error, "assertion defaults resolve failed")
+				return nil, fmt.Errorf("failed to resolve assertion defaults: %w", derr)
+			}
+			if err := credential.MergeDefaults(claims, defaults); err != nil {
+				span.SetStatus(codes.Error, "assertion defaults merge failed")
+				return nil, fmt.Errorf("failed to merge assertion defaults: %w", err)
+			}
 		}
-	}
-	doc := &model.CompleteDocument{
-		Meta:         &model.MetaData{AuthenticSource: session.IDPEntityID},
-		DocumentData: claims,
-	}
-	if err = s.apiv1.StoreVCIDocuments(ctx, preAuthCode, map[string]*model.CompleteDocument{session.IDPEntityID: doc}); err != nil {
-		span.SetStatus(codes.Error, "failed to store VCI documents")
-		return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+		doc := &model.CompleteDocument{
+			Meta:         &model.MetaData{AuthenticSource: session.IDPEntityID},
+			DocumentData: claims,
+		}
+		if err = s.apiv1.StoreVCIDocuments(ctx, preAuthCode, map[string]*model.CompleteDocument{session.IDPEntityID: doc}); err != nil {
+			span.SetStatus(codes.Error, "failed to store VCI documents")
+			return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+		}
 	}
 
 	// Clean up SAML session (clear err so defer doesn't double-delete)

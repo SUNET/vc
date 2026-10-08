@@ -59,7 +59,7 @@ func RunDocuments(ctx context.Context, cfg *model.DatastoreImport, dbService *db
 	for _, path := range cfg.FilePaths {
 		name := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(path), ".gz"), ".json")
 
-		if err := importDocuments(ctx, path, name, cfg.Users, dbService.DatastoreColl, log); err != nil {
+		if err := importDocuments(ctx, path, name, cfg.Users, cfg.ReplaceExisting, dbService.DatastoreColl, log); err != nil {
 			return fmt.Errorf("import documents from %s: %w", filepath.Base(path), err)
 		}
 	}
@@ -68,7 +68,7 @@ func RunDocuments(ctx context.Context, cfg *model.DatastoreImport, dbService *db
 	return nil
 }
 
-func importDocuments(ctx context.Context, path, name string, filterUsers []string, store db.DatastoreStore, log *logger.Log) error {
+func importDocuments(ctx context.Context, path, name string, filterUsers []string, replaceExisting bool, store db.DatastoreStore, log *logger.Log) error {
 	data, err := readBootstrapFile(path)
 	if err != nil {
 		return err
@@ -93,6 +93,7 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 
 	imported := 0
 	skipped := 0
+	replaced := 0
 	for id, doc := range docs {
 		if !shouldImport(id, filterUsers) {
 			continue
@@ -103,6 +104,18 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 			return fmt.Errorf("check document %s/%s: %w", name, id, err)
 		}
 		if present {
+			// Shipped, generator-owned fixtures opt into replacement so corrected
+			// content (e.g. regenerated validity dates) reaches deployments that
+			// already hold the previous version under the same natural key.
+			// Operator-edited data keeps the default insert-only behaviour
+			// (replaceExisting false) and is never overwritten.
+			if replaceExisting {
+				if err := store.Replace(ctx, doc); err != nil {
+					return fmt.Errorf("replace document %s/%s: %w", name, id, err)
+				}
+				replaced++
+				continue
+			}
 			skipped++
 			continue
 		}
@@ -121,7 +134,7 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 		imported++
 	}
 
-	log.Info("Imported documents", "file", filepath.Base(path), "scope", name, "imported", imported, "skipped", skipped)
+	log.Info("Imported documents", "file", filepath.Base(path), "scope", name, "imported", imported, "replaced", replaced, "skipped", skipped)
 	return nil
 }
 

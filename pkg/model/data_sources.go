@@ -49,6 +49,14 @@ type DatastoreImport struct {
 
 	// Users limits which person IDs to import. If empty, all persons are imported.
 	Users []string `yaml:"users,omitempty" doc_example:"[\"100\", \"102\"]"`
+
+	// ReplaceExisting makes the import overwrite documents whose natural key is
+	// already present with the fixture content. Use it only for shipped,
+	// generator-owned fixtures so corrected content (e.g. regenerated validity
+	// dates) reaches deployments that already hold the previous version. Leave
+	// it false (the default) for operator-edited data, which keeps the
+	// insert-only behaviour so existing documents are never overwritten.
+	ReplaceExisting bool `yaml:"replace_existing,omitempty" doc_example:"false"`
 }
 
 // IdentityMappingImport configures automatic import of identity mappings at startup.

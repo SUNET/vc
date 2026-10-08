@@ -482,21 +482,28 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	}
 
 	// Store document data so the credential endpoint can issue the credential
-	// when the wallet redeems the offer.
-	//
-	// Note that this happens for every data source, not only assertion: a
-	// standalone-mode offer stores the callback claims as the document even for
-	// a datastore scope, and never consults the datastore. That looks like a
-	// separate defect, but it is exactly why the filtering has to apply here
-	// too - whatever lands in DocumentData can end up signed into a credential.
-	doc, docErr := c.buildOIDCDocument(cc, session.IssuerURL, credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion)
-	if docErr != nil {
-		span.SetStatus(codes.Error, "document build failed")
-		return nil, docErr
-	}
-	if err = c.StoreVCIDocuments(ctx, preAuthCode, map[string]*model.CompleteDocument{session.IssuerURL: doc}); err != nil {
-		span.SetStatus(codes.Error, "failed to store VCI documents")
-		return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+	// when the wallet redeems the offer. A datastore scope must serve its
+	// pre-loaded document (found via the authenticated identity), not the
+	// callback claims — mirroring the VCI-mode branch above — otherwise
+	// VCICredential signs the OIDC claims instead of the datastore document.
+	// Assertion (and external-API fallback) scopes own the callback claims and
+	// store them directly.
+	if credSourceErr == nil && credSource.DataSource == model.DataSourceDatastore {
+		dsCred := c.cfg.APIGW.DataSources.Datastore.Scopes[session.CredentialType]
+		if err = c.LookupDatastoreByIdentity(ctx, preAuthCode, session.CredentialType, authenticSource, claims, &dsCred); err != nil {
+			span.SetStatus(codes.Error, "datastore lookup failed")
+			return nil, fmt.Errorf("standalone OIDC datastore lookup failed: %w", err)
+		}
+	} else {
+		doc, docErr := c.buildOIDCDocument(cc, session.IssuerURL, credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion)
+		if docErr != nil {
+			span.SetStatus(codes.Error, "document build failed")
+			return nil, docErr
+		}
+		if err = c.StoreVCIDocuments(ctx, preAuthCode, map[string]*model.CompleteDocument{session.IssuerURL: doc}); err != nil {
+			span.SetStatus(codes.Error, "failed to store VCI documents")
+			return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+		}
 	}
 
 	// Clean up session (clear err so defer doesn't double-delete)

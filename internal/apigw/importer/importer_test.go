@@ -61,6 +61,7 @@ func TestReadBootstrapFile(t *testing.T) {
 type fakeDatastore struct {
 	present  map[string]bool
 	saved    []*model.CompleteDocument
+	replaced []*model.CompleteDocument
 	getByKey func(authenticSource, scope, documentID string) (*model.CompleteDocument, error)
 	save     func(doc *model.CompleteDocument) error
 }
@@ -109,7 +110,10 @@ func (f *fakeDatastore) GetByIdentity(context.Context, string, string) (map[stri
 func (f *fakeDatastore) List(context.Context, *db.ListQuery) ([]*model.DocumentList, error) {
 	return nil, nil
 }
-func (f *fakeDatastore) Replace(context.Context, *model.CompleteDocument) error { return nil }
+func (f *fakeDatastore) Replace(_ context.Context, doc *model.CompleteDocument) error {
+	f.replaced = append(f.replaced, doc)
+	return nil
+}
 func (f *fakeDatastore) DeleteByKey(context.Context, string, string, string) error {
 	return nil
 }
@@ -143,7 +147,7 @@ func TestImportDocuments_SavesMissing(t *testing.T) {
 	path := writeDocsFile(t, map[string]*model.CompleteDocument{"100": doc("100"), "101": doc("101")})
 	store := &fakeDatastore{present: map[string]bool{}}
 
-	err := importDocuments(context.Background(), path, "microcredential", nil, store, logger.NewSimple("test"))
+	err := importDocuments(context.Background(), path, "microcredential", nil, false, store, logger.NewSimple("test"))
 	require.NoError(t, err)
 	assert.Len(t, store.saved, 2)
 }
@@ -154,8 +158,23 @@ func TestImportDocuments_SkipsExisting(t *testing.T) {
 		naturalKey("Ladok", "microcredential", "document_id_100"): true,
 	}}
 
-	err := importDocuments(context.Background(), path, "microcredential", nil, store, logger.NewSimple("test"))
+	err := importDocuments(context.Background(), path, "microcredential", nil, false, store, logger.NewSimple("test"))
 	require.NoError(t, err)
+	require.Len(t, store.saved, 1)
+	assert.Equal(t, "document_id_101", store.saved[0].Meta.DocumentID)
+}
+
+func TestImportDocuments_ReplaceExistingReplaces(t *testing.T) {
+	path := writeDocsFile(t, map[string]*model.CompleteDocument{"100": doc("100"), "101": doc("101")})
+	store := &fakeDatastore{present: map[string]bool{
+		naturalKey("Ladok", "microcredential", "document_id_100"): true,
+	}}
+
+	err := importDocuments(context.Background(), path, "microcredential", nil, true, store, logger.NewSimple("test"))
+	require.NoError(t, err)
+	// The present document is replaced, the missing one is saved.
+	require.Len(t, store.replaced, 1)
+	assert.Equal(t, "document_id_100", store.replaced[0].Meta.DocumentID)
 	require.Len(t, store.saved, 1)
 	assert.Equal(t, "document_id_101", store.saved[0].Meta.DocumentID)
 }
@@ -167,7 +186,7 @@ func TestImportDocuments_LookupErrorPropagates(t *testing.T) {
 		return nil, boom
 	}}
 
-	err := importDocuments(context.Background(), path, "microcredential", nil, store, logger.NewSimple("test"))
+	err := importDocuments(context.Background(), path, "microcredential", nil, false, store, logger.NewSimple("test"))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, boom)
 }
@@ -185,7 +204,7 @@ func TestImportDocuments_SaveRaceSkips(t *testing.T) {
 		},
 	}
 
-	err := importDocuments(context.Background(), path, "microcredential", nil, store, logger.NewSimple("test"))
+	err := importDocuments(context.Background(), path, "microcredential", nil, false, store, logger.NewSimple("test"))
 	require.NoError(t, err)
 	assert.Empty(t, store.saved)
 }
@@ -199,7 +218,7 @@ func TestImportDocuments_SaveErrorPropagates(t *testing.T) {
 		save: func(*model.CompleteDocument) error { return boom },
 	}
 
-	err := importDocuments(context.Background(), path, "microcredential", nil, store, logger.NewSimple("test"))
+	err := importDocuments(context.Background(), path, "microcredential", nil, false, store, logger.NewSimple("test"))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, boom)
 }
