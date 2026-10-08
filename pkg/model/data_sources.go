@@ -68,6 +68,14 @@ type DatastoreScope struct {
 	// requests for such a scope are rejected.
 	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=openid4vp saml oidc preauth"`
 
+	// AuthenticSource names the identity-mapping namespace used to resolve the
+	// authenticated user to an authentic_source_person_id for datastore
+	// identity lookups (oidc, saml, openid4vp). Identity mappings are scoped to
+	// an authentic source (SUNET/vc#507 made the namespace mandatory), so this
+	// must match the namespace the mappings were imported under. Not used for
+	// preauth, where the pre-authorized offer already carries the identifier.
+	AuthenticSource string `yaml:"authentic_source,omitempty" doc_example:"\"SUNET\""`
+
 	// AuthClaims lists the normalized claim names used for datastore identity lookup
 	// when auth_provider is saml or oidc. Not used for openid4vp (use AuthScopes instead).
 	// Must be empty when auth_provider is preauth.
@@ -375,9 +383,10 @@ const (
 
 // CredentialSource describes where a credential's data comes from and how the user authenticates.
 type CredentialSource struct {
-	DataSource   DataSourceType
-	AuthProvider string
-	RemoteName   string // only for external_api
+	DataSource      DataSourceType
+	AuthProvider    string
+	RemoteName      string // only for external_api
+	AuthenticSource string // identity-mapping namespace, only for datastore
 }
 
 // LookupCredentialSources finds all data sources where a credential type is configured.
@@ -392,8 +401,9 @@ func (ds *DataSources) LookupCredentialSources(credentialType string) ([]Credent
 
 	if cred, ok := ds.Datastore.Scopes[credentialType]; ok {
 		sources = append(sources, CredentialSource{
-			DataSource:   DataSourceDatastore,
-			AuthProvider: cred.AuthProvider,
+			DataSource:      DataSourceDatastore,
+			AuthProvider:    cred.AuthProvider,
+			AuthenticSource: cred.AuthenticSource,
 		})
 	}
 

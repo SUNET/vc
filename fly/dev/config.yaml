@@ -95,13 +95,6 @@ verifier:
     openid4vp:
       token_endpoint: "https://sunet-vc-verifier.fly.dev/token"
       clients:
-        "1003":
-          type: "public"
-          redirect_uri: "https://dev.wallet.sunet.se"
-          scopes:
-            - "pid"
-            - "ehic"
-            - "microcredential"
         "fly-wallet":
           type: "public"
           redirect_uri: "https://sunet-vc-wallet.fly.dev"
@@ -109,6 +102,7 @@ verifier:
             - "pid"
             - "ehic"
             - "microcredential"
+            - "eduid"
       supported_credentials:
         - vct: "urn:eudi:pid:1"
           scopes:
@@ -119,6 +113,9 @@ verifier:
         - vct: "VerifiableMicroCredential"
           scopes:
             - "microcredential"
+        - vct: "urn:credential:eduid:1"
+          scopes:
+            - "eduid"
   presets:
     "PID":
       credentials:
@@ -132,9 +129,33 @@ verifier:
     "Micro-credential":
       credentials:
         microcredential:
+          # Only request claims the issued credential actually carries: DCQL
+          # treats every requested claim as required for a match, so asking for
+          # WE BUILD optional claims the test data omits makes the wallet find
+          # no matching credential.
           exclude_claims:
             - path: ["attestation_legal_category"]
             - path: ["trust_anchor"]
+            - path: ["cryptographically_bound_to"]
+            - path: ["dateOfBirth"]
+            - path: ["placeOfBirth"]
+            - path: ["citizenshipCountry"]
+            - path: ["nationalID"]
+            - path: ["registeredAddress"]
+            - path: ["mail"]
+            - path: ["nationalQualificationsFrameworkLevel"]
+            - path: ["educationLevelDescriptor"]
+            - path: ["awardingBodyAddress"]
+            - path: ["additionalNote"]
+    "eduID":
+      credentials:
+        eduid:
+          # eduID does not always release a separate surname (family_name); it
+          # reliably provides given_name and the display name. DCQL needs every
+          # requested claim present, so request only these.
+          claims:
+            - path: ["given_name"]
+            - path: ["name"]
     "PID Age Over 18":
       credentials:
         pid:
@@ -318,19 +339,23 @@ apigw:
       scopes:
         pid:
           auth_provider: oidc
+          authentic_source: "Skatteverket"
           auth_claims: ["given_name", "family_name", "birthdate"]
         ehic:
           auth_provider: openid4vp
+          authentic_source: "Skatteverket"
           auth_scopes:
             pid:
               auth_claims: ["given_name", "family_name", "birthdate"]
         microcredential:
           auth_provider: openid4vp
+          authentic_source: "Skatteverket"
           auth_scopes:
             pid:
               auth_claims: ["given_name", "family_name", "birthdate"]
         mdl:
           auth_provider: oidc
+          authentic_source: "Skatteverket"
           auth_claims: ["given_name", "family_name", "birthdate"]
         diploma:
           auth_provider: preauth

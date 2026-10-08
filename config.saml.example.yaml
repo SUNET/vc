@@ -71,9 +71,11 @@ apigw:
       scopes:
         ehic:
           auth_provider: saml
+          authentic_source: "Skatteverket"
           auth_claims: ["given_name", "family_name", "birthdate"]
         pda1:
           auth_provider: saml
+          authentic_source: "Skatteverket"
           auth_claims: ["given_name", "family_name", "birthdate"]
         # "preauth" restricts issuance to pre-authorized credential offers
         # (e.g. via POST /api/v1/datastore/preauth_offer). Wallet-initiated
