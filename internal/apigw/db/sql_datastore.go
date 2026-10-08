@@ -480,6 +480,12 @@ func (c *SQLDatastoreColl) Replace(ctx context.Context, doc *model.CompleteDocum
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:sql:datastore:replace")
 	defer span.End()
 
+	// Validate before overwriting, mirroring Save: a malformed fixture must not
+	// replace a valid existing record and make it unissuable.
+	if err := helpers.Check(ctx, c.Service.cfg, doc, c.Service.log); err != nil {
+		return err
+	}
+
 	tx, err := c.db.BeginTxx(ctx, nil)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())

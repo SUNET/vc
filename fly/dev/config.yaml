@@ -325,6 +325,7 @@ apigw:
   data_sources:
     datastore:
       import:
+        replace_existing: true
         file_paths:
           - "/bootstrapping/diploma.json.gz"
           - "/bootstrapping/ehic.json.gz"
