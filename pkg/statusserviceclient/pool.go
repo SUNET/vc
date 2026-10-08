@@ -38,11 +38,33 @@ type pool struct {
 	mu      sync.Mutex
 	entries []Entry
 
+	// stale holds entries take() discarded because they had expired. They
+	// are still ALLOCATED on the status service, so dropping them locally
+	// and saying nothing leaves a VALID, unreferenced index reserved to us
+	// forever - and unlike the restart loss documented in the package
+	// comment, which costs a pool's worth once, this accrues on every
+	// idle-then-refill cycle and grows without bound.
+	//
+	// Drained by the refill loop rather than by take(), because take() is
+	// on the issuance path: a PATCH there is exactly the synchronous call
+	// to the status service that the pool exists to keep out of it.
+	stale []Entry
+
 	// wake is signalled (non-blocking) whenever the pool drops to or below
 	// LowWaterMark, to trigger an immediate refill attempt instead of
 	// waiting for the next periodic tick.
 	wake chan struct{}
 }
+
+// maxStaleBacklog bounds the queue above.
+//
+// Reclaiming is best-effort and one-shot, like releaseUnusable itself, so
+// the queue only grows while the status service is refusing PATCHes - and
+// a client that cannot reach the service is already leaking slots, which
+// is the failure this bounds rather than fixes. Dropping the oldest costs
+// one leaked index, which is what not having reclaimed at all would have
+// cost; growing without limit costs memory, which is worse.
+const maxStaleBacklog = 1024
 
 func newPool(c *Client) *pool {
 	return &pool{
@@ -61,6 +83,12 @@ func newPool(c *Client) *pool {
 // already-expired status_list reference into an issued credential, where a
 // verifier resolving it is the one who finds out.
 //
+// Discarded locally is not the end of it: the index is still allocated to
+// this issuer on the service, so each one goes on the reclaim queue to be
+// marked INVALID by the refill loop. Without that, a quiet issuer that
+// idles and refills repeatedly consumes list capacity it never uses, one
+// index per cycle, for as long as it runs.
+//
 // This pops from the end, so the oldest entries are the last to be reached
 // and the most likely to have expired; discarding is what stops them
 // accumulating at the bottom of the slice forever.
@@ -70,15 +98,29 @@ func (p *pool) take() (Entry, bool) {
 
 	var e Entry
 	found := false
+	discarded := 0
 	for len(p.entries) > 0 {
 		candidate := p.entries[len(p.entries)-1]
 		p.entries = p.entries[:len(p.entries)-1]
 		if p.c.expired(candidate) {
+			// Queued, not just dropped: the service still has this index
+			// reserved to us. See the stale field.
+			p.queueStaleLocked(candidate)
+			discarded++
 			continue
 		}
 		e = candidate
 		found = true
 		break
+	}
+
+	if discarded > 0 {
+		// Wake the refill loop even if the pool is still comfortably full,
+		// so the reclaim happens promptly rather than at the next tick.
+		select {
+		case p.wake <- struct{}{}:
+		default:
+		}
 	}
 
 	if !found {
@@ -98,6 +140,47 @@ func (p *pool) take() (Entry, bool) {
 		}
 	}
 	return e, true
+}
+
+// queueStaleLocked adds an expired entry to the reclaim queue. Callers hold
+// p.mu.
+func (p *pool) queueStaleLocked(e Entry) {
+	if len(p.stale) >= maxStaleBacklog {
+		dropped := p.stale[0]
+		p.stale = p.stale[1:]
+		p.c.log.Error(nil, "the status-entry reclaim backlog is full; dropping the oldest entry, whose slot stays reserved on the service",
+			"list_url", dropped.ListURL, "index", dropped.Index, "backlog", maxStaleBacklog)
+	}
+	p.stale = append(p.stale, e)
+}
+
+// reclaim marks every queued stale entry INVALID on the status service, so
+// an index that expired in the pool does not stay reserved to this issuer
+// for good.
+//
+// The queue is drained under the lock and the PATCHes are sent outside it:
+// a network call with the pool mutex held would block every take() for the
+// duration, which is the issuance path this whole package is arranged to
+// keep clear.
+//
+// One shot per entry, matching releaseUnusable's own contract - a release
+// that does not land costs one leaked slot, which is exactly what not
+// trying costs. Re-queueing a failed release would turn an unreachable
+// service into unbounded growth instead.
+func (p *pool) reclaim(ctx context.Context) {
+	p.mu.Lock()
+	stale := p.stale
+	p.stale = nil
+	p.mu.Unlock()
+
+	for _, e := range stale {
+		if ctx.Err() != nil {
+			// Shutting down. The rest stay unreclaimed, which is the
+			// bounded restart loss the package comment already describes.
+			return
+		}
+		p.c.releaseUnusable(ctx, e)
+	}
 }
 
 // size returns the current pool size (for tests/observability).
@@ -146,8 +229,10 @@ func (p *pool) run(stopCh <-chan struct{}) {
 		case <-stopCh:
 			return
 		case <-p.wake:
+			p.reclaim(ctx)
 			p.refill(ctx)
 		case <-ticker.C:
+			p.reclaim(ctx)
 			p.refill(ctx)
 		}
 	}
