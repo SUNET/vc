@@ -129,6 +129,15 @@ const minAuthContextRetention = 15 * time.Minute
 // deadlines makes a live session vanish mid-flow and surface as "session not
 // found", so the retention has to cover them.
 //
+// KNOWN LIMITATION, in HA only: a Mongo TTL index cannot be redefined
+// through createIndexes, so changing a duration on a deployment whose
+// collection already exists returns IndexOptionsConflict and the verifier
+// does not start. That is the behaviour on main today for any TTL change;
+// it only becomes reachable here because these durations are now
+// configurable. Migrating the index is deliberately a separate change -
+// it needs collMod, a drop-and-rebuild fallback for least-privilege
+// credentials, and care about which index actually conflicted.
+//
 // It was a flat 15 minutes, which covered the deadlines only because both
 // were themselves hardcoded to code_duration. Now that presentation_timeout
 // is read (SUNET/vc#756) an operator can set a presentation window longer
