@@ -724,36 +724,6 @@ func fenceEdge(extra []string, opening bool) []string {
 	return extra
 }
 
-// splitLeadParagraph divides a doc comment into its opening paragraph and
-// everything after it.
-//
-// The opening SENTENCE is what these renderers want, and a Go doc comment
-// wraps at ~72 columns - so taking lines[0] took half a sentence whenever
-// the first one was longer than that, and handed the remainder to the
-// section body, which then began mid-clause. ZkKeyCacheConfig rendered as
-// "verifier keys (see pkg/mdoc's vegaKeyStore)..." for exactly that reason.
-//
-// A blank line is the boundary Go doc comments already use for paragraphs,
-// so that is the boundary used here. A fence opening in the first paragraph
-// ends it too: an example is not part of the summary.
-func splitLeadParagraph(doc string) (lead string, rest []string) {
-	lines := strings.Split(doc, "\n")
-	end := len(lines)
-	for i, raw := range lines {
-		l := strings.TrimSpace(raw)
-		if l == "" || strings.HasPrefix(l, "```") {
-			end = i
-			break
-		}
-	}
-
-	var head []string
-	for _, raw := range lines[:end] {
-		head = append(head, strings.TrimSpace(raw))
-	}
-	return strings.TrimSpace(strings.Join(head, " ")), lines[end:]
-}
-
 // structDescription renders a struct's doc comment as the section preamble.
 //
 // Lines reflow as markdown, EXCEPT inside a ``` fenced block, where the
@@ -764,7 +734,8 @@ func structDescription(def *StructDef) string {
 	if def == nil || def.Doc == "" {
 		return ""
 	}
-	first, tail := splitLeadParagraph(def.Doc)
+	lines := strings.Split(def.Doc, "\n")
+	first := strings.TrimSpace(lines[0])
 	cleaned := cleanFieldDesc(first, def.Name)
 	if cleaned == "" {
 		return ""
@@ -776,7 +747,7 @@ func structDescription(def *StructDef) string {
 	var extra []string
 	pastBlank := false
 	inFence, skipBlank := false, false
-	for _, raw := range tail {
+	for _, raw := range lines[1:] {
 		l := strings.TrimSpace(raw)
 		// Inside a fenced block the indentation IS the content, so the
 		// line is taken as written. Go doc comments indent an example by
@@ -817,29 +788,13 @@ func structDescriptionExtra(def *StructDef) string {
 	if def == nil || def.Doc == "" {
 		return ""
 	}
-	lead, tail := splitLeadParagraph(def.Doc)
-
-	// The lead paragraph belongs in the body too.
-	//
-	// This used to emit lines[1:], which for a wrapped opening sentence
-	// began mid-clause - ZkKeyCacheConfig rendered as "verifier keys (see
-	// pkg/mdoc's vegaKeyStore)...". Dropping that paragraph instead would
-	// lose the sentence entirely: unlike structDescription's callers, this
-	// one has nowhere else that shows it, since the parent table carries
-	// the FIELD's comment, a different sentence about a different thing.
-	lead = cleanFieldDesc(lead, def.Name)
-	if lead != "" {
-		lead = strings.ToUpper(lead[:1]) + lead[1:]
-		if !strings.HasSuffix(lead, ".") {
-			lead += "."
-		}
-	}
-	if lead == "" && len(tail) == 0 {
+	lines := strings.Split(def.Doc, "\n")
+	if len(lines) <= 1 {
 		return ""
 	}
 	var extra []string
 	inFence, skipBlank := false, false
-	for _, raw := range tail {
+	for _, raw := range lines[1:] {
 		l := strings.TrimSpace(raw)
 		if strings.HasPrefix(l, "```") {
 			inFence = !inFence
@@ -863,15 +818,7 @@ func structDescriptionExtra(def *StructDef) string {
 		}
 		extra = append(extra, l)
 	}
-	body := strings.TrimSpace(strings.Join(extra, "\n"))
-	switch {
-	case lead == "":
-		return body
-	case body == "":
-		return lead
-	default:
-		return lead + "\n\n" + body
-	}
+	return strings.TrimSpace(strings.Join(extra, "\n"))
 }
 
 // knownTerms maps Go identifier fragments to their desired snake_case output.

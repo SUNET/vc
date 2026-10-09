@@ -35,8 +35,6 @@ Shared configuration used across all services.
 
 > **Constraint** (`mongo`, `sql`, `ha`): Mongo.URI is required by registry unconditionally, since it connects to MongoDB whatever SQL.Backend says. For apigw and verifier it is required when SQL.Backend is 'mongo' (the default primary-store backend) or when HA.Enable is true (HA caching has no relational backend yet, so it always uses Mongo), and not required for a pure relational deployment (a non-mongo SQL.Backend with HA disabled). The issuer never needs it, having no database at all. Enforced in configuration.New rather than as a struct validation, since it depends on the running service.
 
-Shared configuration used across all services.
-
 | Field                     | Type     | Description                                                                                                                                                                                                                                                                                                                                             | Example                  | Default | Required |
 | ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------- | -------- |
 | `production`              | `bool`   | Production mode                                                                                                                                                                                                                                                                                                                                         | -                        | `true`  | No       |
@@ -58,8 +56,6 @@ Shared configuration used across all services.
 
 > **Path:** `.common.log`
 
-Logging configuration.
-
 | Field         | Type     | Description            | Example         | Default | Required |
 | ------------- | -------- | ---------------------- | --------------- | ------- | -------- |
 | `folder_path` | `string` | Path to the log folder | `"/var/log/vc"` | -       | No       |
@@ -67,8 +63,6 @@ Logging configuration.
 ### `mongo`
 
 > **Path:** `.common.mongo`
-
-MongoDB configuration.
 
 | Field            | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Example                      | Default | Required                    |
 | ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------- | --------------------------- |
@@ -84,7 +78,9 @@ MongoDB configuration.
 
 > **Constraint** (`postgres`, `mariadb`): When Backend is 'postgres', Postgres.Host and Postgres.User are required; when Backend is 'mariadb', MariaDB.Host and MariaDB.User are required. Enforced at the SQL struct level (rather than required_if tags on PostgresConfig/MariaDBConfig themselves) because 'Backend' lives on the parent SQL struct, not on those nested structs.
 
-Relational database configuration, used by services that support a relational storage backend as an alternative to MongoDB. Backend selection is config-time only: a running service uses exactly one backend for its whole lifetime.
+support a relational storage backend as an alternative to MongoDB.
+Backend selection is config-time only: a running service uses exactly
+one backend for its whole lifetime.
 
 | Field      | Type     | Description                                                                                                                                                                                                                                 | Example | Default | Required                       |
 | ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | ------------------------------ |
@@ -95,8 +91,6 @@ Relational database configuration, used by services that support a relational st
 ### `postgres`
 
 > **Path:** `.common.sql.postgres`
-
-PostgreSQL connection settings.
 
 | Field            | Type     | Description                                                                                                                                                                                                                                                                               | Example      | Default   | Required                    |
 | ---------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | --------- | --------------------------- |
@@ -116,7 +110,9 @@ PostgreSQL connection settings.
 
 > **Path:** `.common.sql.mariadb`
 
-MariaDB/MySQL connection settings. Kept as a separate struct from PostgresConfig (rather than shared) since default port and TLS parameter semantics differ enough between the two drivers to want independent validation tags.
+Kept as a separate struct from PostgresConfig (rather than shared) since
+default port and TLS parameter semantics differ enough between the two
+drivers to want independent validation tags.
 
 | Field            | Type     | Description                                                                                                                                                                                                                                                                            | Example     | Default | Required                    |
 | ---------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------- | --------------------------- |
@@ -136,8 +132,6 @@ MariaDB/MySQL connection settings. Kept as a separate struct from PostgresConfig
 
 > **Path:** `.common.tracing`, `.common.metrics`
 
-OpenTelemetry tracing configuration.
-
 | Field     | Type     | Description                            | Example         | Default | Required         |
 | --------- | -------- | -------------------------------------- | --------------- | ------- | ---------------- |
 | `enable`  | `bool`   | Enable activates OpenTelemetry tracing | -               | `false` | No               |
@@ -147,8 +141,6 @@ OpenTelemetry tracing configuration.
 ### `kafka`
 
 > **Path:** `.common.kafka`
-
-Kafka message broker configuration.
 
 | Field     | Type       | Description                                    | Example                          | Default | Required         |
 | --------- | ---------- | ---------------------------------------------- | -------------------------------- | ------- | ---------------- |
@@ -161,8 +153,6 @@ Kafka message broker configuration.
 
 > **Path:** `.common.kafka.sasl`
 
-SASL authentication settings for Kafka.
-
 | Field       | Type     | Description                                          | Example | Default         | Required         |
 | ----------- | -------- | ---------------------------------------------------- | ------- | --------------- | ---------------- |
 | `enable`    | `bool`   | Enable activates SASL authentication                 | -       | `false`         | No               |
@@ -173,8 +163,6 @@ SASL authentication settings for Kafka.
 ### `mtls`
 
 > **Path:** `.common.kafka.mtls`
-
-Mutual TLS configuration for client connections (verifying peer + presenting own cert).
 
 | Field                  | Type     | Description                                                                                     | Example | Default | Required         |
 | ---------------------- | -------- | ----------------------------------------------------------------------------------------------- | ------- | ------- | ---------------- |
@@ -188,8 +176,6 @@ Mutual TLS configuration for client connections (verifying peer + presenting own
 
 > **Path:** `.common.ha`
 
-High-availability configuration.
-
 | Field                 | Type     | Description                                                                                                                                                                                                                                                 | Example | Default    | Required |
 | --------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ---------- | -------- |
 | `enable`              | `bool`   | HA mode; when true caches are backed by MongoDB instead of in-memory storage.                                                                                                                                                                               | -       | `false`    | No       |
@@ -199,8 +185,6 @@ High-availability configuration.
 ### `pubsub`
 
 > **Path:** `.common.ha.pubsub`
-
-Deployment-facing configuration for the pub/sub bus.
 
 Supports Redis and Valkey today (both speak RESP, so the same client
 serves both; Backend only decides what logs and metrics identify it as).
@@ -220,8 +204,6 @@ stay in-process and do not cross nodes.
 
 > **Path:** `.common.credential_registry`
 
-An optional TS11 credential metadata registry client (github.com/sirosfoundation/go-ts11client), disabled by default. When enabled, Registries is an ordered list of logical registries: a later entry overrides an earlier one for the same vct/doctype, so distinct registries are tried in that order rather than raced - only the mirrors within a single logical registry are queried concurrently, first hit wins, since only mirrors are expected to hold identical content.
-
 | Field              | Type       | Description                                                                                                                                                                                                   | Example | Default | Required         |
 | ------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | ---------------- |
 | `enable`           | `bool`     | Registry-backed resolution for any scope that sets vct or doctype instead of a local file/URL. Existing vctm_file_path/vctm_url/mddl_file_path/mddl_url-configured scopes are entirely unaffected either way. | -       | `false` | No               |
@@ -232,8 +214,6 @@ An optional TS11 credential metadata registry client (github.com/sirosfoundation
 
 > **Path:** `.common.credential_registry.registries[]`
 
-One independent TS11 registry, optionally served by more than one mirror endpoint holding equivalent content, queried concurrently and raced - first hit wins.
-
 | Field     | Type    | Description                                                                         | Example | Default | Required |
 | --------- | ------- | ----------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `mirrors` | `array` | Set of endpoints serving this logical registry's content. At least one is required. | -       | -       | Yes      |
@@ -241,8 +221,6 @@ One independent TS11 registry, optionally served by more than one mirror endpoin
 ### `mirrors` entry
 
 > **Path:** `.common.credential_registry.registries[].mirrors[]`
-
-CredentialRegistryEndpoint identifies one TS11 registry endpoint to query.
 
 | Field      | Type       | Description                                           | Example                        | Default | Required |
 | ---------- | ---------- | ----------------------------------------------------- | ------------------------------ | ------- | -------- |
@@ -252,8 +230,6 @@ CredentialRegistryEndpoint identifies one TS11 registry endpoint to query.
 ### `openid4vp_compat`
 
 > **Path:** `.common.openid4vp_compat`
-
-Interoperability switches for pre-1.0 wallets.
 
 Every field defaults to the conformant behaviour, so a deployment that
 sets none of them is an OpenID4VP 1.0 deployment.
@@ -265,8 +241,6 @@ sets none of them is an OpenID4VP 1.0 deployment.
 ### `branding`
 
 > **Path:** `.common.branding`
-
-Custom branding paths for logo and favicon.
 
 | Field          | Type     | Description                                                                             | Example | Default | Required |
 | -------------- | -------- | --------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -297,7 +271,7 @@ Custom branding paths for logo and favicon.
 
 > **Path:** `.common.credential_metadata.<credential scope>.disclosure_policy`
 
-Rules indicating the conditions a wallet-relying party must meet to access an electronic attestation of attributes. Per CIR 2024/2979 Annex III, three common policy types are defined.
+Per CIR 2024/2979 Annex III, three common policy types are defined.
 
 | Field                        | Type       | Description                                                                                                                                                                                                                                                                                           | Example | Default | Required                                             |
 | ---------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | ---------------------------------------------------- |
@@ -312,8 +286,6 @@ Configuration for the API Gateway service that handles credential issuance reque
 ### `apigw`
 
 > **Path:** `.apigw`
-
-Configuration for the API Gateway service that handles credential issuance requests.
 
 | Field                     | Type     | Description                                                                                                                                                                                                         | Example                     | Default | Required |
 | ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------- | -------- |
@@ -338,8 +310,6 @@ Configuration for the API Gateway service that handles credential issuance reque
 
 > **Path:** `.apigw.api_server`, `.issuer.api_server`, `.verifier.api_server`, `.registry.api_server`
 
-HTTP API server configuration.
-
 | Field              | Type     | Description                                                                                                                                                      | Example | Default | Required |
 | ------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `addr`             | `string` | Listen address for the HTTP server                                                                                                                               | -       | `:8080` | No       |
@@ -352,8 +322,6 @@ HTTP API server configuration.
 ### `tls`
 
 > **Path:** `.apigw.api_server.tls`, `.issuer.api_server.tls`, `.verifier.api_server.tls`, `.registry.api_server.tls`
-
-Server-side TLS configuration (presenting a certificate to clients).
 
 | Field            | Type     | Description                 | Example | Default | Required         |
 | ---------------- | -------- | --------------------------- | ------- | ------- | ---------------- |
@@ -369,7 +337,8 @@ Server-side TLS configuration (presenting a certificate to clients).
 >
 > **Constraint** (`rules`, `rules_file`): Authorization rules require JWKS or OIDC to be enabled.
 
-Authentication for the API route group (datastore, identity mapping, admin UI) JWKS and OIDC are mutually exclusive If neither is enabled, no authentication is applied (open access).
+JWKS and OIDC are mutually exclusive
+If neither is enabled, no authentication is applied (open access)
 
 When Rules (and/or RulesFile) are configured, each authenticated request is
 checked against a SPOCP engine. A query of the form
@@ -397,8 +366,6 @@ When no rules are configured, any valid Bearer JWT grants access.
 
 > **Constraint** (`jwks_url`, `jwks_file_path`): Exactly one of jwks_url or jwks_file_path must be set when enable is true.
 
-Configuration for static JWKS Bearer token authentication.
-
 | Field            | Type     | Description                                                                 | Example                                            | Default | Required                                    |
 | ---------------- | -------- | --------------------------------------------------------------------------- | -------------------------------------------------- | ------- | ------------------------------------------- |
 | `enable`         | `bool`   | Static JWKS Bearer token authentication                                     | -                                                  | `false` | No                                          |
@@ -411,7 +378,11 @@ Configuration for static JWKS Bearer token authentication.
 
 > **Path:** `.apigw.api_server.api_auth.oidc`, `.issuer.api_server.api_auth.oidc`, `.verifier.api_server.api_auth.oidc`, `.registry.api_server.api_auth.oidc`
 
-Configuration for OIDC-based authentication. It serves two purposes: - API auth: Bearer JWTs in Authorization headers are validated locally against the provider's JWKS (auto-discovered from IssuerURL). - Admin UI login: the RP fields (ClientID, RedirectURI, Scopes) enable an authorization-code redirect flow so admins log in via the OIDC provider.
+It serves two purposes:
+- API auth: Bearer JWTs in Authorization headers are validated locally
+against the provider's JWKS (auto-discovered from IssuerURL).
+- Admin UI login: the RP fields (ClientID, RedirectURI, Scopes) enable
+an authorization-code redirect flow so admins log in via the OIDC provider.
 
 | Field           | Type       | Description                                                                  | Example                                   | Default | Required         |
 | --------------- | ---------- | ---------------------------------------------------------------------------- | ----------------------------------------- | ------- | ---------------- |
@@ -427,8 +398,6 @@ Configuration for OIDC-based authentication. It serves two purposes: - API auth:
 
 > **Path:** `.apigw.api_server.cors`, `.issuer.api_server.cors`, `.verifier.api_server.cors`, `.registry.api_server.cors`
 
-CORS configuration.
-
 | Field             | Type       | Description                  | Example                                               | Default | Required |
 | ----------------- | ---------- | ---------------------------- | ----------------------------------------------------- | ------- | -------- |
 | `allowed_origins` | `[]string` | List of allowed CORS origins | `["https://wallet.sunet.se", "https://app.sunet.se"]` | `[]`    | No       |
@@ -437,7 +406,7 @@ CORS configuration.
 
 > **Path:** `.apigw.key_config`, `.issuer.key_config`, `.issuer.access_certificate.key_config`, `.verifier.key_config`, `.registry.token_status_lists.key_config`
 
-Configuration for loading keys from various sources. Supports both file-based and HSM-based keys with explicit control.
+Supports both file-based and HSM-based keys with explicit control.
 
 | Field              | Type     | Description                                                                                                                                                             | Example           | Default | Required                          |
 | ------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | ------- | --------------------------------- |
@@ -453,8 +422,6 @@ Configuration for loading keys from various sources. Supports both file-based an
 
 > **Path:** `.apigw.key_config.pkcs11`, `.apigw.issuer_metadata.credential_encryption.keys[].pkcs11`, `.issuer.key_config.pkcs11`, `.issuer.access_certificate.key_config.pkcs11`, `.verifier.key_config.pkcs11`, `.registry.token_status_lists.key_config.pkcs11`
 
-Configuration for PKCS#11 HSM connection.
-
 | Field         | Type     | Description                       | Example                             | Default | Required |
 | ------------- | -------- | --------------------------------- | ----------------------------------- | ------- | -------- |
 | `module_path` | `string` | Path to the PKCS#11 library       | `"/usr/lib/softhsm/libsofthsm2.so"` | -       | No       |
@@ -467,7 +434,7 @@ Configuration for PKCS#11 HSM connection.
 
 > **Path:** `.apigw.data_sources`
 
-DataSources groups all data source configurations for credential issuance. Each key under a data source is a credential type.
+Each key under a data source is a credential type.
 
 | Field          | Type     | Description                                                                                                         | Example | Default | Required |
 | -------------- | -------- | ------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -480,8 +447,6 @@ DataSources groups all data source configurations for credential issuance. Each 
 
 > **Path:** `.apigw.data_sources.datastore`
 
-DatastoreConfig groups datastore credential scopes and optional data import settings.
-
 | Field    | Type     | Description                                                                                                                                                                                                                                            | Example | Default | Required |
 | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
 | `scopes` | `object` | Credential scope names to their datastore configuration                                                                                                                                                                                                | -       | -       | No       |
@@ -490,8 +455,6 @@ DatastoreConfig groups datastore credential scopes and optional data import sett
 ### `scopes` entry
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>`
-
-A credential type backed by the datastore.
 
 | Field                 | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Example                                 | Default | Required |
 | --------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------- | -------- |
@@ -507,7 +470,7 @@ A credential type backed by the datastore.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.auth_scopes.<key>`
 
-Per-scope authentication requirements for OpenID4VP. Each entry represents one acceptable credential type the wallet can present.
+Each entry represents one acceptable credential type the wallet can present.
 
 | Field         | Type       | Description                                               | Example                                 | Default | Required |
 | ------------- | ---------- | --------------------------------------------------------- | --------------------------------------- | ------- | -------- |
@@ -517,7 +480,7 @@ Per-scope authentication requirements for OpenID4VP. Each entry represents one a
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.oidc_request_params`, `.apigw.data_sources.assertion.scopes.<credential scope>.oidc_request_params`, `.apigw.data_sources.external_api.scopes.<credential scope>.oidc_request_params`
 
-Additional parameters to include in the OIDC authorization request. These allow per-request values to be injected into the authentication flow.
+These allow per-request values to be injected into the authentication flow.
 
 NOT AN AUTHENTIC-SOURCE ASSERTION, despite where the values nominally come
 from. The operator decides WHICH parameters exist and where a template may
@@ -561,7 +524,8 @@ decision (SUNET/vc#380) rather than a missing feature.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.issuance_policy`, `.apigw.data_sources.assertion.scopes.<credential scope>.issuance_policy`, `.apigw.data_sources.external_api.scopes.<credential scope>.issuance_policy`
 
-SPOCP rules for credential issuance authorization. After OIDC authentication completes, a SPOCP query is built from the returned claims and evaluated against these rules. If no rule matches, issuance is denied.
+After OIDC authentication completes, a SPOCP query is built from the returned
+claims and evaluated against these rules. If no rule matches, issuance is denied.
 
 A policy is rules PLUS a query_template. Rules alone are refused at startup:
 SPOCP matches dimensions by POSITION, so a rule cannot be read at all without
@@ -604,7 +568,7 @@ any value.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.issuance_policy.query_template[]`, `.apigw.data_sources.assertion.scopes.<credential scope>.issuance_policy.query_template[]`, `.apigw.data_sources.external_api.scopes.<credential scope>.issuance_policy.query_template[]`
 
-A SPOCP dimension name to the OIDC claim whose value populates it. Ordered slices of QueryDimension ensure deterministic query construction.
+Ordered slices of QueryDimension ensure deterministic query construction.
 
 | Field       | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Example                 | Default | Required |
 | ----------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- | -------- |
@@ -614,8 +578,6 @@ A SPOCP dimension name to the OIDC claim whose value populates it. Ordered slice
 ### `derivations` entry
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[]`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[]`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[]`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[]`
-
-One post-verification claim computation configured on a scope; exactly one field must be set and that field's Apply method runs.
 
 Each list entry under a scope's `derivations` field is keyed by primitive name (e.g. `age_over_thresholds:` or `lowercase: { input: email }`). The subsections below catalog the primitives and their parameters.
 
@@ -635,7 +597,9 @@ Each list entry under a scope's `derivations` field is keyed by primitive name (
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].age_over_thresholds`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].age_over_thresholds`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].age_over_thresholds`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].age_over_thresholds`, `<scope>.derivations[].age_over_thresholds`
 
-The age_over_thresholds primitive. Emits two boolean claims per threshold: age_over_N (completed years at `now`) and over_N_this_year (reaches N at some point in `now`'s calendar year, i.e. year(now) - year(birthdate) >= N).
+Emits two boolean claims per threshold: age_over_N (completed years at
+`now`) and over_N_this_year (reaches N at some point in `now`'s calendar
+year, i.e. year(now) - year(birthdate) >= N).
 
 | Field        | Type     | Description                                                                                                          | Example                | Default | Required |
 | ------------ | -------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------- | -------- |
@@ -646,7 +610,7 @@ The age_over_thresholds primitive. Emits two boolean claims per threshold: age_o
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].lowercase`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].lowercase`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].lowercase`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].lowercase`, `<scope>.derivations[].lowercase`
 
-The lowercase primitive. Scalar strings and []string are handled; other types are an error.
+Scalar strings and []string are handled; other types are an error.
 
 | Field   | Type     | Description                                                                                                                                                         | Example | Default | Required |
 | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -656,8 +620,6 @@ The lowercase primitive. Scalar strings and []string are handled; other types ar
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].uppercase`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].uppercase`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].uppercase`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].uppercase`, `<scope>.derivations[].uppercase`
 
-The uppercase primitive.
-
 | Field   | Type     | Description | Example   | Default | Required |
 | ------- | -------- | ----------- | --------- | ------- | -------- |
 | `input` | `string` | Input       | `country` | -       | Yes      |
@@ -665,8 +627,6 @@ The uppercase primitive.
 ### `trim`
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].trim`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].trim`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].trim`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].trim`, `<scope>.derivations[].trim`
-
-The trim primitive.
 
 | Field   | Type     | Description | Example | Default | Required |
 | ------- | -------- | ----------- | ------- | ------- | -------- |
@@ -676,7 +636,7 @@ The trim primitive.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].country_alpha2`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].country_alpha2`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].country_alpha2`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].country_alpha2`, `<scope>.derivations[].country_alpha2`
 
-The country_alpha2 primitive. Unknown inputs pass through unchanged; applied element-wise on []string.
+Unknown inputs pass through unchanged; applied element-wise on []string.
 
 | Field   | Type     | Description | Example         | Default | Required |
 | ------- | -------- | ----------- | --------------- | ------- | -------- |
@@ -686,8 +646,6 @@ The country_alpha2 primitive. Unknown inputs pass through unchanged; applied ele
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].country_alpha3`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].country_alpha3`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].country_alpha3`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].country_alpha3`, `<scope>.derivations[].country_alpha3`
 
-The country_alpha3 primitive.
-
 | Field   | Type     | Description | Example         | Default | Required |
 | ------- | -------- | ----------- | --------------- | ------- | -------- |
 | `input` | `string` | Input       | `nationalities` | -       | Yes      |
@@ -696,7 +654,7 @@ The country_alpha3 primitive.
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].yyyymmdd_to_iso`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].yyyymmdd_to_iso`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].yyyymmdd_to_iso`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].yyyymmdd_to_iso`, `<scope>.derivations[].yyyymmdd_to_iso`
 
-The yyyymmdd_to_iso primitive. Impossible calendar dates surface as a hard error.
+Impossible calendar dates surface as a hard error.
 
 | Field   | Type     | Description                                              | Example     | Default | Required |
 | ------- | -------- | -------------------------------------------------------- | ----------- | ------- | -------- |
@@ -706,7 +664,9 @@ The yyyymmdd_to_iso primitive. Impossible calendar dates surface as a hard error
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].swamid_highest_assurance_level`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].swamid_highest_assurance_level`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].swamid_highest_assurance_level`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].swamid_highest_assurance_level`, `<scope>.derivations[].swamid_highest_assurance_level`
 
-The swamid_highest_assurance_level primitive. Reduces a multi-valued eduPersonAssurance claim to the strongest recognised SWAMID URI; hard errors if the input is present but no SWAMID URI is recognised.
+swamid_highest_assurance_level primitive. Reduces a multi-valued
+eduPersonAssurance claim to the strongest recognised SWAMID URI; hard
+errors if the input is present but no SWAMID URI is recognised.
 
 | Field   | Type     | Description                               | Example           | Default | Required |
 | ------- | -------- | ----------------------------------------- | ----------------- | ------- | -------- |
@@ -715,8 +675,6 @@ The swamid_highest_assurance_level primitive. Reduces a multi-valued eduPersonAs
 ### `random`
 
 > **Path:** `.apigw.data_sources.datastore.scopes.<credential scope>.derivations[].random`, `.apigw.data_sources.assertion.scopes.<credential scope>.derivations[].random`, `.apigw.data_sources.external_api.scopes.<credential scope>.derivations[].random`, `.apigw.data_sources.presentation.scopes.<credential scope>.derivations[].random`, `<scope>.derivations[].random`
-
-The random primitive.
 
 It writes a freshly generated random value to a claim the source data did
 not supply. The use case is a claim a credential requires but
@@ -761,8 +719,6 @@ an enforced one.
 
 > **Path:** `.apigw.data_sources.datastore.import`
 
-Automatic import of JSON fixture data into the datastore.
-
 | Field              | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                        | Example                                                     | Default | Required |
 | ------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------- | -------- |
 | `file_paths`       | `[]string` | JSON files to import into the datastore. Each JSON file should contain a map of person IDs to CompleteDocument objects. On every startup each document is imported only if one with the same natural key is not already present; existing documents are left untouched.                                                                                                                                                            | `["./bootstrapping/pid.json", "./bootstrapping/ehic.json"]` | -       | Yes      |
@@ -773,8 +729,6 @@ Automatic import of JSON fixture data into the datastore.
 
 > **Path:** `.apigw.data_sources.assertion`
 
-AssertionConfig groups assertion credential scopes.
-
 | Field    | Type     | Description                                             | Example | Default | Required |
 | -------- | -------- | ------------------------------------------------------- | ------- | ------- | -------- |
 | `scopes` | `object` | Credential scope names to their assertion configuration | -       | -       | No       |
@@ -783,7 +737,7 @@ AssertionConfig groups assertion credential scopes.
 
 > **Path:** `.apigw.data_sources.assertion.scopes.<credential scope>`
 
-A credential type backed by authentication assertions. The data comes directly from the SAML attributes or OIDC claims.
+The data comes directly from the SAML attributes or OIDC claims.
 
 | Field                 | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Example   | Default | Required |
 | --------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------- | -------- |
@@ -798,8 +752,6 @@ A credential type backed by authentication assertions. The data comes directly f
 
 > **Path:** `.apigw.data_sources.external_api`
 
-ExternalAPIConfig groups external API credential scopes.
-
 | Field    | Type     | Description                                                | Example | Default | Required |
 | -------- | -------- | ---------------------------------------------------------- | ------- | ------- | -------- |
 | `scopes` | `object` | Credential scope names to their external API configuration | -       | -       | No       |
@@ -807,8 +759,6 @@ ExternalAPIConfig groups external API credential scopes.
 ### `scopes` entry
 
 > **Path:** `.apigw.data_sources.external_api.scopes.<credential scope>`
-
-A credential type backed by an external API.
 
 | Field                 | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Example | Default | Required |
 | --------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -823,7 +773,11 @@ A credential type backed by an external API.
 
 > **Path:** `.apigw.data_sources.external_api.scopes.<credential scope>.attribute_mapping.<attribute>`, `.apigw.auth_providers.saml.attribute_mapping.<attribute>`, `.apigw.auth_providers.oidc.attribute_mapping.<attribute>`
 
-How a single external attribute maps to a credential claim Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys. AttributeConfig is a pure rename + presence step. Any value transformation (canonicalisation, case folding, date reformatting, etc.) is expressed as a derivation on the target scope; see the Derivation Primitives catalog (pkg/credential/primitives).
+Generic across protocols (SAML, OIDC, etc.) - uses protocol-specific identifiers as keys.
+AttributeConfig is a pure rename + presence step. Any value transformation
+(canonicalisation, case folding, date reformatting, etc.) is expressed as
+a derivation on the target scope; see the Derivation Primitives catalog
+(pkg/credential/primitives).
 
 | Field      | Type     | Description                                                                                                                                              | Example                 | Default | Required |
 | ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- | -------- |
@@ -836,8 +790,6 @@ How a single external attribute maps to a credential claim Generic across protoc
 
 > **Path:** `.apigw.data_sources.presentation`
 
-PresentationConfig groups presentation-derived credential scopes.
-
 | Field    | Type     | Description                                                 | Example | Default | Required |
 | -------- | -------- | ----------------------------------------------------------- | ------- | ------- | -------- |
 | `scopes` | `object` | Credential scope names to their presentation configuration. | -       | -       | No       |
@@ -846,7 +798,7 @@ PresentationConfig groups presentation-derived credential scopes.
 
 > **Path:** `.apigw.data_sources.presentation.scopes.<credential scope>`
 
-A credential type whose data is derived from another credential presented by the wallet via OpenID4VP during OpenID4VCI.
+another credential presented by the wallet via OpenID4VP during OpenID4VCI.
 
 | Field             | Type     | Description                                                                                                                                                                                                                                                                                                                                                                           | Example   | Default     | Required |
 | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ----------- | -------- |
@@ -861,8 +813,6 @@ A credential type whose data is derived from another credential presented by the
 
 > **Path:** `.apigw.auth_providers`
 
-APIGWAuthProviders groups the authentication provider configurations.
-
 | Field     | Type     | Description                                                                                 | Example | Default | Required |
 | --------- | -------- | ------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `saml`    | `object` | The SAML SP auth provider                                                                   | -       | -       | No       |
@@ -874,8 +824,6 @@ APIGWAuthProviders groups the authentication provider configurations.
 > **Path:** `.apigw.auth_providers.saml`
 
 > **Constraint** (`mdq_server`, `static_idp_metadata`): Exactly one of mdq_server or static_idp_metadata must be set when enable is true. Mutual exclusivity is enforced by field tags.
-
-SAML Service Provider configuration for the issuer.
 
 | Field                        | Type     | Description                                                                                                                                                                                                                                                                                                                                               | Example                                   | Default | Required                                         |
 | ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------- | ------------------------------------------------ |
@@ -898,8 +846,6 @@ SAML Service Provider configuration for the issuer.
 
 > **Path:** `.apigw.auth_providers.saml.static_idp_metadata`
 
-Configuration for a single static IdP connection.
-
 | Field           | Type     | Description                                                                   | Example | Default | Required                                          |
 | --------------- | -------- | ----------------------------------------------------------------------------- | ------- | ------- | ------------------------------------------------- |
 | `entity_id`     | `string` | IdP entity identifier                                                         | -       | -       | Yes                                               |
@@ -911,8 +857,6 @@ Configuration for a single static IdP connection.
 > **Path:** `.apigw.auth_providers.saml.metadata`
 
 > **Constraint** (`contact_persons`): When contact_persons is set, SWAMID Tech 6.1.4 requires at least one 'technical' and one 'administrative' contact. Other types (support, billing, other) may appear alongside them.
-
-SAMLSPMetadata carries federation-facing SP descriptors.
 
 These descriptors are not populated by crewjam/saml by default; the samlsp
 service serializes them into the published SP metadata XML.
@@ -926,8 +870,6 @@ service serializes them into the published SP metadata XML.
 ### `organization`
 
 > **Path:** `.apigw.auth_providers.saml.metadata.organization`
-
-To md:Organization.
 
 A single language tag applies to all three localized fields; SWAMID Tech
 6.1.4 mandates at least "en".
@@ -943,8 +885,6 @@ A single language tag applies to all three localized fields; SWAMID Tech
 
 > **Path:** `.apigw.auth_providers.saml.metadata.contact_persons[]`
 
-To md:ContactPerson.
-
 | Field        | Type     | Description | Example | Default | Required |
 | ------------ | -------- | ----------- | ------- | ------- | -------- |
 | `type`       | `string` | Type        | -       | -       | Yes      |
@@ -958,7 +898,7 @@ To md:ContactPerson.
 
 > **Path:** `.apigw.auth_providers.saml.metadata.ui_info`
 
-To mdui:UIInfo (namespace urn:oasis:names:tc:SAML:metadata:ui). A single language tag applies to all localized child elements.
+A single language tag applies to all localized child elements.
 
 | Field                   | Type     | Description           | Example | Default | Required |
 | ----------------------- | -------- | --------------------- | ------- | ------- | -------- |
@@ -973,8 +913,6 @@ To mdui:UIInfo (namespace urn:oasis:names:tc:SAML:metadata:ui). A single languag
 
 > **Path:** `.apigw.auth_providers.saml.metadata.ui_info.logo`
 
-To mdui:Logo. Width and height are required by the spec.
-
 | Field    | Type     | Description | Example | Default | Required |
 | -------- | -------- | ----------- | ------- | ------- | -------- |
 | `url`    | `string` | URL         | -       | -       | Yes      |
@@ -986,8 +924,6 @@ To mdui:Logo. Width and height are required by the spec.
 > **Path:** `.apigw.auth_providers.oidc`
 
 > **Constraint** (`scopes`): The 'openid' scope is mandatory when OIDC RP is enabled.
-
-OIDC Relying Party configuration for credential issuance.
 
 | Field               | Type       | Description                                                                                                                                                                                                                                                                                                                                                        | Example                                     | Default                          | Required         |
 | ------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- | -------------------------------- | ---------------- |
@@ -1009,8 +945,6 @@ OIDC Relying Party configuration for credential issuance.
 
 > **Path:** `.apigw.auth_providers.oidc.registration`
 
-How the client obtains its credentials.
-
 | Field           | Type     | Description                                                                                                                  | Example | Default | Required                                           |
 | --------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------------------------------------------------- |
 | `preconfigured` | `object` | Preconfigured uses pre-registered client credentials. Set this when the client is already registered with the OIDC Provider. | -       | -       | Yes (if dynamic not set; mutually exclusive)       |
@@ -1019,8 +953,6 @@ How the client obtains its credentials.
 ### `preconfigured`
 
 > **Path:** `.apigw.auth_providers.oidc.registration.preconfigured`
-
-Pre-registered client credentials.
 
 | Field           | Type     | Description                                       | Example | Default | Required         |
 | --------------- | -------- | ------------------------------------------------- | ------- | ------- | ---------------- |
@@ -1032,7 +964,8 @@ Pre-registered client credentials.
 
 > **Path:** `.apigw.auth_providers.oidc.registration.dynamic`
 
-RFC 7591 dynamic client registration. When set, client credentials are obtained automatically at startup and persisted in the database.
+When set, client credentials are obtained automatically at startup and
+persisted in the database.
 
 | Field                  | Type     | Description                                                                    | Example | Default | Required         |
 | ---------------------- | -------- | ------------------------------------------------------------------------------ | ------- | ------- | ---------------- |
@@ -1043,8 +976,6 @@ RFC 7591 dynamic client registration. When set, client credentials are obtained 
 
 > **Path:** `.apigw.auth_providers.preauth`
 
-The pre-authorized credential offer flow.
-
 | Field        | Type   | Description                                                                                                                                                                                                                  | Example | Default | Required |
 | ------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `enable_pin` | `bool` | EnablePIN, when true, generates a numeric transaction code (PIN) for each pre-authorized credential offer created via /api/v1/datastore/preauth_offer. The wallet must include the PIN in the token request. Default: false. | -       | `false` | No       |
@@ -1052,8 +983,6 @@ The pre-authorized credential offer flow.
 ### `remotes` entry
 
 > **Path:** `.apigw.remotes.<remote name>`
-
-An external API connection.
 
 | Field           | Type                     | Description                                           | Example                               | Default | Required |
 | --------------- | ------------------------ | ----------------------------------------------------- | ------------------------------------- | ------- | -------- |
@@ -1069,8 +998,6 @@ An external API connection.
 
 > **Path:** `.apigw.delivery`
 
-APIGWDelivery groups credential delivery configuration (wallets, offers).
-
 | Field               | Type     | Description                                                                                            | Example | Default | Required |
 | ------------------- | -------- | ------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
 | `openid4vci`        | `object` | The OpenID4VCI Authorization Server for wallet credential issuance                                     | -       | -       | Yes      |
@@ -1080,8 +1007,6 @@ APIGWDelivery groups credential delivery configuration (wallets, offers).
 ### `openid4vci`
 
 > **Path:** `.apigw.delivery.openid4vci`
-
-OAuth2 server configuration.
 
 | Field                               | Type       | Description                                                                                                                                                                                                                                                                                | Example                             | Default                                                                          | Required |
 | ----------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | -------------------------------------------------------------------------------- | -------- |
@@ -1095,8 +1020,6 @@ OAuth2 server configuration.
 
 > **Path:** `.apigw.delivery.openid4vci.clients.<client id>`, `.verifier.inbound.openid4vp.clients.<client id>`
 
-Configuration for a single OAuth2 client.
-
 | Field          | Type       | Description                                                                                                                                                                                                     | Example                          | Default  | Required                        |
 | -------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- | -------- | ------------------------------- |
 | `type`         | `string`   | Client type per RFC 6749 Section 2.1 ("public" or "confidential"). Defaults to "public" since registered clients are wallets (native/web apps) that cannot securely store credentials and rely on PKCE instead. | -                                | `public` | No                              |
@@ -1108,8 +1031,6 @@ Configuration for a single OAuth2 client.
 
 > **Path:** `.apigw.delivery.credential_offers`
 
-Credential offer configurations.
-
 | Field        | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Example | Default | Required |
 | ------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `issuer_url` | `string` | Issuer IDENTIFIER published as `credential_issuer` inside each credential offer. It MUST be byte-identical to apigw.public_url - a trailing slash on one of them is a mismatch, because both are published verbatim - and config load refuses anything else: issuer metadata is generated from public_url and declares that as its own `credential_issuer`, so a wallet resolving an offer to {credential_issuer}/.well-known/openid-credential-issuer would otherwise reach an origin serving no metadata, or metadata naming a different issuer. It is still not where offers are RETRIEVED from. A by-reference offer (`credential_offer_uri`) is built from apigw.public_url, because that field is the statement about where this service answers; this one is an identity claim that happens to hold the same string. | -       | -       | Yes      |
@@ -1119,8 +1040,6 @@ Credential offer configurations.
 
 > **Path:** `.apigw.delivery.credential_offers.wallets.<wallet name>`
 
-Wallet redirect configuration.
-
 | Field          | Type     | Description                  | Example                            | Default | Required |
 | -------------- | -------- | ---------------------------- | ---------------------------------- | ------- | -------- |
 | `label`        | `string` | Display label for the wallet | -                                  | -       | Yes      |
@@ -1129,8 +1048,6 @@ Wallet redirect configuration.
 ### `openid4vci_compat`
 
 > **Path:** `.apigw.delivery.openid4vci_compat`
-
-Interoperability switches for non-conformant wallets.
 
 Every field defaults to the conformant behaviour, so a deployment that sets
 none of them is an OpenID4VCI 1.0 deployment.
@@ -1142,8 +1059,6 @@ none of them is an OpenID4VCI 1.0 deployment.
 ### `issuer_metadata`
 
 > **Path:** `.apigw.issuer_metadata`
-
-OpenID4VCI issuer metadata configuration.
 
 | Field                                     | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Example | Default | Required |
 | ----------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
@@ -1165,8 +1080,6 @@ OpenID4VCI issuer metadata configuration.
 ### `registration_certificate`
 
 > **Path:** `.apigw.issuer_metadata.registration_certificate`, `.verifier.registration_certificate`
-
-The EUDI registration certificate (WRPRC, ETSI TS 119 475) a verifier or a credential issuer presents to wallets.
 
 vc does not issue these. A national Registrar in the eIDAS ecosystem
 issues a WRPRC out of band, attesting what the party is registered to do;
@@ -1193,8 +1106,6 @@ Either way it informs the wallet's consent dialog and policy checks.
 
 > **Path:** `.apigw.issuer_metadata.registration_certificate.revocation`, `.issuer.access_certificate.revocation`, `.verifier.registration_certificate.revocation`
 
-Whether vc checks one of its own certificates for revocation, and what to do about the answer.
-
 This is operational hygiene rather than a security control. An operator who
 wants to present a revoked certificate can switch it off, and a wallet
 checks independently regardless. What it buys is finding out ourselves
@@ -1216,8 +1127,6 @@ policy without any check being performed.
 
 > **Path:** `.apigw.issuer_metadata.credential_response_encryption`
 
-MetadataCredentialResponseEncryption Object containing information about whether the Credential Issuer supports encryption of the Credential and Batch Credential Response on top of TLS.
-
 | Field                  | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                               | Example | Default | Required |
 | ---------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `alg_values_supported` | `[]string` | AlgValuesSupported: REQUIRED. Array containing a list of the JWE [RFC7516] encryption algorithms (alg values) [RFC7518] supported by the Credential and Batch Credential Endpoint to encode the Credential or Batch Credential Response in a JWT [RFC7519].                                                                                                                                                                               | -       | -       | Yes      |
@@ -1228,8 +1137,6 @@ MetadataCredentialResponseEncryption Object containing information about whether
 ### `credential_encryption`
 
 > **Path:** `.apigw.issuer_metadata.credential_encryption`
-
-JWE encryption of the Credential endpoints.
 
 Per OpenID4VCI 1.0 §8.3 and §12.2.4, for both the Credential and the
 Deferred Credential messages.
@@ -1249,8 +1156,6 @@ failing later.
 ### `keys` entry
 
 > **Path:** `.apigw.issuer_metadata.credential_encryption.keys[]`
-
-One of this issuer's key-agreement keys.
 
 The key is held either in a PEM file or in a PKCS#11 token, and exactly
 one of private_key_path and pkcs11 must be set. That is checked
@@ -1276,8 +1181,6 @@ that can name both settings and say which combination was written.
 
 > **Path:** `.apigw.issuer_metadata.display[]`
 
-MetadataDisplay contains display properties of a Credential Issuer for a certain language. Below is a non-exhaustive list of valid parameters that MAY be included:.
-
 | Field    | Type     | Description                                                                                                                                                                                                        | Example | Default | Required |
 | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
 | `name`   | `string` | Name: OPTIONAL. String value of a display name for the Credential Issuer.                                                                                                                                          | -       | -       | No       |
@@ -1288,8 +1191,6 @@ MetadataDisplay contains display properties of a Credential Issuer for a certain
 
 > **Path:** `.apigw.issuer_metadata.display[].logo`
 
-MetadataLogo object with information about the logo of the Credential Issuer. Below is a non-exhaustive list of parameters that MAY be included:.
-
 | Field      | Type     | Description                                                                                                                                                                                                                      | Example | Default | Required |
 | ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `uri`      | `string` | URI: REQUIRED. String value that contains a URI where the Wallet can obtain the logo of the Credential Issuer. The Wallet needs to determine the scheme, since the URI value could use the https: scheme, the data: scheme, etc. | -       | -       | Yes      |
@@ -1298,8 +1199,6 @@ MetadataLogo object with information about the logo of the Credential Issuer. Be
 ### `issuer_client`
 
 > **Path:** `.apigw.issuer_client`, `.apigw.registry_client`, `.issuer.registry_client`
-
-MTLS configuration for gRPC client connections.
 
 | Field            | Type     | Description                                 | Example         | Default | Required |
 | ---------------- | -------- | ------------------------------------------- | --------------- | ------- | -------- |
@@ -1314,8 +1213,6 @@ MTLS configuration for gRPC client connections.
 
 > **Path:** `.apigw.identity_mapping_import`
 
-Automatic import of identity mappings at startup.
-
 | Field        | Type       | Description                                                                                                                                                                                                                                                   | Example                                      | Default | Required |
 | ------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------- | -------- |
 | `file_paths` | `[]string` | JSON files containing identity mappings to import. Each JSON file should contain a map of person IDs to arrays of IdentityMapping objects. On every startup each mapping is imported only if it is not already present; existing mappings are left untouched. | `["./bootstrapping/identity_mappings.json"]` | -       | Yes      |
@@ -1325,7 +1222,7 @@ Automatic import of identity mappings at startup.
 
 > **Path:** `.apigw.trust`, `.verifier.trust`
 
-Configuration for key resolution and trust evaluation via go-trust. This is used for validating W3C VC Data Integrity proofs and other trust-related operations.
+This is used for validating W3C VC Data Integrity proofs and other trust-related operations.
 
 Trust evaluation operates in one of two modes:
 - When PDPURL is configured: "default deny" mode - all trust decisions go through the PDP
@@ -1343,8 +1240,6 @@ Trust evaluation operates in one of two modes:
 
 > **Path:** `.apigw.trust.trust_policies.<role>`, `.verifier.trust.trust_policies.<role>`
 
-Trust policy settings for a specific role.
-
 | Field                      | Type       | Description                                                                                                                           | Example                                                           | Default | Required |
 | -------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------- | -------- |
 | `trust_frameworks`         | `[]string` | The accepted trust frameworks for this role.                                                                                          | `["did:web", "did:ebsi", "etsi-tl", "openid-federation", "x509"]` | -       | No       |
@@ -1354,8 +1249,6 @@ Trust policy settings for a specific role.
 ### `wallet_attestation`
 
 > **Path:** `.apigw.trust.wallet_attestation`, `.verifier.trust.wallet_attestation`
-
-Wallet attestation-based client authentication.
 
 | Field     | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Example | Default | Required |
 | --------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -1367,7 +1260,7 @@ Wallet attestation-based client authentication.
 
 > **Path:** `.apigw.trust.wallet_attestation.policy`, `.verifier.trust.wallet_attestation.policy`
 
-SPOCP-based tier authorization for wallet attestation. Each rule is an S-expression of the form:.
+Each rule is an S-expression of the form:
 
 (wallet (attestation_source <tier>)(scope <scope>)(issuer <provider>))
 
@@ -1387,8 +1280,6 @@ Example rules:
 
 > **Path:** `.apigw.federation`, `.verifier.federation`
 
-Configuration for OpenID Federation participation.
-
 | Field               | Type       | Description                                                                        | Example | Default | Required |
 | ------------------- | ---------- | ---------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `enabled`           | `bool`     | The federation entity configuration endpoint.                                      | -       | `false` | No       |
@@ -1403,8 +1294,6 @@ Configuration for OpenID Federation participation.
 
 > **Path:** `.apigw.federation.trust_marks[]`, `.verifier.federation.trust_marks[]`
 
-A configured trust mark.
-
 | Field | Type     | Description            | Example | Default | Required |
 | ----- | -------- | ---------------------- | ------- | ------- | -------- |
 | `id`  | `string` | Trust mark identifier. | -       | -       | Yes      |
@@ -1413,8 +1302,6 @@ A configured trust mark.
 ### `rate_limit`
 
 > **Path:** `.apigw.rate_limit`
-
-Per-endpoint rate limit settings for the APIGW.
 
 | Field                                  | Type  | Description                                                                                              | Example | Default | Required |
 | -------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -1426,8 +1313,6 @@ Per-endpoint rate limit settings for the APIGW.
 ### `dashboard`
 
 > **Path:** `.apigw.dashboard`
-
-The /dashboard demo landing page that lists every service in the deployment.
 
 Intended for dev/demo environments; opt in by setting enable: true. Off by
 default so no shared-config deployment starts exposing its service inventory
@@ -1443,8 +1328,6 @@ to anonymous callers without an explicit action from the operator.
 
 > **Path:** `.apigw.dashboard.services[]`
 
-Single entry on the /dashboard page.
-
 | Field         | Type     | Description                                                       | Example | Default | Required |
 | ------------- | -------- | ----------------------------------------------------------------- | ------- | ------- | -------- |
 | `name`        | `string` | Display name and match key (e.g. "apigw", "issuer").              | -       | -       | Yes      |
@@ -1455,8 +1338,6 @@ Single entry on the /dashboard page.
 ### `links` entry
 
 > **Path:** `.apigw.dashboard.services[].links[]`
-
-Labelled URL shown under a service entry.
 
 | Field   | Type     | Description                                                                                                                                               | Example | Default | Required |
 | ------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -1471,8 +1352,6 @@ Configuration for the Issuer service that signs and issues verifiable credential
 ### `issuer`
 
 > **Path:** `.issuer`
-
-Configuration for the Issuer service that signs and issues verifiable credentials.
 
 | Field                      | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Example                         | Default | Required |
 | -------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------- | -------- |
@@ -1495,8 +1374,6 @@ Configuration for the Issuer service that signs and issues verifiable credential
 
 > **Path:** `.issuer.grpc_server`, `.registry.grpc_server`
 
-GRPC server configuration.
-
 | Field  | Type     | Description                | Example | Default | Required |
 | ------ | -------- | -------------------------- | ------- | ------- | -------- |
 | `addr` | `string` | GRPC server listen address | -       | `:8090` | No       |
@@ -1505,8 +1382,6 @@ GRPC server configuration.
 ### `tls`
 
 > **Path:** `.issuer.grpc_server.tls`, `.registry.grpc_server.tls`
-
-MTLS configuration for gRPC server.
 
 | Field                         | Type     | Description                                 | Example                        | Default                | Required |
 | ----------------------------- | -------- | ------------------------------------------- | ------------------------------ | ---------------------- | -------- |
@@ -1521,7 +1396,7 @@ MTLS configuration for gRPC server.
 
 > **Path:** `.issuer.jwt_attribute`
 
-Jwt attribute configuration. In a later state this should be placed under authentic source in order to issue credentials based on that configuration.
+In a later state this should be placed under authentic source in order to issue credentials based on that configuration.
 
 | Field                        | Type     | Description                                                    | Example                                           | Default | Required |
 | ---------------------------- | -------- | -------------------------------------------------------------- | ------------------------------------------------- | ------- | -------- |
@@ -1537,8 +1412,6 @@ Jwt attribute configuration. In a later state this should be placed under authen
 
 > **Path:** `.issuer.mdoc`
 
-MDL (ISO 18013-5) issuer configuration.
-
 | Field                    | Type       | Description                                                                                                                                                                         | Example | Default   | Required |
 | ------------------------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | --------- | -------- |
 | `certificate_chain_path` | `string`   | Path to the PEM certificate chain TODO(pki): Consider folding into pki.KeyConfig.ChainPath to unify certificate chain loading with the standard key material configuration pattern. | -       | -         | Yes      |
@@ -1548,8 +1421,6 @@ MDL (ISO 18013-5) issuer configuration.
 ### `audit_log`
 
 > **Path:** `.issuer.audit_log`
-
-Audit log configuration for multiple destinations.
 
 | Field                | Type       | Description                                                                                                                                                                                                                                                 | Example                                                              | Default | Required         |
 | -------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------- | ---------------- |
@@ -1561,8 +1432,6 @@ Audit log configuration for multiple destinations.
 
 > **Path:** `.issuer.sign_metadata_rate_limit`
 
-The SignMetadata gRPC rate limiter.
-
 | Field                 | Type      | Description                                                       | Example | Default | Required |
 | --------------------- | --------- | ----------------------------------------------------------------- | ------- | ------- | -------- |
 | `requests_per_second` | `float64` | Sustained rate limit in requests per second. Default: 2           | -       | `2`     | No       |
@@ -1571,8 +1440,6 @@ The SignMetadata gRPC rate limiter.
 ### `access_certificate`
 
 > **Path:** `.issuer.access_certificate`
-
-The EUDI Relying Party access certificate (WRPAC, ETSI TS 119 411-8) the issuer presents to wallets, and optionally gives it its own key.
 
 Under CIR (EU) 2025/848 a PID or attestation provider is a registered
 wallet-relying party in its own right, so the certificate that
@@ -1600,8 +1467,6 @@ deployment booting across an upgrade rather than failing on start.
 
 > **Path:** `.issuer.bbs`
 
-Issuer's blind BBS key pair.
-
 Separate from Issuer.KeyConfig, and unavoidably so. Every other key this
 issuer signs with is an ECDSA key that signs a digest, which is what
 pki.KeyConfig and PKCS#11 are built around. A BBS secret key is a
@@ -1622,7 +1487,10 @@ is a known and accepted property of this format rather than an oversight.
 
 > **Path:** `.issuer.zk_circuits`
 
-Issuer's zk-circuits configuration: the same catalog Sources the verifier uses, plus CacheTTL. CacheTTL lives here rather than on the shared ZkCircuitsConfig because only the issuer's resolver honours it - the verifier reads Sources alone, so a cache_ttl under verifier.zk_circuits would be a silent no-op.
+catalog Sources the verifier uses, plus CacheTTL. CacheTTL lives here
+rather than on the shared ZkCircuitsConfig because only the issuer's
+resolver honours it - the verifier reads Sources alone, so a cache_ttl
+under verifier.zk_circuits would be a silent no-op.
 
 | Field       | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Example                                                        | Default                           | Required |
 | ----------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | --------------------------------- | -------- |
@@ -1636,8 +1504,6 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 ### `verifier`
 
 > **Path:** `.verifier`
-
-Configuration for the Verifier service that verifies credentials and acts as an OIDC Provider.
 
 | Field                      | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                              | Example                                                                                                          | Default        | Required                           |
 | -------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------- | ---------------------------------- |
@@ -1667,8 +1533,6 @@ Configuration for the Verifier service that verifies credentials and acts as an 
 
 > **Path:** `.verifier.access_certificate`
 
-Validation of the verifier's own wallet-facing certificate as an EUDI Relying Party access certificate (WRPAC, ETSI TS 119 411-8).
-
 This validates the certificate the verifier already signs request objects
 with - it does not introduce a second certificate. Deployments not
 participating in an ARF trust framework can leave it disabled and are
@@ -1683,7 +1547,7 @@ unaffected.
 
 > **Path:** `.verifier.preferred_vp_formats`
 
-Format-specific parameters for Verifier or Wallet metadata. Used in client_metadata and Wallet metadata to indicate supported formats and algorithms.
+Used in client_metadata and Wallet metadata to indicate supported formats and algorithms.
 
 | Field         | Type     | Description                                             | Example | Default | Required |
 | ------------- | -------- | ------------------------------------------------------- | ------- | ------- | -------- |
@@ -1696,8 +1560,6 @@ Format-specific parameters for Verifier or Wallet metadata. Used in client_metad
 
 > **Path:** `.verifier.preferred_vp_formats.ldp_vc`
 
-Format-specific parameters for W3C VC Data Integrity (ldp_vc).
-
 | Field                | Type       | Description                                                                                                                                            | Example                                                               | Default | Required |
 | -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | ------- | -------- |
 | `proof_type_values`  | `[]string` | Non-empty array containing identifiers of proof types supported. If present, the proof type of the presented VC/VP MUST match one of the array values. | `["DataIntegrityProof", "Ed25519Signature2020"]`                      | -       | No       |
@@ -1707,8 +1569,6 @@ Format-specific parameters for W3C VC Data Integrity (ldp_vc).
 
 > **Path:** `.verifier.preferred_vp_formats.jwt_vc_json`
 
-Format-specific parameters for JWT-based W3C VC (jwt_vc_json).
-
 | Field        | Type       | Description                                                                                                                                                              | Example | Default | Required |
 | ------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
 | `alg_values` | `[]string` | Non-empty array containing identifiers of cryptographic algorithms supported. If present, the alg JOSE header of the presented VC/VP MUST match one of the array values. | -       | -       | No       |
@@ -1716,8 +1576,6 @@ Format-specific parameters for JWT-based W3C VC (jwt_vc_json).
 ### `dc+sd-jwt`
 
 > **Path:** `.verifier.preferred_vp_formats.dc+sd-jwt`
-
-Format-specific parameters for IETF SD-JWT VC (dc+sd-jwt).
 
 | Field               | Type       | Description                                                                                                      | Example | Default | Required |
 | ------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -1728,8 +1586,6 @@ Format-specific parameters for IETF SD-JWT VC (dc+sd-jwt).
 
 > **Path:** `.verifier.preferred_vp_formats.mso_mdoc`
 
-Format-specific parameters for ISO mdoc (mso_mdoc).
-
 | Field                   | Type    | Description                                                                                                      | Example | Default | Required |
 | ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `issuerauth_alg_values` | `[]int` | Non-empty array containing cryptographic algorithm identifiers supported for IssuerAuth COSE signatures.         | -       | -       | No       |
@@ -1739,8 +1595,6 @@ Format-specific parameters for ISO mdoc (mso_mdoc).
 
 > **Path:** `.verifier.inbound`
 
-VerifierInbound groups inbound credential verification configuration.
-
 | Field       | Type     | Description                                                | Example | Default | Required |
 | ----------- | -------- | ---------------------------------------------------------- | ------- | ------- | -------- |
 | `openid4vp` | `object` | OpenID4VP configuration for accepting wallet presentations | -       | -       | Yes      |
@@ -1748,8 +1602,6 @@ VerifierInbound groups inbound credential verification configuration.
 ### `openid4vp`
 
 > **Path:** `.verifier.inbound.openid4vp`
-
-OpenID4VP-specific configuration.
 
 | Field                       | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Example                             | Default | Required |
 | --------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | ------- | -------- |
@@ -1764,8 +1616,6 @@ OpenID4VP-specific configuration.
 
 > **Path:** `.verifier.inbound.openid4vp.supported_credentials[]`
 
-Credential types to OIDC scopes.
-
 | Field    | Type       | Description                                      | Example            | Default | Required |
 | -------- | ---------- | ------------------------------------------------ | ------------------ | ------- | -------- |
 | `vct`    | `string`   | Verifiable credential type                       | `"urn:eudi:pid:1"` | -       | Yes      |
@@ -1775,8 +1625,6 @@ Credential types to OIDC scopes.
 
 > **Path:** `.verifier.outbound`
 
-VerifierOutbound groups outbound identity assertion configuration.
-
 | Field           | Type     | Description                                                                   | Example | Default | Required |
 | --------------- | -------- | ----------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `oidc_provider` | `object` | OIDC Provider configuration for asserting verified identity to downstream RPs | -       | -       | No       |
@@ -1785,7 +1633,9 @@ VerifierOutbound groups outbound identity assertion configuration.
 
 > **Path:** `.verifier.outbound.oidc_provider`
 
-OIDCConfig holds OIDC-specific configuration for the verifier's role as an OpenID Provider. This configures how the verifier issues ID tokens and access tokens to relying parties. Note: This is NOT related to verifiable credential issuance (see IssuerConfig for VC issuance). The signing key is shared from the parent Verifier.KeyConfig.
+This configures how the verifier issues ID tokens and access tokens to relying parties.
+Note: This is NOT related to verifiable credential issuance (see IssuerConfig for VC issuance).
+The signing key is shared from the parent Verifier.KeyConfig.
 
 | Field                       | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Example                       | Default | Required |
 | --------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------- | -------- |
@@ -1806,7 +1656,8 @@ OIDCConfig holds OIDC-specific configuration for the verifier's role as an OpenI
 
 > **Path:** `.verifier.outbound.oidc_provider.static_clients[]`
 
-A pre-configured OIDC client for the verifier's OIDC Provider. Static clients are configured in YAML and do not require dynamic registration. These clients are checked in addition to dynamically registered clients stored in the database.
+Static clients are configured in YAML and do not require dynamic registration.
+These clients are checked in addition to dynamically registered clients stored in the database.
 
 | Field                        | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                             | Example | Default                  | Required                                          |
 | ---------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------ | ------------------------------------------------- |
@@ -1824,8 +1675,6 @@ A pre-configured OIDC client for the verifier's OIDC Provider. Static clients ar
 
 > **Path:** `.verifier.outbound.oidc_provider.dynamic_registration_auth`
 
-How the verifier authorizes dynamic client registration requests.
-
 | Field                      | Type     | Description                                                                                                                                                            | Example | Default | Required                  |
 | -------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | ------------------------- |
 | `mode`                     | `string` | Registration authorization behavior. Supported values: open, static, jwt. Future option (not implemented yet): introspection, which the validator rejects until it is. | -       | `open`  | No                        |
@@ -1835,8 +1684,6 @@ How the verifier authorizes dynamic client registration requests.
 ### `jwt`
 
 > **Path:** `.verifier.outbound.oidc_provider.dynamic_registration_auth.jwt`
-
-JWT verification for registration authorization.
 
 | Field                  | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Example | Default             | Required |
 | ---------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------------------- | -------- |
@@ -1850,8 +1697,6 @@ JWT verification for registration authorization.
 
 > **Path:** `.verifier.digital_credentials`
 
-W3C Digital Credentials API configuration.
-
 | Field               | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Example            | Default                                  | Required |
 | ------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------- | -------- |
 | `enable`            | `bool`     | W3C Digital Credentials API support in browser                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | -                  | `false`                                  | No       |
@@ -1864,8 +1709,6 @@ W3C Digital Credentials API configuration.
 ### `authorization_page_css`
 
 > **Path:** `.verifier.authorization_page_css`
-
-Deployers to customize the authorization page styling.
 
 | Field             | Type     | Description                                                                                                                           | Example     | Default | Required |
 | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------- | -------- |
@@ -1882,8 +1725,6 @@ Deployers to customize the authorization page styling.
 
 > **Path:** `.verifier.credential_display`
 
-Whether and how credentials are displayed before being sent to RP.
-
 | Field                  | Type   | Description                                                                                                                              | Example | Default | Required |
 | ---------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `enable`               | `bool` | Users to optionally view credential details before completing authorization When enabled, a checkbox appears on the authorization page   | -       | `false` | No       |
@@ -1895,8 +1736,6 @@ Whether and how credentials are displayed before being sent to RP.
 ### `presets` entry
 
 > **Path:** `.verifier.presets.<preset label>`
-
-Single named verification preset.
 
 It holds the credentials the preset requests, plus optional metadata for
 how the UI should group and order it. The parent Presets map's key serves
@@ -1913,8 +1752,6 @@ as the human-readable label.
 
 > **Path:** `.verifier.presets.<preset label>.credentials.<key>`
 
-Optional overrides for a credential query within a preset.
-
 | Field            | Type     | Description                                                                                                                                                                                                                                                                    | Example | Default | Required |
 | ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
 | `claims`         | `array`  | Specific claims to request. If empty, all VCTM claims are used.                                                                                                                                                                                                                | -       | -       | No       |
@@ -1927,8 +1764,6 @@ Optional overrides for a credential query within a preset.
 
 > **Path:** `.verifier.presets.<preset label>.credentials.<key>.claims[]`, `.verifier.presets.<preset label>.credentials.<key>.exclude_claims[]`
 
-A claim path to request within a credential.
-
 | Field  | Type       | Description         | Example                                  | Default | Required |
 | ------ | ---------- | ------------------- | ---------------------------------------- | ------- | -------- |
 | `path` | `[]string` | Claim path segments | `["birthdate"], ["address", "locality"]` | -       | Yes      |
@@ -1936,8 +1771,6 @@ A claim path to request within a credential.
 ### `validations` entry
 
 > **Path:** `.verifier.presets.<preset label>.credentials.<key>.validations[]`
-
-A validation rule to apply against extracted credential claims.
 
 | Field   | Type       | Description                                     | Example         | Default | Required |
 | ------- | ---------- | ----------------------------------------------- | --------------- | ------- | -------- |
@@ -1949,7 +1782,12 @@ A validation rule to apply against extracted credential claims.
 
 > **Path:** `.verifier.presets.<preset label>.credentials.<key>.zk_system_type[]`
 
-One entry of a CredentialQuery's `meta.zk_system_type` array — a verifier's declaration of one ZK proof system + circuit variant it is willing to accept, mirroring multipaz's `ZkSystemSpec` wire shape (`{"id": ..., "system": ..., ...params}`, e.g. `{"id": "longfellow-libzk-v1_8_1_4259_2945", "system": "longfellow-libzk-v1", "num_attributes": 1, "circuit_hash": "...", "block_enc_hash": ..., "block_enc_sig": ...}`).
+array — a verifier's declaration of one ZK proof system + circuit variant
+it is willing to accept, mirroring multipaz's `ZkSystemSpec` wire shape
+(`{"id": ..., "system": ..., ...params}`, e.g.
+`{"id": "longfellow-libzk-v1_8_1_4259_2945", "system": "longfellow-libzk-v1",
+"num_attributes": 1, "circuit_hash": "...", "block_enc_hash": ...,
+"block_enc_sig": ...}`).
 
 Params is a flat string->string bag (all non-id/system JSON members of the
 wire object). Numeric wire values (e.g. num_attributes, block_enc_hash)
@@ -1967,8 +1805,6 @@ are intentionally loosely typed at this layer.
 
 > **Path:** `.verifier.combined_presentation`
 
-Combined presentation verification.
-
 | Field                 | Type                               | Description                                                                                                                                                                                                                                                                 | Example | Default | Required |
 | --------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `enabled`             | `bool`                             | Enabled activates combined presentation binding verification.                                                                                                                                                                                                               | -       | -       | No       |
@@ -1980,8 +1816,6 @@ Combined presentation verification.
 
 > **Path:** `.verifier.combined_presentation.binding_attributes[]`
 
-A set of attribute paths to compare across credentials.
-
 | Field   | Type       | Description                                                         | Example                                                    | Default | Required |
 | ------- | ---------- | ------------------------------------------------------------------- | ---------------------------------------------------------- | ------- | -------- |
 | `paths` | `[]string` | Claim paths that must ALL match across credentials (AND semantics). | `["family_name", "birth_date", "place_of_birth.locality"]` | -       | Yes      |
@@ -1989,8 +1823,6 @@ A set of attribute paths to compare across credentials.
 ### `revocation`
 
 > **Path:** `.verifier.revocation`
-
-Credential revocation verification at presentation time.
 
 | Field         | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Example | Default | Required |
 | ------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
@@ -2003,7 +1835,10 @@ Credential revocation verification at presentation time.
 
 > **Path:** `.verifier.zk_circuits`
 
-The shared zk-circuits catalog sources (pkg/mdoc/zkcircuit). The verifier uses it to resolve a presented "mso_mdoc_zk" document's zkSystemId to a downloadable circuit artifact; the issuer resolves wire-shape constraints from the same sources through its own IssuerZkCircuitsConfig, which adds a resolver cache.
+(pkg/mdoc/zkcircuit). The verifier uses it to resolve a presented
+"mso_mdoc_zk" document's zkSystemId to a downloadable circuit artifact;
+the issuer resolves wire-shape constraints from the same sources through
+its own IssuerZkCircuitsConfig, which adds a resolver cache.
 
 | Field     | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Example                                                        | Default                           | Required |
 | --------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | --------------------------------- | -------- |
@@ -2013,7 +1848,8 @@ The shared zk-circuits catalog sources (pkg/mdoc/zkcircuit). The verifier uses i
 
 > **Path:** `.verifier.zk_key_cache`
 
-The process-local store of decompressed Vega verifier keys (see pkg/mdoc's vegaKeyStore). Only consulted by builds with the "zknative" Go build tag.
+verifier keys (see pkg/mdoc's vegaKeyStore). Only consulted by builds
+with the "zknative" Go build tag.
 
 A key is ~100MB and the store is keyed by circuit revision, so what this
 bounds is real disk. It is per PROCESS, not per deployment: under
@@ -2035,8 +1871,6 @@ Configuration for the Registry service that manages credential status.
 
 > **Path:** `.registry`
 
-Configuration for the Registry service that manages credential status.
-
 | Field                | Type     | Description                                               | Example                       | Default | Required |
 | -------------------- | -------- | --------------------------------------------------------- | ----------------------------- | ------- | -------- |
 | `api_server`         | `object` | HTTP API server configuration                             | -                             | -       | Yes      |
@@ -2049,8 +1883,6 @@ Configuration for the Registry service that manages credential status.
 
 > **Path:** `.registry.token_status_lists`
 
-Configuration for Token Status List per draft-ietf-oauth-status-list.
-
 | Field                            | Type     | Description                                                                                                                                | Example | Default   | Required |
 | -------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------- | --------- | -------- |
 | `key_config`                     | `object` | Key configuration for signing Token Status List tokens.                                                                                    | -       | -         | Yes      |
@@ -2062,8 +1894,6 @@ Configuration for Token Status List per draft-ietf-oauth-status-list.
 
 > **Path:** `.registry.admin_gui`
 
-Admin GUI configuration.
-
 | Field      | Type     | Description    | Example | Default | Required         |
 | ---------- | -------- | -------------- | ------- | ------- | ---------------- |
 | `enable`   | `bool`   | The admin GUI  | -       | `false` | No               |
@@ -2072,13 +1902,18 @@ Admin GUI configuration.
 
 ## Secrets File Reference
 
-The structure of the separate secrets file. When Common.SecretFilePath is set, ApplySecrets merges these values into the main config: the Mongo URI is only used when the main config has none. For each service section (apigw, registry, verifier) that is present in the secrets file, the corresponding secret fields in the main config are cleared and replaced by the secrets-file values. Sections omitted from the secrets file are left untouched.
+The structure of the separate secrets file.
 
 ### Secrets file structure
 
 > **Path:** `(root)`
 
-The structure of the separate secrets file. When Common.SecretFilePath is set, ApplySecrets merges these values into the main config: the Mongo URI is only used when the main config has none. For each service section (apigw, registry, verifier) that is present in the secrets file, the corresponding secret fields in the main config are cleared and replaced by the secrets-file values. Sections omitted from the secrets file are left untouched.
+When Common.SecretFilePath is set, ApplySecrets merges these values
+into the main config: the Mongo URI is only used when the main config
+has none. For each service section (apigw, registry, verifier) that
+is present in the secrets file, the corresponding secret fields in
+the main config are cleared and replaced by the secrets-file values.
+Sections omitted from the secrets file are left untouched.
 
 | Field      | Type     | Description | Example | Default | Required |
 | ---------- | -------- | ----------- | ------- | ------- | -------- |
@@ -2091,8 +1926,6 @@ The structure of the separate secrets file. When Common.SecretFilePath is set, A
 
 > **Path:** `.common`
 
-Secrets from the common section.
-
 | Field   | Type     | Description                                                   | Example | Default | Required |
 | ------- | -------- | ------------------------------------------------------------- | ------- | ------- | -------- |
 | `mongo` | `object` | Mongo                                                         | -       | -       | No       |
@@ -2103,8 +1936,6 @@ Secrets from the common section.
 
 > **Path:** `.common.mongo`
 
-Mongo connection URI (may contain credentials).
-
 | Field | Type     | Description                                                             | Example | Default | Required |
 | ----- | -------- | ----------------------------------------------------------------------- | ------- | ------- | -------- |
 | `uri` | `string` | MongoDB connection string, which may include authentication credentials | -       | -       | No       |
@@ -2112,8 +1943,6 @@ Mongo connection URI (may contain credentials).
 ### `sql`
 
 > **Path:** `.common.sql`
-
-Relational database passwords, keyed by backend.
 
 | Field      | Type     | Description                  | Example | Default | Required |
 | ---------- | -------- | ---------------------------- | ------- | ------- | -------- |
@@ -2124,8 +1953,6 @@ Relational database passwords, keyed by backend.
 
 > **Path:** `.common.sql.postgres`
 
-Postgres connection password.
-
 | Field      | Type     | Description                  | Example | Default | Required |
 | ---------- | -------- | ---------------------------- | ------- | ------- | -------- |
 | `password` | `string` | Postgres connection password | -       | -       | No       |
@@ -2133,8 +1960,6 @@ Postgres connection password.
 ### `mariadb`
 
 > **Path:** `.common.sql.mariadb`
-
-MariaDB connection password.
 
 | Field      | Type     | Description                 | Example | Default | Required |
 | ---------- | -------- | --------------------------- | ------- | ------- | -------- |
@@ -2144,8 +1969,6 @@ MariaDB connection password.
 
 > **Path:** `.common.ha`
 
-Secrets for the HA section of the common config.
-
 | Field    | Type     | Description                                                                                                      | Example | Default | Required |
 | -------- | -------- | ---------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `pubsub` | `object` | Redis / Valkey ACL credentials used by the HA pub/sub bus. Omitted entirely when the backend is unauthenticated. | -       | -       | No       |
@@ -2153,8 +1976,6 @@ Secrets for the HA section of the common config.
 ### `pubsub`
 
 > **Path:** `.common.ha.pubsub`
-
-Redis / Valkey ACL credentials for the HA pub/sub bus.
 
 | Field      | Type     | Description                                                                    | Example | Default | Required |
 | ---------- | -------- | ------------------------------------------------------------------------------ | ------- | ------- | -------- |
@@ -2165,8 +1986,6 @@ Redis / Valkey ACL credentials for the HA pub/sub bus.
 
 > **Path:** `.apigw`
 
-API gateway secrets.
-
 | Field            | Type     | Description    | Example | Default | Required |
 | ---------------- | -------- | -------------- | ------- | ------- | -------- |
 | `api_server`     | `object` | API Server     | -       | -       | No       |
@@ -2176,8 +1995,6 @@ API gateway secrets.
 
 > **Path:** `.apigw.api_server`
 
-API server secrets (basic auth passwords).
-
 | Field      | Type     | Description | Example | Default | Required |
 | ---------- | -------- | ----------- | ------- | ------- | -------- |
 | `api_auth` | `object` | API Auth    | -       | -       | No       |
@@ -2185,8 +2002,6 @@ API server secrets (basic auth passwords).
 ### `api_auth`
 
 > **Path:** `.apigw.api_server.api_auth`
-
-Secrets for the api_auth section.
 
 | Field  | Type     | Description | Example | Default | Required |
 | ------ | -------- | ----------- | ------- | ------- | -------- |
@@ -2196,8 +2011,6 @@ Secrets for the api_auth section.
 
 > **Path:** `.apigw.api_server.api_auth.oidc`
 
-OIDC client secret for API auth.
-
 | Field           | Type     | Description                                | Example | Default | Required |
 | --------------- | -------- | ------------------------------------------ | ------- | ------- | -------- |
 | `client_secret` | `string` | OAuth2 client secret for the OIDC provider | -       | -       | No       |
@@ -2205,8 +2018,6 @@ OIDC client secret for API auth.
 ### `auth_providers`
 
 > **Path:** `.apigw.auth_providers`
-
-Secrets for auth providers.
 
 | Field  | Type     | Description | Example | Default | Required |
 | ------ | -------- | ----------- | ------- | ------- | -------- |
@@ -2216,8 +2027,6 @@ Secrets for auth providers.
 
 > **Path:** `.apigw.auth_providers.oidc`
 
-OIDC Relying Party secrets.
-
 | Field          | Type     | Description  | Example | Default | Required |
 | -------------- | -------- | ------------ | ------- | ------- | -------- |
 | `registration` | `object` | Registration | -       | -       | No       |
@@ -2225,8 +2034,6 @@ OIDC Relying Party secrets.
 ### `registration`
 
 > **Path:** `.apigw.auth_providers.oidc.registration`
-
-Registration secrets.
 
 | Field           | Type     | Description   | Example | Default | Required |
 | --------------- | -------- | ------------- | ------- | ------- | -------- |
@@ -2237,8 +2044,6 @@ Registration secrets.
 
 > **Path:** `.apigw.auth_providers.oidc.registration.preconfigured`
 
-Pre-registered client secrets.
-
 | Field           | Type     | Description                                         | Example | Default | Required |
 | --------------- | -------- | --------------------------------------------------- | ------- | ------- | -------- |
 | `client_secret` | `string` | Shared secret for the pre-configured OIDC RP client | -       | -       | No       |
@@ -2246,8 +2051,6 @@ Pre-registered client secrets.
 ### `dynamic`
 
 > **Path:** `.apigw.auth_providers.oidc.registration.dynamic`
-
-Dynamic registration secrets.
 
 | Field                  | Type     | Description                                                     | Example | Default | Required |
 | ---------------------- | -------- | --------------------------------------------------------------- | ------- | ------- | -------- |
@@ -2257,8 +2060,6 @@ Dynamic registration secrets.
 
 > **Path:** `.registry`
 
-Registry secrets.
-
 | Field       | Type     | Description | Example | Default | Required |
 | ----------- | -------- | ----------- | ------- | ------- | -------- |
 | `admin_gui` | `object` | Admin GUI   | -       | -       | No       |
@@ -2266,8 +2067,6 @@ Registry secrets.
 ### `admin_gui`
 
 > **Path:** `.registry.admin_gui`
-
-Admin GUI secrets.
 
 | Field      | Type     | Description              | Example | Default | Required |
 | ---------- | -------- | ------------------------ | ------- | ------- | -------- |
@@ -2277,8 +2076,6 @@ Admin GUI secrets.
 
 > **Path:** `.verifier`
 
-Verifier secrets.
-
 | Field      | Type     | Description | Example | Default | Required |
 | ---------- | -------- | ----------- | ------- | ------- | -------- |
 | `outbound` | `object` | Outbound    | -       | -       | No       |
@@ -2287,8 +2084,6 @@ Verifier secrets.
 
 > **Path:** `.verifier.outbound`
 
-Outbound OIDC provider secrets.
-
 | Field           | Type     | Description   | Example | Default | Required |
 | --------------- | -------- | ------------- | ------- | ------- | -------- |
 | `oidc_provider` | `object` | OIDC Provider | -       | -       | No       |
@@ -2296,8 +2091,6 @@ Outbound OIDC provider secrets.
 ### `oidc_provider`
 
 > **Path:** `.verifier.outbound.oidc_provider`
-
-OIDC OP configuration secrets.
 
 | Field            | Type     | Description                                                                                                                                                                                                                                      | Example                          | Default | Required |
 | ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- | ------- | -------- |
