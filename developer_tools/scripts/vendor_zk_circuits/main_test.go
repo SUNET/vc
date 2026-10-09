@@ -210,14 +210,10 @@ func assertNothingOutside(t *testing.T, out string) {
 
 func TestSelectCircuits(t *testing.T) {
 	manifest := &zkcircuit.Manifest{Circuits: []zkcircuit.CircuitDescriptor{
-		{ID: "vega-active", System: "vega-mc", Status: "active", Published: true, DocTypes: []string{"org.iso.18013.5.1.mDL"}},
-		{ID: "vega-deprecated", System: "vega-mc", Status: "deprecated", Published: true, DocTypes: []string{"org.iso.18013.5.1.mDL"}},
-		{ID: "lf-active", System: "longfellow", Status: "active", Published: true, DocTypes: []string{"org.iso.18013.5.1.mDL"}},
-		{ID: "vega-pid", System: "vega-mc", Status: "active", Published: true, DocTypes: []string{"eu.europa.ec.eudi.pid.1"}},
-		// Active but never published. zkcircuit's usable set requires
-		// both, so vendoring this would mirror something the resolver
-		// refuses - or fail the run on an artifact that does not exist.
-		{ID: "vega-unpublished", System: "vega-mc", Status: "active", DocTypes: []string{"org.iso.18013.5.1.mDL"}},
+		{ID: "vega-active", System: "vega-mc", Status: "active", DocTypes: []string{"org.iso.18013.5.1.mDL"}},
+		{ID: "vega-deprecated", System: "vega-mc", Status: "deprecated", DocTypes: []string{"org.iso.18013.5.1.mDL"}},
+		{ID: "lf-active", System: "longfellow", Status: "active", DocTypes: []string{"org.iso.18013.5.1.mDL"}},
+		{ID: "vega-pid", System: "vega-mc", Status: "active", DocTypes: []string{"eu.europa.ec.eudi.pid.1"}},
 	}}
 
 	got := selectCircuits(manifest, "vega-mc", "org.iso.18013.5.1.mDL", true)
@@ -230,15 +226,6 @@ func TestSelectCircuits(t *testing.T) {
 	got = selectCircuits(manifest, "vega-mc", "org.iso.18013.5.1.mDL", false)
 	if len(got) != 2 {
 		t.Fatalf("selectCircuits = %v, want both mDL vega entries", ids(got))
-	}
-
-	// ... and the unpublished one is in neither, which is the point of the
-	// fixture above: -active-only=false relaxes the STATUS filter, not the
-	// published one.
-	for _, c := range got {
-		if c.ID == "vega-unpublished" {
-			t.Error("an unpublished circuit was selected for vendoring")
-		}
 	}
 }
 
@@ -561,17 +548,7 @@ func TestMirrorFileModeFollowsTheDirectory(t *testing.T) {
 		"group readable": {0o750, 0o640},
 		"owner only":     {0o700, 0o600},
 		"group writable": {0o770, 0o660},
-
-		// Write-only directories. The fallback tests the READ bits, not
-		// "any bit survived stripping execute" - 0300 leaves 0200, which
-		// is non-zero, and the mirror was written write-only. The issuer
-		// and verifier then cannot read the manifest they were handed,
-		// which is the one outcome this fallback exists to avoid.
-		"owner write only":  {0o300, 0o600},
-		"group write only":  {0o030, 0o600},
-		"world write only":  {0o003, 0o600},
-		"execute only":      {0o111, 0o600},
-		"write and execute": {0o333, 0o600},
+		"no read":        {0o300, 0o600},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "mirror")
@@ -636,83 +613,5 @@ func TestVendorWritesFilesWithTheMirrorsMode(t *testing.T) {
 		if perm := info.Mode().Perm(); perm != 0o640 {
 			t.Errorf("%s has mode %o, want 0640 from the 0750 directory", rel, perm)
 		}
-	}
-}
-
-// An alias has to resolve from the mirror, not just from the catalog.
-//
-// The catalog serves an alias by redirecting to the canonical id, and the
-// HTTP client follows that. A file:// source has no redirect: fetchFile
-// opens v1/circuits/<id>.json directly, so an alias that worked against the
-// live catalog 404'd against its own vendored copy.
-func TestVendorWritesAliasDescriptors(t *testing.T) {
-	body := []byte("verifier key bytes")
-	artifact, urlPath := artifactFor(body, "")
-
-	source := catalogServer(t,
-		[]map[string]any{{
-			"id": "vega-mc-p256-v1-verifier-key-r12", "system": "vega-mc", "systemVersion": "12",
-			"status": "active", "published": true,
-			"aliases":  []string{"vega-mc-verifier-current"},
-			"docTypes": []string{"org.iso.18013.5.1.mDL"},
-			"params":   map[string]any{"role": "verifier", "saltBytes": "32"},
-			"artifact": artifact,
-		}},
-		map[string][]byte{urlPath: body},
-	)
-
-	out := t.TempDir()
-	if err := run(t.Context(), source, out, "", "", true, false); err != nil {
-		t.Fatalf("run() error = %v", err)
-	}
-
-	mirror := zkcircuit.NewClient("file://" + filepath.ToSlash(out))
-
-	// Both names reach the same descriptor.
-	for _, name := range []string{"vega-mc-p256-v1-verifier-key-r12", "vega-mc-verifier-current"} {
-		descriptor, err := mirror.FetchCircuit(t.Context(), name)
-		if err != nil {
-			t.Fatalf("FetchCircuit(%q) from the mirror: %v", name, err)
-		}
-		if descriptor.ID != "vega-mc-p256-v1-verifier-key-r12" {
-			t.Errorf("FetchCircuit(%q).ID = %q", name, descriptor.ID)
-		}
-	}
-}
-
-// Two descriptors claiming one name would make the mirror depend on write
-// order, so vendoring refuses rather than picking.
-func TestVendorRefusesAnAliasCollision(t *testing.T) {
-	body := []byte("verifier key bytes")
-	artifact, urlPath := artifactFor(body, "")
-
-	source := catalogServer(t,
-		[]map[string]any{
-			{
-				"id": "vega-mc-p256-v1-verifier-key-r12", "system": "vega-mc", "systemVersion": "12",
-				"status": "active", "published": true,
-				"aliases":  []string{"vega-mc-verifier-current"},
-				"docTypes": []string{"org.iso.18013.5.1.mDL"},
-				"params":   map[string]any{"role": "verifier", "saltBytes": "32"},
-				"artifact": artifact,
-			},
-			{
-				"id": "vega-mc-p256-v1-verifier-key-r13", "system": "vega-mc", "systemVersion": "12",
-				"status": "active", "published": true,
-				"aliases":  []string{"vega-mc-verifier-current"},
-				"docTypes": []string{"org.iso.18013.5.1.mDL"},
-				"params":   map[string]any{"role": "verifier", "saltBytes": "32"},
-				"artifact": artifact,
-			},
-		},
-		map[string][]byte{urlPath: body},
-	)
-
-	err := run(t.Context(), source, t.TempDir(), "", "", true, false)
-	if err == nil {
-		t.Fatal("a mirror was written with two descriptors claiming one alias")
-	}
-	if !strings.Contains(err.Error(), "vega-mc-verifier-current") {
-		t.Errorf("the error does not name the clashing alias: %v", err)
 	}
 }

@@ -1,7 +1,6 @@
 package zkcircuit
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -51,30 +50,22 @@ func isFileURL(rawURL string) bool {
 // "known-good" - it was downloaded from the catalog at some point, and a
 // decompression-bomb-sized descriptor should bound out here rather than in
 // the allocator.
-func fetchFile(ctx context.Context, rawURL string, maxBytes int64) ([]byte, error) {
+func fetchFile(rawURL string, maxBytes int64) ([]byte, error) {
 	path, err := filePathFromURL(rawURL)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	// Stat BEFORE opening, and insist on a regular file.
-	//
-	// os.Open on a FIFO blocks until someone opens the other end - with no
-	// context to cancel it, that is issuance hanging forever on a path an
-	// operator controls. The checks that used to catch this ran after the
-	// open and so were never reached. A directory, device or socket is
-	// refused here too; "not a directory" was always too narrow a test for
-	// a path this code already treats as not-necessarily-known-good.
-	info, err := os.Stat(path)
+	// Stat before Open and require a regular file: os.Open on a FIFO or
+	// device blocks until a writer appears, and a mirror is operator-
+	// supplied but not known-good, so a special file left at manifest.json
+	// would hang issuance forever rather than erroring.
+	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, fmt.Errorf("stat vendored circuit file %s: %w", path, err)
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("vendored circuit path %s is not a regular file (%s)", path, info.Mode().Type())
+		return nil, fmt.Errorf("vendored circuit path %s is not a regular file", path)
 	}
 
 	f, err := os.Open(path)
@@ -82,20 +73,6 @@ func fetchFile(ctx context.Context, rawURL string, maxBytes int64) ([]byte, erro
 		return nil, fmt.Errorf("open vendored circuit file %s: %w", path, err)
 	}
 	defer f.Close()
-
-	// Again on the open descriptor, so a path swapped between the two
-	// cannot slip a FIFO past the first check.
-	opened, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat vendored circuit file %s: %w", path, err)
-	}
-	if !opened.Mode().IsRegular() {
-		return nil, fmt.Errorf("vendored circuit path %s is not a regular file (%s)", path, opened.Mode().Type())
-	}
-
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
 
 	// maxBytes+1 so an oversized file is reported as oversized rather than
 	// silently truncated to exactly the cap.

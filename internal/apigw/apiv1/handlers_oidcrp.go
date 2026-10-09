@@ -412,17 +412,27 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 		return nil, fmt.Errorf("failed to generate nonce: %w", nonceErr)
 	}
 
-	identifier, resolveErr := c.ResolveIdentifier(ctx, session.IssuerURL, claims)
-	if resolveErr != nil {
-		c.log.Debug("standalone OIDC: could not resolve identifier", "error", resolveErr)
-	}
-
-	// Resolve the data source for this credential type so that the credential
-	// endpoint knows whether the identity is assertion-based (and can skip
-	// the identifier requirement).
+	// Resolve the data source first so the credential endpoint knows whether
+	// the identity is assertion-based and, crucially, so identity resolution
+	// below uses the scope's configured identity-mapping namespace
+	// (authentic_source) rather than the IdP issuer. The VCI/PAR path already
+	// keys the datastore lookup on the configured namespace; a standalone
+	// offer must match or its identity mapping cannot be found.
 	credSource, credSourceErr := c.cfg.APIGW.DataSources.ResolveDataSource(session.CredentialType, string(model.AuthProviderOIDC))
 	if credSourceErr != nil {
 		c.log.Debug("standalone OIDC: could not resolve data source", "error", credSourceErr)
+	}
+
+	// Resolve the identity against the scope's configured authentic_source
+	// namespace, falling back to the IdP issuer only when the scope did not
+	// configure one (e.g. assertion scopes).
+	authenticSource := session.IssuerURL
+	if credSource.AuthenticSource != "" {
+		authenticSource = credSource.AuthenticSource
+	}
+	identifier, resolveErr := c.ResolveIdentifier(ctx, authenticSource, claims)
+	if resolveErr != nil {
+		c.log.Debug("standalone OIDC: could not resolve identifier", "error", resolveErr)
 	}
 
 	// Fail fast if we have neither an identifier nor a resolved data source —
@@ -464,6 +474,7 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	}
 	if credSourceErr == nil {
 		authCtx.DataSource = string(credSource.DataSource)
+		authCtx.AuthenticSource = credSource.AuthenticSource
 	}
 	if saveErr := c.cacheService.AuthContext.Save(ctx, authCtx); saveErr != nil {
 		span.SetStatus(codes.Error, "pre-auth code persistence failed")
@@ -471,21 +482,28 @@ func (c *Client) OIDCRPCallback(ctx context.Context, req *OIDCRPCallbackRequest,
 	}
 
 	// Store document data so the credential endpoint can issue the credential
-	// when the wallet redeems the offer.
-	//
-	// Note that this happens for every data source, not only assertion: a
-	// standalone-mode offer stores the callback claims as the document even for
-	// a datastore scope, and never consults the datastore. That looks like a
-	// separate defect, but it is exactly why the filtering has to apply here
-	// too - whatever lands in DocumentData can end up signed into a credential.
-	doc, docErr := c.buildOIDCDocument(cc, session.IssuerURL, credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion)
-	if docErr != nil {
-		span.SetStatus(codes.Error, "document build failed")
-		return nil, docErr
-	}
-	if err = c.StoreVCIDocuments(ctx, preAuthCode, map[string]*model.CompleteDocument{session.IssuerURL: doc}); err != nil {
-		span.SetStatus(codes.Error, "failed to store VCI documents")
-		return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+	// when the wallet redeems the offer. A datastore scope must serve its
+	// pre-loaded document (found via the authenticated identity), not the
+	// callback claims — mirroring the VCI-mode branch above — otherwise
+	// VCICredential signs the OIDC claims instead of the datastore document.
+	// Assertion (and external-API fallback) scopes own the callback claims and
+	// store them directly.
+	if credSourceErr == nil && credSource.DataSource == model.DataSourceDatastore {
+		dsCred := c.cfg.APIGW.DataSources.Datastore.Scopes[session.CredentialType]
+		if err = c.LookupDatastoreByIdentity(ctx, preAuthCode, session.CredentialType, authenticSource, claims, &dsCred); err != nil {
+			span.SetStatus(codes.Error, "datastore lookup failed")
+			return nil, fmt.Errorf("standalone OIDC datastore lookup failed: %w", err)
+		}
+	} else {
+		doc, docErr := c.buildOIDCDocument(cc, session.IssuerURL, credSourceErr == nil && credSource.DataSource == model.DataSourceAssertion)
+		if docErr != nil {
+			span.SetStatus(codes.Error, "document build failed")
+			return nil, docErr
+		}
+		if err = c.StoreVCIDocuments(ctx, preAuthCode, map[string]*model.CompleteDocument{session.IssuerURL: doc}); err != nil {
+			span.SetStatus(codes.Error, "failed to store VCI documents")
+			return nil, fmt.Errorf("failed to store VCI documents: %w", err)
+		}
 	}
 
 	// Clean up session (clear err so defer doesn't double-delete)

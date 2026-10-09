@@ -68,7 +68,6 @@ Enable the W3C Digital Credentials API in your `config.yaml`:
 verifier:
   digital_credentials:
     enabled: true
-    use_jar: true
     preferred_formats:
       - "vc+sd-jwt"
       - "dc+sd-jwt"
@@ -83,7 +82,6 @@ verifier:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | boolean | `false` | Enable W3C Digital Credentials API support |
-| `use_jar` | boolean | `false` | Use JWT Authorization Request (JAR) for security |
 | `preferred_formats` | array | `["vc+sd-jwt"]` | Credential formats in preference order |
 | `response_mode` | string | `"direct_post"` | How wallet sends response: `dc_api.jwt`, `direct_post.jwt`, `direct_post` |
 | `allow_qr_fallback` | boolean | `true` | Auto-fallback to QR code if DC API unavailable |
@@ -136,13 +134,31 @@ The W3C Digital Credentials API is currently supported in:
 
 ### JWT Authorization Request (JAR)
 
-When `use_jar: true`, the verifier:
+The request object is **always** a signed JWT, served from
+`GET /verification/request-object/{session_id}` as
+`application/oauth-authz-req+jwt`. This is not configurable:
 
-1. Creates a signed JWT containing the authorization request
-2. Wallet validates the signature before processing
-3. Prevents parameter tampering and injection attacks
+1. The verifier creates a signed JWT containing the authorization request
+2. The wallet validates the signature before processing
+3. Parameter tampering and injection are prevented
 
-**Recommendation**: Always enable JAR in production environments.
+**Who requires this.** Core OpenID4VP 1.0 does *not*: its Digital
+Credentials API binding defines both an unsigned and a signed request mode
+(the `openid4vp-v1-unsigned` and `openid4vp-v1-signed` protocol
+identifiers), and a plain-JSON request object is a conformant choice there.
+It is the **HAIP verifier profile** that mandates a signed request object,
+and that is the profile this verifier targets.
+
+So signed-only is this deployment's decision plus HAIP's requirement, not a
+constraint core OpenID4VP imposes. It is also the only mode vc has ever
+implemented: the request-object endpoint has always returned a signed JWT,
+and no plain-JSON endpoint was ever registered to serve the other mode.
+
+The former `use_jar` option did not choose between the two. Its false arm -
+the default - pointed at a route that does not exist, so the DC API flow
+404'd out of the box (SUNET/vc#755). It was removed rather than made to
+work: implementing the unsigned mode is a feature, and one HAIP would
+forbid, so it is not something a bugfix should add by the back door.
 
 ### Response Modes
 
@@ -294,7 +310,6 @@ When `show_raw_credential: true`, the full credential (including potentially und
    verifier:
      digital_credentials:
        enabled: true
-       use_jar: false              # Easier debugging
        response_mode: "direct_post"  # Simpler for testing
        preferred_formats: ["vc+sd-jwt"]
    ```

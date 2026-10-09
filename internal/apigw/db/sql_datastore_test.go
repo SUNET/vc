@@ -124,7 +124,7 @@ func testDatastoreStoreContract(t *testing.T, store DatastoreStore) {
 	assert.Equal(t, "Replaced", full.DocumentData["family_name"])
 
 	// Replace on a nonexistent document is a silent no-op.
-	require.NoError(t, store.Replace(ctx, mkDoc("NOPE", "x", "y", nil, nil)))
+	require.NoError(t, store.Replace(ctx, mkDoc("NOPE", "x", "y", []string{"identity-x"}, map[string]any{"family_name": "Ghost"})))
 
 	// Save with duplicate identity mapping IDs must not error - the SQL
 	// backend's (authentic_source, scope, document_id, identity_mapping_id)

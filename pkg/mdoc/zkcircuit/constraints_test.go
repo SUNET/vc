@@ -97,6 +97,28 @@ func TestConstraintsIgnoresACircuitThatDeclaresNoDocType(t *testing.T) {
 	}
 }
 
+// A system the catalog has never carried is UNKNOWN - the "not published
+// yet" case a pinned fallback may stand in for. One the catalog carries but
+// whose active circuits are all withdrawn, unpublished, or scoped to other
+// doctypes is a WITHDRAWAL, not a gap, and stays ErrNoActiveCircuit so no
+// pin can revive support the catalog deliberately removed.
+func TestConstraintsSeparatesAnUnknownSystemFromAWithdrawnOne(t *testing.T) {
+	m := &Manifest{Circuits: []CircuitDescriptor{
+		circuit("vega-r11", "vega-mc", "deprecated", []string{mDL}, map[string]any{"saltBytes": "32"}),
+		circuit("lf-scoped", "longfellow", StatusActive, []string{"other.doctype"}, map[string]any{"num_attributes": float64(2)}),
+	}}
+
+	if _, err := m.Constraints("nonesuch", mDL); !errors.Is(err, ErrUnknownSystem) {
+		t.Fatalf("a system the catalog never carried: error = %v, want ErrUnknownSystem", err)
+	}
+	if _, err := m.Constraints("vega-mc", mDL); !errors.Is(err, ErrNoActiveCircuit) {
+		t.Fatalf("a system with only deprecated circuits: error = %v, want ErrNoActiveCircuit", err)
+	}
+	if _, err := m.Constraints("longfellow", mDL); !errors.Is(err, ErrNoActiveCircuit) {
+		t.Fatalf("a system scoped to another doctype: error = %v, want ErrNoActiveCircuit", err)
+	}
+}
+
 func TestConstraints(t *testing.T) {
 	tests := map[string]struct {
 		circuits  []CircuitDescriptor
@@ -111,11 +133,11 @@ func TestConstraints(t *testing.T) {
 			},
 			wantSalt: 32,
 		},
-		"a system that publishes none states no constraint": {
+		"a system that requires saltBytes refuses when its active circuits publish none": {
 			circuits: []CircuitDescriptor{
 				circuit("lf-1", "vega-mc", StatusActive, []string{mDL}, map[string]any{"num_attributes": float64(2)}),
 			},
-			wantSalt: 0,
+			wantErr: "requires saltBytes",
 		},
 		"no active circuit refuses": {
 			circuits: []CircuitDescriptor{
@@ -166,6 +188,30 @@ func TestConstraints(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Whether an absent saltBytes is a refusal or the default-sizing signal
+// turns on the SYSTEM, not on the catalog payload: vega requires the length
+// and must refuse without it, while longfellow legitimately publishes none.
+func TestConstraintsSaltBytesRequirementIsPerSystem(t *testing.T) {
+	none := map[string]any{"num_attributes": float64(2)}
+
+	m := &Manifest{Circuits: []CircuitDescriptor{
+		circuit("vega-nosalt", "vega-mc", StatusActive, []string{mDL}, none),
+		circuit("lf-nosalt", "longfellow", StatusActive, []string{mDL}, none),
+	}}
+
+	if _, err := m.Constraints("vega-mc", mDL); err == nil || !strings.Contains(err.Error(), "requires saltBytes") {
+		t.Fatalf("vega-mc without saltBytes: error = %v, want one about requiring saltBytes", err)
+	}
+
+	got, err := m.Constraints("longfellow", mDL)
+	if err != nil {
+		t.Fatalf("longfellow without saltBytes: unexpected error %v", err)
+	}
+	if got.SaltBytes != 0 {
+		t.Errorf("longfellow SaltBytes = %d, want 0 (default per-element sizing)", got.SaltBytes)
 	}
 }
 
@@ -220,8 +266,8 @@ func TestSaltBytesAcrossSystems(t *testing.T) {
 
 	t.Run("an unknown system refuses rather than resolving to nothing", func(t *testing.T) {
 		_, err := m.SaltBytes([]string{"vega-mc", "nonesuch"}, mDL)
-		if !errors.Is(err, ErrNoActiveCircuit) {
-			t.Fatalf("error = %v, want ErrNoActiveCircuit", err)
+		if !errors.Is(err, ErrUnknownSystem) {
+			t.Fatalf("error = %v, want ErrUnknownSystem", err)
 		}
 	})
 
@@ -524,5 +570,71 @@ func TestResolverDoesNotBackOffOnACancelledRequest(t *testing.T) {
 	}
 	if stale || salt != 32 {
 		t.Fatalf("SaltBytes = %d, stale=%v; want 32, false", salt, stale)
+	}
+}
+
+// A cancelled request must not be answered from the cache: once the
+// resolver holds a usable manifest, converting the cancellation into a
+// stale-but-successful result lets an expired issuance continue into
+// signing. The ctx is checked before any cached return, and the shared
+// backoff is left untouched - the catalog was never the problem.
+func TestResolverPropagatesCancellationWithoutServingStale(t *testing.T) {
+	cc := newCountingClient(oneVegaCircuit)
+	now := time.Now()
+	r := &Resolver{Client: cc.Client, TTL: time.Minute, RetryInterval: 5 * time.Minute, Now: func() time.Time { return now }}
+
+	if _, stale, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL); err != nil || stale {
+		t.Fatalf("first resolve: stale=%v, %v", stale, err)
+	}
+
+	// Within the TTL the manifest is fresh, yet a cancelled caller must
+	// still be turned away rather than handed the cached answer.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, _, err := r.SaltBytes(ctx, []string{"vega-mc"}, mDL); err == nil {
+		t.Fatal("a cancelled request must not be served the cached manifest as success")
+	}
+	if !r.lastFailure.IsZero() {
+		t.Error("a cancelled request must not enter the shared backoff state")
+	}
+
+	// Backoff untouched: the next healthy request answers fresh.
+	salt, stale, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL)
+	if err != nil || stale || salt != 32 {
+		t.Fatalf("SaltBytes = %d, stale=%v, %v; want 32, false, nil", salt, stale, err)
+	}
+}
+
+// Cancellation noticed only AFTER the fetch returns - the request dies
+// mid round trip - is propagated too, rather than papered over with the
+// previously cached manifest, and still leaves the shared backoff alone.
+func TestResolverPropagatesCancellationObservedDuringAFetch(t *testing.T) {
+	now := time.Now()
+	r := &Resolver{
+		Client: newCountingClient(oneVegaCircuit).Client,
+		TTL:    time.Minute, RetryInterval: 5 * time.Minute,
+		Now: func() time.Time { return now },
+	}
+	if _, _, err := r.SaltBytes(t.Context(), []string{"vega-mc"}, mDL); err != nil {
+		t.Fatal(err)
+	}
+
+	// Swap in a client that cancels the request while the fetch is in
+	// flight, and expire the TTL so the next call refreshes.
+	ctx, cancel := context.WithCancel(t.Context())
+	r.Client = &Client{
+		Sources: []string{"https://catalog.example"},
+		FetchText: func(fetchCtx context.Context, _ string) (string, error) {
+			cancel()
+			return "", fetchCtx.Err()
+		},
+	}
+	now = now.Add(2 * time.Minute)
+
+	if _, _, err := r.SaltBytes(ctx, []string{"vega-mc"}, mDL); err == nil {
+		t.Fatal("cancellation during the fetch must propagate, not serve the stale manifest")
+	}
+	if !r.lastFailure.IsZero() {
+		t.Error("a cancelled request must not enter the shared backoff state")
 	}
 }

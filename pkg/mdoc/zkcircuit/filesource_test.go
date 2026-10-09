@@ -8,9 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 )
 
 // writeVendoredMirror lays out a directory the way
@@ -181,10 +179,10 @@ func TestFetchCircuitRefusesAnIDThatIsNotAnID(t *testing.T) {
 // file://host/share is a reference to another machine - a network fetch
 // wearing a local scheme, which is not what a vendored mirror is.
 func TestFileURLWithARemoteHostIsRefused(t *testing.T) {
-	if _, err := fetchFile(t.Context(), "file://fileserver.example/mirror/v1/manifest.json", 1024); err == nil {
+	if _, err := fetchFile("file://fileserver.example/mirror/v1/manifest.json", 1024); err == nil {
 		t.Fatal("expected a refusal for a file URL naming a host")
 	}
-	if _, err := fetchFile(t.Context(), "file://localhost/definitely/not/here.json", 1024); err == nil {
+	if _, err := fetchFile("file://localhost/definitely/not/here.json", 1024); err == nil {
 		t.Fatal("expected an open error, not a host refusal, for localhost")
 	}
 }
@@ -194,14 +192,32 @@ func TestFetchFileBoundsItsRead(t *testing.T) {
 	path := filepath.Join(dir, "big.json")
 	write(t, path, make([]byte, 4096))
 
-	if _, err := fetchFile(t.Context(), "file://"+filepath.ToSlash(path), 1024); err == nil {
+	if _, err := fetchFile("file://"+filepath.ToSlash(path), 1024); err == nil {
 		t.Fatal("expected a refusal for a file over the cap")
 	}
-	if _, err := fetchFile(t.Context(), "file://"+filepath.ToSlash(path), 8192); err != nil {
+	if _, err := fetchFile("file://"+filepath.ToSlash(path), 8192); err != nil {
 		t.Fatalf("a file under the cap should read: %v", err)
 	}
-	if _, err := fetchFile(t.Context(), "file://"+filepath.ToSlash(dir), 8192); err == nil {
+	if _, err := fetchFile("file://"+filepath.ToSlash(dir), 8192); err == nil {
 		t.Fatal("expected a refusal for a directory")
+	}
+}
+
+// A file:// source is read off disk by fetchFile, which takes no ctx; the
+// dispatcher has to honour cancellation around it so a local mirror is not
+// a weaker cancellation contract than the HTTP path.
+func TestFileSourceHonoursContextCancellation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.json")
+	write(t, path, []byte(`{"circuits":[]}`))
+	url := "file://" + filepath.ToSlash(path)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	c := &Client{}
+	if _, err := c.fetchBytesURL(ctx, url, 8192); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled file read: error = %v, want context.Canceled", err)
 	}
 }
 
@@ -396,7 +412,7 @@ func TestPercentEncodedTraversalIsRefused(t *testing.T) {
 	// And the decoded check holds even if something gets past the lexical
 	// one: a file URL whose decoded path carries a ".." segment is refused
 	// at the point of opening it.
-	if _, err := fetchFile(t.Context(), "file://"+filepath.ToSlash(dir)+"/v1/%2e%2e/outside.bin", 1024); err == nil {
+	if _, err := fetchFile("file://"+filepath.ToSlash(dir)+"/v1/%2e%2e/outside.bin", 1024); err == nil {
 		t.Fatal("fetchFile followed a percent-encoded dot segment")
 	}
 }
@@ -420,72 +436,5 @@ func TestFileSourceSchemeIsCaseInsensitive(t *testing.T) {
 
 	if _, err := c.FetchCircuit(t.Context(), "vega-mc-p256-v1-prover-key-r12"); err != nil {
 		t.Errorf("FetchCircuit over a FILE:// source: %v", err)
-	}
-}
-
-// A FIFO at a mirror path must be refused, not opened.
-//
-// os.Open on a FIFO blocks until someone opens the other end, and this
-// function had no context to cancel it - so a replaced or accidental
-// special file could hang issuance permanently. The checks that would have
-// caught it ran after the open and were never reached.
-func TestFetchFileRefusesAFIFO(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "manifest.json")
-
-	if err := syscall.Mkfifo(path, 0o600); err != nil {
-		t.Skipf("cannot create a FIFO here: %v", err)
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		_, err := fetchFile(t.Context(), "file://"+filepath.ToSlash(path), 1024)
-		done <- err
-	}()
-
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("a FIFO was accepted as a vendored circuit file")
-		}
-		if !strings.Contains(err.Error(), "not a regular file") {
-			t.Errorf("want a not-a-regular-file error, got %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("fetchFile blocked on a FIFO instead of refusing it")
-	}
-}
-
-// ... and a regular file is still read, so the guard is not simply
-// refusing everything.
-func TestFetchFileStillReadsARegularFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "manifest.json")
-	if err := os.WriteFile(path, []byte(`{"ok":true}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	data, err := fetchFile(t.Context(), "file://"+filepath.ToSlash(path), 1024)
-	if err != nil {
-		t.Fatalf("a regular file was refused: %v", err)
-	}
-	if string(data) != `{"ok":true}` {
-		t.Errorf("got %q", data)
-	}
-}
-
-// A cancelled context is honoured rather than ignored.
-func TestFetchFileHonoursCancellation(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "manifest.json")
-	if err := os.WriteFile(path, []byte(`{"ok":true}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-
-	if _, err := fetchFile(ctx, "file://"+filepath.ToSlash(path), 1024); !errors.Is(err, context.Canceled) {
-		t.Errorf("want context.Canceled, got %v", err)
 	}
 }

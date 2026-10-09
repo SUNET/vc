@@ -21,7 +21,7 @@ func TestLoadTemplateFile_SingleTemplate(t *testing.T) {
 	if templates[0].ID != "eudi_pid_basic" {
 		t.Errorf("expected ID 'eudi_pid_basic', got %q", templates[0].ID)
 	}
-	if !templates[0].Enabled {
+	if !templates[0].IsEnabled() {
 		t.Error("expected template to be enabled")
 	}
 }
@@ -37,7 +37,7 @@ func TestLoadTemplateFile_SingleTemplateDefaultEnabled(t *testing.T) {
 	if templates[0].ID != "auto_enabled" {
 		t.Errorf("expected ID 'auto_enabled', got %q", templates[0].ID)
 	}
-	if !templates[0].Enabled {
+	if !templates[0].IsEnabled() {
 		t.Error("expected template to be enabled by default")
 	}
 }
@@ -57,7 +57,7 @@ func TestLoadTemplateFile_MultiTemplate(t *testing.T) {
 		t.Errorf("expected second template ID 'basic_ehic', got %q", templates[1].ID)
 	}
 	for i, tmpl := range templates {
-		if !tmpl.Enabled {
+		if !tmpl.IsEnabled() {
 			t.Errorf("expected template %d to be enabled", i)
 		}
 	}
@@ -72,7 +72,7 @@ func TestLoadTemplateFile_MultiTemplateDefaultEnabled(t *testing.T) {
 		t.Fatalf("expected 2 templates, got %d", len(templates))
 	}
 	for i, tmpl := range templates {
-		if !tmpl.Enabled {
+		if !tmpl.IsEnabled() {
 			t.Errorf("expected template %d to be enabled by default", i)
 		}
 	}
@@ -138,7 +138,7 @@ func newTestTemplate() *PresentationRequestTemplate {
 		ClaimMappings: map[string]string{
 			"a": "b",
 		},
-		Enabled: true,
+		Enabled: boolPtr(true),
 	}
 }
 
@@ -177,9 +177,9 @@ func TestGetClaimMappings(t *testing.T) {
 func newTestConfig() *PresentationRequestConfig {
 	return &PresentationRequestConfig{
 		Templates: []*PresentationRequestTemplate{
-			{ID: "pid", Name: "PID", OIDCScopes: []string{"pid"}, Enabled: true, ClaimMappings: map[string]string{"a": "b"}},
-			{ID: "ehic", Name: "EHIC", OIDCScopes: []string{"ehic"}, Enabled: true, ClaimMappings: map[string]string{"c": "d"}},
-			{ID: "disabled", Name: "Disabled", OIDCScopes: []string{"dis"}, Enabled: false, ClaimMappings: map[string]string{}},
+			{ID: "pid", Name: "PID", OIDCScopes: []string{"pid"}, Enabled: boolPtr(true), ClaimMappings: map[string]string{"a": "b"}},
+			{ID: "ehic", Name: "EHIC", OIDCScopes: []string{"ehic"}, Enabled: boolPtr(true), ClaimMappings: map[string]string{"c": "d"}},
+			{ID: "disabled", Name: "Disabled", OIDCScopes: []string{"dis"}, Enabled: boolPtr(false), ClaimMappings: map[string]string{}},
 		},
 		DefaultTemplate: "pid",
 	}
@@ -513,5 +513,76 @@ func TestLoadPresentationRequestsFromFile_DuplicateScopes(t *testing.T) {
 	_, err := LoadPresentationRequestsFromFile(context.Background(), p)
 	if err == nil {
 		t.Fatal("expected error for duplicate scopes")
+	}
+}
+
+// boolPtr is for PresentationRequestTemplate.Enabled, which has to be a
+// pointer so a file's "enabled: false" survives loading (SUNET/vc#754).
+func boolPtr(b bool) *bool { return &b }
+
+// A template file saying "enabled: false" must be skipped.
+//
+// It could not be: Enabled was a plain bool, so loadTemplateFile could not
+// tell "explicitly off" from "not mentioned" and wrote true over both. The
+// flag worked only for templates built in Go - which is to say, only in
+// these tests - and never for the files operators actually deploy
+// (SUNET/vc#754).
+func TestLoadTemplateFile_HonoursAnExplicitEnabledFalse(t *testing.T) {
+	dir := t.TempDir()
+
+	for name, body := range map[string]string{
+		"single template": "id: solo\noidc_scopes: [solo]\nclaim_mappings: {\"*\": \"*\"}\nenabled: false\n",
+		"templates list":  "templates:\n  - id: listed\n    oidc_scopes: [listed]\n    claim_mappings: {\"*\": \"*\"}\n    enabled: false\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(dir, strings.ReplaceAll(name, " ", "-")+".yaml")
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			templates, err := loadTemplateFile(path)
+			if err != nil {
+				t.Fatalf("loadTemplateFile() error = %v", err)
+			}
+			if len(templates) != 1 {
+				t.Fatalf("loaded %d templates, want 1", len(templates))
+			}
+			if templates[0].IsEnabled() {
+				t.Error("a template that says enabled: false must not be enabled")
+			}
+
+			// And it must be invisible to every lookup, which is the part
+			// an operator actually sees.
+			cfg := &PresentationRequestConfig{Templates: templates}
+			if got := cfg.GetEnabledTemplates(); len(got) != 0 {
+				t.Errorf("GetEnabledTemplates returned %d, want none", len(got))
+			}
+			if got := cfg.ListEnabledTemplates(); len(got) != 0 {
+				t.Errorf("ListEnabledTemplates returned %d, want none", len(got))
+			}
+			if _, err := cfg.GetTemplateByID(templates[0].ID); err == nil {
+				t.Error("GetTemplateByID returned a disabled template")
+			}
+			if _, err := cfg.GetTemplateByScope(templates[0].OIDCScopes[0]); err == nil {
+				t.Error("GetTemplateByScope returned a disabled template")
+			}
+		})
+	}
+}
+
+// ... and a file that says nothing is still enabled, so the fix is not
+// "every file-loaded template is now off".
+func TestLoadTemplateFile_DefaultsToEnabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "quiet.yaml")
+	if err := os.WriteFile(path, []byte("id: quiet\noidc_scopes: [quiet]\nclaim_mappings: {\"*\": \"*\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	templates, err := loadTemplateFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !templates[0].IsEnabled() {
+		t.Error("a template that does not mention enabled must be enabled")
 	}
 }

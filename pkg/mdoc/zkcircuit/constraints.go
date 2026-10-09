@@ -101,9 +101,57 @@ func declaresDocType(c *CircuitDescriptor, docType string) bool {
 	return false
 }
 
+// knowsSystem reports whether the manifest carries any circuit naming
+// system, regardless of its status, published flag, or doctype. It
+// separates a system the catalog has never carried - "not published yet" -
+// from one whose circuits are all deprecated, unpublished, or scoped to
+// other doctypes, which is a withdrawal rather than a gap.
+func (m *Manifest) knowsSystem(system string) bool {
+	if m == nil {
+		return false
+	}
+	for _, c := range m.Circuits {
+		if strings.EqualFold(c.System, system) {
+			return true
+		}
+	}
+	return false
+}
+
+// requiresSaltBytes reports whether a system's active circuits MUST publish
+// a saltBytes constraint. Vega bakes DIGEST_ID_OFFSET_BYTES into its R1CS at
+// setup() time, so catalog v1 carries the length on every published Vega
+// entry; an absent value there is a stale/pre-metadata or malformed
+// manifest, not a system that opts into the package's default per-element
+// sizing the way longfellow does. Longfellow and anything else published
+// without the key keep the absent-is-default behaviour.
+func requiresSaltBytes(system string) bool {
+	return strings.HasPrefix(strings.ToLower(system), "vega")
+}
+
 // ErrNoActiveCircuit is returned when a named system has no published,
 // active circuit in the manifest for the document type in question.
 var ErrNoActiveCircuit = errors.New("no active circuit")
+
+// ErrUnknownSystem is returned when the catalog carries no circuit naming a
+// system at ALL - under any status, published flag, or doctype. It is the
+// "not published yet" case, kept apart from ErrNoActiveCircuit, which means
+// the catalog knows the system but has withdrawn its circuits, left them
+// unpublished, or scoped them to other doctypes. Only the former is a gap a
+// pinned fallback may stand in for: issuing against a system whose support
+// the catalog deliberately removed, or a doctype it does not serve, breaks
+// the active-circuit requirement rather than papering over a catalog that
+// cannot answer.
+var ErrUnknownSystem = errors.New("unknown zk system")
+
+// ErrCatalogUnavailable wraps a failure to OBTAIN a manifest at all - the
+// catalog is unreachable, or the resolver has never reached it. It is kept
+// distinct from a constraint refusal (an incompatible or malformed answer
+// the catalog actually returned) so a caller can fall back to a pinned
+// value when the catalog cannot answer, without also masking an answer it
+// gave that must not be issued against. A cancelled request is deliberately
+// NOT wrapped in it.
+var ErrCatalogUnavailable = errors.New("zk circuit catalog unavailable")
 
 // Constraints resolves one system's currently-active wire-shape
 // constraints for docType.
@@ -114,6 +162,9 @@ var ErrNoActiveCircuit = errors.New("no active circuit")
 func (m *Manifest) Constraints(system, docType string) (SystemConstraints, error) {
 	circuits := m.ActiveCircuits(system, docType)
 	if len(circuits) == 0 {
+		if !m.knowsSystem(system) {
+			return SystemConstraints{}, fmt.Errorf("%w %q", ErrUnknownSystem, system)
+		}
 		return SystemConstraints{}, fmt.Errorf("%w for zk system %q and doctype %q", ErrNoActiveCircuit, system, docType)
 	}
 
@@ -158,8 +209,19 @@ func (m *Manifest) Constraints(system, docType string) (SystemConstraints, error
 
 	switch {
 	case len(saltFrom) == 0:
-		// Every active circuit is unconstrained; SaltBytes stays 0, which
-		// means this system wants the caller's default per-element sizing.
+		// Every active circuit is unconstrained. For a system that uses
+		// the package's default per-element sizing (longfellow) that is a
+		// constraint of its own and SaltBytes stays 0. For one that
+		// REQUIRES the length (vega), an absent value is a stale,
+		// pre-metadata or malformed manifest, not a licence to default:
+		// reading it as "no constraint" fails open and mints 16/8-byte
+		// salts the circuit cannot verify. Refuse rather than default.
+		if requiresSaltBytes(system) {
+			sort.Strings(unconstrained)
+			return SystemConstraints{}, fmt.Errorf(
+				"zk system %q requires %s but its active circuits (%s) publish none - refusing rather than defaulting to per-element sizing the circuit cannot verify",
+				system, ParamSaltBytes, strings.Join(unconstrained, ", "))
+		}
 
 	case len(saltFrom) == 1 && len(unconstrained) == 0:
 		for salt := range saltFrom {
@@ -364,7 +426,15 @@ func (r *Resolver) retryInterval() time.Duration {
 // returned only when there is nothing cached to fall back to.
 func (r *Resolver) Manifest(ctx context.Context) (manifest *Manifest, stale bool, err error) {
 	if r == nil || r.Client == nil {
-		return nil, false, errors.New("zk circuit resolver has no catalog client")
+		return nil, false, fmt.Errorf("%w: resolver has no catalog client", ErrCatalogUnavailable)
+	}
+
+	// Check cancellation before the lock too: the lock is held across the
+	// fetch, so a caller arriving with an already-cancelled context would
+	// otherwise block up to the fetch timeout behind an in-flight refresh
+	// before the post-lock check below ever runs.
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
 	}
 
 	// The lock is held across the fetch on purpose: it makes the refresh
@@ -374,6 +444,14 @@ func (r *Resolver) Manifest(ctx context.Context) (manifest *Manifest, stale bool
 	// into every request waiting on its own timeout.
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// A cancelled or expired request must not be answered from cache: the
+	// caller is already gone, and handing back a usable salt length here
+	// lets an expired issuance continue into signing. Guards every cached
+	// return below, and is rechecked after the fetch.
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
 
 	now := r.now()
 	if r.manifest != nil && now.Sub(r.fetchedAt) < r.ttl() {
@@ -399,14 +477,14 @@ func (r *Resolver) Manifest(ctx context.Context) (manifest *Manifest, stale bool
 	fetched, fetchErr := r.Client.FetchManifest(ctx)
 	if fetchErr != nil {
 		// A cancelled or timed-out REQUEST says nothing about the
-		// catalog, and the backoff state is shared by every caller. One
-		// client hanging up during the first fetch would otherwise make
-		// every subsequent issuance replay that cancellation for the
-		// retry interval, against a catalog that is perfectly healthy.
+		// catalog, and the backoff state is shared by every caller. Leave
+		// that state untouched - one client hanging up during a fetch must
+		// not make every subsequent issuance replay the cancellation for
+		// the retry interval, against a catalog that is perfectly healthy -
+		// but do NOT convert the cancellation into a successful stale
+		// answer either: the caller asked with a dead context and has to
+		// see it, or an expired request still mints a credential.
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			if r.manifest != nil {
-				return r.manifest, true, nil
-			}
 			return nil, false, fetchErr
 		}
 
@@ -424,8 +502,8 @@ func (r *Resolver) Manifest(ctx context.Context) (manifest *Manifest, stale bool
 		// schemas that pin zk_salt_bytes, which fall back to the pin only
 		// AFTER the error arrives, and so paid 30 seconds each for an
 		// answer they already had.
-		r.coldErr = fetchErr
-		return nil, false, fetchErr
+		r.coldErr = fmt.Errorf("%w: %w", ErrCatalogUnavailable, fetchErr)
+		return nil, false, r.coldErr
 	}
 
 	r.manifest = fetched

@@ -1,0 +1,27 @@
+{
+  "format": "mso_mdoc",
+  "doctype": "urn:credential:eduid_age_verification:mdoc:1",
+  "display": [
+    {
+      "locale": "en-US",
+      "name": "eduID Age Verification (ZK)",
+      "description": "Age thresholds derived from an eduID AL2 or AL3 credential",
+      "background_color": "#ffffff",
+      "text_color": "#222222"
+    }
+  ],
+  "claims": {
+    "urn:credential:eduid_age_verification:mdoc:1": {
+      "age_over_13": { "mandatory": true, "value_type": "bool" },
+      "age_over_15": { "mandatory": true, "value_type": "bool" },
+      "age_over_18": { "mandatory": true, "value_type": "bool" },
+      "age_over_21": { "mandatory": true, "value_type": "bool" },
+      "age_over_65": { "mandatory": true, "value_type": "bool" },
+      "over_13_this_year": { "value_type": "bool" },
+      "over_15_this_year": { "value_type": "bool" },
+      "over_18_this_year": { "value_type": "bool" },
+      "over_21_this_year": { "value_type": "bool" },
+      "over_65_this_year": { "value_type": "bool" }
+    }
+  }
+}

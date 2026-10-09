@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
@@ -84,7 +85,6 @@ type EHICFields struct {
 	IssuingCountry               string `yaml:"issuing_country"`
 	InstitutionID                string `yaml:"institution_id"`
 	DateOfIssuance               string `yaml:"date_of_issuance"`
-	DateOfExpiry                 string `yaml:"date_of_expiry"`
 }
 
 // PDA1Fields are the per-person fields for PDA1 credentials.
@@ -92,7 +92,6 @@ type PDA1Fields struct {
 	PersonalAdministrativeNumber string           `yaml:"personal_administrative_number"`
 	DocumentNumber               string           `yaml:"document_number"`
 	DateOfIssuance               string           `yaml:"date_of_issuance"`
-	DateOfExpiry                 string           `yaml:"date_of_expiry"`
 	StatusConfirmation           string           `yaml:"status_confirmation"`
 	Employer                     *PDA1Employer    `yaml:"employer,omitempty"`
 	WorkAddress                  *PDA1WorkAddress `yaml:"work_address,omitempty"`
@@ -144,7 +143,6 @@ func main() {
 	pids := sortedKeys(input.Persons)
 
 	writeJSON(outputDir, "pid.json", genPID(pids, &input))
-	writeJSON(outputDir, "eduid.json", genEduID(pids, &input))
 	writeJSON(outputDir, "ehic.json", genEHIC(pids, &input))
 	writeJSON(outputDir, "pda1.json", genPDA1(pids, &input))
 	writeJSON(outputDir, "elm.json", genELM(pids, &input))
@@ -152,7 +150,9 @@ func main() {
 	writeJSON(outputDir, "microcredential.json", genMicroCredential(pids, &input))
 	writeJSON(outputDir, "identity_mappings.json", genIdentityMappings(pids, &input))
 
-	fmt.Printf("Generated 7 credential files and identity_mappings.json for %d persons in %s\n", len(pids), outputDir)
+	gzipAllJSON(cleanOutputDir)
+
+	fmt.Printf("Generated 6 credential files and identity_mappings.json for %d persons in %s\n", len(pids), outputDir)
 }
 
 // --- PID (urn:eudi:pid:1, ARF 1.7.1 / Rulebook v1.0) ---
@@ -219,78 +219,6 @@ func genPID(pids []string, input *InputFile) map[string]*vcclient.UploadRequest 
 	return result
 }
 
-// --- EduID ---
-
-func genEduID(pids []string, input *InputFile) map[string]*vcclient.UploadRequest {
-	result := make(map[string]*vcclient.UploadRequest, len(pids))
-	now := time.Now()
-	for _, pid := range pids {
-		p := input.Persons[pid]
-
-		age := calcAge(p.BirthDate)
-
-		pidExt := p.PID
-		if pidExt == nil {
-			pidExt = &PIDFields{}
-		}
-
-		dd := map[string]any{
-			"given_name":  p.GivenName,
-			"family_name": p.FamilyName,
-			"birthdate":   p.BirthDate,
-			"place_of_birth": map[string]any{
-				"locality": input.Defaults.BirthPlace,
-				"region":   or_(pidExt.ResidentState, "Stockholm"),
-				"country":  firstOr(input.Defaults.Nationality, "SE"),
-			},
-			"issuing_authority":              input.Defaults.IssuingAuthority,
-			"issuing_country":                input.Defaults.IssuingCountry,
-			"nationalities":                  input.Defaults.Nationality,
-			"issuing_jurisdiction":           or_(pidExt.IssuingJurisdiction, "SUNET"),
-			"date_of_expiry":                 now.Add(365 * 24 * time.Hour).Format(time.RFC3339),
-			"expiry_date":                    now.Add(365 * 24 * time.Hour).Format("2006-01-02"),
-			"date_of_issuance":               now.Add(-30 * 24 * time.Hour).Format(time.RFC3339),
-			"document_number":                or_(pidExt.DocumentNumber, fmt.Sprintf("doc-eduid-%s", pid)),
-			"personal_administrative_number": or_(pidExt.PersonalAdministrativeNumber, fmt.Sprintf("pan-%s", pid)),
-			"picture":                        genericFacePNG,
-			"birth_family_name":              or_(pidExt.BirthFamilyName, p.FamilyName),
-			"birth_given_name":               or_(pidExt.BirthGivenName, p.GivenName),
-			"sex":                            or_(pidExt.Sex, "0"),
-			"email":                          or_(pidExt.EmailAddress, fmt.Sprintf("%s@example.com", strings.ReplaceAll(toLower(p.FamilyName), " ", "_"))),
-			"phone_number":                   or_(pidExt.MobilePhoneNumber, "+46700000000"),
-			"address": map[string]any{
-				"locality":       or_(pidExt.ResidentCity, "Stockholm"),
-				"country":        input.Defaults.IssuingCountry,
-				"formatted":      or_(pidExt.ResidentAddress, "Tulegatan 11, Stockholm"),
-				"postal_code":    or_(pidExt.ResidentPostalCode, "11353"),
-				"house_number":   or_(pidExt.ResidentHouseNumber, "11"),
-				"street_address": or_(pidExt.ResidentStreetAddress, "Tulegatan"),
-				"region":         or_(pidExt.ResidentState, "Stockholm"),
-			},
-			"age_equal_or_over": map[string]any{
-				"14": age >= 14,
-				"16": age >= 16,
-				"18": age >= 18,
-				"21": age >= 21,
-				"65": age >= 65,
-			},
-			"age_in_years":   age,
-			"age_birth_year": parseBirthYear(p.BirthDate),
-		}
-
-		result[pid] = &vcclient.UploadRequest{
-			DocumentData: dd,
-			Meta: &model.MetaData{
-				AuthenticSource: "SUNET",
-				Scope:           "eduid",
-				DocumentID:      fmt.Sprintf("document_id_eduid_%s", pid),
-			},
-			IdentityMappingIDs: []string{fmt.Sprintf("authentic_source_person_id_%s", pid)},
-		}
-	}
-	return result
-}
-
 // --- EHIC ---
 
 func genEHIC(pids []string, input *InputFile) map[string]*vcclient.UploadRequest {
@@ -311,7 +239,7 @@ func genEHIC(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 				Name: input.Defaults.IssuingAuthority,
 			},
 			IssuingCountry: or_(e.IssuingCountry, "FR"),
-			DateOfExpiry:   e.DateOfExpiry,
+			DateOfExpiry:   now.AddDate(1, 0, 0).Format("2006-01-02"),
 			DateOfIssuance: e.DateOfIssuance,
 			DocumentNumber: e.DocumentNumber,
 			StartingDate:   now.Format("2006-01-02"),
@@ -390,7 +318,7 @@ func genPDA1(pids []string, input *InputFile) map[string]*vcclient.UploadRequest
 			LegislationCountry: "EU",
 			StatusConfirmation: or_(d.StatusConfirmation, "02"),
 			IssuingCountry:     "EU",
-			DateOfExpiry:       d.DateOfExpiry,
+			DateOfExpiry:       now.AddDate(1, 0, 0).Format("2006-01-02"),
 			DateOfIssuance:     d.DateOfIssuance,
 			DocumentNumber:     d.DocumentNumber,
 			StartingDate:       now.Format("2006-01-02"),
@@ -457,14 +385,59 @@ func genDiploma(pids []string, input *InputFile) map[string]*vcclient.UploadRequ
 	return result
 }
 
-// --- MicroCredential ---
+// --- MicroCredential (VerifiableMicroCredential, WE BUILD Micro-credential Rulebook) ---
 
 func genMicroCredential(pids []string, input *InputFile) map[string]*vcclient.UploadRequest {
-	exampleData := loadExampleJSON("standards/education_credential/micro_credential/uvh_fvhz_microcredential_full.json")
 	result := make(map[string]*vcclient.UploadRequest, len(pids))
 	for _, pid := range pids {
+		p := input.Persons[pid]
+
+		dd := map[string]any{
+			"attestation_legal_category": "non-qualified-EAA",
+			"identifier":                 fmt.Sprintf("MC-2026-000%s", pid),
+			"title":                      "Introduction to Applied Data Ethics",
+			"givenName":                  p.GivenName,
+			"familyName":                 p.FamilyName,
+			"issuerCountry":              input.Defaults.IssuingCountry,
+			"awardingBody":               "Linköping University",
+			"awardingBodyHomepage":       "https://liu.se",
+			"awardingBodyIdentifier":     "999900833",
+			"issuanceDate":               "2026-06-15",
+			"level":                      "EQF-6",
+			"learningOutcomes": []string{
+				"Applies core ethical frameworks to data-driven decision making",
+				"Evaluates bias and fairness risks in a dataset",
+			},
+			"learningOutcomeSummary": "Applies ethical reasoning to real-world data science scenarios.",
+			"fieldOfEducation":       "0613",
+			"escoReference":          []string{"http://data.europa.eu/esco/skill/d2564da5-c21f-4c02-8887-c78a001bb183"},
+			"notionalWorkload": map[string]any{
+				"value": 3,
+				"unit":  "ECTS",
+			},
+			"typeOfAssessment":     "written-examination",
+			"formOfParticipation":  "online",
+			"learningActivityType": "e-learning",
+			"languageOfAssessment": "en",
+			"idVerificationMethod": "proctored-online-exam",
+			"grade":                "Pass",
+			"gradingScheme":        "Pass/Fail",
+			"entryRequirements":    []string{"Beginner-level Python programming"},
+			"qualityAssurance":     "institutional-accreditation",
+			"accreditation": map[string]any{
+				"title":            "Institutional Accreditation 2024",
+				"type":             "institutional-accreditation",
+				"accreditingAgent": "Swedish Higher Education Authority",
+				"decision":         "approved",
+				"decisionDate":     "2024-01-15",
+				"reviewDate":       "2029-01-15",
+			},
+			"stackable":           true,
+			"partOfQualification": "BSc Data Science, Linköping University",
+		}
+
 		result[pid] = &vcclient.UploadRequest{
-			DocumentData: exampleData,
+			DocumentData: dd,
 			Meta: &model.MetaData{
 				AuthenticSource: "Ladok",
 				Scope:           "microcredential",
@@ -511,27 +484,6 @@ func genIdentityMappings(pids []string, input *InputFile) map[string][]*model.Id
 }
 
 // --- Helpers ---
-
-func calcAge(birthDate string) int {
-	bd, err := time.Parse("2006-01-02", birthDate)
-	if err != nil {
-		return 0
-	}
-	now := time.Now()
-	age := now.Year() - bd.Year()
-	if now.YearDay() < bd.YearDay() {
-		age--
-	}
-	return age
-}
-
-func parseBirthYear(birthDate string) int {
-	bd, err := time.Parse("2006-01-02", birthDate)
-	if err != nil {
-		return 0
-	}
-	return bd.Year()
-}
 
 func sortedKeys(m map[string]*Person) []string {
 	keys := make([]string, 0, len(m))
@@ -582,6 +534,42 @@ func writeJSON(dir, filename string, v any) {
 		fatal("write %s: %v", path, err)
 	}
 	fmt.Printf("  wrote %s (%d bytes)\n", filename, len(b))
+}
+
+// gzipAllJSON writes a .gz next to every *.json in dir, so fly-sync-bootstrap
+// can ship the whole tree compressed — including static files (mdl.json,
+// pid_mdoc.json) that aren't produced by the generators above.
+func gzipAllJSON(dir string) {
+	entries, err := os.ReadDir(filepath.Clean(dir))
+	if err != nil {
+		fatal("read output dir %s: %v", dir, err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		src := filepath.Join(filepath.Clean(dir), name)
+		b, err := os.ReadFile(filepath.Clean(src)) //#nosec G304 -- developer CLI, trusted output dir
+		if err != nil {
+			fatal("read %s: %v", src, err)
+		}
+		var buf bytes.Buffer
+		gw, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+		if err != nil {
+			fatal("gzip %s: %v", name, err)
+		}
+		if _, err := gw.Write(b); err != nil {
+			fatal("gzip write %s: %v", name, err)
+		}
+		if err := gw.Close(); err != nil {
+			fatal("gzip close %s: %v", name, err)
+		}
+		if err := os.WriteFile(src+".gz", buf.Bytes(), 0o600); err != nil {
+			fatal("write %s.gz: %v", src, err)
+		}
+		fmt.Printf("  gzipped %s (%d bytes)\n", name, buf.Len())
+	}
 }
 
 func loadExampleJSON(relativePath string) map[string]any {
