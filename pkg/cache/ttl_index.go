@@ -184,13 +184,32 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 // A package variable so the drop-and-rebuild fallback can be exercised
 // without an auth-enabled MongoDB.
 var ttlIndexCollMod = func(ctx context.Context, coll *mongo.Collection, name string, ttl time.Duration) error {
-	return coll.Database().RunCommand(ctx, bson.D{
-		{Key: "collMod", Value: coll.Name()},
+	return coll.Database().RunCommand(ctx, collModCommand(coll.Name(), name, ttl)).Err()
+}
+
+// collModCommand builds the collMod that changes a TTL index's expiry.
+//
+// The write concern is spelled out because RunCommand does not inherit one.
+// The driver says so itself: "This function does not obey the Database's
+// readConcern or writeConcern. A user must supply these values manually."
+// Unlike the CreateMany and CreateOne calls around it, which do obey the
+// collection's.
+//
+// majority, not the server default: without it a deployment configured for
+// w=majority could start on an acknowledgement a failover then discards,
+// restoring the old expiry - documents outliving a retention an operator
+// has already been told is in force. The collection's own concern cannot
+// be read back for this (unexported, with no accessor), and a schema
+// migration is a case where majority is the right answer regardless.
+func collModCommand(collection, index string, ttl time.Duration) bson.D {
+	return bson.D{
+		{Key: "collMod", Value: collection},
 		{Key: "index", Value: bson.D{
-			{Key: "name", Value: name},
+			{Key: "name", Value: index},
 			{Key: "expireAfterSeconds", Value: int32(ttl.Seconds())},
 		}},
-	}).Err()
+		{Key: "writeConcern", Value: bson.D{{Key: "w", Value: "majority"}}},
+	}
 }
 
 // isPermanentCollModFailure reports whether a collMod failure is one that

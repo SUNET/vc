@@ -670,3 +670,33 @@ func indexSpecs(t *testing.T, client *mongo.Client, db, coll string) []bson.M {
 	require.NoError(t, cur.All(t.Context(), &specs))
 	return specs
 }
+
+// The collMod carries an explicit write concern.
+//
+// RunCommand does not inherit the database's, by the driver's own
+// documentation - unlike the CreateMany/CreateOne calls around it. Without
+// one, a deployment configured for w=majority could start on an
+// acknowledgement a failover then discards, restoring the old expiry.
+func TestCollModCarriesAWriteConcern(t *testing.T) {
+	cmd := collModCommand("auth_ctx", createdAtTTLIndex, 15*time.Minute)
+
+	var wc any
+	var index any
+	for _, e := range cmd {
+		switch e.Key {
+		case "writeConcern":
+			wc = e.Value
+		case "index":
+			index = e.Value
+		}
+	}
+
+	require.NotNil(t, wc, "collMod was sent without a write concern")
+	assert.Equal(t, bson.D{{Key: "w", Value: "majority"}}, wc)
+
+	// ... and it still says what it is meant to say.
+	assert.Equal(t, bson.D{
+		{Key: "name", Value: createdAtTTLIndex},
+		{Key: "expireAfterSeconds", Value: int32(900)},
+	}, index)
+}
