@@ -1,8 +1,10 @@
 package zkcircuit
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -198,6 +200,24 @@ func TestFetchFileBoundsItsRead(t *testing.T) {
 	}
 	if _, err := fetchFile("file://"+filepath.ToSlash(dir), 8192); err == nil {
 		t.Fatal("expected a refusal for a directory")
+	}
+}
+
+// A file:// source is read off disk by fetchFile, which takes no ctx; the
+// dispatcher has to honour cancellation around it so a local mirror is not
+// a weaker cancellation contract than the HTTP path.
+func TestFileSourceHonoursContextCancellation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.json")
+	write(t, path, []byte(`{"circuits":[]}`))
+	url := "file://" + filepath.ToSlash(path)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	c := &Client{}
+	if _, err := c.fetchBytesURL(ctx, url, 8192); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled file read: error = %v, want context.Canceled", err)
 	}
 }
 

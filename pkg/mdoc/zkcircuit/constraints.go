@@ -118,6 +118,17 @@ func (m *Manifest) knowsSystem(system string) bool {
 	return false
 }
 
+// requiresSaltBytes reports whether a system's active circuits MUST publish
+// a saltBytes constraint. Vega bakes DIGEST_ID_OFFSET_BYTES into its R1CS at
+// setup() time, so catalog v1 carries the length on every published Vega
+// entry; an absent value there is a stale/pre-metadata or malformed
+// manifest, not a system that opts into the package's default per-element
+// sizing the way longfellow does. Longfellow and anything else published
+// without the key keep the absent-is-default behaviour.
+func requiresSaltBytes(system string) bool {
+	return strings.HasPrefix(strings.ToLower(system), "vega")
+}
+
 // ErrNoActiveCircuit is returned when a named system has no published,
 // active circuit in the manifest for the document type in question.
 var ErrNoActiveCircuit = errors.New("no active circuit")
@@ -198,8 +209,19 @@ func (m *Manifest) Constraints(system, docType string) (SystemConstraints, error
 
 	switch {
 	case len(saltFrom) == 0:
-		// Every active circuit is unconstrained; SaltBytes stays 0, which
-		// means this system wants the caller's default per-element sizing.
+		// Every active circuit is unconstrained. For a system that uses
+		// the package's default per-element sizing (longfellow) that is a
+		// constraint of its own and SaltBytes stays 0. For one that
+		// REQUIRES the length (vega), an absent value is a stale,
+		// pre-metadata or malformed manifest, not a licence to default:
+		// reading it as "no constraint" fails open and mints 16/8-byte
+		// salts the circuit cannot verify. Refuse rather than default.
+		if requiresSaltBytes(system) {
+			sort.Strings(unconstrained)
+			return SystemConstraints{}, fmt.Errorf(
+				"zk system %q requires %s but its active circuits (%s) publish none - refusing rather than defaulting to per-element sizing the circuit cannot verify",
+				system, ParamSaltBytes, strings.Join(unconstrained, ", "))
+		}
 
 	case len(saltFrom) == 1 && len(unconstrained) == 0:
 		for salt := range saltFrom {

@@ -668,7 +668,21 @@ func (c *Client) fetchBytes(ctx context.Context, url string, maxBytes int64) ([]
 // over HTTP.
 func (c *Client) fetchBytesURL(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
 	if isFileURL(url) {
-		return fetchFile(url, maxBytes)
+		// fetchFile reads off disk and takes no ctx; honour the client's
+		// cancellation contract around it so a cancelled request cannot
+		// complete a local read and continue into signing - the HTTP path
+		// observes ctx, and a file source must not be the weaker one.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		data, err := fetchFile(url, maxBytes)
+		if err != nil {
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return data, nil
 	}
 	return c.fetchBytesHTTP(ctx, url, maxBytes)
 }

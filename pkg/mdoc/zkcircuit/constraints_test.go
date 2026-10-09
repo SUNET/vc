@@ -133,11 +133,11 @@ func TestConstraints(t *testing.T) {
 			},
 			wantSalt: 32,
 		},
-		"a system that publishes none states no constraint": {
+		"a system that requires saltBytes refuses when its active circuits publish none": {
 			circuits: []CircuitDescriptor{
 				circuit("lf-1", "vega-mc", StatusActive, []string{mDL}, map[string]any{"num_attributes": float64(2)}),
 			},
-			wantSalt: 0,
+			wantErr: "requires saltBytes",
 		},
 		"no active circuit refuses": {
 			circuits: []CircuitDescriptor{
@@ -188,6 +188,30 @@ func TestConstraints(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Whether an absent saltBytes is a refusal or the default-sizing signal
+// turns on the SYSTEM, not on the catalog payload: vega requires the length
+// and must refuse without it, while longfellow legitimately publishes none.
+func TestConstraintsSaltBytesRequirementIsPerSystem(t *testing.T) {
+	none := map[string]any{"num_attributes": float64(2)}
+
+	m := &Manifest{Circuits: []CircuitDescriptor{
+		circuit("vega-nosalt", "vega-mc", StatusActive, []string{mDL}, none),
+		circuit("lf-nosalt", "longfellow", StatusActive, []string{mDL}, none),
+	}}
+
+	if _, err := m.Constraints("vega-mc", mDL); err == nil || !strings.Contains(err.Error(), "requires saltBytes") {
+		t.Fatalf("vega-mc without saltBytes: error = %v, want one about requiring saltBytes", err)
+	}
+
+	got, err := m.Constraints("longfellow", mDL)
+	if err != nil {
+		t.Fatalf("longfellow without saltBytes: unexpected error %v", err)
+	}
+	if got.SaltBytes != 0 {
+		t.Errorf("longfellow SaltBytes = %d, want 0 (default per-element sizing)", got.SaltBytes)
 	}
 }
 
