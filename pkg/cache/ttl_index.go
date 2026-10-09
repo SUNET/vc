@@ -72,16 +72,22 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 	// created_at_1 is actually present with an expiry other than the one
 	// wanted. Reading live state also avoids parsing an error string whose
 	// wording is not part of anyone's contract.
-	state, listErr := ttlIndexStateOf(ctx, coll, ttl)
+	state, listErr := ttlIndexStateReader(ctx, coll, ttl)
 	switch {
 	case listErr != nil:
 		return fmt.Errorf("index %s conflicts and its current state could not be read: %w (original: %v)",
 			createdAtTTLIndex, listErr, err)
 
 	case state == ttlIndexAbsent || state == ttlIndexMatches:
-		// The conflict belongs to another index. Nothing here can fix it,
-		// and touching the TTL index would only make it worse.
-		return err
+		// Nothing of ours to migrate.
+		//
+		// Fall through to the retry rather than returning the conflict we
+		// are holding. In HA another replica can resolve the TTL index
+		// between our CreateMany and this read, and that error is then
+		// stale - rejecting on it fails startup over a conflict that no
+		// longer exists. If it really does belong to another index, the
+		// retry raises it again, freshly, and without the TTL index having
+		// been touched.
 
 	case state == ttlIndexNotTTL:
 		// created_at_1 exists with no expiry at all. collMod cannot ADD
@@ -239,6 +245,11 @@ const (
 	// expireAfterSeconds from MongoDB 5.1, so this one has to be rebuilt.
 	ttlIndexNotTTL
 )
+
+// ttlIndexStateReader is a seam so the HA interleaving - another replica
+// resolving the conflict between our CreateMany and this read - can be
+// exercised deterministically.
+var ttlIndexStateReader = ttlIndexStateOf
 
 // ttlIndexStateOf reads the state of created_at_1 off the collection.
 //

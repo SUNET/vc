@@ -422,3 +422,47 @@ func TestTTLIndexStillMigratesWhenItIsTheConflict(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int32(3600), ttlOf(t, client, db, coll))
 }
+
+// A conflict another replica has already resolved must not fail startup.
+//
+// In HA, replica A can fix created_at_1 between replica B's CreateMany and
+// B's read of the index state. B is then holding a code-85 error describing
+// a situation that no longer exists; returning it refuses startup over a
+// conflict that is gone. Falling through to the retry is correct either
+// way - if the conflict really did belong to another index, the retry
+// raises it again.
+func TestTTLIndexDoesNotRejectAConflictAnotherReplicaResolved(t *testing.T) {
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	const db, coll = "test_ttl_stale_conflict", "auth_ctx"
+
+	// created_at_1 at the wrong expiry, so our CreateMany conflicts.
+	c := client.Database(db).Collection(coll)
+	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "created_at", Value: 1}},
+		Options: options.Index().SetExpireAfterSeconds(600),
+	})
+	require.NoError(t, err)
+
+	// The other replica wins the race: it resolves the index just before we
+	// read the state, so what we then read is genuinely "matches".
+	originalReader := ttlIndexStateReader
+	var raced bool
+	ttlIndexStateReader = func(ctx context.Context, coll *mongo.Collection, ttl time.Duration) (ttlIndexState, error) {
+		if !raced {
+			raced = true
+			require.NoError(t, ttlIndexCollMod(ctx, coll, ttl),
+				"the stand-in replica could not resolve the index")
+		}
+		return originalReader(ctx, coll, ttl)
+	}
+	t.Cleanup(func() { ttlIndexStateReader = originalReader })
+
+	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	require.NoError(t, err, "startup was refused over a conflict that had already been resolved")
+	assert.True(t, raced, "the interleaving never happened - the test proves nothing")
+
+	assert.Equal(t, int32(900), ttlOf(t, client, db, coll))
+}
