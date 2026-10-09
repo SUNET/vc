@@ -74,7 +74,6 @@ verifier:
       session_duration: 3600
       access_token_duration: 3600
       id_token_duration: 3600
-      refresh_token_duration: 86400
   inbound:
     openid4vp:
       token_endpoint: "https://sunet-vc-demo-verifier.fly.dev/token"

@@ -223,3 +223,46 @@ func TestTTLIndexToleratesLosingTheDropRace(t *testing.T) {
 	assert.Equal(t, int32(3600), ttlOf(t, client, db, coll),
 		"the index was not rebuilt at the new expiry")
 }
+
+// A transient collMod failure must not cost the collection its TTL index.
+//
+// Dropping and rebuilding is the right answer only when collMod can never
+// succeed - the credentials lack the privilege. For a primary election, a
+// network blip or a write-concern timeout it is destructive: if the rebuild
+// then fails too, every replica runs on with NO expiry at all, silently,
+// until some later startup repairs it.
+func TestTTLIndexKeepsTheIndexOnATransientCollModFailure(t *testing.T) {
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	const db, coll = "test_ttl_transient", "auth_ctx"
+
+	_, err := NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, int32(900), ttlOf(t, client, db, coll))
+
+	original := ttlIndexCollMod
+	t.Cleanup(func() { ttlIndexCollMod = original })
+
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"primary stepped down", mongo.CommandError{Code: 189, Message: "PrimarySteppedDown"}},
+		{"write concern timeout", mongo.CommandError{Code: 64, Message: "WriteConcernFailed"}},
+		{"interrupted", mongo.CommandError{Code: 11602, Message: "InterruptedDueToReplStateChange"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ttlIndexCollMod = func(context.Context, *mongo.Collection, time.Duration) error {
+				return tc.err
+			}
+
+			_, err := NewMongoStore(ctx, client, db, coll, 60*time.Minute)
+			assert.Error(t, err, "a transient failure must be reported, not worked around")
+
+			assert.Equal(t, int32(900), ttlOf(t, client, db, coll),
+				"the TTL index was dropped over a retryable error")
+		})
+	}
+}

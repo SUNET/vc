@@ -65,28 +65,46 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 	// A conflict means the collection and the index both exist, so the only
 	// question is how to change the index.
 	if modErr := ttlIndexCollMod(ctx, coll, ttl); modErr != nil {
-		// collMod needs the collMod privilege, which the built-in readWrite
-		// role does NOT grant - a least-privilege deployment gets
-		// Unauthorized (13). readWrite does grant dropIndex and
-		// createIndex, so drop the index and let the retry below rebuild it
-		// with the new expiry.
-		//
-		// Verified on MongoDB 4.4, the documented minimum: as a readWrite
-		// user, collMod fails with 13 and dropIndexes + createIndexes
-		// succeed.
-		//
-		// Between the drop and the rebuild nothing expires documents in
-		// this collection. That window is one index build at startup, and
-		// the alternative is refusing to start at all.
-		// IndexNotFound means another replica got there first. In a
-		// least-privilege HA rollout every replica sees the same conflict
-		// and the same collMod failure, so all of them reach this drop;
-		// losing that race is the expected outcome, not an error, and the
-		// retry below is still the right next step.
-		if dropErr := coll.Indexes().DropOne(ctx, createdAtTTLIndex); dropErr != nil && !isIndexNotFound(dropErr) {
-			return fmt.Errorf(
-				"index %s already exists with a different expiry; collMod to %s failed (%w) and it could not be dropped either: %v",
-				createdAtTTLIndex, ttl, modErr, dropErr)
+		switch {
+		case isIndexNotFound(modErr):
+			// Another replica dropped it between our CreateMany and this
+			// collMod. Nothing to modify and nothing to drop; the retry
+			// below rebuilds it.
+
+		case isPermanentCollModFailure(modErr):
+			// collMod needs the collMod privilege, which the built-in
+			// readWrite role does NOT grant - a least-privilege deployment
+			// gets Unauthorized (13). readWrite does grant dropIndex and
+			// createIndex, so drop the index and let the retry below
+			// rebuild it with the new expiry.
+			//
+			// Verified on MongoDB 4.4, the documented minimum: as a
+			// readWrite user, collMod fails with 13 and dropIndexes +
+			// createIndexes succeed.
+			//
+			// Between the drop and the rebuild nothing expires documents in
+			// this collection. That window is one index build at startup,
+			// and the alternative is refusing to start at all.
+			//
+			// IndexNotFound means another replica got there first. In a
+			// least-privilege HA rollout every replica sees the same
+			// conflict and the same collMod failure, so all of them reach
+			// this drop; losing that race is the expected outcome, not an
+			// error, and the retry below is still the right next step.
+			if dropErr := coll.Indexes().DropOne(ctx, createdAtTTLIndex); dropErr != nil && !isIndexNotFound(dropErr) {
+				return fmt.Errorf(
+					"index %s already exists with a different expiry; collMod to %s failed (%w) and it could not be dropped either: %v",
+					createdAtTTLIndex, ttl, modErr, dropErr)
+			}
+
+		default:
+			// Anything else - a primary election, a network blip, a write
+			// concern timeout - resolves on a retry. Dropping the shared
+			// TTL index over one of those risks leaving the collection with
+			// NO expiry at all if the rebuild then fails too, which is
+			// silent and lasts until some later startup repairs it. Report
+			// it and let the deployment retry instead.
+			return fmt.Errorf("index %s could not be changed to %s: %w", createdAtTTLIndex, ttl, modErr)
 		}
 	}
 
@@ -111,6 +129,27 @@ var ttlIndexCollMod = func(ctx context.Context, coll *mongo.Collection, ttl time
 		}},
 	}).Err()
 }
+
+// isPermanentCollModFailure reports whether a collMod failure is one that
+// a retry cannot fix, so dropping and rebuilding the index is the only way
+// forward.
+//
+// Unauthorized is the one that matters in practice: the built-in readWrite
+// role does not grant the collMod action. CommandNotFound covers a server
+// that does not have the command at all. Everything else is assumed
+// transient, because the cost of being wrong in that direction is a
+// collection left with no TTL index.
+func isPermanentCollModFailure(err error) bool {
+	return hasMongoCode(err, unauthorized) || hasMongoCode(err, commandNotFound)
+}
+
+// MongoDB error codes.
+const (
+	// unauthorized: the credentials may not run this command.
+	unauthorized = 13
+	// commandNotFound: this server has no such command.
+	commandNotFound = 59
+)
 
 // indexNotFound is MongoDB error code 27: no index by that name.
 const indexNotFound = 27
