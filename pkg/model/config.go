@@ -570,6 +570,20 @@ type Issuer struct {
 	// BBS holds blind BBS issuance configuration. Absent disables the
 	// "jwp" credential format entirely.
 	BBS *BBSConfig `yaml:"bbs" validate:"omitempty"`
+	// ZkCircuits configures the zk-circuits catalog the issuer resolves a
+	// credential's ZK wire-shape requirements from - today the
+	// IssuerSignedItem salt length an mdoc schema's declared zk_systems
+	// demand (SUNET/vc#723).
+	//
+	// The same catalog, and the same client, the verifier uses: these are
+	// mirrors of one service, and a vendored local mirror is a file:// URL
+	// here (see developer_tools/scripts/vendor_zk_circuits). Unlike the
+	// verifier, the issuer only ever reads the few-KB descriptors - it
+	// runs no ZK code and never downloads a prover or verifier key.
+	//
+	// Consulted only by schemas that declare zk_systems; a deployment
+	// issuing no ZK-provable mdocs never reaches it.
+	ZkCircuits IssuerZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
 }
 
 // BBSConfig holds the issuer's blind BBS key pair.
@@ -835,15 +849,54 @@ type Verifier struct {
 	ZkCircuits ZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
 }
 
-// ZkCircuitsConfig configures the zk-circuits catalog client
-// (pkg/mdoc/zkcircuit) used to resolve a presented "mso_mdoc_zk" document's
-// zkSystemId to a downloadable circuit artifact.
+// ZkCircuitsConfig configures the shared zk-circuits catalog sources
+// (pkg/mdoc/zkcircuit). The verifier uses it to resolve a presented
+// "mso_mdoc_zk" document's zkSystemId to a downloadable circuit artifact;
+// the issuer resolves wire-shape constraints from the same sources through
+// its own IssuerZkCircuitsConfig, which adds a resolver cache.
 type ZkCircuitsConfig struct {
 	// Sources are zk-circuits catalog mirror base URLs, tried in order
 	// until one succeeds (see pkg/mdoc/zkcircuit.Client - these are
 	// mirrors of the SAME catalog, not distinct registries). Defaults to
 	// the live deployed service if empty.
-	Sources []string `yaml:"sources,omitempty" default:"[\"https://zk-circuits.fly.dev\"]" doc_example:"[\"https://zk-circuits.fly.dev\"]"`
+	//
+	// A "file:///path/to/mirror" entry is a vendored local mirror: a
+	// directory laid out like the service itself, as written by
+	// developer_tools/scripts/vendor_zk_circuits. Artifact hashes are
+	// verified against the descriptors exactly as they are for a remote
+	// source, so vendoring pins the bytes as far as the mirror filesystem
+	// is itself trusted.
+	Sources []string `yaml:"sources,omitempty" default:"[\"https://zk-circuits.fly.dev\"]" doc_example:"[\"https://zk-circuits.fly.dev\",\"file:///etc/vc/zk-circuits\"]"`
+}
+
+// IssuerZkCircuitsConfig is the issuer's zk-circuits configuration: the same
+// catalog Sources the verifier uses, plus CacheTTL. CacheTTL lives here
+// rather than on the shared ZkCircuitsConfig because only the issuer's
+// resolver honours it - the verifier reads Sources alone, so a cache_ttl
+// under verifier.zk_circuits would be a silent no-op.
+type IssuerZkCircuitsConfig struct {
+	// Sources are zk-circuits catalog mirror base URLs, tried in order
+	// until one succeeds (see pkg/mdoc/zkcircuit.Client - these are
+	// mirrors of the SAME catalog, not distinct registries). Defaults to
+	// the live deployed service if empty.
+	//
+	// A "file:///path/to/mirror" entry is a vendored local mirror: a
+	// directory laid out like the service itself, as written by
+	// developer_tools/scripts/vendor_zk_circuits. Artifact hashes are
+	// verified against the descriptors exactly as they are for a remote
+	// source, so vendoring pins the bytes as far as the mirror filesystem
+	// is itself trusted.
+	Sources []string `yaml:"sources,omitempty" default:"[\"https://zk-circuits.fly.dev\"]" doc_example:"[\"https://zk-circuits.fly.dev\",\"file:///etc/vc/zk-circuits\"]"`
+
+	// CacheTTL is how long a fetched manifest is reused before the issuer
+	// refreshes it, in seconds. Issuance must not become a catalog round
+	// trip per credential. Zero means the package default (1 hour).
+	//
+	// A refresh that fails keeps serving the last manifest that parsed, so
+	// the catalog being briefly unreachable does not stop issuance; what
+	// does stop it is having never reached the catalog at all, for a
+	// schema that declares a zk_system and pins nothing.
+	CacheTTL int `yaml:"cache_ttl,omitempty" validate:"omitempty,min=0" doc_example:"3600"`
 }
 
 // RevocationConfig configures credential revocation verification at presentation time.
