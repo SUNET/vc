@@ -27,6 +27,10 @@ common:
       vctm_file_path: "/metadata/vctm_eduid_age_verification.json"
       format: "dc+sd-jwt"
       replace_vct: true
+    microcredential:
+      vctm_file_path: "/metadata/vctm_microcredential.json"
+      format: "dc+sd-jwt"
+      replace_vct: true
     # Disabled pending Longfellow wallet support and age-proof validation.
     #eduid_age_verification_zk:
     #  mddl_file_path: "/metadata/eduid_age_verification_zk.mdoc.json"
@@ -90,18 +94,14 @@ verifier:
     openid4vp:
       token_endpoint: "https://sunet-vc-verifier.fly.dev/token"
       clients:
-        "1003":
-          type: "public"
-          redirect_uri: "https://dev.wallet.sunet.se"
-          scopes:
-            - "pid"
-            - "ehic"
         "fly-wallet":
           type: "public"
           redirect_uri: "https://sunet-vc-wallet.fly.dev"
           scopes:
             - "pid"
             - "ehic"
+            - "microcredential"
+            - "eduid"
       supported_credentials:
         - vct: "urn:eudi:pid:1"
           scopes:
@@ -109,6 +109,12 @@ verifier:
         - vct: "urn:eudi:ehic:1"
           scopes:
             - "ehic"
+        - vct: "VerifiableMicroCredential"
+          scopes:
+            - "microcredential"
+        - vct: "urn:credential:eduid:1"
+          scopes:
+            - "eduid"
   presets:
     "PID":
       credentials:
@@ -119,6 +125,36 @@ verifier:
     "EHIC":
       credentials:
         ehic:
+    "Micro-credential":
+      credentials:
+        microcredential:
+          # Only request claims the issued credential actually carries: DCQL
+          # treats every requested claim as required for a match, so asking for
+          # WE BUILD optional claims the test data omits makes the wallet find
+          # no matching credential.
+          exclude_claims:
+            - path: ["attestation_legal_category"]
+            - path: ["trust_anchor"]
+            - path: ["cryptographically_bound_to"]
+            - path: ["dateOfBirth"]
+            - path: ["placeOfBirth"]
+            - path: ["citizenshipCountry"]
+            - path: ["nationalID"]
+            - path: ["registeredAddress"]
+            - path: ["mail"]
+            - path: ["nationalQualificationsFrameworkLevel"]
+            - path: ["educationLevelDescriptor"]
+            - path: ["awardingBodyAddress"]
+            - path: ["additionalNote"]
+    "eduID":
+      credentials:
+        eduid:
+          # eduID does not always release a separate surname (family_name); it
+          # reliably provides given_name and the display name. DCQL needs every
+          # requested claim present, so request only these.
+          claims:
+            - path: ["given_name"]
+            - path: ["name"]
     "PID Age Over 18":
       credentials:
         pid:
@@ -183,7 +219,6 @@ apigw:
       rules:
         - "(vc (service apigw)(method *)(path /api/v1/*)(subject admin@sunet.se)(authentic_source *)(scope *))"
   public_url: "https://sunet-vc-apigw.fly.dev"
-  registry_public_url: "https://sunet-vc-registry.fly.dev"
   trust:
     pdp_url: "http://sunet-vc-go-trust.internal:6001"
     wallet_attestation:
@@ -197,7 +232,7 @@ apigw:
       - "https://sunet-vc-apigw.fly.dev"
   identity_mapping_import:
     file_paths:
-      - "/bootstrapping/identity_mappings.json"
+      - "/bootstrapping/identity_mappings.json.gz"
     users:
       - "100"
       - "102"
@@ -288,27 +323,38 @@ apigw:
   data_sources:
     datastore:
       import:
+        replace_existing: true
         file_paths:
-          - "/bootstrapping/diploma.json"
-          - "/bootstrapping/ehic.json"
-          - "/bootstrapping/pda1.json"
-          - "/bootstrapping/pid.json"
-          - "/bootstrapping/mdl.json"
-          #- "/bootstrapping/pid_mdoc.json"
+          - "/bootstrapping/diploma.json.gz"
+          - "/bootstrapping/ehic.json.gz"
+          - "/bootstrapping/pda1.json.gz"
+          - "/bootstrapping/pid.json.gz"
+          - "/bootstrapping/mdl.json.gz"
+          - "/bootstrapping/microcredential.json.gz"
+          #- "/bootstrapping/pid_mdoc.json.gz"
         users:
           - "100"
           - "102"
       scopes:
         pid:
           auth_provider: oidc
+          authentic_source: "Skatteverket"
           auth_claims: ["given_name", "family_name", "birthdate"]
         ehic:
           auth_provider: openid4vp
+          authentic_source: "Skatteverket"
+          auth_scopes:
+            pid:
+              auth_claims: ["given_name", "family_name", "birthdate"]
+        microcredential:
+          auth_provider: openid4vp
+          authentic_source: "Skatteverket"
           auth_scopes:
             pid:
               auth_claims: ["given_name", "family_name", "birthdate"]
         mdl:
           auth_provider: oidc
+          authentic_source: "Skatteverket"
           auth_claims: ["given_name", "family_name", "birthdate"]
         diploma:
           auth_provider: preauth
@@ -373,6 +419,7 @@ apigw:
             - "mdl"
             - "eduid"
             - "eduid_age_verification"
+            - "microcredential"
             #- "eduid_age_verification_zk"
         # Interop testbed (webuild-cs01, University of the Aegean). Static
         # allowlist entry lets the headless testbed wallet pass PAR client

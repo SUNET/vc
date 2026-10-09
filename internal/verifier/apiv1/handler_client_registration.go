@@ -56,7 +56,11 @@ type ClientRegistrationRequest struct {
 	RequestURIs             []string `json:"request_uris,omitempty"`
 
 	// PKCE (RFC 7636)
-	CodeChallengeMethod string `json:"code_challenge_method,omitempty" default:"S256" validate:"omitempty,oneof=S256 plain"`
+	// S256 only, matching what /authorize will accept and what discovery
+	// advertises. "plain" was accepted here and then rejected at the
+	// authorization endpoint, so a registration could succeed while
+	// declaring a method the OP would never honour (SUNET/vc#757).
+	CodeChallengeMethod string `json:"code_challenge_method,omitempty" default:"S256" validate:"omitempty,oneof=S256"`
 }
 
 // ClientRegistrationResponse represents RFC 7591 client registration response
@@ -138,8 +142,19 @@ func (c *Client) RegisterClient(ctx context.Context, req *ClientRegistrationRequ
 		allowedScopes = strings.Split(req.Scope, " ")
 	}
 
-	// Determine if PKCE is required
-	requirePKCE := req.CodeChallengeMethod != ""
+	// Registration stores no PKCE policy of its own.
+	//
+	// This read `req.CodeChallengeMethod != ""`, which looked like an
+	// opt-in and could not be false: the field carries `default:"S256"` and
+	// bindings apply defaults before binding, so it is never empty
+	// (SUNET/vc#757). Whichever way it had gone, it let a client's own
+	// registration request decide the policy it is held to.
+	//
+	// PKCE is still required of this client - pkceRequired falls through to
+	// the OP's require_pkce, which defaults to true. Leaving the record
+	// unpinned is what lets an operator relax that policy for dynamic and
+	// static clients alike, instead of only the ones written in YAML.
+	requirePKCE := false
 	requireCodeChallenge := requirePKCE
 
 	// Create client in database
@@ -411,9 +426,12 @@ func (c *Client) UpdateClient(ctx context.Context, req *UpdateClientRequest) (*C
 	}
 	if clientReg.CodeChallengeMethod != "" {
 		client.CodeChallengeMethod = clientReg.CodeChallengeMethod
-		client.RequirePKCE = true
-		client.RequireCodeChallenge = true
 	}
+	// CodeChallengeMethod is stored as metadata only; it does not decide
+	// whether PKCE is enforced. For a dynamic client pkceRequired consults
+	// the OP policy and the public-client rule, never db.Client.RequirePKCE,
+	// so the only update that moves the requirement is
+	// token_endpoint_auth_method changing to or from "none" (SUNET/vc#757).
 
 	// Update in database
 	err = c.db.Clients.Update(ctx, client)

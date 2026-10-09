@@ -60,6 +60,25 @@ type Error struct {
 	Title      string `json:"title"`
 	Err        any    `json:"details"`
 	HTTPStatus int    `json:"-"` // HTTP status code to return, 0 means auto-detect
+
+	// unclassified marks an Error that NewErrorFromError built from an
+	// error it recognised nothing about, by putting the raw Go error string
+	// in Err. Everything else here is a shape somebody chose to publish -
+	// a validation report, a JSON parse position, a sentinel - and is safe
+	// to return. This one is whatever wrapping happened to say, which is
+	// why the HTTP layer redacts it.
+	//
+	// Unexported so only this package can set it, and invisible to JSON.
+	unclassified bool
+}
+
+// IsUnclassified reports whether this Error carries the text of an error
+// nothing recognised, rather than a shape chosen for publication. The
+// distinction lives here rather than in a type switch at the HTTP boundary
+// so there is one list of what counts as classified - the one in
+// NewErrorFromError - instead of two that have to agree.
+func (e *Error) IsUnclassified() bool {
+	return e != nil && e.unclassified
 }
 
 func (e *Error) Error() string {
@@ -107,20 +126,27 @@ func NewErrorFromError(v any) *Error {
 
 	err, ok := v.(error)
 	if !ok {
-		return NewErrorDetails("internal_server_error", fmt.Sprintf("%+v", v))
+		return &Error{Title: "internal_server_error", Err: fmt.Sprintf("%+v", v), unclassified: true}
 	}
 
 	if pbErr, ok := err.(*Error); ok {
 		return pbErr
 	}
 
-	if jsonUnmarshalTypeError, ok := err.(*json.UnmarshalTypeError); ok {
+	// errors.As, not a direct type assertion. A handler that adds context
+	// with %w - "parsing the credential request: <json syntax error>",
+	// which is ordinary Go - used to fall past every branch here and out
+	// the catch-all. That was survivable while the catch-all returned the
+	// error text; now that it redacts, it turns a client error into an
+	// opaque internal_server_error and the caller loses the parse offset
+	// that would have told them what to fix.
+	if jsonUnmarshalTypeError, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
 		return &Error{Title: "json_type_error", Err: formatJSONUnmarshalTypeError(jsonUnmarshalTypeError)}
 	}
-	if jsonSyntaxError, ok := err.(*json.SyntaxError); ok {
+	if jsonSyntaxError, ok := errors.AsType[*json.SyntaxError](err); ok {
 		return &Error{Title: "json_syntax_error", Err: map[string]any{"position": jsonSyntaxError.Offset, "error": jsonSyntaxError.Error()}}
 	}
-	if validatorErr, ok := err.(validator.ValidationErrors); ok {
+	if validatorErr, ok := errors.AsType[validator.ValidationErrors](err); ok {
 		return &Error{Title: "validation_error", Err: formatValidationErrors(validatorErr)}
 	}
 
@@ -139,7 +165,7 @@ func NewErrorFromError(v any) *Error {
 		return wrapped
 	}
 
-	return NewErrorDetails("internal_server_error", err.Error())
+	return &Error{Title: "internal_server_error", Err: err.Error(), unclassified: true}
 }
 
 func formatValidationErrors(err validator.ValidationErrors) []map[string]any {

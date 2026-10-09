@@ -51,6 +51,11 @@ func (s *serverHandler) RegEndpoint(ctx context.Context, rg *gin.RouterGroup, me
 
 		res, err := handler(ctx, c)
 		if err != nil {
+			// Every failed request gets this, here rather than inside
+			// publicError: the two structured branches below return
+			// without reaching it, and an OAuth or OpenID4VCI refusal
+			// deliberately withholds its cause from the RESPONSE - which
+			// is exactly why the cause has to reach the log.
 			s.log.Debug("RegEndpoint", "err", err)
 
 			// OAuth 2.0 structured error response per RFC 6749 §5.2
@@ -71,7 +76,7 @@ func (s *serverHandler) RegEndpoint(ctx context.Context, rg *gin.RouterGroup, me
 			}
 
 			statusCode := StatusCode(ctx, err)
-			s.client.Rendering.Content(ctx, c, statusCode, gin.H{"error": helpers.NewErrorFromError(err)})
+			s.client.Rendering.Content(ctx, c, statusCode, gin.H{"error": s.publicError(c, "RegEndpoint", err, statusCode)})
 			return
 		}
 
@@ -87,6 +92,48 @@ func (s *serverHandler) RegEndpoint(ctx context.Context, rg *gin.RouterGroup, me
 	})
 }
 
+// publicError shapes an error for the client and makes sure it is logged.
+//
+// An error nothing recognised used to go out as its raw Go text - the whole
+// wrapped chain, naming internal paths, configuration fields and failure
+// modes - while the only log line for it was at Debug, which the production
+// logger drops. So the detail reached the caller and nothing reached the
+// operator, and the req_id the caller was handed correlated with a request
+// line carrying no error at all. That is the wrong way round (SUNET/vc#357).
+//
+// Now it is the other way: the chain is logged at Error with the request id,
+// and the caller gets the request id and nothing else.
+//
+// Errors that were recognised are returned unchanged. A validation report, a
+// JSON parse position, a sentinel like "no document found" - those are
+// shapes somebody chose to publish, they are useful to an API client, and
+// they are not secrets.
+func (s *serverHandler) publicError(c *gin.Context, where string, err error, statusCode int) *helpers.Error {
+	shaped := helpers.NewErrorFromError(err)
+	if !shaped.IsUnclassified() {
+		// Already logged at Debug by the caller, along with every other
+		// failed request - see RegEndpoint.
+		return shaped
+	}
+
+	requestID := c.GetString("req_id")
+
+	s.log.Error(err, where+": unclassified error",
+		"req_id", requestID,
+		"status", statusCode,
+		"method", c.Request.Method,
+		"path", c.Request.URL.Path)
+
+	details := map[string]any{}
+	if requestID != "" {
+		// In the body as well as the req_id header: this is the string an
+		// operator gets read back to them off a screenshot.
+		details["req_id"] = requestID
+	}
+
+	return helpers.NewErrorDetails("internal_server_error", details)
+}
+
 // RegStreamEndpoint registers an endpoint with the gin router
 func (s *serverHandler) RegStreamEndpoint(ctx context.Context, rg *gin.RouterGroup, method, path string, defaultStatus int, ch chan string, handler func(context.Context, *gin.Context, chan string) (any, error)) {
 	rg.Handle(method, path, func(c *gin.Context) {
@@ -98,7 +145,7 @@ func (s *serverHandler) RegStreamEndpoint(ctx context.Context, rg *gin.RouterGro
 		if err != nil {
 			s.log.Debug("RegStreamEndpoint", "err", err)
 			statusCode := StatusCode(ctx, err)
-			s.client.Rendering.Content(ctx, c, statusCode, gin.H{"error": helpers.NewErrorFromError(err)})
+			s.client.Rendering.Content(ctx, c, statusCode, gin.H{"error": s.publicError(c, "RegStreamEndpoint", err, statusCode)})
 			return
 		}
 

@@ -48,6 +48,10 @@ func TestAuthorizeSessionExpiresAfterThePresentationTimeout(t *testing.T) {
 		Scope:        strings.Join([]string{"openid", "profile"}, " "),
 		State:        "state",
 		Nonce:        "nonce",
+		// PKCE is required of every client since #764, so a request that
+		// gets as far as creating a session carries a challenge.
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: "S256",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)

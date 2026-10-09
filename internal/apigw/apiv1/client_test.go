@@ -107,7 +107,7 @@ func TestCreateCredentialOfferLookupMetadata(t *testing.T) {
 			},
 			"micro_credential": {
 				Name:        "MicroCredential",
-				Description: "MicroCredential based on the OBv3 schema.",
+				Description: "Micro-credential Attestation per the WE BUILD Micro-credential Rulebook (SD-JWT VC).",
 			},
 			"openbadge_basic": {
 				Name:        "ELM Credential",

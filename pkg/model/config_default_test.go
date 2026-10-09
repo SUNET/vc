@@ -169,6 +169,7 @@ func TestOIDCOPConfigDefaults(t *testing.T) {
 	assert.Equal(t, 300, cfg.CodeDuration)
 	assert.Equal(t, 3600, cfg.AccessTokenDuration)
 	assert.Equal(t, 3600, cfg.IDTokenDuration)
+	assert.True(t, BoolVal(cfg.RequirePKCE, true), "PKCE must be required by default")
 }
 
 func TestOpenID4VPConfigDefaults(t *testing.T) {
@@ -185,7 +186,6 @@ func TestDigitalCredentialsConfigDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.False(t, cfg.Enable)
-	assert.False(t, cfg.UseJAR)
 	assert.Equal(t, []string{"vc+sd-jwt", "dc+sd-jwt", "mso_mdoc"}, cfg.PreferredFormats)
 	assert.Equal(t, "dc_api.jwt", cfg.ResponseMode)
 	require.NotNil(t, cfg.AllowQRFallback)

@@ -208,20 +208,15 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 
 	// Original verifier verification endpoints (with user session)
 	sgVerification := rgOAuthSession.Group("/verification")
-	s.httpHelpers.Server.RegEndpoint(ctx, sgVerification, http.MethodGet, "request-object", http.StatusOK, s.endpointVerificationRequestObject)
-	s.httpHelpers.Server.RegEndpoint(ctx, sgVerification, http.MethodPost, "direct_post", http.StatusOK, s.endpointVerificationDirectPost)
-	s.httpHelpers.Server.RegEndpoint(ctx, sgVerification, http.MethodGet, "callback", http.StatusOK, s.endpointVerificationCallback)
-	// Under sgVerification so endpointSessionPreference can read session_id
-	// from the gin cookie when the body omits it (standalone verifier UI).
-	s.httpHelpers.Server.RegEndpoint(ctx, sgVerification, http.MethodPost, "session-preference", http.StatusOK, s.endpointSessionPreference)
+	for _, r := range sessionVerificationRoutes {
+		s.httpHelpers.Server.RegEndpoint(ctx, sgVerification, r.method, r.path, r.status, r.handler(s))
+	}
 
 	// OIDC-flow OpenID4VP endpoints
 	rgOIDCVerification := rgRoot.Group("/verification")
-	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodGet, "request-object/:session_id", http.StatusOK, s.endpointOIDCRequestObject)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodPost, "oidc-direct_post", http.StatusOK, s.endpointOIDCDirectPost)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodGet, "oidc-callback", http.StatusOK, s.endpointOIDCCallback)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodGet, "display/:session_id", http.StatusOK, s.endpointCredentialDisplay)
-	s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, http.MethodPost, "confirm/:session_id", http.StatusOK, s.endpointConfirmCredentialDisplay)
+	for _, r := range oidcVerificationRoutes {
+		s.httpHelpers.Server.RegEndpoint(ctx, rgOIDCVerification, r.method, r.path, r.status, r.handler(s))
+	}
 
 	// UI Endpoints
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "qr/:session_id", http.StatusOK, s.endpointQRCode)

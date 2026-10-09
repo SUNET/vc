@@ -72,7 +72,7 @@ The verifier verifies credentials that were previously issued by VC issuers and 
 ✅ DCQL (Digital Credentials Query Language) support
 
 ### Security Features
-✅ PKCE enforcement for public clients  
+✅ PKCE enforcement for all clients, mandatory for public ones  
 ✅ State parameter validation  
 ✅ Nonce validation  
 ✅ Authorization code single-use  
@@ -143,7 +143,6 @@ verifier:
 
   digital_credentials:
     enabled: true
-    use_jar: true
     preferred_formats: ["vc+sd-jwt", "dc+sd-jwt", "mso_mdoc"]
     response_mode: "dc_api.jwt"
     allow_qr_fallback: true
@@ -262,7 +261,7 @@ Same `sub` across all clients.
 ### Token Security
 
 - Authorization codes are single-use and expire after 5 minutes
-- PKCE is enforced for public clients and recommended for all
+- PKCE is required of every client by default (OAuth 2.1 §4.1.1, RFC 9700 §2.1.1). `verifier.outbound.oidc_provider.require_pkce: false`, or `require_pkce: false` on a single static client, exempts a confidential client that cannot send a `code_challenge` yet; a public client (`token_endpoint_auth_method: none`) can never be exempted
 - Access tokens are bearer tokens, protect in transit and storage
 - Refresh tokens can be rotated on each use
 - All tokens should use HTTPS in production

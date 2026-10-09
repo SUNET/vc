@@ -179,7 +179,6 @@ apigw:
         redirect_uri: "https://apigw.vc.docker:8080/ui/callback"
         scopes: ["openid", "profile"]
   public_url: "https://apigw.vc.docker:8080"
-  registry_public_url: "https://registry.vc.docker:8080"
   issuer_client:
     addr: issuer.vc.docker:8090
   registry_client:
@@ -195,7 +194,6 @@ apigw:
       import:
         file_paths:
           - "bootstrapping/diploma.json"
-          - "bootstrapping/eduid.json"
           - "bootstrapping/ehic.json"
           - "bootstrapping/elm.json"
           - "bootstrapping/pda1.json"
@@ -208,21 +206,25 @@ apigw:
       scopes:
         pid:
           auth_provider: oidc
+          authentic_source: "Skatteverket"
           auth_claims: ["given_name", "family_name", "birth_date"]
         ehic:
           auth_provider: openid4vp
+          authentic_source: "Skatteverket"
           auth_scopes:
             pid:
               auth_claims: ["given_name", "family_name", "birth_date"]
         pid_mdoc:
           auth_provider: oidc
+          authentic_source: "Skatteverket"
           auth_claims: ["given_name", "family_name", "birth_date"]
         mdl:
           auth_provider: oidc
+          authentic_source: "Skatteverket"
           auth_claims: ["given_name", "family_name", "birth_date"]
         # Example: a credential issuable only via /api/v1/datastore/preauth_offer.
         # Wallet-initiated PAR requests for this scope are rejected.
-        #micro_credential:
+        #microcredential:
         #  auth_provider: preauth
   auth_providers:
     # preauth (data_sources scopes with auth_provider: preauth).

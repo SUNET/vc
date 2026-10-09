@@ -626,6 +626,9 @@ func NewValidator() (*validator.Validate, error) {
 		for scope, cred := range ds.Datastore.Scopes {
 			switch cred.AuthProvider {
 			case model.AuthProviderOpenID4VP:
+				if cred.AuthenticSource == "" {
+					sl.ReportError(cred.AuthenticSource, "AuthenticSource", "AuthenticSource", "authentic_source_required_for_identity_mapping", scope)
+				}
 				if _, selfRef := cred.AuthScopes[scope]; selfRef {
 					sl.ReportError(cred.AuthScopes, "AuthScopes", "AuthScopes", "auth_scopes_self_reference", scope)
 				}
@@ -641,6 +644,9 @@ func NewValidator() (*validator.Validate, error) {
 					sl.ReportError(cred.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_not_allowed_for_openid4vp", scope)
 				}
 			case model.AuthProviderSAML, model.AuthProviderOIDC:
+				if cred.AuthenticSource == "" {
+					sl.ReportError(cred.AuthenticSource, "AuthenticSource", "AuthenticSource", "authentic_source_required_for_identity_mapping", scope)
+				}
 				if len(cred.AuthClaims) == 0 {
 					sl.ReportError(cred.AuthClaims, "AuthClaims", "AuthClaims", "auth_claims_required_for_identity_lookup", scope)
 				}

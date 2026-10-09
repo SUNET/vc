@@ -591,10 +591,12 @@ func TestRegisterClient(t *testing.T) {
 				assert.NotEmpty(t, storedClient.ClientSecretHash)
 				assert.NotEmpty(t, storedClient.RegistrationAccessTokenHash)
 
-				// Verify PKCE flag
-				if tt.request.CodeChallengeMethod != "" {
-					assert.True(t, storedClient.RequirePKCE)
-				}
+				// Registration stores no PKCE policy of the client's
+				// choosing. The flag can only pin PKCE on; whether this
+				// client needs it comes from the OP's require_pkce, which
+				// defaults to true (SUNET/vc#757).
+				assert.False(t, storedClient.RequirePKCE,
+					"registration stored a policy the client asked for")
 			}
 		})
 	}

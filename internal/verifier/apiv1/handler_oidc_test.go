@@ -140,7 +140,6 @@ func TestAuthorizeResponse_Fields(t *testing.T) {
 		DeepLinkURL:      "openid://authorize?...",
 		PollURL:          "https://verifier.example.com/session/session-123",
 		PreferredFormats: []string{"vc+sd-jwt"},
-		UseJAR:           true,
 		ResponseMode:     "direct_post",
 		Title:            "Verify your credential",
 		Subtitle:         "Scan the QR code with your wallet",
@@ -153,7 +152,6 @@ func TestAuthorizeResponse_Fields(t *testing.T) {
 	assert.Equal(t, "session-123", resp.SessionID)
 	assert.Equal(t, "openid://...", resp.QRCodeData)
 	assert.Contains(t, resp.PreferredFormats, "vc+sd-jwt")
-	assert.True(t, resp.UseJAR)
 	assert.Equal(t, "direct_post", resp.ResponseMode)
 }
 
@@ -885,6 +883,13 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, mockDB := CreateTestClientWithMock(t, nil)
+			// Explicitly off. This used to rely on the test harness's
+			// zero value, which read as "disabled" only because
+			// EnableUserInfo was a plain bool - production's configured
+			// default is and always was true, so the assertions below
+			// pinned a state no deployment had (SUNET/vc#753).
+			disabled := false
+			client.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo = &disabled
 			tt.setupMock(t, client.cacheService.AuthContext, mockDB.Clients)
 
 			// Set up test signing key
@@ -907,7 +912,7 @@ func TestToken_AuthorizationCodeGrant(t *testing.T) {
 				assert.Equal(t, "Bearer", resp.TokenType)
 				assert.NotEmpty(t, resp.IDToken)
 
-				// With EnableUserInfo=false (default), access/refresh tokens are not issued
+				// With enable_userinfo off, access/refresh tokens are not issued
 				assert.Empty(t, resp.AccessToken)
 				assert.Empty(t, resp.RefreshToken)
 				assert.Equal(t, 0, resp.ExpiresIn)
@@ -929,7 +934,8 @@ func TestToken_EnableUserInfoTrue(t *testing.T) {
 	ctx := t.Context()
 
 	client, mockDB := CreateTestClientWithMock(t, nil)
-	client.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo = true
+	enabled := true
+	client.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo = &enabled
 	client.cfg.Verifier.Outbound.OIDCProvider.AccessTokenDuration = 3600
 
 	authCtx := &cache.AuthorizationContext{
@@ -1191,6 +1197,10 @@ func TestAuthorize_FullFlow(t *testing.T) {
 				Scope:        strings.Join([]string{"openid", "profile"}, " "),
 				State:        "random-state",
 				Nonce:        "random-nonce",
+				// PKCE is required of every client now, so a request that
+				// succeeds is one that carries a challenge (SUNET/vc#757).
+				CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+				CodeChallengeMethod: "S256",
 			},
 			expectError: false,
 		},
@@ -1331,6 +1341,9 @@ func TestAuthorize_FullFlow(t *testing.T) {
 				Scope:        strings.Join([]string{"openid", "profile", "email"}, " "),
 				State:        "complex-state",
 				Nonce:        "complex-nonce",
+
+				CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+				CodeChallengeMethod: "S256",
 			},
 			expectError: false,
 		},
@@ -1343,7 +1356,6 @@ func TestAuthorize_FullFlow(t *testing.T) {
 			client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 			client.cfg.Verifier.DigitalCredentials.Enable = true
 			client.cfg.Verifier.DigitalCredentials.PreferredFormats = []string{"vc+sd-jwt"}
-			client.cfg.Verifier.DigitalCredentials.UseJAR = true
 			client.cfg.Verifier.DigitalCredentials.ResponseMode = "direct_post.jwt"
 			client.cfg.Verifier.AuthorizationPageCSS.Title = "Test Verifier"
 			client.cfg.Verifier.AuthorizationPageCSS.Theme = "dark"
@@ -1379,7 +1391,6 @@ func TestAuthorize_FullFlow(t *testing.T) {
 
 				// Verify DC API configuration
 				assert.Equal(t, []string{"vc+sd-jwt"}, resp.PreferredFormats)
-				assert.True(t, resp.UseJAR)
 				assert.Equal(t, "direct_post.jwt", resp.ResponseMode)
 
 				// Verify CSS configuration
@@ -1433,12 +1444,14 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
-		ResponseType: "code",
-		ClientID:     "dc-disabled-client",
-		RedirectURI:  "https://example.com/callback",
-		Scope:        strings.Join([]string{"openid", "profile"}, " "),
-		State:        "test-state",
-		Nonce:        "test-nonce",
+		ResponseType:        "code",
+		ClientID:            "dc-disabled-client",
+		RedirectURI:         "https://example.com/callback",
+		Scope:               strings.Join([]string{"openid", "profile"}, " "),
+		State:               "test-state",
+		Nonce:               "test-nonce",
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: "S256",
 	}
 
 	resp, err := client.Authorize(ctx, req)
@@ -1448,7 +1461,6 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 
 	// Verify DC API configuration from struct defaults is applied
 	assert.Equal(t, resp.PreferredFormats, client.cfg.Verifier.DigitalCredentials.PreferredFormats)
-	assert.Equal(t, resp.UseJAR, client.cfg.Verifier.DigitalCredentials.UseJAR)
 	assert.Equal(t, resp.ResponseMode, client.cfg.Verifier.DigitalCredentials.ResponseMode)
 
 	// Verify default title/subtitle are applied
@@ -1482,12 +1494,14 @@ func TestAuthorize_WalletLinks(t *testing.T) {
 	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
-		ResponseType: "code",
-		ClientID:     "wallet-links-client",
-		RedirectURI:  "https://example.com/callback",
-		Scope:        "openid profile",
-		State:        "test-state",
-		Nonce:        "test-nonce",
+		ResponseType:        "code",
+		ClientID:            "wallet-links-client",
+		RedirectURI:         "https://example.com/callback",
+		Scope:               "openid profile",
+		State:               "test-state",
+		Nonce:               "test-nonce",
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: "S256",
 	}
 
 	resp, err := client.Authorize(ctx, req)
@@ -1551,12 +1565,14 @@ func TestAuthorize_NoWalletLinks(t *testing.T) {
 	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
-		ResponseType: "code",
-		ClientID:     "no-wallets-client",
-		RedirectURI:  "https://example.com/callback",
-		Scope:        "openid profile",
-		State:        "test-state",
-		Nonce:        "test-nonce",
+		ResponseType:        "code",
+		ClientID:            "no-wallets-client",
+		RedirectURI:         "https://example.com/callback",
+		Scope:               "openid profile",
+		State:               "test-state",
+		Nonce:               "test-nonce",
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: "S256",
 	}
 
 	resp, err := client.Authorize(ctx, req)
@@ -1595,12 +1611,14 @@ func TestAuthorize_NonASCIIWalletQRCodeBinding(t *testing.T) {
 	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	resp, err := client.Authorize(ctx, &AuthorizeRequest{
-		ResponseType: "code",
-		ClientID:     "non-ascii-wallet-client",
-		RedirectURI:  "https://example.com/callback",
-		Scope:        "openid profile",
-		State:        "test-state",
-		Nonce:        "test-nonce",
+		ResponseType:        "code",
+		ClientID:            "non-ascii-wallet-client",
+		RedirectURI:         "https://example.com/callback",
+		Scope:               "openid profile",
+		State:               "test-state",
+		Nonce:               "test-nonce",
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: "S256",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -1848,7 +1866,7 @@ func TestGetUserInfo(t *testing.T) {
 					CodeDuration:        600,
 					AccessTokenDuration: 3600,
 					IDTokenDuration:     3600,
-					EnableUserInfo:      true,
+					EnableUserInfo:      boolPtr(true),
 				},
 			},
 		},
@@ -2594,6 +2612,13 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 		},
 	}
 
+	// Explicitly off. This assertion used to ride on the test harness's
+	// zero value, which read as "disabled" only while EnableUserInfo was a
+	// plain bool - the configured default is true, so a real deployment
+	// always advertised userinfo_endpoint and this test pinned the
+	// opposite of what shipped (SUNET/vc#753).
+	cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo = boolPtr(false)
+
 	client, _ := CreateTestClientWithMock(t, cfg)
 
 	// Test getting discovery metadata
@@ -2605,7 +2630,7 @@ func TestGetDiscoveryMetadata(t *testing.T) {
 	assert.Equal(t, "https://verifier.example.com", metadata.Issuer)
 	assert.Equal(t, "https://verifier.example.com/authorize", metadata.AuthorizationEndpoint)
 	assert.Equal(t, "https://verifier.example.com/token", metadata.TokenEndpoint)
-	assert.Empty(t, metadata.UserInfoEndpoint, "userinfo_endpoint should be omitted when EnableUserInfo is false")
+	assert.Empty(t, metadata.UserInfoEndpoint, "userinfo_endpoint must be omitted when enable_userinfo is off")
 	assert.Equal(t, "https://verifier.example.com/jwks", metadata.JwksURI)
 
 	// Verify supported features
@@ -2714,7 +2739,7 @@ func TestGetDiscoveryMetadata_CustomExternalURL(t *testing.T) {
 							Issuer:         tt.externalURL,
 							SubjectType:    "public",
 							SubjectSalt:    "test-salt",
-							EnableUserInfo: true,
+							EnableUserInfo: boolPtr(true),
 						},
 					},
 					Inbound: model.VerifierInbound{
@@ -3080,3 +3105,7 @@ func TestBuildOpenID4VPAuthzRequest(t *testing.T) {
 		})
 	}
 }
+
+// boolPtr is for the *bool config fields: a defaulted-true flag has to be a
+// pointer so an explicit false survives defaults.Set (SUNET/vc#753).
+func boolPtr(b bool) *bool { return &b }
