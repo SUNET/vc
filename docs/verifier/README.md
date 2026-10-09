@@ -144,7 +144,6 @@ verifier:
 
   digital_credentials:
     enabled: true
-    use_jar: true
     preferred_formats: ["vc+sd-jwt", "dc+sd-jwt", "mso_mdoc"]
     response_mode: "dc_api.jwt"
     allow_qr_fallback: true

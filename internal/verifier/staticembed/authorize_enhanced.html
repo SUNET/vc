@@ -414,7 +414,6 @@
             sessionId: '{{.SessionID}}',
             baseUrl: window.location.origin,
             preferredFormats: {{.PreferredFormats}},
-            useJAR: {{.UseJAR}},
             responseMode: '{{.ResponseMode}}',
             digitalCredentialsEnabled: {{.Config.DigitalCredentials.Enable}},
             allowQRFallback: {{.Config.DigitalCredentials.AllowQRFallback}},
@@ -427,9 +426,7 @@
         configureDCAPI({
             baseUrl: config.baseUrl,
             sessionId: config.sessionId,
-            requestObjectUrl: config.useJAR
-                ? `${config.baseUrl}/verification/request-object/${config.sessionId}`
-                : undefined,
+            requestObjectUrl: `${config.baseUrl}/verification/request-object/${config.sessionId}`,
             directPostUrl: `${config.baseUrl}/verification/direct_post`,
             pollUrl: `${config.baseUrl}/poll/${config.sessionId}`,
             deepLinkScheme: config.deepLinkScheme || 'openid4vp://',
@@ -486,26 +483,20 @@
 
                 showLoader('Requesting credential from wallet...');
 
-                // Fetch the authorization request (signed JWT or plain object)
-                const endpoint = config.useJAR
-                    ? `/verification/request-object/${config.sessionId}`
-                    : `/verification/request/${config.sessionId}`;
-                const accept = config.useJAR
-                    ? 'application/oauth-authz-req+jwt'
-                    : 'application/json';
-
-                const reqResponse = await fetch(`${config.baseUrl}${endpoint}`, {
+                // The signed request object. The verifier serves exactly
+                // one thing at exactly one route; the branch that used to
+                // be here fetched /verification/request/{session}, which
+                // is not a registered route (SUNET/vc#755).
+                const reqResponse = await fetch(`${config.baseUrl}/verification/request-object/${config.sessionId}`, {
                     method: 'GET',
-                    headers: { 'Accept': accept },
+                    headers: { 'Accept': 'application/oauth-authz-req+jwt' },
                 });
 
                 if (!reqResponse.ok) {
                     throw new Error(`Failed to fetch authorization request: ${reqResponse.status}`);
                 }
 
-                const authRequest = config.useJAR
-                    ? await reqResponse.text()
-                    : await reqResponse.json();
+                const authRequest = await reqResponse.text();
 
                 // Use polyfill — it tries native DC API first, then falls back
                 const credential = await requestCredential(authRequest);

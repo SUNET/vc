@@ -142,8 +142,6 @@ func TestDigitalCredentialsDefaults(t *testing.T) {
 		"ResponseMode should default to dc_api.jwt")
 	assert.False(t, dc.Enable,
 		"Enable should default to false")
-	assert.False(t, dc.UseJAR,
-		"UseJAR should default to false")
 }
 
 func TestSignMetadataRateLimitDefaults(t *testing.T) {

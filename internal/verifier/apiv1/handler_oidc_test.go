@@ -140,7 +140,6 @@ func TestAuthorizeResponse_Fields(t *testing.T) {
 		DeepLinkURL:      "openid://authorize?...",
 		PollURL:          "https://verifier.example.com/session/session-123",
 		PreferredFormats: []string{"vc+sd-jwt"},
-		UseJAR:           true,
 		ResponseMode:     "direct_post",
 		Title:            "Verify your credential",
 		Subtitle:         "Scan the QR code with your wallet",
@@ -153,7 +152,6 @@ func TestAuthorizeResponse_Fields(t *testing.T) {
 	assert.Equal(t, "session-123", resp.SessionID)
 	assert.Equal(t, "openid://...", resp.QRCodeData)
 	assert.Contains(t, resp.PreferredFormats, "vc+sd-jwt")
-	assert.True(t, resp.UseJAR)
 	assert.Equal(t, "direct_post", resp.ResponseMode)
 }
 
@@ -1343,7 +1341,6 @@ func TestAuthorize_FullFlow(t *testing.T) {
 			client.cfg.Verifier.Outbound.OIDCProvider.SessionDuration = 900
 			client.cfg.Verifier.DigitalCredentials.Enable = true
 			client.cfg.Verifier.DigitalCredentials.PreferredFormats = []string{"vc+sd-jwt"}
-			client.cfg.Verifier.DigitalCredentials.UseJAR = true
 			client.cfg.Verifier.DigitalCredentials.ResponseMode = "direct_post.jwt"
 			client.cfg.Verifier.AuthorizationPageCSS.Title = "Test Verifier"
 			client.cfg.Verifier.AuthorizationPageCSS.Theme = "dark"
@@ -1379,7 +1376,6 @@ func TestAuthorize_FullFlow(t *testing.T) {
 
 				// Verify DC API configuration
 				assert.Equal(t, []string{"vc+sd-jwt"}, resp.PreferredFormats)
-				assert.True(t, resp.UseJAR)
 				assert.Equal(t, "direct_post.jwt", resp.ResponseMode)
 
 				// Verify CSS configuration
@@ -1448,7 +1444,6 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 
 	// Verify DC API configuration from struct defaults is applied
 	assert.Equal(t, resp.PreferredFormats, client.cfg.Verifier.DigitalCredentials.PreferredFormats)
-	assert.Equal(t, resp.UseJAR, client.cfg.Verifier.DigitalCredentials.UseJAR)
 	assert.Equal(t, resp.ResponseMode, client.cfg.Verifier.DigitalCredentials.ResponseMode)
 
 	// Verify default title/subtitle are applied

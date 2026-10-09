@@ -63,7 +63,6 @@ type AuthorizeResponse struct {
 	PollURL          string       `json:"poll_url"`
 	WalletLinks      []WalletLink `json:"wallet_links,omitempty"`
 	PreferredFormats []string     `json:"preferred_formats"`
-	UseJAR           bool         `json:"use_jar"`
 	ResponseMode     string       `json:"response_mode"`
 	Title            string       `json:"title"`
 	Subtitle         string       `json:"subtitle"`
@@ -224,7 +223,6 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 
 	// Add Digital Credentials API configuration
 	response.PreferredFormats = c.cfg.Verifier.DigitalCredentials.PreferredFormats
-	response.UseJAR = c.cfg.Verifier.DigitalCredentials.UseJAR
 	response.ResponseMode = c.cfg.Verifier.DigitalCredentials.ResponseMode
 
 	// Add CSS customization configuration

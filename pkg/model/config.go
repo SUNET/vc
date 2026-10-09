@@ -1234,10 +1234,6 @@ type DigitalCredentialsConfig struct {
 	// Enable toggles W3C Digital Credentials API support in browser
 	Enable bool `yaml:"enable" default:"false"`
 
-	// UseJAR enables JWT Authorization Request (JAR) for wallet communication
-	// When true, request objects are signed JWTs instead of plain JSON
-	UseJAR bool `yaml:"use_jar" default:"false"`
-
 	// PreferredFormats specifies the order of preference for credential formats
 	// Supported values: "vc+sd-jwt", "dc+sd-jwt", "mso_mdoc"
 	// Default: ["vc+sd-jwt", "dc+sd-jwt", "mso_mdoc"]
