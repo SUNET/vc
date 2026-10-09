@@ -81,7 +81,19 @@ type recordingVC20Issuer struct {
 
 func (r *recordingVC20Issuer) MakeVC20(_ context.Context, in *apiv1_issuer.MakeVC20Request, _ ...grpc.CallOption) (*apiv1_issuer.MakeVC20Reply, error) {
 	r.got = in
-	return &apiv1_issuer.MakeVC20Reply{Credential: []byte("{}"), CredentialId: "urn:uuid:test"}, nil
+	return &apiv1_issuer.MakeVC20Reply{
+		Credential:   []byte("{}"),
+		CredentialId: "urn:uuid:test",
+		// STATUS_ALLOCATION_NONE, not the zero value. An issuer that does
+		// not SAY is refused by saveCredentialSubjects, deliberately: a
+		// registry's first allocation is section 0 index 0 with no URI,
+		// which is byte-identical to "nothing allocated", so the
+		// unspecified case is what an issuer older than this field looks
+		// like and continuing on that guess mints a credential whose
+		// status reference nothing recorded. This test allocates nothing
+		// and has to say so.
+		StatusAllocation: apiv1_issuer.StatusAllocation_STATUS_ALLOCATION_NONE,
+	}, nil
 }
 
 // TestIssueVC20UsesTheResolvedConfiguration pins the WIRING, which the
@@ -127,7 +139,7 @@ func TestIssueVC20UsesTheResolvedConfiguration(t *testing.T) {
 
 	// The authorised scope is "diploma"; the identifier selected "licence",
 	// and the request carries no credential_configuration_id.
-	_, err := client.issueVC20(t.Context(), "diploma", []byte(`{}`), "person-1", "licence",
+	_, err := client.issueVC20(t.Context(), "diploma", []byte(`{}`), "person-1", "", "licence",
 		&openid4vci.CredentialRequest{
 			CredentialIdentifier: "licence-1",
 			Proof:                &openid4vci.Proof{ProofType: "jwt"},

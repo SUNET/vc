@@ -166,20 +166,24 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 
 		var rows strings.Builder
 		for _, person := range result.Results {
-			statusClass := fmt.Sprintf("status-%d", person.Status)
-			if person.Status > 2 {
-				statusClass = "status-other"
-			}
-			statusLabel := getStatusLabel(person.Status)
-
-			rows.WriteString(fmt.Sprintf(`
-				<tr>
-					<td>%s</td>
-					<td><span class="status-badge %s">%d - %s</span></td>
-					<td>
+			// An entry this registry does not own has no status it can
+			// read and none it may write: offering the Update control
+			// would invite an operator to revoke an unrelated local
+			// credential. Show where the entry actually lives instead.
+			statusCell := `<span class="status-badge status-other">unknown</span>`
+			actionCell := `<em>managed elsewhere</em>`
+			if person.Local && person.StatusKnown {
+				statusClass := fmt.Sprintf("status-%d", person.Status)
+				if person.Status > 2 {
+					statusClass = "status-other"
+				}
+				statusCell = fmt.Sprintf(`<span class="status-badge %s">%d - %s</span>`,
+					statusClass, person.Status, getStatusLabel(person.Status))
+				actionCell = fmt.Sprintf(`
 						<form method="POST" action="/admin/status" class="inline-form">
 							<input type="hidden" name="section" value="%d">
 							<input type="hidden" name="index" value="%d">
+							<input type="hidden" name="status_list_uri" value="%s">
 							<input type="hidden" name="search_identifier" value="%s">
 							<select name="status" style="width: 120px;">
 								<option value="0" %s>VALID</option>
@@ -187,14 +191,24 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 								<option value="2" %s>SUSPENDED</option>
 							</select>
 							<button type="submit" class="btn btn-success" style="padding: 4px 8px;">Update</button>
-						</form>
-					</td>
+						</form>`,
+					person.Section, person.Index,
+					html.EscapeString(person.StatusListURI),
+					html.EscapeString(searchIdentifier),
+					selected(person.Status == 0), selected(person.Status == 1), selected(person.Status == 2))
+			}
+
+			rows.WriteString(fmt.Sprintf(`
+				<tr>
+					<td>%s</td>
+					<td>%s</td>
+					<td>%s</td>
+					<td>%s</td>
 				</tr>`,
 				html.EscapeString(person.Identifier),
-				statusClass, person.Status, statusLabel,
-				person.Section, person.Index,
-				html.EscapeString(searchIdentifier),
-				selected(person.Status == 0), selected(person.Status == 1), selected(person.Status == 2)))
+				statusCell,
+				html.EscapeString(person.StatusListURI),
+				actionCell))
 		}
 
 		resultHTML = fmt.Sprintf(`
@@ -205,6 +219,7 @@ func searchPageHTML(errorMsg string, result *apiv1.SearchPersonReply, successMsg
 					<tr>
 						<th>Identifier</th>
 						<th>Status</th>
+						<th>Status list</th>
 						<th>Actions</th>
 					</tr>
 				</thead>

@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/issuer/apiv1"
@@ -22,9 +23,17 @@ func (s *Service) MakeJWP(ctx context.Context, in *apiv1_issuer.MakeJWPRequest) 
 		return nil, err
 	}
 
+	allocation, err := statusAllocation(reply.StatusAllocated, reply.TokenStatusListURI)
+	if err != nil {
+		return nil, fmt.Errorf("MakeJWP: %w", err)
+	}
+
 	return &apiv1_issuer.MakeJWPReply{
 		Credentials:            reply.Data,
 		TokenStatusListSection: reply.TokenStatusListSection,
 		TokenStatusListIndex:   reply.TokenStatusListIndex,
+		TokenStatusListUri:     reply.TokenStatusListURI,
+		TokenStatusListBackend: reply.TokenStatusListBackend,
+		StatusAllocation:       allocation,
 	}, nil
 }

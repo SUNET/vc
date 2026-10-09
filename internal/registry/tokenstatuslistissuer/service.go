@@ -3,7 +3,6 @@ package tokenstatuslistissuer
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strconv"
 	"time"
 
@@ -233,7 +232,9 @@ func (s *Service) refreshSection(ctx context.Context, section int64) {
 	signingMethod := jwt.GetSigningMethod(s.signer.Algorithm())
 
 	// Token config
-	subject, err := url.JoinPath(s.cfg.Registry.PublicURL, "/statuslists", key)
+	// Section 8.3 requires sub to equal the uri the credential points at,
+	// so this MUST be the same construction the allocation reply used.
+	subject, err := s.cfg.Registry.StatusListURL(section)
 	if err != nil {
 		s.log.Error(err, "Failed to construct subject URL", "section", section)
 		return

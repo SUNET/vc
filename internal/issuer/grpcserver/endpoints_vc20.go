@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/issuer/apiv1"
@@ -22,11 +23,19 @@ func (s *Service) MakeVC20(ctx context.Context, in *apiv1_issuer.MakeVC20Request
 		return nil, err
 	}
 
+	allocation, err := statusAllocation(reply.StatusAllocated, reply.StatusListURI)
+	if err != nil {
+		return nil, fmt.Errorf("MakeVC20: %w", err)
+	}
+
 	return &apiv1_issuer.MakeVC20Reply{
 		Credential:        reply.Credential,
 		CredentialId:      reply.CredentialID,
 		StatusListSection: reply.StatusListSection,
 		StatusListIndex:   reply.StatusListIndex,
+		StatusListUri:     reply.StatusListURI,
+		StatusListBackend: reply.StatusListBackend,
+		StatusAllocation:  allocation,
 		ValidFrom:         reply.ValidFrom,
 		ValidUntil:        reply.ValidUntil,
 	}, nil

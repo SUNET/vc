@@ -8,7 +8,6 @@ package apiv1_issuer
 
 import (
 	context "context"
-
 	apiv1_status "github.com/SUNET/vc/internal/gen/status/apiv1_status"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
@@ -21,14 +20,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	IssuerService_MakeSDJWT_FullMethodName    = "/v1.issuer.IssuerService/MakeSDJWT"
-	IssuerService_MakeMDoc_FullMethodName     = "/v1.issuer.IssuerService/MakeMDoc"
-	IssuerService_MakeVC20_FullMethodName     = "/v1.issuer.IssuerService/MakeVC20"
-	IssuerService_MakeJWP_FullMethodName      = "/v1.issuer.IssuerService/MakeJWP"
-	IssuerService_JWKS_FullMethodName         = "/v1.issuer.IssuerService/JWKS"
-	IssuerService_SignMetadata_FullMethodName = "/v1.issuer.IssuerService/SignMetadata"
-	IssuerService_GetIACAs_FullMethodName     = "/v1.issuer.IssuerService/GetIACAs"
-	IssuerService_Status_FullMethodName       = "/v1.issuer.IssuerService/Status"
+	IssuerService_MakeSDJWT_FullMethodName           = "/v1.issuer.IssuerService/MakeSDJWT"
+	IssuerService_MakeMDoc_FullMethodName            = "/v1.issuer.IssuerService/MakeMDoc"
+	IssuerService_MakeVC20_FullMethodName            = "/v1.issuer.IssuerService/MakeVC20"
+	IssuerService_MakeJWP_FullMethodName             = "/v1.issuer.IssuerService/MakeJWP"
+	IssuerService_JWKS_FullMethodName                = "/v1.issuer.IssuerService/JWKS"
+	IssuerService_SignMetadata_FullMethodName        = "/v1.issuer.IssuerService/SignMetadata"
+	IssuerService_GetIACAs_FullMethodName            = "/v1.issuer.IssuerService/GetIACAs"
+	IssuerService_SetCredentialStatus_FullMethodName = "/v1.issuer.IssuerService/SetCredentialStatus"
+	IssuerService_Status_FullMethodName              = "/v1.issuer.IssuerService/Status"
 )
 
 // IssuerServiceClient is the client API for IssuerService service.
@@ -42,6 +42,11 @@ type IssuerServiceClient interface {
 	JWKS(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*JwksReply, error)
 	SignMetadata(ctx context.Context, in *SignMetadataRequest, opts ...grpc.CallOption) (*SignMetadataReply, error)
 	GetIACAs(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*GetIACAsReply, error)
+	// SetCredentialStatus writes a new status-list value for an
+	// already-issued credential. The issuer is the one component configured
+	// with both status-list backends, so routing between them happens here
+	// rather than in every caller.
+	SetCredentialStatus(ctx context.Context, in *SetCredentialStatusRequest, opts ...grpc.CallOption) (*SetCredentialStatusReply, error)
 	Status(ctx context.Context, in *apiv1_status.StatusRequest, opts ...grpc.CallOption) (*apiv1_status.StatusReply, error)
 }
 
@@ -123,6 +128,16 @@ func (c *issuerServiceClient) GetIACAs(ctx context.Context, in *Empty, opts ...g
 	return out, nil
 }
 
+func (c *issuerServiceClient) SetCredentialStatus(ctx context.Context, in *SetCredentialStatusRequest, opts ...grpc.CallOption) (*SetCredentialStatusReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetCredentialStatusReply)
+	err := c.cc.Invoke(ctx, IssuerService_SetCredentialStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *issuerServiceClient) Status(ctx context.Context, in *apiv1_status.StatusRequest, opts ...grpc.CallOption) (*apiv1_status.StatusReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(apiv1_status.StatusReply)
@@ -144,6 +159,11 @@ type IssuerServiceServer interface {
 	JWKS(context.Context, *Empty) (*JwksReply, error)
 	SignMetadata(context.Context, *SignMetadataRequest) (*SignMetadataReply, error)
 	GetIACAs(context.Context, *Empty) (*GetIACAsReply, error)
+	// SetCredentialStatus writes a new status-list value for an
+	// already-issued credential. The issuer is the one component configured
+	// with both status-list backends, so routing between them happens here
+	// rather than in every caller.
+	SetCredentialStatus(context.Context, *SetCredentialStatusRequest) (*SetCredentialStatusReply, error)
 	Status(context.Context, *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error)
 	mustEmbedUnimplementedIssuerServiceServer()
 }
@@ -175,6 +195,9 @@ func (UnimplementedIssuerServiceServer) SignMetadata(context.Context, *SignMetad
 }
 func (UnimplementedIssuerServiceServer) GetIACAs(context.Context, *Empty) (*GetIACAsReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetIACAs not implemented")
+}
+func (UnimplementedIssuerServiceServer) SetCredentialStatus(context.Context, *SetCredentialStatusRequest) (*SetCredentialStatusReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetCredentialStatus not implemented")
 }
 func (UnimplementedIssuerServiceServer) Status(context.Context, *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Status not implemented")
@@ -326,6 +349,24 @@ func _IssuerService_GetIACAs_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IssuerService_SetCredentialStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetCredentialStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IssuerServiceServer).SetCredentialStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IssuerService_SetCredentialStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IssuerServiceServer).SetCredentialStatus(ctx, req.(*SetCredentialStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IssuerService_Status_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(apiv1_status.StatusRequest)
 	if err := dec(in); err != nil {
@@ -378,6 +419,10 @@ var IssuerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetIACAs",
 			Handler:    _IssuerService_GetIACAs_Handler,
+		},
+		{
+			MethodName: "SetCredentialStatus",
+			Handler:    _IssuerService_SetCredentialStatus_Handler,
 		},
 		{
 			MethodName: "Status",

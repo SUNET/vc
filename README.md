@@ -37,6 +37,10 @@ To stop everything: `make stop`
 
 The main configuration file is `config.yaml`. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for details.
 
+Credential revocation - what is issued with a status reference, how a status
+list signer is trusted, and what is not covered yet - is described in
+[docs/REVOCATION.md](docs/REVOCATION.md).
+
 ### Prerequisites
 
 - Docker and Docker Compose

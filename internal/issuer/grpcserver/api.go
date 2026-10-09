@@ -16,6 +16,7 @@ type Apiv1 interface {
 	JWKS(ctx context.Context, req *apiv1_issuer.Empty) (*apiv1_issuer.JwksReply, error)
 	SignMetadata(ctx context.Context, req *apiv1_issuer.SignMetadataRequest) (*apiv1_issuer.SignMetadataReply, error)
 	GetIACAs(ctx context.Context) (*apiv1_issuer.GetIACAsReply, error)
+	SetCredentialStatus(ctx context.Context, req *apiv1.SetCredentialStatusRequest) error
 
 	Health(ctx context.Context, req *apiv1_status.StatusRequest) (*apiv1_status.StatusReply, error)
 }

@@ -121,7 +121,7 @@ func TestMakeJWPRejectsUnusableHolderPointersWithoutConsumingAStatusEntry(t *tes
 		t.Run(tc.name, func(t *testing.T) {
 			c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
 			registry := &mockRegistryClient{}
-			c.registryClient = registry
+			setRegistry(c, registry)
 
 			_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
 				Commitment:     []byte{1, 2, 3},
@@ -162,7 +162,7 @@ func TestMakeJWPRejectsUnusableDocumentDataWithoutConsumingAStatusEntry(t *testi
 		t.Run(tc.name, func(t *testing.T) {
 			c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
 			registry := &mockRegistryClient{}
-			c.registryClient = registry
+			setRegistry(c, registry)
 
 			_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
 				Commitment:   []byte{1, 2, 3},
@@ -194,11 +194,12 @@ func TestMakeJWPRejectsUnusableDocumentDataWithoutConsumingAStatusEntry(t *testi
 func TestInvalidateStatusEntryHandsTheEntryBack(t *testing.T) {
 	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
 	registry := &mockRegistryClient{}
-	c.registryClient = registry
+	setRegistry(c, registry)
 
-	c.invalidateStatusEntry(context.Background(), &apiv1_registry.TokenStatusListAddStatusReply{
+	c.statusAllocator.Invalidate(context.Background(), &statusAllocation{
 		Section: 7,
 		Index:   42,
+		URI:     "https://registry.example.com/statuslists/7",
 	})
 
 	if len(registry.updates) != 1 {
@@ -211,6 +212,14 @@ func TestInvalidateStatusEntryHandsTheEntryBack(t *testing.T) {
 	if got.GetStatus() != uint32(tokenstatuslist.StatusInvalid) {
 		t.Fatalf("want StatusInvalid (%d), got %d", tokenstatuslist.StatusInvalid, got.GetStatus())
 	}
+	// The list the registry itself named at allocation has to travel back
+	// with the hand-back. The registry refuses an update that does not name
+	// the list it serves at that section, so dropping it here turns every
+	// hand-back into a hard failure and strands the slot it was meant to
+	// return.
+	if got.GetStatusListURI() != "https://registry.example.com/statuslists/7" {
+		t.Fatalf("hand-back must name the list the entry was allocated in, got %q", got.GetStatusListURI())
+	}
 }
 
 // The issuance has already failed by the time this runs, so a registry that
@@ -218,9 +227,9 @@ func TestInvalidateStatusEntryHandsTheEntryBack(t *testing.T) {
 // to receive the real error.
 func TestInvalidateStatusEntrySwallowsRegistryFailure(t *testing.T) {
 	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
-	c.registryClient = &mockRegistryClient{updateErr: errors.New("registry unreachable")}
+	setRegistry(c, &mockRegistryClient{updateErr: errors.New("registry unreachable")})
 
-	c.invalidateStatusEntry(context.Background(), &apiv1_registry.TokenStatusListAddStatusReply{Section: 1, Index: 2})
+	c.statusAllocator.Invalidate(context.Background(), &statusAllocation{Section: 1, Index: 2})
 }
 
 // Revocation status and issuer identity go in the header, not the claims.
@@ -232,9 +241,9 @@ func TestInvalidateStatusEntrySwallowsRegistryFailure(t *testing.T) {
 func TestBBSIssuerHeaderCarriesWhatMustNotBeHidden(t *testing.T) {
 	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
 
-	raw, err := c.bbsIssuerHeader(&apiv1_registry.TokenStatusListAddStatusReply{
-		Index:         42,
-		StatusListUri: "https://issuer.example.com/statuslists/1",
+	raw, err := c.bbsIssuerHeader(&statusAllocation{
+		Index: 42,
+		URI:   "https://issuer.example.com/statuslists/1",
 	})
 	if err != nil {
 		t.Fatalf("bbsIssuerHeader: %v", err)
@@ -510,7 +519,7 @@ func TestMakeJWPSignsUnderTheSuiteItWasGiven(t *testing.T) {
 			signer := &recordingIssuer{}
 			c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
 			c.bbsIssuerOverride = signer
-			c.registryClient = stubRegistry{}
+			setRegistry(c, stubRegistry{})
 
 			_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
 				Commitment:   []byte{1, 2, 3},
@@ -555,7 +564,7 @@ func (failingRegistry) TokenStatusListAddStatus(_ context.Context, _ *apiv1_regi
 func TestMakeJWPAlwaysReturnsAnExplicitStatusCode(t *testing.T) {
 	c := bbsClient(t, &bbsKeyPair{secret: []byte{1}, public: []byte{2}})
 	c.bbsIssuerOverride = &recordingIssuer{}
-	c.registryClient = failingRegistry{}
+	setRegistry(c, failingRegistry{})
 
 	_, err := c.MakeJWP(context.Background(), &CreateJWPRequest{
 		Commitment:   []byte{1, 2, 3},

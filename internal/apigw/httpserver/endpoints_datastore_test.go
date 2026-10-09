@@ -191,6 +191,13 @@ func (u unimplementedApiv1) DatastoreUpload(context.Context, *vcclient.UploadReq
 	panic("not implemented")
 }
 
+// On the shared stub rather than on each fake: RevokeCredential is part of
+// the Apiv1 interface, so every fake in this package needs it, and the next
+// one should not have to find that out from a compile error.
+func (u unimplementedApiv1) RevokeCredential(context.Context, *apiv1.RevokeCredentialRequest) (*apiv1.RevokeCredentialReply, error) {
+	panic("not implemented")
+}
+
 func (u unimplementedApiv1) DatastoreAddIdentity(context.Context, *apiv1.DatastoreAddIdentityRequest) error {
 	panic("not implemented")
 }
@@ -429,6 +436,10 @@ type mockApiv1 struct {
 	searchCalled bool
 	searchReq    *apiv1.DatastoreSearchRequest
 	uploadCalled bool
+}
+
+func (m *mockApiv1) RevokeCredential(_ context.Context, _ *apiv1.RevokeCredentialRequest) (*apiv1.RevokeCredentialReply, error) {
+	panic("not used by these tests")
 }
 
 func (m *mockApiv1) DatastoreSearch(_ context.Context, req *apiv1.DatastoreSearchRequest) (*apiv1.DatastoreSearchReply, error) {

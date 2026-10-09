@@ -1,0 +1,23 @@
+{
+  "@context": {
+    "@protected": true,
+    "TokenStatusListEntry": {
+      "@id": "https://ns.invalid/vc/token-status-list#TokenStatusListEntry",
+      "@context": {
+        "@protected": true,
+        "id": "@id",
+        "type": "@type",
+        "statusListUri": {
+          "@id": "https://ns.invalid/vc/token-status-list#statusListUri",
+          "@type": "@id"
+        },
+        "statusListIndex": {
+          "@id": "https://ns.invalid/vc/token-status-list#statusListIndex"
+        },
+        "statusPurpose": {
+          "@id": "https://ns.invalid/vc/token-status-list#statusPurpose"
+        }
+      }
+    }
+  }
+}

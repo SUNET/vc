@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"strconv"
 	"time"
 
-	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/vc20/contextstore"
 	"github.com/SUNET/vc/pkg/vc20/credential"
 	ecdsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/ecdsa"
 	eddsaSuite "github.com/SUNET/vc/pkg/vc20/crypto/eddsa"
@@ -40,8 +41,24 @@ type CreateVC20Reply struct {
 	CredentialID      string `json:"credential_id"`
 	StatusListSection int64  `json:"status_list_section"`
 	StatusListIndex   int64  `json:"status_list_index"`
-	ValidFrom         string `json:"valid_from"`
-	ValidUntil        string `json:"valid_until,omitempty"`
+	// StatusListURI is the list the entry was allocated in. Empty when no
+	// status entry was allocated, i.e. the credential is not revocable.
+	StatusListURI string `json:"status_list_uri,omitempty"`
+	// StatusListBackend names the backend that issued the entry; see
+	// CreateCredentialReply.TokenStatusListBackend.
+	StatusListBackend string `json:"status_list_backend,omitempty"`
+	// StatusAllocated says whether an entry was allocated at all, so no
+	// caller has to infer it from the other four fields. A registry's
+	// first allocation is legitimately section 0, index 0, and "nothing
+	// was allocated" is also section 0, index 0 - the URI tells them apart
+	// today only because allocateOrDegrade and allocateOptionalStatus both
+	// hand the slot back when one arrives without a URI. That is an
+	// invariant in another file, and a reader derived from an invariant is
+	// a reading that drifts. This is the verdict itself, recorded where
+	// the decision is made.
+	StatusAllocated bool   `json:"status_allocated"`
+	ValidFrom       string `json:"valid_from"`
+	ValidUntil      string `json:"valid_until,omitempty"`
 }
 
 // MakeVC20 creates a W3C VC 2.0 Data Integrity credential
@@ -100,19 +117,31 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 	defaultExpiry := validFrom.AddDate(1, 0, 0)
 	validUntil = &defaultExpiry
 
-	// Allocate status list entry for revocation support (if registry is configured)
+	// Allocate a status list entry for revocation support, if any allocator
+	// is configured. Best-effort for the registry backend, matching this
+	// path's pre-existing behaviour - VC 2.0 issuance has never required a
+	// status entry - but an external service's degraded_mode is honoured.
+	// See allocateOptionalStatus.
 	var statusSection, statusIndex int64
-	if c.registryClient != nil {
-		grpcReply, err := c.registryClient.TokenStatusListAddStatus(ctx, &apiv1_registry.TokenStatusListAddStatusRequest{
-			Status: 0, // VALID status for new credential
-		})
-		if err != nil {
-			c.log.Info("failed to allocate status list entry, issuing without revocation support", "error", err)
-		} else {
-			statusSection = grpcReply.GetSection()
-			statusIndex = grpcReply.GetIndex()
-			c.log.Debug("status list entry allocated for vc20", "section", statusSection, "index", statusIndex)
-		}
+	var statusURI, statusBackend string
+	// No allocation when the credential will carry no status. Allocating
+	// anyway consumed a slot per issuance and handed the APIGW an entry to
+	// record a revocation mapping for a credential with nothing to revoke -
+	// and made degraded_mode "fail" block a format that is deliberately
+	// non-revocable in this configuration.
+	statusAlloc, err := c.allocateVC20Status(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to allocate status list entry: %w", err)
+	}
+	// Everything from here can fail - the JSON-LD build, RDF parsing,
+	// signing, serialization - and the entry is already VALID on its
+	// backend. See releaseUnlessIssued.
+	credentialIssued := false
+	defer c.releaseUnlessIssued(ctx, statusAlloc, &credentialIssued)
+
+	if statusAlloc != nil {
+		statusSection, statusIndex, statusURI, statusBackend = statusAlloc.Section, statusAlloc.Index, statusAlloc.URI, statusAlloc.Backend
+		c.log.Debug("status list entry allocated for vc20", "section", statusSection, "index", statusIndex, "uri", statusURI)
 	}
 
 	// Build the credential JSON structure
@@ -123,6 +152,7 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 		credentialSubject,
 		validFrom,
 		validUntil,
+		statusAlloc,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build credential JSON: %w", err)
@@ -151,6 +181,9 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 		CredentialID:      credentialID,
 		StatusListSection: statusSection,
 		StatusListIndex:   statusIndex,
+		StatusListURI:     statusURI,
+		StatusListBackend: statusBackend,
+		StatusAllocated:   statusAlloc != nil,
 		ValidFrom:         validFrom.Format(time.RFC3339),
 	}
 
@@ -158,6 +191,7 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 		reply.ValidUntil = validUntil.Format(time.RFC3339)
 	}
 
+	credentialIssued = true
 	return reply, nil
 }
 
@@ -237,6 +271,7 @@ func (c *Client) buildVC20CredentialJSON(
 	credentialSubject map[string]any,
 	validFrom time.Time,
 	validUntil *time.Time,
+	status *statusAllocation,
 ) ([]byte, error) {
 	// Ensure VerifiableCredential is in types
 	hasVC := slices.Contains(types, "VerifiableCredential")
@@ -261,6 +296,29 @@ func (c *Client) buildVC20CredentialJSON(
 
 	if validUntil != nil {
 		cred["validUntil"] = validUntil.Format(time.RFC3339)
+	}
+
+	// credentialStatus, when an entry was allocated. The context that
+	// defines TokenStatusListEntry has to be added alongside it: vc signs
+	// VC 2.0 with Data Integrity over canonicalized RDF, and terms no
+	// context defines expand to relative IRIs and vanish from the canonical
+	// form - the status would then not be covered by the proof at all, so a
+	// verifier could have it stripped or rewritten without the signature
+	// failing. Adding the context only when there is a status keeps it out
+	// of credentials that have none.
+	if status != nil {
+		cred["@context"] = []string{credential.ContextV2, contextstore.TokenStatusListContextURL}
+		cred["credentialStatus"] = map[string]any{
+			// The entry identifies itself by the list it is in and its
+			// place in that list, which is exactly what a verifier needs
+			// to resolve it and what the other formats carry as
+			// status_list.{uri,idx}.
+			"id":              fmt.Sprintf("%s#%d", status.URI, status.Index),
+			"type":            contextstore.TokenStatusListEntryType,
+			"statusListUri":   status.URI,
+			"statusListIndex": strconv.FormatInt(status.Index, 10),
+			"statusPurpose":   "revocation",
+		}
 	}
 
 	return json.Marshal(cred)
@@ -324,4 +382,33 @@ func isValidCryptosuite(cryptosuite string) bool {
 	default:
 		return false
 	}
+}
+
+// vc20StatusEnabled reports whether issued VC 2.0 credentials should carry
+// a credentialStatus entry.
+//
+// Off unless issuer.vc20_status_enable is explicitly true. See that field
+// for why: the context namespace is a placeholder no third party can
+// resolve, and no verifier checks the result yet, so a credential emitted
+// with one would look revocable without being so.
+func (c *Client) vc20StatusEnabled() bool {
+	if c.cfg == nil || c.cfg.Issuer == nil || c.cfg.Issuer.VC20StatusEnable == nil {
+		return false
+	}
+	return *c.cfg.Issuer.VC20StatusEnable
+}
+
+// allocateVC20Status allocates a status-list entry for a VC 2.0 issuance,
+// or nothing when the credential will not carry a status.
+//
+// Separate from the caller so the gate is testable on its own: allocating
+// for a credential that will carry no status reference consumes a slot per
+// issuance, hands the APIGW an entry to record a mapping nothing can use,
+// and makes degraded_mode "fail" block a format that is deliberately
+// non-revocable in this configuration.
+func (c *Client) allocateVC20Status(ctx context.Context) (*statusAllocation, error) {
+	if !c.vc20StatusEnabled() {
+		return nil, nil
+	}
+	return c.allocateOptionalStatus(ctx, "vc20")
 }
