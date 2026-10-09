@@ -77,7 +77,7 @@ func NewMongoStore(ctx context.Context, client *mongo.Client, database, collecti
 		},
 	}
 
-	if _, err := coll.Indexes().CreateMany(ctx, indexes); err != nil {
+	if err := ensureIndexes(ctx, coll, indexes, ttl); err != nil {
 		return nil, fmt.Errorf("failed to create indexes: %w", err)
 	}
 
