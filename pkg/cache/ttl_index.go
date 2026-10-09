@@ -73,6 +73,19 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 	// wanted. Reading live state also avoids parsing an error string whose
 	// wording is not part of anyone's contract.
 	state, indexName, listErr := ttlIndexStateReader(ctx, coll, ttl)
+
+	// Ask for the index under the name it already has.
+	//
+	// An operator may have created {created_at: 1} with a name of their
+	// own. Requesting it as created_at_1 then conflicts however the expiry
+	// is fixed - "Index already exists with a different name", measured on
+	// 7 - so collMod alone could never converge and the only way out was to
+	// drop their index and recreate it under ours. Renaming the REQUEST
+	// instead keeps their name, needs no drop, leaves no window with the
+	// collection unexpired, and works for a role that may collMod but not
+	// dropIndex.
+	indexes = withTTLIndexName(indexes, indexName)
+
 	switch {
 	case listErr != nil:
 		return fmt.Errorf("index %s conflicts and its current state could not be read: %w (original: %v)",
@@ -89,21 +102,12 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 		// retry raises it again, freshly, and without the TTL index having
 		// been touched.
 
-	case state == ttlIndexNotTTL || indexName != createdAtTTLIndex:
-		// Two states that collMod cannot resolve, both ending in a
-		// rebuild.
-		//
-		// No expiry at all: collMod cannot ADD expireAfterSeconds before
-		// MongoDB 5.1 - measured on 4.4 and 5.0, which return code 72 "no
+	case state == ttlIndexNotTTL:
+		// collMod cannot ADD expireAfterSeconds before MongoDB 5.1 -
+		// measured on 4.4 and 5.0, which return code 72 "no
 		// expireAfterSeconds field to update" - and 4.4 is the documented
-		// minimum.
-		//
-		// A name the batch will not accept: collMod can fix such an
-		// index's expiry, but CreateMany then conflicts anyway, because it
-		// asks for created_at_1 while an equivalent key already exists
-		// under another name ("Index already exists with a different name",
-		// measured on 7). The only way to converge is to recreate it under
-		// the name the batch expects.
+		// minimum. So go straight to the rebuild rather than attempt a call
+		// that cannot work there.
 		//
 		// Safe to drop because the state has been read off the collection:
 		// this IS the {created_at: 1} index, and it is expiring nothing.
@@ -415,4 +419,20 @@ func ttlIndexModel(indexes []mongo.IndexModel) (mongo.IndexModel, bool) {
 		}
 	}
 	return mongo.IndexModel{}, false
+}
+
+// withTTLIndexName makes the batch ask for the TTL index under name.
+//
+// Returns the batch unchanged when there is no name to apply or it is
+// already the one MongoDB would generate. Mutates the matching model's
+// options builder, which is safe because each constructor builds its batch
+// afresh.
+func withTTLIndexName(indexes []mongo.IndexModel, name string) []mongo.IndexModel {
+	if name == "" || name == createdAtTTLIndex {
+		return indexes
+	}
+	if model, ok := ttlIndexModel(indexes); ok {
+		model.Options.SetName(name)
+	}
+	return indexes
 }

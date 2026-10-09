@@ -481,17 +481,51 @@ func TestTTLIndexMigratesACustomNamedIndex(t *testing.T) {
 	assert.Equal(t, ttlIndexExpiryChanged, state, "a real TTL index was reported absent because of its name")
 	assert.Equal(t, custom, name, "the name found must be carried to collMod and the drop")
 
-	// ... and the migration goes through, converging on the name the store
-	// defines. collMod alone cannot get there: it fixes the expiry, and the
-	// batched CreateMany then conflicts anyway because an equivalent key
-	// exists under another name. So the index is rebuilt as created_at_1.
+	// ... and the migration goes through IN PLACE, keeping the operator's
+	// name. collMod fixes the expiry and the retry asks for the index under
+	// the name already there, so nothing is dropped.
 	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
 	require.NoError(t, err, "a real TTL index under a custom name must be migrated, not refused")
 
-	assert.Equal(t, int32(900), ttlOf(t, client, db, coll),
-		"the store's own index is missing or on the wrong expiry")
-	assert.False(t, indexExists(t, client, db, coll, custom),
-		"the custom-named duplicate was left behind")
+	assert.Equal(t, int32(900), ttlOfNamed(t, client, db, coll, custom),
+		"the operator's index is missing or on the wrong expiry")
+	assert.False(t, indexExists(t, client, db, coll, createdAtTTLIndex),
+		"a duplicate was created under the generated name instead of updating theirs")
+}
+
+// The same index under a custom name, on a deployment that cannot collMod:
+// it has to be rebuilt, and the operator's name still survives.
+func TestTTLIndexRebuildKeepsACustomName(t *testing.T) {
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_custom_rebuild")
+	const custom = "ttl_by_created_at"
+
+	c := client.Database(db).Collection(coll)
+	_, err := c.Indexes().CreateOne(ctx, createdAtIndex(600, custom))
+	require.NoError(t, err)
+
+	refuseCollMod(t, 13, "not authorized to execute command collMod")
+
+	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	require.NoError(t, err)
+
+	assert.Equal(t, int32(900), ttlOfNamed(t, client, db, coll, custom),
+		"the rebuild did not keep the operator's index name")
+}
+
+// ttlOfNamed reads expireAfterSeconds off an index by name.
+func ttlOfNamed(t *testing.T, client *mongo.Client, db, coll, name string) int32 {
+	t.Helper()
+
+	for _, spec := range indexSpecs(t, client, db, coll) {
+		if spec["name"] != name {
+			continue
+		}
+		v, ok := asInt32(spec["expireAfterSeconds"])
+		require.True(t, ok, "%s is not a TTL index", name)
+		return v
+	}
+	t.Fatalf("no %s index on %s.%s", name, db, coll)
+	return 0
 }
 
 // indexExists reports whether an index of this name is on the collection.
