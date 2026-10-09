@@ -38,6 +38,11 @@ var shippedConfigs = []string{
 func TestShippedConfigsCarryNoUnknownKeys(t *testing.T) {
 	root := repoRoot(t)
 
+	// Before the loop, because a loop cannot prove it ran: emptying
+	// shippedConfigs would otherwise make this test and the one below pass
+	// while checking nothing at all.
+	require.Len(t, shippedConfigs, 5, "the list of shipped configs has changed - update it deliberately")
+
 	for _, name := range shippedConfigs {
 		t.Run(name, func(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join(root, name))
@@ -50,10 +55,12 @@ func TestShippedConfigsCarryNoUnknownKeys(t *testing.T) {
 	}
 }
 
-// ... and the files are really being read, so the loop cannot pass by
-// finding nothing.
+// ... and every file named is really there, so the strict pass above
+// cannot quietly skip one that has been renamed or moved.
 func TestShippedConfigsAreAllPresent(t *testing.T) {
 	root := repoRoot(t)
+
+	require.NotEmpty(t, shippedConfigs)
 
 	for _, name := range shippedConfigs {
 		_, err := os.Stat(filepath.Join(root, name))
