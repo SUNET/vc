@@ -466,3 +466,88 @@ func TestTTLIndexDoesNotRejectAConflictAnotherReplicaResolved(t *testing.T) {
 
 	assert.Equal(t, int32(900), ttlOf(t, client, db, coll))
 }
+
+// Two indexes conflicting at once must not cost the collection its TTL.
+//
+// With state_1 mismatched AND created_at_1 on an old expiry, dropping the
+// TTL index and leaving the batched retry to rebuild it left the collection
+// with no expiry at all: CreateMany fails again on state_1, which precedes
+// the TTL model in the batch, and never reaches it.
+func TestTTLIndexSurvivesASimultaneousConflict(t *testing.T) {
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	const db, coll = "test_ttl_both_conflict", "auth_ctx"
+	c := client.Database(db).Collection(coll)
+
+	// state_1 as the store wants it but carrying an expiry it does not -
+	// an 85 that this code cannot resolve.
+	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "state", Value: 1}},
+		Options: options.Index().SetSparse(true).SetExpireAfterSeconds(600),
+	})
+	require.NoError(t, err)
+
+	// ... and created_at_1 on the OLD expiry, so the TTL index genuinely
+	// needs migrating at the same time.
+	_, err = c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "created_at", Value: 1}},
+		Options: options.Index().SetExpireAfterSeconds(600),
+	})
+	require.NoError(t, err)
+
+	// readWrite-only, so the migration takes the drop-and-rebuild path.
+	original := ttlIndexCollMod
+	ttlIndexCollMod = func(context.Context, *mongo.Collection, time.Duration) error {
+		return mongo.CommandError{Code: 13, Message: "not authorized to execute command collMod"}
+	}
+	t.Cleanup(func() { ttlIndexCollMod = original })
+
+	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	require.Error(t, err, "the state_1 conflict is real and must still be reported")
+
+	// The point: startup failed, but the collection still expires
+	// documents - and at the new expiry, not the old one.
+	assert.Equal(t, int32(900), ttlOf(t, client, db, coll),
+		"the collection was left without a TTL index by a conflict it could not fix")
+}
+
+// An unrelated index that merely happens to be NAMED created_at_1 is not
+// the TTL index, and must not be migrated or dropped.
+//
+// "created_at_1" is only MongoDB's default name for {created_at: 1}; an
+// operator can give any index any name.
+func TestTTLIndexIgnoresAnImpostorByName(t *testing.T) {
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	c := client.Database("test_ttl_impostor").Collection("auth_ctx")
+
+	// A different key, wearing the TTL index's default name.
+	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "state", Value: 1}},
+		Options: options.Index().SetName(createdAtTTLIndex),
+	})
+	require.NoError(t, err)
+
+	state, err := ttlIndexStateOf(ctx, c, 15*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, ttlIndexAbsent, state,
+		"an index named created_at_1 on another key was taken for the TTL index")
+}
+
+// isCreatedAtKey on the shapes the driver and a hand-written spec produce.
+func TestIsCreatedAtKey(t *testing.T) {
+	assert.True(t, isCreatedAtKey(bson.D{{Key: "created_at", Value: int32(1)}}))
+	assert.True(t, isCreatedAtKey(bson.M{"created_at": int32(1)}))
+
+	assert.False(t, isCreatedAtKey(bson.D{{Key: "state", Value: int32(1)}}), "another field")
+	assert.False(t, isCreatedAtKey(bson.D{{Key: "created_at", Value: int32(-1)}}), "descending")
+	assert.False(t, isCreatedAtKey(bson.D{
+		{Key: "created_at", Value: int32(1)}, {Key: "state", Value: int32(1)},
+	}), "compound")
+	assert.False(t, isCreatedAtKey(nil))
+	assert.False(t, isCreatedAtKey("created_at"))
+}

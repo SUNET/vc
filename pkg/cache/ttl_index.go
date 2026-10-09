@@ -98,9 +98,9 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 		//
 		// Safe to drop because the state has been read off the collection:
 		// this IS the {created_at: 1} index, and it is expiring nothing.
-		if dropErr := coll.Indexes().DropOne(ctx, createdAtTTLIndex); dropErr != nil && !isIndexNotFound(dropErr) {
-			return fmt.Errorf("index %s exists without an expiry and could not be dropped to add one: %w (original: %v)",
-				createdAtTTLIndex, dropErr, err)
+		if rebuildErr := rebuildTTLIndex(ctx, coll, indexes, ttl); rebuildErr != nil {
+			return fmt.Errorf("index %s exists without an expiry and %w (original: %v)",
+				createdAtTTLIndex, rebuildErr, err)
 		}
 
 	default:
@@ -132,10 +132,10 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 				// conflict and the same collMod failure, so all of them
 				// reach this drop; losing that race is the expected
 				// outcome, not an error.
-				if dropErr := coll.Indexes().DropOne(ctx, createdAtTTLIndex); dropErr != nil && !isIndexNotFound(dropErr) {
+				if err := rebuildTTLIndex(ctx, coll, indexes, ttl); err != nil {
 					return fmt.Errorf(
-						"index %s already exists with a different expiry; collMod to %s failed (%w) and it could not be dropped either: %v",
-						createdAtTTLIndex, ttl, modErr, dropErr)
+						"index %s already exists with a different expiry; collMod to %s failed (%w) and %v",
+						createdAtTTLIndex, ttl, modErr, err)
 				}
 
 			default:
@@ -271,7 +271,7 @@ func ttlIndexStateOf(ctx context.Context, coll *mongo.Collection, ttl time.Durat
 
 	want := int32(ttl.Seconds())
 	for _, spec := range specs {
-		if spec["name"] != createdAtTTLIndex {
+		if spec["name"] != createdAtTTLIndex || !isCreatedAtKey(spec["key"]) {
 			continue
 		}
 		got, ok := asInt32(spec["expireAfterSeconds"])
@@ -287,6 +287,35 @@ func ttlIndexStateOf(ctx context.Context, coll *mongo.Collection, ttl time.Durat
 	return ttlIndexAbsent, nil
 }
 
+// isCreatedAtKey reports whether this index spec's key really is
+// {created_at: 1}.
+//
+// The name alone does not establish it. "created_at_1" is only MongoDB's
+// default name for that key, and an operator can give any index any name -
+// so an unrelated index called created_at_1 would otherwise be collMod'd,
+// or under readWrite dropped, on its way to reporting someone else's
+// conflict.
+func isCreatedAtKey(key any) bool {
+	// The driver decodes an index key as bson.D - it is ordered, and a
+	// compound index's order matters. bson.M is accepted too so this does
+	// not turn on a decoding detail.
+	switch doc := key.(type) {
+	case bson.D:
+		if len(doc) != 1 || doc[0].Key != "created_at" {
+			return false
+		}
+		order, ok := asInt32(doc[0].Value)
+		return ok && order == 1
+	case bson.M:
+		if len(doc) != 1 {
+			return false
+		}
+		order, ok := asInt32(doc["created_at"])
+		return ok && order == 1
+	}
+	return false
+}
+
 // asInt32 normalises the numeric types BSON can decode a stored int into.
 func asInt32(v any) (int32, bool) {
 	switch n := v.(type) {
@@ -300,4 +329,47 @@ func asInt32(v any) (int32, bool) {
 		return int32(n), true
 	}
 	return 0, false
+}
+
+// rebuildTTLIndex drops created_at_1 and recreates it at the wanted expiry,
+// on its own rather than through the caller's batch.
+//
+// The batch is not safe to rely on here: more than one index can conflict
+// at once. With state_1 mismatched AND created_at_1 on an old expiry, a
+// drop followed by the batched retry leaves the collection with no expiry
+// at all - CreateMany fails again on state_1, which precedes the TTL model
+// in the batch, and never reaches it. Recreating immediately means the
+// retry can fail on someone else's conflict without that costing this
+// collection its TTL.
+func rebuildTTLIndex(ctx context.Context, coll *mongo.Collection, indexes []mongo.IndexModel, ttl time.Duration) error {
+	if dropErr := coll.Indexes().DropOne(ctx, createdAtTTLIndex); dropErr != nil && !isIndexNotFound(dropErr) {
+		return fmt.Errorf("it could not be dropped: %w", dropErr)
+	}
+
+	model, ok := ttlIndexModel(indexes)
+	if !ok {
+		// Nothing in the batch defines it, so there is nothing to put back
+		// and the caller's retry is the whole story.
+		return nil
+	}
+
+	if _, err := coll.Indexes().CreateOne(ctx, model); err != nil && !isIndexOptionsConflict(err) {
+		// A conflict here means another replica rebuilt it first.
+		return fmt.Errorf("it could not be recreated at %s: %w", ttl, err)
+	}
+	return nil
+}
+
+// ttlIndexModel finds the {created_at: 1} model in the batch.
+func ttlIndexModel(indexes []mongo.IndexModel) (mongo.IndexModel, bool) {
+	for _, m := range indexes {
+		keys, ok := m.Keys.(bson.D)
+		if !ok || len(keys) != 1 {
+			continue
+		}
+		if keys[0].Key == "created_at" {
+			return m, true
+		}
+	}
+	return mongo.IndexModel{}, false
 }
