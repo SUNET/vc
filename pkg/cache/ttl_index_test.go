@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -138,4 +139,53 @@ func TestLoweringTheTTLShortensExistingEntries(t *testing.T) {
 	require.NotNil(t, stored)
 	assert.Greater(t, stored.ExpiresAt, time.Now().Add(time.Duration(ttl)*time.Second).Unix(),
 		"this entry now outlives the retention that governs it - the documented trade-off")
+}
+
+// A deployment whose credentials cannot run collMod still starts.
+//
+// collMod needs the collMod privilege, which the built-in readWrite role
+// does not grant - measured on MongoDB 4.4: as a readWrite user collMod
+// returns Unauthorized (13), while dropIndexes and createIndexes both
+// succeed. So a failing collMod falls back to dropping the index and
+// letting it be rebuilt with the new expiry.
+func TestTTLIndexFallsBackWhenCollModIsUnavailable(t *testing.T) {
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	const db, coll = "test_ttl_no_collmod", "auth_ctx"
+
+	_, err := NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, int32(900), ttlOf(t, client, db, coll))
+
+	// Stand in for a readWrite-only deployment.
+	original := ttlIndexCollMod
+	var attempted bool
+	ttlIndexCollMod = func(context.Context, *mongo.Collection, time.Duration) error {
+		attempted = true
+		return mongo.CommandError{Code: 13, Message: "not authorized on t to execute command collMod"}
+	}
+	t.Cleanup(func() { ttlIndexCollMod = original })
+
+	_, err = NewMongoStore(ctx, client, db, coll, 60*time.Minute)
+	require.NoError(t, err, "a deployment without the collMod privilege must still start")
+	assert.True(t, attempted, "the fallback ran without collMod having been tried")
+
+	assert.Equal(t, int32(3600), ttlOf(t, client, db, coll),
+		"the index was not rebuilt with the new expiry")
+
+	// The store still works against the rebuilt index.
+	store, err := NewMongoStore(ctx, client, db, coll, 60*time.Minute)
+	require.NoError(t, err)
+	require.NoError(t, store.Create(ctx, &AuthorizationContext{
+		SessionID: "after-rebuild",
+		State:     "after-rebuild",
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(30 * time.Minute).Unix(),
+	}))
+
+	got, err := store.GetByID(ctx, "after-rebuild")
+	require.NoError(t, err)
+	assert.NotNil(t, got)
 }

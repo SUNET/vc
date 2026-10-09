@@ -27,9 +27,15 @@ const indexOptionsConflict = 85
 // edits a duration, with nothing in the error pointing at the duration they
 // changed.
 //
-// collMod is how an existing TTL is changed. Tried only on that specific
-// conflict, and only for this one index; anything else is returned
-// untouched.
+// collMod is how an existing TTL is changed, and it works on MongoDB 4.4,
+// the version this project documents as its minimum (measured, not assumed:
+// 5.1 is where collMod gained the ability to turn a NON-TTL index into a
+// TTL one, which is a different operation). It needs the collMod privilege
+// though, which the built-in readWrite role does not grant, so there is a
+// drop-and-rebuild fallback below for least-privilege deployments.
+//
+// Tried only on that specific conflict, and only for this one index;
+// anything else is returned untouched.
 //
 // A Mongo TTL index is collection-wide, so the new duration governs
 // documents already stored, not only the ones written afterwards.
@@ -56,26 +62,49 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 		return err
 	}
 
-	// collMod returns NamespaceNotFound if the collection does not exist,
-	// but a conflict means it does and the index is already there.
-	res := coll.Database().RunCommand(ctx, bson.D{
+	// A conflict means the collection and the index both exist, so the only
+	// question is how to change the index.
+	if modErr := ttlIndexCollMod(ctx, coll, ttl); modErr != nil {
+		// collMod needs the collMod privilege, which the built-in readWrite
+		// role does NOT grant - a least-privilege deployment gets
+		// Unauthorized (13). readWrite does grant dropIndex and
+		// createIndex, so drop the index and let the retry below rebuild it
+		// with the new expiry.
+		//
+		// Verified on MongoDB 4.4, the documented minimum: as a readWrite
+		// user, collMod fails with 13 and dropIndexes + createIndexes
+		// succeed.
+		//
+		// Between the drop and the rebuild nothing expires documents in
+		// this collection. That window is one index build at startup, and
+		// the alternative is refusing to start at all.
+		if dropErr := coll.Indexes().DropOne(ctx, createdAtTTLIndex); dropErr != nil {
+			return fmt.Errorf(
+				"index %s already exists with a different expiry; collMod to %s failed (%w) and it could not be dropped either: %v",
+				createdAtTTLIndex, ttl, modErr, dropErr)
+		}
+	}
+
+	// Either the TTL index now matches or it is gone, so this no longer
+	// conflicts - and any non-TTL index in the batch still gets created.
+	if _, err := coll.Indexes().CreateMany(ctx, indexes); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ttlIndexCollMod changes an existing TTL index's expiry in place.
+//
+// A package variable so the drop-and-rebuild fallback can be exercised
+// without an auth-enabled MongoDB.
+var ttlIndexCollMod = func(ctx context.Context, coll *mongo.Collection, ttl time.Duration) error {
+	return coll.Database().RunCommand(ctx, bson.D{
 		{Key: "collMod", Value: coll.Name()},
 		{Key: "index", Value: bson.D{
 			{Key: "name", Value: createdAtTTLIndex},
 			{Key: "expireAfterSeconds", Value: int32(ttl.Seconds())},
 		}},
-	})
-	if cmdErr := res.Err(); cmdErr != nil {
-		return fmt.Errorf("index %s already exists with a different expiry and could not be modified to %s: %w (original: %v)",
-			createdAtTTLIndex, ttl, cmdErr, err)
-	}
-
-	// Any non-TTL index in the batch still has to exist. The TTL index now
-	// matches, so this second attempt does not conflict on it.
-	if _, err := coll.Indexes().CreateMany(ctx, indexes); err != nil {
-		return err
-	}
-	return nil
+	}).Err()
 }
 
 // isIndexOptionsConflict reports whether err is MongoDB's code 85.
