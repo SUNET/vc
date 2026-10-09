@@ -422,9 +422,11 @@ func (c *Client) UpdateClient(ctx context.Context, req *UpdateClientRequest) (*C
 	if clientReg.CodeChallengeMethod != "" {
 		client.CodeChallengeMethod = clientReg.CodeChallengeMethod
 	}
-	// An update cannot change the PKCE policy either way: the stored flag
-	// can only ever tighten, and nothing a client sends decides it
-	// (SUNET/vc#757).
+	// CodeChallengeMethod is stored as metadata only; it does not decide
+	// whether PKCE is enforced. For a dynamic client pkceRequired consults
+	// the OP policy and the public-client rule, never db.Client.RequirePKCE,
+	// so the only update that moves the requirement is
+	// token_endpoint_auth_method changing to or from "none" (SUNET/vc#757).
 
 	// Update in database
 	err = c.db.Clients.Update(ctx, client)
