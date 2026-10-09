@@ -252,6 +252,46 @@ func TestVegaKeyStoreTreatsAMissingFileAsAMiss(t *testing.T) {
 	}
 }
 
+// ... and the same when the DIRECTORY goes, not just the file.
+//
+// A temp cleaner that removes the store's own directory left s.dir set, so
+// ensureDir returned happily and every later put failed in os.CreateTemp -
+// permanently. The documented recovery only worked for a missing file
+// whose directory survived.
+func TestVegaKeyStoreRecreatesAMissingDirectory(t *testing.T) {
+	s := newVegaKeyStore(t.TempDir(), 1000)
+	t.Cleanup(func() { _ = s.removeAll(context.Background()) })
+
+	path, release, err := s.put("a", []byte("key material"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+
+	// The whole store directory, as a /tmp cleaner would take it.
+	if err := os.RemoveAll(filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := s.get("a"); ok {
+		t.Fatal("a key whose directory is gone must not be reported as cached")
+	}
+	if s.cache.bytes != 0 {
+		t.Errorf("bytes = %d, want 0 - the accounting has to forget it too", s.cache.bytes)
+	}
+
+	// The point: the store still works afterwards.
+	newPath, release2, err := s.put("b", []byte("more key material"))
+	if err != nil {
+		t.Fatalf("put after the directory was removed: %v", err)
+	}
+	defer release2()
+
+	if got, err := os.ReadFile(newPath); err != nil || string(got) != "more key material" {
+		t.Fatalf("ReadFile(%s) = %q, %v", newPath, got, err)
+	}
+}
+
 func TestVegaKeyStoreSetMaxEvictsDownToTheNewBound(t *testing.T) {
 	s := newVegaKeyStore(t.TempDir(), 1000)
 	t.Cleanup(func() { _ = s.removeAll(context.Background()) })

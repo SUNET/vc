@@ -488,7 +488,25 @@ func (s *vegaKeyStore) put(id string, b []byte) (string, func(), error) {
 // swept up with it.
 func (s *vegaKeyStore) ensureDir() error {
 	if s.dir != "" {
-		return nil
+		// Still there? A temp cleaner that removes the directory itself
+		// leaves s.dir set, so this returned happily and every later put
+		// failed in os.CreateTemp. The documented recovery - a missing
+		// file becomes a miss and is refetched - only worked when the
+		// FILE went and its directory stayed.
+		if info, err := os.Stat(s.dir); err == nil && info.IsDir() {
+			return nil
+		}
+
+		// The entries describe files under a directory that is gone, so
+		// every one of them is a miss now. Dropping them is what turns
+		// this back into the documented recovery; a pinned entry has
+		// already been retired out of the map and its holder keeps its own
+		// path, so nothing in flight is disturbed.
+		for id := range s.entries {
+			s.cache.drop(id)
+		}
+		clear(s.entries)
+		s.dir = ""
 	}
 	if s.parent != "" {
 		if err := os.MkdirAll(s.parent, vegaKeyStoreDirPerm); err != nil {
