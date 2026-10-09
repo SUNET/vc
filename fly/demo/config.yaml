@@ -208,7 +208,6 @@ apigw:
       rules:
         - "(vc (service apigw)(method *)(path /api/v1/*)(subject admin@sunet.se)(authentic_source *)(scope *))"
   public_url: "https://sunet-vc-demo-apigw.fly.dev"
-  registry_public_url: "https://sunet-vc-demo-registry.fly.dev"
   issuer_client:
     addr: sunet-vc-demo-issuer.internal:8090
   registry_client:
