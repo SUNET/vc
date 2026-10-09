@@ -33,8 +33,9 @@ type DatastoreConfig struct {
 	Scopes map[string]DatastoreScope `yaml:"scopes,omitempty" validate:"omitempty,dive" doc_key:"credential scope"`
 
 	// Import configures automatic data import from JSON files at startup.
-	// When configured, APIGW reads JSON files and imports them into the
-	// datastore on first startup (skipped if data already exists).
+	// When configured, APIGW reads JSON files on every startup and imports
+	// each document whose natural key is not already present, so newly added
+	// fixtures (or a whole new scope) are imported on restart.
 	Import *DatastoreImport `yaml:"import,omitempty"`
 }
 
@@ -42,18 +43,28 @@ type DatastoreConfig struct {
 type DatastoreImport struct {
 	// FilePaths lists JSON files to import into the datastore.
 	// Each JSON file should contain a map of person IDs to CompleteDocument objects.
-	// Import is skipped if the datastore already contains data.
+	// On every startup each document is imported only if one with the same
+	// natural key is not already present; existing documents are left untouched.
 	FilePaths []string `yaml:"file_paths" validate:"required,min=1" doc_example:"[\"./bootstrapping/pid.json\", \"./bootstrapping/ehic.json\"]"`
 
 	// Users limits which person IDs to import. If empty, all persons are imported.
 	Users []string `yaml:"users,omitempty" doc_example:"[\"100\", \"102\"]"`
+
+	// ReplaceExisting makes the import overwrite documents whose natural key is
+	// already present with the fixture content. Use it only for shipped,
+	// generator-owned fixtures so corrected content (e.g. regenerated validity
+	// dates) reaches deployments that already hold the previous version. Leave
+	// it false (the default) for operator-edited data, which keeps the
+	// insert-only behaviour so existing documents are never overwritten.
+	ReplaceExisting bool `yaml:"replace_existing,omitempty" doc_example:"false"`
 }
 
 // IdentityMappingImport configures automatic import of identity mappings at startup.
 type IdentityMappingImport struct {
 	// FilePaths lists JSON files containing identity mappings to import.
 	// Each JSON file should contain a map of person IDs to arrays of IdentityMapping objects.
-	// Import is skipped if the identity mappings collection already contains data.
+	// On every startup each mapping is imported only if it is not already
+	// present; existing mappings are left untouched.
 	FilePaths []string `yaml:"file_paths" validate:"required,min=1" doc_example:"[\"./bootstrapping/identity_mappings.json\"]"`
 
 	// Users limits which person IDs to import. If empty, all persons are imported.
@@ -67,6 +78,16 @@ type DatastoreScope struct {
 	// to pre-authorized credential offers only; wallet-initiated PAR/authorize
 	// requests for such a scope are rejected.
 	AuthProvider string `yaml:"auth_provider" validate:"required,oneof=openid4vp saml oidc preauth"`
+
+	// AuthenticSource names the identity-mapping namespace used to resolve the
+	// authenticated user to an authentic_source_person_id for datastore
+	// identity lookups (oidc, saml, openid4vp). Identity mappings are scoped to
+	// an authentic source (SUNET/vc#507 made the namespace mandatory), so this
+	// must match the namespace the mappings were imported under. Not used for
+	// preauth, where the pre-authorized offer already carries the identifier.
+	// Constrained to match AuthorizationContext.AuthenticSource so a namespace
+	// that passes config load cannot later fail every authorize request.
+	AuthenticSource string `yaml:"authentic_source,omitempty" validate:"omitempty,max=128,printascii" doc_example:"\"SUNET\""`
 
 	// AuthClaims lists the normalized claim names used for datastore identity lookup
 	// when auth_provider is saml or oidc. Not used for openid4vp (use AuthScopes instead).
@@ -375,9 +396,10 @@ const (
 
 // CredentialSource describes where a credential's data comes from and how the user authenticates.
 type CredentialSource struct {
-	DataSource   DataSourceType
-	AuthProvider string
-	RemoteName   string // only for external_api
+	DataSource      DataSourceType
+	AuthProvider    string
+	RemoteName      string // only for external_api
+	AuthenticSource string // identity-mapping namespace, only for datastore
 }
 
 // LookupCredentialSources finds all data sources where a credential type is configured.
@@ -392,8 +414,9 @@ func (ds *DataSources) LookupCredentialSources(credentialType string) ([]Credent
 
 	if cred, ok := ds.Datastore.Scopes[credentialType]; ok {
 		sources = append(sources, CredentialSource{
-			DataSource:   DataSourceDatastore,
-			AuthProvider: cred.AuthProvider,
+			DataSource:      DataSourceDatastore,
+			AuthProvider:    cred.AuthProvider,
+			AuthenticSource: cred.AuthenticSource,
 		})
 	}
 

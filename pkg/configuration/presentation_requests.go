@@ -47,8 +47,19 @@ type PresentationRequestTemplate struct {
 	// Special value "*" means map all claims through unchanged
 	ClaimMappings map[string]string `yaml:"claim_mappings" json:"claim_mappings" validate:"required"`
 
-	// Enabled indicates whether this template is active
-	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Enabled indicates whether this template is active. Absent means
+	// enabled, which is why it is a POINTER: with a plain bool,
+	// "enabled: false" and "no enabled key" are the same value, so
+	// loadTemplateFile's default-to-true could not tell them apart and
+	// forced every file-loaded template on (SUNET/vc#754). Use
+	// IsEnabled rather than reading this directly.
+	Enabled *bool `yaml:"enabled" json:"enabled"`
+}
+
+// IsEnabled reports whether this template should be used. A template that
+// says nothing is enabled; only an explicit "enabled: false" turns it off.
+func (t *PresentationRequestTemplate) IsEnabled() bool {
+	return t.Enabled == nil || *t.Enabled
 }
 
 // GetID returns the template ID (implements openid4vp.PresentationRequestTemplate)
@@ -85,7 +96,7 @@ type PresentationRequestConfig struct {
 func (c *PresentationRequestConfig) GetEnabledTemplates() []*PresentationRequestTemplate {
 	enabled := make([]*PresentationRequestTemplate, 0, len(c.Templates))
 	for _, t := range c.Templates {
-		if t.Enabled {
+		if t.IsEnabled() {
 			enabled = append(enabled, t)
 		}
 	}
@@ -216,9 +227,6 @@ func loadTemplateFile(filePath string) ([]*PresentationRequestTemplate, error) {
 			if t.ID != "" {
 				hasID = true
 			}
-			if !t.Enabled {
-				t.Enabled = true
-			}
 		}
 		if hasID {
 			return cfg.Templates, nil
@@ -232,11 +240,9 @@ func loadTemplateFile(filePath string) ([]*PresentationRequestTemplate, error) {
 		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
 	}
 
-	// Set enabled to true by default if not specified
-	if !template.Enabled {
-		template.Enabled = true
-	}
-
+	// No defaulting here any more: Enabled is a pointer, so nil already
+	// means "not specified", and IsEnabled reads it that way. Writing true
+	// over it was what made "enabled: false" unusable in a file.
 	return []*PresentationRequestTemplate{&template}, nil
 }
 
@@ -298,7 +304,7 @@ func (c *PresentationRequestConfig) validateNoDuplicateScopes() error {
 // GetTemplateByID returns a template by its ID
 func (c *PresentationRequestConfig) GetTemplateByID(id string) (*PresentationRequestTemplate, error) {
 	for _, template := range c.Templates {
-		if template.ID == id && template.Enabled {
+		if template.ID == id && template.IsEnabled() {
 			return template, nil
 		}
 	}
@@ -308,7 +314,7 @@ func (c *PresentationRequestConfig) GetTemplateByID(id string) (*PresentationReq
 // GetTemplateByScope returns the template that handles the given OIDC scope
 func (c *PresentationRequestConfig) GetTemplateByScope(scope string) (*PresentationRequestTemplate, error) {
 	for _, template := range c.Templates {
-		if !template.Enabled {
+		if !template.IsEnabled() {
 			continue
 		}
 		if slices.Contains(template.OIDCScopes, scope) {
@@ -340,7 +346,7 @@ func (c *PresentationRequestConfig) GetTemplateByScopes(scopes []string) (*Prese
 func (c *PresentationRequestConfig) ListEnabledTemplates() []*PresentationRequestTemplate {
 	enabled := make([]*PresentationRequestTemplate, 0)
 	for _, template := range c.Templates {
-		if template.Enabled {
+		if template.IsEnabled() {
 			enabled = append(enabled, template)
 		}
 	}

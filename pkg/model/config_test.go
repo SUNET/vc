@@ -481,7 +481,7 @@ func TestLookupCredentialSources(t *testing.T) {
 func TestResolveDataSource(t *testing.T) {
 	ds := &DataSources{
 		Datastore: DatastoreConfig{Scopes: map[string]DatastoreScope{
-			"pid": {AuthProvider: AuthProviderOpenID4VP},
+			"pid": {AuthProvider: AuthProviderOpenID4VP, AuthenticSource: "Skatteverket"},
 		}},
 		Assertion: AssertionConfig{Scopes: map[string]AssertionScope{
 			"pid":     {AuthProvider: AuthProviderSAML},
@@ -498,6 +498,7 @@ func TestResolveDataSource(t *testing.T) {
 		authProvider   string
 		wantSource     DataSourceType
 		wantRemote     string
+		wantAuthentic  string
 		wantErr        bool
 	}{
 		{
@@ -505,6 +506,7 @@ func TestResolveDataSource(t *testing.T) {
 			credentialType: "pid",
 			authProvider:   AuthProviderOpenID4VP,
 			wantSource:     DataSourceDatastore,
+			wantAuthentic:  "Skatteverket",
 		},
 		{
 			name:           "pid with saml -> assertion",
@@ -551,6 +553,7 @@ func TestResolveDataSource(t *testing.T) {
 			if tt.wantRemote != "" {
 				assert.Equal(t, tt.wantRemote, src.RemoteName)
 			}
+			assert.Equal(t, tt.wantAuthentic, src.AuthenticSource)
 		})
 	}
 }

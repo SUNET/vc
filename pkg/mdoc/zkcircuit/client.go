@@ -31,6 +31,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -159,12 +160,21 @@ type CircuitDescriptor struct {
 	Notes         string         `json:"notes,omitempty"`
 }
 
-// ParamInt reads a numeric Params entry (decoded from JSON, so stored as
-// float64) as an int. Returns (0, false) if the key is absent, not
-// numeric, not an integral value (e.g. a catalog entry with
-// "num_attributes": 2.5), or outside the platform int range - all of
-// which would otherwise let a remote/untrusted catalog response silently
-// truncate into a nonsensical value via int(float64).
+// ParamInt reads a numeric Params entry as an int. Returns (0, false) if
+// the key is absent, not numeric, not an integral value (e.g. a catalog
+// entry with "num_attributes": 2.5), or outside the platform int range -
+// all of which would otherwise let a remote/untrusted catalog response
+// silently truncate into a nonsensical value via int(float64).
+//
+// A decimal string holding an integer is accepted as well, because the
+// live catalog publishes both shapes: the longfellow entries carry
+// "num_attributes": 2 while every vega-mc entry carries "saltBytes": "32",
+// "numClaims": "4" and "maxClaimBytes": "176". Which shape a publisher
+// chose is not something a consumer should have to know, and reading one
+// of them as "absent" is how a circuit constraint silently stops being
+// enforced. Only a plain decimal integer is taken - "32.0", "0x20",
+// " 32 " and "" are all refused, so a malformed entry still reads as
+// absent rather than as some number nobody wrote.
 func (d *CircuitDescriptor) ParamInt(key string) (int, bool) {
 	v, ok := d.Params[key]
 	if !ok {
@@ -178,9 +188,28 @@ func (d *CircuitDescriptor) ParamInt(key string) (int, bool) {
 		return int(n), true
 	case int:
 		return n, true
+	case string:
+		parsed, err := strconv.Atoi(n)
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
 	default:
 		return 0, false
 	}
+}
+
+// HasParam reports whether key is present in Params at all, whatever shape
+// its value has - including a JSON null.
+//
+// The companion to ParamInt/ParamString, which cannot tell "the catalog
+// said nothing" from "the catalog said something this cannot read". For a
+// constraint, those are opposites: absent means no constraint, malformed
+// means a constraint nobody can honour, and treating the second as the
+// first fails OPEN.
+func (d *CircuitDescriptor) HasParam(key string) bool {
+	_, ok := d.Params[key]
+	return ok
 }
 
 // ParamString reads a string Params entry. Returns ("", false) if the key
@@ -286,6 +315,14 @@ func (c *Client) FetchManifest(ctx context.Context) (*Manifest, error) {
 // net/http's default behavior). Returns an error only if every source
 // failed.
 func (c *Client) FetchCircuit(ctx context.Context, id string) (*CircuitDescriptor, error) {
+	// id is interpolated straight into the request path, and on the
+	// verifier side it comes from a presented proof's zkSystemId - see
+	// validCircuitID for what a crafted one would otherwise reach,
+	// particularly against a vendored file:// mirror.
+	if !ValidCircuitID(id) {
+		return nil, fmt.Errorf("invalid circuit id %q: a catalog id is a flat token of letters, digits, '-', '_' and '.'", id)
+	}
+
 	var lastErr error
 	for _, source := range c.Sources {
 		url := circuitURL(source, id)
@@ -339,7 +376,8 @@ func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescri
 	if artifact.Hash == "" {
 		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact has no hash - refusing to download unverifiable bytes", descriptor.ID)}
 	}
-	if strings.HasPrefix(artifact.URL, "http://") {
+	scheme := absoluteURLScheme(artifact.URL)
+	if scheme == "http" {
 		// SHA-256 verification below still catches tampered bytes, but a
 		// remote/untrusted catalog dictating a plaintext transport for its
 		// own absolute artifact URL is unnecessary exposure to on-path
@@ -348,7 +386,17 @@ func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescri
 		// http.
 		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact URL %q uses plaintext http - refusing (must be https or a relative path resolved against a configured source)", descriptor.ID, artifact.URL)}
 	}
-	if strings.HasPrefix(artifact.URL, "https://") && !c.isAllowedAbsoluteHost(artifact.URL) {
+	if scheme != "" && scheme != "https" {
+		// Anything else absolute - file://, ftp://, a scheme nobody has
+		// thought about - would fall through to candidateArtifactURLs,
+		// which treats a non-http URL as a RELATIVE PATH and glues it onto
+		// every source. That produces a nonsense URL rather than an error,
+		// which is the wrong way to find out the catalog said something
+		// unexpected. A vendored mirror's descriptors carry relative
+		// paths, which is the supported form and takes the branch below.
+		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact URL %q uses scheme %q - refusing (must be https or a relative path resolved against a configured source)", descriptor.ID, artifact.URL, scheme)}
+	}
+	if scheme == "https" && !c.isAllowedAbsoluteHost(artifact.URL) {
 		// Without this, an absolute artifact.URL from the remote,
 		// configurable catalog is a blind SSRF primitive: a
 		// compromised/malicious mirror could point it at an arbitrary host
@@ -361,7 +409,10 @@ func (c *Client) DownloadArtifact(ctx context.Context, descriptor *CircuitDescri
 	}
 
 	maxBytes := capFor(artifact.Size, hardCeilingCompressedBytes)
-	candidates := c.candidateArtifactURLs(artifact)
+	candidates, err := c.candidateArtifactURLs(artifact)
+	if err != nil {
+		return nil, &ArtifactError{Message: fmt.Sprintf("circuit %q artifact URL is unusable: %v", descriptor.ID, err)}
+	}
 	var lastFailure string
 	for _, url := range candidates {
 		data, err := c.fetchBytes(ctx, url, maxBytes)
@@ -461,6 +512,28 @@ func (c *Client) DownloadAndDecompress(ctx context.Context, descriptor *CircuitD
 	return decompressed, nil
 }
 
+// absoluteURLScheme returns the scheme of rawURL if it is written as an
+// absolute "scheme://..." URL, and "" if it is a relative path. Deliberately
+// textual rather than url.Parse-based: "v1/artifacts/sha256/ab:cd" parses
+// as a URL with no scheme but is a relative path, and that is the form the
+// real catalog serves.
+func absoluteURLScheme(rawURL string) string {
+	i := strings.Index(rawURL, "://")
+	if i <= 0 {
+		return ""
+	}
+	scheme := rawURL[:i]
+	for _, r := range scheme {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9', r == '+', r == '-', r == '.':
+		default:
+			return ""
+		}
+	}
+	return strings.ToLower(scheme)
+}
+
 func manifestURL(source string) string {
 	return strings.TrimRight(source, "/") + "/v1/manifest.json"
 }
@@ -484,6 +557,13 @@ func (c *Client) isAllowedAbsoluteHost(rawURL string) bool {
 		if err != nil {
 			continue
 		}
+		// Scheme as well as host: a file:// source has an empty Host, and
+		// matching on Host alone would make every empty-host URL - any
+		// scheme at all - "one of our sources". Hosts still compare
+		// case-insensitively; schemes are lowercase out of url.Parse.
+		if parsed.Scheme != sourceURL.Scheme {
+			continue
+		}
 		if strings.EqualFold(parsed.Host, sourceURL.Host) {
 			return true
 		}
@@ -493,20 +573,40 @@ func (c *Client) isAllowedAbsoluteHost(rawURL string) bool {
 
 // candidateArtifactURLs implements the resolution rules documented on
 // DownloadArtifact.
-func (c *Client) candidateArtifactURLs(artifact *Artifact) []string {
-	url := artifact.URL
-	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
-		return []string{url}
+func (c *Client) candidateArtifactURLs(artifact *Artifact) ([]string, error) {
+	if absoluteURLScheme(artifact.URL) != "" {
+		// Already validated by DownloadArtifact: https, host allowlisted.
+		// It pins its own host, so there is nothing to mirror-fallback
+		// across.
+		return []string{artifact.URL}, nil
 	}
-	path := strings.TrimPrefix(url, "/")
-	if path == "" {
-		path = "v1/artifacts/sha256/" + bareHex(artifact.Hash)
+
+	// The hash is catalog data too, and with no URL it is the whole of the
+	// path. "sha256:../../../../etc/passwd" would otherwise escape a
+	// file:// mirror before the digest check it is supposed to be.
+	digest := bareHex(artifact.Hash)
+	if !isSHA256Hex(digest) {
+		return nil, fmt.Errorf("artifact hash %q is not a SHA-256 digest", artifact.Hash)
 	}
+
+	relative := "v1/artifacts/sha256/" + digest
+	if artifact.URL != "" {
+		// The descriptor's own path is REMOTE DATA and gets joined onto
+		// every source - including, now, a local directory behind a
+		// file:// source, where "../../x" reads outside the mirror before
+		// hash verification can have an opinion.
+		safe, err := SafeRelativeArtifactPath(artifact.URL)
+		if err != nil {
+			return nil, err
+		}
+		relative = safe
+	}
+
 	candidates := make([]string, 0, len(c.Sources))
 	for _, source := range c.Sources {
-		candidates = append(candidates, strings.TrimRight(source, "/")+"/"+path)
+		candidates = append(candidates, strings.TrimRight(source, "/")+"/"+relative)
 	}
-	return candidates
+	return candidates, nil
 }
 
 func sha256Hex(data []byte) string {
@@ -520,6 +620,17 @@ func sha256Hex(data []byte) string {
 // correctly too. The prefix match is case-insensitive so an uppercase or
 // mixed-case "SHA256:" from the catalog doesn't get left in place and
 // break an otherwise-correct hash comparison/URL fallback.
+// isSHA256Hex reports whether digest is exactly a 32-byte hex SHA-256.
+// Length as well as alphabet: a 2-character "ab" is hex and is not a
+// digest, and anything built from it is not a path to a circuit.
+func isSHA256Hex(digest string) bool {
+	if len(digest) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
+	return err == nil
+}
+
 func bareHex(hash string) string {
 	if len(hash) >= 7 && strings.EqualFold(hash[:7], "sha256:") {
 		return hash[7:]
@@ -535,7 +646,7 @@ func (c *Client) fetchText(ctx context.Context, url string, maxBytes int64) (str
 	if c.FetchText != nil {
 		return c.FetchText(ctx, url)
 	}
-	data, err := c.fetchBytesHTTP(ctx, url, maxBytes)
+	data, err := c.fetchBytesURL(ctx, url, maxBytes)
 	if err != nil {
 		return "", err
 	}
@@ -548,6 +659,30 @@ func (c *Client) fetchText(ctx context.Context, url string, maxBytes int64) (str
 func (c *Client) fetchBytes(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
 	if c.FetchBytes != nil {
 		return c.FetchBytes(ctx, url)
+	}
+	return c.fetchBytesURL(ctx, url, maxBytes)
+}
+
+// fetchBytesURL dispatches on scheme: a file:// URL is a vendored local
+// mirror (see filesource.go) and is read off disk; everything else goes
+// over HTTP.
+func (c *Client) fetchBytesURL(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
+	if isFileURL(url) {
+		// fetchFile reads off disk and takes no ctx; honour the client's
+		// cancellation contract around it so a cancelled request cannot
+		// complete a local read and continue into signing - the HTTP path
+		// observes ctx, and a file source must not be the weaker one.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		data, err := fetchFile(url, maxBytes)
+		if err != nil {
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return data, nil
 	}
 	return c.fetchBytesHTTP(ctx, url, maxBytes)
 }
@@ -579,21 +714,24 @@ func (c *Client) fetchBytesHTTP(ctx context.Context, url string, maxBytes int64)
 			if len(via) >= 5 {
 				return fmt.Errorf("too many redirects fetching %s", url)
 			}
-			if !c.isAllowedAbsoluteHost(req.URL.String()) {
-				return fmt.Errorf("redirect to disallowed host %q", req.URL.Host)
-			}
-			// The host allowlist alone isn't enough: a same-host https->http
-			// redirect would still pass it while silently downgrading the
-			// transport, defeating DownloadArtifact's explicit rejection of
-			// plaintext absolute artifact URLs (candidateArtifactURLs never
-			// builds a plain-http URL itself, so this can only happen via a
-			// redirect response). Only enforce https when the ORIGINAL
-			// request was https (via[0]) - blocking every non-https redirect
-			// unconditionally would also break a Source legitimately
-			// configured as http:// (e.g. a local dev/test mirror), whose
-			// own same-scheme alias redirects are not a downgrade at all.
+			// Checked BEFORE the host allowlist, because a same-host
+			// https->http redirect fails both and the downgrade is the more
+			// useful thing to say: the allowlist compares scheme as well as
+			// host, so it would otherwise report a same-host downgrade as a
+			// "disallowed host". A downgrade defeats DownloadArtifact's
+			// explicit rejection of plaintext absolute artifact URLs
+			// (candidateArtifactURLs never builds a plain-http URL itself,
+			// so this can only happen via a redirect response). Only
+			// enforce https when the ORIGINAL request was https (via[0]) -
+			// blocking every non-https redirect unconditionally would also
+			// break a Source legitimately configured as http:// (e.g. a
+			// local dev/test mirror), whose own same-scheme alias redirects
+			// are not a downgrade at all.
 			if len(via) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme != "https" {
 				return fmt.Errorf("redirect from https to non-https scheme %q (downgrade not allowed)", req.URL.Scheme)
+			}
+			if !c.isAllowedAbsoluteHost(req.URL.String()) {
+				return fmt.Errorf("redirect to disallowed host %q", req.URL.Host)
 			}
 			return nil
 		},

@@ -219,7 +219,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		// Register checkers. To add a future mechanism (e.g., OCSP),
 		// pass it alongside statusListChecker — each checker provides its own Extract().
 		c.revocationRegistry = revocation.NewRegistry(statusListChecker)
-		c.log.Info("Revocation checker initialized", "cache_ttl", cacheTTL, "fail_open", cfg.Verifier.Revocation.FailOpen)
+		c.log.Info("Revocation checker initialized", "cache_ttl", cacheTTL, "fail_open", model.BoolVal(cfg.Verifier.Revocation.FailOpen, true))
 	}
 
 	c.statusAggregator = c.buildStatusAggregator()
@@ -320,6 +320,11 @@ func (c *Client) getClientByID(ctx context.Context, clientID string) (*db.Client
 					TokenEndpointAuthMethod: getOrDefaultString(staticClient.TokenEndpointAuthMethod, "client_secret_basic"),
 					AllowedScopes:           allowedScopes,
 					ClientName:              staticClient.ClientName,
+					// Never set, so it was always false and a static client
+					// was never asked for PKCE - with no field in
+					// StaticOIDCClient to turn it on (SUNET/vc#757). Now
+					// resolved from the OP policy, which defaults to true.
+					RequirePKCE: staticClientRequiresPKCE(staticClient, c.cfg),
 				}, true, nil // true = static client (plaintext secret)
 			}
 		}

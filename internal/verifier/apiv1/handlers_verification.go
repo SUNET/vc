@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/revocation"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -712,7 +713,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				result, err := c.revocationRegistry.Validate(ctx, cc.Credential)
 				if err != nil {
 					// Transient error (network, malformed token) — fail_open controls behavior
-					if c.cfg.Verifier.Revocation.FailOpen {
+					if model.BoolVal(c.cfg.Verifier.Revocation.FailOpen, true) {
 						c.log.Info("Revocation check failed (fail-open: allowing)", "scope", scope, "err", err)
 					} else {
 						c.log.Error(err, "revocation check failed", "scope", scope)

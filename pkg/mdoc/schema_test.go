@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+
+	"github.com/SUNET/vc/pkg/mdoc/zkcircuit"
 )
 
 func TestLoadMDDLSchema(t *testing.T) {
@@ -41,12 +43,38 @@ func TestLoadMDDLSchema(t *testing.T) {
 			}`,
 		},
 		{
-			"unsupported zk_salt_bytes",
+			// Below zkcircuit.MinSaltBytes. 16 used to be rejected here
+			// too, back when "0 or 32" was hardcoded; it is accepted now,
+			// because which length a credential needs is the circuit's to
+			// say and 16 is this package's own default for a non-ZK item.
+			"zk_salt_bytes below the accepted range",
 			`{
 				"format": "mso_mdoc",
 				"doctype": "x",
 				"claims": {"ns": {"a": {}}},
-				"zk_salt_bytes": 16
+				"zk_salt_bytes": 4
+			}`,
+		},
+		{
+			"zk_salt_bytes above the accepted range",
+			`{
+				"format": "mso_mdoc",
+				"doctype": "x",
+				"claims": {"ns": {"a": {}}},
+				"zk_salt_bytes": 65
+			}`,
+		},
+		{
+			// An empty system name resolves to no circuit and would
+			// otherwise be dropped silently, leaving a schema that looks
+			// like it declares a ZK system but is issued with default
+			// sizing.
+			"blank zk_systems entry",
+			`{
+				"format": "mso_mdoc",
+				"doctype": "x",
+				"claims": {"ns": {"a": {}}},
+				"zk_systems": ["vega-mc", "  "]
 			}`,
 		},
 		{
@@ -71,8 +99,11 @@ func TestLoadMDDLSchema(t *testing.T) {
 	}
 }
 
-func TestLoadMDDLSchema_ZkSaltBytesAcceptsZeroAndThirtyTwo(t *testing.T) {
-	for _, saltBytes := range []int{0, 32} {
+// The accepted range is zkcircuit's, so a pinned value and a
+// catalog-published one are held to the same bound. 8 and 64 are the
+// edges; 32 is what zk-cred-vega's r12 circuit publishes today.
+func TestLoadMDDLSchema_ZkSaltBytesAcceptsZeroAndTheCatalogRange(t *testing.T) {
+	for _, saltBytes := range []int{0, zkcircuit.MinSaltBytes, 32, zkcircuit.MaxSaltBytes} {
 		t.Run(fmt.Sprintf("saltBytes=%d", saltBytes), func(t *testing.T) {
 			raw := []byte(fmt.Sprintf(`{
 				"format": "mso_mdoc",
@@ -207,5 +238,20 @@ func TestMDDLSchema_SVGValues_NoSVGIDsReturnsNil(t *testing.T) {
 
 	if got := schema.SVGValues(map[string]any{"family_name": "Andersson"}); got != nil {
 		t.Errorf("SVGValues() = %+v, want nil when no claim declares svg_id", got)
+	}
+}
+
+func TestLoadMDDLSchema_KeepsZkSystems(t *testing.T) {
+	schema, err := LoadMDDLSchema([]byte(`{
+		"format": "mso_mdoc",
+		"doctype": "org.iso.18013.5.1.mDL",
+		"claims": {"ns": {"a": {}}},
+		"zk_systems": ["vega-mc"]
+	}`))
+	if err != nil {
+		t.Fatalf("LoadMDDLSchema() error = %v", err)
+	}
+	if len(schema.ZkSystems) != 1 || schema.ZkSystems[0] != "vega-mc" {
+		t.Errorf("ZkSystems = %v, want [vega-mc]", schema.ZkSystems)
 	}
 }

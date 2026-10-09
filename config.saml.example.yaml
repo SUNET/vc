@@ -45,7 +45,6 @@ apigw:
   api_server:
     addr: :8080
   public_url: "http://apigw.vc.docker:8080"
-  registry_public_url: "http://registry.vc.docker:8080"
   issuer_client:
     addr: issuer.vc.docker:8090
   registry_client:
@@ -71,9 +70,11 @@ apigw:
       scopes:
         ehic:
           auth_provider: saml
+          authentic_source: "Skatteverket"
           auth_claims: ["given_name", "family_name", "birthdate"]
         pda1:
           auth_provider: saml
+          authentic_source: "Skatteverket"
           auth_claims: ["given_name", "family_name", "birthdate"]
         # "preauth" restricts issuance to pre-authorized credential offers
         # (e.g. via POST /api/v1/datastore/preauth_offer). Wallet-initiated
@@ -85,7 +86,7 @@ apigw:
     # SAML identifies the user; the remote API provides the credential data.
     external_api:
       scopes:
-        micro_credential:
+        microcredential:
           auth_provider: saml
           remote: ladok
 

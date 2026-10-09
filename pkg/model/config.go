@@ -570,6 +570,20 @@ type Issuer struct {
 	// BBS holds blind BBS issuance configuration. Absent disables the
 	// "jwp" credential format entirely.
 	BBS *BBSConfig `yaml:"bbs" validate:"omitempty"`
+	// ZkCircuits configures the zk-circuits catalog the issuer resolves a
+	// credential's ZK wire-shape requirements from - today the
+	// IssuerSignedItem salt length an mdoc schema's declared zk_systems
+	// demand (SUNET/vc#723).
+	//
+	// The same catalog, and the same client, the verifier uses: these are
+	// mirrors of one service, and a vendored local mirror is a file:// URL
+	// here (see developer_tools/scripts/vendor_zk_circuits). Unlike the
+	// verifier, the issuer only ever reads the few-KB descriptors - it
+	// runs no ZK code and never downloads a prover or verifier key.
+	//
+	// Consulted only by schemas that declare zk_systems; a deployment
+	// issuing no ZK-provable mdocs never reaches it.
+	ZkCircuits IssuerZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
 }
 
 // BBSConfig holds the issuer's blind BBS key pair.
@@ -886,15 +900,54 @@ type ZkKeyCacheConfig struct {
 	Prewarm *bool `yaml:"prewarm,omitempty" default:"true"`
 }
 
-// ZkCircuitsConfig configures the zk-circuits catalog client
-// (pkg/mdoc/zkcircuit) used to resolve a presented "mso_mdoc_zk" document's
-// zkSystemId to a downloadable circuit artifact.
+// ZkCircuitsConfig configures the shared zk-circuits catalog sources
+// (pkg/mdoc/zkcircuit). The verifier uses it to resolve a presented
+// "mso_mdoc_zk" document's zkSystemId to a downloadable circuit artifact;
+// the issuer resolves wire-shape constraints from the same sources through
+// its own IssuerZkCircuitsConfig, which adds a resolver cache.
 type ZkCircuitsConfig struct {
 	// Sources are zk-circuits catalog mirror base URLs, tried in order
 	// until one succeeds (see pkg/mdoc/zkcircuit.Client - these are
 	// mirrors of the SAME catalog, not distinct registries). Defaults to
 	// the live deployed service if empty.
-	Sources []string `yaml:"sources,omitempty" default:"[\"https://zk-circuits.fly.dev\"]" doc_example:"[\"https://zk-circuits.fly.dev\"]"`
+	//
+	// A "file:///path/to/mirror" entry is a vendored local mirror: a
+	// directory laid out like the service itself, as written by
+	// developer_tools/scripts/vendor_zk_circuits. Artifact hashes are
+	// verified against the descriptors exactly as they are for a remote
+	// source, so vendoring pins the bytes as far as the mirror filesystem
+	// is itself trusted.
+	Sources []string `yaml:"sources,omitempty" default:"[\"https://zk-circuits.fly.dev\"]" doc_example:"[\"https://zk-circuits.fly.dev\",\"file:///etc/vc/zk-circuits\"]"`
+}
+
+// IssuerZkCircuitsConfig is the issuer's zk-circuits configuration: the same
+// catalog Sources the verifier uses, plus CacheTTL. CacheTTL lives here
+// rather than on the shared ZkCircuitsConfig because only the issuer's
+// resolver honours it - the verifier reads Sources alone, so a cache_ttl
+// under verifier.zk_circuits would be a silent no-op.
+type IssuerZkCircuitsConfig struct {
+	// Sources are zk-circuits catalog mirror base URLs, tried in order
+	// until one succeeds (see pkg/mdoc/zkcircuit.Client - these are
+	// mirrors of the SAME catalog, not distinct registries). Defaults to
+	// the live deployed service if empty.
+	//
+	// A "file:///path/to/mirror" entry is a vendored local mirror: a
+	// directory laid out like the service itself, as written by
+	// developer_tools/scripts/vendor_zk_circuits. Artifact hashes are
+	// verified against the descriptors exactly as they are for a remote
+	// source, so vendoring pins the bytes as far as the mirror filesystem
+	// is itself trusted.
+	Sources []string `yaml:"sources,omitempty" default:"[\"https://zk-circuits.fly.dev\"]" doc_example:"[\"https://zk-circuits.fly.dev\",\"file:///etc/vc/zk-circuits\"]"`
+
+	// CacheTTL is how long a fetched manifest is reused before the issuer
+	// refreshes it, in seconds. Issuance must not become a catalog round
+	// trip per credential. Zero means the package default (1 hour).
+	//
+	// A refresh that fails keeps serving the last manifest that parsed, so
+	// the catalog being briefly unreachable does not stop issuance; what
+	// does stop it is having never reached the catalog at all, for a
+	// schema that declares a zk_system and pins nothing.
+	CacheTTL int `yaml:"cache_ttl,omitempty" validate:"omitempty,min=0" doc_example:"3600"`
 }
 
 // RevocationConfig configures credential revocation verification at presentation time.
@@ -907,7 +960,14 @@ type RevocationConfig struct {
 	//   - true: log warning and allow the credential through (fail-open)
 	//   - false: reject the credential (fail-closed)
 	// Note: explicitly revoked/suspended credentials are always rejected regardless of this setting.
-	FailOpen bool `yaml:"fail_open" json:"fail_open" default:"true"`
+	//
+	// A POINTER, and not for style: creasty/defaults fills any field still
+	// at its zero value, and the zero value of a bool is false - which is
+	// exactly the value an operator writes to turn this off. A plain bool
+	// with default:"true" therefore cannot be set to false at all, and a
+	// verifier configured to fail CLOSED on an unreachable status list
+	// quietly failed open (SUNET/vc#753). nil means the default.
+	FailOpen *bool `yaml:"fail_open" json:"fail_open" default:"true"`
 	// SkipScopes lists credential scopes exempt from revocation checking
 	// (e.g., short-lived credentials valid < 24 hours per ARF 3.0 §6.6.3.7).
 	SkipScopes []string `yaml:"skip_scopes,omitempty" json:"skip_scopes,omitempty"`
@@ -1103,6 +1163,16 @@ type StaticOIDCClient struct {
 	ResponseTypes []string `yaml:"response_types,omitempty" default:"[\"code\"]" validate:"omitempty,dive,oneof=code"`
 	// ClientName is an optional human-readable name for the client
 	ClientName string `yaml:"client_name,omitempty"`
+	// RequirePKCE overrides the OP's require_pkce policy for this client
+	// alone. Unset inherits the policy, which defaults to true.
+	//
+	// Use it to exempt one lagging confidential client without relaxing the
+	// policy for every other. Setting it false on a client whose
+	// token_endpoint_auth_method is "none" has no effect: a public client
+	// always needs PKCE.
+	//
+	// A pointer so that an explicit false is distinguishable from unset.
+	RequirePKCE *bool `yaml:"require_pkce,omitempty"`
 }
 
 // OIDCConfig holds OIDC-specific configuration for the verifier's role as an OpenID Provider.
@@ -1124,6 +1194,22 @@ type OIDCOP struct {
 	IDTokenDuration int `yaml:"id_token_duration" validate:"required" default:"3600"`
 	// RefreshTokenDuration is the refresh token duration in seconds
 	RefreshTokenDuration int `yaml:"refresh_token_duration" validate:"required" default:"86400"`
+	// RequirePKCE is the OP's PKCE policy for CONFIDENTIAL clients.
+	//
+	// Default true, which is what OAuth 2.1 4.1.1, RFC 9700 2.1.1 and the
+	// HAIP verifier profile all require: every client using the
+	// authorization code grant uses PKCE.
+	//
+	// Set false only to accommodate a confidential client that cannot send
+	// a code_challenge yet. It does NOT reach public clients - a client
+	// with token_endpoint_auth_method "none" always needs PKCE, because
+	// without a client secret PKCE is the only thing binding the code to
+	// the requester, and nothing here can waive that.
+	//
+	// A POINTER, so that an explicit false survives: defaults.Set fills any
+	// field still at its zero value, and false is the zero value of a bool,
+	// so a plain bool with default:"true" can never be set to false at all.
+	RequirePKCE *bool `yaml:"require_pkce,omitempty" default:"true"`
 	// SubjectType is the subject type: "public" or "pairwise"
 	SubjectType string `yaml:"subject_type" validate:"required,oneof=public pairwise"`
 	// SubjectSalt is the salt for pairwise subject generation
@@ -1134,7 +1220,12 @@ type OIDCOP struct {
 	// returns an access token alongside the ID token. The userinfo endpoint
 	// is stateless: it validates the JWT signature and returns the embedded claims.
 	// When false, only ID tokens are returned — no access_token or userinfo endpoint.
-	EnableUserInfo bool `yaml:"enable_userinfo" default:"true"`
+	//
+	// A pointer for the same reason as RevocationConfig.FailOpen: with a
+	// plain bool, defaults.Set cannot tell "the operator wrote false" from
+	// "the operator wrote nothing", so enable_userinfo: false was ignored
+	// (SUNET/vc#753). nil means the default.
+	EnableUserInfo *bool `yaml:"enable_userinfo" default:"true"`
 	// StaticClients is a list of pre-configured OIDC clients
 	// These clients are checked in addition to dynamically registered clients
 	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty"`
@@ -1284,10 +1375,6 @@ func (c *OpenID4VPConfig) GenerateMetadata(ctx context.Context, issuerURL string
 type DigitalCredentialsConfig struct {
 	// Enable toggles W3C Digital Credentials API support in browser
 	Enable bool `yaml:"enable" default:"false"`
-
-	// UseJAR enables JWT Authorization Request (JAR) for wallet communication
-	// When true, request objects are signed JWTs instead of plain JSON
-	UseJAR bool `yaml:"use_jar" default:"false"`
 
 	// PreferredFormats specifies the order of preference for credential formats
 	// Supported values: "vc+sd-jwt", "dc+sd-jwt", "mso_mdoc"
