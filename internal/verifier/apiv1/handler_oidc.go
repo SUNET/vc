@@ -118,7 +118,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Validate PKCE if required
-	if client.RequirePKCE && req.CodeChallenge == "" {
+	if pkceRequired(client) && req.CodeChallenge == "" {
 		c.log.Info("PKCE required but no code_challenge provided")
 		return nil, ErrInvalidRequest
 	}

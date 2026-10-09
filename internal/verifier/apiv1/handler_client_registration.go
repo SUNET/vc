@@ -133,8 +133,20 @@ func (c *Client) RegisterClient(ctx context.Context, req *ClientRegistrationRequ
 		allowedScopes = strings.Split(req.Scope, " ")
 	}
 
-	// Determine if PKCE is required
-	requirePKCE := req.CodeChallengeMethod != ""
+	// PKCE is required of every dynamically registered client.
+	//
+	// This read `req.CodeChallengeMethod != ""`, which looked like an
+	// opt-in and could not be false: the field carries `default:"S256"` and
+	// bindings apply defaults before binding, so it is never empty
+	// (SUNET/vc#757). The effective behaviour was "always required", and
+	// that is the behaviour kept - it is what OAuth 2.1 4.1.1, RFC 9700
+	// 2.1.1 and HAIP require. What changes is that it now says so.
+	//
+	// Deliberately not derived from the request: a client asking to be
+	// exempt from PKCE is a client certifying its own security policy.
+	// Exemptions are an operator decision, so they live in config, on
+	// static clients only.
+	requirePKCE := true
 	requireCodeChallenge := requirePKCE
 
 	// Create client in database
@@ -406,9 +418,11 @@ func (c *Client) UpdateClient(ctx context.Context, req *UpdateClientRequest) (*C
 	}
 	if clientReg.CodeChallengeMethod != "" {
 		client.CodeChallengeMethod = clientReg.CodeChallengeMethod
-		client.RequirePKCE = true
-		client.RequireCodeChallenge = true
 	}
+	// An update cannot drop PKCE. Registration pins every dynamic client to
+	// it, and nothing a client sends here may undo that (SUNET/vc#757).
+	client.RequirePKCE = true
+	client.RequireCodeChallenge = true
 
 	// Update in database
 	err = c.db.Clients.Update(ctx, client)

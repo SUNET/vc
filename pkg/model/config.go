@@ -1052,6 +1052,16 @@ type StaticOIDCClient struct {
 	ResponseTypes []string `yaml:"response_types,omitempty" default:"[\"code\"]" validate:"omitempty,dive,oneof=code"`
 	// ClientName is an optional human-readable name for the client
 	ClientName string `yaml:"client_name,omitempty"`
+	// RequirePKCE overrides the OP's require_pkce policy for this client
+	// alone. Unset inherits the policy, which defaults to true.
+	//
+	// Use it to exempt one lagging confidential client without relaxing the
+	// policy for every other. Setting it false on a client whose
+	// token_endpoint_auth_method is "none" has no effect: a public client
+	// always needs PKCE.
+	//
+	// A pointer so that an explicit false is distinguishable from unset.
+	RequirePKCE *bool `yaml:"require_pkce,omitempty"`
 }
 
 // OIDCConfig holds OIDC-specific configuration for the verifier's role as an OpenID Provider.
@@ -1073,6 +1083,22 @@ type OIDCOP struct {
 	IDTokenDuration int `yaml:"id_token_duration" validate:"required" default:"3600"`
 	// RefreshTokenDuration is the refresh token duration in seconds
 	RefreshTokenDuration int `yaml:"refresh_token_duration" validate:"required" default:"86400"`
+	// RequirePKCE is the OP's PKCE policy for CONFIDENTIAL clients.
+	//
+	// Default true, which is what OAuth 2.1 4.1.1, RFC 9700 2.1.1 and the
+	// HAIP verifier profile all require: every client using the
+	// authorization code grant uses PKCE.
+	//
+	// Set false only to accommodate a confidential client that cannot send
+	// a code_challenge yet. It does NOT reach public clients - a client
+	// with token_endpoint_auth_method "none" always needs PKCE, because
+	// without a client secret PKCE is the only thing binding the code to
+	// the requester, and nothing here can waive that.
+	//
+	// A POINTER, so that an explicit false survives: defaults.Set fills any
+	// field still at its zero value, and false is the zero value of a bool,
+	// so a plain bool with default:"true" can never be set to false at all.
+	RequirePKCE *bool `yaml:"require_pkce,omitempty" default:"true"`
 	// SubjectType is the subject type: "public" or "pairwise"
 	SubjectType string `yaml:"subject_type" validate:"required,oneof=public pairwise"`
 	// SubjectSalt is the salt for pairwise subject generation

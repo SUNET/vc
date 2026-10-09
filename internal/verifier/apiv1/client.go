@@ -308,6 +308,11 @@ func (c *Client) getClientByID(ctx context.Context, clientID string) (*db.Client
 					TokenEndpointAuthMethod: getOrDefaultString(staticClient.TokenEndpointAuthMethod, "client_secret_basic"),
 					AllowedScopes:           allowedScopes,
 					ClientName:              staticClient.ClientName,
+					// Never set, so it was always false and a static client
+					// was never asked for PKCE - with no field in
+					// StaticOIDCClient to turn it on (SUNET/vc#757). Now
+					// resolved from the OP policy, which defaults to true.
+					RequirePKCE: staticClientRequiresPKCE(staticClient, c.cfg.Verifier.Outbound.OIDCProvider),
 				}, true, nil // true = static client (plaintext secret)
 			}
 		}
