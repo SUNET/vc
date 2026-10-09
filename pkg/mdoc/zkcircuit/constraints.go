@@ -105,6 +105,15 @@ func declaresDocType(c *CircuitDescriptor, docType string) bool {
 // active circuit in the manifest for the document type in question.
 var ErrNoActiveCircuit = errors.New("no active circuit")
 
+// ErrCatalogUnavailable wraps a failure to OBTAIN a manifest at all - the
+// catalog is unreachable, or the resolver has never reached it. It is kept
+// distinct from a constraint refusal (an incompatible or malformed answer
+// the catalog actually returned) so a caller can fall back to a pinned
+// value when the catalog cannot answer, without also masking an answer it
+// gave that must not be issued against. A cancelled request is deliberately
+// NOT wrapped in it.
+var ErrCatalogUnavailable = errors.New("zk circuit catalog unavailable")
+
 // Constraints resolves one system's currently-active wire-shape
 // constraints for docType.
 //
@@ -364,7 +373,7 @@ func (r *Resolver) retryInterval() time.Duration {
 // returned only when there is nothing cached to fall back to.
 func (r *Resolver) Manifest(ctx context.Context) (manifest *Manifest, stale bool, err error) {
 	if r == nil || r.Client == nil {
-		return nil, false, errors.New("zk circuit resolver has no catalog client")
+		return nil, false, fmt.Errorf("%w: resolver has no catalog client", ErrCatalogUnavailable)
 	}
 
 	// The lock is held across the fetch on purpose: it makes the refresh
@@ -424,8 +433,8 @@ func (r *Resolver) Manifest(ctx context.Context) (manifest *Manifest, stale bool
 		// schemas that pin zk_salt_bytes, which fall back to the pin only
 		// AFTER the error arrives, and so paid 30 seconds each for an
 		// answer they already had.
-		r.coldErr = fetchErr
-		return nil, false, fetchErr
+		r.coldErr = fmt.Errorf("%w: %w", ErrCatalogUnavailable, fetchErr)
+		return nil, false, r.coldErr
 	}
 
 	r.manifest = fetched

@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -71,7 +72,13 @@ func (c *Client) resolveZkSaltBytes(ctx context.Context, schema *mdoc.MDDLSchema
 
 	resolved, stale, err := c.zkResolver.SaltBytes(ctx, schema.ZkSystems, schema.DocType)
 	if err != nil {
-		if schema.ZkSaltBytes != 0 {
+		// A pin stands in only for a catalog that cannot answer: unreachable,
+		// or publishing no active circuit for this system yet. A constraint
+		// refusal (incompatible systems, malformed metadata) or a cancelled
+		// request is a real answer, and letting a pin override it would sign a
+		// credential the catalog just said must not be issued.
+		pinnable := errors.Is(err, zkcircuit.ErrCatalogUnavailable) || errors.Is(err, zkcircuit.ErrNoActiveCircuit)
+		if schema.ZkSaltBytes != 0 && pinnable {
 			c.log.Error(err, "zk_circuit_salt_resolution_failed_using_pin",
 				"doctype", schema.DocType, "zk_systems", schema.ZkSystems, "zk_salt_bytes", schema.ZkSaltBytes)
 			return schema.ZkSaltBytes, nil

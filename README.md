@@ -439,7 +439,12 @@ make build-vendor-zk-circuits
 ```
 
 Artifact hashes are verified against their descriptors on the way in and
-again on every read, so vendoring pins the bytes without relaxing anything.
+again on every read, so a corrupted or swapped artifact is caught against
+its descriptor. The hash lives in the same mirror as the bytes, though, so
+this authenticates the artifact to its descriptor, not the mirror to the
+catalog: anyone who can rewrite the tree can replace an artifact and its
+recorded hash together. Vendoring pins bytes only as far as the descriptor
+and the mirror filesystem are themselves trusted.
 
 See `docs/ZK_PPID_VERIFICATION_PLAN.md` for the full Longfellow design
 writeup: what this verifies, the confirmed

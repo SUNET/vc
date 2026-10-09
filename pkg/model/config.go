@@ -583,7 +583,7 @@ type Issuer struct {
 	//
 	// Consulted only by schemas that declare zk_systems; a deployment
 	// issuing no ZK-provable mdocs never reaches it.
-	ZkCircuits ZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
+	ZkCircuits IssuerZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
 }
 
 // BBSConfig holds the issuer's blind BBS key pair.
@@ -849,11 +849,11 @@ type Verifier struct {
 	ZkCircuits ZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
 }
 
-// ZkCircuitsConfig configures the zk-circuits catalog client
+// ZkCircuitsConfig configures the shared zk-circuits catalog sources
 // (pkg/mdoc/zkcircuit). The verifier uses it to resolve a presented
 // "mso_mdoc_zk" document's zkSystemId to a downloadable circuit artifact;
-// the issuer uses it to resolve the wire-shape constraints a schema's
-// declared zk_systems require.
+// the issuer resolves wire-shape constraints from the same sources through
+// its own IssuerZkCircuitsConfig, which adds a resolver cache.
 type ZkCircuitsConfig struct {
 	// Sources are zk-circuits catalog mirror base URLs, tried in order
 	// until one succeeds (see pkg/mdoc/zkcircuit.Client - these are
@@ -864,7 +864,28 @@ type ZkCircuitsConfig struct {
 	// directory laid out like the service itself, as written by
 	// developer_tools/scripts/vendor_zk_circuits. Artifact hashes are
 	// verified against the descriptors exactly as they are for a remote
-	// source, so vendoring pins the bytes without relaxing anything.
+	// source, so vendoring pins the bytes as far as the mirror filesystem
+	// is itself trusted.
+	Sources []string `yaml:"sources,omitempty" default:"[\"https://zk-circuits.fly.dev\"]" doc_example:"[\"https://zk-circuits.fly.dev\",\"file:///etc/vc/zk-circuits\"]"`
+}
+
+// IssuerZkCircuitsConfig is the issuer's zk-circuits configuration: the same
+// catalog Sources the verifier uses, plus CacheTTL. CacheTTL lives here
+// rather than on the shared ZkCircuitsConfig because only the issuer's
+// resolver honours it - the verifier reads Sources alone, so a cache_ttl
+// under verifier.zk_circuits would be a silent no-op.
+type IssuerZkCircuitsConfig struct {
+	// Sources are zk-circuits catalog mirror base URLs, tried in order
+	// until one succeeds (see pkg/mdoc/zkcircuit.Client - these are
+	// mirrors of the SAME catalog, not distinct registries). Defaults to
+	// the live deployed service if empty.
+	//
+	// A "file:///path/to/mirror" entry is a vendored local mirror: a
+	// directory laid out like the service itself, as written by
+	// developer_tools/scripts/vendor_zk_circuits. Artifact hashes are
+	// verified against the descriptors exactly as they are for a remote
+	// source, so vendoring pins the bytes as far as the mirror filesystem
+	// is itself trusted.
 	Sources []string `yaml:"sources,omitempty" default:"[\"https://zk-circuits.fly.dev\"]" doc_example:"[\"https://zk-circuits.fly.dev\",\"file:///etc/vc/zk-circuits\"]"`
 
 	// CacheTTL is how long a fetched manifest is reused before the issuer

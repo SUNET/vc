@@ -155,6 +155,48 @@ func TestResolveZkSaltBytesFallsBackToThePinWhenTheCatalogIsUnreachable(t *testi
 	}
 }
 
+// A pin stands in for a catalog that cannot answer, not for one that
+// answers with something unusable. A circuit whose saltBytes is malformed
+// is a refusal MakeMDoc must see even with a pin present - overriding it
+// would sign a credential the catalog said is not well-formed.
+func TestResolveZkSaltBytesPinDoesNotMaskAConstraintRefusal(t *testing.T) {
+	const malformed = `{"circuits":[{"id":"vega-bad","system":"vega-mc","status":"active","published":true,` +
+		`"docTypes":["org.iso.18013.5.1.mDL"],"params":{"saltBytes":"32.0"}}]}`
+	c := saltClient(t, malformed)
+	if _, err := c.resolveZkSaltBytes(t.Context(), schema([]string{"vega-mc"}, 32)); err == nil {
+		t.Fatal("a malformed-metadata refusal must propagate past the pin")
+	}
+}
+
+// ... but a system the catalog does not publish yet is exactly what the pin
+// is for - an air-gapped issuer, or interop ahead of publication.
+func TestResolveZkSaltBytesPinCoversAnUnpublishedSystem(t *testing.T) {
+	c := saltClient(t, vegaManifest)
+	got, err := c.resolveZkSaltBytes(t.Context(), schema([]string{"nonesuch"}, 24))
+	if err != nil {
+		t.Fatalf("resolveZkSaltBytes() error = %v", err)
+	}
+	if got != 24 {
+		t.Errorf("salt bytes = %d, want the pinned 24", got)
+	}
+}
+
+// A cancelled request is not the catalog being unavailable; a pin must not
+// convert it into a signed credential.
+func TestResolveZkSaltBytesPinDoesNotMaskCancellation(t *testing.T) {
+	catalog := &zkcircuit.Client{
+		Sources:   []string{"https://catalog.example"},
+		FetchText: func(ctx context.Context, _ string) (string, error) { return "", ctx.Err() },
+	}
+	c := &Client{log: logger.NewSimple("test"), zkResolver: zkcircuit.NewResolver(catalog)}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := c.resolveZkSaltBytes(ctx, schema([]string{"vega-mc"}, 32)); err == nil {
+		t.Fatal("a cancelled request must not be papered over by the pin")
+	}
+}
+
 func TestNewZkCircuitResolverIsNilWithoutSources(t *testing.T) {
 	if r := newZkCircuitResolver(nil, 0); r != nil {
 		t.Error("no configured sources should leave the issuer without a resolver")
