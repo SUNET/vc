@@ -129,7 +129,9 @@ func TestTheExpiryBoundarySecondIsExpired(t *testing.T) {
 	assert.True(t, sessionExpired(&cache.AuthorizationContext{ExpiresAt: now}),
 		"the deadline second must be expired, as isReusableAuthContext reads it")
 	assert.True(t, sessionExpired(&cache.AuthorizationContext{ExpiresAt: now - 1}))
-	assert.False(t, sessionExpired(&cache.AuthorizationContext{ExpiresAt: now + 1}))
+	// A minute, not now+1: a second's margin can elapse if this goroutine
+	// is preempted between capturing now and the assertion.
+	assert.False(t, sessionExpired(&cache.AuthorizationContext{ExpiresAt: now + 60}))
 }
 
 // A resume past the deadline is not pending.
@@ -254,4 +256,43 @@ func TestTheRequestObjectEndpointSharesTheExpiryBoundary(t *testing.T) {
 	_, err := client.GetOIDCRequestObject(ctx, &GetRequestObjectRequest{SessionID: sessionID})
 	assert.ErrorIs(t, err, ErrSessionExpired,
 		"a request object was served during the second its response would be refused")
+}
+
+// The standalone request-object endpoint refuses an expired session.
+//
+// A cache hit proves the verifier minted the request; it does not prove the
+// session is open. The request-object cache outlives the presentation
+// window by its own floor, so an object stayed fetchable long after the
+// direct-post handlers would refuse its response - handing a wallet a
+// request it cannot answer.
+func TestVerificationRequestObjectRefusesAnExpiredSession(t *testing.T) {
+	ctx := t.Context()
+	client := newSigningTestClient(t)
+	if client.cfg.Verifier.Inbound.OpenID4VP == nil {
+		client.cfg.Verifier.Inbound.OpenID4VP = &model.OpenID4VPConfig{}
+	}
+	client.cfg.Verifier.Inbound.OpenID4VP.PresentationTimeout = 1800
+
+	reply, err := client.UIInteraction(ctx, &UIInteractionRequest{DCQLQuery: createTestDCQLForVP(t)})
+	require.NoError(t, err)
+
+	session, err := client.cacheService.AuthContext.GetByID(ctx, reply.SessionID)
+	require.NoError(t, err)
+	require.NotNil(t, session)
+
+	// Inside the deadline it is served.
+	signed, err := client.VerificationRequestObject(ctx, &VerificationRequestObjectRequest{ID: session.RequestObjectID})
+	require.NoError(t, err)
+	require.NotEmpty(t, signed)
+
+	// Past it, it is not - while the object is still cached, so this cannot
+	// pass because the cache happened to drop it.
+	session.ExpiresAt = time.Now().Add(-time.Second).Unix()
+	require.NoError(t, client.cacheService.AuthContext.Update(ctx, session))
+
+	_, err = client.cacheService.RequestObject.GetErr(ctx, session.RequestObjectID)
+	require.NoError(t, err, "the request object must still be cached for this test to mean anything")
+
+	_, err = client.VerificationRequestObject(ctx, &VerificationRequestObjectRequest{ID: session.RequestObjectID})
+	assert.ErrorIs(t, err, ErrSessionExpired)
 }

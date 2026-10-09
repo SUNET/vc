@@ -33,11 +33,14 @@ func TestAuthContextRetentionOutlivesTheDeadlinesItHolds(t *testing.T) {
 		presentationTimeout, codeDuration int
 		want                              time.Duration
 	}{
-		// 300 + 300 = 10 minutes, under the floor: the default
-		// configuration retains for exactly as long as it always has.
-		{"defaults now budget both interactions", 300, 300, 16 * time.Minute},
+		// 2*300 + 300 + 60 = 16 minutes, which now exceeds the floor:
+		// the default retention is a minute longer than the 15 it was
+		// hardcoded at, because the credential-display window is budgeted
+		// too.
+		{"defaults budget both interactions", 300, 300, 16 * time.Minute},
+		// Still under the floor, so the floor is what applies.
 		{"short values do not shrink it", 10, 10, 15 * time.Minute},
-		// 30 minutes of presenting cannot be held by a 15-minute cache.
+		// Two 30-minute windows plus the code cannot be held by 15 minutes.
 		{"a long presentation window stretches it", 1800, 300, 66 * time.Minute},
 		{"a long code duration stretches it", 300, 3600, 71 * time.Minute},
 	} {

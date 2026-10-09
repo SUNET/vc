@@ -50,6 +50,17 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", errors.New("request object not found")
 	}
 
+	// A cache hit proves we minted this request; it does not prove the
+	// session is still open. The request-object cache outlives the
+	// presentation window by its own floor, and UIResume can mint a DC API
+	// object moments before the deadline - which then stays fetchable long
+	// after the direct-post handlers would refuse its response. Handing a
+	// wallet a request it can no longer answer is worse than a 404.
+	if authCtx := c.authContextFor(ctx, requestObject.State); sessionExpired(authCtx) {
+		c.log.Info("Request object fetched for an expired session", "state", requestObject.State)
+		return "", ErrSessionExpired
+	}
+
 	signedJWT, err := requestObject.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		c.log.Error(err, "failed to sign authorization request")
