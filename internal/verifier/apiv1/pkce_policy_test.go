@@ -134,59 +134,81 @@ func authorizeNoPKCE(t *testing.T, client *Client, clientID string) error {
 	return err
 }
 
+// pkceTestClient is a verifier configured for the openid scope, with the
+// OP-wide policy set to opPolicy (nil leaves the default).
+func pkceTestClient(t *testing.T, opPolicy *bool) (*Client, *MockDBService) {
+	t.Helper()
+
+	client, mockDB := CreateTestClientWithMock(t, nil)
+	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
+	client.cfg.Verifier.Outbound.OIDCProvider.RequirePKCE = opPolicy
+	client.AddPresentationTemplateForTesting(createSimplePresentationTemplate(t, []string{"openid"}))
+	return client, mockDB
+}
+
+// withStaticClient configures one static client and returns its id.
+func withStaticClient(t *testing.T, client *Client, clientID, authMethod string, requirePKCE *bool) string {
+	t.Helper()
+
+	secret := "secret"
+	if authMethod == tokenEndpointAuthNone {
+		secret = ""
+	}
+	client.cfg.Verifier.Outbound.OIDCProvider.StaticClients = []model.StaticOIDCClient{{
+		ClientID:                clientID,
+		ClientSecret:            secret,
+		RedirectURIs:            []string{"https://example.com/callback"},
+		AllowedScopes:           []string{"openid"},
+		TokenEndpointAuthMethod: authMethod,
+		RequirePKCE:             requirePKCE,
+	}}
+	return clientID
+}
+
+// registerDynamicClient registers a client the way one that wants no PKCE
+// would: no code_challenge_method, and no defaults applied, since this
+// calls the handler directly rather than going through the binding.
+func registerDynamicClient(t *testing.T, client *Client, authMethod string) string {
+	t.Helper()
+
+	reg, err := client.RegisterClient(t.Context(), &ClientRegistrationRequest{
+		RedirectURIs:            []string{"https://example.com/callback"},
+		TokenEndpointAuthMethod: authMethod,
+		GrantTypes:              []string{"authorization_code"},
+		ResponseTypes:           []string{"code"},
+		Scope:                   "openid",
+	})
+	require.NoError(t, err)
+	return reg.ClientID
+}
+
 // A static client reaching /authorize without a code_challenge is refused.
 //
 // It was not: getClientByID built its db.Client without RequirePKCE, so the
 // flag was false and the check at handler_oidc.go never fired - while
 // discovery advertised code_challenge_methods_supported (SUNET/vc#757).
 func TestAuthorizeRefusesAStaticClientWithoutPKCE(t *testing.T) {
-	client, _ := CreateTestClientWithMock(t, nil)
-	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.Outbound.OIDCProvider.StaticClients = []model.StaticOIDCClient{{
-		ClientID:                "static-client",
-		ClientSecret:            "secret",
-		RedirectURIs:            []string{"https://example.com/callback"},
-		AllowedScopes:           []string{"openid"},
-		TokenEndpointAuthMethod: "client_secret_basic",
-	}}
-	client.AddPresentationTemplateForTesting(createSimplePresentationTemplate(t, []string{"openid"}))
+	client, _ := pkceTestClient(t, nil)
+	id := withStaticClient(t, client, "static-client", "client_secret_basic", nil)
 
-	assert.ErrorIs(t, authorizeNoPKCE(t, client, "static-client"), ErrInvalidRequest)
+	assert.ErrorIs(t, authorizeNoPKCE(t, client, id), ErrInvalidRequest)
 }
 
 // ... and an operator can still exempt one, which is what makes the test
 // above a policy test rather than a constant.
 func TestAuthorizeAllowsAnExemptedStaticClientWithoutPKCE(t *testing.T) {
-	client, _ := CreateTestClientWithMock(t, nil)
-	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.Outbound.OIDCProvider.StaticClients = []model.StaticOIDCClient{{
-		ClientID:                "legacy-client",
-		ClientSecret:            "secret",
-		RedirectURIs:            []string{"https://example.com/callback"},
-		AllowedScopes:           []string{"openid"},
-		TokenEndpointAuthMethod: "client_secret_basic",
-		RequirePKCE:             ptr(false),
-	}}
-	client.AddPresentationTemplateForTesting(createSimplePresentationTemplate(t, []string{"openid"}))
+	client, _ := pkceTestClient(t, nil)
+	id := withStaticClient(t, client, "legacy-client", "client_secret_basic", ptr(false))
 
-	assert.NoError(t, authorizeNoPKCE(t, client, "legacy-client"))
+	assert.NoError(t, authorizeNoPKCE(t, client, id))
 }
 
 // A public static client cannot be exempted, however the config is written.
 func TestAuthorizeRefusesAPublicStaticClientEvenWhenExempted(t *testing.T) {
-	client, _ := CreateTestClientWithMock(t, nil)
-	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.Outbound.OIDCProvider.RequirePKCE = ptr(false)
-	client.cfg.Verifier.Outbound.OIDCProvider.StaticClients = []model.StaticOIDCClient{{
-		ClientID:                "public-client",
-		RedirectURIs:            []string{"https://example.com/callback"},
-		AllowedScopes:           []string{"openid"},
-		TokenEndpointAuthMethod: "none",
-		RequirePKCE:             ptr(false),
-	}}
-	client.AddPresentationTemplateForTesting(createSimplePresentationTemplate(t, []string{"openid"}))
+	client, _ := pkceTestClient(t, ptr(false))
+	id := withStaticClient(t, client, "public-client", tokenEndpointAuthNone, ptr(false))
 
-	assert.ErrorIs(t, authorizeNoPKCE(t, client, "public-client"), ErrInvalidRequest)
+	assert.ErrorIs(t, authorizeNoPKCE(t, client, id), ErrInvalidRequest)
 }
 
 // A dynamically registered client cannot register itself out of PKCE.
@@ -196,37 +218,18 @@ func TestAuthorizeRefusesAPublicStaticClientEvenWhenExempted(t *testing.T) {
 // and bindings apply defaults - but the logic said a client's own request
 // decided the policy, which is not a decision a client gets to make.
 func TestARegisteringClientCannotOptOutOfPKCE(t *testing.T) {
-	ctx := t.Context()
-
-	client, mockDB := CreateTestClientWithMock(t, nil)
-	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.AddPresentationTemplateForTesting(createSimplePresentationTemplate(t, []string{"openid"}))
-
-	// No code_challenge_method, exactly as a client wanting to skip PKCE
-	// would send it - and with no defaults applied, since this calls the
-	// handler directly rather than going through the binding.
-	reg, err := client.RegisterClient(ctx, &ClientRegistrationRequest{
-		RedirectURIs:            []string{"https://example.com/callback"},
-		TokenEndpointAuthMethod: "client_secret_basic",
-		GrantTypes:              []string{"authorization_code"},
-		ResponseTypes:           []string{"code"},
-		Scope:                   "openid",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	client, mockDB := pkceTestClient(t, nil)
+	id := registerDynamicClient(t, client, "client_secret_basic")
 
 	// The record carries no policy the client chose. RequirePKCE can only
 	// ever pin PKCE on, and registration does not set it either way - which
 	// is what lets the OP's require_pkce reach dynamic clients too.
-	stored, err := mockDB.Clients.GetByClientID(ctx, reg.ClientID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	stored, err := mockDB.Clients.GetByClientID(t.Context(), id)
+	require.NoError(t, err)
 	assert.False(t, stored.RequirePKCE, "registration stored a policy of the client's choosing")
 
 	// ... and the client is required all the same, by the OP's default.
-	assert.ErrorIs(t, authorizeNoPKCE(t, client, reg.ClientID), ErrInvalidRequest)
+	assert.ErrorIs(t, authorizeNoPKCE(t, client, id), ErrInvalidRequest)
 }
 
 // The OP-wide override reaches dynamic clients, not only the ones written
@@ -235,46 +238,20 @@ func TestARegisteringClientCannotOptOutOfPKCE(t *testing.T) {
 // dynamic ones stayed required - policy depending on how the client was
 // created, which is the thing SUNET/vc#757 is about.
 func TestTheOPOverrideReachesDynamicClients(t *testing.T) {
-	ctx := t.Context()
+	client, _ := pkceTestClient(t, ptr(false))
+	id := registerDynamicClient(t, client, "client_secret_basic")
 
-	client, _ := CreateTestClientWithMock(t, nil)
-	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.Outbound.OIDCProvider.RequirePKCE = ptr(false)
-	client.AddPresentationTemplateForTesting(createSimplePresentationTemplate(t, []string{"openid"}))
-
-	reg, err := client.RegisterClient(ctx, &ClientRegistrationRequest{
-		RedirectURIs:            []string{"https://example.com/callback"},
-		TokenEndpointAuthMethod: "client_secret_basic",
-		GrantTypes:              []string{"authorization_code"},
-		ResponseTypes:           []string{"code"},
-		Scope:                   "openid",
-	})
-	require.NoError(t, err)
-
-	assert.NoError(t, authorizeNoPKCE(t, client, reg.ClientID),
+	assert.NoError(t, authorizeNoPKCE(t, client, id),
 		"require_pkce: false did not reach a dynamically registered client")
 }
 
 // A public client registered dynamically is still required, override or
 // not.
 func TestTheOPOverrideDoesNotReachAPublicDynamicClient(t *testing.T) {
-	ctx := t.Context()
+	client, _ := pkceTestClient(t, ptr(false))
+	id := registerDynamicClient(t, client, tokenEndpointAuthNone)
 
-	client, _ := CreateTestClientWithMock(t, nil)
-	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.cfg.Verifier.Outbound.OIDCProvider.RequirePKCE = ptr(false)
-	client.AddPresentationTemplateForTesting(createSimplePresentationTemplate(t, []string{"openid"}))
-
-	reg, err := client.RegisterClient(ctx, &ClientRegistrationRequest{
-		RedirectURIs:            []string{"https://example.com/callback"},
-		TokenEndpointAuthMethod: "none",
-		GrantTypes:              []string{"authorization_code"},
-		ResponseTypes:           []string{"code"},
-		Scope:                   "openid",
-	})
-	require.NoError(t, err)
-
-	assert.ErrorIs(t, authorizeNoPKCE(t, client, reg.ClientID), ErrInvalidRequest)
+	assert.ErrorIs(t, authorizeNoPKCE(t, client, id), ErrInvalidRequest)
 }
 
 // A code_challenge the OP cannot verify is refused.
@@ -285,24 +262,13 @@ func TestTheOPOverrideDoesNotReachAPublicDynamicClient(t *testing.T) {
 // the verifier, and anyone holding the code can redeem it. Discovery has
 // only ever advertised ["S256"].
 func TestAuthorizeRefusesAChallengeItCannotVerify(t *testing.T) {
-	ctx := t.Context()
-
-	client, mockDB := CreateTestClientWithMock(t, nil)
-	client.cfg.Verifier.PublicURL = "https://verifier.example.com"
-	client.AddPresentationTemplateForTesting(createSimplePresentationTemplate(t, []string{"openid"}))
-
-	require.NoError(t, mockDB.Clients.Create(ctx, &db.Client{
-		ClientID:                "pkce-client",
-		RedirectURIs:            []string{"https://example.com/callback"},
-		ResponseTypes:           []string{"code"},
-		AllowedScopes:           []string{"openid"},
-		TokenEndpointAuthMethod: "client_secret_basic",
-	}))
+	client, _ := pkceTestClient(t, nil)
+	id := withStaticClient(t, client, "pkce-client", "client_secret_basic", nil)
 
 	authorize := func(method string) error {
-		_, err := client.Authorize(ctx, &AuthorizeRequest{
+		_, err := client.Authorize(t.Context(), &AuthorizeRequest{
 			ResponseType:        "code",
-			ClientID:            "pkce-client",
+			ClientID:            id,
 			RedirectURI:         "https://example.com/callback",
 			Scope:               "openid",
 			State:               "state",
