@@ -45,7 +45,6 @@ apigw:
   api_server:
     addr: :8080
   public_url: "http://apigw.vc.docker:8080"
-  registry_public_url: "http://registry.vc.docker:8080"
   issuer_client:
     addr: issuer.vc.docker:8090
   registry_client:

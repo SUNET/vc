@@ -220,7 +220,6 @@ apigw:
       rules:
         - "(vc (service apigw)(method *)(path /api/v1/*)(subject admin@sunet.se)(authentic_source *)(scope *))"
   public_url: "https://sunet-vc-apigw.fly.dev"
-  registry_public_url: "https://sunet-vc-registry.fly.dev"
   trust:
     pdp_url: "http://sunet-vc-go-trust.internal:6001"
     wallet_attestation:

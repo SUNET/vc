@@ -180,7 +180,6 @@ apigw:
         redirect_uri: "https://apigw.vc.docker:8080/ui/callback"
         scopes: ["openid", "profile"]
   public_url: "https://apigw.vc.docker:8080"
-  registry_public_url: "https://registry.vc.docker:8080"
   issuer_client:
     addr: issuer.vc.docker:8090
   registry_client:
