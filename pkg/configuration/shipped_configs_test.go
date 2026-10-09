@@ -30,9 +30,14 @@ var shippedConfigs = []string{
 // nothing reads it. apigw.registry_public_url outlived its field that way
 // (SUNET/vc#765).
 //
-// This catches a key with NO field, and only that. A key that has a field
-// nothing reads decodes cleanly and is invisible here - SUNET/vc#756 was
-// that, not this - so it is a different defect needing a different check.
+// UnmarshalStrict rejects two things: a key with no field in the model, and
+// a mapping key repeated within one block. Both are real defects in a file
+// this repository ships, and the failure message names the key either way -
+// worth knowing which you are looking at, since the remedies differ.
+//
+// What it does NOT catch is a key that HAS a field nothing reads. That
+// decodes perfectly cleanly - SUNET/vc#756 was that, not this - and needs a
+// different check entirely.
 //
 // UnmarshalStrict is what the runtime deliberately does NOT do - loading
 // must stay tolerant of a key from a newer or older release - so the strict
@@ -88,4 +93,12 @@ func repoRoot(t *testing.T) string {
 	}
 	t.Fatal("no go.mod within ten levels")
 	return ""
+}
+
+// ... and a duplicate key is caught too, which is the guard's other half.
+func TestShippedConfigsRejectADuplicateKey(t *testing.T) {
+	var cfg model.Cfg
+
+	assert.Error(t, yaml.UnmarshalStrict([]byte("common:\n  production: true\n  production: false\n"), &cfg),
+		"a repeated mapping key must be refused, not silently last-one-wins")
 }
