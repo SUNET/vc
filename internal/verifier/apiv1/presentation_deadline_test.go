@@ -296,3 +296,53 @@ func TestVerificationRequestObjectRefusesAnExpiredSession(t *testing.T) {
 	_, err = client.VerificationRequestObject(ctx, &VerificationRequestObjectRequest{ID: session.RequestObjectID})
 	assert.ErrorIs(t, err, ErrSessionExpired)
 }
+
+// Polling a session past its deadline reports expired, not pending.
+//
+// Status is only written when something happens TO a session, and a
+// deadline passing is not such an event - so an abandoned session kept
+// polling as "pending" for as long as the auth-context cache held it,
+// which this PR lengthens. The page waited on a session the direct-post
+// handlers had already begun refusing.
+func TestPollSessionReportsAnExpiredSession(t *testing.T) {
+	ctx := t.Context()
+	client, _ := CreateTestClientWithMock(t, nil)
+
+	const sessionID = "polled-expired-session"
+	require.NoError(t, client.cacheService.AuthContext.Create(ctx,
+		pendingSession(sessionID, sessionID, time.Now().Add(time.Minute).Unix())))
+
+	// Inside the deadline it is pending.
+	reply, err := client.PollSession(ctx, &PollSessionRequest{SessionID: sessionID})
+	require.NoError(t, err)
+	require.Equal(t, string(cache.SessionStatusPending), reply.Status)
+
+	// Past it, expired.
+	session, err := client.cacheService.AuthContext.GetByID(ctx, sessionID)
+	require.NoError(t, err)
+	session.ExpiresAt = time.Now().Add(-time.Second).Unix()
+	require.NoError(t, client.cacheService.AuthContext.Update(ctx, session))
+
+	reply, err = client.PollSession(ctx, &PollSessionRequest{SessionID: sessionID})
+	require.NoError(t, err)
+	assert.Equal(t, string(cache.SessionStatusExpired), reply.Status,
+		"the page would keep waiting on a session direct-post has started refusing")
+}
+
+// ... but a session that already finished keeps saying so. A deadline
+// passing after an outcome changes nothing about the outcome.
+func TestPollSessionKeepsATerminalStatusPastTheDeadline(t *testing.T) {
+	ctx := t.Context()
+	client, _ := CreateTestClientWithMock(t, nil)
+
+	const sessionID = "polled-completed-session"
+	session := pendingSession(sessionID, sessionID, time.Now().Add(-time.Second).Unix())
+	session.Status = cache.SessionStatusCodeIssued
+	session.Code = "an-authorization-code"
+	require.NoError(t, client.cacheService.AuthContext.Create(ctx, session))
+
+	reply, err := client.PollSession(ctx, &PollSessionRequest{SessionID: sessionID})
+	require.NoError(t, err)
+	assert.Equal(t, string(cache.SessionStatusCodeIssued), reply.Status,
+		"a session that issued a code was reclassified as expired")
+}

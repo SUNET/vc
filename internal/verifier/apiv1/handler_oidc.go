@@ -1107,6 +1107,22 @@ func (c *Client) PollSession(ctx context.Context, req *PollSessionRequest) (*Pol
 		return nil, ErrSessionNotFound
 	}
 
+	// A session past its deadline polls as expired, not pending.
+	//
+	// The stored Status is only written when something happens TO the
+	// session, and a deadline passing is not an event anyone writes - so
+	// an abandoned session kept reporting "pending" for as long as the
+	// auth-context cache held it, which this PR deliberately lengthens.
+	// The page would wait on a session the direct-post handlers had
+	// already started refusing.
+	//
+	// A completed session still reports what it completed as: the check
+	// comes after none of the terminal states, so it only ever reclassifies
+	// one that is still waiting.
+	if sessionExpired(session) && !sessionStatusIsTerminal(session.Status) {
+		return &PollSessionResponse{Status: string(cache.SessionStatusExpired)}, nil
+	}
+
 	response := &PollSessionResponse{
 		Status: string(session.Status),
 	}

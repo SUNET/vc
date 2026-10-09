@@ -44,3 +44,15 @@ func (c *Client) authContextFor(ctx context.Context, state string) *cache.Author
 	}
 	return nil
 }
+
+// sessionStatusIsTerminal reports whether a session has already reached an
+// outcome, so a deadline passing afterwards changes nothing about it.
+func sessionStatusIsTerminal(status cache.SessionStatus) bool {
+	switch status {
+	case cache.SessionStatusCodeIssued, cache.SessionStatusTokenIssued,
+		cache.SessionStatusCompleted, cache.SessionStatusError,
+		cache.SessionStatusExpired:
+		return true
+	}
+	return false
+}
