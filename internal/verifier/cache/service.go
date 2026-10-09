@@ -67,11 +67,17 @@ func New(ctx context.Context, cfg *model.Cfg, dbService *db.Service, tracer *tra
 		return nil, fmt.Errorf("cache: credentials: %w", err)
 	}
 
-	if s.EphemeralEncryptionKey, err = pkgcache.NewGenericCache[jwk.Key](cs, ctx, "verifier_ephemeral_keys", 10*time.Minute, pkgcache.WithDecoder(jwkKeyDecoder)); err != nil {
+	// These two have to outlive the presentation as well: the wallet
+	// resolves the request URI out of RequestObject and encrypts its
+	// response to the key in EphemeralEncryptionKey. At 5 and 10 minutes
+	// against a 30-minute window, the request URI stopped resolving and
+	// encrypted responses stopped decrypting while ExpiresAt still said the
+	// session was live.
+	if s.EphemeralEncryptionKey, err = pkgcache.NewGenericCache[jwk.Key](cs, ctx, "verifier_ephemeral_keys", presentationScopedTTL(cfg, 10*time.Minute), pkgcache.WithDecoder(jwkKeyDecoder)); err != nil {
 		return nil, fmt.Errorf("cache: ephemeral_keys: %w", err)
 	}
 
-	if s.RequestObject, err = pkgcache.NewGenericCache[*openid4vp.RequestObject](cs, ctx, "verifier_request_objects", 5*time.Minute, pkgcache.WithDecoder(requestObjectDecoder)); err != nil {
+	if s.RequestObject, err = pkgcache.NewGenericCache[*openid4vp.RequestObject](cs, ctx, "verifier_request_objects", presentationScopedTTL(cfg, 5*time.Minute), pkgcache.WithDecoder(requestObjectDecoder)); err != nil {
 		return nil, fmt.Errorf("cache: request_objects: %w", err)
 	}
 
@@ -136,4 +142,20 @@ func authContextRetention(cfg *model.Cfg) time.Duration {
 		needed += time.Duration(op.CodeDuration) * time.Second
 	}
 	return max(needed, minAuthContextRetention)
+}
+
+// PresentationScopedTTL is the retention for a cache a live presentation
+// depends on: at least floor, and never less than the presentation window.
+//
+// Exported so the request-object cache can be written with the same TTL it
+// was built with, rather than a second literal that drifts.
+func PresentationScopedTTL(cfg *model.Cfg, floor time.Duration) time.Duration {
+	return presentationScopedTTL(cfg, floor)
+}
+
+func presentationScopedTTL(cfg *model.Cfg, floor time.Duration) time.Duration {
+	if cfg == nil || cfg.Verifier == nil {
+		return floor
+	}
+	return max(cfg.Verifier.Inbound.OpenID4VP.GetPresentationTimeout(), floor)
 }

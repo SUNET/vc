@@ -1088,7 +1088,7 @@ type OIDCOP struct {
 	EnableUserInfo bool `yaml:"enable_userinfo" default:"true"`
 	// StaticClients is a list of pre-configured OIDC clients
 	// These clients are checked in addition to dynamically registered clients
-	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty"`
+	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty" validate:"omitempty,dive"`
 
 	// DynamicRegistrationAuth configures authorization for POST /register (RFC 7591).
 	// Modes:

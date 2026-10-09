@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SUNET/vc/internal/verifier/cache"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/lestrrat-go/jwx/v3/jwk"
@@ -122,7 +123,9 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	}
 
 	// Cache the request object
-	c.cacheService.RequestObject.SetWithTTL(ctx, sessionID, requestObject, 5*time.Minute)
+	// Same TTL the cache was built with. A literal here expired the request
+	// object before the presentation window it belongs to (SUNET/vc#756).
+	c.cacheService.RequestObject.SetWithTTL(ctx, sessionID, requestObject, cache.PresentationScopedTTL(c.cfg, 5*time.Minute))
 
 	if c.vpMetrics != nil {
 		c.vpMetrics.RequestsCreated.Add(ctx, 1)

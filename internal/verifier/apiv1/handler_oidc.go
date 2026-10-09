@@ -773,6 +773,20 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 		return nil, ErrSessionNotFound
 	}
 
+	// The presentation deadline, enforced where the presentation actually
+	// arrives.
+	//
+	// GetOIDCRequestObject checks ExpiresAt when it SERVES the request
+	// object, which only bounds when a wallet may start. A wallet that
+	// fetched a second before the deadline could post its response any time
+	// until the cache evicted the session - at least fifteen minutes, and
+	// longer once the retention follows the configured window. So the
+	// timeout bounded the wrong half of the flow.
+	if sessionExpired(session) {
+		c.log.Info("Direct post for an expired session", "session_id", session.SessionID)
+		return nil, ErrSessionExpired
+	}
+
 	var vpToken string
 	var presentationSubmission any
 

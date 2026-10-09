@@ -84,3 +84,49 @@ func TestTheAuthContextStoreGetsTheDerivedRetention(t *testing.T) {
 	assert.Equal(t, 35*time.Minute, store.TTL(),
 		"the store did not get the configured retention")
 }
+
+// A live presentation also depends on the request object the wallet
+// resolves its request URI from, and on the ephemeral key it encrypts its
+// response to. Those sat at 5 and 10 minutes while only the auth context
+// followed the configured window, so with a 30-minute presentation the
+// request URI stopped resolving after five minutes and encrypted responses
+// stopped decrypting after ten - with ExpiresAt still saying the session
+// was live (SUNET/vc#756).
+func TestSupportingCachesOutliveThePresentationWindow(t *testing.T) {
+	long := cfgWith(1800, 300)
+
+	assert.Equal(t, 30*time.Minute, PresentationScopedTTL(long, 5*time.Minute),
+		"the request object expires before the presentation it belongs to")
+	assert.Equal(t, 30*time.Minute, PresentationScopedTTL(long, 10*time.Minute),
+		"the ephemeral key expires before the presentation it belongs to")
+
+	// The floors still hold, so a short window does not shorten them.
+	short := cfgWith(60, 300)
+	assert.Equal(t, 5*time.Minute, PresentationScopedTTL(short, 5*time.Minute))
+	assert.Equal(t, 10*time.Minute, PresentationScopedTTL(short, 10*time.Minute))
+
+	// Defaults are unchanged: 300s presentation against the old literals.
+	assert.Equal(t, 5*time.Minute, PresentationScopedTTL(cfgWith(300, 300), 5*time.Minute))
+	assert.Equal(t, 10*time.Minute, PresentationScopedTTL(cfgWith(300, 300), 10*time.Minute))
+
+	assert.Equal(t, 5*time.Minute, PresentationScopedTTL(nil, 5*time.Minute))
+}
+
+// ... and the caches the service builds really get it.
+func TestTheSupportingCachesAreBuiltWithThatTTL(t *testing.T) {
+	cfg := cfgWith(1800, 300)
+
+	svc, err := New(t.Context(), cfg, &db.Service{}, nil, logger.NewSimple("test"))
+	require.NoError(t, err)
+
+	for name, c := range map[string]any{
+		"request objects": svc.RequestObject,
+		"ephemeral keys":  svc.EphemeralEncryptionKey,
+	} {
+		t.Run(name, func(t *testing.T) {
+			mem, ok := c.(interface{ TTL() time.Duration })
+			require.True(t, ok, "expected the non-HA in-memory cache")
+			assert.Equal(t, 30*time.Minute, mem.TTL())
+		})
+	}
+}

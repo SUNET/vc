@@ -130,6 +130,15 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		return nil, err
 	}
 
+	// The presentation deadline. Nothing on this path checked it: the
+	// standalone flow accepted a wallet response for as long as the
+	// auth-context cache kept the session, whatever openid4vp
+	// presentation_timeout said.
+	if sessionExpired(authCtx) {
+		c.log.Info("Verification direct post for an expired session", "state", vpResponse.State)
+		return nil, ErrSessionExpired
+	}
+
 	// Generate response code
 	responseCode := uuid.NewString()
 	callbackURL, err := url.JoinPath(c.cfg.Verifier.PublicURL, "/verification/callback")
