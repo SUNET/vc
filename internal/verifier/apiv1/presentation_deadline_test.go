@@ -207,10 +207,13 @@ func TestTheCredentialDisplayGetsItsOwnWindow(t *testing.T) {
 	}
 	client.cfg.Verifier.Inbound.OpenID4VP.PresentationTimeout = 600
 
-	// A session one second from its presentation deadline, whose wallet
-	// response arrives right now.
+	// A session near its presentation deadline, whose wallet response
+	// arrives right now. A minute rather than a second: the assertion is
+	// that the window is RESET to 600s, which a minute proves just as well,
+	// and a second could elapse while this test builds the JWE on a loaded
+	// runner.
 	const sessionID = "display-window-session"
-	session := pendingSession(sessionID, sessionID, time.Now().Add(time.Second).Unix())
+	session := pendingSession(sessionID, sessionID, time.Now().Add(time.Minute).Unix())
 	session.ShowCredentialDetails = true
 	require.NoError(t, client.cacheService.AuthContext.Create(ctx, session))
 
@@ -225,6 +228,8 @@ func TestTheCredentialDisplayGetsItsOwnWindow(t *testing.T) {
 	// A fresh 600s to read and confirm, not the one second that was left.
 	assert.InDelta(t, time.Now().Add(600*time.Second).Unix(), stored.ExpiresAt, 5,
 		"the user inherited whatever was left of the wallet's deadline")
+	assert.Greater(t, stored.ExpiresAt, time.Now().Add(5*time.Minute).Unix(),
+		"the deadline still looks like the wallet's remaining time")
 	assert.False(t, sessionExpired(stored))
 
 	// ... and confirming now works, where before it was refused outright.

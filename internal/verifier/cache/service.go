@@ -114,6 +114,11 @@ func requestObjectDecoder(data []byte) (*openid4vp.RequestObject, error) {
 
 // minAuthContextRetention is the floor on how long an authorization context
 // is kept. It is the value this retention was hardcoded at.
+//
+// It no longer binds for a default configuration: two interaction windows
+// plus the code duration and the margin come to 16 minutes, so the default
+// retention is one minute longer than the 15 this was fixed at. The floor
+// still covers configurations whose deadlines are shorter than it.
 const minAuthContextRetention = 15 * time.Minute
 
 // authContextRetention is how long an authorization context is kept.

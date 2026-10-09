@@ -67,3 +67,49 @@ func opWith(client model.StaticOIDCClient) *model.OIDCOP {
 		StaticClients:       []model.StaticOIDCClient{client},
 	}
 }
+
+// A negative duration must be refused, not silently treated as unset.
+//
+// defaulting only fills a ZERO value, and `required` only rejects zero, so
+// a negative survived both - and userSessionMaxAge, which guards with
+// `> 0`, then mapped it to the old hardcoded 900 rather than the documented
+// 3600. Now that this setting controls how long a session cookie stays
+// decodable, silently inventing a value for it is the wrong answer
+// (SUNET/vc#756).
+func TestNegativeVerifierDurationsAreRefused(t *testing.T) {
+	validate, err := NewValidator()
+	require.NoError(t, err)
+
+	require.NoError(t, validate.Struct(opWith(model.StaticOIDCClient{
+		ClientID: "ok", ClientSecret: "s",
+		RedirectURIs:            []string{"https://example.com/callback"},
+		TokenEndpointAuthMethod: "client_secret_basic",
+		GrantTypes:              []string{"authorization_code"},
+		ResponseTypes:           []string{"code"},
+	})), "the baseline must pass, or this test proves nothing")
+
+	for name, break_ := range map[string]func(*model.OIDCOP){
+		"session_duration":      func(op *model.OIDCOP) { op.SessionDuration = -1 },
+		"code_duration":         func(op *model.OIDCOP) { op.CodeDuration = -1 },
+		"access_token_duration": func(op *model.OIDCOP) { op.AccessTokenDuration = -1 },
+		"id_token_duration":     func(op *model.OIDCOP) { op.IDTokenDuration = -1 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			op := opWith(model.StaticOIDCClient{
+				ClientID: "ok", ClientSecret: "s",
+				RedirectURIs:            []string{"https://example.com/callback"},
+				TokenEndpointAuthMethod: "client_secret_basic",
+				GrantTypes:              []string{"authorization_code"},
+				ResponseTypes:           []string{"code"},
+			})
+			break_(op)
+			assert.Error(t, validate.Struct(op))
+		})
+	}
+
+	// ... and the presentation window, on the inbound side.
+	assert.Error(t, validate.Struct(&model.OpenID4VPConfig{
+		PresentationTimeout:  -1,
+		SupportedCredentials: []model.SupportedCredentialConfig{{}},
+	}))
+}

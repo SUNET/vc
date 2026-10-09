@@ -1068,13 +1068,13 @@ type OIDCOP struct {
 	// SessionDuration is the lifetime in seconds of the verifier_user_session
 	// cookie - the OP's own session with the end user. Distinct from
 	// openid4vp.presentation_timeout, which bounds a single presentation.
-	SessionDuration int `yaml:"session_duration" validate:"required" default:"3600"`
+	SessionDuration int `yaml:"session_duration" validate:"required,gt=0" default:"3600"`
 	// CodeDuration is the authorization code duration in seconds
-	CodeDuration int `yaml:"code_duration" validate:"required" default:"300"`
+	CodeDuration int `yaml:"code_duration" validate:"required,gt=0" default:"300"`
 	// AccessTokenDuration is the access token duration in seconds
-	AccessTokenDuration int `yaml:"access_token_duration" validate:"required" default:"3600"`
+	AccessTokenDuration int `yaml:"access_token_duration" validate:"required,gt=0" default:"3600"`
 	// IDTokenDuration is the ID token duration in seconds
-	IDTokenDuration int `yaml:"id_token_duration" validate:"required" default:"3600"`
+	IDTokenDuration int `yaml:"id_token_duration" validate:"required,gt=0" default:"3600"`
 	// SubjectType is the subject type: "public" or "pairwise"
 	SubjectType string `yaml:"subject_type" validate:"required,oneof=public pairwise"`
 	// SubjectSalt is the salt for pairwise subject generation
@@ -1180,7 +1180,7 @@ type OpenID4VPConfig struct {
 	// presentation. It is the deadline on both the standalone verification
 	// session and the OIDC authorization session, and the authorization
 	// context is retained for at least this long plus code_duration.
-	PresentationTimeout int `yaml:"presentation_timeout" validate:"required" default:"300"`
+	PresentationTimeout int `yaml:"presentation_timeout" validate:"required,gt=0" default:"300"`
 	// SupportedCredentials holds the supported credential configurations
 	SupportedCredentials []SupportedCredentialConfig `yaml:"supported_credentials" validate:"required"`
 	// PresentationRequestsDir is an optional directory with presentation request templates
