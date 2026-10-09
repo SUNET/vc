@@ -62,7 +62,11 @@ RUN if [ "$SERVICE_NAME" = "verifier" ]; then \
 # distroless/cc-debian12 ships glibc + libgcc_s + libstdc++6, so dynamic
 # linking here matches what the runtime image can resolve. Longfellow's
 # C++ pulls libm/libstdc++, so a static link is not attempted.
-ARG TARGETARCH=amd64
+# No default: BuildKit injects TARGETARCH for cross/multi-arch builds; when it
+# is absent (single native-platform build, e.g. the ubuntu-24.04-arm runner),
+# an empty GOARCH makes Go target the native host arch. A hardcoded amd64
+# default silently cross-targets amd64 on arm64 and fails on the aarch64 gcc.
+ARG TARGETARCH
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     if [ "$SERVICE_NAME" = "verifier" ]; then \

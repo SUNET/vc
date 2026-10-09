@@ -228,6 +228,16 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		return nil, fmt.Errorf("failed to load MDDL schema: %w", err)
 	}
 
+	// Size the IssuerSignedItem salts the way the circuit catalog says the
+	// schema's declared zk_systems need them - see resolveZkSaltBytes. A
+	// no-op for a schema that declares none, which is every non-ZK mdoc.
+	saltBytes, err := c.resolveZkSaltBytes(ctx, schema)
+	if err != nil {
+		c.log.Error(err, "failed to resolve the ZK salt length", "doctype", schema.DocType)
+		return nil, err
+	}
+	schema.ZkSaltBytes = saltBytes
+
 	// Allocate a status list entry for revocation support, if any allocator
 	// is configured. Best-effort for the registry backend, which is what
 	// this path has always done - mDL issuance has never required a status
@@ -251,8 +261,7 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		// allocateOptionalStatus guarantees a non-empty URI here.
 		mdocStatusSection, mdocStatusIndex, mdocStatusURI, mdocStatusBackend = alloc.Section, alloc.Index, alloc.URI, alloc.Backend
 		mdocStatusRef = &mdoc.StatusReference{URI: mdocStatusURI, Index: mdocStatusIndex}
-		c.log.Debug("status list entry allocated for mdoc", "section", mdocStatusSection, "index", mdocStatusIndex, "uri", mdocStatusURI)
-	}
+		c.log.Debug("status list entry allocated for mdoc", "section", mdocStatusSection, "index", mdocStatusIndex, "uri", mdocStatusURI)	}
 
 	// Issue the mdoc. The status reference goes into the MSO
 	// (draft-ietf-oauth-status-list Section 6.3), which is what the issuer

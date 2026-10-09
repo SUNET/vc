@@ -124,6 +124,7 @@ func (s *Service) endpointOAuthAuthorize(ctx context.Context, c *gin.Context) (a
 	authCtx.AuthProvider = authProvider
 	authCtx.DataSource = string(credSource.DataSource)
 	authCtx.RemoteName = credSource.RemoteName
+	authCtx.AuthenticSource = credSource.AuthenticSource
 	if err := s.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		return nil, fmt.Errorf("failed to update auth provider on session %s: %w", reply.SessionID, err)

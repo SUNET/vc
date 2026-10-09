@@ -136,8 +136,21 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 
 	// Apply defaults AFTER unmarshalling so that nested structs inside
 	// pointer fields (e.g. Issuer.APIServer.Addr) receive their default
-	// values. creasty/defaults only sets zero-value fields, so explicit
-	// YAML values are never overwritten.
+	// values.
+	//
+	// creasty/defaults fills any field still at its ZERO value, which is
+	// not the same as any field the YAML left unset - and for a value an
+	// operator writes deliberately, the difference is the whole point.
+	// `enabled: false` on a plain bool, `clock_skew_seconds: 0` on a plain
+	// int, an explicitly empty string: each unmarshals to the zero value,
+	// is indistinguishable from absent by the time this runs, and gets
+	// overwritten by the default.
+	//
+	// So a field whose default is anything other than its zero value must
+	// be a POINTER if an operator is to be able to choose the zero value.
+	// Nil means absent and takes the default; a written zero survives. See
+	// model.BoolVal and pkg/configuration/defaulted_bools_test.go, which
+	// fails if a plain bool is given a default of true.
 	if err := defaults.Set(cfg); err != nil {
 		return nil, err
 	}

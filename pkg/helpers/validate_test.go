@@ -311,7 +311,8 @@ func TestAuthScopesSelfReference(t *testing.T) {
 			ds: model.DataSources{
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"eduid": {
-						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthProvider:    model.AuthProviderOpenID4VP,
+						AuthenticSource: "SUNET",
 						AuthScopes: map[string]model.AuthScopeEntry{
 							"pid": {AuthClaims: []string{"given_name"}},
 						},
@@ -334,7 +335,8 @@ func TestAuthScopesSelfReference(t *testing.T) {
 			ds: model.DataSources{
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"diploma": {
-						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthProvider:    model.AuthProviderOpenID4VP,
+						AuthenticSource: "SUNET",
 						AuthScopes: map[string]model.AuthScopeEntry{
 							"pid": {AuthClaims: []string{"given_name", "family_name"}},
 						},
@@ -392,7 +394,8 @@ func TestAuthScopesSelfReference(t *testing.T) {
 			ds: model.DataSources{
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"ehic": {
-						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthProvider:    model.AuthProviderOpenID4VP,
+						AuthenticSource: "SUNET",
 						AuthScopes: map[string]model.AuthScopeEntry{
 							"pid":   {AuthClaims: []string{"given_name", "family_name", "birth_date"}},
 							"eduid": {AuthClaims: []string{"given_name", "family_name", "date_of_birth"}},
@@ -435,8 +438,9 @@ func TestAuthScopesSelfReference(t *testing.T) {
 			ds: model.DataSources{
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"pid": {
-						AuthProvider: model.AuthProviderSAML,
-						AuthClaims:   []string{"given_name", "family_name"},
+						AuthProvider:    model.AuthProviderSAML,
+						AuthenticSource: "SUNET",
+						AuthClaims:      []string{"given_name", "family_name"},
 					},
 				}},
 			},
@@ -447,12 +451,41 @@ func TestAuthScopesSelfReference(t *testing.T) {
 			ds: model.DataSources{
 				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
 					"pid": {
-						AuthProvider: model.AuthProviderOIDC,
-						AuthClaims:   []string{"given_name"},
+						AuthProvider:    model.AuthProviderOIDC,
+						AuthenticSource: "SUNET",
+						AuthClaims:      []string{"given_name"},
 					},
 				}},
 			},
 			shouldError: false,
+		},
+		{
+			name: "saml without authentic_source is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"pid": {
+						AuthProvider: model.AuthProviderSAML,
+						AuthClaims:   []string{"given_name"},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "authentic_source_required_for_identity_mapping",
+		},
+		{
+			name: "openid4vp without authentic_source is rejected",
+			ds: model.DataSources{
+				Datastore: model.DatastoreConfig{Scopes: map[string]model.DatastoreScope{
+					"eduid": {
+						AuthProvider: model.AuthProviderOpenID4VP,
+						AuthScopes: map[string]model.AuthScopeEntry{
+							"pid": {AuthClaims: []string{"given_name"}},
+						},
+					},
+				}},
+			},
+			shouldError:   true,
+			errorContains: "authentic_source_required_for_identity_mapping",
 		},
 		{
 			name: "preauth on datastore with no auth_claims/auth_scopes passes",

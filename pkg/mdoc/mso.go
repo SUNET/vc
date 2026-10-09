@@ -15,6 +15,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/SUNET/vc/pkg/mdoc/zkcircuit"
+
 	"github.com/fxamacker/cbor/v2"
 )
 
@@ -149,8 +151,9 @@ func (b *MSOBuilder) AddDataElement(namespace, elementID string, value any) erro
 	// a schema constructed directly in Go, bypassing that check entirely -
 	// enforce the same invariant here too, at the actual point of use,
 	// rather than trust every caller to have gone through LoadMDDLSchema.
-	if b.saltBytes != 0 && b.saltBytes != 32 {
-		return fmt.Errorf("unsupported salt size %d: only 0 (default sizing) or 32 (zk-cred-vega's r12 circuit) is supported", b.saltBytes)
+	if b.saltBytes != 0 && (b.saltBytes < zkcircuit.MinSaltBytes || b.saltBytes > zkcircuit.MaxSaltBytes) {
+		return fmt.Errorf("unsupported salt size %d: must be 0 (default sizing) or within [%d, %d]",
+			b.saltBytes, zkcircuit.MinSaltBytes, zkcircuit.MaxSaltBytes)
 	}
 
 	// Use 8-byte random for pseudonym_seed to keep item within 128-byte circuit limit

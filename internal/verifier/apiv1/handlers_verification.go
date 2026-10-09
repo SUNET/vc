@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/jose"
 	"github.com/SUNET/vc/pkg/mdoc"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/revocation"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
@@ -762,7 +763,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 			// allow ZK presentations for a scope where that is acceptable.
 			if !formatCanCarryStatus(credentialFormats[scope]) && len(scopeCredentials[scope]) > 0 {
 				err := fmt.Errorf("revocation status of a ZK mDOC presentation cannot be determined: the proof carries no MSO, so it has no status reference")
-				if c.cfg.Verifier.Revocation.FailOpen {
+				if model.BoolVal(c.cfg.Verifier.Revocation.FailOpen, true) {
 					c.log.Info("Revocation check indeterminate (fail-open: allowing)", "scope", scope, "err", err)
 				} else {
 					c.log.Error(err, "revocation check failed", "scope", scope)
@@ -783,7 +784,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				result, err := c.revocationRegistry.ValidateShaped(ctx, cc.Credential, statusShape)
 				if err != nil {
 					// Transient error (network, malformed token) — fail_open controls behavior
-					if c.cfg.Verifier.Revocation.FailOpen {
+					if model.BoolVal(c.cfg.Verifier.Revocation.FailOpen, true) {
 						c.log.Info("Revocation check failed (fail-open: allowing)", "scope", scope, "err", err)
 					} else {
 						c.log.Error(err, "revocation check failed", "scope", scope)

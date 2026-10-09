@@ -591,6 +591,14 @@ build-jwt-issuer: ## Build jwt_issuer developer tool
 		-ldflags "-w -s --extldflags '-static' -X main.version=$(JWT_ISSUER_VERSION)" \
 		./developer_tools/scripts/jwt_issuer/
 
+build-vendor-zk-circuits: ## Build vendor_zk_circuits developer tool
+	$(info Building vendor_zk_circuits)
+	$(eval VENDOR_ZK_CIRCUITS_VERSION := $(or $(shell git tag -l "vendor-zk-circuits-v*" --sort=-v:refname | head -n1 | sed 's/^vendor-zk-circuits-//'),dev))
+	$(CGO_ENABLED_STATIC) GOOS=$(BUILD_OS) GOARCH=$(BUILD_ARCH) go build \
+		$(BUILD_FLAGS) -o ./bin/vendor_zk_circuits \
+		-ldflags "-w -s --extldflags '-static' -X main.version=$(VENDOR_ZK_CIRCUITS_VERSION)" \
+		./developer_tools/scripts/vendor_zk_circuits/
+
 build-tsl-checker: bbs-native-lib-ensure ## Build tsl_checker developer tool
 	$(info Building tsl_checker)
 	$(eval TSL_CHECKER_VERSION := $(or $(shell git tag -l "tsl-checker-v*" --sort=-v:refname | head -n1 | sed 's/^tsl-checker-//'),dev))
@@ -1052,6 +1060,25 @@ build-gen-bootstrap: bbs-native-lib-ensure ## Build gen_bootstrap tool
 gen-bootstrap: build-gen-bootstrap ## Generate bootstrapping JSON files from YAML source
 	$(info Generating bootstrapping/*.json from developer_tools/scripts/gen_bootstrap/users_paris.yaml)
 	./bin/gen_bootstrap developer_tools/scripts/gen_bootstrap/users_paris.yaml bootstrapping
+
+# Fly environments that receive the bootstrap tree. gen_bootstrap writes the
+# gzipped files (see writeJSON); this target only copies them. Both dev and
+# demo import the .json.gz fixtures. Override per-run with FLY_ENV=dev (or demo)
+# to sync one without touching the other.
+FLY_BOOTSTRAP_ENVS := dev demo
+
+fly-sync-bootstrap: gen-bootstrap ## Sync bootstrapping/*.gz into each fly env (FLY_ENV=dev|demo to restrict)
+	@envs="$(or $(FLY_ENV),$(FLY_BOOTSTRAP_ENVS))"; \
+	for env in $$envs; do \
+		if [ ! -d "fly/$$env" ]; then \
+			echo "Error: unknown fly env '$$env' (fly/$$env does not exist)" >&2; exit 1; \
+		fi; \
+		dest="fly/$$env/bootstrapping"; \
+		mkdir -p "$$dest"; \
+		rm -f "$$dest"/*.gz; \
+		cp bootstrapping/*.gz "$$dest/"; \
+		echo "Synced bootstrapping/*.gz -> $$dest"; \
+	done
 
 install-tools: ## Install required development tools
 	$(info Installing from apt)
