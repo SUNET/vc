@@ -16,5 +16,9 @@ func sessionExpired(authCtx *cache.AuthorizationContext) bool {
 	if authCtx == nil || authCtx.ExpiresAt == 0 {
 		return false
 	}
-	return time.Now().Unix() > authCtx.ExpiresAt
+	// >=, not >: isReusableAuthContext treats ExpiresAt <= now as expired,
+	// and with timestamps truncated to seconds a > here left direct-post
+	// accepted for the whole boundary second while the UI had already given
+	// up on the session.
+	return time.Now().Unix() >= authCtx.ExpiresAt
 }

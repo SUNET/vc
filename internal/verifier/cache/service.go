@@ -141,8 +141,20 @@ func authContextRetention(cfg *model.Cfg) time.Duration {
 	if op := cfg.Verifier.Outbound.OIDCProvider; op != nil && op.CodeDuration > 0 {
 		needed += time.Duration(op.CodeDuration) * time.Second
 	}
-	return max(needed, minAuthContextRetention)
+	return max(needed+codeIssuanceMargin, minAuthContextRetention)
 }
+
+// codeIssuanceMargin covers the gap between a presentation being accepted
+// and its authorization code being written.
+//
+// presentation_timeout + code_duration is the deadline arithmetic, and it
+// is exact only if the code is issued at the instant the window closes. It
+// is not: the deadline is checked, then the presentation is verified, then
+// the code is stored - and MongoDB anchors its retention to the original
+// CreatedAt, so unlike MemoryStore it does not get a fresh lease on that
+// write. Without a margin a code issued right at the deadline could be
+// evicted in the same second it became valid.
+const codeIssuanceMargin = time.Minute
 
 // PresentationScopedTTL is the retention for a cache a live presentation
 // depends on: at least floor, and never less than the presentation window.

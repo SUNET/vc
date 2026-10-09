@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwe"
@@ -115,4 +116,79 @@ func TestAZeroDeadlineIsNotTreatedAsExpired(t *testing.T) {
 	assert.False(t, sessionExpired(nil))
 	assert.True(t, sessionExpired(&cache.AuthorizationContext{ExpiresAt: time.Now().Add(-time.Second).Unix()}))
 	assert.False(t, sessionExpired(&cache.AuthorizationContext{ExpiresAt: time.Now().Add(time.Minute).Unix()}))
+}
+
+// The deadline second itself is already past the deadline.
+//
+// isReusableAuthContext treats ExpiresAt <= now as expired. sessionExpired
+// used >, so with timestamps truncated to seconds direct-post stayed open
+// for the whole boundary second after the UI had given up on the session.
+func TestTheExpiryBoundarySecondIsExpired(t *testing.T) {
+	now := time.Now().Unix()
+
+	assert.True(t, sessionExpired(&cache.AuthorizationContext{ExpiresAt: now}),
+		"the deadline second must be expired, as isReusableAuthContext reads it")
+	assert.True(t, sessionExpired(&cache.AuthorizationContext{ExpiresAt: now - 1}))
+	assert.False(t, sessionExpired(&cache.AuthorizationContext{ExpiresAt: now + 1}))
+}
+
+// A resume past the deadline is not pending.
+//
+// UIResume checked the completed case and the request object cache, but
+// never the session's own deadline - and the request object now outlives it
+// by its own floor. So a reload past the deadline reissued the dead QR and
+// minted a fresh DC API request_uri for a session the direct-post handlers
+// would refuse.
+func TestUIResumeRefusesAnExpiredSession(t *testing.T) {
+	ctx := t.Context()
+	client := newSigningTestClient(t)
+	if client.cfg.Verifier.Inbound.OpenID4VP == nil {
+		client.cfg.Verifier.Inbound.OpenID4VP = &model.OpenID4VPConfig{}
+	}
+	client.cfg.Verifier.Inbound.OpenID4VP.PresentationTimeout = 1800
+
+	reply, err := client.UIInteraction(ctx, &UIInteractionRequest{DCQLQuery: createTestDCQLForVP(t)})
+	require.NoError(t, err)
+	require.NotEmpty(t, reply.SessionID)
+
+	// Inside the deadline it resumes.
+	resumed, err := client.UIResume(ctx, reply.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, UIResumePending, resumed.Status)
+
+	// Past it, it does not - while the request object is still cached, so
+	// this cannot pass because the object happened to expire.
+	session, err := client.cacheService.AuthContext.GetByID(ctx, reply.SessionID)
+	require.NoError(t, err)
+	session.ExpiresAt = time.Now().Add(-time.Second).Unix()
+	require.NoError(t, client.cacheService.AuthContext.Update(ctx, session))
+
+	_, err = client.cacheService.RequestObject.GetErr(ctx, session.RequestObjectID)
+	require.NoError(t, err, "the request object must still be cached for this test to mean anything")
+
+	resumed, err = client.UIResume(ctx, reply.SessionID)
+	require.NoError(t, err)
+	assert.Equal(t, UIResumeExpired, resumed.Status)
+}
+
+// Confirming a credential display past the deadline cannot mint a code.
+//
+// This was the third place a code is issued and the last one with no
+// deadline check, so a confirmation could issue one arbitrarily late -
+// and MongoDB's retention, anchored to CreatedAt, could then evict the
+// session while that code was still valid.
+func TestConfirmCredentialDisplayRefusesAnExpiredSession(t *testing.T) {
+	ctx := t.Context()
+	client, _ := CreateTestClientWithMock(t, nil)
+
+	const sessionID = "expired-confirm-session"
+	session := pendingSession(sessionID, sessionID, time.Now().Add(-time.Second).Unix())
+	session.Status = cache.SessionStatusAwaitingPresentation
+	require.NoError(t, client.cacheService.AuthContext.Create(ctx, session))
+
+	_, err := client.ConfirmCredentialDisplay(ctx, &ConfirmCredentialDisplayRequest{
+		SessionID: sessionID,
+		Confirmed: true,
+	})
+	assert.ErrorIs(t, err, ErrSessionExpired)
 }

@@ -38,8 +38,8 @@ func TestAuthContextRetentionOutlivesTheDeadlinesItHolds(t *testing.T) {
 		{"defaults keep the old 15 minutes", 300, 300, 15 * time.Minute},
 		{"short values do not shrink it", 10, 10, 15 * time.Minute},
 		// 30 minutes of presenting cannot be held by a 15-minute cache.
-		{"a long presentation window stretches it", 1800, 300, 35 * time.Minute},
-		{"a long code duration stretches it", 300, 3600, 65 * time.Minute},
+		{"a long presentation window stretches it", 1800, 300, 36 * time.Minute},
+		{"a long code duration stretches it", 300, 3600, 66 * time.Minute},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := cfgWith(tc.presentationTimeout, tc.codeDuration)
@@ -49,8 +49,8 @@ func TestAuthContextRetentionOutlivesTheDeadlinesItHolds(t *testing.T) {
 
 			deadlines := cfg.Verifier.Inbound.OpenID4VP.GetPresentationTimeout() +
 				time.Duration(tc.codeDuration)*time.Second
-			assert.GreaterOrEqual(t, got, deadlines,
-				"a session would be evicted while its code is still valid")
+			assert.Greater(t, got, deadlines,
+				"a code issued at the deadline would be evicted in the same second")
 		})
 	}
 }
@@ -61,7 +61,7 @@ func TestAuthContextRetentionWithoutAnOIDCProvider(t *testing.T) {
 	cfg := &model.Cfg{Verifier: &model.Verifier{}}
 	cfg.Verifier.Inbound.OpenID4VP = &model.OpenID4VPConfig{PresentationTimeout: 1800}
 
-	assert.Equal(t, 30*time.Minute, authContextRetention(cfg))
+	assert.Equal(t, 31*time.Minute, authContextRetention(cfg))
 }
 
 // The retention the service actually hands the store, not just what the
@@ -81,7 +81,7 @@ func TestTheAuthContextStoreGetsTheDerivedRetention(t *testing.T) {
 	require.True(t, ok, "expected the non-HA in-memory store")
 
 	assert.Equal(t, authContextRetention(cfg), store.TTL())
-	assert.Equal(t, 35*time.Minute, store.TTL(),
+	assert.Equal(t, 36*time.Minute, store.TTL(),
 		"the store did not get the configured retention")
 }
 

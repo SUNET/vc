@@ -921,6 +921,16 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 			ResponseCode: authCtx.VerifierResponseCode,
 		}, nil
 	}
+	// Past the presentation deadline there is nothing to resume. Checked
+	// after the completed case, so a finished session still hands back its
+	// response code, and before the request object, which outlives the
+	// deadline by its own floor - without this, a resume reissued the dead
+	// QR and minted a fresh DC API request_uri for a session the
+	// direct-post handlers would then refuse.
+	if sessionExpired(authCtx) {
+		return &UIResumeReply{Status: UIResumeExpired}, nil
+	}
+
 	requestObject, err := c.cacheService.RequestObject.GetErr(ctx, authCtx.RequestObjectID)
 	if err != nil {
 		if errors.Is(err, cache.ErrNoDocuments) {
