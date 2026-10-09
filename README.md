@@ -414,6 +414,19 @@ systems; Vega additionally resolves a verifier-key catalog entry from the
 wallet-declared prover-key entry via the manifest (see
 `getOrLoadVegaVerifierKey`'s doc comment in `pkg/mdoc/zk_native_cgo_vega.go`).
 
+Vega verifier keys (~100MB decompressed, one per circuit revision) are kept
+as FILES in a process-private directory and handed to the worker by path,
+not inline: sending one as base64 inside the request JSON cost ~133MB of
+encode, pipe and decode on every single verification, cache hit or miss.
+The store is warmed at startup, in the background, from the catalog's
+currently-active circuits. That is best-effort: the server is ready before
+the warm-up finishes, so a presentation in that window still joins or
+starts a load. What it removes is the steady-state case - an instance that
+has been up a minute already holds every active circuit, instead of one
+holder per instance per rollout paying for the download at the end of
+their presentation. Both are configurable under `verifier.zk_key_cache` (`dir`,
+`max_bytes`, `prewarm`); see `docs/CONFIGURATION.md`.
+
 The ISSUER consults the same catalog, for a different reason. An mdoc
 schema that declares which proof systems its credentials are meant for -
 `"zk_systems": ["vega-mc"]` in the MDDL document - has its

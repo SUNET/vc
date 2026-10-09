@@ -70,6 +70,11 @@ type Client struct {
 	claimsExtractor     *openid4vp.ClaimsExtractor
 
 	statusAggregator *status.Aggregator
+
+	// zkPrewarmCancel stops the background Vega verifier-key warm-up and
+	// zkPrewarmDone is closed when it has. See StopVegaPrewarm.
+	zkPrewarmCancel context.CancelFunc
+	zkPrewarmDone   chan struct{}
 }
 
 // New creates a new instance of the public api
@@ -167,6 +172,13 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 			credentialInfo.Attributes = vctm.Attributes()
 		}
 	}
+
+	// Size the Vega verifier-key store and start its warm-up. Best-effort:
+	// the warm-up is asynchronous and the server is ready before it
+	// finishes, so it reduces the chance of a presentation paying for a
+	// ~100MB download inline rather than removing it - see
+	// configureVegaKeyStore (SUNET/vc#656).
+	c.configureVegaKeyStore()
 
 	c.trustService = &openid4vp.TrustService{}
 

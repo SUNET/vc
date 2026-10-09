@@ -16,6 +16,7 @@ import (
 	"github.com/SUNET/vc/internal/verifier/notify"
 	"github.com/SUNET/vc/pkg/configuration"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/metric"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/pubsub"
@@ -30,6 +31,15 @@ func init() {
 type service interface {
 	Close(ctx context.Context) error
 }
+
+// shutdownTimeout bounds everything that happens after SIGTERM: the
+// graceful HTTP shutdown, the verifier-key warm-up, and the key store
+// waiting for in-flight verifications to let go of their key files.
+//
+// Shorter than the grace period an orchestrator gives before SIGKILL
+// (Kubernetes defaults to 30s), so the cleanup below actually runs rather
+// than being cut off halfway.
+const shutdownTimeout = 20 * time.Second
 
 func main() {
 	var (
@@ -107,10 +117,48 @@ func main() {
 
 	mainLog.Info("HALTING SIGNAL!")
 
+	// A deadline, not ctx. Everything below waits for something - a
+	// graceful HTTP shutdown waits for handlers, the verifier-key store
+	// waits for the keys they have pinned - and ctx is context.Background()
+	// with no deadline at all, so one stuck handler would hold SIGTERM
+	// open forever and the orchestrator would send SIGKILL instead,
+	// skipping the cleanup entirely.
+	shutdownCtx, cancelShutdown := context.WithTimeout(ctx, shutdownTimeout)
+	defer cancelShutdown()
+
+	// The HTTP server FIRST, and by name rather than by range: services is
+	// a map, so iteration order is random, and closing the database or the
+	// notify bus while the listener is still accepting leaves in-flight
+	// requests failing against dependencies that have already gone. The
+	// graceful shutdown added here is worth nothing if what it waits for
+	// has been pulled out from under it.
+	if httpService, ok := services["httpserver"]; ok {
+		if err := httpService.Close(shutdownCtx); err != nil {
+			mainLog.Trace("serviceName", "httpserver", "error", err)
+		}
+	}
+
 	for serviceName, service := range services {
-		if err := service.Close(ctx); err != nil {
+		if serviceName == "httpserver" {
+			continue
+		}
+		if err := service.Close(shutdownCtx); err != nil {
 			mainLog.Trace("serviceName", serviceName, "error", err)
 		}
+	}
+
+	// Stop the background verifier-key warm-up before tearing its store
+	// down, or a download finishing a moment later recreates the directory
+	// and leaves half a gigabyte of key files behind.
+	apiv1.StopVegaPrewarm(shutdownCtx)
+
+	// The Vega verifier-key store is a process-wide directory of decompressed
+	// circuit artifacts, up to half a gigabyte of them. The OS would reclaim
+	// a temp directory eventually; a configured zk_key_cache.dir it would
+	// not, and "eventually" is not a promise worth making about that much
+	// disk either way.
+	if err := mdoc.CloseVegaVerifierKeyStore(shutdownCtx); err != nil {
+		mainLog.Error(err, "removing the Vega verifier key store")
 	}
 
 	// notifyService.Close only tears down its own subscriptions; the bus
@@ -122,7 +170,12 @@ func main() {
 		}
 	}
 
-	if err := meter.Shutdown(ctx); err != nil {
+	// shutdownCtx, not ctx: MeterProvider.Shutdown performs exporter I/O
+	// when OTLP metrics are enabled, so a stuck collector would otherwise
+	// hold SIGTERM open past the orchestrator's grace period and get the
+	// whole process SIGKILLed - exactly what the deadline above exists to
+	// prevent, undone two statements later.
+	if err := meter.Shutdown(shutdownCtx); err != nil {
 		mainLog.Error(err, "Meter shutdown")
 	}
 

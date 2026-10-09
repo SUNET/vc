@@ -847,6 +847,63 @@ type Verifier struct {
 	// verification. Only consulted by builds with the "zknative" Go build
 	// tag (see pkg/mdoc/zk_native_cgo.go) - ignored by the default build.
 	ZkCircuits ZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
+	// ZkKeyCache configures the on-disk Vega verifier-key store. Verifier
+	// only: these keys exist to verify a presented proof, and the issuer
+	// never touches one.
+	ZkKeyCache ZkKeyCacheConfig `yaml:"zk_key_cache,omitempty"`
+}
+
+// ZkKeyCacheConfig configures the decompressed Vega verifier key store.
+//
+// Process-local, in pkg/mdoc's vegaKeyStore, and consulted only by builds
+// carrying the "zknative" Go build tag.
+//
+// A key is ~100MB and the store is keyed by circuit revision, so what this
+// bounds is real disk. It is per PROCESS, not per deployment: under
+// common.ha each verifier instance has its own, since these are immutable
+// public artifacts that gain nothing from being shared and could not go in
+// the Mongo-backed cache anyway (BSON documents cap at 16MiB).
+type ZkKeyCacheConfig struct {
+	// Dir is where the store creates its own subdirectory. Empty means the
+	// OS temp directory, which is right for most deployments. Set it when
+	// the OS temp directory is small or memory-backed - putting a few
+	// hundred MB of verifier keys on a tmpfs gives back the memory this
+	// store exists to stop using.
+	//
+	// The store creates and removes its own subdirectory under this; the
+	// directory itself is left alone.
+	Dir string `yaml:"dir,omitempty" doc_example:"\"/var/cache/vc-verifier/zk-keys\""`
+
+	// MaxBytes bounds what the store keeps on disk. Zero means the package
+	// default, 512MiB - room for about five circuit revisions. A working
+	// set one key larger than the bound makes every request evict the key
+	// the next one needs, which fails quietly: no error, nothing in the
+	// logs but latency.
+	// A negative value is a configuration error, not a smaller bound: the
+	// runtime ignores anything at or below zero, so without this check an
+	// operator who wrote -1 would get the 512MiB default and no indication
+	// that their setting did nothing.
+	// The default tag states the same 512MiB the package falls back to, so
+	// the generated reference reports it instead of "-". Behaviour is
+	// unchanged either way: 512<<20 IS 536870912, so a config that omits
+	// the key gets the same bound whether defaults.Set fills it or the
+	// store applies its own.
+	MaxBytes int64 `yaml:"max_bytes,omitempty" default:"536870912" validate:"omitempty,gte=0" doc_example:"536870912"`
+
+	// Prewarm downloads every currently-active Vega circuit's verifier key
+	// at startup, in the background, instead of leaving the first
+	// presentation of each revision to pay for it inline - while a holder
+	// waits, at the very end of a presentation, after selecting
+	// credentials and signing (SUNET/vc#656).
+	//
+	// Defaults to TRUE, because a build carrying the zknative tag is a
+	// deployment that does ZK verification, and the alternative is N
+	// unlucky users per rollout with load balancing choosing which. Set it
+	// false where startup bandwidth matters more than one holder's
+	// latency, or where the catalog is not reachable from the instance at
+	// boot. A failed warm is logged and never fatal; the key then loads
+	// lazily exactly as it did before.
+	Prewarm *bool `yaml:"prewarm,omitempty" default:"true"`
 }
 
 // ZkCircuitsConfig configures the shared zk-circuits catalog sources
