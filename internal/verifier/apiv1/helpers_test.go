@@ -66,6 +66,6 @@ func createSimplePresentationTemplate(t *testing.T, scopes []string) *configurat
 			"given_name":  "given_name",
 			"family_name": "family_name",
 		},
-		Enabled: true,
+		Enabled: boolPtr(true),
 	}
 }
