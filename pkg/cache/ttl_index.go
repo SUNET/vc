@@ -362,11 +362,17 @@ func ttlIndexStateOf(ctx context.Context, coll *mongo.Collection, ttl time.Durat
 		// An index under a name of their own, on this key, with no expiry
 		// at all: an ordinary lookup index, not a TTL index of ours that
 		// has lost its expiry. Converting it would drop an index someone
-		// relies on and hand back something with different semantics -
-		// and MongoDB is content to keep theirs beside ours, since the
-		// options differ.
+		// relies on and hand back something with different semantics.
 		//
 		// Only the generated name is safe to repair from this state.
+		//
+		// Reporting it absent does NOT mean ours gets created beside
+		// theirs: MongoDB refuses that too - "An equivalent index already
+		// exists with a different name and options", measured on 7 - so
+		// the retry fails and the operator gets an error naming the
+		// conflict. That is the intended outcome, and the better of the
+		// two. (A PARTIAL index on this key differs enough that MongoDB
+		// does keep both; this is about a plain one.)
 		return ttlIndexAbsent, "", nil
 	}
 	return state, name, err
@@ -485,7 +491,7 @@ func rebuildTTLIndex(ctx context.Context, coll *mongo.Collection, indexes []mong
 		// returns no error at all, so code 85 says the index now present
 		// has DIFFERENT options - which is the state this function exists
 		// to leave behind, not one to accept on faith. Read it back.
-		state, _, stateErr := ttlIndexStateOf(ctx, coll, ttl)
+		state, foundName, stateErr := ttlIndexStateOf(ctx, coll, ttl)
 		if stateErr != nil {
 			return fmt.Errorf("it conflicted on recreation at %s and its state could not be read: %w (original: %v)",
 				ttl, stateErr, err)
@@ -493,7 +499,14 @@ func rebuildTTLIndex(ctx context.Context, coll *mongo.Collection, indexes []mong
 		if state != ttlIndexMatches {
 			return fmt.Errorf("it conflicted on recreation and the index present does not expire at %s: %w", ttl, err)
 		}
-		// Another replica rebuilt it, at the expiry we wanted.
+
+		// Another replica rebuilt it at the expiry we wanted - but not
+		// necessarily under the name we just asked for. It may have seen
+		// the index absent and created the generated name while we were
+		// still asking for a custom one. The caller's retry has to request
+		// the name that is actually there, or it conflicts on the name
+		// alone and startup fails over an index that is already correct.
+		withTTLIndexName(indexes, foundName)
 	}
 	return nil
 }
@@ -519,7 +532,12 @@ func ttlIndexModel(indexes []mongo.IndexModel) (mongo.IndexModel, bool) {
 // options builder, which is safe because each constructor builds its batch
 // afresh.
 func withTTLIndexName(indexes []mongo.IndexModel, name string) []mongo.IndexModel {
-	if name == "" || name == createdAtTTLIndex {
+	// The generated name is set explicitly rather than skipped: this is
+	// also how a model that already carries a CUSTOM name is pointed back
+	// at the generated one, which the HA read-back in rebuildTTLIndex
+	// needs. Naming {created_at: 1} "created_at_1" by hand produces the
+	// index MongoDB would have generated anyway.
+	if name == "" {
 		return indexes
 	}
 	if model, ok := ttlIndexModel(indexes); ok {

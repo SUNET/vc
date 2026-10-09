@@ -899,3 +899,33 @@ func TestIsPlainIndexRejectsOperatorOptions(t *testing.T) {
 		})
 	}
 }
+
+// The read-back has to carry the name it found into the retry.
+//
+// HA interleaving: this replica renamed its batch to the operator's custom
+// name and dropped that index; another replica then saw it absent and
+// created the GENERATED name. Our CreateOne conflicts, the read-back finds
+// a correct index - but the retry would still ask for the stale custom
+// name and fail on the name alone, over an index that is already right.
+func TestRebuildCarriesTheFoundNameIntoTheRetry(t *testing.T) {
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_name_raced")
+	c := client.Database(db).Collection(coll)
+
+	// The batch this replica is holding, already renamed to the custom one.
+	indexes := []mongo.IndexModel{createdAtIndex(900, "ttl_by_created_at")}
+
+	// The other replica got there first, under the generated name.
+	_, err := c.Indexes().CreateOne(ctx, createdAtIndex(900, ""))
+	require.NoError(t, err)
+
+	// Drop finds nothing, create conflicts, read-back says it is correct.
+	require.NoError(t, rebuildTTLIndex(ctx, c, indexes, "ttl_by_created_at", 15*time.Minute))
+
+	// The retry must now ask for the name that is actually there.
+	_, err = c.Indexes().CreateMany(ctx, indexes)
+	assert.NoError(t, err, "the retry still asked for the stale custom name")
+
+	assert.Equal(t, int32(900), ttlOf(t, client, db, coll))
+	assert.False(t, indexExists(t, client, db, coll, "ttl_by_created_at"),
+		"a duplicate was created under the custom name")
+}
