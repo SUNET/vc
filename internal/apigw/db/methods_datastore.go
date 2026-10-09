@@ -279,6 +279,12 @@ func (c *DatastoreColl) Replace(ctx context.Context, doc *model.CompleteDocument
 	ctx, span := c.Service.tracer.Start(ctx, "db:vc:datastore:replace")
 	defer span.End()
 
+	// Validate before overwriting, mirroring Save: a malformed fixture must not
+	// replace a valid existing record and make it unissuable.
+	if err := helpers.Check(ctx, c.Service.cfg, doc, c.Service.log); err != nil {
+		return err
+	}
+
 	filter := bson.M{
 		"meta.document_id":      bson.M{"$eq": doc.Meta.DocumentID},
 		"meta.authentic_source": bson.M{"$eq": doc.Meta.AuthenticSource},

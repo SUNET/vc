@@ -32,36 +32,36 @@ primary_region = "arn"
   secret_name = "SAML_SP_KEY"
 
 [[files]]
-  guest_path = "/bootstrapping/diploma.json"
-  local_path = "fly/demo/bootstrapping/diploma.json"
+  guest_path = "/bootstrapping/diploma.json.gz"
+  local_path = "fly/demo/bootstrapping/diploma.json.gz"
 
 [[files]]
-  guest_path = "/bootstrapping/eduid.json"
-  local_path = "fly/demo/bootstrapping/eduid.json"
+  guest_path = "/bootstrapping/ehic.json.gz"
+  local_path = "fly/demo/bootstrapping/ehic.json.gz"
 
 [[files]]
-  guest_path = "/bootstrapping/ehic.json"
-  local_path = "fly/demo/bootstrapping/ehic.json"
+  guest_path = "/bootstrapping/pda1.json.gz"
+  local_path = "fly/demo/bootstrapping/pda1.json.gz"
 
 [[files]]
-  guest_path = "/bootstrapping/pda1.json"
-  local_path = "fly/demo/bootstrapping/pda1.json"
+  guest_path = "/bootstrapping/pid.json.gz"
+  local_path = "fly/demo/bootstrapping/pid.json.gz"
 
 [[files]]
-  guest_path = "/bootstrapping/pid.json"
-  local_path = "fly/demo/bootstrapping/pid.json"
+  guest_path = "/bootstrapping/mdl.json.gz"
+  local_path = "fly/demo/bootstrapping/mdl.json.gz"
 
 [[files]]
-  guest_path = "/bootstrapping/mdl.json"
-  local_path = "fly/demo/bootstrapping/mdl.json"
+  guest_path = "/bootstrapping/microcredential.json.gz"
+  local_path = "fly/demo/bootstrapping/microcredential.json.gz"
 
 [[files]]
-  guest_path = "/bootstrapping/pid_mdoc.json"
-  local_path = "fly/demo/bootstrapping/pid_mdoc.json"
+  guest_path = "/bootstrapping/pid_mdoc.json.gz"
+  local_path = "fly/demo/bootstrapping/pid_mdoc.json.gz"
 
 [[files]]
-  guest_path = "/bootstrapping/identity_mappings.json"
-  local_path = "fly/demo/bootstrapping/identity_mappings.json"
+  guest_path = "/bootstrapping/identity_mappings.json.gz"
+  local_path = "fly/demo/bootstrapping/identity_mappings.json.gz"
 
 [http_service]
   internal_port = 8080

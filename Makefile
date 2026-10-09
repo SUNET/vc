@@ -1053,6 +1053,25 @@ gen-bootstrap: build-gen-bootstrap ## Generate bootstrapping JSON files from YAM
 	$(info Generating bootstrapping/*.json from developer_tools/scripts/gen_bootstrap/users_paris.yaml)
 	./bin/gen_bootstrap developer_tools/scripts/gen_bootstrap/users_paris.yaml bootstrapping
 
+# Fly environments that receive the bootstrap tree. gen_bootstrap writes the
+# gzipped files (see writeJSON); this target only copies them. Both dev and
+# demo import the .json.gz fixtures. Override per-run with FLY_ENV=dev (or demo)
+# to sync one without touching the other.
+FLY_BOOTSTRAP_ENVS := dev demo
+
+fly-sync-bootstrap: gen-bootstrap ## Sync bootstrapping/*.gz into each fly env (FLY_ENV=dev|demo to restrict)
+	@envs="$(or $(FLY_ENV),$(FLY_BOOTSTRAP_ENVS))"; \
+	for env in $$envs; do \
+		if [ ! -d "fly/$$env" ]; then \
+			echo "Error: unknown fly env '$$env' (fly/$$env does not exist)" >&2; exit 1; \
+		fi; \
+		dest="fly/$$env/bootstrapping"; \
+		mkdir -p "$$dest"; \
+		rm -f "$$dest"/*.gz; \
+		cp bootstrapping/*.gz "$$dest/"; \
+		echo "Synced bootstrapping/*.gz -> $$dest"; \
+	done
+
 install-tools: ## Install required development tools
 	$(info Installing from apt)
 	apt-get update && apt-get install -y \
