@@ -142,12 +142,23 @@ The request object is **always** a signed JWT, served from
 2. The wallet validates the signature before processing
 3. Parameter tampering and injection are prevented
 
-OpenID4VP 1.0 and the HAIP verifier profile both require a signed request
-object for the DC API, and the verifier never had a plain-JSON request-object
-endpoint to fall back to. The former `use_jar` option selected a route that was
-never registered, so the DC API flow 404'd under its own default of `false`
-(SUNET/vc#755); the option is gone rather than made to work, because the
-unsigned alternative is not something the profile permits.
+**Who requires this.** Core OpenID4VP 1.0 does *not*: its Digital
+Credentials API binding defines both an unsigned and a signed request mode
+(the `openid4vp-v1-unsigned` and `openid4vp-v1-signed` protocol
+identifiers), and a plain-JSON request object is a conformant choice there.
+It is the **HAIP verifier profile** that mandates a signed request object,
+and that is the profile this verifier targets.
+
+So signed-only is this deployment's decision plus HAIP's requirement, not a
+constraint core OpenID4VP imposes. It is also the only mode vc has ever
+implemented: the request-object endpoint has always returned a signed JWT,
+and no plain-JSON endpoint was ever registered to serve the other mode.
+
+The former `use_jar` option did not choose between the two. Its false arm -
+the default - pointed at a route that does not exist, so the DC API flow
+404'd out of the box (SUNET/vc#755). It was removed rather than made to
+work: implementing the unsigned mode is a feature, and one HAIP would
+forbid, so it is not something a bugfix should add by the back door.
 
 ### Response Modes
 
