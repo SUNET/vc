@@ -729,3 +729,60 @@ func TestTTLIndexIsCreatedWhenAbsentDespiteAnotherConflict(t *testing.T) {
 	assert.Equal(t, int32(900), ttlOf(t, client, db, coll),
 		"startup failed on another index and left the collection with no TTL index")
 }
+
+// A custom index on the same key that is NOT ours must be left alone.
+//
+// MongoDB allows several indexes on one key when their options differ - a
+// partial TTL index alongside a full one. Taking the first {created_at: 1}
+// spec could select someone else's: the request would be renamed to it,
+// the retry would fail because the requested options omit its partial
+// filter, and collMod might already have changed the wrong index.
+func TestTTLIndexIgnoresAPartialIndexOnTheSameKey(t *testing.T) {
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_partial_sibling")
+	c := client.Database(db).Collection(coll)
+
+	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "created_at", Value: 1}},
+		Options: options.Index().SetName("ttl_partial").SetExpireAfterSeconds(600).
+			SetPartialFilterExpression(bson.D{{Key: "status", Value: "pending"}}),
+	})
+	require.NoError(t, err)
+
+	// Ours does not exist, and theirs is not it.
+	state, name, err := ttlIndexStateOf(ctx, c, 15*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, ttlIndexAbsent, state, "someone else's partial index was taken for ours")
+	assert.Empty(t, name)
+
+	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	require.NoError(t, err)
+
+	assert.Equal(t, int32(900), ttlOf(t, client, db, coll), "our own index was not created")
+	assert.Equal(t, int32(600), ttlOfNamed(t, client, db, coll, "ttl_partial"),
+		"the operator's partial index was modified")
+}
+
+// Two custom-named indexes on the key and no created_at_1: none of them is
+// ours, so ours is absent rather than arbitrarily one of theirs.
+func TestTTLIndexWithSeveralCustomIndexesOnTheKey(t *testing.T) {
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_several_custom")
+	c := client.Database(db).Collection(coll)
+
+	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "created_at", Value: 1}},
+		Options: options.Index().SetName("ttl_a").SetExpireAfterSeconds(600).
+			SetPartialFilterExpression(bson.D{{Key: "status", Value: "a"}}),
+	})
+	require.NoError(t, err)
+	_, err = c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "created_at", Value: 1}},
+		Options: options.Index().SetName("ttl_b").SetExpireAfterSeconds(700).
+			SetPartialFilterExpression(bson.D{{Key: "status", Value: "b"}}),
+	})
+	require.NoError(t, err)
+
+	state, name, err := ttlIndexStateOf(ctx, c, 15*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, ttlIndexAbsent, state)
+	assert.Empty(t, name, "one of two indexes that are not ours was picked arbitrarily")
+}

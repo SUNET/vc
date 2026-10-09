@@ -322,33 +322,68 @@ func ttlIndexStateOf(ctx context.Context, coll *mongo.Collection, ttl time.Durat
 		return ttlIndexAbsent, "", err
 	}
 
-	want := int32(ttl.Seconds())
+	// MongoDB allows several indexes on one key when their options differ -
+	// a partial TTL index alongside a full one, say - so "the first
+	// {created_at: 1} spec" is not necessarily ours. Measured on 7:
+	// creating created_at_1 next to a custom partial index on the same key
+	// succeeds, and both are listed.
+	//
+	// Precedence: the one MongoDB would have named for us; failing that, a
+	// single custom-named one, which is the index this code renames the
+	// request to. Several custom-named ones and no created_at_1 means none
+	// of them is ours, and the one we want does not exist yet.
+	var candidates []bson.M
 	for _, spec := range specs {
-		// By KEY, not by name. "created_at_1" is only MongoDB's default
-		// name: an index on another key can wear it, and the real
-		// {created_at: 1} index can be called anything an operator likes.
-		// Matching the name alone mistook the first for ours; requiring it
-		// as well missed the second, reported absent, and re-issued the
-		// same failing request.
 		if !isCreatedAtKey(spec["key"]) {
 			continue
 		}
-		name, _ := spec["name"].(string)
-		if name == "" {
-			name = createdAtTTLIndex
+		if name, _ := spec["name"].(string); name == createdAtTTLIndex {
+			return classifyTTLIndex(spec, ttl, createdAtTTLIndex)
 		}
-
-		got, ok := asInt32(spec["expireAfterSeconds"])
-		switch {
-		case !ok:
-			return ttlIndexNotTTL, name, nil
-		case got == want:
-			return ttlIndexMatches, name, nil
-		default:
-			return ttlIndexExpiryChanged, name, nil
+		if isPlainIndex(spec) {
+			candidates = append(candidates, spec)
 		}
 	}
-	return ttlIndexAbsent, "", nil
+
+	if len(candidates) != 1 {
+		return ttlIndexAbsent, "", nil
+	}
+
+	name, _ := candidates[0]["name"].(string)
+	if name == "" {
+		name = createdAtTTLIndex
+	}
+	return classifyTTLIndex(candidates[0], ttl, name)
+}
+
+// isPlainIndex reports whether a spec could be the index this store
+// defines: on its key, with an expiry, and nothing else.
+//
+// A partial, unique, sparse or collated index on {created_at: 1} is a
+// different index serving a different purpose - an operator's own. Renaming
+// our request to it would ask MongoDB to redefine theirs without the
+// options that make it theirs, and collMod would have changed the wrong
+// index on the way.
+func isPlainIndex(spec bson.M) bool {
+	for _, option := range []string{"partialFilterExpression", "unique", "sparse", "collation", "weights", "hidden"} {
+		if _, present := spec[option]; present {
+			return false
+		}
+	}
+	return true
+}
+
+// classifyTTLIndex reads one index spec against the expiry wanted.
+func classifyTTLIndex(spec bson.M, ttl time.Duration, name string) (ttlIndexState, string, error) {
+	got, ok := asInt32(spec["expireAfterSeconds"])
+	switch {
+	case !ok:
+		return ttlIndexNotTTL, name, nil
+	case got == int32(ttl.Seconds()):
+		return ttlIndexMatches, name, nil
+	default:
+		return ttlIndexExpiryChanged, name, nil
+	}
 }
 
 // isCreatedAtKey reports whether this index spec's key really is
