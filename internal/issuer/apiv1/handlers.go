@@ -174,6 +174,16 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		return nil, fmt.Errorf("failed to load MDDL schema: %w", err)
 	}
 
+	// Size the IssuerSignedItem salts the way the circuit catalog says the
+	// schema's declared zk_systems need them - see resolveZkSaltBytes. A
+	// no-op for a schema that declares none, which is every non-ZK mdoc.
+	saltBytes, err := c.resolveZkSaltBytes(ctx, schema)
+	if err != nil {
+		c.log.Error(err, "failed to resolve the ZK salt length", "doctype", schema.DocType)
+		return nil, err
+	}
+	schema.ZkSaltBytes = saltBytes
+
 	// Allocate status list entry for revocation support (if registry is configured)
 	var statusSection, statusIndex int64
 	if c.registryClient != nil {

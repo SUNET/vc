@@ -38,7 +38,6 @@ export class DigitalCredentialsClient {
      * @param {string} config.sessionId Session identifier
      * @param {string} config.baseUrl Base URL of verifier
      * @param {string[]} config.preferredFormats Ordered list of preferred credential formats
-     * @param {boolean} config.useJAR Whether to use JWT Authorization Request
      * @param {string} config.responseMode OpenID4VP response mode (dc_api.jwt, direct_post.jwt, direct_post)
      * @param {Function} config.onProgress Progress callback
      * @param {Function} config.onError Error callback
@@ -52,7 +51,6 @@ export class DigitalCredentialsClient {
             CREDENTIAL_FORMATS.DC_SD_JWT,
             CREDENTIAL_FORMATS.MDOC
         ];
-        this.useJAR = config.useJAR !== false; // Default to true
         this.responseMode = config.responseMode || 'dc_api.jwt';
         this.onProgress = config.onProgress || (() => {});
         this.onError = config.onError || console.error;
@@ -95,35 +93,28 @@ export class DigitalCredentialsClient {
     }
 
     /**
-     * Fetch authorization request from verifier
-     * Returns either a signed JWT (JAR) or plain request object
-     * @returns {Promise<string|Object>}
+     * Fetch the signed authorization request (JAR) from the verifier.
+     *
+     * Always the signed form. The verifier serves exactly one thing at
+     * exactly one route - request-object/{session}, content type
+     * application/oauth-authz-req+jwt - and there has never been a
+     * plain-JSON request-object endpoint. The branch that used to be here
+     * fetched /verification/request/{session}, which is not a registered
+     * route, so the default configuration 404'd (SUNET/vc#755).
+     *
+     * @returns {Promise<string>} the signed request object
      */
     async fetchAuthorizationRequest() {
-        const endpoint = this.useJAR 
-            ? `/verification/request-object/${this.sessionId}`
-            : `/verification/request/${this.sessionId}`;
-        
-        const response = await fetch(`${this.baseUrl}${endpoint}`, {
+        const response = await fetch(`${this.baseUrl}/verification/request-object/${this.sessionId}`, {
             method: 'GET',
-            headers: {
-                'Accept': this.useJAR 
-                    ? 'application/oauth-authz-req+jwt'
-                    : 'application/json'
-            }
+            headers: { 'Accept': 'application/oauth-authz-req+jwt' }
         });
 
         if (!response.ok) {
             throw new Error(`Failed to fetch authorization request: ${response.status} ${response.statusText}`);
         }
 
-        if (this.useJAR) {
-            // Return signed JWT for JAR flow
-            return await response.text();
-        } else {
-            // Return JSON request object for direct parameter flow
-            return await response.json();
-        }
+        return await response.text();
     }
 
     /**

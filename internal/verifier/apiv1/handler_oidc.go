@@ -16,6 +16,7 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/jose"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -63,7 +64,6 @@ type AuthorizeResponse struct {
 	PollURL          string       `json:"poll_url"`
 	WalletLinks      []WalletLink `json:"wallet_links,omitempty"`
 	PreferredFormats []string     `json:"preferred_formats"`
-	UseJAR           bool         `json:"use_jar"`
 	ResponseMode     string       `json:"response_mode"`
 	Title            string       `json:"title"`
 	Subtitle         string       `json:"subtitle"`
@@ -234,7 +234,6 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 
 	// Add Digital Credentials API configuration
 	response.PreferredFormats = c.cfg.Verifier.DigitalCredentials.PreferredFormats
-	response.UseJAR = c.cfg.Verifier.DigitalCredentials.UseJAR
 	response.ResponseMode = c.cfg.Verifier.DigitalCredentials.ResponseMode
 
 	// Add CSS customization configuration
@@ -393,7 +392,7 @@ func (c *Client) handleAuthorizationCodeGrant(ctx context.Context, req *TokenReq
 	// claims as the id_token (with typ=at+jwt per RFC 9068). This allows
 	// the userinfo endpoint to be fully stateless: it validates the JWT
 	// signature and returns the embedded claims without any session lookup.
-	if c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo {
+	if model.BoolVal(c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo, true) {
 		accessToken, err := c.generateAccessToken(ctx, authCtx, client)
 		if err != nil {
 			c.log.Error(err, "Failed to generate access token")
@@ -549,7 +548,7 @@ func (c *Client) GetDiscoveryMetadata(ctx context.Context) (*DiscoveryMetadata, 
 		return nil, err
 	}
 	var userInfoEndpoint string
-	if c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo {
+	if model.BoolVal(c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo, true) {
 		userInfoEndpoint, err = join("/userinfo")
 		if err != nil {
 			return nil, err
@@ -1119,7 +1118,7 @@ type UserInfoResponse map[string]any
 // The endpoint is fully stateless: it validates the JWT signature and expiration
 // using the same signing key that issued the token, then returns the embedded claims.
 func (c *Client) GetUserInfo(ctx context.Context, req *UserInfoRequest) (UserInfoResponse, error) {
-	if !c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo {
+	if !model.BoolVal(c.cfg.Verifier.Outbound.OIDCProvider.EnableUserInfo, true) {
 		return nil, ErrRequestNotSupported
 	}
 

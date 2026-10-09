@@ -51,9 +51,14 @@ func (s *KeyMaterialSigner) Sign(ctx context.Context, data []byte) ([]byte, erro
 		return EncodeECDSASignature(r, sigS, key.Curve)
 	case *rsa.PrivateKey:
 		return rsa.SignPKCS1v15(rand.Reader, key, hash, hashed)
-	default:
-		return nil, fmt.Errorf("unsupported key type: %T", s.km.PrivateKey)
 	}
+
+	// Anything else that can sign - a PKCS#11 key, notably. See
+	// keymaterial_signer_crypto.go.
+	if signer, ok := cryptoSigner(s.km.PrivateKey); ok {
+		return signWithCryptoSigner(signer, hashed, hash)
+	}
+	return nil, fmt.Errorf("unsupported key type: %T", s.km.PrivateKey)
 }
 
 // SignDigest signs a pre-computed digest without additional hashing.
@@ -73,9 +78,12 @@ func (s *KeyMaterialSigner) SignDigest(ctx context.Context, digest []byte) ([]by
 		// (not encryption), a standard scheme for JWT RS256/RS384/RS512.
 		hash := getHashForAlgorithm(s.km.SigningMethod.Alg())
 		return key.Sign(rand.Reader, digest, hash)
-	default:
-		return nil, fmt.Errorf("unsupported key type: %T", s.km.PrivateKey)
 	}
+
+	if signer, ok := cryptoSigner(s.km.PrivateKey); ok {
+		return signWithCryptoSigner(signer, digest, getHashForAlgorithm(s.km.SigningMethod.Alg()))
+	}
+	return nil, fmt.Errorf("unsupported key type: %T", s.km.PrivateKey)
 }
 
 // Algorithm returns the JWT algorithm name based on the key type.
@@ -95,9 +103,14 @@ func (s *KeyMaterialSigner) PublicKey() any {
 		return key.Public()
 	case *rsa.PrivateKey:
 		return key.Public()
-	default:
-		return nil
 	}
+
+	// An HSM key knows its own public half; returning nil here published a
+	// JWK with no key in it.
+	if signer, ok := cryptoSigner(s.km.PrivateKey); ok {
+		return signer.Public()
+	}
+	return nil
 }
 
 // PrivateKey returns the underlying private key.
@@ -121,7 +134,18 @@ func determineKeyID(km *KeyMaterial) string {
 	case *rsa.PrivateKey:
 		pubKey = key.Public()
 	default:
-		return "default-key"
+		// An HSM key reached over PKCS#11 is a crypto.Signer and knows its
+		// own public half. Without this every certificate-less HSM key got
+		// the SAME kid, "default-key", so a JWKS consumer could not tell
+		// two of them apart and picked the wrong one after a rotation.
+		signer, ok := cryptoSigner(km.PrivateKey)
+		if !ok {
+			return "default-key"
+		}
+		pubKey = signer.Public()
+		if pubKey == nil {
+			return "default-key"
+		}
 	}
 
 	pubBytes, err := x509.MarshalPKIXPublicKey(pubKey)

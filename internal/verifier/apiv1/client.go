@@ -207,7 +207,7 @@ func New(ctx context.Context, db *db.Service, notify *notify.Service, cacheServi
 		// Register checkers. To add a future mechanism (e.g., OCSP),
 		// pass it alongside statusListChecker — each checker provides its own Extract().
 		c.revocationRegistry = revocation.NewRegistry(statusListChecker)
-		c.log.Info("Revocation checker initialized", "cache_ttl", cacheTTL, "fail_open", cfg.Verifier.Revocation.FailOpen)
+		c.log.Info("Revocation checker initialized", "cache_ttl", cacheTTL, "fail_open", model.BoolVal(cfg.Verifier.Revocation.FailOpen, true))
 	}
 
 	c.statusAggregator = c.buildStatusAggregator()
