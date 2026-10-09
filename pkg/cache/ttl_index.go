@@ -91,16 +91,30 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 		return fmt.Errorf("index %s conflicts and its current state could not be read: %w (original: %v)",
 			createdAtTTLIndex, listErr, err)
 
-	case state == ttlIndexAbsent || state == ttlIndexMatches:
-		// Nothing of ours to migrate.
+	case state == ttlIndexMatches:
+		// Already what we want. Fall through to the retry rather than
+		// returning the conflict we are holding: in HA another replica can
+		// resolve the TTL index between our CreateMany and this read, and
+		// that error is then stale - rejecting on it fails startup over a
+		// conflict that no longer exists. If it really does belong to
+		// another index, the retry raises it again, freshly, and without
+		// the TTL index having been touched.
+
+	case state == ttlIndexAbsent:
+		// No TTL index at all, which in HA can mean another replica
+		// dropped it for its own rebuild between our CreateMany and this
+		// read. Leaving it to the batched retry is not safe for the same
+		// reason as the collMod race below: a simultaneous conflict on an
+		// earlier index makes CreateMany fail before reaching the TTL
+		// model, and if the other replica's recreate also fails the
+		// collection is left with no expiry.
 		//
-		// Fall through to the retry rather than returning the conflict we
-		// are holding. In HA another replica can resolve the TTL index
-		// between our CreateMany and this read, and that error is then
-		// stale - rejecting on it fails startup over a conflict that no
-		// longer exists. If it really does belong to another index, the
-		// retry raises it again, freshly, and without the TTL index having
-		// been touched.
+		// Creating it here costs an idempotent no-op when the conflict
+		// really was someone else's and this collection never had one.
+		if rebuildErr := rebuildTTLIndex(ctx, coll, indexes, indexName, ttl); rebuildErr != nil {
+			return fmt.Errorf("index %s is absent and %w (original: %v)",
+				createdAtTTLIndex, rebuildErr, err)
+		}
 
 	case state == ttlIndexNotTTL:
 		// collMod cannot ADD expireAfterSeconds before MongoDB 5.1 -
@@ -392,8 +406,12 @@ func asInt32(v any) (int32, bool) {
 // retry can fail on someone else's conflict without that costing this
 // collection its TTL.
 func rebuildTTLIndex(ctx context.Context, coll *mongo.Collection, indexes []mongo.IndexModel, name string, ttl time.Duration) error {
-	if dropErr := coll.Indexes().DropOne(ctx, name); dropErr != nil && !isIndexNotFound(dropErr) {
-		return fmt.Errorf("it could not be dropped: %w", dropErr)
+	// Nothing to drop when the index is absent - the name is empty then,
+	// and DropOne("") is not a no-op but an error.
+	if name != "" {
+		if dropErr := coll.Indexes().DropOne(ctx, name); dropErr != nil && !isIndexNotFound(dropErr) {
+			return fmt.Errorf("it could not be dropped: %w", dropErr)
+		}
 	}
 
 	model, ok := ttlIndexModel(indexes)

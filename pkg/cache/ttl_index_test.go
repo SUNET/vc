@@ -700,3 +700,32 @@ func TestCollModCarriesAWriteConcern(t *testing.T) {
 		{Key: "expireAfterSeconds", Value: int32(900)},
 	}, index)
 }
+
+// An absent TTL index is created here, not left to the batched retry.
+//
+// In HA another replica can drop it for its own rebuild between our
+// CreateMany and the state read. If an earlier index also conflicts, the
+// retry fails before reaching the TTL model - and if that replica's
+// recreate fails too, the collection is left with no expiry. Same
+// interleaving as the collMod race, one branch over.
+func TestTTLIndexIsCreatedWhenAbsentDespiteAnotherConflict(t *testing.T) {
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_absent_conflict")
+	c := client.Database(db).Collection(coll)
+
+	// An 85 this code cannot resolve, so the batched retry is guaranteed to
+	// fail before it reaches the TTL model.
+	_, err := c.Indexes().CreateOne(ctx, unresolvableStateConflict())
+	require.NoError(t, err)
+
+	// ... and no created_at index at all, as if a replica had just dropped
+	// it.
+	state, _, err := ttlIndexStateOf(ctx, c, 15*time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, ttlIndexAbsent, state)
+
+	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	require.Error(t, err, "the state_1 conflict is real and must still be reported")
+
+	assert.Equal(t, int32(900), ttlOf(t, client, db, coll),
+		"startup failed on another index and left the collection with no TTL index")
+}
