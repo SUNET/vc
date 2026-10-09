@@ -356,7 +356,20 @@ func ttlIndexStateOf(ctx context.Context, coll *mongo.Collection, ttl time.Durat
 	if name == "" {
 		name = createdAtTTLIndex
 	}
-	return classifyTTLIndex(candidates[0], ttl, name)
+
+	state, name, err := classifyTTLIndex(candidates[0], ttl, name)
+	if state == ttlIndexNotTTL {
+		// An index under a name of their own, on this key, with no expiry
+		// at all: an ordinary lookup index, not a TTL index of ours that
+		// has lost its expiry. Converting it would drop an index someone
+		// relies on and hand back something with different semantics -
+		// and MongoDB is content to keep theirs beside ours, since the
+		// options differ.
+		//
+		// Only the generated name is safe to repair from this state.
+		return ttlIndexAbsent, "", nil
+	}
+	return state, name, err
 }
 
 // isPlainIndex reports whether a spec could be the index this store
@@ -368,7 +381,10 @@ func ttlIndexStateOf(ctx context.Context, coll *mongo.Collection, ttl time.Durat
 // options that make it theirs, and collMod would have changed the wrong
 // index on the way.
 func isPlainIndex(spec bson.M) bool {
-	for _, option := range []string{"partialFilterExpression", "unique", "sparse", "collation", "weights", "hidden"} {
+	for _, option := range []string{
+		"partialFilterExpression", "unique", "sparse", "collation",
+		"weights", "hidden", "storageEngine",
+	} {
 		if _, present := spec[option]; present {
 			return false
 		}

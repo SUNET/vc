@@ -836,3 +836,66 @@ func indexIsPartial(t *testing.T, client *mongo.Client, db, coll, name string) b
 	t.Fatalf("no %s index on %s.%s", name, db, coll)
 	return false
 }
+
+// An operator's plain lookup index on created_at is not a TTL index of
+// ours that lost its expiry.
+//
+// The sole-custom-candidate fallback used to classify it as ttlIndexNotTTL
+// and repair it: dropped, recreated with an expiry, and handed back with
+// different semantics to whoever was relying on it. Only the generated name
+// is safe to repair from that state.
+func TestTTLIndexLeavesACustomNonTTLIndexAlone(t *testing.T) {
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_custom_lookup")
+	c := client.Database(db).Collection(coll)
+
+	// Their index: our key, their name, no expiry.
+	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "created_at", Value: 1}},
+		Options: options.Index().SetName("created_at_lookup"),
+	})
+	require.NoError(t, err)
+
+	state, name, err := ttlIndexStateOf(ctx, c, 15*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, ttlIndexAbsent, state, "an ordinary lookup index was taken for ours to repair")
+	assert.Empty(t, name)
+
+	// Startup fails, and that is the right outcome: MongoDB will not create
+	// our TTL index beside a plain one on the same key - measured, "An
+	// equivalent index already exists with a different name and options" -
+	// so there is nowhere to converge to without destroying theirs. A
+	// refusal naming the conflict is better than silently repurposing an
+	// index someone relies on.
+	//
+	// (A PARTIAL index on the same key is a different matter: the options
+	// differ enough that MongoDB keeps both, which is why that case ends
+	// with ours created - see the test above.)
+	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	assert.Error(t, err)
+
+	assert.True(t, indexExists(t, client, db, coll, "created_at_lookup"),
+		"the operator's lookup index was dropped")
+	assert.False(t, indexExists(t, client, db, coll, createdAtTTLIndex),
+		"their index was repurposed under our name")
+	for _, spec := range indexSpecs(t, client, db, coll) {
+		if spec["name"] == "created_at_lookup" {
+			_, hasTTL := spec["expireAfterSeconds"]
+			assert.False(t, hasTTL, "the operator's lookup index was turned into a TTL index")
+		}
+	}
+}
+
+// storageEngine marks an index as an operator's too.
+func TestIsPlainIndexRejectsOperatorOptions(t *testing.T) {
+	assert.True(t, isPlainIndex(bson.M{"name": createdAtTTLIndex, "expireAfterSeconds": int32(900)}))
+
+	for _, option := range []string{
+		"partialFilterExpression", "unique", "sparse", "collation",
+		"weights", "hidden", "storageEngine",
+	} {
+		t.Run(option, func(t *testing.T) {
+			assert.False(t, isPlainIndex(bson.M{"name": createdAtTTLIndex, option: "anything"}),
+				"%s marks an index as the operator's and must disqualify it", option)
+		})
+	}
+}
