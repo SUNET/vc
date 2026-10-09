@@ -334,15 +334,18 @@ func ttlIndexStateOf(ctx context.Context, coll *mongo.Collection, ttl time.Durat
 	// of them is ours, and the one we want does not exist yet.
 	var candidates []bson.M
 	for _, spec := range specs {
-		if !isCreatedAtKey(spec["key"]) {
+		// isPlainIndex BEFORE the name check, not after: an operator can
+		// call a partial or unique index created_at_1 themselves, and
+		// matching the name alone would hand theirs to collMod or the drop.
+		// Skipping it leaves ours absent, so the retry reports the real
+		// conflict and nothing of theirs is touched.
+		if !isCreatedAtKey(spec["key"]) || !isPlainIndex(spec) {
 			continue
 		}
 		if name, _ := spec["name"].(string); name == createdAtTTLIndex {
 			return classifyTTLIndex(spec, ttl, createdAtTTLIndex)
 		}
-		if isPlainIndex(spec) {
-			candidates = append(candidates, spec)
-		}
+		candidates = append(candidates, spec)
 	}
 
 	if len(candidates) != 1 {

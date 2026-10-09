@@ -786,3 +786,49 @@ func TestTTLIndexWithSeveralCustomIndexesOnTheKey(t *testing.T) {
 	assert.Equal(t, ttlIndexAbsent, state)
 	assert.Empty(t, name, "one of two indexes that are not ours was picked arbitrarily")
 }
+
+// An operator's partial index named created_at_1 is still not ours.
+//
+// The exact-name branch used to return before the option check, so a
+// partial, unique or sparse index wearing the generated name was handed to
+// collMod or the drop. The name is the weaker signal of the two.
+func TestTTLIndexIgnoresAPartialIndexWearingTheGeneratedName(t *testing.T) {
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_partial_named_ours")
+	c := client.Database(db).Collection(coll)
+
+	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "created_at", Value: 1}},
+		Options: options.Index().SetName(createdAtTTLIndex).SetExpireAfterSeconds(600).
+			SetPartialFilterExpression(bson.D{{Key: "status", Value: "pending"}}),
+	})
+	require.NoError(t, err)
+
+	state, name, err := ttlIndexStateOf(ctx, c, 15*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, ttlIndexAbsent, state, "a partial index was taken for ours because of its name")
+	assert.Empty(t, name)
+
+	// Startup fails - ours cannot be created under a name theirs holds -
+	// but theirs is untouched, which is the part that matters.
+	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	assert.Error(t, err)
+
+	assert.Equal(t, int32(600), ttlOfNamed(t, client, db, coll, createdAtTTLIndex),
+		"the operator's index was modified or dropped")
+	assert.True(t, indexIsPartial(t, client, db, coll, createdAtTTLIndex),
+		"the operator's partial filter was lost")
+}
+
+// indexIsPartial reports whether an index carries a partial filter.
+func indexIsPartial(t *testing.T, client *mongo.Client, db, coll, name string) bool {
+	t.Helper()
+
+	for _, spec := range indexSpecs(t, client, db, coll) {
+		if spec["name"] == name {
+			_, present := spec["partialFilterExpression"]
+			return present
+		}
+	}
+	t.Fatalf("no %s index on %s.%s", name, db, coll)
+	return false
+}
