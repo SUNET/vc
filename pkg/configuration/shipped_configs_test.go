@@ -28,8 +28,11 @@ var shippedConfigs = []string{
 // ignored and a field that has been removed can sit in these files
 // indefinitely - telling operators who copy them that a setting exists when
 // nothing reads it. apigw.registry_public_url outlived its field that way
-// (SUNET/vc#765), and so did verifier...refresh_token_duration
-// (SUNET/vc#756).
+// (SUNET/vc#765).
+//
+// This catches a key with NO field, and only that. A key that has a field
+// nothing reads decodes cleanly and is invisible here - SUNET/vc#756 was
+// that, not this - so it is a different defect needing a different check.
 //
 // UnmarshalStrict is what the runtime deliberately does NOT do - loading
 // must stay tolerant of a key from a newer or older release - so the strict
