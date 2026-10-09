@@ -30,6 +30,23 @@ const indexOptionsConflict = 85
 // collMod is how an existing TTL is changed. Tried only on that specific
 // conflict, and only for this one index; anything else is returned
 // untouched.
+//
+// A Mongo TTL index is collection-wide, so the new duration governs
+// documents already stored, not only the ones written afterwards.
+// Lengthening is harmless. SHORTENING cuts existing entries short: lower
+// the verifier's presentation_timeout from 1800s to 300s and an
+// authorization context whose own ExpiresAt is still half an hour away is
+// deleted when the new retention elapses, surfacing as "session not found"
+// rather than "expired".
+//
+// That is accepted here rather than worked around. The operator has just
+// shortened the window on purpose, and a session granted the old longer
+// one is outside the policy they asked for; the alternative - per-document
+// absolute expiry, an expires_at field with expireAfterSeconds 0 - is the
+// right long-term shape but needs a migration for every document already
+// written, which does not belong in a configuration fix. Pinned by
+// TestLoweringTheTTLShortensExistingEntries so the behaviour is recorded
+// rather than discovered.
 func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.IndexModel, ttl time.Duration) error {
 	_, err := coll.Indexes().CreateMany(ctx, indexes)
 	if err == nil {

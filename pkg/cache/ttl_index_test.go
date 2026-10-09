@@ -88,3 +88,54 @@ func ttlOf(t *testing.T, client *mongo.Client, db, coll string) int32 {
 	t.Fatalf("no %s index on %s.%s", createdAtTTLIndex, db, coll)
 	return 0
 }
+
+// A Mongo TTL index is collection-wide, so a changed duration governs
+// documents that already exist.
+//
+// Lengthening must never shorten an entry, and shortening cuts existing
+// entries short - including one whose own ExpiresAt is still in the future.
+// That is the accepted trade-off (see ensureIndexes), and this records it
+// rather than leaving it to be discovered.
+func TestLoweringTheTTLShortensExistingEntries(t *testing.T) {
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	const db, coll = "test_ttl_existing", "auth_ctx"
+
+	store, err := NewMongoStore(ctx, client, db, coll, 35*time.Minute)
+	require.NoError(t, err)
+
+	// A context with half an hour still to run on its own deadline.
+	require.NoError(t, store.Create(ctx, &AuthorizationContext{
+		SessionID: "long-lived",
+		State:     "long-lived",
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(30 * time.Minute).Unix(),
+	}))
+
+	// Lengthening: the entry is still there and the index covers it.
+	_, err = NewMongoStore(ctx, client, db, coll, 60*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, int32(3600), ttlOf(t, client, db, coll))
+
+	got, err := store.GetByID(ctx, "long-lived")
+	require.NoError(t, err)
+	require.NotNil(t, got, "lengthening the retention must not drop an entry")
+
+	// Shortening: the index now expires it 15 minutes after creation, well
+	// before its own ExpiresAt. MongoDB's TTL monitor runs about once a
+	// minute, so this asserts the INDEX, not the deletion - what the next
+	// reader needs to know is which rule applies.
+	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	require.NoError(t, err)
+
+	ttl := ttlOf(t, client, db, coll)
+	assert.Equal(t, int32(900), ttl)
+
+	stored, err := store.GetByID(ctx, "long-lived")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Greater(t, stored.ExpiresAt, time.Now().Add(time.Duration(ttl)*time.Second).Unix(),
+		"this entry now outlives the retention that governs it - the documented trade-off")
+}
