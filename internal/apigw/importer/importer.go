@@ -99,7 +99,7 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 			continue
 		}
 
-		present, err := documentPresent(ctx, store, doc.Meta)
+		existing, present, err := lookupDocument(ctx, store, doc.Meta)
 		if err != nil {
 			return fmt.Errorf("check document %s/%s: %w", name, id, err)
 		}
@@ -110,6 +110,13 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 			// Operator-edited data keeps the default insert-only behaviour
 			// (replaceExisting false) and is never overwritten.
 			if replaceExisting {
+				// Preserve the creation timestamp assigned on first import: the
+				// generated fixture serializes a zero created_at that would
+				// otherwise overwrite the stored value and reset created-at
+				// ordering on every restart.
+				if existing.Meta != nil {
+					doc.Meta.CreatedAt = existing.Meta.CreatedAt
+				}
 				if err := store.Replace(ctx, doc); err != nil {
 					return fmt.Errorf("replace document %s/%s: %w", name, id, err)
 				}
@@ -138,22 +145,32 @@ func importDocuments(ctx context.Context, path, name string, filterUsers []strin
 	return nil
 }
 
+// lookupDocument returns the stored document with the same natural key
+// (authentic_source, scope, document_id) when one exists. The bool reports
+// presence so a re-run only inserts what is missing, and callers replacing an
+// existing record can carry over immutable fields (e.g. created_at) instead of
+// overwriting them with fixture defaults.
+func lookupDocument(ctx context.Context, store db.DatastoreStore, meta *model.MetaData) (*model.CompleteDocument, bool, error) {
+	if meta == nil {
+		return nil, false, errors.New("document has no meta")
+	}
+	existing, err := store.GetByKey(ctx, meta.AuthenticSource, meta.Scope, meta.DocumentID)
+	if err == nil {
+		return existing, true, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, mongo.ErrNoDocuments) || errors.Is(err, helpers.ErrNoDocumentFound) {
+		return nil, false, nil
+	}
+	return nil, false, err
+}
+
 // documentPresent reports whether a document with the same natural key
 // (authentic_source, scope, document_id) already exists, so a re-run only
 // inserts what is missing instead of overwriting existing (possibly edited)
 // documents.
 func documentPresent(ctx context.Context, store db.DatastoreStore, meta *model.MetaData) (bool, error) {
-	if meta == nil {
-		return false, errors.New("document has no meta")
-	}
-	_, err := store.GetByKey(ctx, meta.AuthenticSource, meta.Scope, meta.DocumentID)
-	if err == nil {
-		return true, nil
-	}
-	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, mongo.ErrNoDocuments) || errors.Is(err, helpers.ErrNoDocumentFound) {
-		return false, nil
-	}
-	return false, err
+	_, present, err := lookupDocument(ctx, store, meta)
+	return present, err
 }
 
 func shouldImport(id string, users []string) bool {
@@ -170,7 +187,7 @@ func RunIdentityMappings(ctx context.Context, cfg *model.IdentityMappingImport, 
 	log = log.New("importer")
 
 	for _, path := range cfg.FilePaths {
-		if err := importIdentityMappings(ctx, path, cfg.Users, dbService, log); err != nil {
+		if err := importIdentityMappings(ctx, path, cfg.Users, dbService.IdentityMappingsColl, log); err != nil {
 			return fmt.Errorf("import identity mappings from %s: %w", filepath.Base(path), err)
 		}
 	}
@@ -179,7 +196,14 @@ func RunIdentityMappings(ctx context.Context, cfg *model.IdentityMappingImport, 
 	return nil
 }
 
-func importIdentityMappings(ctx context.Context, path string, filterUsers []string, dbService *db.Service, log *logger.Log) error {
+// identityMappingStore is the subset of the identity-mapping collection the
+// importer needs. EnsureMapping is insert-if-absent, so a re-run only adds
+// mappings that are missing and never clobbers existing attributes.
+type identityMappingStore interface {
+	EnsureMapping(ctx context.Context, mapping *model.IdentityMapping) error
+}
+
+func importIdentityMappings(ctx context.Context, path string, filterUsers []string, store identityMappingStore, log *logger.Log) error {
 	data, err := readBootstrapFile(path)
 	if err != nil {
 		return err
@@ -196,7 +220,7 @@ func importIdentityMappings(ctx context.Context, path string, filterUsers []stri
 			continue
 		}
 		for _, mapping := range personMappings {
-			if err := dbService.IdentityMappingsColl.EnsureMapping(ctx, mapping); err != nil {
+			if err := store.EnsureMapping(ctx, mapping); err != nil {
 				return fmt.Errorf("ensure identity mapping %s/%s: %w", id, mapping.AuthenticSource, err)
 			}
 			imported++

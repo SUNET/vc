@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/SUNET/vc/internal/apigw/db"
 	"github.com/SUNET/vc/pkg/helpers"
@@ -96,7 +97,7 @@ func (f *fakeDatastore) Count(context.Context) (int64, error) { return 0, nil }
 func (f *fakeDatastore) SaveMany(context.Context, []*model.CompleteDocument) error {
 	return nil
 }
-func (f *fakeDatastore) AddIdentity(context.Context, *db.AddIdentityQuery) error    { return nil }
+func (f *fakeDatastore) AddIdentity(context.Context, *db.AddIdentityQuery) error { return nil }
 func (f *fakeDatastore) DeleteIdentity(context.Context, *db.DeleteIdentityQuery) error {
 	return nil
 }
@@ -219,6 +220,99 @@ func TestImportDocuments_SaveErrorPropagates(t *testing.T) {
 	}
 
 	err := importDocuments(context.Background(), path, "microcredential", nil, false, store, logger.NewSimple("test"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, boom)
+}
+
+func TestImportDocuments_ReplacePreservesCreatedAt(t *testing.T) {
+	created := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	path := writeDocsFile(t, map[string]*model.CompleteDocument{"100": doc("100")})
+	store := &fakeDatastore{
+		getByKey: func(authenticSource, scope, documentID string) (*model.CompleteDocument, error) {
+			return &model.CompleteDocument{Meta: &model.MetaData{
+				AuthenticSource: authenticSource,
+				Scope:           scope,
+				DocumentID:      documentID,
+				CreatedAt:       created,
+			}}, nil
+		},
+	}
+
+	err := importDocuments(context.Background(), path, "microcredential", nil, true, store, logger.NewSimple("test"))
+	require.NoError(t, err)
+	require.Len(t, store.replaced, 1)
+	// The zero created_at in the fixture must not overwrite the stored value.
+	assert.Equal(t, created, store.replaced[0].Meta.CreatedAt)
+}
+
+// fakeMappingStore is a minimal identityMappingStore recording the mappings
+// passed to EnsureMapping and optionally failing on a chosen person id.
+type fakeMappingStore struct {
+	ensured  []*model.IdentityMapping
+	failOnID string
+	failErr  error
+}
+
+func (f *fakeMappingStore) EnsureMapping(_ context.Context, mapping *model.IdentityMapping) error {
+	if f.failErr != nil && mapping.AuthenticSourcePersonID == f.failOnID {
+		return f.failErr
+	}
+	f.ensured = append(f.ensured, mapping)
+	return nil
+}
+
+func writeMappingsFile(t *testing.T, mappings map[string][]*model.IdentityMapping) string {
+	t.Helper()
+	b, err := json.Marshal(mappings)
+	require.NoError(t, err)
+	path := filepath.Join(t.TempDir(), "identity_mappings.json")
+	require.NoError(t, os.WriteFile(path, b, 0o600))
+	return path
+}
+
+func mapping(personID string) *model.IdentityMapping {
+	return &model.IdentityMapping{
+		AuthenticSourcePersonID: personID,
+		AuthenticSource:         "Ladok",
+		Attributes:              map[string]string{"family_name": "Doe"},
+	}
+}
+
+func TestImportIdentityMappings_EnsuresEach(t *testing.T) {
+	path := writeMappingsFile(t, map[string][]*model.IdentityMapping{
+		"100": {mapping("p100")},
+		"101": {mapping("p101")},
+	})
+	store := &fakeMappingStore{}
+
+	err := importIdentityMappings(context.Background(), path, nil, store, logger.NewSimple("test"))
+	require.NoError(t, err)
+	// Every mapping is routed through the insert-if-absent EnsureMapping; existing
+	// ones stay unchanged there, newly added ones are inserted on a rerun.
+	require.Len(t, store.ensured, 2)
+	ids := []string{store.ensured[0].AuthenticSourcePersonID, store.ensured[1].AuthenticSourcePersonID}
+	assert.ElementsMatch(t, []string{"p100", "p101"}, ids)
+}
+
+func TestImportIdentityMappings_FiltersUsers(t *testing.T) {
+	path := writeMappingsFile(t, map[string][]*model.IdentityMapping{
+		"100": {mapping("p100")},
+		"101": {mapping("p101")},
+	})
+	store := &fakeMappingStore{}
+
+	err := importIdentityMappings(context.Background(), path, []string{"101"}, store, logger.NewSimple("test"))
+	require.NoError(t, err)
+	require.Len(t, store.ensured, 1)
+	assert.Equal(t, "p101", store.ensured[0].AuthenticSourcePersonID)
+}
+
+func TestImportIdentityMappings_EnsureErrorPropagates(t *testing.T) {
+	path := writeMappingsFile(t, map[string][]*model.IdentityMapping{"100": {mapping("p100")}})
+	boom := errors.New("mapping store down")
+	store := &fakeMappingStore{failOnID: "p100", failErr: boom}
+
+	err := importIdentityMappings(context.Background(), path, nil, store, logger.NewSimple("test"))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, boom)
 }
