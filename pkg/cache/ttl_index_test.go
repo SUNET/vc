@@ -189,3 +189,37 @@ func TestTTLIndexFallsBackWhenCollModIsUnavailable(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, got)
 }
+
+// Losing the drop race to another replica is not an error.
+//
+// In a least-privilege HA rollout every replica sees the same TTL conflict
+// and the same collMod refusal, so all of them reach the drop. One wins;
+// the others get IndexNotFound (27) and must carry on to the retry, which
+// is the correct next step - the index they wanted dropped is gone.
+func TestTTLIndexToleratesLosingTheDropRace(t *testing.T) {
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	const db, coll = "test_ttl_drop_race", "auth_ctx"
+
+	_, err := NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, int32(900), ttlOf(t, client, db, coll))
+
+	// collMod is refused, and while it is refused another replica drops the
+	// index out from under this one.
+	original := ttlIndexCollMod
+	ttlIndexCollMod = func(ctx context.Context, c *mongo.Collection, _ time.Duration) error {
+		dropErr := c.Indexes().DropOne(ctx, createdAtTTLIndex)
+		require.NoError(t, dropErr, "the stand-in replica could not drop the index")
+		return mongo.CommandError{Code: 13, Message: "not authorized to execute command collMod"}
+	}
+	t.Cleanup(func() { ttlIndexCollMod = original })
+
+	_, err = NewMongoStore(ctx, client, db, coll, 60*time.Minute)
+	require.NoError(t, err, "losing the drop race must not fail startup")
+
+	assert.Equal(t, int32(3600), ttlOf(t, client, db, coll),
+		"the index was not rebuilt at the new expiry")
+}

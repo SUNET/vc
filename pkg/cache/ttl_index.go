@@ -78,7 +78,12 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 		// Between the drop and the rebuild nothing expires documents in
 		// this collection. That window is one index build at startup, and
 		// the alternative is refusing to start at all.
-		if dropErr := coll.Indexes().DropOne(ctx, createdAtTTLIndex); dropErr != nil {
+		// IndexNotFound means another replica got there first. In a
+		// least-privilege HA rollout every replica sees the same conflict
+		// and the same collMod failure, so all of them reach this drop;
+		// losing that race is the expected outcome, not an error, and the
+		// retry below is still the right next step.
+		if dropErr := coll.Indexes().DropOne(ctx, createdAtTTLIndex); dropErr != nil && !isIndexNotFound(dropErr) {
 			return fmt.Errorf(
 				"index %s already exists with a different expiry; collMod to %s failed (%w) and it could not be dropped either: %v",
 				createdAtTTLIndex, ttl, modErr, dropErr)
@@ -107,21 +112,35 @@ var ttlIndexCollMod = func(ctx context.Context, coll *mongo.Collection, ttl time
 	}).Err()
 }
 
+// indexNotFound is MongoDB error code 27: no index by that name.
+const indexNotFound = 27
+
+// isIndexNotFound reports whether err is MongoDB's code 27.
+func isIndexNotFound(err error) bool {
+	return hasMongoCode(err, indexNotFound)
+}
+
 // isIndexOptionsConflict reports whether err is MongoDB's code 85.
 func isIndexOptionsConflict(err error) bool {
+	return hasMongoCode(err, indexOptionsConflict)
+}
+
+// hasMongoCode reports whether err carries this MongoDB error code, whether
+// it arrives as a command error or inside a write exception - CreateMany
+// reports per-index failures through the latter.
+func hasMongoCode(err error, code int32) bool {
 	var cmdErr mongo.CommandError
-	if errors.As(err, &cmdErr) && cmdErr.Code == indexOptionsConflict {
+	if errors.As(err, &cmdErr) && cmdErr.Code == code {
 		return true
 	}
 
-	// CreateMany reports per-index failures through a write exception.
 	var writeErr mongo.WriteException
 	if errors.As(err, &writeErr) {
-		if writeErr.WriteConcernError != nil && writeErr.WriteConcernError.Code == indexOptionsConflict {
+		if writeErr.WriteConcernError != nil && int32(writeErr.WriteConcernError.Code) == code {
 			return true
 		}
 		for _, we := range writeErr.WriteErrors {
-			if we.Code == indexOptionsConflict {
+			if int32(we.Code) == code {
 				return true
 			}
 		}
