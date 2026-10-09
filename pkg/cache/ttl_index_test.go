@@ -286,7 +286,11 @@ func TestTTLIndexStateOf(t *testing.T) {
 		{"absent", nil, ttlIndexAbsent},
 		{"same expiry", options.Index().SetExpireAfterSeconds(900), ttlIndexMatches},
 		{"different expiry", options.Index().SetExpireAfterSeconds(600), ttlIndexExpiryChanged},
-		{"no expiry at all", options.Index().SetSparse(true), ttlIndexNotTTL},
+		// A PLAIN index with no expiry. Not sparse: a sparse index is an
+		// operator's own and is excluded by isPlainIndex, which would make
+		// this read as absent and test the wrong thing.
+		{"no expiry at all", options.Index(), ttlIndexNotTTL},
+		{"sparse is not ours", options.Index().SetSparse(true), ttlIndexAbsent},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := client.Database("test_ttl_gate").Collection(tc.name)
