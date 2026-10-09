@@ -73,11 +73,13 @@ func (c *Client) resolveZkSaltBytes(ctx context.Context, schema *mdoc.MDDLSchema
 	resolved, stale, err := c.zkResolver.SaltBytes(ctx, schema.ZkSystems, schema.DocType)
 	if err != nil {
 		// A pin stands in only for a catalog that cannot answer: unreachable,
-		// or publishing no active circuit for this system yet. A constraint
-		// refusal (incompatible systems, malformed metadata) or a cancelled
-		// request is a real answer, and letting a pin override it would sign a
-		// credential the catalog just said must not be issued.
-		pinnable := errors.Is(err, zkcircuit.ErrCatalogUnavailable) || errors.Is(err, zkcircuit.ErrNoActiveCircuit)
+		// or carrying no circuit for this system at all - a system not
+		// published yet. A system the catalog KNOWS but whose active circuits
+		// it has withdrawn or scoped to other doctypes (ErrNoActiveCircuit), a
+		// constraint refusal (incompatible systems, malformed metadata), or a
+		// cancelled request are all real answers; letting a pin override them
+		// would sign a credential the catalog just said must not be issued.
+		pinnable := errors.Is(err, zkcircuit.ErrCatalogUnavailable) || errors.Is(err, zkcircuit.ErrUnknownSystem)
 		if schema.ZkSaltBytes != 0 && pinnable {
 			c.log.Error(err, "zk_circuit_salt_resolution_failed_using_pin",
 				"doctype", schema.DocType, "zk_systems", schema.ZkSystems, "zk_salt_bytes", schema.ZkSaltBytes)

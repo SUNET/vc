@@ -120,7 +120,7 @@ func TestResolveZkSaltBytesRefusesWhenItCannotResolve(t *testing.T) {
 		"a system the catalog does not publish": {
 			body:    vegaManifest,
 			systems: []string{"nonesuch"},
-			want:    "no active circuit",
+			want:    "unknown zk system",
 		},
 	}
 
@@ -178,6 +178,20 @@ func TestResolveZkSaltBytesPinCoversAnUnpublishedSystem(t *testing.T) {
 	}
 	if got != 24 {
 		t.Errorf("salt bytes = %d, want the pinned 24", got)
+	}
+}
+
+// A pin covers a system the catalog has never carried, not one whose active
+// circuits it has withdrawn. A manifest that knows vega-mc but publishes
+// only a deprecated circuit for it is a support WITHDRAWAL, and a pin must
+// not revive it - that keeps minting credentials for a system the catalog
+// deliberately stopped serving.
+func TestResolveZkSaltBytesPinDoesNotReviveAWithdrawnSystem(t *testing.T) {
+	const deprecated = `{"circuits":[{"id":"vega-r11","system":"vega-mc","status":"deprecated","published":true,` +
+		`"docTypes":["org.iso.18013.5.1.mDL"],"params":{"saltBytes":"32"}}]}`
+	c := saltClient(t, deprecated)
+	if _, err := c.resolveZkSaltBytes(t.Context(), schema([]string{"vega-mc"}, 32)); err == nil {
+		t.Fatal("a withdrawn system must propagate past the pin, not be revived by it")
 	}
 }
 
