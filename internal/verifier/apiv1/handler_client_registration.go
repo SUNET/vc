@@ -133,20 +133,19 @@ func (c *Client) RegisterClient(ctx context.Context, req *ClientRegistrationRequ
 		allowedScopes = strings.Split(req.Scope, " ")
 	}
 
-	// PKCE is required of every dynamically registered client.
+	// Registration stores no PKCE policy of its own.
 	//
 	// This read `req.CodeChallengeMethod != ""`, which looked like an
 	// opt-in and could not be false: the field carries `default:"S256"` and
 	// bindings apply defaults before binding, so it is never empty
-	// (SUNET/vc#757). The effective behaviour was "always required", and
-	// that is the behaviour kept - it is what OAuth 2.1 4.1.1, RFC 9700
-	// 2.1.1 and HAIP require. What changes is that it now says so.
+	// (SUNET/vc#757). Whichever way it had gone, it let a client's own
+	// registration request decide the policy it is held to.
 	//
-	// Deliberately not derived from the request: a client asking to be
-	// exempt from PKCE is a client certifying its own security policy.
-	// Exemptions are an operator decision, so they live in config, on
-	// static clients only.
-	requirePKCE := true
+	// PKCE is still required of this client - pkceRequired falls through to
+	// the OP's require_pkce, which defaults to true. Leaving the record
+	// unpinned is what lets an operator relax that policy for dynamic and
+	// static clients alike, instead of only the ones written in YAML.
+	requirePKCE := false
 	requireCodeChallenge := requirePKCE
 
 	// Create client in database
@@ -419,10 +418,9 @@ func (c *Client) UpdateClient(ctx context.Context, req *UpdateClientRequest) (*C
 	if clientReg.CodeChallengeMethod != "" {
 		client.CodeChallengeMethod = clientReg.CodeChallengeMethod
 	}
-	// An update cannot drop PKCE. Registration pins every dynamic client to
-	// it, and nothing a client sends here may undo that (SUNET/vc#757).
-	client.RequirePKCE = true
-	client.RequireCodeChallenge = true
+	// An update cannot change the PKCE policy either way: the stored flag
+	// can only ever tighten, and nothing a client sends decides it
+	// (SUNET/vc#757).
 
 	// Update in database
 	err = c.db.Clients.Update(ctx, client)

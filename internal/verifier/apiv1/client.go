@@ -312,7 +312,7 @@ func (c *Client) getClientByID(ctx context.Context, clientID string) (*db.Client
 					// was never asked for PKCE - with no field in
 					// StaticOIDCClient to turn it on (SUNET/vc#757). Now
 					// resolved from the OP policy, which defaults to true.
-					RequirePKCE: staticClientRequiresPKCE(staticClient, c.cfg.Verifier.Outbound.OIDCProvider),
+					RequirePKCE: staticClientRequiresPKCE(staticClient, c.cfg),
 				}, true, nil // true = static client (plaintext secret)
 			}
 		}

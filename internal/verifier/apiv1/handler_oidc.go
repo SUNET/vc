@@ -86,7 +86,7 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Validate client (includes static clients from config)
-	client, _, err := c.getClientByID(ctx, req.ClientID)
+	client, isStaticClient, err := c.getClientByID(ctx, req.ClientID)
 	if err != nil {
 		c.log.Error(err, "Failed to get client")
 		return nil, ErrServerError
@@ -118,8 +118,18 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	}
 
 	// Validate PKCE if required
-	if pkceRequired(client) && req.CodeChallenge == "" {
+	if c.pkceRequired(client, isStaticClient) && req.CodeChallenge == "" {
 		c.log.Info("PKCE required but no code_challenge provided")
+		return nil, ErrInvalidRequest
+	}
+
+	// A challenge the OP cannot verify is worse than none: every method but
+	// S256 fell through CreateCodeChallenge unchanged, so an unrecognised
+	// or omitted method was silently treated as plain - where the challenge
+	// IS the verifier and anyone holding the code can redeem it. Discovery
+	// advertises ["S256"] alone (SUNET/vc#757).
+	if req.CodeChallenge != "" && !pkceMethodSupported(req.CodeChallengeMethod) {
+		c.log.Info("Unsupported code_challenge_method", "method", req.CodeChallengeMethod)
 		return nil, ErrInvalidRequest
 	}
 

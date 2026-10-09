@@ -621,7 +621,7 @@ When registering your app, you need to decide whether it's a **public** or **con
 **Confidential clients** are server-side applications that can securely store a secret. Confidential clients:
 
 - Have a client secret used to authenticate when exchanging codes for tokens.
-- Must use PKCE as well. The OP requires it of every client by default, per OAuth 2.1 §4.1.1 and RFC 9700 §2.1.1. An operator can exempt a *confidential* client that cannot send a `code_challenge` yet — see `require_pkce` under [Configuration](#configuration) — but a public client can never be exempted.
+- Must use PKCE as well. The OP requires it of every client by default, per OAuth 2.1 §4.1.1 and RFC 9700 §2.1.1. An operator can exempt a *confidential* client that cannot send a `code_challenge` yet — `verifier.outbound.oidc_provider.require_pkce`, or `require_pkce` on a single entry under `static_clients`; both are documented in [the configuration reference](CONFIGURATION.md) — but a public client can never be exempted.
 - Set `type: "confidential"` in config, or `"token_endpoint_auth_method": "client_secret_basic"` (or `"client_secret_post"`) in dynamic registration.
 
 If you're not sure, choose **confidential** for server-side apps and **public** for everything running in a browser.
