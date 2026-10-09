@@ -75,18 +75,7 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		authorizeLimiter: middleware.NewRateLimiter(rateLimitConfig.AuthorizeRequestsPerMinute, rateLimitConfig.AuthorizeBurst),
 		registerLimiter:  middleware.NewRateLimiter(rateLimitConfig.RegisterRequestsPerMinute, rateLimitConfig.RegisterBurst),
 		registerAuth:     func(c *gin.Context) { c.Next() },
-		sessionsOptions: sessions.Options{
-			Path:     "/",
-			Domain:   "",
-			MaxAge:   900,
-			Secure:   false,
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-		},
-	}
-
-	if s.cfg.Verifier.APIServer.TLS.Enable {
-		s.sessionsOptions.Secure = true
+		sessionsOptions:  userSessionOptions(cfg),
 	}
 
 	// Session keys resolved by the cache service (HA-shared or ephemeral).
@@ -406,4 +395,48 @@ func cleanUnresolvedMarkersForDisplay(v any) any {
 	default:
 		return v
 	}
+}
+
+// defaultUserSessionMaxAge is the lifetime of the verifier-OP's user session
+// cookie when oidc_provider is absent. It is the value this was hardcoded at.
+const defaultUserSessionMaxAge = 900
+
+// userSessionMaxAge is the lifetime, in seconds, of the verifier_user_session
+// cookie - the OP's own session with the end user.
+//
+// oidc_provider.session_duration is the key named for this, and it was read
+// nowhere: the cookie was pinned at 900 seconds whatever an operator wrote
+// (SUNET/vc#756). Its documented default is 3600, so a deployment that never
+// touched the key now gets the hour its configuration has always said it
+// would, rather than fifteen minutes.
+// userSessionOptions builds the cookie options for verifier_user_session.
+//
+// Kept whole and in one place so the cookie's lifetime can be read back in a
+// test. Spread across the constructor, nothing observed what MaxAge ended up
+// as, which is how it stayed pinned at 900 seconds while the key meant to
+// set it went unread (SUNET/vc#756).
+func userSessionOptions(cfg *model.Cfg) sessions.Options {
+	secure := false
+	if cfg != nil && cfg.Verifier != nil {
+		secure = cfg.Verifier.APIServer.TLS.Enable
+	}
+
+	return sessions.Options{
+		Path:     "/",
+		Domain:   "",
+		MaxAge:   userSessionMaxAge(cfg),
+		Secure:   secure,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+}
+
+func userSessionMaxAge(cfg *model.Cfg) int {
+	if cfg == nil || cfg.Verifier == nil {
+		return defaultUserSessionMaxAge
+	}
+	if op := cfg.Verifier.Outbound.OIDCProvider; op != nil && op.SessionDuration > 0 {
+		return op.SessionDuration
+	}
+	return defaultUserSessionMaxAge
 }

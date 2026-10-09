@@ -537,7 +537,14 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		Forfeited:           false,
 		State:               state,
 		ClientID:            uiClientID,
-		ExpiresAt:           0,
+		// How long the user has to complete the presentation.
+		//
+		// This was 0, and isSessionActive reads 0 as "never expires" - so
+		// the standalone verification session had no deadline of its own
+		// and lived until the auth-context cache evicted it. The key for
+		// this, openid4vp.presentation_timeout, was read nowhere in the
+		// codebase (SUNET/vc#756).
+		ExpiresAt:           time.Now().Add(c.cfg.Verifier.Inbound.OpenID4VP.GetPresentationTimeout()).Unix(),
 		CodeChallenge:       "",
 		CodeChallengeMethod: "",
 		Consent:             false,

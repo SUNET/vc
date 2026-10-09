@@ -127,7 +127,6 @@ verifier:
     code_duration: 300           # 5 minutes
     access_token_duration: 3600  # 1 hour
     id_token_duration: 3600      # 1 hour
-    refresh_token_duration: 2592000  # 30 days
     subject_type: "pairwise"     # or "public"
     subject_salt: "change-this-to-random-value"
   

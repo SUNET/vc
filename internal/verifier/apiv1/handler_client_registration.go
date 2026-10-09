@@ -21,7 +21,12 @@ type ClientRegistrationRequest struct {
 	// REQUIRED or OPTIONAL OAuth 2.0 parameters
 	RedirectURIs            []string `json:"redirect_uris,omitempty" validate:"required,min=1,dive,redirect_uri"`
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method,omitempty" default:"client_secret_basic" validate:"omitempty,oneof=client_secret_basic client_secret_post none"`
-	GrantTypes              []string `json:"grant_types,omitempty" default:"[\"authorization_code\"]" validate:"omitempty,dive,oneof=authorization_code refresh_token"`
+	// authorization_code only. RFC 7591 2 lets the server reject requested
+	// metadata it will not honour, and the token endpoint implements no
+	// other grant - registering a client for refresh_token produced a
+	// registration whose grant_types the OP would always refuse, and which
+	// its own discovery document did not advertise (SUNET/vc#756).
+	GrantTypes              []string `json:"grant_types,omitempty" default:"[\"authorization_code\"]" validate:"omitempty,dive,oneof=authorization_code"`
 	ResponseTypes           []string `json:"response_types,omitempty" default:"[\"code\"]" validate:"omitempty,dive,oneof=code"`
 	ClientName              string   `json:"client_name,omitempty"`
 	ClientURI               string   `json:"client_uri,omitempty" validate:"omitempty,httpsurl"`

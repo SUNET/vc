@@ -139,8 +139,17 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	authCtx := &cache.AuthorizationContext{
 		SessionID: sessionID,
 		CreatedAt: time.Now(),
-		// Authorization request expires after the code duration
-		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.CodeDuration) * time.Second).Unix(),
+		// How long the user has to complete the presentation.
+		//
+		// This used to be code_duration, which is the lifetime of the
+		// authorization CODE - a different clock, started later, when the
+		// presentation has already succeeded (handler_openid4vp.go sets
+		// CodeExpiresAt then). Sharing one key meant lengthening the code's
+		// lifetime silently lengthened the presentation window, while
+		// presentation_timeout, the key named for this, was read nowhere at
+		// all (SUNET/vc#756). Both default to 300s, so the default
+		// behaviour is unchanged.
+		ExpiresAt:           time.Now().Add(c.cfg.Verifier.Inbound.OpenID4VP.GetPresentationTimeout()).Unix(),
 		Status:              cache.SessionStatusPending,
 		ClientID:            req.ClientID,
 		RedirectURI:         req.RedirectURI,
