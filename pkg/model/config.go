@@ -853,9 +853,10 @@ type Verifier struct {
 	ZkKeyCache ZkKeyCacheConfig `yaml:"zk_key_cache,omitempty"`
 }
 
-// ZkKeyCacheConfig configures the process-local store of decompressed Vega
-// verifier keys (see pkg/mdoc's vegaKeyStore). Only consulted by builds
-// with the "zknative" Go build tag.
+// ZkKeyCacheConfig configures the decompressed Vega verifier key store.
+//
+// Process-local, in pkg/mdoc's vegaKeyStore, and consulted only by builds
+// carrying the "zknative" Go build tag.
 //
 // A key is ~100MB and the store is keyed by circuit revision, so what this
 // bounds is real disk. It is per PROCESS, not per deployment: under

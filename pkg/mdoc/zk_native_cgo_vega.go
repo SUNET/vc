@@ -195,14 +195,27 @@ func getOrLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitS
 	// Bounded so a pathologically small max_bytes cannot spin here
 	// forever - at that point the deployment has a configuration problem
 	// and should be told so rather than hang.
+	var lastRetryReason error
 	for range vegaKeyLoadAttempts {
 		path, release, retry, err := tryLoadVegaVerifierKey(ctx, zkSystemID, zkCircuitSources)
+		if retry {
+			// err here is why the attempt is being repeated, not a reason
+			// to give up: either the key was evicted again before this
+			// caller could pin it, or somebody else's load failed. Kept so
+			// an exhausted loop can say which.
+			lastRetryReason = err
+			continue
+		}
 		if err != nil {
 			return "", nil, err
 		}
-		if !retry {
-			return path, release, nil
-		}
+		return path, release, nil
+	}
+
+	if lastRetryReason != nil {
+		return "", nil, fmt.Errorf(
+			"Vega verifier key %q could not be loaded on %d consecutive attempts: %w",
+			zkSystemID, vegaKeyLoadAttempts, lastRetryReason)
 	}
 	return "", nil, fmt.Errorf(
 		"Vega verifier key %q was evicted before it could be used on %d consecutive attempts; verifier.zk_key_cache.max_bytes is too small to hold the circuits in use",
@@ -245,7 +258,20 @@ func tryLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitSou
 		case <-load.done:
 		}
 		if load.err != nil {
-			return "", nil, false, fmt.Errorf("Vega verifier key %q failed to load on another goroutine: %w", zkSystemID, load.err)
+			// Retry under THIS caller's context rather than inheriting the
+			// failure.
+			//
+			// The other goroutine is usually the background pre-warm,
+			// whose context is bounded independently of any request. When
+			// it expires, a live verification with time left of its own
+			// woke here and failed - which contradicts the whole premise
+			// of a best-effort warm, that a failed one falls back to
+			// loading at first use.
+			//
+			// Bounded by the same attempt count as an eviction retry, and
+			// the reason is carried out so an exhausted loop reports this
+			// rather than blaming max_bytes.
+			return "", nil, true, fmt.Errorf("Vega verifier key %q failed to load on another goroutine: %w", zkSystemID, load.err)
 		}
 		if cached, releaseCached, ok := vegaVerifierKeys.acquire(zkSystemID); ok {
 			return cached, releaseCached, false, nil

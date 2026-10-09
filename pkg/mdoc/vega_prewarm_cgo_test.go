@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -472,5 +474,81 @@ func TestWarmResidencySnapshotIsTakenAtOnce(t *testing.T) {
 	}
 	if len(missing) != 1 || missing[0] != "b" {
 		t.Errorf("missing = %v, want [b]", missing)
+	}
+}
+
+// A pre-warm is best effort: when it fails, the key is supposed to be
+// loaded at first use instead. That promise was broken for the one caller
+// most likely to be affected - a live verification that arrived while the
+// warm was still running, and so was parked on the warm's in-flight entry
+// when it failed. It woke up and returned the warm's error as its own, even
+// with plenty of time left on its own deadline, because the pre-warm's
+// 15-minute context had nothing to do with the request's.
+//
+// Asserted on the one pass rather than on two racing goroutines: what has
+// to hold is that a shared load's failure is reported as "go round again",
+// and the loop in getOrLoadVegaVerifierKey then retries under the context
+// it was given. Driving it with real goroutines needs the waiter to be
+// provably parked before the other load fails, which nothing here can
+// observe - a sleep would make the test probable rather than certain, and
+// a miss would pass for the wrong reason.
+func TestSharedLoadFailureIsRetriedNotInherited(t *testing.T) {
+	resetVegaKeyState(t)
+
+	// The pre-warm, finished and failed: its 15-minute context expired
+	// while this caller was parked on it. Removed from the map before the
+	// channel closes, the way the real loader's defer does it, so the
+	// waiter holds a pointer to an entry that is already gone.
+	prewarm := &inFlightLoad{done: make(chan struct{})}
+	prewarm.err = fmt.Errorf("downloading verifier-key artifact: %w", context.DeadlineExceeded)
+	close(prewarm.done)
+
+	vegaVerifierKeyCacheState.mu.Lock()
+	vegaVerifierKeyCacheState.inFly["vega-prover-r12"] = prewarm
+	vegaVerifierKeyCacheState.mu.Unlock()
+	defer func() {
+		vegaVerifierKeyCacheState.mu.Lock()
+		delete(vegaVerifierKeyCacheState.inFly, "vega-prover-r12")
+		vegaVerifierKeyCacheState.mu.Unlock()
+	}()
+
+	_, _, retry, err := tryLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{"https://example.invalid"})
+	if !retry {
+		t.Errorf("retry = false, want the caller to load the key itself rather than inherit the pre-warm's failure (err = %v)", err)
+	}
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want the reason kept so an exhausted retry can report it", err)
+	}
+}
+
+// ...but the retry is bounded, and when it runs out the error has to say
+// what actually kept failing. Reporting an undersized max_bytes for a
+// download that never worked sends the operator after the wrong thing.
+func TestExhaustedRetriesReportTheUnderlyingLoadFailure(t *testing.T) {
+	resetVegaKeyState(t)
+
+	// Never removed, so every attempt finds the same failed load: the
+	// shape of a source that is down rather than a cache that is too
+	// small.
+	stuck := &inFlightLoad{done: make(chan struct{})}
+	stuck.err = fmt.Errorf("fetching prover-key circuit descriptor: %w", errors.New("connection refused"))
+	close(stuck.done)
+
+	vegaVerifierKeyCacheState.mu.Lock()
+	vegaVerifierKeyCacheState.inFly["vega-prover-r12"] = stuck
+	vegaVerifierKeyCacheState.mu.Unlock()
+
+	_, _, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{"https://example.invalid"})
+	if err == nil {
+		t.Fatal("expected a repeatedly failing load to be reported as an error")
+	}
+	if !strings.Contains(err.Error(), "could not be loaded on 3 consecutive attempts") {
+		t.Errorf("error = %v, want it to report the exhausted retry", err)
+	}
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("error = %v, want the underlying load failure preserved", err)
+	}
+	if strings.Contains(err.Error(), "max_bytes") {
+		t.Errorf("error = %v, want it not to blame the cache size for a download failure", err)
 	}
 }

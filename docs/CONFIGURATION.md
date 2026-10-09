@@ -1848,8 +1848,8 @@ its own IssuerZkCircuitsConfig, which adds a resolver cache.
 
 > **Path:** `.verifier.zk_key_cache`
 
-verifier keys (see pkg/mdoc's vegaKeyStore). Only consulted by builds
-with the "zknative" Go build tag.
+Process-local, in pkg/mdoc's vegaKeyStore, and consulted only by builds
+carrying the "zknative" Go build tag.
 
 A key is ~100MB and the store is keyed by circuit revision, so what this
 bounds is real disk. It is per PROCESS, not per deployment: under
