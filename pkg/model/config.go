@@ -846,7 +846,24 @@ type Verifier struct {
 	// "mso_mdoc_zk" (Longfellow ZK/PPID) proof circuits for native
 	// verification. Only consulted by builds with the "zknative" Go build
 	// tag (see pkg/mdoc/zk_native_cgo.go) - ignored by the default build.
-	ZkCircuits ZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
+	ZkCircuits VerifierZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
+}
+
+// VerifierZkCircuitsConfig configures the zk-circuits catalog client for
+// the verifier.
+//
+// Deliberately NOT ZkCircuitsConfig, which carries cache_ttl: the verifier
+// builds mdoc.NewZkHandler from Sources alone and keeps no manifest cache
+// to tune, so sharing the type advertised a setting under
+// verifier.zk_circuits that nothing read (SUNET/vc#744 review). A config
+// still carrying it loads - the loader is non-strict - and it is now
+// absent from the generated reference rather than documented as having an
+// effect it never had.
+type VerifierZkCircuitsConfig struct {
+	// Sources are zk-circuits catalog mirror base URLs, tried in order
+	// until one succeeds. Same meaning as the issuer's; see
+	// ZkCircuitsConfig.Sources.
+	Sources []string `yaml:"sources,omitempty" default:"[\"https://zk-circuits.fly.dev\"]" doc_example:"[\"https://zk-circuits.fly.dev\",\"file:///etc/vc/zk-circuits\"]"`
 }
 
 // ZkCircuitsConfig configures the zk-circuits catalog client
@@ -868,7 +885,8 @@ type ZkCircuitsConfig struct {
 	Sources []string `yaml:"sources,omitempty" default:"[\"https://zk-circuits.fly.dev\"]" doc_example:"[\"https://zk-circuits.fly.dev\",\"file:///etc/vc/zk-circuits\"]"`
 
 	// CacheTTL is how long a fetched manifest is reused before the issuer
-	// refreshes it, in seconds. Issuance must not become a catalog round
+	// refreshes it, in seconds. Issuer only - the verifier has no manifest
+	// cache to tune. Issuance must not become a catalog round
 	// trip per credential. Zero means the package default (1 hour).
 	//
 	// A refresh that fails keeps serving the last manifest that parsed, so

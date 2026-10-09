@@ -668,7 +668,7 @@ func (c *Client) fetchBytes(ctx context.Context, url string, maxBytes int64) ([]
 // over HTTP.
 func (c *Client) fetchBytesURL(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
 	if isFileURL(url) {
-		return fetchFile(url, maxBytes)
+		return fetchFile(ctx, url, maxBytes)
 	}
 	return c.fetchBytesHTTP(ctx, url, maxBytes)
 }

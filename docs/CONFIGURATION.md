@@ -1483,7 +1483,7 @@ is a known and accepted property of this format rather than an oversight.
 
 ### `zk_circuits`
 
-> **Path:** `.issuer.zk_circuits`, `.verifier.zk_circuits`
+> **Path:** `.issuer.zk_circuits`
 
 (pkg/mdoc/zkcircuit). The verifier uses it to resolve a presented
 "mso_mdoc_zk" document's zkSystemId to a downloadable circuit artifact;
@@ -1493,7 +1493,7 @@ declared zk_systems require.
 | Field       | Type       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Example                                                        | Default                           | Required |
 | ----------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | --------------------------------- | -------- |
 | `sources`   | `[]string` | Zk-circuits catalog mirror base URLs, tried in order until one succeeds (see pkg/mdoc/zkcircuit.Client - these are mirrors of the SAME catalog, not distinct registries). Defaults to the live deployed service if empty. A "file:///path/to/mirror" entry is a vendored local mirror: a directory laid out like the service itself, as written by developer_tools/scripts/vendor_zk_circuits. Artifact hashes are verified against the descriptors exactly as they are for a remote source, so vendoring pins the bytes without relaxing anything. | `["https://zk-circuits.fly.dev","file:///etc/vc/zk-circuits"]` | `["https://zk-circuits.fly.dev"]` | No       |
-| `cache_ttl` | `int`      | How long a fetched manifest is reused before the issuer refreshes it, in seconds. Issuance must not become a catalog round trip per credential. Zero means the package default (1 hour). A refresh that fails keeps serving the last manifest that parsed, so the catalog being briefly unreachable does not stop issuance; what does stop it is having never reached the catalog at all, for a schema that declares a zk_system and pins nothing.                                                                                                  | `3600`                                                         | -                                 | No       |
+| `cache_ttl` | `int`      | How long a fetched manifest is reused before the issuer refreshes it, in seconds. Issuer only - the verifier has no manifest cache to tune. Issuance must not become a catalog round trip per credential. Zero means the package default (1 hour). A refresh that fails keeps serving the last manifest that parsed, so the catalog being briefly unreachable does not stop issuance; what does stop it is having never reached the catalog at all, for a schema that declares a zk_system and pins nothing.                                        | `3600`                                                         | -                                 | No       |
 
 ## `verifier` (Top-level)
 
@@ -1826,6 +1826,24 @@ are intentionally loosely typed at this layer.
 | `cache_ttl`   | `int`      | Duration in seconds to cache fetched status list tokens.                                                                                                                                                                                                                                      | -       | `300`   | No       |
 | `fail_open`   | `bool`     | FailOpen determines behavior when the status list is unreachable or unparseable: - true: log warning and allow the credential through (fail-open) - false: reject the credential (fail-closed) Note: explicitly revoked/suspended credentials are always rejected regardless of this setting. | -       | `true`  | No       |
 | `skip_scopes` | `[]string` | Credential scopes exempt from revocation checking (e.g., short-lived credentials valid < 24 hours per ARF 3.0 §6.6.3.7).                                                                                                                                                                      | -       | -       | No       |
+
+### `zk_circuits`
+
+> **Path:** `.verifier.zk_circuits`
+
+the verifier.
+
+Deliberately NOT ZkCircuitsConfig, which carries cache_ttl: the verifier
+builds mdoc.NewZkHandler from Sources alone and keeps no manifest cache
+to tune, so sharing the type advertised a setting under
+verifier.zk_circuits that nothing read (SUNET/vc#744 review). A config
+still carrying it loads - the loader is non-strict - and it is now
+absent from the generated reference rather than documented as having an
+effect it never had.
+
+| Field     | Type       | Description                                                                                                                          | Example                                                        | Default                           | Required |
+| --------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- | --------------------------------- | -------- |
+| `sources` | `[]string` | Zk-circuits catalog mirror base URLs, tried in order until one succeeds. Same meaning as the issuer's; see ZkCircuitsConfig.Sources. | `["https://zk-circuits.fly.dev","file:///etc/vc/zk-circuits"]` | `["https://zk-circuits.fly.dev"]` | No       |
 
 ## `registry` (Top-level)
 
