@@ -31,24 +31,22 @@ const tokenEndpointAuthNone = "none"
 //     getClientByID has already run staticClientRequiresPKCE over it,
 //     including an operator's explicit exemption for that one client - a
 //     three-state decision a plain bool on db.Client cannot carry.
-//  3. For a dynamically registered client, RequirePKCE pins it on. The
-//     flag can only tighten; there is no stored value that turns PKCE off,
-//     because a client asking to be exempt is a client certifying its own
-//     security posture.
-//  4. Otherwise the OP's policy, which defaults to true.
+//  3. For a dynamically registered client, the OP's policy, which defaults
+//     to true.
 //
-// Step 4 is what makes require_pkce reach dynamic clients and not only the
-// ones written in YAML. Registration stores no policy of its own, so an
-// operator relaxing the policy relaxes it for both kinds alike.
+// db.Client.RequirePKCE is deliberately NOT consulted for a dynamic
+// client. Releases before this stored true on every one of them - the
+// value came from `req.CodeChallengeMethod != ""`, which the `default:"S256"`
+// made unconditional - so honouring it would mean require_pkce reached
+// only clients registered after the upgrade, and would be honouring an
+// accident rather than a decision anyone made. Registration no longer
+// writes the field at all.
 func (c *Client) pkceRequired(client *db.Client, isStatic bool) bool {
 	if client.TokenEndpointAuthMethod == tokenEndpointAuthNone {
 		return true
 	}
 	if isStatic {
 		return client.RequirePKCE
-	}
-	if client.RequirePKCE {
-		return true
 	}
 	return opRequiresPKCE(c.cfg)
 }

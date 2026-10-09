@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/internal/verifier/db"
+	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -40,19 +41,35 @@ func TestPKCEIsNeverWaivableForAPublicClient(t *testing.T) {
 	}
 }
 
-// A confidential client follows its resolved flag, so an operator can
-// exempt one that cannot send a code_challenge yet.
-func TestPKCEFollowsTheFlagForAConfidentialClient(t *testing.T) {
-	// Pinned on the record: required whatever the policy says.
-	pinned := &db.Client{TokenEndpointAuthMethod: "client_secret_basic", RequirePKCE: true}
-	assert.True(t, clientWith(ptr(true)).pkceRequired(pinned, false))
-	assert.True(t, clientWith(ptr(false)).pkceRequired(pinned, false))
+// A dynamically registered confidential client follows the OP's policy,
+// not the stored flag.
+//
+// Releases before this stored RequirePKCE=true on every dynamic client -
+// the value came from `req.CodeChallengeMethod != ""`, which default:"S256"
+// made unconditional. Honouring it would mean require_pkce: false reached
+// only clients registered after the upgrade, and would be honouring an
+// accident rather than anyone's decision.
+func TestADynamicClientFollowsTheOPPolicy(t *testing.T) {
+	fresh := &db.Client{TokenEndpointAuthMethod: "client_secret_basic"}
+	legacy := &db.Client{TokenEndpointAuthMethod: "client_secret_basic", RequirePKCE: true}
 
-	// Unpinned: the OP's policy decides, and it defaults to true.
-	unpinned := &db.Client{TokenEndpointAuthMethod: "client_secret_basic"}
-	assert.True(t, clientWith(nil).pkceRequired(unpinned, false), "the default is to require PKCE")
-	assert.True(t, clientWith(ptr(true)).pkceRequired(unpinned, false))
-	assert.False(t, clientWith(ptr(false)).pkceRequired(unpinned, false))
+	for name, client := range map[string]*db.Client{"fresh": fresh, "legacy pinned": legacy} {
+		t.Run(name, func(t *testing.T) {
+			assert.True(t, clientWith(nil).pkceRequired(client, false), "the default is to require PKCE")
+			assert.True(t, clientWith(ptr(true)).pkceRequired(client, false))
+			assert.False(t, clientWith(ptr(false)).pkceRequired(client, false),
+				"require_pkce: false did not reach this client")
+		})
+	}
+}
+
+// A static client's flag IS the answer: getClientByID has already resolved
+// the policy, including an operator's exemption for that one client.
+func TestAStaticClientFollowsItsResolvedFlag(t *testing.T) {
+	assert.True(t, clientWith(ptr(false)).pkceRequired(
+		&db.Client{TokenEndpointAuthMethod: "client_secret_basic", RequirePKCE: true}, true))
+	assert.False(t, clientWith(ptr(true)).pkceRequired(
+		&db.Client{TokenEndpointAuthMethod: "client_secret_basic", RequirePKCE: false}, true))
 }
 
 // Static clients had no PKCE at all and no way to ask for it: the db.Client
@@ -286,4 +303,34 @@ func TestAuthorizeRefusesAChallengeItCannotVerify(t *testing.T) {
 	}
 
 	assert.NoError(t, authorize("S256"), "S256 is the method the OP advertises")
+}
+
+// Registration must not accept a code_challenge_method that /authorize
+// will refuse. "plain" was accepted here and rejected there, so a client
+// could register successfully and then never complete an authorization
+// with the method it had declared (SUNET/vc#757).
+func TestRegistrationRefusesAMethodAuthorizeWouldReject(t *testing.T) {
+	validate, err := helpers.NewValidator()
+	require.NoError(t, err)
+
+	reg := func(method string) *ClientRegistrationRequest {
+		return &ClientRegistrationRequest{
+			RedirectURIs:            []string{"https://example.com/callback"},
+			TokenEndpointAuthMethod: "client_secret_basic",
+			GrantTypes:              []string{"authorization_code"},
+			ResponseTypes:           []string{"code"},
+			CodeChallengeMethod:     method,
+		}
+	}
+
+	require.NoError(t, validate.Struct(reg("S256")))
+
+	for _, method := range []string{"plain", "s256", "S512"} {
+		t.Run("method="+method, func(t *testing.T) {
+			assert.Error(t, validate.Struct(reg(method)))
+			// ... and the same value is what /authorize refuses, so the
+			// two ends cannot drift apart.
+			assert.False(t, pkceMethodSupported(method))
+		})
+	}
 }

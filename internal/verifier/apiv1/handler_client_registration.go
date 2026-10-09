@@ -51,7 +51,11 @@ type ClientRegistrationRequest struct {
 	RequestURIs             []string `json:"request_uris,omitempty"`
 
 	// PKCE (RFC 7636)
-	CodeChallengeMethod string `json:"code_challenge_method,omitempty" default:"S256" validate:"omitempty,oneof=S256 plain"`
+	// S256 only, matching what /authorize will accept and what discovery
+	// advertises. "plain" was accepted here and then rejected at the
+	// authorization endpoint, so a registration could succeed while
+	// declaring a method the OP would never honour (SUNET/vc#757).
+	CodeChallengeMethod string `json:"code_challenge_method,omitempty" default:"S256" validate:"omitempty,oneof=S256"`
 }
 
 // ClientRegistrationResponse represents RFC 7591 client registration response
