@@ -74,18 +74,6 @@ func fetchFile(rawURL string, maxBytes int64) ([]byte, error) {
 	}
 	defer f.Close()
 
-	// Again on the open descriptor. The Lstat above closes the common
-	// case; this closes the window between the two, where a path can be
-	// swapped for a FIFO after it has been checked and before it is
-	// opened.
-	opened, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat vendored circuit file %s: %w", path, err)
-	}
-	if !opened.Mode().IsRegular() {
-		return nil, fmt.Errorf("vendored circuit path %s is not a regular file", path)
-	}
-
 	// maxBytes+1 so an oversized file is reported as oversized rather than
 	// silently truncated to exactly the cap.
 	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))

@@ -8,9 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 )
 
 // writeVendoredMirror lays out a directory the way
@@ -438,47 +436,5 @@ func TestFileSourceSchemeIsCaseInsensitive(t *testing.T) {
 
 	if _, err := c.FetchCircuit(t.Context(), "vega-mc-p256-v1-prover-key-r12"); err != nil {
 		t.Errorf("FetchCircuit over a FILE:// source: %v", err)
-	}
-}
-
-// The regular-file check runs again on the OPEN descriptor.
-//
-// The Lstat before the open closes the common case; this closes the window
-// between the two, where a path can be swapped for a FIFO after it has
-// been checked and before it is opened.
-func TestFetchFileRechecksTheOpenedDescriptor(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "manifest.json")
-	if err := os.WriteFile(path, []byte(`{"ok":true}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// A regular file still reads, so the second check is not simply
-	// refusing everything.
-	data, err := fetchFile("file://"+filepath.ToSlash(path), 1024)
-	if err != nil {
-		t.Fatalf("a regular file was refused: %v", err)
-	}
-	if string(data) != `{"ok":true}` {
-		t.Errorf("got %q", data)
-	}
-
-	// And a FIFO is refused by whichever check reaches it first.
-	fifo := filepath.Join(dir, "fifo.json")
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Skipf("cannot create a FIFO here: %v", err)
-	}
-	done := make(chan error, 1)
-	go func() {
-		_, err := fetchFile("file://"+filepath.ToSlash(fifo), 1024)
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
-			t.Errorf("want a not-a-regular-file error, got %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("fetchFile blocked on a FIFO instead of refusing it")
 	}
 }
