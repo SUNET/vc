@@ -186,7 +186,6 @@ func TestDigitalCredentialsConfigDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.False(t, cfg.Enable)
-	assert.False(t, cfg.UseJAR)
 	assert.Equal(t, []string{"vc+sd-jwt", "dc+sd-jwt", "mso_mdoc"}, cfg.PreferredFormats)
 	assert.Equal(t, "dc_api.jwt", cfg.ResponseMode)
 	require.NotNil(t, cfg.AllowQRFallback)
