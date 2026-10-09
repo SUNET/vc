@@ -192,3 +192,61 @@ func TestConfirmCredentialDisplayRefusesAnExpiredSession(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, ErrSessionExpired)
 }
+
+// The credential display gets a window of its own.
+//
+// Reusing the presentation deadline for it meant a wallet that answered
+// just before the deadline left the user no time to read the display at
+// all - presentation_timeout is documented as the time the WALLET has, and
+// confirming is a different step by a different party.
+func TestTheCredentialDisplayGetsItsOwnWindow(t *testing.T) {
+	ctx := t.Context()
+	client, _ := CreateTestClientWithMock(t, nil)
+	if client.cfg.Verifier.Inbound.OpenID4VP == nil {
+		client.cfg.Verifier.Inbound.OpenID4VP = &model.OpenID4VPConfig{}
+	}
+	client.cfg.Verifier.Inbound.OpenID4VP.PresentationTimeout = 600
+
+	// A session one second from its presentation deadline, whose wallet
+	// response arrives right now.
+	const sessionID = "display-window-session"
+	session := pendingSession(sessionID, sessionID, time.Now().Add(time.Second).Unix())
+	session.ShowCredentialDetails = true
+	require.NoError(t, client.cacheService.AuthContext.Create(ctx, session))
+
+	response := encryptedVPResponse(t, client, sessionID, sessionID)
+	_, err := client.ProcessDirectPost(ctx, &DirectPostRequest{Response: response})
+	require.NoError(t, err)
+
+	stored, err := client.cacheService.AuthContext.GetByID(ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, cache.SessionStatusAwaitingPresentation, stored.Status)
+
+	// A fresh 600s to read and confirm, not the one second that was left.
+	assert.InDelta(t, time.Now().Add(600*time.Second).Unix(), stored.ExpiresAt, 5,
+		"the user inherited whatever was left of the wallet's deadline")
+	assert.False(t, sessionExpired(stored))
+
+	// ... and confirming now works, where before it was refused outright.
+	_, err = client.ConfirmCredentialDisplay(ctx, &ConfirmCredentialDisplayRequest{
+		SessionID: sessionID,
+		Confirmed: true,
+	})
+	assert.NotErrorIs(t, err, ErrSessionExpired)
+}
+
+// One boundary across the whole flow: the request-object endpoint must not
+// serve a request during the second the direct-post handlers would refuse
+// its response.
+func TestTheRequestObjectEndpointSharesTheExpiryBoundary(t *testing.T) {
+	ctx := t.Context()
+	client, _ := CreateTestClientWithMock(t, nil)
+
+	const sessionID = "boundary-session"
+	require.NoError(t, client.cacheService.AuthContext.Create(ctx,
+		pendingSession(sessionID, sessionID, time.Now().Unix())))
+
+	_, err := client.GetOIDCRequestObject(ctx, &GetRequestObjectRequest{SessionID: sessionID})
+	assert.ErrorIs(t, err, ErrSessionExpired,
+		"a request object was served during the second its response would be refused")
+}

@@ -627,8 +627,11 @@ func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObject
 		return nil, ErrSessionNotFound
 	}
 
-	// Check if session is expired
-	if time.Now().Unix() > session.ExpiresAt {
+	// Through sessionExpired so this boundary matches the one the
+	// direct-post handlers enforce. With > here and >= there, the verifier
+	// served a request object during the exact second it would refuse the
+	// response to it.
+	if sessionExpired(session) {
 		return nil, ErrSessionExpired
 	}
 
@@ -851,6 +854,17 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 	// Check if user requested credential display
 	if session.ShowCredentialDetails {
 		session.Status = cache.SessionStatusAwaitingPresentation
+
+		// The presentation is in; what follows is a person reading a
+		// credential display and deciding. Reusing the presentation
+		// deadline for that left a wallet that answered just before it with
+		// no time to review at all - presentation_timeout is documented as
+		// the time the WALLET has, and this is a different step.
+		//
+		// So the confirmation gets a window of its own, the same length.
+		// One operator-set interaction timeout, applied to each interaction
+		// rather than to both together.
+		session.ExpiresAt = time.Now().Add(c.cfg.Verifier.Inbound.OpenID4VP.GetPresentationTimeout()).Unix()
 
 		if err := c.cacheService.AuthContext.Update(ctx, session); err != nil {
 			c.log.Error(err, "Failed to update session")

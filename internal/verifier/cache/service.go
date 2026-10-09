@@ -137,7 +137,10 @@ func authContextRetention(cfg *model.Cfg) time.Duration {
 	if cfg == nil || cfg.Verifier == nil {
 		return minAuthContextRetention
 	}
-	needed := cfg.Verifier.Inbound.OpenID4VP.GetPresentationTimeout()
+	// Twice, because a session that shows a credential display has two
+	// timed interactions in series: the wallet presenting, then a person
+	// reading the display and confirming. Each gets presentation_timeout.
+	needed := 2 * cfg.Verifier.Inbound.OpenID4VP.GetPresentationTimeout()
 	if op := cfg.Verifier.Outbound.OIDCProvider; op != nil && op.CodeDuration > 0 {
 		needed += time.Duration(op.CodeDuration) * time.Second
 	}
