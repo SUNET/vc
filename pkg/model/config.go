@@ -882,7 +882,12 @@ type ZkKeyCacheConfig struct {
 	// runtime ignores anything at or below zero, so without this check an
 	// operator who wrote -1 would get the 512MiB default and no indication
 	// that their setting did nothing.
-	MaxBytes int64 `yaml:"max_bytes,omitempty" validate:"omitempty,gte=0" doc_example:"536870912"`
+	// The default tag states the same 512MiB the package falls back to, so
+	// the generated reference reports it instead of "-". Behaviour is
+	// unchanged either way: 512<<20 IS 536870912, so a config that omits
+	// the key gets the same bound whether defaults.Set fills it or the
+	// store applies its own.
+	MaxBytes int64 `yaml:"max_bytes,omitempty" default:"536870912" validate:"omitempty,gte=0" doc_example:"536870912"`
 
 	// Prewarm downloads every currently-active Vega circuit's verifier key
 	// at startup, in the background, instead of leaving the first
