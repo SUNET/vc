@@ -189,10 +189,31 @@ func run(ctx context.Context, source, outDir, system, docType string, activeOnly
 		}
 	}
 
+	// Descriptors, under their canonical id AND each alias.
+	//
+	// The catalog serves an alias by redirecting to the canonical id and
+	// the HTTP client follows that automatically. A file:// source has no
+	// redirect: fetchFile opens v1/circuits/<id>.json directly, so an
+	// alias that resolves against the live catalog 404s against its own
+	// vendored mirror. Writing the alias files is what makes the mirror a
+	// faithful copy rather than a subset.
+	written := make(map[string]string, len(vendored))
 	for _, descriptor := range vendored {
-		path := filepath.Join(staging, "v1", "circuits", descriptor.ID+".json")
-		if err := writeJSON(path, descriptor, fileMode); err != nil {
-			return err
+		for _, name := range append([]string{descriptor.ID}, descriptor.Aliases...) {
+			if !zkcircuit.ValidCircuitID(name) {
+				return fmt.Errorf("circuit %s: alias %q is not a valid circuit id", descriptor.ID, name)
+			}
+			// Two descriptors claiming one name would make the mirror
+			// depend on write order. Refuse rather than pick.
+			if owner, clash := written[name]; clash {
+				return fmt.Errorf("circuit %s and %s both claim the id or alias %q", owner, descriptor.ID, name)
+			}
+			written[name] = descriptor.ID
+
+			path := filepath.Join(staging, "v1", "circuits", name+".json")
+			if err := writeJSON(path, descriptor, fileMode); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -285,6 +306,15 @@ func swapIn(staged, live string) error {
 func selectCircuits(manifest *zkcircuit.Manifest, system, docType string, activeOnly bool) []zkcircuit.CircuitDescriptor {
 	var out []zkcircuit.CircuitDescriptor
 	for _, c := range manifest.Circuits {
+		// Unpublished is never usable, whatever --active-only says.
+		// zkcircuit's own usable set requires BOTH published and active
+		// (constraints.go), so vendoring an unpublished descriptor either
+		// mirrors something the resolver refuses or - worse for a full
+		// run - fails the whole vendoring on an artifact that was never
+		// published.
+		if !c.Published {
+			continue
+		}
 		if activeOnly && c.Status != zkcircuit.StatusActive {
 			continue
 		}
