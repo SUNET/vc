@@ -72,7 +72,7 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 	// created_at_1 is actually present with an expiry other than the one
 	// wanted. Reading live state also avoids parsing an error string whose
 	// wording is not part of anyone's contract.
-	state, listErr := ttlIndexStateReader(ctx, coll, ttl)
+	state, indexName, listErr := ttlIndexStateReader(ctx, coll, ttl)
 	switch {
 	case listErr != nil:
 		return fmt.Errorf("index %s conflicts and its current state could not be read: %w (original: %v)",
@@ -89,27 +89,43 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 		// retry raises it again, freshly, and without the TTL index having
 		// been touched.
 
-	case state == ttlIndexNotTTL:
-		// created_at_1 exists with no expiry at all. collMod cannot ADD
-		// expireAfterSeconds before MongoDB 5.1 - measured on 4.4 and 5.0,
-		// which return code 72 "no expireAfterSeconds field to update" -
-		// and 4.4 is the documented minimum. So go straight to the rebuild
-		// rather than attempt a call that cannot work there.
+	case state == ttlIndexNotTTL || indexName != createdAtTTLIndex:
+		// Two states that collMod cannot resolve, both ending in a
+		// rebuild.
+		//
+		// No expiry at all: collMod cannot ADD expireAfterSeconds before
+		// MongoDB 5.1 - measured on 4.4 and 5.0, which return code 72 "no
+		// expireAfterSeconds field to update" - and 4.4 is the documented
+		// minimum.
+		//
+		// A name the batch will not accept: collMod can fix such an
+		// index's expiry, but CreateMany then conflicts anyway, because it
+		// asks for created_at_1 while an equivalent key already exists
+		// under another name ("Index already exists with a different name",
+		// measured on 7). The only way to converge is to recreate it under
+		// the name the batch expects.
 		//
 		// Safe to drop because the state has been read off the collection:
 		// this IS the {created_at: 1} index, and it is expiring nothing.
-		if rebuildErr := rebuildTTLIndex(ctx, coll, indexes, ttl); rebuildErr != nil {
-			return fmt.Errorf("index %s exists without an expiry and %w (original: %v)",
-				createdAtTTLIndex, rebuildErr, err)
+		if rebuildErr := rebuildTTLIndex(ctx, coll, indexes, indexName, ttl); rebuildErr != nil {
+			return fmt.Errorf("index %s cannot be modified in place and %w (original: %v)",
+				indexName, rebuildErr, err)
 		}
 
 	default:
-		if modErr := ttlIndexCollMod(ctx, coll, ttl); modErr != nil {
+		if modErr := ttlIndexCollMod(ctx, coll, indexName, ttl); modErr != nil {
 			switch {
 			case isIndexNotFound(modErr):
 				// Another replica dropped it between our CreateMany and
-				// this collMod. Nothing to modify and nothing to drop; the
-				// retry below rebuilds it.
+				// this collMod. Nothing to modify - but the batched retry
+				// is not guaranteed to put it back either, because a
+				// simultaneous conflict on an earlier index makes
+				// CreateMany fail before it reaches the TTL model. Rebuild
+				// it here for the same reason the branch below does.
+				if rebuildErr := rebuildTTLIndex(ctx, coll, indexes, indexName, ttl); rebuildErr != nil {
+					return fmt.Errorf("index %s was dropped by another replica and %w (original: %v)",
+						createdAtTTLIndex, rebuildErr, err)
+				}
 
 			case isPermanentCollModFailure(modErr):
 				// collMod needs the collMod privilege, which the built-in
@@ -132,7 +148,7 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 				// conflict and the same collMod failure, so all of them
 				// reach this drop; losing that race is the expected
 				// outcome, not an error.
-				if err := rebuildTTLIndex(ctx, coll, indexes, ttl); err != nil {
+				if err := rebuildTTLIndex(ctx, coll, indexes, indexName, ttl); err != nil {
 					return fmt.Errorf(
 						"index %s already exists with a different expiry; collMod to %s failed (%w) and %v",
 						createdAtTTLIndex, ttl, modErr, err)
@@ -163,11 +179,11 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 //
 // A package variable so the drop-and-rebuild fallback can be exercised
 // without an auth-enabled MongoDB.
-var ttlIndexCollMod = func(ctx context.Context, coll *mongo.Collection, ttl time.Duration) error {
+var ttlIndexCollMod = func(ctx context.Context, coll *mongo.Collection, name string, ttl time.Duration) error {
 	return coll.Database().RunCommand(ctx, bson.D{
 		{Key: "collMod", Value: coll.Name()},
 		{Key: "index", Value: bson.D{
-			{Key: "name", Value: createdAtTTLIndex},
+			{Key: "name", Value: name},
 			{Key: "expireAfterSeconds", Value: int32(ttl.Seconds())},
 		}},
 	}).Err()
@@ -257,34 +273,45 @@ var ttlIndexStateReader = ttlIndexStateOf
 // nobody's contract - and the message does not distinguish "wrong expiry"
 // from "no expiry", which is the distinction that decides whether collMod
 // can be used at all.
-func ttlIndexStateOf(ctx context.Context, coll *mongo.Collection, ttl time.Duration) (ttlIndexState, error) {
+func ttlIndexStateOf(ctx context.Context, coll *mongo.Collection, ttl time.Duration) (ttlIndexState, string, error) {
 	cur, err := coll.Indexes().List(ctx)
 	if err != nil {
-		return ttlIndexAbsent, err
+		return ttlIndexAbsent, "", err
 	}
 	defer cur.Close(ctx)
 
 	var specs []bson.M
 	if err := cur.All(ctx, &specs); err != nil {
-		return ttlIndexAbsent, err
+		return ttlIndexAbsent, "", err
 	}
 
 	want := int32(ttl.Seconds())
 	for _, spec := range specs {
-		if spec["name"] != createdAtTTLIndex || !isCreatedAtKey(spec["key"]) {
+		// By KEY, not by name. "created_at_1" is only MongoDB's default
+		// name: an index on another key can wear it, and the real
+		// {created_at: 1} index can be called anything an operator likes.
+		// Matching the name alone mistook the first for ours; requiring it
+		// as well missed the second, reported absent, and re-issued the
+		// same failing request.
+		if !isCreatedAtKey(spec["key"]) {
 			continue
 		}
+		name, _ := spec["name"].(string)
+		if name == "" {
+			name = createdAtTTLIndex
+		}
+
 		got, ok := asInt32(spec["expireAfterSeconds"])
 		switch {
 		case !ok:
-			return ttlIndexNotTTL, nil
+			return ttlIndexNotTTL, name, nil
 		case got == want:
-			return ttlIndexMatches, nil
+			return ttlIndexMatches, name, nil
 		default:
-			return ttlIndexExpiryChanged, nil
+			return ttlIndexExpiryChanged, name, nil
 		}
 	}
-	return ttlIndexAbsent, nil
+	return ttlIndexAbsent, "", nil
 }
 
 // isCreatedAtKey reports whether this index spec's key really is
@@ -341,8 +368,8 @@ func asInt32(v any) (int32, bool) {
 // in the batch, and never reaches it. Recreating immediately means the
 // retry can fail on someone else's conflict without that costing this
 // collection its TTL.
-func rebuildTTLIndex(ctx context.Context, coll *mongo.Collection, indexes []mongo.IndexModel, ttl time.Duration) error {
-	if dropErr := coll.Indexes().DropOne(ctx, createdAtTTLIndex); dropErr != nil && !isIndexNotFound(dropErr) {
+func rebuildTTLIndex(ctx context.Context, coll *mongo.Collection, indexes []mongo.IndexModel, name string, ttl time.Duration) error {
+	if dropErr := coll.Indexes().DropOne(ctx, name); dropErr != nil && !isIndexNotFound(dropErr) {
 		return fmt.Errorf("it could not be dropped: %w", dropErr)
 	}
 
@@ -353,9 +380,25 @@ func rebuildTTLIndex(ctx context.Context, coll *mongo.Collection, indexes []mong
 		return nil
 	}
 
-	if _, err := coll.Indexes().CreateOne(ctx, model); err != nil && !isIndexOptionsConflict(err) {
-		// A conflict here means another replica rebuilt it first.
-		return fmt.Errorf("it could not be recreated at %s: %w", ttl, err)
+	if _, err := coll.Indexes().CreateOne(ctx, model); err != nil {
+		if !isIndexOptionsConflict(err) {
+			return fmt.Errorf("it could not be recreated at %s: %w", ttl, err)
+		}
+
+		// A conflict is NOT proof that another replica rebuilt it
+		// correctly. Creating the same model again is idempotent and
+		// returns no error at all, so code 85 says the index now present
+		// has DIFFERENT options - which is the state this function exists
+		// to leave behind, not one to accept on faith. Read it back.
+		state, _, stateErr := ttlIndexStateOf(ctx, coll, ttl)
+		if stateErr != nil {
+			return fmt.Errorf("it conflicted on recreation at %s and its state could not be read: %w (original: %v)",
+				ttl, stateErr, err)
+		}
+		if state != ttlIndexMatches {
+			return fmt.Errorf("it conflicted on recreation and the index present does not expire at %s: %w", ttl, err)
+		}
+		// Another replica rebuilt it, at the expiry we wanted.
 	}
 	return nil
 }

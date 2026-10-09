@@ -161,17 +161,11 @@ func TestTTLIndexFallsBackWhenCollModIsUnavailable(t *testing.T) {
 	require.Equal(t, int32(900), ttlOf(t, client, db, coll))
 
 	// Stand in for a readWrite-only deployment.
-	original := ttlIndexCollMod
-	var attempted bool
-	ttlIndexCollMod = func(context.Context, *mongo.Collection, time.Duration) error {
-		attempted = true
-		return mongo.CommandError{Code: 13, Message: "not authorized on t to execute command collMod"}
-	}
-	t.Cleanup(func() { ttlIndexCollMod = original })
+	attempted := refuseCollMod(t, 13, "not authorized on t to execute command collMod")
 
 	_, err = NewMongoStore(ctx, client, db, coll, 60*time.Minute)
 	require.NoError(t, err, "a deployment without the collMod privilege must still start")
-	assert.True(t, attempted, "the fallback ran without collMod having been tried")
+	assert.True(t, *attempted, "the fallback ran without collMod having been tried")
 
 	assert.Equal(t, int32(3600), ttlOf(t, client, db, coll),
 		"the index was not rebuilt with the new expiry")
@@ -210,13 +204,10 @@ func TestTTLIndexToleratesLosingTheDropRace(t *testing.T) {
 
 	// collMod is refused, and while it is refused another replica drops the
 	// index out from under this one.
-	original := ttlIndexCollMod
-	ttlIndexCollMod = func(ctx context.Context, c *mongo.Collection, _ time.Duration) error {
-		dropErr := c.Indexes().DropOne(ctx, createdAtTTLIndex)
-		require.NoError(t, dropErr, "the stand-in replica could not drop the index")
+	stubCollMod(t, func(ctx context.Context, c *mongo.Collection, name string, _ time.Duration) error {
+		require.NoError(t, c.Indexes().DropOne(ctx, name), "the stand-in replica could not drop the index")
 		return mongo.CommandError{Code: 13, Message: "not authorized to execute command collMod"}
-	}
-	t.Cleanup(func() { ttlIndexCollMod = original })
+	})
 
 	_, err = NewMongoStore(ctx, client, db, coll, 60*time.Minute)
 	require.NoError(t, err, "losing the drop race must not fail startup")
@@ -243,9 +234,6 @@ func TestTTLIndexKeepsTheIndexOnATransientCollModFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int32(900), ttlOf(t, client, db, coll))
 
-	original := ttlIndexCollMod
-	t.Cleanup(func() { ttlIndexCollMod = original })
-
 	for _, tc := range []struct {
 		name string
 		err  error
@@ -255,9 +243,9 @@ func TestTTLIndexKeepsTheIndexOnATransientCollModFailure(t *testing.T) {
 		{"interrupted", mongo.CommandError{Code: 11602, Message: "InterruptedDueToReplStateChange"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ttlIndexCollMod = func(context.Context, *mongo.Collection, time.Duration) error {
+			stubCollMod(t, func(context.Context, *mongo.Collection, string, time.Duration) error {
 				return tc.err
-			}
+			})
 
 			_, err := NewMongoStore(ctx, client, db, coll, 60*time.Minute)
 			assert.Error(t, err, "a transient failure must be reported, not worked around")
@@ -311,19 +299,13 @@ func TestTTLIndexSurvivesAConflictOnAnotherIndex(t *testing.T) {
 
 	// collMod would be refused here, so reaching the fallback means
 	// created_at_1 gets dropped.
-	original := ttlIndexCollMod
-	var reached bool
-	ttlIndexCollMod = func(context.Context, *mongo.Collection, time.Duration) error {
-		reached = true
-		return mongo.CommandError{Code: 13, Message: "not authorized to execute command collMod"}
-	}
-	t.Cleanup(func() { ttlIndexCollMod = original })
+	reached := refuseCollMod(t, 13, "not authorized to execute command collMod")
 
 	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
 	require.Error(t, err, "the state_1 conflict is real and must be reported")
 	require.True(t, isIndexOptionsConflict(err),
 		"this test only means something if the conflict is an 85 - got %v", err)
-	assert.False(t, reached, "a conflict on another index reached the TTL migration")
+	assert.False(t, *reached, "a conflict on another index reached the TTL migration")
 
 	assert.Equal(t, int32(900), ttlOf(t, client, db, coll),
 		"the TTL index was dropped over a conflict that was not its own")
@@ -355,7 +337,7 @@ func TestTTLIndexStateOf(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			got, err := ttlIndexStateOf(ctx, c, 15*time.Minute)
+			got, _, err := ttlIndexStateOf(ctx, c, 15*time.Minute)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})
@@ -389,17 +371,11 @@ func TestTTLIndexRebuildsAnIndexThatIsNotTTL(t *testing.T) {
 	require.NoError(t, err)
 
 	// collMod must not be reached: on 4.4/5.0 it cannot do this.
-	original := ttlIndexCollMod
-	var reached bool
-	ttlIndexCollMod = func(context.Context, *mongo.Collection, time.Duration) error {
-		reached = true
-		return mongo.CommandError{Code: 72, Message: "no expireAfterSeconds field to update"}
-	}
-	t.Cleanup(func() { ttlIndexCollMod = original })
+	reached := refuseCollMod(t, 72, "no expireAfterSeconds field to update")
 
 	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
 	require.NoError(t, err, "a non-TTL created_at_1 must be rebuilt, not refused")
-	assert.False(t, reached, "collMod was attempted for a state it cannot change")
+	assert.False(t, *reached, "collMod was attempted for a state it cannot change")
 
 	assert.Equal(t, int32(900), ttlOf(t, client, db, coll),
 		"created_at_1 is still not a TTL index")
@@ -450,10 +426,10 @@ func TestTTLIndexDoesNotRejectAConflictAnotherReplicaResolved(t *testing.T) {
 	// read the state, so what we then read is genuinely "matches".
 	originalReader := ttlIndexStateReader
 	var raced bool
-	ttlIndexStateReader = func(ctx context.Context, coll *mongo.Collection, ttl time.Duration) (ttlIndexState, error) {
+	ttlIndexStateReader = func(ctx context.Context, coll *mongo.Collection, ttl time.Duration) (ttlIndexState, string, error) {
 		if !raced {
 			raced = true
-			require.NoError(t, ttlIndexCollMod(ctx, coll, ttl),
+			require.NoError(t, ttlIndexCollMod(ctx, coll, createdAtTTLIndex, ttl),
 				"the stand-in replica could not resolve the index")
 		}
 		return originalReader(ctx, coll, ttl)
@@ -498,11 +474,7 @@ func TestTTLIndexSurvivesASimultaneousConflict(t *testing.T) {
 	require.NoError(t, err)
 
 	// readWrite-only, so the migration takes the drop-and-rebuild path.
-	original := ttlIndexCollMod
-	ttlIndexCollMod = func(context.Context, *mongo.Collection, time.Duration) error {
-		return mongo.CommandError{Code: 13, Message: "not authorized to execute command collMod"}
-	}
-	t.Cleanup(func() { ttlIndexCollMod = original })
+	refuseCollMod(t, 13, "not authorized to execute command collMod")
 
 	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
 	require.Error(t, err, "the state_1 conflict is real and must still be reported")
@@ -532,7 +504,7 @@ func TestTTLIndexIgnoresAnImpostorByName(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	state, err := ttlIndexStateOf(ctx, c, 15*time.Minute)
+	state, _, err := ttlIndexStateOf(ctx, c, 15*time.Minute)
 	require.NoError(t, err)
 	assert.Equal(t, ttlIndexAbsent, state,
 		"an index named created_at_1 on another key was taken for the TTL index")
@@ -550,4 +522,180 @@ func TestIsCreatedAtKey(t *testing.T) {
 	}), "compound")
 	assert.False(t, isCreatedAtKey(nil))
 	assert.False(t, isCreatedAtKey("created_at"))
+}
+
+// A genuine {created_at: 1} TTL index under a custom name is migrated, not
+// reported absent.
+//
+// "created_at_1" is only MongoDB's default name. Requiring it missed a real
+// TTL index an operator had named something else: the state read as absent,
+// the retry re-issued the same failing request, and startup failed instead
+// of migrating it. The fix for the impostor case was to check the key; the
+// fix for this one is to check ONLY the key, and carry the name found.
+func TestTTLIndexMigratesACustomNamedIndex(t *testing.T) {
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	const db, coll, custom = "test_ttl_custom_name", "auth_ctx", "ttl_by_created_at"
+
+	c := client.Database(db).Collection(coll)
+	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "created_at", Value: 1}},
+		Options: options.Index().SetName(custom).SetExpireAfterSeconds(600),
+	})
+	require.NoError(t, err)
+
+	state, name, err := ttlIndexStateOf(ctx, c, 15*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, ttlIndexExpiryChanged, state, "a real TTL index was reported absent because of its name")
+	assert.Equal(t, custom, name, "the name found must be carried to collMod and the drop")
+
+	// ... and the migration goes through, converging on the name the store
+	// defines. collMod alone cannot get there: it fixes the expiry, and the
+	// batched CreateMany then conflicts anyway because an equivalent key
+	// exists under another name. So the index is rebuilt as created_at_1.
+	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	require.NoError(t, err, "a real TTL index under a custom name must be migrated, not refused")
+
+	assert.Equal(t, int32(900), ttlOf(t, client, db, coll),
+		"the store's own index is missing or on the wrong expiry")
+	assert.False(t, indexExists(t, client, db, coll, custom),
+		"the custom-named duplicate was left behind")
+}
+
+// indexExists reports whether an index of this name is on the collection.
+func indexExists(t *testing.T, client *mongo.Client, db, coll, name string) bool {
+	t.Helper()
+
+	cur, err := client.Database(db).Collection(coll).Indexes().List(t.Context())
+	require.NoError(t, err)
+
+	var specs []bson.M
+	require.NoError(t, cur.All(t.Context(), &specs))
+
+	for _, spec := range specs {
+		if spec["name"] == name {
+			return true
+		}
+	}
+	return false
+}
+
+// Losing the collMod race must still leave a TTL index behind.
+//
+// IndexNotFound means another replica dropped it; leaving the rebuild to
+// the batched retry reintroduces the no-expiry state, because a
+// simultaneous conflict on an earlier index makes CreateMany fail first.
+func TestTTLIndexRebuildsAfterLosingTheCollModRace(t *testing.T) {
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	const db, coll = "test_ttl_collmod_race", "auth_ctx"
+	c := client.Database(db).Collection(coll)
+
+	// An unrelated 85 that this code cannot resolve, so the batched retry
+	// fails before it ever reaches the TTL model.
+	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "state", Value: 1}},
+		Options: options.Index().SetSparse(true).SetExpireAfterSeconds(600),
+	})
+	require.NoError(t, err)
+	_, err = c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "created_at", Value: 1}},
+		Options: options.Index().SetExpireAfterSeconds(600),
+	})
+	require.NoError(t, err)
+
+	// collMod reports the index gone - another replica dropped it.
+	stubCollMod(t, func(ctx context.Context, cc *mongo.Collection, name string, _ time.Duration) error {
+		require.NoError(t, cc.Indexes().DropOne(ctx, name))
+		return mongo.CommandError{Code: 27, Message: "index not found with name [created_at_1]"}
+	})
+
+	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	require.Error(t, err, "the state_1 conflict is real and must still be reported")
+
+	assert.Equal(t, int32(900), ttlOf(t, client, db, coll),
+		"losing the collMod race left the collection with no TTL index")
+}
+
+// A conflict when recreating is not proof the index came back correctly.
+//
+// Creating the same model twice is idempotent and returns no error, so code
+// 85 means the index now present has DIFFERENT options - the very state
+// rebuildTTLIndex exists to leave behind. Accepting it on faith let the
+// helper report success over a wrong expiry.
+func TestRebuildRefusesAConflictItCannotVerify(t *testing.T) {
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	c := client.Database("test_ttl_rebuild_conflict").Collection("auth_ctx")
+
+	indexes := []mongo.IndexModel{{
+		Keys:    bson.D{{Key: "created_at", Value: 1}},
+		Options: options.Index().SetExpireAfterSeconds(900),
+	}}
+
+	// Another replica rebuilt it at the WRONG expiry: the drop finds
+	// nothing, the create conflicts, and the result must not be success.
+	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "created_at", Value: 1}},
+		Options: options.Index().SetExpireAfterSeconds(1800),
+	})
+	require.NoError(t, err)
+
+	err = rebuildTTLIndex(ctx, c, indexes, "nonexistent_index_name", 15*time.Minute)
+	assert.Error(t, err, "a rebuild that left the wrong expiry reported success")
+
+	// ... and when another replica rebuilt it at the RIGHT expiry, the
+	// conflict really is benign.
+	require.NoError(t, c.Indexes().DropOne(ctx, createdAtTTLIndex))
+	_, err = c.Indexes().CreateOne(ctx, indexes[0])
+	require.NoError(t, err)
+
+	assert.NoError(t, rebuildTTLIndex(ctx, c, indexes, "nonexistent_index_name", 15*time.Minute))
+}
+
+// stubCollMod replaces the collMod seam for one test and restores it after.
+func stubCollMod(t *testing.T, fn func(context.Context, *mongo.Collection, string, time.Duration) error) {
+	t.Helper()
+
+	original := ttlIndexCollMod
+	ttlIndexCollMod = fn
+	t.Cleanup(func() { ttlIndexCollMod = original })
+}
+
+// refuseCollMod stands in for a deployment whose credentials cannot run it.
+func refuseCollMod(t *testing.T, code int32, message string) *bool {
+	t.Helper()
+
+	reached := new(bool)
+	stubCollMod(t, func(context.Context, *mongo.Collection, string, time.Duration) error {
+		*reached = true
+		return mongo.CommandError{Code: code, Message: message}
+	})
+	return reached
+}
+
+// createdAtIndex is the TTL index model, optionally under a custom name.
+func createdAtIndex(seconds int32, name string) mongo.IndexModel {
+	opts := options.Index().SetExpireAfterSeconds(seconds)
+	if name != "" {
+		opts = opts.SetName(name)
+	}
+	return mongo.IndexModel{Keys: bson.D{{Key: "created_at", Value: 1}}, Options: opts}
+}
+
+// unresolvableStateConflict is a state_1 index that raises code 85 against
+// the store's own: sparse as the store wants it, carrying an expiry it does
+// not. Nothing in ensureIndexes can fix it, so the batched retry fails on
+// it - which is exactly what the TTL index must survive.
+func unresolvableStateConflict() mongo.IndexModel {
+	return mongo.IndexModel{
+		Keys:    bson.D{{Key: "state", Value: 1}},
+		Options: options.Index().SetSparse(true).SetExpireAfterSeconds(600),
+	}
 }
