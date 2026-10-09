@@ -56,19 +56,23 @@ func fetchFile(rawURL string, maxBytes int64) ([]byte, error) {
 		return nil, err
 	}
 
+	// Stat before Open and require a regular file: os.Open on a FIFO or
+	// device blocks until a writer appears, and a mirror is operator-
+	// supplied but not known-good, so a special file left at manifest.json
+	// would hang issuance forever rather than erroring.
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat vendored circuit file %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("vendored circuit path %s is not a regular file", path)
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open vendored circuit file %s: %w", path, err)
 	}
 	defer f.Close()
-
-	info, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat vendored circuit file %s: %w", path, err)
-	}
-	if info.IsDir() {
-		return nil, fmt.Errorf("vendored circuit path %s is a directory, not a file", path)
-	}
 
 	// maxBytes+1 so an oversized file is reported as oversized rather than
 	// silently truncated to exactly the cap.

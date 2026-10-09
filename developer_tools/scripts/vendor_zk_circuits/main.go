@@ -428,7 +428,7 @@ func mirrorFileMode(dir string) os.FileMode {
 		return 0o600
 	}
 	mode := info.Mode().Perm() &^ 0o111
-	if mode == 0 {
+	if mode&0o444 == 0 {
 		return 0o600
 	}
 	return mode

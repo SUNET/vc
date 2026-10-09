@@ -548,6 +548,7 @@ func TestMirrorFileModeFollowsTheDirectory(t *testing.T) {
 		"group readable": {0o750, 0o640},
 		"owner only":     {0o700, 0o600},
 		"group writable": {0o770, 0o660},
+		"no read":        {0o300, 0o600},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "mirror")
