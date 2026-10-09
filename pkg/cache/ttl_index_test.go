@@ -21,11 +21,7 @@ import (
 // from configuration, that is reached by an operator editing a duration -
 // and before this, it stopped the service from starting at all.
 func TestTTLIndexSurvivesADurationChange(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	const db, coll = "test_ttl_change", "auth_ctx"
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_change")
 
 	_, err := NewMongoStore(ctx, client, db, coll, 15*time.Minute)
 	require.NoError(t, err)
@@ -45,10 +41,7 @@ func TestTTLIndexSurvivesADurationChange(t *testing.T) {
 // The generic caches take the same path, and are where the request object
 // and ephemeral keys live.
 func TestGenericCacheTTLIndexSurvivesADurationChange(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
+	ctx, client, _, _ := ttlTestDB(t, "ttl_misc")
 	const db, coll = "test_ttl_change_generic", "request_objects"
 
 	_, err := NewMongoCache[string](ctx, client, db, coll, 5*time.Minute, nil)
@@ -64,11 +57,7 @@ func TestGenericCacheTTLIndexSurvivesADurationChange(t *testing.T) {
 func ttlOf(t *testing.T, client *mongo.Client, db, coll string) int32 {
 	t.Helper()
 
-	cur, err := client.Database(db).Collection(coll).Indexes().List(t.Context())
-	require.NoError(t, err)
-
-	var specs []bson.M
-	require.NoError(t, cur.All(t.Context(), &specs))
+	specs := indexSpecs(t, client, db, coll)
 
 	for _, spec := range specs {
 		if spec["name"] != createdAtTTLIndex {
@@ -99,11 +88,7 @@ func ttlOf(t *testing.T, client *mongo.Client, db, coll string) int32 {
 // That is the accepted trade-off (see ensureIndexes), and this records it
 // rather than leaving it to be discovered.
 func TestLoweringTheTTLShortensExistingEntries(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	const db, coll = "test_ttl_existing", "auth_ctx"
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_existing")
 
 	store, err := NewMongoStore(ctx, client, db, coll, 35*time.Minute)
 	require.NoError(t, err)
@@ -150,11 +135,7 @@ func TestLoweringTheTTLShortensExistingEntries(t *testing.T) {
 // succeed. So a failing collMod falls back to dropping the index and
 // letting it be rebuilt with the new expiry.
 func TestTTLIndexFallsBackWhenCollModIsUnavailable(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	const db, coll = "test_ttl_no_collmod", "auth_ctx"
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_no_collmod")
 
 	_, err := NewMongoStore(ctx, client, db, coll, 15*time.Minute)
 	require.NoError(t, err)
@@ -192,11 +173,7 @@ func TestTTLIndexFallsBackWhenCollModIsUnavailable(t *testing.T) {
 // the others get IndexNotFound (27) and must carry on to the retry, which
 // is the correct next step - the index they wanted dropped is gone.
 func TestTTLIndexToleratesLosingTheDropRace(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	const db, coll = "test_ttl_drop_race", "auth_ctx"
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_drop_race")
 
 	_, err := NewMongoStore(ctx, client, db, coll, 15*time.Minute)
 	require.NoError(t, err)
@@ -224,11 +201,7 @@ func TestTTLIndexToleratesLosingTheDropRace(t *testing.T) {
 // then fails too, every replica runs on with NO expiry at all, silently,
 // until some later startup repairs it.
 func TestTTLIndexKeepsTheIndexOnATransientCollModFailure(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	const db, coll = "test_ttl_transient", "auth_ctx"
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_transient")
 
 	_, err := NewMongoStore(ctx, client, db, coll, 15*time.Minute)
 	require.NoError(t, err)
@@ -273,28 +246,18 @@ func TestTTLIndexKeepsTheIndexOnATransientCollModFailure(t *testing.T) {
 // built here, rather than a unique/sparse mismatch that never reaches the
 // branch at all.
 func TestTTLIndexSurvivesAConflictOnAnotherIndex(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	const db, coll = "test_ttl_other_conflict", "auth_ctx"
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_other_conflict")
 	c := client.Database(db).Collection(coll)
 
 	// state_1 as the store wants it - sparse - but carrying an expiry the
 	// store does not ask for. Differing in expireAfterSeconds alone is what
 	// makes this 85 rather than 86.
-	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "state", Value: 1}},
-		Options: options.Index().SetSparse(true).SetExpireAfterSeconds(600),
-	})
+	_, err := c.Indexes().CreateOne(ctx, unresolvableStateConflict())
 	require.NoError(t, err)
 
 	// ... and a healthy TTL index at exactly the expiry the store is about
 	// to ask for, so there is nothing about IT to migrate.
-	_, err = c.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "created_at", Value: 1}},
-		Options: options.Index().SetExpireAfterSeconds(900),
-	})
+	_, err = c.Indexes().CreateOne(ctx, createdAtIndex(900, ""))
 	require.NoError(t, err)
 
 	// collMod would be refused here, so reaching the fallback means
@@ -313,10 +276,7 @@ func TestTTLIndexSurvivesAConflictOnAnotherIndex(t *testing.T) {
 
 // ttlIndexStateOf is the gate above, on its own.
 func TestTTLIndexStateOf(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
+	ctx, client, _, _ := ttlTestDB(t, "ttl_misc")
 
 	for _, tc := range []struct {
 		name string
@@ -357,11 +317,7 @@ func TestTTLIndexStateOf(t *testing.T) {
 // failed startup on exactly the versions this project supports - while the
 // state check had already labelled it migratable.
 func TestTTLIndexRebuildsAnIndexThatIsNotTTL(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	const db, coll = "test_ttl_not_ttl", "auth_ctx"
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_not_ttl")
 
 	// created_at_1 exists, expiring nothing.
 	c := client.Database(db).Collection(coll)
@@ -384,11 +340,7 @@ func TestTTLIndexRebuildsAnIndexThatIsNotTTL(t *testing.T) {
 // And the TTL index is still migrated when IT is the one that differs, even
 // though the batch carries ten others that do not.
 func TestTTLIndexStillMigratesWhenItIsTheConflict(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	const db, coll = "test_ttl_own_conflict", "auth_ctx"
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_own_conflict")
 
 	_, err := NewMongoStore(ctx, client, db, coll, 15*time.Minute)
 	require.NoError(t, err)
@@ -408,11 +360,7 @@ func TestTTLIndexStillMigratesWhenItIsTheConflict(t *testing.T) {
 // way - if the conflict really did belong to another index, the retry
 // raises it again.
 func TestTTLIndexDoesNotRejectAConflictAnotherReplicaResolved(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	const db, coll = "test_ttl_stale_conflict", "auth_ctx"
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_stale_conflict")
 
 	// created_at_1 at the wrong expiry, so our CreateMany conflicts.
 	c := client.Database(db).Collection(coll)
@@ -450,27 +398,17 @@ func TestTTLIndexDoesNotRejectAConflictAnotherReplicaResolved(t *testing.T) {
 // with no expiry at all: CreateMany fails again on state_1, which precedes
 // the TTL model in the batch, and never reaches it.
 func TestTTLIndexSurvivesASimultaneousConflict(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	const db, coll = "test_ttl_both_conflict", "auth_ctx"
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_both_conflict")
 	c := client.Database(db).Collection(coll)
 
 	// state_1 as the store wants it but carrying an expiry it does not -
 	// an 85 that this code cannot resolve.
-	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "state", Value: 1}},
-		Options: options.Index().SetSparse(true).SetExpireAfterSeconds(600),
-	})
+	_, err := c.Indexes().CreateOne(ctx, unresolvableStateConflict())
 	require.NoError(t, err)
 
 	// ... and created_at_1 on the OLD expiry, so the TTL index genuinely
 	// needs migrating at the same time.
-	_, err = c.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "created_at", Value: 1}},
-		Options: options.Index().SetExpireAfterSeconds(600),
-	})
+	_, err = c.Indexes().CreateOne(ctx, createdAtIndex(600, ""))
 	require.NoError(t, err)
 
 	// readWrite-only, so the migration takes the drop-and-rebuild path.
@@ -491,11 +429,9 @@ func TestTTLIndexSurvivesASimultaneousConflict(t *testing.T) {
 // "created_at_1" is only MongoDB's default name for {created_at: 1}; an
 // operator can give any index any name.
 func TestTTLIndexIgnoresAnImpostorByName(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	c := client.Database("test_ttl_impostor").Collection("auth_ctx")
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_impostor")
+	c := client.Database(db).Collection(coll)
+	_ = client
 
 	// A different key, wearing the TTL index's default name.
 	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
@@ -533,17 +469,11 @@ func TestIsCreatedAtKey(t *testing.T) {
 // of migrating it. The fix for the impostor case was to check the key; the
 // fix for this one is to check ONLY the key, and carry the name found.
 func TestTTLIndexMigratesACustomNamedIndex(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	const db, coll, custom = "test_ttl_custom_name", "auth_ctx", "ttl_by_created_at"
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_custom_name")
+	const custom = "ttl_by_created_at"
 
 	c := client.Database(db).Collection(coll)
-	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "created_at", Value: 1}},
-		Options: options.Index().SetName(custom).SetExpireAfterSeconds(600),
-	})
+	_, err := c.Indexes().CreateOne(ctx, createdAtIndex(600, custom))
 	require.NoError(t, err)
 
 	state, name, err := ttlIndexStateOf(ctx, c, 15*time.Minute)
@@ -568,11 +498,7 @@ func TestTTLIndexMigratesACustomNamedIndex(t *testing.T) {
 func indexExists(t *testing.T, client *mongo.Client, db, coll, name string) bool {
 	t.Helper()
 
-	cur, err := client.Database(db).Collection(coll).Indexes().List(t.Context())
-	require.NoError(t, err)
-
-	var specs []bson.M
-	require.NoError(t, cur.All(t.Context(), &specs))
+	specs := indexSpecs(t, client, db, coll)
 
 	for _, spec := range specs {
 		if spec["name"] == name {
@@ -588,24 +514,14 @@ func indexExists(t *testing.T, client *mongo.Client, db, coll, name string) bool
 // the batched retry reintroduces the no-expiry state, because a
 // simultaneous conflict on an earlier index makes CreateMany fail first.
 func TestTTLIndexRebuildsAfterLosingTheCollModRace(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	const db, coll = "test_ttl_collmod_race", "auth_ctx"
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_collmod_race")
 	c := client.Database(db).Collection(coll)
 
 	// An unrelated 85 that this code cannot resolve, so the batched retry
 	// fails before it ever reaches the TTL model.
-	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "state", Value: 1}},
-		Options: options.Index().SetSparse(true).SetExpireAfterSeconds(600),
-	})
+	_, err := c.Indexes().CreateOne(ctx, unresolvableStateConflict())
 	require.NoError(t, err)
-	_, err = c.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "created_at", Value: 1}},
-		Options: options.Index().SetExpireAfterSeconds(600),
-	})
+	_, err = c.Indexes().CreateOne(ctx, createdAtIndex(600, ""))
 	require.NoError(t, err)
 
 	// collMod reports the index gone - another replica dropped it.
@@ -628,11 +544,9 @@ func TestTTLIndexRebuildsAfterLosingTheCollModRace(t *testing.T) {
 // rebuildTTLIndex exists to leave behind. Accepting it on faith let the
 // helper report success over a wrong expiry.
 func TestRebuildRefusesAConflictItCannotVerify(t *testing.T) {
-	_, client, cleanup := testsupport.StartMongoContainer(t)
-	defer cleanup()
-
-	ctx := t.Context()
-	c := client.Database("test_ttl_rebuild_conflict").Collection("auth_ctx")
+	ctx, client, db, coll := ttlTestDB(t, "test_ttl_rebuild_conflict")
+	c := client.Database(db).Collection(coll)
+	_ = client
 
 	indexes := []mongo.IndexModel{{
 		Keys:    bson.D{{Key: "created_at", Value: 1}},
@@ -698,4 +612,27 @@ func unresolvableStateConflict() mongo.IndexModel {
 		Keys:    bson.D{{Key: "state", Value: 1}},
 		Options: options.Index().SetSparse(true).SetExpireAfterSeconds(600),
 	}
+}
+
+// ttlTestDB starts a MongoDB container and names a collection to work
+// against. Every test here needs the same four lines; this is them.
+func ttlTestDB(t *testing.T, database string) (context.Context, *mongo.Client, string, string) {
+	t.Helper()
+
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	t.Cleanup(cleanup)
+
+	return t.Context(), client, database, "auth_ctx"
+}
+
+// indexSpecs lists the index specifications on a collection.
+func indexSpecs(t *testing.T, client *mongo.Client, db, coll string) []bson.M {
+	t.Helper()
+
+	cur, err := client.Database(db).Collection(coll).Indexes().List(t.Context())
+	require.NoError(t, err)
+
+	var specs []bson.M
+	require.NoError(t, cur.All(t.Context(), &specs))
+	return specs
 }
