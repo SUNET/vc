@@ -329,8 +329,8 @@ func TestTTLIndexSurvivesAConflictOnAnotherIndex(t *testing.T) {
 		"the TTL index was dropped over a conflict that was not its own")
 }
 
-// ttlIndexExpiryDiffers is the gate above, on its own.
-func TestTTLIndexExpiryDiffers(t *testing.T) {
+// ttlIndexStateOf is the gate above, on its own.
+func TestTTLIndexStateOf(t *testing.T) {
 	_, client, cleanup := testsupport.StartMongoContainer(t)
 	defer cleanup()
 
@@ -339,12 +339,12 @@ func TestTTLIndexExpiryDiffers(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		opts *options.IndexOptionsBuilder
-		want bool
+		want ttlIndexState
 	}{
-		{"absent", nil, false},
-		{"same expiry", options.Index().SetExpireAfterSeconds(900), false},
-		{"different expiry", options.Index().SetExpireAfterSeconds(600), true},
-		{"present but not a TTL index", options.Index().SetSparse(true), true},
+		{"absent", nil, ttlIndexAbsent},
+		{"same expiry", options.Index().SetExpireAfterSeconds(900), ttlIndexMatches},
+		{"different expiry", options.Index().SetExpireAfterSeconds(600), ttlIndexExpiryChanged},
+		{"no expiry at all", options.Index().SetSparse(true), ttlIndexNotTTL},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := client.Database("test_ttl_gate").Collection(tc.name)
@@ -355,11 +355,54 @@ func TestTTLIndexExpiryDiffers(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			got, err := ttlIndexExpiryDiffers(ctx, c, 15*time.Minute)
+			got, err := ttlIndexStateOf(ctx, c, 15*time.Minute)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+// A created_at_1 that is not a TTL index at all is rebuilt, not collMod'd.
+//
+// collMod can only ADD expireAfterSeconds from MongoDB 5.1. Measured on the
+// documented minimum and the next version up, both refuse:
+//
+//	mongo:4.4  ok=0 code=72 "no expireAfterSeconds field to update"
+//	mongo:5.0  ok=0 code=72 "no expireAfterSeconds field to update"
+//	mongo:7    ok=1
+//
+// 72 is not a permanent-failure code, so routing this state through collMod
+// failed startup on exactly the versions this project supports - while the
+// state check had already labelled it migratable.
+func TestTTLIndexRebuildsAnIndexThatIsNotTTL(t *testing.T) {
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	const db, coll = "test_ttl_not_ttl", "auth_ctx"
+
+	// created_at_1 exists, expiring nothing.
+	c := client.Database(db).Collection(coll)
+	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "created_at", Value: 1}},
+	})
+	require.NoError(t, err)
+
+	// collMod must not be reached: on 4.4/5.0 it cannot do this.
+	original := ttlIndexCollMod
+	var reached bool
+	ttlIndexCollMod = func(context.Context, *mongo.Collection, time.Duration) error {
+		reached = true
+		return mongo.CommandError{Code: 72, Message: "no expireAfterSeconds field to update"}
+	}
+	t.Cleanup(func() { ttlIndexCollMod = original })
+
+	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	require.NoError(t, err, "a non-TTL created_at_1 must be rebuilt, not refused")
+	assert.False(t, reached, "collMod was attempted for a state it cannot change")
+
+	assert.Equal(t, int32(900), ttlOf(t, client, db, coll),
+		"created_at_1 is still not a TTL index")
 }
 
 // And the TTL index is still migrated when IT is the one that differs, even

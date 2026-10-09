@@ -72,57 +72,76 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 	// created_at_1 is actually present with an expiry other than the one
 	// wanted. Reading live state also avoids parsing an error string whose
 	// wording is not part of anyone's contract.
-	switch mismatch, listErr := ttlIndexExpiryDiffers(ctx, coll, ttl); {
+	state, listErr := ttlIndexStateOf(ctx, coll, ttl)
+	switch {
 	case listErr != nil:
-		return fmt.Errorf("index %s conflicts and its current expiry could not be read: %w (original: %v)",
+		return fmt.Errorf("index %s conflicts and its current state could not be read: %w (original: %v)",
 			createdAtTTLIndex, listErr, err)
-	case !mismatch:
+
+	case state == ttlIndexAbsent || state == ttlIndexMatches:
 		// The conflict belongs to another index. Nothing here can fix it,
 		// and touching the TTL index would only make it worse.
 		return err
-	}
 
-	if modErr := ttlIndexCollMod(ctx, coll, ttl); modErr != nil {
-		switch {
-		case isIndexNotFound(modErr):
-			// Another replica dropped it between our CreateMany and this
-			// collMod. Nothing to modify and nothing to drop; the retry
-			// below rebuilds it.
+	case state == ttlIndexNotTTL:
+		// created_at_1 exists with no expiry at all. collMod cannot ADD
+		// expireAfterSeconds before MongoDB 5.1 - measured on 4.4 and 5.0,
+		// which return code 72 "no expireAfterSeconds field to update" -
+		// and 4.4 is the documented minimum. So go straight to the rebuild
+		// rather than attempt a call that cannot work there.
+		//
+		// Safe to drop because the state has been read off the collection:
+		// this IS the {created_at: 1} index, and it is expiring nothing.
+		if dropErr := coll.Indexes().DropOne(ctx, createdAtTTLIndex); dropErr != nil && !isIndexNotFound(dropErr) {
+			return fmt.Errorf("index %s exists without an expiry and could not be dropped to add one: %w (original: %v)",
+				createdAtTTLIndex, dropErr, err)
+		}
 
-		case isPermanentCollModFailure(modErr):
-			// collMod needs the collMod privilege, which the built-in
-			// readWrite role does NOT grant - a least-privilege deployment
-			// gets Unauthorized (13). readWrite does grant dropIndex and
-			// createIndex, so drop the index and let the retry below
-			// rebuild it with the new expiry.
-			//
-			// Verified on MongoDB 4.4, the documented minimum: as a
-			// readWrite user, collMod fails with 13 and dropIndexes +
-			// createIndexes succeed.
-			//
-			// Between the drop and the rebuild nothing expires documents in
-			// this collection. That window is one index build at startup,
-			// and the alternative is refusing to start at all.
-			//
-			// IndexNotFound means another replica got there first. In a
-			// least-privilege HA rollout every replica sees the same
-			// conflict and the same collMod failure, so all of them reach
-			// this drop; losing that race is the expected outcome, not an
-			// error, and the retry below is still the right next step.
-			if dropErr := coll.Indexes().DropOne(ctx, createdAtTTLIndex); dropErr != nil && !isIndexNotFound(dropErr) {
-				return fmt.Errorf(
-					"index %s already exists with a different expiry; collMod to %s failed (%w) and it could not be dropped either: %v",
-					createdAtTTLIndex, ttl, modErr, dropErr)
+	default:
+		if modErr := ttlIndexCollMod(ctx, coll, ttl); modErr != nil {
+			switch {
+			case isIndexNotFound(modErr):
+				// Another replica dropped it between our CreateMany and
+				// this collMod. Nothing to modify and nothing to drop; the
+				// retry below rebuilds it.
+
+			case isPermanentCollModFailure(modErr):
+				// collMod needs the collMod privilege, which the built-in
+				// readWrite role does NOT grant - a least-privilege
+				// deployment gets Unauthorized (13). readWrite does grant
+				// dropIndex and createIndex, so drop the index and let the
+				// retry below rebuild it with the new expiry.
+				//
+				// Verified on MongoDB 4.4, the documented minimum: as a
+				// readWrite user, collMod fails with 13 and dropIndexes +
+				// createIndexes succeed.
+				//
+				// Between the drop and the rebuild nothing expires
+				// documents in this collection. That window is one index
+				// build at startup, and the alternative is refusing to
+				// start at all.
+				//
+				// IndexNotFound means another replica got there first. In a
+				// least-privilege HA rollout every replica sees the same
+				// conflict and the same collMod failure, so all of them
+				// reach this drop; losing that race is the expected
+				// outcome, not an error.
+				if dropErr := coll.Indexes().DropOne(ctx, createdAtTTLIndex); dropErr != nil && !isIndexNotFound(dropErr) {
+					return fmt.Errorf(
+						"index %s already exists with a different expiry; collMod to %s failed (%w) and it could not be dropped either: %v",
+						createdAtTTLIndex, ttl, modErr, dropErr)
+				}
+
+			default:
+				// Anything else - a primary election, a network blip, a
+				// write concern timeout - resolves on a retry. Dropping the
+				// shared TTL index over one of those risks leaving the
+				// collection with NO expiry at all if the rebuild then
+				// fails too, which is silent and lasts until some later
+				// startup repairs it. Report it and let the deployment
+				// retry instead.
+				return fmt.Errorf("index %s could not be changed to %s: %w", createdAtTTLIndex, ttl, modErr)
 			}
-
-		default:
-			// Anything else - a primary election, a network blip, a write
-			// concern timeout - resolves on a retry. Dropping the shared
-			// TTL index over one of those risks leaving the collection with
-			// NO expiry at all if the rebuild then fails too, which is
-			// silent and lasts until some later startup repairs it. Report
-			// it and let the deployment retry instead.
-			return fmt.Errorf("index %s could not be changed to %s: %w", createdAtTTLIndex, ttl, modErr)
 		}
 	}
 
@@ -205,21 +224,38 @@ func hasMongoCode(err error, code int32) bool {
 	return false
 }
 
-// ttlIndexExpiryDiffers reports whether created_at_1 exists on this
-// collection with an expireAfterSeconds other than the one asked for.
+// ttlIndexState is what the collection currently has for created_at_1.
+type ttlIndexState int
+
+const (
+	// ttlIndexAbsent: no such index, so whatever conflicted is not ours.
+	ttlIndexAbsent ttlIndexState = iota
+	// ttlIndexMatches: already a TTL index at the expiry wanted.
+	ttlIndexMatches
+	// ttlIndexExpiryChanged: a TTL index at some other expiry. collMod can
+	// change that, on every version from 4.4 up.
+	ttlIndexExpiryChanged
+	// ttlIndexNotTTL: present with no expiry at all. collMod can only ADD
+	// expireAfterSeconds from MongoDB 5.1, so this one has to be rebuilt.
+	ttlIndexNotTTL
+)
+
+// ttlIndexStateOf reads the state of created_at_1 off the collection.
 //
-// False when the index is absent: there is then nothing to migrate, and
-// whatever conflicted is some other index.
-func ttlIndexExpiryDiffers(ctx context.Context, coll *mongo.Collection, ttl time.Duration) (bool, error) {
+// Live state rather than the conflict's error message, whose wording is
+// nobody's contract - and the message does not distinguish "wrong expiry"
+// from "no expiry", which is the distinction that decides whether collMod
+// can be used at all.
+func ttlIndexStateOf(ctx context.Context, coll *mongo.Collection, ttl time.Duration) (ttlIndexState, error) {
 	cur, err := coll.Indexes().List(ctx)
 	if err != nil {
-		return false, err
+		return ttlIndexAbsent, err
 	}
 	defer cur.Close(ctx)
 
 	var specs []bson.M
 	if err := cur.All(ctx, &specs); err != nil {
-		return false, err
+		return ttlIndexAbsent, err
 	}
 
 	want := int32(ttl.Seconds())
@@ -228,11 +264,16 @@ func ttlIndexExpiryDiffers(ctx context.Context, coll *mongo.Collection, ttl time
 			continue
 		}
 		got, ok := asInt32(spec["expireAfterSeconds"])
-		// Present but not a TTL index at all: still a mismatch, and still
-		// ours to migrate.
-		return !ok || got != want, nil
+		switch {
+		case !ok:
+			return ttlIndexNotTTL, nil
+		case got == want:
+			return ttlIndexMatches, nil
+		default:
+			return ttlIndexExpiryChanged, nil
+		}
 	}
-	return false, nil
+	return ttlIndexAbsent, nil
 }
 
 // asInt32 normalises the numeric types BSON can decode a stored int into.
