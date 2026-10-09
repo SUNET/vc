@@ -429,6 +429,14 @@ func (r *Resolver) Manifest(ctx context.Context) (manifest *Manifest, stale bool
 		return nil, false, fmt.Errorf("%w: resolver has no catalog client", ErrCatalogUnavailable)
 	}
 
+	// Check cancellation before the lock too: the lock is held across the
+	// fetch, so a caller arriving with an already-cancelled context would
+	// otherwise block up to the fetch timeout behind an in-flight refresh
+	// before the post-lock check below ever runs.
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+
 	// The lock is held across the fetch on purpose: it makes the refresh
 	// single-flight, so a cold start serving a burst of requests performs
 	// one catalog round trip rather than one per request. The retry

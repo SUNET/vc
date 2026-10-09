@@ -896,7 +896,7 @@ type IssuerZkCircuitsConfig struct {
 	// the catalog being briefly unreachable does not stop issuance; what
 	// does stop it is having never reached the catalog at all, for a
 	// schema that declares a zk_system and pins nothing.
-	CacheTTL int `yaml:"cache_ttl,omitempty" doc_example:"3600"`
+	CacheTTL int `yaml:"cache_ttl,omitempty" validate:"omitempty,min=0" doc_example:"3600"`
 }
 
 // RevocationConfig configures credential revocation verification at presentation time.
