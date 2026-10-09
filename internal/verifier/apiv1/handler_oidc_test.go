@@ -1197,6 +1197,10 @@ func TestAuthorize_FullFlow(t *testing.T) {
 				Scope:        strings.Join([]string{"openid", "profile"}, " "),
 				State:        "random-state",
 				Nonce:        "random-nonce",
+				// PKCE is required of every client now, so a request that
+				// succeeds is one that carries a challenge (SUNET/vc#757).
+				CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+				CodeChallengeMethod: "S256",
 			},
 			expectError: false,
 		},
@@ -1337,6 +1341,9 @@ func TestAuthorize_FullFlow(t *testing.T) {
 				Scope:        strings.Join([]string{"openid", "profile", "email"}, " "),
 				State:        "complex-state",
 				Nonce:        "complex-nonce",
+
+				CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+				CodeChallengeMethod: "S256",
 			},
 			expectError: false,
 		},
@@ -1437,12 +1444,14 @@ func TestAuthorize_DigitalCredentialsDisabled(t *testing.T) {
 	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
-		ResponseType: "code",
-		ClientID:     "dc-disabled-client",
-		RedirectURI:  "https://example.com/callback",
-		Scope:        strings.Join([]string{"openid", "profile"}, " "),
-		State:        "test-state",
-		Nonce:        "test-nonce",
+		ResponseType:        "code",
+		ClientID:            "dc-disabled-client",
+		RedirectURI:         "https://example.com/callback",
+		Scope:               strings.Join([]string{"openid", "profile"}, " "),
+		State:               "test-state",
+		Nonce:               "test-nonce",
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: "S256",
 	}
 
 	resp, err := client.Authorize(ctx, req)
@@ -1485,12 +1494,14 @@ func TestAuthorize_WalletLinks(t *testing.T) {
 	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
-		ResponseType: "code",
-		ClientID:     "wallet-links-client",
-		RedirectURI:  "https://example.com/callback",
-		Scope:        "openid profile",
-		State:        "test-state",
-		Nonce:        "test-nonce",
+		ResponseType:        "code",
+		ClientID:            "wallet-links-client",
+		RedirectURI:         "https://example.com/callback",
+		Scope:               "openid profile",
+		State:               "test-state",
+		Nonce:               "test-nonce",
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: "S256",
 	}
 
 	resp, err := client.Authorize(ctx, req)
@@ -1554,12 +1565,14 @@ func TestAuthorize_NoWalletLinks(t *testing.T) {
 	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	req := &AuthorizeRequest{
-		ResponseType: "code",
-		ClientID:     "no-wallets-client",
-		RedirectURI:  "https://example.com/callback",
-		Scope:        "openid profile",
-		State:        "test-state",
-		Nonce:        "test-nonce",
+		ResponseType:        "code",
+		ClientID:            "no-wallets-client",
+		RedirectURI:         "https://example.com/callback",
+		Scope:               "openid profile",
+		State:               "test-state",
+		Nonce:               "test-nonce",
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: "S256",
 	}
 
 	resp, err := client.Authorize(ctx, req)
@@ -1598,12 +1611,14 @@ func TestAuthorize_NonASCIIWalletQRCodeBinding(t *testing.T) {
 	mockDB.Clients.Create(ctx, dbClient) // #nosec G104
 
 	resp, err := client.Authorize(ctx, &AuthorizeRequest{
-		ResponseType: "code",
-		ClientID:     "non-ascii-wallet-client",
-		RedirectURI:  "https://example.com/callback",
-		Scope:        "openid profile",
-		State:        "test-state",
-		Nonce:        "test-nonce",
+		ResponseType:        "code",
+		ClientID:            "non-ascii-wallet-client",
+		RedirectURI:         "https://example.com/callback",
+		Scope:               "openid profile",
+		State:               "test-state",
+		Nonce:               "test-nonce",
+		CodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		CodeChallengeMethod: "S256",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
