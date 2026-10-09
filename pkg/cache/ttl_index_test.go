@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // Reopening an existing collection with a different TTL must work.
@@ -265,4 +266,116 @@ func TestTTLIndexKeepsTheIndexOnATransientCollModFailure(t *testing.T) {
 				"the TTL index was dropped over a retryable error")
 		})
 	}
+}
+
+// A conflict on some OTHER index must leave the TTL index alone.
+//
+// IndexOptionsConflict says some index in the batch differs, and
+// NewMongoStore sends eleven. Without a check of WHICH, a conflict
+// elsewhere lands in the TTL migration path and - with readWrite-only
+// credentials, where collMod is refused and the fallback drops - takes out
+// a perfectly good created_at_1 on the way to failing anyway, leaving the
+// collection with no expiry at all.
+//
+// Measured on MongoDB 7, an expireAfterSeconds difference is the ONLY thing
+// that raises 85 here; unique, sparse, hidden and partialFilterExpression
+// mismatches all raise IndexKeySpecsConflict (86), which this code does not
+// handle and passes straight through. So the reachable case is an operator
+// having made one of these fields a TTL index by hand - and it is the case
+// built here, rather than a unique/sparse mismatch that never reaches the
+// branch at all.
+func TestTTLIndexSurvivesAConflictOnAnotherIndex(t *testing.T) {
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	const db, coll = "test_ttl_other_conflict", "auth_ctx"
+	c := client.Database(db).Collection(coll)
+
+	// state_1 as the store wants it - sparse - but carrying an expiry the
+	// store does not ask for. Differing in expireAfterSeconds alone is what
+	// makes this 85 rather than 86.
+	_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "state", Value: 1}},
+		Options: options.Index().SetSparse(true).SetExpireAfterSeconds(600),
+	})
+	require.NoError(t, err)
+
+	// ... and a healthy TTL index at exactly the expiry the store is about
+	// to ask for, so there is nothing about IT to migrate.
+	_, err = c.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "created_at", Value: 1}},
+		Options: options.Index().SetExpireAfterSeconds(900),
+	})
+	require.NoError(t, err)
+
+	// collMod would be refused here, so reaching the fallback means
+	// created_at_1 gets dropped.
+	original := ttlIndexCollMod
+	var reached bool
+	ttlIndexCollMod = func(context.Context, *mongo.Collection, time.Duration) error {
+		reached = true
+		return mongo.CommandError{Code: 13, Message: "not authorized to execute command collMod"}
+	}
+	t.Cleanup(func() { ttlIndexCollMod = original })
+
+	_, err = NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	require.Error(t, err, "the state_1 conflict is real and must be reported")
+	require.True(t, isIndexOptionsConflict(err),
+		"this test only means something if the conflict is an 85 - got %v", err)
+	assert.False(t, reached, "a conflict on another index reached the TTL migration")
+
+	assert.Equal(t, int32(900), ttlOf(t, client, db, coll),
+		"the TTL index was dropped over a conflict that was not its own")
+}
+
+// ttlIndexExpiryDiffers is the gate above, on its own.
+func TestTTLIndexExpiryDiffers(t *testing.T) {
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+
+	for _, tc := range []struct {
+		name string
+		opts *options.IndexOptionsBuilder
+		want bool
+	}{
+		{"absent", nil, false},
+		{"same expiry", options.Index().SetExpireAfterSeconds(900), false},
+		{"different expiry", options.Index().SetExpireAfterSeconds(600), true},
+		{"present but not a TTL index", options.Index().SetSparse(true), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := client.Database("test_ttl_gate").Collection(tc.name)
+			if tc.opts != nil {
+				_, err := c.Indexes().CreateOne(ctx, mongo.IndexModel{
+					Keys: bson.D{{Key: "created_at", Value: 1}}, Options: tc.opts,
+				})
+				require.NoError(t, err)
+			}
+
+			got, err := ttlIndexExpiryDiffers(ctx, c, 15*time.Minute)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// And the TTL index is still migrated when IT is the one that differs, even
+// though the batch carries ten others that do not.
+func TestTTLIndexStillMigratesWhenItIsTheConflict(t *testing.T) {
+	_, client, cleanup := testsupport.StartMongoContainer(t)
+	defer cleanup()
+
+	ctx := t.Context()
+	const db, coll = "test_ttl_own_conflict", "auth_ctx"
+
+	_, err := NewMongoStore(ctx, client, db, coll, 15*time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, int32(900), ttlOf(t, client, db, coll))
+
+	_, err = NewMongoStore(ctx, client, db, coll, 60*time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, int32(3600), ttlOf(t, client, db, coll))
 }

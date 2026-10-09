@@ -62,8 +62,26 @@ func ensureIndexes(ctx context.Context, coll *mongo.Collection, indexes []mongo.
 		return err
 	}
 
-	// A conflict means the collection and the index both exist, so the only
-	// question is how to change the index.
+	// IndexOptionsConflict says SOME index in the batch already exists with
+	// different options, and the batch has eleven. A conflict on, say,
+	// session_id_1 would otherwise land here and - with readWrite-only
+	// credentials, where collMod is refused and the fallback drops - take
+	// out a perfectly good created_at_1 on its way to failing anyway.
+	//
+	// So ask the collection rather than the error message: migrate only if
+	// created_at_1 is actually present with an expiry other than the one
+	// wanted. Reading live state also avoids parsing an error string whose
+	// wording is not part of anyone's contract.
+	switch mismatch, listErr := ttlIndexExpiryDiffers(ctx, coll, ttl); {
+	case listErr != nil:
+		return fmt.Errorf("index %s conflicts and its current expiry could not be read: %w (original: %v)",
+			createdAtTTLIndex, listErr, err)
+	case !mismatch:
+		// The conflict belongs to another index. Nothing here can fix it,
+		// and touching the TTL index would only make it worse.
+		return err
+	}
+
 	if modErr := ttlIndexCollMod(ctx, coll, ttl); modErr != nil {
 		switch {
 		case isIndexNotFound(modErr):
@@ -185,4 +203,49 @@ func hasMongoCode(err error, code int32) bool {
 		}
 	}
 	return false
+}
+
+// ttlIndexExpiryDiffers reports whether created_at_1 exists on this
+// collection with an expireAfterSeconds other than the one asked for.
+//
+// False when the index is absent: there is then nothing to migrate, and
+// whatever conflicted is some other index.
+func ttlIndexExpiryDiffers(ctx context.Context, coll *mongo.Collection, ttl time.Duration) (bool, error) {
+	cur, err := coll.Indexes().List(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer cur.Close(ctx)
+
+	var specs []bson.M
+	if err := cur.All(ctx, &specs); err != nil {
+		return false, err
+	}
+
+	want := int32(ttl.Seconds())
+	for _, spec := range specs {
+		if spec["name"] != createdAtTTLIndex {
+			continue
+		}
+		got, ok := asInt32(spec["expireAfterSeconds"])
+		// Present but not a TTL index at all: still a mismatch, and still
+		// ours to migrate.
+		return !ok || got != want, nil
+	}
+	return false, nil
+}
+
+// asInt32 normalises the numeric types BSON can decode a stored int into.
+func asInt32(v any) (int32, bool) {
+	switch n := v.(type) {
+	case int32:
+		return n, true
+	case int64:
+		return int32(n), true
+	case float64:
+		return int32(n), true
+	case int:
+		return int32(n), true
+	}
+	return 0, false
 }
