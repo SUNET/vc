@@ -856,7 +856,14 @@ type RevocationConfig struct {
 	//   - true: log warning and allow the credential through (fail-open)
 	//   - false: reject the credential (fail-closed)
 	// Note: explicitly revoked/suspended credentials are always rejected regardless of this setting.
-	FailOpen bool `yaml:"fail_open" json:"fail_open" default:"true"`
+	//
+	// A POINTER, and not for style: creasty/defaults fills any field still
+	// at its zero value, and the zero value of a bool is false - which is
+	// exactly the value an operator writes to turn this off. A plain bool
+	// with default:"true" therefore cannot be set to false at all, and a
+	// verifier configured to fail CLOSED on an unreachable status list
+	// quietly failed open (SUNET/vc#753). nil means the default.
+	FailOpen *bool `yaml:"fail_open" json:"fail_open" default:"true"`
 	// SkipScopes lists credential scopes exempt from revocation checking
 	// (e.g., short-lived credentials valid < 24 hours per ARF 3.0 §6.6.3.7).
 	SkipScopes []string `yaml:"skip_scopes,omitempty" json:"skip_scopes,omitempty"`
@@ -1083,7 +1090,12 @@ type OIDCOP struct {
 	// returns an access token alongside the ID token. The userinfo endpoint
 	// is stateless: it validates the JWT signature and returns the embedded claims.
 	// When false, only ID tokens are returned — no access_token or userinfo endpoint.
-	EnableUserInfo bool `yaml:"enable_userinfo" default:"true"`
+	//
+	// A pointer for the same reason as RevocationConfig.FailOpen: with a
+	// plain bool, defaults.Set cannot tell "the operator wrote false" from
+	// "the operator wrote nothing", so enable_userinfo: false was ignored
+	// (SUNET/vc#753). nil means the default.
+	EnableUserInfo *bool `yaml:"enable_userinfo" default:"true"`
 	// StaticClients is a list of pre-configured OIDC clients
 	// These clients are checked in addition to dynamically registered clients
 	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty"`
