@@ -1103,9 +1103,11 @@ type StaticOIDCClient struct {
 	// Default: "client_secret_basic"
 	TokenEndpointAuthMethod string `yaml:"token_endpoint_auth_method,omitempty" default:"client_secret_basic" validate:"omitempty,oneof=client_secret_basic client_secret_post none"`
 	// GrantTypes is the list of allowed grant types.
-	// Supported values: authorization_code, refresh_token
+	// Supported values: authorization_code - the only grant the verifier-OP's
+	// token endpoint implements and the only one its discovery document
+	// advertises.
 	// Default: ["authorization_code"]
-	GrantTypes []string `yaml:"grant_types,omitempty" default:"[\"authorization_code\"]" validate:"omitempty,dive,oneof=authorization_code refresh_token"`
+	GrantTypes []string `yaml:"grant_types,omitempty" default:"[\"authorization_code\"]" validate:"omitempty,dive,oneof=authorization_code"`
 	// ResponseTypes is the list of allowed response types.
 	// Supported values: code
 	// Default: ["code"]
@@ -1133,16 +1135,16 @@ type OIDCOP struct {
 	// This identifies the verifier as an OpenID Provider.
 	// Must match the 'iss' claim in all issued ID tokens.
 	Issuer string `yaml:"issuer" validate:"required" doc_example:"\"https://verifier.sunet.se\""`
-	// SessionDuration is the session duration in seconds
-	SessionDuration int `yaml:"session_duration" validate:"required" default:"3600"`
+	// SessionDuration is the lifetime in seconds of the verifier_user_session
+	// cookie - the OP's own session with the end user. Distinct from
+	// openid4vp.presentation_timeout, which bounds a single presentation.
+	SessionDuration int `yaml:"session_duration" validate:"required,gt=0" default:"3600"`
 	// CodeDuration is the authorization code duration in seconds
-	CodeDuration int `yaml:"code_duration" validate:"required" default:"300"`
+	CodeDuration int `yaml:"code_duration" validate:"required,gt=0" default:"300"`
 	// AccessTokenDuration is the access token duration in seconds
-	AccessTokenDuration int `yaml:"access_token_duration" validate:"required" default:"3600"`
+	AccessTokenDuration int `yaml:"access_token_duration" validate:"required,gt=0" default:"3600"`
 	// IDTokenDuration is the ID token duration in seconds
-	IDTokenDuration int `yaml:"id_token_duration" validate:"required" default:"3600"`
-	// RefreshTokenDuration is the refresh token duration in seconds
-	RefreshTokenDuration int `yaml:"refresh_token_duration" validate:"required" default:"86400"`
+	IDTokenDuration int `yaml:"id_token_duration" validate:"required,gt=0" default:"3600"`
 	// RequirePKCE is the OP's PKCE policy for CONFIDENTIAL clients.
 	//
 	// Default true, which is what OAuth 2.1 4.1.1, RFC 9700 2.1.1 and the
@@ -1177,7 +1179,7 @@ type OIDCOP struct {
 	EnableUserInfo *bool `yaml:"enable_userinfo" default:"true"`
 	// StaticClients is a list of pre-configured OIDC clients
 	// These clients are checked in addition to dynamically registered clients
-	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty"`
+	StaticClients []StaticOIDCClient `yaml:"static_clients,omitempty" validate:"omitempty,dive"`
 
 	// DynamicRegistrationAuth configures authorization for POST /register (RFC 7591).
 	// Modes:
@@ -1265,8 +1267,11 @@ type DynamicRegistrationJWTAuthConfig struct {
 
 // OpenID4VPConfig holds OpenID4VP-specific configuration
 type OpenID4VPConfig struct {
-	// PresentationTimeout is the presentation timeout in seconds
-	PresentationTimeout int `yaml:"presentation_timeout" validate:"required" default:"300"`
+	// PresentationTimeout is how long, in seconds, a wallet has to complete a
+	// presentation. It is the deadline on both the standalone verification
+	// session and the OIDC authorization session, and the authorization
+	// context is retained for at least this long plus code_duration.
+	PresentationTimeout int `yaml:"presentation_timeout" validate:"required,gt=0" default:"300"`
 	// SupportedCredentials holds the supported credential configurations
 	SupportedCredentials []SupportedCredentialConfig `yaml:"supported_credentials" validate:"required"`
 	// PresentationRequestsDir is an optional directory with presentation request templates
@@ -1307,6 +1312,27 @@ func (c *OpenID4VPConfig) GetPresentationRequestsDir() string {
 		return ""
 	}
 	return c.PresentationRequestsDir
+}
+
+// DefaultPresentationTimeout is the fallback for GetPresentationTimeout, and
+// mirrors the `default:"300"` on OpenID4VPConfig.PresentationTimeout. It is
+// applied when the whole openid4vp section is absent, which is the one case
+// defaults.Set cannot reach.
+const DefaultPresentationTimeout = 300 * time.Second
+
+// GetPresentationTimeout returns how long a wallet has to complete a
+// presentation.
+//
+// Never zero. A missing or nonsensical value falls back to
+// DefaultPresentationTimeout rather than to "no deadline": the callers turn
+// this into a session expiry, and a zero there means the session never
+// expires on its own.
+
+func (c *OpenID4VPConfig) GetPresentationTimeout() time.Duration {
+	if c == nil || c.PresentationTimeout <= 0 {
+		return DefaultPresentationTimeout
+	}
+	return time.Duration(c.PresentationTimeout) * time.Second
 }
 
 // GenerateMetadata generates OAuth2 metadata from the OpenID4VP configuration.

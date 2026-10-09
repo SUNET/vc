@@ -149,8 +149,17 @@ func (c *Client) Authorize(ctx context.Context, req *AuthorizeRequest) (*Authori
 	authCtx := &cache.AuthorizationContext{
 		SessionID: sessionID,
 		CreatedAt: time.Now(),
-		// Authorization request expires after the code duration
-		ExpiresAt:           time.Now().Add(time.Duration(c.cfg.Verifier.Outbound.OIDCProvider.CodeDuration) * time.Second).Unix(),
+		// How long the user has to complete the presentation.
+		//
+		// This used to be code_duration, which is the lifetime of the
+		// authorization CODE - a different clock, started later, when the
+		// presentation has already succeeded (handler_openid4vp.go sets
+		// CodeExpiresAt then). Sharing one key meant lengthening the code's
+		// lifetime silently lengthened the presentation window, while
+		// presentation_timeout, the key named for this, was read nowhere at
+		// all (SUNET/vc#756). Both default to 300s, so the default
+		// behaviour is unchanged.
+		ExpiresAt:           time.Now().Add(c.cfg.Verifier.Inbound.OpenID4VP.GetPresentationTimeout()).Unix(),
 		Status:              cache.SessionStatusPending,
 		ClientID:            req.ClientID,
 		RedirectURI:         req.RedirectURI,
@@ -627,8 +636,11 @@ func (c *Client) GetOIDCRequestObject(ctx context.Context, req *GetRequestObject
 		return nil, ErrSessionNotFound
 	}
 
-	// Check if session is expired
-	if time.Now().Unix() > session.ExpiresAt {
+	// Through sessionExpired so this boundary matches the one the
+	// direct-post handlers enforce. With > here and >= there, the verifier
+	// served a request object during the exact second it would refuse the
+	// response to it.
+	if sessionExpired(session) {
 		return nil, ErrSessionExpired
 	}
 
@@ -773,6 +785,20 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 		return nil, ErrSessionNotFound
 	}
 
+	// The presentation deadline, enforced where the presentation actually
+	// arrives.
+	//
+	// GetOIDCRequestObject checks ExpiresAt when it SERVES the request
+	// object, which only bounds when a wallet may start. A wallet that
+	// fetched a second before the deadline could post its response any time
+	// until the cache evicted the session - at least fifteen minutes, and
+	// longer once the retention follows the configured window. So the
+	// timeout bounded the wrong half of the flow.
+	if sessionExpired(session) {
+		c.log.Info("Direct post for an expired session", "session_id", session.SessionID)
+		return nil, ErrSessionExpired
+	}
+
 	var vpToken string
 	var presentationSubmission any
 
@@ -837,6 +863,17 @@ func (c *Client) ProcessDirectPost(ctx context.Context, req *DirectPostRequest) 
 	// Check if user requested credential display
 	if session.ShowCredentialDetails {
 		session.Status = cache.SessionStatusAwaitingPresentation
+
+		// The presentation is in; what follows is a person reading a
+		// credential display and deciding. Reusing the presentation
+		// deadline for that left a wallet that answered just before it with
+		// no time to review at all - presentation_timeout is documented as
+		// the time the WALLET has, and this is a different step.
+		//
+		// So the confirmation gets a window of its own, the same length.
+		// One operator-set interaction timeout, applied to each interaction
+		// rather than to both together.
+		session.ExpiresAt = time.Now().Add(c.cfg.Verifier.Inbound.OpenID4VP.GetPresentationTimeout()).Unix()
 
 		if err := c.cacheService.AuthContext.Update(ctx, session); err != nil {
 			c.log.Error(err, "Failed to update session")
@@ -1068,6 +1105,22 @@ func (c *Client) PollSession(ctx context.Context, req *PollSessionRequest) (*Pol
 	}
 	if session == nil {
 		return nil, ErrSessionNotFound
+	}
+
+	// A session past its deadline polls as expired, not pending.
+	//
+	// The stored Status is only written when something happens TO the
+	// session, and a deadline passing is not an event anyone writes - so
+	// an abandoned session kept reporting "pending" for as long as the
+	// auth-context cache held it, which this PR deliberately lengthens.
+	// The page would wait on a session the direct-post handlers had
+	// already started refusing.
+	//
+	// A completed session still reports what it completed as: the check
+	// comes after none of the terminal states, so it only ever reclassifies
+	// one that is still waiting.
+	if sessionExpired(session) && !sessionStatusIsTerminal(session.Status) {
+		return &PollSessionResponse{Status: string(cache.SessionStatusExpired)}, nil
 	}
 
 	response := &PollSessionResponse{

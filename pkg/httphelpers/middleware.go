@@ -23,7 +23,7 @@ import (
 
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/cookie"
+	gsessions "github.com/gorilla/sessions"
 )
 
 type middlewareHandler struct {
@@ -171,9 +171,40 @@ func (m *middlewareHandler) Gzip(ctx context.Context) gin.HandlerFunc {
 }
 
 func (m *middlewareHandler) UserSession(name, authKey, encKey string, opts sessions.Options) gin.HandlerFunc {
-	store := cookie.NewStore([]byte(authKey), []byte(encKey))
+	return sessions.Sessions(name, newCookieStore(authKey, encKey, opts))
+}
+
+// cookieStore is gorilla's CookieStore behind gin-contrib's Store interface.
+//
+// gin-contrib's own cookie.Store exists for this, but its Options() only
+// assigns CookieStore.Options - the browser-facing Max-Age. Gorilla clamps
+// how long an encoded cookie stays DECODABLE separately, through
+// CookieStore.MaxAge, which also sets the age on every securecookie codec.
+// Using gin-contrib's store left those codecs at gorilla's default of 30
+// days, so a copied session cookie could be replayed for a month however
+// short the configured session was (SUNET/vc#756).
+//
+// Wrapping gorilla directly rather than type-asserting gin-contrib's store
+// to an interface{ MaxAge(int) }: an assertion that stops matching fails
+// open, silently restoring the 30 days.
+type cookieStore struct {
+	*gsessions.CookieStore
+}
+
+// Options sets the cookie attributes AND the decode lifetime.
+func (s cookieStore) Options(opts sessions.Options) {
+	s.CookieStore.Options = opts.ToGorillaOptions()
+	// Last, and not folded into the line above: MaxAge writes
+	// Options.MaxAge itself and is the only thing that reaches the codecs.
+	s.CookieStore.MaxAge(opts.MaxAge)
+}
+
+// newCookieStore builds the session store. Separate from UserSession so the
+// decode lifetime can be tested without standing up a gin engine.
+func newCookieStore(authKey, encKey string, opts sessions.Options) sessions.Store {
+	store := cookieStore{gsessions.NewCookieStore([]byte(authKey), []byte(encKey))}
 	store.Options(opts)
-	return sessions.Sessions(name, store)
+	return store
 }
 
 // SessionOrAPIAuth returns middleware that accepts either a valid session (identified by sessionKey)

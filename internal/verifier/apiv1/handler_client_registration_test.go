@@ -228,9 +228,21 @@ func TestClientRegistrationRequest_Validation(t *testing.T) {
 			name: "valid grant types",
 			req: ClientRegistrationRequest{
 				RedirectURIs: []string{"https://example.com/callback"},
-				GrantTypes:   []string{"authorization_code", "refresh_token"},
+				GrantTypes:   []string{"authorization_code"},
 			},
 			wantErr: false,
+		},
+		{
+			// The token endpoint implements no refresh_token grant and
+			// discovery does not advertise one, so registering a client for
+			// it produced a registration the OP would always refuse
+			// (SUNET/vc#756).
+			name: "refresh_token is not a grant this OP has",
+			req: ClientRegistrationRequest{
+				RedirectURIs: []string{"https://example.com/callback"},
+				GrantTypes:   []string{"authorization_code", "refresh_token"},
+			},
+			wantErr: true,
 		},
 		{
 			name: "invalid grant type",
@@ -477,7 +489,7 @@ func TestRegisterClient(t *testing.T) {
 			request: &ClientRegistrationRequest{
 				RedirectURIs:            []string{"https://example.com/callback", "https://example.com/callback2"},
 				TokenEndpointAuthMethod: "client_secret_basic",
-				GrantTypes:              []string{"authorization_code", "refresh_token"},
+				GrantTypes:              []string{"authorization_code"},
 				ResponseTypes:           []string{"code"},
 				ClientName:              "Test Application",
 				ClientURI:               "https://example.com",
@@ -783,7 +795,7 @@ func TestUpdateClient(t *testing.T) {
 			request: &ClientRegistrationRequest{
 				RedirectURIs:            []string{"https://example.com/new-callback"},
 				TokenEndpointAuthMethod: "client_secret_post",
-				GrantTypes:              []string{"authorization_code", "refresh_token"},
+				GrantTypes:              []string{"authorization_code"},
 				ResponseTypes:           []string{"code"},
 				ClientName:              "Updated Client Name",
 			},
@@ -838,7 +850,7 @@ func TestUpdateClient(t *testing.T) {
 			},
 			request: &ClientRegistrationRequest{
 				RedirectURIs:        []string{"https://example.com/new-callback"},
-				GrantTypes:          []string{"authorization_code", "refresh_token"},
+				GrantTypes:          []string{"authorization_code"},
 				ResponseTypes:       []string{"code"},
 				JWKSUri:             "https://example.com/.well-known/jwks.json",
 				JWKS:                nil, // Can't set both jwks_uri and jwks

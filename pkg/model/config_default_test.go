@@ -169,7 +169,6 @@ func TestOIDCOPConfigDefaults(t *testing.T) {
 	assert.Equal(t, 300, cfg.CodeDuration)
 	assert.Equal(t, 3600, cfg.AccessTokenDuration)
 	assert.Equal(t, 3600, cfg.IDTokenDuration)
-	assert.Equal(t, 86400, cfg.RefreshTokenDuration)
 	assert.True(t, BoolVal(cfg.RequirePKCE, true), "PKCE must be required by default")
 }
 
