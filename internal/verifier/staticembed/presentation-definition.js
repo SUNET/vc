@@ -749,12 +749,16 @@ Alpine.data("app", () => ({
     },
 
     /**
-     * Commit the same-device intent before the browser leaves for a web
-     * wallet or launches a native wallet via custom scheme. direct_post
-     * reads this flag to decide whether to return redirect_uri, and a
-     * fire-and-forget fetch here would race the wallet's response: keepalive
-     * only guarantees the request goes out, not that the server has
-     * persisted it before direct_post reads the auth context. Await it.
+     * Record the same-device intent and hand the request to the wallet.
+     *
+     * direct_post reads that flag to decide whether to return
+     * redirect_uri, and what it costs to record it differs by link, which
+     * is why the handoff itself lives in wallet-handoff.js - see the
+     * reasoning at the top of that file. In short: a web wallet replaces
+     * this page, so the POST is confirmed first and a failure falls back
+     * to a second tab; a custom scheme launches an app and must not be
+     * preceded by any await at all, so the POST goes out through
+     * sendBeacon and the page stays where it is.
      *
      * The POST carries the session_id returned by /ui/interaction so the
      * flag lands on this presentation's authorization context. The server's
@@ -762,12 +766,6 @@ Alpine.data("app", () => ({
      * explicit id, a second tab that opened /ui/interaction after this one
      * would silently claim the cookie and this click would mark the wrong
      * session.
-     *
-     * On failure, hand the wallet URL to a tab that was opened synchronously
-     * from the click, so the popup blocker still sees a live user gesture
-     * (transient activation would already be gone after the awaited fetch).
-     * The current tab (and its live SSE) survives to deliver the response
-     * through the cross-device channel instead.
      *
      * Do NOT close the SSE here: a same-tab navigation tears it down on its
      * own, and a custom-scheme launch leaves the tab open and still needing

@@ -49,7 +49,8 @@ export function walletHandoffReplacesPage(url) {
  * @property {(url: string, data: Blob) => boolean} [sendBeacon] navigator.sendBeacon, when the browser has it.
  * @property {(url: string, init: RequestInit) => Promise<Response>} fetch
  * @property {(url: string) => void} navigate Replace the current page.
- * @property {(url: string) => any} openTab Open a tab; null when blocked.
+ * @property {() => any} openPlaceholder Open a blank tab this page keeps a handle on; null when blocked.
+ * @property {(url: string) => void} openExternal Open a URL in a tab severed from this one.
  */
 
 /**
@@ -74,10 +75,11 @@ export async function handOffToWallet(url, endpoint, preference, env) {
 
     // Opened inside the click so the browser still counts a live user
     // activation when the fallback runs after the awaited fetch.
-    // No `noopener`: that feature makes window.open return null and then
-    // we would not be able to close or navigate the placeholder. Severed
-    // manually below (opener = null) before any navigation.
-    const fallbackWindow = env.openTab("");
+    // The placeholder deliberately keeps an opener: `noopener` makes
+    // window.open return null, and then we could neither close nor
+    // navigate it. It is severed manually below (opener = null) before
+    // the wallet URL ever goes into it.
+    const fallbackWindow = env.openPlaceholder();
     try {
         const res = await env.fetch(endpoint, {
             method: "POST",
@@ -98,8 +100,11 @@ export async function handOffToWallet(url, endpoint, preference, env) {
             fallbackWindow.location.href = url;
         } else {
             // Popup blocker denied the pre-opened tab; last-resort try
-            // (likely blocked too, but worth attempting).
-            env.openTab(url);
+            // (likely blocked too, but worth attempting). This one takes
+            // `noopener`: nothing here needs a handle on it, and a web
+            // wallet that keeps window.opener can navigate this tab -
+            // reverse tabnabbing, on the tab holding the presentation.
+            env.openExternal(url);
         }
     }
 }
@@ -155,6 +160,7 @@ export function browserHandoffEnv(scope = globalThis) {
             : undefined,
         fetch: (url, init) => scope.fetch(url, init),
         navigate: (url) => { scope.location.href = url; },
-        openTab: (url) => scope.open(url, "_blank"),
+        openPlaceholder: () => scope.open("", "_blank"),
+        openExternal: (url) => { scope.open(url, "_blank", "noopener"); },
     };
 }
