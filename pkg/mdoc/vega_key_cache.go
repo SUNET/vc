@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -165,12 +166,26 @@ func (c *vegaKeyCache) touch(id string) {
 // is a verifier key, and a verifier key decides which proofs verify, so
 // trusting bytes this process did not itself hash-verify out of the catalog
 // would be a poor trade for a cold start that pre-warming already removes.
+//
+// Not adopting them is not the same as leaving them: only the clean
+// shutdown path removes the directory, so a crash or a SIGKILL used to
+// strand up to max_bytes under a configured persistent parent, once per
+// abnormal restart, until the disk filled - outside the bound the config
+// promises. Each directory therefore holds an flock'd lock file, and
+// ensureDir sweeps away sibling directories whose lock nobody holds. See
+// sweepOrphanedDirs.
 type vegaKeyStore struct {
 	mu sync.Mutex
 	// parent is where dir gets created; "" means the OS temp directory.
 	parent string
 	// dir is this store's own directory, created on first write.
-	dir     string
+	dir string
+	// lock is an open, flock'd file inside dir. Held for as long as the
+	// directory is this process's, and dropped by the kernel if the
+	// process dies without tidying up - which is what lets the next start
+	// tell an orphan apart from a directory still in use. nil where the
+	// platform has no advisory locks.
+	lock    *os.File
 	cache   *vegaKeyCache
 	entries map[string]*vegaKeyEntry
 	// closed is set by removeAll. A store that has been torn down must not
@@ -506,6 +521,7 @@ func (s *vegaKeyStore) ensureDir() error {
 			s.cache.drop(id)
 		}
 		clear(s.entries)
+		s.closeLockLocked()
 		s.dir = ""
 	}
 	if s.parent != "" {
@@ -513,7 +529,20 @@ func (s *vegaKeyStore) ensureDir() error {
 			return fmt.Errorf("creating the Vega verifier key parent directory %s: %w", s.parent, err)
 		}
 	}
-	dir, err := os.MkdirTemp(s.parent, "vc-vega-keys-")
+
+	// Held across the create-and-lock below as well as the sweep, so a
+	// second process starting at the same moment cannot have its brand new
+	// directory swept: there is no window in which a live directory exists
+	// without its lock already taken. Best effort - a parent this process
+	// cannot open just means no sweep, never a failed start.
+	parent := s.parentDir()
+	if sweepLock, err := waitLockVegaKeyStoreDir(parent); err == nil && sweepLock != nil {
+		defer func() {
+			_ = sweepLock.Close()
+		}()
+	}
+
+	dir, err := os.MkdirTemp(s.parent, vegaKeyStoreDirPrefix)
 	if err != nil {
 		return fmt.Errorf("creating the Vega verifier key directory: %w", err)
 	}
@@ -521,8 +550,87 @@ func (s *vegaKeyStore) ensureDir() error {
 	if err := os.Chmod(dir, vegaKeyStoreDirPerm); err != nil {
 		return fmt.Errorf("securing the Vega verifier key directory: %w", err)
 	}
+
+	// Taken before the sweep, so this directory is never a candidate for
+	// it. A platform without advisory locks returns nil here and the sweep
+	// below does nothing, which is the fail-closed answer: better to leak
+	// a directory than to delete one a running verifier is reading keys
+	// out of.
+	lock, lockErr := tryLockVegaKeyStoreFile(filepath.Join(dir, vegaKeyStoreLockName))
+	if lockErr != nil {
+		return fmt.Errorf("locking the Vega verifier key directory: %w", lockErr)
+	}
+	s.lock = lock
+
 	s.dir = dir
+	sweepOrphanedVegaKeyDirs(parent, dir)
 	return nil
+}
+
+// parentDir is where this store's directory lives, resolved: an empty
+// parent means the OS temp directory, and the sweep needs a real path.
+func (s *vegaKeyStore) parentDir() string {
+	if s.parent != "" {
+		return s.parent
+	}
+	return os.TempDir()
+}
+
+// closeLockLocked drops this store's hold on its directory. Callers hold
+// s.mu.
+func (s *vegaKeyStore) closeLockLocked() {
+	if s.lock != nil {
+		_ = s.lock.Close()
+		s.lock = nil
+	}
+}
+
+// sweepOrphanedVegaKeyDirs removes store directories under parent that no
+// running process is using, skipping own.
+//
+// What makes it safe is the lock file each live directory holds: a
+// directory whose lock can be taken is one whose owner is gone, because
+// the kernel released it when that process did. A directory with NO lock
+// file is swept too - every directory this code creates gets one before
+// the sweep lock is released, so a lock-less one is either from a process
+// that died between the mkdir and the lock or from a build that predates
+// this, and neither is in use.
+//
+// Entirely best effort. Every failure is ignored: this is housekeeping on
+// a cache, and a verifier that cannot tidy up should still start and still
+// verify.
+func sweepOrphanedVegaKeyDirs(parent, own string) {
+	if !vegaKeyStoreLocksSupported {
+		return
+	}
+
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), vegaKeyStoreDirPrefix) {
+			continue
+		}
+		dir := filepath.Join(parent, entry.Name())
+		if dir == own {
+			continue
+		}
+
+		lockPath := filepath.Join(dir, vegaKeyStoreLockName)
+		if _, statErr := os.Stat(lockPath); statErr == nil {
+			lock, lockErr := tryLockVegaKeyStoreFile(lockPath)
+			if lockErr != nil || lock == nil {
+				// Either somebody holds it - the directory is live and is
+				// not ours to touch - or we cannot tell, which gets the
+				// same answer.
+				continue
+			}
+			_ = lock.Close()
+		}
+
+		_ = os.RemoveAll(dir)
+	}
 }
 
 // removeAll deletes the store's directory and everything in it, and closes
@@ -568,6 +676,19 @@ func (s *vegaKeyStore) removeAll(ctx context.Context) error {
 	return os.RemoveAll(dir)
 }
 
+// vegaKeyStoreDirPrefix names the store's own directory under the parent,
+// and is what the orphan sweep matches on.
+const vegaKeyStoreDirPrefix = "vc-vega-keys-"
+
+// vegaKeyStoreLockName is the lock file inside each store directory. It
+// goes when the directory does; the sweep's own lock is taken on the parent
+// directory itself, so nothing is left behind there.
+const vegaKeyStoreLockName = ".lock"
+
+// vegaKeyStoreLockPerm is 0600: the lock files carry no content, but they
+// live beside material that decides which proofs verify.
+const vegaKeyStoreLockPerm = 0o600
+
 // vegaKeyStorePinPollInterval is how often removeAll re-checks for
 // outstanding pins. Short: this runs once, at shutdown, and the thing it
 // is waiting for is a subprocess that takes well under a second.
@@ -599,6 +720,7 @@ func (s *vegaKeyStore) pinnedCount() int {
 func (s *vegaKeyStore) resetLocked() {
 	s.entries = make(map[string]*vegaKeyEntry)
 	s.cache = newVegaKeyCache(s.cache.max)
+	s.closeLockLocked()
 	s.dir = ""
 	// pins is deliberately NOT cleared. Outstanding holds still exist and
 	// their releases will decrement it; zeroing it here would make the

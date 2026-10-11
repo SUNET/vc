@@ -872,6 +872,14 @@ type ZkKeyCacheConfig struct {
 	//
 	// The store creates and removes its own subdirectory under this; the
 	// directory itself is left alone.
+	//
+	// A clean shutdown removes that subdirectory. A crash or a SIGKILL
+	// cannot, so each one holds an advisory lock file and every start
+	// sweeps away sibling subdirectories whose lock nobody holds - without
+	// which repeated abnormal restarts would strand up to max_bytes apiece
+	// here, outside the bound this section promises. The sweep needs
+	// flock, so on a platform that has none (Windows) a persistent
+	// directory set here has to be cleaned up from outside the process.
 	Dir string `yaml:"dir,omitempty" doc_example:"\"/var/cache/vc-verifier/zk-keys\""`
 
 	// MaxBytes bounds what the store keeps on disk. Zero means the package
