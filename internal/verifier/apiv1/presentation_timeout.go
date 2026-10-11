@@ -45,6 +45,22 @@ func (c *Client) authContextFor(ctx context.Context, state string) *cache.Author
 	return nil
 }
 
+// authSessionIsTerminal reports whether this authorization context has
+// already reached an outcome, by EITHER of the two markers the flows use.
+//
+// Status is the OIDC OP's: handler_oidc.go writes it at each step. The
+// standalone UI flow does not - VerificationDirectPost records completion
+// by setting VerifierResponseCode and leaves Status empty - so a check on
+// Status alone classifies a finished standalone session as unfinished,
+// and once its deadline passes, as expired. That matters because the tab
+// is still waiting to reconcile the response code it never received.
+func authSessionIsTerminal(authCtx *cache.AuthorizationContext) bool {
+	if authCtx == nil {
+		return false
+	}
+	return sessionStatusIsTerminal(authCtx.Status) || authCtx.VerifierResponseCode != ""
+}
+
 // sessionStatusIsTerminal reports whether a session has already reached an
 // outcome, so a deadline passing afterwards changes nothing about it.
 func sessionStatusIsTerminal(status cache.SessionStatus) bool {

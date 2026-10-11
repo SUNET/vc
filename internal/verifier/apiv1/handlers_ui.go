@@ -530,13 +530,13 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		// which types were asked for, whether holder binding was required.
 		// Without it here the request object cache is the only copy, and the
 		// verification path cannot see what it is checking against.
-		DCQLQuery:           req.DCQLQuery,
-		Code:                "",
-		RequestURI:          "",
-		WalletURI:           "",
-		Forfeited:           false,
-		State:               state,
-		ClientID:            uiClientID,
+		DCQLQuery:  req.DCQLQuery,
+		Code:       "",
+		RequestURI: "",
+		WalletURI:  "",
+		Forfeited:  false,
+		State:      state,
+		ClientID:   uiClientID,
 		// How long the user has to complete the presentation.
 		//
 		// This was 0, and isSessionActive reads 0 as "never expires" - so
@@ -817,7 +817,10 @@ func isReusableAuthContext(authCtx *cache.AuthorizationContext) bool {
 // An expired context reports inactive rather than active-with-a-past
 // deadline, so a tab that reconnects after the deadline is refused
 // outright instead of being handed a stream that exists only to tell it
-// the session is over.
+// the session is over. A context that already reached an outcome is the
+// exception twice over: it stays active past its deadline, and it reports
+// NO deadline, because the tab is still owed the result and the stream is
+// how it reconciles one it missed.
 //
 // expiresAt is the Unix second the session stops being usable, or 0 when
 // it has no deadline - a context created before presentation_timeout was
@@ -838,7 +841,14 @@ func (c *Client) IsActiveAuthSession(ctx context.Context, sessionID string) (act
 	if authCtx == nil {
 		return false, 0, nil
 	}
-	if sessionExpired(authCtx) && !sessionStatusIsTerminal(authCtx.Status) {
+	if authSessionIsTerminal(authCtx) {
+		// No deadline for a session that is already over: the stream is
+		// open so the tab can pick up the result it has not seen yet, and
+		// arming the expiry here would close it immediately on a session
+		// whose outcome is sitting there waiting to be read.
+		return true, 0, nil
+	}
+	if sessionExpired(authCtx) {
 		return false, 0, nil
 	}
 	return true, authCtx.ExpiresAt, nil

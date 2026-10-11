@@ -394,3 +394,23 @@ func TestIsActiveAuthSessionKeepsATerminalSessionStreamable(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, active, "a session that issued a code was refused its own completion stream")
 }
+
+// The standalone UI flow does not write Status: VerificationDirectPost
+// records completion by setting VerifierResponseCode. So a terminal check
+// on Status alone reads a finished standalone session as unfinished and,
+// past its deadline, as expired - which refuses /ui/notify to exactly the
+// tab that has a result waiting and has not seen it.
+func TestIsActiveAuthSessionKeepsACompletedStandaloneSessionStreamable(t *testing.T) {
+	ctx := t.Context()
+	client, _ := CreateTestClientWithMock(t, nil)
+
+	const sessionID = "sse-standalone-completed"
+	session := pendingSession(sessionID, sessionID, time.Now().Add(-time.Second).Unix())
+	session.VerifierResponseCode = "a-response-code"
+	require.NoError(t, client.cacheService.AuthContext.Create(ctx, session))
+
+	active, expiresAt, err := client.IsActiveAuthSession(ctx, sessionID)
+	require.NoError(t, err)
+	assert.True(t, active, "the tab was refused the stream it reconciles its own result on")
+	assert.Zero(t, expiresAt, "arming an expiry here closes the stream before the result can be read")
+}
