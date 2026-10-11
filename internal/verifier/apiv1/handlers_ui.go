@@ -802,31 +802,46 @@ func isReusableAuthContext(authCtx *cache.AuthorizationContext) bool {
 }
 
 // IsActiveAuthSession reports whether sessionID names an authorization
-// context the verifier currently tracks. Used by /ui/notify to refuse to
-// open an SSE listener for an unknown id, which would otherwise let any
+// context the verifier currently tracks, and when that context's
+// presentation deadline falls. Used by /ui/notify to refuse to open an SSE
+// listener for an unknown id, which would otherwise let any
 // unauthenticated caller inflate notify.Service's broadcaster map.
 //
-// (false, nil) means the lookup succeeded and the id is unknown
-// (ErrNoDocuments) or empty. A non-nil error means the authorization
-// store itself failed; the HTTP endpoint surfaces that as a retryable
-// 5xx so a transient Mongo/Redis error in HA does not get mis-reported
-// as 404 and strand the EventSource reconciliation that would run on
-// retry.
-func (c *Client) IsActiveAuthSession(ctx context.Context, sessionID string) (bool, error) {
+// (false, _, nil) means the lookup succeeded and the id is unknown
+// (ErrNoDocuments), empty, or already past its deadline. A non-nil error
+// means the authorization store itself failed; the HTTP endpoint surfaces
+// that as a retryable 5xx so a transient Mongo/Redis error in HA does not
+// get mis-reported as 404 and strand the EventSource reconciliation that
+// would run on retry.
+//
+// An expired context reports inactive rather than active-with-a-past
+// deadline, so a tab that reconnects after the deadline is refused
+// outright instead of being handed a stream that exists only to tell it
+// the session is over.
+//
+// expiresAt is the Unix second the session stops being usable, or 0 when
+// it has no deadline - a context created before presentation_timeout was
+// read, which is bounded only by cache eviction. The caller uses it to
+// arm the expiry event, so "no deadline" must mean "do not arm", never
+// "expire now".
+func (c *Client) IsActiveAuthSession(ctx context.Context, sessionID string) (active bool, expiresAt int64, err error) {
 	if sessionID == "" {
-		return false, nil
+		return false, 0, nil
 	}
 	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, cache.ErrNoDocuments) {
-			return false, nil
+			return false, 0, nil
 		}
-		return false, err
+		return false, 0, err
 	}
 	if authCtx == nil {
-		return false, nil
+		return false, 0, nil
 	}
-	return true, nil
+	if sessionExpired(authCtx) && !sessionStatusIsTerminal(authCtx.Status) {
+		return false, 0, nil
+	}
+	return true, authCtx.ExpiresAt, nil
 }
 
 // CompletedResponseCode returns the VerifierResponseCode set on the

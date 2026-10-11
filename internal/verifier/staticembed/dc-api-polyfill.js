@@ -274,6 +274,15 @@ function _waitViaSSE(options) {
             reject(new DOMException('Request aborted', 'AbortError'));
         }
 
+        // The server's own deadline, which is the one that matters: the
+        // verifier stops accepting the presentation then, whatever
+        // timeoutMs says. Without this the caller waited out its own
+        // timeout on a session that was already over.
+        function onExpired() {
+            cleanup();
+            reject(new DOMException('The verification request timed out', 'AbortError'));
+        }
+
         function cleanup() {
             clearTimeout(timeout);
             eventSource.close();
@@ -281,6 +290,7 @@ function _waitViaSSE(options) {
         }
 
         eventSource.onmessage = onMessage;
+        eventSource.addEventListener('expired', onExpired);
         eventSource.onerror = _sseOnError;
         options.signal?.addEventListener('abort', onAbort, { once: true });
     });

@@ -346,3 +346,51 @@ func TestPollSessionKeepsATerminalStatusPastTheDeadline(t *testing.T) {
 	assert.Equal(t, string(cache.SessionStatusCodeIssued), reply.Status,
 		"a session that issued a code was reclassified as expired")
 }
+
+// A tab that reconnects its SSE stream after the deadline must be refused
+// outright, not handed a live stream nothing will ever be published to.
+//
+// /ui/notify asks IsActiveAuthSession before opening a listener, so this
+// is where the refusal has to happen; EventSource stops reconnecting on an
+// HTTP error, which is the behaviour wanted here.
+func TestIsActiveAuthSessionRefusesAnExpiredSession(t *testing.T) {
+	ctx := t.Context()
+	client, _ := CreateTestClientWithMock(t, nil)
+
+	const sessionID = "sse-reconnect-session"
+	deadline := time.Now().Add(time.Minute).Unix()
+	require.NoError(t, client.cacheService.AuthContext.Create(ctx,
+		pendingSession(sessionID, sessionID, deadline)))
+
+	active, expiresAt, err := client.IsActiveAuthSession(ctx, sessionID)
+	require.NoError(t, err)
+	require.True(t, active, "a session inside its deadline must still open a stream")
+	assert.Equal(t, deadline, expiresAt, "the deadline has to reach the stream, or it cannot arm the expiry event")
+
+	session, err := client.cacheService.AuthContext.GetByID(ctx, sessionID)
+	require.NoError(t, err)
+	session.ExpiresAt = time.Now().Add(-time.Second).Unix()
+	require.NoError(t, client.cacheService.AuthContext.Update(ctx, session))
+
+	active, _, err = client.IsActiveAuthSession(ctx, sessionID)
+	require.NoError(t, err)
+	assert.False(t, active, "an expired session was handed a stream that can only ever go quiet")
+}
+
+// ... and a session that already finished still opens one. The deadline
+// passing after an outcome changes nothing, and the tab may still be
+// waiting for the redirect that carries its response_code.
+func TestIsActiveAuthSessionKeepsATerminalSessionStreamable(t *testing.T) {
+	ctx := t.Context()
+	client, _ := CreateTestClientWithMock(t, nil)
+
+	const sessionID = "sse-completed-session"
+	session := pendingSession(sessionID, sessionID, time.Now().Add(-time.Second).Unix())
+	session.Status = cache.SessionStatusCodeIssued
+	session.Code = "an-authorization-code"
+	require.NoError(t, client.cacheService.AuthContext.Create(ctx, session))
+
+	active, _, err := client.IsActiveAuthSession(ctx, sessionID)
+	require.NoError(t, err)
+	assert.True(t, active, "a session that issued a code was refused its own completion stream")
+}
