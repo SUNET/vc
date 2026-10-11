@@ -13,4 +13,4 @@ const vegaKeyStoreLocksSupported = false
 
 func tryLockVegaKeyStoreFile(string) (*os.File, error) { return nil, nil }
 
-func waitLockVegaKeyStoreDir(string) (*os.File, error) { return nil, nil }
+func tryLockExistingVegaKeyStoreFile(string) (*os.File, error) { return nil, nil }

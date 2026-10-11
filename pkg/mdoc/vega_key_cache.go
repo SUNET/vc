@@ -153,6 +153,17 @@ func (c *vegaKeyCache) touch(id string) {
 // vegaKeyStore keeps decompressed Vega verifier keys as FILES and hands the
 // worker a path instead of the bytes.
 //
+// max_bytes bounds what the store HOLDS, and disk use can briefly exceed
+// it. A key that is evicted while a verification still has it pinned is
+// retired out of the accounting but its file stays until the last holder
+// releases it - deleting it is the failure the pinning exists to prevent.
+// So the peak is max_bytes plus the keys pinned by verifications in
+// flight, and it is bounded by them: each pin lasts one worker
+// invocation, and a presentation pins exactly one key. A deployment whose
+// working set churns under load should size max_bytes for the working set
+// rather than rely on eviction, which is the same advice the undersized-
+// cache case already gets.
+//
 // The worker is a separate process, so the key has to cross a boundary
 // however it is held. It used to cross as base64 inside the request JSON,
 // which meant ~133MB encoded, written down a pipe and decoded again on EVERY
@@ -530,18 +541,6 @@ func (s *vegaKeyStore) ensureDir() error {
 		}
 	}
 
-	// Held across the create-and-lock below as well as the sweep, so a
-	// second process starting at the same moment cannot have its brand new
-	// directory swept: there is no window in which a live directory exists
-	// without its lock already taken. Best effort - a parent this process
-	// cannot open just means no sweep, never a failed start.
-	parent := s.parentDir()
-	if sweepLock, err := waitLockVegaKeyStoreDir(parent); err == nil && sweepLock != nil {
-		defer func() {
-			_ = sweepLock.Close()
-		}()
-	}
-
 	dir, err := os.MkdirTemp(s.parent, vegaKeyStoreDirPrefix)
 	if err != nil {
 		return fmt.Errorf("creating the Vega verifier key directory: %w", err)
@@ -563,7 +562,7 @@ func (s *vegaKeyStore) ensureDir() error {
 	s.lock = lock
 
 	s.dir = dir
-	sweepOrphanedVegaKeyDirs(parent, dir)
+	sweepOrphanedVegaKeyDirs(s.parentDir(), dir)
 	return nil
 }
 
@@ -588,17 +587,29 @@ func (s *vegaKeyStore) closeLockLocked() {
 // sweepOrphanedVegaKeyDirs removes store directories under parent that no
 // running process is using, skipping own.
 //
-// What makes it safe is the lock file each live directory holds: a
-// directory whose lock can be taken is one whose owner is gone, because
-// the kernel released it when that process did. A directory with NO lock
-// file is swept too - every directory this code creates gets one before
-// the sweep lock is released, so a lock-less one is either from a process
-// that died between the mkdir and the lock or from a build that predates
-// this, and neither is in use.
+// ONE question decides it, and it is asked without blocking: can this
+// process take that directory's lock? Only yes sweeps. A lock somebody
+// holds means the directory is live; a lock file that is missing means
+// its owner has not finished creating the directory yet, or never got to;
+// a lock this process cannot even stat means it cannot tell. All three
+// keep the directory, because deleting one a running verifier is reading
+// keys out of would fail live presentations - far worse than the disk it
+// saves.
 //
-// Entirely best effort. Every failure is ignored: this is housekeeping on
-// a cache, and a verifier that cannot tidy up should still start and still
-// verify.
+// That is also why there is no lock over the parent directory. An earlier
+// version took one, to close the window between another process's
+// MkdirTemp and its lock file appearing, and it was wrong twice over: it
+// waited on an unbounded flock while holding s.mu, so a slow sweep
+// elsewhere could keep this process from shutting down, and it swept
+// anyway when the lock could not be had, which is precisely when the
+// window it was guarding is open. Refusing to sweep a directory with no
+// lock file closes the same window with no lock at all. The cost is a
+// directory stranded by a crash in the microseconds between mkdir and
+// lock - empty, and not worth a mutex that can deadlock a shutdown.
+//
+// Entirely best effort otherwise. Every failure is ignored: this is
+// housekeeping on a cache, and a verifier that cannot tidy up should
+// still start and still verify.
 func sweepOrphanedVegaKeyDirs(parent, own string) {
 	if !vegaKeyStoreLocksSupported {
 		return
@@ -617,17 +628,11 @@ func sweepOrphanedVegaKeyDirs(parent, own string) {
 			continue
 		}
 
-		lockPath := filepath.Join(dir, vegaKeyStoreLockName)
-		if _, statErr := os.Stat(lockPath); statErr == nil {
-			lock, lockErr := tryLockVegaKeyStoreFile(lockPath)
-			if lockErr != nil || lock == nil {
-				// Either somebody holds it - the directory is live and is
-				// not ours to touch - or we cannot tell, which gets the
-				// same answer.
-				continue
-			}
-			_ = lock.Close()
+		lock, lockErr := tryLockExistingVegaKeyStoreFile(filepath.Join(dir, vegaKeyStoreLockName))
+		if lockErr != nil || lock == nil {
+			continue
 		}
+		_ = lock.Close()
 
 		_ = os.RemoveAll(dir)
 	}

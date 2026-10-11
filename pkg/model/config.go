@@ -882,6 +882,12 @@ type ZkKeyCacheConfig struct {
 	// directory set here has to be cleaned up from outside the process.
 	Dir string `yaml:"dir,omitempty" doc_example:"\"/var/cache/vc-verifier/zk-keys\""`
 
+	// MaxBytes bounds what the store HOLDS. Peak disk use can exceed it
+	// for as long as a verification still has an evicted key open: that
+	// file is kept until its last holder is finished, because deleting it
+	// would fail a presentation that was already under way. The excess is
+	// bounded by the verifications in flight, one key each.
+	//
 	// MaxBytes bounds what the store keeps on disk. Zero means the package
 	// default, 512MiB - room for about five circuit revisions. A working
 	// set one key larger than the bound makes every request evict the key

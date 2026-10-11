@@ -25,22 +25,27 @@ func tryLockVegaKeyStoreFile(path string) (*os.File, error) {
 	return lockVegaKeyStoreFile(path, syscall.LOCK_EX|syscall.LOCK_NB)
 }
 
-// waitLockVegaKeyStoreDir takes an exclusive advisory lock on the PARENT
-// directory itself, waiting for it, and serialises directory creation
-// against the orphan sweep.
+// tryLockExistingVegaKeyStoreFile is tryLockVegaKeyStoreFile without the
+// create: a path that is not there returns nil, nil, the same answer as a
+// lock somebody holds.
 //
-// The directory rather than a lock file in it, because this one could
-// never be cleaned up: unlinking a lock file is what makes two processes
-// think they hold "the" lock while holding different inodes, so the file
-// would have to stay - and the store promises to leave the configured
-// directory alone except for its own subdirectory.
-func waitLockVegaKeyStoreDir(path string) (*os.File, error) {
-	f, err := os.Open(path)
+// The distinction matters to the orphan sweep, which must never create
+// anything in a directory it is considering deleting, and must read a
+// missing lock file as "not mine to touch" rather than "abandoned": a
+// directory another process made a moment ago has no lock file yet.
+func tryLockExistingVegaKeyStoreFile(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_RDWR, vegaKeyStoreLockPerm)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return f, nil

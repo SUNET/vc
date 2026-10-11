@@ -314,7 +314,7 @@ func tryLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitSou
 	manifest := knownManifest
 	var proverDescriptor *zkcircuit.CircuitDescriptor
 	if manifest != nil {
-		proverDescriptor = findVegaCircuitEntry(manifest, zkSystemID)
+		proverDescriptor = findVegaCircuitEntryByID(manifest, zkSystemID)
 		if proverDescriptor == nil {
 			manifest = nil
 		}
@@ -367,12 +367,8 @@ func tryLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitSou
 	return path, releaseNew, false, nil
 }
 
-// findVegaVerifierKeyEntry searches manifest for the single entry sharing
-// proverDescriptor's System/SystemVersion with params.role == "verifier" -
-// see getOrLoadVegaVerifierKey's doc comment for why this lookup (rather
-// than a naming-convention string substitution) is used.
-// findVegaCircuitEntry returns the manifest's entry for id, or nil.
-func findVegaCircuitEntry(manifest *zkcircuit.Manifest, id string) *zkcircuit.CircuitDescriptor {
+// findVegaCircuitEntryByID returns the manifest's entry for id, or nil.
+func findVegaCircuitEntryByID(manifest *zkcircuit.Manifest, id string) *zkcircuit.CircuitDescriptor {
 	for i := range manifest.Circuits {
 		if manifest.Circuits[i].ID == id {
 			return &manifest.Circuits[i]
@@ -381,6 +377,10 @@ func findVegaCircuitEntry(manifest *zkcircuit.Manifest, id string) *zkcircuit.Ci
 	return nil
 }
 
+// findVegaVerifierKeyEntry searches manifest for the single entry sharing
+// proverDescriptor's System/SystemVersion with params.role == "verifier" -
+// see getOrLoadVegaVerifierKey's doc comment for why this lookup (rather
+// than a naming-convention string substitution) is used.
 func findVegaVerifierKeyEntry(manifest *zkcircuit.Manifest, proverDescriptor *zkcircuit.CircuitDescriptor) (*zkcircuit.CircuitDescriptor, error) {
 	var match *zkcircuit.CircuitDescriptor
 	for i := range manifest.Circuits {

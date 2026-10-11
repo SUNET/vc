@@ -22,11 +22,12 @@ func TestVegaKeyStoreSweepsDirectoriesLeftByACrash(t *testing.T) {
 	orphan := filepath.Join(parent, vegaKeyStoreDirPrefix+"crashed")
 	mkStoreDir(t, orphan, true)
 
-	// ...and the same thing from a build that had no lock file at all.
-	// Also an orphan: nothing this code creates reaches the sweep without
-	// its lock already taken.
-	ancient := filepath.Join(parent, vegaKeyStoreDirPrefix+"ancient")
-	mkStoreDir(t, ancient, false)
+	// A store directory with no lock file yet. NOT an orphan as far as
+	// this process can tell: that is exactly how another process's
+	// directory looks in the moment between its MkdirTemp and its lock
+	// file appearing, and sweeping it would delete a live store.
+	young := filepath.Join(parent, vegaKeyStoreDirPrefix+"just-created")
+	mkStoreDir(t, young, false)
 
 	// Not a store directory, so not the sweep's business however much it
 	// looks like clutter.
@@ -43,13 +44,13 @@ func TestVegaKeyStoreSweepsDirectoriesLeftByACrash(t *testing.T) {
 	}
 	release()
 
-	for _, gone := range []string{orphan, ancient} {
-		if _, err := os.Stat(gone); !os.IsNotExist(err) {
-			t.Errorf("%s still present (stat err = %v), want it swept", filepath.Base(gone), err)
-		}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Errorf("%s still present (stat err = %v), want it swept", filepath.Base(orphan), err)
 	}
-	if _, err := os.Stat(bystander); err != nil {
-		t.Errorf("os.Stat(%s) = %v, want a directory that is not ours left alone", filepath.Base(bystander), err)
+	for _, kept := range []string{young, bystander} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("os.Stat(%s) = %v, want a directory this process cannot prove is abandoned left alone", filepath.Base(kept), err)
+		}
 	}
 	if _, err := os.Stat(store.dir); err != nil {
 		t.Errorf("os.Stat(%s) = %v, want the store's own directory kept", store.dir, err)
@@ -66,7 +67,7 @@ func TestVegaKeyStoreLeavesALockedDirectoryAlone(t *testing.T) {
 	// Another process's store: its lock is held for as long as the file
 	// stays open, exactly as a running verifier holds its own.
 	live := filepath.Join(parent, vegaKeyStoreDirPrefix+"running")
-	mkStoreDir(t, live, false)
+	mkStoreDir(t, live, true)
 	held, err := tryLockVegaKeyStoreFile(filepath.Join(live, vegaKeyStoreLockName))
 	if err != nil || held == nil {
 		t.Fatalf("tryLockVegaKeyStoreFile() = %v, %v, want the lock taken", held, err)
@@ -85,6 +86,37 @@ func TestVegaKeyStoreLeavesALockedDirectoryAlone(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(live, "key.vk")); err != nil {
 		t.Errorf("os.Stat() = %v, want a directory whose lock is held to survive the sweep", err)
+	}
+}
+
+// A lock this process cannot even open is not evidence of anything, so
+// the directory stays. Treating an I/O or permission error the same as
+// "no owner" would delete a running verifier's keys on exactly the kind
+// of filesystem trouble that makes everything else look broken too.
+func TestVegaKeyStoreLeavesADirectoryItCannotReadAlone(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root opens an unreadable file anyway, so the permission cannot be simulated")
+	}
+	parent := t.TempDir()
+
+	unreadable := filepath.Join(parent, vegaKeyStoreDirPrefix+"unreadable")
+	mkStoreDir(t, unreadable, true)
+	lockPath := filepath.Join(unreadable, vegaKeyStoreLockName)
+	if err := os.Chmod(lockPath, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(lockPath, vegaKeyStoreLockPerm) })
+
+	store := newVegaKeyStore(parent, 1<<20)
+	t.Cleanup(func() { _ = store.removeAll(t.Context()) })
+	_, release, err := store.put("vega-r1", []byte("a key"))
+	if err != nil {
+		t.Fatalf("put() error = %v", err)
+	}
+	release()
+
+	if _, err := os.Stat(unreadable); err != nil {
+		t.Errorf("os.Stat() = %v, want a directory whose lock could not be read left alone", err)
 	}
 }
 
