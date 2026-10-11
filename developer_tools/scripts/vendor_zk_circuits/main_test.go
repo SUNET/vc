@@ -639,14 +639,7 @@ func TestVendorWritesAliasDescriptors(t *testing.T) {
 	artifact, urlPath := artifactFor(body, "")
 
 	source := catalogServer(t,
-		[]map[string]any{{
-			"id": "vega-mc-p256-v1-verifier-key-r12", "system": "vega-mc", "systemVersion": "12",
-			"status": "active", "published": true,
-			"aliases":  []string{"vega-mc-verifier-current"},
-			"docTypes": []string{"org.iso.18013.5.1.mDL"},
-			"params":   map[string]any{"role": "verifier", "saltBytes": "32"},
-			"artifact": artifact,
-		}},
+		[]map[string]any{aliasedVerifierDescriptor("vega-mc-p256-v1-verifier-key-r12", artifact)},
 		map[string][]byte{urlPath: body},
 	)
 
@@ -656,7 +649,7 @@ func TestVendorWritesAliasDescriptors(t *testing.T) {
 	}
 
 	mirror := zkcircuit.NewClient("file://" + filepath.ToSlash(out))
-	for _, name := range []string{"vega-mc-p256-v1-verifier-key-r12", "vega-mc-verifier-current"} {
+	for _, name := range []string{"vega-mc-p256-v1-verifier-key-r12", aliasUnderTest} {
 		descriptor, err := mirror.FetchCircuit(t.Context(), name)
 		if err != nil {
 			t.Fatalf("FetchCircuit(%q) from the mirror: %v", name, err)
@@ -673,21 +666,10 @@ func TestVendorRefusesAnAliasCollision(t *testing.T) {
 	body := []byte("verifier key bytes")
 	artifact, urlPath := artifactFor(body, "")
 
-	descriptor := func(id string) map[string]any {
-		return map[string]any{
-			"id": id, "system": "vega-mc", "systemVersion": "12",
-			"status": "active", "published": true,
-			"aliases":  []string{"vega-mc-verifier-current"},
-			"docTypes": []string{"org.iso.18013.5.1.mDL"},
-			"params":   map[string]any{"role": "verifier", "saltBytes": "32"},
-			"artifact": artifact,
-		}
-	}
-
 	source := catalogServer(t,
 		[]map[string]any{
-			descriptor("vega-mc-p256-v1-verifier-key-r12"),
-			descriptor("vega-mc-p256-v1-verifier-key-r13"),
+			aliasedVerifierDescriptor("vega-mc-p256-v1-verifier-key-r12", artifact),
+			aliasedVerifierDescriptor("vega-mc-p256-v1-verifier-key-r13", artifact),
 		},
 		map[string][]byte{urlPath: body},
 	)
@@ -696,7 +678,27 @@ func TestVendorRefusesAnAliasCollision(t *testing.T) {
 	if err == nil {
 		t.Fatal("a mirror was written with two descriptors claiming one alias")
 	}
-	if !strings.Contains(err.Error(), "vega-mc-verifier-current") {
+	if !strings.Contains(err.Error(), aliasUnderTest) {
 		t.Errorf("the error does not name the clashing alias: %v", err)
 	}
 }
+
+// aliasedVerifierDescriptor is a published, active verifier-key entry that
+// also answers to the rolling alias aliasUnderTest. Two tests build the
+// same shape - one proving the alias resolves from the vendored mirror, one
+// giving two entries the same alias - and the point of both is the alias,
+// so the rest of the descriptor is noise that belongs in one place.
+func aliasedVerifierDescriptor(id string, artifact map[string]any) map[string]any {
+	return map[string]any{
+		"id": id, "system": "vega-mc", "systemVersion": "12",
+		"status": "active", "published": true,
+		"aliases":  []string{aliasUnderTest},
+		"docTypes": []string{"org.iso.18013.5.1.mDL"},
+		"params":   map[string]any{"role": "verifier", "saltBytes": "32"},
+		"artifact": artifact,
+	}
+}
+
+// aliasUnderTest is the rolling name a deployment would pin to instead of a
+// revision id.
+const aliasUnderTest = "vega-mc-verifier-current"
