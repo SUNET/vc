@@ -9,6 +9,7 @@ import {
 import { groupPresets } from "./preset-helpers.js";
 import { claimsForLocale } from "./locale-helpers.js";
 import { dcqlMetaFor } from "./dcql-meta.js";
+import { browserHandoffEnv, handOffToWallet } from "./wallet-handoff.js";
 
 /** @typedef {v.InferOutput<typeof credentialAttributesSchema>} CredentialAttributes */
 const credentialAttributesSchema = v.object({
@@ -777,40 +778,15 @@ Alpine.data("app", () => ({
             return;
         }
         event.preventDefault();
-        const url = event.currentTarget.href;
-        // Opened inside the click so the browser still counts a live user
-        // activation when the fallback runs after the awaited fetch.
-        // No `noopener`: that feature makes window.open return null and
-        // then we would not be able to close or navigate the placeholder.
-        // Severed manually below (opener = null) before any navigation.
-        const fallbackWindow = globalThis.open("", "_blank");
-        try {
-            const res = await fetch(new URL("/verification/session-preference", baseUrl).toString(), {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    session_id: this.presentationDefinition?.session_id ?? loadStoredSessionID(),
-                    wallet_follows_redirect: true,
-                }),
-            });
-            if (!res.ok) {
-                throw new Error(`session-preference returned ${res.status}`);
-            }
-            if (fallbackWindow && !fallbackWindow.closed) {
-                fallbackWindow.close();
-            }
-            globalThis.location.href = url;
-        } catch (err) {
-            console.error("Failed to mark same-device flow, opening wallet in a new tab so this page can still redirect", err);
-            if (fallbackWindow && !fallbackWindow.closed) {
-                try { fallbackWindow.opener = null; } catch { /* cross-origin after nav */ }
-                fallbackWindow.location.href = url;
-            } else {
-                // Popup blocker denied the pre-opened tab; last-resort try
-                // (likely blocked too, but worth attempting).
-                globalThis.open(url, "_blank", "noopener");
-            }
-        }
+        await handOffToWallet(
+            event.currentTarget.href,
+            new URL("/verification/session-preference", baseUrl).toString(),
+            {
+                session_id: this.presentationDefinition?.session_id ?? loadStoredSessionID(),
+                wallet_follows_redirect: true,
+            },
+            browserHandoffEnv(),
+        );
     },
 
     /** @param {SubmitEvent} event */
