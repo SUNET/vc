@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/SUNET/vc/pkg/mdoc/zkcircuit"
 )
 
 // warmMirror writes a vendored file:// catalog mirror holding, for each
@@ -57,17 +59,28 @@ func warmMirror(t *testing.T, circuits []map[string]any) string {
 	return server.URL
 }
 
-// mirrorCounts records how often a mirror served an artifact, so a test
-// can tell one shared load from several.
+// mirrorCounts records how often a mirror served an artifact, and how often
+// it served catalog metadata, so a test can tell one shared load from
+// several and one manifest read from one per circuit.
 type mirrorCounts struct {
-	mu sync.Mutex
-	n  int
+	mu        sync.Mutex
+	n         int
+	manifests int
+	circuits  int
 }
 
 func (m *mirrorCounts) artifactFetches() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.n
+}
+
+// metadataFetches is manifest reads and per-circuit descriptor reads, the
+// two requests a load makes before it downloads anything.
+func (m *mirrorCounts) metadataFetches() (manifests, circuits int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.manifests, m.circuits
 }
 
 // countingWarmMirror is warmMirror with a request counter over the
@@ -80,11 +93,16 @@ func countingWarmMirror(t *testing.T, circuits []map[string]any) (string, *mirro
 	counts := &mirrorCounts{}
 	files := http.FileServer(http.Dir(dir))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/v1/artifacts/") {
-			counts.mu.Lock()
+		counts.mu.Lock()
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/v1/artifacts/"):
 			counts.n++
-			counts.mu.Unlock()
+		case r.URL.Path == "/v1/manifest.json":
+			counts.manifests++
+		case strings.HasPrefix(r.URL.Path, "/v1/circuits/"):
+			counts.circuits++
 		}
+		counts.mu.Unlock()
 		files.ServeHTTP(w, r)
 	}))
 	t.Cleanup(server.Close)
@@ -290,7 +308,7 @@ func TestGetOrLoadVegaVerifierKeyCachesThePath(t *testing.T) {
 		vegaCircuit("vega-verifier-r12", "12", "verifier", "active"),
 	})
 
-	first, releaseFirst, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source})
+	first, releaseFirst, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source}, nil)
 	if err != nil {
 		t.Fatalf("getOrLoadVegaVerifierKey() error = %v", err)
 	}
@@ -301,7 +319,7 @@ func TestGetOrLoadVegaVerifierKeyCachesThePath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	second, releaseSecond, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source})
+	second, releaseSecond, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source}, nil)
 	if err != nil {
 		t.Fatalf("a cached key must not need the catalog: %v", err)
 	}
@@ -324,7 +342,7 @@ func TestGetOrLoadVegaVerifierKeyRefetchesAfterTheFileGoes(t *testing.T) {
 		vegaCircuit("vega-verifier-r12", "12", "verifier", "active"),
 	})
 
-	path, releasePath, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source})
+	path, releasePath, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +351,7 @@ func TestGetOrLoadVegaVerifierKeyRefetchesAfterTheFileGoes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	again, releaseAgain, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source})
+	again, releaseAgain, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source}, nil)
 	if err != nil {
 		t.Fatalf("a key whose file is gone must be refetched: %v", err)
 	}
@@ -369,7 +387,7 @@ func TestGetOrLoadVegaVerifierKeyLoadsOncePerID(t *testing.T) {
 	for i := range callers {
 		go func() {
 			defer wg.Done()
-			path, release, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source})
+			path, release, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source}, nil)
 			paths[i], errs[i] = path, err
 			if err == nil {
 				release()
@@ -512,7 +530,7 @@ func TestSharedLoadFailureIsRetriedNotInherited(t *testing.T) {
 		vegaVerifierKeyCacheState.mu.Unlock()
 	}()
 
-	_, _, retry, err := tryLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{"https://example.invalid"})
+	_, _, retry, err := tryLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{"https://example.invalid"}, nil)
 	if !retry {
 		t.Errorf("retry = false, want the caller to load the key itself rather than inherit the pre-warm's failure (err = %v)", err)
 	}
@@ -538,7 +556,7 @@ func TestExhaustedRetriesReportTheUnderlyingLoadFailure(t *testing.T) {
 	vegaVerifierKeyCacheState.inFly["vega-prover-r12"] = stuck
 	vegaVerifierKeyCacheState.mu.Unlock()
 
-	_, _, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{"https://example.invalid"})
+	_, _, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{"https://example.invalid"}, nil)
 	if err == nil {
 		t.Fatal("expected a repeatedly failing load to be reported as an error")
 	}
@@ -550,5 +568,62 @@ func TestExhaustedRetriesReportTheUnderlyingLoadFailure(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "max_bytes") {
 		t.Errorf("error = %v, want it not to blame the cache size for a download failure", err)
+	}
+}
+
+// Warming walks a manifest to decide what to warm, so every load already
+// had one in hand - and then fetched its own prover descriptor and its own
+// copy of the whole manifest anyway. That made warming N revisions cost
+// 2N+1 sequential catalog metadata requests at startup, every one of them
+// avoidable.
+func TestWarmingReadsTheCatalogOnce(t *testing.T) {
+	resetVegaKeyState(t)
+	source, counts := countingWarmMirror(t, []map[string]any{
+		vegaCircuit("vega-prover-r12", "1.2", "prover", "active"),
+		vegaCircuit("vega-verifier-r12", "1.2", "verifier", "active"),
+		vegaCircuit("vega-prover-r13", "1.3", "prover", "active"),
+		vegaCircuit("vega-verifier-r13", "1.3", "verifier", "active"),
+	})
+
+	result, err := WarmVegaVerifierKeys(t.Context(), []string{source})
+	if err != nil {
+		t.Fatalf("WarmVegaVerifierKeys() error = %v", err)
+	}
+	if len(result.Warmed) != 2 {
+		t.Fatalf("Warmed = %v, want both revisions (Failed = %v)", result.Warmed, result.Failed)
+	}
+
+	manifests, circuits := counts.metadataFetches()
+	if manifests != 1 {
+		t.Errorf("manifest reads = %d, want 1 for the whole warm-up", manifests)
+	}
+	if circuits != 0 {
+		t.Errorf("circuit descriptor reads = %d, want none: the manifest already carries every one of them", circuits)
+	}
+}
+
+// ...but a load that was handed no manifest, or one that does not list the
+// circuit, still has to ask. The fast path is an optimisation, never a
+// requirement.
+func TestLoadWithoutAManifestStillFetchesOne(t *testing.T) {
+	resetVegaKeyState(t)
+	source, counts := countingWarmMirror(t, []map[string]any{
+		vegaCircuit("vega-prover-r12", "1.2", "prover", "active"),
+		vegaCircuit("vega-verifier-r12", "1.2", "verifier", "active"),
+	})
+
+	// A manifest that knows nothing about this circuit: the loader must
+	// fall back rather than fail.
+	stale := &zkcircuit.Manifest{ManifestVersion: 1}
+
+	_, release, err := getOrLoadVegaVerifierKey(t.Context(), "vega-prover-r12", []string{source}, stale)
+	if err != nil {
+		t.Fatalf("getOrLoadVegaVerifierKey() error = %v", err)
+	}
+	release()
+
+	manifests, circuits := counts.metadataFetches()
+	if manifests != 1 || circuits != 1 {
+		t.Errorf("metadata reads = %d manifest(s), %d circuit(s), want 1 and 1 from the fallback", manifests, circuits)
 	}
 }

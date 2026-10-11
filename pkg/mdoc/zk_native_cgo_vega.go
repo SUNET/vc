@@ -60,7 +60,7 @@ func nativeVerifyZkProofVega(
 	// worker needs it: the worker is a separate process and opens the path
 	// itself, so an eviction between here and that open would fail a
 	// perfectly valid presentation.
-	verifierKeyPath, release, err := getOrLoadVegaVerifierKey(ctx, zkSystemID, zkCircuitSources)
+	verifierKeyPath, release, err := getOrLoadVegaVerifierKey(ctx, zkSystemID, zkCircuitSources, nil)
 	if err != nil {
 		return zkvegaworker.VerifyResult{}, fmt.Errorf("failed to resolve/load Vega verifier key for %q: %w", zkSystemID, err)
 	}
@@ -184,7 +184,7 @@ var vegaVerifierKeyCacheState = struct {
 // params.role == "verifier" - robust against the exact id-suffix
 // convention (e.g. "-prover-key-r7" -> "-verifier-key-r7") ever changing,
 // unlike a plain string substitution would be.
-func getOrLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitSources []string) (string, func(), error) {
+func getOrLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitSources []string, knownManifest *zkcircuit.Manifest) (string, func(), error) {
 	// A loop, because a waiter can find the key gone again: a concurrent
 	// load for another circuit may evict it between the loading goroutine
 	// installing it and this one pinning it, which a small or churning
@@ -197,7 +197,7 @@ func getOrLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitS
 	// and should be told so rather than hang.
 	var lastRetryReason error
 	for range vegaKeyLoadAttempts {
-		path, release, retry, err := tryLoadVegaVerifierKey(ctx, zkSystemID, zkCircuitSources)
+		path, release, retry, err := tryLoadVegaVerifierKey(ctx, zkSystemID, zkCircuitSources, knownManifest)
 		if retry {
 			// err here is why the attempt is being repeated, not a reason
 			// to give up: either the key was evicted again before this
@@ -228,7 +228,7 @@ const vegaKeyLoadAttempts = 3
 // tryLoadVegaVerifierKey is one pass of getOrLoadVegaVerifierKey. retry is
 // true when the key was loaded by somebody else and evicted again before
 // this caller could pin it.
-func tryLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitSources []string) (_ string, _ func(), retry bool, err error) {
+func tryLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitSources []string, knownManifest *zkcircuit.Manifest) (_ string, _ func(), retry bool, err error) {
 	if cached, releaseCached, ok := vegaVerifierKeys.acquire(zkSystemID); ok {
 		return cached, releaseCached, false, nil
 	}
@@ -301,16 +301,41 @@ func tryLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitSou
 	}()
 
 	client := zkcircuit.NewClient(zkCircuitSources...)
-	proverDescriptor, fetchErr := client.FetchCircuit(ctx, zkSystemID)
-	if fetchErr != nil {
-		err = fmt.Errorf("fetching prover-key circuit descriptor: %w", fetchErr)
-		return "", nil, false, err
+
+	// knownManifest is a manifest the caller already holds. The pre-warm
+	// does: it picks the circuits to warm by walking one, and then every
+	// load re-fetched the prover descriptor AND the whole manifest again -
+	// 2N+1 catalog metadata requests to warm N revisions, sequentially,
+	// at startup, before a single artifact was downloaded.
+	//
+	// A miss falls back to the catalog rather than failing, so a caller
+	// whose manifest is stale or partial is no worse off than one that
+	// passed nothing.
+	manifest := knownManifest
+	var proverDescriptor *zkcircuit.CircuitDescriptor
+	if manifest != nil {
+		proverDescriptor = findVegaCircuitEntry(manifest, zkSystemID)
+		if proverDescriptor == nil {
+			manifest = nil
+		}
 	}
 
-	manifest, manifestErr := client.FetchManifest(ctx)
-	if manifestErr != nil {
-		err = fmt.Errorf("fetching circuit manifest to resolve verifier-key sibling: %w", manifestErr)
-		return "", nil, false, err
+	if proverDescriptor == nil {
+		var fetchErr error
+		proverDescriptor, fetchErr = client.FetchCircuit(ctx, zkSystemID)
+		if fetchErr != nil {
+			err = fmt.Errorf("fetching prover-key circuit descriptor: %w", fetchErr)
+			return "", nil, false, err
+		}
+	}
+
+	if manifest == nil {
+		var manifestErr error
+		manifest, manifestErr = client.FetchManifest(ctx)
+		if manifestErr != nil {
+			err = fmt.Errorf("fetching circuit manifest to resolve verifier-key sibling: %w", manifestErr)
+			return "", nil, false, err
+		}
 	}
 
 	verifierDescriptor, findErr := findVegaVerifierKeyEntry(manifest, proverDescriptor)
@@ -346,6 +371,16 @@ func tryLoadVegaVerifierKey(ctx context.Context, zkSystemID string, zkCircuitSou
 // proverDescriptor's System/SystemVersion with params.role == "verifier" -
 // see getOrLoadVegaVerifierKey's doc comment for why this lookup (rather
 // than a naming-convention string substitution) is used.
+// findVegaCircuitEntry returns the manifest's entry for id, or nil.
+func findVegaCircuitEntry(manifest *zkcircuit.Manifest, id string) *zkcircuit.CircuitDescriptor {
+	for i := range manifest.Circuits {
+		if manifest.Circuits[i].ID == id {
+			return &manifest.Circuits[i]
+		}
+	}
+	return nil
+}
+
 func findVegaVerifierKeyEntry(manifest *zkcircuit.Manifest, proverDescriptor *zkcircuit.CircuitDescriptor) (*zkcircuit.CircuitDescriptor, error) {
 	var match *zkcircuit.CircuitDescriptor
 	for i := range manifest.Circuits {

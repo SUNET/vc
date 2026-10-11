@@ -69,7 +69,10 @@ func WarmVegaVerifierKeys(ctx context.Context, sources []string) (VegaWarmResult
 		// Every error is recorded and none stops the loop: one circuit
 		// revision the catalog cannot serve should not deny the others
 		// the warm-up they were going to get.
-		_, release, err := getOrLoadVegaVerifierKey(ctx, c.ID, sources)
+		// The manifest goes through: without it each load re-fetched
+		// this very descriptor and this very manifest, making the warm-up
+		// 2N+1 catalog metadata requests instead of one.
+		_, release, err := getOrLoadVegaVerifierKey(ctx, c.ID, sources, manifest)
 		if err != nil {
 			result.Failed[c.ID] = err
 			continue
