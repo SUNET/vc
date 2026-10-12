@@ -6,16 +6,18 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+    IMAGE_PLACEHOLDERS,
+    SAFE_IMAGE_SUBTYPES,
     base64ToUtf8,
+    clearUnresolvedPlaceholders,
+    credentialSubjectSummary,
     detectBase64Image,
     escapeHtml,
     escapeSvgValue,
     flattenClaims,
-    clearUnresolvedPlaceholders,
-    IMAGE_PLACEHOLDERS,
+    initialCredentialSelection,
     keyToLabel,
     renderClaimValueHtml,
-    SAFE_IMAGE_SUBTYPES,
     utf8ToBase64,
     valueForSvgPlaceholder,
 } from "../consent-helpers.js";
@@ -602,5 +604,58 @@ describe("escapeSvgValue", () => {
     it("leaves a base64 data URL alone", () => {
         const url = "data:image/png;base64,iVBORw0KGgo=";
         assert.equal(escapeSvgValue(url), url);
+    });
+});
+
+describe("credentialSubjectSummary", () => {
+    it("names the holder from the claims the issuer marked displayable", () => {
+        assert.equal(credentialSubjectSummary({
+            given_name: { label: "Given name", value: "Ada" },
+            family_name: { label: "Family name", value: "Lovelace" },
+            birthdate: { label: "Date of birth", value: "1815-12-10" },
+        }), "Ada · Lovelace · 1815-12-10");
+    });
+
+    it("accepts either birth-date spelling", () => {
+        // SD-JWT VC uses `birthdate`, ISO mdoc uses `birth_date`, and one
+        // consent page serves both.
+        assert.equal(credentialSubjectSummary({
+            given_name: { label: "Given name", value: "Ada" },
+            birth_date: { label: "Date of birth", value: "1815-12-10" },
+        }), "Ada · 1815-12-10");
+    });
+
+    it("skips absent, empty and non-string values", () => {
+        assert.equal(credentialSubjectSummary({
+            given_name: { label: "Given name", value: "" },
+            family_name: { label: "Family name", value: 42 },
+            birthdate: { label: "Date of birth", value: "1815-12-10" },
+        }), "1815-12-10");
+    });
+
+    it("returns nothing when none of them are present", () => {
+        // The caller omits the line rather than rendering an empty one.
+        assert.equal(credentialSubjectSummary({ nationality: { label: "Nationality", value: "GB" } }), "");
+        assert.equal(credentialSubjectSummary({}), "");
+        assert.equal(credentialSubjectSummary(undefined), "");
+    });
+});
+
+describe("initialCredentialSelection", () => {
+    it("preselects the only credential in a single-credential offer", () => {
+        // The defect this fixes: the radio carried a hard `required` and no
+        // checked binding, so a one-credential offer - which is every offer
+        // this page has ever served - would not submit until the holder
+        // clicked a control that had nothing to choose between.
+        assert.equal(initialCredentialSelection([{ vct: "a" }]), 0);
+    });
+
+    it("selects nothing when there is a real choice", () => {
+        assert.equal(initialCredentialSelection([{ vct: "a" }, { vct: "b" }]), null);
+    });
+
+    it("selects nothing when the list is empty or missing", () => {
+        assert.equal(initialCredentialSelection([]), null);
+        assert.equal(initialCredentialSelection(undefined), null);
     });
 });
