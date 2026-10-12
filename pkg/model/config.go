@@ -1994,7 +1994,13 @@ type InteractiveAuthorization struct {
 
 	// AuthSessionTTLSeconds bounds how long one Interactive Authorization
 	// exchange may take.
-	AuthSessionTTLSeconds int `yaml:"auth_session_ttl_seconds" default:"300" validate:"omitempty,gt=0"`
+	//
+	// Capped at MaxAuthSessionTTLSeconds, because the exchange cannot
+	// outlive the authorization context and ephemeral key it runs on.
+	// Configuring more would advertise a longer exchange than this server
+	// can hold open, and the wallet would come back to find its
+	// auth_session gone with nothing having gone wrong.
+	AuthSessionTTLSeconds int `yaml:"auth_session_ttl_seconds" default:"300" validate:"omitempty,gt=0,lte=600"`
 
 	// InteractionTypesSupported names the interaction types this server
 	// can require, as suffixes joined to InteractionTypePrefix.
@@ -2006,6 +2012,20 @@ type InteractiveAuthorization struct {
 	// has a known problem.
 	InteractionTypesSupported []string `yaml:"interaction_types_supported" validate:"omitempty,dive,required"`
 }
+
+// MaxAuthSessionTTLSeconds is the longest an Interactive Authorization
+// exchange may be configured to last.
+//
+// It is the TTL of the apigw authorization-context and ephemeral-key
+// caches, which is what the exchange is actually stored in. pkg/model
+// cannot import that package to read it, so the two are tied by
+// TestAuthContextTTLCoversTheLongestAuthSession in internal/apigw/cache
+// instead - shorten one and that test says to lower the other.
+//
+// It is also the bound in AuthSessionTTLSeconds's validate tag, which a Go
+// tag cannot build from a constant; TestMaxAuthSessionTTLMatchesItsTag
+// reads the tag back and compares.
+const MaxAuthSessionTTLSeconds = 600
 
 // AuthorizationChallengePath is the path the Authorization Challenge
 // Endpoint is served at, relative to the Credential Issuer Identifier. It is
@@ -2102,31 +2122,28 @@ func (ia *InteractiveAuthorization) PresentationAudience(issuerURL string) (stri
 		return prefix + endpoint, nil
 	}
 
-	// RFC 6454 §4: the derived Origin is scheme, host and port, nothing
-	// else. url.Parse keeps the default port out of Host, which is what
-	// the comparison on the wallet's side expects.
-	parsed, err := url.Parse(endpoint)
+	// Serialised the way a browser would (RFC 6454 §6.2), not merely
+	// scheme + Host: the wallet derives the audience it binds to from an
+	// origin it canonicalises itself, and compares as a plain string. A
+	// public_url written as https://Issuer.Example:443 is valid
+	// configuration and would otherwise produce an audience no wallet
+	// computes.
+	origin, err := openid4vp.CanonicalOrigin(endpoint)
 	if err != nil {
 		return "", fmt.Errorf("deriving the Authorization Challenge Endpoint origin: %w", err)
 	}
-	if parsed.Scheme == "" || parsed.Host == "" {
-		return "", fmt.Errorf("deriving the Authorization Challenge Endpoint origin: %q is not an absolute URL", endpoint)
-	}
-	return prefix + parsed.Scheme + "://" + parsed.Host, nil
+	return prefix + origin, nil
 }
 
 // ChallengeEndpointOrigin is the derived Origin (RFC 6454 §4) of the
 // Authorization Challenge Endpoint, which is the only value OpenID4VCI 1.1
 // permits in an Interactive Authorization request's expected_origins.
 func (ia *InteractiveAuthorization) ChallengeEndpointOrigin(issuerURL string) (string, error) {
-	parsed, err := url.Parse(strings.TrimRight(issuerURL, "/") + AuthorizationChallengePath)
+	origin, err := openid4vp.CanonicalOrigin(strings.TrimRight(issuerURL, "/") + AuthorizationChallengePath)
 	if err != nil {
 		return "", fmt.Errorf("deriving the Authorization Challenge Endpoint origin: %w", err)
 	}
-	if parsed.Scheme == "" || parsed.Host == "" {
-		return "", fmt.Errorf("deriving the Authorization Challenge Endpoint origin: %q is not an absolute URL", issuerURL)
-	}
-	return parsed.Scheme + "://" + parsed.Host, nil
+	return origin, nil
 }
 
 // AuthSessionTTL bounds how long one Interactive Authorization exchange may

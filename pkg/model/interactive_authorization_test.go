@@ -2,6 +2,8 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -76,6 +78,38 @@ func TestInteractiveAuthorization_PresentationAudience(t *testing.T) {
 		_, err := enabledIA().PresentationAudience("issuer.example.com")
 		require.Error(t, err)
 	})
+
+	// RFC 6454 §6.2. The wallet derives the audience from an origin it
+	// canonicalises itself and compares as a plain string, so a public URL
+	// written with an explicit default port or an uppercase host - both
+	// valid configuration, neither ever emitted by a browser - would
+	// otherwise produce an audience no wallet computes.
+	t.Run("the origin is serialised the way a browser would", func(t *testing.T) {
+		for name, tc := range map[string]struct{ publicURL, want string }{
+			"an explicit default port is dropped": {
+				publicURL: "https://issuer.example.com:443",
+				want:      "ia:https://issuer.example.com",
+			},
+			"a non-default port is kept": {
+				publicURL: "https://issuer.example.com:8443",
+				want:      "ia:https://issuer.example.com:8443",
+			},
+			"the host is lowercased": {
+				publicURL: "https://Issuer.Example.COM",
+				want:      "ia:https://issuer.example.com",
+			},
+			"both at once": {
+				publicURL: "HTTPS://Issuer.Example.COM:443",
+				want:      "ia:https://issuer.example.com",
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				got, err := enabledIA().PresentationAudience(tc.publicURL)
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
 }
 
 // RFC 6454 §4: an Origin is scheme, host and port - never the path.
@@ -87,6 +121,12 @@ func TestInteractiveAuthorization_ChallengeEndpointOrigin(t *testing.T) {
 	origin, err = enabledIA().ChallengeEndpointOrigin("https://issuer.example.com:8443")
 	require.NoError(t, err)
 	assert.Equal(t, "https://issuer.example.com:8443", origin, "a non-default port is part of the Origin")
+
+	// expected_origins is compared against what the browser reports, which
+	// never carries the default port and never carries case.
+	origin, err = enabledIA().ChallengeEndpointOrigin("HTTPS://Issuer.Example.COM:443")
+	require.NoError(t, err)
+	assert.Equal(t, "https://issuer.example.com", origin)
 
 	_, err = enabledIA().ChallengeEndpointOrigin("not a url at all")
 	require.Error(t, err)
@@ -162,4 +202,25 @@ func metadataJSON(t *testing.T, server *OAuthServer, ia *InteractiveAuthorizatio
 	document := map[string]any{}
 	require.NoError(t, json.Unmarshal(raw, &document))
 	return document
+}
+
+// The bound in AuthSessionTTLSeconds's validate tag is the one thing a Go
+// struct tag cannot build from a constant, so this reads it back. Raising
+// MaxAuthSessionTTLSeconds without the tag would leave config validation
+// enforcing the old ceiling; lowering it without the tag would let a
+// configuration through that the cache cannot hold.
+func TestMaxAuthSessionTTLMatchesItsTag(t *testing.T) {
+	field, ok := reflect.TypeOf(InteractiveAuthorization{}).FieldByName("AuthSessionTTLSeconds")
+	require.True(t, ok)
+
+	want := fmt.Sprintf("lte=%d", MaxAuthSessionTTLSeconds)
+	assert.Contains(t, field.Tag.Get("validate"), want,
+		"the validate tag must enforce MaxAuthSessionTTLSeconds")
+}
+
+// And the ceiling has to be long enough to be usable: an exchange is a
+// user presenting a credential, not a machine round trip.
+func TestDefaultAuthSessionTTLIsWithinTheCeiling(t *testing.T) {
+	assert.LessOrEqual(t, int((&InteractiveAuthorization{}).AuthSessionTTL().Seconds()), MaxAuthSessionTTLSeconds)
+	assert.GreaterOrEqual(t, MaxAuthSessionTTLSeconds, 300, "an exchange needs room for a person to answer")
 }
