@@ -877,8 +877,8 @@ func checkIssuancePolicies(cfg *model.Cfg, serviceName string) error {
 //
 // Every credential offer this service produces publishes
 // apigw.delivery.credential_offers.issuer_url as `credential_issuer`, and a
-// wallet resolves that identifier to
-// {credential_issuer}/.well-known/openid-credential-issuer. But the issuer
+// wallet resolves that identifier by inserting the well-known suffix at its
+// host root per RFC 8615 (openid4vci.WellKnownURL). But the issuer
 // metadata is generated from apigw.public_url and declares THAT as its own
 // `credential_issuer` (see APIGW.IssuerMetadata.Generate, called with
 // PublicURL in internal/apigw/apiv1/client.go). So when the two differ the
