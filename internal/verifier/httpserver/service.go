@@ -266,6 +266,21 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 // Close closing httpserver
 func (s *Service) Close(ctx context.Context) error {
 	s.log.Info("Stopping")
+
+	// Graceful, not just a log line. Shutdown stops accepting connections
+	// and waits for the handlers already running, which is what makes
+	// "the server has stopped" mean anything to whatever is torn down
+	// next - cmd/verifier closes the Vega verifier-key store after this,
+	// and a verification still in flight has a key file it is about to
+	// open (SUNET/vc#656 review).
+	//
+	// Bounded by the caller's context. An error is returned rather than
+	// swallowed, but it is not fatal: the process is exiting either way,
+	// and the key store refuses to delete a pinned file regardless.
+	if err := s.server.Shutdown(ctx); err != nil {
+		s.log.Error(err, "graceful shutdown did not complete")
+		return err
+	}
 	return nil
 }
 

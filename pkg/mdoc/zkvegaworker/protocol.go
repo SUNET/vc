@@ -32,6 +32,12 @@
 // worker, not the process serving other in-flight requests.
 package zkvegaworker
 
+import (
+	"errors"
+	"fmt"
+	"os"
+)
+
 // MaxClaims is zk-cred-vega's MAX_CLAIMS_V1: the fixed number of claim
 // slots a v1 circuit has, and so the exact length of Request.DisclosedBytes.
 //
@@ -47,14 +53,34 @@ const MaxClaims = 4
 // Request is the single JSON object the main process writes to the
 // worker's stdin.
 type Request struct {
-	// VerifierKeyBytes is the raw (decompressed) verifier-key artifact
-	// bytes - the same bytes zkcircuit.Client.DownloadAndDecompress
-	// returns for a vega-mc-p256-v1-*-verifier-key-* catalog entry. The
-	// main process is expected to cache these across calls (see
-	// getOrLoadVegaVerifierKey in zk_native_cgo.go); the worker
-	// re-deserializes them on every invocation since it holds no state
-	// across calls itself.
-	VerifierKeyBytes []byte `json:"verifier_key_bytes"`
+	// VerifierKeyPath is a local file holding the raw (decompressed)
+	// verifier-key artifact - the same bytes
+	// zkcircuit.Client.DownloadAndDecompress returns for a
+	// vega-mc-p256-v1-*-verifier-key-* catalog entry. This is how the main
+	// process sends it (see vegaKeyStore), and the preferred form.
+	//
+	// A key is ~100MB. Sending it inline meant ~133MB of base64 encoded by
+	// the caller, pushed down a pipe and decoded again by the worker on
+	// EVERY verification - paid whether the caller's cache hit or missed,
+	// so what the cache bought was the network fetch and nothing else
+	// (SUNET/vc#656). A path costs nothing to send and lets the kernel's
+	// page cache do the sharing.
+	//
+	// The file must outlive the invocation; the caller owns it. The worker
+	// only reads it.
+	VerifierKeyPath string `json:"verifier_key_path,omitempty"`
+
+	// VerifierKeyBytes is the same artifact sent inline. Retained for
+	// callers that have the bytes and nowhere to put them - a test, or a
+	// one-shot invocation by hand - and for a worker binary that is newer
+	// than its caller. Exactly one of VerifierKeyPath and this must be
+	// set; both, or neither, is a malformed request rather than a
+	// precedence question, because getting the key from somewhere other
+	// than where the caller meant is not a thing to resolve quietly.
+	//
+	// The worker re-deserializes the key on every invocation either way,
+	// since it holds no state across calls.
+	VerifierKeyBytes []byte `json:"verifier_key_bytes,omitempty"`
 
 	// ProofBytes is the presented ZK proof to verify.
 	ProofBytes []byte `json:"proof_bytes"`
@@ -99,6 +125,32 @@ type VerifyResult struct {
 	SignedTs     []byte           `json:"signed_ts"`
 	ValidFromTs  []byte           `json:"valid_from_ts"`
 	ValidUntilTs []byte           `json:"valid_until_ts"`
+}
+
+// VerifierKey returns the verifier-key bytes a Request carries, reading
+// VerifierKeyPath when that is the form used.
+//
+// Lives here rather than in the worker so both sides agree on what
+// "exactly one of" means: a request with both set, or neither, is
+// malformed and is refused, not silently resolved in favour of one.
+func (r *Request) VerifierKey() ([]byte, error) {
+	switch {
+	case r.VerifierKeyPath != "" && len(r.VerifierKeyBytes) > 0:
+		return nil, errors.New("request sets both verifier_key_path and verifier_key_bytes; exactly one is required")
+	case r.VerifierKeyPath != "":
+		data, err := os.ReadFile(r.VerifierKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("reading verifier key from %s: %w", r.VerifierKeyPath, err)
+		}
+		if len(data) == 0 {
+			return nil, fmt.Errorf("verifier key file %s is empty", r.VerifierKeyPath)
+		}
+		return data, nil
+	case len(r.VerifierKeyBytes) > 0:
+		return r.VerifierKeyBytes, nil
+	default:
+		return nil, errors.New("request sets neither verifier_key_path nor verifier_key_bytes")
+	}
 }
 
 // Response is the single JSON object the worker writes to stdout before
