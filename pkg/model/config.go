@@ -1869,6 +1869,254 @@ type APIGWDelivery struct {
 	// OpenID4VCICompat holds opt-in switches for wallets that do not encode
 	// OpenID4VCI 1.0 requests the way the specification does.
 	OpenID4VCICompat OpenID4VCICompat `yaml:"openid4vci_compat" validate:"omitempty"`
+	// InteractiveAuthorization configures OpenID4VCI 1.1's Interactive
+	// Authorization. Absent means the mechanism is not offered at all.
+	InteractiveAuthorization InteractiveAuthorization `yaml:"interactive_authorization" validate:"omitempty"`
+}
+
+// InteractiveAuthorization configures OpenID4VCI 1.1's Interactive Authorization.
+//
+// The mechanism lets an Issuer qualify the Holder before issuing - by
+// requiring a Credential to be presented, or a web step - without sending
+// the wallet out to a browser. It is OPTIONAL in the specification and in
+// WE BUILD CS-01 §7.9, and it is off here until Enable is set.
+//
+// Most of the fields below exist because OpenID4VCI 1.1 is an editor's
+// draft that contradicts itself, not because an operator should expect to
+// tune them. Two contradictions are recorded as CS-01 NOTES CS01_07 and
+// CS01_08 and reported upstream as openid/OpenID4VCI#811 and #812. Keeping
+// the affected strings in configuration means a resolution either way
+// costs a config change rather than a release, which is the whole reason
+// this profile can be adopted pre-flight at all. Leave them alone unless
+// testing against a counterparty that reads the draft the other way.
+type InteractiveAuthorization struct {
+	// Enable exposes the Authorization Challenge Endpoint and advertises
+	// it in Authorization Server metadata. Its presence there is what
+	// tells a wallet the mechanism is available.
+	Enable *bool `yaml:"enable" default:"false"`
+
+	// RequireInteractiveAuthorization advertises that this server accepts
+	// ONLY Interactive Authorization for issuance.
+	//
+	// It excludes every wallet that does not implement the mechanism, so
+	// it must not be set in a shared deployment while that is the common
+	// case (CS-01 §7.7). Setting it without Enable is refused at config
+	// load: the specification forbids the parameter without the endpoint,
+	// and advertising a requirement for a mechanism this server does not
+	// expose is unusable rather than merely wrong.
+	RequireInteractiveAuthorization *bool `yaml:"require_interactive_authorization" default:"false"`
+
+	// InteractionTypePrefix is the namespace of the interaction type URNs.
+	//
+	// CS01_07: the 1.1 change log records a rename to "iae", which its own
+	// normative text does not apply.
+	InteractionTypePrefix string `yaml:"interaction_type_prefix" default:"urn:openid:dcp:ia:" validate:"omitempty,max=128"`
+
+	// BindingPrefix prefixes the value a presentation is bound to, so that
+	// the audience of an Interactive Authorization presentation cannot be
+	// confused with an ordinary Verifier's.
+	//
+	// CS01_07: the change log says "iae:", the normative text says "ia:".
+	BindingPrefix string `yaml:"binding_prefix" default:"ia:" validate:"omitempty,max=32"`
+
+	// ResponseModeUnencrypted and ResponseModeEncrypted name the two
+	// response modes an Interactive Authorization request may ask for.
+	//
+	// CS01_07: the change log says "iae_post".
+	ResponseModeUnencrypted string `yaml:"response_mode_unencrypted" default:"ia_post" validate:"omitempty,max=32"`
+	ResponseModeEncrypted   string `yaml:"response_mode_encrypted" default:"ia_post.jwt" validate:"omitempty,max=32"`
+
+	// MetadataEndpointParameter and MetadataRequireParameter name the two
+	// Authorization Server metadata members.
+	//
+	// CS01_07 lists these alongside the rest, and they are the awkward
+	// ones: the metadata document is SIGNED, so renaming a member after
+	// marshalling would leave the served JSON and the signed claims
+	// disagreeing, and every verifier checking the JWT would fail. Both
+	// documents are therefore produced from one place that applies these
+	// names - see oauth2.AuthorizationServerMetadata.MarshalWithNames.
+	MetadataEndpointParameter string `yaml:"metadata_endpoint_parameter" default:"authorization_challenge_endpoint" validate:"omitempty,max=128"`
+	MetadataRequireParameter  string `yaml:"metadata_require_parameter" default:"require_interactive_authorization" validate:"omitempty,max=128"`
+
+	// MdocHandoverLabel is the fixed identifier inside the mdoc
+	// SessionTranscript handover for this flow.
+	//
+	// CS01_07 again, and from the other side: the normative mdoc section
+	// spells this one "IAE" while every other normative section says
+	// "ia". Whatever the working group settles on, this is the string that
+	// has to move with it - it is hashed into the transcript, so a
+	// mismatch fails DeviceAuth with nothing to point at.
+	MdocHandoverLabel string `yaml:"mdoc_handover_label" default:"OpenID4VCIIAEHandover" validate:"omitempty,max=64"`
+
+	// SDJWTBindingScope decides what an SD-JWT VC presentation's Key
+	// Binding JWT audience is bound to: the derived Origin of the
+	// Authorization Challenge Endpoint, or the endpoint URL.
+	//
+	// CS01_08: the 1.1 text says derived Origin in the normative sentence
+	// and shows the full endpoint URL in that sentence's own example, and
+	// the other three credential formats all say endpoint URL. CS-01 pins
+	// "origin" for testing, following the normative words over the
+	// example. "endpoint" exists so a run against a counterparty that read
+	// it the other way is a config change.
+	SDJWTBindingScope string `yaml:"sdjwt_binding_scope" default:"origin" validate:"omitempty,oneof=origin endpoint"`
+
+	// AuthSessionTTLSeconds bounds how long one Interactive Authorization
+	// exchange may take.
+	AuthSessionTTLSeconds int `yaml:"auth_session_ttl_seconds" default:"300" validate:"omitempty,gt=0"`
+
+	// InteractionTypesSupported names the interaction types this server
+	// can require, as suffixes joined to InteractionTypePrefix.
+	//
+	// Empty means every type the build implements, which is the right
+	// default: what this server can actually do is a property of the code,
+	// not of configuration. Set it to narrow that - to run an interop test
+	// against one interaction, or to stop offering one whose counterparty
+	// has a known problem.
+	InteractionTypesSupported []string `yaml:"interaction_types_supported" validate:"omitempty,dive,required"`
+}
+
+// AuthorizationChallengePath is the path the Authorization Challenge
+// Endpoint is served at, relative to the Credential Issuer Identifier. It is
+// the spelling OpenID4VCI 1.1's own examples use; nothing in the
+// specification constrains it, because wallets find the endpoint through
+// Authorization Server metadata rather than by construction.
+const AuthorizationChallengePath = "/authorize-challenge"
+
+// The interaction types this build implements, as suffixes joined to
+// InteractionTypePrefix. OpenID4VCI 1.1 defines two; auth_via_web is not
+// implemented here, and is named so a wallet asking only for it gets
+// missing_interaction_type rather than silence.
+const (
+	InteractionOpenID4VPPresentation = "openid4vp_presentation"
+	InteractionAuthViaWeb            = "auth_via_web"
+)
+
+// Enabled reports whether this deployment offers Interactive Authorization.
+func (ia *InteractiveAuthorization) Enabled() bool {
+	return ia != nil && BoolVal(ia.Enable, false)
+}
+
+// Required reports whether this deployment accepts ONLY Interactive
+// Authorization. False unless the mechanism is also enabled: the parameter
+// is forbidden without the endpoint, and a server that advertised the
+// requirement without exposing the endpoint could not be used at all.
+func (ia *InteractiveAuthorization) Required() bool {
+	return ia.Enabled() && BoolVal(ia.RequireInteractiveAuthorization, false)
+}
+
+// ChallengeEndpoint is the absolute URL of this server's Authorization
+// Challenge Endpoint, or the empty string when the mechanism is off - which
+// is what suppresses its advertisement in Authorization Server metadata.
+func (ia *InteractiveAuthorization) ChallengeEndpoint(issuerURL string) string {
+	if !ia.Enabled() {
+		return ""
+	}
+	return strings.TrimRight(issuerURL, "/") + AuthorizationChallengePath
+}
+
+// InteractionType joins suffix to the configured URN namespace.
+func (ia *InteractiveAuthorization) InteractionType(suffix string) string {
+	prefix := "urn:openid:dcp:ia:"
+	if ia != nil && ia.InteractionTypePrefix != "" {
+		prefix = ia.InteractionTypePrefix
+	}
+	return prefix + suffix
+}
+
+// Offers reports whether suffix is an interaction type this deployment is
+// willing to require. An empty InteractionTypesSupported means every type
+// the build implements, so the answer is yes for anything the caller asks
+// about - callers only ask about types they implement.
+func (ia *InteractiveAuthorization) Offers(suffix string) bool {
+	if ia == nil || len(ia.InteractionTypesSupported) == 0 {
+		return true
+	}
+	return slices.Contains(ia.InteractionTypesSupported, suffix)
+}
+
+// ResponseMode names the OpenID4VP response mode an Interactive
+// Authorization request asks for.
+//
+// Always the encrypted one. OpenID4VCI 1.1 permits either, but the response
+// travels back through the Wallet and then through a form parameter on a
+// second request, which is the case Section 8.3 of OpenID4VP exists for;
+// asking for ia_post would hand an unauthenticated intermediary the
+// presented Credential. ResponseModeUnencrypted is configured beside it so
+// that both spellings move together if the working group renames them
+// (CS01_07), not because anything selects it.
+func (ia *InteractiveAuthorization) ResponseMode() string {
+	if ia != nil && ia.ResponseModeEncrypted != "" {
+		return ia.ResponseModeEncrypted
+	}
+	return openid4vp.ResponseModeIAPostJWT
+}
+
+// PresentationAudience is what a presentation answering an Interactive
+// Authorization challenge must be addressed to.
+//
+// The prefix is what keeps it out of the namespace of ordinary Verifier
+// client_ids, and the scope decides whether the derived Origin of the
+// Authorization Challenge Endpoint or its full URL follows - see
+// SDJWTBindingScope for why the draft supports both readings.
+func (ia *InteractiveAuthorization) PresentationAudience(issuerURL string) (string, error) {
+	endpoint := strings.TrimRight(issuerURL, "/") + AuthorizationChallengePath
+
+	prefix := "ia:"
+	if ia != nil && ia.BindingPrefix != "" {
+		prefix = ia.BindingPrefix
+	}
+
+	if ia != nil && ia.SDJWTBindingScope == "endpoint" {
+		return prefix + endpoint, nil
+	}
+
+	// RFC 6454 §4: the derived Origin is scheme, host and port, nothing
+	// else. url.Parse keeps the default port out of Host, which is what
+	// the comparison on the wallet's side expects.
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("deriving the Authorization Challenge Endpoint origin: %w", err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("deriving the Authorization Challenge Endpoint origin: %q is not an absolute URL", endpoint)
+	}
+	return prefix + parsed.Scheme + "://" + parsed.Host, nil
+}
+
+// ChallengeEndpointOrigin is the derived Origin (RFC 6454 §4) of the
+// Authorization Challenge Endpoint, which is the only value OpenID4VCI 1.1
+// permits in an Interactive Authorization request's expected_origins.
+func (ia *InteractiveAuthorization) ChallengeEndpointOrigin(issuerURL string) (string, error) {
+	parsed, err := url.Parse(strings.TrimRight(issuerURL, "/") + AuthorizationChallengePath)
+	if err != nil {
+		return "", fmt.Errorf("deriving the Authorization Challenge Endpoint origin: %w", err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("deriving the Authorization Challenge Endpoint origin: %q is not an absolute URL", issuerURL)
+	}
+	return parsed.Scheme + "://" + parsed.Host, nil
+}
+
+// AuthSessionTTL bounds how long one Interactive Authorization exchange may
+// take.
+func (ia *InteractiveAuthorization) AuthSessionTTL() time.Duration {
+	if ia != nil && ia.AuthSessionTTLSeconds > 0 {
+		return time.Duration(ia.AuthSessionTTLSeconds) * time.Second
+	}
+	return 300 * time.Second
+}
+
+// MetadataNames carries the configured spellings of the two Authorization
+// Server metadata members through to the one place that serialises them, so
+// the served JSON and the signed document cannot disagree.
+func (ia *InteractiveAuthorization) MetadataNames() oauth2.MetadataNames {
+	if ia == nil {
+		return oauth2.MetadataNames{}
+	}
+	return oauth2.MetadataNames{
+		AuthorizationChallengeEndpoint:  ia.MetadataEndpointParameter,
+		RequireInteractiveAuthorization: ia.MetadataRequireParameter,
+	}
 }
 
 // OpenID4VCICompat holds interoperability switches for non-conformant wallets.
@@ -3448,16 +3696,27 @@ func (cfg *IssuerMetadata) Generate(ctx context.Context, publicURL string, crede
 
 // GenerateMetadata generates OAuth2 metadata from configuration.
 // Returns unsigned metadata that should be signed on-demand in the endpoint handler for freshness.
-func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string, walletAttestationEnabled bool, allowedSignatureAlgorithms []string) *oauth2.AuthorizationServerMetadata {
+//
+// ia is the deployment's Interactive Authorization configuration, which
+// lives beside this server rather than inside it (it describes the whole
+// delivery path, not one Authorization Server), and is passed in rather
+// than reached for so that a caller without the mechanism can pass nil.
+func (cfg *OAuthServer) GenerateMetadata(ctx context.Context, issuerURL string, walletAttestationEnabled bool, allowedSignatureAlgorithms []string, ia *InteractiveAuthorization) *oauth2.AuthorizationServerMetadata {
 	metadata := oauth2.GenerateMetadata(&oauth2.MetadataConfig{
-		IssuerURL:                  issuerURL,
-		TokenEndpoint:              cfg.TokenEndpoint,
-		GrantTypes:                 cfg.GrantTypes,
-		WalletAttestationEnabled:   walletAttestationEnabled,
-		AllowedSignatureAlgorithms: allowedSignatureAlgorithms,
+		IssuerURL:                       issuerURL,
+		TokenEndpoint:                   cfg.TokenEndpoint,
+		GrantTypes:                      cfg.GrantTypes,
+		WalletAttestationEnabled:        walletAttestationEnabled,
+		AllowedSignatureAlgorithms:      allowedSignatureAlgorithms,
+		AuthorizationChallengeEndpoint:  ia.ChallengeEndpoint(issuerURL),
+		RequireInteractiveAuthorization: ia.Required(),
 	})
 
-	return metadata
+	// Carried on the document rather than applied here, so that the served
+	// JSON and the signed_metadata JWT - produced from this same value at
+	// two different moments - cannot end up spelling these two members
+	// differently. See oauth2.MetadataNames.
+	return metadata.WithInteractiveAuthorizationNames(ia.MetadataNames())
 }
 
 // DeclaredClaimNames returns the top-level claim names this credential type
