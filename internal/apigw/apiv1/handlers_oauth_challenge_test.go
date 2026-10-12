@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	stdcrypto "crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -15,6 +16,7 @@ import (
 	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -922,4 +924,85 @@ func TestClaimedContextCannotResurrectTheHandle(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.NotEmpty(t, stored.AuthSessionDPoPThumbprint)
+}
+
+// The Authorization Challenge Endpoint now supplies an mdoc session
+// transcript, so an mdoc presentation is no longer refused by name - and
+// the transcript it supplies is the Interactive Authorization one, which
+// is a different structure from either of the browser flow's.
+//
+// Verifying against the wrong transcript fails device-auth with nothing to
+// point at, so this asserts on the BYTES rather than on "mdoc is accepted
+// now": the latter would pass just as well with the direct-post builder
+// wired in by mistake.
+func TestAuthorizationChallenge_SuppliesTheInteractiveAuthorizationTranscript(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: opened.AuthSession,
+	})
+	require.NoError(t, err)
+
+	privateEphemeralJWK, ok := client.cacheService.EphemeralEncryptionKey.Get(t.Context(), authCtx.EphemeralEncryptionKeyID)
+	require.True(t, ok)
+
+	ia := &client.cfg.APIGW.Delivery.InteractiveAuthorization
+	build := client.interactiveAuthorizationSessionTranscript(ia, authCtx, privateEphemeralJWK)
+	require.NotNil(t, build, "the challenge endpoint must supply a transcript, or mdoc is refused")
+
+	got, err := build()
+	require.NoError(t, err)
+
+	// Rebuilt from the exchange's own values rather than compared to a
+	// constant, so the test says which inputs are bound rather than only
+	// that some bytes matched.
+	ephemeralPublicJWK, err := privateEphemeralJWK.PublicKey()
+	require.NoError(t, err)
+	thumbprint, err := ephemeralPublicJWK.Thumbprint(stdcrypto.SHA256)
+	require.NoError(t, err)
+
+	want, err := mdoc.BuildOID4VCIIAESessionTranscript(
+		"OpenID4VCIIAEHandover",
+		challengeIssuerURL+"/authorize-challenge",
+		authCtx.Nonce,
+		thumbprint,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+
+	// And it is NOT the browser flow's transcript, which is the mistake
+	// that would otherwise go unnoticed.
+	directPost, err := mdoc.BuildOID4VPSessionTranscript(
+		authCtx.ClientID, authCtx.Nonce, challengeIssuerURL+"/verification/direct_post", thumbprint)
+	require.NoError(t, err)
+	assert.NotEqual(t, directPost, got)
+
+	// The endpoint goes in unprefixed: the "ia:" that keeps an SD-JWT VC
+	// audience out of an ordinary Verifier's namespace must not appear in
+	// the handover.
+	assert.NotContains(t, string(got), "ia:https://")
+}
+
+// CS01_07: the handover label is hashed into the transcript, so a
+// deployment has to be able to follow the working group without a release.
+func TestAuthorizationChallenge_TranscriptLabelFollowsConfiguration(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cfg.APIGW.Delivery.InteractiveAuthorization.MdocHandoverLabel = "OpenID4VCIIAHandover"
+
+	opened := challengeErr(t, client, initialChallenge(t))
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: opened.AuthSession,
+	})
+	require.NoError(t, err)
+
+	privateEphemeralJWK, ok := client.cacheService.EphemeralEncryptionKey.Get(t.Context(), authCtx.EphemeralEncryptionKeyID)
+	require.True(t, ok)
+
+	got, err := client.interactiveAuthorizationSessionTranscript(
+		&client.cfg.APIGW.Delivery.InteractiveAuthorization, authCtx, privateEphemeralJWK)()
+	require.NoError(t, err)
+
+	assert.Contains(t, string(got), "OpenID4VCIIAHandover")
+	assert.NotContains(t, string(got), "OpenID4VCIIAEHandover")
 }

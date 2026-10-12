@@ -263,6 +263,12 @@ type issuanceAuthBinding struct {
 	// this channel must have been signed over. Nil means the channel does
 	// not accept mdoc, which is refused explicitly rather than verified
 	// against some other channel's transcript.
+	//
+	// Both channels supply one now - direct_post and the Authorization
+	// Challenge Endpoint build different structures - so nil is for a
+	// channel added later that has not yet decided what its wallet signs
+	// over. That is the safe default, and the reason this is a callback
+	// rather than a flag.
 	MdocSessionTranscript func() ([]byte, error)
 
 	// ExpectedState is the state the response must carry back, or empty to
