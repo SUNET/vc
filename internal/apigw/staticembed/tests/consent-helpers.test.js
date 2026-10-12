@@ -657,11 +657,23 @@ describe("credentialSubjectSummary", () => {
         }), "");
     });
 
-    it("does not depend on key order when both spellings are present", () => {
-        assert.equal(credentialSubjectSummary({
+    it("resolves duplicate spellings the same way whatever the key order", () => {
+        // Object.entries preserves insertion order, so a "first wins" rule
+        // made the summary depend on how the backend happened to
+        // serialise the object. Both orders must give the same answer.
+        const snakeFirst = credentialSubjectSummary({
             given_name: { label: "Given name", value: "Ada" },
             givenName: { label: "Given name", value: "Augusta" },
-        }), "Ada");
+        });
+        const camelFirst = credentialSubjectSummary({
+            givenName: { label: "Given name", value: "Augusta" },
+            given_name: { label: "Given name", value: "Ada" },
+        });
+        assert.equal(snakeFirst, camelFirst, "the key order must not change the answer");
+        // Which spelling wins is arbitrary - lexicographically first, and
+        // no credential in this ecosystem ships both. That it is always
+        // the same one is the property under test.
+        assert.equal(snakeFirst, "Augusta");
     });
 
     it("skips absent, empty and non-string values", () => {

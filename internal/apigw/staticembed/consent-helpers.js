@@ -329,18 +329,32 @@ function normalizeSvgID(svgID) {
 export function credentialSubjectSummary(svgTemplateClaims) {
     if (!svgTemplateClaims) return "";
 
-    /** @type {Map<string, unknown>} */
+    /** @type {Map<string, string[]>} */
     const byNormalized = new Map();
-    for (const [svgID, claim] of Object.entries(svgTemplateClaims)) {
-        // First spelling wins, so a credential carrying both `given_name`
-        // and `givenName` does not depend on key order.
+    for (const svgID of Object.keys(svgTemplateClaims)) {
         const key = normalizeSvgID(svgID);
-        if (!byNormalized.has(key)) byNormalized.set(key, claim?.value);
+        if (!byNormalized.has(key)) byNormalized.set(key, []);
+        byNormalized.get(key)?.push(svgID);
     }
 
     const parts = [];
-    for (const svgID of SUMMARY_SVG_IDS) {
-        const value = byNormalized.get(svgID);
+    for (const normalized of SUMMARY_SVG_IDS) {
+        const spellings = byNormalized.get(normalized);
+        if (!spellings) continue;
+
+        // A credential carrying two spellings of one claim - given_name
+        // AND givenName - resolves by a stated rule rather than by
+        // whichever JSON key came first. Object.entries preserves
+        // insertion order, so "first wins" made the summary depend on how
+        // the backend happened to serialise the object, and the same
+        // credential could show a different name on two page loads.
+        //
+        // Lexicographically first. WHICH spelling wins is arbitrary -
+        // there is no reason to prefer one over the other, and no
+        // credential in this ecosystem ships both - but that it is always
+        // the same one is not.
+        const svgID = [...spellings].sort()[0];
+        const value = svgTemplateClaims[svgID]?.value;
         if (typeof value === "string" && value.length > 0 && !parts.includes(value)) {
             parts.push(value);
         }
