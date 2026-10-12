@@ -1049,8 +1049,6 @@ persisted in the database.
 
 > **Path:** `.apigw.delivery.openid4vci_compat`
 
-behaviour has to differ from this server's default, in either direction.
-
 Two kinds live here, and they point opposite ways. One kind accepts
 something a non-conformant WALLET sends that the specification does not
 allow. The other emits something a NEWER specification defines that the

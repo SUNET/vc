@@ -1882,8 +1882,7 @@ type APIGWDelivery struct {
 	OpenID4VCICompat OpenID4VCICompat `yaml:"openid4vci_compat" validate:"omitempty"`
 }
 
-// OpenID4VCICompat holds switches for deployments whose OpenID4VCI
-// behaviour has to differ from this server's default, in either direction.
+// OpenID4VCICompat holds switches that change this server's OpenID4VCI behaviour.
 //
 // Two kinds live here, and they point opposite ways. One kind accepts
 // something a non-conformant WALLET sends that the specification does not
