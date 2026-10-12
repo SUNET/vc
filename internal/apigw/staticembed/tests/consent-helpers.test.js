@@ -6,16 +6,17 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+    IMAGE_PLACEHOLDERS,
+    SAFE_IMAGE_SUBTYPES,
     base64ToUtf8,
+    clearUnresolvedPlaceholders,
     detectBase64Image,
     escapeHtml,
     escapeSvgValue,
     flattenClaims,
-    clearUnresolvedPlaceholders,
-    IMAGE_PLACEHOLDERS,
+    initialCredentialSelection,
     keyToLabel,
     renderClaimValueHtml,
-    SAFE_IMAGE_SUBTYPES,
     utf8ToBase64,
     valueForSvgPlaceholder,
 } from "../consent-helpers.js";
@@ -602,5 +603,24 @@ describe("escapeSvgValue", () => {
     it("leaves a base64 data URL alone", () => {
         const url = "data:image/png;base64,iVBORw0KGgo=";
         assert.equal(escapeSvgValue(url), url);
+    });
+});
+
+describe("initialCredentialSelection", () => {
+    it("preselects the only credential in a single-credential offer", () => {
+        // The defect this fixes: the radio carried a hard `required` and no
+        // checked binding, so a one-credential offer - which is every offer
+        // this page has ever served - would not submit until the holder
+        // clicked a control that had nothing to choose between.
+        assert.equal(initialCredentialSelection([{ vct: "a" }]), 0);
+    });
+
+    it("selects nothing when there is a real choice", () => {
+        assert.equal(initialCredentialSelection([{ vct: "a" }, { vct: "b" }]), null);
+    });
+
+    it("selects nothing when the list is empty or missing", () => {
+        assert.equal(initialCredentialSelection([]), null);
+        assert.equal(initialCredentialSelection(undefined), null);
     });
 });
