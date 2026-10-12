@@ -82,33 +82,32 @@ func validMetadata() *AuthorizationServerMetadata {
 }
 
 func TestRequireInteractiveAuthorizationIsRefusedByValidation(t *testing.T) {
+	const endpoint = "https://issuer.example.com/op/authorize-challenge"
 	validate := validator.New()
 
-	t.Run("required without the endpoint does not validate", func(t *testing.T) {
-		m := validMetadata()
-		m.RequireInteractiveAuthorization = true
+	for _, tt := range []struct {
+		name     string
+		endpoint string
+		require  bool
+		wantErr  bool
+	}{
+		{name: "required without the endpoint does not validate", require: true, wantErr: true},
+		{name: "required with the endpoint validates", endpoint: endpoint, require: true},
+		{name: "the endpoint alone validates", endpoint: endpoint},
+		{name: "neither is fine"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := validMetadata()
+			m.AuthorizationChallengeEndpoint = tt.endpoint
+			m.RequireInteractiveAuthorization = tt.require
 
-		err := validate.Struct(m)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "RequireInteractiveAuthorization")
-	})
-
-	t.Run("required with the endpoint validates", func(t *testing.T) {
-		m := validMetadata()
-		m.AuthorizationChallengeEndpoint = "https://issuer.example.com/op/authorize-challenge"
-		m.RequireInteractiveAuthorization = true
-
-		assert.NoError(t, validate.Struct(m))
-	})
-
-	t.Run("the endpoint alone validates", func(t *testing.T) {
-		m := validMetadata()
-		m.AuthorizationChallengeEndpoint = "https://issuer.example.com/op/authorize-challenge"
-
-		assert.NoError(t, validate.Struct(m))
-	})
-
-	t.Run("neither is fine", func(t *testing.T) {
-		assert.NoError(t, validate.Struct(validMetadata()))
-	})
+			err := validate.Struct(m)
+			if !tt.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "RequireInteractiveAuthorization")
+		})
+	}
 }
