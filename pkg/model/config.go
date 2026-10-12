@@ -1922,6 +1922,11 @@ type InteractiveAuthorization struct {
 	// ResponseModeUnencrypted and ResponseModeEncrypted name the two
 	// response modes an Interactive Authorization request may ask for.
 	//
+	// Only the encrypted one is ever asked for - see
+	// InteractiveAuthorization.ResponseMode for why. Its unencrypted
+	// counterpart is configured beside it so that both spellings move
+	// together if the working group renames them.
+	//
 	// CS01_07: the change log says "iae_post".
 	ResponseModeUnencrypted string `yaml:"response_mode_unencrypted" default:"ia_post" validate:"omitempty,max=32"`
 	ResponseModeEncrypted   string `yaml:"response_mode_encrypted" default:"ia_post.jwt" validate:"omitempty,max=32"`
@@ -1934,7 +1939,7 @@ type InteractiveAuthorization struct {
 	// marshalling would leave the served JSON and the signed claims
 	// disagreeing, and every verifier checking the JWT would fail. Both
 	// documents are therefore produced from one place that applies these
-	// names - see oauth2.AuthorizationServerMetadata.MarshalWithNames.
+	// names - see oauth2.AuthorizationServerMetadata.WithInteractiveAuthorizationNames.
 	MetadataEndpointParameter string `yaml:"metadata_endpoint_parameter" default:"authorization_challenge_endpoint" validate:"omitempty,max=128"`
 	MetadataRequireParameter  string `yaml:"metadata_require_parameter" default:"require_interactive_authorization" validate:"omitempty,max=128"`
 
