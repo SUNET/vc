@@ -6,7 +6,9 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,14 +17,34 @@ import (
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/pki"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/lestrrat-go/jwx/v3/jwa"
+	"github.com/lestrrat-go/jwx/v3/jwe"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+)
+
+// challengeWalletKey is the key every test exchange is opened with. DPoP
+// is required on both legs, so a fixture without one tests nothing that
+// can happen.
+var (
+	challengeWalletKey = func() *ecdsa.PrivateKey {
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			panic(err)
+		}
+		return key
+	}()
+
+	// The endpoint burns each jti, so a fixture that reused one would see
+	// its second request refused as a replay.
+	challengeJTI atomic.Int64
 )
 
 const (
@@ -50,6 +72,15 @@ func newChallengeClient(t *testing.T) *Client {
 	cfg := &model.Cfg{
 		Common: &model.Common{
 			CredentialMetadata: map[string]*model.CredentialMetadata{
+				// The scope being ISSUED, which the presentation pipeline
+				// resolves first...
+				challengeScope: {
+					Format: openid4vp.FormatSDJWTVC,
+					VCTM:   &sdjwtvc.VCTM{VCT: "urn:example:issued:1"},
+				},
+				// ...and the scope being PRESENTED to authenticate it,
+				// which the DCQL query is built from. A deployment has both
+				// and the two are not the same thing.
 				challengeAuthScope: {
 					Format: openid4vp.FormatSDJWTVC,
 					VCTM:   &sdjwtvc.VCTM{VCT: "urn:example:pid:1"},
@@ -98,13 +129,32 @@ func newChallengeClient(t *testing.T) *Client {
 
 // initialChallenge is the request a conformant wallet opens an exchange
 // with, so that each test below can vary exactly one thing about it.
-func initialChallenge() *AuthorizationChallengeRequest {
+func initialChallenge(t *testing.T) *AuthorizationChallengeRequest {
+	t.Helper()
 	return &AuthorizationChallengeRequest{
 		ResponseType:              "code",
 		ClientID:                  "wallet-1",
 		Scope:                     challengeScope,
 		RedirectURI:               "https://wallet.example.com/cb",
 		InteractionTypesSupported: "urn:openid:dcp:ia:openid4vp_presentation,urn:openid:dcp:ia:auth_via_web",
+		DPOP:                      walletProof(t),
+	}
+}
+
+// walletProof mints a fresh proof from the shared wallet key.
+func walletProof(t *testing.T) string {
+	t.Helper()
+	return challengeDPoPProof(t, challengeWalletKey, fmt.Sprintf("jti-challenge-test-%d", challengeJTI.Add(1)))
+}
+
+// continueExchange is an intermediate request carrying whatever the test
+// wants to send back, signed with the key the exchange was opened under.
+func continueExchange(t *testing.T, authSession, openID4VPResponse string) *AuthorizationChallengeRequest {
+	t.Helper()
+	return &AuthorizationChallengeRequest{
+		AuthSession:       authSession,
+		OpenID4VPResponse: openID4VPResponse,
+		DPOP:              walletProof(t),
 	}
 }
 
@@ -157,7 +207,7 @@ func unsafeJWTClaims(t *testing.T, compact string) map[string]any {
 func TestAuthorizationChallenge_InitialRequestRequiresAPresentation(t *testing.T) {
 	client := newChallengeClient(t)
 
-	challengeErr := challengeErr(t, client, initialChallenge())
+	challengeErr := challengeErr(t, client, initialChallenge(t))
 
 	assert.Equal(t, 403, challengeErr.HTTPStatus)
 	assert.Equal(t, "insufficient_authorization", challengeErr.ErrorCode)
@@ -191,7 +241,7 @@ func TestAuthorizationChallenge_InitialRequestRequiresAPresentation(t *testing.T
 func TestAuthorizationChallenge_PresentationRequestIsSignedAndBoundToTheEndpoint(t *testing.T) {
 	client := newChallengeClient(t)
 
-	challengeErr := challengeErr(t, client, initialChallenge())
+	challengeErr := challengeErr(t, client, initialChallenge(t))
 
 	var envelope struct {
 		Request string `json:"request"`
@@ -214,7 +264,7 @@ func TestAuthorizationChallenge_PresentationRequestIsSignedAndBoundToTheEndpoint
 func TestAuthorizationChallenge_WalletWithoutThePresentationInteraction(t *testing.T) {
 	client := newChallengeClient(t)
 
-	req := initialChallenge()
+	req := initialChallenge(t)
 	req.InteractionTypesSupported = "urn:openid:dcp:ia:auth_via_web"
 
 	challengeErr := challengeErr(t, client, req)
@@ -234,7 +284,7 @@ func TestAuthorizationChallenge_ScopeThatNeedsAWebInteraction(t *testing.T) {
 		AuthenticSource: "authentic-source",
 	}
 
-	challengeErr := challengeErr(t, client, initialChallenge())
+	challengeErr := challengeErr(t, client, initialChallenge(t))
 
 	assert.Equal(t, 400, challengeErr.HTTPStatus)
 	assert.Equal(t, "missing_interaction_type", challengeErr.ErrorCode)
@@ -248,7 +298,7 @@ func TestAuthorizationChallenge_DeploymentThatDoesNotOfferTheInteraction(t *test
 	client := newChallengeClient(t)
 	client.cfg.APIGW.Delivery.InteractiveAuthorization.InteractionTypesSupported = []string{"auth_via_web"}
 
-	challengeErr := challengeErr(t, client, initialChallenge())
+	challengeErr := challengeErr(t, client, initialChallenge(t))
 
 	assert.Equal(t, "missing_interaction_type", challengeErr.ErrorCode)
 }
@@ -260,7 +310,7 @@ func TestAuthorizationChallenge_DisabledDeployment(t *testing.T) {
 	disabled := false
 	client.cfg.APIGW.Delivery.InteractiveAuthorization.Enable = &disabled
 
-	oauthErr := oauthErrFromChallenge(t, client, initialChallenge())
+	oauthErr := oauthErrFromChallenge(t, client, initialChallenge(t))
 	assert.Equal(t, 404, oauthErr.HTTPStatus)
 }
 
@@ -281,7 +331,7 @@ func TestAuthorizationChallenge_InitialRequestValidation(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			client := newChallengeClient(t)
-			req := initialChallenge()
+			req := initialChallenge(t)
 			mutate(req)
 
 			oauthErr := oauthErrFromChallenge(t, client, req)
@@ -296,13 +346,10 @@ func TestAuthorizationChallenge_InitialRequestValidation(t *testing.T) {
 func TestAuthorizationChallenge_UnknownAndExpiredAuthSessionAreIndistinguishable(t *testing.T) {
 	client := newChallengeClient(t)
 
-	unknown := oauthErrFromChallenge(t, client, &AuthorizationChallengeRequest{
-		AuthSession:       "no-such-session",
-		OpenID4VPResponse: `{"response":"x"}`,
-	})
+	unknown := oauthErrFromChallenge(t, client, continueExchange(t, "no-such-session", `{"response":"x"}`))
 
 	// Open a real exchange and age it past its deadline.
-	opened := challengeErr(t, client, initialChallenge())
+	opened := challengeErr(t, client, initialChallenge(t))
 	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
 		AuthSession: opened.AuthSession,
 	})
@@ -310,10 +357,7 @@ func TestAuthorizationChallenge_UnknownAndExpiredAuthSessionAreIndistinguishable
 	authCtx.ExpiresAt = time.Now().Add(-time.Second).Unix()
 	require.NoError(t, client.cacheService.AuthContext.Update(t.Context(), authCtx))
 
-	expired := oauthErrFromChallenge(t, client, &AuthorizationChallengeRequest{
-		AuthSession:       opened.AuthSession,
-		OpenID4VPResponse: `{"response":"x"}`,
-	})
+	expired := oauthErrFromChallenge(t, client, continueExchange(t, opened.AuthSession, `{"response":"x"}`))
 
 	assert.Equal(t, unknown.ErrorCode, expired.ErrorCode)
 	assert.Equal(t, unknown.Error(), expired.Error())
@@ -324,13 +368,11 @@ func TestAuthorizationChallenge_UnknownAndExpiredAuthSessionAreIndistinguishable
 // session was opened for.
 func TestAuthorizationChallenge_IntermediateRequestFromAnotherClient(t *testing.T) {
 	client := newChallengeClient(t)
-	opened := challengeErr(t, client, initialChallenge())
+	opened := challengeErr(t, client, initialChallenge(t))
 
-	oauthErr := oauthErrFromChallenge(t, client, &AuthorizationChallengeRequest{
-		AuthSession:       opened.AuthSession,
-		ClientID:          "wallet-2",
-		OpenID4VPResponse: `{"response":"x"}`,
-	})
+	mismatched := continueExchange(t, opened.AuthSession, `{"response":"x"}`)
+	mismatched.ClientID = "wallet-2"
+	oauthErr := oauthErrFromChallenge(t, client, mismatched)
 	assert.Equal(t, oauth2.ErrCodeInvalidRequest, oauthErr.ErrorCode)
 	// On the message, not just the code: every later guard on this path
 	// also answers invalid_request, so a test that stopped at the code
@@ -340,11 +382,9 @@ func TestAuthorizationChallenge_IntermediateRequestFromAnotherClient(t *testing.
 	// And the client the session WAS opened for gets past this check, so
 	// the assertion above is about the mismatch rather than about sending
 	// a client_id at all.
-	sameClient := oauthErrFromChallenge(t, client, &AuthorizationChallengeRequest{
-		AuthSession:       opened.AuthSession,
-		ClientID:          "wallet-1",
-		OpenID4VPResponse: `{"response":"x"}`,
-	})
+	matching := continueExchange(t, opened.AuthSession, `{"response":"x"}`)
+	matching.ClientID = "wallet-1"
+	sameClient := oauthErrFromChallenge(t, client, matching)
 	assert.NotContains(t, sameClient.Error(), "client_id does not match")
 }
 
@@ -352,12 +392,10 @@ func TestAuthorizationChallenge_IntermediateRequestFromAnotherClient(t *testing.
 // reason is the one that explains what happened.
 func TestAuthorizationChallenge_WalletErrorIsPassedThrough(t *testing.T) {
 	client := newChallengeClient(t)
-	opened := challengeErr(t, client, initialChallenge())
+	opened := challengeErr(t, client, initialChallenge(t))
 
-	challengeErr := challengeErr(t, client, &AuthorizationChallengeRequest{
-		AuthSession:       opened.AuthSession,
-		OpenID4VPResponse: `{"error":"access_denied","error_description":"user declined"}`,
-	})
+	challengeErr := challengeErr(t, client, continueExchange(t, opened.AuthSession,
+		`{"error":"access_denied","error_description":"user declined"}`))
 
 	assert.Equal(t, "access_denied", challengeErr.ErrorCode)
 	assert.Equal(t, "user declined", challengeErr.ErrorDescription)
@@ -369,22 +407,21 @@ func TestAuthorizationChallenge_WalletErrorIsPassedThrough(t *testing.T) {
 // reach the endpoint strip the encryption the wallet was told to apply.
 func TestAuthorizationChallenge_UnencryptedResponseToAnEncryptedRequest(t *testing.T) {
 	client := newChallengeClient(t)
-	opened := challengeErr(t, client, initialChallenge())
+	opened := challengeErr(t, client, initialChallenge(t))
 
-	oauthErr := oauthErrFromChallenge(t, client, &AuthorizationChallengeRequest{
-		AuthSession:       opened.AuthSession,
-		OpenID4VPResponse: `{"vp_token":{"pid_auth":["ey.."]}}`,
-	})
+	oauthErr := oauthErrFromChallenge(t, client, continueExchange(t, opened.AuthSession,
+		`{"vp_token":{"pid_auth":["ey.."]}}`))
 	assert.Equal(t, oauth2.ErrCodeInvalidRequest, oauthErr.ErrorCode)
 	assert.Contains(t, oauthErr.Error(), "encrypted")
 }
 
 func TestAuthorizationChallenge_IntermediateRequestNeedsAResponse(t *testing.T) {
 	client := newChallengeClient(t)
-	opened := challengeErr(t, client, initialChallenge())
+	opened := challengeErr(t, client, initialChallenge(t))
 
 	oauthErr := oauthErrFromChallenge(t, client, &AuthorizationChallengeRequest{
 		AuthSession: opened.AuthSession,
+		DPOP:        walletProof(t),
 	})
 	assert.Equal(t, oauth2.ErrCodeInvalidRequest, oauthErr.ErrorCode)
 	assert.Contains(t, oauthErr.Error(), "openid4vp_response")
@@ -457,17 +494,13 @@ func challengeDPoPProof(t *testing.T, key *ecdsa.PrivateKey, jti string) string 
 // associated with the DPoP public key, so that a stolen auth_session alone
 // gets a thief nowhere.
 func TestAuthorizationChallenge_AuthSessionIsBoundToTheDPoPKey(t *testing.T) {
-	walletKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
 	thiefKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
 	open := func(t *testing.T) (*Client, string) {
 		t.Helper()
 		client := newChallengeClient(t)
-		req := initialChallenge()
-		req.DPOP = challengeDPoPProof(t, walletKey, "jti-open-exchange")
-		opened := challengeErr(t, client, req)
+		opened := challengeErr(t, client, initialChallenge(t))
 
 		authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
 			AuthSession: opened.AuthSession,
@@ -481,9 +514,11 @@ func TestAuthorizationChallenge_AuthSessionIsBoundToTheDPoPKey(t *testing.T) {
 	t.Run("another key cannot continue it", func(t *testing.T) {
 		client, authSession := open(t)
 
+		thiefProof := challengeDPoPProof(t, thiefKey,
+			fmt.Sprintf("jti-challenge-test-%d", challengeJTI.Add(1)))
 		oauthErr := oauthErrFromChallenge(t, client, &AuthorizationChallengeRequest{
 			AuthSession:       authSession,
-			DPOP:              challengeDPoPProof(t, thiefKey, "jti-thief-attempt"),
+			DPOP:              thiefProof,
 			OpenID4VPResponse: `{"response":"x"}`,
 		})
 		assert.Equal(t, oauth2.ErrCodeInvalidDPoPProof, oauthErr.ErrorCode)
@@ -509,12 +544,347 @@ func TestAuthorizationChallenge_AuthSessionIsBoundToTheDPoPKey(t *testing.T) {
 		// Past the binding and on to the response itself, which this test
 		// deliberately does not supply - the point is which guard it
 		// reaches, not that it succeeds.
-		oauthErr := oauthErrFromChallenge(t, client, &AuthorizationChallengeRequest{
-			AuthSession:       authSession,
-			DPOP:              challengeDPoPProof(t, walletKey, "jti-continue-exchange"),
-			OpenID4VPResponse: `{"vp_token":{}}`,
-		})
+		oauthErr := oauthErrFromChallenge(t, client,
+			continueExchange(t, authSession, `{"vp_token":{}}`))
 		assert.Equal(t, oauth2.ErrCodeInvalidRequest, oauthErr.ErrorCode)
 		assert.Contains(t, oauthErr.Error(), "encrypted")
+	})
+}
+
+// One exchange, one authorization code. The handle has to stop resolving
+// the moment it is used, and the way that was first written could not do
+// it: the memory store hands out the pointer it holds, so clearing the
+// field reached the stored document before Update ran, Update's
+// deleteIndices then saw an empty AuthSession, and the auth_session index
+// survived. A replay resolved the same session.
+//
+// Asserted on the STORE, not on the handler's return: a handler that
+// refuses the second request for some unrelated reason would hide a handle
+// that is still resolvable.
+func TestAuthorizationChallenge_AuthSessionStopsResolvingOnceUsed(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	// Reach the claim: past every request check, and far enough in that the
+	// presentation is attempted. It fails - there is no real VP token here -
+	// which is the harder case for this assertion, because a failed exchange
+	// must consume the handle just as a successful one does.
+	_, err := client.OAuthAuthorizationChallenge(t.Context(),
+		continueExchange(t, opened.AuthSession, `{"response":"not-a-jwe"}`))
+	require.Error(t, err)
+
+	resolved, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: opened.AuthSession,
+	})
+	require.ErrorIs(t, err, cache.ErrNoDocuments,
+		"the auth_session must stop resolving once it has been used")
+	require.Nil(t, resolved)
+}
+
+// The claim is the thing that decides it, so it is also asserted directly:
+// two callers racing for one handle, exactly one winner.
+func TestClaimAuthSessionAdmitsExactlyOne(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	first, err := client.cacheService.AuthContext.ClaimAuthSession(t.Context(), opened.AuthSession)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	assert.Equal(t, opened.AuthSession, first.AuthSession,
+		"the claimant is handed the exchange as it was, so it can still check the DPoP binding")
+
+	second, err := client.cacheService.AuthContext.ClaimAuthSession(t.Context(), opened.AuthSession)
+	require.ErrorIs(t, err, cache.ErrNoDocuments)
+	require.Nil(t, second)
+}
+
+// Claiming must not take the session itself out of the store - the
+// authorization code the exchange produced is redeemed against it at the
+// Token Endpoint, after the handle is long gone.
+func TestClaimAuthSessionLeavesTheSessionRedeemable(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	claimed, err := client.cacheService.AuthContext.ClaimAuthSession(t.Context(), opened.AuthSession)
+	require.NoError(t, err)
+
+	byCode, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		Code: claimed.Code,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, byCode)
+	assert.Equal(t, claimed.SessionID, byCode.SessionID)
+	assert.Empty(t, byCode.AuthSession, "the stored exchange no longer carries the handle")
+}
+
+// DPoP is required, not honoured-when-offered. This server's Token
+// Endpoint refuses an authorization_code request without a proof, so an
+// exchange opened without one could never be redeemed - and until it
+// expired its auth_session would be a bearer handle anyone who learned it
+// could continue under their own key.
+func TestAuthorizationChallenge_DPoPIsRequiredOnBothLegs(t *testing.T) {
+	t.Run("the initial request", func(t *testing.T) {
+		client := newChallengeClient(t)
+		req := initialChallenge(t)
+		req.DPOP = ""
+
+		oauthErr := oauthErrFromChallenge(t, client, req)
+		assert.Equal(t, oauth2.ErrCodeInvalidDPoPProof, oauthErr.ErrorCode)
+		assert.Equal(t, oauth2.OAuthErrDPoPRequired.ErrorDescription, oauthErr.ErrorDescription)
+	})
+
+	t.Run("the intermediate request", func(t *testing.T) {
+		client := newChallengeClient(t)
+		opened := challengeErr(t, client, initialChallenge(t))
+
+		oauthErr := oauthErrFromChallenge(t, client, &AuthorizationChallengeRequest{
+			AuthSession:       opened.AuthSession,
+			OpenID4VPResponse: `{"response":"x"}`,
+		})
+		assert.Equal(t, oauth2.ErrCodeInvalidDPoPProof, oauthErr.ErrorCode)
+		assert.Equal(t, oauth2.OAuthErrDPoPRequired.ErrorDescription, oauthErr.ErrorDescription)
+	})
+}
+
+// The binding has to outlive the handle. The authorization code the
+// exchange produces is redeemed at the Token Endpoint, which binds the
+// access token to whatever key signed the proof on THAT request - which
+// says nothing about who opened the exchange. So the thumbprint recorded
+// at the challenge is what carries the association forward, and claiming
+// the handle must not take it with it.
+func TestClaimAuthSessionKeepsTheCodesDPoPBinding(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	claimed, err := client.cacheService.AuthContext.ClaimAuthSession(t.Context(), opened.AuthSession)
+	require.NoError(t, err)
+	require.NotEmpty(t, claimed.AuthSessionDPoPThumbprint)
+
+	// And on the STORED context, which is what the Token Endpoint reads -
+	// the claimant's copy keeping it would prove nothing.
+	stored, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		Code: claimed.Code,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, claimed.AuthSessionDPoPThumbprint, stored.AuthSessionDPoPThumbprint,
+		"the code must still carry the key its authorization was obtained under")
+	assert.Empty(t, stored.AuthSession, "only the handle is consumed")
+}
+
+// require_interactive_authorization says the browser-mediated path is not
+// accepted. A deployment that advertises it and keeps /op/par working is
+// telling wallets something untrue - and a wallet that believed it gave up
+// a flow that would have worked.
+func TestPARIsRefusedWhenOnlyInteractiveAuthorizationIsAccepted(t *testing.T) {
+	par := func(t *testing.T, client *Client) error {
+		t.Helper()
+		_, err := client.OAuthPar(t.Context(), &openid4vci.PARRequest{
+			ResponseType:        "code",
+			ClientID:            "wallet-1",
+			RedirectURI:         "https://wallet.example.com/cb",
+			Scope:               challengeScope,
+			CodeChallenge:       strings.Repeat("c", 43),
+			CodeChallengeMethod: "S256",
+		})
+		return err
+	}
+
+	t.Run("refused when required", func(t *testing.T) {
+		client := newChallengeClient(t)
+		required := true
+		client.cfg.APIGW.Delivery.InteractiveAuthorization.RequireInteractiveAuthorization = &required
+
+		err := par(t, client)
+		require.Error(t, err)
+
+		var oauthErr *oauth2.OAuthError
+		require.ErrorAs(t, err, &oauthErr)
+		assert.Contains(t, oauthErr.Error(), "only interactive authorization")
+	})
+
+	t.Run("untouched when it is merely offered", func(t *testing.T) {
+		// The default. Interactive Authorization being available says
+		// nothing about the browser path, and this check must not start
+		// refusing every deployment that enables the endpoint.
+		client := newChallengeClient(t)
+
+		if err := par(t, client); err != nil {
+			assert.NotContains(t, err.Error(), "only interactive authorization")
+		}
+	})
+
+	t.Run("untouched when the mechanism is off entirely", func(t *testing.T) {
+		// Required() is false without Enable, so a stray
+		// require_interactive_authorization cannot take the browser path
+		// away from a deployment that never exposed the endpoint.
+		client := newChallengeClient(t)
+		disabled, required := false, true
+		client.cfg.APIGW.Delivery.InteractiveAuthorization.Enable = &disabled
+		client.cfg.APIGW.Delivery.InteractiveAuthorization.RequireInteractiveAuthorization = &required
+
+		if err := par(t, client); err != nil {
+			assert.NotContains(t, err.Error(), "only interactive authorization")
+		}
+	})
+}
+
+// presentationState is the state the exchange minted, which a wallet reads
+// off the request object it was handed.
+func presentationState(t *testing.T, client *Client, authSession string) string {
+	t.Helper()
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: authSession,
+	})
+	require.NoError(t, err)
+	return authCtx.State
+}
+
+// encryptedVPResponse builds the openid4vp_response a wallet would send:
+// a JWE to the exchange's own ephemeral key, so the request gets PAST
+// decryption and into the presentation pipeline, which is where the
+// failures under test actually happen.
+func encryptedVPResponse(t *testing.T, client *Client, authSession, payload string) string {
+	t.Helper()
+
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: authSession,
+	})
+	require.NoError(t, err)
+
+	_, publicJWK, err := client.EphemeralEncryptionKey(t.Context(), authCtx.EphemeralEncryptionKeyID)
+	require.NoError(t, err)
+
+	encrypted, err := jwe.Encrypt([]byte(payload),
+		jwe.WithKey(jwa.ECDH_ES(), publicJWK),
+		jwe.WithContentEncryption(jwa.A256GCM()))
+	require.NoError(t, err)
+
+	envelope, err := json.Marshal(map[string]string{"response": string(encrypted)})
+	require.NoError(t, err)
+	return string(envelope)
+}
+
+// Every answer from this endpoint is an OAuth error with its own status.
+// An untyped error would reach the wallet through the generic envelope as
+// a 500 - telling a wallet whose presentation merely did not verify that
+// the server broke, and inviting a retry that can never succeed.
+func TestAuthorizationChallenge_PresentationFailuresAreOAuthErrors(t *testing.T) {
+	t.Run("a presentation that does not satisfy the request is invalid_grant", func(t *testing.T) {
+		client := newChallengeClient(t)
+		opened := challengeErr(t, client, initialChallenge(t))
+
+		// A properly encrypted response carrying a vp_token for a
+		// credential query that was never asked for: through decryption,
+		// into the pipeline, refused there.
+		response := encryptedVPResponse(t, client, opened.AuthSession,
+			`{"state":"`+presentationState(t, client, opened.AuthSession)+`","vp_token":{"not_asked_for":["ey.."]}}`)
+
+		oauthErr := oauthErrFromChallenge(t, client,
+			continueExchange(t, opened.AuthSession, response))
+		assert.Equal(t, oauth2.ErrCodeInvalidGrant, oauthErr.ErrorCode)
+		assert.Equal(t, 400, oauthErr.HTTPStatus)
+	})
+
+	t.Run("a fault of ours is server_error, not the wallet's fault", func(t *testing.T) {
+		client := newChallengeClient(t)
+
+		// Take the issued scope's metadata away AFTER the exchange is
+		// opened, which is what a half-applied config change looks like
+		// from in here: the pipeline can no longer resolve the scope it is
+		// supposed to be authenticating. That is ours, not the wallet's.
+		opened := challengeErr(t, client, initialChallenge(t))
+		response := encryptedVPResponse(t, client, opened.AuthSession,
+			`{"state":"`+presentationState(t, client, opened.AuthSession)+`","vp_token":{"`+challengeAuthScope+`":["ey.."]}}`)
+		delete(client.cfg.Common.CredentialMetadata, challengeScope)
+
+		oauthErr := oauthErrFromChallenge(t, client,
+			continueExchange(t, opened.AuthSession, response))
+		assert.Equal(t, oauth2.ErrCodeServerError, oauthErr.ErrorCode)
+		assert.Equal(t, 500, oauthErr.HTTPStatus)
+	})
+
+	t.Run("the wallet is not told which reason it was", func(t *testing.T) {
+		client := newChallengeClient(t)
+		opened := challengeErr(t, client, initialChallenge(t))
+
+		response := encryptedVPResponse(t, client, opened.AuthSession,
+			`{"state":"`+presentationState(t, client, opened.AuthSession)+`","vp_token":{"not_asked_for":["ey.."]}}`)
+		oauthErr := oauthErrFromChallenge(t, client,
+			continueExchange(t, opened.AuthSession, response))
+
+		// "no documents for this person", "this credential is not trusted"
+		// and "no token for that query" must not be distinguishable from
+		// the outside - the reasons go to the log.
+		assert.NotContains(t, oauthErr.ErrorDescription, "document")
+		assert.NotContains(t, oauthErr.ErrorDescription, "trust")
+		assert.NotContains(t, oauthErr.ErrorDescription, "VP Token")
+	})
+}
+
+// The state ties the response to the request that asked for it. A response
+// carrying someone else's state is someone else's presentation, however
+// well it verifies (OpenID4VP §14.1).
+//
+// It also has to EXIST: the Authorization Challenge Request has no state
+// parameter to echo, and openid4vp.VPResponse refuses a response whose
+// state is missing - so an exchange that minted none could never be
+// completed at all.
+func TestAuthorizationChallenge_PresentationStateMustMatch(t *testing.T) {
+	t.Run("the exchange mints one", func(t *testing.T) {
+		client := newChallengeClient(t)
+		opened := challengeErr(t, client, initialChallenge(t))
+
+		state := presentationState(t, client, opened.AuthSession)
+		require.NotEmpty(t, state, "a request built without a state could never be answered")
+
+		// And the wallet is told what it is, on the request it is handed.
+		var envelope struct {
+			Request string `json:"request"`
+		}
+		require.NoError(t, json.Unmarshal(opened.OpenID4VPRequest, &envelope))
+		assert.Equal(t, state, unsafeJWTClaims(t, envelope.Request)["state"])
+	})
+
+	t.Run("another exchange's state is refused", func(t *testing.T) {
+		client := newChallengeClient(t)
+		opened := challengeErr(t, client, initialChallenge(t))
+
+		// Well-formed, correctly encrypted, naming a credential query that
+		// WAS asked for - and carrying a state this exchange never issued.
+		response := encryptedVPResponse(t, client, opened.AuthSession,
+			`{"state":"a-state-from-somewhere-else","vp_token":{"`+challengeAuthScope+`":["ey.."]}}`)
+
+		oauthErr := oauthErrFromChallenge(t, client,
+			continueExchange(t, opened.AuthSession, response))
+		assert.Equal(t, oauth2.ErrCodeInvalidGrant, oauthErr.ErrorCode)
+		// On the wrapped CAUSE, not the code and not the description:
+		// "ey.." is not a credential either, so this response is refused
+		// downstream too and with the same code, and a test stopping at
+		// invalid_grant would keep passing with the state check deleted.
+		// The description deliberately says none of this - see the
+		// "not told which reason" subtest above - so the cause is where
+		// the distinction lives.
+		require.NotNil(t, oauthErr.Cause)
+		assert.Contains(t, oauthErr.Cause.Error(), "state does not match the request it answers")
+	})
+
+	t.Run("the right state gets past the check", func(t *testing.T) {
+		client := newChallengeClient(t)
+		opened := challengeErr(t, client, initialChallenge(t))
+
+		response := encryptedVPResponse(t, client, opened.AuthSession,
+			`{"state":"`+presentationState(t, client, opened.AuthSession)+`","vp_token":{"`+challengeAuthScope+`":["ey.."]}}`)
+
+		// It fails further in - "ey.." is not a credential - but never on
+		// the state, which is the assertion.
+		_, err := client.OAuthAuthorizationChallenge(t.Context(),
+			continueExchange(t, opened.AuthSession, response))
+		require.Error(t, err)
+
+		var oauthErr *oauth2.OAuthError
+		require.ErrorAs(t, err, &oauthErr)
+		if oauthErr.Cause != nil {
+			assert.NotContains(t, oauthErr.Cause.Error(), "state does not match")
+		}
 	})
 }

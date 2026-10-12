@@ -38,6 +38,22 @@ type AuthContextStore interface {
 	// ForfeitAuthorizationCode marks an authorization code as used and returns the updated context.
 	ForfeitAuthorizationCode(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error)
 
+	// ClaimAuthSession atomically takes the Interactive Authorization handle
+	// off the context it names and returns that context as it was BEFORE
+	// the handle was removed.
+	//
+	// Only the handle is removed. AuthSessionDPoPThumbprint stays, because
+	// the authorization code this exchange produces inherits that binding
+	// and the Token Endpoint enforces it at redemption.
+	//
+	// Exactly one caller can claim a given handle. A second attempt, and a
+	// concurrent one that had already resolved the same handle, both get
+	// ErrNoDocuments. That is what makes one exchange yield one
+	// authorization code: clearing the field and calling Update cannot,
+	// because the memory store hands out the stored pointer and the Mongo
+	// store replaces unconditionally.
+	ClaimAuthSession(ctx context.Context, authSession string) (*AuthorizationContext, error)
+
 	// RedeemPreAuthorizedCode allows a pre-authorized code to be redeemed by multiple
 	// distinct clients (per DPoP thumbprint). Returns the auth context or an error if
 	// the same client attempts to redeem the code twice.

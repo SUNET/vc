@@ -748,3 +748,52 @@ func (c *MemoryStore) MarkCodeAsForfeited(ctx context.Context, id string) error 
 func (c *MemoryStore) Create(ctx context.Context, doc *AuthorizationContext) error {
 	return c.Save(ctx, doc)
 }
+
+// ClaimAuthSession atomically takes the Interactive Authorization handle off
+// the context it names. See AuthContextStore.ClaimAuthSession.
+//
+// The returned document is a COPY, deliberately. Get hands out the pointer
+// the cache holds, so a caller that cleared a field on it would be mutating
+// the stored document - which is exactly how this was broken before: the
+// clear reached the stored copy first, deleteIndices then saw an empty
+// AuthSession and left the index behind, and the handle stayed resolvable.
+func (c *MemoryStore) ClaimAuthSession(ctx context.Context, authSession string) (*AuthorizationContext, error) {
+	if authSession == "" {
+		return nil, errors.New("authSession cannot be empty")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	indexKey := fmt.Sprintf("auth_session:%s", authSession)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		delete(c.indices, indexKey)
+		return nil, ErrNoDocuments
+	}
+
+	stored := item.Value()
+
+	// The index could name a session whose handle has already been
+	// replaced; treat that as unclaimed rather than trusting the index.
+	if stored.AuthSession != authSession {
+		return nil, ErrNoDocuments
+	}
+
+	claimed := *stored
+
+	// Only the handle. AuthSessionDPoPThumbprint is the binding the
+	// authorization code inherits, and the Token Endpoint checks it when
+	// the code is redeemed - clearing it here would hand out a code that
+	// any key could spend.
+	stored.AuthSession = ""
+	delete(c.indices, indexKey)
+	c.cache.Set(sessionID, stored, ttlcache.DefaultTTL)
+
+	return &claimed, nil
+}

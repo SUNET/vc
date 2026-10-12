@@ -15,6 +15,7 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/vc20/credential"
 
@@ -1018,5 +1019,21 @@ func checkInteractiveAuthorization(cfg *model.Cfg, serviceName string) error {
 				"but enable is false: a server cannot require a mechanism it does not offer " +
 				"(OpenID4VCI 1.1, Authorization Server Metadata)")
 	}
+
+	// The two configured metadata member names are free text, and they are
+	// written straight into the published document. A name that collides
+	// with a member the document already has - "issuer" being the way to do
+	// real damage - would replace it; two names configured the same would
+	// leave map iteration deciding which of the two survives, so the served
+	// document could differ between restarts and stop matching its own
+	// signature.
+	//
+	// The marshaller refuses both, but that refusal arrives when a wallet
+	// asks for the document, with nobody watching. This one arrives at
+	// startup.
+	if err := oauth2.ValidateMetadataNames(ia.MetadataNames(), nil); err != nil {
+		return fmt.Errorf("apigw.delivery.interactive_authorization: %w", err)
+	}
+
 	return nil
 }

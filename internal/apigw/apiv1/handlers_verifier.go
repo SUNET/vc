@@ -228,6 +228,27 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	return reply, nil
 }
 
+// ErrIssuanceAuthServerFault marks a failure in the issuance-auth pipeline
+// that is this server's rather than the wallet's: a configuration problem,
+// a datastore that would not answer, a key that should have been in the
+// cache.
+//
+// It exists because the two kinds of failure have to become different HTTP
+// answers at the Authorization Challenge Endpoint - a wallet that is told
+// invalid_grant will stop and ask the user to try again, which is right
+// for a presentation that did not verify and wrong for a datastore outage -
+// and the pipeline is the only place that knows which is which. Everything
+// NOT marked is the wallet's, which is the safe default: reporting our own
+// fault as the caller's is merely unhelpful, while reporting the caller's
+// as ours invites a retry loop against a request that can never succeed.
+var ErrIssuanceAuthServerFault = errors.New("issuance authentication failed on the server side")
+
+// serverFault tags err as ours. Formatting is left to the caller so the
+// message reads the way it was written.
+func serverFault(err error) error {
+	return fmt.Errorf("%w: %w", ErrIssuanceAuthServerFault, err)
+}
+
 // issuanceAuthBinding is what a presentation must be bound to, which
 // differs by the channel it arrived on.
 type issuanceAuthBinding struct {
@@ -243,6 +264,18 @@ type issuanceAuthBinding struct {
 	// not accept mdoc, which is refused explicitly rather than verified
 	// against some other channel's transcript.
 	MdocSessionTranscript func() ([]byte, error)
+
+	// ExpectedState is the state the response must carry back, or empty to
+	// not check it.
+	//
+	// Empty is what the browser-mediated flow passes, and that is a real
+	// gap rather than a decision: that channel puts the wallet's own PAR
+	// state on the request and never compares what comes back
+	// (OpenID4VP §14.1). It is pre-existing and not this change's to fix,
+	// so it is named here rather than quietly inherited by the new caller.
+	// Interactive Authorization mints its own and checks it, because
+	// nothing there makes a state optional.
+	ExpectedState string
 }
 
 // issuanceAuthOutcome says how a presentation that authenticated an
@@ -278,7 +311,7 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	scope, credMetaCfg, err := c.matchScope(authCtx.Scopes)
 	if err != nil {
 		c.log.Error(err, "no matching scope in authorization context")
-		return nil, err
+		return nil, serverFault(err)
 	}
 
 	// Extract the credential query ID from the persisted DCQL query.
@@ -289,7 +322,7 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	var matchedAuthScope string
 	if authCtx.DCQLQuery == nil || len(authCtx.DCQLQuery.Credentials) == 0 {
 		c.log.Error(nil, "DCQL query has no credential queries", "scope", scope)
-		return nil, errors.New("DCQL query has no credential queries")
+		return nil, serverFault(errors.New("DCQL query has no credential queries"))
 	}
 	for _, cq := range authCtx.DCQLQuery.Credentials {
 		if tokens, ok := vpResponse.VPToken[cq.ID]; ok && len(tokens) > 0 {
@@ -305,6 +338,15 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	if vpToken == "" {
 		c.log.Error(nil, "VP Token not found for any credential query", "available_keys", vpResponse.VPToken)
 		return nil, errors.New("VP Token not found for any configured credential query")
+	}
+
+	// The state ties this response to the request that asked for it. A
+	// response carrying someone else's state is someone else's
+	// presentation, however well it verifies (OpenID4VP §14.1).
+	if binding.ExpectedState != "" && vpResponse.State != binding.ExpectedState {
+		c.log.Error(nil, "presentation state does not match the request it answers",
+			"session_id", authCtx.SessionID)
+		return nil, errors.New("presentation state does not match the request it answers")
 	}
 
 	// Prepare response parameters
@@ -333,10 +375,10 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 		// configured" from "a real PDP wired up". Mdoc issuer trust must
 		// be a real decision, so refuse this path in allow-all mode.
 		if c.cfg.APIGW.Trust.PDPURL == "" {
-			return nil, errors.New("mdoc VP verification requires apigw.trust.pdp_url to be configured")
+			return nil, serverFault(errors.New("mdoc VP verification requires apigw.trust.pdp_url to be configured"))
 		}
 		if authCtx.Nonce == "" || authCtx.ClientID == "" {
-			return nil, errors.New("mdoc VP verification requires nonce and client_id on the authorization context")
+			return nil, serverFault(errors.New("mdoc VP verification requires nonce and client_id on the authorization context"))
 		}
 		// mdoc.IsMDocFormat is only a base64/CBOR-shape sniff and also
 		// matches "mso_mdoc_zk" (ZK-mdoc) presentations, whose
@@ -363,12 +405,12 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 		}
 		sessionTranscript, err := binding.MdocSessionTranscript()
 		if err != nil {
-			return nil, fmt.Errorf("build mdoc session transcript: %w", err)
+			return nil, serverFault(fmt.Errorf("build mdoc session transcript: %w", err))
 		}
 		mdocHandler, err := mdoc.NewMDocHandler(mdoc.WithMDocTrustEvaluator(c.trustEvaluator))
 		if err != nil {
 			c.log.Error(err, "failed to create mdoc handler")
-			return nil, fmt.Errorf("mdoc handler init failed: %w", err)
+			return nil, serverFault(fmt.Errorf("mdoc handler init failed: %w", err))
 		}
 		mdocResult, err := mdocHandler.VerifyAndExtractBound(ctx, responseParams.VPToken, sessionTranscript)
 		if err != nil {
@@ -434,11 +476,11 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	// The vpAuth config tells us which claims to extract based on which credential was presented.
 	vpAuth2 := c.cfg.GetOpenID4VPAuth(scope)
 	if vpAuth2 == nil {
-		return nil, fmt.Errorf("scope %q lost openid4vp configuration", scope)
+		return nil, serverFault(fmt.Errorf("scope %q lost openid4vp configuration", scope))
 	}
 	authScopeEntry, ok := vpAuth2.AuthScopes[matchedAuthScope]
 	if !ok {
-		return nil, fmt.Errorf("matched auth scope %q not found in config for scope %q", matchedAuthScope, scope)
+		return nil, serverFault(fmt.Errorf("matched auth scope %q not found in config for scope %q", matchedAuthScope, scope))
 	}
 	identityClaims, err := model.ExtractIdentityClaims(credential, authScopeEntry.AuthClaims)
 	if err != nil {
@@ -455,14 +497,14 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	}
 	identityMappingID, err := c.ResolveIdentifier(ctx, authCtx.AuthenticSource, claimsAny)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve identity from VP claims: %w", err)
+		return nil, serverFault(fmt.Errorf("failed to resolve identity from VP claims: %w", err))
 	}
 
 	// Persist the resolved identifier on the authorization context so that
 	// downstream credential issuance (VCICredential) can find it.
 	if err := c.cacheService.AuthContext.SetIdentifier(ctx, &cache.AuthorizationContext{SessionID: authCtx.SessionID}, identityMappingID); err != nil {
 		c.log.Error(err, "failed to persist identifier on auth context")
-		return nil, fmt.Errorf("failed to persist identifier: %w", err)
+		return nil, serverFault(fmt.Errorf("failed to persist identifier: %w", err))
 	}
 
 	// Retrieve documents matching the identity by scope
@@ -470,7 +512,7 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 	documents, err := c.datastoreStore.GetByIdentity(ctx, scope, identityMappingID)
 	if err != nil {
 		c.log.Debug("failed to get document", "error", err)
-		return nil, err
+		return nil, serverFault(err)
 	}
 
 	c.log.Debug("Retrieved documents", "count", len(documents))

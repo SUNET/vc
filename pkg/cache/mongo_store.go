@@ -610,3 +610,36 @@ func (s *MongoStore) buildFilter(query *AuthorizationContext) bson.M {
 	}
 	return nil
 }
+
+// ClaimAuthSession atomically takes the Interactive Authorization handle off
+// the context it names. See AuthContextStore.ClaimAuthSession.
+//
+// One FindOneAndUpdate, returning the document as it was BEFORE the unset,
+// so the caller still sees the DPoP thumbprint the exchange is bound to.
+// The filter matching the handle is what makes it one-shot: the second
+// request to arrive matches nothing, because the first has already removed
+// the field it filters on.
+//
+// Replacing the whole document with Update could not do this - two requests
+// that both read the context would both write it, and both would proceed.
+func (s *MongoStore) ClaimAuthSession(ctx context.Context, authSession string) (*AuthorizationContext, error) {
+	if authSession == "" {
+		return nil, errors.New("authSession cannot be empty")
+	}
+
+	filter := bson.M{"auth_session": authSession}
+	// Only the handle. The thumbprint is the binding the authorization
+	// code inherits - see the memory store's note.
+	update := bson.M{"$unset": bson.M{"auth_session": ""}}
+
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.Before)
+	var claimed AuthorizationContext
+	if err := s.coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&claimed); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNoDocuments
+		}
+		return nil, fmt.Errorf("failed to claim auth_session: %w", err)
+	}
+
+	return &claimed, nil
+}

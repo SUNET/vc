@@ -72,6 +72,21 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest, "code_challenge is required for public clients", 400)
 	}
 
+	// A deployment that advertises require_interactive_authorization is
+	// telling every wallet that reads its metadata that this is the only
+	// accepted path to issuance. Leaving the browser-mediated path working
+	// anyway would make that statement false - and a false statement in
+	// metadata is worse than an absent one, because a wallet that believed
+	// it gave up a flow that would have worked.
+	//
+	// Here rather than at /authorize: PAR is where a wallet-initiated
+	// authorization begins, so refusing here costs the wallet one round
+	// trip instead of sending a user to a browser first.
+	if c.cfg.APIGW.Delivery.InteractiveAuthorization.Required() {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			"this server accepts only interactive authorization; use the authorization challenge endpoint", 400)
+	}
+
 	// Reject scopes that are configured for pre-authorized issuance only,
 	// so a wallet cannot initiate the flow itself.
 	if sources, lookupErr := c.cfg.APIGW.DataSources.LookupCredentialSources(req.Scope); lookupErr == nil {
@@ -542,6 +557,24 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		c.log.Error(err, "failed to get authorization")
 		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
 			"Authorization code is invalid or has already been used", 400, err)
+	}
+
+	// A code that came out of an Interactive Authorization exchange carries
+	// that exchange's DPoP key, and must be redeemed with it.
+	//
+	// Everything else here binds the ACCESS TOKEN to whatever key signed
+	// the proof on this request, which says nothing about who opened the
+	// exchange. Without this, a flow opened with key A yields a code that
+	// key B can spend - and the whole point of associating auth_session
+	// with a DPoP key (OpenID4VCI 1.1 §5.2,
+	// draft-ietf-oauth-first-party-apps) is that the same key has to turn
+	// up in the token request.
+	if authorizationContext.AuthSessionDPoPThumbprint != "" &&
+		authorizationContext.AuthSessionDPoPThumbprint != dpopThumbprint {
+		c.log.Error(nil, "authorization code redeemed with a different DPoP key than the exchange it came from",
+			"session_id", authorizationContext.SessionID)
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+			"authorization code must be redeemed with the key its authorization was obtained under", 400)
 	}
 	c.log.Debug("Token", "state", authorizationContext.State)
 

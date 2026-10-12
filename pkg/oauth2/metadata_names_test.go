@@ -123,3 +123,71 @@ func TestWithInteractiveAuthorizationNamesDoesNotMutate(t *testing.T) {
 	assert.Contains(t, members(t, base), "authorization_challenge_endpoint",
 		"the original must still publish the normative names")
 }
+
+// A configured member name is free text written straight into the
+// published document, so it has to be refused when it would displace
+// something rather than quietly overwriting it.
+func TestMetadataNameCollisionsAreRefused(t *testing.T) {
+	metadata := validMetadata()
+	metadata.AuthorizationChallengeEndpoint = "https://issuer.example.com/authorize-challenge"
+	metadata.RequireInteractiveAuthorization = true
+
+	t.Run("a name that is already a member of the document", func(t *testing.T) {
+		// "issuer" is the one that does real damage: the endpoint URL would
+		// replace the Credential Issuer Identifier, and every wallet
+		// reading the document would be pointed somewhere else.
+		_, err := json.Marshal(metadata.WithInteractiveAuthorizationNames(MetadataNames{
+			AuthorizationChallengeEndpoint: "issuer",
+		}))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "already a member")
+	})
+
+	t.Run("both parameters configured to the same name", func(t *testing.T) {
+		// Which one survives is map iteration order, so the served
+		// document could differ between restarts - and stop matching the
+		// signed_metadata built from the same value.
+		_, err := json.Marshal(metadata.WithInteractiveAuthorizationNames(MetadataNames{
+			AuthorizationChallengeEndpoint:  "ia_thing",
+			RequireInteractiveAuthorization: "ia_thing",
+		}))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "both configured to be published as")
+	})
+
+	t.Run("the change log's names, which collide with nothing", func(t *testing.T) {
+		raw, err := json.Marshal(metadata.WithInteractiveAuthorizationNames(MetadataNames{
+			AuthorizationChallengeEndpoint:  "interactive_authorization_endpoint",
+			RequireInteractiveAuthorization: "require_interactive_authorization_request",
+		}))
+		require.NoError(t, err)
+
+		document := map[string]any{}
+		require.NoError(t, json.Unmarshal(raw, &document))
+		assert.Contains(t, document, "interactive_authorization_endpoint")
+		assert.Equal(t, "https://issuer.example.com", document["issuer"],
+			"the document's own members are untouched")
+	})
+}
+
+// The same rule, reachable where an operator can read the message.
+func TestValidateMetadataNames(t *testing.T) {
+	require.NoError(t, ValidateMetadataNames(MetadataNames{}, nil),
+		"the zero value is the specification's own names")
+
+	require.NoError(t, ValidateMetadataNames(MetadataNames{
+		AuthorizationChallengeEndpoint:  "interactive_authorization_endpoint",
+		RequireInteractiveAuthorization: "require_interactive_authorization_request",
+	}, nil))
+
+	err := ValidateMetadataNames(MetadataNames{AuthorizationChallengeEndpoint: "token_endpoint"}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already a member")
+
+	err = ValidateMetadataNames(MetadataNames{
+		AuthorizationChallengeEndpoint:  "same",
+		RequireInteractiveAuthorization: "same",
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "both configured")
+}

@@ -36,7 +36,6 @@ type AuthorizationChallengeRequest struct {
 	ClientID    string `json:"client_id" form:"client_id"`
 	Scope       string `json:"scope" form:"scope"`
 	RedirectURI string `json:"redirect_uri" form:"redirect_uri"`
-	State       string `json:"state" form:"state"`
 
 	CodeChallenge       string `json:"code_challenge" form:"code_challenge"`
 	CodeChallengeMethod string `json:"code_challenge_method" form:"code_challenge_method"`
@@ -203,6 +202,19 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 		return nil, oauth2.OAuthErrPKCERequired
 	}
 
+	// S256 and nothing else, checked HERE because this is the only place
+	// that can: oauth2.ValidatePKCE derives the challenge with
+	// CreateCodeChallenge, which treats every method it does not recognise
+	// as plain. So an unsupported - or empty - method stored now becomes a
+	// plain comparison at redemption, where the challenge is its own
+	// verifier and PKCE protects nothing. The metadata this server
+	// publishes advertises S256 alone, and the Security BCP forbids plain
+	// for a public client, so there is nothing to accept here but S256.
+	if req.CodeChallenge != "" && req.CodeChallengeMethod != "S256" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			"code_challenge_method must be S256", 400)
+	}
+
 	// Which interaction this scope needs is a property of how the scope is
 	// sourced, not of what the Wallet offered: a scope whose Holder is
 	// established by a presentation needs openid4vp_presentation, and one
@@ -227,16 +239,21 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 		return nil, err
 	}
 
-	// DPoP is optional here, but once present it binds the exchange: §5.2
-	// of OpenID4VCI 1.1 requires the auth_session to be associated with
-	// the DPoP public key, so that a stolen auth_session cannot be used
-	// from another key.
-	var dpopThumbprint string
-	if req.DPOP != "" {
-		dpopThumbprint, err = c.dpopProofThumbprint(ctx, req.DPOP, ia.ChallengeEndpoint(c.cfg.APIGW.PublicURL))
-		if err != nil {
-			return nil, err
-		}
+	// DPoP is REQUIRED, not merely honoured when offered.
+	//
+	// OpenID4VCI 1.1 §5.2 says the auth_session MUST be associated with
+	// the DPoP public key where DPoP-bound codes or access tokens are in
+	// use - and they always are here, because this server's Token Endpoint
+	// refuses an authorization_code request without a proof. So an
+	// exchange opened without one could never be redeemed anyway, and in
+	// the meantime its auth_session would be a bearer handle: anyone who
+	// learned it could continue the exchange under their own key.
+	if req.DPOP == "" {
+		return nil, oauth2.OAuthErrDPoPRequired
+	}
+	dpopThumbprint, err := c.dpopProofThumbprint(ctx, req.DPOP, ia.ChallengeEndpoint(c.cfg.APIGW.PublicURL))
+	if err != nil {
+		return nil, err
 	}
 
 	authCtx, err := c.newChallengeAuthContext(ia, req, source)
@@ -298,29 +315,58 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 			"client_id does not match the client this auth_session was issued to", 400)
 	}
 
-	// The DPoP binding, the other half of the association made in the
-	// initial request. An exchange opened with a DPoP key may only be
-	// continued from that key.
-	if authCtx.AuthSessionDPoPThumbprint != "" {
-		if req.DPOP == "" {
-			return nil, oauth2.OAuthErrDPoPRequired
-		}
-		thumbprint, err := c.dpopProofThumbprint(ctx, req.DPOP, ia.ChallengeEndpoint(c.cfg.APIGW.PublicURL))
-		if err != nil {
-			return nil, err
-		}
-		if thumbprint != authCtx.AuthSessionDPoPThumbprint {
-			c.log.Error(nil, "CHALLENGE: DPoP key does not match the one this auth_session is bound to",
-				"session_id", authCtx.SessionID)
-			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
-				"DPoP key does not match the key this auth_session is bound to", 400)
-		}
+	// The other half of the association made in the initial request. Every
+	// exchange is opened with a key, so every continuation needs one - and
+	// the same one.
+	//
+	// The guard on a recorded thumbprint is not a tolerance for exchanges
+	// opened without a key: there are none. It is for a context reaching
+	// this endpoint that never went through the initial request at all,
+	// which must not pass a binding check by having nothing to check.
+	if req.DPOP == "" {
+		return nil, oauth2.OAuthErrDPoPRequired
+	}
+	if authCtx.AuthSessionDPoPThumbprint == "" {
+		c.log.Error(nil, "CHALLENGE: auth_session resolved a context with no DPoP binding",
+			"session_id", authCtx.SessionID)
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+			"auth_session is invalid or has expired", 400)
+	}
+	thumbprint, err := c.dpopProofThumbprint(ctx, req.DPOP, ia.ChallengeEndpoint(c.cfg.APIGW.PublicURL))
+	if err != nil {
+		return nil, err
+	}
+	if thumbprint != authCtx.AuthSessionDPoPThumbprint {
+		c.log.Error(nil, "CHALLENGE: DPoP key does not match the one this auth_session is bound to",
+			"session_id", authCtx.SessionID)
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
+			"DPoP key does not match the key this auth_session is bound to", 400)
 	}
 
 	if req.OpenID4VPResponse == "" {
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
 			"openid4vp_response is required", 400)
 	}
+
+	// Claim the handle before anything is done with the presentation.
+	//
+	// Everything above this line is a check on the request; below it the
+	// presentation is decrypted, verified and turned into a session with
+	// documents attached. Claiming in between is what makes one exchange
+	// yield one authorization code: a second request carrying the same
+	// auth_session - sequential or concurrent - finds nothing to claim.
+	//
+	// A failed presentation therefore costs the wallet its exchange and it
+	// has to ask for a new challenge. That is deliberate: the nonce is
+	// bound to this exchange, so there is no second presentation to make
+	// against it, and leaving the handle alive would let an attacker who
+	// learned it grind presentations at the endpoint.
+	claimed, err := c.cacheService.AuthContext.ClaimAuthSession(ctx, req.AuthSession)
+	if err != nil {
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
+			"auth_session is invalid or has expired", 400, err)
+	}
+	authCtx = claimed
 
 	vpResponse, err := c.decodeInteractiveAuthorizationResponse(ctx, authCtx, req.OpenID4VPResponse)
 	if err != nil {
@@ -333,7 +379,8 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 	}
 
 	if _, err := c.consumeIssuanceAuthPresentation(ctx, authCtx, vpResponse, issuanceAuthBinding{
-		Audience: audience,
+		Audience:      audience,
+		ExpectedState: authCtx.State,
 		// mdoc needs the OpenID4VCI Interactive Authorization handover,
 		// which this build does not produce. Left nil so that an mdoc
 		// presentation is refused by name rather than verified against the
@@ -341,15 +388,7 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 		// transcript this Wallet signed over.
 		MdocSessionTranscript: nil,
 	}); err != nil {
-		return nil, err
-	}
-
-	// The exchange is over: clear the handle so the same presentation
-	// cannot be replayed into a second code.
-	authCtx.AuthSession = ""
-	authCtx.AuthSessionDPoPThumbprint = ""
-	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
-		return nil, err
+		return nil, c.interactiveAuthorizationFailure(err)
 	}
 
 	c.log.Info("CHALLENGE: authorization complete", "session_id", authCtx.SessionID, "scopes", authCtx.Scopes)
@@ -373,7 +412,6 @@ func (c *Client) newChallengeAuthContext(ia *model.InteractiveAuthorization, req
 		Scopes:              []string{req.Scope},
 		CodeChallenge:       req.CodeChallenge,
 		CodeChallengeMethod: req.CodeChallengeMethod,
-		State:               req.State,
 		ClientID:            fmt.Sprintf("x509_san_dns:%s", host),
 		WalletClientID:      req.ClientID,
 		WalletURI:           req.RedirectURI,
@@ -389,6 +427,18 @@ func (c *Client) newChallengeAuthContext(ia *model.InteractiveAuthorization, req
 	// exchange.
 	if authCtx.AuthSession, err = crypto.GenerateSecureToken(32, 0); err != nil {
 		return nil, fmt.Errorf("failed to generate auth_session: %w", err)
+	}
+
+	// The exchange mints its own state rather than echoing one the wallet
+	// sent: draft-ietf-oauth-first-party-apps defines no state parameter on
+	// the Authorization Challenge Request, so there is none to echo - and
+	// a request built without one could not be answered at all, because
+	// openid4vp.VPResponse refuses a response whose state is missing.
+	//
+	// It is checked on the way back (issuanceAuthBinding.ExpectedState),
+	// which is the half that makes it worth having.
+	if authCtx.State, err = crypto.GenerateSecureToken(0, 32); err != nil {
+		return nil, fmt.Errorf("failed to generate presentation state: %w", err)
 	}
 	if authCtx.Nonce, err = crypto.GenerateSecureToken(0, 32); err != nil {
 		return nil, fmt.Errorf("failed to generate nonce: %w", err)
@@ -486,6 +536,44 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 	}
 
 	return vpResponse, nil
+}
+
+// interactiveAuthorizationFailure turns a presentation failure into the
+// answer this endpoint is contracted to give.
+//
+// Everything here is JSON with an "error" member, so an untyped error
+// would reach the wallet through the generic envelope as a 500 - telling a
+// wallet whose presentation simply did not verify that the server broke,
+// and inviting it to retry something that can never succeed.
+//
+// Three cases, in the order they are decided:
+//
+//   - an error that already knows what it is passes through;
+//   - one the pipeline marked as ours becomes server_error, because it is;
+//   - everything else is invalid_grant. The presentation is the grant
+//     material at this endpoint, so a presentation that did not satisfy the
+//     request is precisely an invalid grant.
+//
+// The cause is wrapped in every case and never put in the description: the
+// wallet is told its presentation was not accepted, and the reason goes to
+// the log, because the reasons here distinguish "this credential is not
+// trusted" from "no documents for this person" and that difference is not
+// the caller's to probe.
+func (c *Client) interactiveAuthorizationFailure(err error) error {
+	var oauthErr *oauth2.OAuthError
+	if errors.As(err, &oauthErr) {
+		return err
+	}
+
+	if errors.Is(err, ErrIssuanceAuthServerFault) {
+		c.log.Error(err, "CHALLENGE: interactive authorization failed on the server side")
+		return oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"interactive authorization could not be completed", 500, err)
+	}
+
+	c.log.Info("CHALLENGE: presentation did not satisfy the request", "reason", err)
+	return oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
+		"the presentation did not satisfy the authorization request", 400, err)
 }
 
 // issuanceAuthDCQL builds the DCQL query the Wallet must satisfy for scope.
