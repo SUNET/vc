@@ -1,9 +1,11 @@
 package apiv1
 
 import (
+	"context"
 	"testing"
 
 	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
+	pkgcache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oauth2"
 	"github.com/SUNET/vc/pkg/openid4vci"
@@ -135,4 +137,34 @@ func TestEmitInvalidTXCodeErrorIsNilSafe(t *testing.T) {
 	assert.False(t, nilCfg.EmitInvalidTXCodeError())
 	assert.False(t, (&model.Cfg{}).EmitInvalidTXCodeError())
 	assert.False(t, (&model.Cfg{APIGW: &model.APIGW{}}).EmitInvalidTXCodeError())
+}
+
+// forfeitingStore is an AuthContextStore whose debit reports the budget as
+// exhausted, while every read still shows attempts remaining.
+//
+// That combination is the race: the budget check near the top of the token
+// endpoint reads preCheck and sees room, and the atomic debit further down
+// disagrees because a CONCURRENT wrong-PIN request spent the last attempt
+// and forfeited the code in between. Reproducing it with two real
+// goroutines would be timing-dependent; forcing the sentinel from the
+// store makes the same code path deterministic.
+type forfeitingStore struct {
+	apigwcache.AuthContextStore
+}
+
+func (forfeitingStore) ConsumeTXCodeAttempt(context.Context, string) (*apigwcache.AuthorizationContext, error) {
+	return nil, pkgcache.ErrTXCodeAttemptsExceeded
+}
+
+// ConsumeTXCodeAttempt reporting exhaustion means the offer is dead, even
+// though this request's own preCheck saw attempts left. There is nothing
+// to retry, so it must not look retryable - which is exactly the case the
+// gate must not reach.
+func TestOAuthToken_InvalidTXCodeRaceWithForfeiture(t *testing.T) {
+	client, code := newTokenTestClient(t, "123456")
+	withInvalidTXCodeError(client)
+	client.cacheService.AuthContext = forfeitingStore{client.cacheService.AuthContext}
+
+	assert.Equal(t, oauth2.ErrCodeInvalidGrant, wrongPIN(t, client, code),
+		"a concurrently forfeited offer has nothing to retry")
 }

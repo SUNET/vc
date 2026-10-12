@@ -1882,10 +1882,19 @@ type APIGWDelivery struct {
 	OpenID4VCICompat OpenID4VCICompat `yaml:"openid4vci_compat" validate:"omitempty"`
 }
 
-// OpenID4VCICompat holds interoperability switches for non-conformant wallets.
+// OpenID4VCICompat holds switches for deployments whose OpenID4VCI
+// behaviour has to differ from this server's default, in either direction.
 //
-// Every field defaults to the conformant behaviour, so a deployment that sets
-// none of them is an OpenID4VCI 1.0 deployment.
+// Two kinds live here, and they point opposite ways. One kind accepts
+// something a non-conformant WALLET sends that the specification does not
+// allow. The other emits something a NEWER specification defines that the
+// published one does not. What they have in common is the default: every
+// field is false, and false is what the currently published specification
+// says, so a deployment that sets none of them is a plain OpenID4VCI 1.0
+// deployment.
+//
+// A field of the second kind names the version that would make it
+// unnecessary, and is deleted when that version is published.
 type OpenID4VCICompat struct {
 	// AcceptNonStandardAuthorizationDetailsArrays accepts two further
 	// encodings of authorization_details in a query string or form body,
@@ -1915,11 +1924,6 @@ type OpenID4VCICompat struct {
 	// announced change rather than a silent one - which is also why this is
 	// the only 1.1 item in this struct that needed a switch at all. The rest
 	// are additive.
-	//
-	// This field is the OPPOSITE polarity to the one above it: the other
-	// switch turns a non-conformant leniency ON, this one turns a
-	// NEWER-conformance behaviour on. Both default false, and both default
-	// to what a published specification says today.
 	//
 	// Flip it to true, and delete the switch, once OpenID4VCI 1.1 is Final.
 	//
