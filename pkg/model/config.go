@@ -2103,8 +2103,8 @@ func (cfg *Cfg) SeedDashboardDefaults() {
 		links := []DashboardLink{
 			{Label: "Health", URL: u + "/health", Type: "json"},
 			{Label: "Credential offers", URL: u + "/offers", Type: "page"},
-			{Label: "OpenID4VCI metadata", URL: openid4vci.WellKnownURL(u, "openid-credential-issuer"), Type: "json"},
-			{Label: "OAuth2 metadata", URL: openid4vci.WellKnownURL(u, "oauth-authorization-server"), Type: "json"},
+			{Label: "OpenID4VCI metadata", URL: u + "/.well-known/openid-credential-issuer", Type: "json"},
+			{Label: "OAuth2 metadata", URL: u + "/.well-known/oauth-authorization-server", Type: "json"},
 			{Label: "JWKS", URL: u + "/jwks", Type: "json"},
 		}
 		if cfg.APIGW.AdminUIEnable {
