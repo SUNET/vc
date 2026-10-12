@@ -9,12 +9,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestWithDCAPIResponseModeDiffersOnlyInResponseMode is the guarantee that matters
+// TestWithDCAPIRequestDiffersOnlyInDelivery is the guarantee that matters
 // once a session serves two request objects: they are the same request seen
 // through two delivery channels, so anything a wallet checks must agree.
 // Only response_mode may differ, because only response_mode depends on how
 // the request was delivered (SUNET/vc#652).
-func TestWithDCAPIResponseModeDiffersOnlyInResponseMode(t *testing.T) {
+//
+// With three exceptions, all the same reason stated three ways. Each of
+// response_mode, response_uri and expected_origins says how the request is
+// delivered and answered: a dc_api answer returns inside the browser call
+// rather than to a response_uri, and a signed dc_api request must name the
+// origin that invoked it so the wallet can bind it there. Asserted
+// separately below, then normalised before comparing everything else.
+func TestWithDCAPIRequestDiffersOnlyInDelivery(t *testing.T) {
 	base := &RequestObject{
 		ResponseURI:  "https://verifier.example.com/verification/direct_post",
 		AUD:          "https://self-issued.me/v2",
@@ -29,7 +36,7 @@ func TestWithDCAPIResponseModeDiffersOnlyInResponseMode(t *testing.T) {
 		},
 	}
 
-	variant := base.WithDCAPIResponseMode()
+	variant := base.WithDCAPIRequest("https://verifier.example.com")
 	require.NotNil(t, variant)
 
 	assert.Equal(t, ResponseModeDCAPIJWT, variant.ResponseMode,
@@ -37,20 +44,33 @@ func TestWithDCAPIResponseModeDiffersOnlyInResponseMode(t *testing.T) {
 	assert.Equal(t, ResponseModeDirectPostJWT, base.ResponseMode,
 		"the link channel's own object must not be mutated")
 
-	// Compare with response_mode normalised: every other field, including any
-	// added to RequestObject later, has to be identical.
+	assert.Empty(t, variant.ResponseURI,
+		"a dc_api response returns inside the browser call, so the request must not name a response_uri")
+	assert.NotEmpty(t, base.ResponseURI,
+		"the link channel's own object must keep the one it needs")
+
+	assert.Equal(t, []string{"https://verifier.example.com"}, variant.ExpectedOrigins,
+		"a signed dc_api request must name the origin the wallet binds it to (OpenID4VP 1.0 Appendix A.3)")
+	assert.Empty(t, base.ExpectedOrigins,
+		"the link channel has no invoking origin to name")
+
+	// Compare with the two delivery-dependent fields normalised: every
+	// other field, including any added to RequestObject later, has to be
+	// identical.
 	normalised := *variant
 	normalised.ResponseMode = base.ResponseMode
+	normalised.ResponseURI = base.ResponseURI
+	normalised.ExpectedOrigins = base.ExpectedOrigins
 	assert.True(t, reflect.DeepEqual(*base, normalised),
-		"the two channels must differ only in response_mode")
+		"the two channels must differ only in how the response is delivered")
 
 	// The pointer field is shared, not deep-copied - which is what we want:
 	// the wallet must see the same client_metadata either way.
 	assert.Same(t, base.ClientMetadata, variant.ClientMetadata)
 }
 
-func TestWithDCAPIResponseModeNilIsNil(t *testing.T) {
-	assert.Nil(t, (*RequestObject)(nil).WithDCAPIResponseMode())
+func TestWithDCAPIRequestNilIsNil(t *testing.T) {
+	assert.Nil(t, (*RequestObject)(nil).WithDCAPIRequest("https://verifier.example.com"))
 }
 
 // TestResponseModeConstantsMatchOneofTag makes the constants' doc comment true.
@@ -81,8 +101,26 @@ func TestResponseModeConstantsMatchOneofTag(t *testing.T) {
 	require.NotEmpty(t, oneof, "ResponseMode's validate tag has no oneof= rule; the accepted set is no longer enforced there")
 
 	assert.ElementsMatch(t,
-		[]string{ResponseModeFormPost, ResponseModeDirectPost, ResponseModeDirectPostJWT, ResponseModeDCAPIJWT},
+		[]string{
+			ResponseModeFormPost, ResponseModeDirectPost, ResponseModeDirectPostJWT, ResponseModeDCAPIJWT,
+			ResponseModeIAPost, ResponseModeIAPostJWT,
+		},
 		strings.Fields(oneof),
 		"the response-mode constants and the oneof validation tag have drifted; update both",
 	)
+}
+
+// IsInteractiveAuthorization is the one place that decides whether a
+// response goes back to the Authorization Challenge Endpoint instead of to
+// a response_uri, so it must not drift from the constants either.
+func TestIsInteractiveAuthorization(t *testing.T) {
+	for _, mode := range []string{ResponseModeIAPost, ResponseModeIAPostJWT} {
+		assert.True(t, IsInteractiveAuthorization(mode), mode)
+	}
+	for _, mode := range []string{
+		ResponseModeFormPost, ResponseModeDirectPost, ResponseModeDirectPostJWT,
+		ResponseModeDCAPIJWT, "", "ia_post.other",
+	} {
+		assert.False(t, IsInteractiveAuthorization(mode), mode)
+	}
 }
