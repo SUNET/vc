@@ -137,10 +137,10 @@
                                             <p class="text-base font-semibold break-words" x-text="credential.name"></p>
                                             <p x-show="credential.description" class="text-sm opacity-70 break-words" x-text="credential.description"></p>
                                             <dl class="mt-2 text-sm">
-                                                <template x-if="credentialSummary()">
+                                                <template x-if="credential.subjectSummary">
                                                     <div class="flex gap-2 py-0.5">
                                                         <dt class="opacity-60 shrink-0">Subject</dt>
-                                                        <dd class="min-w-0 break-words font-medium" x-text="credentialSummary()"></dd>
+                                                        <dd class="min-w-0 break-words font-medium" x-text="credential.subjectSummary"></dd>
                                                     </div>
                                                 </template>
                                                 <template x-if="credential.issuer">

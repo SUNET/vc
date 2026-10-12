@@ -27,6 +27,7 @@ import {
  * @property {string} issuer
  * @property {string} svg
  * @property {Record<string, ClaimEntry>} claims
+ * @property {string} subjectSummary
  */
 
 /**
@@ -137,14 +138,6 @@ Alpine.data("app", () => ({
      * @type {number | null}
      */
     selectedCredential: null,
-
-    /**
-     * The claims the issuer marked as displayable on the card. Kept so the
-     * consent card can show a one-line subject summary without walking the
-     * full claim set.
-     * @type {Record<string, { label: string; value: unknown }>}
-     */
-    svgTemplateClaims: {},
 
     /** @type {boolean} */
     loggedIn: false,
@@ -340,8 +333,6 @@ Alpine.data("app", () => ({
 
             const display = data.credential_display ?? {};
 
-            this.svgTemplateClaims = data.svg_template_claims;
-
             this.credentials.push({
                 vct: display.vct ?? "",
                 name: display.name || "Credential",
@@ -349,6 +340,7 @@ Alpine.data("app", () => ({
                 issuer: display.issuer ?? "",
                 svg,
                 claims: data.presentation_claims,
+                subjectSummary: credentialSubjectSummary(data.svg_template_claims),
             });
 
             this.selectedCredential = initialCredentialSelection(this.credentials);
@@ -471,14 +463,6 @@ Alpine.data("app", () => ({
      */
     flattenClaims(claims) {
         return flattenClaims(claims);
-    },
-
-    /**
-     * One-line summary of who the credential is about, for the card header.
-     * @returns {string}
-     */
-    credentialSummary() {
-        return credentialSubjectSummary(this.svgTemplateClaims);
     },
 
     /**
