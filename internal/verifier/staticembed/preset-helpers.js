@@ -47,12 +47,12 @@ export function byOrderThenLabel(a, b) {
  * @param {string[] | null | undefined} categoryOrder server-supplied category
  *   display order; absent when no preset is categorized, so it is not assumed
  *   to be present or complete.
- * @returns {{ featured: PresetEntry[], groups: { category: string, presets: PresetEntry[] }[] }}
+ * @returns {{ featured: PresetEntry[], groups: { category: string, presets: PresetEntry[] }[], collapsible: boolean }}
  */
 export function groupPresets(entries, categoryOrder) {
     const anyMetadata = entries.some(([, p]) => p.featured || p.category);
     if (!anyMetadata) {
-        return { featured: [...entries].sort(byOrderThenLabel), groups: [] };
+        return { featured: [...entries].sort(byOrderThenLabel), groups: [], collapsible: false };
     }
 
     const featured = entries.filter(([, p]) => p.featured).sort(byOrderThenLabel);
@@ -100,5 +100,15 @@ export function groupPresets(entries, categoryOrder) {
             category,
             presets: (byCategory.get(category) ?? []).slice().sort(byOrderThenLabel),
         })),
+        // Whether the groups may start hidden.
+        //
+        // The toggle hides them BEHIND the featured presets. With nothing
+        // featured there is nothing to hide them behind, so collapsing
+        // renders a heading, an empty button list and a "Show more presets"
+        // link - which is how every preset on a deployment that categorises
+        // but does not feature became invisible at rest. A deployment is
+        // free to categorise without featuring; that is a complete config,
+        // not an incomplete one.
+        collapsible: featured.length > 0,
     };
 }

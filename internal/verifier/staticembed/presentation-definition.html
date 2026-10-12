@@ -50,8 +50,10 @@
                     </div>
                     <template x-if="groupedPresetData.groups.length > 0">
                         <div>
+                            <template x-if="groupedPresetData.collapsible">
                             <button class="button is-small is-text" @click="showMorePresets = !showMorePresets" :aria-expanded="showMorePresets" x-text="showMorePresets ? 'Show fewer presets' : 'Show more presets'"></button>
-                            <template x-if="showMorePresets">
+                            </template>
+                            <template x-if="showMorePresets || !groupedPresetData.collapsible">
                                 <div>
                                     <template x-for="group in groupedPresetData.groups" :key="group.category">
                                         <div class="block">
