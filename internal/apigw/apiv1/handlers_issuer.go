@@ -536,9 +536,47 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		c.vciMetrics.IssuanceLatency.Record(ctx, time.Since(start).Seconds(), formatAttr)
 	}
 
+	return c.newCredentialResponse(credentials, scope, configurationID), nil
+}
+
+// newCredentialResponse assembles the Credential Response.
+//
+// It exists so that the response is built in ONE place that a test can
+// call. Assembling it inline meant the only coverage of what goes into it
+// was a test of the pieces, and deleting a field from the literal left
+// every such test green while the field vanished from the wire.
+func (c *Client) newCredentialResponse(credentials []openid4vci.Credential, scope, configurationID string) *openid4vci.CredentialResponse {
 	return &openid4vci.CredentialResponse{
-		Credentials: credentials,
-	}, nil
+		Credentials:        credentials,
+		CredentialMetadata: c.credentialMetadataForResponse(scope, configurationID),
+	}
+}
+
+// credentialMetadataForResponse returns the credential_metadata to echo on
+// the Credential Response, or nil when the deployment has not opted in or
+// the configuration carries none.
+//
+// Resolution follows w3cTypesAndContexts: the configuration named in the
+// REQUEST wins, falling back to the scope the token authorised. Taking it
+// from the scope while the credential was minted from the named
+// configuration would describe a different credential than the one in the
+// response, which is worse than describing none.
+func (c *Client) credentialMetadataForResponse(scope, configurationID string) *openid4vci.CredentialMetadata {
+	if !model.BoolVal(c.cfg.APIGW.Delivery.EmitCredentialMetadataOnResponse, false) {
+		return nil
+	}
+	if c.issuerMetadata == nil {
+		return nil
+	}
+	if configurationID != "" {
+		if config, ok := c.issuerMetadata.CredentialConfigurationsSupported[configurationID]; ok {
+			return config.CredentialMetadata
+		}
+	}
+	if config, ok := c.issuerMetadata.CredentialConfigurationsSupported[scope]; ok {
+		return config.CredentialMetadata
+	}
+	return nil
 }
 
 // issueSDJWT issues SD-JWT credentials, one per JWK.
