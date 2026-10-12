@@ -666,28 +666,8 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		return nil, err
 	}
 
-	// The DC API's own object, identical but for how the response is
-	// delivered: response_mode, response_uri (which a dc_api request does
-	// not carry at all) and expected_origins (which only it carries, and
-	// must, being signed). A copy rather than a second literal so the two
-	// cannot drift - everything the wallet checks (client_id, nonce,
-	// client_metadata, the DCQL query) has to be the same request seen
-	// through a different channel.
 	if c.cfg.Verifier.DigitalCredentials.Enable {
-		dcAPIOrigin, err := c.dcAPIOrigin()
-		if err != nil {
-			return nil, fmt.Errorf("dc_api request_object: %w", err)
-		}
-		dcAPIRequestObject := requestObject.WithDCAPIRequest(dcAPIOrigin)
-
-		dcAPIRequestObjectID := uuid.NewString()
-		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
-			return nil, fmt.Errorf("dc_api request_object persist: %w", err)
-		} else if !ok {
-			return nil, fmt.Errorf("dc_api request_object persist: unexpected id collision for %s", dcAPIRequestObjectID)
-		}
-
-		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
+		reply.DCAPIAuthorizationRequest, err = c.dcAPIAuthorizationRequest(ctx, requestObject)
 		if err != nil {
 			return nil, err
 		}
@@ -770,25 +750,46 @@ func (c *Client) tryReuseInFlightSession(ctx context.Context, req *UIInteraction
 	// request each time so the in-tab attempt has a valid request_uri; the
 	// existing entry (if any) times out on its own.
 	if c.cfg.Verifier.DigitalCredentials.Enable {
-		dcAPIOrigin, err := c.dcAPIOrigin()
-		if err != nil {
-			return nil, false, fmt.Errorf("dc_api request_object: %w", err)
-		}
-		dcAPIRequestObject := requestObject.WithDCAPIRequest(dcAPIOrigin)
-		dcAPIRequestObjectID := uuid.NewString()
-		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
-			return nil, false, fmt.Errorf("dc_api request_object persist: %w", err)
-		} else if !ok {
-			return nil, false, fmt.Errorf("dc_api request_object persist: unexpected id collision for %s", dcAPIRequestObjectID)
-		}
-
-		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
+		reply.DCAPIAuthorizationRequest, err = c.dcAPIAuthorizationRequest(ctx, requestObject)
 		if err != nil {
 			return nil, false, err
 		}
 	}
 
 	return reply, true, nil
+}
+
+// dcAPIAuthorizationRequest builds the Digital Credentials API form of
+// requestObject, persists it under a fresh id, and returns the
+// authorization request URI the page passes to navigator.credentials.get.
+//
+// The DC API's object is the link channel's object, identical but for how
+// the response is delivered: response_mode, response_uri (which a dc_api
+// request does not carry at all) and expected_origins (which only it
+// carries, and must, being signed). A copy rather than a second literal so
+// the two cannot drift - everything the wallet checks (client_id, nonce,
+// client_metadata, the DCQL query) has to be the same request seen through
+// a different channel.
+//
+// One function because all three callers - the first interaction, a reload
+// that reuses an in-flight session, and a resume - want exactly this, and
+// the only thing that differed between their copies was how many values
+// each returns on the way out.
+func (c *Client) dcAPIAuthorizationRequest(ctx context.Context, requestObject *openid4vp.RequestObject) (string, error) {
+	dcAPIOrigin, err := c.dcAPIOrigin()
+	if err != nil {
+		return "", fmt.Errorf("dc_api request_object: %w", err)
+	}
+	dcAPIRequestObject := requestObject.WithDCAPIRequest(dcAPIOrigin)
+
+	dcAPIRequestObjectID := uuid.NewString()
+	if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
+		return "", fmt.Errorf("dc_api request_object persist: %w", err)
+	} else if !ok {
+		return "", fmt.Errorf("dc_api request_object persist: unexpected id collision for %s", dcAPIRequestObjectID)
+	}
+
+	return dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
 }
 
 // isReusableAuthContext reports whether the authorization context still
@@ -994,18 +995,7 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 		return nil, err
 	}
 	if c.cfg.Verifier.DigitalCredentials.Enable {
-		dcAPIOrigin, err := c.dcAPIOrigin()
-		if err != nil {
-			return nil, fmt.Errorf("dc_api request_object: %w", err)
-		}
-		dcAPIRequestObject := requestObject.WithDCAPIRequest(dcAPIOrigin)
-		dcAPIRequestObjectID := uuid.NewString()
-		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
-			return nil, fmt.Errorf("dc_api request_object persist: %w", err)
-		} else if !ok {
-			return nil, fmt.Errorf("dc_api request_object persist: unexpected id collision for %s", dcAPIRequestObjectID)
-		}
-		reply.DCAPIAuthorizationRequest, err = dcAPIRequestObject.CreateAuthorizationRequestURI(ctx, c.cfg.Verifier.PublicURL, dcAPIRequestObjectID)
+		reply.DCAPIAuthorizationRequest, err = c.dcAPIAuthorizationRequest(ctx, requestObject)
 		if err != nil {
 			return nil, err
 		}
