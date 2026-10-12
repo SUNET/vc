@@ -192,6 +192,17 @@ func (cfg *Cfg) SendLegacyJARMEncryptionParams() bool {
 	return BoolVal(cfg.Common.OpenID4VPCompat.SendLegacyJARMEncryptionParams, false)
 }
 
+// EmitInvalidTXCodeError reports whether a wrong Transaction Code should be
+// answered with OpenID4VCI 1.1's invalid_tx_code rather than 1.0's
+// invalid_grant. Nil-safe through the whole APIGW chain, so the token
+// endpoint does not have to repeat it.
+func (cfg *Cfg) EmitInvalidTXCodeError() bool {
+	if cfg == nil || cfg.APIGW == nil {
+		return false
+	}
+	return BoolVal(cfg.APIGW.Delivery.OpenID4VCICompat.EmitInvalidTXCodeError, false)
+}
+
 // Common holds the shared configuration used across all services
 type Common struct {
 	// Production enables production mode
@@ -1894,6 +1905,30 @@ type OpenID4VCICompat struct {
 	//
 	// See SUNET/vc#710 for the interop reports that motivated it.
 	AcceptNonStandardAuthorizationDetailsArrays *bool `yaml:"accept_non_standard_authorization_details_arrays" default:"false"`
+
+	// EmitInvalidTXCodeError returns the OpenID4VCI 1.1 `invalid_tx_code`
+	// error for a wrong Transaction Code, instead of 1.0's `invalid_grant`.
+	//
+	// Off by default because 1.1 is not published: it is an editor's draft,
+	// adopted pre-flight by WE BUILD CS-01 §7.4. Turning it on changes what
+	// an unmodified wallet receives on a mistyped PIN, so it is a deliberate,
+	// announced change rather than a silent one - which is also why this is
+	// the only 1.1 item in this struct that needed a switch at all. The rest
+	// are additive.
+	//
+	// This field is the OPPOSITE polarity to the one above it: the other
+	// switch turns a non-conformant leniency ON, this one turns a
+	// NEWER-conformance behaviour on. Both default false, and both default
+	// to what a published specification says today.
+	//
+	// Flip it to true, and delete the switch, once OpenID4VCI 1.1 is Final.
+	//
+	// Note what it does NOT change. `invalid_grant` still means the
+	// Pre-Authorized Code itself is finished - unknown, expired, already
+	// redeemed, or invalidated by too many failed attempts - and a wallet
+	// relies on exactly that split to tell a remaining attempt from an
+	// exhausted offer.
+	EmitInvalidTXCodeError *bool `yaml:"emit_invalid_tx_code_error" default:"false"`
 }
 
 // APIGWAuthProviders groups the authentication provider configurations.

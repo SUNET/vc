@@ -567,6 +567,20 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 					return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
 						"Authorization code is invalid or has already been used", 400, attemptErr)
 				}
+				// Reaching here means the debit succeeded, so attempts
+				// remain and the holder can try again. OpenID4VCI 1.1 has
+				// an error code that says so; 1.0 does not, and conflates
+				// it with a dead offer.
+				//
+				// The exhausted case is NOT handled here - the budget check
+				// above intercepts a code whose attempts are already spent,
+				// forfeits it, and answers invalid_grant. That split is what
+				// lets a wallet tell a remaining attempt from a finished
+				// offer, and it is why only this return is gated.
+				if c.cfg.EmitInvalidTXCodeError() {
+					return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidTXCode,
+						"invalid tx_code", 400)
+				}
 				return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
 					"invalid tx_code", 400)
 			}
