@@ -1,8 +1,10 @@
 package httpserver
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"testing"
 
 	"github.com/SUNET/vc/internal/apigw/staticembed"
@@ -107,4 +109,54 @@ func TestUnknownPathGetsNoValidator(t *testing.T) {
 	res := get(t, engine, "/static/not-a-real-asset.js", "")
 	require.Equal(t, http.StatusNotFound, res.Code)
 	require.Empty(t, res.Header().Get("ETag"))
+}
+
+// A vendored asset must get the same treatment as a service's own.
+//
+// webvendor.Overlay serves these, but walking the overlay used to find
+// only the base filesystem - fs.ReadDir fell back to opening the
+// directory, Open(".") returned the base's root, and the vendored entries
+// were not in that listing. They were served and absent from the index, so
+// they got no validator and no Cache-Control at all: still stale, and now
+// silently so.
+func TestVendoredAssetsAreTaggedToo(t *testing.T) {
+	engine := staticEngine(t)
+
+	for _, name := range []string{"dc-api.js", "dc-api-full.js"} {
+		t.Run(name, func(t *testing.T) {
+			res := get(t, engine, "/static/"+name, "")
+			require.Equal(t, http.StatusOK, res.Code, "the overlay serves this file")
+
+			etag := res.Header().Get("ETag")
+			require.NotEmpty(t, etag, "a served file with no validator cannot be revalidated")
+			require.Equal(t, "public, no-cache", res.Header().Get("Cache-Control"))
+
+			notModified := get(t, engine, "/static/"+name, etag)
+			require.Equal(t, http.StatusNotModified, notModified.Code)
+		})
+	}
+}
+
+// The overlay's own contract, asserted directly: a merged listing, base
+// winning a name conflict, sorted.
+func TestOverlayReadDirMergesBothFilesystems(t *testing.T) {
+	entries, err := webvendor.Overlay(staticembed.FS).(fs.ReadDirFS).ReadDir(".")
+	require.NoError(t, err)
+
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+
+	require.Contains(t, names, "consent.js", "a file only the base has")
+	require.Contains(t, names, "dc-api.js", "a file only the vendor has")
+	require.True(t, sort.StringsAreSorted(names), "fs.ReadDir is specified to return entries sorted by filename")
+
+	seen := map[string]int{}
+	for _, n := range names {
+		seen[n]++
+	}
+	for n, count := range seen {
+		require.Equal(t, 1, count, "%s appears twice in the merged listing", n)
+	}
 }
