@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/SUNET/vc/internal/verifier/apiv1"
 	"github.com/SUNET/vc/pkg/cache"
@@ -202,7 +203,7 @@ func (s *Service) endpointUINotify(ctx context.Context, c *gin.Context) (any, er
 	// transient HA store error look like an unknown session, so the
 	// browser would stop reconnecting and permanently miss the
 	// completion event.
-	active, err := s.apiv1.IsActiveAuthSession(ctx, sessionID)
+	active, expiresAt, err := s.apiv1.IsActiveAuthSession(ctx, sessionID)
 	if err != nil {
 		s.log.Error(err, "endpointUINotify auth session lookup failed", "sessionID", sessionID)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "session lookup unavailable"})
@@ -235,8 +236,32 @@ func (s *Service) endpointUINotify(ctx context.Context, c *gin.Context) (any, er
 	// that event.
 	c.Writer.Flush()
 
+	// Tell the tab when the session's deadline passes, instead of leaving
+	// it on a stream that will never carry anything again.
+	//
+	// The deadline is enforced on every server-side path that reads it,
+	// but none of them is this one: a page that is just waiting for the
+	// wallet makes no requests, so once direct-post starts refusing the
+	// expired session the tab sat there with a live connection and a QR
+	// code nobody could use any more, until somebody reloaded it. A
+	// reconnect after the deadline is refused outright by the lookup
+	// above, so this event is the only notice an already-open tab gets.
+	//
+	// A context with no deadline arms nothing: a nil channel blocks
+	// forever in the select, which is exactly the old behaviour.
+	var expiry <-chan time.Time
+	if expiresAt > 0 {
+		timer := time.NewTimer(time.Until(time.Unix(expiresAt, 0)))
+		defer timer.Stop()
+		expiry = timer.C
+	}
+
 	c.Stream(func(w io.Writer) bool {
 		select {
+		case <-expiry:
+			s.log.Debug("endpointUINotify session expired", "sessionID", sessionID)
+			c.SSEvent("expired", gin.H{"session_id": sessionID})
+			return false
 		case msg, ok := <-listener:
 			// A closed listener (service shutdown or lifecycle reclaim)
 			// would otherwise fire this case repeatedly with a nil msg

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/SUNET/vc/internal/verifier/apiv1"
 	"github.com/SUNET/vc/internal/verifier/notify"
@@ -39,6 +40,12 @@ type uiInteractionApiv1 struct {
 	// Empty set means every call returns false.
 	activeSessions map[string]struct{}
 
+	// sessionExpiresAt is the presentation deadline IsActiveAuthSession
+	// reports per id, as a Unix second. A missing entry is 0, i.e. no
+	// deadline, which is what a context created before
+	// presentation_timeout was read carries.
+	sessionExpiresAt map[string]int64
+
 	// lookupErr, when non-nil, is returned verbatim by
 	// IsActiveAuthSession so tests can simulate an HA store failure
 	// (not the same as "unknown session"). Must take precedence over
@@ -52,12 +59,12 @@ func (u *uiInteractionApiv1) UIInteraction(ctx context.Context, req *apiv1.UIInt
 	return &apiv1.UIInteractionReply{SessionID: u.replySessionID}, nil
 }
 
-func (u *uiInteractionApiv1) IsActiveAuthSession(ctx context.Context, sessionID string) (bool, error) {
+func (u *uiInteractionApiv1) IsActiveAuthSession(ctx context.Context, sessionID string) (bool, int64, error) {
 	if u.lookupErr != nil {
-		return false, u.lookupErr
+		return false, 0, u.lookupErr
 	}
 	_, ok := u.activeSessions[sessionID]
-	return ok, nil
+	return ok, u.sessionExpiresAt[sessionID], nil
 }
 
 func setupUIEndpointEngine(t *testing.T, apiv1Mock Apiv1) (*gin.Engine, *notify.Service) {
@@ -371,3 +378,66 @@ func TestEndpointUINotify_LookupErrorIsRetryable(t *testing.T) {
 
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code, "backend errors must not be reported as 404")
 }
+
+// A page waiting for a wallet makes no requests of its own, so when the
+// presentation deadline passes it learns nothing: it sat on a live stream
+// showing a QR code the verifier had already started refusing, until
+// somebody reloaded the tab. The stream now says so and closes.
+func TestEndpointUINotify_EmitsExpiredWhenTheDeadlinePasses(t *testing.T) {
+	const sessionID = "expiring-session"
+	mock := &uiInteractionApiv1{
+		activeSessions:   map[string]struct{}{sessionID: {}},
+		sessionExpiresAt: map[string]int64{sessionID: time.Now().Add(time.Second).Unix()},
+	}
+	engine, notifySvc := setupUIEndpointEngine(t, mock)
+	defer func() { _ = notifySvc.Close(context.Background()) }()
+
+	// A backstop on the request, not on the assertion: without the expiry
+	// the stream blocks on its listener forever, and a test that hangs
+	// until the package timeout reports nothing useful about why.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/notify?session_id="+sessionID, nil).WithContext(ctx)
+	w := newStreamRecorder()
+	engine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "event:expired",
+		"the stream went quiet instead of telling the tab the session was over")
+}
+
+// ... and a session with no deadline arms nothing. Contexts created before
+// presentation_timeout was read carry ExpiresAt 0, and reading that as
+// "expire now" would close every one of their streams immediately.
+func TestEndpointUINotify_NoDeadlineArmsNoExpiry(t *testing.T) {
+	const sessionID = "deadline-less-session"
+	mock := &uiInteractionApiv1{activeSessions: map[string]struct{}{sessionID: {}}}
+	engine, notifySvc := setupUIEndpointEngine(t, mock)
+	defer func() { _ = notifySvc.Close(context.Background()) }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/notify?session_id="+sessionID, nil).WithContext(ctx)
+	w := newStreamRecorder()
+	engine.ServeHTTP(w, req)
+
+	assert.NotContains(t, w.Body.String(), "event:expired",
+		"a session with no deadline had one applied anyway")
+}
+
+// streamRecorder is httptest.ResponseRecorder plus the CloseNotifier that
+// gin.Context.Stream type-asserts on. Deprecated in net/http and absent
+// from the recorder, so without it any test that reaches the SSE stream
+// panics before the handler gets a chance to be wrong.
+type streamRecorder struct {
+	*httptest.ResponseRecorder
+	closed chan bool
+}
+
+func newStreamRecorder() *streamRecorder {
+	return &streamRecorder{ResponseRecorder: httptest.NewRecorder(), closed: make(chan bool, 1)}
+}
+
+func (r *streamRecorder) CloseNotify() <-chan bool { return r.closed }

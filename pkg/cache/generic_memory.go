@@ -11,6 +11,7 @@ import (
 // Suitable for single-instance deployments. For HA, swap with MongoCache.
 type MemoryCache[V any] struct {
 	cache *ttlcache.Cache[string, V]
+	ttl   time.Duration
 }
 
 // NewMemoryCache creates a new in-memory generic cache with the given default TTL.
@@ -21,7 +22,16 @@ func NewMemoryCache[V any](ttl time.Duration) *MemoryCache[V] {
 
 	go c.Start()
 
-	return &MemoryCache[V]{cache: c}
+	return &MemoryCache[V]{cache: c, ttl: ttl}
+}
+
+// TTL returns how long this cache retains an entry.
+//
+// Retention is a configured value rather than a constant - several of these
+// caches have to outlive a presentation whose length an operator sets - so
+// callers need to be able to read back what they got.
+func (m *MemoryCache[V]) TTL() time.Duration {
+	return m.ttl
 }
 
 // Get retrieves a value by key.

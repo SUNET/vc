@@ -85,6 +85,16 @@ func (c *Client) ConfirmCredentialDisplay(ctx context.Context, req *ConfirmCrede
 	}
 
 	// Verify session is in the right state
+	// The third place a code is issued, and the last one without a deadline
+	// check. Without it a confirmation could mint an authorization code
+	// arbitrarily long after the presentation window closed - and the Mongo
+	// retention, anchored to CreatedAt, could then evict the session while
+	// that code was still valid.
+	if sessionExpired(authCtx) {
+		c.log.Info("Credential display confirmed for an expired session", "session_id", authCtx.SessionID)
+		return nil, ErrSessionExpired
+	}
+
 	if authCtx.Status != cache.SessionStatusAwaitingPresentation {
 		c.log.Info("Session not awaiting confirmation", "session_id", req.SessionID, "status", authCtx.Status)
 		return nil, ErrInvalidRequest

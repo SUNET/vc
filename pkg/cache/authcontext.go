@@ -26,12 +26,23 @@ type MemoryStore struct {
 	// Secondary indices: various fields -> sessionID
 	indices map[string]string
 	mu      sync.RWMutex
+	ttl     time.Duration
+}
+
+// TTL returns how long this store retains an authorization context.
+//
+// Retention is a configured value rather than a constant, and it has to
+// cover the deadlines checked against the contexts it holds, so callers
+// need to be able to read back what they got.
+func (s *MemoryStore) TTL() time.Duration {
+	return s.ttl
 }
 
 // NewMemoryStore creates a new in-memory authorization context store.
 func NewMemoryStore(ttl time.Duration) *MemoryStore {
 	s := &MemoryStore{
 		indices: make(map[string]string),
+		ttl:     ttl,
 	}
 
 	c := ttlcache.New(

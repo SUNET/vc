@@ -51,6 +51,17 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", errors.New("request object not found")
 	}
 
+	// A cache hit proves we minted this request; it does not prove the
+	// session is still open. The request-object cache outlives the
+	// presentation window by its own floor, and UIResume can mint a DC API
+	// object moments before the deadline - which then stays fetchable long
+	// after the direct-post handlers would refuse its response. Handing a
+	// wallet a request it can no longer answer is worse than a 404.
+	if authCtx := c.authContextFor(ctx, requestObject.State); sessionExpired(authCtx) {
+		c.log.Info("Request object fetched for an expired session", "state", requestObject.State)
+		return "", ErrSessionExpired
+	}
+
 	signedJWT, err := requestObject.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
 	if err != nil {
 		c.log.Error(err, "failed to sign authorization request")
@@ -129,6 +140,15 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	if err != nil {
 		c.log.Error(err, "failed to get authorization context")
 		return nil, err
+	}
+
+	// The presentation deadline. Nothing on this path checked it: the
+	// standalone flow accepted a wallet response for as long as the
+	// auth-context cache kept the session, whatever openid4vp
+	// presentation_timeout said.
+	if sessionExpired(authCtx) {
+		c.log.Info("Verification direct post for an expired session", "state", vpResponse.State)
+		return nil, ErrSessionExpired
 	}
 
 	// Generate response code

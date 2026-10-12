@@ -58,7 +58,6 @@ verifier:
       session_duration: 3600
       access_token_duration: 3600
       id_token_duration: 3600
-      refresh_token_duration: 86400
       # Dynamic Client Registration authorization policy for POST /register
       # Modes: open (default), static (file bearer token), jwt (JWKS validation)
       # The token file must hold a single RFC 6750 b64token on one line

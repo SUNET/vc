@@ -404,8 +404,10 @@ function clearStoredResponseCode() {
  *
  * @param {string | undefined} sessionID
  * @param {(redirectURI: string) => void} onRedirect
+ * @param {() => void} onExpired Called when the server says the session's
+ *   presentation deadline has passed and nothing more will arrive.
  */
-function setupNotifyListener(sessionID, onRedirect) {
+function setupNotifyListener(sessionID, onRedirect, onExpired) {
     console.log("Setting up SSE notify listener");
     const notifyURL = new URL("/ui/notify", baseUrl);
     if (sessionID) {
@@ -441,6 +443,16 @@ function setupNotifyListener(sessionID, onRedirect) {
         eventSource.close();
         onRedirect(redirectURI);
     };
+
+    // The server's one-shot expiry notice. Without it a tab that is just
+    // waiting for a wallet never learns that its deadline passed: it makes
+    // no requests of its own, so it would sit on a live connection showing
+    // a QR code the verifier has already stopped accepting.
+    eventSource.addEventListener("expired", () => {
+        console.log("SSE session expired");
+        eventSource.close();
+        onExpired();
+    });
 
     eventSource.onerror = (error) => {
         console.error("SSE connection error:", error);
@@ -521,6 +533,13 @@ Alpine.data("app", () => ({
     /** @type {boolean} True when a stored response_code refers to a result
      * the server no longer has (credential cache TTL expired). */
     verificationExpired: false,
+
+    /** @type {boolean} Whether the presentation session itself ran out of
+     * time while this page was waiting for a wallet. Distinct from
+     * verificationExpired, which is about a RESULT the server no longer
+     * holds: here there is no result and never will be, and the only way
+     * forward is to start a new request. */
+    sessionExpired: false,
 
     async init() {
         await this.lookupCredentialsList();
@@ -743,6 +762,7 @@ Alpine.data("app", () => ({
         this.dcApiVerified = false;
         this.verificationResult = null;
         this.verificationExpired = false;
+        this.sessionExpired = false;
         clearStoredSessionID();
         clearStoredResponseCode();
     },
@@ -1042,6 +1062,7 @@ Alpine.data("app", () => ({
             this.notifyEventSource = setupNotifyListener(
                 sessionID,
                 (redirectURI) => { this.handleRedirectURI(redirectURI); },
+                () => { this.handleSessionExpired(); },
             );
             // Close the race between /ui/resume (or sendDcqlQuery) reading
             // "pending" and this SSE subscription becoming live. Firing on
@@ -1244,6 +1265,20 @@ Alpine.data("app", () => ({
     },
 
     /**
+     * The session's presentation deadline passed while this page waited.
+     * Drop the stored id - there is nothing to resume to - and show the
+     * notice, so the QR screen stops offering a code the verifier will
+     * refuse.
+     */
+    handleSessionExpired() {
+        this.notifyEventSource = null;
+        clearStoredSessionID();
+        this.presentationDefinition = null;
+        this.redirectUris = null;
+        this.sessionExpired = true;
+    },
+
+    /**
      * Re-materialize the QR / wallet-link screen from a /ui/resume reply.
      * credentialsList and credentialAttributes are set to the sentinel
      * empty objects handleSelectPredefinedPresentationDefinition uses, so
@@ -1291,6 +1326,7 @@ Alpine.data("app", () => ({
         clearStoredSessionID();
         this.verificationResult = null;
         this.verificationExpired = false;
+        this.sessionExpired = false;
         this.dcApiVerified = false;
         this.credentialAttributes = null;
         this.dcqlQuery = null;

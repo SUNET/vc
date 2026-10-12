@@ -530,14 +530,21 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		// which types were asked for, whether holder binding was required.
 		// Without it here the request object cache is the only copy, and the
 		// verification path cannot see what it is checking against.
-		DCQLQuery:           req.DCQLQuery,
-		Code:                "",
-		RequestURI:          "",
-		WalletURI:           "",
-		Forfeited:           false,
-		State:               state,
-		ClientID:            uiClientID,
-		ExpiresAt:           0,
+		DCQLQuery:  req.DCQLQuery,
+		Code:       "",
+		RequestURI: "",
+		WalletURI:  "",
+		Forfeited:  false,
+		State:      state,
+		ClientID:   uiClientID,
+		// How long the user has to complete the presentation.
+		//
+		// This was 0, and isSessionActive reads 0 as "never expires" - so
+		// the standalone verification session had no deadline of its own
+		// and lived until the auth-context cache evicted it. The key for
+		// this, openid4vp.presentation_timeout, was read nowhere in the
+		// codebase (SUNET/vc#756).
+		ExpiresAt:           time.Now().Add(c.cfg.Verifier.Inbound.OpenID4VP.GetPresentationTimeout()).Unix(),
 		CodeChallenge:       "",
 		CodeChallengeMethod: "",
 		Consent:             false,
@@ -795,31 +802,56 @@ func isReusableAuthContext(authCtx *cache.AuthorizationContext) bool {
 }
 
 // IsActiveAuthSession reports whether sessionID names an authorization
-// context the verifier currently tracks. Used by /ui/notify to refuse to
-// open an SSE listener for an unknown id, which would otherwise let any
+// context the verifier currently tracks, and when that context's
+// presentation deadline falls. Used by /ui/notify to refuse to open an SSE
+// listener for an unknown id, which would otherwise let any
 // unauthenticated caller inflate notify.Service's broadcaster map.
 //
-// (false, nil) means the lookup succeeded and the id is unknown
-// (ErrNoDocuments) or empty. A non-nil error means the authorization
-// store itself failed; the HTTP endpoint surfaces that as a retryable
-// 5xx so a transient Mongo/Redis error in HA does not get mis-reported
-// as 404 and strand the EventSource reconciliation that would run on
-// retry.
-func (c *Client) IsActiveAuthSession(ctx context.Context, sessionID string) (bool, error) {
+// (false, _, nil) means the lookup succeeded and the id is unknown
+// (ErrNoDocuments), empty, or already past its deadline. A non-nil error
+// means the authorization store itself failed; the HTTP endpoint surfaces
+// that as a retryable 5xx so a transient Mongo/Redis error in HA does not
+// get mis-reported as 404 and strand the EventSource reconciliation that
+// would run on retry.
+//
+// An expired context reports inactive rather than active-with-a-past
+// deadline, so a tab that reconnects after the deadline is refused
+// outright instead of being handed a stream that exists only to tell it
+// the session is over. A context that already reached an outcome is the
+// exception twice over: it stays active past its deadline, and it reports
+// NO deadline, because the tab is still owed the result and the stream is
+// how it reconciles one it missed.
+//
+// expiresAt is the Unix second the session stops being usable, or 0 when
+// it has no deadline - a context created before presentation_timeout was
+// read, which is bounded only by cache eviction. The caller uses it to
+// arm the expiry event, so "no deadline" must mean "do not arm", never
+// "expire now".
+func (c *Client) IsActiveAuthSession(ctx context.Context, sessionID string) (active bool, expiresAt int64, err error) {
 	if sessionID == "" {
-		return false, nil
+		return false, 0, nil
 	}
 	authCtx, err := c.cacheService.AuthContext.GetByID(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, cache.ErrNoDocuments) {
-			return false, nil
+			return false, 0, nil
 		}
-		return false, err
+		return false, 0, err
 	}
 	if authCtx == nil {
-		return false, nil
+		return false, 0, nil
 	}
-	return true, nil
+	if authSessionIsTerminal(authCtx) {
+		// No deadline for a session that is already over: the stream is
+		// open so the tab can pick up the result it has not seen yet, and
+		// arming the expiry here would close it immediately on a session
+		// whose outcome is sitting there waiting to be read.
+		return true, 0, nil
+	}
+	if sessionExpired(authCtx) {
+		return false, 0, nil
+	}
+	return true, authCtx.ExpiresAt, nil
 }
 
 // CompletedResponseCode returns the VerifierResponseCode set on the
@@ -914,6 +946,16 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 			ResponseCode: authCtx.VerifierResponseCode,
 		}, nil
 	}
+	// Past the presentation deadline there is nothing to resume. Checked
+	// after the completed case, so a finished session still hands back its
+	// response code, and before the request object, which outlives the
+	// deadline by its own floor - without this, a resume reissued the dead
+	// QR and minted a fresh DC API request_uri for a session the
+	// direct-post handlers would then refuse.
+	if sessionExpired(authCtx) {
+		return &UIResumeReply{Status: UIResumeExpired}, nil
+	}
+
 	requestObject, err := c.cacheService.RequestObject.GetErr(ctx, authCtx.RequestObjectID)
 	if err != nil {
 		if errors.Is(err, cache.ErrNoDocuments) {
