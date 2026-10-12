@@ -28,49 +28,20 @@ func TestDCAPIOrigin(t *testing.T) {
 		{name: "a port is part of the origin", publicURL: "https://verifier.example.com:8443/", want: "https://verifier.example.com:8443"},
 
 		// RFC 6454 §6.2. The wallet compares expected_origins against the
-		// Origin the browser reports, as a plain string, so anything
+		// Origin the browser reports, as a plain string, so every spelling
 		// configuration permits that a browser never emits has to be
-		// normalised here or a correct deployment is refused.
-		{
-			name:      "the default https port is dropped, as a browser drops it",
-			publicURL: "https://verifier.example.com:443/",
-			want:      "https://verifier.example.com",
-		},
-		{
-			name:      "the default http port is dropped too",
-			publicURL: "http://verifier.example.com:80",
-			want:      "http://verifier.example.com",
-		},
-		{
-			name:      "a non-default port survives on http",
-			publicURL: "http://verifier.example.com:8080",
-			want:      "http://verifier.example.com:8080",
-		},
-		{
-			name:      "the host is lowercased",
-			publicURL: "https://Verifier.Example.COM",
-			want:      "https://verifier.example.com",
-		},
-		{
-			name:      "the scheme is lowercased",
-			publicURL: "HTTPS://verifier.example.com",
-			want:      "https://verifier.example.com",
-		},
-		{
-			name:      "both at once, which is the configuration that reads as valid and was refused",
-			publicURL: "HTTPS://Verifier.Example.COM:443/ui",
-			want:      "https://verifier.example.com",
-		},
-		{
-			name:      "an IPv6 literal keeps its brackets",
-			publicURL: "https://[2001:db8::1]:8443",
-			want:      "https://[2001:db8::1]:8443",
-		},
-		{
-			name:      "an IPv6 literal on the default port keeps its brackets and loses the port",
-			publicURL: "https://[2001:db8::1]:443",
-			want:      "https://[2001:db8::1]",
-		},
+		// normalised here or a correct deployment is refused. The default
+		// port is the one that bites first: an operator writing :443 is
+		// being precise, not wrong.
+		{name: "the default https port is dropped, as a browser drops it", publicURL: "https://verifier.example.com:443/", want: "https://verifier.example.com"},
+		{name: "the default http port is dropped too", publicURL: "http://verifier.example.com:80", want: "http://verifier.example.com"},
+		{name: "a non-default port survives on http", publicURL: "http://verifier.example.com:8080", want: "http://verifier.example.com:8080"},
+		{name: "the host is lowercased", publicURL: "https://Verifier.Example.COM", want: "https://verifier.example.com"},
+		{name: "the scheme is lowercased", publicURL: "HTTPS://verifier.example.com", want: "https://verifier.example.com"},
+		{name: "all three at once, the config that reads as valid and was refused", publicURL: "HTTPS://Verifier.Example.COM:443/ui", want: "https://verifier.example.com"},
+		{name: "an IPv6 literal keeps its brackets", publicURL: "https://[2001:db8::1]:8443", want: "https://[2001:db8::1]:8443"},
+		{name: "an IPv6 literal loses the default port, keeps the brackets", publicURL: "https://[2001:db8::1]:443", want: "https://[2001:db8::1]"},
+
 		{name: "unset is refused", publicURL: "", wantErr: "not set"},
 		{name: "no scheme is refused", publicURL: "verifier.example.com", wantErr: "no scheme or host"},
 	} {
