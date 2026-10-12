@@ -404,39 +404,11 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	// This ensures a stolen code cannot be consumed without a valid DPoP proof.
 	var dpopThumbprint string
 	if req.DPOP != "" {
-		dpop, dpopErr := oauth2.ValidateAndParseDPoPJWT(req.DPOP)
-		if dpopErr != nil {
-			c.log.Error(dpopErr, "dpop validation error")
-			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidDPoPProof,
-				dpopErr.Error(), 400, dpopErr)
-		}
-
-		dpopThumbprint = dpop.Thumbprint
-
-		unique, err := c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true)
+		var err error
+		dpopThumbprint, err = c.dpopProofThumbprint(ctx, req.DPOP, c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint)
 		if err != nil {
-			c.log.Error(err, "DPoP JTI cache error", "jti", dpop.JTI)
-			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
-				"internal error checking DPoP JTI", 500, err)
+			return nil, err
 		}
-		if !unique {
-			c.log.Error(nil, "DPoP JTI replay detected", "jti", dpop.JTI)
-			return nil, oauth2.OAuthErrJTIReplay
-		}
-
-		// Validate HTU matches token endpoint
-		if dpop.HTU != c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint {
-			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
-				fmt.Sprintf("invalid htu: expected %s, got %s", c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint, dpop.HTU), 400)
-		}
-
-		// Validate HTM is POST (token endpoint only accepts POST)
-		if dpop.HTM != "POST" {
-			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
-				fmt.Sprintf("invalid htm: expected POST, got %s", dpop.HTM), 400)
-		}
-
-		c.log.Debug("DPoP claims", "jti", dpop.JTI, "htu", dpop.HTU, "htm", dpop.HTM)
 	} else if !isPreAuthFlow {
 		return nil, oauth2.OAuthErrDPoPRequired
 	}
@@ -1077,6 +1049,53 @@ type walletClientAuth struct {
 // the same way, and duplicating sixty lines of attestation handling - PoP
 // requirements, subject binding, SPOCP tier policy - is how two endpoints
 // come to disagree about who may ask for what.
+// dpopProofThumbprint validates one DPoP proof and returns the JWK
+// thumbprint of the key it was signed with, which is what an issued
+// artefact is then bound to (RFC 9449 §4).
+//
+// htu is the absolute URL of the endpoint the proof must name. It is a
+// parameter rather than a field read here because the check is what stops a
+// proof minted for one endpoint being replayed at another, and an endpoint
+// that passed the wrong URL - or the same URL for two endpoints - would
+// silently give that away.
+//
+// The proof's jti is BURNED here, so this must be called exactly once per
+// request: a second call for the same proof is indistinguishable from a
+// replay and is refused as one.
+func (c *Client) dpopProofThumbprint(ctx context.Context, proof, htu string) (string, error) {
+	dpop, err := oauth2.ValidateAndParseDPoPJWT(proof)
+	if err != nil {
+		c.log.Error(err, "dpop validation error")
+		return "", oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidDPoPProof, err.Error(), 400, err)
+	}
+
+	unique, err := c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true)
+	if err != nil {
+		c.log.Error(err, "DPoP JTI cache error", "jti", dpop.JTI)
+		return "", oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"internal error checking DPoP JTI", 500, err)
+	}
+	if !unique {
+		c.log.Error(nil, "DPoP JTI replay detected", "jti", dpop.JTI)
+		return "", oauth2.OAuthErrJTIReplay
+	}
+
+	if dpop.HTU != htu {
+		return "", oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
+			fmt.Sprintf("invalid htu: expected %s, got %s", htu, dpop.HTU), 400)
+	}
+
+	// Every endpoint that takes a DPoP proof here is POST-only.
+	if dpop.HTM != "POST" {
+		return "", oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
+			fmt.Sprintf("invalid htm: expected POST, got %s", dpop.HTM), 400)
+	}
+
+	c.log.Debug("DPoP claims", "jti", dpop.JTI, "htu", dpop.HTU, "htm", dpop.HTM)
+
+	return dpop.Thumbprint, nil
+}
+
 func (c *Client) authenticateOAuthClient(ctx context.Context, req *walletClientAuth) (*oauth2.Client, error) {
 	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
 	if err == nil {

@@ -65,27 +65,58 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		return "", fmt.Errorf("failed to update authorization context: %w", err)
 	}
 
-	// Derive VP formats from issuer metadata
-	vf := deriveVPFormatsFromMetadata(c.issuerMetadata)
-
-	_, ephemeralPublicJWK, err := c.EphemeralEncryptionKey(ctx, authorizationContext.EphemeralEncryptionKeyID)
+	authorizationRequest, err := c.buildIssuanceAuthRequestObject(ctx, authorizationContext, dcql)
 	if err != nil {
 		return "", err
 	}
 
+	c.log.Debug("Authorization request", "request", authorizationRequest)
+
+	reply, err := authorizationRequest.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
+	if err != nil {
+		c.log.Error(err, "failed to sign authorization request")
+		return "", err
+	}
+
+	c.log.Debug("Signed JWT", "jwt", reply)
+
+	return reply, nil
+}
+
+// buildIssuanceAuthRequestObject builds the OpenID4VP Authorization Request
+// that authenticates one issuance, in its browser-mediated (direct_post.jwt)
+// form.
+//
+// This is the base both delivery channels start from: the link/QR channel
+// signs it as it stands, and OpenID4VCI 1.1 Interactive Authorization takes
+// it through RequestObject.WithInteractiveAuthorization, which changes only
+// the three fields that describe how the request is delivered and answered.
+// Everything a Wallet checks - client_id, nonce, client_metadata, the DCQL
+// query - is built once, here, so the channels cannot drift into asking for
+// different things.
+func (c *Client) buildIssuanceAuthRequestObject(ctx context.Context, authCtx *cache.AuthorizationContext, dcql *openid4vp.DCQL) (*openid4vp.RequestObject, error) {
+	// Derive VP formats from issuer metadata
+	vf := deriveVPFormatsFromMetadata(c.issuerMetadata)
+
+	_, ephemeralPublicJWK, err := c.EphemeralEncryptionKey(ctx, authCtx.EphemeralEncryptionKeyID)
+	if err != nil {
+		return nil, err
+	}
+
 	responseURI, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/verification/direct_post")
 	if err != nil {
-		return "", fmt.Errorf("failed to construct response URI: %w", err)
+		return nil, fmt.Errorf("failed to construct response URI: %w", err)
 	}
-	authorizationRequest := openid4vp.RequestObject{
+
+	authorizationRequest := &openid4vp.RequestObject{
 		ResponseURI:  responseURI,
 		AUD:          "https://self-issued.me/v2",
-		ISS:          authorizationContext.ClientID,
-		ClientID:     authorizationContext.ClientID,
+		ISS:          authCtx.ClientID,
+		ClientID:     authCtx.ClientID,
 		ResponseType: "vp_token",
-		ResponseMode: "direct_post.jwt",
-		State:        authorizationContext.State,
-		Nonce:        authorizationContext.Nonce,
+		ResponseMode: openid4vp.ResponseModeDirectPostJWT,
+		State:        authCtx.State,
+		Nonce:        authCtx.Nonce,
 		DCQLQuery:    dcql,
 		ClientMetadata: &openid4vp.ClientMetadata{
 			VPFormatsSupported: vf,
@@ -106,17 +137,7 @@ func (c *Client) VerificationRequestObject(ctx context.Context, req *Verificatio
 		authorizationRequest.ClientMetadata.AuthorizationEncryptedResponseENC = "A256GCM"
 	}
 
-	c.log.Debug("Authorization request", "request", authorizationRequest)
-
-	reply, err := authorizationRequest.Sign(ctx, c.pkiSigner, c.pkiSignerChain)
-	if err != nil {
-		c.log.Error(err, "failed to sign authorization request")
-		return "", err
-	}
-
-	c.log.Debug("Signed JWT", "jwt", reply)
-
-	return reply, nil
+	return authorizationRequest, nil
 }
 
 type VerificationDirectPostRequest struct {
@@ -173,7 +194,86 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	}
 
 	c.log.Debug("VP Response received", "vp_token_keys", vpResponse.VPToken, "scope", authCtx.Scopes)
+	outcome, err := c.consumeIssuanceAuthPresentation(ctx, authCtx, &vpResponse, issuanceAuthBinding{
+		Audience:              authCtx.ClientID,
+		MdocSessionTranscript: c.directPostSessionTranscript(authCtx, privateEphemeralJWK),
+	})
+	if err != nil {
+		return nil, err
+	}
 
+	callbackURL, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/authorization/consent/callback/")
+	if err != nil {
+		c.log.Error(nil, "Failed to construct callback URL", "error", err)
+		return nil, errors.New("failed to construct callback URL")
+	}
+	u, err := url.Parse(callbackURL)
+	if err != nil {
+		c.log.Error(nil, "Failed to parse callback URL", "error", err)
+		return nil, errors.New("failed to parse callback URL")
+	}
+	q := u.Query()
+	q.Set("response_code", authCtx.VerifierResponseCode)
+	u.RawQuery = q.Encode()
+
+	reply := &VerificationDirectPostResponse{
+		RedirectURI: u.String(),
+	}
+	// Only the presentation-sourced path reports the session back: the
+	// wallet uses it to resume an issuance it started, and the other paths
+	// have nothing of the kind to resume.
+	if outcome.PresentationSourced {
+		reply.PresentationDuringIssuanceSession = authCtx.SessionID
+	}
+	return reply, nil
+}
+
+// issuanceAuthBinding is what a presentation must be bound to, which
+// differs by the channel it arrived on.
+type issuanceAuthBinding struct {
+	// Audience is what the presentation must be addressed to: the
+	// verifier's own client_id for the browser flow, and the prefixed
+	// Authorization Challenge Endpoint for Interactive Authorization,
+	// which is what stops one Authorization Server relaying another's
+	// challenge.
+	Audience string
+
+	// MdocSessionTranscript builds the transcript an mdoc presentation on
+	// this channel must have been signed over. Nil means the channel does
+	// not accept mdoc, which is refused explicitly rather than verified
+	// against some other channel's transcript.
+	MdocSessionTranscript func() ([]byte, error)
+}
+
+// issuanceAuthOutcome says how a presentation that authenticated an
+// issuance was consumed, so each caller can finish in its own terms.
+type issuanceAuthOutcome struct {
+	// Scope is the issuance scope the presentation satisfied.
+	Scope string
+
+	// PresentationSourced is true when the scope derives its whole
+	// document from the presented credential, so no datastore lookup
+	// happened and finalisePresentationVerification has already run.
+	PresentationSourced bool
+}
+
+// consumeIssuanceAuthPresentation verifies a presentation that authenticates
+// an issuance and resolves it to a person, leaving the authorization context
+// ready for the credential to be issued.
+//
+// Shared by the two ways such a presentation can arrive: the browser-mediated
+// flow, where the wallet posts it to /verification/direct_post, and
+// OpenID4VCI 1.1 Interactive Authorization, where it comes back to the
+// Authorization Challenge Endpoint. Everything between "here is a VP token"
+// and "this session has documents" is the same for both - the DCQL match,
+// SD-JWT and mdoc verification, issuer trust, identity extraction, the
+// datastore lookup - and it is not the kind of code to keep two copies of.
+//
+// audience is what the presentation must be addressed to. The browser flow
+// passes the verifier's own client_id; Interactive Authorization passes the
+// prefixed Authorization Challenge Endpoint, which is what stops one
+// Authorization Server relaying another's challenge.
+func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *cache.AuthorizationContext, vpResponse *openid4vp.VPResponse, binding issuanceAuthBinding) (*issuanceAuthOutcome, error) {
 	// Match a scope from the authorization context to a known credential constructor
 	scope, credMetaCfg, err := c.matchScope(authCtx.Scopes)
 	if err != nil {
@@ -251,26 +351,17 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 				return nil, errors.New("ZK-mdoc (mso_mdoc_zk) VP tokens are not supported on this presentation flow; use the ZK verifier instead")
 			}
 		}
-		responseURI, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/verification/direct_post")
-		if err != nil {
-			return nil, fmt.Errorf("compute mdoc response_uri: %w", err)
+		// The SessionTranscript binds the presentation to the channel it
+		// arrived on, so the channel builds it. A wallet answering a
+		// direct-post request and one answering an Authorization
+		// Challenge Endpoint construct different transcripts, and
+		// verifying against the wrong one fails device-auth with nothing
+		// to point at - so a channel that has not supplied a builder
+		// refuses mdoc rather than guessing.
+		if binding.MdocSessionTranscript == nil {
+			return nil, errors.New("mdoc presentations are not supported on this authentication channel")
 		}
-		// SessionTranscript binds the presentation to this request's
-		// nonce/client_id/response_uri and to the ephemeral response-
-		// encryption public key advertised in ClientMetadata.JWKS. A
-		// conformant mdoc wallet includes that reader-key thumbprint in
-		// its own transcript, so we must derive the same one here or
-		// device-auth verification rejects valid encrypted direct-post
-		// presentations.
-		ephemeralPublicJWK, err := privateEphemeralJWK.PublicKey()
-		if err != nil {
-			return nil, fmt.Errorf("derive ephemeral public key: %w", err)
-		}
-		readerPubKeyThumbprint, err := ephemeralPublicJWK.Thumbprint(crypto.SHA256)
-		if err != nil {
-			return nil, fmt.Errorf("compute ephemeral JWK thumbprint: %w", err)
-		}
-		sessionTranscript, err := mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)
+		sessionTranscript, err := binding.MdocSessionTranscript()
 		if err != nil {
 			return nil, fmt.Errorf("build mdoc session transcript: %w", err)
 		}
@@ -292,7 +383,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 	} else {
 		validator := &openid4vp.VPTokenValidator{
 			Nonce:           authCtx.Nonce,
-			ClientID:        authCtx.ClientID,
+			ClientID:        binding.Audience,
 			ValidateFormat:  true,
 			CheckRevocation: false,
 			DCQLQuery:       authCtx.DCQLQuery,
@@ -336,28 +427,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		if err := c.finalisePresentationVerification(ctx, authCtx, pScope, credential); err != nil {
 			return nil, err
 		}
-		// The consent flow resumes through
-		// /authorization/consent/callback?response_code=... just like the
-		// datastore/assertion path below; emit the same RedirectURI so
-		// the wallet actually drives the browser back to consent rather
-		// than stranding at direct-post with only PresentationDuringIssuanceSession.
-		callbackURL, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/authorization/consent/callback/")
-		if err != nil {
-			c.log.Error(err, "failed to construct consent callback URL")
-			return nil, errors.New("failed to construct callback URL")
-		}
-		u, err := url.Parse(callbackURL)
-		if err != nil {
-			c.log.Error(err, "failed to parse consent callback URL")
-			return nil, errors.New("failed to parse callback URL")
-		}
-		q := u.Query()
-		q.Set("response_code", authCtx.VerifierResponseCode)
-		u.RawQuery = q.Encode()
-		return &VerificationDirectPostResponse{
-			PresentationDuringIssuanceSession: authCtx.SessionID,
-			RedirectURI:                       u.String(),
-		}, nil
+		return &issuanceAuthOutcome{Scope: scope, PresentationSourced: true}, nil
 	}
 
 	// Extract identity from validated credential using the matched auth scope's claims.
@@ -415,24 +485,7 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 
 	c.log.Debug("Documents cached for session", "session_id", authCtx.SessionID)
 
-	callbackURL, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/authorization/consent/callback/")
-	if err != nil {
-		c.log.Error(nil, "Failed to construct callback URL", "error", err)
-		return nil, errors.New("failed to construct callback URL")
-	}
-	u, err := url.Parse(callbackURL)
-	if err != nil {
-		c.log.Error(nil, "Failed to parse callback URL", "error", err)
-		return nil, errors.New("failed to parse callback URL")
-	}
-	q := u.Query()
-	q.Set("response_code", authCtx.VerifierResponseCode)
-	u.RawQuery = q.Encode()
-
-	reply := &VerificationDirectPostResponse{
-		RedirectURI: u.String(),
-	}
-	return reply, nil
+	return &issuanceAuthOutcome{Scope: scope}, nil
 }
 
 // buildIssuanceAuthDCQL builds the DCQL query the wallet must satisfy to
@@ -515,5 +568,31 @@ func authClaimPathSegments(format, claim string) []string {
 		return []string{mdoc.Namespace, claim}
 	default:
 		return strings.Split(claim, ".")
+	}
+}
+
+// directPostSessionTranscript builds the mdoc SessionTranscript for the
+// browser-mediated direct-post channel.
+//
+// It binds the presentation to this request's nonce, client_id and
+// response_uri, and to the ephemeral response-encryption public key
+// advertised in ClientMetadata.JWKS. A conformant mdoc wallet puts that
+// reader-key thumbprint in its own transcript, so the same one has to be
+// derived here or device-auth rejects valid encrypted presentations.
+func (c *Client) directPostSessionTranscript(authCtx *cache.AuthorizationContext, privateEphemeralJWK jwk.Key) func() ([]byte, error) {
+	return func() ([]byte, error) {
+		responseURI, err := url.JoinPath(c.cfg.APIGW.PublicURL, "/verification/direct_post")
+		if err != nil {
+			return nil, fmt.Errorf("compute mdoc response_uri: %w", err)
+		}
+		ephemeralPublicJWK, err := privateEphemeralJWK.PublicKey()
+		if err != nil {
+			return nil, fmt.Errorf("derive ephemeral public key: %w", err)
+		}
+		readerPubKeyThumbprint, err := ephemeralPublicJWK.Thumbprint(crypto.SHA256)
+		if err != nil {
+			return nil, fmt.Errorf("compute ephemeral JWK thumbprint: %w", err)
+		}
+		return mdoc.BuildOID4VPSessionTranscript(authCtx.ClientID, authCtx.Nonce, responseURI, readerPubKeyThumbprint)
 	}
 }
