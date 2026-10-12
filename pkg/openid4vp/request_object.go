@@ -60,8 +60,9 @@ type RequestObject struct {
 
 	// ResponseURI REQUIRED when the Response Mode direct_post is used. The URL to which the Wallet MUST send the Authorization Response using an HTTP POST request as defined by the Response Mode direct_post. The Response URI receives all Authorization Response parameters as defined by the respective Response Type. When the response_uri parameter is present, the redirect_uri Authorization Request parameter MUST NOT be present. If the redirect_uri Authorization Request parameter is present when the Response Mode is direct_post, the Wallet MUST return an invalid_request Authorization Response error. The response_uri value MUST be a value that the client would be permitted to use as redirect_uri when following the rules defined in Section 5.9.
 	//
-	// Required for the post-style modes (form_post, direct_post,
-	// direct_post.jwt) and ABSENT for the others: a dc_api request's
+	// Required for the direct_post modes (direct_post, direct_post.jwt)
+	// and ABSENT for the others. form_post answers to redirect_uri, as
+	// the field documentation above says; a dc_api request's
 	// response returns inside the browser call, and an ia_post request's
 	// goes back to the Authorization Challenge Endpoint it came from. A
 	// struct tag cannot express "required unless the mode is one of

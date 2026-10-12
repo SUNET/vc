@@ -272,10 +272,6 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 		return nil, err
 	}
 
-	if err := checkInteractiveAuthorization(cfg, serviceName); err != nil {
-		return nil, err
-	}
-
 	if err := checkPresentationScopeFromScope(cfg, serviceName); err != nil {
 		return nil, err
 	}
@@ -995,28 +991,4 @@ func LoadSecrets(path string, skipPermCheck bool) (*model.Secrets, error) {
 	}
 
 	return secrets, nil
-}
-
-// checkInteractiveAuthorization refuses a configuration that advertises
-// Interactive Authorization as REQUIRED without offering it.
-//
-// OpenID4VCI 1.1 says require_interactive_authorization MUST NOT be present
-// without authorization_challenge_endpoint, and the reason is practical: a
-// wallet reading that document is told the only accepted path to issuance
-// is a mechanism this server does not expose, which leaves it nothing to
-// do. The metadata generator drops the parameter rather than emit an
-// unusable document, so without this check an operator would get silently
-// corrected instead of told.
-func checkInteractiveAuthorization(cfg *model.Cfg, serviceName string) error {
-	if serviceName != "apigw" || cfg.APIGW == nil {
-		return nil
-	}
-	ia := cfg.APIGW.Delivery.InteractiveAuthorization
-	if model.BoolVal(ia.RequireInteractiveAuthorization, false) && !model.BoolVal(ia.Enable, false) {
-		return errors.New(
-			"apigw.delivery.interactive_authorization.require_interactive_authorization is true " +
-				"but enable is false: a server cannot require a mechanism it does not offer " +
-				"(OpenID4VCI 1.1, Authorization Server Metadata)")
-	}
-	return nil
 }
