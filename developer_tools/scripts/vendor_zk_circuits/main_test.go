@@ -210,10 +210,14 @@ func assertNothingOutside(t *testing.T, out string) {
 
 func TestSelectCircuits(t *testing.T) {
 	manifest := &zkcircuit.Manifest{Circuits: []zkcircuit.CircuitDescriptor{
-		{ID: "vega-active", System: "vega-mc", Status: "active", DocTypes: []string{"org.iso.18013.5.1.mDL"}},
-		{ID: "vega-deprecated", System: "vega-mc", Status: "deprecated", DocTypes: []string{"org.iso.18013.5.1.mDL"}},
-		{ID: "lf-active", System: "longfellow", Status: "active", DocTypes: []string{"org.iso.18013.5.1.mDL"}},
-		{ID: "vega-pid", System: "vega-mc", Status: "active", DocTypes: []string{"eu.europa.ec.eudi.pid.1"}},
+		{ID: "vega-active", System: "vega-mc", Status: "active", Published: true, DocTypes: []string{"org.iso.18013.5.1.mDL"}},
+		{ID: "vega-deprecated", System: "vega-mc", Status: "deprecated", Published: true, DocTypes: []string{"org.iso.18013.5.1.mDL"}},
+		{ID: "lf-active", System: "longfellow", Status: "active", Published: true, DocTypes: []string{"org.iso.18013.5.1.mDL"}},
+		{ID: "vega-pid", System: "vega-mc", Status: "active", Published: true, DocTypes: []string{"eu.europa.ec.eudi.pid.1"}},
+		// Active but never published. zkcircuit's usable set requires
+		// both, so vendoring this mirrors something the resolver refuses -
+		// or fails the run on an artifact that does not exist.
+		{ID: "vega-unpublished", System: "vega-mc", Status: "active", DocTypes: []string{"org.iso.18013.5.1.mDL"}},
 	}}
 
 	got := selectCircuits(manifest, "vega-mc", "org.iso.18013.5.1.mDL", true)
@@ -223,6 +227,14 @@ func TestSelectCircuits(t *testing.T) {
 
 	// -active-only=false keeps deprecated revisions, which is how a mirror
 	// for a wallet population that has not rolled over yet is built.
+	// The unpublished one is in neither selection: -active-only=false
+	// relaxes the STATUS filter, not the published one.
+	for _, c := range got {
+		if c.ID == "vega-unpublished" {
+			t.Error("an unpublished circuit was selected for vendoring")
+		}
+	}
+
 	got = selectCircuits(manifest, "vega-mc", "org.iso.18013.5.1.mDL", false)
 	if len(got) != 2 {
 		t.Fatalf("selectCircuits = %v, want both mDL vega entries", ids(got))
@@ -615,3 +627,78 @@ func TestVendorWritesFilesWithTheMirrorsMode(t *testing.T) {
 		}
 	}
 }
+
+// An alias has to resolve from the mirror, not just from the catalog.
+//
+// The catalog serves an alias by redirecting to the canonical id and the
+// HTTP client follows that. A file:// source has no redirect: fetchFile
+// opens v1/circuits/<id>.json directly, so an alias that resolved against
+// the live catalog 404'd against its own vendored copy.
+func TestVendorWritesAliasDescriptors(t *testing.T) {
+	body := []byte("verifier key bytes")
+	artifact, urlPath := artifactFor(body, "")
+
+	source := catalogServer(t,
+		[]map[string]any{aliasedVerifierDescriptor("vega-mc-p256-v1-verifier-key-r12", artifact)},
+		map[string][]byte{urlPath: body},
+	)
+
+	out := t.TempDir()
+	if err := run(t.Context(), source, out, "", "", true, false); err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+
+	mirror := zkcircuit.NewClient("file://" + filepath.ToSlash(out))
+	for _, name := range []string{"vega-mc-p256-v1-verifier-key-r12", aliasUnderTest} {
+		descriptor, err := mirror.FetchCircuit(t.Context(), name)
+		if err != nil {
+			t.Fatalf("FetchCircuit(%q) from the mirror: %v", name, err)
+		}
+		if descriptor.ID != "vega-mc-p256-v1-verifier-key-r12" {
+			t.Errorf("FetchCircuit(%q).ID = %q", name, descriptor.ID)
+		}
+	}
+}
+
+// Two descriptors claiming one name would make the mirror depend on write
+// order, so vendoring refuses rather than picking.
+func TestVendorRefusesAnAliasCollision(t *testing.T) {
+	body := []byte("verifier key bytes")
+	artifact, urlPath := artifactFor(body, "")
+
+	source := catalogServer(t,
+		[]map[string]any{
+			aliasedVerifierDescriptor("vega-mc-p256-v1-verifier-key-r12", artifact),
+			aliasedVerifierDescriptor("vega-mc-p256-v1-verifier-key-r13", artifact),
+		},
+		map[string][]byte{urlPath: body},
+	)
+
+	err := run(t.Context(), source, t.TempDir(), "", "", true, false)
+	if err == nil {
+		t.Fatal("a mirror was written with two descriptors claiming one alias")
+	}
+	if !strings.Contains(err.Error(), aliasUnderTest) {
+		t.Errorf("the error does not name the clashing alias: %v", err)
+	}
+}
+
+// aliasedVerifierDescriptor is a published, active verifier-key entry that
+// also answers to the rolling alias aliasUnderTest. Two tests build the
+// same shape - one proving the alias resolves from the vendored mirror, one
+// giving two entries the same alias - and the point of both is the alias,
+// so the rest of the descriptor is noise that belongs in one place.
+func aliasedVerifierDescriptor(id string, artifact map[string]any) map[string]any {
+	return map[string]any{
+		"id": id, "system": "vega-mc", "systemVersion": "12",
+		"status": "active", "published": true,
+		"aliases":  []string{aliasUnderTest},
+		"docTypes": []string{"org.iso.18013.5.1.mDL"},
+		"params":   map[string]any{"role": "verifier", "saltBytes": "32"},
+		"artifact": artifact,
+	}
+}
+
+// aliasUnderTest is the rolling name a deployment would pin to instead of a
+// revision id.
+const aliasUnderTest = "vega-mc-verifier-current"
