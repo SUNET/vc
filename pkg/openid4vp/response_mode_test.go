@@ -58,9 +58,12 @@ func TestWithDCAPIRequestDiffersOnlyInDelivery(t *testing.T) {
 	assert.Empty(t, base.ExpectedOrigins,
 		"the link channel has no invoking origin to name")
 
-	// Compare with the two delivery-dependent fields normalised: every
+	// Compare with all three delivery-dependent fields normalised: every
 	// other field, including any added to RequestObject later, has to be
-	// identical.
+	// identical. The count is load-bearing - this comment is where the
+	// exceptions to the cross-channel equality invariant are written down,
+	// and an earlier version of it claiming only one is what made the two
+	// bugs fixed here mandatory.
 	normalised := *variant
 	normalised.ResponseMode = base.ResponseMode
 	normalised.ResponseURI = base.ResponseURI
