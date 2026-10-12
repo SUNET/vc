@@ -32,7 +32,7 @@ func New(ctx context.Context, tracer *trace.Tracer, cfg *model.Cfg, log *logger.
 
 	c.Binding = &bindingHandler{client: c, log: log}
 	c.Middleware = &middlewareHandler{client: c, log: log}
-	c.Rendering = &renderingHandler{client: c, log: log, errorTmpl: errorPageTemplate()}
+	c.Rendering = &renderingHandler{client: c, log: log, errorTmpl: errorPageTemplate(), logoDataURI: errorPageLogo()}
 	c.TLS = &tlsHandler{client: c, log: log}
 	c.Server = &serverHandler{client: c, log: log}
 	c.Validator = &validatorHandler{client: c, log: log}

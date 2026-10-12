@@ -3,8 +3,10 @@ package httphelpers
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"html/template"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,14 +18,26 @@ import (
 )
 
 type renderingHandler struct {
-	client    *Client
-	log       *logger.Log
-	errorTmpl *template.Template
+	client      *Client
+	log         *logger.Log
+	errorTmpl   *template.Template
+	logoDataURI template.URL
 }
 
 // errorPageTemplate parses the shared HTML error page once at startup.
 func errorPageTemplate() *template.Template {
 	return template.Must(template.ParseFS(staticembed.FS, "error.html"))
+}
+
+// errorPageLogo reads the embedded logo into a data URI so the error page is
+// self-contained: services that serve no /static route, or serve it under a
+// different prefix, still render the brand mark.
+func errorPageLogo() template.URL {
+	b, err := staticembed.FS.ReadFile("logo.png")
+	if err != nil {
+		return ""
+	}
+	return template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(b))
 }
 
 // Content renders the content
@@ -50,7 +64,7 @@ func (r *renderingHandler) Content(ctx context.Context, c *gin.Context, code int
 	case gin.MIMEPlain, gin.MIMEHTML:
 		// For OIDC and OAuth2 well-known endpoints, always return JSON per spec
 		// even if text/plain is requested in Accept header
-		if isOIDCEndpoint(c.Request.URL.Path) {
+		if isJSONOnlyPath(c.Request.URL.Path) {
 			c.JSON(code, data)
 		} else {
 			c.String(code, "%v", data)
@@ -63,18 +77,68 @@ func (r *renderingHandler) Content(ctx context.Context, c *gin.Context, code int
 }
 
 // wantsErrorHTML reports whether this failed response should be the shared HTML
-// error page rather than JSON. Only genuine browser navigations qualify: the
-// request must explicitly list text/html (not merely */*, which every API
-// client and curl sends), the status must be an error, and the path must not
-// be an API/OIDC endpoint that is contractually JSON.
+// error page rather than JSON. It qualifies only when the status is an error,
+// the path is not a JSON-only API/OIDC endpoint, and the client named
+// text/html explicitly and preferred it to JSON (see prefersHTML).
 func (r *renderingHandler) wantsErrorHTML(c *gin.Context, code int) bool {
 	if code < 400 {
 		return false
 	}
-	if isOIDCEndpoint(c.Request.URL.Path) {
+	if isJSONOnlyPath(c.Request.URL.Path) {
 		return false
 	}
-	return strings.Contains(c.GetHeader("Accept"), gin.MIMEHTML)
+	return prefersHTML(c.GetHeader("Accept"))
+}
+
+// prefersHTML parses an Accept header and reports whether the client named
+// text/html explicitly with a nonzero quality and ranked it at least as high
+// as JSON. A bare */* (curl, API clients), text/html;q=0, or an Accept that
+// prefers application/json all return false, so only a genuine browser
+// navigation gets HTML.
+func prefersHTML(accept string) bool {
+	var qHTML, qJSON float64
+	htmlNamed := false
+
+	for _, part := range strings.Split(accept, ",") {
+		mediaRange, q := parseMediaRange(part)
+		switch mediaRange {
+		case "":
+			continue
+		case "text/html":
+			htmlNamed = true
+			if q > qHTML {
+				qHTML = q
+			}
+		case "application/json", "application/*", "*/*":
+			// Quality the client would accept JSON at, directly or by wildcard.
+			if q > qJSON {
+				qJSON = q
+			}
+		}
+	}
+
+	return htmlNamed && qHTML > 0 && qHTML >= qJSON
+}
+
+// parseMediaRange splits one Accept entry into its lowercased media range and
+// its quality value, defaulting q to 1 when absent or malformed.
+func parseMediaRange(part string) (string, float64) {
+	segs := strings.Split(part, ";")
+	mediaRange := strings.ToLower(strings.TrimSpace(segs[0]))
+	if mediaRange == "" {
+		return "", 0
+	}
+
+	q := 1.0
+	for _, param := range segs[1:] {
+		param = strings.TrimSpace(param)
+		if after, ok := strings.CutPrefix(param, "q="); ok {
+			if v, err := strconv.ParseFloat(strings.TrimSpace(after), 64); err == nil {
+				q = v
+			}
+		}
+	}
+	return mediaRange, q
 }
 
 // renderErrorHTML renders the shared error page. It surfaces only the safe
@@ -93,11 +157,13 @@ func (r *renderingHandler) renderErrorHTML(c *gin.Context, code int, data any) {
 		StatusText string
 		Message    string
 		RequestID  string
+		LogoURI    template.URL
 	}{
 		Code:       code,
 		StatusText: http.StatusText(code),
 		Message:    message,
 		RequestID:  c.GetString("req_id"),
+		LogoURI:    r.logoDataURI,
 	}
 
 	var buf bytes.Buffer
@@ -110,10 +176,12 @@ func (r *renderingHandler) renderErrorHTML(c *gin.Context, code int, data any) {
 	c.Data(code, gin.MIMEHTML+"; charset=utf-8", buf.Bytes())
 }
 
-// isOIDCEndpoint checks if the path is an OIDC/OAuth2 endpoint that must return JSON
-func isOIDCEndpoint(path string) bool {
-	// OIDC and OAuth2 endpoints that MUST return application/json per spec
-	oidcIndicators := []string{
+// isJSONOnlyPath reports whether a path must always return JSON rather than the
+// HTML error page: the API surface and the OIDC/OAuth2 endpoints that are
+// contractually application/json. Everything else is treated as browser-facing.
+func isJSONOnlyPath(path string) bool {
+	jsonOnlyIndicators := []string{
+		"/api/",
 		"well-known",
 		"/jwks",
 		"/register",
@@ -128,7 +196,7 @@ func isOIDCEndpoint(path string) bool {
 		"/notification",
 	}
 
-	for _, indicator := range oidcIndicators {
+	for _, indicator := range jsonOnlyIndicators {
 		if strings.Contains(path, indicator) {
 			return true
 		}

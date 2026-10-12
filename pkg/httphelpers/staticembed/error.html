@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="/static/favicon.png" type="image/png">
     <title>SUNET · {{.Code}} {{.StatusText}}</title>
     <style>
         :root {
@@ -102,7 +101,7 @@
 </head>
 <body>
     <div class="brand-bar">
-        <img src="/static/logo.png" alt="SUNET">
+        {{if .LogoURI}}<img src="{{.LogoURI}}" alt="SUNET">{{end}}
         <span class="wordmark">SUNET</span>
         <span class="brand-tag">Verifiable Credentials</span>
     </div>
@@ -112,7 +111,7 @@
             <p class="status">{{.StatusText}}</p>
             {{if .Message}}<p class="message">{{.Message}}</p>{{end}}
             <div class="actions">
-                <a class="back" href="/">Back to start</a>
+                <a class="back" href="/" onclick="history.back();return false;">Go back</a>
             </div>
             {{if .RequestID}}
             <p class="reqid">Reference: <code>{{.RequestID}}</code></p>
