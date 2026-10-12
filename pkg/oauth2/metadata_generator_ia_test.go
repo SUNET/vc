@@ -24,54 +24,51 @@ func metadataJSON(t *testing.T, cfg *MetadataConfig) map[string]any {
 // that Interactive Authorization is available, so a deployment that has
 // not enabled it must emit neither parameter.
 func TestGenerateMetadata_InteractiveAuthorization(t *testing.T) {
-	base := &MetadataConfig{IssuerURL: "https://issuer.example.com", TokenEndpoint: "https://issuer.example.com/token"}
+	const endpoint = "https://issuer.example.com/op/authorize-challenge"
 
-	t.Run("absent unless configured", func(t *testing.T) {
-		got := metadataJSON(t, base)
-		assert.NotContains(t, got, "authorization_challenge_endpoint")
-		assert.NotContains(t, got, "require_interactive_authorization")
-	})
-
-	t.Run("the endpoint is advertised when set", func(t *testing.T) {
-		cfg := *base
-		cfg.AuthorizationChallengeEndpoint = "https://issuer.example.com/op/authorize-challenge"
-		got := metadataJSON(t, &cfg)
-
-		assert.Equal(t, "https://issuer.example.com/op/authorize-challenge", got["authorization_challenge_endpoint"])
-		assert.NotContains(t, got, "require_interactive_authorization",
-			"false is the default and omitempty keeps it off the wire")
-	})
-
-	t.Run("required is advertised alongside the endpoint", func(t *testing.T) {
-		cfg := *base
-		cfg.AuthorizationChallengeEndpoint = "https://issuer.example.com/op/authorize-challenge"
-		cfg.RequireInteractiveAuthorization = true
-		got := metadataJSON(t, &cfg)
-
-		assert.Equal(t, true, got["require_interactive_authorization"])
-	})
-
-	t.Run("required without the endpoint is dropped, not emitted", func(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		endpoint     string
+		require      bool
+		wantEndpoint any // nil = the member must be absent
+		wantRequire  any // nil = the member must be absent
+	}{
+		// The presence of authorization_challenge_endpoint is the entire
+		// signal that Interactive Authorization is available, so a
+		// deployment that has not enabled it emits neither parameter.
+		{name: "absent unless configured"},
+		{name: "the endpoint is advertised when set", endpoint: endpoint, wantEndpoint: endpoint},
+		{name: "required is advertised alongside the endpoint", endpoint: endpoint, require: true, wantEndpoint: endpoint, wantRequire: true},
 		// The specification forbids the pair, and the document would be
 		// unusable: a wallet is told the only accepted path to issuance is
 		// a mechanism this server does not expose. GenerateMetadata cannot
 		// report an error, so it refuses to emit it; the struct's own
 		// excluded_without rule refuses the same combination wherever the
 		// metadata is validated, including before it is signed.
-		cfg := *base
-		cfg.RequireInteractiveAuthorization = true
-		got := metadataJSON(t, &cfg)
+		{name: "required without the endpoint is dropped, not emitted", require: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := metadataJSON(t, &MetadataConfig{
+				IssuerURL:                       "https://issuer.example.com",
+				TokenEndpoint:                   "https://issuer.example.com/token",
+				AuthorizationChallengeEndpoint:  tt.endpoint,
+				RequireInteractiveAuthorization: tt.require,
+			})
 
-		assert.NotContains(t, got, "require_interactive_authorization")
-		assert.NotContains(t, got, "authorization_challenge_endpoint")
-	})
+			for key, want := range map[string]any{
+				"authorization_challenge_endpoint":  tt.wantEndpoint,
+				"require_interactive_authorization": tt.wantRequire,
+			} {
+				if want == nil {
+					assert.NotContains(t, got, key)
+					continue
+				}
+				assert.Equal(t, want, got[key])
+			}
+		})
+	}
 }
 
-// The signing path never goes through GenerateMetadata: SignMetadata
-// unmarshals a configured document straight into this struct. A guard that
-// lives only in the generator therefore does nothing for it, and a SIGNED
-// document advertising a requirement for an endpoint it does not publish
-// is worse than an unsigned one - a wallet has every reason to trust it.
 // validMetadata is the smallest document that satisfies every other
 // required field, so these subtests vary only the two Interactive
 // Authorization members.
