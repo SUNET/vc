@@ -1840,10 +1840,10 @@ type CredentialOffers struct {
 	// because both are published verbatim - and config load refuses
 	// anything else: issuer metadata is generated from
 	// public_url and declares that as its own `credential_issuer`, so a
-	// wallet resolving an offer to
-	// {credential_issuer}/.well-known/openid-credential-issuer would
-	// otherwise reach an origin serving no metadata, or metadata naming a
-	// different issuer.
+	// wallet resolving an offer - inserting the well-known suffix at the
+	// credential_issuer's host root per RFC 8615, see openid4vci.WellKnownURL -
+	// would otherwise reach an origin serving no metadata, or metadata naming
+	// a different issuer.
 	//
 	// It is still not where offers are RETRIEVED from. A by-reference offer
 	// (`credential_offer_uri`) is built from apigw.public_url, because that
