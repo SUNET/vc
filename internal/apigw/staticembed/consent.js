@@ -26,6 +26,7 @@ import {
  * @property {string} issuer
  * @property {string} svg
  * @property {Record<string, ClaimEntry>} claims
+ * @property {Array<{ label: string; value?: unknown; isHeader?: boolean; indent?: boolean }>} rows
  */
 
 /**
@@ -338,6 +339,7 @@ Alpine.data("app", () => ({
                 issuer: display.issuer ?? "",
                 svg,
                 claims: data.presentation_claims,
+                rows: flattenClaims(data.presentation_claims),
             });
 
             this.selectedCredential = initialCredentialSelection(this.credentials);
@@ -451,25 +453,6 @@ Alpine.data("app", () => ({
      */
     renderClaimValue(value) {
         return renderClaimValueHtml(value);
-    },
-
-    /**
-     * Flatten presentation claims into table rows for rendering.
-     * @param {Record<string, ClaimEntry>} claims
-     * @returns {Array<{ label: string; value?: unknown; isHeader?: boolean; indent?: boolean }>}
-     */
-    flattenClaims(claims) {
-        return flattenClaims(claims);
-    },
-
-    /**
-     * How many rows sit behind "Show details", so the holder knows what
-     * opening it costs before they open it.
-     * @param {Credential} credential
-     * @returns {number}
-     */
-    claimCount(credential) {
-        return flattenClaims(credential.claims).length;
     },
 
     /** @param {string} url */

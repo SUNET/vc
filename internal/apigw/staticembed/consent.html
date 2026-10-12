@@ -158,10 +158,10 @@
                                          "Show details" toggle the radio. -->
                                     <details class="vc-claim-details mt-3">
                                         <summary class="text-sm font-medium text-primary dark:text-primary-light"
-                                                 x-text="`Show details (${claimCount(credential)})`"></summary>
+                                                 x-text="`Show details (${credential.rows.length})`"></summary>
                                         <table class="vc-claims-table table-auto w-full mt-2">
                                             <tbody>
-                                                <template x-for="row of flattenClaims(credential.claims)">
+                                                <template x-for="row of credential.rows">
                                                     <tr class="[&:not(:last-child)]:border-b [&:not(:last-child)]:border-black/20 [&:not(:last-child)]:dark:border-white/20">
                                                         <th :class="row.isHeader ? 'p-2 text-sm text-left align-top font-semibold' : (row.indent ? 'p-2 pl-6 text-sm text-left align-top font-normal' : 'p-2 text-sm text-left align-top font-normal')"
                                                             x-text="row.label"
