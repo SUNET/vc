@@ -536,10 +536,20 @@ func (c *Client) VCICredential(ctx context.Context, req *openid4vci.CredentialRe
 		c.vciMetrics.IssuanceLatency.Record(ctx, time.Since(start).Seconds(), formatAttr)
 	}
 
+	return c.newCredentialResponse(credentials, scope, configurationID), nil
+}
+
+// newCredentialResponse assembles the Credential Response.
+//
+// It exists so that the response is built in ONE place that a test can
+// call. Assembling it inline meant the only coverage of what goes into it
+// was a test of the pieces, and deleting a field from the literal left
+// every such test green while the field vanished from the wire.
+func (c *Client) newCredentialResponse(credentials []openid4vci.Credential, scope, configurationID string) *openid4vci.CredentialResponse {
 	return &openid4vci.CredentialResponse{
 		Credentials:        credentials,
 		CredentialMetadata: c.credentialMetadataForResponse(scope, configurationID),
-	}, nil
+	}
 }
 
 // credentialMetadataForResponse returns the credential_metadata to echo on
