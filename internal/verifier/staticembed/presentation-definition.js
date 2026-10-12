@@ -493,7 +493,7 @@ Alpine.data("app", () => ({
     presetCategoryOrder: [],
 
     /**
-     * @type {{ featured: [string, any][], groups: { category: string, presets: [string, any][] }[] }}
+     * @type {{ featured: [string, any][], groups: { category: string, presets: [string, any][] }[], collapsible: boolean }}
      * The grouped, sorted view the template renders. Derived from
      * predefinedPresentationDefinitions and presetCategoryOrder, and
      * computed once where those are set rather than on every read: the
@@ -502,7 +502,7 @@ Alpine.data("app", () => ({
      * catalog every time. Both inputs are assigned in exactly one place
      * (loadMetadata), which is why this needs no cache key or invalidation.
      */
-    groupedPresetData: { featured: [], groups: [] },
+    groupedPresetData: { featured: [], groups: [], collapsible: false },
 
     /** @type {boolean} Whether the non-featured/categorized preset groups are expanded. */
     showMorePresets: false,
