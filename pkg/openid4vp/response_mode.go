@@ -20,7 +20,26 @@ const (
 	ResponseModeDirectPost    = "direct_post"
 	ResponseModeDirectPostJWT = "direct_post.jwt"
 	ResponseModeDCAPIJWT      = "dc_api.jwt"
+
+	// The two Interactive Authorization modes (OpenID4VCI 1.1). The
+	// response goes back to the Authorization Challenge Endpoint the
+	// request arrived from, inside an openid4vp_response parameter, so a
+	// request using either carries NO response_uri.
+	//
+	// Spelled as the normative text spells them. The 1.1 draft's change
+	// log claims a rename to iae_post, which its own normative sections
+	// do not apply - see SUNET/vc's model.InteractiveAuthorization, where
+	// the spelling is configurable, and openid/OpenID4VCI#811.
+	ResponseModeIAPost    = "ia_post"
+	ResponseModeIAPostJWT = "ia_post.jwt"
 )
+
+// IsInteractiveAuthorization reports whether mode is one of the two
+// Interactive Authorization response modes, which answer to the
+// Authorization Challenge Endpoint rather than to a response_uri.
+func IsInteractiveAuthorization(mode string) bool {
+	return mode == ResponseModeIAPost || mode == ResponseModeIAPostJWT
+}
 
 // WithDCAPIResponseMode returns a copy of r carrying the response mode the
 // browser's Digital Credentials API requires, and nothing else changed.

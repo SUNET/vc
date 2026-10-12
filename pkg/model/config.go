@@ -1869,6 +1869,99 @@ type APIGWDelivery struct {
 	// OpenID4VCICompat holds opt-in switches for wallets that do not encode
 	// OpenID4VCI 1.0 requests the way the specification does.
 	OpenID4VCICompat OpenID4VCICompat `yaml:"openid4vci_compat" validate:"omitempty"`
+
+	// InteractiveAuthorization configures OpenID4VCI 1.1's Interactive
+	// Authorization. Absent means the mechanism is not offered at all.
+	InteractiveAuthorization InteractiveAuthorization `yaml:"interactive_authorization" validate:"omitempty"`
+}
+
+// InteractiveAuthorization configures OpenID4VCI 1.1's Interactive Authorization.
+//
+// The mechanism lets an Issuer qualify the Holder before issuing - by
+// requiring a Credential to be presented, or a web step - without sending
+// the wallet out to a browser. It is OPTIONAL in the specification and in
+// WE BUILD CS-01 §7.9, and it is off here until Enable is set.
+//
+// Most of the fields below exist because OpenID4VCI 1.1 is an editor's
+// draft that contradicts itself, not because an operator should expect to
+// tune them. Two contradictions are recorded as CS-01 NOTES CS01_07 and
+// CS01_08 and reported upstream as openid/OpenID4VCI#811 and #812. Keeping
+// the affected strings in configuration means a resolution either way
+// costs a config change rather than a release, which is the whole reason
+// this profile can be adopted pre-flight at all. Leave them alone unless
+// testing against a counterparty that reads the draft the other way.
+type InteractiveAuthorization struct {
+	// Enable exposes the Authorization Challenge Endpoint and advertises
+	// it in Authorization Server metadata. Its presence there is what
+	// tells a wallet the mechanism is available.
+	Enable *bool `yaml:"enable" default:"false"`
+
+	// RequireInteractiveAuthorization advertises that this server accepts
+	// ONLY Interactive Authorization for issuance.
+	//
+	// It excludes every wallet that does not implement the mechanism, so
+	// it must not be set in a shared deployment while that is the common
+	// case (CS-01 §7.7). Setting it without Enable is refused at config
+	// load: the specification forbids the parameter without the endpoint,
+	// and advertising a requirement for a mechanism this server does not
+	// expose is unusable rather than merely wrong.
+	RequireInteractiveAuthorization *bool `yaml:"require_interactive_authorization" default:"false"`
+
+	// InteractionTypePrefix is the namespace of the interaction type URNs.
+	//
+	// CS01_07: the 1.1 change log records a rename to "iae", which its own
+	// normative text does not apply.
+	InteractionTypePrefix string `yaml:"interaction_type_prefix" default:"urn:openid:dcp:ia:" validate:"omitempty,max=128"`
+
+	// BindingPrefix prefixes the value a presentation is bound to, so that
+	// the audience of an Interactive Authorization presentation cannot be
+	// confused with an ordinary Verifier's.
+	//
+	// CS01_07: the change log says "iae:", the normative text says "ia:".
+	BindingPrefix string `yaml:"binding_prefix" default:"ia:" validate:"omitempty,max=32"`
+
+	// ResponseModeUnencrypted and ResponseModeEncrypted name the two
+	// response modes an Interactive Authorization request may ask for.
+	//
+	// CS01_07: the change log says "iae_post".
+	ResponseModeUnencrypted string `yaml:"response_mode_unencrypted" default:"ia_post" validate:"omitempty,max=32"`
+	ResponseModeEncrypted   string `yaml:"response_mode_encrypted" default:"ia_post.jwt" validate:"omitempty,max=32"`
+
+	// MdocHandoverLabel is the fixed identifier inside the mdoc
+	// SessionTranscript handover for this flow.
+	//
+	// CS01_07 again, and from the other side: the normative mdoc section
+	// spells this one "IAE" while every other normative section says
+	// "ia". Whatever the working group settles on, this is the string that
+	// has to move with it - it is hashed into the transcript, so a
+	// mismatch fails DeviceAuth with nothing to point at.
+	MdocHandoverLabel string `yaml:"mdoc_handover_label" default:"OpenID4VCIIAEHandover" validate:"omitempty,max=64"`
+
+	// SDJWTBindingScope decides what an SD-JWT VC presentation's Key
+	// Binding JWT audience is bound to: the derived Origin of the
+	// Authorization Challenge Endpoint, or the endpoint URL.
+	//
+	// CS01_08: the 1.1 text says derived Origin in the normative sentence
+	// and shows the full endpoint URL in that sentence's own example, and
+	// the other three credential formats all say endpoint URL. CS-01 pins
+	// "origin" for testing, following the normative words over the
+	// example. "endpoint" exists so a run against a counterparty that read
+	// it the other way is a config change.
+	SDJWTBindingScope string `yaml:"sdjwt_binding_scope" default:"origin" validate:"omitempty,oneof=origin endpoint"`
+
+	// AuthSessionTTLSeconds bounds how long one Interactive Authorization
+	// exchange may take.
+	AuthSessionTTLSeconds int `yaml:"auth_session_ttl_seconds" default:"300" validate:"omitempty,gt=0"`
+
+	// InteractionTypesSupported names the interaction types this server
+	// can require, as suffixes joined to InteractionTypePrefix.
+	//
+	// Empty means every type the build implements, which is the right
+	// default: what this server can actually do is a property of the code,
+	// not of configuration. Set it to narrow that - to run an interop test
+	// against one interaction, or to stop offering one whose counterparty
+	// has a known problem.
+	InteractionTypesSupported []string `yaml:"interaction_types_supported" validate:"omitempty,dive,required"`
 }
 
 // OpenID4VCICompat holds interoperability switches for non-conformant wallets.

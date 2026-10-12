@@ -81,8 +81,26 @@ func TestResponseModeConstantsMatchOneofTag(t *testing.T) {
 	require.NotEmpty(t, oneof, "ResponseMode's validate tag has no oneof= rule; the accepted set is no longer enforced there")
 
 	assert.ElementsMatch(t,
-		[]string{ResponseModeFormPost, ResponseModeDirectPost, ResponseModeDirectPostJWT, ResponseModeDCAPIJWT},
+		[]string{
+			ResponseModeFormPost, ResponseModeDirectPost, ResponseModeDirectPostJWT, ResponseModeDCAPIJWT,
+			ResponseModeIAPost, ResponseModeIAPostJWT,
+		},
 		strings.Fields(oneof),
 		"the response-mode constants and the oneof validation tag have drifted; update both",
 	)
+}
+
+// IsInteractiveAuthorization is the one place that decides whether a
+// response goes back to the Authorization Challenge Endpoint instead of to
+// a response_uri, so it must not drift from the constants either.
+func TestIsInteractiveAuthorization(t *testing.T) {
+	for _, mode := range []string{ResponseModeIAPost, ResponseModeIAPostJWT} {
+		assert.True(t, IsInteractiveAuthorization(mode), mode)
+	}
+	for _, mode := range []string{
+		ResponseModeFormPost, ResponseModeDirectPost, ResponseModeDirectPostJWT,
+		ResponseModeDCAPIJWT, "", "ia_post.other",
+	} {
+		assert.False(t, IsInteractiveAuthorization(mode), mode)
+	}
 }

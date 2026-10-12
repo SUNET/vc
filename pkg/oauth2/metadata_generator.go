@@ -16,6 +16,16 @@ type MetadataConfig struct {
 	// intersection with the deployment's Trust.AllowedSignatureAlgorithms.
 	// Empty means: advertise the full built-in set.
 	AllowedSignatureAlgorithms []string
+
+	// AuthorizationChallengeEndpoint, when set, advertises Interactive
+	// Authorization. Empty means the mechanism is not offered and neither
+	// parameter is emitted.
+	AuthorizationChallengeEndpoint string
+
+	// RequireInteractiveAuthorization advertises that this server accepts
+	// only Interactive Authorization. Setting it without
+	// AuthorizationChallengeEndpoint is refused.
+	RequireInteractiveAuthorization bool
 }
 
 // walletAttestationBaseALGs is the built-in set supported by the evaluator;
@@ -48,7 +58,18 @@ func GenerateMetadata(cfg *MetadataConfig) *AuthorizationServerMetadata {
 		}
 	}
 
+	// require_interactive_authorization MUST NOT appear without the
+	// endpoint. Dropped rather than emitted here, because this function
+	// cannot report an error and a document advertising a requirement for
+	// a mechanism it does not expose is unusable by every wallet that
+	// reads it. The configuration layer refuses the same combination with
+	// a message, so an operator who sets it is told rather than quietly
+	// corrected.
+	requireIA := cfg.RequireInteractiveAuthorization && cfg.AuthorizationChallengeEndpoint != ""
+
 	return &AuthorizationServerMetadata{
+		AuthorizationChallengeEndpoint:                cfg.AuthorizationChallengeEndpoint,
+		RequireInteractiveAuthorization:               requireIA,
 		Issuer:                                        cfg.IssuerURL,
 		AuthorizationEndpoint:                         cfg.IssuerURL + "/authorize",
 		TokenEndpoint:                                 cfg.TokenEndpoint,

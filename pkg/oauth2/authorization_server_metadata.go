@@ -98,6 +98,24 @@ type AuthorizationServerMetadata struct {
 	// PreAuthorizedGrantAnonymousAccessSupported OPTIONAL OPTIONAL. A boolean indicating whether the Credential Issuer accepts a Token Request with a Pre-Authorized Code but without a client_id. The default is false.
 	PreAuthorizedGrantAnonymousAccessSupported bool `json:"pre-authorized_grant_anonymous_access_supported,omitempty"`
 
+	// AuthorizationChallengeEndpoint OPTIONAL. The endpoint at which a
+	// wallet begins Interactive Authorization
+	// (draft-ietf-oauth-first-party-apps §8, profiled by OpenID4VCI 1.1).
+	//
+	// Its PRESENCE is the whole signal: a wallet needs nothing else to
+	// know the mechanism is available.
+	AuthorizationChallengeEndpoint string `json:"authorization_challenge_endpoint,omitempty"`
+
+	// RequireInteractiveAuthorization OPTIONAL. Whether this server accepts
+	// ONLY Interactive Authorization for credential issuance (OpenID4VCI
+	// 1.1). Default false.
+	//
+	// MUST NOT appear without AuthorizationChallengeEndpoint - the
+	// specification says so, and a server advertising a requirement for a
+	// mechanism it does not expose is unusable rather than merely wrong.
+	// GenerateMetadata refuses that combination.
+	RequireInteractiveAuthorization bool `json:"require_interactive_authorization,omitempty"`
+
 	// More attributes MAY be present, such as https://openid.net/specs/openid-connect-discovery-1_0.html
 }
 
