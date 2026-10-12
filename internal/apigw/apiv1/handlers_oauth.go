@@ -1083,11 +1083,16 @@ func (c *Client) authenticateOAuthClient(ctx context.Context, req *walletClientA
 		return oauthClient, nil
 	}
 
+	// Every line this function logs names the caller, not just the ones
+	// after attestation runs: the whole reason it takes a prefix is that
+	// two endpoints authenticate the same wallets, and a rejection has to
+	// say which request produced it. A line without the prefix is a line
+	// that cannot be attributed.
 	if !errors.Is(err, oauth2.ErrClientNotFound) {
-		c.log.Warn("configured OpenID4VCI client rejected; falling back to wallet attestation",
+		c.log.Warn(req.LogPrefix+": configured OpenID4VCI client rejected; falling back to wallet attestation",
 			"client_id", req.ClientID, "redirect_uri", req.RedirectURI, "scope", req.Scope, "reason", err)
 	} else {
-		c.log.Debug("client_id is not statically configured; trying wallet attestation",
+		c.log.Debug(req.LogPrefix+": client_id is not statically configured; trying wallet attestation",
 			"client_id", req.ClientID)
 	}
 

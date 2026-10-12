@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/oauth2"
@@ -99,7 +100,12 @@ func TestAuthenticateOAuthClient(t *testing.T) {
 
 	t.Run("the log prefix names the endpoint that asked", func(t *testing.T) {
 		// Two endpoints authenticate the same wallets through this
-		// function; a denial has to be traceable to the one that caused it.
+		// function, so a rejection has to say which request produced it.
+		//
+		// Asserted on the MESSAGE, not on the client id: an earlier
+		// version of this test looked for the entry by client_id, which
+		// every such line carries whether or not it names the caller - so
+		// it passed with the prefix absent entirely.
 		client, readLog := parLoggingClient(t, configured)
 
 		_, err := client.authenticateOAuthClient(t.Context(), &walletClientAuth{
@@ -110,12 +116,34 @@ func TestAuthenticateOAuthClient(t *testing.T) {
 		})
 		require.Error(t, err)
 
-		found := false
-		for _, entry := range warnings(readLog()) {
-			if entry.ClientID == "wallet-1" {
-				found = true
+		entries := warnings(readLog())
+		require.NotEmpty(t, entries, "a configured client rejected must still be reported")
+
+		attributed := false
+		for _, entry := range entries {
+			if strings.Contains(entry.Message, "CHALLENGE:") {
+				attributed = true
 			}
 		}
-		assert.True(t, found, "a configured client rejected must still be reported")
+		assert.True(t, attributed, "the warning must name the endpoint that asked, got %v", entries)
+	})
+
+	t.Run("a different caller is named differently", func(t *testing.T) {
+		// The other half: a prefix that is hardcoded, or dropped, would
+		// pass the assertion above for every caller.
+		client, readLog := parLoggingClient(t, configured)
+
+		_, err := client.authenticateOAuthClient(t.Context(), &walletClientAuth{
+			ClientID:    "wallet-1",
+			RedirectURI: "https://wallet.example.com/cb",
+			Scope:       "not-a-configured-scope",
+			LogPrefix:   "PAR",
+		})
+		require.Error(t, err)
+
+		for _, entry := range warnings(readLog()) {
+			assert.NotContains(t, entry.Message, "CHALLENGE:")
+			assert.Contains(t, entry.Message, "PAR:")
+		}
 	})
 }
