@@ -46,6 +46,10 @@ type AuthContextStore interface {
 	// the authorization code this exchange produces inherits that binding
 	// and the Token Endpoint enforces it at redemption.
 	//
+	// The returned document has the handle cleared as well. The caller
+	// already has it, and anything downstream that persists the document
+	// would otherwise write it back and make the exchange claimable again.
+	//
 	// Exactly one caller can claim a given handle. A second attempt, and a
 	// concurrent one that had already resolved the same handle, both get
 	// ErrNoDocuments. That is what makes one exchange yield one

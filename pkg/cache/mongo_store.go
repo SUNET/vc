@@ -641,5 +641,11 @@ func (s *MongoStore) ClaimAuthSession(ctx context.Context, authSession string) (
 		return nil, fmt.Errorf("failed to claim auth_session: %w", err)
 	}
 
+	// Before-image, so the decoded document still carries the handle.
+	// Cleared for the same reason the memory store clears it: a caller that
+	// persists this document would write the handle back - see the note
+	// there.
+	claimed.AuthSession = ""
+
 	return &claimed, nil
 }

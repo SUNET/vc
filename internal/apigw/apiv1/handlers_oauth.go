@@ -538,6 +538,31 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		}
 	}
 
+	// A code that came out of an Interactive Authorization exchange carries
+	// that exchange's DPoP key, and must be redeemed with it.
+	//
+	// Checked BEFORE the code is consumed, and that ordering is the whole
+	// of it: forfeiture is irreversible, so refusing after it would let
+	// anyone holding the code burn it with any valid proof - the bound
+	// wallet then finds its own redemption refused, having done nothing
+	// wrong. The read is not atomic with the consumption below, but it does
+	// not need to be: it only ever refuses, and a concurrent request that
+	// slipped past it still meets the same check on the consumed document.
+	//
+	// Everything else here binds the ACCESS TOKEN to whatever key signed
+	// the proof on this request, which says nothing about who obtained the
+	// authorization. Without this, a flow opened with key A yields a code
+	// that key B can spend - and the association OpenID4VCI 1.1 §5.2 and
+	// draft-ietf-oauth-first-party-apps ask for between auth_session and a
+	// DPoP key is only worth having if the same key turns up here.
+	if !isPreAuthFlow {
+		if bound, lookupErr := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code}); lookupErr == nil && bound != nil {
+			if err := c.checkInteractiveAuthorizationBinding(bound, dpopThumbprint); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	// Now consume the authorization code (after DPoP and client binding are validated)
 	var authorizationContext *cache.AuthorizationContext
 	var err error
@@ -559,22 +584,11 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			"Authorization code is invalid or has already been used", 400, err)
 	}
 
-	// A code that came out of an Interactive Authorization exchange carries
-	// that exchange's DPoP key, and must be redeemed with it.
-	//
-	// Everything else here binds the ACCESS TOKEN to whatever key signed
-	// the proof on this request, which says nothing about who opened the
-	// exchange. Without this, a flow opened with key A yields a code that
-	// key B can spend - and the whole point of associating auth_session
-	// with a DPoP key (OpenID4VCI 1.1 §5.2,
-	// draft-ietf-oauth-first-party-apps) is that the same key has to turn
-	// up in the token request.
-	if authorizationContext.AuthSessionDPoPThumbprint != "" &&
-		authorizationContext.AuthSessionDPoPThumbprint != dpopThumbprint {
-		c.log.Error(nil, "authorization code redeemed with a different DPoP key than the exchange it came from",
-			"session_id", authorizationContext.SessionID)
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"authorization code must be redeemed with the key its authorization was obtained under", 400)
+	// Again on the consumed document, which is the authoritative one: the
+	// pre-consumption read above protects the code from being burned, this
+	// is what actually gates the token.
+	if err := c.checkInteractiveAuthorizationBinding(authorizationContext, dpopThumbprint); err != nil {
+		return nil, err
 	}
 	c.log.Debug("Token", "state", authorizationContext.State)
 
@@ -1107,6 +1121,25 @@ type walletClientAuth struct {
 // the same way, and duplicating sixty lines of attestation handling - PoP
 // requirements, subject binding, SPOCP tier policy - is how two endpoints
 // come to disagree about who may ask for what.
+// checkInteractiveAuthorizationBinding refuses a redemption whose DPoP key
+// is not the one the authorization was obtained under.
+//
+// A context carrying no recorded thumbprint never came from an Interactive
+// Authorization exchange, and is unaffected.
+func (c *Client) checkInteractiveAuthorizationBinding(authCtx *cache.AuthorizationContext, dpopThumbprint string) error {
+	if authCtx == nil || authCtx.AuthSessionDPoPThumbprint == "" {
+		return nil
+	}
+	if authCtx.AuthSessionDPoPThumbprint == dpopThumbprint {
+		return nil
+	}
+
+	c.log.Error(nil, "authorization code redeemed with a different DPoP key than the exchange it came from",
+		"session_id", authCtx.SessionID)
+	return oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+		"authorization code must be redeemed with the key its authorization was obtained under", 400)
+}
+
 // dpopProofThumbprint validates one DPoP proof and returns the JWK
 // thumbprint of the key it was signed with, which is what an issued
 // artefact is then bound to (RFC 9449 §4).

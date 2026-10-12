@@ -1031,7 +1031,7 @@ func checkInteractiveAuthorization(cfg *model.Cfg, serviceName string) error {
 	// The marshaller refuses both, but that refusal arrives when a wallet
 	// asks for the document, with nobody watching. This one arrives at
 	// startup.
-	if err := oauth2.ValidateMetadataNames(ia.MetadataNames(), nil); err != nil {
+	if err := oauth2.ValidateMetadataNames(ia.MetadataNames()); err != nil {
 		return fmt.Errorf("apigw.delivery.interactive_authorization: %w", err)
 	}
 

@@ -590,8 +590,10 @@ func TestClaimAuthSessionAdmitsExactlyOne(t *testing.T) {
 	first, err := client.cacheService.AuthContext.ClaimAuthSession(t.Context(), opened.AuthSession)
 	require.NoError(t, err)
 	require.NotNil(t, first)
-	assert.Equal(t, opened.AuthSession, first.AuthSession,
+	assert.NotEmpty(t, first.AuthSessionDPoPThumbprint,
 		"the claimant is handed the exchange as it was, so it can still check the DPoP binding")
+	assert.Empty(t, first.AuthSession,
+		"but not the handle - persisting this document must not put it back")
 
 	second, err := client.cacheService.AuthContext.ClaimAuthSession(t.Context(), opened.AuthSession)
 	require.ErrorIs(t, err, cache.ErrNoDocuments)
@@ -887,4 +889,37 @@ func TestAuthorizationChallenge_PresentationStateMustMatch(t *testing.T) {
 			assert.NotContains(t, oauthErr.Cause.Error(), "state does not match")
 		}
 	})
+}
+
+// The claim is not enough on its own: anything downstream that persists
+// the claimed document would write the handle straight back and re-create
+// its index, making the exchange claimable a second time.
+//
+// This is not hypothetical. A presentation-sourced scope ends in
+// finalisePresentationVerification, which calls AuthContext.Update with
+// the very context the handler was given - so the handle it had just
+// consumed came back.
+func TestClaimedContextCannotResurrectTheHandle(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	claimed, err := client.cacheService.AuthContext.ClaimAuthSession(t.Context(), opened.AuthSession)
+	require.NoError(t, err)
+
+	// Exactly what finalisePresentationVerification does with it.
+	require.NoError(t, client.cacheService.AuthContext.Update(t.Context(), claimed))
+
+	resolved, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: opened.AuthSession,
+	})
+	require.ErrorIs(t, err, cache.ErrNoDocuments,
+		"persisting the claimed context must not make the handle resolvable again")
+	require.Nil(t, resolved)
+
+	// And the binding the authorization code inherits survived that write.
+	stored, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		Code: claimed.Code,
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, stored.AuthSessionDPoPThumbprint)
 }

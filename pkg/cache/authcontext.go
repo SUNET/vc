@@ -787,6 +787,15 @@ func (c *MemoryStore) ClaimAuthSession(ctx context.Context, authSession string) 
 
 	claimed := *stored
 
+	// The handle is cleared on the RETURNED copy too, not just the stored
+	// one. The caller already has the handle - it is what they asked with -
+	// and anything downstream that persists this document would otherwise
+	// write it straight back and make the exchange claimable again. That is
+	// not hypothetical: finalisePresentationVerification updates the
+	// context it is handed, so a presentation-sourced scope resurrected the
+	// handle it had just consumed.
+	claimed.AuthSession = ""
+
 	// Only the handle. AuthSessionDPoPThumbprint is the binding the
 	// authorization code inherits, and the Token Endpoint checks it when
 	// the code is redeemed - clearing it here would hand out a code that
