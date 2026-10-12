@@ -113,46 +113,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, notify *notif
 		return nil, err
 	}
 
-	// Force revalidation of embedded static assets. There is no cache
-	// busting on these URLs, so a browser's heuristic cache can hold onto
-	// an old ES module across a plain reload even after a deploy.
-	s.gin.Use(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/static/") {
-			c.Header("Cache-Control", "no-cache")
-		}
-		c.Next()
-	})
-
-	// Same content-hash revalidation as apigw: embed.FS has no modification
-	// time, so without an ETag a browser has no way to notice a redeploy.
-	// See webvendor.StaticETags.
-	assets := webvendor.Overlay(staticembed.FS)
-	etags, err := webvendor.StaticETags(assets)
-	if err != nil {
+	if err := mountStaticAssets(s.gin); err != nil {
 		return nil, err
 	}
-	s.gin.Use(staticCacheHeaders("/static/", etags))
 
-	s.gin.StaticFS("/static", http.FS(assets))
-
-	tmpl := template.New("").Funcs(template.FuncMap{
-		"toJSON": func(v any) string {
-			cleaned := cleanUnresolvedMarkersForDisplay(v)
-			b, _ := json.MarshalIndent(cleaned, "", "  ")
-			return string(b)
-		},
-		"json": func(v any) (any, error) {
-			jsonBytes, err := json.Marshal(v)
-			if err != nil {
-				return "", err
-			}
-			return template.JS(string(jsonBytes)), nil //#nosec G203 -- json.Marshal output is safe
-		},
-		"claimsTree": func(credential map[string]any) template.HTML {
-			return template.HTML(renderClaimsTree(credential)) //#nosec G203 -- internally generated HTML
-		},
-	})
-	s.gin.SetHTMLTemplate(template.Must(tmpl.ParseFS(staticembed.FS, "*.html")))
+	s.gin.SetHTMLTemplate(htmlTemplates())
 
 	s.httpHelpers.Server.RegEndpoint(ctx, rgRoot, http.MethodGet, "/", http.StatusOK, s.endpointIndex)
 
@@ -483,4 +448,40 @@ func staticCacheHeaders(prefix string, etags map[string]string) gin.HandlerFunc 
 		}
 		c.Next()
 	}
+}
+
+// mountStaticAssets serves /static with content-hash ETags so a redeploy is not
+// masked by a browser's cache; embed.FS reports no modification time, so
+// without an ETag there is no validator. See webvendor.StaticETags.
+func mountStaticAssets(engine *gin.Engine) error {
+	assets := webvendor.Overlay(staticembed.FS)
+	etags, err := webvendor.StaticETags(assets)
+	if err != nil {
+		return err
+	}
+	engine.Use(staticCacheHeaders("/static/", etags))
+	engine.StaticFS("/static", http.FS(assets))
+	return nil
+}
+
+// htmlTemplates parses the embedded HTML with the view helpers the templates call.
+func htmlTemplates() *template.Template {
+	tmpl := template.New("").Funcs(template.FuncMap{
+		"toJSON": func(v any) string {
+			cleaned := cleanUnresolvedMarkersForDisplay(v)
+			b, _ := json.MarshalIndent(cleaned, "", "  ")
+			return string(b)
+		},
+		"json": func(v any) (any, error) {
+			jsonBytes, err := json.Marshal(v)
+			if err != nil {
+				return "", err
+			}
+			return template.JS(string(jsonBytes)), nil //#nosec G203 -- json.Marshal output is safe
+		},
+		"claimsTree": func(credential map[string]any) template.HTML {
+			return template.HTML(renderClaimsTree(credential)) //#nosec G203 -- internally generated HTML
+		},
+	})
+	return template.Must(tmpl.ParseFS(staticembed.FS, "*.html"))
 }

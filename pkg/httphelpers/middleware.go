@@ -518,6 +518,10 @@ func (m *middlewareHandler) CustomBranding(branding model.Branding) gin.HandlerF
 		if err := f.Close(); err != nil {
 			log.Error(err, "failed to close file", "path", path)
 		}
+		// Revalidate on reuse: c.File emits Last-Modified from the on-disk file,
+		// so a conditional request can 304, and a replaced logo is picked up on
+		// the next load rather than lingering under heuristic caching.
+		c.Header("Cache-Control", "no-cache")
 		c.File(path)
 		c.Abort()
 		return true
