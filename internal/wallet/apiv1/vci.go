@@ -374,7 +374,11 @@ func (c *Client) fetchCredentialOffer(ctx context.Context, offerURI string) (*op
 }
 
 func (c *Client) fetchIssuerMetadata(ctx context.Context, issuerURL string) (*openid4vci.CredentialIssuerMetadataParameters, error) {
-	metaURL := strings.TrimRight(issuerURL, "/") + "/.well-known/openid-credential-issuer"
+	// Inserted between host and path, not appended: an issuer identifier
+	// with a tenant path publishes at the host root (OpenID4VCI 1.0
+	// §12.2.2). Appending sent the request to the tenant path instead, so
+	// a multi-tenant issuer was unreachable from this wallet.
+	metaURL := openid4vci.WellKnownURL(issuerURL, "openid-credential-issuer")
 	resp, err := c.httpClient.Get(metaURL)
 	if err != nil {
 		return nil, err
@@ -402,7 +406,8 @@ type oauth2ServerMetadata struct {
 }
 
 func (c *Client) fetchOAuth2Metadata(ctx context.Context, serverURL string) (*oauth2ServerMetadata, error) {
-	metaURL := strings.TrimRight(serverURL, "/") + "/.well-known/oauth-authorization-server"
+	// Same insertion rule, from RFC 8414 §3.
+	metaURL := openid4vci.WellKnownURL(serverURL, "oauth-authorization-server")
 	resp, err := c.httpClient.Get(metaURL)
 	if err != nil {
 		return nil, err
