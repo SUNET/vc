@@ -563,9 +563,34 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			// budget (up to MaxPreAuthRedeemers legitimate wallets). Debits are
 			// atomic to prevent brute-force distributed across many client IPs.
 			if subtle.ConstantTimeCompare([]byte(preCheck.TXCode), []byte(req.TXCode)) != 1 {
-				if _, attemptErr := c.cacheService.AuthContext.ConsumeTXCodeAttempt(ctx, code); attemptErr != nil && !errors.Is(attemptErr, cache.ErrTXCodeAttemptsExceeded) {
+				_, attemptErr := c.cacheService.AuthContext.ConsumeTXCodeAttempt(ctx, code)
+				if attemptErr != nil && !errors.Is(attemptErr, cache.ErrTXCodeAttemptsExceeded) {
 					return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
 						"Authorization code is invalid or has already been used", 400, attemptErr)
+				}
+
+				// Whether the debit SUCCEEDED decides which error this is,
+				// and it has to be read here rather than inferred from
+				// preCheck.
+				//
+				// The budget check further up catches a code whose attempts
+				// were already spent when this request started, and that is
+				// the usual path. But preCheck is a read, and the debit is
+				// the atomic operation: between them, a CONCURRENT wrong-PIN
+				// request can spend the last attempt and forfeit the code.
+				// ConsumeTXCodeAttempt reports exactly that as
+				// ErrTXCodeAttemptsExceeded - the sentinel the guard above
+				// deliberately tolerates, because forfeiture is its job, not
+				// a fault.
+				//
+				// Tolerating it must not mean ignoring it. An offer that is
+				// now dead has nothing left to retry, so it stays
+				// invalid_grant under both specification versions; only a
+				// debit that actually succeeded means the holder can try
+				// again, which is what invalid_tx_code tells them.
+				if attemptErr == nil && c.cfg.EmitInvalidTXCodeError() {
+					return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidTXCode,
+						"invalid tx_code", 400)
 				}
 				return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
 					"invalid tx_code", 400)
