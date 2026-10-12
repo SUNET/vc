@@ -56,6 +56,20 @@ func TestWellKnownURL(t *testing.T) {
 			WellKnownURL("https://issuer.example.com/tenant", "oauth-authorization-server"))
 	})
 
+	t.Run("a percent-encoded path separator survives", func(t *testing.T) {
+		// url.URL.Path is decoded, so building from it turns
+		// /tenant%2Fdivision into /tenant/division - a different resource,
+		// since an encoded slash is not a path separator. The identifier
+		// is matched byte for byte by whoever published it.
+		assert.Equal(t, "https://issuer.example.com/.well-known/"+suffix+"/tenant%2Fdivision",
+			WellKnownURL("https://issuer.example.com/tenant%2Fdivision", suffix))
+	})
+
+	t.Run("other percent-encoding survives too", func(t *testing.T) {
+		assert.Equal(t, "https://issuer.example.com/.well-known/"+suffix+"/a%20b",
+			WellKnownURL("https://issuer.example.com/a%20b", suffix))
+	})
+
 	t.Run("an identifier with no host falls back to appending", func(t *testing.T) {
 		// Not correct, but it is what the caller would have done anyway,
 		// and refusing here would surface a malformed configuration as a

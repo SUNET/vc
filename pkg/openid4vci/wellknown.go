@@ -23,6 +23,9 @@ import (
 // `https://example.com/tenant/` resolve to different URLs, so two
 // conformant wallets can disagree about where one tenant publishes.
 //
+// The path is carried through in its ESCAPED form, so an identifier is
+// never rewritten on the way to its own metadata URL.
+//
 // An identifier that will not parse, or has no host, falls back to plain
 // appending. That is not correct, but it is what the caller would have
 // done anyway, and refusing here would turn a malformed configuration into
@@ -35,7 +38,12 @@ func WellKnownURL(entity, suffix string) string {
 		return entity + "/.well-known/" + suffix
 	}
 
-	path := strings.TrimPrefix(parsed.Path, "/")
+	// EscapedPath, not Path: Path is DECODED, so an identifier whose path
+	// contains a percent-encoded separator - /tenant%2Fdivision - would be
+	// rebuilt as /tenant/division, which is a different resource. The
+	// identifier is matched byte for byte by whoever published it, so the
+	// one thing this function must not do is rewrite it.
+	path := strings.TrimPrefix(parsed.EscapedPath(), "/")
 	base := parsed.Scheme + "://" + parsed.Host
 	if path == "" {
 		return base + "/.well-known/" + suffix
