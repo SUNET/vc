@@ -59,11 +59,18 @@ type AuthorizationChallengeRequest struct {
 	// Attestation, accepted without a PoP where the headers are absent.
 	ClientAssertion string `json:"client_assertion" form:"client_assertion"`
 
-	// Lifted from headers by the transport layer, which is why these carry
-	// no binding tags.
-	ClientAttestation    string `json:"-" form:"-"`
-	ClientAttestationPoP string `json:"-" form:"-"`
-	DPOP                 string `json:"-" form:"-"`
+	// Lifted from headers by the transport layer, which is the only way
+	// they are ever set.
+	//
+	// header:"-" matters: gin's header binder falls back to the FIELD NAME
+	// when a struct has no header tag, and "DPOP" happens to canonicalise
+	// to the same key as the DPoP header - so without it one of these
+	// three arrives by coincidence and the other two do not, and a
+	// transport layer that stopped lifting them would look like it still
+	// worked.
+	ClientAttestation    string `json:"-" form:"-" header:"-"`
+	ClientAttestationPoP string `json:"-" form:"-" header:"-"`
+	DPOP                 string `json:"-" form:"-" header:"-"`
 }
 
 // AuthorizationChallengeResponse is the Authorization Code Response of
