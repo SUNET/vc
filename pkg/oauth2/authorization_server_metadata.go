@@ -113,8 +113,12 @@ type AuthorizationServerMetadata struct {
 	// MUST NOT appear without AuthorizationChallengeEndpoint - the
 	// specification says so, and a server advertising a requirement for a
 	// mechanism it does not expose is unusable rather than merely wrong.
-	// GenerateMetadata refuses that combination.
-	RequireInteractiveAuthorization bool `json:"require_interactive_authorization,omitempty"`
+	//
+	// Enforced on the STRUCT rather than only where it is built, because
+	// this type is also unmarshalled straight from a configured document
+	// and then signed: a guard in GenerateMetadata does nothing for that
+	// path, and a signed forbidden document is worse than an unsigned one.
+	RequireInteractiveAuthorization bool `json:"require_interactive_authorization,omitempty" validate:"excluded_without=AuthorizationChallengeEndpoint"`
 
 	// More attributes MAY be present, such as https://openid.net/specs/openid-connect-discovery-1_0.html
 }

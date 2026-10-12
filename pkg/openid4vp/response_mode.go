@@ -81,5 +81,18 @@ func (r *RequestObject) WithDCAPIResponseMode() *RequestObject {
 	}
 	variant := *r
 	variant.ResponseMode = ResponseModeDCAPIJWT
+
+	// A dc_api response returns inside the browser call, so the request
+	// carries no response_uri (OpenID4VP 1.0 Appendix A.2). Copying the
+	// direct-post object left one on it: a parameter the wallet is
+	// entitled to act on, naming an endpoint this channel will never be
+	// answered at.
+	//
+	// This is the one field that must NOT survive the copy, and it is the
+	// exception that proves the rest of the doc comment above - everything
+	// else has to agree across the two channels, or they are asking for
+	// different things.
+	variant.ResponseURI = ""
+
 	return &variant
 }

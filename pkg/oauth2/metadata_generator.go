@@ -62,9 +62,13 @@ func GenerateMetadata(cfg *MetadataConfig) *AuthorizationServerMetadata {
 	// endpoint. Dropped rather than emitted here, because this function
 	// cannot report an error and a document advertising a requirement for
 	// a mechanism it does not expose is unusable by every wallet that
-	// reads it. The configuration layer refuses the same combination with
-	// a message, so an operator who sets it is told rather than quietly
-	// corrected.
+	// reads it.
+	//
+	// This is the second line of defence, not the only one: the field
+	// carries excluded_without on the struct, so the combination is also
+	// refused wherever the metadata is validated - including the signing
+	// path, which unmarshals a configured document straight into this
+	// type and never passes through here.
 	requireIA := cfg.RequireInteractiveAuthorization && cfg.AuthorizationChallengeEndpoint != ""
 
 	return &AuthorizationServerMetadata{

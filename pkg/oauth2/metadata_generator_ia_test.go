@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/go-playground/validator/v10"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -53,13 +55,63 @@ func TestGenerateMetadata_InteractiveAuthorization(t *testing.T) {
 		// The specification forbids the pair, and the document would be
 		// unusable: a wallet is told the only accepted path to issuance is
 		// a mechanism this server does not expose. GenerateMetadata cannot
-		// report an error, so it refuses to emit it; the configuration
-		// layer rejects the same combination with a message.
+		// report an error, so it refuses to emit it; the struct's own
+		// excluded_without rule refuses the same combination wherever the
+		// metadata is validated, including before it is signed.
 		cfg := *base
 		cfg.RequireInteractiveAuthorization = true
 		got := metadataJSON(t, &cfg)
 
 		assert.NotContains(t, got, "require_interactive_authorization")
 		assert.NotContains(t, got, "authorization_challenge_endpoint")
+	})
+}
+
+// The signing path never goes through GenerateMetadata: SignMetadata
+// unmarshals a configured document straight into this struct. A guard that
+// lives only in the generator therefore does nothing for it, and a SIGNED
+// document advertising a requirement for an endpoint it does not publish
+// is worse than an unsigned one - a wallet has every reason to trust it.
+// validMetadata is the smallest document that satisfies every other
+// required field, so these subtests vary only the two Interactive
+// Authorization members.
+func validMetadata() *AuthorizationServerMetadata {
+	return &AuthorizationServerMetadata{
+		Issuer:                 "https://issuer.example.com",
+		AuthorizationEndpoint:  "https://issuer.example.com/authorize",
+		TokenEndpoint:          "https://issuer.example.com/token",
+		ResponseTypesSupported: []string{"code"},
+	}
+}
+
+func TestRequireInteractiveAuthorizationIsRefusedByValidation(t *testing.T) {
+	validate := validator.New()
+
+	t.Run("required without the endpoint does not validate", func(t *testing.T) {
+		m := validMetadata()
+		m.RequireInteractiveAuthorization = true
+
+		err := validate.Struct(m)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "RequireInteractiveAuthorization")
+	})
+
+	t.Run("required with the endpoint validates", func(t *testing.T) {
+		m := validMetadata()
+		m.AuthorizationChallengeEndpoint = "https://issuer.example.com/op/authorize-challenge"
+		m.RequireInteractiveAuthorization = true
+
+		assert.NoError(t, validate.Struct(m))
+	})
+
+	t.Run("the endpoint alone validates", func(t *testing.T) {
+		m := validMetadata()
+		m.AuthorizationChallengeEndpoint = "https://issuer.example.com/op/authorize-challenge"
+
+		assert.NoError(t, validate.Struct(m))
+	})
+
+	t.Run("neither is fine", func(t *testing.T) {
+		assert.NoError(t, validate.Struct(validMetadata()))
 	})
 }

@@ -14,6 +14,12 @@ import (
 // through two delivery channels, so anything a wallet checks must agree.
 // Only response_mode may differ, because only response_mode depends on how
 // the request was delivered (SUNET/vc#652).
+//
+// With one exception, and it is the same reason stated the other way:
+// response_uri names where a direct_post answer is sent, a dc_api answer
+// returns inside the browser call instead, so carrying one over would hand
+// the wallet an endpoint this channel is never answered at. It is cleared,
+// and asserted separately below.
 func TestWithDCAPIResponseModeDiffersOnlyInResponseMode(t *testing.T) {
 	base := &RequestObject{
 		ResponseURI:  "https://verifier.example.com/verification/direct_post",
@@ -37,12 +43,19 @@ func TestWithDCAPIResponseModeDiffersOnlyInResponseMode(t *testing.T) {
 	assert.Equal(t, ResponseModeDirectPostJWT, base.ResponseMode,
 		"the link channel's own object must not be mutated")
 
-	// Compare with response_mode normalised: every other field, including any
-	// added to RequestObject later, has to be identical.
+	assert.Empty(t, variant.ResponseURI,
+		"a dc_api response returns inside the browser call, so the request must not name a response_uri")
+	assert.NotEmpty(t, base.ResponseURI,
+		"the link channel's own object must keep the one it needs")
+
+	// Compare with the two delivery-dependent fields normalised: every
+	// other field, including any added to RequestObject later, has to be
+	// identical.
 	normalised := *variant
 	normalised.ResponseMode = base.ResponseMode
+	normalised.ResponseURI = base.ResponseURI
 	assert.True(t, reflect.DeepEqual(*base, normalised),
-		"the two channels must differ only in response_mode")
+		"the two channels must differ only in how the response is delivered")
 
 	// The pointer field is shared, not deep-copied - which is what we want:
 	// the wallet must see the same client_metadata either way.
