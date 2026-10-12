@@ -169,3 +169,52 @@ func TestVC20StatusEnabledDoesAllocate(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, 1, alloc.calls)
 }
+
+// A credential type that defines its own terms configures the contexts
+// that define them. Enabling the status reference must ADD its context to
+// those, not replace them: a term left undefined expands to a relative IRI
+// and vanishes from the canonical form the Data Integrity proof covers,
+// which is the same failure the status context exists to prevent - so
+// assigning here traded one silently unsigned term for another.
+func TestVC20StatusContextDoesNotDisplaceTheTypesOwnContexts(t *testing.T) {
+	const typeContext = "https://example.com/contexts/diploma/v1"
+
+	build := func(t *testing.T, status *statusAllocation) []string {
+		t.Helper()
+		raw, err := vc20Builder(t, true).buildVC20CredentialJSON(
+			"urn:uuid:11111111-2222-3333-4444-555555555555",
+			[]string{"VerifiableCredential", "DiplomaCredential"},
+			[]string{typeContext},
+			map[string]any{"id": "did:example:holder"},
+			time.Now().UTC(),
+			nil,
+			status,
+		)
+		require.NoError(t, err)
+
+		var cred map[string]any
+		require.NoError(t, json.Unmarshal(raw, &cred))
+
+		raw_contexts, ok := cred["@context"].([]any)
+		require.True(t, ok, "@context must be an array")
+
+		contexts := make([]string, 0, len(raw_contexts))
+		for _, v := range raw_contexts {
+			contexts = append(contexts, v.(string))
+		}
+		return contexts
+	}
+
+	withoutStatus := build(t, nil)
+	require.Equal(t, []string{credential.ContextV2, typeContext}, withoutStatus,
+		"this subtest only means anything if the type's context is there to begin with")
+
+	withStatus := build(t, &statusAllocation{
+		Index: 42,
+		URI:   "https://status.example.com/statuslists/7",
+	})
+	require.Equal(t,
+		[]string{credential.ContextV2, typeContext, contextstore.TokenStatusListContextURL},
+		withStatus,
+		"enabling the status reference must not drop the credential type's own contexts")
+}

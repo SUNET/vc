@@ -307,7 +307,14 @@ func (c *Client) buildVC20CredentialJSON(
 	// failing. Adding the context only when there is a status keeps it out
 	// of credentials that have none.
 	if status != nil {
-		cred["@context"] = []string{credential.ContextV2, contextstore.TokenStatusListContextURL}
+		// Appended, not assigned. Assigning dropped every
+		// additional_contexts the credential type configures, so turning
+		// vc20_status_enable on silently left that type's own terms
+		// undefined - which is the same failure the comment above
+		// describes, in the other direction: an undefined term expands to
+		// a relative IRI and vanishes from the canonical form the proof
+		// covers.
+		cred["@context"] = append(contexts, contextstore.TokenStatusListContextURL)
 		cred["credentialStatus"] = map[string]any{
 			// The entry identifies itself by the list it is in and its
 			// place in that list, which is exactly what a verifier needs
