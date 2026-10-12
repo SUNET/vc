@@ -518,10 +518,14 @@ func (m *middlewareHandler) CustomBranding(branding model.Branding) gin.HandlerF
 		if err := f.Close(); err != nil {
 			log.Error(err, "failed to close file", "path", path)
 		}
-		// Revalidate on reuse: c.File emits Last-Modified from the on-disk file,
-		// so a conditional request can 304, and a replaced logo is picked up on
-		// the next load rather than lingering under heuristic caching.
-		c.Header("Cache-Control", "no-cache")
+		// These are small, operator-supplied files with no reliable validator:
+		// c.File's Last-Modified has one-second precision and a replacement may
+		// preserve the mtime, so a conditional request could 304 a changed logo.
+		// Don't store, and drop the request's validators so the body is always
+		// sent rather than answered from a stale date.
+		c.Header("Cache-Control", "no-store")
+		c.Request.Header.Del("If-Modified-Since")
+		c.Request.Header.Del("If-None-Match")
 		c.File(path)
 		c.Abort()
 		return true
