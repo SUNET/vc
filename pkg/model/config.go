@@ -192,6 +192,17 @@ func (cfg *Cfg) SendLegacyJARMEncryptionParams() bool {
 	return BoolVal(cfg.Common.OpenID4VPCompat.SendLegacyJARMEncryptionParams, false)
 }
 
+// EmitInvalidTXCodeError reports whether a wrong Transaction Code should be
+// answered with OpenID4VCI 1.1's invalid_tx_code rather than 1.0's
+// invalid_grant. Nil-safe through the whole APIGW chain, so the token
+// endpoint does not have to repeat it.
+func (cfg *Cfg) EmitInvalidTXCodeError() bool {
+	if cfg == nil || cfg.APIGW == nil {
+		return false
+	}
+	return BoolVal(cfg.APIGW.Delivery.OpenID4VCICompat.EmitInvalidTXCodeError, false)
+}
+
 // Common holds the shared configuration used across all services
 type Common struct {
 	// Production enables production mode
@@ -1840,10 +1851,10 @@ type CredentialOffers struct {
 	// because both are published verbatim - and config load refuses
 	// anything else: issuer metadata is generated from
 	// public_url and declares that as its own `credential_issuer`, so a
-	// wallet resolving an offer to
-	// {credential_issuer}/.well-known/openid-credential-issuer would
-	// otherwise reach an origin serving no metadata, or metadata naming a
-	// different issuer.
+	// wallet resolving an offer - inserting the well-known suffix at the
+	// credential_issuer's host root per RFC 8615, see openid4vci.WellKnownURL -
+	// would otherwise reach an origin serving no metadata, or metadata naming
+	// a different issuer.
 	//
 	// It is still not where offers are RETRIEVED from. A by-reference offer
 	// (`credential_offer_uri`) is built from apigw.public_url, because that
@@ -1866,6 +1877,22 @@ type APIGWDelivery struct {
 	OpenID4VCI OAuthServer `yaml:"openid4vci" validate:"required"`
 	// CredentialOffers holds credential offer wallet configurations
 	CredentialOffers CredentialOffers `yaml:"credential_offers" validate:"required"`
+
+	// EmitCredentialMetadataOnResponse adds the issued Credential's
+	// credential_metadata to the Credential Response, as OpenID4VCI 1.1
+	// permits (WE BUILD CS-01 §7.5, a MAY on both sides).
+	//
+	// Off by default for size, not for interop: it repeats the scope's
+	// issuer metadata on every issuance, and a 1.0 wallet ignores an
+	// unrecognised member, so emitting it cannot break one. That is also why
+	// this is NOT in OpenID4VCICompat - nothing about it is a
+	// compatibility switch, and it needs no flipping when 1.1 is Final.
+	//
+	// Worth having because of the precedence 1.1 defines: a wallet prefers
+	// what arrives here over the Credential Format's own mechanism, and both
+	// over the published Issuer Metadata. An issuer that wants to say
+	// something about THIS credential has no other way to.
+	EmitCredentialMetadataOnResponse *bool `yaml:"emit_credential_metadata_on_response" default:"false"`
 	// OpenID4VCICompat holds opt-in switches for wallets that do not encode
 	// OpenID4VCI 1.0 requests the way the specification does.
 	OpenID4VCICompat OpenID4VCICompat `yaml:"openid4vci_compat" validate:"omitempty"`
@@ -2124,10 +2151,18 @@ func (ia *InteractiveAuthorization) MetadataNames() oauth2.MetadataNames {
 	}
 }
 
-// OpenID4VCICompat holds interoperability switches for non-conformant wallets.
+// OpenID4VCICompat holds switches that change this server's OpenID4VCI behaviour.
 //
-// Every field defaults to the conformant behaviour, so a deployment that sets
-// none of them is an OpenID4VCI 1.0 deployment.
+// Two kinds live here, and they point opposite ways. One kind accepts
+// something a non-conformant WALLET sends that the specification does not
+// allow. The other emits something a NEWER specification defines that the
+// published one does not. What they have in common is the default: every
+// field is false, and false is what the currently published specification
+// says, so a deployment that sets none of them is a plain OpenID4VCI 1.0
+// deployment.
+//
+// A field of the second kind names the version that would make it
+// unnecessary, and is deleted when that version is published.
 type OpenID4VCICompat struct {
 	// AcceptNonStandardAuthorizationDetailsArrays accepts two further
 	// encodings of authorization_details in a query string or form body,
@@ -2147,6 +2182,25 @@ type OpenID4VCICompat struct {
 	//
 	// See SUNET/vc#710 for the interop reports that motivated it.
 	AcceptNonStandardAuthorizationDetailsArrays *bool `yaml:"accept_non_standard_authorization_details_arrays" default:"false"`
+
+	// EmitInvalidTXCodeError returns the OpenID4VCI 1.1 `invalid_tx_code`
+	// error for a wrong Transaction Code, instead of 1.0's `invalid_grant`.
+	//
+	// Off by default because 1.1 is not published: it is an editor's draft,
+	// adopted pre-flight by WE BUILD CS-01 §7.4. Turning it on changes what
+	// an unmodified wallet receives on a mistyped PIN, so it is a deliberate,
+	// announced change rather than a silent one - which is also why this is
+	// the only 1.1 item in this struct that needed a switch at all. The rest
+	// are additive.
+	//
+	// Flip it to true, and delete the switch, once OpenID4VCI 1.1 is Final.
+	//
+	// Note what it does NOT change. `invalid_grant` still means the
+	// Pre-Authorized Code itself is finished - unknown, expired, already
+	// redeemed, or invalidated by too many failed attempts - and a wallet
+	// relies on exactly that split to tell a remaining attempt from an
+	// exhausted offer.
+	EmitInvalidTXCodeError *bool `yaml:"emit_invalid_tx_code_error" default:"false"`
 }
 
 // APIGWAuthProviders groups the authentication provider configurations.

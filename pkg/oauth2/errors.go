@@ -63,6 +63,17 @@ const (
 	ErrCodeInvalidScope         = "invalid_scope"
 	ErrCodeServerError          = "server_error"
 	ErrCodeInvalidDPoPProof     = "invalid_dpop_proof" // RFC 9449 §7
+
+	// ErrCodeInvalidTXCode distinguishes a wrong Transaction Code from a
+	// Pre-Authorized Code that is finished (OpenID4VCI 1.1, Token Error
+	// Response). 1.0 returns invalid_grant for both, which leaves a wallet
+	// unable to tell "the holder mistyped it, ask again" from "this offer
+	// is dead, get a new one" - and in a profile that requires a
+	// Transaction Code on every pre-authorized offer, that is the most
+	// common error the flow produces.
+	//
+	// Emitting it is gated: see model.OpenID4VCICompat.EmitInvalidTXCodeError.
+	ErrCodeInvalidTXCode = "invalid_tx_code"
 )
 
 // Sentinel errors (kept for errors.Is compatibility)
