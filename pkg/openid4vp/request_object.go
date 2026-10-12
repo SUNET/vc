@@ -39,7 +39,7 @@ type RequestObject struct {
 	Nonce string `json:"nonce" uri:"nonce" validate:"required"`
 
 	// ResponseMode REQUIRED. Defined in [OAuth.Responses]. This parameter can be used (through the new Response Mode direct_post) to ask the Wallet to send the response to the Verifier via an HTTPS connection (see Section 8.2 for more details). It can also be used to request that the resulting response be encrypted (see Section 8.3 for more details).
-	ResponseMode string `json:"response_mode,omitempty" uri:"response_mode" validate:"omitempty,oneof=form_post direct_post direct_post.jwt dc_api.jwt"`
+	ResponseMode string `json:"response_mode,omitempty" uri:"response_mode" validate:"omitempty,oneof=form_post direct_post direct_post.jwt dc_api.jwt ia_post ia_post.jwt"`
 
 	// dcql_query
 	DCQLQuery *DCQL `json:"dcql_query,omitempty" bson:"dcql_query,omitempty" validate:"omitempty,dive"`
@@ -59,7 +59,35 @@ type RequestObject struct {
 	VerifierInfo []VerifierInfo `json:"verifier_info,omitempty" bson:"verifier_info,omitempty" validate:"omitempty,dive,required"`
 
 	// ResponseURI REQUIRED when the Response Mode direct_post is used. The URL to which the Wallet MUST send the Authorization Response using an HTTP POST request as defined by the Response Mode direct_post. The Response URI receives all Authorization Response parameters as defined by the respective Response Type. When the response_uri parameter is present, the redirect_uri Authorization Request parameter MUST NOT be present. If the redirect_uri Authorization Request parameter is present when the Response Mode is direct_post, the Wallet MUST return an invalid_request Authorization Response error. The response_uri value MUST be a value that the client would be permitted to use as redirect_uri when following the rules defined in Section 5.9.
-	ResponseURI string `json:"response_uri,omitempty" uri:"response_uri" validate:"required"`
+	//
+	// Required for the direct_post modes (direct_post, direct_post.jwt)
+	// and ABSENT for the others. form_post answers to redirect_uri, as
+	// the field documentation above says; a dc_api request's
+	// response returns inside the browser call, and an ia_post request's
+	// goes back to the Authorization Challenge Endpoint it came from. A
+	// struct tag cannot express "required unless the mode is one of
+	// these", so the rule lives here and in the builders rather than in
+	// the tag.
+	//
+	// The tag said `required` for every mode until Interactive
+	// Authorization needed a request object without one. Note that this
+	// struct's tags are not currently exercised - nothing calls a
+	// validator on a RequestObject, which is also why ResponseType's
+	// `eq=code` has coexisted with builders that set "vp_token". That is
+	// a real gap and a separate one.
+	ResponseURI string `json:"response_uri,omitempty" uri:"response_uri" validate:"omitempty"`
+
+	// ExpectedOrigins OPTIONAL. The origins the Verifier expects the
+	// request to be presented at, which a wallet checks before answering
+	// (OpenID4VP 1.0 Appendix A.2, for requests in Digital Credentials
+	// API shape).
+	//
+	// For Interactive Authorization it carries exactly one entry, the
+	// derived Origin of the Authorization Challenge Endpoint, and it is
+	// one of the two defences against a malicious Authorization Server
+	// relaying another server's challenge (OpenID4VCI 1.1; the other is
+	// the per-format binding of the presentation itself).
+	ExpectedOrigins []string `json:"expected_origins,omitempty" bson:"expected_origins,omitempty" validate:"omitempty,dive,required"`
 }
 
 type VerifierInfo struct {
