@@ -283,37 +283,6 @@ export function flattenClaims(claims) {
     return rows;
 }
 
-/**
- * svg_ids that make up the one-line "who is this about" summary, in display
- * order.
- *
- * Both birth-date spellings are listed because SD-JWT VC uses `birthdate`
- * and ISO mdoc uses `birth_date`, and one consent page serves both.
- */
-export const SUMMARY_SVG_IDS = ["given_name", "family_name", "birthdate", "birth_date"];
-
-/**
- * One-line human summary of who the credential is about.
- *
- * Built from the SVG-template claims rather than the full claim set,
- * because those are exactly the claims the issuer marked as displayable on
- * the card - so they are the ones already chosen as safe and meaningful to
- * show at a glance. Returns "" when none of them are present, and the
- * caller omits the line rather than showing an empty one.
- *
- * @param {Record<string, { label: string; value: unknown }>} svgTemplateClaims
- * @returns {string}
- */
-export function credentialSubjectSummary(svgTemplateClaims) {
-    const parts = [];
-    for (const svgID of SUMMARY_SVG_IDS) {
-        const value = svgTemplateClaims?.[svgID]?.value;
-        if (typeof value === "string" && value.length > 0 && !parts.includes(value)) {
-            parts.push(value);
-        }
-    }
-    return parts.join(" · ");
-}
 
 /**
  * Which credential should be selected when the list is first rendered.

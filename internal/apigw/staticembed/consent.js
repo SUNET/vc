@@ -4,7 +4,6 @@ import * as v from "valibot";
 import {
     base64ToUtf8,
     clearUnresolvedPlaceholders,
-    credentialSubjectSummary,
     escapeHtml,
     escapeSvgValue,
     flattenClaims,
@@ -27,7 +26,6 @@ import {
  * @property {string} issuer
  * @property {string} svg
  * @property {Record<string, ClaimEntry>} claims
- * @property {string} subjectSummary
  */
 
 /**
@@ -340,7 +338,6 @@ Alpine.data("app", () => ({
                 issuer: display.issuer ?? "",
                 svg,
                 claims: data.presentation_claims,
-                subjectSummary: credentialSubjectSummary(data.svg_template_claims),
             });
 
             this.selectedCredential = initialCredentialSelection(this.credentials);

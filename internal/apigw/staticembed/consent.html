@@ -137,12 +137,6 @@
                                             <p class="text-base font-semibold break-words" x-text="credential.name"></p>
                                             <p x-show="credential.description" class="text-sm opacity-70 break-words" x-text="credential.description"></p>
                                             <dl class="mt-2 text-sm">
-                                                <template x-if="credential.subjectSummary">
-                                                    <div class="flex gap-2 py-0.5">
-                                                        <dt class="opacity-60 shrink-0">Subject</dt>
-                                                        <dd class="min-w-0 break-words font-medium" x-text="credential.subjectSummary"></dd>
-                                                    </div>
-                                                </template>
                                                 <template x-if="credential.issuer">
                                                     <div class="flex gap-2 py-0.5">
                                                         <dt class="opacity-60 shrink-0">Issuer</dt>
@@ -156,24 +150,28 @@
                                                     </div>
                                                 </template>
                                             </dl>
-                                            <details class="vc-claim-details mt-3">
-                                                <summary class="text-sm font-medium text-primary dark:text-primary-light"
-                                                         x-text="`Show details (${claimCount(credential)})`"></summary>
-                                                <table class="vc-claims-table table-auto w-full mt-2">
-                                                    <tbody>
-                                                        <template x-for="row of flattenClaims(credential.claims)">
-                                                            <tr class="[&:not(:last-child)]:border-b [&:not(:last-child)]:border-black/20 [&:not(:last-child)]:dark:border-white/20">
-                                                                <th :class="row.isHeader ? 'p-2 text-sm text-left align-top font-semibold' : (row.indent ? 'p-2 pl-6 text-sm text-left align-top font-normal' : 'p-2 text-sm text-left align-top font-normal')"
-                                                                    x-text="row.label"
-                                                                    :colspan="row.isHeader ? 2 : 1"></th>
-                                                                <td x-show="!row.isHeader" class="p-2 text-sm text-left align-top" x-html="renderClaimValue(row.value)"></td>
-                                                            </tr>
-                                                        </template>
-                                                    </tbody>
-                                                </table>
-                                            </details>
                                         </div>
                                     </label>
+                                    <!-- Sibling of the label, not nested in it: an
+                                         interactive <details> inside a <label>
+                                         violates the label content model and lets
+                                         "Show details" toggle the radio. -->
+                                    <details class="vc-claim-details mt-3">
+                                        <summary class="text-sm font-medium text-primary dark:text-primary-light"
+                                                 x-text="`Show details (${claimCount(credential)})`"></summary>
+                                        <table class="vc-claims-table table-auto w-full mt-2">
+                                            <tbody>
+                                                <template x-for="row of flattenClaims(credential.claims)">
+                                                    <tr class="[&:not(:last-child)]:border-b [&:not(:last-child)]:border-black/20 [&:not(:last-child)]:dark:border-white/20">
+                                                        <th :class="row.isHeader ? 'p-2 text-sm text-left align-top font-semibold' : (row.indent ? 'p-2 pl-6 text-sm text-left align-top font-normal' : 'p-2 text-sm text-left align-top font-normal')"
+                                                            x-text="row.label"
+                                                            :colspan="row.isHeader ? 2 : 1"></th>
+                                                        <td x-show="!row.isHeader" class="p-2 text-sm text-left align-top" x-html="renderClaimValue(row.value)"></td>
+                                                    </tr>
+                                                </template>
+                                            </tbody>
+                                        </table>
+                                    </details>
                                 </div>
                             </template>
                         </div>
