@@ -467,6 +467,23 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 		return nil, err
 	}
 
+	// The rule the preparing caller supplied, where there was one.
+	//
+	// Here rather than at the Challenge Endpoint, so that an issuance
+	// prepared with a rule is bound by it whichever channel the
+	// presentation arrives on - and ABOVE the presentation-sourced branch
+	// below, which returns early: a check placed after it would be skipped
+	// by exactly the scopes that mint a credential straight out of the
+	// presentation, which are the ones with the least else standing
+	// between a wallet and an issued credential.
+	//
+	// After verification and before anything is issued or looked up: the
+	// claims are trustworthy by this point, and nothing has been done with
+	// them yet.
+	if err := c.matchPresentedIdentity(c.cfg.GetFormatForScope(matchedAuthScope), credential, authCtx.IdentityMatch); err != nil {
+		return nil, err
+	}
+
 	// Presentation-source scopes derive their whole document from the
 	// presented credential — there is no datastore lookup by identity.
 	// Guarded on DataSource so a scope shared with datastore/assertion still

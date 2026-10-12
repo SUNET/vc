@@ -661,3 +661,34 @@ func (s *Service) endpointOAuthAuthorizationConsentSvgTemplate(ctx context.Conte
 
 	return reply, nil
 }
+
+// endpointPrepareIssuance is the issuer-initiated half of Interactive
+// Authorization: a caller that has already authenticated the user asks
+// this server to prepare an issuance, and says which Holder may complete
+// it.
+//
+// On the admin API, behind the same authentication every other /api/v1
+// route is behind. That is where it belongs rather than being a public
+// endpoint: it is the Issuer talking to itself about a user it has
+// already authenticated, and anyone who could call it unauthenticated
+// could prepare an issuance naming any Holder they liked.
+func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointPrepareIssuance")
+	defer span.End()
+
+	request := &apiv1.PrepareIssuanceRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "binding error")
+		return nil, err
+	}
+
+	reply, err := s.apiv1.PrepareIssuance(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "prepare issuance error")
+		return nil, err
+	}
+
+	return reply, nil
+}

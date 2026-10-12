@@ -52,6 +52,19 @@ type AuthorizationChallengeRequest struct {
 	// presence is what makes a request an intermediate one.
 	AuthSession string `json:"auth_session" form:"auth_session"`
 
+	// IssuerState is the handle from an issuer-initiated Credential Offer
+	// (OpenID4VCI 1.0 §5.1.1), naming an issuance this server already
+	// prepared.
+	//
+	// Neither draft-ietf-oauth-first-party-apps §5.1 nor the OpenID4VCI
+	// 1.1 Interactive Authorization text lists it here: as written, the
+	// mechanism is wallet-initiated only, and an Issuer that has already
+	// authenticated the user elsewhere has no way to say so. First-party
+	// apps explicitly allows extension parameters, and OpenID4VCI defines
+	// this one for the Authorization Endpoint, so it is accepted here
+	// under the same meaning. Reported upstream.
+	IssuerState string `json:"issuer_state" form:"issuer_state"`
+
 	// OpenID4VPResponse is the JSON-encoded OpenID4VP Authorization
 	// Response - or Authorization Error Response - answering a Require
 	// Presentation interaction.
@@ -185,6 +198,9 @@ func (c *Client) OAuthAuthorizationChallenge(ctx context.Context, req *Authoriza
 
 	if req.AuthSession != "" {
 		return c.authorizationChallengeIntermediate(ctx, ia, req)
+	}
+	if req.IssuerState != "" {
+		return c.authorizationChallengePrepared(ctx, ia, req)
 	}
 	return c.authorizationChallengeInitial(ctx, ia, req)
 }
@@ -795,4 +811,131 @@ func interactionTypeOffered(supported, required string) bool {
 		}
 	}
 	return false
+}
+
+// authorizationChallengePrepared opens an exchange against an issuance
+// this server already prepared for a known Holder - see PrepareIssuance.
+//
+// It differs from an ordinary initial request in what it takes from the
+// wallet and what it refuses to take. The scope, the data source and the
+// identity rule come from the prepared issuance, because the Issuer
+// decided those when it authenticated the user and let them choose; a
+// wallet that sent its own would be asking to be issued something other
+// than what was prepared. What the wallet still supplies is its own half:
+// client authentication, PKCE, the DPoP key the exchange binds to, and
+// the interaction types it can perform.
+func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.InteractiveAuthorization, req *AuthorizationChallengeRequest) (*AuthorizationChallengeResponse, error) {
+	if req.ResponseType != "code" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest, `response_type must be "code"`, 400)
+	}
+	if req.InteractionTypesSupported == "" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			"interaction_types_supported is required", 400)
+	}
+
+	// Claimed, not read: the issuer_state is the Issuer's handle on an
+	// issuance nobody has taken, and two wallets scanning the same offer
+	// must not both open an exchange against it.
+	authCtx, err := c.cacheService.AuthContext.ClaimIssuerState(ctx, req.IssuerState)
+	if err != nil || authCtx == nil {
+		// Unknown and expired are one answer, for the same reason they are
+		// at the intermediate request: otherwise the endpoint reports
+		// which issuer_state values exist.
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+			"issuer_state is invalid or has expired", 400)
+	}
+	if authCtx.ExpiresAt > 0 && time.Now().Unix() > authCtx.ExpiresAt {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+			"issuer_state is invalid or has expired", 400)
+	}
+
+	// The prepared issuance names the scope; a wallet asking for a
+	// different one is refused rather than quietly served the prepared
+	// one, so that a mismatch is visible to whoever wrote the wallet.
+	scope := authCtx.Scopes[0]
+	if req.Scope != "" && req.Scope != scope {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidScope,
+			"scope does not match the issuance this issuer_state was prepared for", 400)
+	}
+
+	oauthClient, err := c.authenticateOAuthClient(ctx, &walletClientAuth{
+		ClientID:             req.ClientID,
+		RedirectURI:          req.RedirectURI,
+		Scope:                scope,
+		ClientAttestation:    req.ClientAttestation,
+		ClientAttestationPoP: req.ClientAttestationPoP,
+		ClientAssertion:      req.ClientAssertion,
+		LogPrefix:            "CHALLENGE",
+	})
+	if err != nil {
+		return nil, err
+	}
+	if oauthClient != nil && oauthClient.Type == oauth2.ClientTypePublic && req.CodeChallenge == "" {
+		return nil, oauth2.OAuthErrPKCERequired
+	}
+	if req.CodeChallenge != "" && req.CodeChallengeMethod != "S256" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			"code_challenge_method must be S256", 400)
+	}
+
+	required, err := c.interactionTypeForScope(ia, scope)
+	if err != nil {
+		return nil, err
+	}
+	if !interactionTypeOffered(req.InteractionTypesSupported, required) {
+		return nil, &AuthorizationChallengeError{
+			ErrorCode: errMissingInteractionType,
+			ErrorDescription: fmt.Sprintf(
+				"interaction_types_supported in the request is missing the required interaction type %q", required),
+			HTTPStatus: 400,
+		}
+	}
+
+	if req.DPOP == "" {
+		return nil, oauth2.OAuthErrDPoPRequired
+	}
+	dpopThumbprint, err := c.dpopProofThumbprint(ctx, req.DPOP, ia.ChallengeEndpoint(c.cfg.APIGW.PublicURL))
+	if err != nil {
+		return nil, err
+	}
+
+	// The wallet's half, recorded on the prepared issuance.
+	authCtx.WalletClientID = req.ClientID
+	authCtx.WalletURI = req.RedirectURI
+	authCtx.CodeChallenge = req.CodeChallenge
+	authCtx.CodeChallengeMethod = req.CodeChallengeMethod
+	authCtx.AuthSessionDPoPThumbprint = dpopThumbprint
+	authCtx.ExpiresAt = time.Now().Add(ia.AuthSessionTTL()).Unix()
+
+	// From here the exchange is the wallet's, identified by auth_session.
+	if authCtx.AuthSession, err = crypto.GenerateSecureToken(32, 0); err != nil {
+		return nil, fmt.Errorf("failed to generate auth_session: %w", err)
+	}
+
+	dcql, err := c.issuanceAuthDCQL(scope)
+	if err != nil {
+		return nil, err
+	}
+	authCtx.DCQLQuery = dcql
+
+	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
+		return nil, err
+	}
+
+	presentationRequest, err := c.interactiveAuthorizationRequest(ctx, ia, authCtx, dcql)
+	if err != nil {
+		return nil, err
+	}
+
+	c.log.Info("CHALLENGE: prepared issuance resumed, interaction required",
+		"client_id", req.ClientID, "scope", scope,
+		"interaction_type_required", required, "session_id", authCtx.SessionID)
+
+	return nil, &AuthorizationChallengeError{
+		ErrorCode:               errInsufficientAuthorization,
+		InteractionTypeRequired: required,
+		AuthSession:             authCtx.AuthSession,
+		OpenID4VPRequest:        presentationRequest,
+		HTTPStatus:              403,
+	}
 }

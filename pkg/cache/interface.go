@@ -58,6 +58,13 @@ type AuthContextStore interface {
 	// store replaces unconditionally.
 	ClaimAuthSession(ctx context.Context, authSession string) (*AuthorizationContext, error)
 
+	// ClaimIssuerState atomically takes the issuer-initiated handle off
+	// the context it names, with the same one-shot guarantee as
+	// ClaimAuthSession and for the same reason: an issuance prepared for
+	// one Holder must open one exchange, not one per wallet that scans
+	// the offer.
+	ClaimIssuerState(ctx context.Context, issuerState string) (*AuthorizationContext, error)
+
 	// RedeemPreAuthorizedCode allows a pre-authorized code to be redeemed by multiple
 	// distinct clients (per DPoP thumbprint). Returns the auth context or an error if
 	// the same client attempts to redeem the code twice.

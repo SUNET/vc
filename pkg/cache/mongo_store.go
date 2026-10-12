@@ -58,6 +58,10 @@ func NewMongoStore(ctx context.Context, client *mongo.Client, database, collecti
 			Options: options.Index().SetSparse(true),
 		},
 		{
+			Keys:    bson.D{{Key: "issuer_state", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
+		{
 			Keys:    bson.D{{Key: "request_object_id", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
@@ -634,6 +638,9 @@ func (s *MongoStore) buildFilter(query *AuthorizationContext) bson.M {
 	if query.RequestObjectID != "" {
 		return bson.M{"request_object_id": query.RequestObjectID}
 	}
+	if query.IssuerState != "" {
+		return bson.M{"issuer_state": query.IssuerState}
+	}
 	if query.AuthSession != "" {
 		return bson.M{"auth_session": query.AuthSession}
 	}
@@ -675,6 +682,34 @@ func (s *MongoStore) ClaimAuthSession(ctx context.Context, authSession string) (
 	// persists this document would write the handle back - see the note
 	// there.
 	claimed.AuthSession = ""
+
+	return &claimed, nil
+}
+
+// ClaimIssuerState atomically takes the issuer-initiated handle off the
+// context it names. See AuthContextStore.ClaimIssuerState.
+//
+// One FindOneAndUpdate filtered on the handle, which is what makes it
+// one-shot: the second request to arrive matches nothing, because the
+// first has already removed the field it filters on.
+func (s *MongoStore) ClaimIssuerState(ctx context.Context, issuerState string) (*AuthorizationContext, error) {
+	if issuerState == "" {
+		return nil, errors.New("issuerState cannot be empty")
+	}
+
+	filter := bson.M{"issuer_state": issuerState}
+	update := bson.M{"$unset": bson.M{"issuer_state": ""}}
+
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.Before)
+	var claimed AuthorizationContext
+	if err := s.coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&claimed); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNoDocuments
+		}
+		return nil, fmt.Errorf("failed to claim issuer_state: %w", err)
+	}
+
+	claimed.IssuerState = ""
 
 	return &claimed, nil
 }

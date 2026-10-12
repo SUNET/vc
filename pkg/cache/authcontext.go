@@ -105,6 +105,9 @@ func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error
 	if doc.AuthSession != "" {
 		c.indices[fmt.Sprintf("auth_session:%s", doc.AuthSession)] = doc.SessionID
 	}
+	if doc.IssuerState != "" {
+		c.indices[fmt.Sprintf("issuer_state:%s", doc.IssuerState)] = doc.SessionID
+	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.Token.AccessToken)] = doc.SessionID
 	}
@@ -150,6 +153,8 @@ func (c *MemoryStore) Get(ctx context.Context, query *AuthorizationContext) (*Au
 			indexKey = fmt.Sprintf("request_object_id:%s", query.RequestObjectID)
 		} else if query.AuthSession != "" {
 			indexKey = fmt.Sprintf("auth_session:%s", query.AuthSession)
+		} else if query.IssuerState != "" {
+			indexKey = fmt.Sprintf("issuer_state:%s", query.IssuerState)
 		} else {
 			return nil, errors.New("query must have at least one search field")
 		}
@@ -584,6 +589,9 @@ func (c *MemoryStore) updateIndices(doc *AuthorizationContext) {
 	if doc.AuthSession != "" {
 		c.indices[fmt.Sprintf("auth_session:%s", doc.AuthSession)] = doc.SessionID
 	}
+	if doc.IssuerState != "" {
+		c.indices[fmt.Sprintf("issuer_state:%s", doc.IssuerState)] = doc.SessionID
+	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.Token.AccessToken)] = doc.SessionID
 	}
@@ -740,6 +748,9 @@ func (c *MemoryStore) deleteIndices(doc *AuthorizationContext) {
 	if doc.AuthSession != "" {
 		delete(c.indices, fmt.Sprintf("auth_session:%s", doc.AuthSession))
 	}
+	if doc.IssuerState != "" {
+		delete(c.indices, fmt.Sprintf("issuer_state:%s", doc.IssuerState))
+	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		delete(c.indices, fmt.Sprintf("access_token:%s", doc.Token.AccessToken))
 	}
@@ -782,23 +793,50 @@ func (c *MemoryStore) Create(ctx context.Context, doc *AuthorizationContext) err
 	return c.Save(ctx, doc)
 }
 
-// ClaimAuthSession atomically takes the Interactive Authorization handle off
-// the context it names. See AuthContextStore.ClaimAuthSession.
-//
-// The returned document is a COPY, deliberately. Get hands out the pointer
-// the cache holds, so a caller that cleared a field on it would be mutating
-// the stored document - which is exactly how this was broken before: the
-// clear reached the stored copy first, deleteIndices then saw an empty
-// AuthSession and left the index behind, and the handle stayed resolvable.
+// ClaimAuthSession atomically takes the Interactive Authorization handle
+// off the context it names. See AuthContextStore.ClaimAuthSession.
 func (c *MemoryStore) ClaimAuthSession(ctx context.Context, authSession string) (*AuthorizationContext, error) {
 	if authSession == "" {
 		return nil, errors.New("authSession cannot be empty")
 	}
+	return c.claimIndexedHandle("auth_session", authSession,
+		func(doc *AuthorizationContext) string { return doc.AuthSession },
+		func(doc *AuthorizationContext) {
+			// Only the handle. AuthSessionDPoPThumbprint is the binding
+			// the authorization code inherits, and the Token Endpoint
+			// checks it when the code is redeemed - clearing it here would
+			// hand out a code that any key could spend.
+			doc.AuthSession = ""
+		})
+}
 
+// ClaimIssuerState atomically takes the issuer-initiated handle off the
+// context it names. See AuthContextStore.ClaimIssuerState.
+func (c *MemoryStore) ClaimIssuerState(ctx context.Context, issuerState string) (*AuthorizationContext, error) {
+	if issuerState == "" {
+		return nil, errors.New("issuerState cannot be empty")
+	}
+	return c.claimIndexedHandle("issuer_state", issuerState,
+		func(doc *AuthorizationContext) string { return doc.IssuerState },
+		func(doc *AuthorizationContext) { doc.IssuerState = "" })
+}
+
+// claimIndexedHandle is the shared body of the two claims: resolve a
+// one-shot handle through its index, take it off the stored document AND
+// off the returned copy, and let exactly one caller have it.
+//
+// The handle is cleared on the returned copy too, not just the stored
+// one. The caller already has it - it is what they asked with - and
+// anything downstream that persists this document would otherwise write
+// it straight back and make the handle resolvable again. That is not
+// hypothetical: finalisePresentationVerification updates the context it
+// is handed, so a presentation-sourced scope resurrected the handle it
+// had just consumed.
+func (c *MemoryStore) claimIndexedHandle(indexPrefix, handle string, read func(*AuthorizationContext) string, clear func(*AuthorizationContext)) (*AuthorizationContext, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	indexKey := fmt.Sprintf("auth_session:%s", authSession)
+	indexKey := fmt.Sprintf("%s:%s", indexPrefix, handle)
 	sessionID, ok := c.indices[indexKey]
 	if !ok {
 		return nil, ErrNoDocuments
@@ -814,26 +852,14 @@ func (c *MemoryStore) ClaimAuthSession(ctx context.Context, authSession string) 
 
 	// The index could name a session whose handle has already been
 	// replaced; treat that as unclaimed rather than trusting the index.
-	if stored.AuthSession != authSession {
+	if read(stored) != handle {
 		return nil, ErrNoDocuments
 	}
 
 	claimed := *stored
+	clear(&claimed)
 
-	// The handle is cleared on the RETURNED copy too, not just the stored
-	// one. The caller already has the handle - it is what they asked with -
-	// and anything downstream that persists this document would otherwise
-	// write it straight back and make the exchange claimable again. That is
-	// not hypothetical: finalisePresentationVerification updates the
-	// context it is handed, so a presentation-sourced scope resurrected the
-	// handle it had just consumed.
-	claimed.AuthSession = ""
-
-	// Only the handle. AuthSessionDPoPThumbprint is the binding the
-	// authorization code inherits, and the Token Endpoint checks it when
-	// the code is redeemed - clearing it here would hand out a code that
-	// any key could spend.
-	stored.AuthSession = ""
+	clear(stored)
 	delete(c.indices, indexKey)
 	c.cache.Set(sessionID, stored, ttlcache.DefaultTTL)
 

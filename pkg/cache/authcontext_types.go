@@ -95,6 +95,29 @@ type AuthorizationContext struct {
 	// cannot resolve to this context at all.
 	AuthSession string `json:"auth_session,omitempty" bson:"auth_session,omitempty" validate:"omitempty,max=128,printascii"`
 
+	// IssuerState is the handle an issuer-initiated Credential Offer
+	// carries, joining a session the Issuer already has - a portal where
+	// the user authenticated and chose what is being issued - to the
+	// wallet-initiated exchange that follows.
+	//
+	// OpenID4VCI 1.0 defines it for the Authorization Endpoint. Nothing
+	// in the 1.1 Interactive Authorization text says how an
+	// issuer-initiated offer reaches the Authorization Challenge
+	// Endpoint, so this server accepts it there too; see the Challenge
+	// Endpoint's own documentation.
+	IssuerState string `json:"issuer_state,omitempty" bson:"issuer_state,omitempty" validate:"omitempty,max=128,printascii"`
+
+	// IdentityMatch is the rule the preparing caller supplied for
+	// deciding whether the Holder who presents a credential is the one
+	// this issuance was prepared for.
+	//
+	// Carried on the context rather than taken from configuration because
+	// only the caller knows what "the same user" means for its own
+	// session. Nil means no such rule was given, which is a different
+	// thing from a rule that matches anything - IdentityMatch.Validate
+	// refuses the latter.
+	IdentityMatch *openid4vci.IdentityMatch `json:"identity_match,omitempty" bson:"identity_match,omitempty" validate:"omitempty"`
+
 	// AuthSessionDPoPThumbprint binds the Interactive Authorization
 	// exchange to the DPoP key that began it, when DPoP is in use.
 	//
