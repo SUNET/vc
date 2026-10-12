@@ -284,13 +284,35 @@ export function flattenClaims(claims) {
 }
 
 /**
- * svg_ids that make up the one-line "who is this about" summary, in display
- * order.
+ * The claims that make up the one-line "who is this about" summary, in
+ * display order, as NORMALISED svg_ids - lowercased with separators
+ * removed.
  *
- * Both birth-date spellings are listed because SD-JWT VC uses `birthdate`
- * and ISO mdoc uses `birth_date`, and one consent page serves both.
+ * Normalised because the shipped credential types do not agree on a
+ * spelling and there is no reason they should: SD-JWT VC PID uses
+ * `given_name`, the diploma and microcredential types use `givenName`,
+ * ISO mdoc uses `birth_date`, and eduID exposes only `common_name`. An
+ * allowlist of exact strings silently drops the Subject line for whichever
+ * spelling it was not written against, which is the failure mode worth
+ * designing out rather than enumerating around.
+ *
+ * It stays an allowlist rather than "show the first few claims": a
+ * credential whose displayable claims are an administrative number and a
+ * country gets no Subject line at all, which is correct. EHIC and PDA1 are
+ * exactly that, and a line reading "SE · 1234567" would be worse than none.
  */
-export const SUMMARY_SVG_IDS = ["given_name", "family_name", "birthdate", "birth_date"];
+export const SUMMARY_SVG_IDS = ["givenname", "familyname", "commonname", "birthdate"];
+
+/**
+ * Lowercase and strip the separators that distinguish `given_name` from
+ * `givenName`, so one entry matches both.
+ *
+ * @param {string} svgID
+ * @returns {string}
+ */
+function normalizeSvgID(svgID) {
+    return svgID.toLowerCase().replace(/[_\-\s]/g, "");
+}
 
 /**
  * One-line human summary of who the credential is about.
@@ -305,9 +327,20 @@ export const SUMMARY_SVG_IDS = ["given_name", "family_name", "birthdate", "birth
  * @returns {string}
  */
 export function credentialSubjectSummary(svgTemplateClaims) {
+    if (!svgTemplateClaims) return "";
+
+    /** @type {Map<string, unknown>} */
+    const byNormalized = new Map();
+    for (const [svgID, claim] of Object.entries(svgTemplateClaims)) {
+        // First spelling wins, so a credential carrying both `given_name`
+        // and `givenName` does not depend on key order.
+        const key = normalizeSvgID(svgID);
+        if (!byNormalized.has(key)) byNormalized.set(key, claim?.value);
+    }
+
     const parts = [];
     for (const svgID of SUMMARY_SVG_IDS) {
-        const value = svgTemplateClaims?.[svgID]?.value;
+        const value = byNormalized.get(svgID);
         if (typeof value === "string" && value.length > 0 && !parts.includes(value)) {
             parts.push(value);
         }

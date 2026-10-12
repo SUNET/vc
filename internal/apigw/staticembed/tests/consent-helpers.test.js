@@ -616,13 +616,52 @@ describe("credentialSubjectSummary", () => {
         }), "Ada · Lovelace · 1815-12-10");
     });
 
-    it("accepts either birth-date spelling", () => {
-        // SD-JWT VC uses `birthdate`, ISO mdoc uses `birth_date`, and one
-        // consent page serves both.
+    it("matches camelCase as well as snake_case", () => {
+        // The shipped types do not agree on a spelling and there is no
+        // reason they should: PID uses given_name, the diploma and
+        // microcredential types use givenName. An exact-string allowlist
+        // drops the Subject line for whichever one it was not written
+        // against.
+        assert.equal(credentialSubjectSummary({
+            givenName: { label: "Given name", value: "Ada" },
+            familyName: { label: "Family name", value: "Lovelace" },
+        }), "Ada · Lovelace");
+    });
+
+    it("matches both birth-date spellings", () => {
         assert.equal(credentialSubjectSummary({
             given_name: { label: "Given name", value: "Ada" },
             birth_date: { label: "Date of birth", value: "1815-12-10" },
         }), "Ada · 1815-12-10");
+        assert.equal(credentialSubjectSummary({
+            birthdate: { label: "Date of birth", value: "1815-12-10" },
+        }), "1815-12-10");
+    });
+
+    it("summarises a credential that exposes only common_name", () => {
+        // eduID's only displayable identity claim. Before normalisation
+        // this credential got no Subject line at all.
+        assert.equal(credentialSubjectSummary({
+            common_name: { label: "Name", value: "Ada Lovelace" },
+            subject_id: { label: "Subject", value: "ada@example.org" },
+        }), "Ada Lovelace");
+    });
+
+    it("stays silent for a credential with no identity claims", () => {
+        // EHIC and PDA1 are exactly this. "SE · 1234567" would be worse
+        // than no line at all, so the allowlist is not widened to "the
+        // first few claims".
+        assert.equal(credentialSubjectSummary({
+            personal_administrative_number_6: { label: "PAN", value: "1234567" },
+            issuing_country_2: { label: "Country", value: "SE" },
+        }), "");
+    });
+
+    it("does not depend on key order when both spellings are present", () => {
+        assert.equal(credentialSubjectSummary({
+            given_name: { label: "Given name", value: "Ada" },
+            givenName: { label: "Given name", value: "Augusta" },
+        }), "Ada");
     });
 
     it("skips absent, empty and non-string values", () => {
