@@ -9,18 +9,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestWithDCAPIResponseModeDiffersOnlyInResponseMode is the guarantee that matters
+// TestWithDCAPIRequestDiffersOnlyInDelivery is the guarantee that matters
 // once a session serves two request objects: they are the same request seen
 // through two delivery channels, so anything a wallet checks must agree.
 // Only response_mode may differ, because only response_mode depends on how
 // the request was delivered (SUNET/vc#652).
 //
-// With one exception, and it is the same reason stated the other way:
-// response_uri names where a direct_post answer is sent, a dc_api answer
-// returns inside the browser call instead, so carrying one over would hand
-// the wallet an endpoint this channel is never answered at. It is cleared,
-// and asserted separately below.
-func TestWithDCAPIResponseModeDiffersOnlyInResponseMode(t *testing.T) {
+// With three exceptions, all the same reason stated three ways. Each of
+// response_mode, response_uri and expected_origins says how the request is
+// delivered and answered: a dc_api answer returns inside the browser call
+// rather than to a response_uri, and a signed dc_api request must name the
+// origin that invoked it so the wallet can bind it there. Asserted
+// separately below, then normalised before comparing everything else.
+func TestWithDCAPIRequestDiffersOnlyInDelivery(t *testing.T) {
 	base := &RequestObject{
 		ResponseURI:  "https://verifier.example.com/verification/direct_post",
 		AUD:          "https://self-issued.me/v2",
@@ -35,7 +36,7 @@ func TestWithDCAPIResponseModeDiffersOnlyInResponseMode(t *testing.T) {
 		},
 	}
 
-	variant := base.WithDCAPIResponseMode()
+	variant := base.WithDCAPIRequest("https://verifier.example.com")
 	require.NotNil(t, variant)
 
 	assert.Equal(t, ResponseModeDCAPIJWT, variant.ResponseMode,
@@ -48,12 +49,18 @@ func TestWithDCAPIResponseModeDiffersOnlyInResponseMode(t *testing.T) {
 	assert.NotEmpty(t, base.ResponseURI,
 		"the link channel's own object must keep the one it needs")
 
+	assert.Equal(t, []string{"https://verifier.example.com"}, variant.ExpectedOrigins,
+		"a signed dc_api request must name the origin the wallet binds it to (OpenID4VP 1.0 Appendix A.3)")
+	assert.Empty(t, base.ExpectedOrigins,
+		"the link channel has no invoking origin to name")
+
 	// Compare with the two delivery-dependent fields normalised: every
 	// other field, including any added to RequestObject later, has to be
 	// identical.
 	normalised := *variant
 	normalised.ResponseMode = base.ResponseMode
 	normalised.ResponseURI = base.ResponseURI
+	normalised.ExpectedOrigins = base.ExpectedOrigins
 	assert.True(t, reflect.DeepEqual(*base, normalised),
 		"the two channels must differ only in how the response is delivered")
 
@@ -62,8 +69,8 @@ func TestWithDCAPIResponseModeDiffersOnlyInResponseMode(t *testing.T) {
 	assert.Same(t, base.ClientMetadata, variant.ClientMetadata)
 }
 
-func TestWithDCAPIResponseModeNilIsNil(t *testing.T) {
-	assert.Nil(t, (*RequestObject)(nil).WithDCAPIResponseMode())
+func TestWithDCAPIRequestNilIsNil(t *testing.T) {
+	assert.Nil(t, (*RequestObject)(nil).WithDCAPIRequest("https://verifier.example.com"))
 }
 
 // TestResponseModeConstantsMatchOneofTag makes the constants' doc comment true.

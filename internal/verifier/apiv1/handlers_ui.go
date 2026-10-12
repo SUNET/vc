@@ -667,13 +667,18 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 	}
 
 	// The DC API's own object, identical but for how the response is
-	// delivered: response_mode, and response_uri, which a dc_api request
-	// does not carry at all. A copy rather than a second literal so the two
+	// delivered: response_mode, response_uri (which a dc_api request does
+	// not carry at all) and expected_origins (which only it carries, and
+	// must, being signed). A copy rather than a second literal so the two
 	// cannot drift - everything the wallet checks (client_id, nonce,
 	// client_metadata, the DCQL query) has to be the same request seen
 	// through a different channel.
 	if c.cfg.Verifier.DigitalCredentials.Enable {
-		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
+		dcAPIOrigin, err := c.dcAPIOrigin()
+		if err != nil {
+			return nil, fmt.Errorf("dc_api request_object: %w", err)
+		}
+		dcAPIRequestObject := requestObject.WithDCAPIRequest(dcAPIOrigin)
 
 		dcAPIRequestObjectID := uuid.NewString()
 		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
@@ -765,7 +770,11 @@ func (c *Client) tryReuseInFlightSession(ctx context.Context, req *UIInteraction
 	// request each time so the in-tab attempt has a valid request_uri; the
 	// existing entry (if any) times out on its own.
 	if c.cfg.Verifier.DigitalCredentials.Enable {
-		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
+		dcAPIOrigin, err := c.dcAPIOrigin()
+		if err != nil {
+			return nil, false, fmt.Errorf("dc_api request_object: %w", err)
+		}
+		dcAPIRequestObject := requestObject.WithDCAPIRequest(dcAPIOrigin)
 		dcAPIRequestObjectID := uuid.NewString()
 		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
 			return nil, false, fmt.Errorf("dc_api request_object persist: %w", err)
@@ -985,7 +994,11 @@ func (c *Client) UIResume(ctx context.Context, sessionID string) (*UIResumeReply
 		return nil, err
 	}
 	if c.cfg.Verifier.DigitalCredentials.Enable {
-		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
+		dcAPIOrigin, err := c.dcAPIOrigin()
+		if err != nil {
+			return nil, fmt.Errorf("dc_api request_object: %w", err)
+		}
+		dcAPIRequestObject := requestObject.WithDCAPIRequest(dcAPIOrigin)
 		dcAPIRequestObjectID := uuid.NewString()
 		if ok, err := c.cacheService.RequestObject.SetNX(ctx, dcAPIRequestObjectID, dcAPIRequestObject); err != nil {
 			return nil, fmt.Errorf("dc_api request_object persist: %w", err)

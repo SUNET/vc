@@ -53,9 +53,9 @@ func IsInteractiveAuthorization(mode string) bool {
 	return mode == ResponseModeIAPost || mode == ResponseModeIAPostJWT
 }
 
-// WithDCAPIResponseMode returns a copy of r carrying the response mode the
-// browser's Digital Credentials API requires, with the two
-// delivery-dependent fields adjusted and nothing else changed.
+// WithDCAPIRequest returns a copy of r as the browser's Digital Credentials
+// API requires it, with the three delivery-dependent fields adjusted and
+// nothing else changed.
 //
 // For a session that serves both channels, the two requests must be the same
 // request seen through different delivery paths: everything a wallet checks
@@ -63,12 +63,22 @@ func IsInteractiveAuthorization(mode string) bool {
 // channels ask for different things and only one of them is what the user
 // consented to.
 //
-// The exceptions are response_mode and response_uri, and they are the same
-// exception twice: both say HOW the response is delivered, which is the one
-// thing that does differ. A dc_api response returns inside the browser call,
-// so the request carries no response_uri at all (OpenID4VP 1.0 Appendix
-// A.2). Copying one over named an endpoint this channel is never answered
-// at - a parameter the wallet is entitled to act on.
+// The exceptions are response_mode, response_uri and expected_origins, and
+// they are the same exception three times: each says HOW the request is
+// delivered and answered, which is the one thing that does differ.
+//
+// A dc_api response returns inside the browser call, so the request carries
+// no response_uri at all (OpenID4VP 1.0 Appendix A.2). Copying one over
+// named an endpoint this channel is never answered at - a parameter the
+// wallet is entitled to act on.
+//
+// expected_origins is the other direction: a SIGNED dc_api request must
+// carry it (Appendix A.3), because it is what lets the wallet bind the
+// request to the web origin that invoked it. Without it a conforming wallet
+// may refuse the request outright, and one that does not refuse has lost the
+// check that stops a request being replayed from another page. The link
+// channel has no origin to name, which is why this is set here rather than
+// on the object both channels share.
 //
 // A copy of the whole struct rather than a rebuilt literal, so a field added
 // to RequestObject cannot be set on one channel and forgotten on the other.
@@ -83,12 +93,19 @@ func IsInteractiveAuthorization(mode string) bool {
 //
 // That suits the only caller, which caches both and serves them read-only.
 // A caller that needs to mutate one wants a deep copy, not this.
-func (r *RequestObject) WithDCAPIResponseMode() *RequestObject {
+func (r *RequestObject) WithDCAPIRequest(expectedOrigin string) *RequestObject {
 	if r == nil {
 		return nil
 	}
 	variant := *r
 	variant.ResponseMode = ResponseModeDCAPIJWT
+
+	// A fresh slice, not an append to the original's: the copy is shallow,
+	// so appending could write into a backing array the link-channel object
+	// still points at.
+	if expectedOrigin != "" {
+		variant.ExpectedOrigins = []string{expectedOrigin}
+	}
 
 	// A dc_api response returns inside the browser call, so the request
 	// carries no response_uri (OpenID4VP 1.0 Appendix A.2). Copying the
