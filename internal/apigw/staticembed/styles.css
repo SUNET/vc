@@ -146,3 +146,50 @@
 .vc-copy-btn:focus-visible[data-tooltip]::before {
     opacity: 1;
 }
+
+/* The claim table is `table-auto`, so its width comes from its columns'
+   MIN-CONTENT width. Tailwind's `break-words` is `overflow-wrap: break-word`,
+   which by specification does not reduce min-content size - so one unbreakable
+   token (a vct URN, an issuer URL, an email, an ISO timestamp) pinned the
+   table wider than the consent panel and it spilled over the card's border on
+   every phone-width viewport. `anywhere` is the variant that does shrink
+   min-content, which is the whole fix. */
+.vc-claims-table th,
+.vc-claims-table td,
+.vc-wrap-anywhere {
+    overflow-wrap: anywhere;
+}
+
+/* "Show details" disclosure for the full claim list. The default triangle is
+   replaced with one that takes the card's own text colour. */
+.vc-claim-details > summary {
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.vc-claim-details > summary::-webkit-details-marker {
+    display: none;
+}
+
+.vc-claim-details > summary::before {
+    content: "";
+    width: 0;
+    height: 0;
+    border-left: 0.35rem solid currentColor;
+    border-top: 0.3rem solid transparent;
+    border-bottom: 0.3rem solid transparent;
+    transition: transform 0.15s ease;
+}
+
+.vc-claim-details[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vc-claim-details > summary::before {
+        transition: none;
+    }
+}

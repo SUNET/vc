@@ -6,6 +6,7 @@ import (
 	"net/url"
 
 	"github.com/SUNET/vc/pkg/cache"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/vcclient"
@@ -81,6 +82,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 
 	var svgTemplateClaims map[string]sdjwtvc.SVGValue
 	var presentationClaims map[string]any
+	var credentialDisplay *vcclient.CredentialDisplay
 	var doc *model.CompleteDocument
 
 	switch req.AuthProvider {
@@ -144,11 +146,13 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 	case req.VCTM != nil:
 		presentationClaims = req.VCTM.Presentation(doc.DocumentData)
 		svgTemplateClaims = req.VCTM.SVGValues(doc.DocumentData)
+		credentialDisplay = vctmCredentialDisplay(req.VCTM, c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL)
 	case req.MDDL != nil:
 		presentationClaims = req.MDDL.Presentation(doc.DocumentData)
 		// mdoc.SVGValue mirrors sdjwtvc.SVGValue field-for-field but is a
 		// distinct type (keeps pkg/mdoc decoupled from pkg/sdjwtvc); convert
 		// into the wire type UserLookupReply.SVGTemplateClaims already commits to.
+		credentialDisplay = mddlCredentialDisplay(req.MDDL, c.cfg.APIGW.Delivery.CredentialOffers.IssuerURL)
 		mdocSVGValues := req.MDDL.SVGValues(doc.DocumentData)
 		if len(mdocSVGValues) > 0 {
 			svgTemplateClaims = make(map[string]sdjwtvc.SVGValue, len(mdocSVGValues))
@@ -176,6 +180,7 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		SVGTemplateClaims:  svgTemplateClaims,
 		PresentationClaims: presentationClaims,
 		RedirectURL:        redirectResult,
+		CredentialDisplay:  credentialDisplay,
 	}
 
 	return reply, nil
@@ -244,4 +249,55 @@ func buildAuthorizationRedirectURL(walletURI, code, state, issuer string) (strin
 	q.Set("iss", issuer)
 	redirectURL.RawQuery = q.Encode()
 	return redirectURL.String(), nil
+}
+
+// vctmCredentialDisplay resolves what the consent page shows above the
+// claims for an SD-JWT VC scope.
+//
+// Display wins over the top-level Name/Description where it is present.
+// SD-JWT VC says the top-level pair is for DEVELOPERS and the Display entry
+// carries the end-user wording, and the consent page is the most end-user
+// facing surface there is. Display[0] is the same locale convention the
+// rest of apigw already uses.
+func vctmCredentialDisplay(vctm *sdjwtvc.VCTM, issuerURL string) *vcclient.CredentialDisplay {
+	if vctm == nil {
+		return nil
+	}
+	display := &vcclient.CredentialDisplay{
+		Name:        vctm.Name,
+		Description: vctm.Description,
+		VCT:         vctm.VCT,
+		Issuer:      issuerURL,
+	}
+	if len(vctm.Display) > 0 {
+		// Each field falls back independently: a Display entry with a name
+		// and no description should not blank out a description the
+		// top-level metadata does have.
+		if vctm.Display[0].Name != "" {
+			display.Name = vctm.Display[0].Name
+		}
+		if vctm.Display[0].Description != "" {
+			display.Description = vctm.Display[0].Description
+		}
+	}
+	return display
+}
+
+// mddlCredentialDisplay is vctmCredentialDisplay for an mso_mdoc scope.
+//
+// An MDDL schema has no top-level name, so Display is the only source and
+// there is nothing to fall back to. The doctype stands in for the vct.
+func mddlCredentialDisplay(mddl *mdoc.MDDLSchema, issuerURL string) *vcclient.CredentialDisplay {
+	if mddl == nil {
+		return nil
+	}
+	display := &vcclient.CredentialDisplay{
+		VCT:    mddl.DocType,
+		Issuer: issuerURL,
+	}
+	if len(mddl.Display) > 0 {
+		display.Name = mddl.Display[0].Name
+		display.Description = mddl.Display[0].Description
+	}
+	return display
 }
