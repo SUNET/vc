@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/SUNET/vc/pkg/model"
 
@@ -36,6 +37,30 @@ func TestCustomBranding_ServesCustomLogo(t *testing.T) {
 	w := performRequest(r, "GET", "/static/logo.png", nil)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "fake-logo", w.Body.String())
+}
+
+// A conditional request must never answer a stale 304: the on-disk mtime has
+// one-second precision and a replacement may preserve it, so the body is always
+// sent and the response is not stored.
+func TestCustomBranding_ConditionalRequestStillServesBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m := newTestMiddleware(t)
+
+	dir := t.TempDir()
+	logoPath := filepath.Join(dir, "logo.png")
+	require.NoError(t, os.WriteFile(logoPath, []byte("fake-logo"), 0o644)) // #nosec G306
+
+	r := gin.New()
+	r.Use(m.CustomBranding(model.Branding{LogoPath: logoPath}))
+
+	req := httptest.NewRequest("GET", "/static/logo.png", nil)
+	req.Header.Set("If-Modified-Since", time.Now().Add(time.Hour).UTC().Format(http.TimeFormat))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "fake-logo", w.Body.String())
+	assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
 }
 
 func TestCustomBranding_ServesCustomFavicon(t *testing.T) {

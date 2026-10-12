@@ -155,17 +155,29 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	//   s.gin.Static("/static", "./staticembed")
 	//   s.gin.LoadHTMLGlob("./staticembed/*.html")
 
-	// Set Cache-Control on static assets. These are embedded at build time and
-	// only change on redeployment, so a 24-hour cache avoids re-downloading
-	// ~1 MB of CSS/JS on every page load.
-	s.gin.Use(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/static/") {
-			c.Header("Cache-Control", "public, max-age=86400")
-		}
-		c.Next()
-	})
+	// Tag static assets with their content hash and make the browser
+	// revalidate.
+	//
+	// These are embedded at build time and only change on redeployment -
+	// which is exactly the case the previous 24-hour freshness lifetime
+	// could not handle. embed.FS reports a zero modification time, so the
+	// file server emits no Last-Modified, and with no ETag either there was
+	// no validator at all: after a deploy a browser that had loaded the page
+	// in the previous day went on running the old JavaScript against the new
+	// server-rendered HTML, and never asked. See webvendor.StaticETags.
+	//
+	// `no-cache` keeps the stored copy and requires a conditional request
+	// before reusing it, so the bandwidth is still saved - an unchanged file
+	// costs one 304 with no body - while a deploy takes effect on the next
+	// page load.
+	assets := webvendor.Overlay(staticembed.FS)
+	etags, err := webvendor.StaticETags(assets)
+	if err != nil {
+		return nil, err
+	}
+	s.gin.Use(staticCacheHeaders("/static/", etags))
 
-	s.gin.StaticFS("/static", http.FS(webvendor.Overlay(staticembed.FS)))
+	s.gin.StaticFS("/static", http.FS(assets))
 
 	tmpl := template.New("").Funcs(template.FuncMap{
 		"json": func(v any) (any, error) {
@@ -361,4 +373,28 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 func (s *Service) Close(ctx context.Context) error {
 	s.log.Info("Stopped")
 	return nil
+}
+
+// staticCacheHeaders tags a response under prefix with the ETag of the file
+// it is about to serve, and asks the browser to revalidate rather than
+// assume.
+//
+// Set BEFORE the file server runs, which is what makes the conditional
+// request work: net/http's serveContent reads the ETag back off the
+// response header when it evaluates If-None-Match, so a handler that has
+// already set one gets 304 handling for free and does not have to
+// implement it.
+//
+// A path with no entry is left alone rather than given a fabricated
+// validator - there is no such file, and the file server will say so.
+func staticCacheHeaders(prefix string, etags map[string]string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if p := c.Request.URL.Path; strings.HasPrefix(p, prefix) {
+			if etag, ok := etags[strings.TrimPrefix(p, strings.TrimSuffix(prefix, "/"))]; ok {
+				c.Header("ETag", etag)
+				c.Header("Cache-Control", "public, no-cache")
+			}
+		}
+		c.Next()
+	}
 }
