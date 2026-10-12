@@ -666,10 +666,12 @@ func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (
 		return nil, err
 	}
 
-	// The DC API's own object, identical but for response_mode. A copy rather
-	// than a second literal so the two cannot drift: everything the wallet
-	// checks - client_id, nonce, response_uri, client_metadata, the DCQL
-	// query - has to be the same request seen through a different channel.
+	// The DC API's own object, identical but for how the response is
+	// delivered: response_mode, and response_uri, which a dc_api request
+	// does not carry at all. A copy rather than a second literal so the two
+	// cannot drift - everything the wallet checks (client_id, nonce,
+	// client_metadata, the DCQL query) has to be the same request seen
+	// through a different channel.
 	if c.cfg.Verifier.DigitalCredentials.Enable {
 		dcAPIRequestObject := requestObject.WithDCAPIResponseMode()
 

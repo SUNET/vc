@@ -54,13 +54,21 @@ func IsInteractiveAuthorization(mode string) bool {
 }
 
 // WithDCAPIResponseMode returns a copy of r carrying the response mode the
-// browser's Digital Credentials API requires, and nothing else changed.
+// browser's Digital Credentials API requires, with the two
+// delivery-dependent fields adjusted and nothing else changed.
 //
 // For a session that serves both channels, the two requests must be the same
 // request seen through different delivery paths: everything a wallet checks
-// (client_id, nonce, response_uri, client_metadata, the DCQL query) has to
-// agree, or the channels ask for different things and only one of them is
-// what the user consented to.
+// (client_id, nonce, client_metadata, the DCQL query) has to agree, or the
+// channels ask for different things and only one of them is what the user
+// consented to.
+//
+// The exceptions are response_mode and response_uri, and they are the same
+// exception twice: both say HOW the response is delivered, which is the one
+// thing that does differ. A dc_api response returns inside the browser call,
+// so the request carries no response_uri at all (OpenID4VP 1.0 Appendix
+// A.2). Copying one over named an endpoint this channel is never answered
+// at - a parameter the wallet is entitled to act on.
 //
 // A copy of the whole struct rather than a rebuilt literal, so a field added
 // to RequestObject cannot be set on one channel and forgotten on the other.
