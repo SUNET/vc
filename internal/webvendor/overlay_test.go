@@ -1,6 +1,7 @@
 package webvendor
 
 import (
+	"errors"
 	"io/fs"
 	"testing"
 	"testing/fstest"
@@ -46,3 +47,47 @@ func TestOverlay(t *testing.T) {
 		require.ErrorIs(t, err, fs.ErrNotExist)
 	})
 }
+
+// A one-sided ReadDir failure is only "absent" when it IS absent.
+//
+// Treating permission or I/O errors as absence returns a listing short of
+// files Open will still serve, and a caller building an index from it gets
+// a quietly incomplete one - the same shape as the bug ReadDir exists to
+// fix. Open falls back only on ErrNotExist, and this matches it.
+func TestOverlayReadDirPropagatesRealErrors(t *testing.T) {
+	boom := errors.New("disk is unhappy")
+
+	t.Run("base error is reported", func(t *testing.T) {
+		_, err := Overlay(errFS{err: boom}).(fs.ReadDirFS).ReadDir(".")
+		require.ErrorIs(t, err, boom)
+	})
+
+	t.Run("vendor error is reported", func(t *testing.T) {
+		o := overlayFS{base: fstest.MapFS{"a.js": &fstest.MapFile{}}, vendor: errFS{err: boom}}
+		_, err := o.ReadDir(".")
+		require.ErrorIs(t, err, boom)
+	})
+
+	t.Run("a genuinely missing directory on one side still merges", func(t *testing.T) {
+		o := overlayFS{
+			base:   fstest.MapFS{"only/base.js": &fstest.MapFile{}},
+			vendor: fstest.MapFS{"other/vendor.js": &fstest.MapFile{}},
+		}
+		entries, err := o.ReadDir("only")
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+		require.Equal(t, "base.js", entries[0].Name())
+	})
+
+	t.Run("missing on both sides is still an error", func(t *testing.T) {
+		o := overlayFS{base: fstest.MapFS{}, vendor: fstest.MapFS{}}
+		_, err := o.ReadDir("nowhere")
+		require.ErrorIs(t, err, fs.ErrNotExist)
+	})
+}
+
+// errFS fails every operation with a non-ErrNotExist error.
+type errFS struct{ err error }
+
+func (e errFS) Open(string) (fs.File, error)          { return nil, e.err }
+func (e errFS) ReadDir(string) ([]fs.DirEntry, error) { return nil, e.err }

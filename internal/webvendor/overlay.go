@@ -1,6 +1,7 @@
 package webvendor
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"sort"
@@ -55,9 +56,22 @@ func (o overlayFS) ReadDir(name string) ([]fs.DirEntry, error) {
 	baseEntries, baseErr := fs.ReadDir(o.base, name)
 	vendorEntries, vendorErr := fs.ReadDir(o.vendor, name)
 
-	// Only fail when NEITHER has the directory. A path one of them does not
-	// know about is normal - the whole point of an overlay - and must not
-	// take the listing down with it.
+	// A path one filesystem does not have is normal - the whole point of an
+	// overlay - and must not take the listing down with it. Anything ELSE
+	// is reported, matching Open, which also falls back only on
+	// ErrNotExist.
+	//
+	// The distinction matters because the caller cannot see it: silently
+	// treating a permission or I/O error as "absent" returns a listing that
+	// is short some files Open will still happily serve, and a caller
+	// building an index from it gets a quietly incomplete one. That is the
+	// same shape as the bug this ReadDir exists to fix.
+	if baseErr != nil && !errors.Is(baseErr, fs.ErrNotExist) {
+		return nil, baseErr
+	}
+	if vendorErr != nil && !errors.Is(vendorErr, fs.ErrNotExist) {
+		return nil, vendorErr
+	}
 	if baseErr != nil && vendorErr != nil {
 		return nil, baseErr
 	}
