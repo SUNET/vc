@@ -1866,6 +1866,22 @@ type APIGWDelivery struct {
 	OpenID4VCI OAuthServer `yaml:"openid4vci" validate:"required"`
 	// CredentialOffers holds credential offer wallet configurations
 	CredentialOffers CredentialOffers `yaml:"credential_offers" validate:"required"`
+
+	// EmitCredentialMetadataOnResponse adds the issued Credential's
+	// credential_metadata to the Credential Response, as OpenID4VCI 1.1
+	// permits (WE BUILD CS-01 §7.5, a MAY on both sides).
+	//
+	// Off by default for size, not for interop: it repeats the scope's
+	// issuer metadata on every issuance, and a 1.0 wallet ignores an
+	// unrecognised member, so emitting it cannot break one. That is also why
+	// this is NOT in OpenID4VCICompat - nothing about it is a
+	// compatibility switch, and it needs no flipping when 1.1 is Final.
+	//
+	// Worth having because of the precedence 1.1 defines: a wallet prefers
+	// what arrives here over the Credential Format's own mechanism, and both
+	// over the published Issuer Metadata. An issuer that wants to say
+	// something about THIS credential has no other way to.
+	EmitCredentialMetadataOnResponse *bool `yaml:"emit_credential_metadata_on_response" default:"false"`
 	// OpenID4VCICompat holds opt-in switches for wallets that do not encode
 	// OpenID4VCI 1.0 requests the way the specification does.
 	OpenID4VCICompat OpenID4VCICompat `yaml:"openid4vci_compat" validate:"omitempty"`
