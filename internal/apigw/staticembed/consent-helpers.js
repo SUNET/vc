@@ -349,11 +349,12 @@ export function credentialSubjectSummary(svgTemplateClaims) {
         // the backend happened to serialise the object, and the same
         // credential could show a different name on two page loads.
         //
-        // Lexicographically first. WHICH spelling wins is arbitrary -
-        // there is no reason to prefer one over the other, and no
+        // First by localeCompare, matching how this codebase orders every
+        // other operator-visible string. WHICH spelling wins is arbitrary
+        // - there is no reason to prefer one over the other, and no
         // credential in this ecosystem ships both - but that it is always
         // the same one is not.
-        const svgID = [...spellings].sort()[0];
+        const svgID = [...spellings].sort((a, b) => a.localeCompare(b))[0];
         const value = svgTemplateClaims[svgID]?.value;
         if (typeof value === "string" && value.length > 0 && !parts.includes(value)) {
             parts.push(value);

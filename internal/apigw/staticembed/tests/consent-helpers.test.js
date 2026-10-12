@@ -670,10 +670,11 @@ describe("credentialSubjectSummary", () => {
             given_name: { label: "Given name", value: "Ada" },
         });
         assert.equal(snakeFirst, camelFirst, "the key order must not change the answer");
-        // Which spelling wins is arbitrary - lexicographically first, and
+        // Which spelling wins is arbitrary - first by localeCompare, and
         // no credential in this ecosystem ships both. That it is always
-        // the same one is the property under test.
-        assert.equal(snakeFirst, "Augusta");
+        // the same one is the property under test; the value is pinned so
+        // the rule cannot drift unnoticed.
+        assert.equal(snakeFirst, "Ada");
     });
 
     it("skips absent, empty and non-string values", () => {
