@@ -28,8 +28,18 @@ func (c *Client) Health(ctx context.Context, req *apiv1_status.StatusRequest) (*
 // the /dashboard handler, not through this aggregator, so apigw's own /health
 // stays true to what apigw needs to serve requests.
 func (c *Client) buildStatusAggregator() *status.Aggregator {
-	return status.New("apigw").
-		Register("db", c.db).
+	agg := status.New("apigw").
+		// RegisterFunc rather than Register: runProbe calls HealthProbe
+		// without recovering, so registering a nil *db.Service makes the
+		// readiness endpoint PANIC instead of reporting unhealthy - taking
+		// down the path that exists to say what is wrong. A nil db is still
+		// a failure, just a reported one.
+		RegisterFunc("db", func(ctx context.Context) error {
+			if c.db == nil {
+				return errors.New("database not initialized")
+			}
+			return c.db.HealthProbe(ctx)
+		}).
 		RegisterFunc("signer", func(ctx context.Context) error {
 			if c.pkiSigner == nil {
 				return errors.New("signing key not loaded")
@@ -41,11 +51,27 @@ func (c *Client) buildStatusAggregator() *status.Aggregator {
 				return nil, errors.New("issuer client not initialized")
 			}
 			return c.issuerClient.Status(ctx, &apiv1_status.StatusRequest{})
-		}).
-		RegisterDownstream("registry", func(ctx context.Context) (*apiv1_status.StatusReply, error) {
+		})
+
+	// The local registry is optional (see APIGW.RegistryClient), so probe it
+	// only when one is configured. Registering it unconditionally reported a
+	// nil client as "registry client not initialized", which fails the whole
+	// aggregate - an external-status-service deployment would have been
+	// permanently unhealthy, i.e. the configuration this PR makes supported
+	// could never become ready.
+	//
+	// Registration is decided here rather than inside the probe because a
+	// probe that returns success for "not configured" is worse: a registry
+	// that was configured and is down would report healthy too. Absent from
+	// the report and passing are different answers.
+	if c.registryClient != nil {
+		agg = agg.RegisterDownstream("registry", func(ctx context.Context) (*apiv1_status.StatusReply, error) {
 			if c.registryClient == nil {
 				return nil, errors.New("registry client not initialized")
 			}
 			return c.registryClient.Status(ctx, &apiv1_status.StatusRequest{})
 		})
+	}
+
+	return agg
 }

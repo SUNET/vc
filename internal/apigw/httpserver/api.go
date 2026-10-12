@@ -17,6 +17,9 @@ import (
 
 // Apiv1 interface
 type Apiv1 interface {
+	// credential revocation
+	RevokeCredential(ctx context.Context, req *apiv1.RevokeCredentialRequest) (*apiv1.RevokeCredentialReply, error)
+
 	// datastore endpoints
 	DatastoreUpload(ctx context.Context, req *vcclient.UploadRequest) (*apiv1.DatastoreUploadReply, error)
 	DatastoreAddIdentity(ctx context.Context, req *apiv1.DatastoreAddIdentityRequest) error

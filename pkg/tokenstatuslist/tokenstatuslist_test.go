@@ -339,10 +339,10 @@ func TestGenerateCWT(t *testing.T) {
 	assert.NotNil(t, claims[cwtClaimIat])
 	assert.NotNil(t, claims[cwtClaimExp])
 	// TTL may be returned as uint64 by CBOR
-	assert.NotNil(t, claims[cwtClaimTTL])
+	assert.NotNil(t, claims[CWTClaimTTL])
 
 	// Verify status_list claim exists
-	assert.NotNil(t, claims[cwtClaimStatusList])
+	assert.NotNil(t, claims[CWTClaimStatusList])
 }
 
 func TestGetStatusFromCWT(t *testing.T) {
@@ -403,8 +403,14 @@ func TestJWTTypHeader(t *testing.T) {
 	assert.Equal(t, "statuslist+jwt", JWTTypHeader)
 }
 
+// TestCWTTypHeader pins the draft Section 5.2 requirement: the COSE
+// protected header 16 value MUST be the full media type. vc emitted the
+// bare subtype, which is not what the draft says and is not what a
+// conforming reader compares against.
 func TestCWTTypHeader(t *testing.T) {
-	assert.Equal(t, "statuslist+cwt", CWTTypHeader)
+	assert.Equal(t, "application/statuslist+cwt", CWTTypHeader)
+	assert.Equal(t, MediaTypeCWT, CWTTypHeader,
+		"the header value and the media type are the same string")
 }
 
 // Tests for the new method-based API
@@ -522,7 +528,7 @@ func TestStatusListGenerateCWTMethod(t *testing.T) {
 	assert.Equal(t, sl.Subject, claims[cwtClaimSub])
 	assert.NotNil(t, claims[cwtClaimIat])
 	assert.NotNil(t, claims[cwtClaimExp])
-	assert.NotNil(t, claims[cwtClaimStatusList])
+	assert.NotNil(t, claims[CWTClaimStatusList])
 }
 
 func TestParseJWT(t *testing.T) {
@@ -675,7 +681,7 @@ func TestGenerateCWT_RSA_AutoDetect(t *testing.T) {
 	assert.Equal(t, sl.Subject, claims[cwtClaimSub])
 	assert.NotNil(t, claims[cwtClaimIat])
 	assert.NotNil(t, claims[cwtClaimExp])
-	assert.NotNil(t, claims[cwtClaimStatusList])
+	assert.NotNil(t, claims[CWTClaimStatusList])
 
 	// Verify protected header contains PS256 algorithm
 	protectedBytes, signature := extractCOSESign1Parts(t, cwtBytes)

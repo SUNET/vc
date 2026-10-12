@@ -34,6 +34,10 @@ type identityMappingMock struct {
 	updateCalled bool
 }
 
+func (m *identityMappingMock) RevokeCredential(_ context.Context, _ *apiv1.RevokeCredentialRequest) (*apiv1.RevokeCredentialReply, error) {
+	panic("not used by these tests")
+}
+
 func (m *identityMappingMock) IdentityMappingCreate(_ context.Context, req *apiv1.IdentityMappingCreateRequest) (*apiv1.IdentityMappingCreateReply, error) {
 	m.createCalled = true
 	m.createReq = req

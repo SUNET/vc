@@ -138,13 +138,21 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 	}
 	c.issuerClient = apiv1_issuer.NewIssuerServiceClient(issuerConn)
 
-	// Initialize gRPC client for registry service
-	registryConn, err := grpchelpers.NewClientConn(cfg.APIGW.RegistryClient)
-	if err != nil {
-		c.log.Error(err, "Failed to create gRPC connection to registry")
-		return nil, err
+	// Initialize gRPC client for registry service, if there is one. The
+	// local registry is optional: with an external
+	// draft-ietf-oauth-status-list service configured on the issuer,
+	// nothing here needs it - status-list entries are recorded in the
+	// apigw's own database and revocation goes through the issuer.
+	if cfg.APIGW.RegistryClient.Addr == "" {
+		c.log.Info("Registry client not configured, running without a local registry")
+	} else {
+		registryConn, err := grpchelpers.NewClientConn(cfg.APIGW.RegistryClient)
+		if err != nil {
+			c.log.Error(err, "Failed to create gRPC connection to registry")
+			return nil, err
+		}
+		c.registryClient = apiv1_registry.NewRegistryServiceClient(registryConn)
 	}
-	c.registryClient = apiv1_registry.NewRegistryServiceClient(registryConn)
 
 	if err := c.CreateCredentialOfferLookupMetadata(ctx); err != nil {
 		return nil, err

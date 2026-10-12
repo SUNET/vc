@@ -2,23 +2,14 @@
 package mdoc
 
 import (
-	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
-	"net/http"
-	"strings"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
 
-	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
-
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // StatusCheckResult contains the result of a credential status check.
@@ -70,287 +61,6 @@ type StatusReference struct {
 	URI string `json:"uri" cbor:"uri"`
 	// Index is the index within the status list for this credential.
 	Index int64 `json:"idx" cbor:"idx"`
-}
-
-// StatusChecker checks the revocation status of mDL credentials.
-type StatusChecker struct {
-	httpClient  *http.Client
-	cache       cache.Cache[[]uint8]
-	cacheExpiry time.Duration
-	keyFunc     jwt.Keyfunc
-}
-
-// StatusCheckerOption configures the StatusChecker.
-type StatusCheckerOption func(*StatusChecker)
-
-// WithHTTPClient sets a custom HTTP client.
-func WithHTTPClient(client *http.Client) StatusCheckerOption {
-	return func(sc *StatusChecker) {
-		sc.httpClient = client
-	}
-}
-
-// WithCacheExpiry sets the cache expiry duration.
-func WithCacheExpiry(expiry time.Duration) StatusCheckerOption {
-	return func(sc *StatusChecker) {
-		sc.cacheExpiry = expiry
-	}
-}
-
-// WithStatusCache sets an external cache implementation (e.g. MongoCache for HA).
-func WithStatusCache(c cache.Cache[[]uint8]) StatusCheckerOption {
-	return func(sc *StatusChecker) {
-		sc.cache = c
-	}
-}
-
-// WithKeyFunc sets the key function for JWT verification.
-func WithKeyFunc(keyFunc jwt.Keyfunc) StatusCheckerOption {
-	return func(sc *StatusChecker) {
-		sc.keyFunc = keyFunc
-	}
-}
-
-// NewStatusChecker creates a new StatusChecker.
-// A cache must be provided via WithStatusCache.
-// TODO(masv): wire into the verifier so status checking is actually performed at presentation time.
-func NewStatusChecker(opts ...StatusCheckerOption) (*StatusChecker, error) {
-	sc := &StatusChecker{
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		cacheExpiry: 5 * time.Minute,
-	}
-
-	for _, opt := range opts {
-		opt(sc)
-	}
-
-	if sc.cache == nil {
-		return nil, errors.New("cache is required: use WithStatusCache")
-	}
-
-	return sc, nil
-}
-
-// CheckStatus checks the status of a credential using its status reference.
-func (sc *StatusChecker) CheckStatus(ctx context.Context, ref *StatusReference) (*StatusCheckResult, error) {
-	if ref == nil {
-		return nil, errors.New("status reference is required")
-	}
-	if ref.URI == "" {
-		return nil, errors.New("status list URI is required")
-	}
-	if ref.Index < 0 {
-		return nil, errors.New("status index must be non-negative")
-	}
-
-	// Check cache first
-	statuses, err := sc.getStatusList(ctx, ref.URI)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get status list: %w", err)
-	}
-
-	// Get status at index
-	if ref.Index >= int64(len(statuses)) {
-		return nil, fmt.Errorf("status index %d out of range (list size: %d)", ref.Index, len(statuses))
-	}
-
-	statusCode := statuses[ref.Index]
-	status := mapStatusCode(statusCode)
-
-	return &StatusCheckResult{
-		Status:        status,
-		StatusCode:    statusCode,
-		CheckedAt:     time.Now(),
-		StatusListURI: ref.URI,
-		Index:         ref.Index,
-	}, nil
-}
-
-// getStatusList retrieves the status list, using cache if available.
-func (sc *StatusChecker) getStatusList(ctx context.Context, uri string) ([]uint8, error) {
-	if statuses, ok := sc.cache.Get(ctx, uri); ok {
-		return statuses, nil
-	}
-
-	// Fetch from URI
-	statuses, err := sc.fetchStatusList(ctx, uri)
-	if err != nil {
-		return nil, err
-	}
-
-	// Cache the result
-	sc.cache.Set(ctx, uri, statuses)
-
-	return statuses, nil
-}
-
-// fetchStatusList fetches and parses a status list from a URI.
-func (sc *StatusChecker) fetchStatusList(ctx context.Context, uri string) ([]uint8, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Accept both JWT and CWT formats
-	req.Header.Set("Accept", fmt.Sprintf("%s, %s", tokenstatuslist.MediaTypeJWT, tokenstatuslist.MediaTypeCWT))
-
-	resp, err := sc.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch status list: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status list request failed with status %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	// Parse based on content type
-	contentType := resp.Header.Get("Content-Type")
-	return sc.parseStatusListToken(body, contentType)
-}
-
-// parseStatusListToken parses a status list token (JWT or CWT format).
-func (sc *StatusChecker) parseStatusListToken(data []byte, contentType string) ([]uint8, error) {
-	// Try to parse based on content type or auto-detect
-	switch contentType {
-	case tokenstatuslist.MediaTypeCWT:
-		return sc.parseCWTStatusList(data)
-	case tokenstatuslist.MediaTypeJWT:
-		return sc.parseJWTStatusList(data)
-	default:
-		// Try to auto-detect based on content
-		if len(data) > 0 && data[0] == 0xD2 {
-			// CBOR tag 18 (COSE_Sign1) starts with 0xD2
-			return sc.parseCWTStatusList(data)
-		}
-		// Assume JWT format
-		return sc.parseJWTStatusList(data)
-	}
-}
-
-// parseCWTStatusList parses a CWT format status list token.
-func (sc *StatusChecker) parseCWTStatusList(data []byte) ([]uint8, error) {
-	// Parse the CWT and extract the status list
-	claims, err := tokenstatuslist.ParseCWT(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse CWT status list: %w", err)
-	}
-
-	// Extract the status_list claim (key 65534)
-	statusListRaw, ok := claims[65534]
-	if !ok {
-		return nil, errors.New("status_list claim not found in CWT")
-	}
-
-	// Extract lst bytes from the status_list claim
-	var lstBytes []byte
-	switch sl := statusListRaw.(type) {
-	case map[any]any:
-		for k, v := range sl {
-			// Key 2 is "lst"
-			switch key := k.(type) {
-			case int:
-				if key == 2 {
-					if b, ok := v.([]byte); ok {
-						lstBytes = b
-					}
-				}
-			case int64:
-				if key == 2 {
-					if b, ok := v.([]byte); ok {
-						lstBytes = b
-					}
-				}
-			case uint64:
-				if key == 2 {
-					if b, ok := v.([]byte); ok {
-						lstBytes = b
-					}
-				}
-			}
-		}
-	case map[int]any:
-		if b, ok := sl[2].([]byte); ok {
-			lstBytes = b
-		}
-	default:
-		return nil, fmt.Errorf("invalid status_list claim format: %T", statusListRaw)
-	}
-
-	if lstBytes == nil {
-		return nil, errors.New("lst not found in status_list claim")
-	}
-
-	// Decompress the status list
-	return tokenstatuslist.DecompressStatuses(lstBytes)
-}
-
-// parseJWTStatusList parses a JWT format status list token.
-func (sc *StatusChecker) parseJWTStatusList(data []byte) ([]uint8, error) {
-	tokenString := string(data)
-
-	// If a key function is provided, verify the signature
-	if sc.keyFunc != nil {
-		token, err := jwt.Parse(tokenString, sc.keyFunc)
-		if err != nil {
-			return nil, fmt.Errorf("failed to verify JWT: %w", err)
-		}
-		if !token.Valid {
-			return nil, errors.New("invalid JWT token")
-		}
-
-		// Extract claims from verified token
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			return nil, errors.New("failed to extract JWT claims")
-		}
-
-		statusListClaim, ok := claims["status_list"].(map[string]any)
-		if !ok {
-			return nil, errors.New("status_list claim not found or invalid")
-		}
-
-		lst, ok := statusListClaim["lst"].(string)
-		if !ok {
-			return nil, errors.New("lst not found in status_list claim")
-		}
-
-		return tokenstatuslist.DecodeAndDecompress(lst)
-	}
-
-	// Parse without verification (just extract claims)
-	// Split the token to get the payload
-	parts := splitJWT(tokenString)
-	if len(parts) != 3 {
-		return nil, errors.New("invalid JWT format")
-	}
-
-	// Decode the payload
-	payload, err := base64RawURLDecode(parts[1])
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode JWT payload: %w", err)
-	}
-
-	// Parse the claims
-	var claims struct {
-		StatusList struct {
-			Lst string `json:"lst"`
-		} `json:"status_list"`
-	}
-
-	if err := parseJSON(payload, &claims); err != nil {
-		return nil, fmt.Errorf("failed to parse JWT claims: %w", err)
-	}
-
-	// Decode and decompress the status list
-	return tokenstatuslist.DecodeAndDecompress(claims.StatusList.Lst)
 }
 
 // mapStatusCode maps a raw status code to a CredentialStatus.
@@ -449,48 +159,92 @@ func (sm *StatusManager) StatusList() *tokenstatuslist.StatusList {
 	return sm.statusList
 }
 
-// VerifierStatusCheck integrates status checking into the verification flow.
-type VerifierStatusCheck struct {
-	checker *StatusChecker
-	enabled bool
-}
+// ErrNoStatusReference reports that a document carries no revocation
+// reference at all, which is a normal credential rather than a failure. It
+// is distinct from an unreadable reference, which is an error.
+var ErrNoStatusReference = errors.New("no status reference found")
 
-// NewVerifierStatusCheck creates a new VerifierStatusCheck.
-func NewVerifierStatusCheck(checker *StatusChecker) *VerifierStatusCheck {
-	return &VerifierStatusCheck{
-		checker: checker,
-		enabled: true,
+// ExtractMSOStatusReference extracts the status reference a VERIFIER may
+// act on: the MSO's status parameter (draft-ietf-oauth-status-list Section
+// 6.3) and nothing else.
+//
+// The MSO is issuer-signed as a whole and is not subject to selective
+// disclosure, so its presence or absence is a fact about the credential.
+// A "status" issuer-signed DATA ELEMENT is not: the holder chooses which
+// elements to present, so a revoked credential whose only reference lives
+// there is presented with the reference simply left out, and the verifier
+// sees a credential that is not revocable. The reference is authentic when
+// it does arrive - it is digest-covered by the MSO - but its ABSENCE means
+// nothing, and absence is the case an adversary controls.
+//
+// Nor can the absence be detected. The MSO's ValueDigests name every
+// issuer-signed element by digestID, so a verifier can tell that elements
+// were withheld, but not WHICH - the identifier lives inside the element it
+// cannot see. There is no check to add here.
+//
+// So the fallback is not used for verification at all. It only ever caught
+// a holder who chose to be caught, and leaving it in made vc's revocation
+// coverage look uniform across mdoc issuers when it is not. An issuer that
+// wants its mdocs revocable must put the reference in the MSO; vc's own
+// issuance always has (see mso.go).
+//
+// ExtractStatusReference keeps the fallback for diagnostic callers - see
+// its own comment.
+func ExtractMSOStatusReference(doc *DocumentMdoc) (*StatusReference, error) {
+	if doc == nil {
+		return nil, errors.New("document is nil")
 	}
-}
-
-// SetEnabled enables or disables status checking.
-func (vsc *VerifierStatusCheck) SetEnabled(enabled bool) {
-	vsc.enabled = enabled
-}
-
-// CheckDocumentStatus checks the status of a document if it has a status reference.
-func (vsc *VerifierStatusCheck) CheckDocumentStatus(ctx context.Context, doc *DocumentMdoc) (*StatusCheckResult, error) {
-	if !vsc.enabled {
-		return &StatusCheckResult{
-			Status:    CredentialStatusValid,
-			CheckedAt: time.Now(),
-		}, nil
-	}
-
-	// Extract status reference from the document
-	ref, err := ExtractStatusReference(doc)
+	ref, err := statusFromMSO(doc)
 	if err != nil {
-		// No status reference found - credential doesn't support revocation
-		return nil, nil
+		// The MSO carries a status parameter that cannot be read. That is
+		// not the same as carrying none: the issuer signed something here,
+		// so the credential claims to be revocable and its state is
+		// unknown. Reporting "absent" would make it verify as permanently
+		// valid.
+		return nil, err
 	}
-
-	return vsc.checker.CheckStatus(ctx, ref)
+	if ref == nil {
+		return nil, ErrNoStatusReference
+	}
+	return ref, nil
 }
 
 // ExtractStatusReference extracts the status reference from a Document.
+//
+// NOT FOR VERIFICATION. Use ExtractMSOStatusReference there, and read its
+// comment for why.
+//
+// The MSO's status parameter (draft-ietf-oauth-status-list Section 6.3) is
+// the canonical location and is checked first. A "status" issuer-signed data
+// element is accepted as a fallback because implementations that predate
+// Section 6.3 put it there - but it is strictly weaker: a data element is
+// subject to selective disclosure, so a holder can simply not present it,
+// and a verifier cannot tell that it did.
+//
+// That is tolerable for a diagnostic over documents an operator supplies -
+// developer_tools/scripts/tsl_checker, which is asking "where does this
+// document say its status lives" rather than "may I accept this
+// credential". It is not tolerable on a verification path, where the holder
+// is the one choosing what to show.
+//
+// This function does not verify anything. The caller must have verified the
+// document before trusting what comes back.
 func ExtractStatusReference(doc *DocumentMdoc) (*StatusReference, error) {
 	if doc == nil {
 		return nil, errors.New("document is nil")
+	}
+
+	ref, err := statusFromMSO(doc)
+	if err != nil {
+		// The MSO carries a status parameter that cannot be read. That is
+		// not the same as carrying none: the issuer signed something here,
+		// so the credential claims to be revocable and its state is
+		// unknown. Reporting "absent" would make it verify as permanently
+		// valid.
+		return nil, err
+	}
+	if ref != nil {
+		return ref, nil
 	}
 
 	// Look for status reference in issuer signed items
@@ -533,7 +287,7 @@ func ExtractStatusReference(doc *DocumentMdoc) (*StatusReference, error) {
 		}
 	}
 
-	return nil, errors.New("no status reference found")
+	return nil, ErrNoStatusReference
 }
 
 // parseStatusElement parses a status element value into a StatusReference.
@@ -596,17 +350,38 @@ func parseStatusElement(value any) (*StatusReference, bool) {
 	}, true
 }
 
-// splitJWT splits a JWT token string into its three parts.
-func splitJWT(token string) []string {
-	return strings.Split(token, ".")
-}
-
-// base64RawURLDecode decodes a base64 raw URL encoded string.
-func base64RawURLDecode(s string) ([]byte, error) {
-	return base64.RawURLEncoding.DecodeString(s)
-}
-
-// parseJSON parses JSON data into a target struct.
-func parseJSON(data []byte, v any) error {
-	return json.Unmarshal(data, v)
+// statusFromMSO reads the MSO's status parameter.
+//
+// (nil, nil) means the MSO carries no status parameter, so the data-element
+// fallback is still worth trying. A non-nil error means it carries one that
+// cannot be used, which must not be reported as absence - see
+// ExtractStatusReference.
+//
+// A document whose IssuerAuth or MSO will not decode at all is treated as
+// "no status": that document fails verification for its own reasons long
+// before anything asks about revocation, and reporting it here would
+// replace a precise error with a misleading one.
+func statusFromMSO(doc *DocumentMdoc) (*StatusReference, error) {
+	sign1, err := ParseIssuerAuth(doc.IssuerSigned.IssuerAuth)
+	if err != nil {
+		return nil, nil
+	}
+	mso, err := DecodeMSOPayload(sign1)
+	if err != nil {
+		return nil, nil
+	}
+	if mso.Status == nil {
+		return nil, nil
+	}
+	if mso.Status.StatusList == nil {
+		return nil, errors.New("mdoc MSO carries a status parameter with no status_list member")
+	}
+	ref := *mso.Status.StatusList
+	if ref.URI == "" {
+		return nil, errors.New("mdoc MSO status_list has no uri, so the list cannot be resolved")
+	}
+	if ref.Index < 0 {
+		return nil, fmt.Errorf("mdoc MSO status_list has a negative index (%d)", ref.Index)
+	}
+	return &ref, nil
 }

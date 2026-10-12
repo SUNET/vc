@@ -205,9 +205,30 @@ type MDocVerificationResult struct {
 type MDocDocumentClaims struct {
 	DocType    string
 	Namespaces map[string]map[string]any
+
+	// Status is the Token Status List reference from the document's MSO,
+	// nil when the credential was issued without one.
+	Status *StatusReference
 }
 
 // GetClaims returns a flat map of all claims from all namespaces.
+//
+// The MSO's status parameter is surfaced under the "status" key in the same
+// shape a JOSE Referenced Token uses, so that one format-independent
+// revocation check reads mdoc, SD-JWT and JWP credentials alike instead of
+// each format needing its own extractor.
+//
+// That key is the MSO's alone. Every other format reserves `status` for the
+// revocation reference, so whatever sits there is read as one - and an mdoc
+// data element called `status` is chosen by the HOLDER, who decides which
+// elements to present. Letting one land here meant a revoked credential
+// could be presented without it and read as not revocable, with no way for
+// a verifier to tell: the MSO's ValueDigests name withheld elements by
+// digestID, never by identifier.
+//
+// A data element called `status` is still returned, under its namespace-
+// qualified key and in Namespaces. It is simply not allowed to answer the
+// revocation question.
 func (dc *MDocDocumentClaims) GetClaims() map[string]any {
 	claims := make(map[string]any)
 	for ns, nsItems := range dc.Namespaces {
@@ -217,19 +238,55 @@ func (dc *MDocDocumentClaims) GetClaims() map[string]any {
 			claims[qualifiedKey] = value
 
 			// Also add unqualified name for the primary namespace.
-			if ns == Namespace {
+			if ns == Namespace && key != statusClaim {
 				claims[key] = value
 			}
 		}
 	}
+	if dc.Status != nil {
+		claims[statusClaim] = map[string]any{
+			"status_list": map[string]any{
+				"idx": dc.Status.Index,
+				"uri": dc.Status.URI,
+			},
+		}
+	}
 	return claims
 }
+
+// statusClaim is the key every credential format reserves for the Token
+// Status List reference. In an mdoc it may ALSO be a data element
+// identifier, which is why GetClaims keeps the two apart.
+const statusClaim = "status"
 
 // extractDocumentClaims extracts claims from a verified document.
 func (h *MDocHandler) extractDocumentClaims(doc *DocumentMdoc) (*MDocDocumentClaims, error) {
 	claims := &MDocDocumentClaims{
 		DocType:    doc.DocType,
 		Namespaces: make(map[string]map[string]any),
+	}
+
+	// The document's signature was verified by VerifyDeviceResponse before
+	// this is reached, so the MSO's contents can be read here.
+	//
+	// A document with no status parameter simply is not revocable, and that
+	// is not an error. A document carrying one that cannot be read IS an
+	// error: the issuer signed a revocation pointer, so the credential
+	// claims to be revocable and its state is unknown. Swallowing that
+	// would leave claims.Status nil, emit no "status" claim, and make the
+	// credential verify as permanently valid.
+	// MSO only. A "status" data element is selectively disclosable, so a
+	// revoked credential whose reference lives there is simply presented
+	// without it - and the absence cannot be detected. See
+	// ExtractMSOStatusReference.
+	ref, err := ExtractMSOStatusReference(doc)
+	switch {
+	case err == nil:
+		claims.Status = ref
+	case errors.Is(err, ErrNoStatusReference):
+		// Not revocable; nothing to carry.
+	default:
+		return nil, fmt.Errorf("unreadable status reference in %s: %w", doc.DocType, err)
 	}
 
 	for ns, items := range doc.IssuerSigned.NameSpaces {
