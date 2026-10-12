@@ -102,6 +102,9 @@ func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error
 	if doc.RequestObjectID != "" {
 		c.indices[fmt.Sprintf("request_object_id:%s", doc.RequestObjectID)] = doc.SessionID
 	}
+	if doc.AuthSession != "" {
+		c.indices[fmt.Sprintf("auth_session:%s", doc.AuthSession)] = doc.SessionID
+	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.Token.AccessToken)] = doc.SessionID
 	}
@@ -145,6 +148,8 @@ func (c *MemoryStore) Get(ctx context.Context, query *AuthorizationContext) (*Au
 			indexKey = fmt.Sprintf("ephemeral_key_id:%s", query.EphemeralEncryptionKeyID)
 		} else if query.RequestObjectID != "" {
 			indexKey = fmt.Sprintf("request_object_id:%s", query.RequestObjectID)
+		} else if query.AuthSession != "" {
+			indexKey = fmt.Sprintf("auth_session:%s", query.AuthSession)
 		} else {
 			return nil, errors.New("query must have at least one search field")
 		}
@@ -543,6 +548,9 @@ func (c *MemoryStore) updateIndices(doc *AuthorizationContext) {
 	if doc.RequestObjectID != "" {
 		c.indices[fmt.Sprintf("request_object_id:%s", doc.RequestObjectID)] = doc.SessionID
 	}
+	if doc.AuthSession != "" {
+		c.indices[fmt.Sprintf("auth_session:%s", doc.AuthSession)] = doc.SessionID
+	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.Token.AccessToken)] = doc.SessionID
 	}
@@ -695,6 +703,9 @@ func (c *MemoryStore) deleteIndices(doc *AuthorizationContext) {
 	}
 	if doc.RequestObjectID != "" {
 		delete(c.indices, fmt.Sprintf("request_object_id:%s", doc.RequestObjectID))
+	}
+	if doc.AuthSession != "" {
+		delete(c.indices, fmt.Sprintf("auth_session:%s", doc.AuthSession))
 	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		delete(c.indices, fmt.Sprintf("access_token:%s", doc.Token.AccessToken))

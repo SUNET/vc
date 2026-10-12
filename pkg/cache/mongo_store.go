@@ -54,6 +54,10 @@ func NewMongoStore(ctx context.Context, client *mongo.Client, database, collecti
 			Options: options.Index().SetSparse(true),
 		},
 		{
+			Keys:    bson.D{{Key: "auth_session", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
+		{
 			Keys:    bson.D{{Key: "request_object_id", Value: 1}},
 			Options: options.Index().SetSparse(true),
 		},
@@ -600,6 +604,9 @@ func (s *MongoStore) buildFilter(query *AuthorizationContext) bson.M {
 	}
 	if query.RequestObjectID != "" {
 		return bson.M{"request_object_id": query.RequestObjectID}
+	}
+	if query.AuthSession != "" {
+		return bson.M{"auth_session": query.AuthSession}
 	}
 	return nil
 }
