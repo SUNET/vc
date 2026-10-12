@@ -11,16 +11,20 @@ import (
 
 // TestWithDCAPIRequestDiffersOnlyInDelivery is the guarantee that matters
 // once a session serves two request objects: they are the same request seen
-// through two delivery channels, so anything a wallet checks must agree.
-// Only response_mode may differ, because only response_mode depends on how
-// the request was delivered (SUNET/vc#652).
+// through two delivery channels, so anything a wallet checks must agree
+// (SUNET/vc#652).
 //
-// With three exceptions, all the same reason stated three ways. Each of
-// response_mode, response_uri and expected_origins says how the request is
-// delivered and answered: a dc_api answer returns inside the browser call
-// rather than to a response_uri, and a signed dc_api request must name the
-// origin that invoked it so the wallet can bind it there. Asserted
-// separately below, then normalised before comparing everything else.
+// Three fields are exempt, all for the same reason stated three ways. Each
+// of response_mode, response_uri and expected_origins says how the request
+// is delivered and answered: a dc_api answer returns inside the browser
+// call rather than to a response_uri, and a signed dc_api request must name
+// the origin that invoked it so the wallet can bind it there. They are
+// asserted individually below, then normalised before everything else is
+// compared.
+//
+// An earlier version of this comment said only response_mode may differ,
+// and the assertion matched it - which made both of the bugs fixed here
+// (a copied response_uri, a missing expected_origins) mandatory.
 func TestWithDCAPIRequestDiffersOnlyInDelivery(t *testing.T) {
 	base := &RequestObject{
 		ResponseURI:  "https://verifier.example.com/verification/direct_post",

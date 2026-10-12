@@ -23,8 +23,15 @@ type MetadataConfig struct {
 	AuthorizationChallengeEndpoint string
 
 	// RequireInteractiveAuthorization advertises that this server accepts
-	// only Interactive Authorization. Setting it without
-	// AuthorizationChallengeEndpoint is refused.
+	// only Interactive Authorization.
+	//
+	// Setting it without AuthorizationChallengeEndpoint is DROPPED here,
+	// not reported: this function cannot return an error, and a document
+	// advertising a requirement for a mechanism it does not expose is
+	// unusable by every wallet that reads it. The combination is refused
+	// with a message wherever the metadata is validated - the struct
+	// carries excluded_without, which also covers the signing path that
+	// never passes through here.
 	RequireInteractiveAuthorization bool
 }
 
