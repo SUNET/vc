@@ -109,6 +109,19 @@ type AuthorizationChallengeError struct {
 	// package, and must reach the Wallet byte for byte.
 	OpenID4VPRequest json.RawMessage `json:"openid4vp_request,omitempty"`
 
+	// RequestURI is the Authorization via Web interaction's payload: the
+	// Wallet builds an authorization request from it (RFC 9126 §4) and
+	// opens that in a browser.
+	//
+	// It takes the place of auth_session for this interaction rather than
+	// accompanying it - the request_uri is itself what associates the
+	// browser leg with this exchange, and the draft says the response MUST
+	// omit auth_session when it is present.
+	RequestURI string `json:"request_uri,omitempty"`
+
+	// ExpiresIn bounds the request_uri's life, in seconds.
+	ExpiresIn int `json:"expires_in,omitempty"`
+
 	// HTTPStatus is the status the transport layer must answer with: 403
 	// for an Interaction Required Response, and whatever the error calls
 	// for otherwise.
@@ -237,11 +250,6 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 		}
 	}
 
-	source, err := c.openID4VPCredentialSource(req.Scope)
-	if err != nil {
-		return nil, err
-	}
-
 	// DPoP is REQUIRED, not merely honoured when offered.
 	//
 	// OpenID4VCI 1.1 §5.2 says the auth_session MUST be associated with
@@ -255,6 +263,15 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 		return nil, oauth2.OAuthErrDPoPRequired
 	}
 	dpopThumbprint, err := c.dpopProofThumbprint(ctx, req.DPOP, ia.ChallengeEndpoint(c.cfg.APIGW.PublicURL))
+	if err != nil {
+		return nil, err
+	}
+
+	if required == ia.InteractionType(model.InteractionAuthViaWeb) {
+		return nil, c.requireWebInteraction(ctx, ia, req, required, dpopThumbprint)
+	}
+
+	source, err := c.openID4VPCredentialSource(req.Scope)
 	if err != nil {
 		return nil, err
 	}
@@ -615,6 +632,106 @@ func (c *Client) interactiveAuthorizationSessionTranscript(ia *model.Interactive
 	}
 }
 
+// webInteractionTTLSeconds bounds a request_uri's life, matching what
+// /op/par hands out for the same artefact - it is the same artefact,
+// redeemed at the same endpoint.
+const webInteractionTTLSeconds = 60
+
+// requireWebInteraction answers an initial request for a scope whose
+// Holder is established in a browser.
+//
+// The Wallet is handed a request_uri and builds an authorization request
+// from it (RFC 9126 §4), exactly as it would from /op/par - and that is
+// the point: this interaction is the Pushed Authorization Request this
+// server already implements, reached through the challenge endpoint
+// instead of a separate one. The browser leg, the consent screen and the
+// redirect back to the Wallet are unchanged.
+//
+// It returns NO auth_session, which the draft requires: the request_uri
+// is itself what associates the browser leg with this exchange, and two
+// handles for one association is one more than can be kept consistent.
+//
+// There is no intermediate request afterwards either. The draft provides
+// for one - the Authorization Server may redirect back with auth_session
+// rather than code when the authorization is not yet complete - but this
+// server's browser flow finishes the authorization, so it redirects with
+// code and the exchange is over. A deployment that grew a second step
+// would need the auth_session branch and the code_verifier check that
+// goes with it; this returns a code, so PKCE is enforced where it already
+// is, at the Token Endpoint.
+func (c *Client) requireWebInteraction(ctx context.Context, ia *model.InteractiveAuthorization, req *AuthorizationChallengeRequest, required, dpopThumbprint string) error {
+	// The draft says a Wallet listing auth_via_web includes
+	// code_challenge and code_challenge_method in the initial request. It
+	// is not optional here for the same reason it is not optional at PAR:
+	// the code this produces is redeemed over a channel this endpoint
+	// cannot see, and the browser leg in between is the part an attacker
+	// can reach.
+	if req.CodeChallenge == "" {
+		return oauth2.OAuthErrPKCERequired
+	}
+
+	source, err := c.webCredentialSource(req.Scope)
+	if err != nil {
+		return err
+	}
+
+	authCtx, err := c.newChallengeAuthContext(ia, req, source)
+	if err != nil {
+		return err
+	}
+
+	// The handle this interaction is associated by, instead of an
+	// auth_session.
+	authCtx.AuthSession = ""
+	authCtx.AuthSessionDPoPThumbprint = dpopThumbprint
+	authCtx.RequestURI = fmt.Sprintf("urn:ietf:params:oauth:request_uri:%s", uuid.NewString())
+	authCtx.ExpiresAt = time.Now().Add(webInteractionTTLSeconds * time.Second).Unix()
+
+	if err := c.cacheService.AuthContext.Save(ctx, authCtx); err != nil {
+		return err
+	}
+
+	c.log.Info("CHALLENGE: web interaction required",
+		"client_id", req.ClientID, "scope", req.Scope,
+		"interaction_type_required", required, "session_id", authCtx.SessionID)
+
+	return &AuthorizationChallengeError{
+		ErrorCode:               errInsufficientAuthorization,
+		InteractionTypeRequired: required,
+		RequestURI:              authCtx.RequestURI,
+		ExpiresIn:               webInteractionTTLSeconds,
+		HTTPStatus:              403,
+	}
+}
+
+// webCredentialSource finds the data source that backs scope through a
+// browser-mediated auth provider.
+//
+// The mirror of openID4VPCredentialSource: anything that is not a
+// presentation is established in a browser, and a pre-authorised scope is
+// neither - a Wallet cannot initiate that flow at all, which /op/par also
+// refuses.
+func (c *Client) webCredentialSource(scope string) (model.CredentialSource, error) {
+	sources, err := c.cfg.LookupCredentialSources(scope)
+	if err != nil {
+		return model.CredentialSource{}, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidScope,
+			fmt.Sprintf("scope %q is not configured", scope), 400, err)
+	}
+	for _, source := range sources {
+		if source.AuthProvider == model.AuthProviderPreAuth {
+			return model.CredentialSource{}, oauth2.NewOAuthError(oauth2.ErrCodeInvalidScope,
+				"scope is issuable only via pre-authorized credential offer", 400)
+		}
+	}
+	for _, source := range sources {
+		if source.AuthProvider != model.AuthProviderOpenID4VP {
+			return source, nil
+		}
+	}
+	return model.CredentialSource{}, oauth2.NewOAuthError(oauth2.ErrCodeInvalidScope,
+		fmt.Sprintf("scope %q has no browser-mediated authentication configured", scope), 400)
+}
+
 // issuanceAuthDCQL builds the DCQL query the Wallet must satisfy for scope.
 func (c *Client) issuanceAuthDCQL(scope string) (*openid4vp.DCQL, error) {
 	vpAuth := c.cfg.GetOpenID4VPAuth(scope)
@@ -652,16 +769,14 @@ func (c *Client) openID4VPCredentialSource(scope string) (model.CredentialSource
 // refused, rather than silently unsupported, so that a Wallet that offered
 // it learns the server is the side that cannot.
 func (c *Client) interactionTypeForScope(ia *model.InteractiveAuthorization, scope string) (string, error) {
-	if _, err := c.openID4VPCredentialSource(scope); err != nil {
-		return "", &AuthorizationChallengeError{
-			ErrorCode: errMissingInteractionType,
-			ErrorDescription: fmt.Sprintf("scope %q requires the %s interaction, which this server does not implement",
-				scope, ia.InteractionType(model.InteractionAuthViaWeb)),
-			HTTPStatus: 400,
-		}
+	// A scope the Holder proves by presenting a Credential needs the
+	// presentation interaction; anything else is established in a browser,
+	// which is what auth_via_web is for.
+	suffix := model.InteractionAuthViaWeb
+	if _, err := c.openID4VPCredentialSource(scope); err == nil {
+		suffix = model.InteractionOpenID4VPPresentation
 	}
 
-	suffix := model.InteractionOpenID4VPPresentation
 	if !ia.Offers(suffix) {
 		return "", &AuthorizationChallengeError{
 			ErrorCode: errMissingInteractionType,

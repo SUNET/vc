@@ -276,9 +276,13 @@ func TestAuthorizationChallenge_WalletWithoutThePresentationInteraction(t *testi
 	assert.Contains(t, challengeErr.ErrorDescription, "urn:openid:dcp:ia:openid4vp_presentation")
 }
 
-// And a scope this server cannot serve through a presentation is refused
-// by naming the interaction it WOULD need, which this build does not
-// implement - rather than by a message about the scope.
+// A scope whose Holder is established in a browser is answered with the
+// web interaction rather than a presentation request.
+//
+// The Wallet is handed a request_uri and builds an authorization request
+// from it, which is the Pushed Authorization Request this server already
+// implements reached through the challenge endpoint - so the browser leg,
+// the consent screen and the redirect back are unchanged.
 func TestAuthorizationChallenge_ScopeThatNeedsAWebInteraction(t *testing.T) {
 	client := newChallengeClient(t)
 	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = model.DatastoreScope{
@@ -286,11 +290,69 @@ func TestAuthorizationChallenge_ScopeThatNeedsAWebInteraction(t *testing.T) {
 		AuthenticSource: "authentic-source",
 	}
 
-	challengeErr := challengeErr(t, client, initialChallenge(t))
+	req := initialChallenge(t)
+	req.CodeChallenge = strings.Repeat("c", 43)
+	req.CodeChallengeMethod = "S256"
 
-	assert.Equal(t, 400, challengeErr.HTTPStatus)
-	assert.Equal(t, "missing_interaction_type", challengeErr.ErrorCode)
-	assert.Contains(t, challengeErr.ErrorDescription, "urn:openid:dcp:ia:auth_via_web")
+	challengeErr := challengeErr(t, client, req)
+
+	assert.Equal(t, 403, challengeErr.HTTPStatus)
+	assert.Equal(t, "insufficient_authorization", challengeErr.ErrorCode)
+	assert.Equal(t, "urn:openid:dcp:ia:auth_via_web", challengeErr.InteractionTypeRequired)
+	assert.Contains(t, challengeErr.RequestURI, "urn:ietf:params:oauth:request_uri:")
+	assert.Equal(t, webInteractionTTLSeconds, challengeErr.ExpiresIn)
+
+	// The draft requires auth_session to be ABSENT when request_uri is
+	// present: the request_uri is itself what associates the browser leg
+	// with this exchange, and two handles for one association is one more
+	// than can be kept consistent.
+	assert.Empty(t, challengeErr.AuthSession)
+	assert.Empty(t, challengeErr.OpenID4VPRequest, "this interaction asks for no presentation")
+
+	// And the exchange is resolvable by the handle it DID hand out, which
+	// is what /authorize will look it up by.
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		RequestURI: challengeErr.RequestURI,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{challengeScope}, authCtx.Scopes)
+	assert.Empty(t, authCtx.AuthSession, "no auth_session was issued, so none is stored")
+	assert.NotEmpty(t, authCtx.AuthSessionDPoPThumbprint,
+		"the code this produces is still bound to the key the exchange was opened under")
+}
+
+// The draft says a Wallet listing auth_via_web includes code_challenge in
+// the initial request, and it is not optional here for the same reason it
+// is not at PAR: the code this produces is redeemed over a channel this
+// endpoint cannot see, with a browser leg in between that an attacker can
+// reach.
+func TestAuthorizationChallenge_WebInteractionRequiresPKCE(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = model.DatastoreScope{
+		AuthProvider:    model.AuthProviderOIDC,
+		AuthenticSource: "authentic-source",
+	}
+
+	oauthErr := oauthErrFromChallenge(t, client, initialChallenge(t))
+	assert.Equal(t, oauth2.OAuthErrPKCERequired.ErrorCode, oauthErr.ErrorCode)
+}
+
+// A pre-authorised scope is not a browser scope: a Wallet cannot initiate
+// that flow at all, which /op/par also refuses.
+func TestAuthorizationChallenge_PreAuthorizedScopeIsRefused(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = model.DatastoreScope{
+		AuthProvider:    model.AuthProviderPreAuth,
+		AuthenticSource: "authentic-source",
+	}
+
+	req := initialChallenge(t)
+	req.CodeChallenge = strings.Repeat("c", 43)
+	req.CodeChallengeMethod = "S256"
+
+	oauthErr := oauthErrFromChallenge(t, client, req)
+	assert.Equal(t, oauth2.ErrCodeInvalidScope, oauthErr.ErrorCode)
+	assert.Contains(t, oauthErr.Error(), "pre-authorized")
 }
 
 // A deployment that has narrowed interaction_types_supported refuses the
@@ -1005,4 +1067,45 @@ func TestAuthorizationChallenge_TranscriptLabelFollowsConfiguration(t *testing.T
 
 	assert.Contains(t, string(got), "OpenID4VCIIAHandover")
 	assert.NotContains(t, string(got), "OpenID4VCIIAEHandover")
+}
+
+// The request_uri has to be usable at /authorize, which is the entire
+// point of this interaction: the Wallet opens a browser at an
+// authorization request built from it, and from there the existing flow
+// runs unchanged.
+//
+// Asserted by actually calling OAuthAuthorize rather than by inspecting
+// the stored context, because what matters is that the endpoint can read
+// what the challenge wrote - the scope it reports, the wallet it names,
+// and the consent redirect the browser leg starts at.
+//
+// It does NOT establish that the context's own client_id is right: the
+// store resolves this query by its request_uri index alone and never
+// compares the client_id OAuthAuthorize puts in it. That is pre-existing
+// and not this change's to fix, but it means a test asserting "the
+// handoff works" proves less than it looks like it does, so the limit is
+// written down rather than assumed away.
+func TestAuthorizationChallenge_WebInteractionHandsOffToAuthorize(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cfg.APIGW.DataSources.Datastore.Scopes[challengeScope] = model.DatastoreScope{
+		AuthProvider:    model.AuthProviderOIDC,
+		AuthenticSource: "authentic-source",
+	}
+
+	req := initialChallenge(t)
+	req.CodeChallenge = strings.Repeat("c", 43)
+	req.CodeChallengeMethod = "S256"
+	opened := challengeErr(t, client, req)
+	require.NotEmpty(t, opened.RequestURI)
+
+	reply, err := client.OAuthAuthorize(t.Context(), &openid4vci.AuthorizeRequest{
+		RequestURI: opened.RequestURI,
+	})
+	require.NoError(t, err, "the request_uri the challenge handed out must resolve at /authorize")
+	require.NotNil(t, reply)
+
+	assert.Equal(t, challengeScope, reply.Scope)
+	assert.Equal(t, "wallet-1", reply.WalletClientID)
+	assert.Equal(t, "/authorization/consent", reply.RedirectURL,
+		"the browser leg starts at consent, exactly as it does from /op/par")
 }
