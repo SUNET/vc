@@ -636,6 +636,18 @@ func TestTrailingBytesAfterTheDocumentAreRefused(t *testing.T) {
 		})
 	}
 
+	// The case Buffered() cannot see: a Decoder only exposes what it
+	// happened to prefetch, so with enough whitespace between the object
+	// and the garbage the buffer holds nothing but whitespace and the
+	// check passes on an input written to fail it.
+	t.Run("beyond the decoder's prefetch", func(t *testing.T) {
+		far := `{"personal_administrative_number":"198001011234"}` +
+			strings.Repeat(" ", 64*1024) + "trailing"
+		_, err := c.injectCommitments(t.Context(), "nym_auth", []byte(far), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "trailing")
+	})
+
 	// Trailing WHITESPACE is not trailing garbage.
 	_, err := c.injectCommitments(t.Context(), "nym_auth",
 		[]byte("{\"personal_administrative_number\":\"198001011234\"}\n\t "), nil)

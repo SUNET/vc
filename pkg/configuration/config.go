@@ -308,6 +308,22 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 // Client.New iterates the map and dereferences the entry at startup. Here
 // rather than in ResolveVCTUrls because that is gated on an APIGW stanza, so
 // a verifier-only config file never reaches it.
+func checkCredentialMetadataEntries(cfg *model.Cfg) error {
+	if cfg.Common == nil {
+		return nil
+	}
+	var empty []string
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		if cfg.Common.CredentialMetadata[scope] == nil {
+			empty = append(empty, scope)
+		}
+	}
+	if len(empty) > 0 {
+		return fmt.Errorf("common.credential_metadata: no configuration under %s", strings.Join(empty, ", "))
+	}
+	return nil
+}
+
 // checkCommitmentTargets settles every seed-backed claim against the
 // schemas this service has loaded, and refuses a configuration that would
 // not do what it says.
@@ -333,22 +349,6 @@ func checkCommitmentTargets(cfg *model.Cfg) error {
 		if _, err := meta.ResolveCommitmentTargets(meta.MDDL); err != nil {
 			return fmt.Errorf("credential_metadata.%s: %w", scope, err)
 		}
-	}
-	return nil
-}
-
-func checkCredentialMetadataEntries(cfg *model.Cfg) error {
-	if cfg.Common == nil {
-		return nil
-	}
-	var empty []string
-	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
-		if cfg.Common.CredentialMetadata[scope] == nil {
-			empty = append(empty, scope)
-		}
-	}
-	if len(empty) > 0 {
-		return fmt.Errorf("common.credential_metadata: no configuration under %s", strings.Join(empty, ", "))
 	}
 	return nil
 }

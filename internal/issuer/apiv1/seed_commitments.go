@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -172,8 +173,14 @@ func decodeDocumentData(documentData []byte) (map[string]any, error) {
 	if err := decoder.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("document data is not a JSON object: %w", err)
 	}
-	if rest, err := io.ReadAll(decoder.Buffered()); err == nil && len(bytes.TrimSpace(rest)) > 0 {
-		return nil, fmt.Errorf("document data carries %d trailing bytes after the JSON object", len(bytes.TrimSpace(rest)))
+	// A SECOND decode, required to hit io.EOF - not a look at
+	// decoder.Buffered(), which only exposes what the decoder happened to
+	// prefetch. With enough whitespace between the object and the garbage
+	// the prefetch holds nothing but whitespace, and the check passes on
+	// an input it was written to reject.
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("document data carries trailing content after the JSON object")
 	}
 	if doc == nil {
 		doc = map[string]any{}
