@@ -24,6 +24,29 @@ import (
 	"github.com/google/uuid"
 )
 
+// requestURITTL bounds how long a request_uri may be left unredeemed.
+//
+// It is short because it protects one round trip: the wallet has the value
+// in hand already and only has to open a browser with it.
+const requestURITTL = 60 * time.Second
+
+// authorizationCodeTTL is how long an authorization code lives once
+// /authorize has consumed the request_uri that produced it.
+//
+// It covers the browser leg - authenticating at an IdP, the consent
+// screen, the redirect back - and the wallet's redemption at the Token
+// Endpoint afterwards, so it is measured in minutes rather than the
+// seconds a request_uri gets.
+//
+// requestURITTL + authorizationCodeTTL must stay inside
+// cache.AuthContextTTL, the physical lifetime of the document the deadline
+// is written on: MongoDB's TTL index is anchored to created_at and is not
+// moved by extending expires_at, so a deadline past that window would
+// advertise a code whose context has already been deleted.
+// TestAuthorizationCodeTTLFitsTheAuthContextLifetime holds the three to
+// that relationship.
+const authorizationCodeTTL = 5 * time.Minute
+
 // OAuthPar implements OAuth 2.0 Pushed Authorization Request (PAR)
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-authorization-endpoint
 //
@@ -122,7 +145,7 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		ClientID:             fmt.Sprintf("x509_san_dns:%s", host),
 		WalletClientID:       req.ClientID,
 		WalletURI:            req.RedirectURI,
-		ExpiresAt:            time.Now().Add(60 * time.Second).Unix(),
+		ExpiresAt:            time.Now().Add(requestURITTL).Unix(),
 		DynamicParams:        req.DynamicParams,
 	}
 
@@ -147,7 +170,7 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 
 	reply := &openid4vci.ParResponse{
 		RequestURI: requestURI,
-		ExpiresIn:  60,
+		ExpiresIn:  int(requestURITTL.Seconds()),
 	}
 
 	return reply, nil
@@ -192,6 +215,31 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 	if authorizationContext.Forfeited {
 		c.log.Debug("Authorization already used")
 		return nil, errors.New("not allowed")
+	}
+
+	// The request_uri's life ends here; the authorization code's begins.
+	//
+	// Both are kept in one ExpiresAt, which is checked at PAR-time length
+	// again at the Token Endpoint - so without this a code is dead
+	// requestURITTLSeconds after the request_uri was issued, however long
+	// the browser leg in between actually took. Authenticating at an IdP
+	// and reading a consent screen routinely takes longer than that, and
+	// the wallet's redemption is then refused for a code it did nothing
+	// wrong to obtain.
+	//
+	// Extending here rather than when the code is minted is deliberate:
+	// this is the one place every browser-mediated flow passes through,
+	// whether the request_uri came from /op/par or from the auth_via_web
+	// interaction, and it is the moment the short deadline has done its
+	// job. It only ever extends (see ExtendExpiry), so re-entering
+	// /authorize cannot shorten a deadline, and authorizationCodeTTL is
+	// bounded so the extended deadline stays inside the store's own
+	// lifetime - see the constant.
+	codeExpiresAt := time.Now().Add(authorizationCodeTTL).Unix()
+	if err := c.cacheService.AuthContext.ExtendExpiry(ctx,
+		&cache.AuthorizationContext{RequestURI: req.RequestURI}, codeExpiresAt); err != nil {
+		c.log.Error(err, "failed to extend authorization context expiry", "request_uri", req.RequestURI)
+		return nil, err
 	}
 
 	var redirectURL string

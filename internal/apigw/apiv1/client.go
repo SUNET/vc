@@ -86,10 +86,30 @@ type Client struct {
 	// status is the shared readiness aggregator: local probes + downstream
 	// Status RPCs, cached + single-flighted. Configured in New.
 	statusAggregator *status.Aggregator
+
+	// authProviderSelector answers which auth provider a scope will
+	// actually be served by in this deployment. The browser flow consults
+	// it at /authorize; the Authorization Challenge Endpoint consults the
+	// same one so the two cannot disagree about whether a scope needs a
+	// presentation or a browser.
+	authProviderSelector AuthProviderSelector
+}
+
+// AuthProviderSelector names the auth provider, and the credential source,
+// that will serve a scope in this deployment.
+//
+// A narrow local interface rather than the concrete type: the answer
+// depends on which provider services actually started, which is knowledge
+// the wiring layer has and this package does not, and declaring only what
+// is used keeps it substitutable in tests.
+//
+// Implemented by *authproviders.Selector.
+type AuthProviderSelector interface {
+	Select(scope string, ds *model.DataSources) (string, model.CredentialSource, error)
 }
 
 // New creates a new instance of the public api
-func New(ctx context.Context, db *db.Service, cacheService *cache.Service, tracer *trace.Tracer, meter *metric.Meter, cfg *model.Cfg, log *logger.Log) (*Client, error) {
+func New(ctx context.Context, db *db.Service, cacheService *cache.Service, authProviderSelector AuthProviderSelector, tracer *trace.Tracer, meter *metric.Meter, cfg *model.Cfg, log *logger.Log) (*Client, error) {
 	vciMetrics, err := metric.NewVCI(meter.Meter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VCI metrics: %w", err)
@@ -106,6 +126,7 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, trace
 		vciMetrics:                    vciMetrics,
 		CredentialOfferLookupMetadata: &CredentialOfferLookupMetadata{},
 		cacheService:                  cacheService,
+		authProviderSelector:          authProviderSelector,
 	}
 
 	// Generate issuer metadata at runtime (depends on credential constructors being loaded)

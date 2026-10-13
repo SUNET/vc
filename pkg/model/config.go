@@ -1903,10 +1903,22 @@ type APIGWDelivery struct {
 
 // InteractiveAuthorization configures OpenID4VCI 1.1's Interactive Authorization.
 //
-// The mechanism lets an Issuer qualify the Holder before issuing - by
-// requiring a Credential to be presented, or a web step - without sending
-// the wallet out to a browser. It is OPTIONAL in the specification and in
-// WE BUILD CS-01 §7.9, and it is off here until Enable is set.
+// The mechanism lets an Issuer qualify the Holder before issuing, and name
+// what that takes, instead of sending the wallet to a browser and hoping
+// the browser leg establishes enough. The two interactions differ in
+// exactly that respect:
+//
+//   - openid4vp_presentation is browserless. The wallet presents a
+//     Credential over the challenge endpoint itself and no browser is
+//     involved at any point.
+//   - auth_via_web is not. It hands the wallet a request_uri to open in a
+//     browser, and the browser leg - consent, the IdP, the redirect back -
+//     is this server's ordinary one. What Interactive Authorization adds
+//     is that the wallet was TOLD a browser step is required, rather than
+//     discovering it by being redirected.
+//
+// It is OPTIONAL in the specification and in WE BUILD CS-01 §7.9, and it
+// is off here until Enable is set.
 //
 // Most of the fields below exist because OpenID4VCI 1.1 is an editor's
 // draft that contradicts itself, not because an operator should expect to
@@ -2035,9 +2047,10 @@ const MaxAuthSessionTTLSeconds = 600
 const AuthorizationChallengePath = "/authorize-challenge"
 
 // The interaction types this build implements, as suffixes joined to
-// InteractionTypePrefix. OpenID4VCI 1.1 defines two; auth_via_web is not
-// implemented here, and is named so a wallet asking only for it gets
-// missing_interaction_type rather than silence.
+// InteractionTypePrefix. OpenID4VCI 1.1 defines two and this build
+// implements both; which one a given scope requires is not configurable,
+// because it follows from how the scope is sourced - see
+// Client.interactionTypeForScope.
 const (
 	InteractionOpenID4VPPresentation = "openid4vp_presentation"
 	InteractionAuthViaWeb            = "auth_via_web"

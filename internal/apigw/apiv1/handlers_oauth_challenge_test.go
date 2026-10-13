@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	authproviders "github.com/SUNET/vc/internal/apigw/auth_providers"
 	apigwcache "github.com/SUNET/vc/internal/apigw/cache"
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
@@ -126,6 +127,10 @@ func newChallengeClient(t *testing.T) *Client {
 			DPopJTI:                apigwcache.NewTestMemoryCache[bool](10 * time.Minute),
 		},
 		pkiSigner: signer,
+		// Both browser-mediated providers running, which is what makes the
+		// Selector's choice between them and openid4vp the thing under
+		// test rather than a property of what happened to be initialised.
+		authProviderSelector: authproviders.NewSelector(true, true),
 	}
 }
 

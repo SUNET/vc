@@ -76,6 +76,18 @@ type AuthContextStore interface {
 	// Consent marks an authorization context as consented.
 	Consent(ctx context.Context, query *AuthorizationContext) error
 
+	// ExtendExpiry moves the expiry of the context the request_uri in query
+	// names out to expiresAt, and is how a request_uri's short life is kept
+	// separate from the authorization code's. It never shortens: a value
+	// at or before the stored one leaves the document alone.
+	//
+	// It moves the logical deadline only. A store with its own physical
+	// lifetime - MongoDB's TTL index is anchored to created_at - still
+	// deletes the document on its own schedule, so callers must keep the
+	// extended deadline inside that window rather than assume this buys
+	// more time than the store will hold.
+	ExtendExpiry(ctx context.Context, query *AuthorizationContext, expiresAt int64) error
+
 	// AddToken adds a token to an authorization context identified by code.
 	AddToken(ctx context.Context, code string, token *Token) error
 

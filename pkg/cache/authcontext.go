@@ -372,6 +372,39 @@ func (c *MemoryStore) Consent(ctx context.Context, query *AuthorizationContext) 
 	return nil
 }
 
+// ExtendExpiry moves the expiry of the context request_uri names out to
+// expiresAt. See AuthContextStore.ExtendExpiry.
+func (c *MemoryStore) ExtendExpiry(ctx context.Context, query *AuthorizationContext, expiresAt int64) error {
+	if query == nil || query.RequestURI == "" {
+		return errors.New("request_uri cannot be empty")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	indexKey := fmt.Sprintf("request_uri:%s", query.RequestURI)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return ErrNoDocuments
+	}
+
+	doc := item.Value()
+	if doc.ExpiresAt >= expiresAt {
+		return nil
+	}
+	doc.ExpiresAt = expiresAt
+
+	c.cache.Set(sessionID, doc, ttlcache.DefaultTTL)
+	c.updateIndices(doc)
+
+	return nil
+}
+
 // AddToken adds a token to an authorization context
 func (c *MemoryStore) AddToken(ctx context.Context, code string, token *Token) error {
 	if code == "" {

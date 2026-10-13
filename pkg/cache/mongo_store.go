@@ -465,6 +465,35 @@ func (s *MongoStore) Consent(ctx context.Context, query *AuthorizationContext) e
 	return nil
 }
 
+// ExtendExpiry moves the expiry of the context request_uri names out to
+// expiresAt. See AuthContextStore.ExtendExpiry.
+//
+// The $max operator is what makes this never shorten, and makes it safe
+// against a concurrent writer: whichever of the two deadlines is later is
+// the one that survives, whatever order the updates arrive in.
+//
+// The TTL index on created_at is untouched by design - it is the physical
+// bound this deadline has to stay inside, not something to push out.
+func (s *MongoStore) ExtendExpiry(ctx context.Context, query *AuthorizationContext, expiresAt int64) error {
+	if query == nil || query.RequestURI == "" {
+		return errors.New("request_uri cannot be empty")
+	}
+
+	result, err := s.coll.UpdateOne(
+		ctx,
+		bson.M{"request_uri": query.RequestURI},
+		bson.M{"$max": bson.M{"expires_at": expiresAt}},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to extend expiry: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNoDocuments
+	}
+
+	return nil
+}
+
 // AddToken adds a token to an authorization context identified by code.
 func (s *MongoStore) AddToken(ctx context.Context, code string, token *Token) error {
 	if code == "" {
