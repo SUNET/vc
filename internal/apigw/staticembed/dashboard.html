@@ -42,6 +42,11 @@
   .container { max-width: 960px; margin: 0 auto; padding: 32px 16px; }
   h1 { margin: 0 0 8px; font-size: 24px; }
   .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 14px; }
+  .section-head {
+    margin: 32px 0 16px; padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 18px; font-weight: 600; text-align: left;
+  }
   .grid {
     display: grid; gap: 16px;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -141,6 +146,25 @@
       </div>
       {{ end }}
     </div>
+    {{ if .Wallets }}
+    <h2 class="section-head">Wallets</h2>
+    <div class="grid">
+      {{ range .Wallets }}
+      <div class="card">
+        <div class="card-head">
+          <div class="card-name">{{ .Name }}</div>
+        </div>
+        <div class="primary-url"><a href="{{ .URL }}" target="_blank" rel="noopener">{{ .URL }}</a></div>
+        {{ if .Description }}<div class="description">{{ .Description }}</div>{{ end }}
+        {{ if .Links }}
+        <ul class="links">
+          {{ range .Links }}<li><a href="{{ .URL }}" data-type="{{ .Type }}" target="_blank" rel="noopener">{{ .Label }}</a></li>{{ end }}
+        </ul>
+        {{ end }}
+      </div>
+      {{ end }}
+    </div>
+    {{ end }}
     <footer>
       <a href="https://www.sunet.se" target="_blank" rel="noopener">SUNET</a> &middot; apigw /dashboard
     </footer>

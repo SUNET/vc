@@ -2048,6 +2048,9 @@ type DashboardService struct {
 	Description string `yaml:"description,omitempty"`
 	// Links is an ordered list of extra labelled URLs (health, metadata, UIs, ...).
 	Links []DashboardLink `yaml:"links,omitempty" validate:"omitempty,dive"`
+	// Wallet marks this entry as a configured wallet, rendered in its own
+	// section without a health status. Set internally during seeding.
+	Wallet bool `yaml:"-"`
 }
 
 // DashboardLink is a labelled URL shown under a service entry.
@@ -2150,6 +2153,7 @@ func (cfg *Cfg) SeedDashboardDefaults() {
 		if s.URL == "" || have[s.Name] {
 			return
 		}
+		have[s.Name] = true
 		cfg.APIGW.Dashboard.Services = append(cfg.APIGW.Dashboard.Services, s)
 	}
 
@@ -2219,6 +2223,63 @@ func (cfg *Cfg) SeedDashboardDefaults() {
 			})
 		}
 	}
+
+	cfg.seedDashboardWallets(add)
+}
+
+// seedDashboardWallets appends every configured wallet to the dashboard.
+// Wallets are collected from the credential-offer redirect targets
+// (apigw.delivery.credential_offers.wallets) and the verifier's
+// supported_wallets, deduplicated by display name, and sorted for a stable
+// order. Each entry's URL is the origin of its configured URI (the wallet's
+// human-clickable home); wallets have no health endpoint, so the handler
+// renders them as "unknown".
+func (cfg *Cfg) seedDashboardWallets(add func(DashboardService)) {
+	wallets := map[string]string{}
+	remember := func(name, rawURL string) {
+		if name == "" {
+			return
+		}
+		if _, ok := wallets[name]; ok {
+			return
+		}
+		if u := walletOriginURL(rawURL); u != "" {
+			wallets[name] = u
+		}
+	}
+
+	for _, w := range cfg.APIGW.Delivery.CredentialOffers.Wallets {
+		remember(w.Label, w.RedirectURI)
+	}
+	if cfg.Verifier != nil {
+		for name, raw := range cfg.Verifier.SupportedWallets {
+			remember(name, raw)
+		}
+	}
+
+	names := make([]string, 0, len(wallets))
+	for n := range wallets {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		add(DashboardService{
+			Name:   n,
+			URL:    wallets[n],
+			Wallet: true,
+		})
+	}
+}
+
+// walletOriginURL reduces a wallet URI (a deep-link redirect or callback) to
+// its scheme://host origin, which is the clickable home page a human wants on
+// the dashboard. Non-HTTP(S) schemes and unparseable values yield "".
+func walletOriginURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // LookupCredentialSources returns full data source information for a credential type
