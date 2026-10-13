@@ -612,3 +612,32 @@ func TestInjectionPreservesEveryOtherClaimExactly(t *testing.T) {
 
 	assert.NotEmpty(t, got["ssc"], "and the commitment is still written")
 }
+
+// A Decoder stops at the end of the first JSON value, so trailing bytes
+// decode happily and re-marshal as valid JSON. That is strictly weaker
+// than the Unmarshal this replaced: MakeVC20 had full-input validation
+// before, and the JWP validator still assumes it.
+func TestTrailingBytesAfterTheDocumentAreRefused(t *testing.T) {
+	c := commitmentClient(t, openid4vp.FormatSDJWTVC, sscClaim(), derivedSource())
+	require.NoError(t, c.initSeedSources())
+
+	for _, tc := range []struct {
+		name string
+		in   string
+	}{
+		{name: "a bare word", in: `{"personal_administrative_number":"198001011234"} trailing`},
+		{name: "a second object", in: `{"personal_administrative_number":"198001011234"}{"more":1}`},
+		{name: "a stray brace", in: `{"personal_administrative_number":"198001011234"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := c.injectCommitments(t.Context(), "nym_auth", []byte(tc.in), nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "trailing")
+		})
+	}
+
+	// Trailing WHITESPACE is not trailing garbage.
+	_, err := c.injectCommitments(t.Context(), "nym_auth",
+		[]byte("{\"personal_administrative_number\":\"198001011234\"}\n\t "), nil)
+	assert.NoError(t, err)
+}

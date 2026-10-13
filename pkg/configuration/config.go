@@ -308,19 +308,18 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 // Client.New iterates the map and dereferences the entry at startup. Here
 // rather than in ResolveVCTUrls because that is gated on an APIGW stanza, so
 // a verifier-only config file never reaches it.
-// checkCommitmentTargets refuses a seed-backed claim an mso_mdoc schema
-// does not declare.
+// checkCommitmentTargets settles every seed-backed claim against the
+// schemas this service has loaded, and refuses a configuration that would
+// not do what it says.
 //
-// The issuer cannot catch this at ITS startup - it has no schemas, it
+// The issuer cannot do this at ITS startup - it has no schemas, it
 // receives them inline per request - so without this the misconfiguration
-// surfaces at issuance. And it surfaces quietly: an mdoc signer emits the
-// elements its schema declares and ignores anything else in the document,
-// so the credential is issued with no commitment in it and nothing
-// reports a thing. The issuer refuses it at issuance too; this is so
-// nobody gets that far.
+// surfaces when someone is waiting for a credential. And it surfaces
+// quietly: an mdoc signer emits the elements its schema declares and
+// ignores anything else in the document.
 //
-// Only mso_mdoc is checked, because it is the only format whose signer
-// drops an undeclared claim. The others carry the document's own claims.
+// The resolution itself lives in pkg/model and is the same call the issuer
+// makes at issuance. Two implementations of it had already drifted once.
 func checkCommitmentTargets(cfg *model.Cfg) error {
 	if cfg.Common == nil {
 		return nil
@@ -328,51 +327,11 @@ func checkCommitmentTargets(cfg *model.Cfg) error {
 
 	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
 		meta := cfg.Common.CredentialMetadata[scope]
-		if meta == nil || len(meta.Commitments) == 0 || meta.MDDL == nil {
+		if meta == nil || len(meta.Commitments) == 0 {
 			continue
 		}
-
-		for _, path := range slices.Sorted(maps.Keys(meta.Commitments)) {
-			where := fmt.Sprintf("credential_metadata.%s.commitments.%s", scope, path)
-
-			element, declared := "", false
-			for namespace, elements := range meta.MDDL.Claims {
-				if _, ok := elements[path]; ok {
-					element, declared = path, true
-					break
-				}
-				// The namespace-qualified spelling is how the claim is
-				// named everywhere else, so it is accepted and normalised
-				// to the bare element identifier - which is what an mdoc
-				// document is keyed by.
-				if bare := strings.TrimPrefix(path, namespace+"."); bare != path {
-					if _, ok := elements[bare]; ok {
-						element, declared = bare, true
-						break
-					}
-				}
-			}
-			if !declared {
-				return fmt.Errorf(
-					"%s: the mdoc schema for doctype %q declares no such element, "+
-						"so the signer would drop it and issue a credential without the commitment",
-					where, meta.MDDL.DocType)
-			}
-
-			// A bstr element arrives as JSON and mdoc decodes it as
-			// standard base64. A 64-character hex commitment is itself
-			// valid base64, so hex here does not fail - it decodes to 48
-			// bytes of nothing and signs those.
-			if meta.Commitments[path].Encoding == "hex" {
-				for _, elements := range meta.MDDL.Claims {
-					if m, ok := elements[element]; ok && m.ValueType == "bstr" {
-						return fmt.Errorf(
-							"%s: the schema declares it as bstr, which mdoc decodes as base64, "+
-								"so encoding \"hex\" would sign the decoded hex string instead of the commitment",
-							where)
-					}
-				}
-			}
+		if _, err := meta.ResolveCommitmentTargets(meta.MDDL); err != nil {
+			return fmt.Errorf("credential_metadata.%s: %w", scope, err)
 		}
 	}
 	return nil
