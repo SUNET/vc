@@ -93,7 +93,44 @@ type VCIScenario struct {
 	NotificationEvent string `yaml:"notification_event,omitempty"`
 	// ExpectError is the expected error code (for negative testing)
 	ExpectError string `yaml:"expect_error,omitempty"`
+
+	// UseInteractiveAuthorization drives OpenID4VCI 1.1's Authorization
+	// Challenge Endpoint instead of the browser-mediated authorization
+	// code flow. The issuer must advertise the endpoint.
+	UseInteractiveAuthorization bool `yaml:"use_interactive_authorization"`
+
+	// InteractionTypes is what the wallet claims it can perform, sent as
+	// interaction_types_supported. Empty means the one this wallet
+	// actually implements, which is the presentation interaction.
+	//
+	// Settable so a scenario can assert what an issuer does when the
+	// wallet offers something else - the missing_interaction_type path
+	// has no other way to be reached.
+	InteractionTypes []string `yaml:"interaction_types,omitempty"`
+
+	// IssuerState is the handle from an issuer-initiated Credential
+	// Offer, carried into the initial Authorization Challenge Request.
+	//
+	// Taken from the offer's authorization_code grant when one is
+	// present; set it here only to drive the case directly.
+	IssuerState string `yaml:"issuer_state,omitempty"`
+
+	// PresentCredential names a credential in this wallet's store to
+	// present when the issuer asks for one. Empty means the first one
+	// that satisfies the request.
+	PresentCredential string `yaml:"present_credential,omitempty"`
+
+	// codeVerifier is the PKCE verifier minted for this run. Not
+	// configurable - it is state the flow carries from wherever the
+	// challenge was issued to the Token Endpoint that redeems it.
+	codeVerifier string `yaml:"-"`
 }
+
+// SetCodeVerifier records the PKCE verifier this run minted.
+func (v *VCIScenario) SetCodeVerifier(verifier string) { v.codeVerifier = verifier }
+
+// CodeVerifier returns the PKCE verifier this run minted, if any.
+func (v *VCIScenario) CodeVerifier() string { return v.codeVerifier }
 
 // VPScenario defines parameters for an OpenID4VP presentation test
 type VPScenario struct {

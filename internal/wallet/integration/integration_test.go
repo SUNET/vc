@@ -26,6 +26,7 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/testsupport/jwktest"
+	"github.com/lestrrat-go/jwx/v3/jwk"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
@@ -60,6 +61,13 @@ type testEnvironment struct {
 	issuedAccessToken     string
 	deferredTransactionID string
 	deferredReady         bool
+
+	// Interactive Authorization (OpenID4VCI 1.1)
+	challengeRequests  []url.Values
+	challengeKey       jwk.Key
+	iaInteractionType  string
+	iaRequireIA        bool
+	iaMetadataSpelling string
 }
 
 type vpResponseCapture struct {
@@ -255,15 +263,86 @@ func (env *testEnvironment) setupOAuth2Server() {
 
 	// OAuth2 server metadata
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
-		meta := map[string]string{
+		meta := map[string]any{
 			"issuer":                                env.oauth2Server.URL,
 			"authorization_endpoint":                env.oauth2Server.URL + "/authorize",
 			"token_endpoint":                        env.oauth2Server.URL + "/token",
 			"pushed_authorization_request_endpoint": env.oauth2Server.URL + "/par",
 			"nonce_endpoint":                        env.oauth2Server.URL + "/nonce",
 		}
+
+		// Interactive Authorization, advertised under whichever spelling
+		// this test is exercising - a wallet has to read both, since the
+		// draft's change log and its normative text disagree
+		// (openid/OpenID4VCI#811).
+		if env.iaMetadataSpelling != "" {
+			endpoint, require := "authorization_challenge_endpoint", "require_interactive_authorization"
+			if env.iaMetadataSpelling == "changelog" {
+				endpoint, require = "interactive_authorization_endpoint", "require_interactive_authorization_request"
+			}
+			meta[endpoint] = env.oauth2Server.URL + "/authorize-challenge"
+			if env.iaRequireIA {
+				meta[require] = true
+			}
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(meta)
+	})
+
+	// Authorization Challenge Endpoint
+	mux.HandleFunc("POST /authorize-challenge", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+
+		env.mu.Lock()
+		env.challengeRequests = append(env.challengeRequests, r.Form)
+		env.mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+
+		// An intermediate request carries the answer to the last
+		// interaction; the first does not.
+		if r.FormValue("auth_session") == "" {
+			required := env.iaInteractionType
+			if required == "" {
+				required = "urn:openid:dcp:ia:openid4vp_presentation"
+			}
+
+			if !strings.Contains(r.FormValue("interaction_types_supported"), required) {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{
+					"error":             "missing_interaction_type",
+					"error_description": "interaction_types_supported is missing " + required,
+				})
+				return
+			}
+
+			body := map[string]any{
+				"error":                     "insufficient_authorization",
+				"interaction_type_required": required,
+				"auth_session":              "test-auth-session",
+			}
+			if required == "urn:openid:dcp:ia:auth_via_web" {
+				delete(body, "auth_session")
+				body["request_uri"] = "urn:ietf:params:oauth:request_uri:test-ia"
+				body["expires_in"] = 60
+			} else {
+				body["openid4vp_request"] = env.interactiveAuthorizationRequest()
+			}
+
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(body)
+			return
+		}
+
+		if r.FormValue("openid4vp_response") == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_request"})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]string{"authorization_code": "test-ia-code"})
 	})
 
 	// Token endpoint
@@ -276,6 +355,10 @@ func (env *testEnvironment) setupOAuth2Server() {
 			"code":                r.FormValue("code"),
 			"client_id":           r.FormValue("client_id"),
 			"redirect_uri":        r.FormValue("redirect_uri"),
+			// PKCE's working half. The wallet computed a challenge and
+			// never sent the verifier, and nothing captured it here, so
+			// neither side noticed.
+			"code_verifier": r.FormValue("code_verifier"),
 		}
 
 		env.mu.Lock()
