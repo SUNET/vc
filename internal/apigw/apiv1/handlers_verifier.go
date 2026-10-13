@@ -479,12 +479,19 @@ func buildIssuanceAuthDCQL(vpAuth *model.OpenID4VPCredentialAuth, cfg *model.Cfg
 			return nil, fmt.Errorf("auth scope %q has no usable DCQL meta constraint (format %q); check credential_metadata", authScope, format)
 		}
 		credentialQueries = append(credentialQueries, openid4vp.CredentialQuery{
-			ID:                                authScope,
-			Format:                            format,
-			Multiple:                          false,
-			Meta:                              meta,
-			RequireCryptographicHolderBinding: new(false),
-			Claims:                            scopeClaimQueries,
+			ID:       authScope,
+			Format:   format,
+			Multiple: false,
+			Meta:     meta,
+			// Left unset, which is the specification's default of TRUE.
+			//
+			// It said false, which told every wallet that a presentation
+			// authenticating an issuance need not prove possession - and
+			// the verifier did not check, so the two agreed. A
+			// presentation that proves nothing about who is presenting is
+			// not an authentication, and this is the flow that decides
+			// whose documents get issued.
+			Claims: scopeClaimQueries,
 		})
 		options = append(options, []string{authScope})
 	}

@@ -1,19 +1,28 @@
 package openid4vp
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/SUNET/vc/pkg/sdjwtvc"
+
+	jwt "github.com/golang-jwt/jwt/v5"
 )
 
 // VPTokenValidator validates VP Token according to Section 8.6
-// NOTE: This validator performs format and protocol validation only.
-// Cryptographic signature verification must be done separately by the caller
-// (e.g. via jwt.Parse with a resolved key). TrustEvaluator handles trust/policy
-// evaluation — it does NOT perform signature verification itself.
+//
+// It verifies the HOLDER's signature - the Key Binding JWT, against the
+// key the credential names in cnf - because that is what makes the
+// presentation the holder's and nothing else can do it: the key is inside
+// the credential being presented.
+//
+// It does NOT verify the ISSUER's signature or evaluate trust in the
+// issuer. Those need a resolved key and a policy, and the caller does them
+// (EvaluateIssuerTrust). Both halves are required: this one says the right
+// person presented it, the other says the credential is worth anything.
 type VPTokenValidator struct {
 	// Nonce from the Authorization Request
 	Nonce string
@@ -51,7 +60,7 @@ func (v *VPTokenValidator) Validate(vpToken string) error {
 	}
 
 	// 3. Validate holder binding (Section 14.1.2)
-	if err := v.validateHolderBinding(parsed); err != nil {
+	if err := v.validateHolderBinding(vpToken, parsed); err != nil {
 		return fmt.Errorf("holder binding validation failed: %w", err)
 	}
 
@@ -112,14 +121,79 @@ func (v *VPTokenValidator) validatePresentation(parsed *sdjwtvc.ParsedCredential
 	return nil
 }
 
-// validateHolderBinding validates cryptographic holder binding (Section 14.1.2)
-func (v *VPTokenValidator) validateHolderBinding(parsed *sdjwtvc.ParsedCredential) error {
-	// Check for key binding JWT
+// validateHolderBinding verifies cryptographic holder binding
+// (OpenID4VP §14.1.2).
+//
+// This is what makes a presentation mean "I hold this credential" rather
+// than "this credential exists". It checked only that a Key Binding JWT
+// was PRESENT, and the nonce and audience were then read out of its
+// payload without anyone verifying who signed it - so a copy of a genuine
+// credential plus a self-made KB-JWT carrying the expected nonce and
+// audience was accepted as its holder's presentation.
+//
+// Three things have to hold, and all three are the holder's:
+//
+//   - the credential has to name a holder key, in cnf. One that names
+//     none cannot be presented at all, rather than being presentable by
+//     anybody;
+//   - the KB-JWT has to be signed by that key;
+//   - its sd_hash has to cover the SD-JWT actually presented, or the
+//     proof belongs to some other presentation of the same credential.
+//
+// Nonce and audience are still checked separately, by validateNonce and
+// validateAudience. They read the same payload, which is now a payload
+// somebody proved they could produce.
+func (v *VPTokenValidator) validateHolderBinding(vpToken string, parsed *sdjwtvc.ParsedCredential) error {
 	if len(parsed.KeyBinding) == 0 {
 		return fmt.Errorf("missing holder binding proof")
 	}
 
-	// Key binding is present - further validation happens in validateNonce/validateAudience
+	cnf, ok := parsed.Claims["cnf"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("credential carries no cnf claim, so it names no holder")
+	}
+	jwkMap, ok := cnf["jwk"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("credential's cnf claim carries no jwk")
+	}
+	holderKey, err := sdjwtvc.JWKToPublicKey(jwkMap)
+	if err != nil {
+		return fmt.Errorf("reading the holder key the credential names: %w", err)
+	}
+
+	kbJWT := strings.Join(parsed.KeyBinding, ".")
+
+	// Claims validation is off here deliberately: iat on a KB-JWT is the
+	// moment of presentation, and a clock skew between wallet and verifier
+	// would otherwise reject an honest holder. What this call is for is
+	// the signature.
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	token, err := parser.Parse(kbJWT, func(*jwt.Token) (any, error) { return holderKey, nil })
+	if err != nil {
+		return fmt.Errorf("key binding JWT is not signed by the key the credential names: %w", err)
+	}
+	if typ, _ := token.Header["typ"].(string); typ != "kb+jwt" {
+		return fmt.Errorf("key binding JWT has typ %q, which must be kb+jwt", typ)
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return fmt.Errorf("key binding JWT carries no claims")
+	}
+
+	// sd_hash ties the proof to THIS presentation. Without it a KB-JWT
+	// made for one presentation of a credential is a KB-JWT for every
+	// presentation of it, with whatever disclosures the sender chooses.
+	presented := vpToken
+	if idx := strings.LastIndex(vpToken, "~"); idx >= 0 {
+		presented = vpToken[:idx+1]
+	}
+	sum := sha256.Sum256([]byte(presented))
+	want := base64.RawURLEncoding.EncodeToString(sum[:])
+	if got, _ := claims["sd_hash"].(string); got != want {
+		return fmt.Errorf("key binding JWT's sd_hash does not cover the presentation it arrived in")
+	}
+
 	return nil
 }
 
