@@ -26,7 +26,13 @@ import (
 // credential type. A new signing path added later would make the same
 // omission, and no test written against today's handlers would notice.
 func TestEverySigningPathInjectsCommitments(t *testing.T) {
-	const marker = "injectCommitments"
+	const (
+		marker = "injectCommitments"
+		// The status list entry is allocated before signing and never
+		// handed back, so anything that can REFUSE a document has to run
+		// before it or every refusal burns a revocation entry.
+		allocMarker = "TokenStatusListAddStatus"
+	)
 
 	fset := token.NewFileSet()
 	entries, err := os.ReadDir(".")
@@ -36,6 +42,7 @@ func TestEverySigningPathInjectsCommitments(t *testing.T) {
 	// document_data: that is the document about to be signed, so it is
 	// exactly the set that has to inject.
 	found := map[string]bool{}
+	order := map[string]bool{}
 
 	for _, entry := range entries {
 		name := entry.Name()
@@ -54,14 +61,28 @@ func TestEverySigningPathInjectsCommitments(t *testing.T) {
 				continue
 			}
 
-			calls := false
+			injectPos, allocPos := token.NoPos, token.NoPos
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == marker {
-					calls = true
+				sel, ok := n.(*ast.SelectorExpr)
+				if !ok {
+					return true
 				}
-				return !calls
+				switch sel.Sel.Name {
+				case marker:
+					if !injectPos.IsValid() {
+						injectPos = sel.Pos()
+					}
+				case allocMarker:
+					if !allocPos.IsValid() {
+						allocPos = sel.Pos()
+					}
+				}
+				return true
 			})
-			found[fn.Name.Name] = calls
+			found[fn.Name.Name] = injectPos.IsValid()
+			if injectPos.IsValid() && allocPos.IsValid() {
+				order[fn.Name.Name] = injectPos < allocPos
+			}
 		}
 	}
 
@@ -74,6 +95,15 @@ func TestEverySigningPathInjectsCommitments(t *testing.T) {
 		assert.True(t, calls,
 			"%s signs a document but never calls %s: a scope configuring a commitment claim "+
 				"would be issued without it, silently", name, marker)
+	}
+
+	// Injection can refuse a document, and a refusal after the allocation
+	// leaves a VALID revocation entry belonging to no credential.
+	require.NotEmpty(t, order, "no handler allocates a status entry; the ordering guard would pass vacuously")
+	for name, injectFirst := range order {
+		assert.True(t, injectFirst,
+			"%s calls %s AFTER %s: every refused issuance would burn a revocation entry",
+			name, marker, allocMarker)
 	}
 }
 

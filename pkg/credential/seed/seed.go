@@ -72,9 +72,21 @@ type Source interface {
 // what makes the seed recoverable without a database. The cost is that the
 // secret is permanent - see MinSecretBytes.
 type Deriver struct {
-	secret    []byte
+	secret    *secretKey
 	seedBytes int
 }
+
+// secretKey holds the derivation key behind a pointer.
+//
+// The indirection is not for sharing - it is so that REFLECTION prints an
+// address instead of the key. fmt resolves %T and %p before it consults
+// Formatter, and the bad-verb path it lands on sets its erroring flag,
+// which disables String, GoString and Format outright. So %p on a Deriver
+// VALUE renders the struct by reflection with no method able to intervene;
+// go vet flags that as a mistake, but "vet would have caught it" is not
+// the same as "the key cannot be printed". A pointer field renders as an
+// address at that depth, and there is nothing to read.
+type secretKey struct{ bytes []byte }
 
 // NewDeriver returns a Deriver over secret, producing seeds of seedBytes.
 // Pass 0 for DefaultSeedBytes.
@@ -97,7 +109,7 @@ func NewDeriver(secret []byte, seedBytes int) (*Deriver, error) {
 	owned := make([]byte, len(secret))
 	copy(owned, secret)
 
-	return &Deriver{secret: owned, seedBytes: seedBytes}, nil
+	return &Deriver{secret: &secretKey{bytes: owned}, seedBytes: seedBytes}, nil
 }
 
 // Seed derives the subject's seed.
@@ -123,7 +135,7 @@ func (d *Deriver) Seed(_ context.Context, subjectID, context_ string) ([]byte, e
 	// surprise waiting for whoever reads this next. Naming the length
 	// makes the seed a function of all of its declared parameters.
 	info := derivationInfo(strconv.Itoa(d.seedBytes), context_, subjectID)
-	key, err := hkdf.Key(sha256.New, d.secret, nil, info, d.seedBytes)
+	key, err := hkdf.Key(sha256.New, d.secret.bytes, nil, info, d.seedBytes)
 	if err != nil {
 		return nil, fmt.Errorf("seed: derivation failed: %w", err)
 	}
@@ -139,15 +151,21 @@ func (d *Deriver) SeedBytes() int { return d.seedBytes }
 // puts an enclosing struct through %v - a decision nobody takes
 // deliberately, which is exactly why it has to be impossible rather than
 // discouraged.
-func (d *Deriver) String() string {
+func (d Deriver) String() string {
 	return fmt.Sprintf("seed.Deriver{secret: <redacted>, seedBytes: %d}", d.seedBytes)
 }
 
 // GoString keeps the secret out of %#v for a caller that reaches for
 // GoString directly. Format below covers the verb.
-func (d *Deriver) GoString() string { return d.String() }
+func (d Deriver) GoString() string { return d.String() }
 
 // Format redacts under EVERY verb, which String alone does not do.
+//
+// Value receiver, here and on String and GoString, so a COPIED Deriver
+// redacts too - a pointer's method set includes value-receiver methods,
+// but not the other way round, so a pointer receiver would leave
+// fmt.Printf("%v", *d), and any struct holding a Deriver by value, back on
+// reflection and printing the secret.
 //
 // String and GoString are consulted only for the string-capable verbs. A
 // numeric one - %d, say, on an enclosing struct somebody logged - skips
@@ -159,7 +177,7 @@ func (d *Deriver) GoString() string { return d.String() }
 // So the rendering is deliberately the same under every verb, including
 // ones where it reads oddly (%d produces a sentence). A redaction that
 // holds for the verbs someone thought of is not a redaction.
-func (d *Deriver) Format(f fmt.State, _ rune) {
+func (d Deriver) Format(f fmt.State, _ rune) {
 	io.WriteString(f, d.String())
 }
 

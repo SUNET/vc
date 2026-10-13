@@ -290,6 +290,11 @@ func TestDeriverDoesNotPrintItsSecret(t *testing.T) {
 		render[verb] = fmt.Sprintf(verb, []any{d}...)
 		// The case that actually happens: a struct holding one, logged.
 		render[verb+" (enclosing struct)"] = fmt.Sprintf(verb, []any{struct{ D *Deriver }{d}}...)
+		// And the same by VALUE. A pointer's method set includes
+		// value-receiver methods but not the reverse, so a pointer
+		// receiver on Format would leave both of these on reflection.
+		render[verb+" (dereferenced)"] = fmt.Sprintf(verb, []any{*d}...)
+		render[verb+" (struct holding a value)"] = fmt.Sprintf(verb, []any{struct{ D Deriver }{*d}}...)
 	}
 
 	for verb, rendered := range render {
@@ -301,7 +306,10 @@ func TestDeriverDoesNotPrintItsSecret(t *testing.T) {
 	// And the redaction is actually rendered, so the checks above are not
 	// passing on an empty string.
 	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%d"} {
-		assert.Contains(t, render[verb], "redacted", "verb %s must render the redaction", verb)
+		for _, shape := range []string{"", " (enclosing struct)", " (dereferenced)", " (struct holding a value)"} {
+			assert.Contains(t, render[verb+shape], "redacted",
+				"verb %s%s must render the redaction", verb, shape)
+		}
 	}
 }
 

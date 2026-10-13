@@ -162,6 +162,23 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		return nil, fmt.Errorf("mdoc issuer not configured")
 	}
 
+	// Seed-backed claims. A no-op for a scope with no commitments
+	// configured.
+	//
+	// Up here with the other cheap refusals, and specifically BEFORE the
+	// status list entry is allocated below: injection can refuse a
+	// document - no subject identifier, an upstream commitment, a path
+	// conflict - and the entry is allocated before signing and never
+	// handed back, so each such failure would otherwise burn a revocation
+	// entry that is marked VALID and belongs to no credential. The other
+	// three signing paths already inject before their allocation; this one
+	// did not.
+	documentData, err := c.injectCommitments(ctx, req.Scope, req.DocumentData)
+	if err != nil {
+		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
+		return nil, err
+	}
+
 	// Parse device public key based on format
 	keyFormat := req.DeviceKeyFormat
 	if keyFormat == "" {
@@ -206,14 +223,6 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 			statusIndex = grpcReply.GetIndex()
 			c.log.Debug("status list entry allocated for mdoc", "section", statusSection, "index", statusIndex)
 		}
-	}
-
-	// Seed-backed claims, before anything is signed. A no-op for a scope
-	// with no commitments configured.
-	documentData, err := c.injectCommitments(ctx, req.Scope, req.DocumentData)
-	if err != nil {
-		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
-		return nil, err
 	}
 
 	// Issue the mdoc
