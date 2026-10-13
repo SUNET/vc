@@ -72,7 +72,16 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	// object with nothing in it - cannot be signed, and finding that out
 	// inside the native signer costs a status list entry that is never
 	// handed back.
-	if err := bbs.ValidateDocumentData(req.DocumentData); err != nil {
+	// Seed-backed claims, before the shape is validated and before
+	// anything is signed: an injected claim is part of the document the
+	// validator has to pass, and part of what gets signed. A no-op for a
+	// scope with no commitments configured.
+	documentData, err := c.injectCommitments(ctx, req.Scope, req.DocumentData)
+	if err != nil {
+		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
+		return nil, grpcstatus.Error(codes.InvalidArgument, err.Error())
+	}
+	if err := bbs.ValidateDocumentData(documentData); err != nil {
 		return nil, grpcstatus.Error(codes.InvalidArgument, "document_data "+err.Error())
 	}
 	// Validated here, not left to bbs.Issue, for the same reason as the
@@ -157,7 +166,7 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 		PublicKey:      c.bbsKeys.public,
 		Commitment:     req.Commitment,
 		Vct:            req.VCT,
-		DocumentData:   json.RawMessage(req.DocumentData),
+		DocumentData:   json.RawMessage(documentData),
 		HolderPointers: req.HolderPointers,
 		ExtraHeader:    extraHeader,
 		KeyBinding:     keyBinding,

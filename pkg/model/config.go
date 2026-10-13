@@ -608,15 +608,6 @@ type Issuer struct {
 	ZkCircuits IssuerZkCircuitsConfig `yaml:"zk_circuits,omitempty"`
 }
 
-// BBSConfig holds the issuer's blind BBS key pair.
-//
-// Separate from Issuer.KeyConfig, and unavoidably so. Every other key this
-// issuer signs with is an ECDSA key that signs a digest, which is what
-// pki.KeyConfig and PKCS#11 are built around. A BBS secret key is a
-// BLS12-381 scalar consumed inside the signing algebra itself, so it cannot
-// be handed to an HSM that only offers "sign these bytes" — mainstream HSMs
-// do not implement the curve at all. It is therefore a software key, which
-// is a known and accepted property of this format rather than an oversight.
 // Seed models a SeedSource may declare.
 const (
 	// SeedModelDerived computes a subject's seed from a secret and the
@@ -680,6 +671,15 @@ type SeedSource struct {
 	SeedBytes int `yaml:"seed_bytes" validate:"omitempty,min=1,max=64" doc_example:"16"`
 }
 
+// BBSConfig holds the issuer's blind BBS key pair.
+//
+// Separate from Issuer.KeyConfig, and unavoidably so. Every other key this
+// issuer signs with is an ECDSA key that signs a digest, which is what
+// pki.KeyConfig and PKCS#11 are built around. A BBS secret key is a
+// BLS12-381 scalar consumed inside the signing algebra itself, so it cannot
+// be handed to an HSM that only offers "sign these bytes" — mainstream HSMs
+// do not implement the curve at all. It is therefore a software key, which
+// is a known and accepted property of this format rather than an oversight.
 type BBSConfig struct {
 	// SecretKeyPath is a file holding the raw BLS12-381 secret scalar,
 	// base64url-encoded. Preferred where a file can be mounted, since it

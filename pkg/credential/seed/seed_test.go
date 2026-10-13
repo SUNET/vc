@@ -60,6 +60,68 @@ func TestCommitRefusesAnUnknownFunction(t *testing.T) {
 	assert.Equal(t, 32, n)
 }
 
+// Golden vectors, pinning the derivation to fixed bytes.
+//
+// Everything else in this file compares Seed against Seed, which proves
+// the derivation is consistent with ITSELF and nothing more: changing the
+// label, the field order, the length-prefix width, the hash or the HKDF
+// parameters would leave every one of those tests passing while giving
+// every subject a new seed - and therefore a new pseudonym - with no copy
+// of the old ones anywhere, because nothing is stored.
+//
+// These values were computed from the construction in Deriver.Seed's doc
+// comment by a separate implementation, not captured from this one. If
+// this test fails, the question is not whether the new output is also
+// fine; it is whether every credential already issued has just been
+// invalidated.
+func TestDerivationGoldenVectors(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		seedBytes  int
+		context    string
+		subject    string
+		seed       string
+		commitment string
+	}{
+		{
+			name:       "the default length, no context",
+			seedBytes:  0, // DefaultSeedBytes
+			subject:    "198001011234",
+			seed:       "19304fa467cdcfd8ee8ccad8524fbb6a",
+			commitment: "5914935f1d59f0ed167cf4cb4a260fb5169d782c9cf65d16df5dd204d9bda37f",
+		},
+		{
+			name:       "a context, which must change everything",
+			seedBytes:  0,
+			context:    "population-a",
+			subject:    "198001011234",
+			seed:       "0fad2375d7ad6975b276e46b9ea900e9",
+			commitment: "ef4a0313a2c1dcbc7692f827f5688cc0d79cb28da25034c1917e476e9af5ae86",
+		},
+		{
+			name:       "a longer seed, which is a different seed and not a longer one",
+			seedBytes:  32,
+			subject:    "198001011234",
+			seed:       "18e8d4324deeed0a146c2697aef6f961399546ec0f8f6287859e94cfa0703d2b",
+			commitment: "7fb47c6a048ab56c3f8ef2fa0e60a020a041e29392766be2e9c2b7c39ddbaa49",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := NewDeriver(testSecret, tc.seedBytes)
+			require.NoError(t, err)
+
+			got, err := d.Seed(t.Context(), tc.subject, tc.context)
+			require.NoError(t, err)
+			assert.Equal(t, tc.seed, hex.EncodeToString(got),
+				"the derivation has changed; every seed this deployment ever issued over is now different")
+
+			commitment, err := Commit(CommitSHA256, got)
+			require.NoError(t, err)
+			assert.Equal(t, tc.commitment, hex.EncodeToString(commitment))
+		})
+	}
+}
+
 // One subject, one seed - the property the whole mechanism rests on. A
 // seed that varied per call, per credential type or per format would make
 // a pseudonym unrepeatable and remapping impossible.

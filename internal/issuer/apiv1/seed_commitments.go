@@ -295,21 +295,23 @@ func subjectIdentifier(doc map[string]any, path string, flat bool) (string, erro
 func flatDocument(format string) bool { return format == openid4vp.FormatMsoMdoc }
 
 // lookupPath resolves a claim path in the document data.
+//
+// Flat and nested are exclusive, not ordered. Trying the literal key
+// first and falling back to a descent reads like a harmless convenience
+// and is not: in a nested document a literal "identity.id" key would
+// shadow the documented {"identity":{"id":...}}, and the two can carry
+// different values - so a seed could be derived from the wrong subject,
+// or a commitment that is not there could look pre-existing.
 func lookupPath(doc map[string]any, path string, flat bool) (any, bool) {
-	if v, ok := doc[path]; ok {
-		return v, true
-	}
 	if flat {
-		return nil, false
+		v, ok := doc[path]
+		return v, ok
 	}
 
-	segments := strings.Split(path, ".")
-	if len(segments) == 1 {
-		return nil, false
-	}
-
+	// A single segment traverses to exactly the same key, so there is no
+	// special case for it.
 	var current any = doc
-	for _, segment := range segments {
+	for _, segment := range strings.Split(path, ".") {
 		m, ok := current.(map[string]any)
 		if !ok {
 			return nil, false
@@ -331,12 +333,12 @@ func lookupPath(doc map[string]any, path string, flat bool) (any, bool) {
 // would nest every dotted mdoc element identifier into a tree the signer
 // then cannot find.
 func setPath(doc map[string]any, path string, value any, flat bool) {
-	segments := strings.Split(path, ".")
-	if flat || len(segments) == 1 {
+	if flat {
 		doc[path] = value
 		return
 	}
 
+	segments := strings.Split(path, ".")
 	current := doc
 	for _, segment := range segments[:len(segments)-1] {
 		next, ok := current[segment].(map[string]any)

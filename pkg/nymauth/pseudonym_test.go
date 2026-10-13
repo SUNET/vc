@@ -122,3 +122,22 @@ func TestUserManagedXsiteIgnoresTheVerifier(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, a, c)
 }
+
+// The rulebook fixes both seeds at 16 bytes. A generic seed source
+// configured with a different seed_bytes would otherwise hash a
+// concatenation shifted against what the circuit computes - and the
+// result is 32 bytes either way, so nothing downstream could tell.
+func TestSeedLengthIsFixedByTheRulebook(t *testing.T) {
+	good := bytes.Repeat([]byte{0}, 32)
+
+	for _, n := range []int{1, 15, 17, 32} {
+		_, err := Pseudonym("c", bytes.Repeat([]byte{7}, n), good, good)
+		assert.Error(t, err, "a %d-byte seed must be refused", n)
+	}
+
+	_, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, bytes.Repeat([]byte{7}, 32), "x509_san_dns:rp.example")
+	assert.Error(t, err, "the configuration helpers must refuse it too, not just Pseudonym")
+
+	_, err = Pseudonym("c", bytes.Repeat([]byte{7}, SeedBytes), good, good)
+	assert.NoError(t, err)
+}

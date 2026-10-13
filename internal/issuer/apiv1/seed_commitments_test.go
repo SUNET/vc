@@ -204,6 +204,48 @@ func TestScopeWithoutCommitmentsIsUntouched(t *testing.T) {
 	assert.Equal(t, in, unknown)
 }
 
+// In a nested document a literal dotted key must NOT shadow the nested
+// path. The two can carry different values, so resolving the literal one
+// first would derive the seed from the wrong subject - and report nothing,
+// because both lookups succeed.
+func TestLiteralDottedKeyDoesNotShadowTheNestedPath(t *testing.T) {
+	claim := &model.CommitmentClaim{Seed: "primary", Subject: "identity.national_number"}
+	c := commitmentClient(t, openid4vp.FormatSDJWTVC, claim, derivedSource())
+	require.NoError(t, c.initSeedSources())
+
+	// Both spellings present, carrying different people.
+	got := inject(t, c, map[string]any{
+		"identity.national_number": "198001011235",
+		"identity":                 map[string]any{"national_number": "198001011234"},
+	})
+
+	source := c.seedSources["primary"]
+	nested, err := source.Seed(t.Context(), "198001011234", "")
+	require.NoError(t, err)
+	want, err := seed.Commit("", nested)
+	require.NoError(t, err)
+
+	assert.Equal(t, hex.EncodeToString(want), got["ssc"],
+		"a nested format must read the nested path, not a literal key that happens to spell it")
+}
+
+// And the commitment itself is written nested, where the format has
+// nesting - otherwise the signer looks for a claim that is not there.
+func TestNestedFormatWritesTheCommitmentNested(t *testing.T) {
+	claim := &model.CommitmentClaim{Seed: "primary", Subject: "national_number"}
+	c := commitmentClient(t, openid4vp.FormatSDJWTVC, claim, derivedSource())
+	c.cfg.Common.CredentialMetadata["nym_auth"].Commitments = map[string]*model.CommitmentClaim{
+		"nym.ssc": claim,
+	}
+	require.NoError(t, c.initSeedSources())
+
+	got := inject(t, c, map[string]any{"national_number": "198001011234"})
+	nested, ok := got["nym"].(map[string]any)
+	require.True(t, ok, "a dotted claim path in a nested format must create the object")
+	assert.NotEmpty(t, nested["ssc"])
+	assert.NotContains(t, got, "nym.ssc", "and must not also write it flat")
+}
+
 // Startup refusals. Each of these is a configuration that would otherwise
 // issue a credential with no commitment, the wrong one, or a commitment
 // nobody can reproduce - all of which are found long after the fact.

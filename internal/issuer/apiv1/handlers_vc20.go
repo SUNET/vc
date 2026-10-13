@@ -77,9 +77,17 @@ func (c *Client) MakeVC20(ctx context.Context, req *CreateVC20Request) (*CreateV
 		credentialTypes = []string{"VerifiableCredential"}
 	}
 
+	// Seed-backed claims, before anything is signed. A no-op for a scope
+	// with no commitments configured.
+	documentData, err := c.injectCommitments(ctx, req.Scope, req.DocumentData)
+	if err != nil {
+		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
+		return nil, err
+	}
+
 	// Parse document data into credential subject
 	var credentialSubject map[string]any
-	if err := json.Unmarshal(req.DocumentData, &credentialSubject); err != nil {
+	if err := json.Unmarshal(documentData, &credentialSubject); err != nil {
 		c.log.Error(err, "failed to parse document data")
 		return nil, fmt.Errorf("failed to parse document data: %w", err)
 	}

@@ -29,6 +29,11 @@ const (
 	ConfigUserManagedXsiteSSC      = "user-managed-pseudonym-xsite-ssc"
 )
 
+// SeedBytes is the length the rulebook fixes for both secret_seed and
+// private_seed: "a 16-byte random shared secret", and "a 16-byte random
+// value known only to the prover".
+const SeedBytes = 16
+
 // nullInput is the 32 zero bytes the rulebook specifies where a
 // configuration does not use one of the two inputs. Not an empty slice:
 // the inputs are concatenated, so a missing one would shift everything
@@ -53,8 +58,15 @@ func Pseudonym(config string, seed, proverInput, verifierInput []byte) ([]byte, 
 	if config == "" {
 		return nil, fmt.Errorf("nymauth: no pseudonym configuration named")
 	}
-	if len(seed) == 0 {
-		return nil, fmt.Errorf("nymauth: cannot derive a pseudonym from an empty seed")
+	// The rulebook fixes both secret_seed and private_seed at 16 bytes.
+	// A seed of any other length would hash a concatenation shifted
+	// against what the circuit computes, so the pseudonym would simply be
+	// wrong - and wrong in a way nothing here could detect, since the
+	// output is 32 bytes either way. Reachable through a generic seed
+	// source configured with a different seed_bytes, which is exactly the
+	// cost of the primitive not being nym_auth-specific.
+	if len(seed) != SeedBytes {
+		return nil, fmt.Errorf("nymauth: a seed is %d bytes in this rulebook, got %d", SeedBytes, len(seed))
 	}
 	if len(proverInput) != len(nullInput) || len(verifierInput) != len(nullInput) {
 		return nil, fmt.Errorf("nymauth: prover_input and verifier_input must each be %d bytes", len(nullInput))
