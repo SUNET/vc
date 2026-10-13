@@ -106,9 +106,11 @@ func (cfg *Cfg) SeedDashboardDefaults() {
 // Wallets are collected from the credential-offer redirect targets
 // (apigw.delivery.credential_offers.wallets) and the verifier's
 // supported_wallets, deduplicated by display name, and sorted for a stable
-// order. Each entry's URL is the origin of its configured URI (the wallet's
-// human-clickable home); wallets have no health endpoint and the handler
-// renders them in their own section without a health status.
+// order. Both sources are visited in sorted key order so first-label-wins
+// deduplication is deterministic. Each entry's URL is the origin of its
+// configured URI (the wallet's human-clickable home); wallets have no health
+// endpoint and the handler renders them in their own section without a health
+// status.
 func (cfg *Cfg) seedDashboardWallets(add func(DashboardService)) {
 	wallets := map[string]string{}
 	remember := func(name, rawURL string) {
@@ -123,12 +125,13 @@ func (cfg *Cfg) seedDashboardWallets(add func(DashboardService)) {
 		}
 	}
 
-	for _, w := range cfg.APIGW.Delivery.CredentialOffers.Wallets {
+	for _, key := range sortedKeys(cfg.APIGW.Delivery.CredentialOffers.Wallets) {
+		w := cfg.APIGW.Delivery.CredentialOffers.Wallets[key]
 		remember(w.Label, w.RedirectURI)
 	}
 	if cfg.Verifier != nil {
-		for name, raw := range cfg.Verifier.SupportedWallets {
-			remember(name, raw)
+		for _, name := range sortedKeys(cfg.Verifier.SupportedWallets) {
+			remember(name, cfg.Verifier.SupportedWallets[name])
 		}
 	}
 
@@ -155,4 +158,15 @@ func walletOriginURL(raw string) string {
 		return ""
 	}
 	return u.Scheme + "://" + u.Host
+}
+
+// sortedKeys returns the keys of m in ascending order, so callers that iterate
+// a map can produce a deterministic result.
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
