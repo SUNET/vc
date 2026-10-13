@@ -462,6 +462,15 @@ type UIInteractionReply struct {
 func (c *Client) UIInteraction(ctx context.Context, req *UIInteractionRequest) (*UIInteractionReply, error) {
 	c.log.Debug("uiInteraction", "dcql_query", req.DCQLQuery)
 
+	// Before anything else, including the augmentation and the reuse
+	// comparison below: this query came from a caller, and a caller may
+	// ask for a claim this deployment will not request. Filtering here
+	// rather than on the way out means the stored query, the request
+	// object and the later match all see the same thing - a query
+	// filtered at only one of those would ask for one set of claims and
+	// match against another.
+	c.filterNeverDisclose("ui_interaction", req.DCQLQuery)
+
 	// Augment BEFORE the reuse check: the stored request object was
 	// augmented at creation, so the incoming query has to be brought to the
 	// same shape before we can compare them for equality.

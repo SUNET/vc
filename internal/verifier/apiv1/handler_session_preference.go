@@ -209,7 +209,7 @@ func (c *Client) GetCredentialDisplayData(ctx context.Context, req *GetCredentia
 	response := &GetCredentialDisplayDataResponse{
 		SessionID:         authCtx.SessionID,
 		VPToken:           authCtx.VPToken,
-		Claims:            flattenClaimsForDisplay(authCtx.VerifiedClaims),
+		Claims:            flattenClaimsForDisplay(c.cfg.NeverDisclose().FilterClaims(authCtx.VerifiedClaims)),
 		ClientID:          authCtx.ClientID,
 		RedirectURI:       authCtx.RedirectURI,
 		State:             authCtx.State,

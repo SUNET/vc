@@ -21,6 +21,12 @@ func (c *Client) CreateRequestObject(ctx context.Context, sessionID string, dcql
 	ctx, span := c.tracer.Start(ctx, "apiv1:create_request_object")
 	defer span.End()
 
+	// Every request object this verifier sends is built here, whatever
+	// produced its query - a preset, a scope mapping, a caller. So this
+	// is where "never ask" has to hold, rather than at each producer,
+	// where the one added next would be the one that forgot.
+	c.filterNeverDisclose("request_object", dcqlQuery)
+
 	// This request object is served behind the QR code and the same-device
 	// link, so it must never carry a dc_api mode - see
 	// OIDCRelyingPartyResponseMode for why, and for the precedence between
@@ -218,6 +224,17 @@ func (c *Client) HandleDirectPost(ctx context.Context, sessionID string, vpToken
 		}
 		return err
 	}
+
+	// The second filter, and deliberately not the same mechanism as the
+	// one on the query. That one stops this verifier asking; this stops
+	// anything blocked that arrives regardless - volunteered by a wallet,
+	// or carried as an ordinary disclosed claim - from being matched on,
+	// stored, returned to a relying party, or rendered to anyone.
+	//
+	// Before the store, so nothing downstream has to remember: the OIDC
+	// claims, the session-preference display and the result API all read
+	// what is written here.
+	claims = c.cfg.NeverDisclose().FilterClaims(claims)
 
 	// Store verified claims
 	authCtx.VerifiedClaims = claims

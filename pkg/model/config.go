@@ -30,6 +30,21 @@ import (
 	ts11client "github.com/sirosfoundation/go-ts11client"
 )
 
+// NeverDisclose is the configured never-disclose set, ready to filter
+// with.
+//
+// On Cfg rather than on Common so that every call site reads it the same
+// way, and so a nil Common - which happens in tests and in services that
+// build a partial config - yields the built-in default rather than an
+// empty set. Defaulting to empty would turn a missing config block into
+// a silent loss of the control.
+func (c *Cfg) NeverDisclose() openid4vp.NeverDisclose {
+	if c == nil || c.Common == nil || c.Common.NeverDisclose == nil {
+		return openid4vp.NewNeverDisclose(openid4vp.DefaultNeverDisclose)
+	}
+	return openid4vp.NewNeverDisclose(c.Common.NeverDisclose)
+}
+
 // BoolVal safely dereferences a *bool, returning the pointed-to value or
 // the supplied fallback when the pointer is nil.
 func BoolVal(b *bool, fallback bool) bool {
@@ -224,6 +239,25 @@ type Common struct {
 	SecretFilePath string `yaml:"secret_file_path,omitempty" doc_example:"\"/etc/vc/secrets.yaml\""`
 	// SkipSecretsPermCheck disables file permission validation on the secrets file. Required for platforms like Fly.io that mount files as 0755.
 	SkipSecretsPermCheck bool `yaml:"skip_secrets_perm_check" default:"false"`
+	// NeverDisclose names claims that must never be requested from a
+	// wallet, never used to satisfy a match, and never handed to a
+	// verifier or rendered to a user.
+	//
+	// The default is the nym_auth seed commitments. Disclosed in the
+	// clear, either is a permanent, globally unique identifier for its
+	// holder - stable across re-issuance, identical across a batch, and
+	// retroactively linking every pseudonym that holder ever produced.
+	// One disclosure to one verifier cannot be taken back.
+	//
+	// Configurable because the list will grow, and because a deployment
+	// issuing a credential that happens to use one of these names for
+	// something harmless needs a way out. Clearing it entirely is
+	// allowed and means what it says: nothing is filtered.
+	//
+	// Matched on the claim NAME, against every segment of a path, so a
+	// namespace or vct does not have to be enumerated for the rule to
+	// apply. See openid4vp.NeverDisclose.
+	NeverDisclose []string `yaml:"never_disclose" default:"[\"ssc\",\"psc\"]" doc_example:"[\"ssc\",\"psc\"]"`
 	// HA configures high-availability mode. When Enable is true, caches use MongoDB
 	// (Common.Mongo.URI) instead of in-memory storage so state is shared across instances.
 	HA HAConfig `yaml:"ha" validate:"omitempty"`

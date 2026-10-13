@@ -316,6 +316,14 @@ func (c *Client) VerificationDirectPost(ctx context.Context, req *VerificationDi
 		credential = built
 	}
 
+	// Never-disclose claims are removed before anything is done with the
+	// presented credential: before the type check below, before identity
+	// extraction, before the datastore lookup, and before any of it is
+	// cached. A claim on this list must not be able to satisfy a match
+	// either - matching on it would leak it through whether the match
+	// succeeded.
+	credential = c.cfg.NeverDisclose().FilterClaims(credential)
+
 	c.log.Debug("Found credential metadata", "scope", scope, "vct", credMetaCfg.GetVCTURL())
 
 	// Enforce that the verified credential's type matches matchedAuthScope's

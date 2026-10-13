@@ -8,6 +8,7 @@ import (
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
+	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/sdjwtvc"
 	"github.com/SUNET/vc/pkg/vcclient"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -176,9 +177,15 @@ func (c *Client) UserLookup(ctx context.Context, req *vcclient.UserLookupRequest
 		return nil, fmt.Errorf("failed to consent: %w", err)
 	}
 
+	// The consent screen is a frontend, and a never-disclose claim must
+	// not reach one. Filtered here rather than trusted to have been
+	// filtered upstream: this reply is what the browser receives, and it
+	// is the last place that is true.
+	neverDisclose := c.cfg.NeverDisclose()
+
 	reply := &vcclient.UserLookupReply{
-		SVGTemplateClaims:  svgTemplateClaims,
-		PresentationClaims: presentationClaims,
+		SVGTemplateClaims:  openid4vp.FilterNamed(neverDisclose, svgTemplateClaims),
+		PresentationClaims: neverDisclose.FilterClaims(presentationClaims),
 		RedirectURL:        redirectResult,
 		CredentialDisplay:  credentialDisplay,
 	}
