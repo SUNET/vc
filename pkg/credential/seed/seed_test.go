@@ -268,31 +268,40 @@ func TestDeriverOwnsItsSecret(t *testing.T) {
 	assert.Equal(t, before, after)
 }
 
-// Nothing on a Deriver may print the secret. The value reaches logs and
-// error messages through %v on enclosing structs without anyone deciding
-// that it should.
+// Nothing on a Deriver may print the secret, under ANY verb.
+//
+// String and GoString are consulted only for the string-capable verbs.
+// A numeric one - %d on an enclosing struct somebody logged - skips both
+// and falls back to reflection, which walks in and prints the secret as
+// decimal bytes. That was the behaviour here before Format existed, so
+// this enumerates the verb table rather than the verbs that came to mind.
 func TestDeriverDoesNotPrintItsSecret(t *testing.T) {
 	d := mustDeriver(t)
 	secretHex := hex.EncodeToString(testSecret)
-
-	// Go renders a []byte differently under each verb, so each one has to
-	// be checked against each spelling the secret could appear in: the
-	// raw bytes (%s), the decimal slice (%v), and hex.
+	// Go renders a []byte differently per verb, so the decimal spelling
+	// has to be checked alongside the raw bytes and the hex.
 	decimal := strings.Trim(strings.Join(strings.Fields(fmt.Sprint([]byte(testSecret))), " "), "[]")
 
-	for verb, rendered := range map[string]string{
-		"%v":  fmt.Sprintf("%v", d),
-		"%+v": fmt.Sprintf("%+v", d),
-		"%#v": fmt.Sprintf("%#v", d),
-		"%s":  fmt.Sprintf("%s", []any{d}...),
-		"%q":  fmt.Sprintf("%q", []any{d}...),
-		// The case that actually happens: a struct holding one.
-		"enclosing struct": fmt.Sprintf("%+v", struct{ D *Deriver }{d}),
-	} {
+	// Every verb fmt defines for a composite operand, not a chosen few.
+	verbs := []string{"%v", "%+v", "%#v", "%s", "%q", "%d", "%x", "%X", "%o", "%O", "%b", "%c", "%U", "%e", "%f", "%g", "%t", "%p"}
+
+	render := map[string]string{}
+	for _, verb := range verbs {
+		render[verb] = fmt.Sprintf(verb, []any{d}...)
+		// The case that actually happens: a struct holding one, logged.
+		render[verb+" (enclosing struct)"] = fmt.Sprintf(verb, []any{struct{ D *Deriver }{d}}...)
+	}
+
+	for verb, rendered := range render {
 		assert.NotContains(t, rendered, string(testSecret), "verb %s leaks the raw secret", verb)
 		assert.NotContains(t, rendered, secretHex, "verb %s leaks the secret as hex", verb)
 		assert.NotContains(t, rendered, decimal, "verb %s leaks the secret as a byte slice", verb)
-		assert.Contains(t, rendered, "redacted", "verb %s must render the redaction", verb)
+	}
+
+	// And the redaction is actually rendered, so the checks above are not
+	// passing on an empty string.
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%d"} {
+		assert.Contains(t, render[verb], "redacted", "verb %s must render the redaction", verb)
 	}
 }
 

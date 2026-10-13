@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 )
 
@@ -137,13 +138,30 @@ func (d *Deriver) SeedBytes() int { return d.seedBytes }
 // Without it the secret reaches a log or an error the first time someone
 // puts an enclosing struct through %v - a decision nobody takes
 // deliberately, which is exactly why it has to be impossible rather than
-// discouraged. GoString covers %#v, which does not go through String.
+// discouraged.
 func (d *Deriver) String() string {
 	return fmt.Sprintf("seed.Deriver{secret: <redacted>, seedBytes: %d}", d.seedBytes)
 }
 
-// GoString keeps the secret out of %#v.
+// GoString keeps the secret out of %#v for a caller that reaches for
+// GoString directly. Format below covers the verb.
 func (d *Deriver) GoString() string { return d.String() }
+
+// Format redacts under EVERY verb, which String alone does not do.
+//
+// String and GoString are consulted only for the string-capable verbs. A
+// numeric one - %d, say, on an enclosing struct somebody logged - skips
+// both and falls back to reflection, which walks into the struct and
+// prints the secret as decimal bytes. That is not a hypothetical reading
+// of the fmt documentation: it was the observed behaviour here before
+// this existed.
+//
+// So the rendering is deliberately the same under every verb, including
+// ones where it reads oddly (%d produces a sentence). A redaction that
+// holds for the verbs someone thought of is not a redaction.
+func (d *Deriver) Format(f fmt.State, _ rune) {
+	io.WriteString(f, d.String())
+}
 
 // derivationInfo builds the HKDF info string.
 //

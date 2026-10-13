@@ -246,6 +246,32 @@ func TestNestedFormatWritesTheCommitmentNested(t *testing.T) {
 	assert.NotContains(t, got, "nym.ssc", "and must not also write it flat")
 }
 
+// An intermediate segment that already holds a scalar is a path
+// conflict, and must refuse.
+//
+// Creating the map anyway - which is what a plain type assertion does -
+// DELETES that claim on the way to signing, and the credential is issued
+// missing an attribute nobody asked to remove. Silently, because the
+// injection succeeded.
+func TestPathConflictRefusesRatherThanDeletingTheClaim(t *testing.T) {
+	claim := &model.CommitmentClaim{Seed: "primary", Subject: "national_number"}
+	c := commitmentClient(t, openid4vp.FormatSDJWTVC, claim, derivedSource())
+	c.cfg.Common.CredentialMetadata["nym_auth"].Commitments = map[string]*model.CommitmentClaim{
+		"identity.ssc": claim,
+	}
+	require.NoError(t, c.initSeedSources())
+
+	in, err := json.Marshal(map[string]any{
+		"national_number": "198001011234",
+		"identity":        "a claim that is already there",
+	})
+	require.NoError(t, err)
+
+	_, err = c.injectCommitments(t.Context(), "nym_auth", in)
+	require.Error(t, err, "a path conflict must refuse the issuance")
+	assert.Contains(t, err.Error(), "path conflict")
+}
+
 // Startup refusals. Each of these is a configuration that would otherwise
 // issue a credential with no commitment, the wrong one, or a commitment
 // nobody can reproduce - all of which are found long after the fact.

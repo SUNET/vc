@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/credential/seed"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
@@ -231,7 +232,9 @@ func (c *Client) injectOneCommitment(ctx context.Context, scope, path string, cl
 		encoded = base64.StdEncoding.EncodeToString(commitment)
 	}
 
-	setPath(doc, path, encoded, flat)
+	if err := setPath(doc, path, encoded, flat); err != nil {
+		return fmt.Errorf("%s: %w", where, err)
+	}
 	return nil
 }
 
@@ -332,21 +335,16 @@ func lookupPath(doc map[string]any, path string, flat bool) (any, bool) {
 // being written for the first time never exists yet. Deciding that way
 // would nest every dotted mdoc element identifier into a tree the signer
 // then cannot find.
-func setPath(doc map[string]any, path string, value any, flat bool) {
+//
+// The nested case delegates to credential.SetNestedValue, which refuses a
+// path whose intermediate segment is already a scalar. Creating the map
+// anyway - which is what a plain type assertion does - would DELETE that
+// claim from the document on the way to signing it, and the credential
+// would be issued missing an attribute nobody asked to remove.
+func setPath(doc map[string]any, path string, value any, flat bool) error {
 	if flat {
 		doc[path] = value
-		return
+		return nil
 	}
-
-	segments := strings.Split(path, ".")
-	current := doc
-	for _, segment := range segments[:len(segments)-1] {
-		next, ok := current[segment].(map[string]any)
-		if !ok {
-			next = map[string]any{}
-			current[segment] = next
-		}
-		current = next
-	}
-	current[segments[len(segments)-1]] = value
+	return credential.SetNestedValue(doc, path, value)
 }
