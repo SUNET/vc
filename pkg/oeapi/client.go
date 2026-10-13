@@ -12,6 +12,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
+	"golang.org/x/sync/singleflight"
 )
 
 // Client is an HTTP client for Open Education API (OEAPI) v6.0 endpoints.
@@ -29,6 +30,9 @@ type Client struct {
 
 	// Token cache
 	tokenCache cache.Cache[string]
+
+	// tokenGroup single-flights concurrent token refreshes.
+	tokenGroup singleflight.Group
 }
 
 // ClientConfig holds configuration for creating a new OEAPI client.
@@ -77,6 +81,26 @@ func (c *Client) ensureToken(ctx context.Context) (string, error) {
 	if token, ok := c.tokenCache.Get(ctx, cacheKey); ok {
 		return token, nil
 	}
+
+	// Single-flight the refresh so the concurrent GETs in FetchAndStoreForVCI
+	// issue at most one client-credentials request on a cold/expired cache.
+	// Waiters share the winner's result; the recheck inside covers a token
+	// stored between the miss above and entering the critical section.
+	v, err, _ := c.tokenGroup.Do(cacheKey, func() (any, error) {
+		if token, ok := c.tokenCache.Get(ctx, cacheKey); ok {
+			return token, nil
+		}
+		return c.fetchToken(ctx)
+	})
+	if err != nil {
+		return "", err
+	}
+	return v.(string), nil
+}
+
+// fetchToken performs the client-credentials token request and caches the result.
+func (c *Client) fetchToken(ctx context.Context) (string, error) {
+	const cacheKey = "access_token"
 
 	data := url.Values{
 		"grant_type":    {"client_credentials"},
@@ -198,6 +222,17 @@ func WithRole(role string) QueryOption {
 func WithState(state string) QueryOption {
 	return func(q url.Values) {
 		q.Set("state", state)
+	}
+}
+
+// WithExpand requests server-side expansion of referenced entities (e.g.
+// "course_offering", "programme_offering") so their nested claims are embedded
+// in the response instead of being returned as bare IDs.
+func WithExpand(items ...string) QueryOption {
+	return func(q url.Values) {
+		for _, item := range items {
+			q.Add("expand", item)
+		}
 	}
 }
 

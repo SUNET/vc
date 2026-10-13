@@ -417,7 +417,7 @@ func (s *Service) endpointOAuthAuthorizationConsent(ctx context.Context, c *gin.
 			}
 
 			scope, _ := session.Get("scope").(string)
-			if err := s.dataSources.FetchAndStoreForVCI(ctx, authCtx.Identifier, scope, sessionID); err != nil {
+			if err := s.dataSources.FetchAndStoreForVCI(ctx, authCtx.RemoteName, authCtx.Identifier, scope, sessionID); err != nil {
 				span.SetStatus(codes.Error, err.Error())
 				return nil, err
 			}

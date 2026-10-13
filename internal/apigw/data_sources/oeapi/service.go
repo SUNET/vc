@@ -24,8 +24,10 @@ type Service struct {
 	log      *logger.Log
 }
 
-// New creates a new OEAPI service from a remote connection definition.
-func New(ctx context.Context, remote model.Remote, docCache pkgcache.Cache[map[string]*model.CompleteDocument], tokenCache pkgcache.Cache[string], log *logger.Log) (*Service, error) {
+// New creates a new OEAPI service from a remote connection definition and the
+// external_api scopes that reference it. Each scope's AttributeMapping is wired
+// into a per-credential-type mapper.
+func New(ctx context.Context, remote model.Remote, scopes map[string]model.ExternalAPIScope, docCache pkgcache.Cache[map[string]*model.CompleteDocument], tokenCache pkgcache.Cache[string], log *logger.Log) (*Service, error) {
 	cfg := &oeapi.Config{
 		Enable:       true,
 		BaseURL:      remote.BaseURL,
@@ -44,9 +46,9 @@ func New(ctx context.Context, remote model.Remote, docCache pkgcache.Cache[map[s
 		return nil, fmt.Errorf("oeapi: create client: %w", err)
 	}
 
-	mappers := make(map[string]*credential.AttributeMapper, len(cfg.AttributeMappings))
-	for credType, mapping := range cfg.AttributeMappings {
-		mappers[credType] = credential.NewAttributeMapper(toModelMapping(mapping))
+	mappers := make(map[string]*credential.AttributeMapper, len(scopes))
+	for credType, scope := range scopes {
+		mappers[credType] = credential.NewAttributeMapper(scope.AttributeMapping)
 	}
 
 	s := &Service{
@@ -100,11 +102,11 @@ func (s *Service) FetchAndStoreForVCI(ctx context.Context, personID, credentialT
 	}()
 	go func() {
 		defer wg.Done()
-		programmeAssociations, programmeErr = s.client.GetProgrammeOfferingAssociationsForPerson(fetchCtx, personID)
+		programmeAssociations, programmeErr = s.client.GetProgrammeOfferingAssociationsForPerson(fetchCtx, personID, oeapi.WithExpand("programme_offering"))
 	}()
 	go func() {
 		defer wg.Done()
-		courseAssociations, courseErr = s.client.GetCourseOfferingAssociationsForPerson(fetchCtx, personID)
+		courseAssociations, courseErr = s.client.GetCourseOfferingAssociationsForPerson(fetchCtx, personID, oeapi.WithExpand("course_offering"))
 	}()
 	wg.Wait()
 
@@ -190,24 +192,4 @@ func firstActiveCourseAssociation(associations []oeapi.CourseOfferingAssociation
 		}
 	}
 	return &associations[0]
-}
-
-// GetCredentialTypes returns the list of credential types this service handles.
-func (s *Service) GetCredentialTypes() []string {
-	return s.cfg.CredentialTypes
-}
-
-// toModelMapping converts oeapi.AttributeMapping to model.AttributeMapping.
-// The types are structurally identical but defined separately to avoid
-// a circular import between pkg/oeapi and pkg/model.
-func toModelMapping(src oeapi.AttributeMapping) model.AttributeMapping {
-	attrs := make(model.AttributeMapping, len(src))
-	for ak, av := range src {
-		attrs[ak] = model.AttributeConfig{
-			Claim:    av.Claim,
-			Required: av.Required,
-			Default:  av.Default,
-		}
-	}
-	return attrs
 }
