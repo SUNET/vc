@@ -107,6 +107,7 @@
         "nosec",
         "NOSONAR",
         "Numerify",
+        "OEAPI",
         "OIDCOP",
         "OIDCRP",
         "OIDCURL",

@@ -17,18 +17,23 @@ import (
 
 // Service is the Edu-API integration service for the API Gateway.
 type Service struct {
-	cfg          *eduapi.Config
-	client       *eduapi.Client
-	mappers map[string]*credential.AttributeMapper // credential type → mapper
-	docCache     pkgcache.Cache[map[string]*model.CompleteDocument]
-	log          *logger.Log
+	cfg      *eduapi.Config
+	client   *eduapi.Client
+	mappers  map[string]*credential.AttributeMapper // credential type → mapper
+	docCache pkgcache.Cache[map[string]*model.CompleteDocument]
+	log      *logger.Log
 }
 
-// New creates a new Edu-API service.
-func New(ctx context.Context, cfg *eduapi.Config, docCache pkgcache.Cache[map[string]*model.CompleteDocument], tokenCache pkgcache.Cache[string], log *logger.Log) (*Service, error) {
-	if !cfg.Enable {
-		log.Info("Edu-API support disabled")
-		return nil, nil
+// New creates a new Edu-API service from a remote connection definition.
+func New(ctx context.Context, remote model.Remote, docCache pkgcache.Cache[map[string]*model.CompleteDocument], tokenCache pkgcache.Cache[string], log *logger.Log) (*Service, error) {
+	cfg := &eduapi.Config{
+		Enable:       true,
+		BaseURL:      remote.BaseURL,
+		TokenURL:     remote.TokenURL,
+		ClientID:     remote.ClientID,
+		ClientSecret: remote.ClientSecret,
+		Scopes:       remote.Scopes,
+		Timeout:      remote.Timeout,
 	}
 
 	clientCfg := cfg.ClientConfig()
@@ -45,11 +50,11 @@ func New(ctx context.Context, cfg *eduapi.Config, docCache pkgcache.Cache[map[st
 	}
 
 	s := &Service{
-		cfg:          cfg,
-		client:       client,
-		mappers: mappers,
-		docCache:     docCache,
-		log:          log.New("eduapi"),
+		cfg:      cfg,
+		client:   client,
+		mappers:  mappers,
+		docCache: docCache,
+		log:      log.New("eduapi"),
 	}
 
 	log.Info("Edu-API service initialized", "base_url", cfg.BaseURL)
