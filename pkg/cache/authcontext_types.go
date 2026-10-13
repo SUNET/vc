@@ -103,8 +103,9 @@ type AuthorizationContext struct {
 	// OpenID4VCI 1.0 defines it for the Authorization Endpoint. Nothing
 	// in the 1.1 Interactive Authorization text says how an
 	// issuer-initiated offer reaches the Authorization Challenge
-	// Endpoint, so this server accepts it there too; see the Challenge
-	// Endpoint's own documentation.
+	// Endpoint, so this server accepts it there too
+	// (openid/OpenID4VCI#815); see the Challenge Endpoint's own
+	// documentation.
 	IssuerState string `json:"issuer_state,omitempty" bson:"issuer_state,omitempty" validate:"omitempty,max=128,printascii"`
 
 	// IdentityMatch is the rule the preparing caller supplied for

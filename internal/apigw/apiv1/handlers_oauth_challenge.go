@@ -62,7 +62,9 @@ type AuthorizationChallengeRequest struct {
 	// authenticated the user elsewhere has no way to say so. First-party
 	// apps explicitly allows extension parameters, and OpenID4VCI defines
 	// this one for the Authorization Endpoint, so it is accepted here
-	// under the same meaning. Reported upstream.
+	// under the same meaning - reported as openid/OpenID4VCI#815, which
+	// also covers the two properties this endpoint gives it that 1.0 does
+	// not state: single use, and not coexisting with auth_session.
 	IssuerState string `json:"issuer_state" form:"issuer_state"`
 
 	// OpenID4VPResponse is the JSON-encoded OpenID4VP Authorization
