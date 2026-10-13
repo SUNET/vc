@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SUNET · {{.Code}} {{.StatusText}}</title>
+    <style>
+        :root {
+            --bg: #f5f6f8;
+            --card: #ffffff;
+            --text: #1f2937;
+            --muted: #6b7280;
+            --border: #e5e7eb;
+            --brand: #c2410c;
+            --brand-dark: #9a3412;
+            --bad-bg: #fee2e2;
+            --bad-fg: #7f1d1d;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+        }
+        .brand-bar {
+            background: var(--brand);
+            color: #fff;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            border-bottom: 3px solid var(--brand-dark);
+        }
+        .brand-bar img { height: 32px; width: auto; display: block; }
+        .brand-bar .wordmark {
+            font-weight: 700;
+            font-size: 18px;
+            letter-spacing: 0.08em;
+        }
+        .brand-bar .brand-tag {
+            margin-left: auto;
+            font-size: 12px;
+            opacity: 0.85;
+            letter-spacing: 0.04em;
+        }
+        .container { max-width: 640px; margin: 0 auto; padding: 48px 16px; }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            border-top: 3px solid var(--brand);
+            padding: 32px;
+            text-align: center;
+        }
+        .code {
+            font-size: 56px;
+            font-weight: 700;
+            line-height: 1;
+            margin: 0;
+            color: var(--brand);
+        }
+        .status {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 8px 0 0;
+        }
+        .message {
+            display: inline-block;
+            margin: 20px 0 0;
+            background: var(--bad-bg);
+            color: var(--bad-fg);
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 13px;
+            word-break: break-word;
+        }
+        .actions { margin-top: 28px; }
+        .back {
+            display: inline-block;
+            font: inherit;
+            font-size: 14px;
+            background: var(--brand);
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            text-decoration: none;
+        }
+        .back:hover { background: var(--brand-dark); }
+        .reqid { margin-top: 24px; color: var(--muted); font-size: 12px; }
+        .reqid code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            background: var(--bg);
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: var(--text);
+            user-select: all;
+        }
+    </style>
+</head>
+<body>
+    <div class="brand-bar">
+        {{if .LogoURI}}<img src="{{.LogoURI}}" alt="">{{end}}
+        <span class="wordmark">SUNET</span>
+        <span class="brand-tag">Verifiable Credentials</span>
+    </div>
+    <div class="container">
+        <div class="card">
+            <p class="code">{{.Code}}</p>
+            <p class="status">{{.StatusText}}</p>
+            {{if .Message}}<p class="message">{{.Message}}</p>{{end}}
+            <div class="actions">
+                <a class="back" href="/" onclick="history.back();return false;">Go back</a>
+            </div>
+            {{if .RequestID}}
+            <p class="reqid">Reference: <code>{{.RequestID}}</code></p>
+            {{end}}
+        </div>
+    </div>
+</body>
+</html>

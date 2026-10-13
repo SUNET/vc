@@ -30,9 +30,14 @@ func New(ctx context.Context, tracer *trace.Tracer, cfg *model.Cfg, log *logger.
 		cfg:    cfg,
 	}
 
+	var branding model.Branding
+	if cfg.Common != nil {
+		branding = cfg.Common.Branding
+	}
+
 	c.Binding = &bindingHandler{client: c, log: log}
 	c.Middleware = &middlewareHandler{client: c, log: log}
-	c.Rendering = &renderingHandler{client: c, log: log}
+	c.Rendering = &renderingHandler{client: c, log: log, errorTmpl: errorPageTemplate(), logoDataURI: errorPageLogo(branding)}
 	c.TLS = &tlsHandler{client: c, log: log}
 	c.Server = &serverHandler{client: c, log: log}
 	c.Validator = &validatorHandler{client: c, log: log}
