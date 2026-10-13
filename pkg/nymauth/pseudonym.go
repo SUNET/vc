@@ -1,0 +1,138 @@
+// Package nymauth implements the parts of the EUDI nym_auth rulebook that
+// an ISSUER needs.
+//
+// That is a small surface. The rulebook gives the Issuer one sentence -
+// it issues a signed attestation with attributes about an identity subject
+// - and assigns pseudonym generation, proving, DCQL satisfiability and
+// session binding to the Wallet and the Verifier. What is here is the one
+// thing an issuer does with a seed after issuance: recompute the pseudonym
+// a Verifier reports, so a pseudonym can be remapped to a person.
+//
+// It is a consumer of pkg/credential/seed and not the other way round:
+// seeds and commitments are generic, and the DST below is the part that
+// names this rulebook.
+package nymauth
+
+import (
+	"crypto/sha256"
+	"fmt"
+)
+
+// Pseudonym configurations from the rulebook's function catalogue. Each
+// decides what prover_input and verifier_input are; the DST is built from
+// the name, so a pseudonym under one configuration is unrelated to the
+// same subject's pseudonym under another.
+const (
+	ConfigKnownOffenderMatchingSSC = "known-offender-matching-ssc"
+	ConfigKnownOffenderMatchingPSC = "known-offender-matching-psc"
+	ConfigAccountRecoverySSC       = "account-recovery-ssc"
+	ConfigUserManagedXsiteSSC      = "user-managed-pseudonym-xsite-ssc"
+)
+
+// nullInput is the 32 zero bytes the rulebook specifies where a
+// configuration does not use one of the two inputs. Not an empty slice:
+// the inputs are concatenated, so a missing one would shift everything
+// after it and produce a different pseudonym.
+var nullInput = make([]byte, 32)
+
+// Pseudonym computes pseudonym-v1-sha256:
+//
+//	pseudonym = SHA256(DST || seed || prover_input || verifier_input)
+//	DST       = "nym_auth/v1/<config>", UTF-8
+//
+// seed is the OPENING of the commitment in the credential - secret_seed
+// for an ssc configuration, private_seed for a psc one - and not the
+// commitment itself.
+//
+// NOTE: the rulebook publishes a vector for the seed/commitment pair and
+// none for a pseudonym, so this construction is implemented from the
+// specification text and has not been checked against a reference output.
+// Treat a disagreement with a Verifier as this being wrong until shown
+// otherwise.
+func Pseudonym(config string, seed, proverInput, verifierInput []byte) ([]byte, error) {
+	if config == "" {
+		return nil, fmt.Errorf("nymauth: no pseudonym configuration named")
+	}
+	if len(seed) == 0 {
+		return nil, fmt.Errorf("nymauth: cannot derive a pseudonym from an empty seed")
+	}
+	if len(proverInput) != len(nullInput) || len(verifierInput) != len(nullInput) {
+		return nil, fmt.Errorf("nymauth: prover_input and verifier_input must each be %d bytes", len(nullInput))
+	}
+
+	h := sha256.New()
+	h.Write([]byte("nym_auth/v1/" + config))
+	h.Write(seed)
+	h.Write(proverInput)
+	h.Write(verifierInput)
+	return h.Sum(nil), nil
+}
+
+// KnownOffenderMatching computes the pseudonym a Verifier identified by
+// verifierID sees, under either the ssc or psc configuration - they differ
+// only in which seed opens which commitment, which is the caller's to
+// supply.
+//
+// prover_input is null; verifier_input is SHA256(verifier_id).
+//
+// verifierID is the full identifier including its prefix, as the rulebook
+// defines it: "semantic_id:..." or "x509_san_dns:...". The two forms give
+// unrelated pseudonyms for the same Relying Party, which is a property of
+// the rulebook and not something to normalise away here.
+func KnownOffenderMatching(config string, seed []byte, verifierID string) ([]byte, error) {
+	switch config {
+	case ConfigKnownOffenderMatchingSSC, ConfigKnownOffenderMatchingPSC:
+	default:
+		return nil, fmt.Errorf("nymauth: %q is not a known-offender-matching configuration", config)
+	}
+	if verifierID == "" {
+		return nil, fmt.Errorf("nymauth: no verifier_id")
+	}
+	verifierInput := sha256.Sum256([]byte(verifierID))
+	return Pseudonym(config, seed, nullInput, verifierInput[:])
+}
+
+// AccountRecovery computes the pseudonym for account-recovery-ssc.
+//
+// prover_input is null; verifier_input is
+// SHA256(SHA256(verifier_id) || SHA256(verifier_context)).
+func AccountRecovery(seed []byte, verifierID, verifierContext string) ([]byte, error) {
+	if verifierID == "" {
+		return nil, fmt.Errorf("nymauth: no verifier_id")
+	}
+	// The rulebook requires verifier_context for this configuration and
+	// bounds it at 1-64 bytes. An absent one is a different pseudonym, not
+	// a tolerable omission.
+	if l := len(verifierContext); l < 1 || l > 64 {
+		return nil, fmt.Errorf("nymauth: verifier_context must be 1-64 bytes for %s", ConfigAccountRecoverySSC)
+	}
+
+	idDigest := sha256.Sum256([]byte(verifierID))
+	ctxDigest := sha256.Sum256([]byte(verifierContext))
+
+	h := sha256.New()
+	h.Write(idDigest[:])
+	h.Write(ctxDigest[:])
+	verifierInput := h.Sum(nil)
+
+	return Pseudonym(ConfigAccountRecoverySSC, seed, nullInput, verifierInput)
+}
+
+// UserManagedXsite computes the pseudonym for
+// user-managed-pseudonym-xsite-ssc.
+//
+// prover_input is the SHA-256 digest of a value the USER chose and shares
+// across the sites they want linked; verifier_input is null, which is why
+// the same pseudonym goes to every Verifier.
+//
+// An issuer can only reproduce this if it learns the user's value, which
+// it has no way to do on its own - included for completeness, and because
+// leaving it out would make the catalogue look like three configurations
+// rather than four.
+func UserManagedXsite(seed []byte, userValue string) ([]byte, error) {
+	if userValue == "" {
+		return nil, fmt.Errorf("nymauth: no user-supplied value")
+	}
+	proverInput := sha256.Sum256([]byte(userValue))
+	return Pseudonym(ConfigUserManagedXsiteSSC, seed, proverInput[:], nullInput)
+}

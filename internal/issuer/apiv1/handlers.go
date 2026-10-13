@@ -39,6 +39,15 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		return nil, err
 	}
 
+	// Seed-backed claims, before anything is signed. A no-op for a scope
+	// with no commitments configured, which is every scope in a deployment
+	// that does not use the feature.
+	documentData, err := c.injectCommitments(ctx, req.Scope, req.DocumentData)
+	if err != nil {
+		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
+		return nil, err
+	}
+
 	// Build credential options. The VCTM bytes and integrity hash come from
 	// the caller (APIGW) which already loaded and verified them from config.
 	// By accepting the VCTM inline the issuer never fetches arbitrary URLs,
@@ -76,7 +85,7 @@ func (c *Client) MakeSDJWT(ctx context.Context, req *CreateCredentialRequest) (*
 		c.cfg.Issuer.JWTAttribute.Issuer,
 		c.signer,
 		req.VCTM,
-		req.DocumentData,
+		documentData,
 		req.JWK,
 		opts,
 	)
@@ -199,10 +208,18 @@ func (c *Client) MakeMDoc(ctx context.Context, req *CreateMDocRequest) (*CreateM
 		}
 	}
 
+	// Seed-backed claims, before anything is signed. A no-op for a scope
+	// with no commitments configured.
+	documentData, err := c.injectCommitments(ctx, req.Scope, req.DocumentData)
+	if err != nil {
+		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
+		return nil, err
+	}
+
 	// Issue the mdoc
 	issuanceReq := &mdoc.IssuanceRequest{
 		DevicePublicKey: deviceKey,
-		DocumentData:    req.DocumentData,
+		DocumentData:    documentData,
 		Schema:          schema,
 	}
 

@@ -1,0 +1,239 @@
+package seed
+
+import (
+	"bytes"
+	"encoding/hex"
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// testSecret is 32 bytes of nothing in particular. Only its length matters
+// to anything here; the derived values are compared against each other.
+var testSecret = bytes.Repeat([]byte("s"), MinSecretBytes)
+
+func mustDeriver(t *testing.T) *Deriver {
+	t.Helper()
+	d, err := NewDeriver(testSecret, 0)
+	require.NoError(t, err)
+	return d
+}
+
+// The commitment is the only value in this package with a published
+// vector: the nym_auth circuit specification's seed/ssc pair. If Commit
+// ever disagrees with it, every credential this issuer writes is one no
+// circuit can open.
+func TestCommitMatchesThePublishedVector(t *testing.T) {
+	seedValue, err := hex.DecodeString("4a8f9c1d2e3f4a5b6c7d8e9f0a1b2c3d")
+	require.NoError(t, err)
+	require.Len(t, seedValue, DefaultSeedBytes)
+
+	commitment, err := Commit(CommitSHA256, seedValue)
+	require.NoError(t, err)
+	assert.Equal(t,
+		"d424c7068cf26ed1a2c899d095f18b390f2f63897d704ed08c410a9368c345ae",
+		hex.EncodeToString(commitment))
+
+	// An unnamed function is the registered one, so a configuration that
+	// omits it is not a configuration that writes a different commitment.
+	defaulted, err := Commit("", seedValue)
+	require.NoError(t, err)
+	assert.Equal(t, commitment, defaulted)
+}
+
+// An unknown digest must not fall back. A commitment written under the
+// wrong function is one nothing can ever open, and it is signed before
+// anyone finds out.
+func TestCommitRefusesAnUnknownFunction(t *testing.T) {
+	_, err := Commit("sha3-256", bytes.Repeat([]byte("x"), DefaultSeedBytes))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown commitment function")
+
+	_, err = CommitmentBytes("sha3-256")
+	assert.Error(t, err, "and the length of a function that does not exist is not 32")
+
+	n, err := CommitmentBytes(CommitSHA256)
+	require.NoError(t, err)
+	assert.Equal(t, 32, n)
+}
+
+// One subject, one seed - the property the whole mechanism rests on. A
+// seed that varied per call, per credential type or per format would make
+// a pseudonym unrepeatable and remapping impossible.
+func TestSeedIsStablePerSubject(t *testing.T) {
+	d := mustDeriver(t)
+
+	first, err := d.Seed(t.Context(), "subject-1", "")
+	require.NoError(t, err)
+	require.Len(t, first, DefaultSeedBytes)
+
+	for range 5 {
+		again, err := d.Seed(t.Context(), "subject-1", "")
+		require.NoError(t, err)
+		assert.Equal(t, first, again)
+	}
+
+	// A second Deriver over the same secret is the same deployment after a
+	// restart, and must agree.
+	other, err := NewDeriver(testSecret, 0)
+	require.NoError(t, err)
+	restarted, err := other.Seed(t.Context(), "subject-1", "")
+	require.NoError(t, err)
+	assert.Equal(t, first, restarted)
+}
+
+// Distinctness across every input that is supposed to separate seeds, and
+// across none that are not.
+func TestSeedSeparatesWhatItShould(t *testing.T) {
+	d := mustDeriver(t)
+	seen := map[string]string{}
+
+	record := func(label, subject, context_ string) {
+		t.Helper()
+		s, err := d.Seed(t.Context(), subject, context_)
+		require.NoError(t, err)
+		key := hex.EncodeToString(s)
+		if prev, clash := seen[key]; clash {
+			t.Fatalf("%s and %s derive the same seed", prev, label)
+		}
+		seen[key] = label
+	}
+
+	record("subject-1", "subject-1", "")
+	record("subject-2", "subject-2", "")
+	record("subject-1 in context a", "subject-1", "a")
+	record("subject-1 in context b", "subject-1", "b")
+
+	// A different secret is a different deployment.
+	otherSecret, err := NewDeriver(bytes.Repeat([]byte("t"), MinSecretBytes), 0)
+	require.NoError(t, err)
+	fromOther, err := otherSecret.Seed(t.Context(), "subject-1", "")
+	require.NoError(t, err)
+	assert.NotContains(t, seen, hex.EncodeToString(fromOther),
+		"a different secret must give unrelated seeds")
+}
+
+// The context and the subject are length-prefixed rather than joined, so
+// no split of the same characters can collide. Joined by a separator,
+// ("a", "b.c") and ("a.b", "c") would be one derivation and two different
+// people would share a seed.
+func TestContextAndSubjectCannotBeConfused(t *testing.T) {
+	d := mustDeriver(t)
+
+	left, err := d.Seed(t.Context(), "b.c", "a")
+	require.NoError(t, err)
+	right, err := d.Seed(t.Context(), "c", "a.b")
+	require.NoError(t, err)
+
+	assert.NotEqual(t, left, right,
+		"two different (context, subject) pairs must not derive one seed")
+}
+
+// An empty subject identifier is the case where a deployment's identity
+// resolution has failed. Deriving over "" would give every such subject
+// one shared seed, and therefore one shared pseudonym.
+func TestSeedRefusesAnEmptySubject(t *testing.T) {
+	d := mustDeriver(t)
+	_, err := d.Seed(t.Context(), "", "")
+	require.ErrorIs(t, err, ErrNoSubject)
+}
+
+func TestNewDeriverRefusesAnUnusableSecret(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		secret []byte
+	}{
+		{name: "empty", secret: nil},
+		{name: "one byte short", secret: bytes.Repeat([]byte("s"), MinSecretBytes-1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewDeriver(tc.secret, 0)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "shorter than")
+			assert.NotContains(t, err.Error(), fmt.Sprint(len(tc.secret)),
+				"the error must not report the secret's length")
+		})
+	}
+}
+
+func TestNewDeriverSeedLength(t *testing.T) {
+	d, err := NewDeriver(testSecret, 0)
+	require.NoError(t, err)
+	assert.Equal(t, DefaultSeedBytes, d.SeedBytes(), "0 means the default")
+
+	d32, err := NewDeriver(testSecret, 32)
+	require.NoError(t, err)
+	s, err := d32.Seed(t.Context(), "subject-1", "")
+	require.NoError(t, err)
+	assert.Len(t, s, 32)
+
+	// A longer seed is a different seed, not the short one extended.
+	//
+	// HKDF expand is a stream, so without the length in the derivation
+	// context the 32-byte seed would literally begin with the 16-byte one.
+	// Not a weakness, but a derivation whose output is a prefix of another
+	// derivation's is a trap for whoever reads this next.
+	short, err := mustDeriver(t).Seed(t.Context(), "subject-1", "")
+	require.NoError(t, err)
+	assert.NotEqual(t, short, s[:DefaultSeedBytes],
+		"the declared seed length must be part of the derivation, not just its output size")
+
+	for _, bad := range []int{-1, MaxSeedBytes + 1} {
+		_, err := NewDeriver(testSecret, bad)
+		assert.Error(t, err, "seed length %d must be refused", bad)
+	}
+}
+
+// The secret is copied in, so a caller reusing or zeroing its buffer
+// cannot silently change every subject's seed afterwards.
+func TestDeriverOwnsItsSecret(t *testing.T) {
+	buf := bytes.Repeat([]byte("s"), MinSecretBytes)
+	d, err := NewDeriver(buf, 0)
+	require.NoError(t, err)
+
+	before, err := d.Seed(t.Context(), "subject-1", "")
+	require.NoError(t, err)
+
+	for i := range buf {
+		buf[i] = 0
+	}
+
+	after, err := d.Seed(t.Context(), "subject-1", "")
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+}
+
+// Nothing on a Deriver may print the secret. The value reaches logs and
+// error messages through %v on enclosing structs without anyone deciding
+// that it should.
+func TestDeriverDoesNotPrintItsSecret(t *testing.T) {
+	d := mustDeriver(t)
+	secretHex := hex.EncodeToString(testSecret)
+
+	// Go renders a []byte differently under each verb, so each one has to
+	// be checked against each spelling the secret could appear in: the
+	// raw bytes (%s), the decimal slice (%v), and hex.
+	decimal := strings.Trim(strings.Join(strings.Fields(fmt.Sprint([]byte(testSecret))), " "), "[]")
+
+	for verb, rendered := range map[string]string{
+		"%v":  fmt.Sprintf("%v", d),
+		"%+v": fmt.Sprintf("%+v", d),
+		"%#v": fmt.Sprintf("%#v", d),
+		"%s":  fmt.Sprintf("%s", []any{d}...),
+		"%q":  fmt.Sprintf("%q", []any{d}...),
+		// The case that actually happens: a struct holding one.
+		"enclosing struct": fmt.Sprintf("%+v", struct{ D *Deriver }{d}),
+	} {
+		assert.NotContains(t, rendered, string(testSecret), "verb %s leaks the raw secret", verb)
+		assert.NotContains(t, rendered, secretHex, "verb %s leaks the secret as hex", verb)
+		assert.NotContains(t, rendered, decimal, "verb %s leaks the secret as a byte slice", verb)
+		assert.Contains(t, rendered, "redacted", "verb %s must render the redaction", verb)
+	}
+}
+
+// Deriver satisfies Source, which is what lets a stored implementation
+// replace it later without anything above changing.
+var _ Source = (*Deriver)(nil)
