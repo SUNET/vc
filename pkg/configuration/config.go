@@ -225,6 +225,11 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 			}
 		}
 
+		// Needs the schemas, so it runs after the loop above.
+		if err := checkCommitmentTargets(cfg); err != nil {
+			return nil, err
+		}
+
 		// Resolve URL-based VCTs from the APIGW public URL so that issued
 		// credentials reference a dereferenceable VCT and the served VCTM
 		// document is consistent.
@@ -303,6 +308,57 @@ func New(ctx context.Context, serviceName string) (*model.Cfg, error) {
 // Client.New iterates the map and dereferences the entry at startup. Here
 // rather than in ResolveVCTUrls because that is gated on an APIGW stanza, so
 // a verifier-only config file never reaches it.
+// checkCommitmentTargets refuses a seed-backed claim an mso_mdoc schema
+// does not declare.
+//
+// The issuer cannot catch this at ITS startup - it has no schemas, it
+// receives them inline per request - so without this the misconfiguration
+// surfaces at issuance. And it surfaces quietly: an mdoc signer emits the
+// elements its schema declares and ignores anything else in the document,
+// so the credential is issued with no commitment in it and nothing
+// reports a thing. The issuer refuses it at issuance too; this is so
+// nobody gets that far.
+//
+// Only mso_mdoc is checked, because it is the only format whose signer
+// drops an undeclared claim. The others carry the document's own claims.
+func checkCommitmentTargets(cfg *model.Cfg) error {
+	if cfg.Common == nil {
+		return nil
+	}
+
+	for _, scope := range slices.Sorted(maps.Keys(cfg.Common.CredentialMetadata)) {
+		meta := cfg.Common.CredentialMetadata[scope]
+		if meta == nil || len(meta.Commitments) == 0 || meta.MDDL == nil {
+			continue
+		}
+
+		for _, path := range slices.Sorted(maps.Keys(meta.Commitments)) {
+			declared := false
+			for namespace, elements := range meta.MDDL.Claims {
+				if _, ok := elements[path]; ok {
+					declared = true
+					break
+				}
+				// The namespace-qualified spelling is how the claim is
+				// named everywhere else, so it is accepted here too.
+				if bare := strings.TrimPrefix(path, namespace+"."); bare != path {
+					if _, ok := elements[bare]; ok {
+						declared = true
+						break
+					}
+				}
+			}
+			if !declared {
+				return fmt.Errorf(
+					"credential_metadata.%s.commitments.%s: the mdoc schema for doctype %q declares no such element, "+
+						"so the signer would drop it and issue a credential without the commitment",
+					scope, path, meta.MDDL.DocType)
+			}
+		}
+	}
+	return nil
+}
+
 func checkCredentialMetadataEntries(cfg *model.Cfg) error {
 	if cfg.Common == nil {
 		return nil

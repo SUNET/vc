@@ -6,10 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/credential/seed"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 )
@@ -144,10 +147,13 @@ func seedSecret(name, path, inline string) ([]byte, error) {
 // injectCommitments writes this scope's seed-backed claims into the
 // document data, and returns it re-encoded.
 //
+// schema is the mso_mdoc schema about to be signed, or nil for a format
+// that has none.
+//
 // A no-op for a scope with no commitments configured, which is every scope
 // in a deployment that does not use the feature - including the encoding
 // round trip, so nothing changes for anybody else.
-func (c *Client) injectCommitments(ctx context.Context, scope string, documentData []byte) ([]byte, error) {
+func (c *Client) injectCommitments(ctx context.Context, scope string, documentData []byte, schema *mdoc.MDDLSchema) ([]byte, error) {
 	meta := c.cfg.GetCredentialMetadata(scope)
 	if meta == nil || len(meta.Commitments) == 0 {
 		return documentData, nil
@@ -161,8 +167,62 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, documentDa
 		doc = map[string]any{}
 	}
 
-	for path, claim := range meta.Commitments {
-		if err := c.injectOneCommitment(ctx, scope, path, claim, meta.Format, doc); err != nil {
+	flat := flatDocument(meta.Format)
+
+	// Every subject identifier is resolved from the document AS RECEIVED,
+	// before anything is written to it.
+	//
+	// Resolving inside the write loop would make the result depend on Go's
+	// map iteration order: a commitment whose subject path happens to name
+	// another commitment's target would sometimes find nothing and
+	// sometimes find the value just injected, and the credential would
+	// differ between two issuances of the same request. Subject is
+	// documented as coming from the received document data, so it reads
+	// the received document data.
+	//
+	// Sorted for the same reason - a deterministic order so that an error
+	// naming one claim is the same error twice.
+	type resolved struct {
+		path      string
+		claim     *model.CommitmentClaim
+		subjectID string
+	}
+	pending := make([]resolved, 0, len(meta.Commitments))
+	for _, path := range slices.Sorted(maps.Keys(meta.Commitments)) {
+		claim := meta.Commitments[path]
+		where := fmt.Sprintf("commitment claim %q for scope %q", path, scope)
+		if claim == nil {
+			return nil, fmt.Errorf("%s: empty commitment", where)
+		}
+
+		// An upstream value must never win. The whole property of an
+		// issuer-held commitment is that the issuer holds the seed; a
+		// value arriving in the document data was computed by something
+		// that does not, so signing it would produce a credential that
+		// looks remappable and is not. Refused rather than overwritten,
+		// because a data source supplying it is a misconfiguration
+		// somebody needs to hear about.
+		if existing, present := lookupPath(doc, path, flat); present && existing != nil {
+			return nil, fmt.Errorf("%s: the document data already carries a value for it, which an issuer-held commitment must not accept", where)
+		}
+
+		// An mdoc signer emits the elements its schema declares and
+		// silently ignores anything else in the document, so a claim path
+		// the schema does not declare would inject cleanly and issue a
+		// credential with no commitment in it.
+		if err := schemaDeclares(schema, path); err != nil {
+			return nil, fmt.Errorf("%s: %w", where, err)
+		}
+
+		subjectID, err := subjectIdentifier(doc, claim.Subject, flat)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", where, err)
+		}
+		pending = append(pending, resolved{path: path, claim: claim, subjectID: subjectID})
+	}
+
+	for _, p := range pending {
+		if err := c.writeCommitment(ctx, scope, p.path, p.claim, p.subjectID, meta.Format, doc, flat); err != nil {
 			return nil, err
 		}
 	}
@@ -174,19 +234,31 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, documentDa
 	return injected, nil
 }
 
-func (c *Client) injectOneCommitment(ctx context.Context, scope, path string, claim *model.CommitmentClaim, format string, doc map[string]any) error {
-	where := fmt.Sprintf("commitment claim %q for scope %q", path, scope)
-
-	// An upstream value must never win. The whole property of an
-	// issuer-held commitment is that the issuer holds the seed; a value
-	// arriving in the document data was computed by something that does
-	// not, so signing it would produce a credential that looks remappable
-	// and is not. Refused rather than overwritten, because a data source
-	// supplying it is a misconfiguration somebody needs to hear about.
-	flat := flatDocument(format)
-	if existing, present := lookupPath(doc, path, flat); present && existing != nil {
-		return fmt.Errorf("%s: the document data already carries a value for it, which an issuer-held commitment must not accept", where)
+// schemaDeclares refuses a claim path an mso_mdoc schema does not declare.
+//
+// Nil schema means a format with no schema to check against, where the
+// claim is the document's own and is carried as written.
+func schemaDeclares(schema *mdoc.MDDLSchema, path string) error {
+	if schema == nil {
+		return nil
 	}
+	for namespace, elements := range schema.Claims {
+		if _, ok := elements[path]; ok {
+			return nil
+		}
+		// Tolerated so an operator may write the namespace-qualified
+		// spelling, which is how the claim is named everywhere else.
+		if strings.TrimPrefix(path, namespace+".") != path {
+			if _, ok := elements[strings.TrimPrefix(path, namespace+".")]; ok {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("the schema for doctype %q declares no such element, so the signer would drop it and issue a credential without the commitment", schema.DocType)
+}
+
+func (c *Client) writeCommitment(ctx context.Context, scope, path string, claim *model.CommitmentClaim, subjectID, format string, doc map[string]any, flat bool) error {
+	where := fmt.Sprintf("commitment claim %q for scope %q", path, scope)
 
 	source, ok := c.seedSources[claim.Seed]
 	if !ok {
@@ -194,11 +266,6 @@ func (c *Client) injectOneCommitment(ctx context.Context, scope, path string, cl
 		// checking here too: this function must not fall back to deriving
 		// from nothing.
 		return fmt.Errorf("%s: seed source %q is not available", where, claim.Seed)
-	}
-
-	subjectID, err := subjectIdentifier(doc, claim.Subject, flat)
-	if err != nil {
-		return fmt.Errorf("%s: %w", where, err)
 	}
 
 	seedValue, err := source.Seed(ctx, subjectID, claim.Context)

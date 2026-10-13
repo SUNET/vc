@@ -9,6 +9,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/credential/seed"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
@@ -53,7 +54,7 @@ func inject(t *testing.T, c *Client, doc map[string]any) map[string]any {
 	t.Helper()
 	in, err := json.Marshal(doc)
 	require.NoError(t, err)
-	out, err := c.injectCommitments(t.Context(), "nym_auth", in)
+	out, err := c.injectCommitments(t.Context(), "nym_auth", in, nil)
 	require.NoError(t, err)
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(out, &got))
@@ -151,7 +152,7 @@ func TestUpstreamCommitmentIsRefused(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = c.injectCommitments(t.Context(), "nym_auth", in)
+	_, err = c.injectCommitments(t.Context(), "nym_auth", in, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already carries a value")
 }
@@ -178,7 +179,7 @@ func TestMissingSubjectRefusesIssuance(t *testing.T) {
 
 			in, err := json.Marshal(tc.doc)
 			require.NoError(t, err)
-			_, err = c.injectCommitments(t.Context(), "nym_auth", in)
+			_, err = c.injectCommitments(t.Context(), "nym_auth", in, nil)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.want)
 		})
@@ -195,11 +196,11 @@ func TestScopeWithoutCommitmentsIsUntouched(t *testing.T) {
 		}}},
 	}
 	in := []byte(`{"given_name":"Anna","birth_date":"1980-01-01"}`)
-	out, err := c.injectCommitments(t.Context(), "pid", in)
+	out, err := c.injectCommitments(t.Context(), "pid", in, nil)
 	require.NoError(t, err)
 	assert.Equal(t, in, out, "the bytes must be the same bytes, not re-encoded")
 
-	unknown, err := c.injectCommitments(t.Context(), "no-such-scope", in)
+	unknown, err := c.injectCommitments(t.Context(), "no-such-scope", in, nil)
 	require.NoError(t, err)
 	assert.Equal(t, in, unknown)
 }
@@ -267,9 +268,114 @@ func TestPathConflictRefusesRatherThanDeletingTheClaim(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = c.injectCommitments(t.Context(), "nym_auth", in)
+	_, err = c.injectCommitments(t.Context(), "nym_auth", in, nil)
 	require.Error(t, err, "a path conflict must refuse the issuance")
 	assert.Contains(t, err.Error(), "path conflict")
+}
+
+// An mdoc signer emits the elements its schema declares and silently
+// ignores anything else in the document. A commitment path the schema
+// does not declare therefore injects cleanly and issues a credential with
+// no commitment in it, reporting nothing.
+func TestMdocSchemaMustDeclareTheCommitmentTarget(t *testing.T) {
+	schema := &mdoc.MDDLSchema{
+		DocType: "eu.europa.ec.eudi.nym_auth.1",
+		Claims: map[string]mdoc.NamespaceClaims{
+			"eu.europa.ec.eudi.nym_auth.1": {
+				"birth_date": {Mandatory: true, ValueType: "full-date"},
+				"ssc":        {Mandatory: true, ValueType: "bstr"},
+			},
+		},
+	}
+
+	doc, err := json.Marshal(map[string]any{"personal_administrative_number": "198001011234"})
+	require.NoError(t, err)
+
+	t.Run("declared, bare", func(t *testing.T) {
+		c := commitmentClient(t, openid4vp.FormatMsoMdoc, sscClaim(), derivedSource())
+		require.NoError(t, c.initSeedSources())
+		_, err := c.injectCommitments(t.Context(), "nym_auth", doc, schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("declared, namespace-qualified", func(t *testing.T) {
+		claim := sscClaim()
+		c := commitmentClient(t, openid4vp.FormatMsoMdoc, claim, derivedSource())
+		c.cfg.Common.CredentialMetadata["nym_auth"].Commitments = map[string]*model.CommitmentClaim{
+			"eu.europa.ec.eudi.nym_auth.1.ssc": claim,
+		}
+		require.NoError(t, c.initSeedSources())
+		_, err := c.injectCommitments(t.Context(), "nym_auth", doc, schema)
+		assert.NoError(t, err, "the namespace-qualified spelling is how the claim is named everywhere else")
+	})
+
+	t.Run("not declared", func(t *testing.T) {
+		claim := sscClaim()
+		c := commitmentClient(t, openid4vp.FormatMsoMdoc, claim, derivedSource())
+		c.cfg.Common.CredentialMetadata["nym_auth"].Commitments = map[string]*model.CommitmentClaim{
+			"psc": claim,
+		}
+		require.NoError(t, c.initSeedSources())
+		_, err := c.injectCommitments(t.Context(), "nym_auth", doc, schema)
+		require.Error(t, err, "the signer would drop it and issue a credential without the commitment")
+		assert.Contains(t, err.Error(), "declares no such element")
+	})
+}
+
+// Subject identifiers are resolved from the document AS RECEIVED, before
+// anything is written to it.
+//
+// Resolving inside the write loop lets one commitment derive from
+// another's freshly injected value. Sorting the claim paths makes that
+// deterministic but not correct: with "a_ssc" written before "z_other",
+// z_other's subject path "a_ssc" finds the commitment just written and
+// derives a seed from it - silently, and from a value that identifies
+// nobody. Subject is documented as coming from the received document
+// data, so it reads the received document data and this refuses.
+func TestSubjectsResolveAgainstTheReceivedDocument(t *testing.T) {
+	c := commitmentClient(t, openid4vp.FormatSDJWTVC, sscClaim(), derivedSource())
+	c.cfg.Common.CredentialMetadata["nym_auth"].Commitments = map[string]*model.CommitmentClaim{
+		"a_ssc": {Seed: "primary", Subject: "personal_administrative_number"},
+		// Sorts AFTER a_ssc, and its subject is a_ssc's target - which the
+		// received document does not carry.
+		"z_other": {Seed: "primary", Subject: "a_ssc"},
+	}
+	require.NoError(t, c.initSeedSources())
+
+	in, err := json.Marshal(map[string]any{"personal_administrative_number": "198001011234"})
+	require.NoError(t, err)
+
+	_, err = c.injectCommitments(t.Context(), "nym_auth", in, nil)
+	require.Error(t, err, "a subject that is not in the received document must refuse")
+	assert.Contains(t, err.Error(), "not present",
+		"and must never derive from a commitment written earlier in the same pass")
+}
+
+// The same request must produce the same credential every time. Go's map
+// iteration order is deliberately randomised, so a pass that reads and
+// writes the same document in one loop can differ between runs.
+func TestInjectionIsOrderIndependent(t *testing.T) {
+	var first map[string]any
+	for i := range 50 {
+		c := commitmentClient(t, openid4vp.FormatSDJWTVC, sscClaim(), derivedSource())
+		c.cfg.Common.CredentialMetadata["nym_auth"].Commitments = map[string]*model.CommitmentClaim{
+			"ssc":   {Seed: "primary", Subject: "personal_administrative_number"},
+			"other": {Seed: "primary", Subject: "given_name", Context: "other"},
+			"third": {Seed: "primary", Subject: "family_name", Context: "third"},
+		}
+		require.NoError(t, c.initSeedSources())
+
+		got := inject(t, c, map[string]any{
+			"personal_administrative_number": "198001011234",
+			"given_name":                     "Anna",
+			"family_name":                    "Andersson",
+		})
+		if i == 0 {
+			first = got
+			continue
+		}
+		assert.Equal(t, first, got, "two passes over the same request produced different documents")
+	}
 }
 
 // Startup refusals. Each of these is a configuration that would otherwise
@@ -389,7 +495,7 @@ func TestInjectionErrorsDoNotCarryTheSubject(t *testing.T) {
 
 	in, err := json.Marshal(map[string]any{"personal_administrative_number": "198001011234"})
 	require.NoError(t, err)
-	_, err = c.injectCommitments(t.Context(), "nym_auth", in)
+	_, err = c.injectCommitments(t.Context(), "nym_auth", in, nil)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "198001011234",
 		"an error about a commitment must not name the person it was for")

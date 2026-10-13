@@ -60,6 +60,13 @@ func run() error {
 		return errors.New("-seed is required")
 	case *subject == "":
 		return errors.New("-subject is required")
+	case *expect != "" && *pseudonymConfig == "":
+		// Refused rather than ignored, because the documented use is a
+		// loop over candidate subjects driven by the exit code. Exiting 0
+		// without having compared anything reports a MATCH for every
+		// candidate, and the operator concludes the first person they
+		// tried is the one behind the pseudonym.
+		return errors.New("-expect needs -pseudonym-config: there is nothing to compare against without one")
 	}
 
 	source, err := loadSeedSource(*configPath, *sourceName)
@@ -86,6 +93,7 @@ func run() error {
 	fmt.Printf("commitment: %s\n", hex.EncodeToString(commitment))
 
 	if *pseudonymConfig == "" {
+		// No -expect either; the guard above refuses that pairing.
 		return nil
 	}
 
@@ -96,6 +104,9 @@ func run() error {
 	fmt.Printf("pseudonym:  %s\n", hex.EncodeToString(pseudonym))
 
 	if *expect == "" {
+		// Nothing to compare against: the pseudonym was asked for and is
+		// printed above. No "match" line, so a caller parsing output
+		// cannot read a comparison that did not happen.
 		return nil
 	}
 	want, err := hex.DecodeString(strings.TrimSpace(*expect))

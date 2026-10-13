@@ -80,6 +80,18 @@ so the path is the element identifier — including one containing dots,
 which is read as a single key and not as a descent. For every other format
 a dotted path descends into the JSON object.
 
+`subject` is read from the document data **as received**, before any
+commitment is written into it. A `subject` naming another commitment's
+claim path therefore refuses rather than deriving a seed from a value this
+issuer just computed.
+
+For `mso_mdoc`, the claim path must be an element the schema declares. A
+signer emits the elements its schema declares and ignores anything else in
+the document, so an undeclared target would inject cleanly and issue a
+credential with no commitment in it. The apigw refuses that at startup,
+where it has the schemas; the issuer refuses it at issuance, where it
+receives them inline.
+
 A path that resolves to nothing, to a non-string, or to an empty string
 **refuses the issuance**. There is no fallback: deriving over `""` would
 give every subject whose identity failed to resolve the same seed, and so
@@ -166,7 +178,10 @@ make build-seed-recover
 ```
 
 It exits 0 on a match and 2 on a mismatch, so it can drive a loop over
-candidate subjects. The seed itself is printed only with `-show-seed`.
+candidate subjects. `-expect` requires `-pseudonym-config`: without one
+there is nothing to compare against, and exiting 0 regardless would report
+a match for every candidate. The seed itself is printed only with
+`-show-seed`.
 
 It reads the issuer's config and secret, so it has to run where those are.
 That is the intended restriction rather than an inconvenience: whoever can
