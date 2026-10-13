@@ -43,7 +43,7 @@ issuer:
   seeds:
     primary:
       model: derived
-      secret_path: /etc/vc/seed/issuer.key   # >= 32 bytes, base64url
+      secret_path: /etc/vc/seed/issuer.key   # base64url; >= 32 bytes DECODED
       # secret: <base64url>                  # the inline alternative; not both
       # seed_bytes: 16                       # default
 ```
@@ -126,6 +126,17 @@ is not a preference, it is what the format's carrier accepts:
 - everything else → `hex`, lowercase, which is what the `nym_auth` circuits
   read from an SD-JWT disclosure.
 
+A commitment is injected as a JSON string, so for `mso_mdoc` only `bstr`
+and `tstr` elements may be targets. Anything else is refused at startup:
+`int` and `uint` fail the conversion after a revocation entry has already
+been allocated, and `bool`, `array` and `map` do not fail at all — the
+value passes through and is signed as a CBOR text string where the schema
+promises something else, which only a verifier ever discovers.
+
+In a nested format, two commitment paths where one is nested under the
+other (`a` and `a.b`) are refused for the same reason: the outer is written
+as a string, so the inner could never be written at all.
+
 ## The derivation secret is permanent
 
 ```
@@ -136,6 +147,11 @@ commitment = SHA-256(seed)
 
 `lp(x)` is a two-byte big-endian length followed by the bytes, so no two
 context fields can be slid into one another.
+
+The file holds the secret **base64url-encoded**, and the decoded value must
+be at least 32 bytes — 32 raw bytes in the file decode to 24 or fail
+outright. `head -c 32 /dev/urandom | basenc --base64url | tr -d '='`
+produces one.
 
 **Back the secret up. Do not rotate it.**
 

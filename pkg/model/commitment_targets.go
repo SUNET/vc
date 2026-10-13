@@ -97,6 +97,25 @@ func (c *CredentialMetadata) ResolveCommitmentTargets(schema *mdoc.MDDLSchema) (
 				"commitment claims %q and %q both resolve to %q; one would silently overwrite the other",
 				other, path, element)
 		}
+		// In a nested document "a" and "a.b" are mutually exclusive too:
+		// the first is written as a string, and writing the second then
+		// has to descend through it. Caught here rather than left to
+		// issuance, where it is a path conflict that refuses every
+		// credential - deterministically, so an operator should be told
+		// at startup instead of by the first holder who tries.
+		//
+		// Not a relation in a flat document, where a dotted element
+		// identifier is one key and nothing descends into it.
+		if c.Format != openid4vp.FormatMsoMdoc {
+			for taken, other := range claimedBy {
+				if isNestedUnder(element, taken) || isNestedUnder(taken, element) {
+					return nil, fmt.Errorf(
+						"commitment claims %q and %q resolve to %q and %q, and one is nested under the other; "+
+							"the outer is written as a string, so the inner could never be written at all",
+						other, path, taken, element)
+				}
+			}
+		}
 		claimedBy[element] = path
 
 		resolved = append(resolved, CommitmentTarget{
@@ -178,13 +197,23 @@ func resolveEncoding(configured, format string) (string, error) {
 	}
 }
 
-// checkCarrier refuses an encoding the target element cannot carry.
+// checkCarrier refuses a target element that cannot carry a commitment.
 //
-// A bstr element is decoded as standard base64, and a 64-character
-// SHA-256 hex string is ITSELF valid base64 - so hex here does not fail.
-// It decodes to 48 bytes of nothing and is signed as the commitment, and
-// a 48-byte bstr is a perfectly well-formed element, so nothing
-// downstream can tell. The only symptom is that no proof ever verifies.
+// Every commitment is injected as a JSON STRING, so the element's declared
+// value_type decides what mdoc then makes of it. Only two can hold one:
+//
+//   - bstr, which mdoc decodes as standard base64. A 64-character SHA-256
+//     hex string is ITSELF valid base64, so configuring hex here does not
+//     fail - it decodes to 48 bytes of nothing and is signed as the
+//     commitment, and a 48-byte bstr is perfectly well-formed. Base64 only.
+//   - tstr, which carries the string as written.
+//
+// Everything else is refused at startup rather than at issuance. int and
+// uint fail the conversion - after a status list entry has been allocated
+// and never handed back - and bool, array and map do not fail at all:
+// convertElementValue passes an unrecognised value_type through unchanged,
+// so the commitment would be signed as a CBOR text string where the schema
+// promises something else, and only a verifier would ever find out.
 func (c *CredentialMetadata) checkCarrier(schema *mdoc.MDDLSchema, element, encoding string) error {
 	if schema == nil || c.Format != openid4vp.FormatMsoMdoc {
 		return nil
@@ -194,10 +223,24 @@ func (c *CredentialMetadata) checkCarrier(schema *mdoc.MDDLSchema, element, enco
 		if !ok {
 			continue
 		}
-		if meta.ValueType == "bstr" && encoding != CommitmentEncodingBase64 {
-			return fmt.Errorf("the schema declares it as bstr, which mdoc decodes as base64, so encoding %q would sign the decoded %[1]s string instead of the commitment", encoding)
+		switch meta.ValueType {
+		case "bstr":
+			if encoding != CommitmentEncodingBase64 {
+				return fmt.Errorf("the schema declares it as bstr, which mdoc decodes as base64, so encoding %q would sign the decoded %[1]s string instead of the commitment", encoding)
+			}
+			return nil
+		case "tstr":
+			return nil
+		default:
+			return fmt.Errorf("the schema declares it as %q, which cannot carry a commitment: it is injected as a JSON string, and only bstr and tstr elements accept one",
+				meta.ValueType)
 		}
-		return nil
 	}
 	return nil
+}
+
+// isNestedUnder reports whether child is written inside parent in a
+// nested document - "a.b" under "a", but not "ab" under "a".
+func isNestedUnder(child, parent string) bool {
+	return strings.HasPrefix(child, parent+".")
 }

@@ -163,3 +163,89 @@ func TestNoCommitmentsResolvesToNothing(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, targets)
 }
+
+// In a nested document "a" and "a.b" are mutually exclusive: the outer is
+// written as a string, so writing the inner has to descend through it and
+// cannot. Startup accepted that configuration and every issuance then
+// failed with a path conflict - deterministically, which is exactly the
+// kind of error an operator should be told about at startup.
+func TestNestedParentAndChildTargetsAreRefused(t *testing.T) {
+	for _, pair := range [][2]string{
+		{"a", "a.b"},
+		{"a.b", "a"},
+		{"identity", "identity.ssc"},
+		{"a.b", "a.b.c"},
+	} {
+		meta := &CredentialMetadata{
+			Format: openid4vp.FormatSDJWTVC,
+			Commitments: map[string]*CommitmentClaim{
+				pair[0]: sscClaim(),
+				pair[1]: sscClaim(),
+			},
+		}
+		_, err := meta.ResolveCommitmentTargets(nil)
+		require.Error(t, err, "%q and %q cannot both be written", pair[0], pair[1])
+		assert.Contains(t, err.Error(), "nested under the other")
+	}
+
+	// Siblings and merely-similar names are fine.
+	for _, pair := range [][2]string{{"a", "b"}, {"a", "ab"}, {"a.b", "a.c"}} {
+		meta := &CredentialMetadata{
+			Format: openid4vp.FormatSDJWTVC,
+			Commitments: map[string]*CommitmentClaim{
+				pair[0]: sscClaim(),
+				pair[1]: sscClaim(),
+			},
+		}
+		_, err := meta.ResolveCommitmentTargets(nil)
+		assert.NoError(t, err, "%q and %q are independent", pair[0], pair[1])
+	}
+
+	// A flat document has no nesting: a dotted element identifier is one
+	// key and nothing descends into it.
+	flat := &CredentialMetadata{
+		Format: openid4vp.FormatMsoMdoc,
+		Commitments: map[string]*CommitmentClaim{
+			"a":   sscClaim(),
+			"a.b": sscClaim(),
+		},
+	}
+	_, err := flat.ResolveCommitmentTargets(nil)
+	assert.NoError(t, err, "mdoc element identifiers are flat keys, not paths")
+}
+
+// A commitment is injected as a JSON string, so only elements that can
+// carry one may be targets. int and uint fail conversion AFTER a status
+// list entry has been allocated; bool, array and map do not fail at all -
+// convertElementValue passes an unrecognised value_type through, so the
+// commitment is signed as a CBOR text string where the schema promises
+// something else, and only a verifier finds out.
+func TestOnlyStringCarryingElementsMayHoldACommitment(t *testing.T) {
+	for valueType, allowed := range map[string]bool{
+		"bstr":      true,
+		"tstr":      true,
+		"int":       false,
+		"uint":      false,
+		"bool":      false,
+		"array":     false,
+		"map":       false,
+		"full-date": false,
+		"tdate":     false,
+	} {
+		schema := &mdoc.MDDLSchema{
+			DocType: "org.example.1",
+			Claims:  map[string]mdoc.NamespaceClaims{"org.example.1": {"ssc": {ValueType: valueType}}},
+		}
+		meta := &CredentialMetadata{
+			Format:      openid4vp.FormatMsoMdoc,
+			Commitments: map[string]*CommitmentClaim{"ssc": sscClaim()},
+		}
+		_, err := meta.ResolveCommitmentTargets(schema)
+		if allowed {
+			assert.NoError(t, err, "value_type %q can carry a commitment", valueType)
+			continue
+		}
+		require.Error(t, err, "value_type %q cannot carry a commitment", valueType)
+		assert.Contains(t, err.Error(), "cannot carry a commitment")
+	}
+}

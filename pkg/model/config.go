@@ -637,9 +637,16 @@ type SeedSource struct {
 	// subject a seed the operator did not ask for.
 	Model string `yaml:"model" validate:"required,oneof=derived stored" doc_example:"\"derived\""`
 
-	// SecretPath is a file holding the derivation secret, at least 32
-	// bytes. Preferred where a file can be mounted, since it keeps the
-	// secret out of the rendered config entirely.
+	// SecretPath is a file holding the derivation secret, base64url-encoded
+	// (padding and trailing whitespace are tolerated), whose DECODED value
+	// must be at least 32 bytes. Preferred where a file can be mounted,
+	// since it keeps the secret out of the rendered config entirely.
+	//
+	// Base64url rather than raw bytes, matching BBSConfig.SecretKeyPath:
+	// 32 raw bytes in this file decode to 24 or fail outright, which is a
+	// confusing way to find out the format was not what you assumed.
+	// `head -c 32 /dev/urandom | basenc --base64url | tr -d '='` produces
+	// one.
 	//
 	// THE SECRET IS PERMANENT. Every commitment ever written under it is a
 	// function of it, so replacing it gives every subject a new seed and a
@@ -649,7 +656,8 @@ type SeedSource struct {
 	// mechanism, because having one would suggest otherwise.
 	SecretPath string `yaml:"secret_path" validate:"omitempty" doc_example:"\"/etc/vc/seed/issuer.key\""`
 
-	// Secret is the same value inline, base64url-encoded.
+	// Secret is the same value inline, base64url-encoded, decoding to at
+	// least 32 bytes.
 	//
 	// Exists for the same reason BBSConfig.SecretKey does: a Helm chart
 	// that models specific named secret volumes cannot add one for a key
