@@ -85,7 +85,10 @@ commitment is written into it. A `subject` naming another commitment's
 claim path therefore refuses rather than deriving a seed from a value this
 issuer just computed.
 
-For `mso_mdoc`, the claim path must be an element the schema declares. A
+For `mso_mdoc`, the claim path must be an element the schema declares. The
+namespace-qualified spelling is accepted and normalised to the bare element
+identifier, because that is what an mdoc document is keyed by — writing the
+qualified path verbatim would be dropped by the signer. A
 signer emits the elements its schema declares and ignores anything else in
 the document, so an undeclared target would inject cleanly and issue a
 credential with no commitment in it. The apigw refuses that at startup,
@@ -115,8 +118,11 @@ How the commitment bytes are written into the document data. The default
 is not a preference, it is what the format's carrier accepts:
 
 - `mso_mdoc` → `base64`. A `bstr` element arrives as JSON and is decoded as
-  standard base64, so hex there would be signed as the ASCII of the hex
-  rather than as the 32 bytes.
+  standard base64. Setting `hex` against a `bstr` target is refused, at
+  startup and at issuance, because it does not fail on its own: a
+  64-character hex commitment is itself valid base64, so it would decode to
+  48 bytes of nothing and be signed as the commitment, and nothing
+  downstream could tell.
 - everything else → `hex`, lowercase, which is what the `nym_auth` circuits
   read from an SD-JWT disclosure.
 

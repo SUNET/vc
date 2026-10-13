@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -298,15 +299,58 @@ func TestMdocSchemaMustDeclareTheCommitmentTarget(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("declared, namespace-qualified", func(t *testing.T) {
+	t.Run("declared, namespace-qualified, written at the bare element id", func(t *testing.T) {
 		claim := sscClaim()
 		c := commitmentClient(t, openid4vp.FormatMsoMdoc, claim, derivedSource())
 		c.cfg.Common.CredentialMetadata["nym_auth"].Commitments = map[string]*model.CommitmentClaim{
 			"eu.europa.ec.eudi.nym_auth.1.ssc": claim,
 		}
 		require.NoError(t, c.initSeedSources())
+
+		out, err := c.injectCommitments(t.Context(), "nym_auth", doc, schema)
+		require.NoError(t, err, "the namespace-qualified spelling is how the claim is named everywhere else")
+
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(out, &got))
+		assert.NotEmpty(t, got["ssc"],
+			"an mdoc document is keyed by bare element identifier; writing the qualified path verbatim would be dropped by the signer")
+		assert.NotContains(t, got, "eu.europa.ec.eudi.nym_auth.1.ssc")
+	})
+
+	// The dangerous half of the same bug: with a qualified configuration,
+	// an upstream BARE value is the one the signer reads, so missing it
+	// means signing a commitment the issuer did not compute.
+	t.Run("a qualified target still detects an upstream bare value", func(t *testing.T) {
+		claim := sscClaim()
+		c := commitmentClient(t, openid4vp.FormatMsoMdoc, claim, derivedSource())
+		c.cfg.Common.CredentialMetadata["nym_auth"].Commitments = map[string]*model.CommitmentClaim{
+			"eu.europa.ec.eudi.nym_auth.1.ssc": claim,
+		}
+		require.NoError(t, c.initSeedSources())
+
+		withUpstream, err := json.Marshal(map[string]any{
+			"personal_administrative_number": "198001011234",
+			"ssc":                            base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", 32))),
+		})
+		require.NoError(t, err)
+
+		_, err = c.injectCommitments(t.Context(), "nym_auth", withUpstream, schema)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "already carries a value")
+	})
+
+	// A bstr element is decoded as standard base64, and a 64-character hex
+	// commitment is itself valid base64 - so hex does not fail here, it
+	// decodes to 48 bytes of nothing and signs those.
+	t.Run("hex against a bstr target", func(t *testing.T) {
+		claim := sscClaim()
+		claim.Encoding = "hex"
+		c := commitmentClient(t, openid4vp.FormatMsoMdoc, claim, derivedSource())
+		require.NoError(t, c.initSeedSources())
+
 		_, err := c.injectCommitments(t.Context(), "nym_auth", doc, schema)
-		assert.NoError(t, err, "the namespace-qualified spelling is how the claim is named everywhere else")
+		require.Error(t, err, "a 64-character hex string decodes as base64 to 48 bytes, and nothing downstream could tell")
+		assert.Contains(t, err.Error(), "bstr")
 	})
 
 	t.Run("not declared", func(t *testing.T) {
@@ -530,4 +574,41 @@ func TestPathResolution(t *testing.T) {
 		assert.NotEmpty(t, got["eu.europa.ec.eudi.nym_auth.1.ssc"],
 			"a dotted element identifier must be written flat, as mdoc document data is")
 	})
+}
+
+// Injecting a commitment must not rewrite claims it never touched.
+//
+// Decoding into map[string]any turns every JSON number into a float64,
+// and marshalling that back changes any integer past 2^53. MakeJWP
+// forwarded the document untouched before this feature existed, so
+// without UseNumber the injection is a silent data change for every
+// number in every document it passes through.
+func TestInjectionPreservesEveryOtherClaimExactly(t *testing.T) {
+	c := commitmentClient(t, openid4vp.FormatSDJWTVC, sscClaim(), derivedSource())
+	require.NoError(t, c.initSeedSources())
+
+	in := []byte(`{"personal_administrative_number":"198001011234",` +
+		`"big":9007199254740993,` +
+		`"precise":0.1234567890123456789,` +
+		`"huge":123456789012345678901234567890,` +
+		`"negative":-9007199254740993,` +
+		`"nested":{"also_big":9007199254740993}}`)
+
+	out, err := c.injectCommitments(t.Context(), "nym_auth", in, nil)
+	require.NoError(t, err)
+
+	var got map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(out))
+	decoder.UseNumber()
+	require.NoError(t, decoder.Decode(&got))
+
+	assert.Equal(t, json.Number("9007199254740993"), got["big"])
+	assert.Equal(t, json.Number("0.1234567890123456789"), got["precise"])
+	assert.Equal(t, json.Number("123456789012345678901234567890"), got["huge"])
+	assert.Equal(t, json.Number("-9007199254740993"), got["negative"])
+	nested, ok := got["nested"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, json.Number("9007199254740993"), nested["also_big"])
+
+	assert.NotEmpty(t, got["ssc"], "and the commitment is still written")
 }

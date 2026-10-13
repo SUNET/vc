@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
@@ -144,6 +145,17 @@ func seedSecret(name, path, inline string) ([]byte, error) {
 	}
 }
 
+// resolvedCommitment is one commitment claim with everything the write
+// pass needs already settled: nothing below reads configuration or the
+// document again, which is what makes the pass order-independent.
+type resolvedCommitment struct {
+	path      string // as configured, for error messages
+	target    string // the key the signer actually reads
+	encoding  string
+	claim     *model.CommitmentClaim
+	subjectID string
+}
+
 // injectCommitments writes this scope's seed-backed claims into the
 // document data, and returns it re-encoded.
 //
@@ -159,8 +171,16 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, documentDa
 		return documentData, nil
 	}
 
+	// UseNumber, so that re-encoding the document does not rewrite claims
+	// this function never touched. Plain Unmarshal turns every JSON number
+	// into a float64, and marshalling that back changes any integer past
+	// 2^53 - 9007199254740993 is signed as ...992. MakeJWP forwarded the
+	// bytes untouched before this feature existed, so without this the
+	// injection is a silent data change for every number in the document.
 	var doc map[string]any
-	if err := json.Unmarshal(documentData, &doc); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(documentData))
+	decoder.UseNumber()
+	if err := decoder.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("commitment claims for scope %q: document data is not a JSON object: %w", scope, err)
 	}
 	if doc == nil {
@@ -182,12 +202,7 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, documentDa
 	//
 	// Sorted for the same reason - a deterministic order so that an error
 	// naming one claim is the same error twice.
-	type resolved struct {
-		path      string
-		claim     *model.CommitmentClaim
-		subjectID string
-	}
-	pending := make([]resolved, 0, len(meta.Commitments))
+	pending := make([]resolvedCommitment, 0, len(meta.Commitments))
 	for _, path := range slices.Sorted(maps.Keys(meta.Commitments)) {
 		claim := meta.Commitments[path]
 		where := fmt.Sprintf("commitment claim %q for scope %q", path, scope)
@@ -202,15 +217,17 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, documentDa
 		// looks remappable and is not. Refused rather than overwritten,
 		// because a data source supplying it is a misconfiguration
 		// somebody needs to hear about.
-		if existing, present := lookupPath(doc, path, flat); present && existing != nil {
-			return nil, fmt.Errorf("%s: the document data already carries a value for it, which an issuer-held commitment must not accept", where)
+
+		target, err := resolveMdocTarget(schema, path)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", where, err)
 		}
 
-		// An mdoc signer emits the elements its schema declares and
-		// silently ignores anything else in the document, so a claim path
-		// the schema does not declare would inject cleanly and issue a
-		// credential with no commitment in it.
-		if err := schemaDeclares(schema, path); err != nil {
+		encoding, err := commitmentEncoding(claim, meta.Format)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", where, err)
+		}
+		if err := checkMdocCarrier(schema, target, encoding); err != nil {
 			return nil, fmt.Errorf("%s: %w", where, err)
 		}
 
@@ -218,11 +235,19 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, documentDa
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", where, err)
 		}
-		pending = append(pending, resolved{path: path, claim: claim, subjectID: subjectID})
+		// Against the RESOLVED target, which is the key the signer reads.
+		// Checking the configured spelling instead would miss an upstream
+		// bare value under a namespace-qualified configuration, and that
+		// value is the one that would be signed.
+		if existing, present := lookupPath(doc, target, flat); present && existing != nil {
+			return nil, fmt.Errorf("%s: the document data already carries a value for it, which an issuer-held commitment must not accept", where)
+		}
+
+		pending = append(pending, resolvedCommitment{path: path, target: target, encoding: encoding, claim: claim, subjectID: subjectID})
 	}
 
 	for _, p := range pending {
-		if err := c.writeCommitment(ctx, scope, p.path, p.claim, p.subjectID, meta.Format, doc, flat); err != nil {
+		if err := c.writeCommitment(ctx, scope, p, doc, flat); err != nil {
 			return nil, err
 		}
 	}
@@ -234,52 +259,90 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, documentDa
 	return injected, nil
 }
 
-// schemaDeclares refuses a claim path an mso_mdoc schema does not declare.
+// resolveMdocTarget maps a configured claim path to the key an mdoc
+// document is actually keyed by, and refuses one the schema does not
+// declare.
 //
-// Nil schema means a format with no schema to check against, where the
-// claim is the document's own and is carried as written.
-func schemaDeclares(schema *mdoc.MDDLSchema, path string) error {
+// Two things make this more than a lookup:
+//
+// An mdoc document is FLAT and keyed by bare element identifier -
+// addElements reads doc[elementID] - so a namespace-qualified target
+// cannot be written verbatim. Doing that drops the value AND, worse, makes
+// the pre-existing-value check look at the wrong key, so an upstream bare
+// "ssc" goes unnoticed and is what gets signed. The qualified spelling is
+// how the claim is named everywhere else in the configuration, so it is
+// accepted and NORMALISED here rather than refused.
+//
+// And the signer emits only the elements the schema declares, ignoring
+// anything else in the document - so an undeclared target would inject
+// cleanly and issue a credential with no commitment in it.
+//
+// An empty schema name means a format with no schema to check against,
+// where the claim is the document's own and is carried as written.
+func resolveMdocTarget(schema *mdoc.MDDLSchema, path string) (string, error) {
 	if schema == nil {
-		return nil
+		return path, nil
 	}
 	for namespace, elements := range schema.Claims {
 		if _, ok := elements[path]; ok {
-			return nil
+			return path, nil
 		}
-		// Tolerated so an operator may write the namespace-qualified
-		// spelling, which is how the claim is named everywhere else.
-		if strings.TrimPrefix(path, namespace+".") != path {
-			if _, ok := elements[strings.TrimPrefix(path, namespace+".")]; ok {
-				return nil
+		if bare := strings.TrimPrefix(path, namespace+"."); bare != path {
+			if _, ok := elements[bare]; ok {
+				return bare, nil
 			}
 		}
 	}
-	return fmt.Errorf("the schema for doctype %q declares no such element, so the signer would drop it and issue a credential without the commitment", schema.DocType)
+	return "", fmt.Errorf("the schema for doctype %q declares no such element, so the signer would drop it and issue a credential without the commitment", schema.DocType)
 }
 
-func (c *Client) writeCommitment(ctx context.Context, scope, path string, claim *model.CommitmentClaim, subjectID, format string, doc map[string]any, flat bool) error {
-	where := fmt.Sprintf("commitment claim %q for scope %q", path, scope)
+// checkMdocCarrier refuses an encoding the target element cannot carry.
+//
+// A bstr element arrives as JSON and mdoc decodes it as STANDARD BASE64.
+// A 64-character SHA-256 hex string is itself valid base64, so configuring
+// encoding: hex against a bstr target does not fail - it decodes to 48
+// bytes of nothing and signs those as the commitment. Nothing downstream
+// can tell, because a 48-byte bstr is a perfectly well-formed element.
+func checkMdocCarrier(schema *mdoc.MDDLSchema, element, encoding string) error {
+	if schema == nil {
+		return nil
+	}
+	for _, elements := range schema.Claims {
+		meta, ok := elements[element]
+		if !ok {
+			continue
+		}
+		if meta.ValueType == "bstr" && encoding != encodingBase64 {
+			return fmt.Errorf("the schema declares it as bstr, which mdoc decodes as base64, so encoding %q would sign the decoded %[1]s string instead of the commitment", encoding)
+		}
+		return nil
+	}
+	return nil
+}
 
-	source, ok := c.seedSources[claim.Seed]
+func (c *Client) writeCommitment(ctx context.Context, scope string, p resolvedCommitment, doc map[string]any, flat bool) error {
+	where := fmt.Sprintf("commitment claim %q for scope %q", p.path, scope)
+
+	source, ok := c.seedSources[p.claim.Seed]
 	if !ok {
 		// Unreachable if initSeedSources ran, which is the point of
 		// checking here too: this function must not fall back to deriving
 		// from nothing.
-		return fmt.Errorf("%s: seed source %q is not available", where, claim.Seed)
+		return fmt.Errorf("%s: seed source %q is not available", where, p.claim.Seed)
 	}
 
-	seedValue, err := source.Seed(ctx, subjectID, claim.Context)
+	seedValue, err := source.Seed(ctx, p.subjectID, p.claim.Context)
 	if err != nil {
 		// The subject identifier is NOT in this error: it is the thing
 		// that identifies the person, and this error reaches a log.
 		return fmt.Errorf("%s: %w", where, err)
 	}
 
-	commitment, err := seed.Commit(claim.Commit, seedValue)
+	commitment, err := seed.Commit(p.claim.Commit, seedValue)
 	if err != nil {
 		return fmt.Errorf("%s: %w", where, err)
 	}
-	expected, err := seed.CommitmentBytes(claim.Commit)
+	expected, err := seed.CommitmentBytes(p.claim.Commit)
 	if err != nil {
 		return fmt.Errorf("%s: %w", where, err)
 	}
@@ -287,19 +350,17 @@ func (c *Client) writeCommitment(ctx context.Context, scope, path string, claim 
 		return fmt.Errorf("%s: commitment is %d bytes, expected %d", where, len(commitment), expected)
 	}
 
-	encoding, err := commitmentEncoding(claim, format)
-	if err != nil {
-		return fmt.Errorf("%s: %w", where, err)
-	}
 	var encoded string
-	switch encoding {
+	switch p.encoding {
 	case encodingHex:
 		encoded = hex.EncodeToString(commitment)
 	case encodingBase64:
 		encoded = base64.StdEncoding.EncodeToString(commitment)
+	default:
+		return fmt.Errorf("%s: unknown encoding %q", where, p.encoding)
 	}
 
-	if err := setPath(doc, path, encoded, flat); err != nil {
+	if err := setPath(doc, p.target, encoded, flat); err != nil {
 		return fmt.Errorf("%s: %w", where, err)
 	}
 	return nil

@@ -333,26 +333,45 @@ func checkCommitmentTargets(cfg *model.Cfg) error {
 		}
 
 		for _, path := range slices.Sorted(maps.Keys(meta.Commitments)) {
-			declared := false
+			where := fmt.Sprintf("credential_metadata.%s.commitments.%s", scope, path)
+
+			element, declared := "", false
 			for namespace, elements := range meta.MDDL.Claims {
 				if _, ok := elements[path]; ok {
-					declared = true
+					element, declared = path, true
 					break
 				}
 				// The namespace-qualified spelling is how the claim is
-				// named everywhere else, so it is accepted here too.
+				// named everywhere else, so it is accepted and normalised
+				// to the bare element identifier - which is what an mdoc
+				// document is keyed by.
 				if bare := strings.TrimPrefix(path, namespace+"."); bare != path {
 					if _, ok := elements[bare]; ok {
-						declared = true
+						element, declared = bare, true
 						break
 					}
 				}
 			}
 			if !declared {
 				return fmt.Errorf(
-					"credential_metadata.%s.commitments.%s: the mdoc schema for doctype %q declares no such element, "+
+					"%s: the mdoc schema for doctype %q declares no such element, "+
 						"so the signer would drop it and issue a credential without the commitment",
-					scope, path, meta.MDDL.DocType)
+					where, meta.MDDL.DocType)
+			}
+
+			// A bstr element arrives as JSON and mdoc decodes it as
+			// standard base64. A 64-character hex commitment is itself
+			// valid base64, so hex here does not fail - it decodes to 48
+			// bytes of nothing and signs those.
+			if meta.Commitments[path].Encoding == "hex" {
+				for _, elements := range meta.MDDL.Claims {
+					if m, ok := elements[element]; ok && m.ValueType == "bstr" {
+						return fmt.Errorf(
+							"%s: the schema declares it as bstr, which mdoc decodes as base64, "+
+								"so encoding \"hex\" would sign the decoded hex string instead of the commitment",
+							where)
+					}
+				}
 			}
 		}
 	}
