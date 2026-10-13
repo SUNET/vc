@@ -16,6 +16,7 @@ package nymauth
 import (
 	"crypto/sha256"
 	"fmt"
+	"strings"
 )
 
 // Pseudonym configurations from the rulebook's function catalogue. Each
@@ -80,6 +81,36 @@ func Pseudonym(config string, seed, proverInput, verifierInput []byte) ([]byte, 
 	return h.Sum(nil), nil
 }
 
+// Verifier identifier prefixes the rulebook defines. A verifier_id is
+// exactly one of these followed by a non-empty value; the two yield
+// unrelated pseudonyms for the same Relying Party, which is a property of
+// the rulebook and not something to normalise away.
+const (
+	VerifierIDSemantic   = "semantic_id:"
+	VerifierIDX509SANDNS = "x509_san_dns:"
+)
+
+// checkVerifierID refuses an identifier no conforming Verifier could have
+// reported.
+//
+// Hashing whatever it is given would succeed and return a 32-byte
+// pseudonym indistinguishable from a correct one - so a remapping loop
+// comparing against a Verifier's real pseudonym would simply never match,
+// and the operator would conclude the subject is not the one they are
+// looking for. A wrong answer, not an error.
+func checkVerifierID(verifierID string) error {
+	for _, prefix := range []string{VerifierIDSemantic, VerifierIDX509SANDNS} {
+		if value, ok := strings.CutPrefix(verifierID, prefix); ok {
+			if value == "" {
+				return fmt.Errorf("nymauth: verifier_id %q has no value after its prefix", verifierID)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("nymauth: verifier_id must begin with %q or %q, which is what a Verifier reports; got %q",
+		VerifierIDSemantic, VerifierIDX509SANDNS, verifierID)
+}
+
 // KnownOffenderMatching computes the pseudonym a Verifier identified by
 // verifierID sees, under either the ssc or psc configuration - they differ
 // only in which seed opens which commitment, which is the caller's to
@@ -97,8 +128,8 @@ func KnownOffenderMatching(config string, seed []byte, verifierID string) ([]byt
 	default:
 		return nil, fmt.Errorf("nymauth: %q is not a known-offender-matching configuration", config)
 	}
-	if verifierID == "" {
-		return nil, fmt.Errorf("nymauth: no verifier_id")
+	if err := checkVerifierID(verifierID); err != nil {
+		return nil, err
 	}
 	verifierInput := sha256.Sum256([]byte(verifierID))
 	return Pseudonym(config, seed, nullInput, verifierInput[:])
@@ -109,8 +140,8 @@ func KnownOffenderMatching(config string, seed []byte, verifierID string) ([]byt
 // prover_input is null; verifier_input is
 // SHA256(SHA256(verifier_id) || SHA256(verifier_context)).
 func AccountRecovery(seed []byte, verifierID, verifierContext string) ([]byte, error) {
-	if verifierID == "" {
-		return nil, fmt.Errorf("nymauth: no verifier_id")
+	if err := checkVerifierID(verifierID); err != nil {
+		return nil, err
 	}
 	// The rulebook requires verifier_context for this configuration and
 	// bounds it at 1-64 bytes. An absent one is a different pseudonym, not

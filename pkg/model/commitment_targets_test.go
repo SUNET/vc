@@ -249,3 +249,61 @@ func TestOnlyStringCarryingElementsMayHoldACommitment(t *testing.T) {
 		assert.Contains(t, err.Error(), "cannot carry a commitment")
 	}
 }
+
+// A format's signing layer writes some claims for itself, AFTER the
+// document this feature injects into has been parsed. A commitment
+// configured at one of them is injected perfectly well and then
+// overwritten, so the credential carries the envelope value instead of
+// commit(seed) - with no error, because both writes succeeded.
+func TestTargetsTheSigningLayerOverwritesAreRefused(t *testing.T) {
+	// The SD-JWT builder assigns every one of these unconditionally.
+	for _, claim := range []string{"iat", "nbf", "exp", "iss", "jti", "vct", "vct#integrity", "cnf", "status"} {
+		meta := &CredentialMetadata{
+			Format:      openid4vp.FormatSDJWTVC,
+			Commitments: map[string]*CommitmentClaim{claim: sscClaim()},
+		}
+		_, err := meta.ResolveCommitmentTargets(nil)
+		require.Error(t, err, "a commitment at %q would be replaced by the builder", claim)
+		assert.Contains(t, err.Error(), "silently replaced")
+	}
+
+	// The ROOT segment is what matters: the builder assigns "status" as a
+	// whole object, so a nested target under it is destroyed just as
+	// completely.
+	nested := &CredentialMetadata{
+		Format:      openid4vp.FormatSDJWTVC,
+		Commitments: map[string]*CommitmentClaim{"status.value": sscClaim()},
+	}
+	_, err := nested.ResolveCommitmentTargets(nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "silently replaced")
+
+	// MakeVC20 fills the subject identifier from the request's SubjectDID
+	// after injection.
+	for _, format := range []string{openid4vp.FormatLdpVC, openid4vp.FormatVC20JSON} {
+		meta := &CredentialMetadata{
+			Format:      format,
+			Commitments: map[string]*CommitmentClaim{"id": sscClaim()},
+		}
+		_, err := meta.ResolveCommitmentTargets(nil)
+		require.Error(t, err, "%s: a commitment at the subject id would be replaced", format)
+		assert.Contains(t, err.Error(), "silently replaced")
+	}
+
+	// A name that merely starts the same way is not reserved, and the
+	// SD-JWT envelope names mean nothing in another format.
+	for _, tc := range []struct{ format, path string }{
+		{openid4vp.FormatSDJWTVC, "issuing_authority"},
+		{openid4vp.FormatSDJWTVC, "statuses"},
+		{openid4vp.FormatSDJWTVC, "ssc"},
+		{openid4vp.FormatLdpVC, "iss"},
+		{openid4vp.FormatMsoMdoc, "iss"},
+	} {
+		meta := &CredentialMetadata{
+			Format:      tc.format,
+			Commitments: map[string]*CommitmentClaim{tc.path: sscClaim()},
+		}
+		_, err := meta.ResolveCommitmentTargets(nil)
+		assert.NoError(t, err, "%s: %q is not written by the signing layer", tc.format, tc.path)
+	}
+}

@@ -137,6 +137,14 @@ In a nested format, two commitment paths where one is nested under the
 other (`a` and `a.b`) are refused for the same reason: the outer is written
 as a string, so the inner could never be written at all.
 
+Claims a format's signing layer writes for itself are refused as targets
+too, since it writes them *after* this document is parsed — a commitment
+there is injected and then silently replaced, and the credential carries
+the envelope value instead. For SD-JWT VC that is `iat`, `nbf`, `exp`,
+`iss`, `jti`, `vct`, `vct#integrity`, `cnf` and `status`; for the W3C
+formats it is the subject's `id`. The root segment is what counts, because
+`status` is assigned as a whole object and takes `status.value` with it.
+
 ## The derivation secret is permanent
 
 ```
@@ -204,6 +212,12 @@ candidate subjects. `-expect` requires `-pseudonym-config`: without one
 there is nothing to compare against, and exiting 0 regardless would report
 a match for every candidate. The seed itself is printed only with
 `-show-seed`.
+
+`-verifier-id` must be one of the two forms the rulebook defines —
+`semantic_id:<value>` or `x509_san_dns:<value>` — and is refused otherwise.
+Hashing anything else would succeed and return a pseudonym no Verifier
+could have reported, so the loop would simply never match and the operator
+would conclude the subject is innocent.
 
 It reads the issuer's config and secret, so it has to run where those are.
 That is the intended restriction rather than an inconvenience: whoever can

@@ -141,3 +141,31 @@ func TestSeedLengthIsFixedByTheRulebook(t *testing.T) {
 	_, err = Pseudonym("c", bytes.Repeat([]byte{7}, SeedBytes), good, good)
 	assert.NoError(t, err)
 }
+
+// The rulebook defines exactly two verifier_id forms. Hashing anything
+// else succeeds and returns a 32-byte value indistinguishable from a
+// correct pseudonym - so a remapping loop comparing against what a
+// Verifier actually reported would never match, and the operator would
+// conclude the subject is not the one they are looking for. A wrong
+// answer, not an error.
+func TestVerifierIDMustBeAFormTheRulebookDefines(t *testing.T) {
+	for _, bad := range []string{
+		"rp.example",              // no prefix at all
+		"semantic_id:",            // prefix, no value
+		"x509_san_dns:",           // prefix, no value
+		"x509_hash:abcd",          // a prefix the rulebook excludes
+		"X509_SAN_DNS:rp.example", // prefixes are exact
+		"",
+	} {
+		_, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, bad)
+		assert.Error(t, err, "verifier_id %q is not a form any Verifier reports", bad)
+
+		_, err = AccountRecovery(testSeed, bad, "account-1")
+		assert.Error(t, err, "account recovery must refuse %q too", bad)
+	}
+
+	for _, good := range []string{"semantic_id:rp.example", "x509_san_dns:rp.example"} {
+		_, err := KnownOffenderMatching(ConfigKnownOffenderMatchingSSC, testSeed, good)
+		assert.NoError(t, err, "%q is a form the rulebook defines", good)
+	}
+}

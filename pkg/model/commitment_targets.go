@@ -79,6 +79,10 @@ func (c *CredentialMetadata) ResolveCommitmentTargets(schema *mdoc.MDDLSchema) (
 			return nil, fmt.Errorf("commitment claim %q: %w", path, err)
 		}
 
+		if err := c.checkNotReserved(element); err != nil {
+			return nil, fmt.Errorf("commitment claim %q: %w", path, err)
+		}
+
 		encoding, err := resolveEncoding(claim.Encoding, c.Format)
 		if err != nil {
 			return nil, fmt.Errorf("commitment claim %q: %w", path, err)
@@ -175,6 +179,60 @@ func (c *CredentialMetadata) resolveElement(schema *mdoc.MDDLSchema, path string
 
 	return "", fmt.Errorf("the schema for doctype %q declares no such element, so the signer would drop it and issue a credential without the commitment",
 		schema.DocType)
+}
+
+// reservedTargets names the claims a format's signing layer writes for
+// itself, AFTER the document this feature injects into has been parsed.
+//
+// A commitment configured at one of them is injected perfectly well and
+// then overwritten, so the credential carries the envelope value instead
+// of commit(seed) - and nothing reports it, because both writes
+// succeeded. The only symptom is a proof that never verifies.
+//
+// Taken from the signing code rather than from a specification: the
+// SD-JWT list is what BuildCredentialWithSigner assigns unconditionally
+// (pkg/sdjwtvc/methods.go), and the W3C one is the subject identifier
+// MakeVC20 fills from the request's SubjectDID.
+var reservedTargets = map[string]map[string]string{
+	openid4vp.FormatSDJWTVC: {
+		"iat":           "the SD-JWT builder sets the issuance time",
+		"nbf":           "the SD-JWT builder sets the not-before time",
+		"exp":           "the SD-JWT builder sets the expiry",
+		"iss":           "the SD-JWT builder sets the issuer",
+		"jti":           "the SD-JWT builder sets the token identifier",
+		"vct":           "the SD-JWT builder sets the credential type",
+		"vct#integrity": "the SD-JWT builder sets the type-metadata integrity hash",
+		"cnf":           "the SD-JWT builder sets the holder key confirmation",
+		"status":        "the SD-JWT builder sets the revocation status reference",
+	},
+	openid4vp.FormatLdpVC: {
+		"id": "MakeVC20 sets the credential subject identifier from the request",
+	},
+	openid4vp.FormatVC20JSON: {
+		"id": "MakeVC20 sets the credential subject identifier from the request",
+	},
+}
+
+// checkNotReserved refuses a target the signing layer will overwrite.
+//
+// The ROOT segment is what matters, not the whole path: the builder
+// assigns status as a whole object, so a commitment at "status.value" is
+// destroyed just as completely as one at "status" - it is simply replaced
+// along with everything else under that key.
+func (c *CredentialMetadata) checkNotReserved(element string) error {
+	reserved, ok := reservedTargets[c.Format]
+	if !ok {
+		return nil
+	}
+	root, _, _ := strings.Cut(element, ".")
+	for _, name := range slices.Sorted(maps.Keys(reserved)) {
+		if root != name {
+			continue
+		}
+		return fmt.Errorf("%q is written by this format's signing layer after the document is parsed (%s), so a commitment there would be injected and then silently replaced",
+			name, reserved[name])
+	}
+	return nil
 }
 
 // resolveEncoding decides how the commitment bytes are written.
