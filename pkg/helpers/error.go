@@ -220,3 +220,9 @@ func Problem404() *problems.Problem {
 
 	return problem
 }
+
+func Problem405() *problems.Problem {
+	problem := problems.NewStatusProblem(405)
+
+	return problem
+}
