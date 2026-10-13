@@ -21,6 +21,9 @@ import (
 type DashboardReply struct {
 	Title    string
 	Services []DashboardServiceView
+	// Wallets are configured wallets, rendered in their own section without
+	// a health status.
+	Wallets []DashboardServiceView
 }
 
 // DashboardServiceView is a single service card on the dashboard.
@@ -49,19 +52,25 @@ func (c *Client) Dashboard(ctx context.Context) (*DashboardReply, error) {
 
 	entries := c.cfg.APIGW.Dashboard.Services
 	services := make([]DashboardServiceView, 0, len(entries))
+	wallets := make([]DashboardServiceView, 0)
 	for _, s := range entries {
-		services = append(services, DashboardServiceView{
+		view := DashboardServiceView{
 			Name:        s.Name,
 			URL:         s.URL,
 			Description: s.Description,
 			Links:       s.Links,
-		})
+		}
+		if s.Wallet {
+			wallets = append(wallets, view)
+			continue
+		}
+		services = append(services, view)
 	}
 
 	c.applyHealth(ctx, services)
 	c.probeUnknownServices(ctx, services)
 
-	return &DashboardReply{Title: title, Services: services}, nil
+	return &DashboardReply{Title: title, Services: services, Wallets: wallets}, nil
 }
 
 // applyHealth joins per-service health from the cached aggregator onto the
