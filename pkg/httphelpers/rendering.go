@@ -109,8 +109,12 @@ func (r *renderingHandler) wantsErrorHTML(c *gin.Context, code int) bool {
 // prefers application/json all return false, so only a genuine browser
 // navigation gets HTML.
 func prefersHTML(accept string) bool {
-	var qHTML, qJSON float64
+	var qHTML float64
 	htmlNamed := false
+
+	// JSON quality per specificity tier; -1 means the tier was not named, so a
+	// more specific range always wins over a wildcard fallback (RFC 7231).
+	qJSONExact, qJSONType, qStar := -1.0, -1.0, -1.0
 
 	for _, part := range strings.Split(accept, ",") {
 		mediaRange, q := parseMediaRange(part)
@@ -122,12 +126,31 @@ func prefersHTML(accept string) bool {
 			if q > qHTML {
 				qHTML = q
 			}
-		case "application/json", "application/*", "*/*":
-			// Quality the client would accept JSON at, directly or by wildcard.
-			if q > qJSON {
-				qJSON = q
+		case "application/json":
+			if q > qJSONExact {
+				qJSONExact = q
+			}
+		case "application/*":
+			if q > qJSONType {
+				qJSONType = q
+			}
+		case "*/*":
+			if q > qStar {
+				qStar = q
 			}
 		}
+	}
+
+	// The most specific JSON range the client named sets its quality; an
+	// explicit application/json;q=0 therefore beats a */*;q=1 fallback.
+	qJSON := 0.0
+	switch {
+	case qJSONExact >= 0:
+		qJSON = qJSONExact
+	case qJSONType >= 0:
+		qJSON = qJSONType
+	case qStar >= 0:
+		qJSON = qStar
 	}
 
 	return htmlNamed && qHTML > 0 && qHTML >= qJSON
@@ -207,6 +230,10 @@ func isJSONOnlyPath(path string) bool {
 		"/credential",
 		"/deferred_credential",
 		"/notification",
+		// OpenID4VP protocol routes a wallet drives, not browser pages;
+		// substrings so the oidc-direct_post and :session_id variants match too.
+		"request-object",
+		"direct_post",
 	}
 
 	for _, indicator := range jsonOnlyIndicators {

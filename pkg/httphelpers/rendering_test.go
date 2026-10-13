@@ -45,6 +45,16 @@ func TestIsJSONOnlyPath(t *testing.T) {
 		{"/api/v1/users", true},
 		{"/api/v1/datastore", true},
 
+		// OpenID4VP protocol routes a wallet drives are JSON-only
+		{"/verification/request-object", true},
+		{"/verification/request-object/abc123", true},
+		{"/verification/direct_post", true},
+		{"/verification/oidc-direct_post", true},
+
+		// Browser-facing verification pages are not JSON-only
+		{"/verification/display/abc123", false},
+		{"/verification/callback", false},
+
 		// Browser-facing paths are not JSON-only
 		{"/dashboard", false},
 		{"/admin", false},
@@ -73,6 +83,7 @@ func TestPrefersHTML(t *testing.T) {
 		{"html disabled by q=0", "text/html;q=0", false},
 		{"html ranked below json", "application/json, text/html;q=0.5", false},
 		{"html equal to json wins", "application/json;q=0.5, text/html;q=0.5", true},
+		{"explicit json q=0 beats wildcard fallback", "application/json;q=0, text/html;q=0.5, */*;q=1", true},
 		{"json only", "application/json", false},
 		{"wildcard only (curl)", "*/*", false},
 		{"empty header", "", false},
