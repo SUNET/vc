@@ -3,11 +3,15 @@ package apiv1
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/crypto"
 	"github.com/SUNET/vc/pkg/helpers"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vci"
 
 	"github.com/google/uuid"
@@ -63,6 +67,21 @@ type PrepareIssuanceReply struct {
 // authorization-context cache, which is what it is stored in.
 const defaultPreparedIssuanceTTLSeconds = 300
 
+// maxPreparedIssuanceTTLSeconds is the longest a prepared issuance may be
+// asked to last.
+//
+// It is the authorization-context cache's own lifetime, and it is a hard
+// bound rather than a policy: the prepared issuance IS a document in that
+// cache, so a longer TTL would return an expires_at the caller can read,
+// print on a QR code and hand to someone, for an issuer_state that has
+// already been deleted. Refused rather than clamped - a caller that asked
+// for an hour should be told it cannot have one, not handed ten minutes
+// and left to discover the difference.
+//
+// Same bound as model.MaxAuthSessionTTLSeconds, for the same reason and
+// from the same cache.
+const maxPreparedIssuanceTTLSeconds = model.MaxAuthSessionTTLSeconds
+
 // PrepareIssuance prepares an issuer-initiated issuance and returns the
 // Credential Offer for it.
 //
@@ -75,14 +94,40 @@ const defaultPreparedIssuanceTTLSeconds = 300
 // to present a credential, and is issued to only if that credential
 // satisfies the rule the caller supplied here.
 func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceRequest) (*PrepareIssuanceReply, error) {
+	ia := &c.cfg.APIGW.Delivery.InteractiveAuthorization
+
+	// Nothing prepared here is redeemable while Interactive Authorization
+	// is off: the Challenge Endpoint is the only place an issuer_state can
+	// be spent, and it answers 404 when the mechanism is not enabled. A
+	// preparation that succeeds anyway hands the caller a valid-looking
+	// offer to print and distribute, and the failure surfaces to whoever
+	// scans it.
+	if !ia.Enabled() {
+		return nil, helpers.NewErrorDetailsWithStatus("interactive_authorization_disabled",
+			"interactive authorization is not enabled on this server, so a prepared issuance could not be redeemed", 400)
+	}
+
 	if err := req.IdentityMatch.Validate(); err != nil {
 		return nil, helpers.NewErrorDetailsWithStatus("invalid_identity_match", err.Error(), 400)
 	}
 
 	// The scope has to be one a presentation can authenticate, or there is
-	// no point at which the rule could be evaluated.
-	source, err := c.openID4VPCredentialSource(req.Scope)
+	// no point at which the rule could be evaluated. Asked through the
+	// same Selector the Challenge Endpoint and /authorize use, so a scope
+	// prepared here is one this deployment will actually answer with a
+	// presentation rather than a browser.
+	required, source, err := c.interactionTypeForScope(ia, req.Scope)
 	if err != nil {
+		return nil, err
+	}
+	if required != ia.InteractionType(model.InteractionOpenID4VPPresentation) {
+		return nil, helpers.NewErrorDetailsWithStatus("scope_not_presentation_authenticated",
+			fmt.Sprintf("scope %q is authenticated by %q, and an identity match can only be evaluated against a presentation",
+				req.Scope, required), 400)
+	}
+
+	// A rule naming a claim the request will not ask for can never pass.
+	if err := c.validateIdentityMatchIsAskable(req.Scope, req.IdentityMatch); err != nil {
 		return nil, err
 	}
 
@@ -94,6 +139,11 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 	ttl := req.TTLSeconds
 	if ttl == 0 {
 		ttl = defaultPreparedIssuanceTTLSeconds
+	}
+	if ttl > maxPreparedIssuanceTTLSeconds {
+		return nil, helpers.NewErrorDetailsWithStatus("ttl_too_long",
+			fmt.Sprintf("ttl_seconds must be at most %d; a prepared issuance is stored in a cache that does not keep it longer",
+				maxPreparedIssuanceTTLSeconds), 400)
 	}
 
 	issuerState, err := crypto.GenerateSecureToken(32, 0)
@@ -149,4 +199,61 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 		IssuerState:     issuerState,
 		ExpiresAt:       authCtx.ExpiresAt,
 	}, nil
+}
+
+// validateIdentityMatchIsAskable refuses a rule that names a claim the
+// presentation request will not ask the Wallet for.
+//
+// The DCQL this scope's challenge produces is built from the configured
+// authentication scopes' auth_claims (see buildIssuanceAuthDCQL), and a
+// privacy-preserving Wallet discloses what it was asked for and no more.
+// So a rule naming anything outside those lists cannot be evaluated: the
+// claim never arrives, matchPresentedIdentity refuses, and the prepared
+// issuance is one that can never be redeemed by anyone.
+//
+// Refused here rather than widened into the request. Adding the caller's
+// paths to the DCQL would make an API caller able to decide what this
+// Issuer asks Holders to disclose, which is an operator's decision and is
+// configured as one.
+//
+// Satisfiable by ONE authentication scope is enough. A deployment with
+// several lets a Holder authenticate with any of them; a presentation of a
+// scope that does not carry the matched claim then fails the match, which
+// is the correct outcome and not this check's business. What this check
+// catches is the rule no presentation at all could satisfy.
+func (c *Client) validateIdentityMatchIsAskable(scope string, match *openid4vci.IdentityMatch) error {
+	paths := match.ClaimPaths()
+	if len(paths) == 0 {
+		return nil
+	}
+
+	vpAuth := c.cfg.GetOpenID4VPAuth(scope)
+	if vpAuth == nil || len(vpAuth.AuthScopes) == 0 {
+		return helpers.NewErrorDetailsWithStatus("invalid_identity_match",
+			fmt.Sprintf("scope %q has no authentication scopes configured, so no claim could be matched on", scope), 400)
+	}
+
+	offered := make(map[string][]string, len(vpAuth.AuthScopes))
+	for _, authScope := range slices.Sorted(maps.Keys(vpAuth.AuthScopes)) {
+		claims := vpAuth.AuthScopes[authScope].AuthClaims
+		offered[authScope] = claims
+		if coversAll(claims, paths) {
+			return nil
+		}
+	}
+
+	return helpers.NewErrorDetailsWithStatus("invalid_identity_match",
+		fmt.Sprintf("no authentication scope for %q discloses every claim this rule matches on (%s); "+
+			"the authentication scopes offer %v, and the presentation request asks for those and nothing else",
+			scope, strings.Join(paths, ", "), offered), 400)
+}
+
+// coversAll reports whether every path appears in claims.
+func coversAll(claims, paths []string) bool {
+	for _, path := range paths {
+		if !slices.Contains(claims, path) {
+			return false
+		}
+	}
+	return true
 }

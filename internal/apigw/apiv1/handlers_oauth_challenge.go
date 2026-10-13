@@ -835,10 +835,22 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 			"interaction_types_supported is required", 400)
 	}
 
-	// Claimed, not read: the issuer_state is the Issuer's handle on an
-	// issuance nobody has taken, and two wallets scanning the same offer
-	// must not both open an exchange against it.
-	authCtx, err := c.cacheService.AuthContext.ClaimIssuerState(ctx, req.IssuerState)
+	// Read, not claimed.
+	//
+	// The issuer_state is the Issuer's handle on an issuance nobody has
+	// taken, and taking it is irreversible: a prepared issuance is the
+	// product of a user authenticating at a portal and choosing what to be
+	// issued, and nothing re-prepares it. So everything that can refuse
+	// this request - client authentication, PKCE, the DPoP proof,
+	// building and signing the request object - happens while the handle
+	// is still resolvable, and it is claimed at the bottom, once there is
+	// nothing left that can fail. A malformed request carrying a handle
+	// somebody photographed off a screen must not be able to destroy the
+	// issuance it names.
+	//
+	// The claim at the bottom is what makes it one-shot: two wallets
+	// scanning the same offer both reach it, and exactly one wins.
+	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{IssuerState: req.IssuerState})
 	if err != nil || authCtx == nil {
 		// Unknown and expired are one answer, for the same reason they are
 		// at the intermediate request: otherwise the endpoint reports
@@ -880,7 +892,9 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 			"code_challenge_method must be S256", 400)
 	}
 
-	required, err := c.interactionTypeForScope(ia, scope)
+	// The source is not taken from here: a prepared issuance recorded its
+	// own at preparation time, and that is the one this exchange runs on.
+	required, _, err := c.interactionTypeForScope(ia, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -901,16 +915,9 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 		return nil, err
 	}
 
-	// The wallet's half, recorded on the prepared issuance.
-	authCtx.WalletClientID = req.ClientID
-	authCtx.WalletURI = req.RedirectURI
-	authCtx.CodeChallenge = req.CodeChallenge
-	authCtx.CodeChallengeMethod = req.CodeChallengeMethod
-	authCtx.AuthSessionDPoPThumbprint = dpopThumbprint
-	authCtx.ExpiresAt = time.Now().Add(ia.AuthSessionTTL()).Unix()
-
 	// From here the exchange is the wallet's, identified by auth_session.
-	if authCtx.AuthSession, err = crypto.GenerateSecureToken(32, 0); err != nil {
+	authSession, err := crypto.GenerateSecureToken(32, 0)
+	if err != nil {
 		return nil, fmt.Errorf("failed to generate auth_session: %w", err)
 	}
 
@@ -918,14 +925,50 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 	if err != nil {
 		return nil, err
 	}
-	authCtx.DCQLQuery = dcql
 
-	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
+	// Built BEFORE the handle is claimed, and against the context as read:
+	// signing can fail, and a signing failure that had already consumed
+	// the issuer_state would destroy the issuance over a server-side
+	// problem the wallet did nothing to cause. Nothing below this line
+	// reads a field the claim changes - the state, nonce and ephemeral key
+	// were all minted at preparation time.
+	authCtx.DCQLQuery = dcql
+	presentationRequest, err := c.interactiveAuthorizationRequest(ctx, ia, authCtx, dcql)
+	if err != nil {
 		return nil, err
 	}
 
-	presentationRequest, err := c.interactiveAuthorizationRequest(ctx, ia, authCtx, dcql)
-	if err != nil {
+	// The point of no return. Exactly one caller gets the handle; everyone
+	// else is told the issuer_state is invalid, which by then it is.
+	claimed, err := c.cacheService.AuthContext.ClaimIssuerState(ctx, req.IssuerState)
+	if err != nil || claimed == nil {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+			"issuer_state is invalid or has expired", 400)
+	}
+	authCtx = claimed
+
+	// The wallet's half, recorded on the prepared issuance.
+	authCtx.WalletClientID = req.ClientID
+	authCtx.WalletURI = req.RedirectURI
+	authCtx.CodeChallenge = req.CodeChallenge
+	authCtx.CodeChallengeMethod = req.CodeChallengeMethod
+	authCtx.AuthSessionDPoPThumbprint = dpopThumbprint
+	authCtx.AuthSession = authSession
+	authCtx.DCQLQuery = dcql
+	authCtx.ExpiresAt = time.Now().Add(ia.AuthSessionTTL()).Unix()
+
+	// Move the physical anchor too, not just the logical deadline.
+	//
+	// MongoDB expires these documents on a TTL index over created_at, and
+	// MongoStore.Update replaces the whole document - so without this, an
+	// offer resumed late advertises an auth_session that outlives the
+	// document holding it, and the wallet comes back to find the exchange
+	// gone with nothing having gone wrong. The memory store re-anchors on
+	// write anyway; this makes the two behave alike rather than leaving
+	// the difference to be discovered in production.
+	authCtx.CreatedAt = time.Now()
+
+	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
 		return nil, err
 	}
 

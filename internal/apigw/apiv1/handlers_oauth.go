@@ -260,6 +260,38 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 	return reply, nil
 }
 
+// lookupCodeBeforeConsuming resolves an authorization code for one of the
+// checks that run BEFORE the code is consumed.
+//
+// Those checks exist because forfeiture is irreversible: a request with
+// the wrong client_id, redirect_uri, transaction code or DPoP key must be
+// refused without burning a code the legitimate wallet still needs. That
+// only works if "the store could not answer" is distinguished from "there
+// is no such code":
+//
+//   - absent (ErrNoDocuments) returns (nil, nil). The caller decides what
+//     that means - usually to carry on and let consumption answer, which
+//     gives a code that never existed and one already spent the same reply,
+//     as it should.
+//   - anything else is the store failing, and is reported as server_error.
+//     Reporting it as invalid_grant would tell a wallet its code is dead
+//     over a connection reset, and a wallet that believes that discards a
+//     code that was still good; silently skipping the check would let the
+//     request it was meant to refuse proceed to forfeiture.
+func (c *Client) lookupCodeBeforeConsuming(ctx context.Context, code string) (*cache.AuthorizationContext, error) {
+	doc, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code})
+	switch {
+	case err == nil:
+		return doc, nil
+	case errors.Is(err, cache.ErrNoDocuments):
+		return nil, nil
+	default:
+		c.log.Error(err, "failed to look up authorization code before consuming it")
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"failed to look up the authorization code", 500, err)
+	}
+}
+
 // OAuthToken implements OAuth 2.0 token endpoint for credential issuance
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-token-endpoint
 //
@@ -488,10 +520,15 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	// (RFC 6749 §4.1.3). A mismatched client_id must not burn the code, otherwise
 	// an attacker with a stolen code could invalidate it for the legitimate client.
 	if !isPreAuthFlow {
-		preCheck, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code})
+		preCheck, err := c.lookupCodeBeforeConsuming(ctx, code)
 		if err != nil {
-			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
-				"Authorization code is invalid or has already been used", 400, err)
+			return nil, err
+		}
+		if preCheck == nil {
+			// No such code. Answered by the consumption below, which gives
+			// the same reply for a code that never existed as for one
+			// already spent - and that is the reply to give.
+			preCheck = &cache.AuthorizationContext{}
 		}
 		// Reject cross-grant use: a pre-authorized code must not be redeemable
 		// via authorization_code (which would bypass the tx_code check).
@@ -512,10 +549,14 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	// Validate transaction code (PIN) BEFORE consuming the pre-authorized code
 	// so wrong-PIN attempts do not burn the code (OID4VCI §6.3).
 	if isPreAuthFlow {
-		preCheck, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code})
+		preCheck, err := c.lookupCodeBeforeConsuming(ctx, code)
 		if err != nil {
-			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
-				"Authorization code is invalid or has already been used", 400, err)
+			return nil, err
+		}
+		if preCheck == nil {
+			// No such pre-authorized code. Same reply as one already spent.
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+				"Authorization code is invalid or has already been used", 400)
 		}
 		// Reject cross-grant use: a plain authorization_code context must not
 		// be redeemable via the pre-authorized_code grant.
@@ -604,7 +645,11 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	// draft-ietf-oauth-first-party-apps ask for between auth_session and a
 	// DPoP key is only worth having if the same key turns up here.
 	if !isPreAuthFlow {
-		if bound, lookupErr := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code}); lookupErr == nil && bound != nil {
+		bound, lookupErr := c.lookupCodeBeforeConsuming(ctx, code)
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
+		if bound != nil {
 			if err := c.checkInteractiveAuthorizationBinding(bound, dpopThumbprint); err != nil {
 				return nil, err
 			}
