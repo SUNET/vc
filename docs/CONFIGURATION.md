@@ -984,15 +984,15 @@ persisted in the database.
 
 > **Path:** `.apigw.remotes.<remote name>`
 
-| Field           | Type                     | Description                                           | Example                               | Default | Required |
-| --------------- | ------------------------ | ----------------------------------------------------- | ------------------------------------- | ------- | -------- |
-| `type`          | `string` (eduapi\|ooapi) | API protocol type                                     | -                                     | -       | Yes      |
-| `base_url`      | `string`                 | Base URL of the API endpoint                          | `"https://api.ladok.se/eduapi"`       | -       | Yes      |
-| `token_url`     | `string`                 | OAuth 2.0 token endpoint for Client Credentials Grant | `"https://api.ladok.se/oauth2/token"` | -       | Yes      |
-| `client_id`     | `string`                 | OAuth 2.0 client identifier                           | -                                     | -       | Yes      |
-| `client_secret` | `string`                 | OAuth 2.0 client secret                               | -                                     | -       | Yes      |
-| `scopes`        | `[]string`               | OAuth 2.0 scopes to request                           | -                                     | -       | No       |
-| `timeout`       | `duration`               | HTTP client timeout                                   | -                                     | `10s`   | No       |
+| Field           | Type                            | Description                                           | Example                               | Default | Required |
+| --------------- | ------------------------------- | ----------------------------------------------------- | ------------------------------------- | ------- | -------- |
+| `type`          | `string` (eduapi\|ooapi\|oeapi) | API protocol type                                     | -                                     | -       | Yes      |
+| `base_url`      | `string`                        | Base URL of the API endpoint                          | `"https://api.ladok.se/eduapi"`       | -       | Yes      |
+| `token_url`     | `string`                        | OAuth 2.0 token endpoint for Client Credentials Grant | `"https://api.ladok.se/oauth2/token"` | -       | Yes      |
+| `client_id`     | `string`                        | OAuth 2.0 client identifier                           | -                                     | -       | Yes      |
+| `client_secret` | `string`                        | OAuth 2.0 client secret                               | -                                     | -       | Yes      |
+| `scopes`        | `[]string`                      | OAuth 2.0 scopes to request                           | -                                     | -       | No       |
+| `timeout`       | `duration`                      | HTTP client timeout                                   | -                                     | `10s`   | No       |
 
 ### `delivery`
 
