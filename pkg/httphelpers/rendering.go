@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"html/template"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/SUNET/vc/pkg/helpers"
 	"github.com/SUNET/vc/pkg/httphelpers/staticembed"
 	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/model"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,15 +32,25 @@ func errorPageTemplate() *template.Template {
 	return template.Must(template.ParseFS(staticembed.FS, "error.html"))
 }
 
-// errorPageLogo reads the embedded logo into a data URI so the error page is
-// self-contained: services that serve no /static route, or serve it under a
-// different prefix, still render the brand mark.
-func errorPageLogo() template.URL {
-	b, err := staticembed.FS.ReadFile("logo.png")
-	if err != nil {
-		return ""
+// errorPageLogo builds the data URI the error page renders its brand mark from.
+// A readable common.branding.logo_path overrides the built-in SUNET logo, the
+// same operator override CustomBranding applies to /static/logo.png; otherwise
+// the embedded logo is used so the page stays self-contained on services that
+// serve no /static route. Read once at startup, so a change needs a restart.
+func errorPageLogo(branding model.Branding) template.URL {
+	if branding.LogoPath != "" {
+		if b, err := os.ReadFile(filepath.Clean(branding.LogoPath)); err == nil {
+			return logoDataURI(b)
+		}
 	}
-	return template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(b))
+	if b, err := staticembed.FS.ReadFile("logo.png"); err == nil {
+		return logoDataURI(b)
+	}
+	return ""
+}
+
+func logoDataURI(png []byte) template.URL {
+	return template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(png))
 }
 
 // Content renders the content

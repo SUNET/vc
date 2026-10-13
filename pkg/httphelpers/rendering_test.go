@@ -2,8 +2,12 @@ package httphelpers
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/helpers"
@@ -164,4 +168,20 @@ func TestWantsErrorHTML(t *testing.T) {
 	require.False(t, r.wantsErrorHTML(newCtx("/dashboard", "application/json"), 500))
 	require.False(t, r.wantsErrorHTML(newCtx("/token", "text/html"), 500), "OIDC endpoints stay JSON")
 	require.False(t, r.wantsErrorHTML(newCtx("/api/v1/datastore", "text/html"), 500), "API routes stay JSON")
+}
+
+func TestErrorPageLogo(t *testing.T) {
+	embedded := errorPageLogo(model.Branding{})
+	require.True(t, strings.HasPrefix(string(embedded), "data:image/png;base64,"))
+
+	custom := []byte("custom-logo-bytes")
+	path := filepath.Join(t.TempDir(), "logo.png")
+	require.NoError(t, os.WriteFile(path, custom, 0o600))
+
+	got := errorPageLogo(model.Branding{LogoPath: path})
+	want := "data:image/png;base64," + base64.StdEncoding.EncodeToString(custom)
+	require.Equal(t, want, string(got), "a readable logo_path overrides the embedded logo")
+
+	// An unreadable override falls back to the embedded logo rather than failing.
+	require.Equal(t, embedded, errorPageLogo(model.Branding{LogoPath: "/no/such/logo.png"}))
 }
