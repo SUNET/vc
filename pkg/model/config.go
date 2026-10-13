@@ -2332,6 +2332,9 @@ type DashboardService struct {
 	Description string `yaml:"description,omitempty"`
 	// Links is an ordered list of extra labelled URLs (health, metadata, UIs, ...).
 	Links []DashboardLink `yaml:"links,omitempty" validate:"omitempty,dive"`
+	// Wallet marks this entry as a configured wallet, rendered in its own
+	// section without a health status. Set internally during seeding.
+	Wallet bool `yaml:"-"`
 }
 
 // DashboardLink is a labelled URL shown under a service entry.
@@ -2410,99 +2413,6 @@ type Cfg struct {
 	Issuer   *Issuer   `yaml:"issuer" validate:"omitempty"`
 	Verifier *Verifier `yaml:"verifier" validate:"omitempty"`
 	Registry *Registry `yaml:"registry" validate:"omitempty"`
-}
-
-// SeedDashboardDefaults appends auto-discovered service entries (apigw,
-// issuer, verifier, registry) to cfg.APIGW.Dashboard.Services from the
-// currently populated sibling sections. Operator-supplied entries win:
-// a Name match in Services skips the corresponding default.
-//
-// Intended to be called by the config loader before it nils sibling
-// service sections, so the /dashboard handler has data to render even
-// when it can no longer read cfg.Issuer / cfg.Verifier / cfg.Registry
-// directly.
-func (cfg *Cfg) SeedDashboardDefaults() {
-	if cfg == nil || cfg.APIGW == nil {
-		return
-	}
-
-	have := map[string]bool{}
-	for _, s := range cfg.APIGW.Dashboard.Services {
-		have[s.Name] = true
-	}
-	add := func(s DashboardService) {
-		if s.URL == "" || have[s.Name] {
-			return
-		}
-		cfg.APIGW.Dashboard.Services = append(cfg.APIGW.Dashboard.Services, s)
-	}
-
-	if u := strings.TrimRight(cfg.APIGW.PublicURL, "/"); u != "" {
-		links := []DashboardLink{
-			{Label: "Health", URL: u + "/health", Type: "json"},
-			{Label: "Credential offers", URL: u + "/offers", Type: "page"},
-			{Label: "OpenID4VCI metadata", URL: u + "/.well-known/openid-credential-issuer", Type: "json"},
-			{Label: "OAuth2 metadata", URL: u + "/.well-known/oauth-authorization-server", Type: "json"},
-			{Label: "JWKS", URL: u + "/jwks", Type: "json"},
-		}
-		if cfg.APIGW.AdminUIEnable {
-			links = append(links, DashboardLink{Label: "Admin UI", URL: u + "/ui", Type: "page"})
-		}
-		if cfg.APIGW.OpenIDFederation != nil {
-			links = append(links, DashboardLink{Label: "OpenID federation", URL: u + "/.well-known/openid-federation", Type: "page"})
-		}
-		add(DashboardService{
-			Name:        "apigw",
-			URL:         u,
-			Description: "API gateway – credential issuance, OAuth2/OIDC, wallet-facing endpoints.",
-			Links:       links,
-		})
-	}
-
-	if cfg.Issuer != nil {
-		if u := strings.TrimRight(cfg.Issuer.IssuerURL, "/"); u != "" {
-			add(DashboardService{
-				Name:        "issuer",
-				URL:         u,
-				Description: "Credential issuer – signs verifiable credentials.",
-				Links: []DashboardLink{
-					{Label: "Health", URL: u + "/health", Type: "json"},
-					{Label: "JWKS", URL: u + "/jwks", Type: "json"},
-				},
-			})
-		}
-	}
-
-	if cfg.Verifier != nil {
-		if u := strings.TrimRight(cfg.Verifier.PublicURL, "/"); u != "" {
-			add(DashboardService{
-				Name:        "verifier",
-				URL:         u,
-				Description: "Credential verifier – OpenID4VP relying party.",
-				Links: []DashboardLink{
-					{Label: "Health", URL: u + "/health", Type: "json"},
-				},
-			})
-		}
-	}
-
-	if cfg.Registry != nil {
-		if u := strings.TrimRight(cfg.Registry.PublicURL, "/"); u != "" {
-			links := []DashboardLink{
-				{Label: "Health", URL: u + "/health", Type: "json"},
-				{Label: "Status lists", URL: u + "/statuslists", Type: "json"},
-			}
-			if BoolVal(cfg.Registry.AdminGUI.Enable, false) {
-				links = append(links, DashboardLink{Label: "Admin GUI", URL: u + "/admin", Type: "page"})
-			}
-			add(DashboardService{
-				Name:        "registry",
-				URL:         u,
-				Description: "Credential status registry - token status lists.",
-				Links:       links,
-			})
-		}
-	}
 }
 
 // LookupCredentialSources returns full data source information for a credential type

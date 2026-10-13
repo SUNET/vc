@@ -89,6 +89,44 @@ func TestSeedDashboardDefaults_AdminUIEnableAddsLink(t *testing.T) {
 	assert.True(t, hasLinkLabel(apigw.Links, "Admin UI"))
 }
 
+func TestSeedDashboardDefaults_AddsConfiguredWallets(t *testing.T) {
+	cfg := &Cfg{
+		APIGW: &APIGW{
+			PublicURL: "https://apigw.example.com",
+			Delivery: APIGWDelivery{
+				CredentialOffers: CredentialOffers{
+					Wallets: map[string]CredentialOfferWallets{
+						"fly_wallet": {Label: "Fly Wallet", RedirectURI: "https://wallet.example.com/credential-offer"},
+						"dev_wallet": {Label: "Dev Wallet", RedirectURI: "https://dev.wallet.example.com/credential-offer"},
+					},
+				},
+			},
+		},
+		Verifier: &Verifier{
+			PublicURL:        "https://verifier.example.com",
+			SupportedWallets: map[string]string{"Fly Wallet": "https://wallet.example.com/cb"},
+		},
+	}
+
+	cfg.SeedDashboardDefaults()
+
+	fly := findService(cfg.APIGW.Dashboard.Services, "Fly Wallet")
+	require.NotNil(t, fly, "credential-offer wallet added")
+	assert.Equal(t, "https://wallet.example.com", fly.URL, "origin of redirect URI")
+
+	dev := findService(cfg.APIGW.Dashboard.Services, "Dev Wallet")
+	require.NotNil(t, dev)
+	assert.Equal(t, "https://dev.wallet.example.com", dev.URL)
+
+	var flyCount int
+	for _, s := range cfg.APIGW.Dashboard.Services {
+		if s.Name == "Fly Wallet" {
+			flyCount++
+		}
+	}
+	assert.Equal(t, 1, flyCount, "wallet present in both sources is deduplicated by name")
+}
+
 func serviceNames(services []DashboardService) []string {
 	out := make([]string, 0, len(services))
 	for _, s := range services {
