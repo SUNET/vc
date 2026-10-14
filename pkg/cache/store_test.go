@@ -48,6 +48,27 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		assert.Equal(t, "contract-session-1", result.SessionID)
 	})
 
+	t.Run("GetReturnsASnapshot", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID: "contract-snapshot-1",
+			State:     "contract-snapshot-state",
+			Code:      "contract-snapshot-code",
+		}))
+
+		read, err := store.Get(ctx, &AuthorizationContext{State: "contract-snapshot-state"})
+		require.NoError(t, err)
+
+		// A caller that was handed the stored document would change the
+		// cache by assigning to it, and would race with any concurrent
+		// claim mutating the same struct. Writing back goes through
+		// Update, which every caller already does.
+		read.Identifier = "scribbled-on"
+
+		again, err := store.Get(ctx, &AuthorizationContext{State: "contract-snapshot-state"})
+		require.NoError(t, err)
+		assert.Empty(t, again.Identifier, "a caller must not be able to write to the store by assignment")
+	})
+
 	t.Run("ResumeIssuerState", func(t *testing.T) {
 		require.NoError(t, store.Save(ctx, &AuthorizationContext{
 			SessionID:   "contract-resume-1",

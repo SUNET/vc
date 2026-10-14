@@ -34,6 +34,18 @@ type IssuerStateResume struct {
 	// DCQLQuery is what the wallet is being asked to present.
 	DCQLQuery *openid4vp.DCQL
 
+	// EphemeralEncryptionKeyID names the key the request object this
+	// attempt built advertised, and therefore the private half the
+	// response has to be decrypted with.
+	//
+	// It is written here rather than taken from the prepared issuance
+	// because every attempt builds its own request object before any of
+	// them has claimed the handle. Sharing one key id meant two attempts
+	// racing to provision it: a Get-then-Set that both miss generates two
+	// keys, and whichever Set lands last is the private key stored -
+	// which need not be the public key the winning wallet was handed.
+	EphemeralEncryptionKeyID string
+
 	// ExpiresAt is the deadline the exchange is checked against, and
 	// CreatedAt the anchor MongoDB's TTL index expires the document on.
 	// Both move: a logical deadline outliving its physical document means
@@ -53,6 +65,7 @@ func (r *IssuerStateResume) applyTo(doc *AuthorizationContext) {
 	doc.CodeChallenge = r.CodeChallenge
 	doc.CodeChallengeMethod = r.CodeChallengeMethod
 	doc.DCQLQuery = r.DCQLQuery
+	doc.EphemeralEncryptionKeyID = r.EphemeralEncryptionKeyID
 	doc.ExpiresAt = r.ExpiresAt
 	doc.CreatedAt = r.CreatedAt
 }

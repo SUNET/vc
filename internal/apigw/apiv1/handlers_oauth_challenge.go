@@ -957,8 +957,42 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 	// problem the wallet did nothing to cause. Nothing below this line
 	// reads a field the claim changes - the state, nonce and ephemeral key
 	// were all minted at preparation time.
-	authCtx.DCQLQuery = dcql
-	presentationRequest, err := c.interactiveAuthorizationRequest(ctx, ia, authCtx, dcql)
+	// A key id of this attempt's own, not the prepared issuance's.
+	//
+	// Every attempt on one issuer_state builds its request object here,
+	// before any of them has claimed the handle - that ordering is
+	// deliberate, so that a failure cannot destroy the issuance. But it
+	// means two attempts would provision an ephemeral key under the same
+	// id, and EphemeralEncryptionKey is a Get-then-Set: both miss, both
+	// generate, and the private key left in the cache is whichever Set
+	// landed last. That need not be the public key the winning wallet was
+	// handed, and its encrypted response then cannot be decrypted at all.
+	//
+	// Giving each attempt its own id removes the shared cell entirely.
+	// The winner's id is persisted by the claim below, in the same
+	// operation, so the id that is stored is always the one whose request
+	// object was actually returned. The losers' keys are never advertised
+	// to anyone and expire with the cache.
+	attemptKeyID, err := crypto.GenerateSecureToken(0, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate ephemeral key id: %w", err)
+	}
+
+	// A COPY, because authCtx is not ours to write to.
+	//
+	// MemoryStore.Get hands back the stored document itself rather than a
+	// copy - that is what makes ClaimIssuerState's compare-and-swap work -
+	// so assigning to the value read here mutates the cache. Every attempt
+	// on one issuer_state does that at the same time, which is a data race
+	// on shared state and, worse, a write to a prepared issuance by a
+	// request that is about to be refused.
+	//
+	// Nothing below the claim reads from this copy; the resume carries the
+	// same two fields into the store atomically.
+	pending := *authCtx
+	pending.DCQLQuery = dcql
+	pending.EphemeralEncryptionKeyID = attemptKeyID
+	presentationRequest, err := c.interactiveAuthorizationRequest(ctx, ia, &pending, dcql)
 	if err != nil {
 		return nil, err
 	}
@@ -988,6 +1022,7 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 		CodeChallenge:             req.CodeChallenge,
 		CodeChallengeMethod:       req.CodeChallengeMethod,
 		DCQLQuery:                 dcql,
+		EphemeralEncryptionKeyID:  attemptKeyID,
 		ExpiresAt:                 time.Now().Add(ia.AuthSessionTTL()).Unix(),
 		CreatedAt:                 time.Now(),
 	})

@@ -172,7 +172,25 @@ func (c *MemoryStore) Get(ctx context.Context, query *AuthorizationContext) (*Au
 		return nil, ErrNoDocuments
 	}
 
-	return item.Value(), nil
+	// A SNAPSHOT, not the stored document.
+	//
+	// Handing out the live pointer made every reader a writer's neighbour:
+	// a caller reading the fields it was given raced with any concurrent
+	// Claim or Resume mutating the same struct, and a caller that assigned
+	// to them changed the cache without meaning to. Both happen for real -
+	// several requests reach the Authorization Challenge Endpoint with one
+	// issuer_state and all of them read the prepared issuance while one of
+	// them is consuming it.
+	//
+	// Copying here is what makes it safe rather than copying at the call
+	// sites: the copy is taken under the same read lock that excludes the
+	// writers, which a caller cannot do for itself. Writing back still
+	// goes through Update, as every caller already does.
+	//
+	// The claims do not go through Get - they reach into the cache under
+	// the write lock - so their compare-and-swap is unaffected.
+	snapshot := *item.Value()
+	return &snapshot, nil
 }
 
 // GetWithAccessToken retrieves an authorization context by access token

@@ -2,13 +2,17 @@ package apiv1
 
 import (
 	"context"
+	stdcrypto "crypto"
+	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/oauth2"
 
+	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -134,4 +138,107 @@ func TestIssuerInitiated_ResumeSurvivesAFailingUpdate(t *testing.T) {
 	})
 	require.ErrorIs(t, err, cache.ErrNoDocuments)
 	assert.Nil(t, spent)
+}
+
+// Two wallets scanning one prepared issuance both build a request object
+// before either has claimed the handle - that ordering is deliberate, so
+// a failure cannot destroy an issuance nothing re-prepares. It means the
+// ephemeral encryption key must not be provisioned under an id they
+// share: EphemeralEncryptionKey is a Get-then-Set, so both would miss,
+// both would generate, and the private key left in the cache would be
+// whichever Set landed last - which need not be the public key the
+// WINNING wallet was handed. Its encrypted presentation would then be
+// undecryptable, and the exchange would be lost after the Holder had
+// already consented.
+//
+// Each attempt therefore mints its own key id and the winner's is
+// persisted by the atomic claim, so the id stored is always the one whose
+// request object was actually returned.
+func TestIssuerInitiated_ConcurrentResumesDoNotShareAnEncryptionKey(t *testing.T) {
+	client := newChallengeClient(t)
+	issuerState := prepareIssuance(t, client, portalMatch())
+
+	prepared, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		IssuerState: issuerState,
+	})
+	require.NoError(t, err)
+	preparedKeyID := prepared.EphemeralEncryptionKeyID
+	require.NotEmpty(t, preparedKeyID)
+
+	const attempts = 4
+	var (
+		mu     sync.Mutex
+		opened []*AuthorizationChallengeError
+		wg     sync.WaitGroup
+	)
+	for range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := initialChallenge(t)
+			req.Scope = ""
+			req.IssuerState = issuerState
+			_, err := client.OAuthAuthorizationChallenge(t.Context(), req)
+
+			var challengeErr *AuthorizationChallengeError
+			if errors.As(err, &challengeErr) {
+				mu.Lock()
+				opened = append(opened, challengeErr)
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	require.Len(t, opened, 1, "a one-shot handle yields exactly one exchange")
+	winner := opened[0]
+
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: winner.AuthSession,
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, preparedKeyID, authCtx.EphemeralEncryptionKeyID,
+		"the attempt's own key id must replace the one every attempt shared")
+
+	// The decisive assertion: the private key the exchange will decrypt
+	// with is the pair of the public key this wallet was actually handed.
+	advertised := advertisedEncryptionKey(t, winner.OpenID4VPRequest)
+	stored, ok := client.cacheService.EphemeralEncryptionKey.Get(t.Context(), authCtx.EphemeralEncryptionKeyID)
+	require.True(t, ok, "the stored key must be the one the winning request object named")
+
+	storedPublic, err := stored.PublicKey()
+	require.NoError(t, err)
+	storedThumb, err := storedPublic.Thumbprint(stdcrypto.SHA256)
+	require.NoError(t, err)
+	advertisedThumb, err := advertised.Thumbprint(stdcrypto.SHA256)
+	require.NoError(t, err)
+	assert.Equal(t, storedThumb, advertisedThumb,
+		"the response is encrypted to the advertised key, so the stored private half must match it")
+}
+
+// advertisedEncryptionKey reads the key a signed Interactive
+// Authorization request object offered in client_metadata.jwks.
+func advertisedEncryptionKey(t *testing.T, raw json.RawMessage) jwk.Key {
+	t.Helper()
+
+	var signed struct {
+		Request string `json:"request"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &signed))
+	require.NotEmpty(t, signed.Request)
+
+	claims := unsafeJWTClaims(t, signed.Request)
+	metadata, ok := claims["client_metadata"].(map[string]any)
+	require.True(t, ok, "the request must carry client_metadata")
+	jwks, ok := metadata["jwks"].(map[string]any)
+	require.True(t, ok, "the request must advertise an encryption key")
+
+	encoded, err := json.Marshal(jwks)
+	require.NoError(t, err)
+	set, err := jwk.Parse(encoded)
+	require.NoError(t, err)
+	require.Equal(t, 1, set.Len())
+	key, ok := set.Key(0)
+	require.True(t, ok)
+	return key
 }
