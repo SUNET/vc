@@ -189,16 +189,36 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 // a string. A query whose "id" is a number is a query this build has no
 // opinion about, which is the whole reason it went down this path.
 func (q *CredentialQuery) adoptRawRouting() {
+	id, format := q.rawRouting()
+	if id != "" {
+		q.ID = id
+	}
+	if format != "" {
+		q.Format = format
+	}
+}
+
+// rawRouting reads id and format out of the raw bytes, which are the
+// source of truth for both.
+//
+// Read here rather than trusted from the struct because the struct's
+// copies are only populated by UnmarshalJSON. A query built in code -
+// CredentialQuery{Raw: ...}, which is how the escape hatch is meant to be
+// used directly - carries none, and an empty Format means SD-JWT to every
+// reader, so a raw circuit_zk query would be refused for a missing
+// vct_values it was never going to have.
+func (q CredentialQuery) rawRouting() (id, format string) {
 	var members map[string]json.RawMessage
 	if err := json.Unmarshal(q.Raw, &members); err != nil {
-		return // not an object at all; nothing to route by
+		return "", "" // not an object at all; nothing to route by
 	}
-	for name, into := range map[string]*string{"id": &q.ID, "format": &q.Format} {
+	for name, into := range map[string]*string{"id": &id, "format": &format} {
 		var value string
 		if err := json.Unmarshal(members[name], &value); err == nil {
 			*into = value
 		}
 	}
+	return id, format
 }
 
 // rawMeta re-reads just the meta member of a raw query, and reports
@@ -883,9 +903,12 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 		// passes the permissive default exactly where there is no rule to
 		// fail. A format that grows one later is covered without anything
 		// here being updated.
+		// From the BYTES, not from the struct's copies of them: those are
+		// populated by UnmarshalJSON, and a query built in code has none.
+		id, format := query.rawRouting()
 		meta, readable := query.rawMeta()
-		raw := query
-		query = CredentialQuery{ID: raw.ID, Format: raw.Format, Meta: meta}
+
+		query = CredentialQuery{ID: id, Format: format, Meta: meta}
 		if !readable {
 			if err := ValidateCredentialQuery(query); err != nil {
 				// Reported as what it is. "vct_values is required" would
@@ -893,7 +916,7 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 				// in the bytes, inside the meta this could not read.
 				return &DCQLValidationError{
 					Field:   "meta",
-					Message: fmt.Sprintf("meta is a shape this build cannot read, so the %s constraint it would have to satisfy cannot be established: %v", formatOrDefault(raw.Format), err),
+					Message: fmt.Sprintf("meta is a shape this build cannot read, so the %s constraint it would have to satisfy cannot be established: %v", formatOrDefault(query.Format), err),
 				}
 			}
 			return nil

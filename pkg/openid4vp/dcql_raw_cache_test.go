@@ -164,3 +164,46 @@ func TestValidateRejectsRawThatIsNotJSON(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "raw")
 }
+
+// The escape hatch is meant to be used in code too, not only reached by
+// a decode that failed. A query built as CredentialQuery{Raw: ...} - a
+// template the verifier assembles, say - carries none of the struct's
+// shadow copies of id and format, so validation has to read them from the
+// bytes rather than trust the struct.
+//
+// Without that, an empty Format means SD-JWT to every reader, and a raw
+// circuit_zk query is refused for a vct_values it was never going to
+// have, on every production path that validates.
+func TestValidateReadsTheFormatFromRawNotFromTheStruct(t *testing.T) {
+	for _, tc := range []struct {
+		name, query, wantErr string
+	}{
+		{
+			name:  "circuit_zk, built in code with no decode in sight",
+			query: `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`,
+		},
+		{
+			name:  "mso_mdoc with its doctype, likewise",
+			query: `{"id":"q","format":"mso_mdoc","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`,
+		},
+		{
+			name:    "and the rules still apply: sd-jwt with no vct_values",
+			query:   `{"id":"q","format":"vc+sd-jwt","claims":{"_req":[]}}`,
+			wantErr: "vct_values",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Constructed directly. No UnmarshalJSON anywhere.
+			query := CredentialQuery{Raw: json.RawMessage(tc.query)}
+			require.Empty(t, query.Format, "the point of this case is that the struct carries nothing")
+
+			err := ValidateCredentialQuery(query)
+			if tc.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
