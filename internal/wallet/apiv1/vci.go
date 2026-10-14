@@ -927,6 +927,34 @@ func (c *Client) createProofJWT(ctx context.Context, audience, cNonce string) (s
 	return signed, nil
 }
 
+// dpopHTU is the "htu" claim for a request to uri: RFC 9449 §4.2 defines
+// it as the HTTP target URI WITHOUT its query and fragment.
+//
+// The URI was being copied in whole, so an endpoint published with a
+// query - "https://as.example/challenge?tenant=a", which is an ordinary
+// way to write a multi-tenant deployment - produced a proof that this
+// repository's own validator rejects, in pkg/oauth2.DPoP.Validate. Every
+// DPoP-protected request this wallet makes would have failed against such
+// a deployment, and the failure would have looked like the server's.
+//
+// Only the claim is trimmed. The request still goes to the full URI; the
+// query is part of where the wallet is talking to, just not part of what
+// the proof is bound to.
+func dpopHTU(uri string) string {
+	u, err := url.Parse(uri)
+	if err != nil {
+		// Not a URL this function can take apart. The server will reject
+		// the proof, which is the honest outcome - inventing an htu here
+		// would only hide where the problem is.
+		return uri
+	}
+	u.RawQuery = ""
+	u.ForceQuery = false
+	u.Fragment = ""
+	u.RawFragment = ""
+	return u.String()
+}
+
 func (c *Client) createDPoPProof(method, uri, accessToken string) (string, error) {
 	_, alg := jose.GetSigningMethodFromKey(c.signingKey)
 
@@ -944,7 +972,7 @@ func (c *Client) createDPoPProof(method, uri, accessToken string) (string, error
 	body := jwtv5.MapClaims{
 		"jti": uuid.New().String(),
 		"htm": method,
-		"htu": uri,
+		"htu": dpopHTU(uri),
 		"iat": time.Now().Unix(),
 	}
 
