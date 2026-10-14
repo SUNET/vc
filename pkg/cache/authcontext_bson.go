@@ -20,6 +20,13 @@ func (a AuthorizationContext) MarshalBSON() ([]byte, error) {
 	type plain AuthorizationContext // no methods, so no recursion
 	document := plain(a)
 
+	// Derived from DCQLQuery, so it is cleared before being rebuilt. A
+	// context loaded from BSON carries the exact text in memory; a caller
+	// that then CLEARS DCQLQuery and saves would otherwise leave the old
+	// text in the replacement document, and the next read - which prefers
+	// it - would restore the query that had just been removed.
+	document.DCQLQueryExact = ""
+
 	if a.DCQLQuery != nil {
 		encoded, err := json.Marshal(a.DCQLQuery)
 		if err != nil {

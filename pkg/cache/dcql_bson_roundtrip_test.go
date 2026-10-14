@@ -164,3 +164,35 @@ func TestAuthorizationContextRefusesACorruptExactQuery(t *testing.T) {
 	var loaded AuthorizationContext
 	require.Error(t, bson.Unmarshal(stored, &loaded))
 }
+
+// The exact copy is DERIVED from DCQLQuery, so clearing the query has to
+// clear it too.
+//
+// A context loaded from BSON carries the exact text in memory. A caller
+// that then clears DCQLQuery and saves would otherwise leave the old text
+// in the replacement document - and the next read prefers it, restoring
+// the query that had just been removed.
+func TestClearingTheQueryClearsTheExactCopy(t *testing.T) {
+	query := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+		ID: "nym", Format: openid4vp.FormatCircuitZk,
+		Meta: openid4vp.MetaQuery{DoctypeValue: "d"},
+	}}}
+
+	stored, err := bson.Marshal(&AuthorizationContext{SessionID: "s", DCQLQuery: query})
+	require.NoError(t, err)
+
+	var loaded AuthorizationContext
+	require.NoError(t, bson.Unmarshal(stored, &loaded))
+	require.NotNil(t, loaded.DCQLQuery)
+	require.NotEmpty(t, loaded.DCQLQueryExact, "the exact copy is what makes this worth testing")
+
+	// What a caller removing the query does.
+	loaded.DCQLQuery = nil
+	resaved, err := bson.Marshal(&loaded)
+	require.NoError(t, err)
+
+	var reloaded AuthorizationContext
+	require.NoError(t, bson.Unmarshal(resaved, &reloaded))
+	assert.Nil(t, reloaded.DCQLQuery, "a removed query must not come back")
+	assert.Empty(t, reloaded.DCQLQueryExact)
+}

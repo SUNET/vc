@@ -104,6 +104,15 @@ func (q CredentialQuery) MarshalYAML() (any, error) {
 		if !json.Valid(q.Raw) {
 			return nil, fmt.Errorf("credential query: raw is not valid JSON")
 		}
+		// A duplicate member has no YAML representation that keeps both.
+		// This path decodes the bytes to a tree, which collapses them to
+		// the last value - so writing the configuration back out would
+		// emit a DIFFERENT request, and the whole reason such a query is
+		// carried raw is that it must not change. Refused rather than
+		// quietly reduced; the JSON path still carries it.
+		if hasDuplicateMembers(q.Raw) {
+			return nil, fmt.Errorf("credential query: this query names a member more than once, which YAML cannot write without dropping one")
+		}
 		var tree any
 		if err := decodeExact(q.Raw, &tree); err != nil {
 			return nil, fmt.Errorf("credential query: %w", err)

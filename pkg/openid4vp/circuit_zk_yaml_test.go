@@ -867,3 +867,28 @@ func TestTypedContainersDoNotHideANumberYAMLWouldRound(t *testing.T) {
 	_, err := yamlv2.Marshal(query)
 	require.Error(t, err)
 }
+
+// A duplicate member has no YAML representation that keeps both.
+//
+// The raw YAML path decodes the bytes to a tree, which collapses them to
+// the last value - so writing the configuration back out would emit a
+// different request, and the whole reason such a query is carried raw is
+// that it must not change. Refused rather than quietly reduced.
+func TestYAMLRefusesARawQueryWithDuplicateMembers(t *testing.T) {
+	// Not a constraint member - those are refused outright now - but one
+	// the model still carries raw.
+	const in = `{"id":"first","id":"last","format":"circuit_zk","meta":{"doctype_value":"d"}}`
+
+	query, err := NewRawCredentialQuery(json.RawMessage(in))
+	require.NoError(t, err, "this is a request a verifier may legitimately send")
+
+	_, err = yamlv2.Marshal(query)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "more than once")
+
+	// And the JSON path still carries it, which is the point of the
+	// refusal being narrow: only YAML cannot say this.
+	encoded, err := json.Marshal(query)
+	require.NoError(t, err)
+	assert.Equal(t, in, string(encoded))
+}
