@@ -149,6 +149,25 @@ func validateNymAuthPseudonym(where string, item ReqItem) error {
 			strings.Join(slices.Sorted(maps.Keys(nymAuthConfigs)), ", "))
 	}
 
+	// Two named members the rulebook does not allow on a request, kept
+	// separate from the unknown-member case: everything this profile
+	// supports is an -ssc configuration, so a psc - the commitment a
+	// HOLDER already knows - has no place in one; and the request names
+	// the KIND of verifier identity, which the wallet then derives,
+	// rather than the identity itself.
+	//
+	// Named members only. An unknown parameter stays permissive, because
+	// a newer rulebook adding one is the case this whole format is built
+	// around.
+	for name, why := range map[string]string{
+		"psc":         "every configuration this profile supports is -ssc, and a psc is the holder's own commitment",
+		"verifier_id": "the request names verifier_id_type, and the wallet derives the identity itself",
+	} {
+		if _, present := item.Params[name]; present {
+			return fmt.Errorf("%s: params.%s is not a member the %s rulebook allows on a request: %s", where, name, ProfileNymAuth, why)
+		}
+	}
+
 	idType, hasIDType := item.Params["verifier_id_type"]
 	switch {
 	case spec.usesVerifierID && !hasIDType:

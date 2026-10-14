@@ -2,6 +2,7 @@ package openid4vp
 
 import (
 	"encoding/json"
+	"maps"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -255,4 +256,34 @@ func TestNymAuthProfileRefusesPSCConfigurationsAsPending(t *testing.T) {
 	assert.Contains(t, err.Error(), "defined by the rulebook but cannot be requested yet")
 	assert.Contains(t, err.Error(), "conveying one to a wallet")
 	assert.NotContains(t, err.Error(), "is not a configuration the rulebook defines")
+}
+
+// Two named members the rulebook does not allow on a request. Separate
+// from the unknown-member case, which stays permissive: a newer rulebook
+// adding a parameter is what this whole format is built around.
+func TestNymAuthProfileRefusesMembersTheRulebookDoesNotAllow(t *testing.T) {
+	base := map[string]any{"config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns"}
+	with := func(name string, value any) map[string]any {
+		params := map[string]any{}
+		maps.Copy(params, base)
+		params[name] = value
+		return params
+	}
+
+	for _, tc := range []struct{ name, param, want string }{
+		{"a psc, which only a holder has", "psc", "every configuration this profile supports is -ssc"},
+		{"a verifier_id, where the request names the kind", "verifier_id", "the wallet derives the identity itself"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateProfile(ProfileNymAuth, nymQuery(pseudonymItem(with(tc.param, "x"))))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.Contains(t, err.Error(), "params."+tc.param)
+		})
+	}
+
+	t.Run("an unknown parameter is still allowed", func(t *testing.T) {
+		assert.NoError(t, ValidateProfile(ProfileNymAuth,
+			nymQuery(pseudonymItem(with("some_future_param", "x")))))
+	})
 }
