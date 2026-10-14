@@ -1,10 +1,13 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"strings"
 
@@ -680,6 +683,26 @@ func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointPrepareIssuance")
 	defer span.End()
 
+	// Refused before binding, because binding is where the two readings
+	// of this body diverge.
+	//
+	// encoding/json matches members to struct fields case-INSENSITIVELY
+	// and lets a later member overwrite an earlier one, so
+	// {"scope":"a","Scope":"b"} binds Scope to "b". The authorization
+	// middleware reads the body into a map and looks up the exact key
+	// "scope", which is "a". One request, two different scopes, and the
+	// one that was authorized is not the one that would be acted on.
+	//
+	// Refusing the ambiguity is the fix rather than picking a winner:
+	// there is no reading of a body with both members that a caller could
+	// have meant, and any rule for choosing between them would have to be
+	// kept in step with encoding/json's.
+	if err := refuseAmbiguousJSONMembers(c); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "ambiguous request body")
+		return nil, err
+	}
+
 	request := &apiv1.PrepareIssuanceRequest{}
 	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
 		span.SetStatus(codes.Error, err.Error())
@@ -695,4 +718,44 @@ func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (
 	}
 
 	return reply, nil
+}
+
+// refuseAmbiguousJSONMembers rejects a JSON body carrying two members that
+// differ only in case.
+//
+// Exact duplicates need no check: encoding/json and a map decode both keep
+// the LAST one, so the two readings agree. Case variants are the problem -
+// a struct field matches either, while a map keeps them apart - and no
+// legitimate caller sends both.
+//
+// The body is restored for the binder, the same way the authorization
+// middleware restores it.
+func refuseAmbiguousJSONMembers(c *gin.Context) error {
+	if c.Request.Body == nil || c.Request.ContentLength <= 0 || c.ContentType() != "application/json" {
+		return nil
+	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+	if err != nil {
+		return oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "could not read the request body", 400, err)
+	}
+
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(body, &members); err != nil {
+		// Not an object, or not JSON at all. The binder will say so.
+		return nil
+	}
+
+	seen := make(map[string]string, len(members))
+	for name := range members {
+		folded := strings.ToLower(name)
+		if first, ok := seen[folded]; ok {
+			return oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+				fmt.Sprintf("the request body carries both %q and %q, which name the same member", first, name), 400)
+		}
+		seen[folded] = name
+	}
+
+	return nil
 }

@@ -274,3 +274,61 @@ func TestEndpointPrepareIssuance_ScopeCannotComeFromAHeader(t *testing.T) {
 			"a scope the authorization middleware never saw must not reach the handler")
 	}
 }
+
+// encoding/json matches members to struct fields case-INSENSITIVELY and
+// lets a later member overwrite an earlier one, while the authorization
+// middleware reads the body into a map and looks up the exact key
+// "scope". So {"scope":"a","Scope":"b"} is one request with two scopes:
+// the middleware authorizes "a" and the handler would act on "b".
+//
+// Refusing the ambiguity is the fix rather than picking a winner. There
+// is no reading of such a body that a caller could have meant, and any
+// rule for choosing between the two would have to be kept in step with
+// encoding/json's own.
+func TestEndpointPrepareIssuance_RefusesACaseVariantScope(t *testing.T) {
+	ctx := t.Context()
+
+	log, err := logger.New("prepare-ambiguous-test", t.TempDir(), true)
+	require.NoError(t, err)
+	tracer, err := trace.NewForTesting(ctx, "prepare-ambiguous-test", log)
+	require.NoError(t, err)
+
+	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
+	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
+	require.NoError(t, err)
+
+	api := &prepareAPI{}
+	s := &Service{cfg: cfg, log: log.New("httpserver"), apiv1: api, tracer: tracer, httpHelpers: helpers}
+
+	engine := gin.New()
+	helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
+
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+
+	const match = `"identity_match":{"claims":{"given_name":{"equals":"Alice"}}}`
+
+	api.seen = nil
+	w := post(`{"scope":"allowed_scope","Scope":"forbidden_scope",` + match + `}`)
+	assert.Nil(t, api.seen,
+		"a body naming one member twice must not reach preparation at all")
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+
+	// The other order too: which of the two encoding/json happens to keep
+	// is not something this should depend on.
+	api.seen = nil
+	w = post(`{"Scope":"forbidden_scope","scope":"allowed_scope",` + match + `}`)
+	assert.Nil(t, api.seen)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	// An ordinary body is unaffected.
+	api.seen = nil
+	w = post(`{"scope":"allowed_scope",` + match + `}`)
+	require.NotNil(t, api.seen, "body: %s", w.Body.String())
+	assert.Equal(t, "allowed_scope", api.seen.Scope)
+}

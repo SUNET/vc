@@ -65,7 +65,7 @@ func TestCheckInteractiveAuthorization(t *testing.T) {
 		assert.Contains(t, err.Error(), "api_auth")
 	})
 
-	t.Run("either Bearer mode is enough", func(t *testing.T) {
+	t.Run("either Bearer mode is enough on its own", func(t *testing.T) {
 		jwks := iaCfgWithoutAPIAuth(true, false)
 		jwks.APIGW.APIServer.APIAuth.JWKS.Enable = true
 		assert.NoError(t, checkInteractiveAuthorization(jwks, "apigw"))
@@ -73,6 +73,38 @@ func TestCheckInteractiveAuthorization(t *testing.T) {
 		oidc := iaCfgWithoutAPIAuth(true, false)
 		oidc.APIGW.APIServer.APIAuth.OIDC.Enable = true
 		assert.NoError(t, checkInteractiveAuthorization(oidc, "apigw"))
+	})
+
+	// A Bearer mode is not enough when the admin session is an
+	// ALTERNATIVE to it rather than a second check on top.
+	//
+	// /ui/login grants a session with admin_subject "anonymous" when no
+	// OIDC is configured, and SessionOrAPIAuth accepts a session INSTEAD
+	// of falling through to the Bearer middleware. So jwks enabled plus
+	// the admin UI on still leaves preparation reachable by an anonymous
+	// caller, and the jwks configuration says nothing about it.
+	t.Run("the admin UI without OIDC is refused", func(t *testing.T) {
+		cfg := iaCfgWithoutAPIAuth(true, false)
+		cfg.APIGW.APIServer.APIAuth.JWKS.Enable = true
+		cfg.APIGW.AdminUIEnable = true
+
+		err := checkInteractiveAuthorization(cfg, "apigw")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "anonymous session")
+		assert.Contains(t, err.Error(), "admin_ui_enable")
+	})
+
+	t.Run("the admin UI with OIDC is accepted", func(t *testing.T) {
+		cfg := iaCfgWithoutAPIAuth(true, false)
+		cfg.APIGW.APIServer.APIAuth.OIDC.Enable = true
+		cfg.APIGW.AdminUIEnable = true
+		assert.NoError(t, checkInteractiveAuthorization(cfg, "apigw"))
+	})
+
+	t.Run("the admin UI off needs no OIDC", func(t *testing.T) {
+		cfg := iaCfgWithoutAPIAuth(true, false)
+		cfg.APIGW.APIServer.APIAuth.JWKS.Enable = true
+		assert.NoError(t, checkInteractiveAuthorization(cfg, "apigw"))
 	})
 
 	// An admin session is not authentication for this purpose: it is

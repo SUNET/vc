@@ -1048,12 +1048,33 @@ func checkInteractiveAuthorization(cfg *model.Cfg, serviceName string) error {
 	// session it would otherwise look for is granted anonymously when OIDC
 	// is absent. There is no authenticated principal to require, so the
 	// only honest check is on the configuration that left none.
-	if model.BoolVal(ia.Enable, false) && !apiAuthenticationConfigured(cfg.APIGW.APIServer.APIAuth) {
-		return errors.New(
-			"apigw.delivery.interactive_authorization.enable is true but apigw.api_server.api_auth " +
-				"configures neither jwks nor oidc: enabling it exposes /api/v1/issuance/prepare, " +
-				"which prepares an issuance for a Holder the caller names, and without API " +
-				"authentication anyone who can reach the port may call it")
+	if model.BoolVal(ia.Enable, false) {
+		if !apiAuthenticationConfigured(cfg.APIGW.APIServer.APIAuth) {
+			return errors.New(
+				"apigw.delivery.interactive_authorization.enable is true but apigw.api_server.api_auth " +
+					"configures neither jwks nor oidc: enabling it exposes /api/v1/issuance/prepare, " +
+					"which prepares an issuance for a Holder the caller names, and without API " +
+					"authentication anyone who can reach the port may call it")
+		}
+
+		// Having a Bearer mode configured is not enough on its own,
+		// because the admin session is an alternative to it rather than a
+		// second check on top of it.
+		//
+		// With the admin UI on and no OIDC, /ui/login grants a session
+		// with admin_subject "anonymous" to anybody who asks, and
+		// SessionOrAPIAuth accepts a session INSTEAD of falling through
+		// to the Bearer middleware. So a deployment with jwks enabled and
+		// the admin UI on still exposes preparation to an anonymous
+		// caller, and the JWKS configuration says nothing about it.
+		if cfg.APIGW.AdminUIEnable && !cfg.APIGW.APIServer.APIAuth.OIDC.Enable {
+			return errors.New(
+				"apigw.delivery.interactive_authorization.enable is true with apigw.admin_ui_enable " +
+					"true and apigw.api_server.api_auth.oidc disabled: the admin UI grants an " +
+					"anonymous session when OIDC is absent, and that session is accepted in place " +
+					"of a bearer token - so /api/v1/issuance/prepare would be reachable without " +
+					"authenticating anybody. Configure oidc, or turn the admin UI off")
+		}
 	}
 
 	return nil
