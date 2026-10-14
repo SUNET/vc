@@ -29,6 +29,14 @@ func circuitZkPresetConfig(t *testing.T, scopeCfg *model.VerificationPresetScope
 			},
 		},
 		Verifier: &model.Verifier{
+			// A circuit_zk query is answered with a proof, and which
+			// circuits this verifier accepts one from lives here. Without
+			// it the preset is not published at all, which is the subject
+			// of TestCircuitZkPresetNeedsTheFormatAdvertised.
+			PreferredVPFormats: &openid4vp.VPFormatsSupported{
+				MsoMdoc:   &openid4vp.MsoMdocFormat{},
+				CircuitZk: &openid4vp.CircuitZkFormat{},
+			},
 			Presets: map[string]model.PresetDefinition{
 				"Nym": {Credentials: model.VerificationPreset{"nym": scopeCfg}},
 			},
@@ -107,8 +115,10 @@ func TestCircuitZkPresetCarriesNoClaims(t *testing.T) {
 
 			reply, err := client.UIMetadata(t.Context())
 			require.NoError(t, err)
-			require.Len(t, reply.Presets["Nym"].Credentials, 1)
-			assert.Empty(t, reply.Presets["Nym"].Credentials[0].Claims)
+			preset := reply.Presets["Nym"]
+			require.NotNil(t, preset)
+			require.Len(t, preset.Credentials, 1)
+			assert.Empty(t, preset.Credentials[0].Claims)
 		})
 	}
 }
@@ -136,4 +146,99 @@ func TestCircuitZkPresetWithoutReqIsOmitted(t *testing.T) {
 func TestCircuitZkOverrideKeepsTheConstraintFamily(t *testing.T) {
 	assert.True(t, sameConstraintFamily(openid4vp.FormatMsoMdoc, openid4vp.FormatCircuitZk))
 	assert.False(t, sameConstraintFamily(openid4vp.FormatSDJWTVC, openid4vp.FormatCircuitZk))
+}
+
+// The circuit filter - which proof systems and circuits this verifier
+// will accept a proof from - lives in
+// client_metadata.vp_formats_supported.circuit_zk and nowhere else.
+// vpFormatsOrDefault's default names only dc+sd-jwt and mso_mdoc, so a
+// deployment that never configured preferred_vp_formats would publish
+// this preset and then send the query alongside metadata declaring no
+// support for its format at all.
+//
+// No default is invented: those identifiers are deployment-specific, and
+// guessing one would pin this verifier to whichever implementation
+// happened to be in front of whoever wrote it. An EMPTY circuit_zk object
+// is a perfectly good answer - the shared vectors read a missing filter
+// as "any circuit" - but it has to be the operator's answer.
+func TestCircuitZkPresetNeedsTheFormatAdvertised(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		formats *openid4vp.VPFormatsSupported
+		publish bool
+	}{
+		{"nothing configured, so the default applies and names no circuit_zk", nil, false},
+		{"configured, but without circuit_zk", &openid4vp.VPFormatsSupported{
+			MsoMdoc: &openid4vp.MsoMdocFormat{},
+		}, false},
+		{"an empty circuit_zk, which means any circuit", &openid4vp.VPFormatsSupported{
+			CircuitZk: &openid4vp.CircuitZkFormat{},
+		}, true},
+		{"and one naming a filter", &openid4vp.VPFormatsSupported{
+			CircuitZk: &openid4vp.CircuitZkFormat{
+				CircuitProofSystemValues: []string{"longfellow-libzk-v1"},
+			},
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := circuitZkPresetConfig(t, &model.VerificationPresetScope{
+				Format: openid4vp.FormatCircuitZk,
+				Req:    nymReq,
+			}, nil)
+			cfg.Verifier.PreferredVPFormats = tc.formats
+
+			client, _ := CreateTestClientWithMock(t, cfg)
+			client.cfg = cfg
+			reply, err := client.UIMetadata(t.Context())
+			require.NoError(t, err)
+
+			preset := reply.Presets["Nym"]
+			if !tc.publish {
+				if preset != nil {
+					assert.Empty(t, preset.Credentials,
+						"a wallet would be asked for a proof the request declares no support for")
+				}
+				return
+			}
+			require.NotNil(t, preset)
+			require.Len(t, preset.Credentials, 1)
+		})
+	}
+}
+
+// The circuit_zk requirement must not reach any other format. My first
+// version of that guard was not gated on the format at all, so it dropped
+// every preset carrying ANY format override whenever circuit_zk was
+// unadvertised - which the existing mso_mdoc_zk test caught. This keeps
+// the two apart on purpose rather than by accident.
+func TestTheCircuitZkRequirementDoesNotTouchOtherFormats(t *testing.T) {
+	schema := &mdoc.MDDLSchema{Format: "mso_mdoc", DocType: "eu.europa.ec.eudi.pid.1"}
+	cfg := &model.Cfg{
+		Common: &model.Common{
+			CredentialMetadata: map[string]*model.CredentialMetadata{
+				"pid": {Format: "mso_mdoc", MDDL: schema, Attributes: schema.Attributes()},
+			},
+		},
+		Verifier: &model.Verifier{
+			// Deliberately no circuit_zk.
+			PreferredVPFormats: &openid4vp.VPFormatsSupported{MsoMdoc: &openid4vp.MsoMdocFormat{}},
+			Presets: map[string]model.PresetDefinition{
+				"ZK": {Credentials: model.VerificationPreset{"pid": &model.VerificationPresetScope{
+					Format:       openid4vp.FormatMsoMdocZk,
+					ZKSystemType: []openid4vp.ZKSystemTypeSpec{{ID: "circuit-1", System: "longfellow"}},
+				}}},
+				"Plain": {Credentials: model.VerificationPreset{"pid": nil}},
+			},
+		},
+	}
+	client, _ := CreateTestClientWithMock(t, cfg)
+	client.cfg = cfg
+
+	reply, err := client.UIMetadata(t.Context())
+	require.NoError(t, err)
+	require.Contains(t, reply.Presets, "ZK")
+	require.Len(t, reply.Presets["ZK"].Credentials, 1,
+		"mso_mdoc_zk declares its circuits in meta.zk_system_type, not in vp_formats_supported.circuit_zk")
+	require.Contains(t, reply.Presets, "Plain")
+	require.Len(t, reply.Presets["Plain"].Credentials, 1)
 }

@@ -371,6 +371,29 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					// systems disagreeing about who someone is, with nothing
 					// malformed to point at. Refused here, where the
 					// operator can still fix it.
+					// A circuit_zk query is answered with a PROOF, and
+					// which circuits a verifier will accept one from lives
+					// in client_metadata.vp_formats_supported.circuit_zk -
+					// nowhere else. vpFormatsOrDefault's default names
+					// only dc+sd-jwt and mso_mdoc, so a deployment that
+					// never configured preferred_vp_formats would publish
+					// this preset and then send the query alongside
+					// metadata declaring no support for its format at all.
+					//
+					// No default is invented here. The circuit filter
+					// names proof systems and circuit identifiers that are
+					// deployment-specific, and guessing one would pin this
+					// verifier to whichever implementation happened to be
+					// in front of me. An empty circuit_zk object is a
+					// perfectly good answer - the shared vectors read a
+					// missing filter as "any circuit" - but it has to be
+					// the operator's answer.
+					if scopeCfg.Format == openid4vp.FormatCircuitZk &&
+						vpFormatsOrDefault(c.cfg.Verifier.PreferredVPFormats).CircuitZk == nil {
+						c.log.Error(nil, "credential omitted from a verifier UI preset: circuit_zk is not advertised in verifier.preferred_vp_formats, so a wallet would be asked for a proof the request declares no support for",
+							"preset", label, "scope", scope)
+						continue
+					}
 					if err := reqSurvivesTheBrowser(scopeCfg.Req); err != nil {
 						c.log.Error(err, "credential omitted from a verifier UI preset: a req param cannot survive the browser's JSON round trip",
 							"preset", label, "scope", scope)
