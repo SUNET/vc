@@ -48,7 +48,7 @@ type challengeResponse struct {
 // is required, perform it, ask again. It is bounded because a server that
 // keeps asking for interactions is a server this wallet cannot finish with,
 // and a test wallet that spins forever reports nothing useful.
-func (c *Client) doInteractiveAuthorization(ctx context.Context, meta *oauth2ServerMetadata, vci *config.VCIScenario, result *ScenarioResult) (string, error) {
+func (c *Client) doInteractiveAuthorization(ctx context.Context, meta *oauth2ServerMetadata, vci *config.VCIScenario, flow *vciFlow, result *ScenarioResult) (string, error) {
 	endpoint := meta.challengeEndpoint()
 	if endpoint == "" {
 		return "", fmt.Errorf("issuer does not advertise an authorization challenge endpoint")
@@ -65,14 +65,14 @@ func (c *Client) doInteractiveAuthorization(ctx context.Context, meta *oauth2Ser
 	if vci.RedirectURI != "" {
 		form.Set("redirect_uri", vci.RedirectURI)
 	}
-	if vci.IssuerState != "" {
-		form.Set("issuer_state", vci.IssuerState)
+	if flow.issuerState != "" {
+		form.Set("issuer_state", flow.issuerState)
 	}
 
 	// PKCE always. The code this exchange ends with is redeemed on a
 	// separate connection, and the Security BCP allows only S256.
 	verifier := uuid.New().String() + uuid.New().String()
-	vci.SetCodeVerifier(verifier)
+	flow.codeVerifier = verifier
 	form.Set("code_challenge", computeS256Challenge(verifier))
 	form.Set("code_challenge_method", "S256")
 

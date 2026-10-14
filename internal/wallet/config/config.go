@@ -111,26 +111,17 @@ type VCIScenario struct {
 	// IssuerState is the handle from an issuer-initiated Credential
 	// Offer, carried into the initial Authorization Challenge Request.
 	//
-	// Taken from the offer's authorization_code grant when one is
-	// present; set it here only to drive the case directly.
+	// Set it here only to drive the case directly; an offer's own handle
+	// is read into the run's state and never written back here, because
+	// this struct outlives the run and is shared with every other run of
+	// the same scenario.
 	IssuerState string `yaml:"issuer_state,omitempty"`
 
 	// PresentCredential names a credential in this wallet's store to
 	// present when the issuer asks for one. Empty means the first one
 	// that satisfies the request.
 	PresentCredential string `yaml:"present_credential,omitempty"`
-
-	// codeVerifier is the PKCE verifier minted for this run. Not
-	// configurable - it is state the flow carries from wherever the
-	// challenge was issued to the Token Endpoint that redeems it.
-	codeVerifier string `yaml:"-"`
 }
-
-// SetCodeVerifier records the PKCE verifier this run minted.
-func (v *VCIScenario) SetCodeVerifier(verifier string) { v.codeVerifier = verifier }
-
-// CodeVerifier returns the PKCE verifier this run minted, if any.
-func (v *VCIScenario) CodeVerifier() string { return v.codeVerifier }
 
 // VPScenario defines parameters for an OpenID4VP presentation test
 type VPScenario struct {

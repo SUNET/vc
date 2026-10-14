@@ -68,6 +68,14 @@ type testEnvironment struct {
 	iaInteractionType  string
 	iaRequireIA        bool
 	iaMetadataSpelling string
+
+	// offerIssuerState makes /credential-offer serve an issuer-initiated
+	// offer whose authorization_code grant carries a FRESH issuer_state on
+	// every fetch, which is what a real prepared issuance does. Two runs
+	// of one scenario must then present two different handles.
+	offerIssuerState  bool
+	offersServed      int
+	offerStatesServed []string
 }
 
 type vpResponseCapture struct {
@@ -149,14 +157,27 @@ func (env *testEnvironment) setupIssuerServer() {
 
 	// Credential offer
 	mux.HandleFunc("GET /credential-offer", func(w http.ResponseWriter, r *http.Request) {
+		grants := map[string]any{
+			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
+				"pre-authorized_code": "test-pre-auth-code-abc",
+			},
+		}
+
+		env.mu.Lock()
+		if env.offerIssuerState {
+			env.offersServed++
+			state := fmt.Sprintf("issuer-state-%d", env.offersServed)
+			env.offerStatesServed = append(env.offerStatesServed, state)
+			grants = map[string]any{
+				"authorization_code": map[string]any{"issuer_state": state},
+			}
+		}
+		env.mu.Unlock()
+
 		offer := openid4vci.CredentialOfferParameters{
 			CredentialIssuer:           env.issuerServer.URL,
 			CredentialConfigurationIDs: []string{"test_credential"},
-			Grants: map[string]any{
-				"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
-					"pre-authorized_code": "test-pre-auth-code-abc",
-				},
-			},
+			Grants:                     grants,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(offer)
@@ -359,6 +380,10 @@ func (env *testEnvironment) setupOAuth2Server() {
 			// never sent the verifier, and nothing captured it here, so
 			// neither side noticed.
 			"code_verifier": r.FormValue("code_verifier"),
+			// The Authorization Challenge Endpoint binds every exchange
+			// to a DPoP key, so a code that came out of one cannot be
+			// redeemed without proving the same key.
+			"dpop": r.Header.Get("DPoP"),
 		}
 
 		env.mu.Lock()

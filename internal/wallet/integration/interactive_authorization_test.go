@@ -5,8 +5,11 @@ package integration
 import (
 	"crypto/ecdh"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/SUNET/vc/internal/wallet/config"
@@ -258,7 +261,11 @@ func TestVCI_InteractiveAuthorization_KeyBindingAudience(t *testing.T) {
 	wantAudience, err := openid4vp.CanonicalOrigin(env.oauth2Server.URL + "/authorize-challenge")
 	require.NoError(t, err)
 
-	assert.Contains(t, keyBindingAudience(t, presented), "ia:"+wantAudience)
+	// Exactly, not Contains. The binding is the whole point of the
+	// prefixed audience, and "ia:https://issuer.example" is a prefix of
+	// "ia:https://issuer.example.evil" - a Contains assertion would pass
+	// for a presentation bound to an attacker's origin.
+	assert.Equal(t, "ia:"+wantAudience, keyBindingAudience(t, presented))
 }
 
 // seedPresentableCredential puts a credential in the wallet that
@@ -291,4 +298,238 @@ func keyBindingAudience(t *testing.T, presented string) string {
 
 	audience, _ := claims["aud"].(string)
 	return audience
+}
+
+// An authorization code produced by the Authorization Challenge Endpoint
+// is bound to the DPoP key the exchange was opened with, and the Token
+// Endpoint refuses it unless the redemption proves the same key.
+//
+// The wallet used to send DPoP on this leg only when the scenario set
+// use_dpop, which no Interactive Authorization scenario does - so the
+// default flow obtained a code and could not spend it.
+func TestVCI_InteractiveAuthorization_RedeemsTheCodeWithDPoP(t *testing.T) {
+	env := setupTestEnvironment(t, func(e *testEnvironment) {
+		e.iaMetadataSpelling = "normative"
+	})
+	defer env.cleanup()
+
+	env.seedPresentableCredential(t)
+	env.addScenario(config.Scenario{
+		Name: "ia-dpop-redemption",
+		Type: "vci",
+		VCI: &config.VCIScenario{
+			IssuerURL:                   env.issuerServer.URL,
+			Scope:                       "pid",
+			UseInteractiveAuthorization: true,
+			CredentialConfigurationID:   "test_credential",
+			// Deliberately not set: the binding is the protocol's, not
+			// the scenario's, so it must not depend on this.
+			UseDPoP: false,
+		},
+	})
+
+	result, err := env.wallet.RunScenario(t.Context(), "ia-dpop-redemption")
+	require.NoError(t, err)
+	require.True(t, result.Success, "scenario failed: %s", result.Error)
+
+	env.mu.Lock()
+	tokenRequests := env.tokenRequestsReceived
+	env.mu.Unlock()
+	require.Len(t, tokenRequests, 1)
+	assert.NotEmpty(t, tokenRequests[0]["dpop"],
+		"a code from the challenge endpoint carries a DPoP binding the token request must prove")
+}
+
+// A prepared issuance hands out a fresh issuer_state every time its offer
+// is fetched, and the handle is one-shot. A wallet that remembered the
+// first one on the scenario configuration presented a spent handle on
+// every later run.
+func TestVCI_InteractiveAuthorization_IssuerStateIsPerRun(t *testing.T) {
+	env := setupTestEnvironment(t, func(e *testEnvironment) {
+		e.iaMetadataSpelling = "normative"
+		e.offerIssuerState = true
+	})
+	defer env.cleanup()
+
+	env.seedPresentableCredential(t)
+	scenario := config.Scenario{
+		Name: "ia-issuer-initiated",
+		Type: "vci",
+		VCI: &config.VCIScenario{
+			CredentialOfferURI:          env.issuerServer.URL + "/credential-offer",
+			Scope:                       "pid",
+			UseInteractiveAuthorization: true,
+			CredentialConfigurationID:   "test_credential",
+		},
+	}
+	env.addScenario(scenario)
+
+	for range 2 {
+		result, err := env.wallet.RunScenario(t.Context(), "ia-issuer-initiated")
+		require.NoError(t, err)
+		require.True(t, result.Success, "scenario failed: %s", result.Error)
+	}
+
+	env.mu.Lock()
+	served := env.offerStatesServed
+	requests := env.challengeRequests
+	env.mu.Unlock()
+
+	require.Len(t, served, 2, "each run fetches its own offer")
+	require.Len(t, requests, 4, "two runs, each an initial and an intermediate request")
+
+	assert.Equal(t, served[0], requests[0].Get("issuer_state"),
+		"the first run presents the handle its own offer carried")
+	assert.Equal(t, served[1], requests[2].Get("issuer_state"),
+		"the second run must present ITS offer's handle, not the first run's spent one")
+
+	assert.Empty(t, scenario.VCI.IssuerState,
+		"an offer-derived handle must not be written back to the shared scenario")
+}
+
+// A configured issuer_state is a deliberate instruction to drive a
+// particular case, so an offer must not quietly replace it.
+func TestVCI_InteractiveAuthorization_ConfiguredIssuerStateWins(t *testing.T) {
+	env := setupTestEnvironment(t, func(e *testEnvironment) {
+		e.iaMetadataSpelling = "normative"
+		e.offerIssuerState = true
+	})
+	defer env.cleanup()
+
+	env.seedPresentableCredential(t)
+	env.addScenario(config.Scenario{
+		Name: "ia-configured-state",
+		Type: "vci",
+		VCI: &config.VCIScenario{
+			CredentialOfferURI:          env.issuerServer.URL + "/credential-offer",
+			Scope:                       "pid",
+			IssuerState:                 "configured-handle",
+			UseInteractiveAuthorization: true,
+			CredentialConfigurationID:   "test_credential",
+		},
+	})
+
+	result, err := env.wallet.RunScenario(t.Context(), "ia-configured-state")
+	require.NoError(t, err)
+	require.True(t, result.Success, "scenario failed: %s", result.Error)
+
+	env.mu.Lock()
+	requests := env.challengeRequests
+	env.mu.Unlock()
+	require.NotEmpty(t, requests)
+	assert.Equal(t, "configured-handle", requests[0].Get("issuer_state"))
+}
+
+// An inline credential_offer is the same document as one behind a
+// credential_offer_uri, so its grants have to be read the same way. They
+// were not: the inline branch inspected nothing, and an issuer-initiated
+// inline offer reached the challenge endpoint with no issuer_state.
+func TestVCI_InlineCredentialOffer_CarriesItsGrants(t *testing.T) {
+	env := setupTestEnvironment(t, func(e *testEnvironment) {
+		e.iaMetadataSpelling = "normative"
+	})
+	defer env.cleanup()
+
+	env.seedPresentableCredential(t)
+
+	offer := map[string]any{
+		"credential_issuer":            env.issuerServer.URL,
+		"credential_configuration_ids": []string{"test_credential"},
+		"grants": map[string]any{
+			"authorization_code": map[string]any{"issuer_state": "inline-issuer-state"},
+		},
+	}
+	offerJSON, err := json.Marshal(offer)
+	require.NoError(t, err)
+
+	env.addScenario(config.Scenario{
+		Name: "ia-inline-offer",
+		Type: "vci",
+		VCI: &config.VCIScenario{
+			CredentialOffer:             string(offerJSON),
+			Scope:                       "pid",
+			UseInteractiveAuthorization: true,
+			CredentialConfigurationID:   "test_credential",
+		},
+	})
+
+	result, err := env.wallet.RunScenario(t.Context(), "ia-inline-offer")
+	require.NoError(t, err)
+	require.True(t, result.Success, "scenario failed: %s", result.Error)
+
+	env.mu.Lock()
+	requests := env.challengeRequests
+	env.mu.Unlock()
+	require.NotEmpty(t, requests)
+	assert.Equal(t, "inline-issuer-state", requests[0].Get("issuer_state"),
+		"an inline offer's issuer_state must reach the challenge endpoint")
+}
+
+// RunScenario copies the Scenario struct but reaches VCIScenario through
+// a pointer, so two concurrent runs of one scenario name share it. A PKCE
+// verifier kept there was therefore one run's secret being redeemed by
+// the other, and the Token Endpoint saw a verifier that did not hash to
+// the challenge it was sent with.
+//
+// The pairing is asserted as a set rather than per-run because the runs
+// finish in no fixed order: what matters is that every verifier
+// redeemed is the verifier for a challenge that was actually issued, and
+// that no two runs used the same one.
+func TestVCI_InteractiveAuthorization_PKCEVerifierIsPerRun(t *testing.T) {
+	env := setupTestEnvironment(t, func(e *testEnvironment) {
+		e.iaMetadataSpelling = "normative"
+	})
+	defer env.cleanup()
+
+	env.seedPresentableCredential(t)
+	env.addScenario(config.Scenario{
+		Name: "ia-concurrent",
+		Type: "vci",
+		VCI: &config.VCIScenario{
+			IssuerURL:                   env.issuerServer.URL,
+			Scope:                       "pid",
+			UseInteractiveAuthorization: true,
+			CredentialConfigurationID:   "test_credential",
+		},
+	})
+
+	const runs = 4
+	var wg sync.WaitGroup
+	for range runs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, err := env.wallet.RunScenario(t.Context(), "ia-concurrent")
+			assert.NoError(t, err)
+			if result != nil {
+				assert.True(t, result.Success, "scenario failed: %s", result.Error)
+			}
+		}()
+	}
+	wg.Wait()
+
+	env.mu.Lock()
+	requests := env.challengeRequests
+	tokenRequests := env.tokenRequestsReceived
+	env.mu.Unlock()
+
+	challenges := map[string]bool{}
+	for _, r := range requests {
+		if challenge := r.Get("code_challenge"); challenge != "" {
+			challenges[challenge] = true
+		}
+	}
+	require.Len(t, challenges, runs, "each run must mint its own PKCE challenge")
+
+	require.Len(t, tokenRequests, runs)
+	redeemed := map[string]bool{}
+	for _, tr := range tokenRequests {
+		verifier := tr["code_verifier"]
+		require.NotEmpty(t, verifier)
+		sum := sha256.Sum256([]byte(verifier))
+		redeemed[base64.RawURLEncoding.EncodeToString(sum[:])] = true
+	}
+
+	assert.Equal(t, challenges, redeemed,
+		"every redeemed verifier must be the verifier for a challenge this run issued")
 }
