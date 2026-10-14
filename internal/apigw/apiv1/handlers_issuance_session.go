@@ -50,6 +50,20 @@ type PrepareIssuanceRequest struct {
 	// wants that should ask for it by name rather than by omission.
 	IdentityMatch *openid4vci.IdentityMatch `json:"identity_match" header:"-" validate:"required"`
 
+	// AuthenticSource names the source this credential will be issued
+	// from, and is checked against the one the scope actually resolves to.
+	//
+	// Optional, and NOT how the source is chosen - the Selector decides
+	// that, from what this deployment has running. It exists because the
+	// authorization middleware reads authentic_source out of this body and
+	// authorizes the (source, scope) pair it finds there. A caller allowed
+	// source A could otherwise send "authentic_source": "A" alongside a
+	// scope that resolves to B, pass a check about A, and have an issuance
+	// prepared against B. Supplying it means the pair that was authorized
+	// is the pair that is used; omitting it authorizes a pair with no
+	// source, which the deployment's own rules decide about.
+	AuthenticSource string `json:"authentic_source,omitempty" header:"-" validate:"omitempty"`
+
 	// TTLSeconds bounds how long the offer may be left unredeemed.
 	// Optional; the server's default applies when it is absent.
 	TTLSeconds int `json:"ttl_seconds,omitempty" header:"-" validate:"omitempty,gt=0"`
@@ -135,6 +149,24 @@ func (c *Client) PrepareIssuance(ctx context.Context, req *PrepareIssuanceReques
 		return nil, helpers.NewErrorDetailsWithStatus("scope_not_presentation_authenticated",
 			fmt.Sprintf("scope %q is authenticated by %q, and an identity match can only be evaluated against a presentation",
 				req.Scope, required), 400)
+	}
+
+	// The source the caller named, if it named one, has to be the source
+	// this scope resolves to.
+	//
+	// The authorization middleware reads authentic_source from this body
+	// and authorizes the (source, scope) pair it finds. Nothing else
+	// compared that pair to the one preparation would actually use, so a
+	// caller permitted source A could name A, send a scope the Selector
+	// resolves to B, and have the issuance prepared against B having been
+	// authorized for nothing of the sort. Refusing the mismatch keeps the
+	// pair that was checked and the pair that is used the same pair.
+	if req.AuthenticSource != "" && req.AuthenticSource != source.AuthenticSource {
+		c.log.Error(nil, "PREPARE: authentic_source does not match the source the scope resolves to",
+			"scope", req.Scope, "named", req.AuthenticSource, "resolved", source.AuthenticSource)
+		return nil, helpers.NewErrorDetailsWithStatus("authentic_source_mismatch",
+			fmt.Sprintf("scope %q is served by authentic source %q, not %q",
+				req.Scope, source.AuthenticSource, req.AuthenticSource), 403)
 	}
 
 	// A rule naming a claim the request will not ask for can never pass.

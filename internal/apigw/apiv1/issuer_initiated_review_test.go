@@ -258,3 +258,52 @@ func TestIssuerInitiated_ResumingResetsTheStoredLifetimeAnchor(t *testing.T) {
 	assert.LessOrEqual(t, resumed.ExpiresAt, resumed.CreatedAt.Add(apigwcache.AuthContextTTL).Unix(),
 		"and the advertised deadline must fit inside the lifetime that anchor gives it")
 }
+
+// The (authentic_source, scope) pair the authorization middleware checked
+// has to be the pair preparation actually uses.
+//
+// SPOCP reads authentic_source out of the request body and authorizes the
+// pair it finds there. Nothing compared that pair to the one the Selector
+// resolves, so a caller permitted source A could name A, send a scope that
+// resolves to B, and have the issuance prepared against B - authorized for
+// a combination it never asked about.
+func TestPrepareIssuance_RefusesAnAuthenticSourceSubstitution(t *testing.T) {
+	t.Run("naming another source than the scope resolves to", func(t *testing.T) {
+		client := newChallengeClient(t)
+
+		_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
+			Scope:           challengeScope,
+			AuthenticSource: "some-other-source",
+			IdentityMatch:   portalMatch(),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "authentic_source_mismatch")
+		// And it names both, so an operator reading the log or the
+		// response can see which substitution was attempted.
+		assert.Contains(t, err.Error(), "some-other-source")
+		assert.Contains(t, err.Error(), "authentic-source")
+	})
+
+	t.Run("naming the source it does resolve to is accepted", func(t *testing.T) {
+		client := newChallengeClient(t)
+
+		_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
+			Scope:           challengeScope,
+			AuthenticSource: "authentic-source",
+			IdentityMatch:   portalMatch(),
+		})
+		require.NoError(t, err)
+	})
+
+	// Omitting it is still allowed: the pair then carries no source, and
+	// the deployment's own rules decide what that means.
+	t.Run("omitting it is unchanged", func(t *testing.T) {
+		client := newChallengeClient(t)
+
+		_, err := client.PrepareIssuance(t.Context(), &PrepareIssuanceRequest{
+			Scope:         challengeScope,
+			IdentityMatch: portalMatch(),
+		})
+		require.NoError(t, err)
+	})
+}
