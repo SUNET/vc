@@ -91,3 +91,76 @@ func TestAuthorizationContextWithoutADCQLQuery(t *testing.T) {
 	require.NoError(t, bson.Unmarshal(stored, &loaded))
 	assert.Nil(t, loaded.DCQLQuery)
 }
+
+// Rolling upgrades, both directions. The exact copy is ADDITIVE, so
+// neither build is broken by the other's documents.
+func TestAuthorizationContextSurvivesARollingUpgrade(t *testing.T) {
+	query := &openid4vp.DCQL{Credentials: []openid4vp.CredentialQuery{{
+		ID: "nym", Format: openid4vp.FormatCircuitZk,
+		Meta: openid4vp.MetaQuery{DoctypeValue: "d"},
+		Req: []openid4vp.ReqItem{{ID: openid4vp.FunctionPseudonym, Return: "nym-1",
+			Params: map[string]any{"p": json.Number("1.00000000000000001")}}},
+	}}}
+
+	t.Run("a new replica reads an old document", func(t *testing.T) {
+		// What an older build wrote: the query as a document, with no
+		// exact copy beside it.
+		type oldShape struct {
+			SessionID string          `bson:"session_id"`
+			DCQLQuery *openid4vp.DCQL `bson:"dcql_query,omitempty"`
+		}
+		stored, err := bson.Marshal(&oldShape{SessionID: "s", DCQLQuery: query})
+		require.NoError(t, err)
+
+		var loaded AuthorizationContext
+		require.NoError(t, bson.Unmarshal(stored, &loaded),
+			"an old document must still load; a rollout cannot require every session to be new")
+		require.NotNil(t, loaded.DCQLQuery)
+		require.Len(t, loaded.DCQLQuery.Credentials, 1)
+		assert.Equal(t, "nym", loaded.DCQLQuery.Credentials[0].ID)
+
+		// Rounded, because that is what the old build stored. Nothing
+		// regresses; the exactness is what is new, not a repair of what
+		// was already written.
+		encoded, err := json.Marshal(loaded.DCQLQuery)
+		require.NoError(t, err)
+		assert.NotContains(t, string(encoded), "1.00000000000000001")
+	})
+
+	t.Run("an old replica reads a new document", func(t *testing.T) {
+		stored, err := bson.Marshal(&AuthorizationContext{SessionID: "s", DCQLQuery: query})
+		require.NoError(t, err)
+
+		// An older build models only dcql_query and ignores the rest.
+		var loaded struct {
+			SessionID string          `bson:"session_id"`
+			DCQLQuery *openid4vp.DCQL `bson:"dcql_query,omitempty"`
+		}
+		require.NoError(t, bson.Unmarshal(stored, &loaded),
+			"a new document must still load on an old replica, or a rollout fails in the other direction")
+		require.NotNil(t, loaded.DCQLQuery)
+		require.Len(t, loaded.DCQLQuery.Credentials, 1)
+		assert.Equal(t, "nym", loaded.DCQLQuery.Credentials[0].ID)
+	})
+
+	t.Run("and a new replica reads a new document exactly", func(t *testing.T) {
+		stored, err := bson.Marshal(&AuthorizationContext{SessionID: "s", DCQLQuery: query})
+		require.NoError(t, err)
+
+		var loaded AuthorizationContext
+		require.NoError(t, bson.Unmarshal(stored, &loaded))
+		encoded, err := json.Marshal(loaded.DCQLQuery)
+		require.NoError(t, err)
+		assert.Contains(t, string(encoded), "1.00000000000000001")
+	})
+}
+
+// A corrupted exact copy is refused rather than quietly replaced by the
+// rounded one, which would send numbers that differ from those stored.
+func TestAuthorizationContextRefusesACorruptExactQuery(t *testing.T) {
+	stored, err := bson.Marshal(bson.M{"session_id": "s", "dcql_query_exact": "{not json"})
+	require.NoError(t, err)
+
+	var loaded AuthorizationContext
+	require.Error(t, bson.Unmarshal(stored, &loaded))
+}

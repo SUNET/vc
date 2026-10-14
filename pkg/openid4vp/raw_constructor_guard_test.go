@@ -66,6 +66,21 @@ func TestRawIsOnlyConstructedThroughTheConstructor(t *testing.T) {
 			for _, element := range composite.Elts {
 				kv, ok := element.(*ast.KeyValueExpr)
 				if !ok {
+					// An UNKEYED literal sets fields by position, so it
+					// can reach Raw without ever naming it - and skipping
+					// those, as this did at first, left the invariant
+					// open to the one spelling nobody reads carefully.
+					//
+					// Rejected wholesale rather than counted to Raw's
+					// position: that position changes whenever a field is
+					// added, which would make this guard quietly stop
+					// looking at the right thing.
+					literals++
+					t.Errorf("%s: a CredentialQuery literal must name its fields - "+
+						"an unkeyed one can set Raw by position, and a raw query not built by "+
+						"openid4vp.NewRawCredentialQuery carries no ID, Format or Meta, so the "+
+						"response path cannot match it",
+						fset.Position(element.Pos()))
 					continue
 				}
 				if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "Raw" {
