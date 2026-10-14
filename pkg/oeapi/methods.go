@@ -39,12 +39,29 @@ func (c *Client) GetCourseOfferingAssociationsForPerson(ctx context.Context, per
 	return getAllPages[CourseOfferingAssociation](ctx, c, path, opts)
 }
 
+// GetProgrammeOfferingAssociation retrieves a single programme offering
+// association by ID. Unlike the person collection, this endpoint supports
+// expanding the embedded programme offering.
+func (c *Client) GetProgrammeOfferingAssociation(ctx context.Context, associationID string, opts ...QueryOption) (*ProgrammeOfferingAssociation, error) {
+	q := buildQuery(opts)
+	data, err := c.doGet(ctx, basePath+"/programme-offering-associations/"+url.PathEscape(associationID), q)
+	if err != nil {
+		return nil, err
+	}
+	var a ProgrammeOfferingAssociation
+	if err := json.Unmarshal(data, &a); err != nil {
+		return nil, fmt.Errorf("oeapi: decode programme offering association: %w", err)
+	}
+	return &a, nil
+}
+
 // maxPages bounds pagination to avoid an unbounded loop against a server that
 // always reports hasNextPage.
 const maxPages = 100
 
 // getAllPages walks every page of a paginated OEAPI collection and returns the
 // concatenated items. A large page size is requested unless the caller set one.
+// It returns an error rather than a truncated result if the page bound is hit.
 func getAllPages[T any](ctx context.Context, c *Client, path string, opts []QueryOption) ([]T, error) {
 	var all []T
 	for pageNumber := 1; pageNumber <= maxPages; pageNumber++ {
@@ -64,8 +81,8 @@ func getAllPages[T any](ctx context.Context, c *Client, path string, opts []Quer
 		}
 		all = append(all, page.Items...)
 		if !page.HasNextPage {
-			break
+			return all, nil
 		}
 	}
-	return all, nil
+	return nil, fmt.Errorf("oeapi: %s exceeded %d pages; refusing to return truncated results", path, maxPages)
 }

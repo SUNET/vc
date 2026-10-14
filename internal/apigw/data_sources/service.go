@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/SUNET/vc/internal/apigw/data_sources/eduapi"
-	"github.com/SUNET/vc/internal/apigw/data_sources/oeapi"
+	"github.com/SUNET/vc/internal/apigw/data_sources/externalapi"
 	pkgcache "github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -35,14 +34,14 @@ func New(ctx context.Context, remotes map[string]model.Remote, externalAPI model
 
 		switch remote.Type {
 		case model.RemoteTypeEduAPI:
-			svc, err := eduapi.New(ctx, remote, scopes, docCache, tokenCache, log)
+			svc, err := externalapi.NewEduAPI(ctx, remote, scopes, docCache, tokenCache, log)
 			if err != nil {
 				return nil, err
 			}
 			s.sources[remoteName] = svc
 			log.Info("Edu-API data source initialized", "remote", remoteName, "base_url", remote.BaseURL)
 		case model.RemoteTypeOEAPI:
-			svc, err := oeapi.New(ctx, remote, scopes, docCache, tokenCache, log)
+			svc, err := externalapi.NewOEAPI(ctx, remote, scopes, docCache, tokenCache, log)
 			if err != nil {
 				return nil, err
 			}

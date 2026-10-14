@@ -6,10 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
-	"github.com/SUNET/vc/pkg/cache"
-	"github.com/SUNET/vc/pkg/logger"
+	"github.com/SUNET/vc/pkg/oauth2client/oauth2clienttest"
 )
 
 // testServer creates a mock OEAPI server with realistic data and returns the
@@ -19,14 +17,7 @@ func testServer(t *testing.T) (*httptest.Server, *Client) {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/oauth2/token", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{ // #nosec G104
-			"access_token": "test-token",
-			"token_type":   "Bearer",
-			"expires_in":   3600,
-		})
-	})
+	oauth2clienttest.RegisterTokenHandler(mux, "/oauth2/token", "test-token")
 
 	mux.HandleFunc("/v6/persons/p-lisa", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-token" {
@@ -124,23 +115,7 @@ func testServer(t *testing.T) (*httptest.Server, *Client) {
 	})
 
 	srv := httptest.NewServer(mux)
-
-	log, err := logger.New("test", "", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client, err := NewClient(ClientConfig{
-		BaseURL:      srv.URL,
-		TokenURL:     srv.URL + "/oauth2/token",
-		ClientID:     "test-client",
-		ClientSecret: "test-secret",
-		TokenCache:   cache.NewMemoryCache[string](1 * time.Hour),
-	}, log)
-	if err != nil {
-		srv.Close()
-		t.Fatal(err)
-	}
-	return srv, client
+	return srv, NewClient(oauth2clienttest.NewClient(t, srv.URL, "application/vnd.oeapi+json, application/json", "oeapi"))
 }
 
 func TestGetPerson(t *testing.T) {

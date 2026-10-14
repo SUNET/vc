@@ -42,6 +42,7 @@
         "etree",
         "Eudi",
         "excelize",
+        "externalapi",
         "extldflags",
         "fsnotify",
         "ginratelimit",

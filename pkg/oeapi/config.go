@@ -52,15 +52,3 @@ type AttributeConfig struct {
 	// Default is an optional default value if attribute is missing
 	Default string `yaml:"default,omitempty"`
 }
-
-// ClientConfig returns the subset of Config needed by NewClient.
-func (c *Config) ClientConfig() ClientConfig {
-	return ClientConfig{
-		BaseURL:      c.BaseURL,
-		TokenURL:     c.TokenURL,
-		ClientID:     c.ClientID,
-		ClientSecret: c.ClientSecret,
-		Scopes:       c.Scopes,
-		Timeout:      c.Timeout,
-	}
-}

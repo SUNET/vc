@@ -1,7 +1,4 @@
-// Package oeapi implements the Open Education API (OEAPI) integration service for
-// the API Gateway. It fetches a person's educational data from an OEAPI v6.0
-// compliant endpoint and transforms it into credential claims for OpenID4VCI issuance.
-package oeapi
+package externalapi
 
 import (
 	"context"
@@ -9,58 +6,32 @@ import (
 	"sync"
 
 	pkgcache "github.com/SUNET/vc/pkg/cache"
-	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/oeapi"
 )
 
-// Service is the OEAPI integration service for the API Gateway.
-type Service struct {
-	cfg      *oeapi.Config
-	client   *oeapi.Client
-	mappers  map[string]*credential.AttributeMapper // credential type → mapper
-	docCache pkgcache.Cache[map[string]*model.CompleteDocument]
-	log      *logger.Log
+// OEAPI is the Open Education API (OEAPI v6.0) data source: it fetches a
+// person's educational data from an OEAPI-compliant endpoint and transforms it
+// into credential claims for OpenID4VCI issuance.
+type OEAPI struct {
+	*service
+	client *oeapi.Client
+	log    *logger.Log
 }
 
-// New creates a new OEAPI service from a remote connection definition and the
-// external_api scopes that reference it. Each scope's AttributeMapping is wired
-// into a per-credential-type mapper.
-func New(ctx context.Context, remote model.Remote, scopes map[string]model.ExternalAPIScope, docCache pkgcache.Cache[map[string]*model.CompleteDocument], tokenCache pkgcache.Cache[string], log *logger.Log) (*Service, error) {
-	cfg := &oeapi.Config{
-		Enable:       true,
-		BaseURL:      remote.BaseURL,
-		TokenURL:     remote.TokenURL,
-		ClientID:     remote.ClientID,
-		ClientSecret: remote.ClientSecret,
-		Scopes:       remote.Scopes,
-		Timeout:      remote.Timeout,
-	}
-
-	clientCfg := cfg.ClientConfig()
-	clientCfg.TokenCache = tokenCache
-
-	client, err := oeapi.NewClient(clientCfg, log)
+// NewOEAPI creates an OEAPI data source from a remote connection definition and
+// the external_api scopes that reference it. Each scope's AttributeMapping is
+// wired into a per-credential-type mapper.
+func NewOEAPI(ctx context.Context, remote model.Remote, scopes map[string]model.ExternalAPIScope, docCache pkgcache.Cache[map[string]*model.CompleteDocument], tokenCache pkgcache.Cache[string], log *logger.Log) (*OEAPI, error) {
+	base, err := newService(remote, scopes, "application/vnd.oeapi+json, application/json", "oeapi", docCache, tokenCache, log)
 	if err != nil {
-		return nil, fmt.Errorf("oeapi: create client: %w", err)
+		return nil, err
 	}
 
-	mappers := make(map[string]*credential.AttributeMapper, len(scopes))
-	for credType, scope := range scopes {
-		mappers[credType] = credential.NewAttributeMapper(scope.AttributeMapping)
-	}
-
-	s := &Service{
-		cfg:      cfg,
-		client:   client,
-		mappers:  mappers,
-		docCache: docCache,
-		log:      log.New("oeapi"),
-	}
-
-	log.Info("OEAPI service initialized", "base_url", cfg.BaseURL)
-	return s, nil
+	svcLog := log.New("oeapi")
+	svcLog.Info("OEAPI service initialized", "base_url", remote.BaseURL)
+	return &OEAPI{service: base, client: oeapi.NewClient(base.http), log: svcLog}, nil
 }
 
 // FetchAndStoreForVCI queries the OEAPI for a person's educational data,
@@ -70,7 +41,7 @@ func New(ctx context.Context, remote model.Remote, scopes map[string]model.Exter
 // personID is the OEAPI personId that identifies the student.
 // credentialType is the credential type being issued.
 // vciSessionID is the OpenID4VCI session to associate the document with.
-func (s *Service) FetchAndStoreForVCI(ctx context.Context, personID, credentialType, vciSessionID string) error {
+func (s *OEAPI) FetchAndStoreForVCI(ctx context.Context, personID, credentialType, vciSessionID string) error {
 	s.log.Info("Fetching OEAPI data for VCI",
 		"person_id", personID,
 		"credential_type", credentialType,
@@ -102,7 +73,9 @@ func (s *Service) FetchAndStoreForVCI(ctx context.Context, personID, credentialT
 	}()
 	go func() {
 		defer wg.Done()
-		programmeAssociations, programmeErr = s.client.GetProgrammeOfferingAssociationsForPerson(fetchCtx, personID, oeapi.WithExpand("programme_offering"))
+		// The programme-offering-associations collection does not support expand;
+		// the selected association is enriched via its instance endpoint below.
+		programmeAssociations, programmeErr = s.client.GetProgrammeOfferingAssociationsForPerson(fetchCtx, personID)
 	}()
 	go func() {
 		defer wg.Done()
@@ -120,48 +93,35 @@ func (s *Service) FetchAndStoreForVCI(ctx context.Context, personID, credentialT
 	if programmeErr != nil {
 		s.log.Info("Could not fetch programme offering associations, continuing without", "error", programmeErr)
 	} else if a := firstActiveProgrammeAssociation(programmeAssociations); a != nil {
-		for k, v := range a.Flatten() {
-			claims["programme."+k] = v
+		// The collection omits the programme offering, so pull the selected
+		// association from the instance endpoint (which supports expand).
+		if a.ProgrammeOffering == nil && a.AssociationID != "" {
+			if full, err := s.client.GetProgrammeOfferingAssociation(ctx, a.AssociationID, oeapi.WithExpand("programme_offering")); err != nil {
+				s.log.Info("Could not expand programme offering association, continuing without", "association_id", a.AssociationID, "error", err)
+			} else {
+				a = full
+			}
 		}
+		mergeClaims(claims, "programme.", a.Flatten())
 	}
 
 	// Merge first active course association and its embedded result.
 	if courseErr != nil {
 		s.log.Info("Could not fetch course offering associations, continuing without", "error", courseErr)
 	} else if a := firstActiveCourseAssociation(courseAssociations); a != nil {
-		for k, v := range a.Flatten() {
-			claims["course."+k] = v
-		}
+		mergeClaims(claims, "course.", a.Flatten())
 	}
 
-	// Apply attribute mapper if configured for this credential type.
-	var transformedClaims map[string]any
-	if t, ok := s.mappers[credentialType]; ok {
-		var err error
-		transformedClaims, err = t.Apply(claims)
-		if err != nil {
-			return fmt.Errorf("oeapi: transform claims: %w", err)
-		}
-	} else {
-		transformedClaims = claims
+	// Apply the configured mapper and store the resulting VCI document.
+	count, err := s.storeMappedDocument(ctx, credentialType, vciSessionID, claims)
+	if err != nil {
+		return fmt.Errorf("oeapi: transform claims: %w", err)
 	}
-
-	doc := &model.CompleteDocument{
-		Meta: &model.MetaData{
-			AuthenticSource: s.cfg.BaseURL,
-		},
-		DocumentData: transformedClaims,
-	}
-	docs := map[string]*model.CompleteDocument{
-		s.cfg.BaseURL: doc,
-	}
-
-	s.docCache.Set(ctx, vciSessionID, docs)
 
 	s.log.Info("OEAPI document stored for VCI",
 		"vci_session_id", vciSessionID,
 		"credential_type", credentialType,
-		"claims_count", len(transformedClaims))
+		"claims_count", count)
 
 	return nil
 }
