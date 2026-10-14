@@ -478,10 +478,19 @@ func TestVCTMPathSegmentsAreNotFlattened(t *testing.T) {
 }
 
 // The disclosure machinery's own claims are reserved, and that beats a
-// VCTM declaring them disclosable: _sd_alg and _sd are written by the
-// builder regardless, so a commitment there is replaced whatever the type
-// metadata says. The reserved check therefore has to run before the
-// disclosability one, and this pins that ordering.
+// VCTM declaring them disclosable. The reserved check therefore has to
+// run before the disclosability one, and this pins that ordering.
+//
+// The two are refused for DIFFERENT reasons, and the messages say so
+// because the difference is what an operator needs to act on. _sd_alg is
+// assigned by the builder, so a commitment there is injected and then
+// overwritten - nothing fails, and the only symptom is a proof that never
+// verifies. _sd is refused outright by processClaimPath, so issuance
+// fails instead.
+//
+// This test asserted "silently replaced" for both until _sd stopped being
+// checked only at the root; that wording was never true of _sd, and the
+// test had been documenting the wrong failure for it.
 func TestDisclosureMachineryClaimsAreReservedEvenWhenDeclared(t *testing.T) {
 	always := func(p string) sdjwtvc.Claim { return sdjwtvc.Claim{Path: []*string{&p}, SD: "always"} }
 	vctm := &sdjwtvc.VCTM{
@@ -489,13 +498,66 @@ func TestDisclosureMachineryClaimsAreReservedEvenWhenDeclared(t *testing.T) {
 		Claims: []sdjwtvc.Claim{always("_sd_alg"), always("_sd")},
 	}
 
-	for _, claim := range []string{"_sd_alg", "_sd"} {
+	for _, tc := range []struct{ claim, because string }{
+		{"_sd_alg", "silently replaced"},
+		{"_sd", "cannot be a claim name at any depth"},
+	} {
 		meta := &CredentialMetadata{
 			Format:      openid4vp.FormatSDJWTVC,
-			Commitments: map[string]*CommitmentClaim{claim: sscClaim()},
+			Commitments: map[string]*CommitmentClaim{tc.claim: sscClaim()},
 		}
 		_, err := meta.ResolveCommitmentTargets(CredentialSchemas{VCTM: vctm})
-		require.Error(t, err, "%s is written by the builder whatever the VCTM says", claim)
-		assert.Contains(t, err.Error(), "silently replaced")
+		require.Errorf(t, err, "%s is unusable whatever the VCTM says", tc.claim)
+		assert.Containsf(t, err.Error(), tc.because,
+			"%s has to be refused for the reason that actually applies to it", tc.claim)
 	}
+}
+
+// _sd and "..." are not envelope claims the builder happens to assign at
+// the root - they are how SD-JWT encodes disclosures wherever they occur,
+// and processClaimPath refuses them as a claim name at ANY depth
+// (SD-JWT VC 4.2.1.1).
+//
+// Checking only the root let a VCTM declaring ["identity", "_sd"] with
+// sd: always pass startup and injection and then fail every issuance -
+// after a status-list entry had already been allocated, so each attempt
+// also burned one.
+func TestStructuralClaimNamesAreRefusedAtEveryDepth(t *testing.T) {
+	cm := &CredentialMetadata{Format: openid4vp.FormatSDJWTVC}
+
+	for _, tc := range []struct {
+		name, target string
+		refused      bool
+	}{
+		{"_sd at the root", "_sd", true},
+		{"_sd nested, which is the case that got through", "identity._sd", true},
+		{"_sd deeper still", "a.b._sd", true},
+		// "..." is not here: these paths are dot-separated, so a segment
+		// that is itself dots cannot be written - it splits into empty
+		// segments and never reaches the comparison. processClaimPath
+		// refuses it, but nothing can express it to get that far.
+
+		// Envelope claims stay ROOT-only: the builder assigns them as
+		// whole objects, so a nested one is not written by it and is a
+		// perfectly good target.
+		{"status at the root is still refused", "status", true},
+		{"but status nested under something else is fine", "identity.status", false},
+		{"and an ordinary nested target is fine", "identity.seed_commitment", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := cm.checkNotReserved(tc.target)
+			if !tc.refused {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err, "this target cannot be issued, so it must not pass startup")
+		})
+	}
+}
+
+// A format with no reserved list is unaffected - the structural names are
+// an SD-JWT rule, not a universal one.
+func TestStructuralNamesDoNotLeakIntoOtherFormats(t *testing.T) {
+	cm := &CredentialMetadata{Format: openid4vp.FormatMsoMdoc}
+	assert.NoError(t, cm.checkNotReserved("namespace._sd"))
 }

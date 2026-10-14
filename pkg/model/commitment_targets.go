@@ -329,6 +329,28 @@ func (c *CredentialMetadata) checkNotReserved(element string) error {
 	if !ok {
 		return nil
 	}
+	// The structural names first, and at EVERY segment.
+	//
+	// _sd and "..." are not envelope claims the builder happens to assign
+	// at the root - they are how SD-JWT encodes disclosures wherever they
+	// occur, and processClaimPath refuses them as a claim name at any
+	// depth (SD-JWT VC 4.2.1.1). Checking only the root let a VCTM
+	// declaring ["identity", "_sd"] pass startup and injection and then
+	// fail EVERY issuance - after a status-list entry had already been
+	// allocated, so each attempt also burned one.
+	//
+	// processClaimPath refuses "..." identically, and it is deliberately
+	// NOT checked here: these paths are dot-separated, so a segment that
+	// is itself dots cannot be written - "..." splits into empty segments
+	// and never reaches a comparison. Adding it would be a branch no
+	// input can take, which reads like protection and is not.
+	for segment := range strings.SplitSeq(element, ".") {
+		if segment == "_sd" {
+			return fmt.Errorf("%q cannot be a claim name at any depth in an SD-JWT (SD-JWT VC 4.2.1.1), so a commitment at %q is refused by the issuer after the credential has been prepared",
+				segment, element)
+		}
+	}
+
 	root, _, _ := strings.Cut(element, ".")
 	for _, name := range slices.Sorted(maps.Keys(reserved)) {
 		if root != name {
