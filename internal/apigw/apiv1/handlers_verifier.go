@@ -312,6 +312,20 @@ type issuanceAuthOutcome struct {
 // passes the verifier's own client_id; Interactive Authorization passes the
 // prefixed Authorization Challenge Endpoint, which is what stops one
 // Authorization Server relaying another's challenge.
+// issuanceAuthConsumer is consumeIssuanceAuthPresentation's signature, so
+// that a channel feeding it can be tested against the pipeline rather than
+// against a PDP, a trust deployment and a datastore.
+type issuanceAuthConsumer func(ctx context.Context, authCtx *cache.AuthorizationContext, vpResponse *openid4vp.VPResponse, binding issuanceAuthBinding) (*issuanceAuthOutcome, error)
+
+// issuanceAuthPipeline is the consumer to feed. The real one unless a test
+// has put something else in its place - see Client.issuanceAuth.
+func (c *Client) issuanceAuthPipeline() issuanceAuthConsumer {
+	if c.issuanceAuth != nil {
+		return c.issuanceAuth
+	}
+	return c.consumeIssuanceAuthPresentation
+}
+
 func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *cache.AuthorizationContext, vpResponse *openid4vp.VPResponse, binding issuanceAuthBinding) (*issuanceAuthOutcome, error) {
 	// Match a scope from the authorization context to a known credential constructor
 	scope, credMetaCfg, err := c.matchScope(authCtx.Scopes)

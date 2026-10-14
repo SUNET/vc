@@ -1,8 +1,10 @@
 package apiv1
 
 import (
+	"bytes"
 	"context"
 	stdcrypto "crypto"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -141,6 +143,10 @@ type AuthorizationChallengeError struct {
 	// for an Interaction Required Response, and whatever the error calls
 	// for otherwise.
 	HTTPStatus int `json:"-"`
+
+	// Cause is what actually went wrong, for the log. Never serialised:
+	// the reasons distinguished here are not the caller's to probe.
+	Cause error `json:"-"`
 }
 
 func (e *AuthorizationChallengeError) Error() string {
@@ -149,6 +155,10 @@ func (e *AuthorizationChallengeError) Error() string {
 	}
 	return e.ErrorCode
 }
+
+// Unwrap exposes the cause to errors.Is and errors.As without putting it
+// anywhere a caller can read.
+func (e *AuthorizationChallengeError) Unwrap() error { return e.Cause }
 
 // The error codes this endpoint answers with beyond the OAuth 2.0 set.
 const (
@@ -161,7 +171,31 @@ const (
 	// needs to finish the authorization (OpenID4VCI 1.1, Authorization
 	// Challenge Error Response).
 	errMissingInteractionType = "missing_interaction_type"
+
+	// errInvalidSession says the auth_session is unknown, expired or
+	// revoked (draft-ietf-oauth-first-party-apps §5.2.2).
+	//
+	// Not invalid_grant, which is the Token Endpoint's code for a spent
+	// authorization code. A wallet reading this endpoint's contract looks
+	// for invalid_session to decide that its exchange is over and a new
+	// challenge is needed; told invalid_grant instead, it has no defined
+	// way to recognise the condition.
+	errInvalidSession = "invalid_session"
 )
+
+// invalidSession is the answer to an auth_session this endpoint cannot
+// continue. The cause is carried for the log and never for the wallet:
+// "no such handle", "already claimed" and "expired" must not be
+// distinguishable from outside, or the endpoint becomes an oracle for
+// which auth_session values exist.
+func invalidSession(cause error) *AuthorizationChallengeError {
+	return &AuthorizationChallengeError{
+		ErrorCode:        errInvalidSession,
+		ErrorDescription: "auth_session is invalid or has expired",
+		HTTPStatus:       400,
+		Cause:            cause,
+	}
+}
 
 // OAuthAuthorizationChallenge is the Authorization Challenge Endpoint.
 //
@@ -245,6 +279,22 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 	// insists on it: the code this exchange ends with is redeemed over a
 	// channel this endpoint cannot see.
 	if oauthClient != nil && oauthClient.Type == oauth2.ClientTypePublic && req.CodeChallenge == "" {
+		return nil, oauth2.OAuthErrPKCERequired
+	}
+
+	// A Wallet that OFFERS auth_via_web must send a code_challenge,
+	// whichever interaction this server then picks.
+	//
+	// Checked on what the Wallet advertised rather than on what the server
+	// selected, because that is where the draft puts it and because the
+	// alternative has a hole: a confidential client listing both
+	// interactions and asking for a presentation-backed scope never
+	// reaches requireWebInteraction, so the rule there never ran and the
+	// exchange was accepted with no PKCE at all. The Wallet has told us it
+	// is prepared to be sent into a browser; the code is redeemed over a
+	// channel this endpoint cannot see either way.
+	if req.CodeChallenge == "" &&
+		interactionTypeOffered(req.InteractionTypesSupported, ia.InteractionType(model.InteractionAuthViaWeb)) {
 		return nil, oauth2.OAuthErrPKCERequired
 	}
 
@@ -341,16 +391,22 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 // hands back the authorization code.
 func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *model.InteractiveAuthorization, req *AuthorizationChallengeRequest) (*AuthorizationChallengeResponse, error) {
 	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{AuthSession: req.AuthSession})
-	if err != nil || authCtx == nil {
+	switch {
+	case errors.Is(err, cache.ErrNoDocuments), err == nil && authCtx == nil:
 		// Unknown and expired are deliberately indistinguishable: telling
 		// the two apart turns the endpoint into an oracle for which
 		// auth_session values exist.
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"auth_session is invalid or has expired", 400)
+		return nil, invalidSession(err)
+	case err != nil:
+		// A store that would not answer is OURS. Reported as a bad
+		// session it would tell a wallet to abandon an exchange that is
+		// still perfectly good, and a wallet cannot retry what it has
+		// been told is dead - so the one outage becomes a lost issuance
+		// rather than a slow one.
+		return nil, c.authSessionStoreFailure(err, "resolve")
 	}
 	if authCtx.ExpiresAt > 0 && time.Now().Unix() > authCtx.ExpiresAt {
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"auth_session is invalid or has expired", 400)
+		return nil, invalidSession(nil)
 	}
 
 	// §5.1: a client_id sent alongside an auth_session MUST identify the
@@ -374,8 +430,7 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 	if authCtx.AuthSessionDPoPThumbprint == "" {
 		c.log.Error(nil, "CHALLENGE: auth_session resolved a context with no DPoP binding",
 			"session_id", authCtx.SessionID)
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"auth_session is invalid or has expired", 400)
+		return nil, invalidSession(nil)
 	}
 	thumbprint, err := c.dpopProofThumbprint(ctx, req.DPOP, ia.ChallengeEndpoint(c.cfg.APIGW.PublicURL))
 	if err != nil {
@@ -407,9 +462,13 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 	// against it, and leaving the handle alive would let an attacker who
 	// learned it grind presentations at the endpoint.
 	claimed, err := c.cacheService.AuthContext.ClaimAuthSession(ctx, req.AuthSession)
-	if err != nil {
-		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
-			"auth_session is invalid or has expired", 400, err)
+	switch {
+	case errors.Is(err, cache.ErrNoDocuments):
+		// Nothing left to claim: a concurrent or repeated request took
+		// the handle first, which is the one-shot rule working.
+		return nil, invalidSession(err)
+	case err != nil:
+		return nil, c.authSessionStoreFailure(err, "claim")
 	}
 	authCtx = claimed
 
@@ -423,7 +482,7 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 		return nil, err
 	}
 
-	if _, err := c.consumeIssuanceAuthPresentation(ctx, authCtx, vpResponse, issuanceAuthBinding{
+	if _, err := c.issuanceAuthPipeline()(ctx, authCtx, vpResponse, issuanceAuthBinding{
 		Audience:      audience,
 		ExpectedState: authCtx.State,
 		// mdoc binds to the OpenID4VCI Interactive Authorization handover,
@@ -432,6 +491,29 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 		MdocSessionTranscript: c.interactiveAuthorizationSessionTranscript(ia, authCtx, privateEphemeralJWK),
 	}); err != nil {
 		return nil, c.interactiveAuthorizationFailure(err)
+	}
+
+	// The auth_session's life ends here; the authorization code's begins.
+	//
+	// Both are kept in one ExpiresAt, and the Token Endpoint checks that
+	// same field - so without this the code a wallet is about to be handed
+	// expires whenever the EXCHANGE was going to, however long the
+	// presentation actually took. A holder who spent two minutes choosing
+	// a credential on a 300-second exchange gets a code with a hundred
+	// seconds on it, and at the configured maximum the code and the
+	// context expire together.
+	//
+	// This is the same handover /authorize makes for the browser leg, at
+	// the moment the short deadline has done its job, and through the same
+	// never-shortening ExtendExpiry - so a presentation that finished
+	// early cannot pull the deadline in.
+	codeExpiresAt := time.Now().Add(authorizationCodeTTL).Unix()
+	if err := c.cacheService.AuthContext.ExtendExpiry(ctx,
+		&cache.AuthorizationContext{SessionID: authCtx.SessionID}, codeExpiresAt); err != nil {
+		c.log.Error(err, "CHALLENGE: failed to start the authorization code's lifetime",
+			"session_id", authCtx.SessionID)
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"interactive authorization could not be completed", 500, err)
 	}
 
 	c.log.Info("CHALLENGE: authorization complete", "session_id", authCtx.SessionID, "scopes", authCtx.Scopes)
@@ -558,10 +640,25 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 			"openid4vp_response must carry an encrypted response", 400)
 	}
 
+	// The key this exchange's request was signed around. Its absence is a
+	// cache that lost it, not a wallet that did anything wrong, so it is
+	// server_error - and typed, because an untyped error here would leave
+	// this endpoint through RegEndpoint's generic envelope instead of the
+	// OAuth error response every other answer uses.
 	privateEphemeralJWK, ok := c.cacheService.EphemeralEncryptionKey.Get(ctx, authCtx.EphemeralEncryptionKeyID)
 	if !ok {
-		c.log.Debug("CHALLENGE: no ephemeral key found in cache", "kid", authCtx.EphemeralEncryptionKeyID)
-		return nil, nil, errors.New("ephemeral key not found in cache")
+		err := fmt.Errorf("ephemeral key %q is not in the cache", authCtx.EphemeralEncryptionKeyID)
+		c.log.Error(err, "CHALLENGE: cannot decrypt the response without the key the request was built with",
+			"session_id", authCtx.SessionID)
+		return nil, nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"interactive authorization could not be completed", 500, err)
+	}
+
+	if err := validateInteractiveAuthorizationJWE([]byte(envelope.Response)); err != nil {
+		c.log.Error(err, "CHALLENGE: openid4vp_response is not the JWE this request asked for",
+			"session_id", authCtx.SessionID)
+		return nil, nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest,
+			"openid4vp_response is not encrypted the way the request required", 400, err)
 	}
 
 	decrypted, err := jwe.Decrypt([]byte(envelope.Response), jwe.WithKey(jwa.ECDH_ES(), privateEphemeralJWK))
@@ -579,6 +676,16 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 	}
 
 	return vpResponse, privateEphemeralJWK, nil
+}
+
+// authSessionStoreFailure is the answer to an authorization-context store
+// that would not answer, as distinct from one that answered "no such
+// handle". Both are failures of the same call; only one is the wallet's
+// problem, and only one is worth retrying.
+func (c *Client) authSessionStoreFailure(err error, op string) error {
+	c.log.Error(err, "CHALLENGE: the authorization context store failed", "operation", op)
+	return oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+		"interactive authorization could not be completed", 500, err)
 }
 
 // interactiveAuthorizationFailure turns a presentation failure into the
@@ -708,6 +815,16 @@ func (c *Client) requireWebInteraction(ctx context.Context, ia *model.Interactiv
 	// The handle this interaction is associated by, instead of an
 	// auth_session.
 	authCtx.AuthSession = ""
+
+	// The presentation state goes with it. newChallengeAuthContext mints
+	// one so an OpenID4VP response has something to echo, and this
+	// interaction has no OpenID4VP response: nothing ever tells the Wallet
+	// the value, and nothing ever checks it. Left on the context it would
+	// be echoed back as `state` in the Token Response - a random value the
+	// Wallet never sent, which a Wallet correlating its own OAuth state
+	// is entitled to reject. The browser flow leaves this empty when the
+	// Wallet sends no state, and so does this.
+	authCtx.State = ""
 	authCtx.AuthSessionDPoPThumbprint = dpopThumbprint
 	authCtx.RequestURI = fmt.Sprintf("urn:ietf:params:oauth:request_uri:%s", uuid.NewString())
 	authCtx.ExpiresAt = time.Now().Add(requestURITTL).Unix()
@@ -983,4 +1100,86 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 		OpenID4VPRequest:        presentationRequest,
 		HTTPStatus:              403,
 	}
+}
+
+// The encryption an Interactive Authorization response must use. These are
+// the values the request itself advertises - see the request object's
+// encrypted_response_enc_values_supported and the ECDH-ES key agreement
+// the ephemeral key is generated for - and a wallet that followed the
+// request produces exactly them.
+const (
+	iaResponseAlg = "ECDH-ES"
+	iaResponseEnc = "A256GCM"
+)
+
+// validateInteractiveAuthorizationJWE refuses a response that is not the
+// JWE this exchange asked for, BEFORE anything is decrypted.
+//
+// jwe.Decrypt on its own accepts a good deal more than the request
+// advertised: other content-encryption algorithms, the JSON serialization,
+// a compressed payload, and critical header parameters it silently ignores.
+// None of that is what a conformant wallet sends, so accepting it only
+// widens what an attacker may hand the decrypter - and the checks are the
+// ones pkg/openid4vci already makes on encrypted Credential Requests, for
+// the same reasons.
+func validateInteractiveAuthorizationJWE(response []byte) error {
+	// Compact serialization only, checked before anything is parsed.
+	// jwe.Parse also accepts the JSON serialization, where a per-recipient
+	// header can carry parameters the protected header does not - zip
+	// among them, which would put a compressed payload past the check
+	// below and into the decrypter. Refusing the JSON form closes that
+	// whole class rather than chasing one member of it.
+	if !isCompactJWE(response) {
+		return errors.New("the response must use JWE compact serialization")
+	}
+
+	msg, err := jwe.Parse(response)
+	if err != nil {
+		return fmt.Errorf("the response is not a well-formed JWE: %w", err)
+	}
+	headers := msg.ProtectedHeaders()
+
+	if alg, ok := headers.Algorithm(); !ok || alg.String() != iaResponseAlg {
+		return fmt.Errorf("unsupported response encryption alg; this request asked for %s", iaResponseAlg)
+	}
+	if enc, ok := headers.ContentEncryption(); !ok || enc.String() != iaResponseEnc {
+		return fmt.Errorf("unsupported response encryption enc; this request asked for %s", iaResponseEnc)
+	}
+	// No zip is advertised, so none is accepted: refusing here is the
+	// point of not advertising it, rather than letting the library inflate
+	// first.
+	if zip, ok := headers.Compression(); ok && zip.String() != "" {
+		return errors.New("a compressed response is not accepted")
+	}
+	// RFC 7516 §4.1.13, via RFC 7515 §4.1.11: a recipient MUST reject a
+	// JWE whose crit list names an extension it does not understand. This
+	// endpoint understands none, so any crit at all is refused - including
+	// an empty list, which §4.1.11 makes invalid in its own right.
+	//
+	// Not inherited from the library: jwx only makes this check when asked,
+	// with jwe.WithCritValidation(true), and the default is off.
+	if _, ok := headers.Critical(); ok {
+		return errors.New("no critical JWE header extensions are understood by this endpoint")
+	}
+
+	return nil
+}
+
+// isCompactJWE reports whether body is the five-part compact serialization.
+func isCompactJWE(body []byte) bool {
+	parts := bytes.Split(body, []byte("."))
+	if len(parts) != 5 {
+		return false
+	}
+	for i, part := range parts {
+		// Only the encrypted key may be empty, which is what ECDH-ES
+		// direct key agreement produces.
+		if len(part) == 0 && i != 1 {
+			return false
+		}
+		if _, err := base64.RawURLEncoding.DecodeString(string(part)); err != nil {
+			return false
+		}
+	}
+	return true
 }

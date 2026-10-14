@@ -2022,7 +2022,14 @@ type InteractiveAuthorization struct {
 	// not of configuration. Set it to narrow that - to run an interop test
 	// against one interaction, or to stop offering one whose counterparty
 	// has a known problem.
-	InteractionTypesSupported []string `yaml:"interaction_types_supported" validate:"omitempty,dive,required"`
+	//
+	// Entries are the two SUFFIXES this build implements, not full URNs:
+	// the namespace comes from InteractionTypePrefix, so writing one here
+	// would never match. Restricted to those two because this list can only
+	// ever narrow what the code can do - a typo or an unimplemented name
+	// adds nothing, and silently leaves the affected scope unservable at an
+	// endpoint the metadata still advertises.
+	InteractionTypesSupported []string `yaml:"interaction_types_supported" validate:"omitempty,dive,oneof=openid4vp_presentation auth_via_web"`
 }
 
 // MaxAuthSessionTTLSeconds is the longest an Interactive Authorization
@@ -2317,6 +2324,14 @@ type APIGWRateLimit struct {
 	DatastoreRequestsPerMinute int `yaml:"datastore_requests_per_minute" default:"60"`
 	// CredentialOfferRequestsPerMinute is the maximum issuer-UI credential offer creation requests (GET /offers/:scope) per minute per IP. Default: 20
 	CredentialOfferRequestsPerMinute int `yaml:"credential_offer_requests_per_minute" default:"20"`
+	// AuthorizationChallengeRequestsPerMinute is the maximum Authorization Challenge Endpoint requests per minute per IP. Default: 20
+	//
+	// The endpoint is unauthenticated in the sense that matters here: anyone
+	// who can reach it with a public client's parameters and a fresh DPoP
+	// proof gets an authorization context plus an ephemeral P-256 key
+	// persisted for the whole auth_session lifetime. Request volume is
+	// therefore storage growth, and the limit is what bounds it.
+	AuthorizationChallengeRequestsPerMinute int `yaml:"authorization_challenge_requests_per_minute" default:"20"`
 }
 
 // APIGWDashboard configures the /dashboard demo landing page that lists every service in the deployment.
