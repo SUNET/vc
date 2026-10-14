@@ -232,3 +232,147 @@ func unknownMembers(data []byte, known ...string) (map[string]any, error) {
 	}
 	return all, nil
 }
+
+// YAML support for the extension bags.
+//
+// Extra is tagged yaml:"-", so without these an operator configuring
+// .verifier.preferred_vp_formats.circuit_zk or a presentation request
+// template could not use it at all - the members would be read and
+// silently dropped, which is the worst way for an escape hatch to fail.
+// pkg/configuration loads both of those from YAML.
+//
+// The shape mirrors ZKSystemTypeSpec's, which solved the same problem for
+// its Params in this package.
+
+// MarshalYAML flattens Extra alongside the known members.
+func (r ReqItem) MarshalYAML() (any, error) {
+	m := map[string]any{"id": r.ID, "return": r.Return}
+	if r.Params != nil {
+		m["params"] = r.Params
+	}
+	return mergeExtraYAML(m, r.Extra, declaredJSONKeys(reflect.TypeOf(ReqItem{})), "req item")
+}
+
+// UnmarshalYAML captures every member other than the modelled ones.
+func (r *ReqItem) UnmarshalYAML(unmarshal func(any) error) error {
+	var m map[string]any
+	if err := unmarshal(&m); err != nil {
+		return err
+	}
+	r.ID, _ = m["id"].(string)
+	r.Return, _ = m["return"].(string)
+	if params, ok := m["params"]; ok {
+		converted, err := asStringMap(params, "req item params")
+		if err != nil {
+			return err
+		}
+		r.Params = converted
+	}
+	r.Extra = extraFromYAML(m, "id", "return", "params")
+	return nil
+}
+
+// MarshalYAML flattens Extra alongside the known members.
+func (c CircuitZkFormat) MarshalYAML() (any, error) {
+	m := map[string]any{}
+	if c.CircuitProofSystemValues != nil {
+		m["circuit_proof_system_values"] = c.CircuitProofSystemValues
+	}
+	if c.CircuitIDValues != nil {
+		m["circuit_id_values"] = c.CircuitIDValues
+	}
+	return mergeExtraYAML(m, c.Extra, declaredJSONKeys(reflect.TypeOf(CircuitZkFormat{})), "circuit_zk client metadata")
+}
+
+// UnmarshalYAML captures every member other than the modelled ones -
+// including the rulebook example's fn_id and input, which is the shape an
+// operator is most likely to need and the one this could not express.
+func (c *CircuitZkFormat) UnmarshalYAML(unmarshal func(any) error) error {
+	var m map[string]any
+	if err := unmarshal(&m); err != nil {
+		return err
+	}
+	var err error
+	if c.CircuitProofSystemValues, err = asStringSlice(m["circuit_proof_system_values"], "circuit_proof_system_values"); err != nil {
+		return err
+	}
+	if c.CircuitIDValues, err = asStringSlice(m["circuit_id_values"], "circuit_id_values"); err != nil {
+		return err
+	}
+	c.Extra = extraFromYAML(m, "circuit_proof_system_values", "circuit_id_values")
+	return nil
+}
+
+// mergeExtraYAML adds extra to m, refusing a member the type models.
+//
+// Against the DECLARED set, not against what m happens to hold. Checking
+// m would only catch the collision when the field was populated, so an
+// empty one would let extra take the member over - quietly, and only
+// sometimes. That is the same mistake the JSON side had, found in review;
+// it was reproduced here within the hour, writing this function, which is
+// why both now go through declaredJSONKeys instead of inspecting output.
+func mergeExtraYAML(m map[string]any, extra map[string]any, reserved map[string]bool, what string) (any, error) {
+	for _, key := range slices.Sorted(maps.Keys(extra)) {
+		if reserved[key] {
+			return nil, fmt.Errorf("%s: %q is a member this type models, so it cannot be set through extra; use raw to change its type", what, key)
+		}
+		m[key] = extra[key]
+	}
+	return m, nil
+}
+
+// extraFromYAML returns every member of m not named in known.
+func extraFromYAML(m map[string]any, known ...string) map[string]any {
+	extra := map[string]any{}
+	maps.Copy(extra, m)
+	for _, name := range known {
+		delete(extra, name)
+	}
+	if len(extra) == 0 {
+		return nil
+	}
+	return extra
+}
+
+// asStringSlice converts a YAML sequence to []string.
+func asStringSlice(v any, what string) ([]string, error) {
+	if v == nil {
+		return nil, nil
+	}
+	items, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s must be a list of strings", what)
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		s, ok := item.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s must be a list of strings", what)
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+// asStringMap converts a YAML mapping to map[string]any, rejecting a
+// non-string key rather than rendering it into one.
+func asStringMap(v any, what string) (map[string]any, error) {
+	switch typed := v.(type) {
+	case map[string]any:
+		return typed, nil
+	case map[any]any:
+		out := make(map[string]any, len(typed))
+		for k, value := range typed {
+			key, ok := k.(string)
+			if !ok {
+				return nil, fmt.Errorf("%s: %v is not a string key", what, k)
+			}
+			out[key] = value
+		}
+		return out, nil
+	case nil:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("%s must be a mapping", what)
+	}
+}

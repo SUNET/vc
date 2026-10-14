@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"slices"
 
 	"github.com/SUNET/vc/pkg/vc20/credential"
@@ -76,6 +77,51 @@ type CredentialQuery struct {
 	// It is deliberately all-or-nothing. A half-raw query would leave an
 	// operator guessing which of the two sources a given member came from.
 	Raw json.RawMessage `json:"-" yaml:"-"`
+}
+
+// MarshalYAML flattens Extra alongside the known members, so a query read
+// from configuration can be written back out whole.
+func (q CredentialQuery) MarshalYAML() (any, error) {
+	type plain CredentialQuery
+	encoded, err := json.Marshal(plain(q))
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := decodeExact(encoded, &m); err != nil {
+		return nil, err
+	}
+	return mergeExtraYAML(m, q.Extra, declaredJSONKeys(reflect.TypeOf(CredentialQuery{})), "credential query")
+}
+
+// UnmarshalYAML captures every member other than the modelled ones.
+//
+// Without it a presentation request template - which pkg/configuration
+// loads from YAML into an openid4vp.DCQL - could not carry a member this
+// build does not model, which is the whole purpose of Extra.
+func (q *CredentialQuery) UnmarshalYAML(unmarshal func(any) error) error {
+	var m map[string]any
+	if err := unmarshal(&m); err != nil {
+		return err
+	}
+	normalised, err := asStringMap(m, "credential query")
+	if err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(normalised)
+	if err != nil {
+		return err
+	}
+	type plain CredentialQuery
+	var known plain
+	if err := decodeExact(encoded, &known); err != nil {
+		return err
+	}
+	*q = CredentialQuery(known)
+	q.Extra = extraFromYAML(normalised,
+		"id", "format", "multiple", "meta", "trusted_authorities",
+		"require_cryptographic_holder_binding", "claims", "claim_sets", "req")
+	return nil
 }
 
 // MarshalJSON flattens Extra alongside the known members.
