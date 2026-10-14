@@ -228,6 +228,30 @@ func jsonEquivalent(a, b []byte) bool {
 	return reflect.DeepEqual(left, right)
 }
 
+// NewRawCredentialQuery builds a query that is sent as exactly these
+// bytes, with every modelled member it can read filled in alongside.
+//
+// This is the supported way to use the escape hatch. Writing
+// CredentialQuery{Raw: ...} by hand compiles and is wrong: Raw is
+// authoritative for the WIRE, and the rest of the stack reads the struct -
+// UIInteraction records ID in the authorization context's scopes and the
+// response path matches a presentation back to it, matching reads
+// Meta.TypeValues, Multiple and RequireCryptographicHolderBinding decide
+// what a response may contain. A hand-built query is therefore sent
+// correctly and then tracked under defaults nobody chose, which fails as
+// a result that cannot be matched rather than as an error.
+//
+// TestRawIsOnlyConstructedThroughTheConstructor keeps that from being
+// advice: production code may not write the literal.
+func NewRawCredentialQuery(raw json.RawMessage) (CredentialQuery, error) {
+	if !json.Valid(raw) {
+		return CredentialQuery{}, fmt.Errorf("credential query: raw is not valid JSON")
+	}
+	query := CredentialQuery{Raw: append(json.RawMessage(nil), raw...)}
+	query.adoptRawShadow()
+	return query, nil
+}
+
 // adoptRawShadow fills in every modelled member the raw bytes can be read
 // for, and reports the names of those that are present but unreadable.
 //

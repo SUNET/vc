@@ -296,3 +296,46 @@ func TestEveryModelledMemberIsShadowed(t *testing.T) {
 		})
 	}
 }
+
+// The constructor is what makes a hand-built raw query usable: the
+// shadow has to be on the STORED query, not only on the copy validation
+// happens to make, because the response path reads the stored one.
+func TestNewRawCredentialQueryFillsTheShadow(t *testing.T) {
+	const in = `{"id":"w3c","format":"ldp_vc","multiple":true,"meta":{"type_values":[["https://example.org#Diploma"]]},"claims":{"_req":[]}}`
+
+	query, err := NewRawCredentialQuery(json.RawMessage(in))
+	require.NoError(t, err)
+
+	assert.Equal(t, "w3c", query.ID, "the response path matches a presentation back to this")
+	assert.Equal(t, FormatLdpVCDCQL, query.Format)
+	assert.True(t, query.Multiple)
+	require.Len(t, query.Meta.TypeValues, 1, "matching reads this; empty matches nothing")
+
+	// And the wire is still exactly the bytes handed in.
+	out, err := json.Marshal(query)
+	require.NoError(t, err)
+	assert.JSONEq(t, in, string(out))
+}
+
+// It refuses bytes that are not JSON rather than deferring the failure to
+// send time, where it would surface as an unencodable request object a
+// long way from the call that caused it.
+func TestNewRawCredentialQueryRefusesNonJSON(t *testing.T) {
+	_, err := NewRawCredentialQuery(json.RawMessage(`{not json`))
+	require.Error(t, err)
+}
+
+// The copy is independent: mutating the caller's slice afterwards must
+// not change what the query sends.
+func TestNewRawCredentialQueryCopiesItsInput(t *testing.T) {
+	raw := []byte(`{"id":"q","format":"circuit_zk","claims":{"_req":[]}}`)
+	query, err := NewRawCredentialQuery(raw)
+	require.NoError(t, err)
+
+	before, err := json.Marshal(query)
+	require.NoError(t, err)
+	copy(raw, []byte(`{"id":"X"`))
+	after, err := json.Marshal(query)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(before), string(after))
+}
