@@ -68,7 +68,10 @@ func TestEveryVectorQueryCanBeEmitted(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			var query CredentialQuery
-			if err := json.Unmarshal(v.Query, &query); err == nil {
+			// Raw non-nil means the decode fell back rather than
+			// modelling the shape - decoding is total now, so "no error"
+			// no longer means the model understood it.
+			if err := json.Unmarshal(v.Query, &query); err == nil && query.Raw == nil {
 				encoded, marshalErr := json.Marshal(query)
 				require.NoError(t, marshalErr)
 				if sameJSON(t, v.Query, encoded) {
@@ -118,7 +121,7 @@ func TestTheModelProducesEveryAcceptedShape(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var query CredentialQuery
 			err := json.Unmarshal(v.Query, &query)
-			if err == nil {
+			if err == nil && query.Raw == nil {
 				encoded, marshalErr := json.Marshal(query)
 				require.NoError(t, marshalErr)
 				if sameJSON(t, v.Query, encoded) {

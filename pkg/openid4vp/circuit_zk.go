@@ -241,8 +241,14 @@ func unknownMembers(data []byte, known ...string) (map[string]any, error) {
 // silently dropped, which is the worst way for an escape hatch to fail.
 // pkg/configuration loads both of those from YAML.
 //
-// The shape mirrors ZKSystemTypeSpec's, which solved the same problem for
-// its Params in this package.
+// Known members are decoded into a methodless alias, so yaml.v2 applies
+// the struct tags and reports a wrong type itself. Unknown members are
+// collected separately and normalised. Nothing goes through JSON on the
+// way, which matters: yaml.v2 materialises every nested mapping as
+// map[any]any, and what encoding/json does with that has changed between
+// releases - it currently coerces an integer key to a string and drops a
+// sequence key silently, neither of which should be how a verifier's
+// configuration is interpreted.
 
 // MarshalYAML flattens Extra alongside the known members.
 func (r ReqItem) MarshalYAML() (any, error) {
@@ -255,20 +261,18 @@ func (r ReqItem) MarshalYAML() (any, error) {
 
 // UnmarshalYAML captures every member other than the modelled ones.
 func (r *ReqItem) UnmarshalYAML(unmarshal func(any) error) error {
-	var m map[string]any
-	if err := unmarshal(&m); err != nil {
+	type plain ReqItem // no methods, so yaml.v2 uses the struct tags
+	var known plain
+	if err := unmarshal(&known); err != nil {
+		return fmt.Errorf("req item: %w", err)
+	}
+	*r = ReqItem(known)
+
+	extra, err := yamlExtra(unmarshal, "req item", "id", "return", "params")
+	if err != nil {
 		return err
 	}
-	r.ID, _ = m["id"].(string)
-	r.Return, _ = m["return"].(string)
-	if params, ok := m["params"]; ok {
-		converted, err := asStringMap(params, "req item params")
-		if err != nil {
-			return err
-		}
-		r.Params = converted
-	}
-	r.Extra = extraFromYAML(m, "id", "return", "params")
+	r.Extra = extra
 	return nil
 }
 
@@ -288,19 +292,90 @@ func (c CircuitZkFormat) MarshalYAML() (any, error) {
 // including the rulebook example's fn_id and input, which is the shape an
 // operator is most likely to need and the one this could not express.
 func (c *CircuitZkFormat) UnmarshalYAML(unmarshal func(any) error) error {
-	var m map[string]any
-	if err := unmarshal(&m); err != nil {
+	type plain CircuitZkFormat
+	var known plain
+	if err := unmarshal(&known); err != nil {
+		return fmt.Errorf("circuit_zk client metadata: %w", err)
+	}
+	*c = CircuitZkFormat(known)
+
+	extra, err := yamlExtra(unmarshal, "circuit_zk client metadata",
+		"circuit_proof_system_values", "circuit_id_values")
+	if err != nil {
 		return err
 	}
-	var err error
-	if c.CircuitProofSystemValues, err = asStringSlice(m["circuit_proof_system_values"], "circuit_proof_system_values"); err != nil {
-		return err
-	}
-	if c.CircuitIDValues, err = asStringSlice(m["circuit_id_values"], "circuit_id_values"); err != nil {
-		return err
-	}
-	c.Extra = extraFromYAML(m, "circuit_proof_system_values", "circuit_id_values")
+	c.Extra = extra
 	return nil
+}
+
+// yamlExtra decodes the same node a second time as a mapping and returns
+// every member not named in known, normalised.
+func yamlExtra(unmarshal func(any) error, what string, known ...string) (map[string]any, error) {
+	var all map[string]any
+	if err := unmarshal(&all); err != nil {
+		// Not a mapping at all; the typed decode above has already
+		// reported whatever is wrong with it.
+		return nil, nil
+	}
+	for _, name := range known {
+		delete(all, name)
+	}
+	if len(all) == 0 {
+		return nil, nil
+	}
+	normalised, err := normaliseYAML(all, what)
+	if err != nil {
+		return nil, err
+	}
+	return normalised.(map[string]any), nil
+}
+
+// normaliseYAML converts yaml.v2's map[any]any into map[string]any, all
+// the way down, refusing a key that is not a string.
+//
+// Refusing rather than rendering: a non-string key has no JSON spelling,
+// and the alternatives are both silent - encoding/json coerces an integer
+// key and drops a sequence key entirely. A verifier that quietly discards
+// part of its own configuration is worse than one that will not start.
+func normaliseYAML(value any, what string) (any, error) {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for k, v := range typed {
+			converted, err := normaliseYAML(v, what)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = converted
+		}
+		return out, nil
+	case map[any]any:
+		out := make(map[string]any, len(typed))
+		for k, v := range typed {
+			key, ok := k.(string)
+			if !ok {
+				return nil, fmt.Errorf("%s: %v is not a string key, and has no JSON spelling", what, k)
+			}
+			converted, err := normaliseYAML(v, what)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = converted
+		}
+		return out, nil
+	case []any:
+		out := make([]any, len(typed))
+		for i, v := range typed {
+			converted, err := normaliseYAML(v, what)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = converted
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
 }
 
 // mergeExtraYAML adds extra to m, refusing a member the type models.
@@ -319,60 +394,4 @@ func mergeExtraYAML(m map[string]any, extra map[string]any, reserved map[string]
 		m[key] = extra[key]
 	}
 	return m, nil
-}
-
-// extraFromYAML returns every member of m not named in known.
-func extraFromYAML(m map[string]any, known ...string) map[string]any {
-	extra := map[string]any{}
-	maps.Copy(extra, m)
-	for _, name := range known {
-		delete(extra, name)
-	}
-	if len(extra) == 0 {
-		return nil
-	}
-	return extra
-}
-
-// asStringSlice converts a YAML sequence to []string.
-func asStringSlice(v any, what string) ([]string, error) {
-	if v == nil {
-		return nil, nil
-	}
-	items, ok := v.([]any)
-	if !ok {
-		return nil, fmt.Errorf("%s must be a list of strings", what)
-	}
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		s, ok := item.(string)
-		if !ok {
-			return nil, fmt.Errorf("%s must be a list of strings", what)
-		}
-		out = append(out, s)
-	}
-	return out, nil
-}
-
-// asStringMap converts a YAML mapping to map[string]any, rejecting a
-// non-string key rather than rendering it into one.
-func asStringMap(v any, what string) (map[string]any, error) {
-	switch typed := v.(type) {
-	case map[string]any:
-		return typed, nil
-	case map[any]any:
-		out := make(map[string]any, len(typed))
-		for k, value := range typed {
-			key, ok := k.(string)
-			if !ok {
-				return nil, fmt.Errorf("%s: %v is not a string key", what, k)
-			}
-			out[key] = value
-		}
-		return out, nil
-	case nil:
-		return nil, nil
-	default:
-		return nil, fmt.Errorf("%s must be a mapping", what)
-	}
 }

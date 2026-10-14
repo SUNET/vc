@@ -170,3 +170,90 @@ func TestYAMLExtraCannotSupplyAModelledMember(t *testing.T) {
 		})
 	}
 }
+
+// A wrong type in YAML must not be silently replaced by a zero value.
+//
+// The first implementation here assigned through a comma-ok assertion, so
+// `id: 7` became "" - the serialiser repairing a request it promised to
+// pass through, and losing the operator's value in the process. Known
+// members go through a methodless alias now, so yaml.v2 handles the type
+// exactly as it does for every other configuration struct in this
+// repository: a scalar is coerced to the field's type, and a structural
+// mismatch is an error.
+//
+// Coercion rather than refusal is deliberate. Diverging from yaml.v2 here
+// would make this one struct behave unlike the rest of the configuration
+// surface, which is a worse surprise than "7" where 7 was written.
+func TestYAMLWrongTypesAreNotSilentlyEmptied(t *testing.T) {
+	t.Run("a scalar is coerced, not emptied", func(t *testing.T) {
+		var item ReqItem
+		require.NoError(t, yamlv2.Unmarshal([]byte("id: 7\nreturn: h\n"), &item))
+		assert.Equal(t, "7", item.ID, "the configured value must survive in some form, not become empty")
+		assert.NotEmpty(t, item.ID)
+	})
+
+	for _, tc := range []struct{ name, in string }{
+		{"params that are a list", "id: age_check\nreturn: h\nparams: [1, 2]\n"},
+		{"params that are a scalar", "id: age_check\nreturn: h\nparams: 7\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var item ReqItem
+			require.Error(t, yamlv2.Unmarshal([]byte(tc.in), &item),
+				"a structural mismatch is an error, as it is everywhere else in the configuration")
+		})
+	}
+
+	t.Run("a circuit list that is not a list", func(t *testing.T) {
+		var format CircuitZkFormat
+		require.Error(t, yamlv2.Unmarshal([]byte("circuit_id_values: {a: b}\n"), &format))
+	})
+}
+
+// yaml.v2 materialises every nested mapping as map[any]any. Carrying that
+// into Extra and out through JSON depends on what encoding/json does with
+// a non-string key, which has changed between releases: it currently
+// coerces an integer key and drops a sequence key SILENTLY. Neither is an
+// acceptable way to read a verifier's own configuration.
+func TestNestedYAMLExtraIsNormalisedAndNonStringKeysRefused(t *testing.T) {
+	t.Run("nested mappings survive", func(t *testing.T) {
+		const in = `
+id: age_check
+return: h
+source:
+  path: [birth_date]
+  nested:
+    deep: 1
+`
+		var item ReqItem
+		require.NoError(t, yamlv2.Unmarshal([]byte(in), &item))
+		encoded, err := json.Marshal(item)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"id":"age_check","return":"h","source":{"path":["birth_date"],"nested":{"deep":1}}}`, string(encoded))
+	})
+
+	t.Run("a non-string key is refused rather than coerced or dropped", func(t *testing.T) {
+		var item ReqItem
+		err := yamlv2.Unmarshal([]byte("id: age_check\nreturn: h\nsource:\n  2: two\n"), &item)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a string key")
+	})
+}
+
+// The whole point of the alias decode: an ordinary, pre-existing
+// presentation template with nested meta still loads.
+func TestOrdinaryTemplatesStillLoad(t *testing.T) {
+	const in = `
+id: pid
+format: dc+sd-jwt
+meta:
+  vct_values: ["urn:eudi:pid:1"]
+claims:
+  - path: [family_name]
+`
+	var query CredentialQuery
+	require.NoError(t, yamlv2.Unmarshal([]byte(in), &query))
+	assert.Equal(t, FormatSDJWTVC, query.Format)
+	assert.Equal(t, []string{"urn:eudi:pid:1"}, query.Meta.VCTValues)
+	require.Len(t, query.Claims, 1)
+	assert.Nil(t, query.Extra, "nothing here is an extension")
+}

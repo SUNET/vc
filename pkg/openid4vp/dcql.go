@@ -99,28 +99,26 @@ func (q CredentialQuery) MarshalYAML() (any, error) {
 // Without it a presentation request template - which pkg/configuration
 // loads from YAML into an openid4vp.DCQL - could not carry a member this
 // build does not model, which is the whole purpose of Extra.
+//
+// The known members go through a methodless alias so yaml.v2 applies the
+// struct tags and reports a wrong type itself, rather than this coercing
+// one. See the note above ReqItem.UnmarshalYAML for why nothing here
+// passes through JSON on the way.
 func (q *CredentialQuery) UnmarshalYAML(unmarshal func(any) error) error {
-	var m map[string]any
-	if err := unmarshal(&m); err != nil {
-		return err
-	}
-	normalised, err := asStringMap(m, "credential query")
-	if err != nil {
-		return err
-	}
-	encoded, err := json.Marshal(normalised)
-	if err != nil {
-		return err
-	}
 	type plain CredentialQuery
 	var known plain
-	if err := decodeExact(encoded, &known); err != nil {
-		return err
+	if err := unmarshal(&known); err != nil {
+		return fmt.Errorf("credential query: %w", err)
 	}
 	*q = CredentialQuery(known)
-	q.Extra = extraFromYAML(normalised,
+
+	extra, err := yamlExtra(unmarshal, "credential query",
 		"id", "format", "multiple", "meta", "trusted_authorities",
 		"require_cryptographic_holder_binding", "claims", "claim_sets", "req")
+	if err != nil {
+		return err
+	}
+	q.Extra = extra
 	return nil
 }
 
@@ -149,7 +147,21 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 	type plain CredentialQuery
 	var known plain
 	if err := decodeExact(data, &known); err != nil {
-		return err
+		// A shape the model cannot hold is kept verbatim rather than
+		// refused. Decoding has to be TOTAL for the escape hatch to be
+		// worth anything: a request object is JSON-encoded into the HA
+		// cache and read back by another node, so a raw query with - say -
+		// an object at "claims" would be written out fine and then fail to
+		// load anywhere but the node that built it.
+		//
+		// It also keeps the verifier's own promise. This serialiser does
+		// not repair a request, and refusing to read back something it
+		// just wrote would be a repair by other means.
+		if !json.Valid(data) {
+			return err
+		}
+		*q = CredentialQuery{Raw: append(json.RawMessage(nil), data...)}
+		return nil
 	}
 	*q = CredentialQuery(known)
 	extra, err := unknownMembers(data,
