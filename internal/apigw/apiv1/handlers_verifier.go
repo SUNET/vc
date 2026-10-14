@@ -780,28 +780,57 @@ const issuerCredentialClockSkew = 30 * time.Second
 // one that omits it would reject credentials that are valid by their own
 // terms.
 func validIssuerCredentialWindow(claims jwt.MapClaims, now time.Time) error {
-	if exp, ok := numericDate(claims, "exp"); ok && now.After(exp.Add(issuerCredentialClockSkew)) {
+	exp, haveExp, err := numericDate(claims, "exp")
+	if err != nil {
+		return err
+	}
+	if haveExp && now.After(exp.Add(issuerCredentialClockSkew)) {
 		return fmt.Errorf("the presented credential expired at %s", exp.UTC().Format(time.RFC3339))
 	}
-	if nbf, ok := numericDate(claims, "nbf"); ok && now.Before(nbf.Add(-issuerCredentialClockSkew)) {
+
+	nbf, haveNbf, err := numericDate(claims, "nbf")
+	if err != nil {
+		return err
+	}
+	if haveNbf && now.Before(nbf.Add(-issuerCredentialClockSkew)) {
 		return fmt.Errorf("the presented credential is not valid until %s", nbf.UTC().Format(time.RFC3339))
 	}
+
 	return nil
 }
 
-// numericDate reads a JWT NumericDate claim. A claim that is present but
-// not a number is reported as absent rather than as zero, which would
-// otherwise read as 1970 and expire every credential carrying one.
-func numericDate(claims jwt.MapClaims, name string) (time.Time, bool) {
-	switch v := claims[name].(type) {
-	case float64:
-		return time.Unix(int64(v), 0), true
-	case int64:
-		return time.Unix(v, 0), true
-	case json.Number:
-		if n, err := v.Int64(); err == nil {
-			return time.Unix(n, 0), true
-		}
+// numericDate reads a JWT NumericDate claim, and distinguishes the three
+// cases that are not the same thing: absent, a date, and a value that is
+// present but is not a date.
+//
+// The last one is REFUSED rather than treated as either of the others.
+// Absent means the issuer placed no restriction; present-but-malformed
+// means the issuer placed one this server cannot read, and accepting the
+// credential without it decides in the presenter's favour a question we
+// were unable to answer. Reading it as zero would be the opposite
+// failure - 1970, expiring every credential carrying one - which is why
+// it cannot simply be parsed loosely either. Nothing upstream catches it:
+// the issuer signature check runs with claims validation off.
+func numericDate(claims jwt.MapClaims, name string) (time.Time, bool, error) {
+	raw, present := claims[name]
+	if !present || raw == nil {
+		return time.Time{}, false, nil
 	}
-	return time.Time{}, false
+
+	switch v := raw.(type) {
+	case float64:
+		return time.Unix(int64(v), 0), true, nil
+	case int64:
+		return time.Unix(v, 0), true, nil
+	case int:
+		return time.Unix(int64(v), 0), true, nil
+	case json.Number:
+		n, err := v.Float64()
+		if err != nil {
+			return time.Time{}, true, fmt.Errorf("the presented credential has a %s claim that is not a number: %q", name, v.String())
+		}
+		return time.Unix(int64(n), 0), true, nil
+	default:
+		return time.Time{}, true, fmt.Errorf("the presented credential has a %s claim that is not a NumericDate, but a %T", name, raw)
+	}
 }
