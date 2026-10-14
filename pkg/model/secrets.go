@@ -12,6 +12,27 @@ type Secrets struct {
 	APIGW    *APIGWSecrets    `yaml:"apigw,omitempty"`
 	Registry *RegistrySecrets `yaml:"registry,omitempty"`
 	Verifier *VerifierSecrets `yaml:"verifier,omitempty"`
+	Issuer   *IssuerSecrets   `yaml:"issuer,omitempty"`
+}
+
+// IssuerSecrets holds secrets from the issuer section.
+type IssuerSecrets struct {
+	// Seeds carries the derivation secret for each named seed source,
+	// keyed exactly as issuer.seeds is in the main configuration.
+	Seeds map[string]SeedSourceSecrets `yaml:"seeds,omitempty"`
+}
+
+// SeedSourceSecrets holds the derivation secret for one seed source.
+type SeedSourceSecrets struct {
+	// Secret is the base64url-encoded derivation secret, the same value
+	// issuer.seeds.<name>.secret takes in the main configuration.
+	//
+	// This is where it belongs when it cannot be a mounted file: the
+	// secrets file is how this deployment keeps secrets out of the
+	// rendered config, and a derivation secret is the most permanent one
+	// an issuer has - every commitment ever written under it is a
+	// function of it.
+	Secret string `yaml:"secret,omitempty"`
 }
 
 // CommonSecrets holds secrets from the common section
@@ -183,6 +204,25 @@ func (cfg *Cfg) ApplySecrets(secrets *Secrets) {
 			}
 			if cfg.Common.HA.PubSub.Password == "" && secrets.Common.HA.PubSub.Password != "" {
 				cfg.Common.HA.PubSub.Password = secrets.Common.HA.PubSub.Password
+			}
+		}
+	}
+
+	// Seed derivation secrets, same backfill rule as everything above:
+	// the main config wins where it has a value, so a deployment can keep
+	// this in config.yaml, in a mounted file via secret_path, or here.
+	//
+	// Only sources the main config already names are filled. A secrets
+	// file naming a seed source that does not exist is a mistake worth
+	// leaving visible - inventing the source here would hand a subject a
+	// seed from a configuration nobody wrote.
+	if secrets.Issuer != nil && cfg.Issuer != nil {
+		for name, source := range cfg.Issuer.Seeds {
+			if source == nil || source.Secret != "" {
+				continue
+			}
+			if fromFile, ok := secrets.Issuer.Seeds[name]; ok && fromFile.Secret != "" {
+				source.Secret = fromFile.Secret
 			}
 		}
 	}

@@ -317,3 +317,63 @@ func TestApplySecrets_RedisHANoRedisConfigured(t *testing.T) {
 	assert.NotPanics(t, func() { cfg.ApplySecrets(secrets) })
 	assert.Nil(t, cfg.Common.HA.PubSub, "PubSub config must not be auto-created from secrets")
 }
+
+// A seed derivation secret belongs in the secrets file like every other
+// secret this deployment holds, which is what s-jairl pointed out on
+// #793: the inline field followed BBSConfig.SecretKey, and that field is
+// itself an exception to the convention rather than an example of it.
+//
+// Same backfill rule as Mongo, SQL and the HA credentials - the main
+// config wins where it has a value - so a deployment can keep this in
+// config.yaml, in a mounted file via secret_path, or here.
+func TestApplySecretsFillsSeedDerivationSecrets(t *testing.T) {
+	const fromSecretsFile = "c2VjcmV0cy1maWxlLXZhbHVlLWF0LWxlYXN0LTMyLWJ5dGVz"
+
+	t.Run("an empty secret is filled from the secrets file", func(t *testing.T) {
+		cfg := &Cfg{Issuer: &Issuer{Seeds: map[string]*SeedSource{
+			"pseudonym": {Model: "derived"},
+		}}}
+		cfg.ApplySecrets(&Secrets{Issuer: &IssuerSecrets{
+			Seeds: map[string]SeedSourceSecrets{"pseudonym": {Secret: fromSecretsFile}},
+		}})
+		assert.Equal(t, fromSecretsFile, cfg.Issuer.Seeds["pseudonym"].Secret)
+	})
+
+	t.Run("a secret already in the config is left alone", func(t *testing.T) {
+		cfg := &Cfg{Issuer: &Issuer{Seeds: map[string]*SeedSource{
+			"pseudonym": {Model: "derived", Secret: "config-wins"},
+		}}}
+		cfg.ApplySecrets(&Secrets{Issuer: &IssuerSecrets{
+			Seeds: map[string]SeedSourceSecrets{"pseudonym": {Secret: fromSecretsFile}},
+		}})
+		assert.Equal(t, "config-wins", cfg.Issuer.Seeds["pseudonym"].Secret,
+			"the main config wins, exactly as it does for Mongo and the HA credentials")
+	})
+
+	t.Run("a source the main config does not name is not invented", func(t *testing.T) {
+		cfg := &Cfg{Issuer: &Issuer{Seeds: map[string]*SeedSource{
+			"pseudonym": {Model: "derived", Secret: "config-wins"},
+		}}}
+		cfg.ApplySecrets(&Secrets{Issuer: &IssuerSecrets{
+			Seeds: map[string]SeedSourceSecrets{"not-configured": {Secret: fromSecretsFile}},
+		}})
+		assert.Len(t, cfg.Issuer.Seeds, 1,
+			"a secrets file naming an unknown source is a mistake worth leaving visible; "+
+				"inventing the source here would hand a subject a seed from a configuration nobody wrote")
+	})
+
+	t.Run("no issuer section, and nothing happens", func(t *testing.T) {
+		cfg := &Cfg{Issuer: &Issuer{Seeds: map[string]*SeedSource{"pseudonym": {Model: "derived"}}}}
+		cfg.ApplySecrets(&Secrets{})
+		assert.Empty(t, cfg.Issuer.Seeds["pseudonym"].Secret)
+	})
+
+	t.Run("no issuer in the config at all, and it does not panic", func(t *testing.T) {
+		cfg := &Cfg{}
+		require.NotPanics(t, func() {
+			cfg.ApplySecrets(&Secrets{Issuer: &IssuerSecrets{
+				Seeds: map[string]SeedSourceSecrets{"pseudonym": {Secret: fromSecretsFile}},
+			}})
+		})
+	})
+}

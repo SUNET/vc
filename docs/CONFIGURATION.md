@@ -1480,7 +1480,7 @@ reproduce a subject's seed, which is what makes anything derived from it
 | ------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------- | -------- |
 | `model`       | `string` | How a subject's seed comes about. "derived" computes it from Secret and the subject identifier, so nothing is stored and the seed is recomputable forever. "stored" draws a random seed on first sight of a subject and keeps it. It needs a store, which the issuer does not have, so it is not implemented here - a configuration naming it is refused at startup rather than silently treated as "derived", which would hand every subject a seed the operator did not ask for.                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `"derived"`                 | -       | Yes      |
 | `secret_path` | `string` | File holding the derivation secret, base64url-encoded (padding and trailing whitespace are tolerated), whose DECODED value must be at least 32 bytes. Preferred where a file can be mounted, since it keeps the secret out of the rendered config entirely. Base64url rather than raw bytes, matching BBSConfig.SecretKeyPath: 32 raw bytes in this file decode to 24 or fail outright, which is a confusing way to find out the format was not what you assumed. `head -c 32 /dev/urandom | basenc --base64url | tr -d '='` produces one. THE SECRET IS PERMANENT. Every commitment ever written under it is a function of it, so replacing it gives every subject a new seed and a new pseudonym, and losing it destroys the ability to reproduce any seed this deployment has ever issued over. Back it up; do not rotate it. There is deliberately no key identifier and no rotation mechanism, because having one would suggest otherwise. | `"/etc/vc/seed/issuer.key"` | -       | No       |
-| `secret`      | `string` | Same value inline, base64url-encoded, decoding to at least 32 bytes. Exists for the same reason BBSConfig.SecretKey does: a Helm chart that models specific named secret volumes cannot add one for a key it does not know about. Prefer SecretPath where a file is possible. Exactly one of secret_path and secret must be set for a derived source. Both, or neither, is refused at startup rather than resolved by precedence - a deployment with two sources of truth for this secret cannot tell which one is live, and an operator editing the half that is not would see no effect at all.                                                                                                                                                                                                                                                                                                                                               | -                           | -       | No       |
+| `secret`      | `string` | Same value inline, base64url-encoded, decoding to at least 32 bytes. PREFER THE SECRETS FILE for this: issuer.seeds.<name>.secret there is backfilled into this field when it is empty, the same way Mongo, SQL and the HA credentials are, and it keeps the most permanent secret an issuer holds out of the rendered configuration. This field remains for a deployment that has no secrets file. Exists for the same reason BBSConfig.SecretKey does: a Helm chart that models specific named secret volumes cannot add one for a key it does not know about. Prefer SecretPath where a file is possible. Exactly one of secret_path and secret must be set for a derived source. Both, or neither, is refused at startup rather than resolved by precedence - a deployment with two sources of truth for this secret cannot tell which one is live, and an operator editing the half that is not would see no effect at all.                | -                           | -       | No       |
 | `seed_bytes`  | `int`    | Length of the seeds this source produces. 0 means 16, which is what the nym_auth rulebook specifies. It is part of the derivation, not just its output size, so changing it changes every seed - the same irreversible act as changing the secret.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `16`                        | -       | No       |
 
 ### `access_certificate`
@@ -1966,6 +1966,7 @@ Sections omitted from the secrets file are left untouched.
 | `apigw`    | `object` | APIGW       | -       | -       | No       |
 | `registry` | `object` | Registry    | -       | -       | No       |
 | `verifier` | `object` | Verifier    | -       | -       | No       |
+| `issuer`   | `object` | Issuer      | -       | -       | No       |
 
 ### `common`
 
@@ -2142,6 +2143,22 @@ Sections omitted from the secrets file are left untouched.
 | `subject_salt`   | `string` | Secret value used to derive pairwise subject identifiers for OIDC clients                                                                                                                                                                        | -                                | -       | No       |
 | `static_clients` | `object` | Client_id to client_secret for static OIDC clients. Only clients listed here will have their secrets applied; clients not present in this map keep whatever value the main config provides (which will be empty after ApplySecrets clears them). | `<client_id>: "<client_secret>"` | -       | No       |
 
+### `issuer`
+
+> **Path:** `.issuer`
+
+| Field   | Type     | Description                                                                                                                 | Example | Default | Required |
+| ------- | -------- | --------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `seeds` | `object` | Seeds carries the derivation secret for each named seed source, keyed exactly as issuer.seeds is in the main configuration. | -       | -       | No       |
+
+### `seeds` entry
+
+> **Path:** `.issuer.seeds.<key>`
+
+| Field    | Type     | Description                                                                                                                                                                                                                                                                                                                                                                                | Example | Default | Required |
+| -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------- | -------- |
+| `secret` | `string` | Base64url-encoded derivation secret, the same value issuer.seeds.<name>.secret takes in the main configuration. This is where it belongs when it cannot be a mounted file: the secrets file is how this deployment keeps secrets out of the rendered config, and a derivation secret is the most permanent one an issuer has - every commitment ever written under it is a function of it. | -       | -       | No       |
+
 ### Example `secrets.yaml`
 
 > **Path:** `file referenced by .common.secret_file_path`
@@ -2180,6 +2197,9 @@ verifier:
       subject_salt: "random-salt-for-pairwise-subjects"
       static_clients:
         <client_id>: "<client_secret>"
+issuer:
+  seeds:
+    <key>: "<value>"
 ```
 
 

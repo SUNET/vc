@@ -659,6 +659,12 @@ type SeedSource struct {
 	// Secret is the same value inline, base64url-encoded, decoding to at
 	// least 32 bytes.
 	//
+	// PREFER THE SECRETS FILE for this: issuer.seeds.<name>.secret there
+	// is backfilled into this field when it is empty, the same way Mongo,
+	// SQL and the HA credentials are, and it keeps the most permanent
+	// secret an issuer holds out of the rendered configuration. This
+	// field remains for a deployment that has no secrets file.
+	//
 	// Exists for the same reason BBSConfig.SecretKey does: a Helm chart
 	// that models specific named secret volumes cannot add one for a key
 	// it does not know about. Prefer SecretPath where a file is possible.
