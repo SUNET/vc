@@ -2,6 +2,7 @@ package openid4vp
 
 import (
 	"fmt"
+	"net/netip"
 	"net/url"
 	"strings"
 
@@ -40,6 +41,10 @@ var browserHost = idna.New(
 // unnormalised origin fails a comparison it should pass and the deployment
 // looks broken while being configured correctly.
 //
+// An IPv6 literal is serialised the way RFC 5952 - and therefore a
+// browser - does, rather than merely lowercased: the same address has many
+// valid spellings and only one canonical one.
+//
 // An internationalized host is converted to its A-label form, which is the
 // other half of the same problem: a browser reporting an Origin for
 // "münchen.example" emits "xn--mnchen-3ya.example", and public_url
@@ -63,8 +68,16 @@ func CanonicalOrigin(rawURL string) (string, error) {
 	host := u.Hostname()
 	if strings.Contains(host, ":") {
 		// An IPv6 literal, which is not a domain name and must not be put
-		// through IDNA - the colons alone would fail it.
-		host = "[" + strings.ToLower(host) + "]"
+		// through IDNA - the colons alone would fail it. Lowercasing is
+		// not its canonical form either: a browser serialises an address
+		// the way RFC 5952 does, so "[2001:0DB8:0:0:0:0:0:1]" comes back
+		// as "[2001:db8::1]" and a lowercased spelling matches neither
+		// the Origin it reports nor the audience derived from it.
+		addr, err := netip.ParseAddr(host)
+		if err != nil {
+			return "", fmt.Errorf("parsing the IPv6 literal in %q: %w", rawURL, err)
+		}
+		host = "[" + addr.String() + "]"
 	} else {
 		// ToASCII does the case folding too, as part of the UTS #46
 		// mapping, so there is no ToLower here to disagree with it.

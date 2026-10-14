@@ -27,6 +27,15 @@ func TestCanonicalOrigin(t *testing.T) {
 		{name: "an IPv6 literal keeps its brackets", in: "https://[2001:DB8::1]:8443", want: "https://[2001:db8::1]:8443"},
 		{name: "an IPv6 literal on the default port", in: "https://[2001:db8::1]:443", want: "https://[2001:db8::1]"},
 
+		// RFC 5952 is what a browser serialises an address with, and the
+		// same address has many valid spellings. Lowercasing alone left
+		// the expanded and zero-padded forms unmatchable against the
+		// Origin a browser reports for the very same host.
+		{name: "a fully expanded IPv6 literal", in: "https://[2001:0db8:0000:0000:0000:0000:0000:0001]", want: "https://[2001:db8::1]"},
+		{name: "a zero-padded IPv6 literal", in: "https://[2001:0DB8::0001]:8443", want: "https://[2001:db8::1]:8443"},
+		{name: "an IPv6 loopback written the long way", in: "https://[0:0:0:0:0:0:0:1]", want: "https://[::1]"},
+		{name: "an IPv4-mapped IPv6 literal", in: "https://[::ffff:192.0.2.1]", want: "https://[::ffff:192.0.2.1]"},
+
 		// An internationalized host. A browser's URL parser runs UTS #46
 		// ToASCII, so the Origin it reports is the A-label form; a
 		// deployment that writes its public_url in Unicode - which
@@ -61,6 +70,7 @@ func TestCanonicalOriginRefusesWhatItCannotSerialise(t *testing.T) {
 		{name: "no host", in: "https:///op/par"},
 		{name: "not a URL at all", in: "://"},
 		{name: "a punycode label that decodes to nothing valid", in: "https://xn--a.example"},
+		{name: "something bracketed that is not an address", in: "https://[2001:db8::zz]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := CanonicalOrigin(tc.in)
