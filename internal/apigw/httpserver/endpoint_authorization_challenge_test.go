@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -43,6 +44,15 @@ func (a *challengeAPI) OAuthPar(context.Context, *openid4vci.PARRequest) (*openi
 
 func challengeEngine(t *testing.T, api *challengeAPI) *gin.Engine {
 	t.Helper()
+	return challengeEngineWithRateLimit(t, api, 0)
+}
+
+// challengeEngineWithRateLimit registers the challenge route the way
+// service.go does, with the rate limiter optionally wired in the same
+// shape (rgRoot.Group("") + RateLimiter.Middleware()). rpm <= 0 leaves it
+// off.
+func challengeEngineWithRateLimit(t *testing.T, api *challengeAPI, rpm int) *gin.Engine {
+	t.Helper()
 	ctx := t.Context()
 
 	log, err := logger.New("challenge-endpoint-test", t.TempDir(), true)
@@ -64,8 +74,34 @@ func challengeEngine(t *testing.T, api *challengeAPI) *gin.Engine {
 
 	engine := gin.New()
 	rg := engine.Group("")
+	if rpm > 0 {
+		rg.Use(httphelpers.NewRateLimiter(cache.NewMemoryRateLimitCounter(), rpm).Middleware())
+	}
 	helpers.Server.RegEndpoint(ctx, rg, http.MethodPost, "authorize-challenge", http.StatusOK, s.endpointOAuthAuthorizationChallenge)
 	return engine
+}
+
+// The Authorization Challenge Endpoint does real work before the caller
+// has proved anything: an initial request allocates an authorization
+// context, generates an ephemeral P-256 encryption key and signs a
+// request object. Whoever goes on to the token or credential endpoints is
+// bounded there; whoever only ever asks for challenges was bounded
+// nowhere, so the route is rate limited on the Token Endpoint's pattern -
+// service.go registers it on its own rgRoot.Group("") with
+// RateLimiter.Middleware, which is the shape this mirrors.
+func TestEndpointOAuthAuthorizationChallenge_RateLimited(t *testing.T) {
+	api := &challengeAPI{reply: &apiv1.AuthorizationChallengeResponse{}}
+	engine := challengeEngineWithRateLimit(t, api, 3)
+
+	for i := range 3 {
+		w := postChallenge(t, engine, url.Values{"client_id": {"wallet-1"}}, nil)
+		require.Equal(t, http.StatusOK, w.Code, "request %d should be within the limit", i+1)
+	}
+
+	w := postChallenge(t, engine, url.Values{"client_id": {"wallet-1"}}, nil)
+	require.Equal(t, http.StatusTooManyRequests, w.Code,
+		"the request over the limit must be refused before it allocates a context and signs a request object")
+	require.Equal(t, "wallet-1", api.seen.ClientID)
 }
 
 func postChallenge(t *testing.T, engine *gin.Engine, form url.Values, headers map[string]string) *httptest.ResponseRecorder {
