@@ -338,6 +338,45 @@ func (v *VPFormatsSupported) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalYAML flattens Extra alongside the known format entries.
+//
+// Needed as much as the JSON pair, and arguably more: this is the type
+// verifier.preferred_vp_formats loads into, so the OPERATOR CONFIGURATION
+// path is the one an unknown format identifier has to come in by. With
+// JSON support alone the promise held only for metadata this build
+// constructed itself, which is not where a format that postdates it
+// arrives from.
+func (v VPFormatsSupported) MarshalYAML() (any, error) {
+	type plain VPFormatsSupported
+	encoded, err := json.Marshal(plain(v))
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := decodeExact(encoded, &m); err != nil {
+		return nil, err
+	}
+	return mergeExtraYAML(m, v.Extra, declaredJSONKeys(reflect.TypeOf(VPFormatsSupported{})), "vp_formats_supported")
+}
+
+// UnmarshalYAML captures format entries this build does not model.
+func (v *VPFormatsSupported) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain VPFormatsSupported
+	var known plain
+	if err := unmarshal(&known); err != nil {
+		return fmt.Errorf("vp_formats_supported: %w", err)
+	}
+	*v = VPFormatsSupported(known)
+
+	extra, err := yamlExtra(unmarshal, "vp_formats_supported",
+		"ldp_vc", "jwt_vc_json", "dc+sd-jwt", "mso_mdoc", "circuit_zk")
+	if err != nil {
+		return err
+	}
+	v.Extra = extra
+	return nil
+}
+
 // LDPVCFormat defines format-specific parameters for W3C VC Data Integrity (ldp_vc).
 type LDPVCFormat struct {
 	// ProofTypeValues is a non-empty array containing identifiers of proof types supported.

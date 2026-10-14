@@ -268,6 +268,30 @@ func (r *ReqItem) UnmarshalYAML(unmarshal func(any) error) error {
 	}
 	*r = ReqItem(known)
 
+	// Params is an open tree, so it needs the same walk Extra gets. The
+	// struct tag puts it in a map[string]any, but yaml.v2 leaves every
+	// NESTED mapping inside it as map[any]any - and this item is emitted
+	// as JSON, where a key with no JSON spelling is coerced to its
+	// rendering or, for a sequence key, dropped without a word. A function
+	// parameter is the one place a configuration must survive unchanged:
+	// it is an input to a proof, so a changed one yields a different
+	// pseudonym and the failure appears nowhere near here.
+	//
+	// (A nested tree whose keys are all strings encodes correctly through
+	// encoding/json on this toolchain either way. The walk is here so that
+	// staying correct is this code's decision rather than that package's.)
+	params, err := normaliseYAML(r.Params, "req item params")
+	if err != nil {
+		return err
+	}
+	if params != nil {
+		normalised, ok := params.(map[string]any)
+		if !ok {
+			return fmt.Errorf("req item params: expected a mapping, got %T", params)
+		}
+		r.Params = normalised
+	}
+
 	extra, err := yamlExtra(unmarshal, "req item", "id", "return", "params")
 	if err != nil {
 		return err

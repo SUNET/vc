@@ -257,3 +257,101 @@ claims:
 	require.Len(t, query.Claims, 1)
 	assert.Nil(t, query.Extra, "nothing here is an extension")
 }
+
+// A valid nested params tree must come through the normalisation walk
+// unchanged.
+//
+// This direction is the one the walk could break: it rebuilds every
+// mapping it touches, and params is an INPUT TO A PROOF - the pseudonym a
+// wallet computes depends on it byte for byte. The behaviour the walk
+// CHANGES is in TestReqItemParamsRefusesNonStringKeys; on this toolchain
+// encoding/json already handles a nested map[any]any whose keys are all
+// strings, so this case would pass without the walk too.
+func TestReqItemParamsSurviveNormalisationUnchanged(t *testing.T) {
+	const in = `
+id: pseudonym-v1-sha256
+return: nym-123
+params:
+  config: known-offender-matching-ssc
+  nested:
+    inner: value
+    deeper:
+      - key: in-a-sequence
+`
+	var item ReqItem
+	require.NoError(t, yamlv2.Unmarshal([]byte(in), &item))
+
+	// The point is that this encodes at all, and keeps every member.
+	encoded, err := json.Marshal(item)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+		"id": "pseudonym-v1-sha256",
+		"return": "nym-123",
+		"params": {
+			"config": "known-offender-matching-ssc",
+			"nested": {"inner": "value", "deeper": [{"key": "in-a-sequence"}]}
+		}
+	}`, string(encoded))
+}
+
+// A key with no JSON spelling is refused rather than coerced to its
+// rendering or dropped, for the same reason: silently changing a proof
+// input is worse than refusing to load the configuration.
+func TestReqItemParamsRefusesNonStringKeys(t *testing.T) {
+	for _, tc := range []struct{ name, in, wantErr string }{
+		// An integer key reaches the walk: yaml.v2 is happy to put it in a
+		// map[any]any, and JSON would then quietly render it as "7".
+		{"an integer key", "id: f\nreturn: h\nparams:\n  nested:\n    7: seven\n", "not a string key"},
+		// A sequence key never gets that far - yaml.v2 refuses it on its
+		// own. Asserted anyway, and on the OUTCOME rather than the
+		// wording: this is the case JSON drops in silence, and which of
+		// the two layers catches it is not the point.
+		{"a sequence key", "id: f\nreturn: h\nparams:\n  nested:\n    [a, b]: pair\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var item ReqItem
+			err := yamlv2.Unmarshal([]byte(tc.in), &item)
+			require.Error(t, err)
+			if tc.wantErr != "" {
+				assert.Contains(t, err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+// verifier.preferred_vp_formats loads into VPFormatsSupported from YAML,
+// so that is the path a format identifier postdating this build actually
+// arrives by. With JSON methods alone the extension bag was dropped
+// exactly where an operator would use it.
+func TestVPFormatsSupportedCarriesUnknownFormatsThroughYAML(t *testing.T) {
+	const in = `
+mso_mdoc: {}
+circuit_zk:
+  circuit_proof_system_values: [longfellow-libzk-v1]
+some_future_format:
+  alg_values: [ES256]
+`
+	var formats VPFormatsSupported
+	require.NoError(t, yamlv2.Unmarshal([]byte(in), &formats))
+
+	require.NotNil(t, formats.MsoMdoc)
+	require.NotNil(t, formats.CircuitZk)
+	assert.Equal(t, []string{"longfellow-libzk-v1"}, formats.CircuitZk.CircuitProofSystemValues)
+	require.Contains(t, formats.Extra, "some_future_format")
+
+	// And out to the wallet unchanged - client_metadata is JSON.
+	encoded, err := json.Marshal(formats)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+		"mso_mdoc": {},
+		"circuit_zk": {"circuit_proof_system_values": ["longfellow-libzk-v1"]},
+		"some_future_format": {"alg_values": ["ES256"]}
+	}`, string(encoded))
+
+	// And back to YAML, so a config that round-trips keeps it.
+	reencoded, err := yamlv2.Marshal(formats)
+	require.NoError(t, err)
+	var again VPFormatsSupported
+	require.NoError(t, yamlv2.Unmarshal(reencoded, &again))
+	assert.Equal(t, formats.Extra, again.Extra)
+}
