@@ -821,6 +821,53 @@ func (c *MemoryStore) ClaimIssuerState(ctx context.Context, issuerState string) 
 		func(doc *AuthorizationContext) { doc.IssuerState = "" })
 }
 
+// ResumeIssuerState claims the issuer-initiated handle and writes the
+// resumed exchange in the same critical section. See
+// AuthContextStore.ResumeIssuerState.
+func (c *MemoryStore) ResumeIssuerState(ctx context.Context, issuerState string, resume *IssuerStateResume) (*AuthorizationContext, error) {
+	if issuerState == "" {
+		return nil, errors.New("issuerState cannot be empty")
+	}
+	if resume == nil {
+		return nil, errors.New("resume cannot be nil")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	indexKey := fmt.Sprintf("issuer_state:%s", issuerState)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		delete(c.indices, indexKey)
+		return nil, ErrNoDocuments
+	}
+
+	stored := item.Value()
+
+	// The index could name a session whose handle has already been
+	// replaced; treat that as unclaimed rather than trusting the index.
+	if stored.IssuerState != issuerState {
+		return nil, ErrNoDocuments
+	}
+
+	// Old indices first: the handle being removed and the auth_session
+	// being added both live there, and rebuilding over a stale map would
+	// leave the consumed handle resolvable.
+	c.deleteIndices(stored)
+	stored.IssuerState = ""
+	resume.applyTo(stored)
+	c.cache.Set(sessionID, stored, ttlcache.DefaultTTL)
+	c.updateIndices(stored)
+
+	resumed := *stored
+	return &resumed, nil
+}
+
 // claimIndexedHandle is the shared body of the two claims: resolve a
 // one-shot handle through its index, take it off the stored document AND
 // off the returned copy, and let exactly one caller have it.

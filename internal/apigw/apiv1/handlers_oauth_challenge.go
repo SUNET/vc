@@ -335,6 +335,30 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 	}
 }
 
+// handleLookupError is the answer a wallet gets when a one-shot handle
+// could not be resolved or claimed.
+//
+// Unknown and expired are deliberately one answer - otherwise the
+// endpoint reports which auth_session and issuer_state values exist, and
+// anyone holding a guess can enumerate them. But only cache.ErrNoDocuments
+// means that. Every other error is the store itself failing: a MongoDB
+// outage, a timeout, a decode error. The exchange those name may be
+// perfectly alive, and answering invalid_grant tells the wallet to throw
+// it away and start over - which, during an outage, is exactly the
+// request that will fail next.
+//
+// So an infrastructure failure gets server_error, which says "not your
+// fault, try again" and leaks nothing: the wallet learns nothing about
+// which handles exist from an error it would have received whatever it
+// sent.
+func handleLookupError(err error, description string) error {
+	if err == nil || errors.Is(err, cache.ErrNoDocuments) {
+		return oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant, description, 400)
+	}
+	return oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+		"the authorization context could not be read", 500, err)
+}
+
 // authorizationChallengeIntermediate handles every request after the first:
 // it finds the exchange the auth_session names, consumes whatever the
 // interaction produced, and - when that leaves the Holder established -
@@ -342,11 +366,7 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *model.InteractiveAuthorization, req *AuthorizationChallengeRequest) (*AuthorizationChallengeResponse, error) {
 	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{AuthSession: req.AuthSession})
 	if err != nil || authCtx == nil {
-		// Unknown and expired are deliberately indistinguishable: telling
-		// the two apart turns the endpoint into an oracle for which
-		// auth_session values exist.
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"auth_session is invalid or has expired", 400)
+		return nil, handleLookupError(err, "auth_session is invalid or has expired")
 	}
 	if authCtx.ExpiresAt > 0 && time.Now().Unix() > authCtx.ExpiresAt {
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
@@ -408,8 +428,7 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 	// learned it grind presentations at the endpoint.
 	claimed, err := c.cacheService.AuthContext.ClaimAuthSession(ctx, req.AuthSession)
 	if err != nil {
-		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
-			"auth_session is invalid or has expired", 400, err)
+		return nil, handleLookupError(err, "auth_session is invalid or has expired")
 	}
 	authCtx = claimed
 
@@ -852,11 +871,7 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 	// scanning the same offer both reach it, and exactly one wins.
 	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{IssuerState: req.IssuerState})
 	if err != nil || authCtx == nil {
-		// Unknown and expired are one answer, for the same reason they are
-		// at the intermediate request: otherwise the endpoint reports
-		// which issuer_state values exist.
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"issuer_state is invalid or has expired", 400)
+		return nil, handleLookupError(err, "issuer_state is invalid or has expired")
 	}
 	if authCtx.ExpiresAt > 0 && time.Now().Unix() > authCtx.ExpiresAt {
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
@@ -938,39 +953,38 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 		return nil, err
 	}
 
-	// The point of no return. Exactly one caller gets the handle; everyone
-	// else is told the issuer_state is invalid, which by then it is.
-	claimed, err := c.cacheService.AuthContext.ClaimIssuerState(ctx, req.IssuerState)
-	if err != nil || claimed == nil {
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"issuer_state is invalid or has expired", 400)
-	}
-	authCtx = claimed
-
-	// The wallet's half, recorded on the prepared issuance.
-	authCtx.WalletClientID = req.ClientID
-	authCtx.WalletURI = req.RedirectURI
-	authCtx.CodeChallenge = req.CodeChallenge
-	authCtx.CodeChallengeMethod = req.CodeChallengeMethod
-	authCtx.AuthSessionDPoPThumbprint = dpopThumbprint
-	authCtx.AuthSession = authSession
-	authCtx.DCQLQuery = dcql
-	authCtx.ExpiresAt = time.Now().Add(ia.AuthSessionTTL()).Unix()
-
-	// Move the physical anchor too, not just the logical deadline.
+	// The point of no return, and a single store operation.
 	//
-	// MongoDB expires these documents on a TTL index over created_at, and
-	// MongoStore.Update replaces the whole document - so without this, an
-	// offer resumed late advertises an auth_session that outlives the
-	// document holding it, and the wallet comes back to find the exchange
-	// gone with nothing having gone wrong. The memory store re-anchors on
-	// write anyway; this makes the two behave alike rather than leaving
-	// the difference to be discovered in production.
-	authCtx.CreatedAt = time.Now()
-
-	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
-		return nil, err
+	// Claiming the handle and writing the resumed exchange used to be two
+	// calls. Between them the issuance was irreversibly consumed and no
+	// resumable exchange existed yet, so a failure in the second one - a
+	// MongoDB blip, a validation error - destroyed a prepared issuance
+	// that nothing re-prepares, which is precisely the outcome the
+	// ordering above exists to prevent. One FindOneAndUpdate, and one
+	// pass under the memory store's lock, close that window: either the
+	// handle is still there and the exchange is written with it, or
+	// neither happened.
+	//
+	// CreatedAt moves with it. MongoDB expires these documents on a TTL
+	// index over created_at, so without this an offer resumed late
+	// advertises an auth_session that outlives the document holding it,
+	// and the wallet comes back to find the exchange gone with nothing
+	// having gone wrong.
+	resumed, err := c.cacheService.AuthContext.ResumeIssuerState(ctx, req.IssuerState, &cache.IssuerStateResume{
+		AuthSession:               authSession,
+		AuthSessionDPoPThumbprint: dpopThumbprint,
+		WalletClientID:            req.ClientID,
+		WalletURI:                 req.RedirectURI,
+		CodeChallenge:             req.CodeChallenge,
+		CodeChallengeMethod:       req.CodeChallengeMethod,
+		DCQLQuery:                 dcql,
+		ExpiresAt:                 time.Now().Add(ia.AuthSessionTTL()).Unix(),
+		CreatedAt:                 time.Now(),
+	})
+	if err != nil {
+		return nil, handleLookupError(err, "issuer_state is invalid or has expired")
 	}
+	authCtx = resumed
 
 	c.log.Info("CHALLENGE: prepared issuance resumed, interaction required",
 		"client_id", req.ClientID, "scope", scope,

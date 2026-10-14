@@ -65,6 +65,23 @@ type AuthContextStore interface {
 	// the offer.
 	ClaimIssuerState(ctx context.Context, issuerState string) (*AuthorizationContext, error)
 
+	// ResumeIssuerState claims the issuer-initiated handle AND records the
+	// exchange that replaces it, in one store operation.
+	//
+	// ClaimIssuerState followed by Update does the same thing in two, and
+	// the gap between them is a hole: the prepared issuance is consumed by
+	// the first call and the resumable exchange only exists after the
+	// second, so a failure in between destroys an issuance that nothing
+	// re-prepares. A wallet is then holding a handle the server has eaten
+	// and no auth_session to continue with, over a server-side fault it
+	// did nothing to cause.
+	//
+	// Same one-shot guarantee as ClaimIssuerState: exactly one caller
+	// wins, everyone else gets ErrNoDocuments. The returned document is
+	// the resumed one - after the write, not before - because that is the
+	// state the caller goes on to answer from.
+	ResumeIssuerState(ctx context.Context, issuerState string, resume *IssuerStateResume) (*AuthorizationContext, error)
+
 	// RedeemPreAuthorizedCode allows a pre-authorized code to be redeemed by multiple
 	// distinct clients (per DPoP thumbprint). Returns the auth context or an error if
 	// the same client attempts to redeem the code twice.

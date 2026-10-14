@@ -713,3 +713,51 @@ func (s *MongoStore) ClaimIssuerState(ctx context.Context, issuerState string) (
 
 	return &claimed, nil
 }
+
+// ResumeIssuerState claims the issuer-initiated handle and writes the
+// resumed exchange in one FindOneAndUpdate. See
+// AuthContextStore.ResumeIssuerState.
+//
+// The $unset that consumes the handle and the $set that records the
+// exchange are one update on one document, so the two cannot come apart:
+// either the filter still matches and both apply, or neither does. The
+// document is returned After the write because that is the state the
+// caller answers from.
+func (s *MongoStore) ResumeIssuerState(ctx context.Context, issuerState string, resume *IssuerStateResume) (*AuthorizationContext, error) {
+	if issuerState == "" {
+		return nil, errors.New("issuerState cannot be empty")
+	}
+	if resume == nil {
+		return nil, errors.New("resume cannot be nil")
+	}
+
+	filter := bson.M{"issuer_state": issuerState}
+	update := bson.M{
+		"$unset": bson.M{"issuer_state": ""},
+		// Field for field what IssuerStateResume.applyTo writes in the
+		// memory store; the two have to stay in step or an issuance
+		// resumes differently depending on which backend is configured.
+		"$set": bson.M{
+			"auth_session":                 resume.AuthSession,
+			"auth_session_dpop_thumbprint": resume.AuthSessionDPoPThumbprint,
+			"wallet_client_id":             resume.WalletClientID,
+			"redirect_url":                 resume.WalletURI,
+			"code_challenge":               resume.CodeChallenge,
+			"code_challenge_method":        resume.CodeChallengeMethod,
+			"dcql_query":                   resume.DCQLQuery,
+			"expires_at":                   resume.ExpiresAt,
+			"created_at":                   resume.CreatedAt,
+		},
+	}
+
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	var resumed AuthorizationContext
+	if err := s.coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&resumed); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNoDocuments
+		}
+		return nil, fmt.Errorf("failed to resume issuer_state: %w", err)
+	}
+
+	return &resumed, nil
+}
