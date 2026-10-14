@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
 
@@ -44,7 +45,7 @@ func reqSurvivesTheBrowser(items []openid4vp.ReqItem) error {
 		walk = func(value any) error {
 			switch typed := value.(type) {
 			case json.Number:
-				if !survivesFloat64(typed.String()) {
+				if !survivesTheBrowser(typed.String()) {
 					return fmt.Errorf("req[%d]: %s cannot be represented exactly as a JavaScript number, and the picker posts this query back through one", i, typed.String())
 				}
 			case map[string]any:
@@ -73,21 +74,42 @@ func reqSurvivesTheBrowser(items []openid4vp.ReqItem) error {
 	return nil
 }
 
-// survivesFloat64 reports whether a JSON number literal is exactly
-// representable as a float64 - which is what a JavaScript number is.
+// survivesTheBrowser reports whether a JSON number literal denotes the
+// same number after a JavaScript JSON.parse/JSON.stringify round trip.
 //
-// Compared as exact rationals rather than by magnitude: "beyond 2^53" is
-// the familiar case but not the only one, and a decimal fraction can lose
-// precision well inside it.
-func survivesFloat64(literal string) bool {
+// Not the same question as "is it exactly representable as a float64",
+// which is what this asked at first. 0.1 is NOT exactly representable and
+// survives perfectly: ECMAScript prints the shortest decimal that parses
+// back to the same double, so 0.1 comes out "0.1". Testing
+// representability refused presets that were fine.
+//
+// And the two differ in the other direction as well, which is the part I
+// would not have predicted: 4611686018427387904 (2^62) IS exactly
+// representable and does not survive - the shortest round-tripping
+// decimal for it is 4611686018427388000, so that is what the picker posts
+// back. A wallet reading it as an integer gets a different number than
+// the one configured.
+//
+// So the test is on the VALUE the wallet ends up with: take the literal
+// to a float64 as the browser does, print the shortest decimal that
+// round-trips as the browser does, and compare that against the original
+// as exact rationals. Comparing values rather than text on purpose - JS
+// prints 1.0 as "1", which is a different spelling of the same number and
+// changes no proof.
+func survivesTheBrowser(literal string) bool {
 	exact, ok := new(big.Rat).SetString(literal)
 	if !ok {
 		return false
 	}
 	asFloat, err := strconv.ParseFloat(literal, 64)
 	if err != nil {
+		// Out of float64 range. JSON.stringify turns an Infinity into
+		// null, so the parameter does not merely change - it disappears.
 		return false
 	}
-	rounded := new(big.Rat).SetFloat64(asFloat)
-	return rounded != nil && rounded.Cmp(exact) == 0
+	if math.IsInf(asFloat, 0) || math.IsNaN(asFloat) {
+		return false
+	}
+	printed, ok := new(big.Rat).SetString(strconv.FormatFloat(asFloat, 'g', -1, 64))
+	return ok && printed.Cmp(exact) == 0
 }
