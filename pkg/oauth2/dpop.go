@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/SUNET/vc/pkg/jose"
 
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/net/idna"
 )
 
 var (
@@ -236,4 +238,80 @@ func (c *DPoP) IsAccessTokenDPoP(token string) bool {
 	h := sha256.Sum256([]byte(token))
 	computed := base64.RawURLEncoding.EncodeToString(h[:])
 	return subtle.ConstantTimeCompare([]byte(c.ATH), []byte(computed)) == 1
+}
+
+// SameHTU reports whether a proof's htu names the same resource as the
+// endpoint it arrived at.
+//
+// RFC 9449 §4.3 says to compare the two "ignoring any query and fragment
+// parts" and after URI normalization, and both halves of that matter in
+// practice. A deployment writes its endpoint URL in configuration and a
+// wallet builds the htu from the URL it actually requested, so the two
+// legitimately differ in every way RFC 3986 §6.2.2 calls insignificant:
+// the case of the scheme and host, an explicitly written default port, and
+// a host spelled in Unicode where the other side used its A-label. A byte
+// comparison refuses those proofs, and the refusal is unfixable from the
+// wallet's side - it is a correct proof for the URL it was sent to.
+//
+// What normalization deliberately does NOT touch is the path. Two
+// endpoints on one host differ only there, so a proof for /token must
+// never satisfy a request to the Authorization Challenge Endpoint; case,
+// percent-encoding and empty-versus-root are left exactly as written,
+// except that "" and "/" are the same path under RFC 3986 §6.2.3.
+func SameHTU(htu, endpoint string) bool {
+	normalizedHTU, okHTU := normalizeURIForComparison(htu)
+	normalizedEndpoint, okEndpoint := normalizeURIForComparison(endpoint)
+	if !okHTU || !okEndpoint {
+		// Something that would not parse is compared as written rather
+		// than silently treated as equal to anything.
+		return htu == endpoint
+	}
+	return normalizedHTU == normalizedEndpoint
+}
+
+// normalizeURIForComparison applies RFC 3986 §6.2.2 syntax-based
+// normalization to the parts of a URI that are case- or port-insignificant,
+// and drops the query and fragment RFC 9449 §4.3 says to ignore.
+func normalizeURIForComparison(raw string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", false
+	}
+
+	scheme := strings.ToLower(u.Scheme)
+
+	host := strings.ToLower(u.Hostname())
+	// A Unicode host and its A-label are the same host. ToASCII only ever
+	// narrows the spelling, so a failure leaves the lowercased form rather
+	// than rejecting a proof over it.
+	if ascii, err := idna.Lookup.ToASCII(host); err == nil {
+		host = ascii
+	}
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if port := u.Port(); port != "" && port != defaultPortFor(scheme) {
+		host += ":" + port
+	}
+
+	path := u.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+
+	return scheme + "://" + host + path, true
+}
+
+// defaultPortFor returns the port that is implied by a scheme and so
+// carries no meaning when written out, or "" where every port is
+// significant.
+func defaultPortFor(scheme string) string {
+	switch scheme {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	default:
+		return ""
+	}
 }

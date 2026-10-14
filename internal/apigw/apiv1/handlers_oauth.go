@@ -459,6 +459,35 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
 				"redirect_uri does not match the authorization request", 400)
 		}
+
+		// A code that came out of an Interactive Authorization exchange
+		// carries that exchange's DPoP key, and must be redeemed with it.
+		//
+		// Checked here, on the context this block already read, and that
+		// placement is the whole of it: forfeiture below is irreversible,
+		// so refusing after it would let anyone holding the code burn it
+		// with any valid proof - the bound wallet then finds its own
+		// redemption refused, having done nothing wrong. A second read
+		// would not only cost another round trip; a read that FAILED
+		// would skip this check and leave exactly the burn it exists to
+		// prevent, because the failure of a check is not a reason to
+		// stop checking.
+		//
+		// Everything else here binds the ACCESS TOKEN to whatever key
+		// signed the proof on this request, which says nothing about who
+		// obtained the authorization. Without this, a flow opened with
+		// key A yields a code that key B can spend - and the association
+		// OpenID4VCI 1.1 §5.2 and draft-ietf-oauth-first-party-apps ask
+		// for between auth_session and a DPoP key is only worth having if
+		// the same key turns up here.
+		//
+		// It is not atomic with the consumption below and does not need
+		// to be: it only ever refuses, and a concurrent request that
+		// slipped past it still meets the same check on the consumed
+		// document.
+		if err := c.checkInteractiveAuthorizationBinding(preCheck, dpopThumbprint); err != nil {
+			return nil, err
+		}
 	}
 
 	// Validate transaction code (PIN) BEFORE consuming the pre-authorized code
@@ -534,31 +563,6 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 				}
 				return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
 					"invalid tx_code", 400)
-			}
-		}
-	}
-
-	// A code that came out of an Interactive Authorization exchange carries
-	// that exchange's DPoP key, and must be redeemed with it.
-	//
-	// Checked BEFORE the code is consumed, and that ordering is the whole
-	// of it: forfeiture is irreversible, so refusing after it would let
-	// anyone holding the code burn it with any valid proof - the bound
-	// wallet then finds its own redemption refused, having done nothing
-	// wrong. The read is not atomic with the consumption below, but it does
-	// not need to be: it only ever refuses, and a concurrent request that
-	// slipped past it still meets the same check on the consumed document.
-	//
-	// Everything else here binds the ACCESS TOKEN to whatever key signed
-	// the proof on this request, which says nothing about who obtained the
-	// authorization. Without this, a flow opened with key A yields a code
-	// that key B can spend - and the association OpenID4VCI 1.1 §5.2 and
-	// draft-ietf-oauth-first-party-apps ask for between auth_session and a
-	// DPoP key is only worth having if the same key turns up here.
-	if !isPreAuthFlow {
-		if bound, lookupErr := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code}); lookupErr == nil && bound != nil {
-			if err := c.checkInteractiveAuthorizationBinding(bound, dpopThumbprint); err != nil {
-				return nil, err
 			}
 		}
 	}
@@ -1171,7 +1175,11 @@ func (c *Client) dpopProofThumbprint(ctx context.Context, proof, htu string) (st
 		return "", oauth2.OAuthErrJTIReplay
 	}
 
-	if dpop.HTU != htu {
+	// Compared after URI normalization, which is what RFC 9449 §4.3 asks
+	// for: a wallet builds htu from the URL it requested and an operator
+	// writes the endpoint in configuration, so the two differ in the ways
+	// RFC 3986 calls insignificant without either side being wrong.
+	if !oauth2.SameHTU(dpop.HTU, htu) {
 		return "", oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
 			fmt.Sprintf("invalid htu: expected %s, got %s", htu, dpop.HTU), 400)
 	}
