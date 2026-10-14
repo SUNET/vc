@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -306,4 +307,66 @@ func TestPrepareIssuance_RefusesAnAuthenticSourceSubstitution(t *testing.T) {
 		})
 		require.NoError(t, err)
 	})
+}
+
+// Resuming an offer mints a FRESH ephemeral encryption key, rather than
+// reusing the one minted when the issuance was prepared.
+//
+// The exchange a resume opens runs for a full auth_session lifetime from
+// that moment, while the preparation's key entry was created when the
+// offer was and reusing it does not renew its retention. An offer resumed
+// near the end of its own life therefore opened an exchange that outlives
+// the only key able to decrypt its answer - and the wallet's presentation
+// then arrives correct, inside the exchange's advertised deadline, and
+// undecryptable. Minting the key here makes the two lifetimes start
+// together.
+func TestIssuerInitiated_ResumingMintsAFreshEphemeralKey(t *testing.T) {
+	client := newChallengeClient(t)
+	issuerState := prepareIssuance(t, client, portalMatch())
+
+	prepared, err := client.cacheService.AuthContext.Get(t.Context(),
+		&cache.AuthorizationContext{IssuerState: issuerState})
+	require.NoError(t, err)
+	preparedKeyID := prepared.EphemeralEncryptionKeyID
+	require.NotEmpty(t, preparedKeyID)
+
+	req := initialChallenge(t)
+	req.Scope = ""
+	req.IssuerState = issuerState
+	opened := challengeErr(t, client, req)
+
+	resumed, err := client.cacheService.AuthContext.Get(t.Context(),
+		&cache.AuthorizationContext{AuthSession: opened.AuthSession})
+	require.NoError(t, err)
+
+	assert.NotEqual(t, preparedKeyID, resumed.EphemeralEncryptionKeyID,
+		"the exchange must not run on a key older than itself")
+	assert.NotEmpty(t, resumed.EphemeralEncryptionKeyID)
+
+	// And the key the WALLET was told to encrypt to is the one the opened
+	// exchange records - otherwise the fresh id would just be a different
+	// way to be undecryptable.
+	var envelope struct {
+		Request string `json:"request"`
+	}
+	require.NoError(t, json.Unmarshal(opened.OpenID4VPRequest, &envelope))
+	claims := unsafeJWTClaims(t, envelope.Request)
+
+	metadata, ok := claims["client_metadata"].(map[string]any)
+	require.True(t, ok, "the signed request must carry client_metadata")
+	jwks, ok := metadata["jwks"].(map[string]any)
+	require.True(t, ok)
+	keys, ok := jwks["keys"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, keys)
+
+	advertised, ok := keys[0].(map[string]any)["kid"].(string)
+	require.True(t, ok)
+	assert.Equal(t, resumed.EphemeralEncryptionKeyID, advertised,
+		"the wallet encrypts to the kid in the signed request, so the exchange has to hold that key")
+
+	// The key really is in the cache under that id, so the response can
+	// actually be decrypted.
+	_, ok = client.cacheService.EphemeralEncryptionKey.Get(t.Context(), resumed.EphemeralEncryptionKeyID)
+	assert.True(t, ok, "the key the request advertises must be the one that was stored")
 }

@@ -1078,12 +1078,31 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 		return nil, err
 	}
 
+	// A fresh ephemeral encryption key for this attempt, rather than the
+	// one minted when the issuance was prepared.
+	//
+	// The exchange this opens runs for a full AuthSessionTTL from NOW,
+	// and the preparation's key is older than that: its cache entry was
+	// created when the offer was, and reusing it does not renew the
+	// retention. An offer resumed late - near the end of its own lifetime
+	// - therefore opened an exchange that outlives the only key that can
+	// decrypt its answer, and the wallet's presentation arrives correct,
+	// on time by the exchange's deadline, and undecryptable.
+	//
+	// Minting a new id here keeps the key's life and the exchange's life
+	// the same length, because both start at this moment. It is set on
+	// the context BEFORE the request is built, so the key the wallet
+	// encrypts to is the key the opened exchange records.
+	if authCtx.EphemeralEncryptionKeyID, err = crypto.GenerateSecureToken(0, 32); err != nil {
+		return nil, fmt.Errorf("failed to generate ephemeral key id: %w", err)
+	}
+
 	// Built BEFORE the handle is claimed, and against the context as read:
 	// signing can fail, and a signing failure that had already consumed
 	// the issuer_state would destroy the issuance over a server-side
 	// problem the wallet did nothing to cause. Nothing below this line
-	// reads a field the claim changes - the state, nonce and ephemeral key
-	// were all minted at preparation time.
+	// reads a field the claim changes - the state and nonce were minted at
+	// preparation time, and the ephemeral key id was just replaced above.
 	authCtx.DCQLQuery = dcql
 	presentationRequest, err := c.interactiveAuthorizationRequest(ctx, ia, authCtx, dcql)
 	if err != nil {

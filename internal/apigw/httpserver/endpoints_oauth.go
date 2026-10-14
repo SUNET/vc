@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
@@ -697,7 +698,7 @@ func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (
 	// there is no reading of a body with both members that a caller could
 	// have meant, and any rule for choosing between them would have to be
 	// kept in step with encoding/json's.
-	if err := refuseAmbiguousJSONMembers(c); err != nil {
+	if err := requireCanonicalJSONMembers(c, "scope", "identity_match", "authentic_source", "ttl_seconds"); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "ambiguous request body")
 		return nil, err
@@ -720,17 +721,30 @@ func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (
 	return reply, nil
 }
 
-// refuseAmbiguousJSONMembers rejects a JSON body carrying two members that
-// differ only in case.
+// requireCanonicalJSONMembers rejects a JSON body whose member names are
+// not exactly the ones this request defines.
 //
-// Exact duplicates need no check: encoding/json and a map decode both keep
-// the LAST one, so the two readings agree. Case variants are the problem -
-// a struct field matches either, while a map keeps them apart - and no
-// legitimate caller sends both.
+// It exists because two parts of this server read the same body by
+// different rules. encoding/json matches members to struct fields
+// case-INSENSITIVELY and lets a later member overwrite an earlier one, so
+// {"Scope":"x"} and {"scope":"a","Scope":"b"} both put something in
+// Scope. The authorization middleware reads the body into a map and looks
+// up the exact key "scope", so it sees nothing in the first case and "a"
+// in the second. Either way the scope that was authorized is not the
+// scope that would be acted on.
+//
+// Requiring exact names is what makes the two readings the same reading.
+// A looser rule - refusing only bodies that carry BOTH spellings - closes
+// the collision and leaves the lone "Scope" wide open, which is the same
+// bug with one fewer member.
+//
+// Case is the whole point, so this cannot be done with gin's binder or
+// DisallowUnknownFields: both match case-insensitively and would accept
+// "Scope" as the Scope field.
 //
 // The body is restored for the binder, the same way the authorization
 // middleware restores it.
-func refuseAmbiguousJSONMembers(c *gin.Context) error {
+func requireCanonicalJSONMembers(c *gin.Context, allowed ...string) error {
 	if c.Request.Body == nil || c.Request.ContentLength <= 0 || c.ContentType() != "application/json" {
 		return nil
 	}
@@ -747,14 +761,11 @@ func refuseAmbiguousJSONMembers(c *gin.Context) error {
 		return nil
 	}
 
-	seen := make(map[string]string, len(members))
 	for name := range members {
-		folded := strings.ToLower(name)
-		if first, ok := seen[folded]; ok {
+		if !slices.Contains(allowed, name) {
 			return oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
-				fmt.Sprintf("the request body carries both %q and %q, which name the same member", first, name), 400)
+				fmt.Sprintf("the request body carries a member %q that this request does not define; member names are case-sensitive", name), 400)
 		}
-		seen[folded] = name
 	}
 
 	return nil

@@ -326,9 +326,34 @@ func TestEndpointPrepareIssuance_RefusesACaseVariantScope(t *testing.T) {
 	assert.Nil(t, api.seen)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
+	// A LONE case variant, with no lowercase member beside it. This is
+	// the sharper version: nothing collides, the middleware's map lookup
+	// of "scope" finds nothing at all so no resource pair is authorized,
+	// and encoding/json still puts the value in the field. A rule that
+	// only refused bodies carrying BOTH spellings would leave it open.
+	api.seen = nil
+	w = post(`{"Scope":"forbidden_scope",` + match + `}`)
+	assert.Nil(t, api.seen,
+		"a scope the authorization middleware cannot see must not reach preparation")
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+
+	// And the same for the other members, since the rule is about the
+	// names rather than about this one field.
+	api.seen = nil
+	w = post(`{"scope":"allowed_scope","Authentic_Source":"B",` + match + `}`)
+	assert.Nil(t, api.seen)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
 	// An ordinary body is unaffected.
 	api.seen = nil
 	w = post(`{"scope":"allowed_scope",` + match + `}`)
 	require.NotNil(t, api.seen, "body: %s", w.Body.String())
 	assert.Equal(t, "allowed_scope", api.seen.Scope)
+
+	// Including one using every member this request defines.
+	api.seen = nil
+	w = post(`{"scope":"allowed_scope","authentic_source":"A","ttl_seconds":60,` + match + `}`)
+	require.NotNil(t, api.seen, "body: %s", w.Body.String())
+	assert.Equal(t, "A", api.seen.AuthenticSource)
+	assert.Equal(t, 60, api.seen.TTLSeconds)
 }
