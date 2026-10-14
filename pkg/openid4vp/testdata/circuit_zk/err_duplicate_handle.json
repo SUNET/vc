@@ -1,0 +1,31 @@
+{
+  "description": "Two items return the same handle (different functions).",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "req": [
+      {
+        "id": "pseudonym-v1-sha256",
+        "return": "nym-123",
+        "params": {
+          "config": "known-offender-matching-ssc",
+          "verifier_id_type": "x509_san_dns"
+        }
+      },
+      {
+        "id": "age_check",
+        "return": "nym-123",
+        "params": {
+          "ge": "2008-10-10",
+          "le": "2013-10-09"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "error": "duplicate_handle"
+  }
+}

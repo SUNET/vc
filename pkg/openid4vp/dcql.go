@@ -43,6 +43,77 @@ type CredentialQuery struct {
 
 	// ClaimSet OPTIONAL. A non-empty array containing arrays of identifiers for elements in claims that specifies which combinations of claims for the Credential are requested. The rules for selecting claims to send are defined in Section 6.4.1.
 	ClaimSet [][]string `json:"claim_sets,omitempty" yaml:"claim_sets,omitempty" validate:"omitnil,min=1,dive,required,min=1,dive,required"`
+
+	// Req is the circuit_zk format's list of requested calculations.
+	//
+	// It replaces Claims rather than accompanying it: a circuit_zk
+	// presentation discloses no issuer-signed attribute at all, so every
+	// value a Verifier wants is the output of a function named here. A
+	// query carrying both is one the planner rejects - which this does
+	// not prevent, because sending it is how a wallet gets tested.
+	Req []ReqItem `json:"req,omitempty" yaml:"req,omitempty"`
+
+	// Extra carries members this build does not know about, flattened
+	// alongside the known ones.
+	//
+	// The request shape is moving - the nym_auth rulebook, OpenID4VP and
+	// the DC API all - and wallets of several generations will be in the
+	// field at once. Without somewhere to put a member this code has never
+	// heard of, talking to any of them means waiting for a release here.
+	Extra map[string]any `json:"-" yaml:"-"`
+
+	// Raw replaces this query entirely: when set, it is emitted as exactly
+	// these bytes and every other field is ignored.
+	//
+	// Extra covers a shape that ADDS members. This covers one that changes
+	// the type of a member already modelled - the rulebook's WIP example
+	// makes "claims" an object where DCQL has an array, and a future
+	// generation could do the same to "req" or "meta". A per-member
+	// override for each of those is a field this struct grows every time a
+	// specification moves; one raw escape hatch covers all of them and
+	// needs no release here.
+	//
+	// It is deliberately all-or-nothing. A half-raw query would leave an
+	// operator guessing which of the two sources a given member came from.
+	Raw json.RawMessage `json:"-" yaml:"-"`
+}
+
+// MarshalJSON flattens Extra alongside the known members.
+//
+// With Extra empty this is byte-identical to the struct encoding it
+// replaces, which TestCredentialQueryEncodingUnchanged pins: every format
+// other than circuit_zk goes through here too, and none of them should be
+// able to tell this method exists.
+func (q CredentialQuery) MarshalJSON() ([]byte, error) {
+	if q.Raw != nil {
+		if q.Extra != nil {
+			return nil, fmt.Errorf("credential query: raw and extra are both set, and raw would discard extra")
+		}
+		if !json.Valid(q.Raw) {
+			return nil, fmt.Errorf("credential query: raw is not valid JSON")
+		}
+		return q.Raw, nil
+	}
+	type plain CredentialQuery // no methods, so no recursion
+	return marshalWithExtra(plain(q), q.Extra, "credential query")
+}
+
+// UnmarshalJSON collects unknown members into Extra.
+func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
+	type plain CredentialQuery
+	var known plain
+	if err := json.Unmarshal(data, &known); err != nil {
+		return err
+	}
+	*q = CredentialQuery(known)
+	extra, err := unknownMembers(data,
+		"id", "format", "multiple", "meta", "trusted_authorities",
+		"require_cryptographic_holder_binding", "claims", "claim_sets", "req")
+	if err != nil {
+		return err
+	}
+	q.Extra = extra
+	return nil
 }
 
 type CredentialSetQuery struct {
@@ -119,6 +190,38 @@ type VPFormatsSupported struct {
 
 	// MsoMdoc is the configuration for ISO mdoc format (mso_mdoc)
 	MsoMdoc *MsoMdocFormat `json:"mso_mdoc,omitempty" yaml:"mso_mdoc,omitempty"`
+
+	// CircuitZk is the configuration for zero-knowledge circuit
+	// presentations (circuit_zk): which proof systems and circuits a proof
+	// may come from.
+	CircuitZk *CircuitZkFormat `json:"circuit_zk,omitempty" yaml:"circuit_zk,omitempty"`
+
+	// Extra carries format entries this build does not know about,
+	// flattened alongside the known ones - so a Verifier can offer a
+	// format identifier that postdates this code.
+	Extra map[string]any `json:"-" yaml:"-"`
+}
+
+// MarshalJSON flattens Extra alongside the known format entries.
+func (v VPFormatsSupported) MarshalJSON() ([]byte, error) {
+	type plain VPFormatsSupported
+	return marshalWithExtra(plain(v), v.Extra, "vp_formats_supported")
+}
+
+// UnmarshalJSON collects unknown format entries into Extra.
+func (v *VPFormatsSupported) UnmarshalJSON(data []byte) error {
+	type plain VPFormatsSupported
+	var known plain
+	if err := json.Unmarshal(data, &known); err != nil {
+		return err
+	}
+	*v = VPFormatsSupported(known)
+	extra, err := unknownMembers(data, "ldp_vc", "jwt_vc_json", "dc+sd-jwt", "mso_mdoc", "circuit_zk")
+	if err != nil {
+		return err
+	}
+	v.Extra = extra
+	return nil
 }
 
 // LDPVCFormat defines format-specific parameters for W3C VC Data Integrity (ldp_vc).

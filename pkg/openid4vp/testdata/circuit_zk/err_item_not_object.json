@@ -1,0 +1,16 @@
+{
+  "description": "A req element that is not an object.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "req": [
+      "age_check"
+    ]
+  },
+  "expect": {
+    "error": "item_missing_function_id"
+  }
+}

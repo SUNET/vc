@@ -1,0 +1,16 @@
+{
+  "description": "req is not an array.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "req": {
+      "id": "age_check"
+    }
+  },
+  "expect": {
+    "error": "req_missing_or_empty"
+  }
+}

@@ -1,0 +1,18 @@
+These vectors are vendored verbatim from
+
+    https://github.com/sirosfoundation/siros-dc-matcher
+    crates/siros-dc-matcher-core/tests/vectors/circuit_zk
+
+commit f7d240b46605267725fb15e2421565450f1f7a80 (v0.7.0-2-gf7d240b)
+
+They are the shared conformance set for every implementation of the
+circuit_zk query planner - the Rust matcher, the Kotlin and Swift SDKs, and
+this verifier. Vendored rather than fetched so the test suite does not
+depend on the network.
+
+A vendored snapshot goes stale silently: if the matcher's request shape
+moves, these tests keep passing against the old one. Refresh with
+
+    make vendor-circuit-zk-vectors
+
+and commit the result, which updates this file's commit line too.

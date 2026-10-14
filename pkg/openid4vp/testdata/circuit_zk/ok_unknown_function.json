@@ -1,0 +1,36 @@
+{
+  "description": "A function the table does not know is passed through with its params untouched (unsatisfiable for wallets, not malformed).",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "req": [
+      {
+        "id": "future_fn",
+        "return": "h",
+        "params": {
+          "ge": "not a date",
+          "n": 1
+        }
+      }
+    ]
+  },
+  "expect": {
+    "plan": {
+      "functions": [
+        {
+          "function_id": "future_fn",
+          "handle": "h",
+          "params": {
+            "ge": "not a date",
+            "n": 1
+          }
+        }
+      ],
+      "circuit_filter": {},
+      "meta_doctype": "eu.europa.ec.eudi.nym_auth.1"
+    }
+  }
+}

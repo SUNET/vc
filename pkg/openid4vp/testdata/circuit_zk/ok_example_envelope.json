@@ -1,0 +1,92 @@
+{
+  "description": "Rulebook WIP example: claims._req shape, vp_formats_supported envelope {fn_id,input:base64(json)}. Item `source` params and the claims fn_id/input members are preserved, not interpreted.",
+  "query": {
+    "id": "nym_attestation",
+    "format": "circuit_zk",
+    "meta": {
+      "source_format": "mdoc_mso",
+      "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
+    },
+    "claims": {
+      "_req": [
+        {
+          "fn_id": "pseudonym-v1-sha256",
+          "id": "nym-123",
+          "params": {
+            "config": "known-offender-matching-ssc",
+            "verifier_id_type": "x509_san_dns",
+            "source": {
+              "path": [
+                "ssc"
+              ]
+            }
+          }
+        },
+        {
+          "fn_id": "age_check",
+          "id": "age-range-123",
+          "params": {
+            "ge": "2008-10-10",
+            "le": "2013-10-09",
+            "source": {
+              "path": [
+                "birth_date"
+              ]
+            }
+          }
+        }
+      ],
+      "fn_id": "circuit_zk_longfellow",
+      "input": "eyJjaXJjdWl0X3Byb29mX3N5c3RlbV92YWx1ZXMiOiBbImxvbmdmZWxsb3ctbGliemstdjEiXSwgImNpcmN1aXRfaWRfdmFsdWVzIjogWyJ1cm46Y2lyY3VpdHM6bG9uZ2ZlbGxvdzpueW1fYXV0aDp2MSJdfQ=="
+    }
+  },
+  "client_metadata": {
+    "vp_formats_supported": {
+      "circuit_zk": {
+        "fn_id": "circuit_zk_longfellow",
+        "input": "eyJjaXJjdWl0X3Byb29mX3N5c3RlbV92YWx1ZXMiOiBbImxvbmdmZWxsb3ctbGliemstdjEiXSwgImNpcmN1aXRfaWRfdmFsdWVzIjogWyJ1cm46Y2lyY3VpdHM6bG9uZ2ZlbGxvdzpueW1fYXV0aDp2MSJdfQ=="
+      }
+    }
+  },
+  "expect": {
+    "plan": {
+      "functions": [
+        {
+          "function_id": "pseudonym-v1-sha256",
+          "handle": "nym-123",
+          "params": {
+            "config": "known-offender-matching-ssc",
+            "verifier_id_type": "x509_san_dns",
+            "source": {
+              "path": [
+                "ssc"
+              ]
+            }
+          }
+        },
+        {
+          "function_id": "age_check",
+          "handle": "age-range-123",
+          "params": {
+            "ge": "2008-10-10",
+            "le": "2013-10-09",
+            "source": {
+              "path": [
+                "birth_date"
+              ]
+            }
+          }
+        }
+      ],
+      "circuit_filter": {
+        "proof_systems": [
+          "longfellow-libzk-v1"
+        ],
+        "circuit_ids": [
+          "urn:circuits:longfellow:nym_auth:v1"
+        ]
+      },
+      "meta_doctype": "eu.europa.ec.eudi.nym_auth.1"
+    }
+  }
+}
