@@ -414,6 +414,7 @@ func TestEndpointPrepareIssuance_RefusesBodiesTheTwoReadersDisagreeAbout(t *test
 		name        string
 		contentType string
 		body        string
+		query       string
 	}{
 		{
 			// A map decode keeps the LAST "scope", which is null, so the
@@ -451,10 +452,28 @@ func TestEndpointPrepareIssuance_RefusesBodiesTheTwoReadersDisagreeAbout(t *test
 			contentType: "application/json",
 			body:        `["scope","forbidden_scope"]`,
 		},
+		{
+			// gin's form binding reads the QUERY STRING as well as the
+			// body, so a form request with no body at all can still
+			// populate fields. extractResourcePairs does read
+			// c.Query("scope"), so this pair would be authorized - but
+			// only because the name happens to match, and a wallet
+			// controls the spelling. Refusing the content type removes
+			// the question.
+			name:        "a form request carrying its fields in the query string",
+			contentType: "application/x-www-form-urlencoded",
+			body:        "",
+			query:       "?scope=forbidden_scope",
+		},
+		{
+			name:        "an empty body",
+			contentType: "application/json",
+			body:        "",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			api.seen = nil
-			req := httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(tc.body))
+			req := httptest.NewRequest(http.MethodPost, "/issuance/prepare"+tc.query, strings.NewReader(tc.body))
 			req.Header.Set("Content-Type", tc.contentType)
 			w := httptest.NewRecorder()
 			engine.ServeHTTP(w, req)
