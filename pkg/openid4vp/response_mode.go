@@ -1,5 +1,7 @@
 package openid4vp
 
+import "slices"
+
 // The response modes RequestObject.ResponseMode accepts.
 //
 // The authoritative list for validation is the oneof rule in that field's
@@ -146,5 +148,38 @@ func (r *RequestObject) WithInteractiveAuthorization(responseMode, expectedOrigi
 		return nil
 	}
 	variant.ResponseMode = responseMode
+
+	// Advertise only what this channel will actually accept.
+	//
+	// The Digital Credentials API request offers A256GCM and A128GCM, and
+	// a wallet is entitled to pick either. The Authorization Challenge
+	// Endpoint accepts only A256GCM - so a wallet that chose the second
+	// advertised option was refused AFTER its auth_session had been
+	// claimed, which costs it the whole exchange for doing exactly what
+	// the request permitted. Offering one algorithm is the honest form of
+	// accepting one.
+	//
+	// Copied rather than assigned into: the variant shares its
+	// ClientMetadata pointer with the request this was derived from, and
+	// narrowing the base request would change the browser flow too.
+	if variant.ClientMetadata != nil {
+		metadata := *variant.ClientMetadata
+		metadata.EncryptedResponseEncValuesSupported = slices.Clone(InteractiveAuthorizationEncValues)
+		if metadata.AuthorizationEncryptedResponseENC != "" {
+			metadata.AuthorizationEncryptedResponseENC = InteractiveAuthorizationEncValues[0]
+		}
+		variant.ClientMetadata = &metadata
+	}
+
 	return variant
 }
+
+// InteractiveAuthorizationEncValues is the content encryption an
+// Interactive Authorization response may use, and therefore the only
+// thing its request advertises.
+//
+// One list, read by the request builder and by the endpoint that decrypts
+// the answer, because the two disagreeing is a failure the wallet cannot
+// avoid or diagnose: it picks an advertised algorithm, and is refused for
+// it once its auth_session is already spent.
+var InteractiveAuthorizationEncValues = []string{"A256GCM"}

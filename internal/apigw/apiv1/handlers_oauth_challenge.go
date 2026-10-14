@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -940,10 +941,7 @@ func interactionTypeOffered(supported, required string) bool {
 // encrypted_response_enc_values_supported and the ECDH-ES key agreement
 // the ephemeral key is generated for - and a wallet that followed the
 // request produces exactly them.
-const (
-	iaResponseAlg = "ECDH-ES"
-	iaResponseEnc = "A256GCM"
-)
+const iaResponseAlg = "ECDH-ES"
 
 // validateInteractiveAuthorizationJWE refuses a response that is not the
 // JWE this exchange asked for, BEFORE anything is decrypted.
@@ -975,8 +973,12 @@ func validateInteractiveAuthorizationJWE(response []byte) error {
 	if alg, ok := headers.Algorithm(); !ok || alg.String() != iaResponseAlg {
 		return fmt.Errorf("unsupported response encryption alg; this request asked for %s", iaResponseAlg)
 	}
-	if enc, ok := headers.ContentEncryption(); !ok || enc.String() != iaResponseEnc {
-		return fmt.Errorf("unsupported response encryption enc; this request asked for %s", iaResponseEnc)
+	// Against the list the REQUEST advertises, not a constant beside it:
+	// a wallet that picks an offered algorithm and is refused for it has
+	// been given no way to succeed, and by then its auth_session is spent.
+	if enc, ok := headers.ContentEncryption(); !ok || !slices.Contains(openid4vp.InteractiveAuthorizationEncValues, enc.String()) {
+		return fmt.Errorf("unsupported response encryption enc; this request asked for %v",
+			openid4vp.InteractiveAuthorizationEncValues)
 	}
 	// No zip is advertised, so none is accepted: refusing here is the
 	// point of not advertising it, rather than letting the library inflate
