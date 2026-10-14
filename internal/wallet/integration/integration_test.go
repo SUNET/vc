@@ -239,9 +239,17 @@ func (env *testEnvironment) setupIssuerServer() {
 		var req openid4vci.DeferredCredentialRequest
 		json.Unmarshal(body, &req)
 
-		if !env.deferredReady {
+		// Under the lock: the test flips deferredReady from its own
+		// goroutine while this handler is serving the wallet's polls, so
+		// reading it bare is a race - one the race detector reports as
+		// soon as anything in this package is run with -race.
+		env.mu.Lock()
+		ready, transactionID := env.deferredReady, env.deferredTransactionID
+		env.mu.Unlock()
+
+		if !ready {
 			resp := openid4vci.CredentialResponse{
-				TransactionID: env.deferredTransactionID,
+				TransactionID: transactionID,
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(resp)
