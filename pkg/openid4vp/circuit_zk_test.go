@@ -46,11 +46,20 @@ func loadVectors(t *testing.T) map[string]vector {
 	return out
 }
 
-// Every vector's credential query must be emittable, byte for byte.
+// Every vector's credential query must be emittable with every member
+// and value intact.
+//
+// Not byte for byte, which this never checked and the implementation
+// cannot promise: encoding/json compacts and HTML-escapes whatever a
+// MarshalJSON returns, so an operator's layout and an ampersand's
+// spelling do not survive. What does survive, and what the comparison
+// checks, is every member, its nesting, and every value - numeric
+// literals included, which is why that comparison decodes with
+// UseNumber rather than into a float64.
 //
 // This is the conformance that matters for a REQUEST builder. The planner
 // vectors describe what a wallet must accept, so a query we cannot
-// reproduce exactly is a query we cannot send - including the shapes this
+// reproduce is a query we cannot send - including the shapes this
 // build does not model, which is most of the point: the rulebook's WIP
 // claims._req form, members whose type a later generation changed, and
 // unknown members at every level.
