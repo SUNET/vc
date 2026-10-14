@@ -554,3 +554,58 @@ func TestReqItemParamsKeepWhatIsRepresentable(t *testing.T) {
 		})
 	}
 }
+
+// Raw is tagged yaml:"-", so the YAML bridge emitted only the modelled
+// shadow - a DIFFERENT query, missing whatever made the bytes raw, and
+// missing it silently. A presentation template written back out lost the
+// one member it existed to carry.
+//
+// Both directions, because emitting a shape this type then refuses to
+// read back would be the same defect wearing the other face.
+func TestRawSurvivesTheYAMLRoundTrip(t *testing.T) {
+	const configured = `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"claims":{"_req":[{"fn_id":"age_check","id":"h"}]}}`
+
+	query, err := NewRawCredentialQuery(json.RawMessage(configured))
+	require.NoError(t, err)
+
+	out, err := yamlv2.Marshal(query)
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "_req", "the member that made this raw has to be in the output")
+
+	var reloaded CredentialQuery
+	require.NoError(t, yamlv2.Unmarshal(out, &reloaded),
+		"a query this type just wrote must load; refusing to would be a repair by other means")
+	require.NotNil(t, reloaded.Raw, "and it is still the shape the typed model cannot hold")
+
+	// And what reaches the wallet is what was configured.
+	encoded, err := json.Marshal(reloaded)
+	require.NoError(t, err)
+	assert.JSONEq(t, configured, string(encoded))
+
+	// The shadow comes back too, so the response path can still match it.
+	assert.Equal(t, "q", reloaded.ID)
+	assert.Equal(t, FormatCircuitZk, reloaded.Format)
+	assert.Equal(t, "d", reloaded.Meta.DoctypeValue)
+}
+
+// A number the YAML writer cannot reproduce is refused rather than
+// rounded, on the raw path as on the typed one.
+func TestRawYAMLRefusesANumberItWouldChange(t *testing.T) {
+	query, err := NewRawCredentialQuery(json.RawMessage(
+		`{"id":"q","format":"circuit_zk","claims":{"_req":[]},"req":[{"params":{"p":123456789012345678901234567890}}]}`))
+	require.NoError(t, err)
+
+	_, err = yamlv2.Marshal(query)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "without changing it")
+}
+
+// The laundering guard applies on this path too: a member of the right
+// kind that the model rejects is an invalid query, not an unmodelled one,
+// and must not become raw just because it arrived as YAML.
+func TestYAMLDoesNotLaunderInvalidModelledMembers(t *testing.T) {
+	const in = "id: q\nformat: dc+sd-jwt\nmeta:\n  vct_values: [urn:x]\nclaims:\n  - path: []\n"
+	var query CredentialQuery
+	require.Error(t, yamlv2.Unmarshal([]byte(in), &query),
+		"an empty claim path is refused by the model, and YAML is not a way around that")
+}

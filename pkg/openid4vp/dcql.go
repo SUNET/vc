@@ -93,6 +93,28 @@ type CredentialQuery struct {
 // MarshalYAML flattens Extra alongside the known members, so a query read
 // from configuration can be written back out whole.
 func (q CredentialQuery) MarshalYAML() (any, error) {
+	// Raw is tagged yaml:"-", so the bridge below would emit only the
+	// modelled shadow - a DIFFERENT query, missing whatever made these
+	// bytes raw in the first place, and missing it silently.
+	if q.Raw != nil {
+		if q.Extra != nil {
+			return nil, fmt.Errorf("credential query: raw and extra are both set, and raw would discard extra")
+		}
+		if !json.Valid(q.Raw) {
+			return nil, fmt.Errorf("credential query: raw is not valid JSON")
+		}
+		var tree any
+		if err := decodeExact(q.Raw, &tree); err != nil {
+			return nil, fmt.Errorf("credential query: %w", err)
+		}
+		// decodeExact keeps numbers as their literals; this refuses the
+		// ones yaml.v2 would round on the way out, rather than writing a
+		// different number than the one configured.
+		if err := checkYAMLRendersNumbersExactly(tree, "credential query", nil); err != nil {
+			return nil, err
+		}
+		return tree, nil
+	}
 	type plain CredentialQuery
 	encoded, err := json.Marshal(plain(q))
 	if err != nil {
@@ -119,7 +141,24 @@ func (q *CredentialQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	type plain CredentialQuery
 	var known plain
 	if err := unmarshal(&known); err != nil {
-		return fmt.Errorf("credential query: %w", err)
+		// Same fallback as the JSON decode, for the same reason: a shape
+		// the typed model cannot hold - claims as a mapping, say - is
+		// kept rather than refused. Without it this type would refuse to
+		// read back a query it had just written, since MarshalYAML above
+		// emits exactly such a shape.
+		raw, rawErr := rawFromYAML(unmarshal)
+		if rawErr != nil {
+			return fmt.Errorf("credential query: %w", err)
+		}
+		fallback := CredentialQuery{Raw: raw}
+		if _, invalid := fallback.adoptRawShadowReporting(); len(invalid) > 0 {
+			// A member of the right JSON kind that the model still
+			// rejects is an invalid query, not an unmodelled one. See the
+			// JSON decode.
+			return fmt.Errorf("credential query: %w", err)
+		}
+		*q = fallback
+		return nil
 	}
 	*q = CredentialQuery(known)
 
@@ -131,6 +170,25 @@ func (q *CredentialQuery) UnmarshalYAML(unmarshal func(any) error) error {
 	}
 	q.Extra = extra
 	return nil
+}
+
+// rawFromYAML reads a whole YAML value and returns it as JSON, keeping
+// each numeric scalar's original text.
+//
+// Through yamlValue rather than a plain any, so a decimal does not lose
+// its digits on the way in - see that type. Non-string keys are refused
+// by normaliseYAML rather than coerced, since JSON has no spelling for
+// them.
+func rawFromYAML(unmarshal func(any) error) (json.RawMessage, error) {
+	var tree yamlValue
+	if err := unmarshal(&tree); err != nil {
+		return nil, err
+	}
+	normalised, err := normaliseYAML(tree.value, "credential query")
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(normalised)
 }
 
 // MarshalJSON flattens Extra alongside the known members.
