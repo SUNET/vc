@@ -90,9 +90,23 @@ func TestValidateJudgesARawQueryByItsOwnBytes(t *testing.T) {
 			query:   `{"id":"q","format":"mso_mdoc","claims":{"_req":[]}}`,
 			wantErr: "doctype_value",
 		},
+		// "Cannot read the constraint" and "there is no constraint" are
+		// the same thing downstream, so an unreadable meta is judged as an
+		// empty one. Otherwise the check is dodged by making the member
+		// harder to read rather than by leaving it out.
 		{
-			name:  "meta itself unreadable: no constraint this build can judge",
-			query: `{"id":"q","format":"vc+sd-jwt","meta":"not an object"}`,
+			name:    "meta unreadable, on a format that has a rule",
+			query:   `{"id":"q","format":"vc+sd-jwt","meta":"not an object"}`,
+			wantErr: "cannot read",
+		},
+		{
+			name:    "and the whole query not being an object is the same thing",
+			query:   `[1,2,3]`,
+			wantErr: "cannot read",
+		},
+		{
+			name:  "meta unreadable, on a format that has none",
+			query: `{"id":"q","format":"circuit_zk","meta":"not an object"}`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

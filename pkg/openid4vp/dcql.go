@@ -866,16 +866,38 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 				Message: "a raw credential query must be valid JSON",
 			}
 		}
+		// An UNREADABLE meta is judged as an EMPTY one, not waved through.
+		//
+		// "Cannot read the constraint" and "there is no constraint" are
+		// the same thing to everyone downstream: either way nothing here
+		// has established what the request is limited to. Returning nil
+		// on the first and refusing the second would let
+		// {"format":"vc+sd-jwt","meta":"not an object"} be signed and
+		// served with no vct_values - the very case this check exists for,
+		// reached by making the member harder to read rather than by
+		// omitting it.
+		//
+		// Substituting the zero value rather than naming the formats that
+		// have rules keeps the two in step by construction: a zero
+		// MetaQuery satisfies no constraint rule in the switch below, and
+		// passes the permissive default exactly where there is no rule to
+		// fail. A format that grows one later is covered without anything
+		// here being updated.
 		meta, readable := query.rawMeta()
+		raw := query
+		query = CredentialQuery{ID: raw.ID, Format: raw.Format, Meta: meta}
 		if !readable {
-			// meta itself is a shape this build cannot read, so there is
-			// no constraint here to judge - saying otherwise would be
-			// inventing a verdict. Narrow on purpose: an ABSENT meta is
-			// readable (see rawMeta), so the unconstrained-request case
-			// the rules exist for is still caught.
+			if err := ValidateCredentialQuery(query); err != nil {
+				// Reported as what it is. "vct_values is required" would
+				// send an operator looking for a member that may well be
+				// in the bytes, inside the meta this could not read.
+				return &DCQLValidationError{
+					Field:   "meta",
+					Message: fmt.Sprintf("meta is a shape this build cannot read, so the %s constraint it would have to satisfy cannot be established: %v", formatOrDefault(raw.Format), err),
+				}
+			}
 			return nil
 		}
-		query = CredentialQuery{ID: query.ID, Format: query.Format, Meta: meta}
 	}
 	switch query.Format {
 	// Not FormatJwtVCJson: UIInteraction calls this on the live ingress, and
@@ -972,6 +994,16 @@ func ValidateCredentialQuery(query CredentialQuery) error {
 		// Unknown format - allow but don't validate
 	}
 	return nil
+}
+
+// formatOrDefault names a format for an error message, spelling out the
+// empty one rather than printing "" - which reads as a missing format
+// when it is in fact the SD-JWT default.
+func formatOrDefault(format string) string {
+	if format == "" {
+		return FormatSDJWTVC + " (the default for an absent format)"
+	}
+	return format
 }
 
 // validateMsoMdocZkQuery validates the ZK-mdoc (mso_mdoc_zk)-specific
