@@ -576,10 +576,7 @@ func (c *Client) doAuthorization(ctx context.Context, oauth2Meta *oauth2ServerMe
 	flow.codeVerifier = codeVerifier
 
 	state := uuid.New().String()
-	redirectURI := vci.RedirectURI
-	if redirectURI == "" {
-		redirectURI = "http://localhost:8080/callback"
-	}
+	redirectURI := redirectURIFor(vci)
 
 	if vci.UsePAR && oauth2Meta.PAREndpoint != "" {
 		parData := url.Values{
@@ -682,10 +679,7 @@ func (c *Client) followAuthorization(ctx context.Context, authURL string) (strin
 }
 
 func (c *Client) tokenRequestAuthCode(ctx context.Context, tokenEndpoint, code string, vci *config.VCIScenario, flow *vciFlow, requireDPoP bool) (*openid4vci.TokenResponse, error) {
-	redirectURI := vci.RedirectURI
-	if redirectURI == "" {
-		redirectURI = "http://localhost:8080/callback"
-	}
+	redirectURI := redirectURIFor(vci)
 
 	data := url.Values{
 		"grant_type":   {"authorization_code"},

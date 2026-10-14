@@ -533,3 +533,60 @@ func TestVCI_InteractiveAuthorization_PKCEVerifierIsPerRun(t *testing.T) {
 	assert.Equal(t, challenges, redeemed,
 		"every redeemed verifier must be the verifier for a challenge this run issued")
 }
+
+// An Authorization Server registers a client against a fixed set of
+// redirect URIs and refuses anything else, so every leg of one exchange
+// has to send the same one.
+//
+// With no redirect_uri configured, the challenge request omitted the
+// parameter entirely while the token request supplied a default. Against
+// a server that validates it - which the production challenge endpoint
+// does, through Clients.Allow - the omission reads as a redirect_uri no
+// registered client has, and the wallet is refused before it ever
+// receives a challenge.
+func TestVCI_InteractiveAuthorization_SendsOneRedirectURIThroughout(t *testing.T) {
+	for name, configured := range map[string]string{
+		"defaulted":  "",
+		"configured": "https://wallet.example.com/cb",
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := setupTestEnvironment(t, func(e *testEnvironment) {
+				e.iaMetadataSpelling = "normative"
+			})
+			defer env.cleanup()
+
+			env.seedPresentableCredential(t)
+			env.addScenario(config.Scenario{
+				Name: "ia-redirect-uri",
+				Type: "vci",
+				VCI: &config.VCIScenario{
+					IssuerURL:                   env.issuerServer.URL,
+					Scope:                       "pid",
+					RedirectURI:                 configured,
+					UseInteractiveAuthorization: true,
+					CredentialConfigurationID:   "test_credential",
+				},
+			})
+
+			result, err := env.wallet.RunScenario(t.Context(), "ia-redirect-uri")
+			require.NoError(t, err)
+			require.True(t, result.Success, "scenario failed: %s", result.Error)
+
+			env.mu.Lock()
+			requests := env.challengeRequests
+			tokenRequests := env.tokenRequestsReceived
+			env.mu.Unlock()
+
+			require.NotEmpty(t, requests)
+			require.Len(t, tokenRequests, 1)
+
+			sent := requests[0].Get("redirect_uri")
+			assert.NotEmpty(t, sent, "a registered client always has a redirect_uri")
+			assert.Equal(t, tokenRequests[0]["redirect_uri"], sent,
+				"the challenge and the token request must name the same redirect_uri")
+			if configured != "" {
+				assert.Equal(t, configured, sent)
+			}
+		})
+	}
+}

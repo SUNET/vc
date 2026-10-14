@@ -1,6 +1,7 @@
 package openid4vp
 
 import (
+	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,7 +35,20 @@ func TestCanonicalOrigin(t *testing.T) {
 		{name: "a fully expanded IPv6 literal", in: "https://[2001:0db8:0000:0000:0000:0000:0000:0001]", want: "https://[2001:db8::1]"},
 		{name: "a zero-padded IPv6 literal", in: "https://[2001:0DB8::0001]:8443", want: "https://[2001:db8::1]:8443"},
 		{name: "an IPv6 loopback written the long way", in: "https://[0:0:0:0:0:0:0:1]", want: "https://[::1]"},
-		{name: "an IPv4-mapped IPv6 literal", in: "https://[::ffff:192.0.2.1]", want: "https://[::ffff:192.0.2.1]"},
+		// The WHATWG URL Standard's IPv6 serializer has no IPv4-mapped
+		// case: eight hexadecimal pieces, always. Both spellings of the
+		// same address therefore come back as the one a browser emits.
+		{name: "an IPv4-mapped IPv6 literal written with dots", in: "https://[::ffff:192.0.2.1]", want: "https://[::ffff:c000:201]"},
+		{name: "an IPv4-mapped IPv6 literal written in hex", in: "https://[::FFFF:C000:201]", want: "https://[::ffff:c000:201]"},
+		{name: "an IPv4-embedded address that is not mapped", in: "https://[64:ff9b::192.0.2.33]", want: "https://[64:ff9b::c000:221]"},
+
+		// A port is a number, not a string. A browser parses it and emits
+		// the decimal form, so a leading zero neither survives nor stops
+		// a default port from being dropped.
+		{name: "a zero-padded default port", in: "https://issuer.example:0443", want: "https://issuer.example"},
+		{name: "a zero-padded non-default port", in: "https://issuer.example:008443", want: "https://issuer.example:8443"},
+		{name: "a zero-padded default port on http", in: "http://issuer.example:00080/op", want: "http://issuer.example"},
+		{name: "port zero is a port", in: "https://issuer.example:0", want: "https://issuer.example:0"},
 
 		// An internationalized host. A browser's URL parser runs UTS #46
 		// ToASCII, so the Origin it reports is the A-label form; a
@@ -71,10 +85,35 @@ func TestCanonicalOriginRefusesWhatItCannotSerialise(t *testing.T) {
 		{name: "not a URL at all", in: "://"},
 		{name: "a punycode label that decodes to nothing valid", in: "https://xn--a.example"},
 		{name: "something bracketed that is not an address", in: "https://[2001:db8::zz]"},
+		{name: "a port outside the range a port can take", in: "https://issuer.example:70000"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := CanonicalOrigin(tc.in)
 			assert.Error(t, err)
 		})
 	}
+}
+
+// serialiseIPv6 reimplements a serializer net/netip already has, so the
+// two are held to each other everywhere they are supposed to agree -
+// which is everywhere except the IPv4-mapped case the URL Standard does
+// not have. Without this the hand-written compression could drift and
+// only the handful of cases spelled out above would notice.
+func TestSerialiseIPv6AgreesWithNetipExceptWhereItMustNot(t *testing.T) {
+	for _, in := range []string{
+		"::", "::1", "2001:db8::1", "2001:db8:0:0:1:0:0:1",
+		"fe80::1", "ff02::2", "2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+		"64:ff9b::c000:221", "0:1:0:0:0:0:0:8", "1:0:0:2:0:0:0:3",
+	} {
+		addr, err := netip.ParseAddr(in)
+		require.NoError(t, err)
+		require.False(t, addr.Is4In6(), "%s is the case the two deliberately differ on", in)
+		assert.Equal(t, addr.String(), serialiseIPv6(addr), "disagreed on %s", in)
+	}
+
+	// And the one case they must differ on.
+	mapped, err := netip.ParseAddr("::ffff:192.0.2.1")
+	require.NoError(t, err)
+	assert.Equal(t, "::ffff:192.0.2.1", mapped.String(), "netip renders the dotted tail")
+	assert.Equal(t, "::ffff:c000:201", serialiseIPv6(mapped), "a browser renders eight hex pieces")
 }

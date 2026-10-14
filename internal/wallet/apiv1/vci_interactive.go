@@ -62,9 +62,11 @@ func (c *Client) doInteractiveAuthorization(ctx context.Context, meta *oauth2Ser
 	if vci.Scope != "" {
 		form.Set("scope", vci.Scope)
 	}
-	if vci.RedirectURI != "" {
-		form.Set("redirect_uri", vci.RedirectURI)
-	}
+	// Always, and the same value the Token Endpoint will be given. The
+	// Authorization Server validates it against what this client is
+	// registered with, so omitting it here while sending it there meant
+	// the exchange was refused before a challenge was ever issued.
+	form.Set("redirect_uri", redirectURIFor(vci))
 	if flow.issuerState != "" {
 		form.Set("issuer_state", flow.issuerState)
 	}

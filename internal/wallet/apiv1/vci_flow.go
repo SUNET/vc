@@ -41,6 +41,26 @@ type vciFlow struct {
 	codeVerifier string
 }
 
+// defaultWalletRedirectURI is where this wallet says to send the Holder
+// back to when a scenario does not say.
+//
+// One constant, reached through one helper, because the value has to be
+// IDENTICAL everywhere it is sent. An Authorization Server registers a
+// client against a fixed set of redirect URIs and refuses anything else,
+// so a challenge that omitted the parameter while the token request sent
+// this value was refused at whichever end validated first - and the
+// omission read as "this client has no redirect_uri", which is not a
+// thing a registered client can be.
+const defaultWalletRedirectURI = "http://localhost:8080/callback"
+
+// redirectURIFor is the redirect_uri every leg of a run must send.
+func redirectURIFor(vci *config.VCIScenario) string {
+	if vci.RedirectURI != "" {
+		return vci.RedirectURI
+	}
+	return defaultWalletRedirectURI
+}
+
 // newVCIFlow seeds a run from what the scenario configured.
 func newVCIFlow(vci *config.VCIScenario) *vciFlow {
 	return &vciFlow{
