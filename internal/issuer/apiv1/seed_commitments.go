@@ -13,7 +13,6 @@ import (
 
 	"github.com/SUNET/vc/pkg/credential"
 	"github.com/SUNET/vc/pkg/credential/seed"
-	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/openid4vp"
 )
@@ -115,7 +114,7 @@ func (c *Client) checkCommitmentClaims() error {
 		// cannot drift apart. Without a schema here it checks what it can;
 		// the issuer receives schemas inline per request, so the rest is
 		// checked again at issuance.
-		if _, err := meta.ResolveCommitmentTargets(nil); err != nil {
+		if _, err := meta.ResolveCommitmentTargets(model.CredentialSchemas{}); err != nil {
 			return fmt.Errorf("credential_metadata.%s: %w", scope, err)
 		}
 	}
@@ -199,13 +198,13 @@ type resolvedCommitment struct {
 // injectCommitments writes this scope's seed-backed claims into the
 // document data, and returns it re-encoded.
 //
-// schema is the mso_mdoc schema about to be signed, or nil for a format
-// that has none.
+// schemas are the declarations the credential is issued against, which
+// the issuer receives inline per request rather than holding.
 //
 // A no-op for a scope with no commitments configured, which is every scope
 // in a deployment that does not use the feature - including the encoding
 // round trip, so nothing changes for anybody else.
-func (c *Client) injectCommitments(ctx context.Context, scope string, documentData []byte, schema *mdoc.MDDLSchema) ([]byte, error) {
+func (c *Client) injectCommitments(ctx context.Context, scope string, documentData []byte, schemas model.CredentialSchemas) ([]byte, error) {
 	meta := c.cfg.GetCredentialMetadata(scope)
 	if meta == nil || len(meta.Commitments) == 0 {
 		return documentData, nil
@@ -230,7 +229,7 @@ func (c *Client) injectCommitments(ctx context.Context, scope string, documentDa
 	// which an existing-value check made against the received document
 	// cannot catch - neither has been written yet, so both pass and the
 	// second write replaces the first commitment.
-	targets, err := meta.ResolveCommitmentTargets(schema)
+	targets, err := meta.ResolveCommitmentTargets(schemas)
 	if err != nil {
 		return nil, fmt.Errorf("scope %q: %w", scope, err)
 	}

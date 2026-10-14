@@ -8,6 +8,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 )
 
 // Commitment encodings.
@@ -15,6 +16,18 @@ const (
 	CommitmentEncodingHex    = "hex"
 	CommitmentEncodingBase64 = "base64"
 )
+
+// CredentialSchemas are the declarations a credential is issued against.
+//
+// Both are per-issuance for the issuer, which receives them inline, and
+// stored for the apigw, which loads them at startup - so they are passed
+// rather than read from CredentialMetadata.
+type CredentialSchemas struct {
+	// MDoc is the mso_mdoc schema, or nil.
+	MDoc *mdoc.MDDLSchema
+	// VCTM is the SD-JWT VC type metadata, or nil.
+	VCTM *sdjwtvc.VCTM
+}
 
 // CommitmentTarget is one seed-backed claim with everything about WHERE
 // and HOW it is written already settled.
@@ -52,7 +65,7 @@ type CommitmentTarget struct {
 // sorting it first, because the inputs are maps and Go randomises their
 // order: a check that passes today and fails tomorrow on the same
 // configuration is worse than one that always fails.
-func (c *CredentialMetadata) ResolveCommitmentTargets(schema *mdoc.MDDLSchema) ([]CommitmentTarget, error) {
+func (c *CredentialMetadata) ResolveCommitmentTargets(schemas CredentialSchemas) ([]CommitmentTarget, error) {
 	if c == nil || len(c.Commitments) == 0 {
 		return nil, nil
 	}
@@ -74,7 +87,7 @@ func (c *CredentialMetadata) ResolveCommitmentTargets(schema *mdoc.MDDLSchema) (
 			return nil, fmt.Errorf("a commitment claim path is empty")
 		}
 
-		element, err := c.resolveElement(schema, path)
+		element, err := c.resolveElement(schemas.MDoc, path)
 		if err != nil {
 			return nil, fmt.Errorf("commitment claim %q: %w", path, err)
 		}
@@ -83,11 +96,15 @@ func (c *CredentialMetadata) ResolveCommitmentTargets(schema *mdoc.MDDLSchema) (
 			return nil, fmt.Errorf("commitment claim %q: %w", path, err)
 		}
 
+		if err := c.checkDisclosable(schemas.VCTM, element); err != nil {
+			return nil, fmt.Errorf("commitment claim %q: %w", path, err)
+		}
+
 		encoding, err := resolveEncoding(claim.Encoding, c.Format)
 		if err != nil {
 			return nil, fmt.Errorf("commitment claim %q: %w", path, err)
 		}
-		if err := c.checkCarrier(schema, element, encoding); err != nil {
+		if err := c.checkCarrier(schemas.MDoc, element, encoding); err != nil {
 			return nil, fmt.Errorf("commitment claim %q: %w", path, err)
 		}
 
@@ -233,6 +250,63 @@ func (c *CredentialMetadata) checkNotReserved(element string) error {
 			name, reserved[name])
 	}
 	return nil
+}
+
+// checkDisclosable refuses an SD-JWT target the type metadata does not
+// make selectively disclosable.
+//
+// This is a privacy failure rather than a correctness one, and the worst
+// in this feature. MakeCredential turns a claim into a disclosure only
+// when the VCTM lists its path with sd "always"; anything else stays in
+// the clear signed payload. So a misspelled or undeclared commitment path
+// is not "missing" - it is issued, permanently, in a form the holder
+// CANNOT withhold.
+//
+// For a seed commitment that is the whole value at stake: it is a stable
+// identifier for its holder, the one attribute the wallet is supposed to
+// be able to keep back, and this would hand it to every verifier
+// unconditionally.
+//
+// A nil VCTM means the caller has none to check against - the issuer
+// validates again at issuance with the one it was sent.
+func (c *CredentialMetadata) checkDisclosable(vctm *sdjwtvc.VCTM, element string) error {
+	if vctm == nil || c.Format != openid4vp.FormatSDJWTVC {
+		return nil
+	}
+
+	for _, claim := range vctm.Claims {
+		if claimPath(claim.Path) != element {
+			continue
+		}
+		if claim.SD != "always" {
+			return fmt.Errorf("the type metadata declares it with sd %q, so it would be signed in the clear and the holder could not withhold it; a commitment must be sd \"always\"",
+				orDefault(claim.SD, "allowed"))
+		}
+		return nil
+	}
+	return fmt.Errorf("the type metadata for %q does not declare it, so it would be signed in the clear rather than as a disclosure and the holder could not withhold it",
+		vctm.VCT)
+}
+
+// claimPath renders a VCTM claim path as the dotted form a commitment is
+// configured with. A nil segment selects every array element and has no
+// dotted spelling, so such a path matches nothing here.
+func claimPath(path []*string) string {
+	segments := make([]string, 0, len(path))
+	for _, p := range path {
+		if p == nil {
+			return "\x00array"
+		}
+		segments = append(segments, *p)
+	}
+	return strings.Join(segments, ".")
+}
+
+func orDefault(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 // resolveEncoding decides how the commitment bytes are written.

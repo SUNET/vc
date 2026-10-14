@@ -137,6 +137,17 @@ In a nested format, two commitment paths where one is nested under the
 other (`a` and `a.b`) are refused for the same reason: the outer is written
 as a string, so the inner could never be written at all.
 
+For SD-JWT VC the target must be a claim the **type metadata declares with
+`sd: always`**. Only those become disclosures — anything else is signed in
+the clear, so a misspelled or undeclared commitment path is not *missing*
+from the credential, it is issued permanently in a form the holder cannot
+withhold. That is the one outcome this feature must never produce: the
+commitment is a stable identifier for its holder, and the wallet's ability
+to keep it back is the entire protection.
+
+Checked at startup against the configured VCTM and again at issuance
+against the one the request carries.
+
 Claims a format's signing layer writes for itself are refused as targets
 too, since it writes them *after* this document is parsed — a commitment
 there is injected and then silently replaced, and the credential carries

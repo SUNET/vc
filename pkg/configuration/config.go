@@ -346,7 +346,7 @@ func checkCommitmentTargets(cfg *model.Cfg) error {
 		if meta == nil || len(meta.Commitments) == 0 {
 			continue
 		}
-		if _, err := meta.ResolveCommitmentTargets(meta.MDDL); err != nil {
+		if _, err := meta.ResolveCommitmentTargets(model.CredentialSchemas{MDoc: meta.MDDL, VCTM: meta.VCTM}); err != nil {
 			return fmt.Errorf("credential_metadata.%s: %w", scope, err)
 		}
 	}

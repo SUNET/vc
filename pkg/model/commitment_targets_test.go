@@ -5,6 +5,7 @@ import (
 
 	"github.com/SUNET/vc/pkg/mdoc"
 	"github.com/SUNET/vc/pkg/openid4vp"
+	"github.com/SUNET/vc/pkg/sdjwtvc"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,7 +39,7 @@ func sscClaim() *CommitmentClaim { return &CommitmentClaim{Seed: "primary", Subj
 // writing it verbatim puts the value where the signer never looks.
 func TestQualifiedPathResolvesToTheBareElement(t *testing.T) {
 	for _, path := range []string{"ssc", "eu.europa.ec.eudi.nym_auth.1.ssc"} {
-		targets, err := mdocMeta(map[string]*CommitmentClaim{path: sscClaim()}).ResolveCommitmentTargets(nymSchema())
+		targets, err := mdocMeta(map[string]*CommitmentClaim{path: sscClaim()}).ResolveCommitmentTargets(CredentialSchemas{MDoc: nymSchema()})
 		require.NoError(t, err)
 		require.Len(t, targets, 1)
 		assert.Equal(t, "ssc", targets[0].Element, "%q must resolve to the key the signer reads", path)
@@ -53,7 +54,7 @@ func TestTwoPathsResolvingToOneElementAreRefused(t *testing.T) {
 	_, err := mdocMeta(map[string]*CommitmentClaim{
 		"ssc":                              sscClaim(),
 		"eu.europa.ec.eudi.nym_auth.1.ssc": sscClaim(),
-	}).ResolveCommitmentTargets(nymSchema())
+	}).ResolveCommitmentTargets(CredentialSchemas{MDoc: nymSchema()})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "silently overwrite")
 	assert.Contains(t, err.Error(), "ssc")
@@ -83,7 +84,7 @@ func TestAmbiguousPathsResolveTheSameWayEveryTime(t *testing.T) {
 	// The exact match wins, in a full pass before any qualified matching,
 	// and it wins on every one of these runs rather than most of them.
 	for range 50 {
-		targets, err := meta.ResolveCommitmentTargets(schema)
+		targets, err := meta.ResolveCommitmentTargets(CredentialSchemas{MDoc: schema})
 		require.NoError(t, err)
 		require.Len(t, targets, 1)
 		assert.Equal(t, "org.example.b.ssc", targets[0].Element,
@@ -106,7 +107,7 @@ func TestAQualifiedPathMatchingTwoNamespacesIsRefused(t *testing.T) {
 		MDDL:        schema,
 		Commitments: map[string]*CommitmentClaim{"org.a.b.ssc": sscClaim()},
 	}
-	_, err := meta.ResolveCommitmentTargets(schema)
+	_, err := meta.ResolveCommitmentTargets(CredentialSchemas{MDoc: schema})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "more than one element")
 }
@@ -116,7 +117,7 @@ func TestAQualifiedPathMatchingTwoNamespacesIsRefused(t *testing.T) {
 // the service down at startup with a stack trace instead of a message.
 func TestANilClaimIsReportedNotDereferenced(t *testing.T) {
 	assert.NotPanics(t, func() {
-		_, err := mdocMeta(map[string]*CommitmentClaim{"ssc": nil}).ResolveCommitmentTargets(nymSchema())
+		_, err := mdocMeta(map[string]*CommitmentClaim{"ssc": nil}).ResolveCommitmentTargets(CredentialSchemas{MDoc: nymSchema()})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "empty")
 	})
@@ -128,13 +129,13 @@ func TestANilClaimIsReportedNotDereferenced(t *testing.T) {
 func TestHexAgainstABstrTargetIsRefused(t *testing.T) {
 	claim := sscClaim()
 	claim.Encoding = CommitmentEncodingHex
-	_, err := mdocMeta(map[string]*CommitmentClaim{"ssc": claim}).ResolveCommitmentTargets(nymSchema())
+	_, err := mdocMeta(map[string]*CommitmentClaim{"ssc": claim}).ResolveCommitmentTargets(CredentialSchemas{MDoc: nymSchema()})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bstr")
 }
 
 func TestEncodingDefaultsByFormat(t *testing.T) {
-	targets, err := mdocMeta(map[string]*CommitmentClaim{"ssc": sscClaim()}).ResolveCommitmentTargets(nymSchema())
+	targets, err := mdocMeta(map[string]*CommitmentClaim{"ssc": sscClaim()}).ResolveCommitmentTargets(CredentialSchemas{MDoc: nymSchema()})
 	require.NoError(t, err)
 	assert.Equal(t, CommitmentEncodingBase64, targets[0].Encoding, "mso_mdoc carries a bstr as base64")
 
@@ -142,24 +143,24 @@ func TestEncodingDefaultsByFormat(t *testing.T) {
 		Format:      openid4vp.FormatSDJWTVC,
 		Commitments: map[string]*CommitmentClaim{"ssc": sscClaim()},
 	}
-	targets, err = sdjwt.ResolveCommitmentTargets(nil)
+	targets, err = sdjwt.ResolveCommitmentTargets(CredentialSchemas{})
 	require.NoError(t, err)
 	assert.Equal(t, CommitmentEncodingHex, targets[0].Encoding, "everything else carries the claim itself")
 	assert.Equal(t, "ssc", targets[0].Element, "and has no schema to normalise against")
 }
 
 func TestUndeclaredTargetIsRefused(t *testing.T) {
-	_, err := mdocMeta(map[string]*CommitmentClaim{"psc": sscClaim()}).ResolveCommitmentTargets(nymSchema())
+	_, err := mdocMeta(map[string]*CommitmentClaim{"psc": sscClaim()}).ResolveCommitmentTargets(CredentialSchemas{MDoc: nymSchema()})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "declares no such element")
 }
 
 func TestNoCommitmentsResolvesToNothing(t *testing.T) {
-	targets, err := (&CredentialMetadata{Format: openid4vp.FormatMsoMdoc}).ResolveCommitmentTargets(nymSchema())
+	targets, err := (&CredentialMetadata{Format: openid4vp.FormatMsoMdoc}).ResolveCommitmentTargets(CredentialSchemas{MDoc: nymSchema()})
 	require.NoError(t, err)
 	assert.Empty(t, targets)
 
-	targets, err = (*CredentialMetadata)(nil).ResolveCommitmentTargets(nil)
+	targets, err = (*CredentialMetadata)(nil).ResolveCommitmentTargets(CredentialSchemas{})
 	require.NoError(t, err)
 	assert.Empty(t, targets)
 }
@@ -183,7 +184,7 @@ func TestNestedParentAndChildTargetsAreRefused(t *testing.T) {
 				pair[1]: sscClaim(),
 			},
 		}
-		_, err := meta.ResolveCommitmentTargets(nil)
+		_, err := meta.ResolveCommitmentTargets(CredentialSchemas{})
 		require.Error(t, err, "%q and %q cannot both be written", pair[0], pair[1])
 		assert.Contains(t, err.Error(), "nested under the other")
 	}
@@ -197,7 +198,7 @@ func TestNestedParentAndChildTargetsAreRefused(t *testing.T) {
 				pair[1]: sscClaim(),
 			},
 		}
-		_, err := meta.ResolveCommitmentTargets(nil)
+		_, err := meta.ResolveCommitmentTargets(CredentialSchemas{})
 		assert.NoError(t, err, "%q and %q are independent", pair[0], pair[1])
 	}
 
@@ -210,7 +211,7 @@ func TestNestedParentAndChildTargetsAreRefused(t *testing.T) {
 			"a.b": sscClaim(),
 		},
 	}
-	_, err := flat.ResolveCommitmentTargets(nil)
+	_, err := flat.ResolveCommitmentTargets(CredentialSchemas{})
 	assert.NoError(t, err, "mdoc element identifiers are flat keys, not paths")
 }
 
@@ -240,7 +241,7 @@ func TestOnlyStringCarryingElementsMayHoldACommitment(t *testing.T) {
 			Format:      openid4vp.FormatMsoMdoc,
 			Commitments: map[string]*CommitmentClaim{"ssc": sscClaim()},
 		}
-		_, err := meta.ResolveCommitmentTargets(schema)
+		_, err := meta.ResolveCommitmentTargets(CredentialSchemas{MDoc: schema})
 		if allowed {
 			assert.NoError(t, err, "value_type %q can carry a commitment", valueType)
 			continue
@@ -262,7 +263,7 @@ func TestTargetsTheSigningLayerOverwritesAreRefused(t *testing.T) {
 			Format:      openid4vp.FormatSDJWTVC,
 			Commitments: map[string]*CommitmentClaim{claim: sscClaim()},
 		}
-		_, err := meta.ResolveCommitmentTargets(nil)
+		_, err := meta.ResolveCommitmentTargets(CredentialSchemas{})
 		require.Error(t, err, "a commitment at %q would be replaced by the builder", claim)
 		assert.Contains(t, err.Error(), "silently replaced")
 	}
@@ -274,7 +275,7 @@ func TestTargetsTheSigningLayerOverwritesAreRefused(t *testing.T) {
 		Format:      openid4vp.FormatSDJWTVC,
 		Commitments: map[string]*CommitmentClaim{"status.value": sscClaim()},
 	}
-	_, err := nested.ResolveCommitmentTargets(nil)
+	_, err := nested.ResolveCommitmentTargets(CredentialSchemas{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "silently replaced")
 
@@ -285,7 +286,7 @@ func TestTargetsTheSigningLayerOverwritesAreRefused(t *testing.T) {
 			Format:      format,
 			Commitments: map[string]*CommitmentClaim{"id": sscClaim()},
 		}
-		_, err := meta.ResolveCommitmentTargets(nil)
+		_, err := meta.ResolveCommitmentTargets(CredentialSchemas{})
 		require.Error(t, err, "%s: a commitment at the subject id would be replaced", format)
 		assert.Contains(t, err.Error(), "silently replaced")
 	}
@@ -303,7 +304,73 @@ func TestTargetsTheSigningLayerOverwritesAreRefused(t *testing.T) {
 			Format:      tc.format,
 			Commitments: map[string]*CommitmentClaim{tc.path: sscClaim()},
 		}
-		_, err := meta.ResolveCommitmentTargets(nil)
+		_, err := meta.ResolveCommitmentTargets(CredentialSchemas{})
 		assert.NoError(t, err, "%s: %q is not written by the signing layer", tc.format, tc.path)
 	}
+}
+
+// An SD-JWT commitment must be a claim the type metadata makes
+// selectively disclosable.
+//
+// MakeCredential turns a claim into a disclosure only when the VCTM lists
+// its path with sd "always". Anything else is signed in the CLEAR, so a
+// misspelled or undeclared commitment path is not missing - it is issued
+// permanently in a form the holder cannot withhold. For a seed commitment
+// that is the whole value at stake: a stable identifier for its holder,
+// handed to every verifier unconditionally.
+func TestSDJWTCommitmentsMustBeSelectivelyDisclosable(t *testing.T) {
+	path := func(segments ...string) []*string {
+		out := make([]*string, 0, len(segments))
+		for _, s := range segments {
+			out = append(out, &s)
+		}
+		return out
+	}
+	vctm := &sdjwtvc.VCTM{
+		VCT: "urn:example:nym_auth:1",
+		Claims: []sdjwtvc.Claim{
+			{Path: path("ssc"), SD: "always"},
+			{Path: path("birth_date"), SD: "always"},
+			{Path: path("issuing_country"), SD: "allowed"},
+			{Path: path("issuer_note")},
+			{Path: path("nested", "inner"), SD: "always"},
+		},
+	}
+	meta := func(target string) *CredentialMetadata {
+		return &CredentialMetadata{
+			Format:      openid4vp.FormatSDJWTVC,
+			Commitments: map[string]*CommitmentClaim{target: sscClaim()},
+		}
+	}
+
+	for _, target := range []string{"ssc", "nested.inner"} {
+		_, err := meta(target).ResolveCommitmentTargets(CredentialSchemas{VCTM: vctm})
+		assert.NoError(t, err, "%q is declared sd always", target)
+	}
+
+	for _, tc := range []struct{ target, want string }{
+		{"issuing_country", `sd "allowed"`},
+		{"issuer_note", `sd "allowed"`}, // absent sd defaults to allowed
+		{"ssc_typo", "does not declare it"},
+		{"nested", "does not declare it"}, // the parent is not itself a claim
+	} {
+		_, err := meta(tc.target).ResolveCommitmentTargets(CredentialSchemas{VCTM: vctm})
+		require.Error(t, err, "%q is not selectively disclosable", tc.target)
+		assert.Contains(t, err.Error(), tc.want)
+		assert.Contains(t, err.Error(), "could not withhold it")
+	}
+
+	// No VCTM to check against means the caller has none; the issuer
+	// checks again with the one it is sent.
+	_, err := meta("anything").ResolveCommitmentTargets(CredentialSchemas{})
+	assert.NoError(t, err)
+
+	// And the rule is SD-JWT's: an mdoc element is selectively
+	// disclosable by construction.
+	mdocMeta := &CredentialMetadata{
+		Format:      openid4vp.FormatMsoMdoc,
+		Commitments: map[string]*CommitmentClaim{"ssc": sscClaim()},
+	}
+	_, err = mdocMeta.ResolveCommitmentTargets(CredentialSchemas{MDoc: nymSchema(), VCTM: vctm})
+	assert.NoError(t, err)
 }

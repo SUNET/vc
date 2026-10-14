@@ -10,6 +10,7 @@ import (
 	"github.com/SUNET/vc/internal/gen/issuer/apiv1_issuer"
 	"github.com/SUNET/vc/internal/gen/registry/apiv1_registry"
 	"github.com/SUNET/vc/pkg/bbs"
+	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/tokenstatuslist"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -76,7 +77,7 @@ func (c *Client) MakeJWP(ctx context.Context, req *CreateJWPRequest) (*CreateJWP
 	// anything is signed: an injected claim is part of the document the
 	// validator has to pass, and part of what gets signed. A no-op for a
 	// scope with no commitments configured.
-	documentData, err := c.injectCommitments(ctx, req.Scope, req.DocumentData, nil)
+	documentData, err := c.injectCommitments(ctx, req.Scope, req.DocumentData, model.CredentialSchemas{})
 	if err != nil {
 		c.log.Error(err, "failed to inject commitment claims", "scope", req.Scope)
 		return nil, grpcstatus.Error(codes.InvalidArgument, err.Error())
