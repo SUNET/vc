@@ -1753,3 +1753,39 @@ func (c *failingKeyCache) SetNX(ctx context.Context, key string, value jwk.Key) 
 	}
 	return c.Cache.SetNX(ctx, key, value)
 }
+
+// auth_session and issuer_state are documented as mutually exclusive, and
+// the dispatch has to enforce that rather than resolve it by precedence.
+//
+// Silently preferring auth_session accepted an ambiguous request AND left
+// the supplied issuer_state live: a prepared issuance still waiting to be
+// claimed, named by a caller that believed it had just used it. The
+// wallet has a bug either way; the useful answer says so while it can
+// still be found.
+func TestAuthorizationChallenge_BothHandlesIsInvalidRequest(t *testing.T) {
+	client := newChallengeClient(t)
+
+	req := continueExchange(t, "some-auth-session", `{"response":"x"}`)
+	req.IssuerState = "some-issuer-state"
+
+	oauthErr := oauthErrFromChallenge(t, client, req)
+	assert.Equal(t, oauth2.ErrCodeInvalidRequest, oauthErr.ErrorCode)
+	assert.Equal(t, 400, oauthErr.HTTPStatus)
+	// On the message, not just the code: the intermediate path answers
+	// invalid_request for other reasons too, so a test stopping at the
+	// code would keep passing with this check deleted.
+	assert.Contains(t, oauthErr.Error(), "mutually exclusive")
+
+	// Each on its own still reaches its flow, so the assertion above is
+	// about the combination rather than about either handle.
+	authSessionOnly := challengeErr(t, client,
+		continueExchange(t, "some-auth-session", `{"response":"x"}`))
+	assert.Equal(t, errInvalidSession, authSessionOnly.ErrorCode,
+		"an auth_session on its own still reaches the intermediate flow")
+
+	issuerStateOnly := initialChallenge(t)
+	issuerStateOnly.IssuerState = "some-issuer-state"
+	_, err := client.OAuthAuthorizationChallenge(t.Context(), issuerStateOnly)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "mutually exclusive")
+}

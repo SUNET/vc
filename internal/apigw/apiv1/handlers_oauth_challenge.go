@@ -232,6 +232,19 @@ func (c *Client) OAuthAuthorizationChallenge(ctx context.Context, req *Authoriza
 			"interactive authorization is not enabled on this server", 404)
 	}
 
+	// The two handles are mutually exclusive, so a request carrying both
+	// is refused rather than resolved by precedence.
+	//
+	// Preferring auth_session silently accepted an ambiguous request and
+	// left the supplied issuer_state live - a prepared issuance still
+	// waiting to be claimed, named by a caller who believed it had just
+	// been used. A wallet that sends both has a bug, and the useful answer
+	// says so at the point it can still be found.
+	if req.AuthSession != "" && req.IssuerState != "" {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			"auth_session and issuer_state are mutually exclusive; send one", 400)
+	}
+
 	if req.AuthSession != "" {
 		return c.authorizationChallengeIntermediate(ctx, ia, req)
 	}
