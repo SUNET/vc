@@ -2,7 +2,9 @@ package openid4vp
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -728,4 +730,89 @@ func TestOrdinaryTemplatesStayTyped(t *testing.T) {
 	assert.Nil(t, query.Raw)
 	require.Len(t, query.Req, 1)
 	assert.Equal(t, FunctionPseudonym, query.Req[0].ID)
+}
+
+// age_check takes full-dates, and a full-date is exactly what YAML has a
+// native type for - so an unquoted `ge: 2008-10-10` is both the most
+// natural way to write the rulebook's central input and the one most at
+// risk of arriving as something else.
+//
+// It reaches the wire as the string it was written as. On yaml.v2 that is
+// the library's own doing: it sets a timestamp-resolved scalar as a
+// string when the destination is an interface, deliberately and for
+// backward compatibility. That is also why this test is here rather than
+// taken on trust - the same source marks the behaviour "TODO(v3) Drop
+// this", so it is someone else's compatibility promise, not ours.
+func TestUnquotedFullDatesReachTheWireUnchanged(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{
+			name: "the rulebook's own age_check range, unquoted",
+			in:   "id: age_check\nreturn: age-1\nparams:\n  ge: 2008-10-10\n  le: 2013-10-09\n",
+			want: `{"id":"age_check","return":"age-1","params":{"ge":"2008-10-10","le":"2013-10-09"}}`,
+		},
+		{
+			name: "and quoted, which must come out the same",
+			in:   "id: age_check\nreturn: age-1\nparams:\n  ge: \"2008-10-10\"\n  le: \"2013-10-09\"\n",
+			want: `{"id":"age_check","return":"age-1","params":{"ge":"2008-10-10","le":"2013-10-09"}}`,
+		},
+		{
+			name: "a full timestamp, likewise untouched",
+			in:   "id: age_check\nreturn: age-1\nparams:\n  ge: 2008-10-10T00:00:00Z\n",
+			want: `{"id":"age_check","return":"age-1","params":{"ge":"2008-10-10T00:00:00Z"}}`,
+		},
+		{
+			name: "a date nested under an unknown member",
+			in:   "id: age_check\nreturn: age-1\nfuture:\n  ge: 2008-10-10\n",
+			want: `{"id":"age_check","return":"age-1","future":{"ge":"2008-10-10"}}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var item ReqItem
+			require.NoError(t, yamlv2.Unmarshal([]byte(tc.in), &item))
+			encoded, err := json.Marshal(item)
+			require.NoError(t, err)
+			// want pins it exactly, which is the point: a bare date that
+			// had become an RFC 3339 timestamp would fail here, and the
+			// matcher would reject such a value as not a full-date.
+			assert.JSONEq(t, tc.want, string(encoded))
+		})
+	}
+}
+
+// The time.Time arm of yamlValue cannot be reached through yaml.v2: that
+// library sets a timestamp-resolved scalar as a string when the
+// destination is an interface, deliberately, with "TODO(v3) Drop this"
+// beside it. So the arm is exercised directly rather than left as code no
+// test can reach - it exists for the day that TODO is acted on, and the
+// cost of being wrong then is the rulebook's central input silently
+// becoming a value the matcher rejects.
+func TestYAMLValueRecoversALexemeFromATimestamp(t *testing.T) {
+	when, err := time.Parse(time.DateOnly, "2008-10-10")
+	require.NoError(t, err)
+
+	// Stands in for a library that resolves a full-date to a time.Time:
+	// an interface target gets the time, a string target gets the lexeme,
+	// which is what yaml.v2 itself does for every other scalar.
+	unmarshal := func(into any) error {
+		switch target := into.(type) {
+		case *any:
+			*target = when
+			return nil
+		case *string:
+			*target = "2008-10-10"
+			return nil
+		}
+		return fmt.Errorf("unexpected target %T", into)
+	}
+
+	var value yamlValue
+	require.NoError(t, value.UnmarshalYAML(unmarshal))
+	assert.Equal(t, "2008-10-10", value.value,
+		"a full-date must survive as the full-date it was written as, not as an RFC 3339 timestamp")
+
+	// And the shape that would have gone out without it.
+	encoded, err := json.Marshal(when)
+	require.NoError(t, err)
+	assert.Equal(t, `"2008-10-10T00:00:00Z"`, string(encoded),
+		"which is what a time.Time encodes as, and what the matcher rejects as not a full-date")
 }

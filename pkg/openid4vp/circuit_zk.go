@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // FormatCircuitZk is the DCQL format identifier for a zero-knowledge
@@ -300,6 +301,27 @@ func (v *yamlValue) UnmarshalYAML(unmarshal func(any) error) error {
 		var lexeme string
 		if err := unmarshal(&lexeme); err == nil && isJSONNumber(lexeme) {
 			v.value = json.Number(lexeme)
+			return nil
+		}
+	case time.Time:
+		// Does not happen on yaml.v2, which sets a timestamp-resolved
+		// scalar as a string when the destination is an interface -
+		// deliberately, for backward compatibility, and with a
+		// "TODO(v3) Drop this" beside it (decode.go, the
+		// yaml_TIMESTAMP_TAG branch). That TODO is the reason this case
+		// exists.
+		//
+		// If it ever does happen, the damage is specific and severe: the
+		// rulebook's age_check takes full-dates, so `ge: 2008-10-10`
+		// would be emitted as "2008-10-10T00:00:00Z" - a value the
+		// matcher rejects as not a full-date, from a template that reads
+		// as perfectly correct. The lexeme is recoverable the same way a
+		// number's is, so recovering it costs nothing and removes the
+		// dependency on a compatibility hack someone else has already
+		// scheduled for removal.
+		var lexeme string
+		if err := unmarshal(&lexeme); err == nil {
+			v.value = lexeme
 			return nil
 		}
 	case string:
