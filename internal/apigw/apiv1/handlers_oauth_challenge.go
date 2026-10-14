@@ -428,6 +428,12 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 		// browser flow's session transcript, which would not be the
 		// transcript this Wallet signed over.
 		MdocSessionTranscript: nil,
+
+		// The whole exchange exists to establish WHO is asking for an
+		// issuance, so a check that cannot tell the Holder from someone
+		// holding a copy of their credential would not do its job. See
+		// issuanceAuthBinding.VerifyHolderBinding.
+		VerifyHolderBinding: true,
 	}); err != nil {
 		return nil, c.interactiveAuthorizationFailure(err)
 	}

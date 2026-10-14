@@ -434,6 +434,13 @@ func TestSameHTU(t *testing.T) {
 		{name: "a different host", htu: "https://attacker.example.com/token", want: false},
 		{name: "a different scheme", htu: "http://issuer.example.com/token", want: false},
 		{name: "a non-default port", htu: "https://issuer.example.com:8443/token", want: false},
+
+		// A port is a number. Leading zeroes are not part of it, so these
+		// name the same endpoint as the one with no port at all - and a
+		// proof refused over them is one the wallet cannot correct,
+		// because the spelling is this deployment's, not the wallet's.
+		{name: "the default port with a leading zero", htu: "https://issuer.example.com:0443/token", want: true},
+		{name: "the default port with several", htu: "https://issuer.example.com:000443/token", want: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, SameHTU(tc.htu, endpoint))
@@ -442,6 +449,11 @@ func TestSameHTU(t *testing.T) {
 
 	t.Run("a Unicode host matches its A-label", func(t *testing.T) {
 		assert.True(t, SameHTU("https://münchen.example/token", "https://xn--mnchen-3ya.example/token"))
+	})
+
+	t.Run("a non-default port with a leading zero is the same port", func(t *testing.T) {
+		assert.True(t, SameHTU("https://issuer.example.com:08443/token", "https://issuer.example.com:8443/token"))
+		assert.False(t, SameHTU("https://issuer.example.com:08443/token", "https://issuer.example.com/token"))
 	})
 
 	t.Run("an empty path is the root path", func(t *testing.T) {
