@@ -335,6 +335,16 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 	}
 }
 
+// The one answer an unresolvable handle gets, whether it never existed or
+// has expired. Named because the two endpoints must answer identically:
+// a difference in wording between them is a difference an attacker can
+// measure, and the whole point of collapsing unknown into expired is that
+// there is nothing to measure.
+const (
+	errDescAuthSessionInvalid = "auth_session is invalid or has expired"
+	errDescIssuerStateInvalid = "issuer_state is invalid or has expired"
+)
+
 // handleLookupError is the answer a wallet gets when a one-shot handle
 // could not be resolved or claimed.
 //
@@ -366,11 +376,11 @@ func handleLookupError(err error, description string) error {
 func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *model.InteractiveAuthorization, req *AuthorizationChallengeRequest) (*AuthorizationChallengeResponse, error) {
 	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{AuthSession: req.AuthSession})
 	if err != nil || authCtx == nil {
-		return nil, handleLookupError(err, "auth_session is invalid or has expired")
+		return nil, handleLookupError(err, errDescAuthSessionInvalid)
 	}
 	if authCtx.ExpiresAt > 0 && time.Now().Unix() > authCtx.ExpiresAt {
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"auth_session is invalid or has expired", 400)
+			errDescAuthSessionInvalid, 400)
 	}
 
 	// §5.1: a client_id sent alongside an auth_session MUST identify the
@@ -395,7 +405,7 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 		c.log.Error(nil, "CHALLENGE: auth_session resolved a context with no DPoP binding",
 			"session_id", authCtx.SessionID)
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"auth_session is invalid or has expired", 400)
+			errDescAuthSessionInvalid, 400)
 	}
 	thumbprint, err := c.dpopProofThumbprint(ctx, req.DPOP, ia.ChallengeEndpoint(c.cfg.APIGW.PublicURL))
 	if err != nil {
@@ -428,7 +438,7 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 	// learned it grind presentations at the endpoint.
 	claimed, err := c.cacheService.AuthContext.ClaimAuthSession(ctx, req.AuthSession)
 	if err != nil {
-		return nil, handleLookupError(err, "auth_session is invalid or has expired")
+		return nil, handleLookupError(err, errDescAuthSessionInvalid)
 	}
 	authCtx = claimed
 
@@ -871,11 +881,11 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 	// scanning the same offer both reach it, and exactly one wins.
 	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{IssuerState: req.IssuerState})
 	if err != nil || authCtx == nil {
-		return nil, handleLookupError(err, "issuer_state is invalid or has expired")
+		return nil, handleLookupError(err, errDescIssuerStateInvalid)
 	}
 	if authCtx.ExpiresAt > 0 && time.Now().Unix() > authCtx.ExpiresAt {
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"issuer_state is invalid or has expired", 400)
+			errDescIssuerStateInvalid, 400)
 	}
 
 	// The prepared issuance names the scope; a wallet asking for a
@@ -982,7 +992,7 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 		CreatedAt:                 time.Now(),
 	})
 	if err != nil {
-		return nil, handleLookupError(err, "issuer_state is invalid or has expired")
+		return nil, handleLookupError(err, errDescIssuerStateInvalid)
 	}
 	authCtx = resumed
 

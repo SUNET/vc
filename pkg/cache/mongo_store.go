@@ -647,6 +647,10 @@ func (s *MongoStore) buildFilter(query *AuthorizationContext) bson.M {
 	return nil
 }
 
+// mongoUnset is the update operator that removes a field, which is how
+// every one-shot handle in this store is consumed.
+const mongoUnset = "$unset"
+
 // ClaimAuthSession atomically takes the Interactive Authorization handle off
 // the context it names. See AuthContextStore.ClaimAuthSession.
 //
@@ -666,7 +670,7 @@ func (s *MongoStore) ClaimAuthSession(ctx context.Context, authSession string) (
 	filter := bson.M{"auth_session": authSession}
 	// Only the handle. The thumbprint is the binding the authorization
 	// code inherits - see the memory store's note.
-	update := bson.M{"$unset": bson.M{"auth_session": ""}}
+	update := bson.M{mongoUnset: bson.M{"auth_session": ""}}
 
 	opts := options.FindOneAndUpdate().SetReturnDocument(options.Before)
 	var claimed AuthorizationContext
@@ -698,7 +702,7 @@ func (s *MongoStore) ClaimIssuerState(ctx context.Context, issuerState string) (
 	}
 
 	filter := bson.M{"issuer_state": issuerState}
-	update := bson.M{"$unset": bson.M{"issuer_state": ""}}
+	update := bson.M{mongoUnset: bson.M{"issuer_state": ""}}
 
 	opts := options.FindOneAndUpdate().SetReturnDocument(options.Before)
 	var claimed AuthorizationContext
@@ -733,7 +737,7 @@ func (s *MongoStore) ResumeIssuerState(ctx context.Context, issuerState string, 
 
 	filter := bson.M{"issuer_state": issuerState}
 	update := bson.M{
-		"$unset": bson.M{"issuer_state": ""},
+		mongoUnset: bson.M{"issuer_state": ""},
 		// Field for field what IssuerStateResume.applyTo writes in the
 		// memory store; the two have to stay in step or an issuance
 		// resumes differently depending on which backend is configured.
