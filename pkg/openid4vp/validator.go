@@ -250,9 +250,13 @@ func issuerSDAlg(vpToken string) (string, error) {
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return "", fmt.Errorf("parsing the issuer-signed payload: %w", err)
 	}
-	sdAlg, _ := claims["_sd_alg"].(string)
-	if sdAlg == "" {
+	raw, present := claims["_sd_alg"]
+	if !present {
 		return "sha-256", nil
+	}
+	sdAlg, ok := raw.(string)
+	if !ok || sdAlg == "" {
+		return "", fmt.Errorf("credential declares a non-string _sd_alg (%T), so the hash sd_hash was taken under is unknown", raw)
 	}
 	return sdAlg, nil
 }

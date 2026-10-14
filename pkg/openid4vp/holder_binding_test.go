@@ -360,3 +360,55 @@ func TestHolderBinding_RefusesASymmetricHolderKey(t *testing.T) {
 	require.Error(t, err, "a shared secret inside the credential cannot be a holder key")
 	assert.Contains(t, err.Error(), "cannot prove possession")
 }
+
+// _sd_alg that is present but not a readable algorithm name is a refusal,
+// not a fall back to the spec's default.
+//
+// The default applies when the issuer said nothing. When the issuer said
+// something the verifier cannot read, the hash sd_hash was taken under is
+// unknown, and a check that cannot be made must fail rather than be
+// replaced with a guess that happens to be the common case.
+func TestHolderBinding_RefusesAnUnreadableSDAlg(t *testing.T) {
+	const (
+		nonce    = "request-nonce"
+		audience = "x509_san_dns:issuer.example.com"
+	)
+
+	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	holderKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	holderJWK := publicJWK(t, holderKey.Public())
+	validator := &VPTokenValidator{Nonce: nonce, ClientID: audience}
+
+	t.Run("no _sd_alg at all is sha-256", func(t *testing.T) {
+		credential := issuedCredentialFor(t, issuerKey, holderJWK, "")
+		require.NoError(t, validator.Validate(
+			presentationProvedWith(t, credential, jwtv5.SigningMethodES256, holderKey, nonce, audience, "sha-256")),
+			"the spec's default must still apply when the issuer said nothing")
+	})
+
+	t.Run("an _sd_alg that is not a string is refused", func(t *testing.T) {
+		// Built by hand: the fixture takes a string, and the point is a
+		// credential whose _sd_alg is not one. Token.Parse accepts it -
+		// it reads the claim with a comma-ok cast and defaults - so this
+		// reaches the holder binding check.
+		token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, jwtv5.MapClaims{
+			"iss":     "https://issuer.example.com",
+			"vct":     "https://credentials.example.com/identity_credential",
+			"iat":     time.Now().Unix(),
+			"cnf":     map[string]any{"jwk": holderJWK},
+			"_sd_alg": 256,
+		})
+		token.Header["typ"] = "dc+sd-jwt"
+		credential, err := token.SignedString(issuerKey)
+		require.NoError(t, err)
+
+		// Signed by the real holder over a correct sha-256 sd_hash: the
+		// only thing wrong is that the credential does not say so.
+		err = validator.Validate(
+			presentationProvedWith(t, credential, jwtv5.SigningMethodES256, holderKey, nonce, audience, "sha-256"))
+		require.Error(t, err, "an unreadable _sd_alg must not be read as sha-256")
+		assert.Contains(t, err.Error(), "_sd_alg")
+	})
+}
