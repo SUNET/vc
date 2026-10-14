@@ -1055,39 +1055,52 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 		return nil, err
 	}
 
-	// The point of no return. Exactly one caller gets the handle; everyone
-	// else is told the issuer_state is invalid, which by then it is.
-	claimed, err := c.cacheService.AuthContext.ClaimIssuerState(ctx, req.IssuerState)
-	if err != nil || claimed == nil {
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"issuer_state is invalid or has expired", 400)
-	}
-	authCtx = claimed
-
-	// The wallet's half, recorded on the prepared issuance.
-	authCtx.WalletClientID = req.ClientID
-	authCtx.WalletURI = req.RedirectURI
-	authCtx.CodeChallenge = req.CodeChallenge
-	authCtx.CodeChallengeMethod = req.CodeChallengeMethod
-	authCtx.AuthSessionDPoPThumbprint = dpopThumbprint
-	authCtx.AuthSession = authSession
-	authCtx.DCQLQuery = dcql
-	authCtx.ExpiresAt = time.Now().Add(ia.AuthSessionTTL()).Unix()
+	// The wallet's half, recorded on the prepared issuance as it was read.
+	// Nothing is stored yet: this is the document the claim will install.
+	opened := *authCtx
+	opened.WalletClientID = req.ClientID
+	opened.WalletURI = req.RedirectURI
+	opened.CodeChallenge = req.CodeChallenge
+	opened.CodeChallengeMethod = req.CodeChallengeMethod
+	opened.AuthSessionDPoPThumbprint = dpopThumbprint
+	opened.AuthSession = authSession
+	opened.DCQLQuery = dcql
+	opened.ExpiresAt = time.Now().Add(ia.AuthSessionTTL()).Unix()
 
 	// Move the physical anchor too, not just the logical deadline.
 	//
 	// MongoDB expires these documents on a TTL index over created_at, and
-	// MongoStore.Update replaces the whole document - so without this, an
+	// the claim below replaces the whole document - so without this, an
 	// offer resumed late advertises an auth_session that outlives the
 	// document holding it, and the wallet comes back to find the exchange
 	// gone with nothing having gone wrong. The memory store re-anchors on
 	// write anyway; this makes the two behave alike rather than leaving
 	// the difference to be discovered in production.
-	authCtx.CreatedAt = time.Now()
+	opened.CreatedAt = time.Now()
 
-	if err := c.cacheService.AuthContext.Update(ctx, authCtx); err != nil {
-		return nil, err
+	// The point of no return, and ONE write. Exactly one caller gets the
+	// handle; everyone else is told the issuer_state is invalid, which by
+	// then it is.
+	//
+	// Claiming and then persisting as two writes had a failure mode with
+	// no recovery: the claim succeeds, the persist does not, and the
+	// document has lost its issuer_state without ever gaining an
+	// auth_session - so the prepared issuance is unreachable by either
+	// handle and nothing, including the issuer, can get it back. A
+	// transient store failure must not be able to destroy a prepared
+	// issuance, so the handle is replaced BY the opened exchange rather
+	// than removed and then written over.
+	claimed, err := c.cacheService.AuthContext.ClaimIssuerState(ctx, req.IssuerState, &opened)
+	if err != nil || claimed == nil {
+		if err != nil && !errors.Is(err, cache.ErrNoDocuments) {
+			// A store that would not answer is ours, and the prepared
+			// issuance is untouched - so the wallet can simply come back.
+			return nil, c.authSessionStoreFailure(err, "claim issuer_state")
+		}
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+			"issuer_state is invalid or has expired", 400)
 	}
+	authCtx = claimed
 
 	c.log.Info("CHALLENGE: prepared issuance resumed, interaction required",
 		"client_id", req.ClientID, "scope", scope,

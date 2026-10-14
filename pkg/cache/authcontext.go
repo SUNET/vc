@@ -809,15 +809,56 @@ func (c *MemoryStore) ClaimAuthSession(ctx context.Context, authSession string) 
 		})
 }
 
-// ClaimIssuerState atomically takes the issuer-initiated handle off the
-// context it names. See AuthContextStore.ClaimIssuerState.
-func (c *MemoryStore) ClaimIssuerState(ctx context.Context, issuerState string) (*AuthorizationContext, error) {
+// ClaimIssuerState atomically replaces the issuer-initiated handle with the
+// exchange that claims it. See AuthContextStore.ClaimIssuerState.
+//
+// One mutation under the lock: the handle is read, checked and replaced
+// without releasing it, so a second caller finds nothing to claim and
+// there is no moment at which the document has neither handle.
+func (c *MemoryStore) ClaimIssuerState(ctx context.Context, issuerState string, opened *AuthorizationContext) (*AuthorizationContext, error) {
 	if issuerState == "" {
 		return nil, errors.New("issuerState cannot be empty")
 	}
-	return c.claimIndexedHandle("issuer_state", issuerState,
-		func(doc *AuthorizationContext) string { return doc.IssuerState },
-		func(doc *AuthorizationContext) { doc.IssuerState = "" })
+	if opened == nil || opened.SessionID == "" {
+		return nil, errors.New("opened document with session_id is required")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	indexKey := "issuer_state:" + issuerState
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+	if sessionID != opened.SessionID {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		delete(c.indices, indexKey)
+		return nil, ErrNoDocuments
+	}
+
+	// The index could name a session whose handle has already been
+	// replaced; treat that as unclaimed rather than trusting the index.
+	if item.Value().IssuerState != issuerState {
+		return nil, ErrNoDocuments
+	}
+
+	// The claimant's document wins wholesale, with the handle gone from
+	// it: anything that persisted a document still carrying the handle
+	// would re-create its index and make the issuance claimable again.
+	stored := *opened
+	stored.IssuerState = ""
+
+	delete(c.indices, indexKey)
+	c.cache.Set(sessionID, &stored, ttlcache.DefaultTTL)
+	c.updateIndices(&stored)
+
+	claimed := stored
+	return &claimed, nil
 }
 
 // claimIndexedHandle is the shared body of the two claims: resolve a

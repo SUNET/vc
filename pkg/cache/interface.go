@@ -68,12 +68,26 @@ type AuthContextStore interface {
 	// store replaces unconditionally.
 	ClaimAuthSession(ctx context.Context, authSession string) (*AuthorizationContext, error)
 
-	// ClaimIssuerState atomically takes the issuer-initiated handle off
-	// the context it names, with the same one-shot guarantee as
-	// ClaimAuthSession and for the same reason: an issuance prepared for
-	// one Holder must open one exchange, not one per wallet that scans
-	// the offer.
-	ClaimIssuerState(ctx context.Context, issuerState string) (*AuthorizationContext, error)
+	// ClaimIssuerState atomically replaces the issuer-initiated handle with
+	// the exchange that claims it, and returns the document as it now
+	// stands.
+	//
+	// opened is the whole document the claimant wants stored: the context
+	// as it was read, with the handle cleared and the wallet's half filled
+	// in. One mutation, filtered on the handle - which gives the same
+	// one-shot guarantee as ClaimAuthSession, for the same reason (an
+	// issuance prepared for one Holder must open one exchange, not one per
+	// wallet that scans the offer) AND makes the claim and the opened
+	// exchange inseparable.
+	//
+	// That second property is the point of the signature. Claiming and
+	// then persisting as two writes leaves a window where the first
+	// succeeded and the second did not: the document has lost its
+	// issuer_state and never gained an auth_session, so the prepared
+	// issuance is unreachable by either handle and nothing can recover it.
+	// A transient store failure must not be able to destroy a prepared
+	// issuance.
+	ClaimIssuerState(ctx context.Context, issuerState string, opened *AuthorizationContext) (*AuthorizationContext, error)
 
 	// RedeemPreAuthorizedCode allows a pre-authorized code to be redeemed by multiple
 	// distinct clients (per DPoP thumbprint). Returns the auth context or an error if

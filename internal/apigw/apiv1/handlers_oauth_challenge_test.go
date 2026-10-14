@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1652,4 +1653,103 @@ func TestAuthorizationChallenge_WebInteractionCarriesNoPresentationState(t *test
 	})
 	require.NoError(t, err)
 	assert.NotEmpty(t, presentationCtx.State)
+}
+
+// One ephemeral key per kid, whoever asks and however many at once.
+//
+// The private half decrypts the wallet's response; the public half goes
+// into a request the server SIGNS. Two callers that each generated their
+// own would produce two signed requests, and whichever private key ended
+// up in the cache could not decrypt a response to the other - a flow that
+// fails with a correct presentation, a valid signature and an
+// undecryptable ciphertext, which is about as hard to diagnose as this
+// gets.
+//
+// Get-then-Set could not promise that. SetNX can.
+func TestEphemeralEncryptionKeyIsOneKeyPerKid(t *testing.T) {
+	client := newChallengeClient(t)
+
+	const kid = "contended-kid"
+	const contenders = 8
+
+	var (
+		start    sync.WaitGroup
+		finished sync.WaitGroup
+		mu       sync.Mutex
+		publics  []string
+		privates []string
+	)
+	start.Add(1)
+	finished.Add(contenders)
+
+	for range contenders {
+		go func() {
+			defer finished.Done()
+			start.Wait()
+			private, public, err := client.EphemeralEncryptionKey(t.Context(), kid)
+			if err != nil {
+				return
+			}
+			privateThumb, err := private.Thumbprint(stdcrypto.SHA256)
+			if err != nil {
+				return
+			}
+			publicThumb, err := public.Thumbprint(stdcrypto.SHA256)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			privates = append(privates, string(privateThumb))
+			publics = append(publics, string(publicThumb))
+			mu.Unlock()
+		}()
+	}
+	start.Done()
+	finished.Wait()
+
+	require.Len(t, privates, contenders, "every caller must get a key")
+
+	// Every caller got the SAME key, and it is the one the cache holds -
+	// which is the only one that can decrypt anything.
+	for i := range privates {
+		assert.Equal(t, privates[0], privates[i],
+			"two callers were given different private keys for one kid")
+		assert.Equal(t, publics[0], publics[i],
+			"two callers would have signed requests carrying different public keys")
+	}
+
+	stored, ok := client.cacheService.EphemeralEncryptionKey.Get(t.Context(), kid)
+	require.True(t, ok)
+	storedThumb, err := stored.Thumbprint(stdcrypto.SHA256)
+	require.NoError(t, err)
+	assert.Equal(t, privates[0], string(storedThumb),
+		"the key callers were given must be the one that was persisted")
+}
+
+// A cache that will not hold the key is a request whose answer this server
+// cannot decrypt, so signing one anyway produces a failure much later with
+// nothing to point at.
+func TestEphemeralEncryptionKeyPropagatesStoreFailures(t *testing.T) {
+	client := newChallengeClient(t)
+	client.cacheService.EphemeralEncryptionKey = &failingKeyCache{
+		Cache: client.cacheService.EphemeralEncryptionKey,
+		err:   errors.New("connection refused"),
+	}
+
+	_, _, err := client.EphemeralEncryptionKey(t.Context(), "some-kid")
+	require.Error(t, err, "a cache that refused the key must not yield a key to sign with")
+}
+
+// failingKeyCache fails SetNX the way an unreachable cache does and leaves
+// every other call to the real one.
+type failingKeyCache struct {
+	cache.Cache[jwk.Key]
+	err error
+}
+
+func (c *failingKeyCache) SetNX(ctx context.Context, key string, value jwk.Key) (bool, error) {
+	if c.err != nil {
+		return false, c.err
+	}
+	return c.Cache.SetNX(ctx, key, value)
 }

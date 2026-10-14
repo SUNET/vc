@@ -259,32 +259,27 @@ func New(ctx context.Context, db *db.Service, cacheService *cache.Service, authP
 }
 
 // EphemeralEncryptionKey returns the ephemeral encryption key pair for the
-// given kid.  If a private key already exists in the cache (i.e. the request-
-// object endpoint was already called for this session) the cached key is
-// reused so that the wallet's encrypted response can still be decrypted.
-// Otherwise a fresh P-256 key pair is generated, the private key is cached,
-// and both private and public JWKs are returned.
+// given kid, generating and storing one if this is the first caller to ask.
+//
+// Exactly one key ever exists for a kid, and every caller gets that one.
+// The private half is what decrypts the wallet's response, and the public
+// half goes into a REQUEST THE SERVER SIGNS - so two callers that each
+// generated their own would produce two signed requests, and whichever
+// private key ended up in the cache would be unable to decrypt a response
+// to the other. Nothing downstream could recover from that: the wallet's
+// presentation is correct, the signature verifies, and the ciphertext is
+// simply undecryptable.
+//
+// A plain Get-then-Set could not give that guarantee, and the window is
+// not theoretical: issuer-initiated issuance and the request-object
+// endpoint both reach here for the same kid, and a wallet retrying a
+// request object races itself. SetNX decides the winner atomically, and a
+// loser reads the winner's key back rather than keeping its own.
 func (c *Client) EphemeralEncryptionKey(ctx context.Context, kid string) (jwk.Key, jwk.Key, error) {
 	// Return the existing key pair when available to avoid overwriting the
 	// private key on repeated request-object fetches (wallet retries, etc.).
 	if existing, ok := c.cacheService.EphemeralEncryptionKey.Get(ctx, kid); ok {
-		publicJWK, err := existing.PublicKey()
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to derive public key from cached ephemeral key: %w", err)
-		}
-		if err := publicJWK.Set("use", "enc"); err != nil {
-			return nil, nil, err
-		}
-		// The reference wallet's ClientMetaDataValidator (eudi-lib-jvm-openid4vp-kt)
-		// only treats a jwks entry as a viable encryption-key candidate if it has
-		// both a non-blank "kid" AND a non-blank "alg" -- entries without "alg"
-		// are silently filtered out, so without this the candidate list ends up
-		// empty and the wallet rejects the request with InvalidClientMetaData
-		// ("No encryption JWKs were advertised").
-		if err := publicJWK.Set("alg", "ECDH-ES"); err != nil {
-			return nil, nil, err
-		}
-		return existing, publicJWK, nil
+		return ephemeralKeyPair(existing)
 	}
 
 	privKey, err := ecdh.P256().GenerateKey(rand.Reader)
@@ -300,29 +295,49 @@ func (c *Client) EphemeralEncryptionKey(ctx context.Context, kid string) (jwk.Ke
 		return nil, nil, err
 	}
 
-	c.cacheService.EphemeralEncryptionKey.Set(ctx, kid, privateJWK)
-
-	pub := privKey.Public()
-
-	publicJWK, err := jwk.Import(pub)
+	stored, err := c.cacheService.EphemeralEncryptionKey.SetNX(ctx, kid, privateJWK)
 	if err != nil {
-		return nil, nil, err
+		// Propagated rather than swallowed. A cache that would not take
+		// the key is a request this server cannot decrypt the answer to,
+		// and signing it anyway produces a flow that fails much later
+		// with nothing to point at.
+		c.log.Error(err, "failed to store the ephemeral encryption key", "kid", kid)
+		return nil, nil, fmt.Errorf("storing the ephemeral encryption key for %q: %w", kid, err)
+	}
+	if !stored {
+		// Another caller got there first. Its key is the one the cache
+		// holds and therefore the only one that can decrypt anything, so
+		// this caller signs with that rather than with the key it just
+		// generated and is about to throw away.
+		winner, ok := c.cacheService.EphemeralEncryptionKey.Get(ctx, kid)
+		if !ok {
+			return nil, nil, fmt.Errorf("the ephemeral encryption key for %q was taken by another caller and is already gone", kid)
+		}
+		return ephemeralKeyPair(winner)
 	}
 
+	return ephemeralKeyPair(privateJWK)
+}
+
+// ephemeralKeyPair returns the private key as stored and the public half a
+// wallet will accept.
+func ephemeralKeyPair(privateJWK jwk.Key) (jwk.Key, jwk.Key, error) {
+	publicJWK, err := privateJWK.PublicKey()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to derive public key from ephemeral key: %w", err)
+	}
 	if err := publicJWK.Set("use", "enc"); err != nil {
 		return nil, nil, err
 	}
-
-	if err := publicJWK.Set("kid", kid); err != nil {
-		return nil, nil, err
-	}
-
-	// See the comment on the cache-hit branch above: the wallet requires "alg"
-	// on the JWK itself, not just at the top-level authorization_encrypted_response_alg.
+	// The reference wallet's ClientMetaDataValidator (eudi-lib-jvm-openid4vp-kt)
+	// only treats a jwks entry as a viable encryption-key candidate if it has
+	// both a non-blank "kid" AND a non-blank "alg" -- entries without "alg"
+	// are silently filtered out, so without this the candidate list ends up
+	// empty and the wallet rejects the request with InvalidClientMetaData
+	// ("No encryption JWKs were advertised").
 	if err := publicJWK.Set("alg", "ECDH-ES"); err != nil {
 		return nil, nil, err
 	}
-
 	return privateJWK, publicJWK, nil
 }
 

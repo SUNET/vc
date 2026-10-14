@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -393,6 +394,105 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		result, err = store.GetByID(ctx, "contract-extend-1")
 		require.NoError(t, err)
 		assert.Equal(t, extended, result.ExpiresAt, "ExtendExpiry must never shorten")
+	})
+
+	// The issuer-initiated handle has to be replaced BY the opened
+	// exchange, in one mutation.
+	//
+	// Claiming and then persisting as two writes has a failure mode with
+	// no recovery: the claim lands, the persist does not, and the document
+	// has lost its issuer_state without ever gaining an auth_session - so
+	// the prepared issuance is unreachable by either handle and nothing,
+	// including the issuer that prepared it, can get it back. There is no
+	// state in which that is true here, because there is only one write.
+	t.Run("ClaimIssuerState", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:   "contract-issuer-1",
+			Code:        "contract-issuer-code-1",
+			IssuerState: "contract-issuer-handle-1",
+		}))
+
+		opened, err := store.GetByID(ctx, "contract-issuer-1")
+		require.NoError(t, err)
+		toStore := *opened
+		toStore.AuthSession = "contract-issuer-auth-session-1"
+		toStore.AuthSessionDPoPThumbprint = "contract-issuer-thumbprint-1"
+		toStore.WalletClientID = "wallet-1"
+
+		claimed, err := store.ClaimIssuerState(ctx, "contract-issuer-handle-1", &toStore)
+		require.NoError(t, err)
+		require.NotNil(t, claimed)
+		assert.Empty(t, claimed.IssuerState)
+		assert.Equal(t, "contract-issuer-auth-session-1", claimed.AuthSession)
+		assert.Equal(t, "wallet-1", claimed.WalletClientID)
+
+		// The handle is spent and the exchange is open, both at once:
+		// there is no observable moment with neither.
+		_, err = store.Get(ctx, &AuthorizationContext{IssuerState: "contract-issuer-handle-1"})
+		assert.ErrorIs(t, err, ErrNoDocuments)
+
+		byHandle, err := store.Get(ctx, &AuthorizationContext{AuthSession: "contract-issuer-auth-session-1"})
+		require.NoError(t, err, "the exchange the claim opened must be resolvable by its auth_session")
+		assert.Equal(t, "contract-issuer-1", byHandle.SessionID)
+
+		// Exactly one claimant: an issuance prepared for one Holder opens
+		// one exchange, not one per wallet that scans the offer.
+		second, err := store.ClaimIssuerState(ctx, "contract-issuer-handle-1", &toStore)
+		assert.ErrorIs(t, err, ErrNoDocuments)
+		assert.Nil(t, second)
+	})
+
+	t.Run("ClaimIssuerState_Concurrent", func(t *testing.T) {
+		require.NoError(t, store.Save(ctx, &AuthorizationContext{
+			SessionID:   "contract-issuer-race",
+			Code:        "contract-issuer-race-code",
+			IssuerState: "contract-issuer-handle-race",
+		}))
+
+		base, err := store.GetByID(ctx, "contract-issuer-race")
+		require.NoError(t, err)
+
+		const contenders = 8
+		var (
+			start     sync.WaitGroup
+			finished  sync.WaitGroup
+			succeeded atomic.Int32
+		)
+		start.Add(1)
+		finished.Add(contenders)
+
+		for i := range contenders {
+			go func() {
+				defer finished.Done()
+				opened := *base
+				opened.AuthSession = fmt.Sprintf("contract-issuer-race-session-%d", i)
+				start.Wait()
+				claimed, err := store.ClaimIssuerState(ctx, "contract-issuer-handle-race", &opened)
+				if err == nil && claimed != nil {
+					succeeded.Add(1)
+				}
+			}()
+		}
+		start.Done()
+		finished.Wait()
+
+		assert.Equal(t, int32(1), succeeded.Load(),
+			"exactly one of %d concurrent claimants may open the prepared issuance", contenders)
+	})
+
+	t.Run("ClaimIssuerState_Unknown", func(t *testing.T) {
+		claimed, err := store.ClaimIssuerState(ctx, "contract-issuer-never-prepared",
+			&AuthorizationContext{SessionID: "contract-issuer-1"})
+		assert.ErrorIs(t, err, ErrNoDocuments)
+		assert.Nil(t, claimed)
+	})
+
+	t.Run("ClaimIssuerState_Empty", func(t *testing.T) {
+		_, err := store.ClaimIssuerState(ctx, "", &AuthorizationContext{SessionID: "contract-issuer-1"})
+		assert.Error(t, err)
+
+		_, err = store.ClaimIssuerState(ctx, "contract-issuer-handle-1", nil)
+		assert.Error(t, err)
 	})
 
 	t.Run("ClaimAuthSession_Empty", func(t *testing.T) {
