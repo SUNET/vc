@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"reflect"
 	"slices"
@@ -361,11 +362,105 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 	//
 	// So the test is not "did it decode" but "does it encode back to what
 	// arrived". Anything that does not is kept as it stands.
+	if ambiguous := ambiguousConstraintMembers(data); len(ambiguous) > 0 {
+		return &DCQLValidationError{
+			Field: strings.Join(ambiguous, ", "),
+			Message: "named more than once, and JSON decoders disagree about which value wins; " +
+				"a request whose constraint depends on the reader is one this verifier will not sign",
+		}
+	}
 	if hasDuplicateMembers(data) || !q.encodesBackTo(data) {
 		*q = CredentialQuery{Raw: append(json.RawMessage(nil), data...)}
 		q.adoptRawShadow()
 	}
 	return nil
+}
+
+// ambiguousConstraintMembers names the members that decide what a request
+// is LIMITED TO and appear more than once.
+//
+// A duplicate is a parser differential: encoding/json keeps the last
+// value, other decoders keep the first, and the two disagree about what
+// the document says. For most members that is a curiosity this verifier
+// passes through, because sending a malformed request is how a wallet
+// gets tested. For the members validation reads it is not.
+//
+// {"format":"dc+sd-jwt","meta":{},"meta":{"vct_values":["urn:x"]}} is the
+// shape: Go validates against the LAST meta, finds a constraint, signs
+// and sends - while a first-wins wallet reads an unconstrained SD-JWT
+// request and may return anything it holds. The query arrives at the
+// ingress from a browser, so that is attacker-reachable over-disclosure,
+// reached through the very escape hatch added to preserve malformed
+// requests.
+//
+// So these are refused rather than carried, wherever they come from. A
+// request whose constraint depends on who is reading it is not one to
+// sign on anybody's behalf - and the negative-test cases that matter
+// (the rulebook's own uniqueness rules on req ids and handles) are deeper
+// in the document and still pass through untouched.
+func ambiguousConstraintMembers(data []byte) []string {
+	members, ok := topLevelMemberNames(data)
+	if !ok {
+		return nil
+	}
+
+	var ambiguous []string
+	for _, name := range []string{"format", "meta"} {
+		if members[name] > 1 {
+			ambiguous = append(ambiguous, name)
+		}
+	}
+
+	// And inside meta, where the constraint itself lives. Only the last
+	// one can be read back, which is the same reading validation uses, so
+	// checking it is enough to catch a constraint that differs between
+	// decoders.
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(data, &envelope); err == nil {
+		if nested, present := envelope["meta"]; present {
+			if inner, ok := topLevelMemberNames(nested); ok {
+				for _, name := range slices.Sorted(maps.Keys(inner)) {
+					if inner[name] > 1 {
+						ambiguous = append(ambiguous, "meta."+name)
+					}
+				}
+			}
+		}
+	}
+	slices.Sort(ambiguous)
+	return slices.Compact(ambiguous)
+}
+
+// topLevelMemberNames counts how often each member name appears in a JSON
+// object, without descending into it.
+func topLevelMemberNames(data []byte) (map[string]int, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, false
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '{' {
+		return nil, false
+	}
+
+	counts := map[string]int{}
+	for decoder.More() {
+		name, err := decoder.Token()
+		if err != nil {
+			return nil, false
+		}
+		text, ok := name.(string)
+		if !ok {
+			return nil, false
+		}
+		counts[text]++
+		if _, err := scanForDuplicateMembers(decoder); err != nil {
+			return nil, false
+		}
+	}
+	return counts, true
 }
 
 // hasDuplicateMembers reports whether any object in data names the same
@@ -515,6 +610,16 @@ func jsonEquivalent(a, b []byte) bool {
 func NewRawCredentialQuery(raw json.RawMessage) (CredentialQuery, error) {
 	if !json.Valid(raw) {
 		return CredentialQuery{}, fmt.Errorf("credential query: raw is not valid JSON")
+	}
+	if ambiguous := ambiguousConstraintMembers(raw); len(ambiguous) > 0 {
+		// Refused here as well as on the decode path. A request whose
+		// constraint depends on the reader is not one to sign on
+		// anybody's behalf, and allowing it here would also mean a query
+		// that works on the replica that built it and nowhere else,
+		// since the decode path refuses to read it back.
+		return CredentialQuery{}, fmt.Errorf(
+			"credential query: %s named more than once, and JSON decoders disagree about which value wins",
+			strings.Join(ambiguous, ", "))
 	}
 	query := CredentialQuery{Raw: append(json.RawMessage(nil), raw...)}
 	query.adoptRawShadow()

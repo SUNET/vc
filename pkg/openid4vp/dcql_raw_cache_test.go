@@ -418,7 +418,6 @@ func TestDuplicateMembersGoRawAndSurvive(t *testing.T) {
 	}{
 		{"a duplicate at the top level", `{"id":"first","id":"last","format":"circuit_zk","meta":{"doctype_value":"d"}}`, true},
 		{"a duplicate nested inside a req param", `{"id":"q","format":"circuit_zk","meta":{},"req":[{"id":"f","return":"h","params":{"p":1,"p":2}}]}`, true},
-		{"a duplicate inside meta", `{"id":"q","format":"mso_mdoc","meta":{"doctype_value":"a","doctype_value":"b"}}`, true},
 
 		// The same NAME in two different objects is not a duplicate. A
 		// scanner that missed this would push every ordinary req down the
@@ -506,5 +505,77 @@ func TestInvalidModelledMembersAreNotLaunderedIntoRaw(t *testing.T) {
 			}
 			require.NoError(t, err)
 		})
+	}
+}
+
+// A duplicate is a parser differential, and for the members that decide
+// what a request is LIMITED TO that is not a curiosity to pass through.
+//
+// {"format":"dc+sd-jwt","meta":{},"meta":{"vct_values":["urn:x"]}} is the
+// shape: Go validates against the last meta, finds a constraint, and
+// signs - while a first-wins wallet reads an unconstrained SD-JWT request
+// and may return anything it holds. The query reaches the ingress from a
+// browser, so that is attacker-reachable over-disclosure, through the
+// very escape hatch added to preserve malformed requests.
+//
+// Refused wherever it comes from, including the constructor: a request
+// whose constraint depends on who is reading it is not one to sign on
+// anybody's behalf.
+func TestAmbiguousConstraintMembersAreRefused(t *testing.T) {
+	for _, tc := range []struct{ name, query, want string }{
+		{
+			name:  "two metas, the second constraining",
+			query: `{"id":"q","format":"dc+sd-jwt","meta":{},"meta":{"vct_values":["urn:x"]}}`,
+			want:  "meta",
+		},
+		{
+			name:  "and the other way round, which a last-wins reader finds unconstrained",
+			query: `{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]},"meta":{}}`,
+			want:  "meta",
+		},
+		{
+			name:  "two formats",
+			query: `{"id":"q","format":"circuit_zk","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]}}`,
+			want:  "format",
+		},
+		{
+			name:  "a duplicate of the constraint itself",
+			query: `{"id":"q","format":"mso_mdoc","meta":{"doctype_value":"a","doctype_value":"b"}}`,
+			want:  "meta.doctype_value",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var query CredentialQuery
+			err := json.Unmarshal([]byte(tc.query), &query)
+			require.Error(t, err, "this must not be signed, and must not be carried as raw either")
+			assert.Contains(t, err.Error(), tc.want)
+
+			// And the explicit, trusted construction path refuses it too -
+			// otherwise it would build a query the decode path cannot read
+			// back, which works on one replica and nowhere else.
+			_, err = NewRawCredentialQuery(json.RawMessage(tc.query))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// Duplicates that do NOT decide what the request is limited to still pass
+// through, because sending a malformed request is how a wallet gets
+// tested - and the rulebook's own uniqueness rules, on req ids and
+// handles, are exactly there.
+func TestDuplicatesThatDoNotDecideTheConstraintStillPass(t *testing.T) {
+	for _, in := range []string{
+		`{"id":"first","id":"last","format":"circuit_zk","meta":{"doctype_value":"d"}}`,
+		`{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":[{"id":"f","return":"h","params":{"p":1,"p":2}}]}`,
+		`{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":[{"id":"a","return":"h","id":"b"}]}`,
+	} {
+		var query CredentialQuery
+		require.NoErrorf(t, json.Unmarshal([]byte(in), &query), "%s", in)
+		require.NotNilf(t, query.Raw, "%s", in)
+
+		out, err := json.Marshal(query)
+		require.NoError(t, err)
+		assert.Equal(t, in, string(out), "both members have to reach the wallet")
 	}
 }
