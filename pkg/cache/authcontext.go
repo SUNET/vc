@@ -392,14 +392,26 @@ func (c *MemoryStore) ExtendExpiry(ctx context.Context, query *AuthorizationCont
 		return ErrNoDocuments
 	}
 
-	doc := item.Value()
-	if doc.ExpiresAt >= expiresAt {
+	stored := item.Value()
+	if stored.ExpiresAt >= expiresAt {
 		return nil
 	}
-	doc.ExpiresAt = expiresAt
 
-	c.cache.Set(sessionID, doc, ttlcache.DefaultTTL)
-	c.updateIndices(doc)
+	// A COPY, replacing the cached pointer, rather than a write through
+	// it.
+	//
+	// Get hands out the pointer this cache holds and returns before the
+	// caller is done with it, so a reader can be looking at the document
+	// while this runs - /authorize reads ExpiresAt on a context it fetched
+	// a moment earlier, and two overlapping authorization requests put a
+	// read and this write on the same field. The lock here does not help:
+	// the reader never takes it, because it is not calling this store at
+	// all any more, it is holding a pointer it was given.
+	updated := *stored
+	updated.ExpiresAt = expiresAt
+
+	c.cache.Set(sessionID, &updated, ttlcache.DefaultTTL)
+	c.updateIndices(&updated)
 
 	return nil
 }
@@ -878,14 +890,18 @@ func (c *MemoryStore) SetAuthProvider(ctx context.Context, sessionID string, fie
 		return ErrNoDocuments
 	}
 
-	doc := item.Value()
-	doc.AuthProvider = fields.AuthProvider
-	doc.DataSource = fields.DataSource
-	doc.RemoteName = fields.RemoteName
-	doc.AuthenticSource = fields.AuthenticSource
+	// Copied for the same reason ExtendExpiry copies: a caller holding a
+	// pointer Get handed out would otherwise see these four fields change
+	// underneath it, and /authorize is exactly such a caller - it reads
+	// the context, then this runs against the same session.
+	updated := *item.Value()
+	updated.AuthProvider = fields.AuthProvider
+	updated.DataSource = fields.DataSource
+	updated.RemoteName = fields.RemoteName
+	updated.AuthenticSource = fields.AuthenticSource
 
-	c.cache.Set(sessionID, doc, ttlcache.DefaultTTL)
-	c.updateIndices(doc)
+	c.cache.Set(sessionID, &updated, ttlcache.DefaultTTL)
+	c.updateIndices(&updated)
 
 	return nil
 }
