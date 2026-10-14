@@ -7,6 +7,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -250,6 +251,74 @@ func unknownMembers(data []byte, known ...string) (map[string]any, error) {
 // sequence key silently, neither of which should be how a verifier's
 // configuration is interpreted.
 
+// yamlValue decodes a YAML value while keeping each numeric scalar's
+// ORIGINAL TEXT.
+//
+// yaml.v2 resolves a non-integer scalar to a float64 and discards the
+// lexeme (vendor/gopkg.in/yaml.v2/resolve.go), so a configured
+// 1.00000000000000001 is already 1 by the time any check here could look
+// at it - and a check downstream then sees a value that is perfectly
+// stable, because the damage is upstream of it. Integers survive yaml.v2
+// intact; it is the decimals that do not.
+//
+// A req param is an input to a proof, so this is the one place in the
+// configuration where that matters: the wallet hashes what it is given,
+// and a parameter that quietly became a different number yields a
+// different pseudonym.
+//
+// The lexeme is recoverable because yaml.v2 will decode any scalar into a
+// string field. When it is also a valid JSON number it is carried as a
+// json.Number, which encodes back out as exactly those digits. When it is
+// not - YAML's 0x10, 1_000, .inf have no JSON spelling - the resolved
+// value is kept, since inventing one would be worse than the rounding.
+type yamlValue struct{ value any }
+
+func (v *yamlValue) UnmarshalYAML(unmarshal func(any) error) error {
+	var typed any
+	if err := unmarshal(&typed); err != nil {
+		return err
+	}
+	switch typed.(type) {
+	case int, int64, uint64, float64:
+		var lexeme string
+		if err := unmarshal(&lexeme); err == nil && isJSONNumber(lexeme) {
+			v.value = json.Number(lexeme)
+			return nil
+		}
+	case map[any]any:
+		var mapping map[any]yamlValue
+		if err := unmarshal(&mapping); err == nil {
+			out := make(map[any]any, len(mapping))
+			for key, item := range mapping {
+				out[key] = item.value
+			}
+			v.value = out
+			return nil
+		}
+	case []any:
+		var sequence []yamlValue
+		if err := unmarshal(&sequence); err == nil {
+			out := make([]any, len(sequence))
+			for i, item := range sequence {
+				out[i] = item.value
+			}
+			v.value = out
+			return nil
+		}
+	}
+	v.value = typed
+	return nil
+}
+
+// isJSONNumber reports whether literal is spelled the way JSON spells a
+// number. YAML admits several that JSON does not.
+func isJSONNumber(literal string) bool {
+	if _, err := strconv.ParseFloat(literal, 64); err != nil {
+		return false
+	}
+	return json.Valid([]byte(literal))
+}
+
 // MarshalYAML flattens Extra alongside the known members.
 func (r ReqItem) MarshalYAML() (any, error) {
 	m := map[string]any{"id": r.ID, "return": r.Return}
@@ -267,6 +336,29 @@ func (r *ReqItem) UnmarshalYAML(unmarshal func(any) error) error {
 		return fmt.Errorf("req item: %w", err)
 	}
 	*r = ReqItem(known)
+
+	// Params is decoded a second time, keeping each numeric scalar's
+	// original text. See yamlValue: yaml.v2 resolves a non-integer scalar
+	// to a float64 before anything here runs, so the lexeme is the only
+	// place the configured precision still exists.
+	var lexemes struct {
+		Params yamlValue `yaml:"params"`
+	}
+	if err := unmarshal(&lexemes); err == nil && lexemes.Params.value != nil {
+		if params, ok := lexemes.Params.value.(map[any]any); ok {
+			r.Params = nil
+			for key, item := range params {
+				name, ok := key.(string)
+				if !ok {
+					return fmt.Errorf("req item params: %v is not a string key, and has no JSON spelling", key)
+				}
+				if r.Params == nil {
+					r.Params = make(map[string]any, len(params))
+				}
+				r.Params[name] = item
+			}
+		}
+	}
 
 	// Params is an open tree, so it needs the same walk Extra gets. The
 	// struct tag puts it in a map[string]any, but yaml.v2 leaves every

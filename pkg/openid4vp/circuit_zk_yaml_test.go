@@ -355,3 +355,90 @@ some_future_format:
 	require.NoError(t, yamlv2.Unmarshal(reencoded, &again))
 	assert.Equal(t, formats.Extra, again.Extra)
 }
+
+// A req param is an input to a proof, and yaml.v2 resolves a non-integer
+// scalar to a float64 before anything here can look at it - so the
+// configured precision is gone upstream of every check, and the check
+// downstream sees a value that is perfectly stable because the damage
+// already happened.
+//
+// Integers survive yaml.v2 intact. It is the decimals that do not, which
+// is why this pins both.
+func TestReqItemParamsKeepTheConfiguredDigits(t *testing.T) {
+	for _, tc := range []struct{ name, in, want, wantLiteral string }{
+		{
+			name:        "a decimal yaml.v2 would round",
+			in:          "id: f\nreturn: h\nparams:\n  p: 1.00000000000000001\n",
+			want:        `{"id":"f","return":"h","params":{"p":1.00000000000000001}}`,
+			wantLiteral: "1.00000000000000001",
+		},
+		{
+			name:        "an ordinary decimal",
+			in:          "id: f\nreturn: h\nparams:\n  p: 0.1\n",
+			want:        `{"id":"f","return":"h","params":{"p":0.1}}`,
+			wantLiteral: "0.1",
+		},
+		{
+			name:        "a large integer, which survived already",
+			in:          "id: f\nreturn: h\nparams:\n  p: 9007199254740993\n",
+			want:        `{"id":"f","return":"h","params":{"p":9007199254740993}}`,
+			wantLiteral: "9007199254740993",
+		},
+		{
+			name:        "nested inside a mapping",
+			in:          "id: f\nreturn: h\nparams:\n  outer:\n    p: 1.00000000000000001\n",
+			want:        `{"id":"f","return":"h","params":{"outer":{"p":1.00000000000000001}}}`,
+			wantLiteral: "1.00000000000000001",
+		},
+		{
+			name:        "and inside a sequence",
+			in:          "id: f\nreturn: h\nparams:\n  list:\n    - 1.00000000000000001\n",
+			want:        `{"id":"f","return":"h","params":{"list":[1.00000000000000001]}}`,
+			wantLiteral: "[1.00000000000000001]",
+		},
+		{
+			name:        "a string stays a string",
+			in:          "id: f\nreturn: h\nparams:\n  p: \"1.00000000000000001\"\n",
+			want:        `{"id":"f","return":"h","params":{"p":"1.00000000000000001"}}`,
+			wantLiteral: `"1.00000000000000001"`,
+		},
+		{
+			name:        "and a bool is untouched",
+			in:          "id: f\nreturn: h\nparams:\n  p: true\n",
+			want:        `{"id":"f","return":"h","params":{"p":true}}`,
+			wantLiteral: "true",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var item ReqItem
+			require.NoError(t, yamlv2.Unmarshal([]byte(tc.in), &item))
+			encoded, err := json.Marshal(item)
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(encoded))
+
+			// JSONEq parses both sides as float64, so it cannot see the
+			// digits it was given - it passes on a rounded value. The
+			// literal has to be checked as text.
+			assert.Contains(t, string(encoded), tc.wantLiteral,
+				"the configured digits have to reach the wire, not a float64's rendering of them")
+		})
+	}
+}
+
+// A spelling YAML allows and JSON does not keeps the resolved value:
+// inventing a JSON spelling for it would be a worse answer than the
+// rounding.
+func TestReqItemParamsFallBackForNonJSONSpellings(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"hexadecimal", "id: f\nreturn: h\nparams:\n  p: 0x10\n", `{"id":"f","return":"h","params":{"p":16}}`},
+		{"octal", "id: f\nreturn: h\nparams:\n  p: 0o17\n", `{"id":"f","return":"h","params":{"p":15}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var item ReqItem
+			require.NoError(t, yamlv2.Unmarshal([]byte(tc.in), &item))
+			encoded, err := json.Marshal(item)
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(encoded))
+		})
+	}
+}
