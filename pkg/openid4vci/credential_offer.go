@@ -40,8 +40,14 @@ func (c *CredentialOfferParameters) Marshal() ([]byte, error) {
 
 // GrantAuthorizationCode authorization code grant
 type GrantAuthorizationCode struct {
-	IssuerState         string `json:"issuer_state" bson:"issuer_state"`
-	AuthorizationServer string `json:"authorization,omitempty" bson:"authorization_server,omitempty"`
+	IssuerState string `json:"issuer_state" bson:"issuer_state"`
+	// AuthorizationServer is "authorization_server", not "authorization":
+	// OpenID4VCI 1.0 §4.1.1 names it the same in both grants, and the
+	// pre-authorized one below already spelled it correctly. Under the old
+	// spelling this member was written and read under a name no other
+	// implementation uses, so an offer naming a particular Authorization
+	// Server was silently ignored by every wallet including ours.
+	AuthorizationServer string `json:"authorization_server,omitempty" bson:"authorization_server,omitempty"`
 }
 
 // GrantPreAuthorizedCode authorization code grant

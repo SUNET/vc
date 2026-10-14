@@ -257,6 +257,26 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "authorization/consent/callback", http.StatusNotModified, s.endpointOAuthAuthorizationConsentCallback)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgOAuthSession, http.MethodGet, "authorization/consent/svg-template", http.StatusOK, s.endpointOAuthAuthorizationConsentSvgTemplate)
 
+	// Authorization Challenge Endpoint with rate limiting, on the Token
+	// Endpoint's pattern and its budget.
+	//
+	// It is the one endpoint in this flow that does real work before the
+	// caller has proved anything: an initial request allocates an
+	// authorization context, generates an ephemeral P-256 key and signs a
+	// request object, and none of that is behind a secret the caller had
+	// to already hold. Whoever reaches the token or credential endpoints
+	// is bounded there; whoever only ever asks for challenges was not
+	// bounded anywhere.
+	challengeRPM := 20
+	if s.cfg.APIGW.RateLimit != nil && s.cfg.APIGW.RateLimit.AuthorizationChallengeRequestsPerMinute > 0 {
+		challengeRPM = s.cfg.APIGW.RateLimit.AuthorizationChallengeRequestsPerMinute
+	}
+	challengeRL := httphelpers.NewRateLimiter(s.cacheService.RateLimit, challengeRPM)
+	rgChallengeSession := rgRoot.Group("")
+	rgChallengeSession.Use(s.httpHelpers.Middleware.UserSession(s.sessionsName, s.sessionsAuthKey, s.sessionsEncKey, s.sessionsOptions))
+	rgChallengeSession.Use(challengeRL.Middleware())
+	s.httpHelpers.Server.RegEndpoint(ctx, rgChallengeSession, http.MethodPost, strings.TrimPrefix(model.AuthorizationChallengePath, "/"), http.StatusOK, s.endpointOAuthAuthorizationChallenge)
+
 	// Token endpoint with rate limiting (most restrictive — sensitive operation)
 	tokenRPM := 20
 	if s.cfg.APIGW.RateLimit != nil && s.cfg.APIGW.RateLimit.TokenRequestsPerMinute > 0 {
@@ -324,6 +344,11 @@ func New(ctx context.Context, cfg *model.Cfg, apiv1 *apiv1.Client, tracer *trace
 	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodDelete, "/mapping", http.StatusOK, s.endpointIdentityMappingDelete)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodGet, "/mapping/search", http.StatusOK, s.endpointIdentityMappingSearch)
 	s.httpHelpers.Server.RegEndpoint(ctx, rgIdentity, http.MethodPost, "/mapping/bulk", http.StatusOK, s.endpointIdentityMappingBulkCreate)
+
+	// Issuer-initiated Interactive Authorization: a caller that has
+	// already authenticated the user prepares an issuance and says who
+	// may complete it.
+	s.httpHelpers.Server.RegEndpoint(ctx, rgAPIv1, http.MethodPost, "/issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
 
 	// Datastore endpoints
 	rgDatastore := rgAPIv1.Group("/datastore")

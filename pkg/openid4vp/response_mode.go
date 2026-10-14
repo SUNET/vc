@@ -121,3 +121,30 @@ func (r *RequestObject) WithDCAPIRequest(expectedOrigin string) *RequestObject {
 
 	return &variant
 }
+
+// WithInteractiveAuthorization returns a copy of r as OpenID4VCI 1.1
+// Interactive Authorization requires it.
+//
+// The draft defines the request by difference: "the same as for requests
+// passed to the Digital Credentials API ... except" the response mode, and
+// except that expected_origins, if present, carries only the derived Origin
+// of the Authorization Challenge Endpoint. So this is WithDCAPIRequest with
+// the response mode replaced, and deliberately not a second construction of
+// the same object - the two channels have to stay the same request seen
+// through different delivery paths.
+//
+// responseMode is passed in rather than taken from the constants here
+// because its spelling is configurable (CS01_07); it is expected to be one
+// of ResponseModeIAPost or ResponseModeIAPostJWT, or whatever a deployment
+// has renamed those to.
+//
+// The copy is SHALLOW, with the same constraint on callers that
+// WithDCAPIRequest documents: treat both objects as immutable once created.
+func (r *RequestObject) WithInteractiveAuthorization(responseMode, expectedOrigin string) *RequestObject {
+	variant := r.WithDCAPIRequest(expectedOrigin)
+	if variant == nil {
+		return nil
+	}
+	variant.ResponseMode = responseMode
+	return variant
+}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SUNET/vc/internal/apigw/apiv1"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -26,6 +27,14 @@ type parAPI struct {
 	unimplementedApiv1
 	got   *openid4vci.PARRequest
 	calls int
+}
+
+func (p *parAPI) PrepareIssuance(context.Context, *apiv1.PrepareIssuanceRequest) (*apiv1.PrepareIssuanceReply, error) {
+	return nil, nil
+}
+
+func (p *parAPI) OAuthAuthorizationChallenge(context.Context, *apiv1.AuthorizationChallengeRequest) (*apiv1.AuthorizationChallengeResponse, error) {
+	return nil, nil
 }
 
 func (p *parAPI) OAuthPar(_ context.Context, req *openid4vci.PARRequest) (*openid4vci.ParResponse, error) {

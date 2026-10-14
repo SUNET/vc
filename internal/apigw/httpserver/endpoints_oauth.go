@@ -88,6 +88,51 @@ func (s *Service) endpointOAuthPar(ctx context.Context, c *gin.Context) (any, er
 	return reply, nil
 }
 
+// endpointOAuthAuthorizationChallenge is the Authorization Challenge
+// Endpoint (OpenID4VCI 1.1 Interactive Authorization).
+//
+// It renders *apiv1.AuthorizationChallengeError itself rather than handing
+// it to the shared error renderer: the Interaction Required Response is a
+// 403 whose body carries the whole next step of the flow -
+// interaction_type_required, auth_session and the OpenID4VP request - and a
+// renderer that only knows error/error_description would drop all three.
+func (s *Service) endpointOAuthAuthorizationChallenge(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointOAuthAuthorizationChallenge")
+	defer span.End()
+
+	request := &apiv1.AuthorizationChallengeRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "binding error")
+		return nil, err
+	}
+
+	// draft-ietf-oauth-attestation-based-client-auth §3.1, and RFC 9449 §4
+	// for the DPoP proof that binds the auth_session.
+	request.ClientAttestation = c.GetHeader("OAuth-Client-Attestation")
+	request.ClientAttestationPoP = c.GetHeader("OAuth-Client-Attestation-PoP")
+	request.DPOP = c.GetHeader("DPoP")
+
+	// Every response from this endpoint carries an authorization code or
+	// the material for one - draft-ietf-oauth-first-party-apps §5.2 says
+	// no-store, and so does every example in OpenID4VCI 1.1.
+	c.Header("Cache-Control", "no-store")
+
+	reply, err := s.apiv1.OAuthAuthorizationChallenge(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		var challengeErr *apiv1.AuthorizationChallengeError
+		if errors.As(err, &challengeErr) {
+			c.AbortWithStatusJSON(challengeErr.HTTPStatus, challengeErr)
+			return nil, nil
+		}
+		s.log.Error(err, "authorization challenge error")
+		return nil, err
+	}
+
+	return reply, nil
+}
+
 func (s *Service) endpointOAuthAuthorize(ctx context.Context, c *gin.Context) (any, error) {
 	ctx, span := s.tracer.Start(ctx, "httpserver:endpointAuthorize")
 	defer span.End()
@@ -613,6 +658,37 @@ func (s *Service) endpointOAuthAuthorizationConsentSvgTemplate(ctx context.Conte
 	}
 
 	c.SetAccepted("application/json")
+
+	return reply, nil
+}
+
+// endpointPrepareIssuance is the issuer-initiated half of Interactive
+// Authorization: a caller that has already authenticated the user asks
+// this server to prepare an issuance, and says which Holder may complete
+// it.
+//
+// On the admin API, behind the same authentication every other /api/v1
+// route is behind. That is where it belongs rather than being a public
+// endpoint: it is the Issuer talking to itself about a user it has
+// already authenticated, and anyone who could call it unauthenticated
+// could prepare an issuance naming any Holder they liked.
+func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (any, error) {
+	ctx, span := s.tracer.Start(ctx, "httpserver:endpointPrepareIssuance")
+	defer span.End()
+
+	request := &apiv1.PrepareIssuanceRequest{}
+	if err := s.httpHelpers.Binding.Request(ctx, c, request); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "binding error")
+		return nil, err
+	}
+
+	reply, err := s.apiv1.PrepareIssuance(ctx, request)
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		s.log.Error(err, "prepare issuance error")
+		return nil, err
+	}
 
 	return reply, nil
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 	"github.com/SUNET/vc/pkg/testsupport/jwktest"
+	"github.com/lestrrat-go/jwx/v3/jwk"
 
 	jwtv5 "github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
@@ -60,6 +61,26 @@ type testEnvironment struct {
 	issuedAccessToken     string
 	deferredTransactionID string
 	deferredReady         bool
+
+	// Interactive Authorization (OpenID4VCI 1.1)
+	challengeRequests  []url.Values
+	challengeKey       jwk.Key
+	iaInteractionType  string
+	iaRequireIA        bool
+	iaMetadataSpelling string
+
+	// iaIgnoreOfferedTypes makes the mock issuer demand its interaction
+	// whatever the wallet advertised, which is the server behaviour
+	// interaction_types_supported exists to make visible.
+	iaIgnoreOfferedTypes bool
+
+	// offerIssuerState makes /credential-offer serve an issuer-initiated
+	// offer whose authorization_code grant carries a FRESH issuer_state on
+	// every fetch, which is what a real prepared issuance does. Two runs
+	// of one scenario must then present two different handles.
+	offerIssuerState  bool
+	offersServed      int
+	offerStatesServed []string
 }
 
 type vpResponseCapture struct {
@@ -141,14 +162,27 @@ func (env *testEnvironment) setupIssuerServer() {
 
 	// Credential offer
 	mux.HandleFunc("GET /credential-offer", func(w http.ResponseWriter, r *http.Request) {
+		grants := map[string]any{
+			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
+				"pre-authorized_code": "test-pre-auth-code-abc",
+			},
+		}
+
+		env.mu.Lock()
+		if env.offerIssuerState {
+			env.offersServed++
+			state := fmt.Sprintf("issuer-state-%d", env.offersServed)
+			env.offerStatesServed = append(env.offerStatesServed, state)
+			grants = map[string]any{
+				"authorization_code": map[string]any{"issuer_state": state},
+			}
+		}
+		env.mu.Unlock()
+
 		offer := openid4vci.CredentialOfferParameters{
 			CredentialIssuer:           env.issuerServer.URL,
 			CredentialConfigurationIDs: []string{"test_credential"},
-			Grants: map[string]any{
-				"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
-					"pre-authorized_code": "test-pre-auth-code-abc",
-				},
-			},
+			Grants:                     grants,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(offer)
@@ -210,9 +244,17 @@ func (env *testEnvironment) setupIssuerServer() {
 		var req openid4vci.DeferredCredentialRequest
 		json.Unmarshal(body, &req)
 
-		if !env.deferredReady {
+		// Under the lock: the test flips deferredReady from its own
+		// goroutine while this handler is serving the wallet's polls, so
+		// reading it bare is a race - one the race detector reports as
+		// soon as anything in this package is run with -race.
+		env.mu.Lock()
+		ready, transactionID := env.deferredReady, env.deferredTransactionID
+		env.mu.Unlock()
+
+		if !ready {
 			resp := openid4vci.CredentialResponse{
-				TransactionID: env.deferredTransactionID,
+				TransactionID: transactionID,
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(resp)
@@ -255,15 +297,86 @@ func (env *testEnvironment) setupOAuth2Server() {
 
 	// OAuth2 server metadata
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
-		meta := map[string]string{
+		meta := map[string]any{
 			"issuer":                                env.oauth2Server.URL,
 			"authorization_endpoint":                env.oauth2Server.URL + "/authorize",
 			"token_endpoint":                        env.oauth2Server.URL + "/token",
 			"pushed_authorization_request_endpoint": env.oauth2Server.URL + "/par",
 			"nonce_endpoint":                        env.oauth2Server.URL + "/nonce",
 		}
+
+		// Interactive Authorization, advertised under whichever spelling
+		// this test is exercising - a wallet has to read both, since the
+		// draft's change log and its normative text disagree
+		// (openid/OpenID4VCI#811).
+		if env.iaMetadataSpelling != "" {
+			endpoint, require := "authorization_challenge_endpoint", "require_interactive_authorization"
+			if env.iaMetadataSpelling == "changelog" {
+				endpoint, require = "interactive_authorization_endpoint", "require_interactive_authorization_request"
+			}
+			meta[endpoint] = env.oauth2Server.URL + "/authorize-challenge"
+			if env.iaRequireIA {
+				meta[require] = true
+			}
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(meta)
+	})
+
+	// Authorization Challenge Endpoint
+	mux.HandleFunc("POST /authorize-challenge", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+
+		env.mu.Lock()
+		env.challengeRequests = append(env.challengeRequests, r.Form)
+		env.mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+
+		// An intermediate request carries the answer to the last
+		// interaction; the first does not.
+		if r.FormValue("auth_session") == "" {
+			required := env.iaInteractionType
+			if required == "" {
+				required = "urn:openid:dcp:ia:openid4vp_presentation"
+			}
+
+			if !env.iaIgnoreOfferedTypes && !strings.Contains(r.FormValue("interaction_types_supported"), required) {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{
+					"error":             "missing_interaction_type",
+					"error_description": "interaction_types_supported is missing " + required,
+				})
+				return
+			}
+
+			body := map[string]any{
+				"error":                     "insufficient_authorization",
+				"interaction_type_required": required,
+				"auth_session":              "test-auth-session",
+			}
+			if required == "urn:openid:dcp:ia:auth_via_web" {
+				delete(body, "auth_session")
+				body["request_uri"] = "urn:ietf:params:oauth:request_uri:test-ia"
+				body["expires_in"] = 60
+			} else {
+				body["openid4vp_request"] = env.interactiveAuthorizationRequest()
+			}
+
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(body)
+			return
+		}
+
+		if r.FormValue("openid4vp_response") == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_request"})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]string{"authorization_code": "test-ia-code"})
 	})
 
 	// Token endpoint
@@ -276,6 +389,14 @@ func (env *testEnvironment) setupOAuth2Server() {
 			"code":                r.FormValue("code"),
 			"client_id":           r.FormValue("client_id"),
 			"redirect_uri":        r.FormValue("redirect_uri"),
+			// PKCE's working half. The wallet computed a challenge and
+			// never sent the verifier, and nothing captured it here, so
+			// neither side noticed.
+			"code_verifier": r.FormValue("code_verifier"),
+			// The Authorization Challenge Endpoint binds every exchange
+			// to a DPoP key, so a code that came out of one cannot be
+			// redeemed without proving the same key.
+			"dpop": r.Header.Get("DPoP"),
 		}
 
 		env.mu.Lock()
@@ -368,6 +489,13 @@ func (env *testEnvironment) setupVerifierServer() {
 // createMockSDJWT generates a minimal SD-JWT for testing (header.payload.sig~disclosure~)
 func createMockSDJWT(t *testing.T) string {
 	t.Helper()
+	return createMockSDJWTWithVCT(t, "urn:credential:test")
+}
+
+// createMockSDJWTWithVCT is the same credential under a chosen type, for
+// tests that need one a particular DCQL query actually asks for.
+func createMockSDJWTWithVCT(t *testing.T, vct string) string {
+	t.Helper()
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
@@ -375,7 +503,7 @@ func createMockSDJWT(t *testing.T) string {
 	token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, jwtv5.MapClaims{
 		"iss": "https://issuer.example.com",
 		"iat": time.Now().Unix(),
-		"vct": "urn:credential:test",
+		"vct": vct,
 		"cnf": map[string]any{
 			"jwk": jwktest.PublicKeyJWK(&key.PublicKey),
 		},

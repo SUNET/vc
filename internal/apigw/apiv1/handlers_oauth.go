@@ -24,6 +24,29 @@ import (
 	"github.com/google/uuid"
 )
 
+// requestURITTL bounds how long a request_uri may be left unredeemed.
+//
+// It is short because it protects one round trip: the wallet has the value
+// in hand already and only has to open a browser with it.
+const requestURITTL = 60 * time.Second
+
+// authorizationCodeTTL is how long an authorization code lives once
+// /authorize has consumed the request_uri that produced it.
+//
+// It covers the browser leg - authenticating at an IdP, the consent
+// screen, the redirect back - and the wallet's redemption at the Token
+// Endpoint afterwards, so it is measured in minutes rather than the
+// seconds a request_uri gets.
+//
+// requestURITTL + authorizationCodeTTL must stay inside
+// cache.AuthContextTTL, the physical lifetime of the document the deadline
+// is written on: MongoDB's TTL index is anchored to created_at and is not
+// moved by extending expires_at, so a deadline past that window would
+// advertise a code whose context has already been deleted.
+// TestAuthorizationCodeTTLFitsTheAuthContextLifetime holds the three to
+// that relationship.
+const authorizationCodeTTL = 5 * time.Minute
+
 // OAuthPar implements OAuth 2.0 Pushed Authorization Request (PAR)
 // https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-authorization-endpoint
 //
@@ -72,6 +95,21 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest, "code_challenge is required for public clients", 400)
 	}
 
+	// A deployment that advertises require_interactive_authorization is
+	// telling every wallet that reads its metadata that this is the only
+	// accepted path to issuance. Leaving the browser-mediated path working
+	// anyway would make that statement false - and a false statement in
+	// metadata is worse than an absent one, because a wallet that believed
+	// it gave up a flow that would have worked.
+	//
+	// Here rather than at /authorize: PAR is where a wallet-initiated
+	// authorization begins, so refusing here costs the wallet one round
+	// trip instead of sending a user to a browser first.
+	if c.cfg.APIGW.Delivery.InteractiveAuthorization.Required() {
+		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
+			"this server accepts only interactive authorization; use the authorization challenge endpoint", 400)
+	}
+
 	// Reject scopes that are configured for pre-authorized issuance only,
 	// so a wallet cannot initiate the flow itself.
 	if sources, lookupErr := c.cfg.APIGW.DataSources.LookupCredentialSources(req.Scope); lookupErr == nil {
@@ -107,7 +145,7 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 		ClientID:             fmt.Sprintf("x509_san_dns:%s", host),
 		WalletClientID:       req.ClientID,
 		WalletURI:            req.RedirectURI,
-		ExpiresAt:            time.Now().Add(60 * time.Second).Unix(),
+		ExpiresAt:            time.Now().Add(requestURITTL).Unix(),
 		DynamicParams:        req.DynamicParams,
 	}
 
@@ -132,7 +170,7 @@ func (c *Client) OAuthPar(ctx context.Context, req *openid4vci.PARRequest) (*ope
 
 	reply := &openid4vci.ParResponse{
 		RequestURI: requestURI,
-		ExpiresIn:  60,
+		ExpiresIn:  int(requestURITTL.Seconds()),
 	}
 
 	return reply, nil
@@ -179,6 +217,31 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 		return nil, errors.New("not allowed")
 	}
 
+	// The request_uri's life ends here; the authorization code's begins.
+	//
+	// Both are kept in one ExpiresAt, which is checked at PAR-time length
+	// again at the Token Endpoint - so without this a code is dead
+	// requestURITTLSeconds after the request_uri was issued, however long
+	// the browser leg in between actually took. Authenticating at an IdP
+	// and reading a consent screen routinely takes longer than that, and
+	// the wallet's redemption is then refused for a code it did nothing
+	// wrong to obtain.
+	//
+	// Extending here rather than when the code is minted is deliberate:
+	// this is the one place every browser-mediated flow passes through,
+	// whether the request_uri came from /op/par or from the auth_via_web
+	// interaction, and it is the moment the short deadline has done its
+	// job. It only ever extends (see ExtendExpiry), so re-entering
+	// /authorize cannot shorten a deadline, and authorizationCodeTTL is
+	// bounded so the extended deadline stays inside the store's own
+	// lifetime - see the constant.
+	codeExpiresAt := time.Now().Add(authorizationCodeTTL).Unix()
+	if err := c.cacheService.AuthContext.ExtendExpiry(ctx,
+		&cache.AuthorizationContext{RequestURI: req.RequestURI}, codeExpiresAt); err != nil {
+		c.log.Error(err, "failed to extend authorization context expiry", "request_uri", req.RequestURI)
+		return nil, err
+	}
+
 	var redirectURL string
 	if !authorizationContext.Consent {
 		redirectURL = "/authorization/consent"
@@ -195,6 +258,38 @@ func (c *Client) OAuthAuthorize(ctx context.Context, req *openid4vci.AuthorizeRe
 	c.log.Debug("Authorize", "authorization", authorizationContext)
 
 	return reply, nil
+}
+
+// lookupCodeBeforeConsuming resolves an authorization code for one of the
+// checks that run BEFORE the code is consumed.
+//
+// Those checks exist because forfeiture is irreversible: a request with
+// the wrong client_id, redirect_uri, transaction code or DPoP key must be
+// refused without burning a code the legitimate wallet still needs. That
+// only works if "the store could not answer" is distinguished from "there
+// is no such code":
+//
+//   - absent (ErrNoDocuments) returns (nil, nil). The caller decides what
+//     that means - usually to carry on and let consumption answer, which
+//     gives a code that never existed and one already spent the same reply,
+//     as it should.
+//   - anything else is the store failing, and is reported as server_error.
+//     Reporting it as invalid_grant would tell a wallet its code is dead
+//     over a connection reset, and a wallet that believes that discards a
+//     code that was still good; silently skipping the check would let the
+//     request it was meant to refuse proceed to forfeiture.
+func (c *Client) lookupCodeBeforeConsuming(ctx context.Context, code string) (*cache.AuthorizationContext, error) {
+	doc, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code})
+	switch {
+	case err == nil:
+		return doc, nil
+	case errors.Is(err, cache.ErrNoDocuments):
+		return nil, nil
+	default:
+		c.log.Error(err, "failed to look up authorization code before consuming it")
+		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"failed to look up the authorization code", 500, err)
+	}
 }
 
 // OAuthToken implements OAuth 2.0 token endpoint for credential issuance
@@ -404,39 +499,11 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	// This ensures a stolen code cannot be consumed without a valid DPoP proof.
 	var dpopThumbprint string
 	if req.DPOP != "" {
-		dpop, dpopErr := oauth2.ValidateAndParseDPoPJWT(req.DPOP)
-		if dpopErr != nil {
-			c.log.Error(dpopErr, "dpop validation error")
-			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidDPoPProof,
-				dpopErr.Error(), 400, dpopErr)
-		}
-
-		dpopThumbprint = dpop.Thumbprint
-
-		unique, err := c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true)
+		var err error
+		dpopThumbprint, err = c.dpopProofThumbprint(ctx, req.DPOP, c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint)
 		if err != nil {
-			c.log.Error(err, "DPoP JTI cache error", "jti", dpop.JTI)
-			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
-				"internal error checking DPoP JTI", 500, err)
+			return nil, err
 		}
-		if !unique {
-			c.log.Error(nil, "DPoP JTI replay detected", "jti", dpop.JTI)
-			return nil, oauth2.OAuthErrJTIReplay
-		}
-
-		// Validate HTU matches token endpoint
-		if dpop.HTU != c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint {
-			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
-				fmt.Sprintf("invalid htu: expected %s, got %s", c.cfg.APIGW.Delivery.OpenID4VCI.TokenEndpoint, dpop.HTU), 400)
-		}
-
-		// Validate HTM is POST (token endpoint only accepts POST)
-		if dpop.HTM != "POST" {
-			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
-				fmt.Sprintf("invalid htm: expected POST, got %s", dpop.HTM), 400)
-		}
-
-		c.log.Debug("DPoP claims", "jti", dpop.JTI, "htu", dpop.HTU, "htm", dpop.HTM)
 	} else if !isPreAuthFlow {
 		return nil, oauth2.OAuthErrDPoPRequired
 	}
@@ -453,10 +520,15 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	// (RFC 6749 §4.1.3). A mismatched client_id must not burn the code, otherwise
 	// an attacker with a stolen code could invalidate it for the legitimate client.
 	if !isPreAuthFlow {
-		preCheck, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code})
+		preCheck, err := c.lookupCodeBeforeConsuming(ctx, code)
 		if err != nil {
-			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
-				"Authorization code is invalid or has already been used", 400, err)
+			return nil, err
+		}
+		if preCheck == nil {
+			// No such code. Answered by the consumption below, which gives
+			// the same reply for a code that never existed as for one
+			// already spent - and that is the reply to give.
+			preCheck = &cache.AuthorizationContext{}
 		}
 		// Reject cross-grant use: a pre-authorized code must not be redeemable
 		// via authorization_code (which would bypass the tx_code check).
@@ -477,10 +549,14 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 	// Validate transaction code (PIN) BEFORE consuming the pre-authorized code
 	// so wrong-PIN attempts do not burn the code (OID4VCI §6.3).
 	if isPreAuthFlow {
-		preCheck, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{Code: code})
+		preCheck, err := c.lookupCodeBeforeConsuming(ctx, code)
 		if err != nil {
-			return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
-				"Authorization code is invalid or has already been used", 400, err)
+			return nil, err
+		}
+		if preCheck == nil {
+			// No such pre-authorized code. Same reply as one already spent.
+			return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+				"Authorization code is invalid or has already been used", 400)
 		}
 		// Reject cross-grant use: a plain authorization_code context must not
 		// be redeemable via the pre-authorized_code grant.
@@ -551,6 +627,35 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		}
 	}
 
+	// A code that came out of an Interactive Authorization exchange carries
+	// that exchange's DPoP key, and must be redeemed with it.
+	//
+	// Checked BEFORE the code is consumed, and that ordering is the whole
+	// of it: forfeiture is irreversible, so refusing after it would let
+	// anyone holding the code burn it with any valid proof - the bound
+	// wallet then finds its own redemption refused, having done nothing
+	// wrong. The read is not atomic with the consumption below, but it does
+	// not need to be: it only ever refuses, and a concurrent request that
+	// slipped past it still meets the same check on the consumed document.
+	//
+	// Everything else here binds the ACCESS TOKEN to whatever key signed
+	// the proof on this request, which says nothing about who obtained the
+	// authorization. Without this, a flow opened with key A yields a code
+	// that key B can spend - and the association OpenID4VCI 1.1 §5.2 and
+	// draft-ietf-oauth-first-party-apps ask for between auth_session and a
+	// DPoP key is only worth having if the same key turns up here.
+	if !isPreAuthFlow {
+		bound, lookupErr := c.lookupCodeBeforeConsuming(ctx, code)
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
+		if bound != nil {
+			if err := c.checkInteractiveAuthorizationBinding(bound, dpopThumbprint); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	// Now consume the authorization code (after DPoP and client binding are validated)
 	var authorizationContext *cache.AuthorizationContext
 	var err error
@@ -570,6 +675,13 @@ func (c *Client) OAuthToken(ctx context.Context, req *openid4vci.TokenRequest) (
 		c.log.Error(err, "failed to get authorization")
 		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
 			"Authorization code is invalid or has already been used", 400, err)
+	}
+
+	// Again on the consumed document, which is the authoritative one: the
+	// pre-consumption read above protects the code from being burned, this
+	// is what actually gates the token.
+	if err := c.checkInteractiveAuthorizationBinding(authorizationContext, dpopThumbprint); err != nil {
+		return nil, err
 	}
 	c.log.Debug("Token", "state", authorizationContext.State)
 
@@ -1102,6 +1214,72 @@ type walletClientAuth struct {
 // the same way, and duplicating sixty lines of attestation handling - PoP
 // requirements, subject binding, SPOCP tier policy - is how two endpoints
 // come to disagree about who may ask for what.
+// checkInteractiveAuthorizationBinding refuses a redemption whose DPoP key
+// is not the one the authorization was obtained under.
+//
+// A context carrying no recorded thumbprint never came from an Interactive
+// Authorization exchange, and is unaffected.
+func (c *Client) checkInteractiveAuthorizationBinding(authCtx *cache.AuthorizationContext, dpopThumbprint string) error {
+	if authCtx == nil || authCtx.AuthSessionDPoPThumbprint == "" {
+		return nil
+	}
+	if authCtx.AuthSessionDPoPThumbprint == dpopThumbprint {
+		return nil
+	}
+
+	c.log.Error(nil, "authorization code redeemed with a different DPoP key than the exchange it came from",
+		"session_id", authCtx.SessionID)
+	return oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
+		"authorization code must be redeemed with the key its authorization was obtained under", 400)
+}
+
+// dpopProofThumbprint validates one DPoP proof and returns the JWK
+// thumbprint of the key it was signed with, which is what an issued
+// artefact is then bound to (RFC 9449 §4).
+//
+// htu is the absolute URL of the endpoint the proof must name. It is a
+// parameter rather than a field read here because the check is what stops a
+// proof minted for one endpoint being replayed at another, and an endpoint
+// that passed the wrong URL - or the same URL for two endpoints - would
+// silently give that away.
+//
+// The proof's jti is BURNED here, so this must be called exactly once per
+// request: a second call for the same proof is indistinguishable from a
+// replay and is refused as one.
+func (c *Client) dpopProofThumbprint(ctx context.Context, proof, htu string) (string, error) {
+	dpop, err := oauth2.ValidateAndParseDPoPJWT(proof)
+	if err != nil {
+		c.log.Error(err, "dpop validation error")
+		return "", oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidDPoPProof, err.Error(), 400, err)
+	}
+
+	unique, err := c.cacheService.DPopJTI.SetNX(ctx, dpop.JTI, true)
+	if err != nil {
+		c.log.Error(err, "DPoP JTI cache error", "jti", dpop.JTI)
+		return "", oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"internal error checking DPoP JTI", 500, err)
+	}
+	if !unique {
+		c.log.Error(nil, "DPoP JTI replay detected", "jti", dpop.JTI)
+		return "", oauth2.OAuthErrJTIReplay
+	}
+
+	if dpop.HTU != htu {
+		return "", oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
+			fmt.Sprintf("invalid htu: expected %s, got %s", htu, dpop.HTU), 400)
+	}
+
+	// Every endpoint that takes a DPoP proof here is POST-only.
+	if dpop.HTM != "POST" {
+		return "", oauth2.NewOAuthError(oauth2.ErrCodeInvalidDPoPProof,
+			fmt.Sprintf("invalid htm: expected POST, got %s", dpop.HTM), 400)
+	}
+
+	c.log.Debug("DPoP claims", "jti", dpop.JTI, "htu", dpop.HTU, "htm", dpop.HTM)
+
+	return dpop.Thumbprint, nil
+}
+
 func (c *Client) authenticateOAuthClient(ctx context.Context, req *walletClientAuth) (*oauth2.Client, error) {
 	oauthClient, err := c.cfg.APIGW.Delivery.OpenID4VCI.Clients.Allow(req.ClientID, req.RedirectURI, req.Scope)
 	if err == nil {

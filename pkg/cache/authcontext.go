@@ -102,6 +102,12 @@ func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error
 	if doc.RequestObjectID != "" {
 		c.indices[fmt.Sprintf("request_object_id:%s", doc.RequestObjectID)] = doc.SessionID
 	}
+	if doc.AuthSession != "" {
+		c.indices[fmt.Sprintf("auth_session:%s", doc.AuthSession)] = doc.SessionID
+	}
+	if doc.IssuerState != "" {
+		c.indices[fmt.Sprintf("issuer_state:%s", doc.IssuerState)] = doc.SessionID
+	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.Token.AccessToken)] = doc.SessionID
 	}
@@ -117,12 +123,19 @@ func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error
 
 // Get retrieves an authorization context by query fields
 func (c *MemoryStore) Get(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.getLocked(query)
+}
+
+// getLocked is the body Get and GetSnapshot share: resolve the query to a
+// session id and hand back the stored document. Both hold the read lock,
+// which is what makes GetSnapshot's copy safe against a concurrent claim.
+func (c *MemoryStore) getLocked(query *AuthorizationContext) (*AuthorizationContext, error) {
 	if query == nil {
 		return nil, errors.New("query cannot be nil")
 	}
-
-	c.mu.RLock()
-	defer c.mu.RUnlock()
 
 	var sessionID string
 
@@ -145,6 +158,10 @@ func (c *MemoryStore) Get(ctx context.Context, query *AuthorizationContext) (*Au
 			indexKey = fmt.Sprintf("ephemeral_key_id:%s", query.EphemeralEncryptionKeyID)
 		} else if query.RequestObjectID != "" {
 			indexKey = fmt.Sprintf("request_object_id:%s", query.RequestObjectID)
+		} else if query.AuthSession != "" {
+			indexKey = fmt.Sprintf("auth_session:%s", query.AuthSession)
+		} else if query.IssuerState != "" {
+			indexKey = fmt.Sprintf("issuer_state:%s", query.IssuerState)
 		} else {
 			return nil, errors.New("query must have at least one search field")
 		}
@@ -163,6 +180,36 @@ func (c *MemoryStore) Get(ctx context.Context, query *AuthorizationContext) (*Au
 	}
 
 	return item.Value(), nil
+}
+
+// GetSnapshot resolves a context the way Get does and returns a COPY.
+//
+// Get hands back the stored document itself, which is what lets a caller
+// mutate it and persist with Update - the pattern this codebase is built
+// on. It also means a caller reading those fields races with any
+// concurrent claim mutating the same struct, and several requests reach
+// the Authorization Challenge Endpoint with one issuer_state while one of
+// them is consuming it.
+//
+// A caller cannot take that copy for itself: it has to be made under the
+// read lock that excludes the writers, and only the store holds it. So
+// this is a separate method rather than a change to Get - callers that
+// read-modify-Update still need the document, and giving every one of
+// them a snapshot would turn their Update into a lost update against any
+// in-store mutation that landed in between.
+//
+// The copy is shallow. That is enough here because nothing mutates a
+// context's slices or sub-objects in place; they are replaced whole.
+func (c *MemoryStore) GetSnapshot(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	doc, err := c.getLocked(query)
+	if err != nil {
+		return nil, err
+	}
+	snapshot := *doc
+	return &snapshot, nil
 }
 
 // GetWithAccessToken retrieves an authorization context by access token
@@ -367,6 +414,39 @@ func (c *MemoryStore) Consent(ctx context.Context, query *AuthorizationContext) 
 	return nil
 }
 
+// ExtendExpiry moves the expiry of the context request_uri names out to
+// expiresAt. See AuthContextStore.ExtendExpiry.
+func (c *MemoryStore) ExtendExpiry(ctx context.Context, query *AuthorizationContext, expiresAt int64) error {
+	if query == nil || query.RequestURI == "" {
+		return errors.New("request_uri cannot be empty")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	indexKey := fmt.Sprintf("request_uri:%s", query.RequestURI)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		return ErrNoDocuments
+	}
+
+	doc := item.Value()
+	if doc.ExpiresAt >= expiresAt {
+		return nil
+	}
+	doc.ExpiresAt = expiresAt
+
+	c.cache.Set(sessionID, doc, ttlcache.DefaultTTL)
+	c.updateIndices(doc)
+
+	return nil
+}
+
 // AddToken adds a token to an authorization context
 func (c *MemoryStore) AddToken(ctx context.Context, code string, token *Token) error {
 	if code == "" {
@@ -543,6 +623,12 @@ func (c *MemoryStore) updateIndices(doc *AuthorizationContext) {
 	if doc.RequestObjectID != "" {
 		c.indices[fmt.Sprintf("request_object_id:%s", doc.RequestObjectID)] = doc.SessionID
 	}
+	if doc.AuthSession != "" {
+		c.indices[fmt.Sprintf("auth_session:%s", doc.AuthSession)] = doc.SessionID
+	}
+	if doc.IssuerState != "" {
+		c.indices[fmt.Sprintf("issuer_state:%s", doc.IssuerState)] = doc.SessionID
+	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		c.indices[fmt.Sprintf("access_token:%s", doc.Token.AccessToken)] = doc.SessionID
 	}
@@ -696,6 +782,12 @@ func (c *MemoryStore) deleteIndices(doc *AuthorizationContext) {
 	if doc.RequestObjectID != "" {
 		delete(c.indices, fmt.Sprintf("request_object_id:%s", doc.RequestObjectID))
 	}
+	if doc.AuthSession != "" {
+		delete(c.indices, fmt.Sprintf("auth_session:%s", doc.AuthSession))
+	}
+	if doc.IssuerState != "" {
+		delete(c.indices, fmt.Sprintf("issuer_state:%s", doc.IssuerState))
+	}
 	if doc.Token != nil && doc.Token.AccessToken != "" {
 		delete(c.indices, fmt.Sprintf("access_token:%s", doc.Token.AccessToken))
 	}
@@ -736,4 +828,124 @@ func (c *MemoryStore) MarkCodeAsForfeited(ctx context.Context, id string) error 
 // Create is an alias for Save to match the Session API
 func (c *MemoryStore) Create(ctx context.Context, doc *AuthorizationContext) error {
 	return c.Save(ctx, doc)
+}
+
+// ClaimAuthSession atomically takes the Interactive Authorization handle
+// off the context it names. See AuthContextStore.ClaimAuthSession.
+func (c *MemoryStore) ClaimAuthSession(ctx context.Context, authSession string) (*AuthorizationContext, error) {
+	if authSession == "" {
+		return nil, errors.New("authSession cannot be empty")
+	}
+	return c.claimIndexedHandle("auth_session", authSession,
+		func(doc *AuthorizationContext) string { return doc.AuthSession },
+		func(doc *AuthorizationContext) {
+			// Only the handle. AuthSessionDPoPThumbprint is the binding
+			// the authorization code inherits, and the Token Endpoint
+			// checks it when the code is redeemed - clearing it here would
+			// hand out a code that any key could spend.
+			doc.AuthSession = ""
+		})
+}
+
+// ClaimIssuerState atomically takes the issuer-initiated handle off the
+// context it names. See AuthContextStore.ClaimIssuerState.
+func (c *MemoryStore) ClaimIssuerState(ctx context.Context, issuerState string) (*AuthorizationContext, error) {
+	if issuerState == "" {
+		return nil, errors.New("issuerState cannot be empty")
+	}
+	return c.claimIndexedHandle("issuer_state", issuerState,
+		func(doc *AuthorizationContext) string { return doc.IssuerState },
+		func(doc *AuthorizationContext) { doc.IssuerState = "" })
+}
+
+// ResumeIssuerState claims the issuer-initiated handle and writes the
+// resumed exchange in the same critical section. See
+// AuthContextStore.ResumeIssuerState.
+func (c *MemoryStore) ResumeIssuerState(ctx context.Context, issuerState string, resume *IssuerStateResume) (*AuthorizationContext, error) {
+	if issuerState == "" {
+		return nil, errors.New("issuerState cannot be empty")
+	}
+	if resume == nil {
+		return nil, errors.New("resume cannot be nil")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	indexKey := fmt.Sprintf("issuer_state:%s", issuerState)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		delete(c.indices, indexKey)
+		return nil, ErrNoDocuments
+	}
+
+	stored := item.Value()
+
+	// The index could name a session whose handle has already been
+	// replaced; treat that as unclaimed rather than trusting the index.
+	if stored.IssuerState != issuerState {
+		return nil, ErrNoDocuments
+	}
+
+	// Old indices first: the handle being removed and the auth_session
+	// being added both live there, and rebuilding over a stale map would
+	// leave the consumed handle resolvable.
+	c.deleteIndices(stored)
+	stored.IssuerState = ""
+	resume.applyTo(stored)
+	c.cache.Set(sessionID, stored, ttlcache.DefaultTTL)
+	c.updateIndices(stored)
+
+	resumed := *stored
+	return &resumed, nil
+}
+
+// claimIndexedHandle is the shared body of the two claims: resolve a
+// one-shot handle through its index, take it off the stored document AND
+// off the returned copy, and let exactly one caller have it.
+//
+// The handle is cleared on the returned copy too, not just the stored
+// one. The caller already has it - it is what they asked with - and
+// anything downstream that persists this document would otherwise write
+// it straight back and make the handle resolvable again. That is not
+// hypothetical: finalisePresentationVerification updates the context it
+// is handed, so a presentation-sourced scope resurrected the handle it
+// had just consumed.
+func (c *MemoryStore) claimIndexedHandle(indexPrefix, handle string, read func(*AuthorizationContext) string, clear func(*AuthorizationContext)) (*AuthorizationContext, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	indexKey := fmt.Sprintf("%s:%s", indexPrefix, handle)
+	sessionID, ok := c.indices[indexKey]
+	if !ok {
+		return nil, ErrNoDocuments
+	}
+
+	item := c.cache.Get(sessionID)
+	if item == nil {
+		delete(c.indices, indexKey)
+		return nil, ErrNoDocuments
+	}
+
+	stored := item.Value()
+
+	// The index could name a session whose handle has already been
+	// replaced; treat that as unclaimed rather than trusting the index.
+	if read(stored) != handle {
+		return nil, ErrNoDocuments
+	}
+
+	claimed := *stored
+	clear(&claimed)
+
+	clear(stored)
+	delete(c.indices, indexKey)
+	c.cache.Set(sessionID, stored, ttlcache.DefaultTTL)
+
+	return &claimed, nil
 }
