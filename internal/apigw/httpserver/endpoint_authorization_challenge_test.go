@@ -344,6 +344,32 @@ func TestEndpointPrepareIssuance_RefusesACaseVariantScope(t *testing.T) {
 	assert.Nil(t, api.seen)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
+	// U+017F LATIN SMALL LETTER LONG S. encoding/json does not compare
+	// member names with strings.ToLower - it uses a Unicode fold in which
+	// "ſ" folds to "s" (the same rule that folds U+212A KELVIN SIGN
+	// to "k") - so "ſcope" binds into Scope while an exact map lookup
+	// of "scope" sees only the member beside it. A case-folding check
+	// written with ToLower would NOT catch this, which is why the rule
+	// here is exact membership rather than any kind of folding.
+	api.seen = nil
+	w = post("{\"scope\":\"allowed_scope\",\"\u017Fcope\":\"forbidden_scope\"," + match + "}")
+	assert.Nil(t, api.seen,
+		"a Unicode fold of scope must not reach preparation either")
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+
+	// The same spelling on its own, with no member for the middleware to
+	// find at all.
+	api.seen = nil
+	w = post("{\"\u017Fcope\":\"forbidden_scope\"," + match + "}")
+	assert.Nil(t, api.seen)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	// And for authentic_source, which the authorization pair also reads.
+	api.seen = nil
+	w = post("{\"scope\":\"allowed_scope\",\"authentic_\u017Fource\":\"B\"," + match + "}")
+	assert.Nil(t, api.seen)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
 	// An ordinary body is unaffected.
 	api.seen = nil
 	w = post(`{"scope":"allowed_scope",` + match + `}`)
