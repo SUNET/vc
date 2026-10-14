@@ -754,6 +754,21 @@ func NewTrustedAuthorityOpenIDFederation(trustAnchors ...string) TrustedAuthorit
 // ValidateCredentialQuery validates that a CredentialQuery has the required fields
 // for the specified format.
 func ValidateCredentialQuery(query CredentialQuery) error {
+	// A raw query is not judged here. Its members are bytes this build does
+	// not model, so Format is empty on it - and empty Format means SD-JWT to
+	// every other reader in this package, which would make the escape hatch
+	// fail the one check standing on the live ingress (UIInteraction) with
+	// "vct_values is required". Refusing to validate is the honest answer:
+	// nothing here knows what these bytes mean.
+	if query.Raw != nil {
+		if !json.Valid(query.Raw) {
+			return &DCQLValidationError{
+				Field:   "raw",
+				Message: "a raw credential query must be valid JSON",
+			}
+		}
+		return nil
+	}
 	switch query.Format {
 	// Not FormatJwtVCJson: UIInteraction calls this on the live ingress, and
 	// the rest of the stack refuses that format - nothing issues it and the

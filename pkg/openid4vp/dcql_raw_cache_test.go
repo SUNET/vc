@@ -59,3 +59,33 @@ func TestInvalidJSONIsStillRejected(t *testing.T) {
 	var query CredentialQuery
 	require.Error(t, json.Unmarshal([]byte(`{not json`), &query))
 }
+
+// The escape hatch has to get PAST the ingress, not just through the
+// serialiser. UIInteraction and the two VC 2.0 paths run every query it
+// is handed through ValidateCredentialQuery, and a raw query carries no
+// Format - which every other reader in this package reads as SD-JWT. Left
+// unguarded, the hatch fails on "vct_values is required" at the one door
+// a browser-built query arrives by.
+func TestValidateDoesNotJudgeARawQuery(t *testing.T) {
+	for _, tc := range []struct{ name, query string }{
+		{"the WIP shape, claims as an object", `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`},
+		{"an sd-jwt query with no vct_values, which is what the SD-JWT branch refuses", `{"id":"q","format":"vc+sd-jwt","claims":{"_req":[]}}`},
+		{"meta itself of a type the model does not expect", `{"id":"q","format":"mso_mdoc","meta":"not an object"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var query CredentialQuery
+			require.NoError(t, json.Unmarshal([]byte(tc.query), &query))
+			require.NotNil(t, query.Raw, "the point of this case is that it fell back to raw")
+			assert.NoError(t, ValidateCredentialQuery(query))
+		})
+	}
+}
+
+// Not judging is not the same as not looking. Raw is emitted verbatim, so
+// bytes that are not JSON would make the whole request object unencodable
+// at send time, far from the configuration that caused it.
+func TestValidateRejectsRawThatIsNotJSON(t *testing.T) {
+	err := ValidateCredentialQuery(CredentialQuery{Raw: json.RawMessage(`{not json`)})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "raw")
+}
