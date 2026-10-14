@@ -2199,7 +2199,8 @@ verifier:
         <client_id>: "<client_secret>"
 issuer:
   seeds:
-    <key>: "<value>"
+    <key>:
+      secret: "<secret-value>"
 ```
 
 

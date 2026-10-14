@@ -24,6 +24,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/SUNET/vc/pkg/configuration"
 	"github.com/SUNET/vc/pkg/credential/seed"
 	"github.com/SUNET/vc/pkg/model"
 	"github.com/SUNET/vc/pkg/nymauth"
@@ -150,6 +151,27 @@ func loadSeedSource(configPath, name string) (seed.Source, error) {
 	if err := yaml.Unmarshal(raw, cfg); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", configPath, err)
 	}
+
+	// The secrets file, the same way the issuer reads it.
+	//
+	// Without this the recommended setup - the derivation secret in the
+	// secrets file rather than inline - lets issuance work and makes
+	// RECOVERY fail, reporting that the source sets neither secret_path
+	// nor secret. That is the worst place for this tool to break: the
+	// whole reason the issuer keeps a derivation secret is that a seed
+	// can be reproduced later, and this is what does the reproducing.
+	//
+	// Through configuration.LoadSecrets rather than a local reader, so
+	// the permission check on the secrets file is the issuer's own and
+	// the precedence between the two sources cannot drift from it.
+	if cfg.Common != nil && cfg.Common.SecretFilePath != "" {
+		secrets, err := configuration.LoadSecrets(cfg.Common.SecretFilePath, cfg.Common.SkipSecretsPermCheck)
+		if err != nil {
+			return nil, fmt.Errorf("loading the secrets file named by %s: %w", configPath, err)
+		}
+		cfg.ApplySecrets(secrets)
+	}
+
 	if cfg.Issuer == nil || len(cfg.Issuer.Seeds) == 0 {
 		return nil, fmt.Errorf("%s configures no issuer.seeds", configPath)
 	}

@@ -1065,13 +1065,26 @@ func generateSecretsExample(reg *TypeRegistry, def *StructDef, indent int) strin
 		if childDef != nil && len(childDef.Fields) > 0 {
 			buf.WriteString(fmt.Sprintf("%s%s:\n", prefix, f.Tag.YAMLName))
 			buf.WriteString(generateSecretsExample(reg, childDef, indent+1))
-		} else if _, ok := asMapType(f.TypeExpr); ok {
+		} else if mapType, ok := asMapType(f.TypeExpr); ok {
 			buf.WriteString(fmt.Sprintf("%s%s:\n", prefix, f.Tag.YAMLName))
-			if f.Tag.DocExample != "" {
+			keyPH := mapKeyPlaceholder(f.Tag)
+			switch {
+			case f.Tag.DocExample != "":
 				buf.WriteString(fmt.Sprintf("%s  %s\n", prefix, f.Tag.DocExample))
-			} else {
-				keyPH := mapKeyPlaceholder(f.Tag)
-				buf.WriteString(fmt.Sprintf("%s  %s: \"<value>\"\n", prefix, keyPH))
+			default:
+				// A map whose VALUE is a struct needs its fields under the
+				// key, not a scalar beside it. Emitting "<key>: \"<value>\""
+				// for issuer.seeds produced an example that cannot be
+				// loaded at all - the type wants an object with a secret
+				// in it - so anyone copying the documented shape broke
+				// their configuration.
+				valueDef := reg.Lookup(resolveTypeName(mapType.Value))
+				if valueDef != nil && len(valueDef.Fields) > 0 {
+					buf.WriteString(fmt.Sprintf("%s  %s:\n", prefix, keyPH))
+					buf.WriteString(generateSecretsExample(reg, valueDef, indent+2))
+				} else {
+					buf.WriteString(fmt.Sprintf("%s  %s: \"<value>\"\n", prefix, keyPH))
+				}
 			}
 		} else {
 			placeholder := secretPlaceholder(f.Tag.YAMLName)
