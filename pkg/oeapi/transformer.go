@@ -50,6 +50,7 @@ func (p *Person) Flatten() map[string]any {
 	if p.Initials != "" {
 		m["initials"] = p.Initials
 	}
+	m["activeEnrolment"] = p.ActiveEnrolment
 	if p.DateOfBirth != "" {
 		m["dateOfBirth"] = p.DateOfBirth
 	}
@@ -299,9 +300,7 @@ func (r *Result) Flatten() map[string]any {
 	if r.Score != "" {
 		m["score"] = r.Score
 	}
-	if r.Final {
-		m["final"] = r.Final
-	}
+	m["final"] = r.Final
 	if r.ResultDateTime != "" {
 		m["resultDateTime"] = r.ResultDateTime
 	}
