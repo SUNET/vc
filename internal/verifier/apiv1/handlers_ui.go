@@ -67,10 +67,19 @@ type UIPreset struct {
 
 // UIPresetCredential is a credential query within a preset.
 type UIPresetCredential struct {
-	ID          string                      `json:"id"`
-	Format      string                      `json:"format"`
-	Meta        UIPresetMeta                `json:"meta"`
-	Claims      []UIPresetClaim             `json:"claims,omitempty"`
+	ID     string          `json:"id"`
+	Format string          `json:"format"`
+	Meta   UIPresetMeta    `json:"meta"`
+	Claims []UIPresetClaim `json:"claims,omitempty"`
+	// Req is the circuit_zk format's requested calculations, from the
+	// preset's VerificationPresetScope.Req.
+	//
+	// It has to reach the browser. The picker builds the DCQL query here
+	// and posts it back, so a req that stayed server-side would leave the
+	// UI sending a circuit_zk query that asks for nothing - and such a
+	// query discloses nothing either, so the wallet would have no reason
+	// to return anything at all.
+	Req         []openid4vp.ReqItem         `json:"req,omitempty"`
 	Validations []openid4vp.ClaimValidation `json:"validations,omitempty"`
 }
 
@@ -144,7 +153,10 @@ func validZKSystemTypes(specs []openid4vp.ZKSystemTypeSpec) bool {
 // override a scope to a W3C identifier while keeping vct_values.
 func constraintFamily(format string) string {
 	switch format {
-	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk:
+	// circuit_zk is matched on doctype_value too (the nym_auth rulebook's
+	// own examples carry one), so an mdoc scope can be requested as a
+	// circuit proof over the same document.
+	case openid4vp.FormatMsoMdoc, openid4vp.FormatMsoMdocZk, openid4vp.FormatCircuitZk:
 		return "doctype"
 	// Not jwt_vc_json: DCQLMetaQuery refuses it, so calling it family-
 	// compatible here would approve an override the query builder then drops.
@@ -341,8 +353,20 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 							"preset", label, "scope", scope)
 						continue
 					}
+					// Same shape of defect for circuit_zk, from the other
+					// direction: the query discloses nothing, so every value
+					// it yields is named in req. With req empty the preset
+					// publishes a button that asks a wallet for nothing and
+					// gets nothing back - which looks like a wallet fault
+					// and is not one.
+					if scopeCfg.Format == openid4vp.FormatCircuitZk && len(scopeCfg.Req) == 0 {
+						c.log.Error(nil, "credential omitted from a verifier UI preset: circuit_zk format override with no req",
+							"preset", label, "scope", scope)
+						continue
+					}
 					uiCred.Format = scopeCfg.Format
 					uiCred.Meta.ZKSystemType = scopeCfg.ZKSystemType
+					uiCred.Req = scopeCfg.Req
 				}
 
 				// scopeCfg may be nil (scope with no overrides)
@@ -358,8 +382,19 @@ func (c *Client) UIMetadata(ctx context.Context) (*UIMetadataReply, error) {
 					uiCred.Validations = scopeCfg.Validations
 				}
 
+				// A circuit_zk query carries no claims at all - it discloses
+				// nothing, and req says what it computes. Falling through to
+				// the VCTM list below would attach every claim in the
+				// document to a query whose whole point is to reveal none of
+				// them, and an operator's explicit claims on such a scope
+				// are a configuration mistake worth not silently honouring.
+				if uiCred.Format == openid4vp.FormatCircuitZk {
+					claims = nil
+					excludeSet = nil
+				}
+
 				// Resolve claims: use explicit claims, or fall back to VCTM claims
-				if len(claims) == 0 && meta != nil {
+				if len(claims) == 0 && meta != nil && uiCred.Format != openid4vp.FormatCircuitZk {
 					if vctm := meta.GetVCTM(); vctm != nil {
 						// First pass: collect all valid paths (including array-element paths with null)
 						var allPaths [][]*string

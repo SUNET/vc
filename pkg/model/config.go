@@ -782,6 +782,27 @@ type VerificationPresetScope struct {
 	// DCQL query has no other way to say which proof system/circuit a
 	// verifier accepts. See openid4vp.ZKSystemTypeSpec's own doc comment.
 	ZKSystemType []openid4vp.ZKSystemTypeSpec `yaml:"zk_system_type,omitempty" validate:"omitempty,dive"`
+
+	// Req is the circuit_zk format's list of requested calculations -
+	// required whenever Format is "circuit_zk", since such a query
+	// discloses nothing and every value comes from a function named here.
+	//
+	// Passed through to the wire as configured. Nothing validates it
+	// unless Validate names a profile: this verifier is how wallets are
+	// tested, so a request that breaks a rulebook on purpose has to be
+	// sendable, and the specifications underneath are still moving.
+	Req []openid4vp.ReqItem `yaml:"req,omitempty" validate:"omitempty,dive"`
+
+	// Validate names a profile to check this credential's request against
+	// AT STARTUP. Empty means no checking, which is the default.
+	//
+	// Startup rather than request time, and named rather than a strict
+	// flag. An operator who wants to be told their preset violates the
+	// nym_auth rulebook asks for it by name and is told while they are
+	// still editing configuration; traffic is never validated, because a
+	// circuit_zk request that is not a nym_auth request is not invalid and
+	// this server is not the one to decide.
+	Validate string `yaml:"validate,omitempty" validate:"omitempty,oneof=nym_auth" doc_example:"\"nym_auth\""`
 }
 
 // VerificationPresetClaim defines a claim path to request within a credential.

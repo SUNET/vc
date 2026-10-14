@@ -1,0 +1,178 @@
+package openid4vp
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func nymQuery(items ...ReqItem) CredentialQuery {
+	return CredentialQuery{
+		ID: "nym_attestation", Format: FormatCircuitZk,
+		Meta: MetaQuery{DoctypeValue: "eu.europa.ec.eudi.nym_auth.1"},
+		Req:  items,
+	}
+}
+
+func pseudonymItem(params map[string]any) ReqItem {
+	return ReqItem{ID: FunctionPseudonym, Return: "nym-1", Params: params}
+}
+
+// The conformant request from the rulebook passes.
+func TestNymAuthProfileAcceptsTheRulebookExample(t *testing.T) {
+	query := nymQuery(
+		pseudonymItem(map[string]any{"config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns"}),
+		ReqItem{ID: FunctionAgeCheck, Return: "age-1", Params: map[string]any{"ge": "2008-10-10", "le": "2013-10-09"}},
+	)
+	assert.NoError(t, ValidateProfile(ProfileNymAuth, query))
+}
+
+// Each rulebook MUST, violated in turn.
+func TestNymAuthProfileRejectsEachViolation(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		query CredentialQuery
+		want  string
+	}{
+		{
+			name:  "two pseudonym items",
+			query: nymQuery(pseudonymItem(map[string]any{"config": "user-managed-pseudonym-xsite-ssc"}), ReqItem{ID: FunctionPseudonym, Return: "nym-2", Params: map[string]any{"config": "user-managed-pseudonym-xsite-ssc"}}),
+			want:  "allows one",
+		},
+		{
+			name: "two age_check items",
+			query: nymQuery(
+				ReqItem{ID: FunctionAgeCheck, Return: "a1", Params: map[string]any{"ge": "2000-01-01"}},
+				ReqItem{ID: FunctionAgeCheck, Return: "a2", Params: map[string]any{"ge": "2000-01-01"}}),
+			want: "allows one",
+		},
+		{
+			name:  "a duplicate handle",
+			query: nymQuery(ReqItem{ID: FunctionAgeCheck, Return: "same", Params: map[string]any{"ge": "2000-01-01"}}, ReqItem{ID: FunctionPseudonym, Return: "same", Params: map[string]any{"config": "user-managed-pseudonym-xsite-ssc"}}),
+			want:  "more than once",
+		},
+		{
+			name:  "an unknown function",
+			query: nymQuery(ReqItem{ID: "no-such-function", Return: "h"}),
+			want:  "not a function the nym_auth rulebook registers",
+		},
+		{
+			name:  "an unknown pseudonym configuration",
+			query: nymQuery(pseudonymItem(map[string]any{"config": "made-up", "verifier_id_type": "x509_san_dns"})),
+			want:  "not a configuration the rulebook defines",
+		},
+		{
+			name:  "no verifier_id_type where the configuration needs one",
+			query: nymQuery(pseudonymItem(map[string]any{"config": "known-offender-matching-ssc"})),
+			want:  "verifier_id_type is required",
+		},
+		{
+			name:  "a verifier_id_type where the configuration does not use one",
+			query: nymQuery(pseudonymItem(map[string]any{"config": "user-managed-pseudonym-xsite-ssc", "verifier_id_type": "x509_san_dns"})),
+			want:  "must not be present",
+		},
+		{
+			name:  "no verifier_context for account recovery",
+			query: nymQuery(pseudonymItem(map[string]any{"config": "account-recovery-ssc", "verifier_id_type": "x509_san_dns"})),
+			want:  "requires params.verifier_context",
+		},
+		{
+			name:  "a verifier_context where it is not allowed",
+			query: nymQuery(pseudonymItem(map[string]any{"config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns", "verifier_context": "x"})),
+			want:  "does not allow params.verifier_context",
+		},
+		{
+			name:  "a verifier_context past 64 bytes",
+			query: nymQuery(pseudonymItem(map[string]any{"config": "account-recovery-ssc", "verifier_id_type": "x509_san_dns", "verifier_context": string(make([]byte, 65))})),
+			want:  "1 to 64",
+		},
+		{
+			name:  "an age_check with neither bound",
+			query: nymQuery(ReqItem{ID: FunctionAgeCheck, Return: "a"}),
+			want:  "at least one of params.ge and params.le",
+		},
+		{
+			name:  "le before ge",
+			query: nymQuery(ReqItem{ID: FunctionAgeCheck, Return: "a", Params: map[string]any{"ge": "2013-10-09", "le": "2008-10-10"}}),
+			want:  "before params.ge",
+		},
+		{
+			name:  "a range under 365 days",
+			query: nymQuery(ReqItem{ID: FunctionAgeCheck, Return: "a", Params: map[string]any{"ge": "2010-01-01", "le": "2010-06-01"}}),
+			want:  "at least 365",
+		},
+		{
+			name:  "a date that is not a full-date",
+			query: nymQuery(ReqItem{ID: FunctionAgeCheck, Return: "a", Params: map[string]any{"ge": "2010-01-01T00:00:00Z"}}),
+			want:  "not an RFC 3339 full-date",
+		},
+		{
+			name:  "no req at all",
+			query: nymQuery(),
+			want:  "req is required",
+		},
+		{
+			name:  "no doctype",
+			query: CredentialQuery{Format: FormatCircuitZk, Req: []ReqItem{{ID: FunctionAgeCheck, Return: "a", Params: map[string]any{"ge": "2000-01-01"}}}},
+			want:  "meta.doctype_value is required",
+		},
+		{
+			name: "claims alongside req",
+			query: func() CredentialQuery {
+				q := nymQuery(ReqItem{ID: FunctionAgeCheck, Return: "a", Params: map[string]any{"ge": "2000-01-01"}})
+				q.Claims = []ClaimQuery{{Path: StringPath("ssc")}}
+				return q
+			}(),
+			want: "discloses nothing",
+		},
+		{
+			name:  "the wrong format",
+			query: CredentialQuery{Format: FormatMsoMdoc, Meta: MetaQuery{DoctypeValue: "d"}, Req: []ReqItem{{ID: FunctionAgeCheck, Return: "a"}}},
+			want:  "describes circuit_zk requests",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateProfile(ProfileNymAuth, tc.query)
+			require.Error(t, err, "this violates a rulebook MUST and the profile must say so")
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// Exactly 365 days is allowed; 364 is not. The rulebook counts the range
+// inclusively, so an off-by-one here silently moves where the line is.
+func TestNymAuthProfileAgeSpanBoundary(t *testing.T) {
+	// 2010-01-01 to 2010-12-31 is 365 days inclusive (2010 is not a leap year).
+	ok := nymQuery(ReqItem{ID: FunctionAgeCheck, Return: "a", Params: map[string]any{"ge": "2010-01-01", "le": "2010-12-31"}})
+	assert.NoError(t, ValidateProfile(ProfileNymAuth, ok))
+
+	short := nymQuery(ReqItem{ID: FunctionAgeCheck, Return: "a", Params: map[string]any{"ge": "2010-01-01", "le": "2010-12-30"}})
+	require.Error(t, ValidateProfile(ProfileNymAuth, short))
+}
+
+// No profile means no validation. That is the default, and it is what
+// lets this verifier send a request no rulebook would accept.
+func TestNoProfileValidatesNothing(t *testing.T) {
+	nonsense := CredentialQuery{
+		Format: FormatCircuitZk,
+		Req: []ReqItem{
+			{ID: "whatever", Return: "same"},
+			{ID: "whatever", Return: "same"},
+		},
+	}
+	assert.NoError(t, ValidateProfile("", nonsense))
+
+	err := ValidateProfile("no-such-profile", nonsense)
+	require.Error(t, err, "an unknown profile name is a configuration mistake, not a silent no-op")
+	assert.Contains(t, err.Error(), "unknown validation profile")
+}
+
+// A raw query is bytes this package does not model, so the profile says
+// it cannot check it rather than passing it as if it had.
+func TestProfileRefusesToJudgeARawQuery(t *testing.T) {
+	err := ValidateProfile(ProfileNymAuth, CredentialQuery{Raw: json.RawMessage(`{"format":"circuit_zk"}`)})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "raw query cannot be checked")
+}
