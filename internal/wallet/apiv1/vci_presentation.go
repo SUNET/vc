@@ -267,13 +267,25 @@ func (c *Client) buildIAVPTokens(ctx context.Context, ro *openid4vp.RequestObjec
 		return nil, 0, fmt.Errorf("the openid4vp_request carried no dcql_query, so there is nothing to answer")
 	}
 
+	answerable := map[string][]*credential.StoredCredential{}
+	for _, query := range ro.DCQLQuery.Credentials {
+		if matched := matchingCredentials(candidates, query); len(matched) > 0 {
+			answerable[query.ID] = matched
+		}
+	}
+
+	selected, err := selectCredentialQueries(ro.DCQLQuery, answerable)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	tokens := map[string]any{}
 	presented := 0
 	for _, query := range ro.DCQLQuery.Credentials {
-		matched := matchingCredentials(candidates, query)
-		if len(matched) == 0 {
-			return nil, 0, fmt.Errorf("no credential in this wallet satisfies the credential query %q", query.ID)
+		if !selected[query.ID] {
+			continue
 		}
+		matched := answerable[query.ID]
 		if !query.Multiple {
 			matched = matched[:1]
 		}
@@ -291,6 +303,93 @@ func (c *Client) buildIAVPTokens(ctx context.Context, ro *openid4vp.RequestObjec
 	}
 
 	return tokens, presented, nil
+}
+
+// selectCredentialQueries decides which of the request's credential
+// queries this response answers, given which of them the wallet can
+// answer at all.
+//
+// Requiring every query is only right when credential_sets is absent -
+// OpenID4VP 1.0 §6.2 makes that the default. When it is present, each set
+// lists ALTERNATIVES in its options, and satisfying one option satisfies
+// the set. Our own issuer builds exactly that: buildIssuanceAuthDCQL puts
+// each authentication scope in its own option, so a deployment offering
+// two ways to authenticate produced a request this wallet refused unless
+// the Holder happened to carry both credentials.
+//
+// A required set with no satisfiable option is reported, naming the set.
+// An optional one is skipped, which is what optional means. A query no
+// set references stays required: nothing else would ever ask for it, so
+// treating it as optional would silently drop it.
+func selectCredentialQueries(dcql *openid4vp.DCQL, answerable map[string][]*credential.StoredCredential) (map[string]bool, error) {
+	selected := map[string]bool{}
+
+	if len(dcql.CredentialSets) == 0 {
+		for _, query := range dcql.Credentials {
+			if _, ok := answerable[query.ID]; !ok {
+				return nil, fmt.Errorf("no credential in this wallet satisfies the credential query %q", query.ID)
+			}
+			selected[query.ID] = true
+		}
+		return selected, nil
+	}
+
+	referenced := map[string]bool{}
+	for setIndex, set := range dcql.CredentialSets {
+		chosen := []string(nil)
+		for _, option := range set.Options {
+			for _, id := range option {
+				referenced[id] = true
+			}
+			if chosen != nil {
+				continue
+			}
+			if optionIsAnswerable(option, answerable) {
+				chosen = option
+			}
+		}
+
+		if chosen == nil {
+			if set.IsRequired() {
+				return nil, fmt.Errorf(
+					"no credential in this wallet satisfies any option of required credential set %d", setIndex)
+			}
+			continue
+		}
+		for _, id := range chosen {
+			selected[id] = true
+		}
+	}
+
+	for _, query := range dcql.Credentials {
+		if referenced[query.ID] {
+			continue
+		}
+		if _, ok := answerable[query.ID]; !ok {
+			return nil, fmt.Errorf("no credential in this wallet satisfies the credential query %q", query.ID)
+		}
+		selected[query.ID] = true
+	}
+
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("the request's credential sets are all optional and this wallet satisfies none of them")
+	}
+	return selected, nil
+}
+
+// optionIsAnswerable reports whether every credential query in one
+// credential-set option can be answered. An option is all-or-nothing:
+// half of an alternative satisfies nothing.
+func optionIsAnswerable(option []string, answerable map[string][]*credential.StoredCredential) bool {
+	if len(option) == 0 {
+		return false
+	}
+	for _, id := range option {
+		if _, ok := answerable[id]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // presentableCredentials is the pool the DCQL query is matched against:
