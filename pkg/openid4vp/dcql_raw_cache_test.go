@@ -339,3 +339,63 @@ func TestNewRawCredentialQueryCopiesItsInput(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, string(before), string(after))
 }
+
+// escapedAmpersand is how encoding/json writes & inside a string. Built
+// rather than spelled so this file contains no escape sequence that could
+// be mistaken for the thing it describes.
+var escapedAmpersand = string(rune(92)) + "u0026"
+
+// What Raw does and does not promise.
+//
+// encoding/json post-processes whatever a MarshalJSON returns on its way
+// into the enclosing document: it compacts, and it HTML-escapes. So "the
+// exact bytes" was never true, and the semantic comparisons everywhere
+// else in this file could not have caught that. This pins the real
+// guarantee from both sides, so neither half is an assumption.
+func TestRawPreservesTheValueAndNotTheBytes(t *testing.T) {
+	// Spaced and indented the way an operator might write it, with a
+	// character encoding/json escapes inside a string value.
+	const configured = `{
+		"id": "q",
+		"format": "circuit_zk",
+		"meta": { "doctype_value": "a&b" },
+		"claims": { "_req": [] }
+	}`
+
+	query, err := NewRawCredentialQuery(json.RawMessage(configured))
+	require.NoError(t, err)
+	encoded, err := json.Marshal(&DCQL{Credentials: []CredentialQuery{query}})
+	require.NoError(t, err)
+
+	t.Run("the bytes are not preserved, and this is the documented limit", func(t *testing.T) {
+		assert.NotContains(t, string(encoded), "\n\t\t",
+			"encoding/json compacts, so an operator's layout does not reach the wire")
+		assert.NotContains(t, string(encoded), "a&b",
+			"and it HTML-escapes, so the configured text is not what appears on the wire")
+		assert.Contains(t, string(encoded), "a"+escapedAmpersand+"b",
+			"the ampersand is written as its escape")
+	})
+
+	t.Run("every member and value is preserved, which is the promise", func(t *testing.T) {
+		var decoded DCQL
+		require.NoError(t, json.Unmarshal(encoded, &decoded))
+		require.Len(t, decoded.Credentials, 1)
+
+		out, err := json.Marshal(decoded.Credentials[0])
+		require.NoError(t, err)
+		assert.JSONEq(t, configured, string(out),
+			"including claims as an object, which the typed model cannot hold")
+
+		// And the escaping is a spelling, not a change: a wallet reading
+		// it gets the string that was configured.
+		var shape struct {
+			Credentials []struct {
+				Meta struct {
+					DoctypeValue string `json:"doctype_value"`
+				} `json:"meta"`
+			} `json:"credentials"`
+		}
+		require.NoError(t, json.Unmarshal(encoded, &shape))
+		assert.Equal(t, "a&b", shape.Credentials[0].Meta.DoctypeValue)
+	})
+}

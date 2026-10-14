@@ -64,8 +64,18 @@ type CredentialQuery struct {
 	// heard of, talking to any of them means waiting for a release here.
 	Extra map[string]any `json:"-" yaml:"-"`
 
-	// Raw replaces this query entirely: when set, it is emitted as exactly
-	// these bytes and every other field is ignored.
+	// Raw replaces this query entirely: when set, it is emitted as this
+	// JSON VALUE and every other modelled member is ignored on the wire.
+	//
+	// The value, not the bytes. encoding/json compacts and HTML-escapes
+	// whatever a MarshalJSON returns, so an operator's whitespace is
+	// dropped and a & inside a string is written \u0026 - which no
+	// conformant wallet can tell apart from what was configured, and
+	// which nothing here can prevent short of re-implementing the
+	// request-object encoder. What IS guaranteed is that every member,
+	// its nesting, and every value survives unchanged, including members
+	// this build has never heard of and numeric literals it would
+	// otherwise reformat.
 	//
 	// Extra covers a shape that ADDS members. This covers one that changes
 	// the type of a member already modelled - the rulebook's WIP example
@@ -130,6 +140,9 @@ func (q *CredentialQuery) UnmarshalYAML(unmarshal func(any) error) error {
 // other than circuit_zk goes through here too, and none of them should be
 // able to tell this method exists.
 func (q CredentialQuery) MarshalJSON() ([]byte, error) {
+	// Returned as-is, which encoding/json then compacts and HTML-escapes
+	// on its way into the enclosing document. See Raw's own comment for
+	// why the guarantee is on the JSON value rather than the bytes.
 	if q.Raw != nil {
 		if q.Extra != nil {
 			return nil, fmt.Errorf("credential query: raw and extra are both set, and raw would discard extra")
@@ -148,7 +161,7 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 	type plain CredentialQuery
 	var known plain
 	if err := decodeExact(data, &known); err != nil {
-		// A shape the model cannot hold is kept verbatim rather than
+		// A shape the model cannot hold is kept as it stands rather than
 		// refused. Decoding has to be TOTAL for the escape hatch to be
 		// worth anything: a request object is JSON-encoded into the HA
 		// cache and read back by another node, so a raw query with - say -
@@ -182,7 +195,7 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 	// them, and the HA cache round trip would quietly repair them.
 	//
 	// So the test is not "did it decode" but "does it encode back to what
-	// arrived". Anything that does not is kept verbatim.
+	// arrived". Anything that does not is kept as it stands.
 	if !q.encodesBackTo(data) {
 		*q = CredentialQuery{Raw: append(json.RawMessage(nil), data...)}
 		q.adoptRawShadow()
