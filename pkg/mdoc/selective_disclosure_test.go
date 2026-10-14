@@ -266,7 +266,7 @@ func TestNewDeviceResponseBuilder(t *testing.T) {
 func TestDeviceResponseBuilder_Build_WithSignature(t *testing.T) {
 	issuerSigned := createTestIssuerSigned(t)
 	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	request := &ItemsRequest{
 		DocType: DocType,
@@ -332,7 +332,7 @@ func TestDeviceResponseBuilder_Build_WithMAC(t *testing.T) {
 	issuerSigned := createTestIssuerSigned(t)
 	macKey := make([]byte, 32)
 	rand.Read(macKey)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	builder := NewDeviceResponseBuilder(DocType).
 		WithIssuerSigned(issuerSigned).
@@ -388,7 +388,7 @@ func TestDeviceResponseBuilder_Build_MissingTranscript(t *testing.T) {
 
 func TestDeviceResponseBuilder_Build_MissingKey(t *testing.T) {
 	issuerSigned := createTestIssuerSigned(t)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	builder := NewDeviceResponseBuilder(DocType).
 		WithIssuerSigned(issuerSigned).
@@ -403,7 +403,7 @@ func TestDeviceResponseBuilder_Build_MissingKey(t *testing.T) {
 func TestDeviceResponseBuilder_AddError(t *testing.T) {
 	issuerSigned := createTestIssuerSigned(t)
 	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	// Request an element that doesn't exist
 	request := &ItemsRequest{
@@ -565,7 +565,7 @@ func TestDisclosurePolicy_CanAutoDisclose(t *testing.T) {
 func TestEncodeDecodeDeviceResponse(t *testing.T) {
 	issuerSigned := createTestIssuerSigned(t)
 	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	builder := NewDeviceResponseBuilder(DocType).
 		WithIssuerSigned(issuerSigned).
@@ -605,7 +605,7 @@ func TestEncodeDecodeDeviceResponse(t *testing.T) {
 func TestSelectiveDisclosure_RoundTrip(t *testing.T) {
 	issuerSigned := createTestIssuerSigned(t)
 	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	transcript := []byte("test session transcript")
+	transcript := testSessionTranscript()
 
 	request := &ItemsRequest{
 		DocType: DocType,

@@ -398,7 +398,7 @@ func TestMac0AndVerifyCOSEMac0(t *testing.T) {
 	}
 
 	// Verify
-	if err := VerifyCOSEMac0(mac0, key, nil); err != nil {
+	if err := VerifyCOSEMac0(mac0, key, payload, nil); err != nil {
 		t.Fatalf("VerifyCOSEMac0() error = %v", err)
 	}
 }
@@ -417,7 +417,7 @@ func TestVerifyCOSEMac0_WrongKey(t *testing.T) {
 	}
 
 	// Verify with wrong key should fail
-	if err := VerifyCOSEMac0(mac0, key2, nil); err == nil {
+	if err := VerifyCOSEMac0(mac0, key2, payload, nil); err == nil {
 		t.Error("VerifyCOSEMac0() should fail with wrong key")
 	}
 }
@@ -473,7 +473,7 @@ func TestCOSEMac0_AllAlgorithms(t *testing.T) {
 				t.Fatal("Mac0() returned nil")
 			}
 
-			if err := VerifyCOSEMac0(mac0, key, nil); err != nil {
+			if err := VerifyCOSEMac0(mac0, key, payload, nil); err != nil {
 				t.Fatalf("VerifyCOSEMac0() error = %v", err)
 			}
 		})
@@ -493,17 +493,17 @@ func TestCOSEMac0_WithExternalAAD(t *testing.T) {
 	}
 
 	// Verify with correct AAD
-	if err := VerifyCOSEMac0(mac0, key, externalAAD); err != nil {
+	if err := VerifyCOSEMac0(mac0, key, nil, externalAAD); err != nil {
 		t.Fatalf("VerifyCOSEMac0() with correct AAD error = %v", err)
 	}
 
 	// Verify with wrong AAD should fail
-	if err := VerifyCOSEMac0(mac0, key, []byte("wrong AAD")); err == nil {
+	if err := VerifyCOSEMac0(mac0, key, nil, []byte("wrong AAD")); err == nil {
 		t.Error("VerifyCOSEMac0() should fail with wrong AAD")
 	}
 
 	// Verify with nil AAD should fail
-	if err := VerifyCOSEMac0(mac0, key, nil); err == nil {
+	if err := VerifyCOSEMac0(mac0, key, nil, nil); err == nil {
 		t.Error("VerifyCOSEMac0() should fail with nil AAD when original had AAD")
 	}
 }
@@ -522,7 +522,7 @@ func TestCOSEMac0_TamperedPayload(t *testing.T) {
 	// Tamper with payload
 	mac0.Payload = []byte("tampered payload")
 
-	if err := VerifyCOSEMac0(mac0, key, nil); err == nil {
+	if err := VerifyCOSEMac0(mac0, key, nil, nil); err == nil {
 		t.Error("VerifyCOSEMac0() should fail with tampered payload")
 	}
 }

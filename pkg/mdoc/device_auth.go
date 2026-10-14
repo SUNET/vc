@@ -99,16 +99,7 @@ func (b *DeviceAuthBuilder) Build() (*DeviceSignedMdoc, error) {
 		}
 	}
 
-	// Build DeviceAuthentication structure
-	// Per ISO 18013-5: DeviceAuthentication = ["DeviceAuthentication", SessionTranscript, DocType, DeviceNameSpacesBytes]
-	deviceAuth := []any{
-		"DeviceAuthentication",
-		b.sessionTranscript,
-		b.docType,
-		deviceNameSpacesBytes,
-	}
-
-	deviceAuthBytes, err := encoder.Marshal(deviceAuth)
+	deviceAuthBytes, err := buildDeviceAuthenticationBytes(b.sessionTranscript, b.docType, deviceNameSpacesBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode device authentication: %w", err)
 	}
@@ -125,10 +116,15 @@ func (b *DeviceAuthBuilder) Build() (*DeviceSignedMdoc, error) {
 			return nil, fmt.Errorf("failed to create device MAC: %w", err)
 		}
 
+		// Null payload: ISO 18013-5 9.1.3.4 says a DeviceMac "shall use a
+		// null value for the payload" and that the detached content is
+		// DeviceAuthenticationBytes. Shipping it inline, as this did,
+		// both diverges from the specification and doubles the response
+		// size with bytes the verifier reconstructs anyway.
 		deviceSigned.DeviceAuth.DeviceMac = []any{
 			mac0.Protected,   // []byte
 			mac0.Unprotected, // map[any]any
-			mac0.Payload,     // []byte or nil
+			nil,              // detached, per 9.1.3.4
 			mac0.Tag,         // []byte
 		}
 
@@ -261,11 +257,21 @@ func (v *DeviceAuthVerifier) VerifySignature(deviceSigned *DeviceSignedMdoc, dev
 	if err != nil {
 		return fmt.Errorf("failed to build device auth bytes: %w", err)
 	}
-	if err := Verify1(&sign1, deviceAuthBytes, deviceKey, nil); err != nil {
+	if err := Verify1(&sign1, deviceAuthBytes, deviceKey, nil); err == nil {
+		return nil
+	} else if legacy, lerr := buildLegacyDeviceAuthenticationBytes(v.sessionTranscript, v.docType, nameSpacesBytes); lerr == nil {
+		// A presentation from a build of THIS code that predates the
+		// conformance fix. Accepted on the way in only - nothing signs
+		// that shape any more - so a wallet in the field keeps working
+		// while the fix propagates. Delete this with
+		// buildLegacyDeviceAuthenticationBytes once none can be in flight.
+		if Verify1(&sign1, legacy, deviceKey, nil) == nil {
+			return nil
+		}
+		return fmt.Errorf("device signature verification failed: %w", err)
+	} else {
 		return fmt.Errorf("device signature verification failed: %w", err)
 	}
-
-	return nil
 }
 
 // VerifyMAC verifies a MAC-based device authentication.
@@ -304,9 +310,15 @@ func (v *DeviceAuthVerifier) VerifyMAC(deviceSigned *DeviceSignedMdoc, sessionKe
 		return fmt.Errorf("failed to build device auth bytes: %w", err)
 	}
 
-	// Verify the MAC
-	if err := VerifyCOSEMac0(&mac0, sessionKey, nil); err != nil {
-		return fmt.Errorf("device MAC verification failed: %w", err)
+	// Verify the MAC over the detached DeviceAuthenticationBytes, falling
+	// back to the pre-conformance shape for a presentation built by an
+	// older build of this code.
+	if err := VerifyCOSEMac0(&mac0, sessionKey, deviceAuthBytes, nil); err != nil {
+		legacy, lerr := buildLegacyDeviceAuthenticationBytes(v.sessionTranscript, v.docType, nameSpacesBytes)
+		if lerr != nil || VerifyCOSEMac0(&mac0, sessionKey, legacy, nil) != nil {
+			return fmt.Errorf("device MAC verification failed: %w", err)
+		}
+		return nil
 	}
 
 	// Also verify the payload matches
@@ -322,28 +334,7 @@ func (v *DeviceAuthVerifier) VerifyMAC(deviceSigned *DeviceSignedMdoc, sessionKe
 
 // buildDeviceAuthBytes reconstructs the DeviceAuthentication bytes for verification.
 func (v *DeviceAuthVerifier) buildDeviceAuthBytes(deviceNameSpacesBytes []byte) ([]byte, error) {
-	encoder, err := NewCBOREncoder()
-	if err != nil {
-		return nil, err
-	}
-
-	// Ensure we have device namespaces bytes
-	if deviceNameSpacesBytes == nil {
-		deviceNameSpacesBytes, err = encoder.Marshal(map[string]any{})
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Build DeviceAuthentication structure
-	deviceAuth := []any{
-		"DeviceAuthentication",
-		v.sessionTranscript,
-		v.docType,
-		deviceNameSpacesBytes,
-	}
-
-	return encoder.Marshal(deviceAuth)
+	return buildDeviceAuthenticationBytes(v.sessionTranscript, v.docType, deviceNameSpacesBytes)
 }
 
 // ExtractDeviceKeyFromMSO extracts the device public key from the MSO.
