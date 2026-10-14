@@ -767,8 +767,17 @@ type PresetDefinition struct {
 // VerificationPresetScope defines optional overrides for a credential query within a preset.
 type VerificationPresetScope struct {
 	// Claims lists specific claims to request. If empty, all VCTM claims are used.
+	//
+	// Ignored entirely when the effective format is "circuit_zk". Such a
+	// query discloses no issuer-signed attribute at all - every value it
+	// yields is the output of a function named in Req - so neither these
+	// claims nor the VCTM fall-back are attached to it. Listing claims on
+	// a circuit_zk credential is a configuration mistake rather than an
+	// instruction, and is dropped rather than honoured.
 	Claims []VerificationPresetClaim `yaml:"claims,omitempty" validate:"omitempty,dive"`
 	// ExcludeClaims lists claims to exclude from the DCQL query.
+	//
+	// Also ignored for "circuit_zk", which carries no claims to exclude.
 	ExcludeClaims []VerificationPresetClaim `yaml:"exclude_claims,omitempty" validate:"omitempty,dive"`
 	// Validations are optional rules applied server-side after claims extraction
 	Validations []openid4vp.ClaimValidation `yaml:"validations,omitempty" validate:"omitempty,dive"`
