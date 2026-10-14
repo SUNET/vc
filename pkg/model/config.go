@@ -787,6 +787,28 @@ type VerificationPresetScope struct {
 	// required whenever Format is "circuit_zk", since such a query
 	// discloses nothing and every value comes from a function named here.
 	//
+	// A circuit_zk preset needs TWO things to be published: a non-empty
+	// req here, and verifier.preferred_vp_formats.circuit_zk advertising
+	// the format (an empty mapping will do - see that field). Without
+	// either, the preset is omitted and the reason is logged, rather than
+	// a button being offered that asks a wallet for a proof the request
+	// declares no support for.
+	//
+	//   verifier:
+	//     preferred_vp_formats:
+	//       circuit_zk: {}              # or a circuit filter
+	//     presets:
+	//       "Pseudonym":
+	//         credentials:
+	//           nym_auth:
+	//             format: circuit_zk
+	//             req:
+	//               - id: pseudonym-v1-sha256
+	//                 return: nym-123
+	//                 params:
+	//                   config: known-offender-matching-ssc
+	//                   verifier_id_type: x509_san_dns
+	//
 	// Passed through to the wire as configured. Nothing validates it
 	// unless Validate names a profile: this verifier is how wallets are
 	// tested, so a request that breaks a rulebook on purpose has to be
@@ -844,7 +866,16 @@ type Verifier struct {
 	AccessCertificate *AccessCertificate `yaml:"access_certificate,omitempty"`
 	// RegistrationCertificate points at a Relying Party registration certificate (WRPRC, ETSI TS 119 475) issued to this verifier by a national Registrar, to be presented to wallets in the OpenID4VP verifier_info parameter. vc does not issue these.
 	RegistrationCertificate *RegistrationCertificate `yaml:"registration_certificate,omitempty"`
-	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets
+	// PreferredVPFormats specifies informational VP formats and algorithms supported by wallets.
+	//
+	// Required for a circuit_zk preset. The circuit filter - which proof
+	// systems and circuits this Verifier will accept a proof from - lives
+	// at preferred_vp_formats.circuit_zk and nowhere else, so a preset
+	// using that format is NOT PUBLISHED unless it is set. An empty
+	// `circuit_zk: {}` is a complete answer and means "any circuit"; no
+	// default is supplied, because those identifiers are
+	// deployment-specific and guessing one would pin this Verifier to a
+	// single implementation.
 	PreferredVPFormats *openid4vp.VPFormatsSupported `yaml:"preferred_vp_formats,omitempty"`
 	// SupportedWallets holds supported wallet configurations
 	SupportedWallets map[string]string `yaml:"supported_wallets" validate:"omitempty"`
