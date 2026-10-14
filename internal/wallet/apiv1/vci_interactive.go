@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -110,6 +111,19 @@ func (c *Client) doInteractiveAuthorization(ctx context.Context, meta *oauth2Ser
 		form = url.Values{}
 		if resp.AuthSession != "" {
 			form.Set("auth_session", resp.AuthSession)
+		}
+
+		// An Issuer asking for something this wallet did not offer is the
+		// case interaction_types_supported exists to make visible, and a
+		// scenario overriding the offered list is asking to drive exactly
+		// that. Performing the interaction anyway would let a server that
+		// ignored the advertised capabilities finish the exchange, and the
+		// scenario would report success for the thing it was written to
+		// catch - after disclosing a credential to get there.
+		if !slices.Contains(c.offeredInteractionTypes(vci), resp.InteractionTypeRequired) {
+			return "", fmt.Errorf(
+				"issuer requires interaction type %q, which this wallet did not offer (it offered %v)",
+				resp.InteractionTypeRequired, c.offeredInteractionTypes(vci))
 		}
 
 		switch resp.InteractionTypeRequired {

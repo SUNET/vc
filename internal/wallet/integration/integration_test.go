@@ -69,6 +69,11 @@ type testEnvironment struct {
 	iaRequireIA        bool
 	iaMetadataSpelling string
 
+	// iaIgnoreOfferedTypes makes the mock issuer demand its interaction
+	// whatever the wallet advertised, which is the server behaviour
+	// interaction_types_supported exists to make visible.
+	iaIgnoreOfferedTypes bool
+
 	// offerIssuerState makes /credential-offer serve an issuer-initiated
 	// offer whose authorization_code grant carries a FRESH issuer_state on
 	// every fetch, which is what a real prepared issuance does. Two runs
@@ -338,7 +343,7 @@ func (env *testEnvironment) setupOAuth2Server() {
 				required = "urn:openid:dcp:ia:openid4vp_presentation"
 			}
 
-			if !strings.Contains(r.FormValue("interaction_types_supported"), required) {
+			if !env.iaIgnoreOfferedTypes && !strings.Contains(r.FormValue("interaction_types_supported"), required) {
 				w.WriteHeader(http.StatusBadRequest)
 				json.NewEncoder(w).Encode(map[string]string{
 					"error":             "missing_interaction_type",
@@ -484,6 +489,13 @@ func (env *testEnvironment) setupVerifierServer() {
 // createMockSDJWT generates a minimal SD-JWT for testing (header.payload.sig~disclosure~)
 func createMockSDJWT(t *testing.T) string {
 	t.Helper()
+	return createMockSDJWTWithVCT(t, "urn:credential:test")
+}
+
+// createMockSDJWTWithVCT is the same credential under a chosen type, for
+// tests that need one a particular DCQL query actually asks for.
+func createMockSDJWTWithVCT(t *testing.T, vct string) string {
+	t.Helper()
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
@@ -491,7 +503,7 @@ func createMockSDJWT(t *testing.T) string {
 	token := jwtv5.NewWithClaims(jwtv5.SigningMethodES256, jwtv5.MapClaims{
 		"iss": "https://issuer.example.com",
 		"iat": time.Now().Unix(),
-		"vct": "urn:credential:test",
+		"vct": vct,
 		"cnf": map[string]any{
 			"jwk": jwktest.PublicKeyJWK(&key.PublicKey),
 		},

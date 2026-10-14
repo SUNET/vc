@@ -664,3 +664,98 @@ func TestVCI_InteractiveAuthorization_ConfiguredScopeWins(t *testing.T) {
 	require.NotEmpty(t, requests)
 	assert.Equal(t, "pid", requests[0].Get("scope"))
 }
+
+// The credential this wallet presents should be one it could actually
+// have been issued.
+//
+// seedPresentableCredential writes the request's own "dc+sd-jwt" by hand,
+// so every other test here sidesteps the question. Issuance records what
+// detectFormat says instead, which is the legacy "vc+sd-jwt" - so a
+// credential obtained through the wallet's own issuance flow could never
+// satisfy a presentation request for the very type it is, and no test
+// noticed because none of them presented an issued credential.
+func TestVCI_InteractiveAuthorization_PresentsAnIssuedCredential(t *testing.T) {
+	env := setupTestEnvironment(t, func(e *testEnvironment) {
+		e.iaMetadataSpelling = "normative"
+	})
+	defer env.cleanup()
+
+	// Exactly what issuance stores: the legacy format identifier, and no
+	// vct recorded, because runVCIScenario does not read the credential.
+	env.wallet.Store().Add(&credential.StoredCredential{
+		RawCredential: createMockSDJWTWithVCT(t, "https://credentials.example.com/identity_credential"),
+		Format:        "vc+sd-jwt",
+		IssuerURL:     env.issuerServer.URL,
+		ScenarioName:  "issued",
+	})
+
+	env.addScenario(config.Scenario{
+		Name: "ia-issued-credential",
+		Type: "vci",
+		VCI: &config.VCIScenario{
+			IssuerURL:                   env.issuerServer.URL,
+			Scope:                       "pid",
+			UseInteractiveAuthorization: true,
+			CredentialConfigurationID:   "test_credential",
+		},
+	})
+
+	result, err := env.wallet.RunScenario(t.Context(), "ia-issued-credential")
+	require.NoError(t, err)
+	require.True(t, result.Success, "scenario failed: %s", result.Error)
+
+	env.mu.Lock()
+	requests := env.challengeRequests
+	env.mu.Unlock()
+	require.Len(t, requests, 2)
+
+	payload := env.decryptIAResponse(t, requests[1].Get("openid4vp_response"))
+	tokens, ok := payload["vp_token"].(map[string]any)
+	require.True(t, ok)
+	assert.Len(t, tokens["pid_auth"], 1,
+		"a credential this wallet issued itself must satisfy a request for its own type")
+}
+
+// interaction_types_supported exists so an Issuer knows what the wallet
+// can do, and a scenario overriding it is asking to drive the case where
+// the Issuer ignores that. Performing the interaction anyway would let
+// such a server finish the exchange - and the scenario would report
+// success for the very thing it was written to catch, after disclosing a
+// credential to get there.
+func TestVCI_InteractiveAuthorization_RefusesAnInteractionItDidNotOffer(t *testing.T) {
+	env := setupTestEnvironment(t, func(e *testEnvironment) {
+		e.iaMetadataSpelling = "normative"
+		// The issuer asks for a presentation regardless of what the
+		// wallet said it can do.
+		e.iaInteractionType = "urn:openid:dcp:ia:openid4vp_presentation"
+		e.iaIgnoreOfferedTypes = true
+	})
+	defer env.cleanup()
+
+	env.seedPresentableCredential(t)
+	env.addScenario(config.Scenario{
+		Name: "ia-unoffered-interaction",
+		Type: "vci",
+		VCI: &config.VCIScenario{
+			IssuerURL:                   env.issuerServer.URL,
+			Scope:                       "pid",
+			UseInteractiveAuthorization: true,
+			CredentialConfigurationID:   "test_credential",
+			// This wallet says it can only do the web leg.
+			InteractionTypes: []string{"urn:openid:dcp:ia:auth_via_web"},
+		},
+	})
+
+	result, err := env.wallet.RunScenario(t.Context(), "ia-unoffered-interaction")
+	require.NoError(t, err)
+	require.False(t, result.Success, "an issuer ignoring the advertised capabilities must not be allowed to finish")
+	assert.Contains(t, result.Error, "did not offer")
+
+	// And nothing was disclosed getting there.
+	env.mu.Lock()
+	requests := env.challengeRequests
+	env.mu.Unlock()
+	for _, r := range requests {
+		assert.Empty(t, r.Get("openid4vp_response"), "no presentation may be sent for an interaction never offered")
+	}
+}

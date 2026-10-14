@@ -461,7 +461,7 @@ func (c *Client) presentableCredentials(vci *config.VCIScenario) ([]*credential.
 func matchingCredentials(candidates []*credential.StoredCredential, query openid4vp.CredentialQuery) []*credential.StoredCredential {
 	var matched []*credential.StoredCredential
 	for _, cred := range candidates {
-		if query.Format != "" && cred.Format != query.Format {
+		if query.Format != "" && normalisedFormat(cred.Format) != normalisedFormat(query.Format) {
 			continue
 		}
 		if !credentialTypeMatches(cred, query) {
@@ -470,6 +470,25 @@ func matchingCredentials(candidates []*credential.StoredCredential, query openid
 		matched = append(matched, cred)
 	}
 	return matched
+}
+
+// normalisedFormat folds the two spellings of SD-JWT VC together.
+//
+// "dc+sd-jwt" is the current identifier and the one a DCQL query carries;
+// "vc+sd-jwt" is the legacy one, and it is what this wallet's own
+// detectFormat records for every credential it is issued. Comparing them
+// literally meant a credential obtained through issuance could never
+// satisfy a presentation request for the very type it is - the IA tests
+// only passed because their fixture writes the new spelling by hand.
+//
+// The repository already treats the two as one format elsewhere; see
+// CredentialMetadata.DCQLMetaQuery, which accepts both for the same
+// reason.
+func normalisedFormat(format string) string {
+	if format == "vc+sd-jwt" {
+		return openid4vp.FormatSDJWTVC
+	}
+	return format
 }
 
 // credentialTypeMatches applies the format-specific meta constraint.
