@@ -1559,12 +1559,13 @@ unaffected.
 
 Used in client_metadata and Wallet metadata to indicate supported formats and algorithms.
 
-| Field         | Type     | Description                                             | Example | Default | Required |
-| ------------- | -------- | ------------------------------------------------------- | ------- | ------- | -------- |
-| `ldp_vc`      | `object` | Configuration for W3C VC Data Integrity format (ldp_vc) | -       | -       | No       |
-| `jwt_vc_json` | `object` | Configuration for JWT-based W3C VC format (jwt_vc_json) | -       | -       | No       |
-| `dc+sd-jwt`   | `object` | Configuration for SD-JWT VC format (dc+sd-jwt)          | -       | -       | No       |
-| `mso_mdoc`    | `object` | Configuration for ISO mdoc format (mso_mdoc)            | -       | -       | No       |
+| Field         | Type     | Description                                                                                                                  | Example | Default | Required |
+| ------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
+| `ldp_vc`      | `object` | Configuration for W3C VC Data Integrity format (ldp_vc)                                                                      | -       | -       | No       |
+| `jwt_vc_json` | `object` | Configuration for JWT-based W3C VC format (jwt_vc_json)                                                                      | -       | -       | No       |
+| `dc+sd-jwt`   | `object` | Configuration for SD-JWT VC format (dc+sd-jwt)                                                                               | -       | -       | No       |
+| `mso_mdoc`    | `object` | Configuration for ISO mdoc format (mso_mdoc)                                                                                 | -       | -       | No       |
+| `circuit_zk`  | `object` | Configuration for zero-knowledge circuit presentations (circuit_zk): which proof systems and circuits a proof may come from. | -       | -       | No       |
 
 ### `ldp_vc`
 
@@ -1600,6 +1601,24 @@ Used in client_metadata and Wallet metadata to indicate supported formats and al
 | ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------------- | ------- | ------- | -------- |
 | `issuerauth_alg_values` | `[]int` | Non-empty array containing cryptographic algorithm identifiers supported for IssuerAuth COSE signatures.         | -       | -       | No       |
 | `deviceauth_alg_values` | `[]int` | Non-empty array containing cryptographic algorithm identifiers supported for DeviceAuth COSE signatures or MACs. | -       | -       | No       |
+
+### `circuit_zk`
+
+> **Path:** `.verifier.preferred_vp_formats.circuit_zk`
+
+vp_formats_supported: which proof systems and circuits the Verifier will
+accept a proof from.
+
+Entirely an open map, with the two known arrays as a convenience. The
+rulebook's own example wraps the same information in a
+{"fn_id":..., "input": base64(json)} envelope, and the matcher accepts
+both - so an operator talking to a wallet generation that wants the
+envelope has to be able to send it without waiting for a release here.
+
+| Field                         | Type       | Description                                               | Example                                   | Default | Required |
+| ----------------------------- | ---------- | --------------------------------------------------------- | ----------------------------------------- | ------- | -------- |
+| `circuit_proof_system_values` | `[]string` | Acceptable proof systems.                                 | `["longfellow-libzk-v1"]`                 | -       | No       |
+| `circuit_id_values`           | `[]string` | Acceptable circuit identifiers, from the circuit catalog. | `["urn:circuits:longfellow:nym_auth:v1"]` | -       | No       |
 
 ### `inbound`
 
