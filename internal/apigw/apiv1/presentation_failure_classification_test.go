@@ -27,7 +27,7 @@ func ageDerivingScope() model.PresentationScope {
 	}
 }
 
-func presentedWithBirthdate(birthdate string) map[string]any {
+func presentedWithBirthdate(birthdate any) map[string]any {
 	return map[string]any{
 		"vct":       "urn:credential:eduid:1",
 		"birthdate": birthdate,
@@ -44,9 +44,16 @@ func presentedWithBirthdate(birthdate string) map[string]any {
 // data: reporting server_error tells the wallet to retry something no
 // retry can fix, and there is nothing left to retry with.
 func TestFinalisePresentationVerification_AnUnusableBirthdateIsNotAServerFault(t *testing.T) {
-	for name, birthdate := range map[string]string{
-		"malformed":     "not-a-date",
-		"in the future": "2099-01-01",
+	// Every shape the credential can carry that the derivation cannot
+	// use. With no allow-list configured, all of them pass the
+	// required-claim check and fail inside the derivation - including the
+	// two that never reach AgeOverThresholds at all.
+	for name, birthdate := range map[string]any{
+		"malformed":            "not-a-date",
+		"in the future":        "2099-01-01",
+		"present but empty":    "",
+		"present but a number": 19901014,
+		"present but a list":   []any{"1990-10-14"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := newPresentationTestClient(t)
@@ -83,7 +90,9 @@ func TestFinalisePresentationVerification_AMisconfiguredDerivationIsAServerFault
 		t.Context(), authCtx, pScope, presentedWithBirthdate("1990-10-14"))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrIssuanceAuthServerFault,
-		"a derivation naming a claim nothing provides is a configuration fault")
+		"a derivation naming a claim nothing provides is a configuration fault - ABSENT is the "+
+			"one case here that is not the Holder's, which is why it is not enough to mark every "+
+			"derivation failure as theirs")
 
 	challengeClient := newChallengeClient(t)
 	oauthErr := &oauth2.OAuthError{}

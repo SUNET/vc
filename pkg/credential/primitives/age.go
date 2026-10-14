@@ -27,9 +27,25 @@ type AgeOverThresholdsArgs struct {
 
 // Apply implements Applier.
 func (a *AgeOverThresholdsArgs) Apply(claims map[string]any, now time.Time) (map[string]any, error) {
-	bd, ok := claims[a.Input].(string)
-	if !ok || bd == "" {
-		return nil, fmt.Errorf("input claim %q missing or not a string", a.Input)
+	// Three different situations, and only one of them is the server's.
+	//
+	// A claim that is ABSENT means this derivation names something no
+	// presentation supplies, which is how the scope was configured and
+	// nothing a Holder can do - so it stays unmarked and is reported as a
+	// server fault.
+	//
+	// A claim that is PRESENT but not a string is what the credential
+	// carried, and an empty string likewise. Both are the Holder's data,
+	// so both must reach the caller marked: the empty one through
+	// AgeOverThresholds, which already says so, and the wrong-typed one
+	// here, because it never gets that far.
+	raw, present := claims[a.Input]
+	if !present {
+		return nil, fmt.Errorf("input claim %q is not present on the credential this derivation reads", a.Input)
+	}
+	bd, ok := raw.(string)
+	if !ok {
+		return nil, fmt.Errorf("%w: input claim %q is %T, not a string", ErrInvalidClaimInput, a.Input, raw)
 	}
 	booleans, err := AgeOverThresholds(bd, now, a.Thresholds)
 	if err != nil {
