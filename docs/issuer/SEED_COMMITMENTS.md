@@ -67,6 +67,20 @@ common:
 
 A credential with no `commitments` block is issued exactly as it is today.
 
+**Formats.** Commitments are implemented for `mso_mdoc` and SD-JWT VC.
+Configuring one on any other format is refused at startup.
+
+The W3C formats are refused for a specific reason rather than for want of
+effort: `MakeVC20` signs the RDF canonical form, where a property the
+credential's JSON-LD contexts do not define expands to a relative predicate
+and is dropped, while `ToCompactJSON` returns the original JSON unchanged.
+A commitment at an undefined term would therefore be *visible in the issued
+credential and not covered by the proof over it* — alterable without
+invalidating the signature. Supporting them means resolving commitment
+paths against the pinned contexts and refusing undefined or non-absolute
+predicates, which belongs with the JSON-LD context handling rather than
+here.
+
 ### `subject` — what "the same person" means
 
 `subject` is a path into the document data the issuer receives, naming the

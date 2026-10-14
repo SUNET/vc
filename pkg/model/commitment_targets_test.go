@@ -279,25 +279,12 @@ func TestTargetsTheSigningLayerOverwritesAreRefused(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "silently replaced")
 
-	// MakeVC20 fills the subject identifier from the request's SubjectDID
-	// after injection.
-	for _, format := range []string{openid4vp.FormatLdpVC, openid4vp.FormatVC20JSON} {
-		meta := &CredentialMetadata{
-			Format:      format,
-			Commitments: map[string]*CommitmentClaim{"id": sscClaim()},
-		}
-		_, err := meta.ResolveCommitmentTargets(CredentialSchemas{})
-		require.Error(t, err, "%s: a commitment at the subject id would be replaced", format)
-		assert.Contains(t, err.Error(), "silently replaced")
-	}
-
 	// A name that merely starts the same way is not reserved, and the
 	// SD-JWT envelope names mean nothing in another format.
 	for _, tc := range []struct{ format, path string }{
 		{openid4vp.FormatSDJWTVC, "issuing_authority"},
 		{openid4vp.FormatSDJWTVC, "statuses"},
 		{openid4vp.FormatSDJWTVC, "ssc"},
-		{openid4vp.FormatLdpVC, "iss"},
 		{openid4vp.FormatMsoMdoc, "iss"},
 	} {
 		meta := &CredentialMetadata{
@@ -307,6 +294,52 @@ func TestTargetsTheSigningLayerOverwritesAreRefused(t *testing.T) {
 		_, err := meta.ResolveCommitmentTargets(CredentialSchemas{})
 		assert.NoError(t, err, "%s: %q is not written by the signing layer", tc.format, tc.path)
 	}
+}
+
+// Commitments are implemented for the two formats whose signing layers
+// this code has a complete account of. The W3C path in particular needs
+// something it does not have: the proof covers the RDF canonical form,
+// where a term the JSON-LD contexts do not define is dropped, while
+// ToCompactJSON returns the original JSON - so the commitment would be
+// visible in the credential and NOT covered by the proof over it, free to
+// be altered without invalidating the signature.
+//
+// Refused rather than injected, because that outcome is worse than the
+// format not being supported. It subsumes the reserved subject identifier
+// these formats used to carry.
+func TestOnlyFormatsWithAccountedSigningLayersAreSupported(t *testing.T) {
+	for _, format := range []string{openid4vp.FormatMsoMdoc, openid4vp.FormatSDJWTVC, "vc+sd-jwt", ""} {
+		meta := &CredentialMetadata{
+			Format:      format,
+			Commitments: map[string]*CommitmentClaim{"ssc": sscClaim()},
+		}
+		schemas := CredentialSchemas{}
+		if format == openid4vp.FormatMsoMdoc {
+			schemas.MDoc = nymSchema()
+		}
+		_, err := meta.ResolveCommitmentTargets(schemas)
+		assert.NoError(t, err, "%q is supported", format)
+	}
+
+	for _, format := range []string{openid4vp.FormatLdpVC, openid4vp.FormatVC20JSON} {
+		meta := &CredentialMetadata{
+			Format:      format,
+			Commitments: map[string]*CommitmentClaim{"ssc": sscClaim()},
+		}
+		_, err := meta.ResolveCommitmentTargets(CredentialSchemas{})
+		require.Error(t, err, "%q cannot carry a commitment the proof covers", format)
+		assert.Contains(t, err.Error(), "not implemented")
+		assert.Contains(t, err.Error(), "unprotected")
+	}
+
+	// And anything else, named rather than silently accepted.
+	other := &CredentialMetadata{
+		Format:      "jwt_vc_json",
+		Commitments: map[string]*CommitmentClaim{"ssc": sscClaim()},
+	}
+	_, err := other.ResolveCommitmentTargets(CredentialSchemas{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not implemented")
 }
 
 // An SD-JWT commitment must be a claim the type metadata makes

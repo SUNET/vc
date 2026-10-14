@@ -70,6 +70,10 @@ func (c *CredentialMetadata) ResolveCommitmentTargets(schemas CredentialSchemas)
 		return nil, nil
 	}
 
+	if err := c.checkFormatSupported(); err != nil {
+		return nil, err
+	}
+
 	resolved := make([]CommitmentTarget, 0, len(c.Commitments))
 	// Which configured path claimed which element, so that two paths
 	// resolving to one element can be named in the error.
@@ -198,6 +202,45 @@ func (c *CredentialMetadata) resolveElement(schema *mdoc.MDDLSchema, path string
 		schema.DocType)
 }
 
+// checkFormatSupported refuses a format this build cannot inject into
+// safely.
+//
+// mso_mdoc and SD-JWT VC are the two the design covers, and the two whose
+// signing layers this code has a complete account of. The others were
+// wired up reactively, to answer a review finding about coverage, without
+// that account - and the W3C path turns out to need something this does
+// not have:
+//
+// MakeVC20 signs the RDF canonical form, where a property its JSON-LD
+// contexts do not define expands to a relative predicate and is DROPPED.
+// RDFCredential.ToCompactJSON then returns the original JSON verbatim. So
+// a commitment at an undefined term is visible in the issued credential
+// and NOT covered by the proof over it - it can be altered without
+// invalidating the signature, which is a worse outcome than not
+// supporting the format at all.
+//
+// Doing it properly means resolving commitment paths against the pinned
+// contexts and refusing undefined or non-absolute predicates. That is
+// real work and it belongs with someone who has the JSON-LD context
+// handling in view, not bolted onto this.
+//
+// Refused at startup, so the configuration fails where an operator can
+// read it rather than producing credentials whose commitment the proof
+// does not cover.
+func (c *CredentialMetadata) checkFormatSupported() error {
+	switch {
+	case c.Format == openid4vp.FormatMsoMdoc, isSDJWTFormat(c.Format):
+		return nil
+	case c.Format == openid4vp.FormatLdpVC, c.Format == openid4vp.FormatVC20JSON:
+		return fmt.Errorf("commitments are not implemented for %q: the proof covers the RDF canonical form, "+
+			"where a term the JSON-LD contexts do not define is dropped, while the issued credential keeps it - "+
+			"so the commitment would be visible and unprotected", c.Format)
+	default:
+		return fmt.Errorf("commitments are not implemented for %q; they are available for %q and SD-JWT VC",
+			c.Format, openid4vp.FormatMsoMdoc)
+	}
+}
+
 // isSDJWTFormat reports whether a configured format reaches the SD-JWT
 // signing path.
 //
@@ -255,29 +298,24 @@ var reservedTargets = map[string]map[string]string{
 		"_sd_alg":       "the SD-JWT builder sets the disclosure hash algorithm",
 		"_sd":           "the SD-JWT builder writes the disclosure digests of this object",
 	},
-	formatFamilyW3C: {
-		"id": "MakeVC20 sets the credential subject identifier from the request",
-	},
 }
 
-// Format families, so a reserved-claim list is looked up by what a format
-// IS rather than by one of its spellings.
-const (
-	formatFamilySDJWT = "sd-jwt"
-	formatFamilyW3C   = "w3c"
-)
+// formatFamilySDJWT groups the SD-JWT spellings, so a reserved-claim list
+// is looked up by what a format IS rather than by one of its names.
+//
+// It is the only family: mso_mdoc's signer writes no claims of its own,
+// and the W3C formats never reach the lookup - checkFormatSupported
+// refuses them outright, which subsumes the reserved subject identifier
+// they used to carry.
+const formatFamilySDJWT = "sd-jwt"
 
 // formatFamily classifies a configured format, or returns "" for one with
 // no reserved claims.
 func formatFamily(format string) string {
-	switch {
-	case isSDJWTFormat(format):
+	if isSDJWTFormat(format) {
 		return formatFamilySDJWT
-	case format == openid4vp.FormatLdpVC || format == openid4vp.FormatVC20JSON:
-		return formatFamilyW3C
-	default:
-		return ""
 	}
+	return ""
 }
 
 // checkNotReserved refuses a target the signing layer will overwrite.
