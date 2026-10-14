@@ -190,6 +190,17 @@ func encryptToRequestKey(ro *openid4vp.RequestObject, payload []byte) (string, e
 	return string(encrypted), nil
 }
 
+// supportedContentEncryption is the JWE "enc" this wallet can produce,
+// under the names encrypted_response_enc_values_supported uses.
+var supportedContentEncryption = map[string]jwa.ContentEncryptionAlgorithm{
+	"A128GCM":       jwa.A128GCM(),
+	"A192GCM":       jwa.A192GCM(),
+	"A256GCM":       jwa.A256GCM(),
+	"A128CBC-HS256": jwa.A128CBC_HS256(),
+	"A192CBC-HS384": jwa.A192CBC_HS384(),
+	"A256CBC-HS512": jwa.A256CBC_HS512(),
+}
+
 // responseContentEncryption picks the JWE "enc" to use for the response.
 //
 // A256GCM was hardcoded here, which is not what the request says. OpenID4VP
@@ -204,22 +215,13 @@ func encryptToRequestKey(ro *openid4vp.RequestObject, payload []byte) (string, e
 // algorithms this wallet cannot produce is an error, not a silent
 // downgrade to the default: the server said what it accepts.
 func responseContentEncryption(advertised []string) (jwa.ContentEncryptionAlgorithm, error) {
-	supported := map[string]jwa.ContentEncryptionAlgorithm{
-		"A128GCM":       jwa.A128GCM(),
-		"A192GCM":       jwa.A192GCM(),
-		"A256GCM":       jwa.A256GCM(),
-		"A128CBC-HS256": jwa.A128CBC_HS256(),
-		"A192CBC-HS384": jwa.A192CBC_HS384(),
-		"A256CBC-HS512": jwa.A256CBC_HS512(),
-	}
-
 	if len(advertised) == 0 {
 		// OpenID4VP §5.1: absent means the default single value A128GCM.
 		return jwa.A128GCM(), nil
 	}
 
 	for _, name := range advertised {
-		if enc, ok := supported[name]; ok {
+		if enc, ok := supportedContentEncryption[name]; ok {
 			return enc, nil
 		}
 	}
