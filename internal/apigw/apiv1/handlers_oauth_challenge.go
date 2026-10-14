@@ -1002,14 +1002,30 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 	//
 	// The claim at the bottom is what makes it one-shot: two wallets
 	// scanning the same offer both reach it, and exactly one wins.
-	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{IssuerState: req.IssuerState})
-	if err != nil || authCtx == nil {
+	resolved, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{IssuerState: req.IssuerState})
+	if err != nil || resolved == nil {
 		// Unknown and expired are one answer, for the same reason they are
 		// at the intermediate request: otherwise the endpoint reports
 		// which issuer_state values exist.
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
 			"issuer_state is invalid or has expired", 400)
 	}
+
+	// A COPY, because this request is about to write to it.
+	//
+	// The memory store hands out the document it holds, so two wallets
+	// scanning the same offer resolve the SAME object - and both of them
+	// mint an ephemeral key id onto it below, before either has claimed
+	// anything. Without this, B's id overwrites A's after A has already
+	// signed a request advertising A's; A then wins the claim and commits
+	// a context naming B's key, and the wallet that won cannot have its
+	// response decrypted. The claim being atomic does not help: it
+	// arbitrates who wins, not what the winner is carrying by then.
+	//
+	// Nothing is stored from this copy except through ClaimIssuerState at
+	// the bottom, which installs it wholesale.
+	local := *resolved
+	authCtx := &local
 	if authCtx.ExpiresAt > 0 && time.Now().Unix() > authCtx.ExpiresAt {
 		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
 			"issuer_state is invalid or has expired", 400)

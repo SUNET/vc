@@ -2,6 +2,8 @@ package apiv1
 
 import (
 	"encoding/json"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -369,4 +371,80 @@ func TestIssuerInitiated_ResumingMintsAFreshEphemeralKey(t *testing.T) {
 	// actually be decrypted.
 	_, ok = client.cacheService.EphemeralEncryptionKey.Get(t.Context(), resumed.EphemeralEncryptionKeyID)
 	assert.True(t, ok, "the key the request advertises must be the one that was stored")
+}
+
+// Two wallets scanning the same offer must not be able to make the winner
+// commit the loser's ephemeral key.
+//
+// The memory store hands out the document it holds, so both requests
+// resolve the SAME object, and each mints an ephemeral key id onto it
+// before either has claimed anything. Writing through that shared pointer
+// lets B's id land after A has already signed a request advertising A's -
+// and if A then wins the claim, the committed exchange names a key the
+// winning wallet was never told to encrypt to. Its presentation is
+// correct and undecryptable.
+//
+// The atomic claim does not prevent this: it decides who wins, not what
+// the winner is carrying by the time it wins.
+func TestIssuerInitiated_ConcurrentResumesDoNotCrossTheirKeys(t *testing.T) {
+	for range 20 {
+		client := newChallengeClient(t)
+		issuerState := prepareIssuance(t, client, portalMatch())
+
+		const contenders = 4
+		var (
+			start    sync.WaitGroup
+			finished sync.WaitGroup
+			mu       sync.Mutex
+			winners  []*AuthorizationChallengeError
+		)
+		start.Add(1)
+		finished.Add(contenders)
+
+		for range contenders {
+			go func() {
+				defer finished.Done()
+				req := initialChallenge(t)
+				req.Scope = ""
+				req.IssuerState = issuerState
+				start.Wait()
+
+				_, err := client.OAuthAuthorizationChallenge(t.Context(), req)
+				var challengeErr *AuthorizationChallengeError
+				if errors.As(err, &challengeErr) && challengeErr.AuthSession != "" {
+					mu.Lock()
+					winners = append(winners, challengeErr)
+					mu.Unlock()
+				}
+			}()
+		}
+		start.Done()
+		finished.Wait()
+
+		// Exactly one, which is the one-shot guarantee.
+		require.Len(t, winners, 1, "an issuance prepared for one Holder opens one exchange")
+		won := winners[0]
+
+		committed, err := client.cacheService.AuthContext.Get(t.Context(),
+			&cache.AuthorizationContext{AuthSession: won.AuthSession})
+		require.NoError(t, err)
+
+		// The key the winning wallet was told to encrypt to has to be the
+		// key the committed exchange holds.
+		var envelope struct {
+			Request string `json:"request"`
+		}
+		require.NoError(t, json.Unmarshal(won.OpenID4VPRequest, &envelope))
+		claims := unsafeJWTClaims(t, envelope.Request)
+
+		metadata := claims["client_metadata"].(map[string]any)
+		keys := metadata["jwks"].(map[string]any)["keys"].([]any)
+		advertised := keys[0].(map[string]any)["kid"].(string)
+
+		require.Equal(t, committed.EphemeralEncryptionKeyID, advertised,
+			"the winning exchange must hold the key its own request advertised")
+
+		_, ok := client.cacheService.EphemeralEncryptionKey.Get(t.Context(), advertised)
+		require.True(t, ok, "and that key must be in the cache to decrypt with")
+	}
 }

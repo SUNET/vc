@@ -383,3 +383,97 @@ func TestEndpointPrepareIssuance_RefusesACaseVariantScope(t *testing.T) {
 	assert.Equal(t, "A", api.seen.AuthenticSource)
 	assert.Equal(t, 60, api.seen.TTLSeconds)
 }
+
+// The other readings of one body that the middleware and the binder can
+// disagree about. Each of these is a way for the scope that was
+// authorized to differ from the scope that would be acted on, and none of
+// them needs an unusual member NAME - which is what the canonical-name
+// rule alone could not see.
+func TestEndpointPrepareIssuance_RefusesBodiesTheTwoReadersDisagreeAbout(t *testing.T) {
+	ctx := t.Context()
+
+	log, err := logger.New("prepare-disagree-test", t.TempDir(), true)
+	require.NoError(t, err)
+	tracer, err := trace.NewForTesting(ctx, "prepare-disagree-test", log)
+	require.NoError(t, err)
+
+	cfg := &model.Cfg{Common: &model.Common{}, APIGW: &model.APIGW{}}
+	helpers, err := httphelpers.New(ctx, tracer, cfg, log)
+	require.NoError(t, err)
+
+	api := &prepareAPI{}
+	s := &Service{cfg: cfg, log: log.New("httpserver"), apiv1: api, tracer: tracer, httpHelpers: helpers}
+
+	engine := gin.New()
+	helpers.Server.RegEndpoint(ctx, engine.Group(""), http.MethodPost, "issuance/prepare", http.StatusOK, s.endpointPrepareIssuance)
+
+	const match = `"identity_match":{"claims":{"given_name":{"equals":"Alice"}}}`
+	valid := `{"scope":"allowed_scope",` + match + `}`
+
+	for _, tc := range []struct {
+		name        string
+		contentType string
+		body        string
+	}{
+		{
+			// A map decode keeps the LAST "scope", which is null, so the
+			// middleware authorizes nothing. encoding/json leaves a
+			// string field UNTOUCHED on null, so the struct keeps the
+			// first value. My earlier reasoning that exact duplicates
+			// agree was wrong for exactly this reason.
+			name:        "a member repeated with a null",
+			contentType: "application/json",
+			body:        `{"scope":"forbidden_scope","scope":null,` + match + `}`,
+		},
+		{
+			name:        "a member simply repeated",
+			contentType: "application/json",
+			body:        `{"scope":"allowed_scope","scope":"forbidden_scope",` + match + `}`,
+		},
+		{
+			// encoding/json's Decoder reads one value and ignores the
+			// rest; a whole-body Unmarshal refuses trailing data. So the
+			// two readers disagree about whether this body is even valid.
+			name:        "a valid object with another value after it",
+			contentType: "application/json",
+			body:        valid + `{}`,
+		},
+		{
+			// Binding.Request also accepts form encodings, and the
+			// middleware's extraction never reads a form body - so this
+			// reaches binding with no resource pair checked at all.
+			name:        "a form-encoded body",
+			contentType: "application/x-www-form-urlencoded",
+			body:        "Scope=forbidden_scope&IdentityMatch=x",
+		},
+		{
+			name:        "not an object at all",
+			contentType: "application/json",
+			body:        `["scope","forbidden_scope"]`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api.seen = nil
+			req := httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", tc.contentType)
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+
+			assert.Nil(t, api.seen, "this body must not reach preparation")
+			assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+		})
+	}
+
+	// And the ordinary request still works, so none of the above is a
+	// blanket refusal.
+	t.Run("a well-formed request is unaffected", func(t *testing.T) {
+		api.seen = nil
+		req := httptest.NewRequest(http.MethodPost, "/issuance/prepare", strings.NewReader(valid))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+
+		require.NotNil(t, api.seen, "body: %s", w.Body.String())
+		assert.Equal(t, "allowed_scope", api.seen.Scope)
+	})
+}

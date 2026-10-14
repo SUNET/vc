@@ -698,7 +698,7 @@ func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (
 	// there is no reading of a body with both members that a caller could
 	// have meant, and any rule for choosing between them would have to be
 	// kept in step with encoding/json's.
-	if err := requireCanonicalJSONMembers(c, "scope", "identity_match", "authentic_source", "ttl_seconds"); err != nil {
+	if err := requireCanonicalJSONBody(c, "scope", "identity_match", "authentic_source", "ttl_seconds"); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		s.log.Error(err, "ambiguous request body")
 		return nil, err
@@ -721,32 +721,35 @@ func (s *Service) endpointPrepareIssuance(ctx context.Context, c *gin.Context) (
 	return reply, nil
 }
 
-// requireCanonicalJSONMembers rejects a JSON body whose member names are
-// not exactly the ones this request defines.
+// requireCanonicalJSONBody refuses any request body that the authorization
+// middleware and the request binder could read differently.
 //
-// It exists because two parts of this server read the same body by
-// different rules. encoding/json matches members to struct fields
-// case-INSENSITIVELY and lets a later member overwrite an earlier one, so
-// {"Scope":"x"} and {"scope":"a","Scope":"b"} both put something in
-// Scope. The authorization middleware reads the body into a map and looks
-// up the exact key "scope", so it sees nothing in the first case and "a"
-// in the second. Either way the scope that was authorized is not the
-// scope that would be acted on.
+// Those two read the same bytes by different rules. The middleware parses
+// the body into a map and looks up exact lowercase keys; the binder hands
+// it to encoding/json, whose field matching is case-insensitive under a
+// Unicode fold, whose later members overwrite earlier ones, whose null
+// leaves a field untouched, and whose Decoder stops at the first value and
+// ignores whatever follows. Every one of those is a way for the scope the
+// middleware authorized to differ from the scope the handler acts on.
 //
-// Requiring exact names is what makes the two readings the same reading.
-// A looser rule - refusing only bodies that carry BOTH spellings - closes
-// the collision and leaves the lone "Scope" wide open, which is the same
-// bug with one fewer member.
+// Rather than model each of them, this requires a body with nothing to
+// disagree about: one JSON object, members named exactly as this request
+// defines them, none repeated, and nothing after it.
 //
-// Case is the whole point, so this cannot be done with gin's binder or
-// DisallowUnknownFields: both match case-insensitively and would accept
-// "Scope" as the Scope field.
+// The content type is pinned for the same reason. Binding.Request also
+// accepts form encodings, and the middleware's extraction reads the query
+// string and the JSON body but never a form body - so a form-encoded
+// request reaches binding with no resource pair checked at all.
 //
-// The body is restored for the binder, the same way the authorization
-// middleware restores it.
-func requireCanonicalJSONMembers(c *gin.Context, allowed ...string) error {
-	if c.Request.Body == nil || c.Request.ContentLength <= 0 || c.ContentType() != "application/json" {
-		return nil
+// The body is restored for the binder, the same way the middleware
+// restores it.
+func requireCanonicalJSONBody(c *gin.Context, allowed ...string) error {
+	refuse := func(format string, args ...any) error {
+		return oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest, fmt.Sprintf(format, args...), 400)
+	}
+
+	if c.ContentType() != "application/json" {
+		return refuse("this request must be sent as application/json")
 	}
 
 	body, err := io.ReadAll(c.Request.Body)
@@ -755,17 +758,49 @@ func requireCanonicalJSONMembers(c *gin.Context, allowed ...string) error {
 		return oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidRequest, "could not read the request body", 400, err)
 	}
 
-	var members map[string]json.RawMessage
-	if err := json.Unmarshal(body, &members); err != nil {
-		// Not an object, or not JSON at all. The binder will say so.
-		return nil
+	// Streamed rather than unmarshalled into a map, because a map has
+	// already collapsed the duplicates this needs to see.
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	opening, err := decoder.Token()
+	if err != nil {
+		return refuse("the request body is not a JSON object")
+	}
+	if delim, ok := opening.(json.Delim); !ok || delim != '{' {
+		return refuse("the request body must be a JSON object")
 	}
 
-	for name := range members {
-		if !slices.Contains(allowed, name) {
-			return oauth2.NewOAuthError(oauth2.ErrCodeInvalidRequest,
-				fmt.Sprintf("the request body carries a member %q that this request does not define; member names are case-sensitive", name), 400)
+	seen := make(map[string]bool, len(allowed))
+	for decoder.More() {
+		nameToken, err := decoder.Token()
+		if err != nil {
+			return refuse("the request body is not a well-formed JSON object")
 		}
+		name, ok := nameToken.(string)
+		if !ok {
+			return refuse("the request body is not a well-formed JSON object")
+		}
+		if !slices.Contains(allowed, name) {
+			return refuse("the request body carries a member %q that this request does not define; member names are case-sensitive", name)
+		}
+		if seen[name] {
+			return refuse("the request body carries the member %q more than once", name)
+		}
+		seen[name] = true
+
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return refuse("the request body is not a well-formed JSON object")
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return refuse("the request body is not a well-formed JSON object")
+	}
+
+	// encoding/json's Decoder reads ONE value and ignores the rest, so a
+	// valid object followed by anything at all would otherwise bind
+	// cleanly while this check looked at a different reading of the body.
+	if decoder.More() {
+		return refuse("the request body carries more than one JSON value")
 	}
 
 	return nil
