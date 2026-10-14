@@ -102,7 +102,7 @@ func (q CredentialQuery) MarshalJSON() ([]byte, error) {
 func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 	type plain CredentialQuery
 	var known plain
-	if err := json.Unmarshal(data, &known); err != nil {
+	if err := decodeExact(data, &known); err != nil {
 		return err
 	}
 	*q = CredentialQuery(known)
@@ -212,7 +212,7 @@ func (v VPFormatsSupported) MarshalJSON() ([]byte, error) {
 func (v *VPFormatsSupported) UnmarshalJSON(data []byte) error {
 	type plain VPFormatsSupported
 	var known plain
-	if err := json.Unmarshal(data, &known); err != nil {
+	if err := decodeExact(data, &known); err != nil {
 		return err
 	}
 	*v = VPFormatsSupported(known)

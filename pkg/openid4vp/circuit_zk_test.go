@@ -325,19 +325,92 @@ func TestBadRequestsAreEmittedUnchanged(t *testing.T) {
 	}
 }
 
-// Extra may not shadow a member the struct already names: both would be
-// the same JSON key, so one is silently discarded and which one is an
-// implementation detail nobody configuring a request should have to know.
-func TestExtraCannotShadowAKnownMember(t *testing.T) {
-	_, err := json.Marshal(ReqItem{ID: "f", Return: "h", Extra: map[string]any{"id": "other"}})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "both as a known member and in extra")
+// Extra may not supply a member the struct models, whether or not that
+// member's field happens to be set.
+//
+// Checking the ENCODED output would only catch the collision when the
+// typed field survived omitempty - so an empty one would let Extra take
+// over the member silently, and only sometimes. Changing a modelled
+// member's type is what Raw is for.
+func TestExtraCannotSupplyAModelledMember(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		do   func() ([]byte, error)
+	}{
+		{"req item, field set", func() ([]byte, error) {
+			return json.Marshal(ReqItem{ID: "f", Return: "h", Extra: map[string]any{"id": "other"}})
+		}},
+		{"req item, field EMPTY", func() ([]byte, error) {
+			return json.Marshal(ReqItem{Return: "h", Extra: map[string]any{"params": "not an object"}})
+		}},
+		{"credential query, field set", func() ([]byte, error) {
+			return json.Marshal(CredentialQuery{ID: "q", Format: FormatCircuitZk, Extra: map[string]any{"format": "other"}})
+		}},
+		{"credential query, field EMPTY", func() ([]byte, error) {
+			return json.Marshal(CredentialQuery{ID: "q", Format: FormatCircuitZk, Extra: map[string]any{"req": "not an array"}})
+		}},
+		{"circuit metadata, field set", func() ([]byte, error) {
+			return json.Marshal(CircuitZkFormat{CircuitIDValues: []string{"a"}, Extra: map[string]any{"circuit_id_values": []string{"b"}}})
+		}},
+		{"circuit metadata, field EMPTY", func() ([]byte, error) {
+			return json.Marshal(CircuitZkFormat{Extra: map[string]any{"circuit_id_values": "x"}})
+		}},
+		{"vp_formats_supported, field EMPTY", func() ([]byte, error) {
+			return json.Marshal(VPFormatsSupported{Extra: map[string]any{"circuit_zk": "x"}})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.do()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "a member this type models")
+		})
+	}
 
-	_, err = json.Marshal(CredentialQuery{ID: "q", Format: FormatCircuitZk, Extra: map[string]any{"format": "other"}})
-	require.Error(t, err)
+	// A member the type does not model still goes through, which is the
+	// whole purpose of Extra.
+	encoded, err := json.Marshal(ReqItem{ID: "f", Return: "h", Extra: map[string]any{"source": map[string]any{"path": []string{"ssc"}}}})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"id":"f","return":"h","source":{"path":["ssc"]}}`, string(encoded))
+}
 
-	_, err = json.Marshal(CircuitZkFormat{CircuitIDValues: []string{"a"}, Extra: map[string]any{"circuit_id_values": []string{"b"}}})
-	require.Error(t, err)
+// A function parameter is passed through unchanged, and "unchanged"
+// includes numbers a float64 cannot hold.
+//
+// Decoding an `any` with plain Unmarshal makes every number a float64, so
+// 9007199254740993 comes back out as ...992 - a parameter the verifier
+// never configured, inside a request a wallet is being tested against.
+func TestParamsPreserveNumbersExactly(t *testing.T) {
+	const in = `{"id":"f","return":"h","params":{` +
+		`"big":9007199254740993,` +
+		`"negative":-9007199254740993,` +
+		`"huge":123456789012345678901234567890,` +
+		`"precise":0.1234567890123456789,` +
+		`"nested":{"also_big":9007199254740993},` +
+		`"list":[9007199254740993]}}`
+
+	var item ReqItem
+	require.NoError(t, json.Unmarshal([]byte(in), &item))
+	encoded, err := json.Marshal(item)
+	require.NoError(t, err)
+	assert.JSONEq(t, in, string(encoded))
+	assert.Contains(t, string(encoded), "9007199254740993", "the exact integer must survive")
+
+	// The same for members this build does not model, which reach the
+	// wire through Extra.
+	const withExtra = `{"id":"f","return":"h","future":{"n":9007199254740993}}`
+	var item2 ReqItem
+	require.NoError(t, json.Unmarshal([]byte(withExtra), &item2))
+	encoded, err = json.Marshal(item2)
+	require.NoError(t, err)
+	assert.JSONEq(t, withExtra, string(encoded))
+
+	// And for a whole credential query, since Extra lives there too.
+	const query = `{"id":"q","format":"circuit_zk","meta":{},"future":9007199254740993}`
+	var q CredentialQuery
+	require.NoError(t, json.Unmarshal([]byte(query), &q))
+	encoded, err = json.Marshal(q)
+	require.NoError(t, err)
+	assert.JSONEq(t, query, string(encoded))
 }
 
 func TestIsCircuitZkFormat(t *testing.T) {

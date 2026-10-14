@@ -1,10 +1,13 @@
 package openid4vp
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
+	"strings"
 )
 
 // FormatCircuitZk is the DCQL format identifier for a zero-knowledge
@@ -74,7 +77,7 @@ func (r ReqItem) MarshalJSON() ([]byte, error) {
 func (r *ReqItem) UnmarshalJSON(data []byte) error {
 	type plain ReqItem
 	var known plain
-	if err := json.Unmarshal(data, &known); err != nil {
+	if err := decodeExact(data, &known); err != nil {
 		return err
 	}
 	*r = ReqItem(known)
@@ -118,7 +121,7 @@ func (c CircuitZkFormat) MarshalJSON() ([]byte, error) {
 func (c *CircuitZkFormat) UnmarshalJSON(data []byte) error {
 	type plain CircuitZkFormat
 	var known plain
-	if err := json.Unmarshal(data, &known); err != nil {
+	if err := decodeExact(data, &known); err != nil {
 		return err
 	}
 	*c = CircuitZkFormat(known)
@@ -132,10 +135,13 @@ func (c *CircuitZkFormat) UnmarshalJSON(data []byte) error {
 
 // marshalWithExtra serialises known and merges extra at the top level.
 //
-// A member in extra that collides with a known one is an error rather than
-// a silent winner: the two would be the same JSON key, so one of them is
-// discarded, and which one is a detail of this function that nobody
-// configuring a request should have to know.
+// A member in extra that collides with one the struct models is an error
+// rather than a silent winner. The check is against every member the type
+// DECLARES, not against the ones that happened to survive omitempty: a
+// typed field left empty is omitted from the encoding, so checking the
+// output would let extra supply a modelled key whenever its field is
+// unset - quietly, and only sometimes, which is the worst shape a rule
+// can have. Changing the type of a modelled member is what Raw is for.
 func marshalWithExtra(known any, extra map[string]any, what string) ([]byte, error) {
 	encoded, err := json.Marshal(known)
 	if err != nil {
@@ -145,11 +151,16 @@ func marshalWithExtra(known any, extra map[string]any, what string) ([]byte, err
 		return encoded, nil
 	}
 
+	reserved := declaredJSONKeys(reflect.TypeOf(known))
+
 	var merged map[string]json.RawMessage
 	if err := json.Unmarshal(encoded, &merged); err != nil {
 		return nil, err
 	}
 	for _, key := range slices.Sorted(maps.Keys(extra)) {
+		if reserved[key] {
+			return nil, fmt.Errorf("%s: %q is a member this type models, so it cannot be set through extra; use raw to change its type", what, key)
+		}
 		if _, taken := merged[key]; taken {
 			return nil, fmt.Errorf("%s: %q is set both as a known member and in extra", what, key)
 		}
@@ -162,12 +173,55 @@ func marshalWithExtra(known any, extra map[string]any, what string) ([]byte, err
 	return json.Marshal(merged)
 }
 
+// declaredJSONKeys returns every JSON member name a struct type declares,
+// including ones omitempty may drop and ones tagged "-".
+//
+// Derived from the type rather than listed by hand. A list would be
+// correct until the next field is added, and the failure it produces then
+// is an extension silently overriding a modelled member.
+func declaredJSONKeys(t reflect.Type) map[string]bool {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	keys := map[string]bool{}
+	if t.Kind() != reflect.Struct {
+		return keys
+	}
+	for _, field := range reflect.VisibleFields(t) {
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		switch name {
+		case "", "-":
+			// "-" is a field deliberately kept off the wire (Extra, Raw);
+			// an empty tag means the field name is the member name.
+			if name == "" && field.IsExported() {
+				keys[field.Name] = true
+			}
+			continue
+		}
+		keys[name] = true
+	}
+	return keys
+}
+
+// decodeExact decodes data into v preserving numbers exactly.
+//
+// Plain Unmarshal turns every JSON number reaching an `any` into a
+// float64, so 9007199254740993 is re-emitted as ...992. These structures
+// are mostly `any` by design - a function's params are passed through
+// untouched - so without this the one guarantee this package makes about
+// params would be false for any integer past 2^53.
+func decodeExact(data []byte, v any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	return decoder.Decode(v)
+}
+
 // unknownMembers returns every top-level member of data that is not named
 // in known, so a shape this build does not understand survives a decode
 // and can be written back out unchanged.
 func unknownMembers(data []byte, known ...string) (map[string]any, error) {
 	var all map[string]any
-	if err := json.Unmarshal(data, &all); err != nil {
+	if err := decodeExact(data, &all); err != nil {
 		return nil, err
 	}
 	for _, name := range known {
