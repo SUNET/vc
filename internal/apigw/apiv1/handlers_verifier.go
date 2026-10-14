@@ -505,6 +505,24 @@ func (c *Client) consumeIssuanceAuthPresentation(ctx context.Context, authCtx *c
 			if !ok {
 				return nil, serverFault(errors.New("verified issuer JWT carries no claims"))
 			}
+
+			// The credential has to be valid NOW, which its signature
+			// does not say.
+			//
+			// VerifyJWTSignature parses with jwt.WithoutClaimsValidation
+			// - it is answering "who signed this", and the trust
+			// evaluation it feeds is about the issuer rather than the
+			// document - and neither the VP validator nor the credential
+			// parser looks at exp or nbf either. So an expired credential
+			// presented with a freshly signed proof was accepted: the
+			// holder genuinely holds the key, the nonce is genuinely this
+			// request's, and the credential genuinely stopped being valid
+			// last year. A fresh proof does not renew a credential.
+			if err := validIssuerCredentialWindow(issuerClaims, time.Now()); err != nil {
+				c.log.Error(err, "presented credential is outside its validity window", "scope", scope)
+				return nil, fmt.Errorf("credential validity check failed: %w", err)
+			}
+
 			if err := sdjwtvc.VerifyKeyBinding(responseParams.VPToken, issuerClaims, sdjwtvc.KeyBindingExpectations{
 				Nonce:    authCtx.Nonce,
 				Audience: binding.Audience,
@@ -718,4 +736,49 @@ func (c *Client) directPostSessionTranscript(authCtx *cache.AuthorizationContext
 func issuerJWTOf(vpToken string) string {
 	issuerJWT, _, _ := strings.Cut(vpToken, "~")
 	return issuerJWT
+}
+
+// issuerCredentialClockSkew is how far out of its window a presented
+// credential may be and still be accepted.
+//
+// Small, and symmetric. Clocks between an Issuer, a Holder's device and
+// this server differ by seconds in practice, and refusing a credential
+// that became valid one second ago is a failure a user cannot act on;
+// accepting one that expired a minute ago is not a risk worth the
+// confusion either.
+const issuerCredentialClockSkew = 30 * time.Second
+
+// validIssuerCredentialWindow refuses a credential that has expired or has
+// not started.
+//
+// Both are read from the ISSUER-VERIFIED claims, so a presenter cannot
+// extend its own credential's life by rewriting them. A credential with
+// neither claim is accepted: SD-JWT VC makes exp OPTIONAL, and refusing
+// one that omits it would reject credentials that are valid by their own
+// terms.
+func validIssuerCredentialWindow(claims jwt.MapClaims, now time.Time) error {
+	if exp, ok := numericDate(claims, "exp"); ok && now.After(exp.Add(issuerCredentialClockSkew)) {
+		return fmt.Errorf("the presented credential expired at %s", exp.UTC().Format(time.RFC3339))
+	}
+	if nbf, ok := numericDate(claims, "nbf"); ok && now.Before(nbf.Add(-issuerCredentialClockSkew)) {
+		return fmt.Errorf("the presented credential is not valid until %s", nbf.UTC().Format(time.RFC3339))
+	}
+	return nil
+}
+
+// numericDate reads a JWT NumericDate claim. A claim that is present but
+// not a number is reported as absent rather than as zero, which would
+// otherwise read as 1970 and expire every credential carrying one.
+func numericDate(claims jwt.MapClaims, name string) (time.Time, bool) {
+	switch v := claims[name].(type) {
+	case float64:
+		return time.Unix(int64(v), 0), true
+	case int64:
+		return time.Unix(v, 0), true
+	case json.Number:
+		if n, err := v.Int64(); err == nil {
+			return time.Unix(n, 0), true
+		}
+	}
+	return time.Time{}, false
 }
