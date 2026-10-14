@@ -1,6 +1,9 @@
 package apiv1
 
 import (
+	"fmt"
+	"slices"
+
 	"github.com/SUNET/vc/internal/wallet/config"
 	"github.com/SUNET/vc/pkg/openid4vci"
 )
@@ -45,6 +48,11 @@ type vciFlow struct {
 	// one the Issuer advertises for the credential configuration being
 	// requested.
 	scope string
+
+	// authorizationServer is the Authorization Server the offer's grant
+	// named, when it named one. An Issuer may advertise several, and the
+	// handle in that grant belongs to exactly one of them.
+	authorizationServer string
 }
 
 // defaultWalletRedirectURI is where this wallet says to send the Holder
@@ -127,5 +135,46 @@ func (f *vciFlow) adoptOfferGrants(grants map[string]any) {
 		if state, ok := grant["issuer_state"].(string); ok && state != "" && !f.issuerStateIsConfigured {
 			f.issuerState = state
 		}
+
+		// The grant may name WHICH Authorization Server the handle belongs
+		// to, and an Issuer is allowed to advertise several. Keeping the
+		// state while dropping the server sends a one-shot handle to an
+		// endpoint that has never heard of it.
+		if server, ok := grant["authorization_server"].(string); ok && server != "" {
+			f.authorizationServer = server
+		}
 	}
+}
+
+// authorizationServerFor is the Authorization Server this run talks to.
+//
+// The offer's grant decides when it named one, because that is where the
+// issuer_state lives. Otherwise the Issuer's first advertised server, as
+// before.
+//
+// A named server that the Issuer does not advertise is refused rather
+// than followed. The offer is the least trustworthy input in this flow -
+// it arrives as a QR code - and following it to an Authorization Server
+// the Issuer never vouched for is how a wallet is talked into sending a
+// handle, and then a DPoP proof, somewhere of an attacker's choosing.
+// The Issuer's own metadata is the authority on which servers are its.
+func (f *vciFlow) authorizationServerFor(metadata *openid4vci.CredentialIssuerMetadataParameters, issuerURL string) (string, error) {
+	advertised := []string(nil)
+	if metadata != nil {
+		advertised = metadata.AuthorizationServers
+	}
+
+	if f.authorizationServer != "" {
+		if !slices.Contains(advertised, f.authorizationServer) {
+			return "", fmt.Errorf(
+				"the credential offer names authorization server %q, which the issuer does not advertise (it advertises %v)",
+				f.authorizationServer, advertised)
+		}
+		return f.authorizationServer, nil
+	}
+
+	if len(advertised) > 0 {
+		return advertised[0], nil
+	}
+	return issuerURL, nil
 }

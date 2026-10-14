@@ -220,9 +220,12 @@ func (c *Client) runVCIScenario(ctx context.Context, vci *config.VCIScenario, re
 
 	// Step 3: Fetch OAuth2 authorization server metadata
 	step = StepResult{Name: "fetch_oauth2_metadata", StartedAt: time.Now()}
-	authServerURL := issuerURL
-	if len(metadata.AuthorizationServers) > 0 {
-		authServerURL = metadata.AuthorizationServers[0]
+	authServerURL, err := flow.authorizationServerFor(metadata, issuerURL)
+	if err != nil {
+		step.Error = err.Error()
+		step.CompletedAt = time.Now()
+		result.Steps = append(result.Steps, step)
+		return err
 	}
 	oauth2Meta, err := c.fetchOAuth2Metadata(ctx, authServerURL)
 	step.CompletedAt = time.Now()

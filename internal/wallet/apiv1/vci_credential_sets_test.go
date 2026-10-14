@@ -1,9 +1,11 @@
 package apiv1
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/SUNET/vc/internal/wallet/credential"
+	"github.com/SUNET/vc/pkg/openid4vci"
 	"github.com/SUNET/vc/pkg/openid4vp"
 
 	"github.com/stretchr/testify/assert"
@@ -128,4 +130,76 @@ func TestSelectCredentialQueries_AllOptionalAndNoneSatisfiedIsAnError(t *testing
 
 	_, err := selectCredentialQueries(dcql, held())
 	require.Error(t, err)
+}
+
+// An Issuer may advertise several Authorization Servers, and an
+// issuer-initiated offer's grant says which one its issuer_state belongs
+// to. Keeping the handle while dropping the server sends a one-shot
+// handle to an endpoint that has never heard of it.
+func TestAuthorizationServerFor(t *testing.T) {
+	metadata := &openid4vci.CredentialIssuerMetadataParameters{
+		AuthorizationServers: []string{"https://as-one.example", "https://as-two.example"},
+	}
+
+	t.Run("the grant decides when it names a server", func(t *testing.T) {
+		flow := &vciFlow{}
+		flow.adoptOfferGrants(map[string]any{
+			"authorization_code": map[string]any{
+				"issuer_state":         "handle",
+				"authorization_server": "https://as-two.example",
+			},
+		})
+
+		got, err := flow.authorizationServerFor(metadata, "https://issuer.example")
+		require.NoError(t, err)
+		assert.Equal(t, "https://as-two.example", got,
+			"the handle belongs to the server the grant named, not to the first advertised one")
+	})
+
+	t.Run("the first advertised server otherwise", func(t *testing.T) {
+		got, err := (&vciFlow{}).authorizationServerFor(metadata, "https://issuer.example")
+		require.NoError(t, err)
+		assert.Equal(t, "https://as-one.example", got)
+	})
+
+	t.Run("the issuer itself when it advertises none", func(t *testing.T) {
+		got, err := (&vciFlow{}).authorizationServerFor(
+			&openid4vci.CredentialIssuerMetadataParameters{}, "https://issuer.example")
+		require.NoError(t, err)
+		assert.Equal(t, "https://issuer.example", got)
+	})
+
+	// The offer arrives as a QR code, so it is the least trustworthy input
+	// in this flow. Following it to a server the Issuer never vouched for
+	// is how a wallet is talked into sending a handle, and then a DPoP
+	// proof, somewhere of an attacker's choosing.
+	t.Run("a server the issuer does not advertise is refused", func(t *testing.T) {
+		flow := &vciFlow{}
+		flow.adoptOfferGrants(map[string]any{
+			"authorization_code": map[string]any{
+				"issuer_state":         "handle",
+				"authorization_server": "https://attacker.example",
+			},
+		})
+
+		_, err := flow.authorizationServerFor(metadata, "https://issuer.example")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "attacker.example")
+	})
+}
+
+// The member is "authorization_server" in both grants - OpenID4VCI 1.0
+// §4.1.1 - and the authorization_code one was tagged "authorization",
+// so it was written and read under a name no other implementation uses.
+func TestGrantAuthorizationCodeNamesTheServerTheSpecWay(t *testing.T) {
+	encoded, err := json.Marshal(openid4vci.GrantAuthorizationCode{
+		IssuerState:         "handle",
+		AuthorizationServer: "https://as-two.example",
+	})
+	require.NoError(t, err)
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	assert.Equal(t, "https://as-two.example", decoded["authorization_server"])
+	assert.NotContains(t, decoded, "authorization")
 }
