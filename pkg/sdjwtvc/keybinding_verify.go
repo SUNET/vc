@@ -5,11 +5,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
-	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/SUNET/vc/pkg/jose"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -99,7 +100,23 @@ func VerifyKeyBinding(vpToken string, issuerClaims map[string]any, expected KeyB
 	}
 
 	// sd_hash is over the US-ASCII bytes of everything before the proof,
-	// trailing separator included (SD-JWT VC §4.3.1).
+	// trailing separator included (SD-JWT VC §4.3.1), and under the hash
+	// the ISSUER chose.
+	//
+	// _sd_alg comes from the verified issuer claims rather than from the
+	// proof: it is the algorithm the credential's own disclosure digests
+	// use, a holder computes sd_hash with it, and a presenter must not be
+	// able to nominate a weaker one. Absent means sha-256 (§4.1.1), which
+	// is the common case and the only one a hardcoded SHA-256 got right.
+	sdAlg, _ := issuerClaims["_sd_alg"].(string)
+	if sdAlg == "" {
+		sdAlg = "sha-256"
+	}
+	hasher, err := getHashFromAlgorithm(sdAlg)
+	if err != nil {
+		return fmt.Errorf("key binding: the credential's _sd_alg %q is not a hash this build computes: %w", sdAlg, err)
+	}
+
 	var presented strings.Builder
 	presented.WriteString(issuerJWT)
 	for _, disclosure := range disclosures {
@@ -108,8 +125,9 @@ func VerifyKeyBinding(vpToken string, issuerClaims map[string]any, expected KeyB
 	}
 	presented.WriteByte('~')
 
-	sum := sha256.Sum256([]byte(presented.String()))
-	want := base64.RawURLEncoding.EncodeToString(sum[:])
+	hasher.Reset()
+	hasher.Write([]byte(presented.String()))
+	want := base64.RawURLEncoding.EncodeToString(hasher.Sum(nil))
 	if got, _ := claims["sd_hash"].(string); got != want {
 		return errors.New("key binding: the proof was not made over this presentation")
 	}
@@ -152,11 +170,29 @@ func holderKeyFromCnf(issuerClaims map[string]any) (crypto.PublicKey, error) {
 	if !ok {
 		return nil, errors.New("the credential's cnf claim carries no jwk")
 	}
-	key, err := jwkToPublicKey(jwkMap)
+	// jose.ParseJWKToPublicKey rather than this package's jwkToPublicKey:
+	// that one handles EC alone - it returns an error for RSA and has no
+	// OKP branch at all - so an RSA- or Ed25519-bound credential could
+	// never have been presented, however correct its proof. Those
+	// families are advertised by default in the proof algorithms and in
+	// the request metadata, so refusing them here would have been a
+	// silent contradiction of what this server asks wallets for.
+	key, err := jose.ParseJWKToPublicKey(jwkMap)
 	if err != nil {
 		return nil, fmt.Errorf("reading the key the credential is bound to: %w", err)
 	}
-	return key, nil
+
+	// Narrowed to the public key types a proof can actually be verified
+	// against. jwk.Export will hand back a PRIVATE key for a JWK carrying
+	// private parameters, and a symmetric key for an oct JWK; neither is
+	// something a credential may be bound to, and both would otherwise
+	// reach the parser as "some key".
+	switch key.(type) {
+	case *ecdsa.PublicKey, *rsa.PublicKey, ed25519.PublicKey:
+		return key, nil
+	default:
+		return nil, fmt.Errorf("the credential is bound to a %T, which is not a public key a holder proof can be verified against", key)
+	}
 }
 
 // validMethodsFor pins the algorithms a proof may be signed with to the
