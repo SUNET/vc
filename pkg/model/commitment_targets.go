@@ -198,6 +198,31 @@ func (c *CredentialMetadata) resolveElement(schema *mdoc.MDDLSchema, path string
 		schema.DocType)
 }
 
+// isSDJWTFormat reports whether a configured format reaches the SD-JWT
+// signing path.
+//
+// Three spellings do: the current identifier, the legacy "vc+sd-jwt" this
+// repo still issues, and the empty string, which is what an unset Format
+// means. pkg/openid4vp's DCQL validation already lists all three, with a
+// comment that says why - "every place that decides what a format MEANS
+// has to agree with every place that decides whether it is CONSTRAINED" -
+// and checking only the current identifier here is exactly what that
+// warns against: the VCTM disclosure check and the reserved-claim check
+// both silently did nothing for a legacy-spelled scope.
+//
+// openid4vp.IsSDJWTFormatIdentifier is NOT used, because it has the same
+// narrow definition and no production callers; widening it would mean
+// changing a test that pins it, in a file this change has no other reason
+// to touch.
+func isSDJWTFormat(format string) bool {
+	switch format {
+	case openid4vp.FormatSDJWTVC, "vc+sd-jwt", "":
+		return true
+	default:
+		return false
+	}
+}
+
 // reservedTargets names the claims a format's signing layer writes for
 // itself, AFTER the document this feature injects into has been parsed.
 //
@@ -211,7 +236,7 @@ func (c *CredentialMetadata) resolveElement(schema *mdoc.MDDLSchema, path string
 // (pkg/sdjwtvc/methods.go), and the W3C one is the subject identifier
 // MakeVC20 fills from the request's SubjectDID.
 var reservedTargets = map[string]map[string]string{
-	openid4vp.FormatSDJWTVC: {
+	formatFamilySDJWT: {
 		"iat":           "the SD-JWT builder sets the issuance time",
 		"nbf":           "the SD-JWT builder sets the not-before time",
 		"exp":           "the SD-JWT builder sets the expiry",
@@ -222,12 +247,29 @@ var reservedTargets = map[string]map[string]string{
 		"cnf":           "the SD-JWT builder sets the holder key confirmation",
 		"status":        "the SD-JWT builder sets the revocation status reference",
 	},
-	openid4vp.FormatLdpVC: {
+	formatFamilyW3C: {
 		"id": "MakeVC20 sets the credential subject identifier from the request",
 	},
-	openid4vp.FormatVC20JSON: {
-		"id": "MakeVC20 sets the credential subject identifier from the request",
-	},
+}
+
+// Format families, so a reserved-claim list is looked up by what a format
+// IS rather than by one of its spellings.
+const (
+	formatFamilySDJWT = "sd-jwt"
+	formatFamilyW3C   = "w3c"
+)
+
+// formatFamily classifies a configured format, or returns "" for one with
+// no reserved claims.
+func formatFamily(format string) string {
+	switch {
+	case isSDJWTFormat(format):
+		return formatFamilySDJWT
+	case format == openid4vp.FormatLdpVC || format == openid4vp.FormatVC20JSON:
+		return formatFamilyW3C
+	default:
+		return ""
+	}
 }
 
 // checkNotReserved refuses a target the signing layer will overwrite.
@@ -237,7 +279,7 @@ var reservedTargets = map[string]map[string]string{
 // destroyed just as completely as one at "status" - it is simply replaced
 // along with everything else under that key.
 func (c *CredentialMetadata) checkNotReserved(element string) error {
-	reserved, ok := reservedTargets[c.Format]
+	reserved, ok := reservedTargets[formatFamily(c.Format)]
 	if !ok {
 		return nil
 	}
@@ -270,12 +312,12 @@ func (c *CredentialMetadata) checkNotReserved(element string) error {
 // A nil VCTM means the caller has none to check against - the issuer
 // validates again at issuance with the one it was sent.
 func (c *CredentialMetadata) checkDisclosable(vctm *sdjwtvc.VCTM, element string) error {
-	if vctm == nil || c.Format != openid4vp.FormatSDJWTVC {
+	if vctm == nil || !isSDJWTFormat(c.Format) {
 		return nil
 	}
 
 	for _, claim := range vctm.Claims {
-		if claimPath(claim.Path) != element {
+		if !claimPathMatches(claim.Path, element) {
 			continue
 		}
 		if claim.SD != "always" {
@@ -288,18 +330,31 @@ func (c *CredentialMetadata) checkDisclosable(vctm *sdjwtvc.VCTM, element string
 		vctm.VCT)
 }
 
-// claimPath renders a VCTM claim path as the dotted form a commitment is
-// configured with. A nil segment selects every array element and has no
-// dotted spelling, so such a path matches nothing here.
-func claimPath(path []*string) string {
-	segments := make([]string, 0, len(path))
-	for _, p := range path {
-		if p == nil {
-			return "\x00array"
-		}
-		segments = append(segments, *p)
+// claimPathMatches compares a VCTM claim path with a configured one,
+// segment by segment.
+//
+// NOT by flattening the VCTM path and comparing strings: that conflates
+// path ["a.b"] - a single top-level key that happens to contain a dot -
+// with path ["a","b"], which is nested. Injection always reads a
+// configured "a.b" as nested, so a VCTM declaring the literal top-level
+// key would pass a flattened comparison while MakeCredential never turns
+// the nested value it actually wrote into a disclosure. The commitment
+// stays in the clear, which is the failure this whole check exists to
+// prevent, reintroduced by the comparison meant to catch it.
+//
+// A nil segment selects every element of an array and has no spelling in
+// a configured path, so such a claim matches nothing here.
+func claimPathMatches(vctmPath []*string, configured string) bool {
+	segments := strings.Split(configured, ".")
+	if len(vctmPath) != len(segments) {
+		return false
 	}
-	return strings.Join(segments, ".")
+	for i, segment := range vctmPath {
+		if segment == nil || *segment != segments[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func orDefault(value, fallback string) string {

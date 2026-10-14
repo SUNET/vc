@@ -374,3 +374,72 @@ func TestSDJWTCommitmentsMustBeSelectivelyDisclosable(t *testing.T) {
 	_, err = mdocMeta.ResolveCommitmentTargets(CredentialSchemas{MDoc: nymSchema(), VCTM: vctm})
 	assert.NoError(t, err)
 }
+
+// Every spelling that reaches the SD-JWT signing path gets the SD-JWT
+// checks. Checking only the current identifier meant a legacy-spelled
+// scope silently got neither the VCTM disclosure check nor the
+// reserved-claim check - so its commitment could be signed in the clear,
+// or at a path the builder overwrites, with nothing reporting either.
+func TestEverySDJWTSpellingGetsTheSDJWTChecks(t *testing.T) {
+	sd := func(p string) []*string { return []*string{&p} }
+	vctm := &sdjwtvc.VCTM{
+		VCT:    "urn:example:nym_auth:1",
+		Claims: []sdjwtvc.Claim{{Path: sd("ssc"), SD: "always"}},
+	}
+
+	for _, format := range []string{openid4vp.FormatSDJWTVC, "vc+sd-jwt", ""} {
+		undeclared := &CredentialMetadata{
+			Format:      format,
+			Commitments: map[string]*CommitmentClaim{"not_in_the_vctm": sscClaim()},
+		}
+		_, err := undeclared.ResolveCommitmentTargets(CredentialSchemas{VCTM: vctm})
+		require.Error(t, err, "format %q must get the disclosure check", format)
+		assert.Contains(t, err.Error(), "could not withhold it")
+
+		reserved := &CredentialMetadata{
+			Format:      format,
+			Commitments: map[string]*CommitmentClaim{"cnf": sscClaim()},
+		}
+		_, err = reserved.ResolveCommitmentTargets(CredentialSchemas{VCTM: vctm})
+		require.Error(t, err, "format %q must get the reserved-claim check", format)
+		assert.Contains(t, err.Error(), "silently replaced")
+
+		ok := &CredentialMetadata{
+			Format:      format,
+			Commitments: map[string]*CommitmentClaim{"ssc": sscClaim()},
+		}
+		_, err = ok.ResolveCommitmentTargets(CredentialSchemas{VCTM: vctm})
+		assert.NoError(t, err, "format %q: a declared, non-reserved target is fine", format)
+	}
+}
+
+// A VCTM path of ["a.b"] is a single top-level key that happens to contain
+// a dot. A configured "a.b" is always injected NESTED, so the two are not
+// the same claim - and treating them as equal would let the commitment be
+// written somewhere MakeCredential never turns into a disclosure, leaving
+// it in the clear. The comparison meant to catch that must not reintroduce
+// it.
+func TestVCTMPathSegmentsAreNotFlattened(t *testing.T) {
+	literal := "a.b"
+	outer, inner := "a", "b"
+
+	declaresLiteralKey := &sdjwtvc.VCTM{
+		VCT:    "urn:example:1",
+		Claims: []sdjwtvc.Claim{{Path: []*string{&literal}, SD: "always"}},
+	}
+	declaresNested := &sdjwtvc.VCTM{
+		VCT:    "urn:example:1",
+		Claims: []sdjwtvc.Claim{{Path: []*string{&outer, &inner}, SD: "always"}},
+	}
+	meta := &CredentialMetadata{
+		Format:      openid4vp.FormatSDJWTVC,
+		Commitments: map[string]*CommitmentClaim{"a.b": sscClaim()},
+	}
+
+	_, err := meta.ResolveCommitmentTargets(CredentialSchemas{VCTM: declaresLiteralKey})
+	require.Error(t, err, "a literal top-level key is not the nested path injection writes")
+	assert.Contains(t, err.Error(), "does not declare it")
+
+	_, err = meta.ResolveCommitmentTargets(CredentialSchemas{VCTM: declaresNested})
+	assert.NoError(t, err, "the nested declaration is the one that matches")
+}
