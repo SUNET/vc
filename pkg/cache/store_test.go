@@ -48,25 +48,37 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		assert.Equal(t, "contract-session-1", result.SessionID)
 	})
 
-	t.Run("GetReturnsASnapshot", func(t *testing.T) {
+	t.Run("GetSnapshotIsolatesTheCallerAndGetDoesNot", func(t *testing.T) {
 		require.NoError(t, store.Save(ctx, &AuthorizationContext{
 			SessionID: "contract-snapshot-1",
 			State:     "contract-snapshot-state",
 			Code:      "contract-snapshot-code",
 		}))
+		query := &AuthorizationContext{State: "contract-snapshot-state"}
 
-		read, err := store.Get(ctx, &AuthorizationContext{State: "contract-snapshot-state"})
+		// GetSnapshot is for readers. What it returns is the caller's,
+		// so the store cannot be changed by assigning to it - and, the
+		// point of the method, reading it cannot race with a concurrent
+		// claim mutating the stored document.
+		snapshot, err := store.GetSnapshot(ctx, query)
 		require.NoError(t, err)
+		snapshot.Identifier = "scribbled-on"
 
-		// A caller that was handed the stored document would change the
-		// cache by assigning to it, and would race with any concurrent
-		// claim mutating the same struct. Writing back goes through
-		// Update, which every caller already does.
-		read.Identifier = "scribbled-on"
-
-		again, err := store.Get(ctx, &AuthorizationContext{State: "contract-snapshot-state"})
+		after, err := store.GetSnapshot(ctx, query)
 		require.NoError(t, err)
-		assert.Empty(t, again.Identifier, "a caller must not be able to write to the store by assignment")
+		assert.Empty(t, after.Identifier, "a snapshot must not be a handle on the store")
+
+		// Get is for read-modify-Update, and must keep working that way:
+		// handing those callers a snapshot would turn their Update into a
+		// lost update against anything the store changed in between.
+		live, err := store.Get(ctx, query)
+		require.NoError(t, err)
+		live.Identifier = "written-back"
+		require.NoError(t, store.Update(ctx, live))
+
+		persisted, err := store.GetSnapshot(ctx, query)
+		require.NoError(t, err)
+		assert.Equal(t, "written-back", persisted.Identifier)
 	})
 
 	t.Run("ResumeIssuerState", func(t *testing.T) {
@@ -288,4 +300,48 @@ func runAuthContextStoreContractTests(t *testing.T, store AuthContextStore) {
 		_, err := store.GetByAccessToken(ctx, "")
 		assert.Error(t, err)
 	})
+}
+
+// Get hands a caller the stored document, which is what keeps a
+// read-modify-Update caller from erasing an in-store mutation that landed
+// in between: the forfeited code it writes back is the same struct the
+// forfeit was recorded on.
+//
+// That is the property this PR relied on when it narrowed its snapshot to
+// GetSnapshot instead of changing Get, so it is pinned here rather than
+// left as an observation.
+//
+// NOT a shared contract test, because MongoStore does not have this
+// property and never did: every Mongo read decodes a fresh struct and
+// Update replaces the document, so the same interleaving loses the
+// forfeit there. That divergence is real and predates this change - it is
+// the wider lost-update hazard in Update, which wants version-checked
+// writes to fix properly - and asserting it as a contract both backends
+// meet would be asserting something false.
+func TestMemoryStore_GetKeepsAConcurrentForfeitVisible(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(5 * time.Minute)
+
+	require.NoError(t, store.Save(ctx, &AuthorizationContext{
+		SessionID: "forfeit-1",
+		Code:      "forfeit-code",
+	}))
+
+	// What a read-modify-Update caller does: read, change a field of its
+	// own, write back.
+	held, err := store.Get(ctx, &AuthorizationContext{SessionID: "forfeit-1"})
+	require.NoError(t, err)
+	held.AuthProvider = "some-provider"
+
+	// Meanwhile the code is redeemed and consumed.
+	_, err = store.ForfeitAuthorizationCode(ctx, &AuthorizationContext{Code: "forfeit-code"})
+	require.NoError(t, err)
+
+	require.NoError(t, store.Update(ctx, held))
+
+	after, err := store.GetSnapshot(ctx, &AuthorizationContext{SessionID: "forfeit-1"})
+	require.NoError(t, err)
+	assert.True(t, after.Forfeited,
+		"a consumed code must not be resurrected by a caller that read before it was consumed")
+	assert.Equal(t, "some-provider", after.AuthProvider, "and the caller's own change must still land")
 }

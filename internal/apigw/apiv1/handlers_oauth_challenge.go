@@ -374,7 +374,11 @@ func handleLookupError(err error, description string) error {
 // interaction produced, and - when that leaves the Holder established -
 // hands back the authorization code.
 func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *model.InteractiveAuthorization, req *AuthorizationChallengeRequest) (*AuthorizationChallengeResponse, error) {
-	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{AuthSession: req.AuthSession})
+	// A snapshot: everything this function does with the context before
+	// the claim is a READ, and the claim is what writes. Taking the
+	// stored document instead would mean reading fields another request
+	// is concurrently consuming.
+	authCtx, err := c.cacheService.AuthContext.GetSnapshot(ctx, &cache.AuthorizationContext{AuthSession: req.AuthSession})
 	if err != nil || authCtx == nil {
 		return nil, handleLookupError(err, errDescAuthSessionInvalid)
 	}
@@ -879,7 +883,11 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 	//
 	// The claim at the bottom is what makes it one-shot: two wallets
 	// scanning the same offer both reach it, and exactly one wins.
-	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{IssuerState: req.IssuerState})
+	// A snapshot, for the reason given at the intermediate request, and
+	// more sharply here: two wallets scanning one offer both reach this
+	// line, and one of them is about to claim the document the other is
+	// reading.
+	authCtx, err := c.cacheService.AuthContext.GetSnapshot(ctx, &cache.AuthorizationContext{IssuerState: req.IssuerState})
 	if err != nil || authCtx == nil {
 		return nil, handleLookupError(err, errDescIssuerStateInvalid)
 	}
@@ -978,21 +986,14 @@ func (c *Client) authorizationChallengePrepared(ctx context.Context, ia *model.I
 		return nil, fmt.Errorf("failed to generate ephemeral key id: %w", err)
 	}
 
-	// A COPY, because authCtx is not ours to write to.
-	//
-	// MemoryStore.Get hands back the stored document itself rather than a
-	// copy - that is what makes ClaimIssuerState's compare-and-swap work -
-	// so assigning to the value read here mutates the cache. Every attempt
-	// on one issuer_state does that at the same time, which is a data race
-	// on shared state and, worse, a write to a prepared issuance by a
-	// request that is about to be refused.
-	//
-	// Nothing below the claim reads from this copy; the resume carries the
-	// same two fields into the store atomically.
-	pending := *authCtx
-	pending.DCQLQuery = dcql
-	pending.EphemeralEncryptionKeyID = attemptKeyID
-	presentationRequest, err := c.interactiveAuthorizationRequest(ctx, ia, &pending, dcql)
+	// Written on the snapshot, which is this request's own. Nothing is
+	// persisted by doing so and nothing should be: the resume below
+	// carries these two fields into the store atomically, and an attempt
+	// that is about to be refused must leave the prepared issuance
+	// exactly as it found it.
+	authCtx.DCQLQuery = dcql
+	authCtx.EphemeralEncryptionKeyID = attemptKeyID
+	presentationRequest, err := c.interactiveAuthorizationRequest(ctx, ia, authCtx, dcql)
 	if err != nil {
 		return nil, err
 	}

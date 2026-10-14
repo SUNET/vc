@@ -651,6 +651,17 @@ func (s *MongoStore) buildFilter(query *AuthorizationContext) bson.M {
 // every one-shot handle in this store is consumed.
 const mongoUnset = "$unset"
 
+// GetSnapshot resolves a context the way Get does. See
+// AuthContextStore.GetSnapshot.
+//
+// For this store the two are already the same thing: every read decodes
+// BSON into a fresh struct, so a Mongo caller has never shared a document
+// with anyone. The method exists so the two backends present one contract
+// and a caller does not have to know which it is talking to.
+func (s *MongoStore) GetSnapshot(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error) {
+	return s.Get(ctx, query)
+}
+
 // ClaimAuthSession atomically takes the Interactive Authorization handle off
 // the context it names. See AuthContextStore.ClaimAuthSession.
 //

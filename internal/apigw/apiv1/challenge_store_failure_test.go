@@ -30,15 +30,33 @@ type downAuthContextStore struct {
 }
 
 func (d *downAuthContextStore) Get(ctx context.Context, query *cache.AuthorizationContext) (*cache.AuthorizationContext, error) {
-	if query != nil {
-		if d.failAuthSession && query.AuthSession != "" {
-			return nil, errStoreDown
-		}
-		if d.failIssuerState && query.IssuerState != "" {
-			return nil, errStoreDown
-		}
+	if err := d.failureFor(query); err != nil {
+		return nil, err
 	}
 	return d.AuthContextStore.Get(ctx, query)
+}
+
+// Both reads, because which one a handler uses is its business: a reader
+// takes a snapshot and a read-modify-Update caller takes the document,
+// and an outage stops either.
+func (d *downAuthContextStore) GetSnapshot(ctx context.Context, query *cache.AuthorizationContext) (*cache.AuthorizationContext, error) {
+	if err := d.failureFor(query); err != nil {
+		return nil, err
+	}
+	return d.AuthContextStore.GetSnapshot(ctx, query)
+}
+
+func (d *downAuthContextStore) failureFor(query *cache.AuthorizationContext) error {
+	if query == nil {
+		return nil
+	}
+	if d.failAuthSession && query.AuthSession != "" {
+		return errStoreDown
+	}
+	if d.failIssuerState && query.IssuerState != "" {
+		return errStoreDown
+	}
+	return nil
 }
 
 // A store that could not answer has not said the handle is invalid, and

@@ -123,12 +123,19 @@ func (c *MemoryStore) Save(ctx context.Context, doc *AuthorizationContext) error
 
 // Get retrieves an authorization context by query fields
 func (c *MemoryStore) Get(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.getLocked(query)
+}
+
+// getLocked is the body Get and GetSnapshot share: resolve the query to a
+// session id and hand back the stored document. Both hold the read lock,
+// which is what makes GetSnapshot's copy safe against a concurrent claim.
+func (c *MemoryStore) getLocked(query *AuthorizationContext) (*AuthorizationContext, error) {
 	if query == nil {
 		return nil, errors.New("query cannot be nil")
 	}
-
-	c.mu.RLock()
-	defer c.mu.RUnlock()
 
 	var sessionID string
 
@@ -172,24 +179,36 @@ func (c *MemoryStore) Get(ctx context.Context, query *AuthorizationContext) (*Au
 		return nil, ErrNoDocuments
 	}
 
-	// A SNAPSHOT, not the stored document.
-	//
-	// Handing out the live pointer made every reader a writer's neighbour:
-	// a caller reading the fields it was given raced with any concurrent
-	// Claim or Resume mutating the same struct, and a caller that assigned
-	// to them changed the cache without meaning to. Both happen for real -
-	// several requests reach the Authorization Challenge Endpoint with one
-	// issuer_state and all of them read the prepared issuance while one of
-	// them is consuming it.
-	//
-	// Copying here is what makes it safe rather than copying at the call
-	// sites: the copy is taken under the same read lock that excludes the
-	// writers, which a caller cannot do for itself. Writing back still
-	// goes through Update, as every caller already does.
-	//
-	// The claims do not go through Get - they reach into the cache under
-	// the write lock - so their compare-and-swap is unaffected.
-	snapshot := *item.Value()
+	return item.Value(), nil
+}
+
+// GetSnapshot resolves a context the way Get does and returns a COPY.
+//
+// Get hands back the stored document itself, which is what lets a caller
+// mutate it and persist with Update - the pattern this codebase is built
+// on. It also means a caller reading those fields races with any
+// concurrent claim mutating the same struct, and several requests reach
+// the Authorization Challenge Endpoint with one issuer_state while one of
+// them is consuming it.
+//
+// A caller cannot take that copy for itself: it has to be made under the
+// read lock that excludes the writers, and only the store holds it. So
+// this is a separate method rather than a change to Get - callers that
+// read-modify-Update still need the document, and giving every one of
+// them a snapshot would turn their Update into a lost update against any
+// in-store mutation that landed in between.
+//
+// The copy is shallow. That is enough here because nothing mutates a
+// context's slices or sub-objects in place; they are replaced whole.
+func (c *MemoryStore) GetSnapshot(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	doc, err := c.getLocked(query)
+	if err != nil {
+		return nil, err
+	}
+	snapshot := *doc
 	return &snapshot, nil
 }
 

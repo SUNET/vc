@@ -17,6 +17,22 @@ type AuthContextStore interface {
 	// Get retrieves an authorization context by query fields (sessionID, requestURI, code, state, etc.).
 	Get(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error)
 
+	// GetSnapshot retrieves a context the way Get does, but returns a
+	// copy the caller owns rather than the stored document.
+	//
+	// Get hands back the stored document itself, which is what lets a
+	// caller mutate it and persist with Update. That also makes every
+	// reader a writer's neighbour: reading the fields it was given races
+	// with any concurrent claim mutating the same struct, and several
+	// requests do reach the Authorization Challenge Endpoint with one
+	// issuer_state while one of them is consuming it.
+	//
+	// Use this wherever a context is only READ. A caller that goes on to
+	// Update must use Get: writing a snapshot back would replace whatever
+	// an in-store mutation - a forfeited code, a redeemed pre-authorized
+	// code, an added token - had recorded in the meantime.
+	GetSnapshot(ctx context.Context, query *AuthorizationContext) (*AuthorizationContext, error)
+
 	// GetByID retrieves an authorization context by session ID.
 	GetByID(ctx context.Context, id string) (*AuthorizationContext, error)
 
