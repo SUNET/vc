@@ -1253,6 +1253,14 @@ func TestAuthorizationChallenge_SuccessfulPresentationYieldsTheCode(t *testing.T
 	assert.Equal(t, audience, seenBinding.Audience)
 	assert.Equal(t, stored.State, seenBinding.ExpectedState)
 
+	// And it asked the pipeline to verify WHO presented this, not merely
+	// that a credential a trusted Issuer signed was sent. Without it, a
+	// copied credential plus a proof the copier signs themselves opens an
+	// exchange under their own DPoP key - which is the one thing this
+	// endpoint exists to prevent.
+	assert.True(t, seenBinding.VerifyHolderBinding,
+		"an exchange that establishes who is asking cannot accept an unverified holder proof")
+
 	// The handle is spent either way, so the code cannot be collected twice.
 	again := challengeErr(t, client, continueExchange(t, opened.AuthSession, response))
 	assert.Equal(t, errInvalidSession, again.ErrorCode)

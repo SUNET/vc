@@ -54,6 +54,30 @@ func TestCanonicalOrigin(t *testing.T) {
 
 		// A dotted-quad IPv4 address is already what a browser emits.
 		{name: "a dotted-quad address", in: "https://127.0.0.1:8443", want: "https://127.0.0.1:8443"},
+
+		// A port is a NUMBER, so leading zeroes are not part of it. A URL
+		// parser drops them - and then drops the port itself when what is
+		// left is the scheme's default.
+		{name: "a default port written with a leading zero", in: "https://issuer.example:0443", want: "https://issuer.example"},
+		{name: "a non-default port written with a leading zero", in: "https://issuer.example:08443", want: "https://issuer.example:8443"},
+		{name: "several leading zeroes", in: "https://issuer.example:000443", want: "https://issuer.example"},
+		{name: "http's default port with a leading zero", in: "http://issuer.example:080", want: "http://issuer.example"},
+
+		// An IPv4-MAPPED IPv6 address is where RFC 5952 and the WHATWG
+		// URL Standard part company: net/netip writes the dotted-decimal
+		// tail, and a browser has no such special case and reports
+		// hexadecimal pieces. The dotted form is an origin nothing emits.
+		{name: "an IPv4-mapped address stays hexadecimal", in: "https://[::ffff:c000:201]", want: "https://[::ffff:c000:201]"},
+		{name: "an IPv4-mapped address written in full", in: "https://[0:0:0:0:0:ffff:c000:201]", want: "https://[::ffff:c000:201]"},
+		{name: "an IPv4-mapped address with a port", in: "https://[::ffff:c000:201]:8443", want: "https://[::ffff:c000:201]:8443"},
+
+		// A single zero piece is written out rather than compressed, and
+		// only the LONGEST run is compressed, both per the WHATWG
+		// serializer.
+		{name: "a single zero piece is not compressed", in: "https://[2001:db8:0:1:1:1:1:1]", want: "https://[2001:db8:0:1:1:1:1:1]"},
+		{name: "the longest run wins", in: "https://[1:0:0:1:0:0:0:1]", want: "https://[1:0:0:1::1]"},
+		{name: "the unspecified address", in: "https://[::]", want: "https://[::]"},
+		{name: "a trailing run", in: "https://[2001:db8:1::]", want: "https://[2001:db8:1::]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := CanonicalOrigin(tc.in)
