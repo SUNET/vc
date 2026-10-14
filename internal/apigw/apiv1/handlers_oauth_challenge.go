@@ -126,6 +126,10 @@ type AuthorizationChallengeError struct {
 	// for an Interaction Required Response, and whatever the error calls
 	// for otherwise.
 	HTTPStatus int `json:"-"`
+
+	// Cause is what actually went wrong, for the log. Never serialised:
+	// the reasons distinguished here are not the caller's to probe.
+	Cause error `json:"-"`
 }
 
 func (e *AuthorizationChallengeError) Error() string {
@@ -134,6 +138,10 @@ func (e *AuthorizationChallengeError) Error() string {
 	}
 	return e.ErrorCode
 }
+
+// Unwrap exposes the cause to errors.Is and errors.As without putting it
+// anywhere a caller can read.
+func (e *AuthorizationChallengeError) Unwrap() error { return e.Cause }
 
 // The error codes this endpoint answers with beyond the OAuth 2.0 set.
 const (
@@ -146,7 +154,31 @@ const (
 	// needs to finish the authorization (OpenID4VCI 1.1, Authorization
 	// Challenge Error Response).
 	errMissingInteractionType = "missing_interaction_type"
+
+	// errInvalidSession says the auth_session is unknown, expired or
+	// revoked (draft-ietf-oauth-first-party-apps §5.2.2).
+	//
+	// Not invalid_grant, which is the Token Endpoint's code for a spent
+	// authorization code. A wallet reading this endpoint's contract looks
+	// for invalid_session to decide that its exchange is over and a new
+	// challenge is needed; told invalid_grant instead, it has no defined
+	// way to recognise the condition.
+	errInvalidSession = "invalid_session"
 )
+
+// invalidSession is the answer to an auth_session this endpoint cannot
+// continue. The cause is carried for the log and never for the wallet:
+// "no such handle", "already claimed" and "expired" must not be
+// distinguishable from outside, or the endpoint becomes an oracle for
+// which auth_session values exist.
+func invalidSession(cause error) *AuthorizationChallengeError {
+	return &AuthorizationChallengeError{
+		ErrorCode:        errInvalidSession,
+		ErrorDescription: "auth_session is invalid or has expired",
+		HTTPStatus:       400,
+		Cause:            cause,
+	}
+}
 
 // OAuthAuthorizationChallenge is the Authorization Challenge Endpoint.
 //
@@ -323,16 +355,22 @@ func (c *Client) authorizationChallengeInitial(ctx context.Context, ia *model.In
 // hands back the authorization code.
 func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *model.InteractiveAuthorization, req *AuthorizationChallengeRequest) (*AuthorizationChallengeResponse, error) {
 	authCtx, err := c.cacheService.AuthContext.Get(ctx, &cache.AuthorizationContext{AuthSession: req.AuthSession})
-	if err != nil || authCtx == nil {
+	switch {
+	case errors.Is(err, cache.ErrNoDocuments), err == nil && authCtx == nil:
 		// Unknown and expired are deliberately indistinguishable: telling
 		// the two apart turns the endpoint into an oracle for which
 		// auth_session values exist.
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"auth_session is invalid or has expired", 400)
+		return nil, invalidSession(err)
+	case err != nil:
+		// A store that would not answer is OURS. Reported as a bad
+		// session it would tell a wallet to abandon an exchange that is
+		// still perfectly good, and a wallet cannot retry what it has
+		// been told is dead - so the one outage becomes a lost issuance
+		// rather than a slow one.
+		return nil, c.authSessionStoreFailure(err, "resolve")
 	}
 	if authCtx.ExpiresAt > 0 && time.Now().Unix() > authCtx.ExpiresAt {
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"auth_session is invalid or has expired", 400)
+		return nil, invalidSession(nil)
 	}
 
 	// §5.1: a client_id sent alongside an auth_session MUST identify the
@@ -356,8 +394,7 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 	if authCtx.AuthSessionDPoPThumbprint == "" {
 		c.log.Error(nil, "CHALLENGE: auth_session resolved a context with no DPoP binding",
 			"session_id", authCtx.SessionID)
-		return nil, oauth2.NewOAuthError(oauth2.ErrCodeInvalidGrant,
-			"auth_session is invalid or has expired", 400)
+		return nil, invalidSession(nil)
 	}
 	thumbprint, err := c.dpopProofThumbprint(ctx, req.DPOP, ia.ChallengeEndpoint(c.cfg.APIGW.PublicURL))
 	if err != nil {
@@ -389,9 +426,13 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 	// against it, and leaving the handle alive would let an attacker who
 	// learned it grind presentations at the endpoint.
 	claimed, err := c.cacheService.AuthContext.ClaimAuthSession(ctx, req.AuthSession)
-	if err != nil {
-		return nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeInvalidGrant,
-			"auth_session is invalid or has expired", 400, err)
+	switch {
+	case errors.Is(err, cache.ErrNoDocuments):
+		// Nothing left to claim: a concurrent or repeated request took
+		// the handle first, which is the one-shot rule working.
+		return nil, invalidSession(err)
+	case err != nil:
+		return nil, c.authSessionStoreFailure(err, "claim")
 	}
 	authCtx = claimed
 
@@ -405,7 +446,7 @@ func (c *Client) authorizationChallengeIntermediate(ctx context.Context, ia *mod
 		return nil, err
 	}
 
-	if _, err := c.consumeIssuanceAuthPresentation(ctx, authCtx, vpResponse, issuanceAuthBinding{
+	if _, err := c.issuanceAuthPipeline()(ctx, authCtx, vpResponse, issuanceAuthBinding{
 		Audience:      audience,
 		ExpectedState: authCtx.State,
 		// mdoc binds to the OpenID4VCI Interactive Authorization handover,
@@ -540,10 +581,18 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 			"openid4vp_response must carry an encrypted response", 400)
 	}
 
+	// The key this exchange's request was signed around. Its absence is a
+	// cache that lost it, not a wallet that did anything wrong, so it is
+	// server_error - and typed, because an untyped error here would leave
+	// this endpoint through RegEndpoint's generic envelope instead of the
+	// OAuth error response every other answer uses.
 	privateEphemeralJWK, ok := c.cacheService.EphemeralEncryptionKey.Get(ctx, authCtx.EphemeralEncryptionKeyID)
 	if !ok {
-		c.log.Debug("CHALLENGE: no ephemeral key found in cache", "kid", authCtx.EphemeralEncryptionKeyID)
-		return nil, nil, errors.New("ephemeral key not found in cache")
+		err := fmt.Errorf("ephemeral key %q is not in the cache", authCtx.EphemeralEncryptionKeyID)
+		c.log.Error(err, "CHALLENGE: cannot decrypt the response without the key the request was built with",
+			"session_id", authCtx.SessionID)
+		return nil, nil, oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+			"interactive authorization could not be completed", 500, err)
 	}
 
 	decrypted, err := jwe.Decrypt([]byte(envelope.Response), jwe.WithKey(jwa.ECDH_ES(), privateEphemeralJWK))
@@ -561,6 +610,16 @@ func (c *Client) decodeInteractiveAuthorizationResponse(ctx context.Context, aut
 	}
 
 	return vpResponse, privateEphemeralJWK, nil
+}
+
+// authSessionStoreFailure is the answer to an authorization-context store
+// that would not answer, as distinct from one that answered "no such
+// handle". Both are failures of the same call; only one is the wallet's
+// problem, and only one is worth retrying.
+func (c *Client) authSessionStoreFailure(err error, op string) error {
+	c.log.Error(err, "CHALLENGE: the authorization context store failed", "operation", op)
+	return oauth2.NewOAuthErrorWithCause(oauth2.ErrCodeServerError,
+		"interactive authorization could not be completed", 500, err)
 }
 
 // interactiveAuthorizationFailure turns a presentation failure into the

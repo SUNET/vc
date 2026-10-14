@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/SUNET/vc/internal/apigw/apiv1"
+	"github.com/SUNET/vc/pkg/cache"
 	"github.com/SUNET/vc/pkg/httphelpers"
 	"github.com/SUNET/vc/pkg/logger"
 	"github.com/SUNET/vc/pkg/model"
@@ -30,10 +31,12 @@ type challengeAPI struct {
 	seen  *apiv1.AuthorizationChallengeRequest
 	reply *apiv1.AuthorizationChallengeResponse
 	err   error
+	calls int
 }
 
 func (a *challengeAPI) OAuthAuthorizationChallenge(_ context.Context, req *apiv1.AuthorizationChallengeRequest) (*apiv1.AuthorizationChallengeResponse, error) {
 	a.seen = req
+	a.calls++
 	return a.reply, a.err
 }
 
@@ -42,6 +45,13 @@ func (a *challengeAPI) OAuthPar(context.Context, *openid4vci.PARRequest) (*openi
 }
 
 func challengeEngine(t *testing.T, api *challengeAPI) *gin.Engine {
+	return challengeEngineWithLimit(t, api, 0)
+}
+
+// challengeEngineWithLimit registers the route the way service.go does,
+// with the rate limiter wired in the same shape (rgRoot.Group("") +
+// RateLimiter.Middleware()). rpm <= 0 leaves it off.
+func challengeEngineWithLimit(t *testing.T, api *challengeAPI, rpm int) *gin.Engine {
 	t.Helper()
 	ctx := t.Context()
 
@@ -64,6 +74,9 @@ func challengeEngine(t *testing.T, api *challengeAPI) *gin.Engine {
 
 	engine := gin.New()
 	rg := engine.Group("")
+	if rpm > 0 {
+		rg.Use(httphelpers.NewRateLimiter(cache.NewMemoryRateLimitCounter(), rpm).Middleware())
+	}
 	helpers.Server.RegEndpoint(ctx, rg, http.MethodPost, "authorize-challenge", http.StatusOK, s.endpointOAuthAuthorizationChallenge)
 	return engine
 }
@@ -164,4 +177,32 @@ func TestEndpointAuthorizationChallenge_CarriesTheHeaderCredentials(t *testing.T
 	assert.Equal(t, "wallet-1", api.seen.ClientID)
 	assert.Equal(t, "pid", api.seen.Scope)
 	assert.Equal(t, "urn:openid:dcp:ia:openid4vp_presentation", api.seen.InteractionTypesSupported)
+}
+
+// The Authorization Challenge Endpoint is rate limited, and service.go
+// registers it on its own rgRoot.Group("") with RateLimiter.Middleware -
+// the same shape as the credential, token and offer routes.
+//
+// It needs one of its own because of what an ACCEPTED request costs. The
+// initial request carries nothing an attacker cannot mint - a public
+// client's own parameters and a fresh DPoP proof - and each one that is
+// accepted persists an authorization context plus an ephemeral P-256 key
+// until the auth_session expires. Request volume is therefore storage
+// growth, and nothing else in the flow bounds it: there is no code to
+// forfeit and no session to exhaust before the records are written.
+func TestEndpointOAuthAuthorizationChallenge_RateLimited(t *testing.T) {
+	api := &challengeAPI{reply: &apiv1.AuthorizationChallengeResponse{AuthorizationCode: "code"}}
+	engine := challengeEngineWithLimit(t, api, 3)
+
+	form := url.Values{"auth_session": {"opaque-handle"}}
+	for i := range 3 {
+		w := postChallenge(t, engine, form, nil)
+		require.Equal(t, http.StatusOK, w.Code, "request %d should be within the limit", i+1)
+	}
+
+	w := postChallenge(t, engine, form, nil)
+	require.Equal(t, http.StatusTooManyRequests, w.Code,
+		"the request over the limit must be rejected before it reaches the endpoint")
+	assert.Equal(t, 3, api.calls,
+		"a rate limited request must not reach OAuthAuthorizationChallenge")
 }

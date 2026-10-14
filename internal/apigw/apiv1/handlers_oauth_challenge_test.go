@@ -1,12 +1,14 @@
 package apiv1
 
 import (
+	"context"
 	stdcrypto "crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -412,10 +414,16 @@ func TestAuthorizationChallenge_InitialRequestValidation(t *testing.T) {
 
 // An auth_session nobody issued and one that has expired are the same
 // answer, so that the endpoint cannot be asked which handles exist.
+//
+// And that answer is invalid_session. draft-ietf-oauth-first-party-apps
+// §5.2.2 defines it for exactly this - an auth session that is invalid,
+// expired or revoked - and a wallet looking for it to decide that its
+// exchange is over cannot recognise invalid_grant, which belongs to the
+// Token Endpoint and to spent authorization codes.
 func TestAuthorizationChallenge_UnknownAndExpiredAuthSessionAreIndistinguishable(t *testing.T) {
 	client := newChallengeClient(t)
 
-	unknown := oauthErrFromChallenge(t, client, continueExchange(t, "no-such-session", `{"response":"x"}`))
+	unknown := challengeErr(t, client, continueExchange(t, "no-such-session", `{"response":"x"}`))
 
 	// Open a real exchange and age it past its deadline.
 	opened := challengeErr(t, client, initialChallenge(t))
@@ -426,11 +434,128 @@ func TestAuthorizationChallenge_UnknownAndExpiredAuthSessionAreIndistinguishable
 	authCtx.ExpiresAt = time.Now().Add(-time.Second).Unix()
 	require.NoError(t, client.cacheService.AuthContext.Update(t.Context(), authCtx))
 
-	expired := oauthErrFromChallenge(t, client, continueExchange(t, opened.AuthSession, `{"response":"x"}`))
+	expired := challengeErr(t, client, continueExchange(t, opened.AuthSession, `{"response":"x"}`))
 
 	assert.Equal(t, unknown.ErrorCode, expired.ErrorCode)
 	assert.Equal(t, unknown.Error(), expired.Error())
-	assert.Equal(t, oauth2.ErrCodeInvalidGrant, unknown.ErrorCode)
+	assert.Equal(t, errInvalidSession, unknown.ErrorCode)
+	assert.Equal(t, 400, unknown.HTTPStatus)
+
+	// A handle already claimed is the same condition and gets the same
+	// answer: the exchange it named is over either way.
+	reopened := challengeErr(t, client, initialChallenge(t))
+	_, err = client.cacheService.AuthContext.ClaimAuthSession(t.Context(), reopened.AuthSession)
+	require.NoError(t, err)
+
+	claimed := challengeErr(t, client, continueExchange(t, reopened.AuthSession, `{"response":"x"}`))
+	assert.Equal(t, errInvalidSession, claimed.ErrorCode)
+}
+
+// A store that will not answer is OURS, and must not be reported as the
+// wallet's dead session.
+//
+// The difference decides what the wallet does next. invalid_session says
+// the exchange is over and a new challenge is needed, so a wallet that
+// believes it throws away an auth_session that a retry a second later
+// would have resolved; server_error says to retry. One MongoDB blip
+// therefore becomes a lost issuance rather than a slow one.
+func TestAuthorizationChallenge_StoreFailuresAreServerErrors(t *testing.T) {
+	t.Run("resolving the handle", func(t *testing.T) {
+		client := newChallengeClient(t)
+		opened := challengeErr(t, client, initialChallenge(t))
+
+		failing := &failingAuthContextStore{AuthContextStore: client.cacheService.AuthContext}
+		client.cacheService.AuthContext = failing
+		failing.getErr = errors.New("connection refused")
+
+		oauthErr := oauthErrFromChallenge(t, client,
+			continueExchange(t, opened.AuthSession, `{"response":"x"}`))
+		assert.Equal(t, oauth2.ErrCodeServerError, oauthErr.ErrorCode)
+		assert.Equal(t, 500, oauthErr.HTTPStatus)
+	})
+
+	t.Run("claiming the handle", func(t *testing.T) {
+		client := newChallengeClient(t)
+		opened := challengeErr(t, client, initialChallenge(t))
+
+		failing := &failingAuthContextStore{AuthContextStore: client.cacheService.AuthContext}
+		client.cacheService.AuthContext = failing
+		failing.claimErr = errors.New("connection refused")
+
+		oauthErr := oauthErrFromChallenge(t, client,
+			continueExchange(t, opened.AuthSession, `{"response":"x"}`))
+		assert.Equal(t, oauth2.ErrCodeServerError, oauthErr.ErrorCode)
+		assert.Equal(t, 500, oauthErr.HTTPStatus)
+	})
+}
+
+// failingAuthContextStore makes one store call fail the way an unreachable
+// MongoDB does - an error that is not ErrNoDocuments - and leaves every
+// other call to the real store.
+type failingAuthContextStore struct {
+	cache.AuthContextStore
+	getErr   error
+	claimErr error
+}
+
+func (s *failingAuthContextStore) Get(ctx context.Context, query *cache.AuthorizationContext) (*cache.AuthorizationContext, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	return s.AuthContextStore.Get(ctx, query)
+}
+
+func (s *failingAuthContextStore) ClaimAuthSession(ctx context.Context, authSession string) (*cache.AuthorizationContext, error) {
+	if s.claimErr != nil {
+		return nil, s.claimErr
+	}
+	return s.AuthContextStore.ClaimAuthSession(ctx, authSession)
+}
+
+// The ephemeral key the request was built around is the server's to keep.
+// Losing it is not something a wallet can do anything about, and an
+// untyped error here would leave the endpoint through the generic
+// envelope rather than as the OAuth error response its contract promises.
+func TestAuthorizationChallenge_MissingEphemeralKeyIsAServerError(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: opened.AuthSession,
+	})
+	require.NoError(t, err)
+	client.cacheService.EphemeralEncryptionKey.Delete(t.Context(), authCtx.EphemeralEncryptionKeyID)
+
+	oauthErr := oauthErrFromChallenge(t, client,
+		continueExchange(t, opened.AuthSession, `{"response":"not-a-jwe"}`))
+	assert.Equal(t, oauth2.ErrCodeServerError, oauthErr.ErrorCode)
+	assert.Equal(t, 500, oauthErr.HTTPStatus)
+}
+
+// A scope this server has never been configured with is invalid_scope, and
+// not an invitation to implement an interaction that would not help.
+//
+// missing_interaction_type names auth_via_web, so answering it for an
+// unknown scope tells a wallet that implementing a browser step would get
+// it this credential. It would not: there is no such scope here under any
+// interaction.
+func TestAuthorizationChallenge_UnknownScopeIsInvalidScope(t *testing.T) {
+	client := newChallengeClient(t)
+
+	// Allowed to the client, so the request gets past client
+	// authentication and reaches the lookup this test is about, and
+	// configured as a credential source nowhere.
+	const unconfigured = "no-such-scope"
+	wallet := client.cfg.APIGW.Delivery.OpenID4VCI.Clients["wallet-1"]
+	wallet.Scopes = append(wallet.Scopes, unconfigured)
+	client.cfg.APIGW.Delivery.OpenID4VCI.Clients["wallet-1"] = wallet
+
+	req := initialChallenge(t)
+	req.Scope = unconfigured
+
+	oauthErr := oauthErrFromChallenge(t, client, req)
+	assert.Equal(t, oauth2.ErrCodeInvalidScope, oauthErr.ErrorCode)
+	assert.Equal(t, 400, oauthErr.HTTPStatus)
 }
 
 // §5.1: a client_id sent with an auth_session must be the client the
@@ -537,12 +662,19 @@ func TestInteractionTypeOffered(t *testing.T) {
 // proof reusing one is a replay, not a retry.
 func challengeDPoPProof(t *testing.T, key *ecdsa.PrivateKey, jti string) string {
 	t.Helper()
+	return challengeDPoPProofWithHTU(t, key, jti, challengeIssuerURL+"/authorize-challenge")
+}
+
+// challengeDPoPProofWithHTU is the same proof with the htu the caller
+// wants, for the cases where the SPELLING of the endpoint is the point.
+func challengeDPoPProofWithHTU(t *testing.T, key *ecdsa.PrivateKey, jti, htu string) string {
+	t.Helper()
 
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
 		"jti": jti,
 		"iat": time.Now().Unix(),
 		"htm": "POST",
-		"htu": challengeIssuerURL + "/authorize-challenge",
+		"htu": htu,
 	})
 	token.Header["typ"] = "dpop+jwt"
 
@@ -1113,4 +1245,191 @@ func TestAuthorizationChallenge_WebInteractionHandsOffToAuthorize(t *testing.T) 
 	assert.Equal(t, "wallet-1", reply.WalletClientID)
 	assert.Equal(t, "/authorization/consent", reply.RedirectURL,
 		"the browser leg starts at consent, exactly as it does from /op/par")
+}
+
+// A proof is for the ENDPOINT, not for one spelling of its URL.
+//
+// A wallet builds htu from the URL it requested; this deployment writes
+// public_url in configuration. RFC 9449 §4.3 says to compare the two after
+// URI normalization because they legitimately differ - an explicit :443,
+// a host in a different case - and a byte comparison refuses proofs that
+// are correct for the URL they were sent to, with nothing the wallet can
+// do about it.
+//
+// The path is excluded from that tolerance: it is the only thing
+// separating this endpoint from the Token Endpoint on the same host.
+func TestAuthorizationChallenge_HTUIsComparedAfterNormalization(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		htu      string
+		accepted bool
+	}{
+		{name: "the default port written out", htu: "https://issuer.example.com:443/authorize-challenge", accepted: true},
+		{name: "an uppercase host", htu: "https://Issuer.Example.COM/authorize-challenge", accepted: true},
+		{name: "another endpoint on the same host", htu: challengeIssuerURL + "/token", accepted: false},
+		{name: "another host", htu: "https://attacker.example.com/authorize-challenge", accepted: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := newChallengeClient(t)
+
+			req := initialChallenge(t)
+			req.DPOP = challengeDPoPProofWithHTU(t, challengeWalletKey,
+				fmt.Sprintf("jti-challenge-htu-%d", challengeJTI.Add(1)), tc.htu)
+
+			_, err := client.OAuthAuthorizationChallenge(t.Context(), req)
+			require.Error(t, err, "the endpoint answers an initial request with an interaction either way")
+
+			var oauthErr *oauth2.OAuthError
+			if tc.accepted {
+				if errors.As(err, &oauthErr) {
+					assert.NotEqual(t, oauth2.ErrCodeInvalidDPoPProof, oauthErr.ErrorCode,
+						"a proof for this endpoint must not be refused over the spelling of its URL")
+				}
+				return
+			}
+			require.ErrorAs(t, err, &oauthErr)
+			assert.Equal(t, oauth2.ErrCodeInvalidDPoPProof, oauthErr.ErrorCode)
+		})
+	}
+}
+
+// The whole point of the endpoint is the authorization code it ends with,
+// and every other test here stops short of it: they all fail on purpose,
+// during decryption or in the pipeline. So the one path a conformant
+// wallet actually takes - open, present, receive a code - had no coverage
+// at all, and the line that returns the code could have been deleted
+// without a single test noticing.
+//
+// The pipeline itself is replaced (see Client.issuanceAuth), because what
+// it would need to say yes - a signing authority, a trust deployment, a
+// datastore with documents - is not what this test is about. Everything
+// between the wallet and the pipeline is real: the exchange is opened
+// through the endpoint, the response is encrypted to the key the endpoint
+// published, and the endpoint decrypts it and hands back the code it
+// stored.
+func TestAuthorizationChallenge_SuccessfulPresentationYieldsTheCode(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	stored, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: opened.AuthSession,
+	})
+	require.NoError(t, err)
+
+	var (
+		seenVPToken map[string][]string
+		seenBinding issuanceAuthBinding
+		calls       int
+	)
+	client.issuanceAuth = func(_ context.Context, authCtx *cache.AuthorizationContext, vpResponse *openid4vp.VPResponse, binding issuanceAuthBinding) (*issuanceAuthOutcome, error) {
+		calls++
+		seenVPToken = vpResponse.VPToken
+		seenBinding = binding
+		return &issuanceAuthOutcome{Scope: authCtx.Scopes[0]}, nil
+	}
+
+	response := encryptedVPResponse(t, client, opened.AuthSession,
+		`{"state":"`+stored.State+`","vp_token":{"`+challengeAuthScope+`":["ey.."]}}`)
+
+	reply, err := client.OAuthAuthorizationChallenge(t.Context(),
+		continueExchange(t, opened.AuthSession, response))
+	require.NoError(t, err)
+	require.NotNil(t, reply)
+
+	// The code is the one this exchange was built around, not a fresh
+	// value: it is what the authorization context is stored under, and the
+	// Token Endpoint finds the context by it.
+	assert.Equal(t, stored.Code, reply.AuthorizationCode)
+	assert.NotEmpty(t, reply.AuthorizationCode)
+
+	byCode, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		Code: reply.AuthorizationCode,
+	})
+	require.NoError(t, err, "the code handed back must resolve the exchange that produced it")
+	assert.Equal(t, stored.SessionID, byCode.SessionID)
+	assert.Equal(t, stored.AuthSessionDPoPThumbprint, byCode.AuthSessionDPoPThumbprint,
+		"the binding the Token Endpoint checks has to survive the exchange")
+
+	// And the endpoint really did the work on the way: it decrypted the
+	// response to the key it published, and bound the presentation to this
+	// endpoint and to the state this exchange minted.
+	require.Equal(t, 1, calls)
+	assert.Contains(t, seenVPToken, challengeAuthScope)
+
+	audience, err := client.cfg.APIGW.Delivery.InteractiveAuthorization.PresentationAudience(challengeIssuerURL)
+	require.NoError(t, err)
+	assert.Equal(t, audience, seenBinding.Audience)
+	assert.Equal(t, stored.State, seenBinding.ExpectedState)
+
+	// The handle is spent either way, so the code cannot be collected twice.
+	again := challengeErr(t, client, continueExchange(t, opened.AuthSession, response))
+	assert.Equal(t, errInvalidSession, again.ErrorCode)
+	assert.Equal(t, 1, calls, "a spent auth_session must not reach the pipeline again")
+}
+
+// The transcript test above builds one directly, which says that the
+// builder is right and nothing about whether the ENDPOINT uses it. Wiring
+// the direct-post builder in by mistake - or nil, which refuses mdoc by
+// name - would leave it green, and that substitution is exactly the
+// mistake worth catching: verifying against the wrong transcript fails
+// device-auth with nothing to point at.
+//
+// So this drives a real encrypted response through the endpoint and
+// asserts on the transcript the pipeline is actually handed. The pipeline
+// itself is replaced (Client.issuanceAuth): what it would need to accept a
+// genuine DeviceResponse is an mdoc signed over this transcript by a
+// trusted IACA, which is a fixture about mdoc verification rather than
+// about this endpoint's wiring.
+func TestAuthorizationChallenge_PassesTheInteractiveAuthorizationTranscriptToThePipeline(t *testing.T) {
+	client := newChallengeClient(t)
+	opened := challengeErr(t, client, initialChallenge(t))
+
+	authCtx, err := client.cacheService.AuthContext.Get(t.Context(), &cache.AuthorizationContext{
+		AuthSession: opened.AuthSession,
+	})
+	require.NoError(t, err)
+
+	privateEphemeralJWK, ok := client.cacheService.EphemeralEncryptionKey.Get(t.Context(), authCtx.EphemeralEncryptionKeyID)
+	require.True(t, ok)
+
+	var seen issuanceAuthBinding
+	client.issuanceAuth = func(_ context.Context, ctxArg *cache.AuthorizationContext, _ *openid4vp.VPResponse, binding issuanceAuthBinding) (*issuanceAuthOutcome, error) {
+		seen = binding
+		return &issuanceAuthOutcome{Scope: ctxArg.Scopes[0]}, nil
+	}
+
+	response := encryptedVPResponse(t, client, opened.AuthSession,
+		`{"state":"`+authCtx.State+`","vp_token":{"`+challengeAuthScope+`":["ey.."]}}`)
+	_, err = client.OAuthAuthorizationChallenge(t.Context(),
+		continueExchange(t, opened.AuthSession, response))
+	require.NoError(t, err)
+
+	// nil is what refused mdoc by name before this PR, so it is the first
+	// thing to rule out.
+	require.NotNil(t, seen.MdocSessionTranscript,
+		"the endpoint must supply a transcript, or every mdoc presentation is refused")
+
+	got, err := seen.MdocSessionTranscript()
+	require.NoError(t, err)
+
+	ephemeralPublicJWK, err := privateEphemeralJWK.PublicKey()
+	require.NoError(t, err)
+	thumbprint, err := ephemeralPublicJWK.Thumbprint(stdcrypto.SHA256)
+	require.NoError(t, err)
+
+	want, err := mdoc.BuildOID4VCIIAESessionTranscript(
+		"OpenID4VCIIAEHandover",
+		challengeIssuerURL+"/authorize-challenge",
+		authCtx.Nonce,
+		thumbprint,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, want, got, "the endpoint must pass the Interactive Authorization transcript")
+
+	// And not the browser flow's, which is the substitution the direct
+	// builder test could not see.
+	directPost, err := mdoc.BuildOID4VPSessionTranscript(
+		authCtx.ClientID, authCtx.Nonce, challengeIssuerURL+"/verification/direct_post", thumbprint)
+	require.NoError(t, err)
+	assert.NotEqual(t, directPost, got)
 }
