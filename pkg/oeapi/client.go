@@ -65,10 +65,12 @@ func WithExpand(items ...string) QueryOption {
 		if len(items) == 0 {
 			return
 		}
+		combined := make([]string, 0, len(items)+1)
 		if existing := q.Get("expand"); existing != "" {
-			items = append([]string{existing}, items...)
+			combined = append(combined, existing)
 		}
-		q.Set("expand", strings.Join(items, ","))
+		combined = append(combined, items...)
+		q.Set("expand", strings.Join(combined, ","))
 	}
 }
 

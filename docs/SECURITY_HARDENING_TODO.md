@@ -11,7 +11,7 @@ The codebase makes outbound HTTP requests driven by untrusted input (credential 
 - `pkg/revocation/status_list.go` — fetches status list tokens from credential-supplied URIs
 - `pkg/trust/jwks_resolver.go` — JWKS discovery from credential `iss` claims
 - `pkg/mdoc/status.go` — status list fetching (mdoc path)
-- `internal/apigw/data_sources/externalapi/eduapi/` — external API calls
+- `internal/apigw/data_sources/externalapi/eduapi.go` — external API calls (alongside the shared client in `externalapi.go` and `oeapi.go`)
 - OIDC/SAML metadata fetching
 
 **Recommended implementation**:
