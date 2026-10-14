@@ -449,3 +449,62 @@ func TestDuplicateMembersGoRawAndSurvive(t *testing.T) {
 		})
 	}
 }
+
+// The escape hatch must not become a laundry for invalid ordinary
+// queries.
+//
+// Making the decode total meant any query the model rejected became Raw -
+// including one that is plain DCQL and simply WRONG. An SD-JWT query with
+// claims:[{"path":[]}] is refused by ClaimQuery.UnmarshalJSON, and used
+// to be refused outright; under a total decode it became Raw, the shadow
+// left Claims empty, and validation then found nothing to object to. The
+// UI path would sign and send a query that previously could not be
+// decoded at all.
+//
+// The line is the JSON KIND. A member of a kind the model does not have
+// is a shape this build has never seen, and belongs in Raw. A member of
+// the right kind that the model still rejects is an ordinary query that
+// is invalid, and stays refused.
+func TestInvalidModelledMembersAreNotLaunderedIntoRaw(t *testing.T) {
+	for _, tc := range []struct {
+		name, query string
+		wantErr     bool
+	}{
+		{
+			name:    "an empty claim path, which the model rejects",
+			query:   `{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]},"claims":[{"path":[]}]}`,
+			wantErr: true,
+		},
+		{
+			name:    "and the same inside an otherwise fine mdoc query",
+			query:   `{"id":"q","format":"mso_mdoc","meta":{"doctype_value":"d"},"claims":[{"path":[]}]}`,
+			wantErr: true,
+		},
+		{
+			// Same member, different KIND: an object where DCQL has an
+			// array. This is the rulebook's WIP shape and the reason Raw
+			// exists at all.
+			name:  "claims as an object, which the model does not have",
+			query: `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"claims":{"_req":[]}}`,
+		},
+		{
+			name:  "req as an object, likewise",
+			query: `{"id":"q","format":"circuit_zk","meta":{"doctype_value":"d"},"req":{"not":"an array"}}`,
+		},
+		{
+			name:  "an ordinary valid query",
+			query: `{"id":"q","format":"dc+sd-jwt","meta":{"vct_values":["urn:x"]},"claims":[{"path":["a"]}]}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var query CredentialQuery
+			err := json.Unmarshal([]byte(tc.query), &query)
+			if tc.wantErr {
+				require.Error(t, err,
+					"a query the model rejects must stay rejected, not become raw and then validate")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}

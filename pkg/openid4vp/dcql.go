@@ -174,8 +174,17 @@ func (q *CredentialQuery) UnmarshalJSON(data []byte) error {
 		if !json.Valid(data) {
 			return err
 		}
-		*q = CredentialQuery{Raw: append(json.RawMessage(nil), data...)}
-		q.adoptRawShadow()
+		fallback := CredentialQuery{Raw: append(json.RawMessage(nil), data...)}
+		if _, invalid := fallback.adoptRawShadowReporting(); len(invalid) > 0 {
+			// A member of the right JSON kind that the model still
+			// rejects is an ordinary query that is simply invalid, not a
+			// shape this build has never seen. Sending it to Raw would
+			// launder a decode error into a query that validates - the
+			// SD-JWT and mdoc rules read the shadow, and an unreadable
+			// member leaves nothing there to judge.
+			return err
+		}
+		*q = fallback
 		return nil
 	}
 	*q = CredentialQuery(known)
@@ -377,9 +386,24 @@ func NewRawCredentialQuery(raw json.RawMessage) (CredentialQuery, error) {
 // decode. A query with a member this code has never seen is the reason
 // these bytes are raw in the first place.
 func (q *CredentialQuery) adoptRawShadow() (unreadable []string) {
+	unreadable, _ = q.adoptRawShadowReporting()
+	return unreadable
+}
+
+// adoptRawShadowReporting is adoptRawShadow, also reporting members that
+// are the RIGHT JSON KIND for the model and still failed to decode.
+//
+// That distinction is the whole difference between the escape hatch and a
+// bypass. "claims" as an object is a shape the model does not have - the
+// rulebook's WIP example - and belongs in Raw. "claims" as an ARRAY whose
+// entries the model rejects is an ordinary DCQL query that is simply
+// invalid, and sending it to Raw would launder a decode error into a
+// query that validates: ClaimQuery.UnmarshalJSON refuses an empty path,
+// and such a query used to be refused outright.
+func (q *CredentialQuery) adoptRawShadowReporting() (unreadable, invalid []string) {
 	var members map[string]json.RawMessage
 	if err := json.Unmarshal(q.Raw, &members); err != nil {
-		return nil // not an object at all; nothing to shadow
+		return nil, nil // not an object at all; nothing to shadow
 	}
 
 	type plain CredentialQuery // no methods, so no recursion
@@ -398,6 +422,9 @@ func (q *CredentialQuery) adoptRawShadow() (unreadable []string) {
 		field := reflect.New(structure.Field(i).Type)
 		if err := json.Unmarshal(encoded, field.Interface()); err != nil {
 			unreadable = append(unreadable, name)
+			if jsonKindMatches(structure.Field(i).Type, encoded) {
+				invalid = append(invalid, name)
+			}
 			continue
 		}
 		value.Field(i).Set(field.Elem())
@@ -407,7 +434,41 @@ func (q *CredentialQuery) adoptRawShadow() (unreadable []string) {
 	*q = CredentialQuery(shadow)
 	q.Raw = raw
 	slices.Sort(unreadable)
-	return unreadable
+	slices.Sort(invalid)
+	return unreadable, invalid
+}
+
+// jsonKindMatches reports whether encoded is the JSON kind that target is
+// modelled as - an array for a slice, an object for a struct or map, and
+// so on.
+//
+// null matches everything, since unmarshalling it is a no-op whatever the
+// destination, and an interface accepts any kind by definition.
+func jsonKindMatches(target reflect.Type, encoded json.RawMessage) bool {
+	trimmed := bytes.TrimLeft(encoded, " \t\r\n")
+	if len(trimmed) == 0 {
+		return false
+	}
+	for target.Kind() == reflect.Pointer {
+		target = target.Elem()
+	}
+	switch target.Kind() {
+	case reflect.Interface:
+		return true
+	case reflect.Slice, reflect.Array:
+		return trimmed[0] == '[' || trimmed[0] == 'n'
+	case reflect.Struct, reflect.Map:
+		return trimmed[0] == '{' || trimmed[0] == 'n'
+	case reflect.String:
+		return trimmed[0] == '"' || trimmed[0] == 'n'
+	case reflect.Bool:
+		return trimmed[0] == 't' || trimmed[0] == 'f' || trimmed[0] == 'n'
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return trimmed[0] == '-' || trimmed[0] == 'n' || (trimmed[0] >= '0' && trimmed[0] <= '9')
+	}
+	return false
 }
 
 type CredentialSetQuery struct {
